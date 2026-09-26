@@ -47,6 +47,20 @@ def _clipboard(text: str) -> bool:
         return False
 
 
+def _clipboard_read() -> str:
+    try:
+        sysname = platform.system()
+        if sysname == "Darwin":
+            cmd = ["pbpaste"]
+        elif sysname == "Windows":
+            cmd = ["powershell", "-command", "Get-Clipboard"]
+        else:
+            cmd = ["xclip", "-selection", "clipboard", "-o"]
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=3, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str | None) -> tuple[str, list]:
     """Replace every match with its reference, right to left so offsets hold."""
     entries = []

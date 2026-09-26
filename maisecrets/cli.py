@@ -46,6 +46,36 @@ def cmd_get(args: list[str]) -> int:
     return 0
 
 
+def cmd_put(args: list[str]) -> int:
+    """Store a value you choose (a password, a key without a known shape) and get a reference.
+
+    The value comes from the clipboard (--clipboard) or from stdin, never from an
+    argument: an argument lands in the shell history and in the transcript.
+    """
+    type_ = "SECRET"
+    source = "stdin"
+    for a in args:
+        if a in ("-c", "--clipboard"):
+            source = "clipboard"
+        elif a.startswith("--type="):
+            type_ = a.split("=", 1)[1].upper()
+    if source == "clipboard":
+        from .hooks import _clipboard_read
+        value = _clipboard_read()
+    else:
+        value = sys.stdin.read()
+    value = value.strip()
+    if not value:
+        print("maisecrets put: no value (empty clipboard/stdin)", file=sys.stderr)
+        return 2
+    e = Vault().put(value, type_, "manual")
+    from .hooks import _clipboard
+    copied = _clipboard(e.ref)
+    print(f"stored as {e.key} ({len(value)} chars); reference {e.ref} "
+          f"{'is in the clipboard' if copied else 'printed above'}")
+    return 0
+
+
 def cmd_expire(_: list[str]) -> int:
     print(f"purged {Vault().expire()} expired value(s)")
     return 0
@@ -63,13 +93,15 @@ def cmd_config(_: list[str]) -> int:
     return 0
 
 
-COMMANDS = {"list": cmd_list, "get": cmd_get, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config}
+COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "expire": cmd_expire,
+            "scan": cmd_scan, "config": cmd_config}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] in {"-h", "--help"}:
-        print("maisecrets list | get <KEY> | expire | scan [text] | config | hook <event>")
+        print("maisecrets list | get <KEY> | put [--clipboard] [--type=EMAIL] | expire | scan [text]\n"
+              "           | config | hook <event>")
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])
