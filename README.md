@@ -189,7 +189,8 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
 
 `backend`: `keychain` (macOS), `windows-vault`, `encrypted-file` (Linux and
 any other), `jsonfile` (test mode, plaintext). `pii_regions`: Presidio
-regions besides the generic ones.
+regions besides the generic ones. `tips`: `false` turns off the one-line tip
+that appears once a day at session start.
 
 Every entry has a TTL. Each use renews it, up to `max_ttl_seconds`. On
 expiry the value is deleted and the metadata stays as a record. Commands:

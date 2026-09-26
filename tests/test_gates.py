@@ -221,5 +221,27 @@ class ReportTests(unittest.TestCase):
         self.assertNotIn("hits", url)
 
 
+class TipTests(unittest.TestCase):
+    def test_one_tip_per_day_rotating_and_switchable_off(self):
+        from maisecrets import tips
+        try:
+            os.unlink(Path(HOME, ".tip"))
+        except FileNotFoundError:
+            pass
+        first = tips.tip_of_the_day()
+        self.assertTrue(first and first.startswith("maisecrets:"))
+        self.assertIsNone(tips.tip_of_the_day())          # same day: silent
+        Path(HOME, ".tip").write_text("2000-01-01 0\n")   # another day: the next tip
+        self.assertEqual(tips.tip_of_the_day(), tips.TIPS[1])
+        cfg = Path(HOME, "config.json")
+        old = cfg.read_text()
+        cfg.write_text('{"backend": "jsonfile", "tips": false}')
+        try:
+            Path(HOME, ".tip").write_text("2000-01-01 0\n")
+            self.assertIsNone(tips.tip_of_the_day())
+        finally:
+            cfg.write_text(old)
+
+
 if __name__ == "__main__":
     unittest.main()

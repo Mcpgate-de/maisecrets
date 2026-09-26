@@ -29,6 +29,11 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
             marker.write_text(type(v.backend).__name__ + "\n")
         except OSError:
             pass
+    else:
+        from maisecrets.tips import tip_of_the_day  # noqa: E402
+        tip = tip_of_the_day()
+        if tip:
+            out["systemMessage"] = tip
     print(json.dumps(out))
     sys.exit(0)
 sys.exit(main(["hook", sys.argv[1] if len(sys.argv) == 2 else ""]))
