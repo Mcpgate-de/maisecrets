@@ -242,6 +242,8 @@ def _ds_value_ok(v: str) -> bool:
         return False
     if v.count(" ") >= 2:
         return False   # a sentence or an i18n label ("Add API key"), not a value
+    if not any(c.isdigit() for c in v) and re.fullmatch(r"[A-Za-z]+(?:[_-][A-Za-z]+)+", v):
+        return False   # an identifier: secret_value, from-secret, NAME_OF_SECRET
     low = v.lower()
     if low in {"password", "changeme", "placeholder", "example", "none", "null", "true", "false", "redacted"}:
         return False
@@ -270,7 +272,10 @@ VALIDATORS = {
     "public_ip": _public_ip,
     "not_placeholder": lambda v: v.lower() not in {"placeholder", "changeme", "redacted", "example"}
     and not v.startswith("<"),
+    "person_email": lambda v: v.split("@", 1)[0].lower() not in _SYSTEM_USERS,
 }
+_SYSTEM_USERS = frozenset({"git", "root", "ubuntu", "ec2-user", "admin", "noreply", "no-reply", "postmaster",
+                           "hostmaster", "webmaster", "mailer-daemon", "bounce", "bounces"})
 
 
 # --------------------------------------------------------------- own rules --
@@ -278,7 +283,7 @@ OWN_RULES: list[dict] = [
     # ?token=… / &api_key=… in a URL
     {"id": "url-query-secret", "type": "SECRET", "secret_group": 2,
      "regex": r"(?i)[?&]((?:access_?)?token|api[_-]?key|apikey|secret|password|sig|signature)=([^&\s#\"']{8,})"},
-    {"id": "email", "type": "EMAIL",
+    {"id": "email", "type": "EMAIL", "validator": "person_email",
      "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})@[\w-]{1,63}\.[\w.-]{0,254}[\w-]"},
     {"id": "phone", "type": "PHONE",
      "regex": r"(?<![\w+])\+\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?!\w)"},
@@ -408,6 +413,15 @@ SECRET_TYPES = frozenset({"SECRET"})
 # a value that is obviously a placeholder is never a secret, whichever rule matched it
 PLACEHOLDER_VALUES = frozenset({"changeme", "change_me", "password", "placeholder", "example", "redacted",
                                 "secret", "your_api_key", "xxxxxxxx", "todo", "none", "null"})
+PLACEHOLDER_PARTS = ("your_", "your-", "bogus", "dummy", "example", "sample", "placeholder", "changeme",
+                     "xxxxxxxx", "test-token", "secure-token", "<redacted", "fake")
+_TEMPLATE_NAME = re.compile(r"^[A-Z]+(?:_[A-Z]+)+$")   # YOUR_PORTKEY_API_KEY: words joined by underscores, no digits
+
+
+def looks_like_placeholder(value: str) -> bool:
+    v = value.strip("\"'` ")
+    low = v.lower()
+    return low in PLACEHOLDER_VALUES or any(p in low for p in PLACEHOLDER_PARTS) or bool(_TEMPLATE_NAME.match(v))
 
 
 # ------------------------------------------------------------------ scanner --
@@ -509,7 +523,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     ok = False   # a validator that cannot parse the value has not validated it
                 if not ok:
                     continue
-            if rule.type == "SECRET" and secret.strip("\"'` ").lower() in PLACEHOLDER_VALUES:
+            if rule.type == "SECRET" and looks_like_placeholder(secret):
                 continue
             if rule.score < 1.0 or rule.require_context:
                 # presidio semantics: a weak shape passes only with a context WORD nearby
