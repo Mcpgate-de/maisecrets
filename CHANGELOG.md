@@ -2,9 +2,20 @@
 
 ## Unreleased
 
+## [0.3.23] - 2026-09-26
+
 - `/maisecrets:shortcut` installs a personal `/ms` for `/maisecrets:send`; the answer to a
   sent prompt starts with `Sent: ` and the text, so Remote Control users see what went out.
 - `/maisecrets:put` explains the SSH case (no clipboard: use a label in a prompt).
+
+### Features
+
+- /maisecrets:shortcut installs a personal /ms; the answer to a sent prompt shows the text (53553e7)
+
+### Fixes
+
+- one path separator style in the wrapper under Git Bash (9c31784)
+- the wrapper honours HOME under Git Bash on Windows (b39ab76)
 
 ## [0.3.22] - 2026-09-26
 
