@@ -3,7 +3,7 @@
 #   macOS / Linux: python3 (always present or one package away)
 #   Windows: Claude Code requires Git Bash, so this script runs there too; Python
 #            installs as python.exe or the py launcher (winget install Python.Python.3.12)
-# Usage: run.sh <user-prompt|pre-tool|post-tool|session-start> | run.sh report [last|n] [note]
+# Usage: run.sh <user-prompt|pre-tool|post-tool|session-start> | run.sh report … | run.sh put --clipboard [--type=…]
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 for PY in python3 python "py -3"; do

@@ -373,13 +373,20 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
     return out
 
 
+# detect-secrets' denylist is English (plus Spanish contraseña). German labels are added at load
+# time so `passwort: …` is a credential too (measured 2026-09-26: `password:` hit, `passwort:` did not).
+GERMAN_KEYWORDS = ("passwort", "kennwort", "geheimnis", "schl(?:ü|ue)ssel", "zugangsdaten")
+
+
 def _load_detect_secrets() -> list[Rule]:
     data = json.loads((RULES_DIR / "detect_secrets.json").read_text(encoding="utf-8"))
-    kws = tuple(sorted({"key", "pass", "pwd", "secret", "contrase"}))
+    kws = tuple(sorted({"key", "pass", "pwd", "secret", "contrase", "kennw", "geheim", "schl", "zugang"}))
+    denylist = "|".join(data["denylist"])
     out: list[Rule] = []
     for r in data["rules"]:
         flags = re.IGNORECASE if r.get("ignorecase") else 0
-        out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(r["regex"], flags),
+        regex = r["regex"].replace("(" + denylist + ")", "(" + denylist + "|" + "|".join(GERMAN_KEYWORDS) + ")", 1)
+        out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(regex, flags),
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
                         secret_group=int(r["group"]), validator="ds_value"))
     return out

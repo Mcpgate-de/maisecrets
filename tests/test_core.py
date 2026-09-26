@@ -69,6 +69,12 @@ class DetectTests(unittest.TestCase):
         self.assertNotIn(GLPAT, out["reason"])
         self.assertNotIn(AKIA, out["reason"])
 
+    def test_german_credential_labels_are_keywords_too(self):
+        for label in ("passwort", "Kennwort", "Schlüssel", "zugangsdaten"):
+            with self.subTest(label):
+                ms = detect.scan(f"{label}: Sommer2026!xyz")
+                self.assertEqual([(m.type, m.value) for m in ms], [("SECRET", "Sommer2026!xyz")])
+
     def test_named_credential_keeps_the_name_and_takes_the_value(self):
         ms = detect.scan("DB_PASSWORD=" + "Sup3rSecret" + "Value1234")
         self.assertEqual(len(ms), 1)

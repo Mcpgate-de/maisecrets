@@ -6,9 +6,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from maisecrets.hooks import main  # noqa: E402
 
-if len(sys.argv) >= 2 and sys.argv[1] == "report":
+if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put"):
     from maisecrets.cli import main as cli_main  # noqa: E402
-    sys.exit(cli_main(["report"] + sys.argv[2:]))
+    sys.exit(cli_main(sys.argv[1:]))
 
 if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     import json

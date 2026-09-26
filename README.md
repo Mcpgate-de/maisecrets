@@ -202,6 +202,21 @@ PowerShell or openssl hand the value to any such process without a dialog
 (`docs/THREAT-MODEL.md`). The gates below stand in front of the agent, not in
 front of you.
 
+## Handing a value to Claude on purpose
+
+Paste it. A value with a known shape (a token, a key, an IBAN) is blocked,
+stored, and comes back as a placeholder in your clipboard. A password without
+a shape needs a label or the vault command:
+
+- label it: `password: …`, `passwort: …`, `api_key=…` (English, Spanish and
+  German labels are recognised);
+- or copy the value and run `/maisecrets:put` in Claude Code; the placeholder
+  replaces the value in your clipboard. Paste the placeholder into your next
+  message, and Claude uses it in commands and tool calls.
+
+A bare password in prose, such as "use Sommer2026 for the login", is not
+detected. That is a limit of pattern detection, not a setting.
+
 ## Reporting a wrong detection
 
 Every block and every redaction leaves an event in `~/.maisecrets/events.log`
