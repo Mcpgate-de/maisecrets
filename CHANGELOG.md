@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.3.21] - 2026-09-26
+
+### Features
+
+- Codex on Windows runs the hooks through a PowerShell launcher (c8d0606)
+
+### Fixes
+
+- the Codex launcher is a batch file, run as cmd.exe /C like Codex does (e7bd8d2)
+
 ## [0.3.20] - 2026-09-26
 
 ### Fixes
