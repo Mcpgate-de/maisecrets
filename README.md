@@ -94,7 +94,7 @@ has the record.
 | client | prompt | rehydrate | redact | adapter |
 |---|:---:|:---:|:---:|---|
 | Claude Code, Cowork | ✅ | ✅ | ✅ | built |
-| Codex | ✅ | ✅ | ✅ | built |
+| Codex CLI, IDE extension, Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks |
 | Gemini CLI | ☑️ | ☑️ | ☑️ | not planned (successor: Antigravity) |
 | Cursor | ☑️ | ☑️ | ⚠️ MCP only | waits for a shell-output hook |
 | Copilot CLI | ⚠️ SDK only | ☑️ | ☑️ | waits for a prompt hook |
@@ -115,6 +115,20 @@ claude plugin marketplace add Mcpgate-de/maisecrets     # the GitHub repo is its
 claude plugin install maisecrets@maisecrets             # user scope; new session or /reload-plugins
 claude plugin update maisecrets@maisecrets              # later versions
 ```
+
+Codex (CLI, IDE extension, and the Codex agent inside the ChatGPT desktop app):
+
+```bash
+codex plugin marketplace add https://github.com/Mcpgate-de/maisecrets.git
+codex plugin add maisecrets@maisecrets
+```
+
+Codex skips a plugin's hooks until you review and trust them once: open `/hooks`
+in Codex and trust the maisecrets entries. Until then nothing is protected and
+the plugin cannot tell you so, because no hook of it runs. A workspace admin
+can ship the hooks as managed hooks (`requirements.toml`, MDM), which are
+trusted by policy and cannot be disabled. The plain ChatGPT chat, web and
+mobile have no local runtime and no hooks.
 
 For development:
 
