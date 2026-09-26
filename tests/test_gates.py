@@ -102,6 +102,15 @@ class GrantTests(unittest.TestCase):
         out = _bash_pre("echo " + self.e.ref, session="S2")["hookSpecificOutput"]
         self.assertIn("updatedInput", out)
 
+    def test_entry_written_before_the_sessions_list_resolves_in_its_creating_session(self):
+        v = Vault()
+        meta = v._index["entries"][self.e.key]
+        meta["sessions"] = []            # the shape a 0.2.0 hook left behind: creator known, no list
+        meta["session"] = "S1"
+        v._save_index()
+        self.assertEqual(Vault().status(self.e.key, "S1"), "ok")
+        self.assertEqual(Vault().status(self.e.key, "S2"), "foreign-session")
+
     def test_agent_reads_of_the_store_are_denied(self):
         for cmd in ["python3 -m maisecrets.cli get SECRET_c1",
                     "security find-generic-password -s maisecrets -a SECRET_c1 -w",

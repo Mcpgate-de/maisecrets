@@ -405,7 +405,12 @@ class Vault:
             return "expired"
         if session is None:
             return "no-session"
-        if session not in meta.get("sessions", []):
+        # the creating session always counts; entries written before 0.3.0 have `session` but no
+        # `sessions` list (a 0.2.0 entry was refused in its own session after the update, 2026-09-26)
+        allowed = set(meta.get("sessions") or [])
+        if meta.get("session"):
+            allowed.add(meta["session"])
+        if session not in allowed:
             return "foreign-session"
         return "ok"
 
