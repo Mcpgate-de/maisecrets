@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.3] - 2026-09-26
+
+### Features
+
+- /maisecrets:report and maisecrets report open a prefilled GitHub issue from the last detection event, never with a value (991d1de)
+
 ## [0.3.2] - 2026-09-26
 
 ### Fixes
