@@ -107,6 +107,8 @@ def _iban_ok(raw: str) -> bool:
 def _public_ip(ip: str) -> bool:
     if ":" in ip:
         return True   # IPv6: no private-range rule here
+    if not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", ip):
+        return False   # e.g. a CIDR tail the upstream regex swallowed
     parts = [int(p) for p in ip.split(".")]
     if any(p > 255 for p in parts):
         return False
@@ -435,8 +437,13 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue
             if rule.entropy and shannon_entropy(secret) < rule.entropy:
                 continue
-            if rule.validator and not VALIDATORS[rule.validator](secret):
-                continue
+            if rule.validator:
+                try:
+                    ok = VALIDATORS[rule.validator](secret)
+                except (ValueError, IndexError, TypeError):
+                    ok = False   # a validator that cannot parse the value has not validated it
+                if not ok:
+                    continue
             if rule.type == "SECRET" and secret.strip("\"'` ").lower() in PLACEHOLDER_VALUES:
                 continue
             if rule.score < 1.0 or rule.require_context:

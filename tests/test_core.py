@@ -67,6 +67,15 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(detect.scan("host 127.0.0.1 and 10.0.0.5 and 192.168.1.1"), [])
         self.assertEqual([(m.type, m.value) for m in detect.scan("edge 93.184.216.34")], [("IP", "93.184.216.34")])
 
+    def test_validators_never_raise_on_odd_shapes(self):
+        for v in ("0/8", "999.1.1.1", "", "DE", "abc"):
+            for name, fn in detect.VALIDATORS.items():
+                with self.subTest(validator=name, value=v):
+                    try:
+                        self.assertIn(fn(v), (True, False))
+                    except (ValueError, IndexError, TypeError):
+                        self.fail(f"{name} raised on {v!r}")
+
     def test_placeholder_is_not_a_hit(self):
         self.assertEqual(detect.scan("send to ⟦EMAIL_c1:ma•••@example.org⟧ now"), [])
         self.assertEqual(detect.scan("legacy <EMAIL_c1:ma***@example.org> form"), [])
