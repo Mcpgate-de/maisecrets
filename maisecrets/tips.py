@@ -6,8 +6,8 @@ import time
 from .vault import HOME, load_config
 
 TIPS = [
-    "maisecrets: write `password: <value>` (or passwort:, api_key=) and the value goes to your vault; "
-    "Claude gets a placeholder and can still use it in commands.",
+    "maisecrets: write `password: <value>` (or passwort:, api_key=; 8+ characters) and the value goes to "
+    "your vault; the model gets a placeholder and can still use it in commands.",
     "maisecrets: copy a value, then /maisecrets:put stores it and hands back the placeholder in your clipboard.",
     "maisecrets: a placeholder resolves only in a session where you typed it. Paste it into a prompt to allow it here.",
     "maisecrets: /maisecrets:report prepares a GitHub issue from the last detection, without the value. "

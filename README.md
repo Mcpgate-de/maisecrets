@@ -224,7 +224,8 @@ stored, and comes back as a placeholder in your clipboard. A password without
 a shape needs a label or the vault command:
 
 - label it: `password: …`, `passwort: …`, `api_key=…` (English, Spanish and
-  German labels are recognised);
+  German labels are recognised; the value counts from 8 characters, so
+  `password: yes` is not a hit);
 - or copy the value and run `/maisecrets:put` in Claude Code; the placeholder
   replaces the value in your clipboard. Paste the placeholder into your next
   message, and Claude uses it in commands and tool calls.
