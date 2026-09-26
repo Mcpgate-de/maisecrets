@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.1] - 2026-09-26
+
+### Fixes
+
+- while the major is 0, feat and fix bump the last number and only a breaking change bumps the middle one (6fc978f)
+
 ## [0.3.0] - 2026-09-26
 
 ### Features
