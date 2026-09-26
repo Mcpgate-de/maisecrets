@@ -37,8 +37,8 @@ Hooks run through `hooks/run.sh` (bash), which picks `python3`, `python` or
 too; install Python with `winget install Python.Python.3.12`. Without a
 Python 3.11+ the launcher exits 2 and prompts are blocked: fail closed.
 
-Proven with the harness on macOS (Claude Code 2.1.283, 6 scenarios) and on
-Debian 13 (2.1.223, first version); Windows through the GitHub Actions matrix
+Proven with the harness on macOS (Claude Code 2.1.283) and on Debian 13
+(2.1.223), 6 scenarios each, version 0.3.5; Windows through the GitHub Actions matrix
 (unit tests, launcher, Credential Locker round trip), not yet with a live
 Claude Code session. Codex (codex-cli 0.155.1): the same `hooks/hooks.json`
 works unchanged, Codex sets `CLAUDE_PLUGIN_ROOT` itself; `harness/codex.py`

@@ -26,8 +26,8 @@ from 0 plugins`. Bisected by removing one manifest field at a time: 2.1.223
 rejects `userConfig`; 2.1.283 accepts it. A rejected manifest does not block
 anything, it just loads nothing. The manifest carries no `userConfig` now,
 and the harness fails a scenario when the debug log does not show
-`Registered N hooks from M plugins` with N, M ≥ 1. Debian after the fix: see
-below.
+`Registered N hooks from M plugins` with N, M ≥ 1. Debian 13 with 2.1.223
+after the fix (0.3.5, cloned from the public GitHub repo): 6 of 6 green.
 
 ## Mutation probes
 
