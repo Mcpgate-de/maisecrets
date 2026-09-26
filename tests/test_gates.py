@@ -81,10 +81,12 @@ class GrantTests(unittest.TestCase):
     def test_value_is_delivered_once_and_a_missing_delivery_fails_the_whole_command(self):
         out = _bash_pre("printf '%s' " + self.e.ref + " | tr a-z A-Z; echo tail")["hookSpecificOutput"]
         cmd = out["updatedInput"]["command"]
-        self.assertTrue(cmd.startswith('__ms_1="$(cat '), cmd)         # read up front, in the main shell
+        self.assertTrue(cmd.startswith('__ms_1="$('), cmd)             # read up front, in the main shell
         self.assertNotIn(NASTY, cmd)
         r = _run(cmd)
         self.assertEqual(r.stdout, NASTY.upper() + "tail\n", r.stderr)   # the value reached a pipeline element
+        if sys.platform == "win32":
+            return   # Git Bash reads through the resolver script under a grant (up to 3 reads), not a FIFO
         # the FIFO delivered once and is gone: the same command again fails closed as a whole,
         # no "" reaches the pipeline, nothing after it runs
         r2 = _run(cmd)
