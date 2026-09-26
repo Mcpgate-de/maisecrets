@@ -1,6 +1,9 @@
 {
   "description": "maisecrets: block prompts that carry secrets or PII, rehydrate placeholders in Bash, redact tool results.",
   "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py\"", "timeout": 30}]}
+    ],
     "UserPromptSubmit": [
       {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/user_prompt.py\"", "timeout": 10}]}
     ],

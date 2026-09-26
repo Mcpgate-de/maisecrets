@@ -77,7 +77,7 @@ def cmd_put(args: list[str]) -> int:
 
 
 def cmd_expire(_: list[str]) -> int:
-    print(f"purged {Vault().expire()} expired value(s)")
+    print(f"purged {Vault().expire(limit=None)} expired value(s)")
     return 0
 
 

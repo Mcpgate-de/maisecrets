@@ -231,11 +231,19 @@ class Vault:
         self.expire()
         return [Entry(**m) for m in self._index["entries"].values()]
 
-    def expire(self) -> int:
-        """Delete expired values; keep their metadata. Returns the count."""
+    def expire(self, limit: int | None = 25) -> int:
+        """Delete expired values; keep their metadata. Returns the count.
+
+        Runs on every put/get/list, so every hook call sweeps. A keychain
+        delete costs ~10 ms (measured 2026-09-26), so a sweep is capped at
+        `limit` deletes per call; the rest go on the next call. `limit=None`
+        sweeps everything (SessionStart, `maisecrets expire`).
+        """
         now = time.time()
         n = 0
         for key, meta in self._index["entries"].items():
+            if limit is not None and n >= limit:
+                break
             if not meta.get("purged") and meta["expires"] < now:
                 self.backend.delete(key)
                 meta["purged"] = True
