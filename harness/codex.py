@@ -64,7 +64,7 @@ def run_scenario(name: str, sc: dict) -> list[str]:
     cwd.mkdir()
     home = work / "vaulthome"
     home.mkdir()
-    (home / "config.json").write_text(json.dumps({"backend": "jsonfile"}))
+    (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True}))
     codex_home = work / "codex_home"
     codex_home.mkdir()
     out = work / "out"

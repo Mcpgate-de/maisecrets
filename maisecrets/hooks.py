@@ -22,7 +22,7 @@ from typing import Any
 
 from . import detect
 from .placeholder import find_refs
-from .vault import Vault, load_config
+from .vault import ConfigError, Vault, load_config
 
 # a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
 AT_MENTION_RE = re.compile(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
@@ -151,8 +151,8 @@ def _scrub_forms(values: list[str]) -> list[bytes]:
     (a value ending in a backslash broke the record; review, 2026-09-26)."""
     forms: list[bytes] = []
     for v in values:
-        if not v:
-            continue
+        if not v or len(v) < 4 or v.isdigit():
+            continue   # a short or all-digit form would mask JSON numbers and unrelated bytes
         esc_a = json.dumps(v)[1:-1]
         esc_u = json.dumps(v, ensure_ascii=False)[1:-1]
         cands = [json.dumps(esc_a)[1:-1], json.dumps(esc_u, ensure_ascii=False)[1:-1], esc_a, esc_u, v]
@@ -195,6 +195,11 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
                 data = os.read(fd, chunk + overlap)
                 if not data:
                     break
+                # a JSONL record never spans a newline: end the window at the last one, so no
+                # escape sequence is cut between two windows (review, 2026-09-26)
+                cut = data.rfind(b"\n", 0, chunk) if len(data) > chunk else -1
+                if cut > 0:
+                    data = data[:cut + 1]
                 n_here = 0
                 for b in forms:
                     n = data.count(b)
@@ -205,7 +210,7 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
                     hits += n_here
                     os.lseek(fd, pos, os.SEEK_SET)
                     os.write(fd, data)
-                pos += chunk
+                pos += len(data)
             if hits:
                 os.fsync(fd)
         finally:
@@ -264,8 +269,11 @@ PRIMER = (
     "maisecrets: a placeholder like ⟦SECRET_c1⟧ or ⟦EMAIL_c2:ma•••@x.de⟧ stands for a value the user "
     "stored locally. Use it unchanged. In a Bash command the value is read when the command runs; in "
     "an MCP tool argument it is inserted at call time. It is NOT resolved in Write, Edit, WebFetch or a "
-    "subagent prompt: there it stays literal text. Never ask the user for the value, never try to print, "
-    "encode, slice or save it, never read the maisecrets store or its files, never change its settings."
+    "subagent prompt: there it stays literal text. In Bash use it as a plain argument, inside '…' or \"…\", "
+    "or in an unquoted heredoc; a command with bash -c, sh -c, ssh, eval, backticks, $'…', a quoted heredoc, "
+    "base64/xxd/od, ${x:0:4} or set -x is refused, and awk needs V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. "
+    "Never ask the user for the value, never try to print, encode, slice or save it, never read the "
+    "maisecrets store or its files, never change its settings."
 )
 
 
@@ -284,7 +292,7 @@ def user_prompt(payload: dict) -> dict:
                     "decision": "block",
                     "reason": (
                         f"maisecrets: @{m.group('path')} would inline the file without scanning. "
-                        "Ask Claude to read it instead, so the Read result can be redacted."
+                        "Ask the assistant to read it instead, so the Read result can be redacted."
                     ),
                     "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True},
                 }
@@ -349,12 +357,15 @@ def user_prompt(payload: dict) -> dict:
 # named so a deny can say what it matched and the user can report a false positive
 _STORE_READ_PATTERNS: list[tuple[str, str]] = [
     ("maisecrets get", r"(?<![\w.-])maisecrets(?:\.cli)?(?:\.py)?\s+get\b|(?<![\w-])cli\.py\s+get\b"),
-    ("keychain read of the maisecrets service", r"security\s+(?:find-generic-password|dump-keychain)[^\n]*maisecrets"),
+    ("keychain read of the maisecrets service",
+     r"security\s+find-generic-password[^\n]*maisecrets|security\s+dump-keychain"),
     ("Credential Locker read", r"PasswordVault[^\n]*maisecrets|maisecrets[^\n]*PasswordVault"),
     ("the vault files", r"vault\.enc\.json|vault\.json[^\n]*maisecrets|maisecrets[^\n]*vault\.json"),
-    ("the maisecrets home directory", r"\.maisecrets(?![\w-])|MAISECRETS_HOME"),
-    ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"),
-    ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets[/\\]v-|__ms_\d+\b"),
+    ("the maisecrets home directory", r"(?i:\.maisecrets)(?![\w-])|MAISECRETS_HOME"),
+    ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"
+                           r"|(?<![\w-])resolve\s+\S+\s+--grant\b|cmd_resolve|\.redeem\("),
+    ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\]v-|__ms_\d+\b"
+                              r"|XDG_RUNTIME_DIR[^\n]*maisecrets"),
 ]
 _STORE_READ_RE = re.compile("|".join(f"(?P<p{i}>{rx})" for i, (_n, rx) in enumerate(_STORE_READ_PATTERNS)))
 
@@ -370,29 +381,38 @@ def _store_read_match(command: str) -> str | None:
     return "store read"
 
 
-_HEREDOC_RE = re.compile(r"<<-?[ \t]*(?P<q>['\"]?)(?P<tag>\w+)(?P=q)")
-_NESTED_SHELL_RE = re.compile(
-    r"(?<![\w./-])(?:bash|sh|zsh|dash|ksh|fish)\s+(?:-[A-Za-z]+\s+)*-[A-Za-z]*c\b"
-    r"|(?<![\w./-])(?:ssh|eval|su|sudo\s+(?:-\S+\s+)*(?:bash|sh|zsh)|xargs|watch|script|expect|docker\s+(?:exec|run)|kubectl\s+exec)\b")
-_TRANSFORM_RE = re.compile(
-    r"(?<![\w./-])(?:base64|base32|xxd|od|hexdump|uuencode|rev|openssl\s+(?:enc|base64))(?![\w-])"
-    r"|\$\{\w+:\s*-?\d"          # ${x:0:4}: a slice
-    r"|(?<!\w)PS4="                  # a custom xtrace prompt
-    r"|\bset\s+(?:-[a-wyz]*x|-o\s+xtrace)\b"
-    r"|(?<![\w./-])(?:bash|sh|zsh)\s+-[a-wyz]*x\b")
+_HEREDOC_RE = re.compile(r"<<(?P<dash>-?)[ \t]*(?P<tag>(?:'[^'\n]*'|\"[^\"\n]*\"|\\[^\s]|[^\s;&|<>()'\"\\])+)")
+_REFUSED_CONTEXT = {
+    "ansi": "inside $'…' the value would need ANSI-C escaping",
+    "backtick": "inside `…` the value would be parsed a second time",
+    "hdq": "inside a quoted heredoc nothing expands, the file would get the variable name",
+    "hdx": "inside a heredoc that runs a command substitution the placement cannot be proven",
+    "arith": "inside $((…)) a value is not a number",
+}
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish", "ash", "mksh"}
+INLINE_INTERPRETERS = {"python", "python2", "python3", "perl", "ruby", "node", "nodejs", "php", "lua", "osascript",
+                       "deno", "bun"}
+INLINE_CODE_FLAGS = re.compile(r"^-(?:[A-Za-z]*[ceE][A-Za-z]*|-eval|-command|-exec)$")
+REMOTE_OR_EVAL = {"ssh", "eval", "su", "expect", "script", "sshpass", "plink", "mosh", "screen", "tmux"}
+ENCODERS = {"base64", "base32", "xxd", "od", "hexdump", "uuencode", "rev", "b2sum", "cksum"}
+WRAPPERS = {"env", "command", "exec", "nice", "time", "nohup", "sudo", "doas", "builtin", "timeout", "stdbuf",
+            "caffeinate", "ionice", "chronic"}
+_SLICE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
 
 
 def _shell_contexts(command: str) -> list[str]:
     """One context per character position of a bash command line, as a small state machine
     reads it. Contexts: '' (plain word), 'sq' (inside '…'), 'dq' (inside "…"), 'hd' (body of
     an unquoted heredoc, expands like dq), 'comment', and the ones the rewrite refuses:
-    'ansi' ($'…'), 'backtick', 'hdq' (body of a quoted heredoc, expands nothing). A $(…) opens
-    a fresh quoting scope on a stack, so a placeholder inside "$(printf '%s' ⟦X⟧)" is placed
-    for the inner single quotes and not for the outer double quotes (review, 2026-09-26: the
-    quote counter before this scanner returned the literal $__ms_1 there)."""
+    'ansi' ($'…'), 'backtick', 'hdq' (body of a quoted heredoc), 'hdx' (an unquoted heredoc
+    body with a command substitution in it), 'arith' ($((…))). A $(…) opens a fresh quoting
+    scope on a stack with its own parenthesis depth, so a placeholder inside
+    "$(printf '%s' ⟦X⟧)" is placed for the inner single quotes and a `)` of a subshell inside
+    does not close the scope (reviews, 2026-09-26)."""
     n = len(command)
     out = [""] * n
     stack: list[str] = [""]          # quoting scope per $( ) level
+    depth: list[int] = [0]           # open '(' inside the current $( ) scope
     pending: list[tuple[str, bool]] = []   # heredocs announced on the current line: (tag, quoted)
     i = 0
     while i < n:
@@ -404,26 +424,30 @@ def _shell_contexts(command: str) -> list[str]:
                 stack[-1] = ""
             i += 1
             continue
-        if st == "ansi":
-            out[i] = "ansi"
+        if st in ("ansi", "backtick"):
+            out[i] = st
             if c == "\\":
                 if i + 1 < n:
-                    out[i + 1] = "ansi"
+                    out[i + 1] = st
                 i += 2
                 continue
-            if c == "'":
-                stack[-1] = ""
+            if (st == "ansi" and c == "'") or (st == "backtick" and c == "`"):
+                if st == "backtick" and len(stack) > 1:
+                    stack.pop()
+                    depth.pop()
+                else:
+                    stack[-1] = ""
             i += 1
             continue
-        if st == "backtick":
-            out[i] = "backtick"
-            if c == "\\":
-                if i + 1 < n:
-                    out[i + 1] = "backtick"
-                i += 2
-                continue
-            if c == "`":
-                stack.pop()
+        if st == "arith":
+            out[i] = "arith"
+            if c == "(":
+                depth[-1] += 1
+            elif c == ")":
+                depth[-1] -= 1
+                if depth[-1] <= 0:
+                    stack.pop()
+                    depth.pop()
             i += 1
             continue
         if st == "dq":
@@ -437,14 +461,22 @@ def _shell_contexts(command: str) -> list[str]:
                 stack[-1] = ""
                 i += 1
                 continue
+            if c == "$" and command.startswith("$((", i):
+                out[i + 1] = out[i + 2] = "arith"
+                stack.append("arith")
+                depth.append(2)
+                i += 3
+                continue
             if c == "$" and i + 1 < n and command[i + 1] == "(":
                 out[i + 1] = "dq"
                 stack.append("")
+                depth.append(0)
                 i += 2
                 continue
             if c == "`":
                 out[i] = "backtick"     # a backtick inside "…" starts a substitution too
                 stack.append("backtick")
+                depth.append(0)
             i += 1
             continue
         # plain
@@ -459,13 +491,15 @@ def _shell_contexts(command: str) -> list[str]:
             i += 1
             if pending:
                 # heredoc bodies follow, in announcement order, each up to its terminator line
-                for tag, quoted in pending:
+                for tag, quoted, dash in pending:
                     ctx = "hdq" if quoted else "hd"
+                    body_start = i
                     while i < n:
                         eol = command.find("\n", i)
                         eol = n if eol < 0 else eol
-                        line = command[i:eol]
-                        if line.strip("\t") == tag:
+                        line = command[i:eol].rstrip("\r")
+                        probe = line.lstrip("\t") if dash else line
+                        if probe == tag:
                             for k in range(i, min(eol + 1, n)):
                                 out[k] = ""
                             i = eol + 1
@@ -473,9 +507,15 @@ def _shell_contexts(command: str) -> list[str]:
                         for k in range(i, min(eol + 1, n)):
                             out[k] = ctx
                         i = eol + 1
+                    if not quoted:
+                        body = command[body_start:i]
+                        if "$(" in body or "`" in body:
+                            for k in range(body_start, min(i, n)):
+                                if out[k] == "hd":
+                                    out[k] = "hdx"
                 pending = []
             continue
-        if c == "#" and (i == 0 or command[i - 1] in " \t\n;&|(" ):
+        if c == "#" and (i == 0 or command[i - 1] in " \t\n;&|("):
             eol = command.find("\n", i)
             eol = n if eol < 0 else eol
             for k in range(i, eol):
@@ -497,27 +537,51 @@ def _shell_contexts(command: str) -> list[str]:
             stack[-1] = "ansi"
             i += 2
             continue
+        if c == "$" and command.startswith("$((", i):
+            out[i] = out[i + 1] = out[i + 2] = "arith"
+            stack.append("arith")
+            depth.append(2)
+            i += 3
+            continue
         if c == "$" and i + 1 < n and command[i + 1] == "(":
             out[i] = out[i + 1] = ""
             stack.append("")
+            depth.append(0)
             i += 2
             continue
-        if c == ")" and len(stack) > 1:
+        if c == "(":
             out[i] = ""
-            stack.pop()
+            depth[-1] += 1
+            i += 1
+            continue
+        if c == ")":
+            out[i] = ""
+            if depth[-1] > 0:
+                depth[-1] -= 1
+            elif len(stack) > 1:
+                stack.pop()
+                depth.pop()
             i += 1
             continue
         if c == "`":
             out[i] = "backtick"
             stack.append("backtick")
+            depth.append(0)
             i += 1
+            continue
+        if c == "<" and command.startswith("<<<", i):
+            out[i] = out[i + 1] = out[i + 2] = ""      # a here-string is a word, not a heredoc
+            i += 3
             continue
         if c == "<" and command.startswith("<<", i):
             m = _HEREDOC_RE.match(command, i)
             if m:
                 for k in range(i, m.end()):
                     out[k] = ""
-                pending.append((m.group("tag"), bool(m.group("q"))))
+                raw = m.group("tag")
+                quoted = any(ch in raw for ch in "'\"\\")
+                tag = raw.replace("'", "").replace('"', "").replace("\\", "")
+                pending.append((tag, quoted, bool(m.group("dash"))))
                 i = m.end()
                 continue
         out[i] = ""
@@ -529,6 +593,111 @@ def _quote_state(command: str, pos: int) -> str:
     """Context of the placeholder at ``pos``; see _shell_contexts."""
     ctxs = _shell_contexts(command)
     return ctxs[pos] if pos < len(ctxs) else ""
+
+
+_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z_0-9]*=")
+
+
+def _segments(command: str, ctxs: list[str]) -> list[dict]:
+    """The simple commands of a command line, read only in the plain context: text inside
+    quotes, comments and heredoc bodies is masked to 'Q' so it never forms a command word
+    (`python3 script.py`, a word in a comment and `docker run -e` were taken for a nested
+    shell by a substring regex; review, 2026-09-26). Each segment: its words with leading
+    assignments and wrappers (env, sudo, nice, …) removed, its command word (basename),
+    whether it is fed by a pipe and whether it announces a heredoc."""
+    masked = "".join(ch if ctx == "" else ("\n" if ch == "\n" else "Q") for ch, ctx in zip(command, ctxs))
+    segs: list[dict] = []
+    piped = False
+    cur: list[str] = []
+    heredoc = False
+
+    def flush(next_piped: bool) -> None:
+        nonlocal cur, piped, heredoc
+        text = "".join(cur).strip()
+        if text:
+            segs.append({"text": text, "piped": piped, "heredoc": heredoc})
+        cur, piped, heredoc = [], next_piped, False
+
+    i = 0
+    while i < len(masked):
+        ch = masked[i]
+        if masked.startswith("<<", i) and not masked.startswith("<<<", i):
+            heredoc = True
+        if ch in ";\n()" :
+            flush(False)
+            i += 1
+            continue
+        if ch == "|":
+            two = masked.startswith("||", i)
+            flush(not two)
+            i += 2 if two else 1
+            continue
+        if ch == "&":
+            flush(False)
+            i += 2 if masked.startswith("&&", i) else 1
+            continue
+        cur.append(ch)
+        i += 1
+    flush(False)
+    for seg in segs:
+        words = seg["text"].split()
+        # leading assignments and wrappers
+        while words and (_ASSIGN_RE.match(words[0]) or os.path.basename(words[0]) in WRAPPERS):
+            w = os.path.basename(words[0])
+            words = words[1:]
+            if w in ("sudo", "doas", "timeout", "nice", "ionice", "stdbuf", "env"):
+                # their own options, with the one argument some take
+                while words and words[0].startswith("-"):
+                    takes_arg = words[0] in ("-u", "-g", "-h", "-p", "-C", "-n", "-i", "-e", "-o", "-s")
+                    words = words[2:] if takes_arg else words[1:]
+                if w == "timeout" and words and re.fullmatch(r"[0-9.]+[smhd]?", words[0]):
+                    words = words[1:]
+        seg["words"] = words
+        seg["cmd"] = os.path.basename(words[0]) if words else ""
+    return segs
+
+
+def _refusal_for(command: str, ctxs: list[str]) -> str | None:
+    """Why a command that carries placeholders is refused: a shell or an interpreter that would
+    parse the value a second time, or a step that would encode, slice or trace it. Command
+    words only, so `python3 script.py ⟦K⟧` and `docker run -e T=⟦K⟧ img` pass."""
+    plain = "".join(ch if ctx in ("", "dq", "hd") else " " for ch, ctx in zip(command, ctxs))
+    for seg in _segments(command, ctxs):
+        words, cmd = seg["words"], seg["cmd"]
+        if not words:
+            continue
+        flags = [w for w in words[1:] if w.startswith("-")]
+        if cmd in SHELLS:
+            if any(INLINE_CODE_FLAGS.match(f) and "c" in f for f in flags) or seg["heredoc"] or seg["piped"]:
+                return f"{cmd} would parse the value a second time as shell code"
+            if any(re.fullmatch(r"-[A-Za-z]*x[A-Za-z]*", f) for f in flags):
+                return f"{cmd} -x would trace the value"
+        if cmd in REMOTE_OR_EVAL:
+            return f"{cmd} hands the command line to another shell"
+        if cmd in INLINE_INTERPRETERS and any(INLINE_CODE_FLAGS.match(f) for f in flags):
+            return f"{cmd} with inline code would parse the value as program text"
+        if cmd in ENCODERS:
+            return f"{cmd} would encode the value"
+        if cmd in ("awk", "gawk", "mawk", "nawk") and "-v" in words:
+            return "awk -v changes backslashes in the value; use V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …' instead"
+        if cmd == "openssl" and len(words) > 1 and words[1] in ("enc", "base64", "dgst"):
+            return f"openssl {words[1]} would encode the value"
+        if cmd == "set" and any(re.fullmatch(r"-[a-wyz]*x[a-z]*", f) for f in flags):
+            return "set -x would trace the value"
+        if cmd == "set" and "xtrace" in words:
+            return "set -o xtrace would trace the value"
+        for w in words[1:]:
+            # a shell named later in the segment with its own -c: docker run img sh -c "…"
+            if os.path.basename(w) in SHELLS:
+                rest = words[words.index(w) + 1:]
+                if any(INLINE_CODE_FLAGS.match(r) and "c" in r for r in rest if r.startswith("-")):
+                    return f"{os.path.basename(w)} -c would parse the value a second time as shell code"
+    if re.search(r"(?<![\w-])PS4=", plain):
+        return "a custom PS4 would trace the value"
+    m = _SLICE_RE.search(plain)
+    if m:
+        return f"the parameter expansion {m.group(0)}… would slice or rewrite the value"
+    return None
 
 
 def _resolver_call(key: str, nonce: str) -> str:
@@ -587,18 +756,26 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0) -> bool:
 
 def _run_dir() -> str:
     """The directory the value FIFOs live in: $XDG_RUNTIME_DIR/maisecrets when the system offers
-    a per-user runtime dir, else ~/.maisecrets/run. Never the shared /tmp: a directory another
-    local user created first there would let them swap the FIFO and receive the value (review,
-    2026-09-26). The directory is refused unless it is a real directory, owned by this user,
-    with no group or world bits."""
-    from .vault import HOME
-    xdg = os.environ.get("XDG_RUNTIME_DIR", "")
-    base = os.path.join(xdg, "maisecrets") if xdg and os.path.isdir(xdg) else str(HOME / "run")
-    os.makedirs(base, mode=0o700, exist_ok=True)
-    st = os.lstat(base)
+    a per-user runtime dir, else <tempdir>/maisecrets-<uid>. Not the vault home: the README asks
+    users to deny ~/.maisecrets in the Claude Code sandbox, and the command that reads the FIFO
+    runs inside that sandbox (review, 2026-09-26). Not the shared /tmp/maisecrets either: a
+    directory another local user created first there would let them swap the FIFO and receive
+    the value. The directory is refused unless it is a real directory (no symlink), owned by
+    this user, with no group or world bits."""
     import stat as _stat
+    import tempfile
+    xdg = os.environ.get("XDG_RUNTIME_DIR", "")
+    if xdg and os.path.isdir(xdg):
+        base = os.path.join(xdg, "maisecrets")
+    else:
+        base = os.path.join(tempfile.gettempdir(), f"maisecrets-{os.getuid()}")
+    try:
+        os.mkdir(base, 0o700)
+    except FileExistsError:
+        pass
+    st = os.lstat(base)
     if not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or (st.st_mode & 0o077):
-        raise RuntimeError("run dir unsafe")
+        raise RuntimeError(base)
     return base
 
 
@@ -630,25 +807,20 @@ def _updated(payload: dict, new_input: dict) -> dict:
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": new_input}}
 
 
-_REFUSED_CONTEXT = {
-    "ansi": "inside $'…' the value would need ANSI-C escaping",
-    "backtick": "inside `…` the value would be parsed a second time",
-    "hdq": "inside a quoted heredoc nothing expands, the file would get the variable name",
-}
-
-
 def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     """Bash: every value is read into a shell variable in the MAIN shell before the command
     runs, and the placeholder becomes that variable in its quoting context. The read fails
     closed for the whole command (``|| exit 97``), also inside pipelines and subshells, where
     a ``kill $$`` behind a substitution did not reach (review, 2026-09-26). The command the
     user approves, the transcript and the tool_use record carry no value. A context the rewrite
-    cannot place safely (a nested shell, a quoted heredoc, $'…', backticks) and a command that
-    would transform the value (base64, xxd, a slice, xtrace) are refused with the reason. On
+    cannot place (a nested shell, a quoted heredoc, $'…', backticks, arithmetic) and a command
+    word that would parse, encode, slice or trace the value are refused with the reason. On
     POSIX the value comes through a FIFO in the user's run dir served by a detached child
-    (readable from inside Codex's sandbox); on Windows Git Bash through the resolver script.
-    Every key is checked before any child starts serving, so a refused command leaves no value
-    waiting (review, 2026-09-26)."""
+    (readable from inside Codex's sandbox and from a Claude Code sandbox that denies the vault
+    home); no grant is minted there, so nothing is redeemable afterwards. On Windows Git Bash
+    the resolver script reads it under a one-time grant. Every key passes the session rule and
+    the limiter before anything is recorded or served, so a refused command leaves no audit
+    line and no value waiting (reviews, 2026-09-26)."""
     command = tool_input.get("command", "")
     matched = _store_read_match(command)
     if matched:
@@ -660,7 +832,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     if not refs:
         return {}
     keys = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(k for k, _a, _b in refs))
-    if platform.system() == "Windows" and client_of(payload) == "codex":
+    windows = platform.system() == "Windows"
+    if windows and client_of(payload) == "codex":
         return _deny(f"maisecrets: {keys} cannot be placed in a shell command on Codex for Windows "
                      "(PowerShell quoting is not supported). The command did not run. Use the value "
                      "through an MCP tool, or ask the user to run the command themselves.")
@@ -670,72 +843,97 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
             return _deny(f"maisecrets: ⟦{k}⟧ sits where the value cannot be placed safely: {why}. "
                          "The command did not run. Pass the placeholder as a plain argument of the "
                          "command that needs it.")
-    m = _NESTED_SHELL_RE.search(command)
-    if m:
-        return _deny(f"maisecrets: {keys} inside a command that starts another shell ({m.group(0).strip()}) "
-                     "would be parsed a second time and could become shell syntax. The command did not "
-                     "run. Run the inner command directly, without the wrapper.")
-    m = _TRANSFORM_RE.search(command)
-    if m:
-        return _deny(f"maisecrets: a command that uses {keys} must not encode, slice or trace the value "
-                     f"(matched \"{m.group(0).strip()}\"). The command did not run. Use the placeholder only "
-                     "as an argument of the tool that needs the value.")
+    why = _refusal_for(command, ctxs)
+    if why:
+        return _deny(f"maisecrets: {keys} is refused in this command: {why}. The command did not run. "
+                     "Use the placeholder only as a plain argument of the tool that needs the value; "
+                     "run a wrapper's inner command directly, and do not encode, slice or trace the value.")
     vault = Vault(cfg)
     session = payload.get("session_id")
-    failed: list[str] = []
-    windows = platform.system() == "Windows"
-    # phase 1: every key passes the session rule, the limiter and the store before anything serves
-    plan: dict[str, tuple[str, str | None]] = {}    # key -> (nonce, value)
-    for key in dict.fromkeys(k for k, _a, _b in refs):
-        nonce, status = vault.grant(key, session, "Bash", command)
-        if status != "ok":
-            failed.append(f"{key} ({status})")
-            continue
-        value = None
-        if not windows:
-            value, status = vault.get(key, session)
+    uniq = list(dict.fromkeys(k for k, _a, _b in refs))
+    # phase 1: session rule and limiter for every key, before anything is recorded
+    failed = [f"{k} ({st})" for k in uniq for st in [vault.status(k, session)] if st != "ok"]
+    if failed:
+        return _deny(_deny_reason(failed))
+    failed = [f"{k} ({st})" for k in uniq for st in [vault._limit(k, session)] if st != "ok"]
+    if failed:
+        return _deny(_deny_reason(failed))
+    # phase 2: record (audit line, limiter) and fetch; a failure here has recorded nothing served
+    plan: dict[str, tuple[str | None, str | None]] = {}    # key -> (nonce, value)
+    for key in uniq:
+        if windows:
+            nonce, status = vault.grant(key, session, "Bash", command)
             if status != "ok":
                 failed.append(f"{key} ({status})")
                 continue
-        plan[key] = (nonce, value)
+            plan[key] = (nonce, None)
+        else:
+            status = vault.record_resolve(key, session, "Bash", command)
+            if status == "ok":
+                value, status = vault.get(key, session)
+            if status != "ok":
+                failed.append(f"{key} ({status})")
+                continue
+            plan[key] = (None, value)
     if failed:
         return _deny(_deny_reason(failed))
-    # phase 2: serve and rewrite
+    # phase 3: serve and rewrite
     prelude: list[str] = []
     var_by_key: dict[str, str] = {}
+    served: list[str] = []
     rewritten = command
     for key, (nonce, value) in plan.items():
         var = f"__ms_{len(var_by_key) + 1}"
         var_by_key[key] = var
         if windows:
-            read = _resolver_call(key, nonce)
+            read = _resolver_call(key, nonce or "")
         else:
             try:
-                fifo = _fifo_path(nonce)
-            except (OSError, RuntimeError):
-                return _deny(f"maisecrets: the value for ⟦{key}⟧ has no safe place to wait (the run "
-                             "directory is missing or not private). The command did not run. Tell the user "
-                             "to check the permissions of ~/.maisecrets/run.")
+                fifo = _fifo_path(key_nonce())
+            except (OSError, RuntimeError) as exc:
+                _unserve(served)
+                return _deny(f"maisecrets: the value for ⟦{key}⟧ has no safe place to wait: the run directory "
+                             f"{exc} is missing, not private, or not a directory. The command did not run. "
+                             "Tell the user to check it; do not retry.")
             if not _serve_value_later(fifo, value or ""):
+                _unserve(served)
                 return _deny(f"maisecrets: the value for ⟦{key}⟧ could not be prepared for delivery "
                              "(delivery unavailable). The command did not run. Retry once; if this "
                              "message comes again, stop and tell the user.")
+            served.append(fifo)
             read = f"$(cat {shlex_quote(fifo)})"
         prelude.append(f'{var}="{read}" || {{ echo "maisecrets: the value for {key} was not delivered '
-                       f'(served for 120 s, or read by another process); the command did not run" >&2; exit 97; }}')
+                       f'(served for 120 s, or read by another process); the command did not run. Run it again '
+                       f'once; if it fails again, stop and tell the user" >&2; exit 97; }}')
     for key, start, end in sorted(refs, key=lambda r: r[1], reverse=True):
         var = var_by_key[key]
         ctx = ctxs[start]
+        # always braced: ⟦X⟧b inside "…" became $__ms_1b, an empty variable (claims review, 2026-09-26)
         if ctx == "sq":
-            piece = "'\"$" + var + "\"'"
+            piece = "'\"${" + var + "}\"'"
         elif ctx in ("dq", "hd"):
-            piece = "$" + var
+            piece = "${" + var + "}"
         else:
-            piece = '"$' + var + '"'
+            piece = '"${' + var + '}"'
         rewritten = rewritten[:start] + piece + rewritten[end:]
     new_input = dict(tool_input)
     new_input["command"] = "; ".join(prelude) + "; " + rewritten
     return _updated(payload, new_input)
+
+
+def key_nonce() -> str:
+    import secrets as _secrets
+    return _secrets.token_urlsafe(16)
+
+
+def _unserve(fifos: list[str]) -> None:
+    """Take back values already waiting when a later step refuses the command: without the
+    FIFO the serving child cannot open it and exits with nothing written."""
+    for f in fifos:
+        try:
+            os.unlink(f)
+        except OSError:
+            pass
 
 
 def shlex_quote(s: str) -> str:
@@ -752,8 +950,9 @@ def _deny_reason(failed: list[str]) -> str:
         hints.append("A key marked (unknown) does not exist; do not guess other keys, use only "
                      "placeholders the user gave you.")
     if any("(expired)" in f for f in failed):
-        hints.append("A key marked (expired) has no value any more; ask the user to paste the value "
-                     "again, maisecrets will block it and give a new placeholder.")
+        hints.append("A key marked (expired) has no value any more. Ask the user to store it again with "
+                     "/maisecrets:put or to paste it into a prompt (maisecrets blocks it and gives a new "
+                     "placeholder), then use the new placeholder. Do not ask for the value in any other way.")
     if any("foreign-session" in f or "no-session" in f for f in failed):
         hints.append("A key marked (foreign-session) resolves only in a session where a human typed "
                      "it: ask the user to paste the placeholder, never the value.")
@@ -828,7 +1027,7 @@ def _dict_keys(node: Any) -> list[str]:
 _FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 
 
-def _pre_file_tool(cfg: dict, tool: str, tool_input: dict) -> dict:
+def _pre_file_tool(cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:
     """Write/Edit never resolve a placeholder: the file would get the literal text, or the edit
     would not match the redacted Read. Say so instead of letting the workflow fail later. The
     maisecrets home is off limits for the agent: a config written by an injected instruction
@@ -836,10 +1035,17 @@ def _pre_file_tool(cfg: dict, tool: str, tool_input: dict) -> dict:
     from .vault import HOME
     path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
     try:
-        inside = path and os.path.realpath(os.path.expanduser(path)).startswith(os.path.realpath(str(HOME)) + os.sep)
+        expanded = os.path.expanduser(path)
+        if expanded and not os.path.isabs(expanded) and cwd:
+            expanded = os.path.join(cwd, expanded)   # the client's cwd, not the hook's
+        real = os.path.realpath(expanded)
+        home = os.path.realpath(str(HOME))
+        if platform.system() in ("Darwin", "Windows"):   # case-insensitive file systems (APFS, NTFS)
+            real, home = real.lower(), home.lower()
+        inside = bool(path) and real.startswith(home + os.sep)
     except (OSError, ValueError):
         inside = False
-    if inside or ".maisecrets" in path:
+    if inside or ".maisecrets" in path.lower():
         return _deny(f"maisecrets: {tool} on {path} is refused; the maisecrets home is changed by the human "
                      "only. Nothing was written. Tell the user what you wanted to change there.")
     keys: list[str] = []
@@ -865,7 +1071,7 @@ def pre_tool(payload: dict) -> dict:
     if tool == "Bash":
         return _pre_bash(payload, cfg, tool_input)
     if tool in _FILE_TOOLS:
-        return _pre_file_tool(cfg, tool, tool_input)
+        return _pre_file_tool(cfg, tool, tool_input, str(payload.get("cwd") or ""))
     if tool.startswith("mcp__"):
         # Gateway servers too: the deposit path (gateway resolves ⟦REF⟧ itself, PROTOCOL §4) is not
         # built; until it is, a placeholder that reaches a gateway action is parsed as text
@@ -925,7 +1131,7 @@ def _derived_forms(value: str) -> list[str]:
         forms += [f, f.rstrip("=")]
     forms += [raw.hex(), raw.hex().upper(), quote(value, safe=""), quote_plus(value),
               json.dumps(value)[1:-1], json.dumps(value, ensure_ascii=False)[1:-1]]
-    return [f for f in dict.fromkeys(forms) if len(f) >= 4]
+    return [f for f in dict.fromkeys(forms) if len(f) >= _EXACT_MIN_LEN]
 
 
 def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]:
@@ -936,13 +1142,16 @@ def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]
     keys = [r["key"] for r in vault._index.get("resolves", []) if r.get("session") == session and r["ts"] > now - 3600]
     out: list[tuple[str, str]] = []
     from .vault import Entry
-    for key in dict.fromkeys(keys):
-        meta = vault._index["entries"].get(key)
-        if not meta or meta.get("purged"):
-            continue
-        value = vault.backend.get(key)
+    live = [k for k in dict.fromkeys(keys)
+            if vault._index["entries"].get(k) and not vault._index["entries"][k].get("purged")]
+    if hasattr(vault.backend, "get_many"):
+        found = vault.backend.get_many(live)
+    else:
+        found = {k: v for k in live for v in [vault.backend.get(k)] if v}
+    for key in live:
+        value = found.get(key)
         if value:
-            out.append((value, Entry(**meta).ref))
+            out.append((value, Entry(**vault._index["entries"][key]).ref))
     return out
 
 
@@ -1099,6 +1308,8 @@ def _post_tool_guarded(payload: dict) -> dict:
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
     try:
         return post_tool(payload)
+    except ConfigError as exc:
+        return _fail_closed("post-tool", payload, f"configuration error: {exc}. Fix the file named there.", hint=False)
     except Exception as exc:  # noqa: BLE001
         _debug(f"post-tool: {type(exc).__name__}")
         return _fail_closed("post-tool", payload, f"failed ({type(exc).__name__}).")
@@ -1112,7 +1323,7 @@ HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post
 WATCHDOG_SECONDS = {"user-prompt": 7.0, "pre-tool": 7.0, "post-tool": 16.0}
 
 
-def _fail_closed(event: str, payload: dict, why: str) -> dict:
+def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict:
     """The answer that keeps the guard up when the hook itself cannot finish: block the prompt,
     deny the tool, withhold the tool output. Never a value, never an exception text (a keychain
     error carried the value in its argument list; Codex review, 2026-09-26). Each text says
@@ -1120,19 +1331,65 @@ def _fail_closed(event: str, payload: dict, why: str) -> dict:
     reason = f"maisecrets {event}: {why}"
     codex = client_of(payload) == "codex"
     if event == "user-prompt":
-        out = {"decision": "block", "reason": reason + " The prompt was not sent; try again. If this message "
-               "comes again, tell the user that maisecrets cannot finish (a locked store or a slow disk)."}
+        tail = (" The prompt was not sent; try again. If this message comes again, tell the user that "
+                "maisecrets cannot finish (a locked store or a slow disk)." if hint
+                else " The prompt was not sent. Tell the user; do not retry.")
+        out = {"decision": "block", "reason": reason + tail}
         if not codex:
             out["hookSpecificOutput"] = {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}
         return out
     if event == "pre-tool":
-        return _deny(reason + " The command did NOT run. Retry once; if this message comes again, stop and "
-                     "tell the user that maisecrets cannot reach its store.")
+        tail = (" The command did NOT run. Retry once; if this message comes again, stop and tell the user "
+                "that maisecrets cannot reach its store." if hint
+                else " The command did NOT run. Tell the user; do not retry.")
+        return _deny(reason + tail)
     tail = (" The tool ran and finished; its output is withheld because the redaction did not finish. "
             "Do NOT run it again to see the output; tell the user to check the result in their terminal.")
     if codex:
         return {"decision": "block", "reason": reason + tail}
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": f"[{reason}{tail}]"}}
+
+
+def _decision_of(event: str, obj: dict) -> str:
+    """One word for the run log: what the hook answered, never why."""
+    if not obj:
+        return "pass"
+    if obj.get("decision") == "block":
+        return "block"
+    hso = obj.get("hookSpecificOutput") or {}
+    if hso.get("permissionDecision") == "deny":
+        return "deny"
+    if "updatedInput" in hso:
+        return "rewrite"
+    if "updatedToolOutput" in hso:
+        return "redact"
+    if "additionalContext" in hso:
+        return "context"
+    return "answer"
+
+
+def _run_log(event: str, payload: dict, how: str, decision: str, ms: int) -> None:
+    """One line per hook run in ~/.maisecrets/hooks.log: time, event, client, session, tool,
+    decision, duration, how it ended. Never a value, never a command. Without it a silent pass
+    cannot be told from a hook that did not run (field report, 2026-09-26: a placeholder went
+    unchanged into a file and no record said whether the hook ran). Capped at 2000 lines."""
+    try:
+        from .vault import HOME, atomic_write
+        HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path = HOME / "hooks.log"
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
+        tool = str(payload.get("tool_name", "-"))[:40]
+        sess = str(payload.get("session_id") or "-")[:8]
+        line = f"{stamp}\t{event}\t{client_of(payload)}\t{sess}\t{tool}\t{decision}\t{ms}ms\t{how}\n"
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(line)
+        if path.stat().st_size > 2000 * 100:
+            lines = path.read_text(encoding="utf-8").splitlines()
+            if len(lines) > 2000:
+                atomic_write(path, "\n".join(lines[-2000:]) + "\n")
+    except OSError:
+        pass
 
 
 def main(argv: list[str]) -> int:
@@ -1144,6 +1401,10 @@ def main(argv: list[str]) -> int:
         payload = json.load(sys.stdin)
     except ValueError:
         sys.stderr.write("maisecrets: bad payload\n")
+        if event == "post-tool":
+            # exit 2 is ignored here and the raw output would reach the model
+            _out(_fail_closed("post-tool", {}, "got a payload that is not JSON."))
+            return 0
         return 2  # fail closed
     import threading
     started = time.time()
@@ -1158,8 +1419,10 @@ def main(argv: list[str]) -> int:
                 return
             answered["v"] = True
             _out(obj)
-        _debug(f"{event}: {how} {client_of(payload)} {int((time.time() - started) * 1000)}ms "
-               f"{'answered' if obj else 'pass'}")
+        ms = int((time.time() - started) * 1000)
+        decision = _decision_of(event, obj)
+        _debug(f"{event}: {how} {client_of(payload)} {ms}ms {decision}")
+        _run_log(event, payload, how, decision, ms)
 
     def on_timeout() -> None:
         answer(_fail_closed(event, payload, f"took longer than {WATCHDOG_SECONDS[event]:.0f}s."), "watchdog")
@@ -1169,6 +1432,12 @@ def main(argv: list[str]) -> int:
     watchdog.start()
     try:
         answer(HANDLERS[event](payload), "ok")
+        return 0
+    except ConfigError as exc:
+        # the policy file is wrong: fail closed, and say which key (its message never carries
+        # a value; a bare type name sent the user to "a locked store"; review, 2026-09-26)
+        answer(_fail_closed(event, payload, f"configuration error: {exc}. Fix the file named there.", hint=False),
+               "config-error")
         return 0
     except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         # the type only: an exception message may carry a value (subprocess errors list the argv)

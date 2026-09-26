@@ -172,6 +172,9 @@ def cmd_status(_: list[str]) -> int:
     except (OSError, ValueError):
         pass
     print(f"maisecrets {version} at {root}")
+    cfg_warning = load_config().get("config_warning")
+    if cfg_warning:
+        print(f"WARNING: {cfg_warning}")
     print(f"python {platform.python_version()} at {sys.executable}; {platform.system()} {platform.release()}")
     v = Vault()
     live = [e for e in v.list() if not e.purged]
@@ -185,7 +188,7 @@ def cmd_status(_: list[str]) -> int:
           f"presidio {open(detect.RULES_DIR / 'PRESIDIO_VERSION').read().strip()}, "
           f"detect-secrets {open(detect.RULES_DIR / 'DETECT_SECRETS_VERSION').read().strip()}); "
           f"regions {v.cfg.get('pii_regions')}")
-    for name in ("events.log", "audit.log"):
+    for name in ("events.log", "audit.log", "hooks.log"):
         p = HOME / name
         try:
             n = sum(1 for _ in open(p, encoding="utf-8")) if p.exists() else 0
@@ -198,12 +201,20 @@ def cmd_status(_: list[str]) -> int:
 def cmd_wipe(args: list[str]) -> int:
     """Delete every stored value, the metadata and the logs of this vault: offboarding."""
     if "--yes" not in args:
-        print("maisecrets wipe deletes every stored value, the index, the audit and event logs and the "
-              "pending prompts of this user. Run `maisecrets wipe --yes` to do it.")
+        print("maisecrets wipe deletes every stored value, the index, the audit, event and hook logs and the "
+              "pending prompts of this user. Run `wipe --yes` to do it.")
         return 2
-    v = Vault()
-    n = v.wipe()
+    from .hooks import _run_dir
+    from .vault import wipe_everything
+    try:
+        run_dir = _run_dir()
+    except (OSError, RuntimeError):
+        run_dir = None
+    n, problems = wipe_everything(load_config(), run_dir)
     print(f"wiped: {n} stored value(s), index, logs. The config file stays.")
+    if problems:
+        print("NOT complete: " + "; ".join(problems) + ". A value may still be in the store; check it by hand.")
+        return 1
     return 0
 
 
@@ -211,10 +222,16 @@ def cmd_repair(_: list[str]) -> int:
     """Rebuild a damaged index from the store; every stored value is deleted, the counters
     continue past the highest key seen, so no new value overwrites an old one."""
     from .vault import make_backend
+    from .vault import HOME, _lock_for
     v = Vault.__new__(Vault)
     v.cfg = load_config()
     v.backend = make_backend(v.cfg)
-    info = v.repair()
+    try:
+        with _lock_for(HOME / ".lock"):
+            info = v.repair()
+    except RuntimeError as exc:
+        print(f"repair refused: {exc}", file=sys.stderr)
+        return 1
     print(f"repaired: {info['keys_seen']} stored key(s) deleted, counters {info['counters']}")
     return 0
 

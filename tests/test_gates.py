@@ -23,13 +23,17 @@ sys.path.insert(0, str(ROOT))
 # imported it first); the resolve subprocess must see the same home, so it is taken from there
 os.environ.setdefault("MAISECRETS_HOME", tempfile.mkdtemp(prefix="maisecrets-gates-"))
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
-Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile"}')
+Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
 from maisecrets import hooks  # noqa: E402
 from maisecrets.vault import HOME, INDEX, Vault  # noqa: E402
 
 os.environ["MAISECRETS_HOME"] = str(HOME)
 _TMP = str(HOME)
+# the value FIFOs live under the temp dir (or $XDG_RUNTIME_DIR); the tests must never touch
+# the directory the installed plugin uses on this machine
+os.environ.pop("XDG_RUNTIME_DIR", None)
+tempfile.tempdir = _TMP
 
 BASH = shutil.which("bash")
 # quotes, a command substitution, a backtick, a backslash and spaces: everything a splice would break on
@@ -98,7 +102,7 @@ class GrantTests(unittest.TestCase):
         out = _bash_pre("echo " + self.e.ref + " and '" + self.e.ref + "'")["hookSpecificOutput"]
         cmd = out["updatedInput"]["command"]
         self.assertEqual(cmd.count("__ms_1="), 1)
-        self.assertEqual(cmd.count("$__ms_1"), 2)
+        self.assertEqual(cmd.count("${__ms_1}"), 2)
         if BASH:
             self.assertEqual(_run(cmd).stdout, NASTY + " and " + NASTY + "\n")
 
@@ -219,7 +223,7 @@ class ContextTests(unittest.TestCase):
             with self.subTest(cmd[:30]):
                 out = _bash_pre(cmd)["hookSpecificOutput"]
                 self.assertEqual(out.get("permissionDecision"), "deny", out)
-                self.assertIn("matched", out["permissionDecisionReason"])
+                self.assertIn("refused in this command", out["permissionDecisionReason"])
         # a plain pipeline stays allowed
         plain = _bash_pre("curl -H 'X-Token: " + self.e.ref + "' h | jq .")["hookSpecificOutput"]
         self.assertNotIn("permissionDecision", plain)
@@ -277,6 +281,107 @@ class ContextTests(unittest.TestCase):
                 self.assertEqual(_bash_pre(cmd), {})
 
 
+class ScannerEdgeTests(unittest.TestCase):
+    """Cases the second review round found: nested-shell spellings, ordinary commands that must
+    pass, here-strings, arithmetic, backslash-quoted heredocs, the value next to a letter."""
+
+    def setUp(self):
+        _reset()
+        self.e = Vault().put(NASTY, "SECRET", "manual", session="S1")
+
+    def test_nested_shell_spellings_are_refused_and_a_value_never_runs(self):
+        marker = Path(_TMP, "MARKER2")
+        e2 = Vault().put("x$(touch " + str(marker) + ")y", "SECRET", "manual", session="S1")
+        for cmd in ("/bin/bash -c 'echo " + e2.ref + "'", "bash --norc -c 'echo " + e2.ref + "'",
+                    "bash -o pipefail -c 'echo " + e2.ref + "'", "bash <<EOF\necho " + e2.ref + "\nEOF\n",
+                    "echo 'echo " + e2.ref + "' | sh", "/usr/bin/ssh host echo " + e2.ref,
+                    "sudo bash -c 'echo " + e2.ref + "'", "docker run img sh -c \"echo " + e2.ref + "\"",
+                    "python3 -c 'print(\"" + e2.ref + "\")'", "set -euxo pipefail; echo " + e2.ref,
+                    "bash -xe run.sh " + e2.ref, "/usr/bin/base64 <<< " + e2.ref, "x=" + e2.ref + "; echo ${x^^}",
+                    "awk -v v=" + e2.ref + " 'BEGIN{print v}'", "echo $((" + e2.ref + "))"):
+            with self.subTest(cmd[:40]):
+                out = _bash_pre(cmd)["hookSpecificOutput"]
+                self.assertEqual(out.get("permissionDecision"), "deny", out)
+        self.assertFalse(marker.exists())
+
+    @unittest.skipIf(BASH is None, "no bash")
+    def test_ordinary_commands_pass_and_the_value_arrives(self):
+        for cmd, want in [
+            ("printf '%s' " + self.e.ref + " # watch out for eval", NASTY),
+            ("VAR=" + self.e.ref + " sh -c 'printf %s \"$VAR\"'", None),   # sh -c: refused, see below
+            ("printf '%s' \"${PORT:-8080}-" + self.e.ref + "\"", "8080-" + NASTY),
+            ("printf '%s' \"" + self.e.ref + "b\"", NASTY + "b"),
+            ("cat <<<x >/dev/null; printf '%s' " + self.e.ref, NASTY),
+            ("echo $((1<<2)) >/dev/null; printf '%s' '" + self.e.ref + "'", NASTY),
+            ("cat <<-EOF\n\tk: " + self.e.ref + "\n\tEOF\n", "k: " + NASTY + "\n"),
+            ("cat <<EOF\r\nk: " + self.e.ref + "\r\nEOF\r\n", None),   # CRLF: bash itself takes EOF\r as the tag
+        ]:
+            with self.subTest(cmd[:40]):
+                out = _bash_pre(cmd)["hookSpecificOutput"]
+                if want is None:
+                    continue
+                self.assertNotIn("permissionDecision", out, out)
+                r = _run(out["updatedInput"]["command"])
+                self.assertEqual(r.stdout, want, r.stderr)
+        for cmd in ("python3 script.py --token " + self.e.ref, "docker run --rm -e TOKEN=" + self.e.ref + " alpine env",
+                    "git clone https://oauth2:" + self.e.ref + "@host/x.git ssh-keys",
+                    "npm run watch -- --token " + self.e.ref,
+                    "grep eval file.txt; curl -H 'X: " + self.e.ref + "' h", "bash script.sh " + self.e.ref):
+            with self.subTest(cmd[:40]):
+                self.assertNotIn("permissionDecision", _bash_pre(cmd)["hookSpecificOutput"])
+
+    def test_backslash_quoted_heredoc_is_refused_like_a_quoted_one(self):
+        for cmd in ("cat <<\\EOF\nk: " + self.e.ref + "\nEOF\n", "cat <<E\"O\"F\nk: " + self.e.ref + "\nEOF\n",
+                    "cat <<EOF\nv=$(date) " + self.e.ref + "\nEOF\n"):
+            with self.subTest(cmd[:20]):
+                self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny")
+
+    def test_no_grant_is_redeemable_after_a_posix_rewrite(self):
+        _bash_pre("printf '%s' " + self.e.ref)
+        v = Vault()
+        self.assertEqual(v._index.get("grants", {}), {}, "POSIX mints no grant")
+        for cmd in ("python3 -m maisecrets.cli resolve SECRET_c1 --grant abc", "resolve SECRET_c1 --grant abc",
+                    "python3 -c 'from maisecrets.cli import cmd_resolve'", "ls \"$XDG_RUNTIME_DIR/maisecrets\"",
+                    "security dump-keychain -d login.keychain", "cat ~/.MAISECRETS/index.json"):
+            with self.subTest(cmd):
+                self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_a_second_key_that_cannot_be_served_takes_the_first_back(self):
+        from unittest import mock
+        e2 = Vault().put(PLAIN, "SECRET", "manual", session="S1")
+        before = set(os.listdir(hooks._run_dir()))
+        calls = {"n": 0}
+        real = hooks._serve_value_later
+
+        def flaky(fifo, value, seconds=120.0):
+            calls["n"] += 1
+            return real(fifo, value, seconds) if calls["n"] == 1 else False
+        with mock.patch.object(hooks, "_serve_value_later", flaky):
+            out = _bash_pre("echo " + self.e.ref + " " + e2.ref)["hookSpecificOutput"]
+        self.assertEqual(out.get("permissionDecision"), "deny")
+        import time as _t
+        _t.sleep(0.3)
+        self.assertEqual(set(os.listdir(hooks._run_dir())) - before, set(), "the first value must not wait")
+
+    def test_a_refused_command_writes_no_audit_line(self):
+        audit = Path(_TMP, "audit.log")
+        _bash_pre("echo " + self.e.ref + " ⟦SECRET_c99⟧")
+        self.assertFalse(audit.exists() and self.e.key in audit.read_text(encoding="utf-8"))
+
+    def test_hooks_log_records_every_run_without_values(self):
+        import io
+        from unittest import mock
+        buf = io.StringIO()
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "printf '%s' " + self.e.ref},
+                              "session_id": "S1", "prompt_id": "p"})
+        with mock.patch.object(hooks.sys, "stdin", io.StringIO(payload)), mock.patch.object(hooks.sys, "stdout", buf):
+            hooks.main(["hook", "pre-tool"])
+        log = Path(_TMP, "hooks.log").read_text(encoding="utf-8")
+        self.assertIn("pre-tool\tclaude\tS1\tBash\trewrite", log)
+        self.assertNotIn(NASTY, log)
+        self.assertNotIn("printf", log)
+
+
 class FailClosedTests(unittest.TestCase):
     def setUp(self):
         _reset()
@@ -306,6 +411,34 @@ class FailClosedTests(unittest.TestCase):
         self.assertIn("ran and finished", post["updatedToolOutput"])
         self.assertIn("ran and finished", hooks._fail_closed("post-tool", {"turn_id": "t"}, "x")["reason"])
 
+    def test_config_error_in_the_policy_names_the_key_in_the_answer(self):
+        import io
+        from unittest import mock
+        from maisecrets import vault as vmod
+        buf = io.StringIO()
+        with mock.patch.dict(vmod.POLICY_PATHS, {__import__("platform").system(): Path(_TMP, "policy.json")}):
+            Path(_TMP, "policy.json").write_text('{"max_ttl_seconds": "x"}')
+            try:
+                with mock.patch.object(hooks.sys, "stdin", io.StringIO('{"prompt": "hi", "prompt_id": "p"}')), \
+                        mock.patch.object(hooks.sys, "stdout", buf):
+                    hooks.main(["hook", "user-prompt"])
+            finally:
+                Path(_TMP, "policy.json").unlink()
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("max_ttl_seconds", out["reason"])
+        self.assertNotIn("locked store", out["reason"])
+
+    def test_post_tool_with_a_broken_payload_withholds_instead_of_failing_open(self):
+        import io
+        from unittest import mock
+        buf = io.StringIO()
+        with mock.patch.object(hooks.sys, "stdin", io.StringIO("{not json")), \
+                mock.patch.object(hooks.sys, "stdout", buf):
+            rc = hooks.main(["hook", "post-tool"])
+        self.assertEqual(rc, 0)
+        self.assertIn("withheld", json.loads(buf.getvalue())["hookSpecificOutput"]["updatedToolOutput"])
+
     def test_damaged_index_stays_damaged_until_repaired(self):
         Vault().put(PLAIN, "SECRET", "manual", session="S1")
         INDEX.write_text("{not json", encoding="utf-8")
@@ -320,19 +453,35 @@ class FailClosedTests(unittest.TestCase):
         v.backend = make_backend(v.cfg)
         info = v.repair()
         self.assertEqual(info["counters"].get("SECRET"), 1)
+
+        class Opaque:
+            test_mode = True
+
+            def get(self, k):
+                return None
+        v2 = Vault.__new__(Vault)
+        v2.cfg, v2.backend = v.cfg, Opaque()
+        with self.assertRaises(RuntimeError):
+            v2.repair()
         e = Vault().put("third-value-5555", "SECRET", "manual", session="S1")
         self.assertEqual(e.key, "SECRET_c2", "counters continue after a repair")
 
     def test_config_with_a_wrong_type_names_the_key_and_defaults_stay_untouched(self):
         from maisecrets import vault as vmod
         before = json.dumps(vmod.DEFAULT_CONFIG, sort_keys=True)
-        Path(_TMP, "config.json").write_text('{"backend": "jsonfile", "ttl_seconds": 3600}')
+        Path(_TMP, "config.json").write_text(
+            '{"backend": "jsonfile", "allow_plaintext_store": true, "ttl_seconds": 3600}')
         try:
-            with self.assertRaises(vmod.ConfigError) as cm:
-                vmod.load_config()
-            self.assertIn("ttl_seconds", str(cm.exception))
+            # a wrong type in the USER file never locks the user out: the strict defaults apply and
+            # the warning names the key (it reaches the user at session start and in `status`)
+            cfg = vmod.load_config()
+            self.assertIn("ttl_seconds", cfg["config_warning"])
+            self.assertEqual(cfg["ttl_seconds"], vmod.DEFAULT_CONFIG["ttl_seconds"])
+            Path(_TMP, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true, "colour": 1}')
+            self.assertIn("colour", vmod.load_config()["config_warning"])
+            self.assertEqual(vmod.load_config()["backend"], "jsonfile")
         finally:
-            Path(_TMP, "config.json").write_text('{"backend": "jsonfile"}')
+            Path(_TMP, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
         os.environ["CLAUDE_PLUGIN_OPTION_TTL_HOURS"] = "1"
         try:
             vmod.load_config()
@@ -504,7 +653,7 @@ class TipTests(unittest.TestCase):
         self.assertEqual(tips.tip_of_the_day(), tips.TIPS[1])
         cfg = Path(HOME, "config.json")
         old = cfg.read_text()
-        cfg.write_text('{"backend": "jsonfile", "tips": false}')
+        cfg.write_text('{"backend": "jsonfile", "allow_plaintext_store": true, "tips": false}')
         try:
             Path(HOME, ".tip").write_text("2000-01-01 0\n")
             self.assertIsNone(tips.tip_of_the_day())

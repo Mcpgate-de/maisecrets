@@ -24,7 +24,8 @@ case "${1:-}" in
   post-tool)
     # Claude Code ignores exit 2 here and would show the raw output to the model: answer
     # fail-closed with the JSON the hook itself would give (review, 2026-09-26)
-    printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"[%s Tool output withheld; the tool ran and finished, do not run it again.]"}}' "$MSG"
+    # both shapes: updatedToolOutput for Claude Code, decision/reason for Codex
+    printf '{"decision":"block","reason":"[%s Tool output withheld; the tool ran and finished, do not run it again.]","hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"[%s Tool output withheld; the tool ran and finished, do not run it again.]"}}' "$MSG" "$MSG"
     exit 0 ;;
   session-start)
     printf '{"systemMessage":"%s Until then every prompt is blocked."}' "$MSG"

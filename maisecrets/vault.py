@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import platform
 import subprocess
 import time
@@ -178,7 +179,7 @@ class ConfigError(RuntimeError):
 
 def _check_types(cfg: dict, source: str) -> None:
     for key, want in _CONFIG_TYPES.items():
-        if key in cfg and not isinstance(cfg[key], want):
+        if key in cfg and (not isinstance(cfg[key], want) or (want is int and isinstance(cfg[key], bool))):
             raise ConfigError(f"{source}: {key} has the wrong type")
     ttl = cfg.get("ttl_seconds")
     if isinstance(ttl, dict) and not all(isinstance(v, int) for v in ttl.values()):
@@ -196,15 +197,28 @@ def load_config() -> dict:
     import copy
     import platform as _platform
     cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["config_warning"] = ""
     try:
         user = json.loads(CONFIG.read_text(encoding="utf-8"))
+        if not isinstance(user, dict):
+            raise ConfigError(f"{CONFIG.name} must hold one JSON object")
+        _check_types(user, CONFIG.name)
     except OSError:
         user = {}
-    except ValueError as exc:
-        raise ConfigError(f"{CONFIG.name} is not valid JSON") from exc
-    if not isinstance(user, dict):
-        raise ConfigError(f"{CONFIG.name} must hold one JSON object")
-    _check_types(user, CONFIG.name)
+    except ValueError:
+        # the user file is advisory: a typo must not lock the user out of the client (review,
+        # 2026-09-26). The defaults are the strict values, so the fallback loosens nothing; the
+        # warning is shown at session start and in the block notice.
+        user = {}
+        cfg["config_warning"] = f"{CONFIG.name} is not valid JSON and was ignored"
+    except ConfigError as exc:
+        user = {}
+        cfg["config_warning"] = f"{exc}; the file was ignored"
+    unknown = sorted(k for k in user if k not in _CONFIG_TYPES)
+    if unknown:
+        cfg["config_warning"] = (cfg["config_warning"] + "; " if cfg["config_warning"] else "") + \
+            f"{CONFIG.name}: unknown key(s) {', '.join(unknown)} ignored"
+        user = {k: v for k, v in user.items() if k in _CONFIG_TYPES}
     cfg.update(user)
     env = os.environ
     backend = env.get("CLAUDE_PLUGIN_OPTION_BACKEND", "").strip()
@@ -235,10 +249,9 @@ def load_config() -> dict:
             cfg.update(policy)
             cfg["policy_keys"] = sorted(policy)
     cfg["max_ttl_seconds"] = min(int(cfg.get("max_ttl_seconds", 30 * 86400)), 30 * 86400)
-    if cfg.get("backend") == "jsonfile" and not cfg.get("allow_plaintext_store", False) \
-            and "MAISECRETS_HOME" not in env:
-        # the plaintext store is for tests and the harness, which run in their own home
-        raise ConfigError("backend jsonfile is the TEST store; set allow_plaintext_store to use it here")
+    if cfg.get("backend") == "jsonfile" and not cfg.get("allow_plaintext_store", False):
+        # the plaintext store is for tests and the harness, which say so in their own config
+        raise ConfigError("backend jsonfile is the TEST store; set allow_plaintext_store to use it")
     return cfg
 
 
@@ -331,6 +344,8 @@ class KeychainBackend:
     """macOS login keychain via the ``security`` CLI. No sync flag is set."""
     test_mode = False
 
+    MAX_LINE = 3900   # `security -i` line limit is 4096 bytes; the rest would run as a command
+
     @staticmethod
     def _q(s: str) -> str:
         """Quote one argument for the `security -i` command reader (double quotes, backslash escapes)."""
@@ -360,7 +375,18 @@ class KeychainBackend:
             parts += ["-j", self._q(comment)]
         # no check=True: CalledProcessError prints the argument list, and an error text can reach
         # the model as a block reason (Codex review, 2026-09-26)
-        r = self._interactive(" ".join(parts))
+        line = " ".join(parts)
+        if len(line.encode("utf-8")) <= self.MAX_LINE:
+            r = self._interactive(line)
+        else:
+            # `security -i` reads at most 4096 bytes per line and runs the rest as a second
+            # command (review, 2026-09-26: a 4096-bit PEM key). A long value goes on the
+            # command line instead: the value is then visible to `ps` of any local user for the
+            # milliseconds of the call, the trade documented in the README
+            r = subprocess.run(["security", "add-generic-password", "-U", "-s", SERVICE, "-a", key,
+                                "-l", label or f"maisecrets {key}", "-D", "maisecrets placeholder",
+                                "-w", stored] + (["-j", comment] if comment else []),
+                               capture_output=True, timeout=5)
         if r.returncode != 0:
             raise RuntimeError(f"keychain add failed (rc {r.returncode})")
         if self.get(key) != value:
@@ -392,15 +418,37 @@ class KeychainBackend:
         if r.returncode not in (0, 44):
             raise RuntimeError(f"keychain delete failed (rc {r.returncode})")
 
+    def keys(self) -> list[str]:
+        """Every account of the service, from the attribute dump (no secrets are printed without
+        -d), so a damaged index can be rebuilt and an orphan item found (review, 2026-09-26)."""
+        r = subprocess.run(["security", "dump-keychain"], capture_output=True, text=True, timeout=20)
+        if r.returncode != 0:
+            return []
+        out: list[str] = []
+        acct = None
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("keychain:"):
+                acct = None
+            elif line.startswith('"acct"<blob>='):
+                acct = line.split("=", 1)[1].strip('"')
+            elif line.startswith('"svce"<blob>=') and line.split("=", 1)[1].strip('"') == SERVICE and acct:
+                out.append(acct)
+        return out
+
     def wipe(self) -> int:
         """Delete every item of the service, one call per item until none is left: the store is
-        enumerated by deleting, so an item whose index entry is gone goes too."""
+        enumerated by deleting, so an item whose index entry is gone goes too. Raises when an
+        item refuses to go (a locked keychain), so the caller never reports a wipe that did not
+        happen."""
         n = 0
         for _ in range(10000):
             r = subprocess.run(["security", "delete-generic-password", "-s", SERVICE],
                                capture_output=True, timeout=5)
-            if r.returncode != 0:
+            if r.returncode == 44:
                 break
+            if r.returncode != 0:
+                raise RuntimeError(f"keychain delete failed (rc {r.returncode})")
             n += 1
         return n
 
@@ -538,6 +586,29 @@ class WindowsVaultBackend:
     def keys(self) -> list[str]:
         r = self._ps(f"try {{ $v.FindAllByResource('{SERVICE}') | ForEach-Object {{ $_.UserName }} }} catch {{}}")
         return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()] if r.returncode == 0 else []
+
+    def get_many(self, keys: list[str]) -> dict[str, str]:
+        """All values in one PowerShell start (each start costs hundreds of milliseconds; one
+        per key on every tool result reached the watchdog; review, 2026-09-26)."""
+        import base64
+        if not keys:
+            return {}
+        wanted = ",".join("'" + k + "'" for k in keys if re.fullmatch(r"[A-Z][A-Z_]*_c\d{1,9}", k))
+        r = self._ps("foreach ($k in @(" + wanted + ")) { try { "
+                     f"$c = $v.Retrieve('{SERVICE}', $k); $c.RetrievePassword(); "
+                     "[Console]::Out.WriteLine($k + ' ' + "
+                     "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($c.Password))) "
+                     "} catch {} }")
+        out: dict[str, str] = {}
+        if r.returncode != 0:
+            return out
+        for ln in r.stdout.splitlines():
+            k, _sp, b = ln.strip().partition(" ")
+            try:
+                out[k] = base64.b64decode(b).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                pass
+        return out
 
     def wipe(self) -> int:
         keys = self.keys()
@@ -717,6 +788,8 @@ class Vault:
             out.append(self._put_new(value, type_, kind, session, None))
             new += 1
             dirty = True
+            if new % 10 == 0:
+                self._save_index()   # a watchdog exit mid-way leaves at most ten unnamed store items
         if dirty:
             self._save_index()
         return out
@@ -908,7 +981,13 @@ class Vault:
             if limit is not None and n >= limit:
                 break
             if not meta.get("purged") and meta["expires"] < now:
-                self.backend.delete(key)
+                try:
+                    self.backend.delete(key)
+                except RuntimeError:
+                    # one item that refuses to go (a locked keychain over SSH) must not block
+                    # every hook; the entry stays unpurged and the next sweep tries again
+                    n += 1
+                    continue
                 meta["purged"] = True
                 meta["purged_at"] = now
                 n += 1
@@ -926,38 +1005,13 @@ class Vault:
             self._save_index()
         return n
 
-    def wipe(self) -> int:
-        """Delete every stored value of this vault's service, the metadata and the logs; the
-        step for offboarding a machine (operator review, 2026-09-26). The backend enumerates
-        itself, so an item without an index entry goes too."""
-        with self._exclusive():
-            n = self.backend.wipe() if hasattr(self.backend, "wipe") else 0
-            for key in list(self._index["entries"]):
-                try:
-                    self.backend.delete(key)
-                except RuntimeError:
-                    pass
-            self._index = {"entries": {}, "counters": {}, "by_fingerprint": {}}
-            for name in ("index.json", "audit.log", "events.log", ".announced"):
-                try:
-                    (HOME / name).unlink()
-                except OSError:
-                    pass
-            for sub in ("pending", "run"):
-                d = HOME / sub
-                if d.is_dir():
-                    for f in d.iterdir():
-                        try:
-                            f.unlink()
-                        except OSError:
-                            pass
-        return n
-
     def repair(self) -> dict:
-        """Rebuild a damaged index from the store: every key the backend still holds gets an
-        entry that is expired at once (the value is deleted, nothing resolves), and the counters
-        are set past every key seen so no new entry can overwrite an old value."""
-        keys = self.backend.keys() if hasattr(self.backend, "keys") else []
+        """Rebuild a damaged index from the store: every stored value is deleted (nothing
+        resolves), and the counters are set past every key seen so no new entry can overwrite
+        an old value. Refused on a backend that cannot enumerate itself."""
+        if not hasattr(self.backend, "keys"):
+            raise RuntimeError("this store cannot be enumerated; repair is not possible here")
+        keys = self.backend.keys()
         counters: dict[str, int] = {}
         for key in keys:
             if "_c" not in key:
@@ -974,3 +1028,44 @@ class Vault:
         idx = {"entries": {}, "counters": counters, "by_fingerprint": {}}
         atomic_write(INDEX, json.dumps(idx, indent=1))
         return {"keys_seen": len(keys), "counters": counters}
+
+
+def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[str]]:
+    """Delete every stored value of this vault's service, the metadata, the logs and the waiting
+    prompts: the offboarding step. Works without a readable index (a damaged index is the case
+    where it is needed most). Returns (values deleted, problems); a problem means a value may
+    still be in the store, and the caller must say so (review, 2026-09-26)."""
+    backend = make_backend(cfg)
+    problems: list[str] = []
+    n = 0
+    with _lock_for(HOME / ".lock"):
+        try:
+            n = backend.wipe() if hasattr(backend, "wipe") else 0
+        except RuntimeError as exc:
+            problems.append(f"store: {type(exc).__name__}")
+        try:
+            keys = backend.keys() if hasattr(backend, "keys") else []
+        except RuntimeError:
+            keys = []
+        for key in keys:
+            try:
+                backend.delete(key)
+                n += 1
+            except RuntimeError:
+                problems.append(f"store item {key} not deleted")
+        for name in ("index.json", "audit.log", "events.log", ".announced"):
+            try:
+                (HOME / name).unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                problems.append(f"{name} not deleted")
+        dirs = [HOME / "pending", HOME / "run"] + ([Path(run_dir)] if run_dir else [])
+        for d in dirs:
+            if d.is_dir():
+                for f in d.iterdir():
+                    try:
+                        f.unlink()
+                    except OSError:
+                        problems.append(f"{f.name} not deleted")
+    return n, problems

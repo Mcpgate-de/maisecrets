@@ -24,7 +24,12 @@ if not errorlevel 1 (
   python3 "%HERE%dispatch.py" %*
   goto :done
 )
-echo maisecrets needs Python 3.11 or newer (tried py -3, python, python3). Install it with: winget install Python.Python.3.12 - then restart the client. Until then every prompt is blocked. 1>&2
+if "%~1"=="post-tool" (
+  rem both shapes: updatedToolOutput for Claude Code, decision/reason for Codex
+  echo {"decision":"block","reason":"[maisecrets needs Python 3.11 or newer. Install it with: winget install Python.Python.3.12 - then restart the client. Tool output withheld; the tool ran and finished, do not run it again.]","hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"[maisecrets needs Python 3.11 or newer. Install it with: winget install Python.Python.3.12 - then restart the client. Tool output withheld; the tool ran and finished, do not run it again.]"}}
+  exit /b 0
+)
+echo maisecrets needs Python 3.11 or newer (tried py -3, python, python3). Install it with: winget install Python.Python.3.12 - then restart the client. Until then every prompt and command is blocked; the command did not run. 1>&2
 exit /b 2
 :done
 exit /b %errorlevel%

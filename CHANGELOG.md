@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Codex users: re-trust the hooks once in `/hooks` after this update.** `hooks/hooks.json`
+  changed (Write/Edit/MultiEdit/NotebookEdit joined the PreToolUse matcher, and every hook
+  has a `commandWindows` entry). Until the hooks are trusted again, Codex runs no maisecrets
+  hook and says nothing.
+- The plaintext `jsonfile` store now needs `"allow_plaintext_store": true` in the config
+  (or the policy); it is the test store.
+- A wrong type or an unknown key in `~/.maisecrets/config.json` no longer changes anything
+  silently: the strict defaults apply and the session start names the key. A broken machine
+  policy file blocks every prompt and names the key.
+- Keychain values are stored base64-marked (`b64:`), so umlauts round-trip; entries written
+  by earlier versions are still read.
+- Every hook run is recorded in `~/.maisecrets/hooks.log` (no value, no command).
+- Requires Python 3.11+; without it every prompt is blocked and the message names what to
+  install.
+
 ## [0.3.21] - 2026-09-26
 
 ### Features

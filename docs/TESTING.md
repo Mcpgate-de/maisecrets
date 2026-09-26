@@ -100,7 +100,7 @@ Codex harness to measure retries after a block-as-output.
 
 ## Unit tests
 
-77 tests (`tests/test_core.py`, `tests/test_gates.py`, `tests/test_platform_backend.py`;
+86 tests (`tests/test_core.py`, `tests/test_gates.py`, `tests/test_platform_backend.py`;
 the last one runs only with `MAISECRETS_NATIVE_BACKEND_TEST=1` or in CI, because it
 touches the real store), in under three seconds. The gate tests execute the rewritten command through a
 real bash and compare bytes, so a broken quoting context or a leaked value
@@ -111,7 +111,10 @@ fails them:
 | C4 session rule | `test_reference_resolves_only_in_a_session_that_saw_it`, `test_mcp_foreign_session_is_denied…` |
 | C5 up-front read | `test_value_is_delivered_once_and_a_missing_delivery_fails_the_whole_command`, `test_a_refused_key_leaves_no_value_waiting`, `test_the_run_dir_is_private_and_refused_when_it_is_not` |
 | C6 quoting contexts | `test_value_arrives_byte_for_byte_in_every_quoting_context`, `test_value_arrives_inside_a_command_substitution_and_an_unquoted_heredoc`, `test_contexts_the_rewrite_cannot_place_are_refused_with_the_reason` (a value with `$(touch …)` never runs), `test_a_command_that_would_transform_the_value_is_refused` |
-| C13 fail closed | `test_exactly_one_answer_leaves_the_process_when_the_watchdog_fires`, `test_fail_closed_texts_say_whether_the_tool_ran`, `test_damaged_index_stays_damaged_until_repaired`, `test_config_with_a_wrong_type_names_the_key_and_defaults_stay_untouched` |
+| C13 fail closed | `test_exactly_one_answer_leaves_the_process_when_the_watchdog_fires`, `test_fail_closed_texts_say_whether_the_tool_ran`, `test_damaged_index_stays_damaged_until_repaired`, `test_config_with_a_wrong_type_names_the_key_and_defaults_stay_untouched`, `test_config_error_in_the_policy_names_the_key_in_the_answer`, `test_post_tool_with_a_broken_payload_withholds_instead_of_failing_open` |
+| C6 command words | `test_nested_shell_spellings_are_refused_and_a_value_never_runs`, `test_ordinary_commands_pass_and_the_value_arrives`, `test_backslash_quoted_heredoc_is_refused_like_a_quoted_one` |
+| C5 no grant on POSIX | `test_no_grant_is_redeemable_after_a_posix_rewrite`, `test_a_second_key_that_cannot_be_served_takes_the_first_back`, `test_a_refused_command_writes_no_audit_line` |
+| run log | `test_hooks_log_records_every_run_without_values` |
 | C14 file tools | `test_file_tools_never_resolve_and_the_home_is_off_limits` |
 | client detection | `test_client_is_read_from_the_payload_before_the_environment` |
 | C3 transcript scrub | `test_transcript_scrub_keeps_every_record_valid_json` |

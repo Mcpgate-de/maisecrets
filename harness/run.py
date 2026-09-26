@@ -136,7 +136,7 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     home = work / "vaulthome"
     home.mkdir()
     # preload and hooks must agree on the backend, on every OS: pin the test backend for this home
-    (home / "config.json").write_text(json.dumps({"backend": "jsonfile"}))
+    (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True}))
     env = dict(os.environ, ANTHROPIC_BASE_URL=f"http://127.0.0.1:{PORT}", CLAUDE_CODE_MAX_RETRIES="0",
                MAISECRETS_HOME=str(home), MAISECRETS_DUMP=str(dump), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
     for fname, content in sc.get("files", {}).items():

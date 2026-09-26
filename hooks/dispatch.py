@@ -12,7 +12,8 @@ if len(sys.argv) >= 2 and sys.argv[1] == "pending":
     print(text if text is not None else "(maisecrets: no blocked prompt is waiting)")
     sys.exit(0)
 
-if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put", "status", "list", "audit", "expire", "config"):
+if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put", "status", "list", "audit", "expire", "config",
+                                          "wipe", "repair", "scan", "get"):
     from maisecrets.cli import main as cli_main  # noqa: E402
     sys.exit(cli_main(sys.argv[1:]))
 
@@ -26,8 +27,15 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     from maisecrets.vault import describe_backend  # noqa: E402
     import time
     from maisecrets.hooks import PRIMER  # noqa: E402
+    from maisecrets.vault import ConfigError, load_config  # noqa: E402
     HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
-    v = Vault()
+    try:
+        cfg = load_config()
+    except ConfigError as exc:
+        print(json.dumps({"systemMessage": f"maisecrets: configuration error: {exc}. Every prompt is blocked "
+                                           "until the file is fixed."}))
+        sys.exit(0)
+    v = Vault(cfg)
     v.expire(limit=None)
     # a blocked prompt older than 15 minutes is never sent; the file goes too (retention)
     pending = HOME / "pending"
@@ -43,7 +51,8 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     try:
         manifest = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 ".claude-plugin", "plugin.json")
-        version = json.load(open(manifest, encoding="utf-8")).get("version", "?")
+        with open(manifest, encoding="utf-8") as f:
+            version = json.load(f).get("version", "?")
     except (OSError, ValueError):
         pass
     marker = HOME / ".announced"
@@ -59,6 +68,8 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         # one short line every session, so a lost hook registration is visible by its absence
         # (operator review, 2026-09-26); the tip rotates, the version does not
         out["systemMessage"] = f"maisecrets {version} active." + (f" {tip}" if tip else "")
+    if cfg.get("config_warning"):
+        out["systemMessage"] = out.get("systemMessage", "") + f" Warning: {cfg['config_warning']}."
     # the model reads what a placeholder is once per session, before it meets one
     out["hookSpecificOutput"] = {"hookEventName": "SessionStart", "additionalContext": PRIMER}
     print(json.dumps(out))

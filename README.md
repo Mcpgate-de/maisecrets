@@ -174,8 +174,14 @@ codex plugin remove maisecrets@maisecrets
 
 Uninstalling keeps the stored values until their TTL ends. To delete them,
 the metadata and the logs at once, run `maisecrets wipe --yes` from the plugin
-folder (`/maisecrets:status` prints the folder), or delete the `maisecrets`
-items in Keychain Access or Credential Manager and the `~/.maisecrets` folder.
+folder (`/maisecrets:status` prints the folder):
+
+```bash
+bash <plugin folder>/hooks/run.sh wipe --yes
+```
+
+or delete the `maisecrets` items in Keychain Access or Credential Manager and
+the `~/.maisecrets` folder by hand. `wipe` reports when an item refused to go.
 
 ## For administrators
 
@@ -215,8 +221,12 @@ value is deleted after `keep_purged_days` (30). `audit.log` holds one line per
 resolve (time, session, key, tool, the command with placeholders; capped at
 `audit_max_lines`). `events.log` holds the last 200 detections (rule name and
 type). `pending/` holds a blocked prompt with placeholders for 15 minutes.
-`run/` holds the FIFOs a value is delivered through, for up to 120 s. The
-values live in the store of the platform. Nothing leaves the machine: no hook
+`hooks.log` holds one line per hook run (capped at 2000). The FIFOs a value
+is delivered through live in `$XDG_RUNTIME_DIR/maisecrets` or
+`maisecrets-<uid>` in the temp directory, for up to 120 s. The values live in
+the store of the platform; on macOS a value longer than about 2.8 KB (a private
+key) is passed to `security` on its command line, visible to `ps` for the
+milliseconds of the call, because the stdin form has a line limit. Nothing leaves the machine: no hook
 opens a network connection. Two exceptions to state to a data-protection
 officer: the Windows Credential Locker can roam through a Microsoft account on
 a machine that is not domain-joined (set `backend` to `encrypted-file` by
@@ -228,18 +238,25 @@ reporting off).
 store, policy keys and log counts. `/maisecrets:audit` prints the last
 resolves. `MAISECRETS_DEBUG_LOG=<file>` in the client's environment records one
 line per hook call (event, client, duration, answer; never a value).
-`maisecrets wipe --yes` is the offboarding step.
+`bash <plugin folder>/hooks/run.sh wipe --yes` is the offboarding step; a
+damaged `index.json` is rebuilt with `… run.sh repair` (stored values are
+deleted, the counters continue). `hooks.log` in `~/.maisecrets` records every
+hook run (time, event, client, session, tool, decision, duration; no value and
+no command), so "the plugin did nothing" can be told from "the hook did not
+run".
 
 ## What the plugin runs, sends and fetches
 
 - Runs: `bash hooks/run.sh <event>` (or `hooks/run.cmd` for Codex on Windows)
   → `hooks/dispatch.py` on the matching hook events. Each reads one JSON
   payload from stdin and prints one JSON object. A Bash command with a
-  placeholder reads the value from a FIFO in `~/.maisecrets/run` (POSIX) or
-  through `hooks/resolve.py` under a one-time grant (Windows Git Bash).
+  placeholder reads the value from a FIFO in the per-user runtime or temp
+  directory (POSIX) or through `hooks/resolve.py` under a one-time grant
+  (Windows Git Bash).
 - Writes: under `~/.maisecrets`: `index.json` (metadata and keyed
-  fingerprints, never a value), `audit.log`, `events.log`, `pending/`, `run/`,
-  `.announced`; the vault backend; on a blocked prompt the clipboard. With
+  fingerprints, never a value), `audit.log`, `events.log`, `hooks.log`,
+  `pending/`, `.announced`; the value FIFOs in the per-user runtime or temp
+  directory; the vault backend; on a blocked prompt the clipboard. With
   `scrub_transcript` on, it masks the raw value inside the client's transcript
   file named in the hook payload, in place, because the client writes the
   prompt to disk before or after the hook runs. "For administrators" has the
@@ -331,10 +348,13 @@ A placeholder turns back into its value only here:
 - **Read up front in Bash.** The hook prefixes the command with
   `__ms_1="$(cat <fifo>)" || exit 97;` and turns `⟦SECRET_c1⟧` into
   `$__ms_1` in its quoting context. A detached process serves the value once
-  through a FIFO in `~/.maisecrets/run` (a directory only you can enter;
-  readable from inside Codex's sandbox, which can neither write the vault nor
-  read the keychain); on Windows Git Bash the resolver script reads it under a
-  grant. The command you approve, the transcript and the tool record carry no
+  through a FIFO in a directory only you can enter (`$XDG_RUNTIME_DIR/maisecrets`
+  where the system has one, else `maisecrets-<uid>` in the temp directory; owner
+  and mode are checked, a symlink is refused). It is readable from inside Codex's
+  sandbox, which can neither write the vault nor read the keychain, and from a
+  Claude Code sandbox that denies `~/.maisecrets`. On POSIX no grant is minted,
+  so nothing is redeemable afterwards; on Windows Git Bash the resolver script
+  reads the value under a one-time grant. The command you approve, the transcript and the tool record carry no
   value. A missing delivery ends the whole command with exit 97 before
   anything runs, also for references inside pipelines and subshells; nothing
   ever runs with an empty value. Every key is checked before anything is
@@ -342,10 +362,14 @@ A placeholder turns back into its value only here:
   `$(` arrives byte for byte in the contexts the rewrite can prove: plain,
   `'…'`, `"…"`, inside `$(…)`, an unquoted heredoc. A placeholder inside
   another shell (`bash -c`, `ssh`, `eval`, `su -c`), a quoted heredoc, `$'…'`
-  or backticks, and a command that would encode, slice or trace the value
+  or backticks, an interpreter with inline code (`python3 -c`, `perl -e`),
+  `awk -v`, and a command that would encode, slice or trace the value
   (`base64`, `xxd`, `${x:0:4}`, `set -x`, `PS4=`) are refused with the
   reason, because there the value would be parsed a second time or leave in a
-  shape the redaction cannot see.
+  shape the redaction cannot see. The check reads command words, so
+  `python3 script.py ⟦KEY⟧`, `docker run -e T=⟦KEY⟧ img` and a word inside
+  quotes or a comment pass. A refused command is refused as a whole: split off
+  the step that needs the value and run it on its own.
 - **Never in Write, Edit or a file.** A placeholder in Write/Edit is refused
   with the reason: the file would get the literal text. Writing a value to
   disk is a Bash command the user approves (`printf '%s' ⟦KEY⟧ > file`).

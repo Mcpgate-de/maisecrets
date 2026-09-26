@@ -49,7 +49,8 @@ TYPES_PATCH = {"fix", "perf", "security", "deps"}
 TYPES_NONE = {"docs", "ci", "test", "chore", "build", "style", "refactor"}
 KNOWN = TYPES_MINOR | TYPES_PATCH | TYPES_NONE
 SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(\((?P<scope>[^)]+)\))?(?P<bang>!)?: (?P<text>\S.*)$")
-SECTION = {"feat": "Features", "fix": "Fixes", "perf": "Fixes", "security": "Security", "deps": "Dependencies"}
+SECTION = {"feat": "Features", "fix": "Fixes", "perf": "Fixes", "security": "Security", "deps": "Dependencies",
+           "revert": "Reverts"}
 
 
 def _git(*args: str) -> str:
@@ -83,15 +84,22 @@ def commits_since(ref: str | None) -> list[tuple[str, str, str]]:
 
 
 def classify(subject: str, body: str) -> tuple[str, str, bool]:
-    """(type or "other", text, breaking). A `Revert "<subject>"` takes the inner type and
-    releases like a fix of it, so a rollback needs no hand-written subject."""
-    inner = _unrevert(subject)
-    m = SUBJECT_RE.match(inner)
+    """(type or "other", text, breaking). A `Revert "…"` of anything is a patch release under
+    "Reverts": a rollback needs no hand-written subject and never bumps more than the last
+    number (operator review, 2026-09-26)."""
+    inner, reverted = subject, 0
+    while True:
+        m = _REVERT_RE.match(inner)
+        if not m:
+            break
+        inner, reverted = m.group("inner"), reverted + 1
+    if reverted:
+        return "revert", ("revert: " if reverted % 2 else "re-apply: ") + inner, False
+    m = SUBJECT_RE.match(subject)
     breaking = "BREAKING CHANGE" in body
     if not m or m.group("type") not in KNOWN:
         return "other", subject, breaking
-    text = m.group("text") if inner == subject else "revert: " + m.group("text")
-    return m.group("type"), text, breaking or bool(m.group("bang"))
+    return m.group("type"), m.group("text"), breaking or bool(m.group("bang"))
 
 
 _REVERT_RE = re.compile(r'^Revert "(?P<inner>.+)"$')
@@ -158,7 +166,7 @@ def render_notes(version: str, commits: list[tuple[str, str, str]]) -> str:
         section = "Breaking" if breaking else SECTION.get(typ, "Other")
         groups.setdefault(section, []).append(f"- {text} ({sha[:7]})")
     lines = [f"## [{version}] - {_dt.date.today().isoformat()}", ""]
-    for section in ("Breaking", "Features", "Fixes", "Security", "Dependencies", "Other"):
+    for section in ("Breaking", "Features", "Fixes", "Security", "Reverts", "Dependencies", "Other"):
         if section in groups:
             lines += [f"### {section}", ""] + groups[section] + [""]
     return "\n".join(lines).rstrip("\n") + "\n"
@@ -200,7 +208,9 @@ def check(base: str | None) -> int:
         for sha, subject, _body in commits_since(base):
             if subject.startswith("chore(release):") or subject.startswith("Merge "):
                 continue
-            m = SUBJECT_RE.match(_unrevert(subject))
+            if _REVERT_RE.match(subject):
+                continue   # a revert of anything is well-formed by construction
+            m = SUBJECT_RE.match(subject)
             if not m or m.group("type") not in KNOWN:
                 bad.append(f"  {sha[:7]} {subject}")
         if bad:

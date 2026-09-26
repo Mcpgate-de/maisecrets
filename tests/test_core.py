@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 _TMP = tempfile.mkdtemp(prefix="maisecrets-test-")
 os.environ["MAISECRETS_HOME"] = _TMP
 # tests never touch the real keychain
-Path(_TMP, "config.json").write_text('{"backend": "jsonfile"}')
+Path(_TMP, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
 from maisecrets import detect, hooks, placeholder  # noqa: E402
 from maisecrets.vault import Vault  # noqa: E402
@@ -301,7 +301,7 @@ class HookTests(unittest.TestCase):
         self.assertNotIn(GLPAT, cmd)                     # the value is never spliced into the command
         self.assertTrue(cmd.startswith('__ms_1="$('), cmd)              # read up front in the main shell
         self.assertIn(f"value for {e.key} was not delivered", cmd)
-        self.assertTrue(cmd.endswith('curl -H "PRIVATE-TOKEN: $__ms_1" u'), cmd)   # double-quote context
+        self.assertTrue(cmd.endswith('curl -H "PRIVATE-TOKEN: ${__ms_1}" u'), cmd)   # double-quote context
         self.assertNotIn("permissionDecision", out["hookSpecificOutput"])
         out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", "tool_input": {"command": "echo ⟦SECRET_c42⟧"}})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
