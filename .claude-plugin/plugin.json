@@ -4,7 +4,8 @@
   "version": "0.3.10",
   "description": "Keeps secrets and PII out of the cloud model. Deterministic detection, local vault with TTL, placeholders that are rehydrated only where the real call happens.",
   "author": {
-    "name": "Sprinterli"
+    "name": "mcpgate",
+    "url": "https://mcpgate.de"
   },
   "repository": "https://github.com/Sprinterli/maisecrets",
   "license": "Apache-2.0",
@@ -15,5 +16,6 @@
     "pii",
     "redaction",
     "vault"
-  ]
+  ],
+  "homepage": "https://mcpgate.de/maisecrets"
 }

@@ -1,7 +1,12 @@
 {
   "name": "maisecrets",
-  "owner": {"name": "Sprinterli"},
-  "metadata": {"description": "maisecrets development marketplace (this repository)"},
+  "owner": {
+    "name": "mcpgate",
+    "url": "https://mcpgate.de"
+  },
+  "metadata": {
+    "description": "maisecrets development marketplace (this repository)"
+  },
   "plugins": [
     {
       "name": "maisecrets",
