@@ -28,6 +28,14 @@ AT_MENTION_RE = re.compile(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
 
 
 # ---------------------------------------------------------------- helpers --
+def client_of(payload: dict) -> str:
+    """Which agent sent this payload. Codex marks turn-scoped events with `turn_id` and
+    every event with `model`; Claude Code sends `prompt_id`/`effort` and neither of those."""
+    if "turn_id" in payload or ("model" in payload and "prompt_id" not in payload):
+        return "codex"
+    return "claude"
+
+
 def _out(obj: dict) -> None:
     sys.stdout.write(json.dumps(obj))
     sys.stdout.flush()
@@ -156,6 +164,8 @@ def user_prompt(payload: dict) -> dict:
         reason += "\n(vault backend: jsonfile, TEST MODE)"
     if cfg.get("report_url"):
         reason += f" Wrong? Report it: {cfg['report_url']}"
+    if client_of(payload) == "codex":
+        return {"decision": "block", "reason": reason}
     return {
         "decision": "block",
         "reason": reason,
@@ -199,7 +209,11 @@ def pre_tool(payload: dict) -> dict:
         }
     new_input = dict(tool_input)
     new_input["command"] = resolved
-    # No permissionDecision: the normal permission rules apply to the resolved command.
+    if client_of(payload) == "codex":
+        # Codex accepts updatedInput only together with "allow"; its own approval policy still applies.
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                       "updatedInput": new_input}}
+    # Claude Code: no permissionDecision, the normal permission rules apply to the resolved command.
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": new_input}}
 
 
@@ -227,6 +241,12 @@ def post_tool(payload: dict) -> dict:
     new_response = _walk_strings(response, redact)
     if not hit["n"]:
         return {}
+    if client_of(payload) == "codex":
+        # Codex has no updatedToolOutput; a "block" replaces the tool result with the reason text,
+        # so the reason IS the redacted output.
+        text = new_response if isinstance(new_response, str) else json.dumps(new_response, ensure_ascii=False)
+        return {"decision": "block",
+                "reason": f"[maisecrets redacted {hit['n']} value(s); placeholders are references]\n{text}"}
     return {
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
