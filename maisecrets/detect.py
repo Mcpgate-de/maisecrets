@@ -129,7 +129,9 @@ def _iban_ok(raw: str) -> bool:
 
 def _public_ip(ip: str) -> bool:
     if ":" in ip:
-        return True   # IPv6: no private-range rule here
+        # IPv6: no private-range rule here, but "::", "::1" and "fe80:…" are not worth a placeholder
+        return bool(re.fullmatch(r"[0-9A-Fa-f:.]{7,45}", ip)) and ip.count(":") >= 2 \
+            and any(c in "123456789abcdefABCDEF" for c in ip) and not ip.lower().startswith(("::1", "fe80", "fc", "fd"))
     if not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", ip):
         return False   # e.g. a CIDR tail the upstream regex swallowed
     parts = [int(p) for p in ip.split(".")]
@@ -238,6 +240,8 @@ def _ds_value_ok(v: str) -> bool:
         return False
     if not any(c.isalnum() for c in v):
         return False
+    if v.count(" ") >= 2:
+        return False   # a sentence or an i18n label ("Add API key"), not a value
     low = v.lower()
     if low in {"password", "changeme", "placeholder", "example", "none", "null", "true", "false", "redacted"}:
         return False
@@ -282,7 +286,7 @@ OWN_RULES: list[dict] = [
     {"id": "gitlab-runner-token", "type": "SECRET", "regex": r"glrt-[0-9A-Za-z_.-]{20,}"},
     {"id": "gitlab-deploy-token-any", "type": "SECRET", "regex": r"gldt-[0-9A-Za-z_-]{20,}"},
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
-     "regex": r"(?i)\b(Bearer|Basic|Token|APIKey)(\s+)([A-Za-z0-9._~+/=-]{16,})"},
+     "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
 ]
 
 
@@ -315,7 +319,7 @@ def _load_gitleaks() -> list[Rule]:
 ENTITY_TYPE = {"EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "CREDIT_CARD": "CARD",
                "IP_ADDRESS": "IP", "PHONE_NUMBER": "PHONE"}
 # covered by OWN_RULES with bounded regexes and validators, or not PII worth a placeholder
-PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone"}
+PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "crypto"}
 # validator id per presidio recognizer id; a recognizer with a validator we did not port
 # keeps its pattern score and is treated as weak (context required)
 PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
@@ -407,6 +411,49 @@ PLACEHOLDER_VALUES = frozenset({"changeme", "change_me", "password", "placeholde
 
 
 # ------------------------------------------------------------------ scanner --
+_CTX_CACHE: dict[tuple[str, ...], re.Pattern[str]] = {}
+
+
+def _has_context_word(window: str, context: tuple[str, ...]) -> bool:
+    """A context word counts as a whole word: "ort" must not fire inside "report"."""
+    if not context:
+        return False
+    rx = _CTX_CACHE.get(context)
+    if rx is None:
+        rx = re.compile(r"(?<![a-z0-9äöüß])(?:" + "|".join(re.escape(c) for c in context) + r")(?![a-z0-9äöüß])")
+        _CTX_CACHE[context] = rx
+    return rx.search(window) is not None
+
+
+def _matches(rule: Rule, text: str):
+    """detect-secrets keyword rules are line rules: run them per line, keep absolute offsets."""
+    if not rule.id.startswith("ds-keyword") or "\n" not in text:
+        yield from rule.regex.finditer(text)
+        return
+    pos = 0
+    for line in text.split("\n"):
+        for m in rule.regex.finditer(line):
+            yield _Shifted(m, pos)
+        pos += len(line) + 1
+
+
+class _Shifted:
+    """A match object whose offsets are shifted into the enclosing text."""
+    __slots__ = ("_m", "_off")
+
+    def __init__(self, m: re.Match, off: int) -> None:
+        self._m, self._off = m, off
+
+    def group(self, i: int = 0):
+        return self._m.group(i)
+
+    def start(self, i: int = 0) -> int:
+        return self._m.start(i) + self._off
+
+    def end(self, i: int = 0) -> int:
+        return self._m.end(i) + self._off
+
+
 def _line_of(text: str, start: int, end: int) -> str:
     a = text.rfind("\n", 0, start) + 1
     b = text.find("\n", end)
@@ -437,14 +484,16 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
         if rule.keywords and not any(k in low for k in rule.keywords):
             continue
         # a rule that cannot fire without a context word need not run its regex without one
-        if rule.context and (rule.require_context or rule.score < 0.5) and not any(c in low for c in rule.context):
+        if rule.context and (rule.require_context or rule.score < 0.5) and not _has_context_word(low, rule.context):
             continue
-        for m in rule.regex.finditer(text):
+        for m in _matches(rule, text):
             ngroups = rule.regex.groups or 0
             if rule.whole_match:
                 g = 0
+            elif 0 < rule.secret_group <= ngroups:
+                g = rule.secret_group
             else:
-                g = rule.secret_group if 0 < rule.secret_group <= ngroups else (1 if ngroups >= 1 and m.group(1) else 0)
+                g = next((i for i in range(1, ngroups + 1) if m.group(i)), 0)
             start, end = m.start(g), m.end(g)
             if end <= start:
                 continue
@@ -463,9 +512,9 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if rule.type == "SECRET" and secret.strip("\"'` ").lower() in PLACEHOLDER_VALUES:
                 continue
             if rule.score < 1.0 or rule.require_context:
-                # presidio semantics: a weak shape passes only with a context word nearby
+                # presidio semantics: a weak shape passes only with a context WORD nearby
                 window = low[max(0, start - 80):min(len(low), end + 40)]
-                has_context = any(c in window for c in rule.context)
+                has_context = _has_context_word(window, rule.context)
                 if rule.require_context and not has_context:
                     continue
                 if rule.score < 0.5 and not has_context:
