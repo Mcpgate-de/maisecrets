@@ -82,4 +82,4 @@ expiry the value is deleted and the metadata stays as a record. Commands:
 
 ## Licence
 
-Apache-2.0. See `docs/ZIEL.md` for the concept and the decisions.
+Apache-2.0. See `docs/CONCEPT.md` for the concept and the decisions.

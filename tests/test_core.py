@@ -1,7 +1,7 @@
 """Unit tests for detector, placeholder, vault and hook handlers.
 
 Run: python3 -m unittest discover -s tests -v
-Mutation probes: see docs/ZIEL.md, section "Tests that cannot fail" — counts are
+Mutation probes: see docs/CONCEPT.md, section "Tests that cannot fail" — counts are
 recorded per probe in harness/out/mutations.md when a probe has been run.
 """
 from __future__ import annotations

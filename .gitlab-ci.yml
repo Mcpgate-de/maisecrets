@@ -41,10 +41,9 @@ no_secrets_in_tree:
 
 lint:
   stage: validate
-  image:
-    name: ghcr.io/astral-sh/ruff:0.14.2
-    entrypoint: [""]
+  # The ruff image has no shell, and the docker executor needs one. Pinned pip install instead.
   script:
+    - pip install --quiet --disable-pip-version-check ruff==0.14.2
     - ruff check --select E,F,W --line-length 120 maisecrets hooks harness tests
 
 unit:
