@@ -311,3 +311,14 @@ app (same format; output via block feedback). Docs, untested: ChatGPT Work
 mode runs plugin hooks in the Codex runtime. OpenCode: own npm plugin, can
 rewrite the prompt. Unchecked: Cursor, Copilot CLI, Gemini CLI, Kiro. No
 adapter: Claude Chat, ChatGPT Chat, web, mobile.
+
+Antigravity CLI (`agy` 1.2.11, checked 2026-09-26 from the hook doc embedded
+in the binary): own `hooks.json` contract, named hooks in `plugins/<name>/hooks.json`
+or `.agents/hooks.json`, camelCase payloads. `PreToolUse` on `run_command` gets
+`toolCall.args.CommandLine` and may answer `decision` allow/deny/ask plus
+`overwrite` for the arguments, so rehydration and a deny are possible.
+`PostToolUse` expects `{}` back: a tool result cannot be rewritten. There is no
+prompt hook; `PreInvocation` carries no prompt and can only inject messages.
+Two of the three guards (block a prompt, redact a result) have no hook to live
+in, so an adapter would only rehydrate and deny. Not built; `agy plugin
+validate` accepts the plugin layout but finds no hooks in it.
