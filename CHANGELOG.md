@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.13] - 2026-09-26
+
+### Features
+
+- one short tip per day at session start (label a password, /maisecrets:put, session rule, report, audit); off with tips=false (8d6a66c)
+
 ## [0.3.12] - 2026-09-26
 
 ### Features
