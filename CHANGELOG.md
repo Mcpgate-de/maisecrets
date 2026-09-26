@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.4] - 2026-09-26
+
+### Fixes
+
+- a fixed-length secret shape is extended to the end of the token run; harnesses check the marker tail (56b3a92)
+
 ## [0.3.3] - 2026-09-26
 
 ### Features
