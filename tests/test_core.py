@@ -21,6 +21,8 @@ sys.path.insert(0, str(ROOT))
 # isolate the vault for every test run
 _TMP = tempfile.mkdtemp(prefix="maisecrets-test-")
 os.environ["MAISECRETS_HOME"] = _TMP
+# tests never touch the real keychain
+Path(_TMP, "config.json").write_text('{"backend": "jsonfile"}')
 
 from maisecrets import detect, hooks, placeholder  # noqa: E402
 from maisecrets.vault import Vault  # noqa: E402

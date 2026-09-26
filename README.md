@@ -21,18 +21,21 @@ package install, no dependency outside the Python standard library.
 
 ## Status
 
-Day-1 prototype (2026-09-26). Vault backend `jsonfile` is a plaintext file
-under `~/.maisecrets/` with mode 0600, marked TEST MODE. The `keychain`
-backend (macOS `security`, no iCloud sync flag) is present but not yet
-default. Windows Credential Manager: not yet.
+Day-1 prototype (2026-09-26). Default vault backend on macOS is `keychain`
+(login keychain via `security`, no iCloud sync flag; smoke-tested against the
+real keychain). Elsewhere, and with `"backend": "jsonfile"`, values sit in a
+plaintext file under `~/.maisecrets/` with mode 0600, marked TEST MODE.
+Windows Credential Manager: not yet.
 
 ## Install (development)
 
 ```bash
-claude --plugin-dir /path/to/maisecrets        # one session
-python3 -m unittest discover -s tests -v      # 22 tests, milliseconds
-python3 harness/run.py                        # 4 scenarios against a fake upstream
-scripts/install-hooks.sh                      # git pre-commit / pre-push
+claude --plugin-dir /path/to/maisecrets                 # one session only
+claude plugin marketplace add /path/to/maisecrets       # the repo is its own marketplace
+claude plugin install maisecrets@maisecrets             # every session (user scope)
+python3 -m unittest discover -s tests -v               # 23 tests, milliseconds
+python3 harness/run.py                                 # 4 scenarios against a fake upstream
+scripts/install-hooks.sh                               # git pre-commit / pre-push
 ```
 
 ## What the plugin runs, sends and fetches
@@ -53,7 +56,7 @@ scripts/install-hooks.sh                      # git pre-commit / pre-push
 
 ```json
 {
-  "backend": "jsonfile",
+  "backend": "keychain",
   "ttl_seconds": {"default": 86400, "CARD": 3600},
   "max_ttl_seconds": 2592000,
   "renew_on_use": true,

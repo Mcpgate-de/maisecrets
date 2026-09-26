@@ -30,7 +30,7 @@ CONFIG = HOME / "config.json"
 SERVICE = "maisecrets"
 
 DEFAULT_CONFIG = {
-    "backend": "jsonfile",          # jsonfile | keychain
+    "backend": "keychain",          # keychain (macOS) | jsonfile (test mode, any OS)
     "ttl_seconds": {"default": 86400, "CARD": 3600},
     "max_ttl_seconds": 30 * 86400,
     "renew_on_use": True,
@@ -135,6 +135,7 @@ class KeychainBackend:
 
 
 def make_backend(cfg: dict):
+    """keychain on macOS; elsewhere the jsonfile test backend until the Windows store exists."""
     if cfg.get("backend") == "keychain" and platform.system() == "Darwin":
         return KeychainBackend()
     return JsonFileBackend()

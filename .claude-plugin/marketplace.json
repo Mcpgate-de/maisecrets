@@ -1,0 +1,14 @@
+{
+  "name": "maisecrets",
+  "owner": {"name": "Sprinterli"},
+  "metadata": {"description": "maisecrets development marketplace (this repository)"},
+  "plugins": [
+    {
+      "name": "maisecrets",
+      "source": "./",
+      "description": "Keeps secrets and PII out of the cloud model: deterministic detection, local vault with TTL, placeholders rehydrated only where the real call happens.",
+      "version": "0.1.0",
+      "category": "security"
+    }
+  ]
+}
