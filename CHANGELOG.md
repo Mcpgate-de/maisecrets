@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.9] - 2026-09-26
+
+### Fixes
+
+- a span that contains a placeholder is never a hit (curl -u app:⟦SECRET_c1⟧ minted a second reference); README opens with what the user sees (bd1e9b3)
+
 ## [0.3.8] - 2026-09-26
 
 ### Fixes
