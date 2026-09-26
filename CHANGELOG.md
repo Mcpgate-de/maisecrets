@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.3.20] - 2026-09-26
+
+### Fixes
+
+- the up-front read tests accept the resolver form Git Bash uses (061258b)
+- fail closed on the plugin's own faults and deliver Bash values through a FIFO read up front in the main shell (9170416)
+
 ## [0.3.19] - 2026-09-26
 
 ### Features
