@@ -22,6 +22,11 @@ is a Jira link and a regex class, `***` is a regex quantifier; `⟦…⟧` with
   empty or is itself a display (a fixed point of the mask transformation); a
   real value in token form is still scanned.
 - The earlier `<TYPE_cN>` form is recognised for rehydration, never minted.
+- Gateway side: ai-gateway MR !2374 (`src/security/pii_display.py` blob
+  `fc6e2df2…`, vendored here as `maisecrets/pii_display.py`). A client
+  reference in a rehydrate field of a gateway action is answered with
+  `UNRESOLVED_CLIENT_REFERENCE` and the API is not called
+  (`src/mcp/hooks/pii_hooks.py`, `tool_executor._answer_without_executing`).
 
 ## 2. Vault entry
 

@@ -173,6 +173,7 @@ class VaultTests(unittest.TestCase):
         self.assertNotEqual(v.SERVICE, "maisecrets")
         self.assertTrue(v.SERVICE.startswith("maisecrets@"))
 
+    @unittest.skipIf(sys.platform == "win32", "openssl is not on a stock Windows PATH; Windows uses the Credential Locker")
     def test_encrypted_file_backend_roundtrip_and_tamper(self):
         from maisecrets.vault import EncryptedFileBackend
         b = EncryptedFileBackend()
@@ -188,6 +189,7 @@ class VaultTests(unittest.TestCase):
         b.delete("SECRET_c9")
         self.assertIsNone(b.get("SECRET_c9"))
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX file modes do not apply on Windows")
     def test_vault_file_is_private(self):
         self.v.put(AKIA, "SECRET", "aws-access-token")
         mode = os.stat(self.v.backend.path).st_mode & 0o777
