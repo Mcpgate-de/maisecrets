@@ -221,7 +221,8 @@ class ContextTests(unittest.TestCase):
                 self.assertEqual(out.get("permissionDecision"), "deny", out)
                 self.assertIn("matched", out["permissionDecisionReason"])
         # a plain pipeline stays allowed
-        self.assertNotIn("permissionDecision", _bash_pre("curl -H 'X-Token: " + self.e.ref + "' h | jq .")["hookSpecificOutput"])
+        plain = _bash_pre("curl -H 'X-Token: " + self.e.ref + "' h | jq .")["hookSpecificOutput"]
+        self.assertNotIn("permissionDecision", plain)
 
     def test_a_refused_key_leaves_no_value_waiting(self):
         before = set(os.listdir(hooks._run_dir()))
@@ -261,9 +262,11 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("Nothing was written", out["hookSpecificOutput"]["permissionDecisionReason"])
         out = hooks.pre_tool({"tool_name": "Edit", "session_id": "S1",
-                              "tool_input": {"file_path": str(Path(_TMP, "config.json")), "old_string": "a", "new_string": "b"}})
+                              "tool_input": {"file_path": str(Path(_TMP, "config.json")),
+                                             "old_string": "a", "new_string": "b"}})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertEqual(hooks.pre_tool({"tool_name": "Write", "tool_input": {"file_path": "/tmp/y", "content": "hi"}}), {})
+        harmless = {"tool_name": "Write", "tool_input": {"file_path": "/tmp/y", "content": "hi"}}
+        self.assertEqual(hooks.pre_tool(harmless), {})
         out = _bash_pre("echo x > ~/.maisecrets/config.json")["hookSpecificOutput"]
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertIn("home directory", out["permissionDecisionReason"])
@@ -281,7 +284,10 @@ class FailClosedTests(unittest.TestCase):
     def test_exactly_one_answer_leaves_the_process_when_the_watchdog_fires(self):
         import io
         from unittest import mock
-        slow = lambda payload: (__import__("time").sleep(0.6), {"decision": "block", "reason": "handler"})[1]
+        def slow(payload):
+            import time as _t
+            _t.sleep(0.6)
+            return {"decision": "block", "reason": "handler"}
         buf = io.StringIO()
         with mock.patch.dict(hooks.HANDLERS, {"user-prompt": slow}), \
                 mock.patch.dict(hooks.WATCHDOG_SECONDS, {"user-prompt": 0.2}), \
@@ -294,8 +300,10 @@ class FailClosedTests(unittest.TestCase):
         self.assertIn("took longer", obj["reason"])
 
     def test_fail_closed_texts_say_whether_the_tool_ran(self):
-        self.assertIn("did NOT run", hooks._fail_closed("pre-tool", {}, "x")["hookSpecificOutput"]["permissionDecisionReason"])
-        self.assertIn("ran and finished", hooks._fail_closed("post-tool", {}, "x")["hookSpecificOutput"]["updatedToolOutput"])
+        pre = hooks._fail_closed("pre-tool", {}, "x")["hookSpecificOutput"]
+        self.assertIn("did NOT run", pre["permissionDecisionReason"])
+        post = hooks._fail_closed("post-tool", {}, "x")["hookSpecificOutput"]
+        self.assertIn("ran and finished", post["updatedToolOutput"])
         self.assertIn("ran and finished", hooks._fail_closed("post-tool", {"turn_id": "t"}, "x")["reason"])
 
     def test_damaged_index_stays_damaged_until_repaired(self):
@@ -306,7 +314,10 @@ class FailClosedTests(unittest.TestCase):
                 Vault().put("second-value-9876", "SECRET", "manual", session="S1")
         self.assertEqual(json.loads(Path(_TMP, "vault.json").read_text())["SECRET_c1"], PLAIN,
                          "the first value is never overwritten")
-        v = Vault.__new__(Vault); v.cfg = hooks.load_config(); v.backend = __import__("maisecrets.vault", fromlist=["make_backend"]).make_backend(v.cfg)
+        from maisecrets.vault import make_backend
+        v = Vault.__new__(Vault)
+        v.cfg = hooks.load_config()
+        v.backend = make_backend(v.cfg)
         info = v.repair()
         self.assertEqual(info["counters"].get("SECRET"), 1)
         e = Vault().put("third-value-5555", "SECRET", "manual", session="S1")
@@ -419,8 +430,9 @@ class ResolvedValueRedactionTests(unittest.TestCase):
     def test_a_result_above_the_cap_is_masked_without_storing(self):
         _reset()
         emails = " ".join(f"user{i}@corp-example.org" for i in range(130))
-        out = hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p",
-                               "tool_response": {"stdout": emails}})["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+        res = hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p",
+                               "tool_response": {"stdout": emails}})
+        out = res["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
         self.assertNotIn("@corp-example.org", out)
         self.assertIn("⟦EMAIL⟧", out)
         self.assertLessEqual(len([e for e in Vault().list() if not e.purged]), 100)

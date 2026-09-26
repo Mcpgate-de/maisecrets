@@ -176,7 +176,8 @@ def cmd_status(_: list[str]) -> int:
     v = Vault()
     live = [e for e in v.list() if not e.purged]
     print(describe_backend(v.backend))
-    print(f"entries: {len(live)} live, {len(v.list()) - len(live)} expired (metadata kept {v.cfg.get('keep_purged_days')} days)")
+    kept = v.cfg.get("keep_purged_days")
+    print(f"entries: {len(live)} live, {len(v.list()) - len(live)} expired (metadata kept {kept} days)")
     policy = v.cfg.get("policy_keys") or []
     print("settings from a machine policy: " + (", ".join(policy) if policy else "none"))
     from . import detect
