@@ -209,28 +209,29 @@ printed: `scripts/replay_sessions.py --claude --codex`.
 
 ## Known gaps (measured or documented)
 
-- `@file` mentions inline content outside the hook pipeline. The prompt hook
-  blocks them when the path exists; ask Claude to read the file instead.
-- The `UserPromptSubmit` hook is fail-open on timeout (30 s default). The
+What the plugin does not protect. Each item is a limit of the mechanism, not
+a to-do.
+
+- **No hook, no protection.** Claude Chat, ChatGPT Chat, the web and the
+  mobile apps run no plugin hooks. Cowork does, Claude Code does, Codex does.
+- **A client that rejects the manifest loads nothing and says nothing.**
+  Claude Code 2.1.223 did so for a manifest key it did not know. Check with
+  `/hooks` that maisecrets is listed; the harness checks the debug log.
+- **The prompt hook is fail-open on timeout** (30 s in Claude Code). The
   detector is regex only and runs in milliseconds; keep it that way.
-- Tool output above 50K characters is spilled to a file by Claude Code and is
-  not rewritten.
-- Names are not detected. Regex only, by design, for now.
-- A value that a command transforms (base64, split across lines) comes back
-  unredacted; exact match works on whole tokens and on the rest of a
-  `KEY=value` line.
-- Gateway (MCP) arguments are resolved on the client until the gateway's
-  deposit endpoint exists; the value then travels to the gateway like any
-  other argument.
-- Codex on Windows runs commands in PowerShell, where the bash quoting
+- **Tool output above 50K characters** is spilled to a file by Claude Code
+  and is not rewritten.
+- **`@file` mentions** inline a file outside the hook pipeline. The prompt
+  hook blocks them when the path exists; ask Claude to read the file instead.
+- **Names are not detected.** Regex only, by design.
+- **A transformed value passes.** Base64, split across lines, or a value with
+  spaces and quotes inside prose comes back unredacted; exact match works on
+  whole tokens and on the rest of a `KEY=value` line.
+- **Every store hands a value to any process of the same user.** The gates
+  stand in front of the agent, not in front of you; a Touch ID gate needs a
+  signed helper and is not built. See "Vault" and `docs/THREAT-MODEL.md`.
+- **Codex on Windows** runs commands in PowerShell, where the bash quoting
   contexts of the grant rewrite do not apply. Not tested.
-- A value with spaces or quotes is matched exactly only as the rest of a
-  `KEY=value` or `key: value` line, not inside prose.
-- Every store hands a value to any process of the same user; see "Vault"
-  and `docs/THREAT-MODEL.md`. A Touch ID gate needs a signed helper and is
-  not built.
-- A real Codex model may refuse to run a command that prints `.env` at all;
-  that is the model's own policy, not the plugin.
 
 ## Licence
 
