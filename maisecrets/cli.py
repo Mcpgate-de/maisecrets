@@ -220,7 +220,7 @@ def cmd_wipe(args: list[str]) -> int:
 
 
 SHORTCUT_COMMAND = """---
-description: Send the last blocked prompt as maisecrets rewrote it (short for /maisecrets:send). Works over SSH and in Remote Control.
+description: Send the last blocked prompt as maisecrets rewrote it (short for /maisecrets:send).
 allowed-tools: Bash(bash ~/.maisecrets/bin/ms.sh*)
 ---
 
@@ -233,9 +233,9 @@ Remote Control show neither the blocked prompt nor a slash command's expansion),
 
 
 def cmd_shortcut(args: list[str]) -> int:
-    """Install a personal `/ms` command for this user: `~/.claude/commands/ms.md` plus the stable
-    wrapper `~/.maisecrets/bin/ms.sh`, which finds the newest installed plugin copy at run time
-    (the plugin folder moves with every version). Field request, 2026-09-26."""
+    """Install a personal `/ms` command for this user: `~/.claude/commands/ms.md` plus the
+    stable wrapper `~/.maisecrets/bin/ms.sh`, which finds the newest installed plugin copy at
+    run time (the plugin folder moves with every version). Field request, 2026-09-26."""
     from pathlib import Path as _P
     from .vault import HOME
     name = (args[0] if args and args[0].isalnum() else "ms")
