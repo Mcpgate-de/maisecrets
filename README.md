@@ -46,6 +46,27 @@ proves the three tool scenarios against a fake Responses upstream and, with
 `--real`, against the real model (3 of 3 on 2026-09-26). `docs/TESTING.md`
 has the record.
 
+## Client support
+
+Three guards, one row per client. "proven" = the harness in this repo ran
+against that client; "docs" = read in the vendor's hook documentation on
+2026-09-26, not measured; "no" = the client has no hook for it.
+
+| client | block a prompt | rehydrate in Bash / tool args | redact tool output | status |
+|---|---|---|---|---|
+| Claude Code, Cowork, Claude Desktop (Code) | yes | yes | yes | proven, this plugin |
+| Codex CLI, Codex in the ChatGPT app | yes | yes | yes (block-as-output) | proven, this plugin |
+| Gemini CLI | yes (`BeforeModel` may rewrite) | yes (`BeforeTool` may rewrite) | yes (`AfterTool` may redact) | docs; adapter not built |
+| GitHub Copilot CLI | no for config hooks (`modifiedPrompt` is SDK-only) | yes (`modifiedArgs`) | yes (`modifiedResult`) | docs; adapter not built |
+| Cursor | yes (`beforeSubmitPrompt` blocks) | yes (`beforeShellExecution`) | MCP results only; shell output cannot be rewritten | docs; adapter not built |
+| OpenCode | no hook rewrites the prompt | yes (`tool.execute.before`) | yes (`tool.execute.after`) | docs; own JS plugin API, adapter not built |
+| Antigravity CLI (`agy`) | no | yes (`PreToolUse` `overwrite`) | no (`PostToolUse` returns `{}`) | docs from the binary; not supportable |
+| Claude Chat, ChatGPT Chat, web, mobile | no | no | no | no hooks |
+
+A client with a "no" in the first or third column cannot be made safe by
+this plugin; it would look protected and leak. Adapters are built only for
+clients where all three guards have a hook.
+
 ## Install
 
 ```bash

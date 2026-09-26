@@ -309,7 +309,11 @@ hook names, block/rewrite fields). Proven: Claude Code/Cowork/Desktop Code
 (hooks: block prompt, rewrite tool I/O), Codex CLI and Codex in the ChatGPT
 app (same format; output via block feedback). Docs, untested: ChatGPT Work
 mode runs plugin hooks in the Codex runtime. OpenCode: own npm plugin, can
-rewrite the prompt. Unchecked: Cursor, Copilot CLI, Gemini CLI, Kiro. No
+rewrite the prompt (correction 2026-09-26: the current plugin API lists
+`tool.execute.before/after` as modifiable, no prompt hook). Checked in the
+docs on 2026-09-26, matrix in README "Client support": Gemini CLI has all
+three hooks, Copilot CLI two (prompt rewrite is SDK-only), Cursor two and a
+half (shell output cannot be rewritten), OpenCode two. Unchecked: Kiro. No
 adapter: Claude Chat, ChatGPT Chat, web, mobile.
 
 Antigravity CLI (`agy` 1.2.11, checked 2026-09-26 from the hook doc embedded
