@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.17] - 2026-09-26
+
+### Fixes
+
+- drop the root plugin.json, with it Codex discovered none of the four hooks; the Codex harness installs the plugin through Codex's own discovery (723bb8f)
+
 ## [0.3.16] - 2026-09-26
 
 ### Fixes
