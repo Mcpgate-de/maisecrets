@@ -89,7 +89,8 @@ class PlaceholderTests(unittest.TestCase):
 class VaultTests(unittest.TestCase):
     def setUp(self):
         for f in Path(_TMP).glob("*"):
-            f.unlink()
+            if f.name != "config.json":   # keep the jsonfile pin, or the default (keychain) takes over
+                f.unlink()
         self.v = Vault({"backend": "jsonfile", "ttl_seconds": {"default": 60},
                         "max_ttl_seconds": 120, "renew_on_use": True})
 
@@ -122,7 +123,8 @@ class VaultTests(unittest.TestCase):
 class HookTests(unittest.TestCase):
     def setUp(self):
         for f in Path(_TMP).glob("*"):
-            f.unlink()
+            if f.name != "config.json":   # keep the jsonfile pin, or the default (keychain) takes over
+                f.unlink()
         hooks._clipboard = lambda text: True  # no real clipboard in tests
 
     def test_prompt_with_secret_is_blocked_and_stored(self):
