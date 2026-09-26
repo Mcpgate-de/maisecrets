@@ -65,6 +65,14 @@ and OpenAI plugin directories.
   first tag pipeline ran before the tags were protected and got an empty
   key variable; the mirror job now fails loudly on an empty key.
 
+- claude.ai organisation marketplace: synced from the private GitLab project
+  through a read-only project token (`claude-ai-org-sync`, Reporter,
+  `read_api` + `read_repository`). "Sync automatically" wants a Standard
+  Webhooks signature that gitlab.com does not send (403 on every delivery),
+  so the tag pipeline's `notify_marketplace` job sends the signed push event
+  itself (`scripts/notify_marketplace.py`, variables
+  `MAISECRETS_CLAUDE_MARKETPLACE_URL` and `MAISECRETS_CLAUDE_WEBHOOK_SECRET`).
+
 ## Remotes (now)
 
 - Primary: `gitlab.com/Sprinterli/maisecrets`. Two mirrors, both written

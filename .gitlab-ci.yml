@@ -127,6 +127,16 @@ release:
     - git push origin "v$VERSION"
     - echo "released v$VERSION"
 
+notify_marketplace:
+  stage: mirror
+  # the claude.ai organisation marketplace re-syncs on a signed push event; gitlab.com's own
+  # webhook carries no signature and is answered 403, so the release pipeline sends it
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs: []
+  script:
+    - python scripts/notify_marketplace.py
+
 mirror:
   stage: mirror
   image: alpine:3.20
