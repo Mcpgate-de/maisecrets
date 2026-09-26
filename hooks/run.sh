@@ -5,6 +5,9 @@
 #            installs as python.exe or the py launcher (winget install Python.Python.3.12)
 # Usage: run.sh <user-prompt|pre-tool|post-tool|session-start> | run.sh report … | run.sh put --clipboard [--type=…]
 set -u
+# the payload is UTF-8 JSON; on Windows python.exe would otherwise decode a pipe with the
+# console code page and a prompt with umlauts fails the hook (fail closed, but for no reason)
+export PYTHONUTF8=1
 HERE="$(cd "$(dirname "$0")" && pwd)"
 for PY in python3 python "py -3"; do
   if $PY -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >/dev/null 2>&1; then

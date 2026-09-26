@@ -86,7 +86,10 @@ now); a damaged index became an empty one and would have overwritten
 in one process could wait for each other (one lock per path per process);
 a pending prompt older than 15 min is not sent. Open: Codex `allow` skips
 its approval prompt (documented in the README); a plugin-side confirm step;
-Codex on Windows (denied for now); an echo-and-count MCP server in the real
+Codex on Windows: the hooks run since `commandWindows` + `hooks/run.ps1`
+(checked in the Windows matrix job through `powershell.exe`, block and pass
+with a UTF-8 payload), a Bash placeholder is still denied, no live session
+yet; an echo-and-count MCP server in the real
 Codex harness to measure retries after a block-as-output.
 
 ## Mutation probes

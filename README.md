@@ -75,8 +75,11 @@ a feature or a fix bumps the last number). Vault backend per platform:
 
 Hooks run through `hooks/run.sh` (bash), which picks `python3`, `python` or
 `py -3`. Claude Code on Windows requires Git Bash, so the launcher runs there
-too; install Python with `winget install Python.Python.3.12`. Without a
-Python 3.11+ the launcher exits 2 and prompts are blocked: fail closed.
+too. Codex on Windows has no Git Bash, so every hook also names a
+`commandWindows` entry: `hooks/run.ps1` runs the same `dispatch.py` from
+PowerShell and hands the payload through byte for byte. Install Python with
+`winget install Python.Python.3.12`. Without a Python 3.11+ either launcher
+exits 2 and prompts are blocked: fail closed.
 
 Proven with the harness on macOS (Claude Code 2.1.283) and on Debian 13
 (2.1.223), 6 scenarios each, version 0.3.5; Windows through the GitHub Actions matrix
@@ -95,7 +98,7 @@ has the record.
 | client | prompt | rehydrate | redact | adapter |
 |---|:---:|:---:|:---:|---|
 | Claude Code, Cowork | ✅ | ✅ | ✅ | built |
-| Codex CLI, IDE extension, Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks |
+| Codex CLI, IDE extension, Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks; on Windows a shell placeholder is denied (PowerShell rewrite not built) |
 | Gemini CLI | ☑️ | ☑️ | ☑️ | not planned (successor: Antigravity) |
 | Cursor | ☑️ | ☑️ | ⚠️ MCP only | waits for a shell-output hook |
 | Copilot CLI | ⚠️ SDK only | ☑️ | ☑️ | waits for a prompt hook |
@@ -356,7 +359,11 @@ a to-do.
   stand in front of the agent, not in front of you; a Touch ID gate needs a
   signed helper and is not built. See "Vault" and `docs/THREAT-MODEL.md`.
 - **Codex on Windows** runs commands in PowerShell, where the bash quoting
-  contexts of the grant rewrite do not apply. Not tested.
+  contexts of the grant rewrite do not apply. The prompt block, the output
+  redaction and the inline MCP resolve run through `hooks/run.ps1`; a
+  placeholder in a shell command is denied with a reason. The launcher is
+  proven in the GitHub Actions Windows job (block and pass through
+  `powershell.exe` with a UTF-8 payload), not yet in a live Codex session.
 
 ## Licence
 

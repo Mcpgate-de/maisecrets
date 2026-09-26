@@ -2,16 +2,53 @@
   "description": "maisecrets: block prompts that carry secrets or PII, rehydrate placeholders in Bash, redact tool results.",
   "hooks": {
     "SessionStart": [
-      {"hooks": [{"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" session-start", "timeout": 30}]}
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" session-start",
+            "timeout": 30,
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/hooks/run.ps1\" session-start"
+          }
+        ]
+      }
     ],
     "UserPromptSubmit": [
-      {"hooks": [{"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" user-prompt", "timeout": 10}]}
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" user-prompt",
+            "timeout": 10,
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/hooks/run.ps1\" user-prompt"
+          }
+        ]
+      }
     ],
     "PreToolUse": [
-      {"matcher": "Bash|mcp__.*", "hooks": [{"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" pre-tool", "timeout": 10}]}
+      {
+        "matcher": "Bash|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" pre-tool",
+            "timeout": 10,
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/hooks/run.ps1\" pre-tool"
+          }
+        ]
+      }
     ],
     "PostToolUse": [
-      {"hooks": [{"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" post-tool", "timeout": 20}]}
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" post-tool",
+            "timeout": 20,
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/hooks/run.ps1\" post-tool"
+          }
+        ]
+      }
     ]
   }
 }
