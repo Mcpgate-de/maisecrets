@@ -3,7 +3,7 @@
 ## Reporting
 
 Report a weakness by e-mail to the maintainer named in `.claude-plugin/plugin.json`
-(repository owner on GitHub: Sprinterli). Do not open a public issue for a
+(organisation on GitHub: Mcpgate-de). Do not open a public issue for a
 weakness that lets a value leave the machine. You get an answer within 7 days
 and a fix or a documented decision within 30 days. A report that contains a
 real value is not needed: name the shape and the path.

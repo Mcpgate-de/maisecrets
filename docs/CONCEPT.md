@@ -231,7 +231,7 @@ readable source inside the plugin.)*
 
 ## Carrier and name (2026-09-26)
 
-- **Developed privately.** Repo on gitlab.com/Sprinterli with a mirror to
+- **Developed privately.** Repo on gitlab.com/mcpgate (moved from Sprinterli on 2026-09-26) with a mirror to
   github.com. Plugin, vault and protocol specification live there. The
   gateway part (deposit, rehydration for read actions) implements the
   specification in the ai-gateway; phase6 is the first user.
@@ -297,7 +297,7 @@ before packaging.
 `~/.maisecrets/vault.json` (0600, test mode) + detector from pii_scrubber +
 clipboard + listener harness. Day 2–3 keychain backend, TTL/index, PreToolUse
 insertion in Bash, PostToolUse scrub, mutation probe per hook. Week 2 plugin
-folder, portal validation, marketplace repo `Sprinterli/maisecrets`, 2–3
+folder, portal validation, marketplace repo `Mcpgate-de/maisecrets`, 2–3
 phase6 Macs, Codex hooks.json, Cowork test. Then gateway deposit, OpenCode,
 privacy policy/domain, directory. First building block: the harness (golden
 payloads against hook drift).

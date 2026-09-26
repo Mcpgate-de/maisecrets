@@ -111,7 +111,7 @@ behind each mark are in `docs/CONCEPT.md`, "Provider coverage".
 ## Install
 
 ```bash
-claude plugin marketplace add Sprinterli/maisecrets     # the GitHub repo is its own marketplace
+claude plugin marketplace add Mcpgate-de/maisecrets     # the GitHub repo is its own marketplace
 claude plugin install maisecrets@maisecrets             # user scope; new session or /reload-plugins
 claude plugin update maisecrets@maisecrets              # later versions
 ```
@@ -183,7 +183,7 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
   "pii_regions": ["generic", "de"],
   "max_keys_per_session": 25,
   "max_resolves_per_hour": 60,
-  "report_url": "https://github.com/Sprinterli/maisecrets/issues"
+  "report_url": "https://github.com/Mcpgate-de/maisecrets/issues"
 }
 ```
 

@@ -15,7 +15,7 @@ from .vault import HOME
 
 EVENTS = HOME / "events.log"
 KEEP = 200
-ISSUES_URL = "https://github.com/Sprinterli/maisecrets/issues/new"
+ISSUES_URL = "https://github.com/Mcpgate-de/maisecrets/issues/new"
 
 
 def plugin_version() -> str:

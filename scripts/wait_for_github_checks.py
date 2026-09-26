@@ -20,7 +20,7 @@ import urllib.request
 
 def main(argv: list[str]) -> int:
     sha = argv[1]
-    repo = "Sprinterli/maisecrets"
+    repo = "Mcpgate-de/maisecrets"
     timeout_min = 20.0
     for i, a in enumerate(argv):
         if a == "--repo":

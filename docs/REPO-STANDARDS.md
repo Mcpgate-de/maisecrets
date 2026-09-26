@@ -80,9 +80,9 @@ and OpenAI plugin directories.
 
 ## Remotes (now)
 
-- Primary: `gitlab.com/Sprinterli/maisecrets`, private; it is also the source
+- Primary: `gitlab.com/mcpgate/maisecrets`, private; it is also the source
   the claude.ai organisation marketplace syncs from. Mirror:
-  `github.com/Sprinterli/maisecrets`, public, the marketplace for everyone,
+  `github.com/Mcpgate-de/maisecrets`, public, the marketplace for everyone,
   written only by the CI `mirror` job (`origin/main` and tags, deploy key,
   host keys pinned in `.ci-known-hosts-github`). Nobody pushes to GitHub by
   hand. A second private GitHub mirror for the organisation sync existed for

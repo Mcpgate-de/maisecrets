@@ -191,6 +191,6 @@ mirror:
     - git fetch --tags --quiet origin
     # main as gitlab.com has it (a release commit may have landed after this pipeline's SHA).
     # This job is the only writer of the GitHub repo, so a plain fast-forward push is enough.
-    - git push ssh://git@github.com/Sprinterli/maisecrets.git "origin/main:refs/heads/main"
-    - git push ssh://git@github.com/Sprinterli/maisecrets.git --tags
-    - echo "mirrored origin/main and tags to github.com/Sprinterli/maisecrets"
+    - git push ssh://git@github.com/Mcpgate-de/maisecrets.git "origin/main:refs/heads/main"
+    - git push ssh://git@github.com/Mcpgate-de/maisecrets.git --tags
+    - echo "mirrored origin/main and tags to github.com/Mcpgate-de/maisecrets"
