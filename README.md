@@ -284,9 +284,10 @@ Four sources, one scanner (`maisecrets/detect.py`):
   bounded regex; the unbounded one took 11 s on an 80 KB dotted run), phone
   with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, and
   full-length GitLab runner and deploy tokens.
-- Prefixes newer than the vendored rulesets are own rules too: `whsec_`
-  (webhook signing secrets) and `cfut_` (Cloudflare user API tokens), both
-  found bare in real prompts on 2026-09-26.
+- Prefixes newer than the vendored rulesets live in
+  `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
+  (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last
+  two found bare in real prompts on 2026-09-26.
 - A secret shape with a fixed length (gitleaks: `glpat-[\w-]{20}`) is
   extended to the end of the token characters, so a longer token does not
   leave its tail in the clear (found with a 24-char token, 2026-09-26).

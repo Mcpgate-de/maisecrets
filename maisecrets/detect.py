@@ -289,15 +289,7 @@ OWN_RULES: list[dict] = [
      "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})@[\w-]{1,63}\.[\w.-]{0,254}[\w-]"},
     {"id": "phone", "type": "PHONE",
      "regex": r"(?<![\w+])\+\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?!\w)"},
-    # full-length GitLab runner / deploy tokens; the gitleaks legacy shape stops after 20 chars
-    {"id": "gitlab-runner-token", "type": "SECRET", "regex": r"glrt-[0-9A-Za-z_.-]{20,}"},
-    {"id": "gitlab-deploy-token-any", "type": "SECRET", "regex": r"gldt-[0-9A-Za-z_-]{20,}"},
-    # Standard Webhooks / Svix / Stripe webhook signing secret: whsec_ + base64. Not in gitleaks
-    # 8.30; a bare one on its own line passed the detector on 2026-09-26
-    {"id": "webhook-signing-secret", "type": "SECRET", "regex": r"whsec_[A-Za-z0-9+/=_-]{24,}"},
-    # Cloudflare user API token, prefix cfut_ (2025); gitleaks 8.30 knows only the old shapes and
-    # needs "cloudflare" plus an assignment sign next to them (found by a peer session, 2026-09-26)
-    {"id": "cloudflare-user-api-token", "type": "SECRET", "regex": r"cfut_[A-Za-z0-9_-]{30,}"},
+    # bare token prefixes newer than the vendored rulesets live in rules/prefixes.txt (see _load_prefixes)
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
 ]
@@ -395,10 +387,23 @@ def _load_detect_secrets() -> list[Rule]:
     return out
 
 
+def _load_prefixes() -> list[Rule]:
+    """Bare token prefixes newer than the vendored rulesets: maisecrets/rules/prefixes.txt, one
+    per line `id  regex`, extended by pull request. The whole match is the secret."""
+    out: list[Rule] = []
+    for line in (RULES_DIR / "prefixes.txt").read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        rule_id, regex = line.split(None, 1)
+        out.append(Rule(id=rule_id, type="SECRET", regex=_Lazy(regex.strip())))
+    return out
+
+
 def _load_own() -> list[Rule]:
     return [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"]),
                  secret_group=d.get("secret_group", 0), validator=d.get("validator"))
-            for d in OWN_RULES]
+            for d in OWN_RULES] + _load_prefixes()
 
 
 _RULES: list[Rule] | None = None
