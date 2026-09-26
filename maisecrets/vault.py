@@ -96,7 +96,7 @@ class JsonFileBackend:
             json.dump(data, f)
         os.replace(tmp, self.path)
 
-    def put(self, key: str, value: str) -> None:
+    def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
         d = self._load()
         d[key] = value
         self._save(d)
@@ -114,11 +114,15 @@ class KeychainBackend:
     """macOS login keychain via the ``security`` CLI. No sync flag is set."""
     test_mode = False
 
-    def put(self, key: str, value: str) -> None:
-        subprocess.run(
-            ["security", "add-generic-password", "-U", "-s", SERVICE, "-a", key, "-w", value],
-            check=True, capture_output=True,
-        )
+    def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
+        # -l is the "Name" column in Keychain Access, -j the comment shown in the item's info.
+        # No -A / -T: the default ACL stays (the creating tool may read it, others are asked).
+        # No synchronizable flag: the item never joins iCloud Keychain or the Passwords app.
+        cmd = ["security", "add-generic-password", "-U", "-s", SERVICE, "-a", key,
+               "-l", label or f"maisecrets {key}", "-D", "maisecrets placeholder", "-w", value]
+        if comment:
+            cmd += ["-j", comment]
+        subprocess.run(cmd, check=True, capture_output=True)
 
     def get(self, key: str) -> str | None:
         r = subprocess.run(
@@ -187,7 +191,13 @@ class Vault:
                   display=display_for(type_, value), created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
                   session=session, uses=0)
-        self.backend.put(key, value)
+        created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
+        self.backend.put(
+            key, value,
+            label=f"maisecrets {key} ({kind})",
+            comment=f"maisecrets placeholder {e.ref}. type={type_} kind={kind} created={created} "
+                    f"ttl={ttl}s fingerprint={fp}. Value is inserted only into the real call.",
+        )
         self._index["entries"][key] = asdict(e)
         self._index["by_fingerprint"][fp] = key
         self._save_index()
