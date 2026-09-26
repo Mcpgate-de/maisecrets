@@ -89,20 +89,13 @@ at session start; otherwise `claude plugin update maisecrets@<marketplace>`.
 
 ## Options
 
-Claude Code asks for these when the plugin is installed (`userConfig` in
-`.claude-plugin/plugin.json`); they reach the hooks as
-`CLAUDE_PLUGIN_OPTION_<KEY>` and override `~/.maisecrets/config.json`:
-
-| option | default | meaning |
-|---|---|---|
-| `backend` | `auto` | `keychain` (macOS), `windows-vault`, `encrypted-file` (Linux), `jsonfile` (test mode) |
-| `pii_regions` | `de` | Presidio regions besides the generic ones, comma-separated |
-| `ttl_hours` | `24` | lifetime of a stored value; every use renews it, up to 30 days |
-| `report_url` | GitHub issues | shown in the block notice next to `/maisecrets:report` |
-
-At the first session start, and at every start in test mode, a notice names
-the active store, its path and where to change it. `python3 -m maisecrets.cli
-status` prints the same at any time.
+All options live in `~/.maisecrets/config.json` (next section) and take
+effect on the next hook call. The manifest declares no `userConfig` on
+purpose: Claude Code 2.1.223 rejects a manifest with that key and then loads
+no hook at all, silently. A guard that vanishes on an older client is worse
+than one without a settings dialog. At the first session start, and at every
+start in test mode, a notice names the active store, its path and where to
+change it. `python3 -m maisecrets.cli status` prints the same at any time.
 
 ## Vault
 
@@ -116,9 +109,16 @@ status` prints the same at any time.
   "renew_on_use": true,
   "scrub_transcript": true,
   "block_at_mentions": true,
-  "gateway_servers": ["phase6-ai-gateway"]
+  "pii_regions": ["generic", "de"],
+  "max_keys_per_session": 25,
+  "max_resolves_per_hour": 60,
+  "report_url": "https://github.com/Sprinterli/maisecrets/issues"
 }
 ```
+
+`backend`: `keychain` (macOS), `windows-vault`, `encrypted-file` (Linux and
+any other), `jsonfile` (test mode, plaintext). `pii_regions`: Presidio
+regions besides the generic ones.
 
 Every entry has a TTL. Each use renews it, up to `max_ttl_seconds`. On
 expiry the value is deleted and the metadata stays as a record. Commands:

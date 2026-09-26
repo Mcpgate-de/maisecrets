@@ -48,8 +48,11 @@ DEFAULT_CONFIG = {
 
 
 def load_config() -> dict:
-    """Defaults, then ~/.maisecrets/config.json, then the plugin options Claude Code passes as
-    CLAUDE_PLUGIN_OPTION_<KEY> (set at install time, editable via the plugin's settings)."""
+    """Defaults, then ~/.maisecrets/config.json, then CLAUDE_PLUGIN_OPTION_<KEY> if a client passes
+    plugin options that way. The manifest declares no `userConfig`: Claude Code 2.1.223 rejects a
+    manifest with that key as invalid and then loads NO hook at all (measured on Debian,
+    2026-09-26), and a guard that silently vanishes on an older client is worse than a guard
+    without a settings dialog. The env path stays for clients that know the key."""
     cfg = dict(DEFAULT_CONFIG)
     try:
         cfg.update(json.loads(CONFIG.read_text()))
@@ -83,8 +86,7 @@ def describe_backend(backend) -> str:
         "JsonFileBackend": f"PLAINTEXT file {HOME / 'vault.json'} - TEST MODE, not for real secrets",
     }.get(name, name)
     return (f"maisecrets vault: {where}. Metadata: {INDEX}. "
-            f"To change it: /plugin configure maisecrets@maisecrets (installed plugin), "
-            f"or write {{\"backend\": \"encrypted-file\"}} to {CONFIG} (any mode, next call).")
+            f"To change it: write {{\"backend\": \"encrypted-file\"}} to {CONFIG} (takes effect on the next call).")
 
 
 FP_KEY_ENTRY = "_maisecrets_fpkey"   # backend key that holds the fingerprint key (32 random bytes, hex)

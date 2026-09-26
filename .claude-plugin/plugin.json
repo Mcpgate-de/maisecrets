@@ -15,38 +15,5 @@
     "pii",
     "redaction",
     "vault"
-  ],
-  "userConfig": {
-    "backend": {
-      "type": "string",
-      "title": "Vault backend",
-      "description": "Where placeholder values are stored. auto = keychain on macOS, Credential Locker on Windows, encrypted file on Linux.",
-      "options": [
-        "auto",
-        "keychain",
-        "windows-vault",
-        "encrypted-file",
-        "jsonfile"
-      ],
-      "default": "auto"
-    },
-    "pii_regions": {
-      "type": "string",
-      "title": "PII regions",
-      "description": "Comma-separated Presidio regions to detect besides the generic ones (email, IBAN, card, IP). Example: de,at",
-      "default": "de"
-    },
-    "ttl_hours": {
-      "type": "number",
-      "title": "Placeholder lifetime (hours)",
-      "description": "How long a stored value stays resolvable; every use renews it, up to 30 days.",
-      "default": 24
-    },
-    "report_url": {
-      "type": "string",
-      "title": "Issue tracker URL",
-      "description": "Shown in the block notice next to /maisecrets:report. Empty hides it.",
-      "default": "https://github.com/Sprinterli/maisecrets/issues"
-    }
-  }
+  ]
 }

@@ -15,6 +15,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -142,14 +143,21 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                                               for ev in ("UserPromptSubmit", "PreToolUse", "PostToolUse")}}))
     srv = start_server(turns, out)
     try:
+        debug_log = work / "claude-debug.log"
         r = subprocess.run(
             ["claude", "-p", sc["prompt"], "--plugin-dir", str(ROOT), "--settings", str(settings),
-             "--allowedTools", "Bash,Read", "--max-turns", "3"],
+             "--allowedTools", "Bash,Read", "--max-turns", "3", "--debug-file", str(debug_log)],
             cwd=cwd, env=env, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
         )
     finally:
         srv.terminate()
     (out / "claude_stdout.txt").write_text(r.stdout + "\n--- stderr ---\n" + r.stderr)
+    # the plugin must have loaded: Claude Code 2.1.223 rejected a manifest with `userConfig`,
+    # registered 0 hooks and let every scenario run unguarded (Debian, 2026-09-26)
+    dbg = debug_log.read_text(errors="ignore") if debug_log.exists() else ""
+    if "invalid manifest" in dbg or not re.search(r"Registered [1-9]\d* hooks from [1-9]\d* plugins", dbg):
+        fails.append("PLUGIN NOT LOADED: no hooks registered (see claude-debug.log); the manifest is rejected by this "
+                     "Claude Code version")
     bodies = sorted(glob.glob(str(out / "request_*.json")))
     if len(bodies) != sc["expect_requests"]:
         fails.append(f"expected {sc['expect_requests']} requests, got {len(bodies)}")

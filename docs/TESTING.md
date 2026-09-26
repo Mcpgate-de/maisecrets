@@ -17,6 +17,18 @@ Golden payload shapes captured in `harness/golden/` (top-level keys, `tool_input
 keys, `tool_response` keys per event and tool). A later Claude Code version
 that changes a shape fails the harness with "schema drift".
 
+## Plugin must load, or nothing runs (Debian, Claude Code 2.1.223, 2026-09-26)
+
+The first harness run of 0.3.4 on Debian failed 16 checks at once: every
+secret reached the upstream, no placeholder resolved. `--debug-file` showed
+why: `Plugin maisecrets has an invalid manifest file` and `Registered 0 hooks
+from 0 plugins`. Bisected by removing one manifest field at a time: 2.1.223
+rejects `userConfig`; 2.1.283 accepts it. A rejected manifest does not block
+anything, it just loads nothing. The manifest carries no `userConfig` now,
+and the harness fails a scenario when the debug log does not show
+`Registered N hooks from M plugins` with N, M ≥ 1. Debian after the fix: see
+below.
+
 ## Mutation probes
 
 | date | mutation | expected | observed |
