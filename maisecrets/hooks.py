@@ -169,6 +169,44 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
         return False
 
 
+def _pending_path(session: str | None):
+    from .vault import HOME
+    return HOME / "pending" / (f"{session or 'nosession'}.txt")
+
+
+def _save_pending(rewritten: str, session: str | None) -> None:
+    """The rewritten prompt, kept for /maisecrets:send. Over SSH or in Remote Control there is
+    no clipboard and no visible notice (Oleg, 2026-09-26). The file holds placeholders, never
+    a value; the prompt text around them is the user's own."""
+    try:
+        p = _pending_path(session)
+        p.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(rewritten)
+    except OSError:
+        pass
+
+
+def take_pending(session: str | None = None) -> str | None:
+    """Return and delete the pending prompt: the session's own, else the newest one."""
+    from .vault import HOME
+    d = HOME / "pending"
+    cands = []
+    if session and _pending_path(session).exists():
+        cands = [_pending_path(session)]
+    elif d.exists():
+        cands = sorted(d.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)[:1]
+    if not cands:
+        return None
+    text = cands[0].read_text(encoding="utf-8")
+    try:
+        cands[0].unlink()
+    except OSError:
+        pass
+    return text
+
+
 # --------------------------------------------------------- UserPromptSubmit --
 def user_prompt(payload: dict) -> dict:
     cfg = load_config()
@@ -200,6 +238,7 @@ def user_prompt(payload: dict) -> dict:
         return {}
     rewritten, entries = _replace(prompt, matches, vault, session)
     copied = _clipboard(rewritten)
+    _save_pending(rewritten, session)
     if cfg.get("scrub_transcript", True):
         values, refs = [m.value for m in matches], [e.ref for e in entries]
         if not _scrub_transcript(payload.get("transcript_path", ""), values, refs):
@@ -209,7 +248,8 @@ def user_prompt(payload: dict) -> dict:
         counts[e.type] = counts.get(e.type, 0) + 1
     summary = ", ".join(f"{n} {t}" for t, n in counts.items())
     keys = ", ".join(e.key for e in entries)
-    where = "in the clipboard: paste and send again" if copied else "below (clipboard unavailable)"
+    where = ("in the clipboard (paste and send), or type /maisecrets:send to send it as is"
+             if copied else "saved: type /maisecrets:send to send it as is (clipboard unavailable here)")
     reason = (
         f"maisecrets: {summary} detected and stored as {keys}. "
         f"The prompt did not reach the model. The rewritten prompt is {where}."
@@ -239,7 +279,10 @@ def user_prompt(payload: dict) -> dict:
 _STORE_READ_RE = re.compile(
     r"(maisecrets(\.cli)?(\.py)?\s+get\b)|(cli\.py\s+get\b)"
     r"|(security\s+(find-generic-password|dump-keychain)[^\n]*maisecrets)"
-    r"|(PasswordVault)|(vault\.enc\.json)|(\.maisecrets[/\\](vault|key|index))",
+    r"|(PasswordVault)|(vault\.enc\.json)|(\.maisecrets[/\\](vault|key|index))"
+    # a resolver call with a nonce is written by this hook, never by the model; one in the
+    # model's command is a replay of a nonce it read in the transcript
+    r"|(resolve\.py\b)|(--grant\b)",
 )
 
 
@@ -261,11 +304,14 @@ def _quote_state(command: str, pos: int) -> str:
 
 
 def _resolver_call(key: str, nonce: str) -> str:
-    """The command substitution that reads one value under a one-time grant."""
+    """The command substitution that reads one value under a grant. When the resolve fails
+    (burned or expired grant), the whole command is terminated instead of running with an
+    empty string: `grep … $(…)` with an empty value reported "0 matches" as a false all-clear
+    (Oleg, 2026-09-26). `$$` inside a command substitution is the command's own shell."""
     from pathlib import Path as _P
     py = _P(sys.executable).as_posix()
     script = (_P(__file__).resolve().parent.parent / "hooks" / "resolve.py").as_posix()
-    return f'$("{py}" "{script}" {key} --grant {nonce})'
+    return f'$("{py}" "{script}" {key} --grant {nonce} || kill -TERM $$)'
 
 
 def _deny(reason: str) -> dict:

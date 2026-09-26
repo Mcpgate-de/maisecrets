@@ -57,6 +57,17 @@ loaded next to the `--plugin-dir` checkout and answered first, so the harness
 had been exercising the released version instead of the working tree. The
 harness settings now disable `maisecrets@synced`.
 
+## Field report Oleg (Linux, Claude Code over SSH and Remote Control, 2026-09-26)
+
+Confirmed: prompt block, Bash rehydration over SSH, output redaction of
+values never seen before. Found: (1) no clipboard over SSH, no block notice
+in Remote Control → `/maisecrets:send` sends the kept rewritten prompt without
+copying; (2) a burned grant substituted "" and the command ran (`grep` said
+"0 matches") → the resolver call now terminates the command on failure and a
+grant serves retries within its lifetime; (3) one tool result came back
+empty once, cause unknown, not reproduced; (4) MCP values inline: measured the
+same day, the model sees placeholders only and the transcript is scrubbed.
+
 ## Mutation probes
 
 | date | mutation | expected | observed |

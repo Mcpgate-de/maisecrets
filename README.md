@@ -8,10 +8,11 @@ Keeps secrets and PII out of the cloud model. Works as a plugin for Claude Code
 **What it does, deterministically and locally:**
 
 1. **You type a secret or a customer address.** A `UserPromptSubmit` hook
-   detects it, stores it in a local vault, blocks the prompt, and puts the
+   detects it, stores it in a local vault, blocks the prompt, and keeps the
    rewritten prompt with a placeholder such as `⟦SECRET_c1⟧` or
-   `⟦EMAIL_c1:ma•••@example.org⟧` into your clipboard. Paste, send. The value
-   never reached the model. Measured: zero API requests for a blocked prompt.
+   `⟦EMAIL_c1:ma•••@example.org⟧`. Type `/maisecrets:send` to send it as is,
+   or paste it from the clipboard where one exists. The value never reached
+   the model. Measured: zero API requests for a blocked prompt.
 2. **The model reads a file or runs a command that outputs a secret.** A
    `PostToolUse` hook redacts the result before the model sees it.
 3. **The model uses a placeholder in a Bash command or a tool argument.** A
@@ -250,11 +251,15 @@ A placeholder turns back into its value only here:
 - **In the session where a human typed it.** A reference minted in session A
   resolves in session B only after you paste it into a prompt there. Keys are
   counters, so an injected text could otherwise name one it never saw.
-- **Through a one-time grant in Bash.** The hook rewrites `⟦SECRET_c1⟧` to
-  `$(python resolve.py SECRET_c1 --grant NONCE)` in the quoting context of the
-  placeholder. The command you approve, the transcript and the tool record
-  carry no value; the command reads it once, and the nonce dies. A value with
-  quotes or `$(` arrives byte for byte instead of becoming shell syntax.
+- **Through a grant in Bash.** The hook rewrites `⟦SECRET_c1⟧` to
+  `$(python resolve.py SECRET_c1 --grant NONCE || kill -TERM $$)` in the
+  quoting context of the placeholder. The command you approve, the transcript
+  and the tool record carry no value; the command reads it, a retry loop may
+  read it again, and the nonce dies after 120 s or 20 reads. A failed resolve
+  terminates the command instead of running it with an empty value (a
+  `grep` with "" would report a false all-clear). A nonce the model copies
+  from the transcript into a later command is denied. A value with quotes or
+  `$(` arrives byte for byte instead of becoming shell syntax.
 - **Inline for MCP tools.** An argument has no shell to read from, so the value
   is inserted after the same session rule. The permission prompt of the client
   then shows your own value at the point of the real call.

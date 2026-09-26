@@ -43,6 +43,7 @@ def _reset() -> None:
             os.unlink(Path(_TMP, f))
         except FileNotFoundError:
             pass
+    shutil.rmtree(Path(_TMP, "pending"), ignore_errors=True)
     hooks._live_cache.clear()
 
 
@@ -77,17 +78,38 @@ class GrantTests(unittest.TestCase):
                 self.assertEqual(r.stdout, want, r.stderr)
 
     @unittest.skipIf(BASH is None, "no bash")
-    def test_grant_is_single_use_and_bound_to_its_key(self):
-        new = _bash_pre("printf '%s' " + self.e.ref)["hookSpecificOutput"]["updatedInput"]["command"]
-        self.assertEqual(_run(new).stdout, NASTY)
-        second = _run(new)
-        self.assertEqual(second.stdout, "")
-        self.assertIn("grant-used", second.stderr)
+    def test_grant_serves_retries_within_one_command_and_a_burned_grant_kills_the_command(self):
+        new = _bash_pre("for i in 1 2 3; do printf '%s;' " + self.e.ref + "; done")["hookSpecificOutput"]
+        r = _run(new["updatedInput"]["command"])
+        self.assertEqual(r.stdout, (NASTY + ";") * 3, r.stderr)          # a retry loop resolves again
         # the nonce of one key does not open another key
         e2 = Vault().put(PLAIN, "SECRET", "manual", session="S1")
-        nonce = new.split("--grant ")[1].split(")")[0]
-        value, status = Vault().redeem(e2.key, nonce)
-        self.assertEqual((value, status), (None, "no-grant"))
+        nonce = new["updatedInput"]["command"].split("--grant ")[1].split(" ")[0]
+        self.assertEqual(Vault().redeem(e2.key, nonce), (None, "no-grant"))
+        # a burned grant (uses exhausted) terminates the command instead of running it with ""
+        v = Vault()
+        v._index["grants"][nonce]["uses"] = v.GRANT_USES
+        v._save_index()
+        r = _run("printf 'matches:%s' \"$(grep -c " + '"$(' + new["updatedInput"]["command"].split("$(", 1)[1]
+                 .split(")", 1)[0] + ' || kill -TERM $$)" /dev/null)"')
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("matches:", r.stdout)          # no false all-clear
+        self.assertIn("grant-used", r.stderr)
+
+    def test_a_model_written_grant_or_resolver_call_is_denied(self):
+        for cmd in ('python3 /x/hooks/resolve.py SECRET_c1 --grant abc', 'echo x --grant abc'):
+            with self.subTest(cmd):
+                self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_blocked_prompt_is_kept_for_send_and_taken_once(self):
+        hooks._clipboard = lambda text: False                       # SSH: no clipboard
+        token = "glpat-" + "PendingProbeAbc123456789x"
+        out = hooks.user_prompt({"prompt": f"deploy with {token} now", "session_id": "S7", "transcript_path": ""})
+        self.assertIn("/maisecrets:send", out["reason"])
+        self.assertNotIn(token, out["reason"])
+        text = hooks.take_pending("S7")
+        self.assertEqual(text, "deploy with ⟦SECRET_c2⟧ now")
+        self.assertIsNone(hooks.take_pending("S7"))                 # taken once
 
     def test_reference_resolves_only_in_a_session_that_saw_it(self):
         out = _bash_pre("echo " + self.e.ref, session="S2")["hookSpecificOutput"]
@@ -117,9 +139,10 @@ class GrantTests(unittest.TestCase):
                     "cat ~/.maisecrets/vault.json"]:
             with self.subTest(cmd):
                 self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"]["permissionDecision"], "deny")
-        # the granted resolve call itself is not a store read
+        # the rewritten command never comes back through PreToolUse (the model's own input does);
+        # if it does, the model copied a nonce from the transcript, and that is denied too
         new = _bash_pre("echo " + self.e.ref)["hookSpecificOutput"]["updatedInput"]["command"]
-        self.assertEqual(_bash_pre(new), {})
+        self.assertEqual(_bash_pre(new)["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_limiter_caps_distinct_keys_per_session_and_resolves_per_hour(self):
         v = Vault()

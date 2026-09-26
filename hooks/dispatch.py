@@ -6,6 +6,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from maisecrets.hooks import main  # noqa: E402
 
+if len(sys.argv) >= 2 and sys.argv[1] == "pending":
+    from maisecrets.hooks import take_pending  # noqa: E402
+    text = take_pending()
+    print(text if text is not None else "(maisecrets: no blocked prompt is waiting)")
+    sys.exit(0)
+
 if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put"):
     from maisecrets.cli import main as cli_main  # noqa: E402
     sys.exit(cli_main(sys.argv[1:]))

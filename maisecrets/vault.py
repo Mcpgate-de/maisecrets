@@ -447,6 +447,8 @@ class Vault:
 
     # grants: one-time permission for a command to read one value ----------
     GRANT_TTL = 120
+    GRANT_USES = 20     # a retry loop or two references to one key redeem the same nonce; a command
+                        # that needs more is not a command, it is a sweep
 
     def grant(self, key: str, session: str | None, tool: str, context: str) -> tuple[str | None, str]:
         """Mint a one-time grant for ``key`` after the session rule and the limiter passed.
@@ -466,9 +468,9 @@ class Vault:
         nonce = _secrets.token_urlsafe(16)
         now = time.time()
         grants = self._index.setdefault("grants", {})
-        for n in [n for n, g in grants.items() if g["expires"] < now or g.get("used")]:
+        for n in [n for n, g in grants.items() if g["expires"] < now or g.get("uses", 0) >= self.GRANT_USES]:
             del grants[n]
-        grants[nonce] = {"key": key, "session": session, "expires": now + self.GRANT_TTL, "used": False}
+        grants[nonce] = {"key": key, "session": session, "expires": now + self.GRANT_TTL, "uses": 0}
         self._record(key, session, tool, context)
         self._save_index()
         return nonce, "ok"
@@ -477,11 +479,11 @@ class Vault:
         g = self._index.get("grants", {}).get(nonce)
         if g is None or g["key"] != key:
             return None, "no-grant"
-        if g.get("used"):
+        if g.get("used") or g.get("uses", 0) >= self.GRANT_USES:
             return None, "grant-used"
         if g["expires"] < time.time():
             return None, "grant-expired"
-        g["used"] = True
+        g["uses"] = g.get("uses", 0) + 1
         self._save_index()
         return self.get(key, human=True)
 
