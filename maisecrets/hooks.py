@@ -272,8 +272,9 @@ PRIMER = (
     "subagent prompt: there it stays literal text. In Bash use it as a plain argument, inside '…' or \"…\", "
     "or in an unquoted heredoc; a command with bash -c, sh -c, ssh, eval, backticks, $'…', a quoted heredoc, "
     "base64/xxd/od, ${x:0:4} or set -x is refused, and awk needs V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. "
-    "Never ask the user for the value, never try to print, encode, slice or save it, never read the "
-    "maisecrets store or its files, never change its settings."
+    "Never ask the user for the value, never print, encode or slice it, never read the maisecrets store or "
+    "its files, never change its settings. When the user asks for the value in a file or a command, use the "
+    "placeholder there as they asked; the hook inserts the value at run time."
 )
 
 
