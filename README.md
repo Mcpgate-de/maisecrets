@@ -20,6 +20,44 @@ Keeps secrets and PII out of the cloud model. Works as a plugin for Claude Code
 Everything a hook runs is readable source in this folder. No download, no
 package install, no dependency outside the Python standard library.
 
+## What it looks like
+
+You ask Claude to set up a deploy script and it reads your `.env`:
+
+```
+$ cat .env                          # what the command printed
+DB_PASSWORD=example-hunter2-9Qz
+STRIPE_KEY=sk_live_example…
+
+                                    # what the model received
+DB_PASSWORD=⟦SECRET_c1⟧
+STRIPE_KEY=⟦SECRET_c2⟧
+```
+
+Claude writes the deploy command with the placeholder. You approve this,
+and only this:
+
+```
+curl -u "app:⟦SECRET_c1⟧" https://db.example.internal/migrate
+```
+
+At execution the placeholder is read once from your keychain, the request
+carries the real password, and the command's output comes back with any
+value replaced again. The password was never in the prompt, the transcript,
+or the model's context.
+
+You paste a token into the prompt by accident:
+
+```
+> please check why glpat-EXAMPLEEXAMPLE1234567 fails in CI
+maisecrets: 1 SECRET detected and stored as SECRET_c3. The prompt did not
+reach the model. The rewritten prompt is in the clipboard: paste and send again.
+```
+
+Zero requests left the machine for that prompt. The rewritten prompt reads
+`please check why ⟦SECRET_c3⟧ fails in CI`, and Claude can use the
+placeholder in a command as above.
+
 ## Status
 
 Released from `main` on every merge (`CHANGELOG.md`, tags `vX.Y.Z`, 0.x scale:

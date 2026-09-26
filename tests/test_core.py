@@ -100,6 +100,10 @@ class DetectTests(unittest.TestCase):
                     except (ValueError, IndexError, TypeError):
                         self.fail(f"{name} raised on {v!r}")
 
+    def test_a_span_that_contains_a_placeholder_is_not_a_hit(self):
+        self.assertEqual(detect.scan('curl -u "app:⟦SECRET_c1⟧" https://h/x'), [])
+        self.assertEqual(detect.scan("password = ⟦SECRET_c2:•••⟧"), [])
+
     def test_placeholder_is_not_a_hit(self):
         self.assertEqual(detect.scan("send to ⟦EMAIL_c1:ma•••@example.org⟧ now"), [])
         self.assertEqual(detect.scan("legacy <EMAIL_c1:ma***@example.org> form"), [])

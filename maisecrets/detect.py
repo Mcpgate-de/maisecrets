@@ -543,8 +543,11 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     continue
             if _allowed(rule, text, m, secret):
                 continue
-            # our own placeholders are never a hit
+            # our own placeholders are never a hit, alone or inside a larger span such as the
+            # user:pass of `curl -u "app:⟦SECRET_c1⟧"` (the README example was flagged, 2026-09-26)
             if text[max(0, start - 1):start] in ("<", "\u27e6") and re.match(r"[A-Z][A-Z_]*_c\d+", secret):
+                continue
+            if "\u27e6" in secret or re.search(r"<[A-Z][A-Z_]*_c\d+>", secret):
                 continue
             if rule.type == "SECRET":
                 # a fixed-length shape (gitleaks: glpat-[\w-]{20}) stops inside a longer token and
