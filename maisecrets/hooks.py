@@ -23,7 +23,8 @@ from . import detect
 from .placeholder import find_refs
 from .vault import Vault, load_config
 
-AT_MENTION_RE = re.compile(r"(?<![\w@])@(?P<path>[\w./~-]+)")
+# a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
+AT_MENTION_RE = re.compile(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
 
 
 # ---------------------------------------------------------------- helpers --
@@ -119,7 +120,7 @@ def user_prompt(payload: dict) -> dict:
     # 1. @file mentions inline the file OUTSIDE the hook pipeline. Force a Read.
     if cfg.get("block_at_mentions", True):
         for m in AT_MENTION_RE.finditer(prompt):
-            p = os.path.expanduser(m.group("path"))
+            p = os.path.expanduser(m.group("path")).rstrip(".,;:)")
             if os.path.exists(p) or os.path.exists(os.path.join(payload.get("cwd", ""), p)):
                 return {
                     "decision": "block",
