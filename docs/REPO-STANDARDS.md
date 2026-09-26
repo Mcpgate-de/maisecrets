@@ -44,8 +44,10 @@ and OpenAI plugin directories.
   deps docs ci test chore build style refactor`, `!` or `BREAKING CHANGE` for
   a breaking change. CI job `commit_format` refuses anything else.
 - `scripts/release.py` derives the next version from the commits since the
-  last `v*` tag: breaking → major (minor while the major is 0), `feat` →
-  minor, `fix perf security deps` → patch, the rest → no release. It writes
+  last `v*` tag: breaking → major, `feat` → minor, `fix perf security deps`
+  → patch, the rest → no release. While the major is 0 the scale shifts one
+  step down (breaking → 0.x+1.0, everything else → 0.x.y+1), so a 0.x
+  release is small and the middle number stays a compatibility signal. It writes
   the version into the three manifests and a generated section into
   `CHANGELOG.md`.
 - The `release` job runs on every push to `main` after the tests, commits

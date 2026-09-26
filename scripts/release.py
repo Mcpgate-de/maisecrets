@@ -14,9 +14,11 @@ Commit subject format (checked by ``check`` in CI):
 
 Bump rules, applied to all commits since the last ``v*`` tag:
 
-    breaking (``!`` or "BREAKING CHANGE")   major   (minor while the major is 0)
+    breaking (``!`` or "BREAKING CHANGE")   major
     feat                                    minor
     fix, perf, security, deps               patch
+    While the major is 0 (Cargo's reading of semver): breaking -> minor,
+    feat/fix -> patch. So 0.3.0 + feat = 0.3.1, 0.3.0 + feat! = 0.4.0.
     docs, ci, test, chore, build, style,
     refactor                                none
     a subject without a known type          patch   (listed under "Other")
@@ -111,8 +113,9 @@ def bump_for(commits: list[tuple[str, str, str]]) -> str | None:
 
 def next_version(current: str, level: str) -> str:
     major, minor, patch = (int(p) for p in current.split("."))
-    if level == "major" and major == 0:
-        level = "minor"  # 0.x: a breaking change is a minor bump, as semver allows
+    if major == 0:
+        # 0.x: the middle number marks a break, the last number everything compatible
+        level = {"major": "minor", "minor": "patch", "patch": "patch"}[level]
     if level == "major":
         return f"{major + 1}.0.0"
     if level == "minor":
