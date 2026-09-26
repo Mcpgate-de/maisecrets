@@ -60,7 +60,10 @@ and OpenAI plugin directories.
 - Credentials: `MAISECRETS_CI_PUSH_TOKEN` (project access token
   `maisecrets-ci-release`, `write_repository`, expires 2027-09-25) and
   `MAISECRETS_GITHUB_DEPLOY_KEY` (file variable, deploy key with write access
-  on the GitHub repo only). Both protected, so only `main` and tags see them.
+  on the GitHub repo only). Both protected, so only protected refs see them:
+  `main` and the tags `v*` (protected tags, create level Maintainer). The
+  first tag pipeline ran before the tags were protected and got an empty
+  key variable; the mirror job now fails loudly on an empty key.
 
 ## Remotes (now)
 

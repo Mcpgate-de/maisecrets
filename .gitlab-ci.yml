@@ -140,9 +140,11 @@ mirror:
     - apk add --no-cache git openssh-client >/dev/null
     - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     - cp .ci-known-hosts-github ~/.ssh/known_hosts
+    - 'test -s "$MAISECRETS_GITHUB_DEPLOY_KEY" || { echo "deploy key variable is empty - protected variables reach only protected refs (main, tags v*)"; exit 1; }'
     - cp "$MAISECRETS_GITHUB_DEPLOY_KEY" ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
     - git fetch --tags --quiet origin
-    # main as gitlab.com has it (a release commit may have landed after this pipeline's SHA)
-    - git push --force-with-lease=main:refs/remotes/github/main ssh://git@github.com/Sprinterli/maisecrets.git "origin/main:refs/heads/main" || git push ssh://git@github.com/Sprinterli/maisecrets.git "origin/main:refs/heads/main"
+    # main as gitlab.com has it (a release commit may have landed after this pipeline's SHA).
+    # This job is the only writer of the GitHub repo, so a plain fast-forward push is enough.
+    - git push ssh://git@github.com/Sprinterli/maisecrets.git "origin/main:refs/heads/main"
     - git push ssh://git@github.com/Sprinterli/maisecrets.git --tags
     - echo "mirrored origin/main and tags to github.com/Sprinterli/maisecrets"
