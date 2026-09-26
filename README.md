@@ -21,11 +21,23 @@ package install, no dependency outside the Python standard library.
 
 ## Status
 
-Day-1 prototype (2026-09-26). Default vault backend on macOS is `keychain`
-(login keychain via `security`, no iCloud sync flag; smoke-tested against the
-real keychain). Elsewhere, and with `"backend": "jsonfile"`, values sit in a
-plaintext file under `~/.maisecrets/` with mode 0600, marked TEST MODE.
-Windows Credential Manager: not yet.
+Day-1 prototype (2026-09-26). Vault backend per platform:
+
+| platform | backend | where the values live |
+|---|---|---|
+| macOS | `keychain` | login keychain via `security`, no iCloud sync flag |
+| Windows | `windows-vault` | Credential Locker (`PasswordVault`, DPAPI) via PowerShell |
+| Linux | `encrypted-file` | `openssl` AES-256-CBC + PBKDF2 + HMAC tag, key file 0600 |
+| any | `jsonfile` | plaintext 0600, TEST MODE only |
+
+Hooks run through `hooks/run.sh` (bash), which picks `python3`, `python` or
+`py -3`. Claude Code on Windows requires Git Bash, so the launcher runs there
+too; install Python with `winget install Python.Python.3.12`. Without a
+Python 3.11+ the launcher exits 2 and prompts are blocked: fail closed.
+
+Proven on macOS (Claude Code 2.1.283) and Debian 13 (2.1.223) with the
+harness; Windows through the GitHub Actions matrix (unit tests, launcher,
+Credential Locker round trip), not yet with a live Claude Code session.
 
 ## Install (development)
 

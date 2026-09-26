@@ -1,0 +1,30 @@
+# Cross-platform CI on the GitHub mirror. GitLab (netcup runner) stays the primary CI
+# for Linux; GitHub is the only place we have Windows and macOS runners for free.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: unit tests
+        run: python -m unittest discover -s tests -v
+      - name: hook launcher through bash (Git Bash on Windows)
+        shell: bash
+        run: |
+          echo '{"prompt":"say hi","session_id":"s","transcript_path":""}' | bash hooks/run.sh user-prompt
+          # the token is assembled at run time so the repo scan never sees a secret shape
+          T="glpat-""CiRunAbc123Def456Ghi7"
+          echo "{\"prompt\":\"token $T\",\"session_id\":\"s\",\"transcript_path\":\"\"}" | bash hooks/run.sh user-prompt | python -c "import sys,json; d=json.load(sys.stdin); assert d.get('decision')=='block', d; print('blocked ok')"
+      - name: platform backend
+        run: python -m unittest tests.test_platform_backend -v

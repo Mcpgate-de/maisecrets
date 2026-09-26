@@ -35,7 +35,7 @@ _DEFAULT_HOME = Path.home() / ".maisecrets"
 SERVICE = "maisecrets" if HOME == _DEFAULT_HOME else "maisecrets@" + hashlib.sha256(str(HOME).encode()).hexdigest()[:8]
 
 DEFAULT_CONFIG = {
-    "backend": "keychain",          # keychain (macOS) | encrypted-file (Linux, any OS) | jsonfile (test mode)
+    "backend": "keychain",          # keychain (macOS) | windows-vault | encrypted-file (Linux) | jsonfile (test)
     "report_url": "",               # shown in the block notice once the project is public
     "ttl_seconds": {"default": 86400, "CARD": 3600},
     "max_ttl_seconds": 30 * 86400,
@@ -221,6 +221,36 @@ class EncryptedFileBackend:
         self._save(d)
 
 
+class WindowsVaultBackend:
+    """Windows: the per-user Credential Locker (``Windows.Security.Credentials.PasswordVault``),
+    DPAPI-backed, reached through PowerShell. No module to install; the entries show up in
+    Settings > Credential Manager under the resource name ``maisecrets``."""
+    test_mode = False
+    _PRELUDE = ("[Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]"
+                " | Out-Null; $v = New-Object Windows.Security.Credentials.PasswordVault; ")
+
+    def _ps(self, script: str, stdin: str = "") -> subprocess.CompletedProcess:
+        return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", self._PRELUDE + script],
+                              input=stdin, capture_output=True, text=True, timeout=15)
+
+    def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
+        # the value travels via stdin, never as a command-line argument
+        r = self._ps("$p = [Console]::In.ReadToEnd().TrimEnd(\"`r\", \"`n\"); "
+                     f"try {{ $old = $v.Retrieve('{SERVICE}', '{key}'); $v.Remove($old) }} catch {{}}; "
+                     f"$v.Add((New-Object Windows.Security.Credentials.PasswordCredential('{SERVICE}', '{key}', $p)))",
+                     stdin=value)
+        if r.returncode != 0:
+            raise RuntimeError("PasswordVault add failed: " + r.stderr[:200])
+
+    def get(self, key: str) -> str | None:
+        r = self._ps(f"try {{ $c = $v.Retrieve('{SERVICE}', '{key}'); $c.RetrievePassword(); "
+                     "[Console]::Out.Write($c.Password) } catch { exit 3 }")
+        return r.stdout if r.returncode == 0 else None
+
+    def delete(self, key: str) -> None:
+        self._ps(f"try {{ $v.Remove($v.Retrieve('{SERVICE}', '{key}')) }} catch {{}}")
+
+
 def make_backend(cfg: dict):
     """keychain on macOS; an openssl-encrypted file elsewhere; jsonfile only when asked (test mode)."""
     backend = cfg.get("backend", "keychain")
@@ -228,8 +258,12 @@ def make_backend(cfg: dict):
         return JsonFileBackend()
     if backend == "encrypted-file":
         return EncryptedFileBackend()
+    if backend == "windows-vault":
+        return WindowsVaultBackend()
     if platform.system() == "Darwin":
         return KeychainBackend()
+    if platform.system() == "Windows":
+        return WindowsVaultBackend()
     return EncryptedFileBackend()
 
 
