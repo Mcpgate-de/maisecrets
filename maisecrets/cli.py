@@ -112,8 +112,14 @@ def cmd_put(args: list[str]) -> int:
 
 def cmd_report(args: list[str]) -> int:
     """`report` lists the last detections; `report last [note]` or `report <n> [note]` builds a
-    prefilled GitHub issue link for one of them and opens it. Nothing in the link is a value."""
+    prefilled GitHub issue link for one of them; `report bug <text>` and `report feature <text>`
+    build one without an event. Every link opens in the browser; nothing in it is a value."""
     from . import events
+    if args and args[0] in ("bug", "feature"):
+        url = events.generic_issue_url(args[0], " ".join(args[1:]))
+        opened = events.open_in_browser(url)
+        print(("opened in the browser: " if opened else "open this link: ") + url)
+        return 0
     evs = events.load(20)
     if not evs:
         print("(no detection recorded yet)")
@@ -123,7 +129,7 @@ def cmd_report(args: list[str]) -> int:
         for i, e in enumerate(evs, 1):
             hits = ", ".join(f"{h['type']}/{h['kind']}" for h in e.get("hits", []))
             print(f"{i:<3} {e.get('ts', ''):<20} {e.get('hook', ''):<17} {e.get('client', ''):<7} {hits}")
-        print("\nmaisecrets report last [note]   or   maisecrets report <n> [note]")
+        print("\nmaisecrets report last [note] | report <n> [note] | report bug <text> | report feature <text>")
         return 0
     ev = evs[-1] if args[0] == "last" else evs[int(args[0]) - 1]
     url = events.issue_url(ev, " ".join(args[1:]))
@@ -172,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] in {"-h", "--help"}:
         print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | audit [n]\n"
-              "           | report [last|n] [note] | expire | scan [text] | config\n"
+              "           | report [last|n|bug|feature] [text] | expire | scan [text] | config\n"
               "           | resolve <KEY> --grant <NONCE> | hook <event>")
         return 0
     if argv[0] == "hook":

@@ -211,5 +211,15 @@ class ReportTests(unittest.TestCase):
         self.assertIn("a+build+id", url)
 
 
+    def test_bug_and_feature_links_carry_the_text_and_no_event(self):
+        from maisecrets import events
+        url = events.generic_issue_url("feature", "ask before a persistent value resolves")
+        self.assertIn("labels=enhancement", url)
+        self.assertIn("Feature%3A+ask+before", url)
+        url = events.generic_issue_url("bug", "the block notice hides the clipboard hint")
+        self.assertIn("labels=bug", url)
+        self.assertNotIn("hits", url)
+
+
 if __name__ == "__main__":
     unittest.main()

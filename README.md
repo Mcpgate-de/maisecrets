@@ -203,9 +203,11 @@ front of you.
 ## Reporting a wrong detection
 
 Every block and every redaction leaves an event in `~/.maisecrets/events.log`
-(hook, client, rule name, type, plugin version; never a value). `/maisecrets:report`
-in Claude Code, or `python3 -m maisecrets.cli report last "why it is wrong"`,
-opens a GitHub issue prefilled from the last event. The value is not in the
+(hook, client, rule name, type, plugin version; never a value). In Claude Code,
+`/maisecrets:report last <why it is wrong>` opens a GitHub issue prefilled from
+the last event; `/maisecrets:report bug <what happened>` and
+`/maisecrets:report feature <what it should do>` open one without an event.
+The CLI form is `python3 -m maisecrets.cli report …`. The value is not in the
 event, so it cannot be in the issue; describe its shape in words.
 
 ## Gates around a resolve

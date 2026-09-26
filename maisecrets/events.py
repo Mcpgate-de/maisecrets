@@ -86,6 +86,25 @@ def issue_url(event: dict, note: str = "") -> str:
     return f"{ISSUES_URL}?{q}"
 
 
+def generic_issue_url(kind: str, text: str) -> str:
+    """A bug or a feature request straight from the session: title from the user's words,
+    environment facts in the body, no event and no value."""
+    label = "enhancement" if kind == "feature" else "bug"
+    title = ("Feature: " if kind == "feature" else "Bug: ") + (text.strip()[:70] or "(describe it)")
+    body = "\n".join([
+        f"## {'What should maisecrets do' if kind == 'feature' else 'What happened'}",
+        text.strip() or "(describe it here)",
+        "",
+        "## Environment",
+        f"- plugin version: {plugin_version()} · {platform.system()} {platform.release()} · "
+        f"Python {sys.version_info.major}.{sys.version_info.minor}",
+        "",
+        "_Prepared by `maisecrets report`; it carries no value._",
+    ])
+    q = urllib.parse.urlencode({"title": title, "body": body, "labels": label})
+    return f"{ISSUES_URL}?{q}"
+
+
 def open_in_browser(url: str) -> bool:
     import subprocess
     try:
