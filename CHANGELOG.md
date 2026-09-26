@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.8] - 2026-09-26
+
+### Fixes
+
+- every file read names UTF-8; the audit-log test read the file with the platform encoding and failed on windows-latest (254cc36)
+
 ## [0.3.7] - 2026-09-26
 
 ### Features
