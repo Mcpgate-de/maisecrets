@@ -296,7 +296,8 @@ ENTITY_TYPE = {"EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "CREDIT_CARD": "CA
 PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone"}
 # validator id per presidio recognizer id; a recognizer with a validator we did not port
 # keeps its pattern score and is treated as weak (context required)
-PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip", "de-tax-id": "de_tax_id", "de-social-security": "de_social_security",
+PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
+                      "de-tax-id": "de_tax_id", "de-social-security": "de_social_security",
                       "de-id-card": "de_id_card", "de-passport": "de_passport",
                       "de-health-insurance": "de_health_insurance", "de-lanr": "de_lanr",
                       "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id"}
