@@ -1,6 +1,6 @@
 # maisecrets
 
-by [mcpgate](https://mcpgate.de) · Apache-2.0 · free
+[maisecrets.dev](https://maisecrets.dev) · by [mcpgate](https://mcpgate.de) · Apache-2.0 · free
 
 Keeps secrets and PII out of the cloud model. Works as a plugin for Claude Code
 (and Cowork) and for Codex, from the same `hooks/hooks.json`.
