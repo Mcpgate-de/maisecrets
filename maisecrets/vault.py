@@ -66,20 +66,25 @@ def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
             pass
 
 
-_PROCESS_LOCK: "_Lock | None" = None
-
-
 class _Lock:
-    """One exclusive lock per vault home, taken once per process on the first Vault and held
-    until the process ends (a hook process lives for milliseconds; a second flock in the same
-    process would wait for itself). Serialises the read-modify-write of the index between hook
-    processes that run at the same time. POSIX flock; on Windows msvcrt; else no lock."""
+    """An exclusive lock per vault home, taken around each read-modify-write of the index and
+    released right after. Not held for a process's lifetime: a long-lived holder (a harness that
+    preloads in-process, a test process) starved every hook, and a Codex hook that times out
+    is fail-OPEN (measured 2026-09-26: all four hooks "Failed", the command ran with the
+    placeholder). POSIX flock; msvcrt on Windows; no lock where neither exists."""
 
     def __init__(self, path: Path) -> None:
+        self.path = path
         self.fd = None
+        self.depth = 0
+
+    def __enter__(self):
+        self.depth += 1
+        if self.depth > 1:
+            return self
         try:
-            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            self.fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
             try:
                 import fcntl
                 fcntl.flock(self.fd, fcntl.LOCK_EX)
@@ -88,9 +93,11 @@ class _Lock:
                 msvcrt.locking(self.fd, msvcrt.LK_LOCK, 1)
         except OSError:
             self.fd = None
+        return self
 
-    def release(self) -> None:
-        if self.fd is None:
+    def __exit__(self, *exc) -> None:
+        self.depth -= 1
+        if self.depth > 0 or self.fd is None:
             return
         try:
             try:
@@ -361,15 +368,47 @@ def make_backend(cfg: dict):
     return EncryptedFileBackend()
 
 
+def _mutating(fn):
+    """Run the method as one read-modify-write under the vault lock."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self._exclusive():
+            return fn(self, *args, **kwargs)
+    return wrapper
+
+
+class _Mutation:
+    def __init__(self, vault: "Vault") -> None:
+        self.vault = vault
+
+    def __enter__(self):
+        self.vault._lock.__enter__()
+        if self.vault._lock.depth == 1:
+            self.vault._index = self.vault._load_index()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        try:
+            if exc_type is None and self.vault._lock.depth == 1:
+                self.vault._save_index()
+        finally:
+            self.vault._lock.__exit__(exc_type, exc, tb)
+
+
 # ------------------------------------------------------------------- vault --
 class Vault:
     def __init__(self, cfg: dict | None = None) -> None:
         self.cfg = cfg or load_config()
         self.backend = make_backend(self.cfg)
-        global _PROCESS_LOCK
-        if _PROCESS_LOCK is None:
-            _PROCESS_LOCK = _Lock(HOME / ".lock")   # released when the process ends
+        self._lock = _Lock(HOME / ".lock")
         self._index = self._load_index()
+
+    def _exclusive(self):
+        """Lock, re-read the index (another process may have written it), and save on exit:
+        every mutation is a read-modify-write under the lock, so no update is lost."""
+        return _Mutation(self)
 
     # index -----------------------------------------------------------------
     def _load_index(self) -> dict:
@@ -406,6 +445,7 @@ class Vault:
         return {m["fingerprint"]: k for k, m in self._index["entries"].items() if not m.get("purged")}
 
     # api -------------------------------------------------------------------
+    @_mutating
     def put(self, value: str, type_: str, kind: str, session: str | None = None,
             ttl: int | None = None) -> Entry:
         """Store a value; the same live value yields the same reference."""
@@ -464,6 +504,7 @@ class Vault:
             return "foreign-session"
         return "ok"
 
+    @_mutating
     def admit(self, key: str, session: str | None) -> None:
         """A human brought the reference into this session (it was in a prompt)."""
         meta = self._index["entries"].get(key)
@@ -472,6 +513,7 @@ class Vault:
         meta.setdefault("sessions", []).append(session)
         self._save_index()
 
+    @_mutating
     def get(self, key: str, session: str | None = None, human: bool = False) -> tuple[str | None, str]:
         """Return (value, status). ``human=True`` is the CLI path: no session rule."""
         self.expire()
@@ -496,6 +538,7 @@ class Vault:
     GRANT_USES = 20     # a retry loop or two references to one key redeem the same nonce; a command
                         # that needs more is not a command, it is a sweep
 
+    @_mutating
     def grant(self, key: str, session: str | None, tool: str, context: str) -> tuple[str | None, str]:
         """Mint a one-time grant for ``key`` after the session rule and the limiter passed.
 
@@ -521,6 +564,7 @@ class Vault:
         self._save_index()
         return nonce, "ok"
 
+    @_mutating
     def redeem(self, key: str, nonce: str) -> tuple[str | None, str]:
         g = self._index.get("grants", {}).get(nonce)
         if g is None or g["key"] != key:
@@ -559,6 +603,7 @@ class Vault:
         except OSError:
             pass
 
+    @_mutating
     def record_resolve(self, key: str, session: str | None, tool: str, context: str) -> str:
         """For tools that need the value inline (MCP arguments): session rule + limiter + audit."""
         st = self.status(key, session)
@@ -571,6 +616,7 @@ class Vault:
         self._save_index()
         return "ok"
 
+    @_mutating
     def _touch(self, e: Entry) -> None:
         now = time.time()
         e.last_used = now
@@ -584,6 +630,7 @@ class Vault:
         self.expire()
         return [Entry(**m) for m in self._index["entries"].values()]
 
+    @_mutating
     def expire(self, limit: int | None = 25) -> int:
         """Delete expired values; keep their metadata. Returns the count.
 

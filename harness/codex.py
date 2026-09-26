@@ -97,10 +97,11 @@ def run_scenario(name: str, sc: dict) -> list[str]:
     for fname, content in sc.get("files", {}).items():
         (cwd / fname).write_text(content)
     if sc.get("preload"):
-        sys.path.insert(0, str(ROOT))
-        os.environ["MAISECRETS_HOME"] = str(home)
-        from maisecrets.vault import Vault  # noqa: E402
-        Vault().put(MARK, "SECRET", "gitlab-pat")
+        # in a subprocess: a Vault held in this process would hold the vault lock while codex
+        # runs the hooks, and a Codex hook that times out is fail-open (measured 2026-09-26)
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); from maisecrets.vault import Vault; "
+                "Vault().put(sys.stdin.read(), 'SECRET', 'gitlab-pat')")
+        subprocess.run([sys.executable, "-c", code, str(ROOT)], input=MARK, text=True, check=True, env=env)
     last = work / "last.txt"
     srv = None
     if not REAL:

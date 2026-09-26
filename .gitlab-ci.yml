@@ -140,8 +140,14 @@ release:
   script:
     - apk add --no-cache git python3 curl >/dev/null
     # the GitHub Actions matrix (Windows, macOS, Linux) must be green for this SHA before it is
-    # released; Windows was red across four releases on 2026-09-26 because nothing waited for it
+    # released; Windows was red across four releases on 2026-09-26 because nothing waited for it.
+    # The wait ends early when main moved on (rc 0, nothing released here); the release commit
+    # must not be made from a superseded SHA.
     - python3 scripts/wait_for_github_checks.py "$CI_COMMIT_SHA"
+    - |
+      if [ "$(git ls-remote --quiet origin refs/heads/main | cut -f1)" != "$CI_COMMIT_SHA" ]; then
+        echo "main moved on; the newer pipeline releases"; exit 0
+      fi
     - git fetch --tags --quiet origin
     - git checkout -q "$CI_COMMIT_SHA"
     # `if ! cmd` would hand `$?` the negated status (a ci-only push reported "failed with 0"

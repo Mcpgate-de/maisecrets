@@ -18,6 +18,16 @@ import urllib.error
 import urllib.request
 
 
+def _main_moved(sha: str) -> bool:
+    import subprocess
+    try:
+        out = subprocess.run(["git", "ls-remote", "--quiet", "origin", "refs/heads/main"],
+                             capture_output=True, text=True, timeout=30).stdout.split()
+        return bool(out) and out[0] != sha
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def main(argv: list[str]) -> int:
     sha = argv[1]
     repo = "Mcpgate-de/maisecrets"
@@ -30,6 +40,11 @@ def main(argv: list[str]) -> int:
     url = f"https://api.github.com/repos/{repo}/commits/{sha}/check-runs"
     deadline = time.time() + timeout_min * 60
     while time.time() < deadline:
+        # the mirror pushes the branch tip; when main moved on, this SHA was never the tip on
+        # GitHub, no check runs will ever appear, and the newer pipeline gates its own SHA
+        if _main_moved(sha):
+            print("main moved on; this SHA is superseded and the newer pipeline releases")
+            return 0
         try:
             req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
                                                        "User-Agent": "maisecrets-release"})
