@@ -66,9 +66,12 @@ scripts/install-hooks.sh                               # git pre-commit / pre-pu
 
 ## Install (organisation, claude.ai)
 
-An organisation admin adds the GitHub repository as a marketplace source
-under claude.ai organisation settings and sets the availability (available,
-installed by default, or required). Claude Code then offers the plugin to
+An organisation admin adds a **private** GitHub repository as a marketplace
+source under claude.ai organisation settings ("Sync from GitHub" lists private
+repositories only and needs the Claude GitHub App installed on it) and sets
+the availability (available, installed by default, or required). For this
+plugin that source is the private mirror `Sprinterli/maisecrets-claude`, which
+CI keeps identical to the public repository. Claude Code then offers the plugin to
 every member; a new version is picked up when the `version` in
 `.claude-plugin/plugin.json` changes, which the release job does on every
 merge to `main`. With `autoUpdate` on the marketplace entry the update lands
