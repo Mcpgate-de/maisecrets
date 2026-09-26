@@ -118,3 +118,4 @@ Measured on the way, both against the Codex hook docs:
 - With the built-in `openai` provider Codex tries a WebSocket upgrade first and
   retries five times before falling back to HTTP; a custom provider with
   `supports_websockets = false` avoids that.
+
