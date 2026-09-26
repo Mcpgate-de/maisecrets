@@ -56,7 +56,7 @@ against that client; "docs" = read in the vendor's hook documentation on
 |---|---|---|---|---|
 | Claude Code, Cowork, Claude Desktop (Code) | yes | yes | yes | proven, this plugin |
 | Codex CLI, Codex in the ChatGPT app | yes | yes | yes (block-as-output) | proven, this plugin |
-| Gemini CLI | yes (`BeforeModel` may rewrite) | yes (`BeforeTool` may rewrite) | yes (`AfterTool` may redact) | docs; adapter not built |
+| Gemini CLI | yes (`BeforeModel` may rewrite) | yes (`BeforeTool` may rewrite) | yes (`AfterTool` may redact) | docs; no adapter planned, Google's successor is Antigravity |
 | GitHub Copilot CLI | no for config hooks (`modifiedPrompt` is SDK-only) | yes (`modifiedArgs`) | yes (`modifiedResult`) | docs; adapter not built |
 | Cursor | yes (`beforeSubmitPrompt` blocks) | yes (`beforeShellExecution`) | MCP results only; shell output cannot be rewritten | docs; adapter not built |
 | OpenCode | no hook rewrites the prompt | yes (`tool.execute.before`) | yes (`tool.execute.after`) | docs; own JS plugin API, adapter not built |
@@ -65,7 +65,9 @@ against that client; "docs" = read in the vendor's hook documentation on
 
 A client with a "no" in the first or third column cannot be made safe by
 this plugin; it would look protected and leak. Adapters are built only for
-clients where all three guards have a hook.
+clients where all three guards have a hook. Cursor and Copilot CLI get one
+when their vendors add the missing hook (shell output rewrite; a prompt block
+for config hooks).
 
 ## Install
 
