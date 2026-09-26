@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.14] - 2026-09-26
+
+### Fixes
+
+- Cloudflare user API tokens (cfut_) are a secret shape when bare; gitleaks 8.30 needs the word cloudflare and an assignment sign (e17ff23)
+
 ## [0.3.13] - 2026-09-26
 
 ### Features
