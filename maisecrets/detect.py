@@ -295,6 +295,9 @@ OWN_RULES: list[dict] = [
     # Standard Webhooks / Svix / Stripe webhook signing secret: whsec_ + base64. Not in gitleaks
     # 8.30; a bare one on its own line passed the detector on 2026-09-26
     {"id": "webhook-signing-secret", "type": "SECRET", "regex": r"whsec_[A-Za-z0-9+/=_-]{24,}"},
+    # Cloudflare user API token, prefix cfut_ (2025); gitleaks 8.30 knows only the old shapes and
+    # needs "cloudflare" plus an assignment sign next to them (found by a peer session, 2026-09-26)
+    {"id": "cloudflare-user-api-token", "type": "SECRET", "regex": r"cfut_[A-Za-z0-9_-]{30,}"},
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
 ]

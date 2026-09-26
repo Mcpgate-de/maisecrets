@@ -58,6 +58,12 @@ class DetectTests(unittest.TestCase):
         ms = detect.scan("https://example.org/api/webhooks/marketplace-push/marketplace_0123\n" + fake + "\n")
         self.assertEqual([(m.kind, m.value) for m in ms], [("webhook-signing-secret", fake)])
 
+    def test_prefixed_tokens_newer_than_the_vendored_rulesets_are_hits_when_bare(self):
+        cf = "cfut_" + "Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAb7cDe0f"
+        for text in (cf, f"token {cf}", f"cloudflare token {cf}"):
+            with self.subTest(text[:12]):
+                self.assertEqual([(m.kind, m.value) for m in detect.scan(text)], [("cloudflare-user-api-token", cf)])
+
     def test_two_secrets_in_one_text_become_two_references(self):
         text = f"token {GLPAT} and key {AKIA} please"
         ms = detect.scan(text)
