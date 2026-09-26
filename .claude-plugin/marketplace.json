@@ -7,7 +7,7 @@
       "name": "maisecrets",
       "source": "./",
       "description": "Keeps secrets and PII out of the cloud model: deterministic detection, local vault with TTL, placeholders rehydrated only where the real call happens.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "security"
     }
   ]

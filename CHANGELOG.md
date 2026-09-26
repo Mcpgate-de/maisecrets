@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.0] - 2026-09-26
+
+### Features
+
+- session-bound references, one-time grants for Bash, MCP argument resolution, exact-match redaction, limiter and audit log (f337394)
+
 ## [0.2.0] - 2026-09-26
 
 ### Features
