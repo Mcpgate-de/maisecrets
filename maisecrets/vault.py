@@ -86,7 +86,9 @@ def describe_backend(backend) -> str:
         "JsonFileBackend": f"PLAINTEXT file {HOME / 'vault.json'} - TEST MODE, not for real secrets",
     }.get(name, name)
     return (f"maisecrets vault: {where}. Metadata: {INDEX}. "
-            f"To change it: write {{\"backend\": \"encrypted-file\"}} to {CONFIG} (takes effect on the next call).")
+            f"To change it: write {{\"backend\": \"encrypted-file\"}} to {CONFIG} (takes effect on the next call). "
+            "maisecrets is free and open source, brought to you by mcpgate.de - "
+            "connecting your company with its tools.")
 
 
 FP_KEY_ENTRY = "_maisecrets_fpkey"   # backend key that holds the fingerprint key (32 random bytes, hex)
