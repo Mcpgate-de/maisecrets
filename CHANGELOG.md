@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.10] - 2026-09-26
+
+### Features
+
+- /maisecrets:report bug <text> and feature <text> open a prefilled issue without a detection event (bb07a67)
+
 ## [0.3.9] - 2026-09-26
 
 ### Fixes
