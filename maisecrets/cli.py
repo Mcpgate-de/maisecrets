@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 
@@ -218,6 +219,42 @@ def cmd_wipe(args: list[str]) -> int:
     return 0
 
 
+SHORTCUT_COMMAND = """---
+description: Send the last blocked prompt as maisecrets rewrote it (short for /maisecrets:send). Works over SSH and in Remote Control.
+allowed-tools: Bash(bash ~/.maisecrets/bin/ms.sh*)
+---
+
+!`bash ~/.maisecrets/bin/ms.sh`
+
+The text above is the prompt the user sent through maisecrets, with placeholders instead of
+values. Begin your reply with one line `Sent: ` followed by that text as it is (clients such as
+Remote Control show neither the blocked prompt nor a slash command's expansion), then answer it.
+"""
+
+
+def cmd_shortcut(args: list[str]) -> int:
+    """Install a personal `/ms` command for this user: `~/.claude/commands/ms.md` plus the stable
+    wrapper `~/.maisecrets/bin/ms.sh`, which finds the newest installed plugin copy at run time
+    (the plugin folder moves with every version). Field request, 2026-09-26."""
+    from pathlib import Path as _P
+    from .vault import HOME
+    name = (args[0] if args and args[0].isalnum() else "ms")
+    root = _P(__file__).resolve().parent.parent
+    wrapper_src = root / "hooks" / "ms.sh"
+    bin_dir = HOME / "bin"
+    bin_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    wrapper = bin_dir / "ms.sh"
+    wrapper.write_text(wrapper_src.read_text(encoding="utf-8"), encoding="utf-8")
+    wrapper.chmod(0o700)
+    commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
+    commands.mkdir(parents=True, exist_ok=True)
+    target = commands / f"{name}.md"
+    target.write_text(SHORTCUT_COMMAND, encoding="utf-8")
+    print(f"installed /{name}: {target} -> {wrapper}.")
+    print("Start a new session (or /reload-plugins) to use it.")
+    return 0
+
+
 def cmd_repair(_: list[str]) -> int:
     """Rebuild a damaged index from the store; every stored value is deleted, the counters
     continue past the highest key seen, so no new value overwrites an old one."""
@@ -238,7 +275,7 @@ def cmd_repair(_: list[str]) -> int:
 
 COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_resolve, "audit": cmd_audit,
             "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
-            "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair}
+            "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -246,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     if not argv or argv[0] in {"-h", "--help"}:
         print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | audit [n]\n"
               "           | report [last|n|bug|feature] [text] | expire | scan [text] | config\n"
-              "           | wipe --yes | repair | resolve <KEY> --grant <NONCE> | hook <event>")
+              "           | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>")
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])

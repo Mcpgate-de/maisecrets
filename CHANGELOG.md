@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `/maisecrets:shortcut` installs a personal `/ms` for `/maisecrets:send`; the answer to a
+  sent prompt starts with `Sent: ` and the text, so Remote Control users see what went out.
+- `/maisecrets:put` explains the SSH case (no clipboard: use a label in a prompt).
+
 ## [0.3.22] - 2026-09-26
 
 - **Codex users: re-trust the hooks once in `/hooks` after this update.** `hooks/hooks.json`

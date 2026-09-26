@@ -322,10 +322,20 @@ a shape needs a label or the vault command:
   `password: yes` is not a hit);
 - or copy the value and run `/maisecrets:put` in Claude Code; the placeholder
   replaces the value in your clipboard. Paste the placeholder into your next
-  message, and Claude uses it in commands and tool calls.
+  message, and Claude uses it in commands and tool calls. Over SSH and in a
+  headless session there is no clipboard: type the value after a label
+  (`passwort: …`) instead; the block stores it and names the placeholder.
 
 A bare password in prose, such as "use Sommer2026 for the login", is not
 detected. That is a limit of pattern detection, not a setting.
+
+**Sending a blocked prompt.** `/maisecrets:send` sends the rewritten prompt as
+it is, without the clipboard; `/maisecrets:shortcut` installs a personal `/ms`
+for it (a fixed wrapper in `~/.maisecrets/bin` that finds the installed plugin
+at run time, so it survives updates). The answer starts with `Sent: ` and the
+text that went out, because Remote Control shows neither a blocked prompt nor
+a slash command's expansion; the block notice itself is not shown there
+either (reported to the vendor).
 
 ## Reporting a wrong detection
 
