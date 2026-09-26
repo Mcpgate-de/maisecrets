@@ -62,3 +62,24 @@ validator call is guarded now.
 
 The full replay over 3.7 GB (Claude) + 0.5 GB (Codex) is scheduled for a
 later run with the tuned rules; at 5 s/MB it takes hours.
+
+## Codex harness (codex-cli 0.155.1, fake Responses upstream, 2026-09-26)
+
+`python3 harness/codex.py` runs the same three tool scenarios through
+`codex exec` with an isolated `CODEX_HOME`, a custom provider pointed at
+`harness/fake_openai.py` (Responses SSE, code-mode `exec` tool, zstd request
+bodies) and no credits. 3 of 3 green: the marker never reaches an upstream
+request body, the rollout on disk, or the final message; placeholders do.
+
+Measured on the way, both against the Codex hook docs:
+
+- `PostToolUse` with `continue: false` + `stopReason` let the RAW tool output
+  reach the model. `decision: "block"` + `reason` replaced it with the redacted
+  text. maisecrets uses `block` for Codex.
+- Codex writes the raw command output into its rollout file
+  (`event_msg / item_completed / CommandExecution`) before `PostToolUse` runs,
+  outside the hook path. maisecrets scrubs `transcript_path` after redaction,
+  the same way it does for Claude Code's `queue-operation` record.
+- With the built-in `openai` provider Codex tries a WebSocket upgrade first and
+  retries five times before falling back to HTTP; a custom provider with
+  `supports_websockets = false` avoids that.

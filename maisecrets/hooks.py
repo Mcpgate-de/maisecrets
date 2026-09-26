@@ -226,6 +226,8 @@ def post_tool(payload: dict) -> dict:
     session = payload.get("session_id")
     vault: Vault | None = None
     hit = {"n": 0}
+    values: list[str] = []
+    entries: list = []
 
     def redact(s: str) -> str:
         nonlocal vault
@@ -234,17 +236,25 @@ def post_tool(payload: dict) -> dict:
             return s
         if vault is None:
             vault = Vault(cfg)
-        out, _ = _replace(s, matches, vault, session)
+        out, ents = _replace(s, matches, vault, session)
         hit["n"] += len(matches)
+        values.extend(m.value for m in matches)
+        entries.extend(ents)
         return out
 
     new_response = _walk_strings(response, redact)
     if not hit["n"]:
         return {}
     if client_of(payload) == "codex":
-        # Codex has no updatedToolOutput; a "block" replaces the tool result with the reason text,
-        # so the reason IS the redacted output.
+        # Codex has no updatedToolOutput. A "block" replaces the model-visible result with the
+        # reason text, so the reason IS the redacted output. Measured on codex-cli 0.155.1
+        # (2026-09-26): `continue: false` + stopReason let the RAW output reach the model; "block"
+        # kept the request clean (the code-mode script sees a rejected promise, which is acceptable).
+        # Codex also writes the raw command output into its rollout file before this hook runs
+        # (item_completed / CommandExecution), so that file is scrubbed too.
         text = new_response if isinstance(new_response, str) else json.dumps(new_response, ensure_ascii=False)
+        if cfg.get("scrub_transcript", True):
+            _scrub_transcript(payload.get("transcript_path", ""), values, [e.ref for e in entries])
         return {"decision": "block",
                 "reason": f"[maisecrets redacted {hit['n']} value(s); placeholders are references]\n{text}"}
     return {

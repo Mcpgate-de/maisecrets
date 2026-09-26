@@ -173,7 +173,7 @@ class VaultTests(unittest.TestCase):
         self.assertNotEqual(v.SERVICE, "maisecrets")
         self.assertTrue(v.SERVICE.startswith("maisecrets@"))
 
-    @unittest.skipIf(sys.platform == "win32", "openssl is not on a stock Windows PATH; Windows uses the Credential Locker")
+    @unittest.skipIf(sys.platform == "win32", "no openssl on a stock Windows PATH; Windows uses the Credential Locker")
     def test_encrypted_file_backend_roundtrip_and_tamper(self):
         from maisecrets.vault import EncryptedFileBackend
         b = EncryptedFileBackend()

@@ -38,6 +38,9 @@ Python 3.11+ the launcher exits 2 and prompts are blocked: fail closed.
 Proven on macOS (Claude Code 2.1.283) and Debian 13 (2.1.223) with the
 harness; Windows through the GitHub Actions matrix (unit tests, launcher,
 Credential Locker round trip), not yet with a live Claude Code session.
+Codex (codex-cli 0.155.1): the same `hooks/hooks.json` works unchanged, Codex
+sets `CLAUDE_PLUGIN_ROOT` itself; `harness/codex.py` proves the three tool
+scenarios against a fake Responses upstream.
 
 ## Install (development)
 
