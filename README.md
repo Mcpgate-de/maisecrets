@@ -62,6 +62,23 @@ scripts/install-hooks.sh                               # git pre-commit / pre-pu
   the hook runs.
 - Sends and fetches: nothing. No network access in any hook.
 
+## Options
+
+Claude Code asks for these when the plugin is installed (`userConfig` in
+`.claude-plugin/plugin.json`); they reach the hooks as
+`CLAUDE_PLUGIN_OPTION_<KEY>` and override `~/.maisecrets/config.json`:
+
+| option | default | meaning |
+|---|---|---|
+| `backend` | `auto` | `keychain` (macOS), `windows-vault`, `encrypted-file` (Linux), `jsonfile` (test mode) |
+| `pii_regions` | `de` | Presidio regions besides the generic ones, comma-separated |
+| `ttl_hours` | `24` | lifetime of a stored value; every use renews it, up to 30 days |
+| `report_url` | empty | shown in the block notice so a wrong detection can be reported |
+
+At the first session start, and at every start in test mode, a notice names
+the active store, its path and where to change it. `python3 -m maisecrets.cli
+status` prints the same at any time.
+
 ## Vault
 
 `~/.maisecrets/config.json` (all optional):

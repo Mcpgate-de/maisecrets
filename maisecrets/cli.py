@@ -93,14 +93,28 @@ def cmd_config(_: list[str]) -> int:
     return 0
 
 
+def cmd_status(_: list[str]) -> int:
+    from .vault import describe_backend
+    v = Vault()
+    live = [e for e in v.list() if not e.purged]
+    print(describe_backend(v.backend))
+    print(f"entries: {len(live)} live, {len(v.list()) - len(live)} expired (metadata kept)")
+    from . import detect
+    print(f"rules: {len(detect.rules())} (gitleaks {open(detect.RULES_DIR / 'GITLEAKS_VERSION').read().strip()}, "
+          f"presidio {open(detect.RULES_DIR / 'PRESIDIO_VERSION').read().strip()}, "
+          f"detect-secrets {open(detect.RULES_DIR / 'DETECT_SECRETS_VERSION').read().strip()}); "
+          f"regions {v.cfg.get('pii_regions')}")
+    return 0
+
+
 COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "expire": cmd_expire,
-            "scan": cmd_scan, "config": cmd_config}
+            "scan": cmd_scan, "config": cmd_config, "status": cmd_status}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] in {"-h", "--help"}:
-        print("maisecrets list | get <KEY> | put [--clipboard] [--type=EMAIL] | expire | scan [text]\n"
+        print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | expire | scan [text]\n"
               "           | config | hook <event>")
         return 0
     if argv[0] == "hook":

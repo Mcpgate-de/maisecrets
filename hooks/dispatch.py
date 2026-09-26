@@ -13,8 +13,18 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         json.load(sys.stdin)
     except ValueError:
         pass
+    from maisecrets.vault import describe_backend  # noqa: E402
     HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
-    Vault().expire(limit=None)
-    print("{}")
+    v = Vault()
+    v.expire(limit=None)
+    out = {}
+    marker = HOME / ".announced"
+    if v.backend.test_mode or not marker.exists():
+        out["systemMessage"] = describe_backend(v.backend)
+        try:
+            marker.write_text(type(v.backend).__name__ + "\n")
+        except OSError:
+            pass
+    print(json.dumps(out))
     sys.exit(0)
 sys.exit(main(["hook", sys.argv[1] if len(sys.argv) == 2 else ""]))

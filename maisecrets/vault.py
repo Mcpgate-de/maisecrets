@@ -48,12 +48,42 @@ DEFAULT_CONFIG = {
 
 
 def load_config() -> dict:
+    """Defaults, then ~/.maisecrets/config.json, then the plugin options Claude Code passes as
+    CLAUDE_PLUGIN_OPTION_<KEY> (set at install time, editable via the plugin's settings)."""
     cfg = dict(DEFAULT_CONFIG)
     try:
         cfg.update(json.loads(CONFIG.read_text()))
     except (OSError, ValueError):
         pass
+    env = os.environ
+    backend = env.get("CLAUDE_PLUGIN_OPTION_BACKEND", "").strip()
+    if backend and backend != "auto":
+        cfg["backend"] = backend
+    regions = env.get("CLAUDE_PLUGIN_OPTION_PII_REGIONS", "").strip()
+    if regions:
+        cfg["pii_regions"] = ["generic"] + [r.strip().lower() for r in regions.split(",") if r.strip()]
+    ttl = env.get("CLAUDE_PLUGIN_OPTION_TTL_HOURS", "").strip()
+    if ttl:
+        try:
+            cfg.setdefault("ttl_seconds", {})["default"] = int(float(ttl) * 3600)
+        except ValueError:
+            pass
+    if env.get("CLAUDE_PLUGIN_OPTION_REPORT_URL", "").strip():
+        cfg["report_url"] = env["CLAUDE_PLUGIN_OPTION_REPORT_URL"].strip()
     return cfg
+
+
+def describe_backend(backend) -> str:
+    """One line for a human: which store, where, and how to change it."""
+    name = type(backend).__name__
+    where = {
+        "KeychainBackend": f"macOS login keychain, service '{SERVICE}' (Keychain Access shows the entries)",
+        "WindowsVaultBackend": f"Windows Credential Locker, resource '{SERVICE}' (Settings > Credential Manager)",
+        "EncryptedFileBackend": f"encrypted file {HOME / 'vault.enc.json'} (openssl, key file {HOME / 'key'})",
+        "JsonFileBackend": f"PLAINTEXT file {HOME / 'vault.json'} - TEST MODE, not for real secrets",
+    }.get(name, name)
+    return (f"maisecrets vault: {where}. Metadata: {INDEX}. "
+            f"Change the backend in the plugin options (backend) or {CONFIG}.")
 
 
 def fingerprint(value: str) -> str:
