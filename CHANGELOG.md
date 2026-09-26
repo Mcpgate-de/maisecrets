@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.3.22] - 2026-09-26
+
 - **Codex users: re-trust the hooks once in `/hooks` after this update.** `hooks/hooks.json`
   changed (Write/Edit/MultiEdit/NotebookEdit joined the PreToolUse matcher, and every hook
   has a `commandWindows` entry). Until the hooks are trusted again, Codex runs no maisecrets
@@ -19,6 +21,17 @@
   turns that off.
 - Requires Python 3.11+; without it every prompt is blocked and the message names what to
   install.
+
+### Features
+
+- Write and Edit resolve a placeholder like an MCP argument; Windows run dir without uid (9b1cf00)
+- second review round applied - private FIFO dir, shell-context scanner, model-facing texts, policy file, retention (099032d)
+
+### Fixes
+
+- the block notice says a placeholder resolves only where maisecrets is active (e2a1db4)
+- the primer allows a value in a file or a command when the user asks for it (1a60541)
+- second-round findings - command-word refusals, no POSIX grants, private tmp run dir, config fallback, keychain line limit, hooks.log (71e2826)
 
 ## [0.3.21] - 2026-09-26
 
