@@ -46,22 +46,31 @@ def find_refs(text: str) -> list[tuple[str, int, int]]:
     return [(_key(m), m.start(), m.end()) for m in REF_RE.finditer(text)]
 
 
-def display_for(type_: str, value: str) -> str | None:
-    """A human-readable hint that does not identify the value. Same rules as the gateway."""
-    if type_ == "EMAIL" and "@" in value:
-        local, _, domain = value.partition("@")
-        return f"{local[:2]}{MASK * 3}@{domain}"
-    if type_ == "PHONE":
-        digits = re.sub(r"\D", "", value)
-        return f"{MASK * 3}{digits[-2:]}" if len(digits) >= 4 else None
-    if type_ == "CARD":
-        digits = re.sub(r"\D", "", value)
-        return f"{MASK * 4}{digits[-4:]}"
-    if type_ == "IBAN":
-        s = value.replace(" ", "")
-        return f"{s[:2]}{MASK * 2}{s[-4:]}"
-    if type_ == "IP":
-        parts = value.split(".")
-        return f"{parts[0]}.{parts[1]}.{MASK}.{MASK}"
-    # SECRET and the country-specific identifiers: key only, no display
-    return None
+ENTITY_OF_TYPE = {"EMAIL": "email", "PHONE": "phone", "CARD": "credit_card", "IBAN": "iban",
+                  "IP": "ip_address", "IPV6": "ip_address_v6"}
+_FREEMAIL: frozenset[str] | None = None
+
+
+def freemail_domains() -> frozenset[str]:
+    global _FREEMAIL
+    if _FREEMAIL is None:
+        from pathlib import Path
+        path = Path(__file__).resolve().parent / "rules" / "freemail_domains.txt"
+        _FREEMAIL = frozenset(line.strip().lower() for line in path.read_text().splitlines() if line.strip())
+    return _FREEMAIL
+
+
+def display_for(type_: str, value: str, level: str = "standard") -> str | None:
+    """The display part, rendered by the gateway's own rules (pii_display.py, vendored).
+
+    Same transformation on both sides, so the gateway recognises our display as a
+    display. SECRET and the country-specific identifiers get no display.
+    """
+    from . import pii_display
+    entity = ENTITY_OF_TYPE.get(type_)
+    if entity is None:
+        return None
+    if type_ == "IP" and ":" in value:
+        entity = "ip_address_v6"
+    shown = pii_display.display(value, entity, level, freemail_domains())
+    return shown or None

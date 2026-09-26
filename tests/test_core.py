@@ -133,7 +133,11 @@ class PlaceholderTests(unittest.TestCase):
 
     def test_secret_display_is_never_shown(self):
         self.assertIsNone(placeholder.display_for("SECRET", GLPAT))
-        self.assertEqual(placeholder.display_for("EMAIL", "max@example.org"), "ma•••@example.org")
+        # gateway rules (pii_display.py): the domain shows only for freemail providers at "standard"
+        self.assertEqual(placeholder.display_for("EMAIL", "max.mustermann@example.org"), "ma•••@•••.org")
+        self.assertEqual(placeholder.display_for("EMAIL", "max.mustermann@gmail.com"), "ma•••@gmail.com")
+        self.assertEqual(placeholder.display_for("EMAIL", "max@gmail.com"), "m•••@gmail.com")   # 2 chars stay hidden
+        self.assertEqual(placeholder.display_for("IBAN", "DE89 3704 0044 0532 0130 00"), "DE89••••••••••••••3000")
 
 
 class VaultTests(unittest.TestCase):
