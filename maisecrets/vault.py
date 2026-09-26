@@ -71,8 +71,8 @@ class Entry:
 
     @property
     def ref(self) -> str:
-        t, _, _ = self.key.rpartition("_")
-        return f"<{self.key}:{self.display}>" if self.display else f"<{self.key}>"
+        from .placeholder import CLOSE, OPEN
+        return f"{OPEN}{self.key}:{self.display}{CLOSE}" if self.display else f"{OPEN}{self.key}{CLOSE}"
 
 
 # ---------------------------------------------------------------- backends --

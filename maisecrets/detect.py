@@ -1,20 +1,29 @@
 """Deterministic detection of secrets and PII in text.
 
-Two rule sources, one scanner:
+Three rule sources, one scanner:
 
 1. **gitleaks** (`rules/gitleaks.toml`, vendored, MIT, version in
    `rules/GITLEAKS_VERSION`): ~220 secret shapes with keywords, entropy
    thresholds and allowlists. Consumed as data; no gitleaks binary. Refresh
    with `scripts/sync_gitleaks.py vX.Y.Z`.
-2. **Own rules** (`OWN_RULES` below): what gitleaks does not cover. PII with
-   validators (email, IBAN mod-97, card Luhn, public IP, phone), credentials
-   recognised by position (`password=…`, `Bearer …`, `user:pass@host`).
+2. **Presidio** (`rules/presidio.json`, derived from Microsoft Presidio's
+   pattern recognizers, MIT, version in `rules/PRESIDIO_VERSION`): country
+   and generic PII shapes with scores and context words. Languages are
+   opt-in (`pii_languages`, default `en` + `de`). Checksum validators for
+   the generic and the German types are ported below; the others keep
+   their pattern score and need a context word. Refresh with
+   `scripts/sync_presidio.py`.
+3. **Own rules** (`OWN_RULES` below): what neither covers. Email, IBAN,
+   card and IPv4 stay ours (bounded regexes plus validators), phone with a
+   country code, and credentials recognised by position (`password=…`,
+   `Bearer …`, `user:pass@host`, `?api_key=`).
 
 One detector, shared by every hook and every direction. Two detectors with
 slightly different rules is how a redaction leaks.
 """
 from __future__ import annotations
 
+import json
 import math
 import re
 import tomllib
@@ -46,6 +55,9 @@ class Rule:
     allow_regexes: tuple[tuple[re.Pattern[str], str], ...] = ()   # (pattern, target: match|line)
     stopwords: tuple[str, ...] = ()
     validator: str | None = None
+    score: float = 1.0                 # presidio pattern score; 1.0 = shape alone is enough
+    context: tuple[str, ...] = ()      # presidio context words; a nearby one lifts a weak score
+    require_context: bool = False      # weak shape: accept only with a context word nearby
 
 
 # ----------------------------------------------------------------- helpers --
@@ -96,7 +108,99 @@ def _public_ip(ip: str) -> bool:
     return not private
 
 
+def _de_tax_id_ok(v: str) -> bool:
+    """Steuer-ID, ISO 7064 Mod 11,10 (BZSt), plus the digit-frequency rule."""
+    if len(v) != 11 or not v.isdigit() or v[0] == "0":
+        return False
+    digits = [int(d) for d in v]
+    if max(Counter(digits[:10]).values()) > 3:
+        return False
+    product = 10
+    for i in range(10):
+        total = (digits[i] + product) % 10 or 10
+        product = (total * 2) % 11
+    check = 11 - product
+    return (0 if check == 10 else check) == digits[10]
+
+
+def _de_social_security_ok(v: str) -> bool:
+    """Rentenversicherungsnummer, VKVV § 4 checksum plus birth-date ranges."""
+    v = v.upper().replace(" ", "")
+    if not re.fullmatch(r"\d{8}[A-Z]\d{3}", v):
+        return False
+    day, month = int(v[2:4]), int(v[4:6])
+    if not (1 <= day <= 31 or 51 <= day <= 81) or not 1 <= month <= 12:
+        return False
+    letter = str(ord(v[8]) - ord("A") + 1).zfill(2)
+    effective = v[:8] + letter + v[9:11]
+    weights = [2, 1, 2, 5, 7, 1, 2, 1, 2, 1, 2, 1]
+    total = 0
+    for ch, w in zip(effective, weights):
+        prod = int(ch) * w
+        total += prod // 10 + prod % 10
+    return total % 10 == int(v[11])
+
+
+def _icao_check(v: str, forbidden: str = "") -> bool:
+    """ICAO Doc 9303 check digit (weights 7,3,1) over 8 characters, digit at position 9."""
+    v = v.upper().strip()
+    if len(v) != 9 or not v[-1].isdigit():
+        return False
+    if any(c in forbidden for c in v[:-1]):
+        return False
+    total = 0
+    for i, c in enumerate(v[:-1]):
+        if c.isdigit():
+            val = int(c)
+        elif "A" <= c <= "Z":
+            val = ord(c) - ord("A") + 10
+        else:
+            return False
+        total += val * (7, 3, 1)[i % 3]
+    return total % 10 == int(v[-1])
+
+
+def _de_id_card_ok(v: str) -> bool:
+    v = v.upper().strip()
+    if len(v) == 9 and v[0] == "T" and v[1:].isdigit():
+        return True   # legacy pre-2010 number, no check digit
+    return _icao_check(v)
+
+
+def _de_health_insurance_ok(v: str) -> bool:
+    v = v.upper().strip()
+    if not re.fullmatch(r"[A-Z]\d{9}", v):
+        return False
+    effective = str(ord(v[0]) - ord("A") + 1).zfill(2) + v[1:9]
+    total = 0
+    for ch, f in zip(effective, (1, 2) * 5):
+        prod = int(ch) * f
+        total += prod // 10 + prod % 10 if prod >= 10 else prod
+    return total % 10 == int(v[9])
+
+
+def _de_lanr_ok(v: str) -> bool:
+    v = v.strip()
+    if len(v) != 9 or not v.isdigit():
+        return False
+    total = sum(int(d) * w for d, w in zip(v[:6], (4, 9, 4, 9, 4, 9)))
+    return int(v[6]) == (10 - total % 10) % 10
+
+
+def _de_vat_id_ok(v: str) -> bool:
+    n = re.sub(r"[\s.\-]", "", v.upper())
+    return len(n) == 11 and n.startswith("DE") and n[2:].isdigit()
+
+
 VALIDATORS = {
+    "de_tax_id": _de_tax_id_ok,
+    "de_social_security": _de_social_security_ok,
+    "de_id_card": _de_id_card_ok,
+    "de_passport": lambda v: _icao_check(v, forbidden="ABDEIOQSU"),
+    "de_health_insurance": _de_health_insurance_ok,
+    "de_lanr": _de_lanr_ok,
+    "de_bsnr": lambda v: len(v.strip()) == 9 and v.strip().isdigit() and v.strip() != "000000000",
+    "de_vat_id": _de_vat_id_ok,
     "luhn": lambda v: _luhn_ok(re.sub(r"\D", "", v)),
     "iban": _iban_ok,
     "public_ip": _public_ip,
@@ -164,6 +268,45 @@ def _load_gitleaks() -> list[Rule]:
     return rules
 
 
+# entity -> placeholder type (short, stable); anything else keeps its entity name
+ENTITY_TYPE = {"EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "CREDIT_CARD": "CARD",
+               "IP_ADDRESS": "IP", "PHONE_NUMBER": "PHONE"}
+# covered by OWN_RULES with bounded regexes and validators, or not PII worth a placeholder
+PRESIDIO_SKIP = {"email", "iban", "credit-card", "ip", "url", "date", "mac-address", "uuid", "phone"}
+# validator id per presidio recognizer id; a recognizer with a validator we did not port
+# keeps its pattern score and is treated as weak (context required)
+PRESIDIO_VALIDATOR = {"de-tax-id": "de_tax_id", "de-social-security": "de_social_security",
+                      "de-id-card": "de_id_card", "de-passport": "de_passport",
+                      "de-health-insurance": "de_health_insurance", "de-lanr": "de_lanr",
+                      "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id"}
+# shapes that are plain digit runs: even with a valid checksum, ask for a context word
+PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "de-plz", "de-kfz",
+                           "de-handelsregister", "de-fuehrerschein", "nhs", "aba-routing", "medical-license"}
+DEFAULT_PII_LANGUAGES = ("en", "de")
+
+
+def _load_presidio(languages: tuple[str, ...] = DEFAULT_PII_LANGUAGES) -> list[Rule]:
+    data = json.loads((RULES_DIR / "presidio.json").read_text())
+    out: list[Rule] = []
+    for rec in data["recognizers"]:
+        if rec["id"] in PRESIDIO_SKIP or rec["language"] not in languages:
+            continue
+        validator = PRESIDIO_VALIDATOR.get(rec["id"])
+        weak = rec["id"] in PRESIDIO_ALWAYS_CONTEXT or (rec["validator"] and validator is None)
+        for i, pat in enumerate(rec["patterns"]):
+            try:
+                rx = re.compile(_re2_to_python(pat["regex"]))
+            except re.error:
+                continue
+            out.append(Rule(
+                id=f"{rec['id']}" if len(rec["patterns"]) == 1 else f"{rec['id']}#{i}",
+                type=ENTITY_TYPE.get(rec["entity"], rec["entity"]), regex=rx,
+                validator=validator, score=float(pat["score"]),
+                context=tuple(c.lower() for c in rec.get("context", [])), require_context=weak,
+            ))
+    return out
+
+
 def _load_own() -> list[Rule]:
     return [Rule(id=d["id"], type=d["type"], regex=re.compile(d["regex"]),
                  secret_group=d.get("secret_group", 0), validator=d.get("validator"))
@@ -180,8 +323,17 @@ def rules() -> list[Rule]:
         own = _load_own()
         secrets = [r for r in own if r.type == "SECRET"]
         pii = [r for r in own if r.type != "SECRET"]
-        _RULES = secrets + _load_gitleaks() + pii
+        _RULES = secrets + _load_gitleaks() + _load_presidio(_pii_languages()) + pii
     return _RULES
+
+
+def _pii_languages() -> tuple[str, ...]:
+    try:
+        from .vault import load_config
+        langs = load_config().get("pii_languages")
+        return tuple(langs) if langs else DEFAULT_PII_LANGUAGES
+    except Exception:  # noqa: BLE001 - config is optional
+        return DEFAULT_PII_LANGUAGES
 
 
 SECRET_TYPES = frozenset({"SECRET"})
@@ -230,10 +382,18 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue
             if rule.validator and not VALIDATORS[rule.validator](secret):
                 continue
+            if rule.score < 1.0 or rule.require_context:
+                # presidio semantics: a weak shape passes only with a context word nearby
+                window = low[max(0, start - 80):min(len(low), end + 40)]
+                has_context = any(c in window for c in rule.context)
+                if rule.require_context and not has_context:
+                    continue
+                if rule.score < 0.5 and not has_context:
+                    continue
             if _allowed(rule, text, m, secret):
                 continue
             # our own placeholders are never a hit
-            if text[max(0, start - 1):start] == "<" and re.match(r"[A-Z]+_c\d+", secret):
+            if text[max(0, start - 1):start] in ("<", "\u27e6") and re.match(r"[A-Z][A-Z_]*_c\d+", secret):
                 continue
             found.append(Match(rule.id, rule.type, secret, start, end))
             taken.append((start, end))

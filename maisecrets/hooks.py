@@ -6,7 +6,7 @@ the action it guards, and says so.
 
 Events:
   user-prompt  UserPromptSubmit  -> block + store + clipboard on a hit
-  pre-tool     PreToolUse        -> rehydrate <REF> in Bash commands
+  pre-tool     PreToolUse        -> rehydrate ⟦REF⟧ in Bash commands
   post-tool    PostToolUse       -> redact tool results before the model sees them
 """
 from __future__ import annotations
@@ -230,7 +230,7 @@ def post_tool(payload: dict) -> dict:
             "updatedToolOutput": new_response,
             "additionalContext": (
                 f"maisecrets redacted {hit['n']} value(s) in this tool result; "
-                "use the <REF> placeholders as-is."
+                "use the ⟦REF⟧ placeholders as-is."
             ),
         }
     }

@@ -7,8 +7,8 @@ Keeps secrets and PII out of the cloud model. Works as a plugin for Claude Code
 
 1. **You type a secret or a customer address.** A `UserPromptSubmit` hook
    detects it, stores it in a local vault, blocks the prompt, and puts the
-   rewritten prompt with a placeholder such as `<SECRET_c1>` or
-   `<EMAIL_c1:ma***@example.org>` into your clipboard. Paste, send. The value
+   rewritten prompt with a placeholder such as `⟦SECRET_c1⟧` or
+   `⟦EMAIL_c1:ma•••@example.org⟧` into your clipboard. Paste, send. The value
    never reached the model. Measured: zero API requests for a blocked prompt.
 2. **The model reads a file or runs a command that outputs a secret.** A
    `PostToolUse` hook redacts the result before the model sees it.
@@ -78,9 +78,19 @@ Two sources, one scanner (`maisecrets/detect.py`):
   version in `GITLEAKS_VERSION`, refresh with `scripts/sync_gitleaks.py vX.Y.Z`):
   ~220 secret shapes with keywords, entropy thresholds and allowlists. No
   gitleaks binary is used.
-- **Own rules** for what gitleaks does not cover: PII with validators (email,
-  IBAN mod-97, card Luhn, public IPv4, phone with country code) and
-  credentials recognised by position (`password=…`, `Bearer …`,
+- **Presidio** pattern recognizers, vendored as data under `maisecrets/rules/`
+  (MIT, version in `PRESIDIO_VERSION`, refresh with `scripts/sync_presidio.py`):
+  country-specific PII with scores and context words. Languages are opt-in via
+  `pii_languages` in the config (default `en` and `de`: Steuer-ID,
+  Sozialversicherungsnummer, Personalausweis, Reisepass, USt-ID,
+  Krankenversicherung, PLZ, Kfz, LANR, BSNR, Handelsregister). Checksums for
+  the German types are ported and checked against Presidio
+  (`scripts/check_validators_against_presidio.py`). A digit-only shape such as
+  a Steuer-ID is reported only with a context word nearby, even when the
+  checksum passes.
+- **Own rules** for what neither covers: PII with bounded regexes and
+  validators (email, IBAN mod-97, card Luhn, public IPv4, phone with country
+  code) and credentials recognised by position (`password=…`, `Bearer …`,
   `user:pass@host`, `?api_key=…`).
 
 Measure what the rules would catch on your own recordings, values never

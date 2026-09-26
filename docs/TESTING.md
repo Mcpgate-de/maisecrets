@@ -7,9 +7,9 @@ Run 2026-09-26, 4 scenarios, 0 failures:
 | scenario | what it proves |
 |---|---|
 | prompt_secret | a typed secret is blocked; 0 requests reach the upstream; the transcript on disk carries no secret |
-| read_env | a Read of `.env` reaches the model with `<SECRET_c1>` and `<EMAIL_c1:…>`, never the values |
+| read_env | a Read of `.env` reaches the model with `⟦SECRET_c1⟧` and `⟦EMAIL_c1:…⟧`, never the values |
 | bash_echo | `cat .env` output is redacted before the model sees it |
-| bash_rehydrate | `<SECRET_c1>` in a Bash command is replaced by the real value at execution; the file the command wrote holds the value, the requests hold only the placeholder |
+| bash_rehydrate | `⟦SECRET_c1⟧` in a Bash command is replaced by the real value at execution; the file the command wrote holds the value, the requests hold only the placeholder |
 
 Golden payload shapes captured in `harness/golden/` (top-level keys, `tool_input`
 keys, `tool_response` keys per event and tool). A later Claude Code version

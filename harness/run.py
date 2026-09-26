@@ -43,7 +43,7 @@ SCENARIOS = {
         "files": {".env": f"GITLAB_TOKEN={MARK}\nMAIL={MAIL}\n"},
         "turns": [{"tool": "Read", "input": {"file_path": "{cwd}/.env"}}, {"text": "done"}],
         "expect_requests": 2,
-        "expect_placeholders": ["<SECRET_c", "<EMAIL_c"],
+        "expect_placeholders": ["⟦SECRET_c", "⟦EMAIL_c"],
     },
     # the model runs a command whose output holds a secret
     "bash_echo": {
@@ -51,7 +51,7 @@ SCENARIOS = {
         "files": {".env": f"TOKEN={MARK}\n"},
         "turns": [{"tool": "Bash", "input": {"command": "cat .env"}}, {"text": "done"}],
         "expect_requests": 2,
-        "expect_placeholders": ["<SECRET_c"],
+        "expect_placeholders": ["⟦SECRET_c"],
     },
     # the model uses a placeholder in Bash: PreToolUse rehydrates, the command sees the value,
     # PostToolUse redacts the echo again
@@ -59,11 +59,11 @@ SCENARIOS = {
         "prompt": "use the stored token",
         "preload": [(MARK, "SECRET", "gitlab_pat")],
         "turns": [
-            {"tool": "Bash", "input": {"command": "printf 'got:%s' '<SECRET_c1>' > used.txt; cat used.txt"}},
+            {"tool": "Bash", "input": {"command": "printf 'got:%s' '⟦SECRET_c1⟧' > used.txt; cat used.txt"}},
             {"text": "done"},
         ],
         "expect_requests": 2,
-        "expect_placeholders": ["<SECRET_c1>"],
+        "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_file": ("used.txt", f"got:{MARK}"),
     },
 }

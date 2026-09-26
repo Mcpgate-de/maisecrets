@@ -6,7 +6,11 @@ implements it.
 
 ## 1. Placeholder
 
-`<TYPE_cN>` or `<TYPE_cN:display>`.
+`⟦TYPE_cN⟧` or `⟦TYPE_cN:display⟧` (brackets U+27E6/U+27E7, mask character
+U+2022 in the display). Chosen by measurement against real parsers in
+ai-gateway #1396: `<…>` vanishes in HTML and is a shell redirection, `[…]`
+is a Jira link and a regex class, `***` is a regex quantifier; `⟦…⟧` with
+`•` survives CommonMark, HTML, XHTML, URL query, regex and SQL LIKE.
 
 - `TYPE` is one of `SECRET`, `EMAIL`, `IBAN`, `CARD`, `IP`, `PHONE`.
 - `c` marks a client-minted reference. A gateway mints `<TYPE_N>` without `c`
@@ -14,8 +18,10 @@ implements it.
 - `N` is a per-client, per-type counter. It is never derived from the value.
 - Resolution matches the key `TYPE_cN` only. The display part is for humans
   and may be dropped or altered by a model.
-- Open: the delimiter matrix (Slack mrkdwn, Markdown, Jira, HTML, shell).
-  `<` and `>` are shell redirection when unquoted in Bash.
+- The gateway treats a `⟦…⟧` token as its own only when the display part is
+  empty or is itself a display (a fixed point of the mask transformation); a
+  real value in token form is still scanned.
+- The earlier `<TYPE_cN>` form is recognised for rehydration, never minted.
 
 ## 2. Vault entry
 

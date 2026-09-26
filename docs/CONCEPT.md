@@ -163,7 +163,7 @@ The value travels only over TLS to the gateway, never to Anthropic. No
 connection from the gateway back to the client is needed.
 
 **For #1396:** client-minted references need their own range (e.g.
-`<EMAIL_c1:…>`) that the gateway never mints. Otherwise a deposit overwrites a
+`⟦EMAIL_c1:…⟧`) that the gateway never mints. Otherwise a deposit overwrites a
 foreign gateway entry with the same counter.
 
 ## Market and distribution (research 2026-09-26)

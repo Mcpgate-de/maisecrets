@@ -65,7 +65,8 @@ class DetectTests(unittest.TestCase):
         self.assertEqual([m.value for m in detect.scan("edge 93.184.216.34")], ["93.184.216.34"])
 
     def test_placeholder_is_not_a_hit(self):
-        self.assertEqual(detect.scan("send to <EMAIL_c1:ma***@example.org> now"), [])
+        self.assertEqual(detect.scan("send to ⟦EMAIL_c1:ma•••@example.org⟧ now"), [])
+        self.assertEqual(detect.scan("legacy <EMAIL_c1:ma***@example.org> form"), [])
 
     def test_url_userinfo_is_a_secret_not_an_email(self):
         ms = detect.scan("postgres://etl:" + "s3cretPassw0rd" + "@db.internal:5432/x")
@@ -80,23 +81,45 @@ class DetectTests(unittest.TestCase):
         self.assertGreater(len(ids), 200)
         self.assertTrue({"gitlab-pat", "aws-access-token", "private-key", "email", "iban"} <= ids)
 
+    def test_german_tax_id_needs_context_and_checksum(self):
+        valid = "86095742719"   # the BZSt example number
+        self.assertEqual([m.type for m in detect.scan("Meine Steuer-ID lautet " + valid)], ["DE_TAX_ID"])
+        self.assertEqual(detect.scan("Bestellung " + valid + " ist raus"), [])           # no context word
+        self.assertEqual(detect.scan("Steuer-ID " + valid[:-1] + "0"), [])                # checksum fails
+
+    def test_german_vat_id_and_plz(self):
+        self.assertEqual([m.type for m in detect.scan("USt-IdNr. DE123456789")], ["DE_VAT_ID"])
+        self.assertEqual(detect.scan("10115 Berlin"), [])
+        self.assertEqual([m.type for m in detect.scan("PLZ 10115")], ["DE_PLZ"])
+
+    def test_presidio_languages_are_opt_in(self):
+        ids = {r.id.split("#")[0] for r in detect.rules()}
+        self.assertIn("de-tax-id", ids)
+        self.assertNotIn("pl-pesel", ids)   # not in the default languages
+
+    def test_placeholder_types_with_underscores(self):
+        self.assertEqual(placeholder.key_of("⟦DE_TAX_ID_c2⟧"), "DE_TAX_ID_c2")
+        self.assertEqual(detect.scan("see ⟦DE_TAX_ID_c2⟧ above"), [])
+
     def test_a_short_prose_word_after_token_is_not_a_credential(self):
         self.assertEqual(detect.scan("the token expired yesterday"), [])
 
 
 class PlaceholderTests(unittest.TestCase):
     def test_refs_round_trip_with_and_without_display(self):
-        self.assertEqual(placeholder.key_of("<EMAIL_c3:ma***@x.de>"), "EMAIL_c3")
-        self.assertEqual(placeholder.key_of("<SECRET_c1>"), "SECRET_c1")
-        self.assertIsNone(placeholder.key_of("<EMAIL_3>"))  # gateway-minted, not ours
+        self.assertEqual(placeholder.key_of("⟦EMAIL_c3:ma•••@x.de⟧"), "EMAIL_c3")
+        self.assertEqual(placeholder.key_of("⟦SECRET_c1⟧"), "SECRET_c1")
+        self.assertEqual(placeholder.key_of("<SECRET_c1>"), "SECRET_c1")   # legacy form still resolves
+        self.assertIsNone(placeholder.key_of("⟦EMAIL_3⟧"))  # gateway-minted, not ours
+        self.assertEqual(placeholder.make_ref("EMAIL", 4, "ma•••@x.de"), "⟦EMAIL_c4:ma•••@x.de⟧")
 
     def test_find_refs_reports_offsets(self):
-        text = 'curl -H "Bearer <SECRET_c1>" https://x/<EMAIL_c2:a***@b.c>'
+        text = 'curl -H "Bearer ⟦SECRET_c1⟧" https://x/⟦EMAIL_c2:a•••@b.c⟧'
         self.assertEqual([k for k, _, _ in placeholder.find_refs(text)], ["SECRET_c1", "EMAIL_c2"])
 
     def test_secret_display_is_never_shown(self):
         self.assertIsNone(placeholder.display_for("SECRET", GLPAT))
-        self.assertEqual(placeholder.display_for("EMAIL", "max@example.org"), "ma***@example.org")
+        self.assertEqual(placeholder.display_for("EMAIL", "max@example.org"), "ma•••@example.org")
 
 
 class VaultTests(unittest.TestCase):
@@ -161,11 +184,11 @@ class HookTests(unittest.TestCase):
         out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": f'curl -H "PRIVATE-TOKEN: {e.ref}" u'}})
         self.assertEqual(out["hookSpecificOutput"]["updatedInput"]["command"], f'curl -H "PRIVATE-TOKEN: {GLPAT}" u')
         self.assertNotIn("permissionDecision", out["hookSpecificOutput"])
-        out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": "echo <SECRET_c42>"}})
+        out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": "echo ⟦SECRET_c42⟧"}})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_pre_tool_leaves_gateway_tools_alone(self):
-        out = hooks.pre_tool({"tool_name": "mcp__phase6-ai-gateway__x", "tool_input": {"q": "<EMAIL_c1>"},
+        out = hooks.pre_tool({"tool_name": "mcp__phase6-ai-gateway__x", "tool_input": {"q": "⟦EMAIL_c1⟧"},
                               "mcp_server": {"name": "phase6-ai-gateway", "source": "user"}})
         self.assertEqual(out, {})
 
@@ -176,7 +199,7 @@ class HookTests(unittest.TestCase):
         upd = out["hookSpecificOutput"]["updatedToolOutput"]
         self.assertEqual(set(upd), {"stdout", "stderr", "interrupted", "isImage"})
         self.assertNotIn(GLPAT, upd["stdout"])
-        self.assertIn("<SECRET_c1>", upd["stdout"])
+        self.assertIn("⟦SECRET_c1⟧", upd["stdout"])
 
     def test_post_tool_without_hit_returns_nothing(self):
         self.assertEqual(hooks.post_tool({"tool_response": {"stdout": "all good"}}), {})
