@@ -70,6 +70,22 @@ Every entry has a TTL. Each use renews it, up to `max_ttl_seconds`. On
 expiry the value is deleted and the metadata stays as a record. Commands:
 `python3 -m maisecrets.cli list | get <KEY> | expire | scan | config`.
 
+## Detection rules
+
+Two sources, one scanner (`maisecrets/detect.py`):
+
+- **gitleaks** ruleset, vendored as data under `maisecrets/rules/` (MIT,
+  version in `GITLEAKS_VERSION`, refresh with `scripts/sync_gitleaks.py vX.Y.Z`):
+  ~220 secret shapes with keywords, entropy thresholds and allowlists. No
+  gitleaks binary is used.
+- **Own rules** for what gitleaks does not cover: PII with validators (email,
+  IBAN mod-97, card Luhn, public IPv4, phone with country code) and
+  credentials recognised by position (`password=…`, `Bearer …`,
+  `user:pass@host`, `?api_key=…`).
+
+Measure what the rules would catch on your own recordings, values never
+printed: `scripts/replay_sessions.py --claude --codex`.
+
 ## Known gaps (measured or documented)
 
 - `@file` mentions inline content outside the hook pipeline. The prompt hook

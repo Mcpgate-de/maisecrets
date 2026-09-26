@@ -29,7 +29,7 @@ from maisecrets.vault import Vault  # noqa: E402
 
 GLPAT = "glpat-" + "A1b2C3d4E5f6G7h8I9j0"          # 20 chars after prefix
 AKIA = "AKIA" + "ABCDEFGHIJKLMNOP"
-GHP = "ghp_" + "a" * 36
+GHP = "ghp_" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"  # mixed: gitleaks needs entropy >= 3
 GLRT = "glrt-" + "AbCdEfGhIjKlMnOpQrStUv.01.1a2b3c4d5"
 # canonical public test values, assembled at runtime so no literal sits in the tree
 IBAN_OK = " ".join(["DE89", "3704", "0044", "0532", "0130", "00"])
@@ -39,8 +39,8 @@ JWT = ".".join(["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "dozjgNry
 
 class DetectTests(unittest.TestCase):
     def test_secret_shapes_are_found_with_the_exact_value(self):
-        for kind, val in [("gitlab_pat", GLPAT), ("aws_key", AKIA), ("github_token", GHP), ("jwt", JWT),
-                          ("gitlab_runner_token", GLRT)]:
+        for kind, val in [("gitlab-pat", GLPAT), ("aws-access-token", AKIA), ("github-pat", GHP), ("jwt", JWT),
+                          ("gitlab-runner-token", GLRT)]:
             with self.subTest(kind=kind):
                 ms = detect.scan(f"token is {val} ok")
                 self.assertEqual([(m.kind, m.value) for m in ms], [(kind, val)])
@@ -54,7 +54,7 @@ class DetectTests(unittest.TestCase):
     def test_email_iban_card_are_pii_and_validated(self):
         text = "mail max.mustermann@example.org iban " + IBAN_OK + " card " + CARD_OK
         kinds = {m.kind for m in detect.scan(text)}
-        self.assertEqual(kinds, {"email", "iban", "credit_card"})
+        self.assertEqual(kinds, {"email", "iban", "credit-card"})
 
     def test_invalid_iban_and_luhn_failing_card_are_not_hits(self):
         self.assertEqual([m.kind for m in detect.scan(IBAN_OK[:-1] + "1")], [])
@@ -66,6 +66,19 @@ class DetectTests(unittest.TestCase):
 
     def test_placeholder_is_not_a_hit(self):
         self.assertEqual(detect.scan("send to <EMAIL_c1:ma***@example.org> now"), [])
+
+    def test_url_userinfo_is_a_secret_not_an_email(self):
+        ms = detect.scan("postgres://etl:" + "s3cretPassw0rd" + "@db.internal:5432/x")
+        self.assertEqual([(m.kind, m.value) for m in ms], [("url-userinfo", "s3cretPassw0rd")])
+
+    def test_query_parameter_secret(self):
+        ms = detect.scan("GET https://x/api?api_key=" + "0123456789abcdef0123")
+        self.assertEqual(ms[0].type, "SECRET")
+
+    def test_gitleaks_ruleset_is_loaded(self):
+        ids = {r.id for r in detect.rules()}
+        self.assertGreater(len(ids), 200)
+        self.assertTrue({"gitlab-pat", "aws-access-token", "private-key", "email", "iban"} <= ids)
 
     def test_a_short_prose_word_after_token_is_not_a_credential(self):
         self.assertEqual(detect.scan("the token expired yesterday"), [])
@@ -95,18 +108,18 @@ class VaultTests(unittest.TestCase):
                         "max_ttl_seconds": 120, "renew_on_use": True})
 
     def test_put_get_same_value_same_ref(self):
-        a = self.v.put(GLPAT, "SECRET", "gitlab_pat")
-        b = self.v.put(GLPAT, "SECRET", "gitlab_pat")
+        a = self.v.put(GLPAT, "SECRET", "gitlab-pat")
+        b = self.v.put(GLPAT, "SECRET", "gitlab-pat")
         self.assertEqual(a.key, b.key)
         self.assertEqual(self.v.get(a.key), (GLPAT, "ok"))
 
     def test_counter_is_per_type(self):
-        self.v.put(GLPAT, "SECRET", "gitlab_pat")
+        self.v.put(GLPAT, "SECRET", "gitlab-pat")
         e = self.v.put("max@example.org", "EMAIL", "email")
         self.assertEqual(e.key, "EMAIL_c1")
 
     def test_expired_value_is_deleted_but_metadata_stays(self):
-        e = self.v.put(AKIA, "SECRET", "aws_key")
+        e = self.v.put(AKIA, "SECRET", "aws-access-token")
         self.v._index["entries"][e.key]["expires"] = 0
         self.v._save_index()
         self.assertEqual(self.v.get(e.key), (None, "expired"))
@@ -115,7 +128,7 @@ class VaultTests(unittest.TestCase):
         self.assertEqual(self.v.get("SECRET_c99"), (None, "unknown"))
 
     def test_vault_file_is_private(self):
-        self.v.put(AKIA, "SECRET", "aws_key")
+        self.v.put(AKIA, "SECRET", "aws-access-token")
         mode = os.stat(self.v.backend.path).st_mode & 0o777
         self.assertEqual(mode, 0o600)
 
@@ -144,7 +157,7 @@ class HookTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
 
     def test_pre_tool_rehydrates_bash_and_denies_unknown(self):
-        e = Vault().put(GLPAT, "SECRET", "gitlab_pat")
+        e = Vault().put(GLPAT, "SECRET", "gitlab-pat")
         out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": f'curl -H "PRIVATE-TOKEN: {e.ref}" u'}})
         self.assertEqual(out["hookSpecificOutput"]["updatedInput"]["command"], f'curl -H "PRIVATE-TOKEN: {GLPAT}" u')
         self.assertNotIn("permissionDecision", out["hookSpecificOutput"])

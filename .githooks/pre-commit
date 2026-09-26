@@ -9,7 +9,8 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT" || exit 1
 
 # 1. staged additions through the detector
-ADDED=$(git diff --cached --unified=0 --no-color | grep -E '^\+' | grep -vE '^\+\+\+' | sed 's/^+//')
+# the vendored ruleset legitimately contains secret SHAPES (its own regexes), so it is excluded
+ADDED=$(git diff --cached --unified=0 --no-color -- . ':(exclude)maisecrets/rules/*' | grep -E '^\+' | grep -vE '^\+\+\+' | sed 's/^+//')
 if [ -n "$ADDED" ]; then
   HITS=$(printf '%s\n' "$ADDED" | python3 -m maisecrets.cli scan 2>/dev/null | grep -v -E '^(EMAIL|IP) ' || true)
   if [ -n "$HITS" ]; then

@@ -1,98 +1,68 @@
 """Deterministic detection of secrets and PII in text.
 
-One detector, shared by every hook and every direction. Two detectors with
-slightly different rules is how a redaction leaks: a rule closed in one place
-reopens a gap in the other.
+Two rule sources, one scanner:
 
-The patterns come from the ai-gateway scrubber (src/security/pii_scrubber.py,
-origin/main 1575685b4, 2026-09-26). They were copied, not re-invented, so a
-value the gateway hides is a value this detector hides.
+1. **gitleaks** (`rules/gitleaks.toml`, vendored, MIT, version in
+   `rules/GITLEAKS_VERSION`): ~220 secret shapes with keywords, entropy
+   thresholds and allowlists. Consumed as data; no gitleaks binary. Refresh
+   with `scripts/sync_gitleaks.py vX.Y.Z`.
+2. **Own rules** (`OWN_RULES` below): what gitleaks does not cover. PII with
+   validators (email, IBAN mod-97, card Luhn, public IP, phone), credentials
+   recognised by position (`password=…`, `Bearer …`, `user:pass@host`).
+
+One detector, shared by every hook and every direction. Two detectors with
+slightly different rules is how a redaction leaks.
 """
 from __future__ import annotations
 
+import math
 import re
+import tomllib
+import warnings
+from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 
-# --- secret shapes: an issuer prefix plus a fixed alphabet and length -------
-SECRET_PATTERNS: dict[str, str] = {
-    "aws_key": r"AKIA[0-9A-Z]{16}",
-    "github_token": r"gh[puso]_[a-zA-Z0-9]{36}",
-    "slack_token": r"xox[baprs]-\d[a-zA-Z0-9-]{20,}",
-    "stripe_key": r"sk_live_[0-9a-zA-Z]{24}",
-    "google_api_key": r"AIza[0-9A-Za-z-_]{35}",
-    "gitlab_pat": r"glpat-[0-9A-Za-z_-]{20,}",
-    # GitLab runner authentication token (`gitlab-runner list` prints it), deploy token, CI job token
-    "gitlab_runner_token": r"glrt-[0-9A-Za-z_.-]{20,}",
-    "gitlab_deploy_token": r"gldt-[0-9A-Za-z_-]{20,}",
-    "openai_key": r"sk-[a-zA-Z0-9_-]{20,}",
-    "google_oauth": r"ya29\.[a-zA-Z0-9_-]{20,}",
-    "jwt": r"eyJ[a-zA-Z0-9_-]{8,}\.eyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}",
-    "private_key": (
-        r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"
-        r"[\s\S]{0,8192}?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----"
-    ),
-    "bcrypt_hash": r"\$2[abxy]?\$\d{2}\$[./A-Za-z0-9]{53}",
-    "argon2_hash": (
-        r"\$argon2(?:id|i|d)\$v=\d{1,3}\$m=\d{1,8},t=\d{1,4},p=\d{1,3}"
-        r"\$[A-Za-z0-9+/]{8,128}\$[A-Za-z0-9+/]{16,256}"
-    ),
-    "sha_crypt_hash": r"\$[56]\$(?:rounds=\d{1,9}\$)?[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{43,86}",
-    "pbkdf2_hash": r"pbkdf2_sha(?:1|256|512)\$\d{1,7}\$[A-Za-z0-9+/=.]{1,64}\$[A-Za-z0-9+/=]{20,128}",
-    "ldap_ssha_hash": r"\{SSHA(?:256|512)?\}[A-Za-z0-9+/]{20,256}={0,2}",
-    "phpass_hash": r"\$[PH]\$[./0-9A-Za-z]{31}",
-    # A credential recognised by its position: a name says what the value is.
-    # Group 2 is the value; the name stays in the text.
-    "named_credential": (
-        r"(?i)\b((?:[a-z0-9]{1,16}[_-])?(?:secret|passwo?rd|passwd|pwd|token"
-        r"|api[_-]?key|apikey|client[_-]?secret|access[_-]?key|private[_-]?key"
-        r"|auth[_-]?token))"
-        r"(\s*[:=]\s*[\"']?)"
-        r"([A-Za-z0-9_\-./+=~]{16,})"
-    ),
-    "auth_scheme": (
-        r"(?i)\b(Bearer|Basic|Token|APIKey)"
-        r"(\s+)([A-Za-z0-9._~+/=-]{16,})"
-    ),
-}
-
-# --- PII shapes -------------------------------------------------------------
-PII_PATTERNS: dict[str, str] = {
-    "email": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})@[\w-]{1,63}\.[\w.-]{0,254}[\w-]",
-    "iban": r"\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,4})?\b",
-    "credit_card": r"(?<!\w)(?<!\d{4}-)(?:\d{4}[\s-]?){3}\d{4}(?!-\d{4})(?!\w)",
-    "ip": r"(?<!\w)(?<!\d\.)\d{1,3}(?:\.\d{1,3}){3}(?!\w)",
-    "phone": r"(?<![\w+])\+\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?!\w)",
-}
-
-# Which pattern names produce which placeholder type, and which are secrets.
-TYPE_OF: dict[str, str] = {
-    **{k: "SECRET" for k in SECRET_PATTERNS},
-    "email": "EMAIL",
-    "iban": "IBAN",
-    "credit_card": "CARD",
-    "ip": "IP",
-    "phone": "PHONE",
-}
-SECRET_TYPES = frozenset({"SECRET"})
-
-# The group that holds the value for patterns that also match a prefix.
-VALUE_GROUP: dict[str, int] = {"named_credential": 3, "auth_scheme": 3}
-
-_COMPILED: dict[str, re.Pattern[str]] = {
-    name: re.compile(rx) for name, rx in {**SECRET_PATTERNS, **PII_PATTERNS}.items()
-}
-
-# Order matters: a longer, more specific shape must win over a generic one.
-_ORDER = list(SECRET_PATTERNS) + list(PII_PATTERNS)
+RULES_DIR = Path(__file__).resolve().parent / "rules"
 
 
 @dataclass(frozen=True)
 class Match:
-    kind: str      # pattern name, e.g. "gitlab_pat"
-    type: str      # placeholder type, e.g. "SECRET"
+    kind: str      # rule id, e.g. "gitlab-pat" or "email"
+    type: str      # placeholder type: SECRET, EMAIL, IBAN, CARD, IP, PHONE
     value: str     # the exact text to replace
     start: int
     end: int
+
+
+@dataclass(frozen=True)
+class Rule:
+    id: str
+    type: str
+    regex: re.Pattern[str]
+    keywords: tuple[str, ...] = ()
+    entropy: float = 0.0
+    secret_group: int = 0
+    allow_regexes: tuple[tuple[re.Pattern[str], str], ...] = ()   # (pattern, target: match|line)
+    stopwords: tuple[str, ...] = ()
+    validator: str | None = None
+
+
+# ----------------------------------------------------------------- helpers --
+def _re2_to_python(rx: str) -> str:
+    """gitleaks regexes are RE2. Python differs in two spots we hit."""
+    flags = ""
+    if "(?i)" in rx:
+        rx = rx.replace("(?i)", "")
+        flags = "(?i)"
+    return flags + rx.replace(r"\z", r"\Z")
+
+
+def shannon_entropy(s: str) -> float:
+    if not s:
+        return 0.0
+    n = len(s)
+    return -sum(c / n * math.log2(c / n) for c in Counter(s).values())
 
 
 def _luhn_ok(digits: str) -> bool:
@@ -113,63 +83,159 @@ def _iban_ok(raw: str) -> bool:
     if not 15 <= len(s) <= 34:
         return False
     rearranged = s[4:] + s[:4]
-    num = "".join(str(ord(c) - 55) if c.isalpha() else c for c in rearranged)
-    return int(num) % 97 == 1
+    return int("".join(str(ord(c) - 55) if c.isalpha() else c for c in rearranged)) % 97 == 1
 
 
-def _private_ip(ip: str) -> bool:
-    parts = ip.split(".")
-    try:
-        a, b = int(parts[0]), int(parts[1])
-    except ValueError:
+def _public_ip(ip: str) -> bool:
+    parts = [int(p) for p in ip.split(".")]
+    if any(p > 255 for p in parts):
+        return False
+    a, b = parts[0], parts[1]
+    private = (a in (10, 127, 0) or (a == 192 and b == 168) or (a == 172 and 16 <= b <= 31)
+               or (a == 169 and b == 254))
+    return not private
+
+
+VALIDATORS = {
+    "luhn": lambda v: _luhn_ok(re.sub(r"\D", "", v)),
+    "iban": _iban_ok,
+    "public_ip": _public_ip,
+    "not_placeholder": lambda v: v.lower() not in {"placeholder", "changeme", "redacted", "example"}
+    and not v.startswith("<"),
+}
+
+
+# --------------------------------------------------------------- own rules --
+OWN_RULES: list[dict] = [
+    {"id": "url-userinfo", "type": "SECRET", "secret_group": 2,
+     "regex": r"(?i)\b[a-z][a-z0-9+.-]*://([^/\s:@]{1,128}):([^/\s@]{1,256})@"},
+    # ?token=… / &api_key=… in a URL
+    {"id": "url-query-secret", "type": "SECRET", "secret_group": 2,
+     "regex": r"(?i)[?&]((?:access_?)?token|api[_-]?key|apikey|secret|password|sig|signature)=([^&\s#\"']{8,})"},
+    {"id": "email", "type": "EMAIL",
+     "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})@[\w-]{1,63}\.[\w.-]{0,254}[\w-]"},
+    {"id": "iban", "type": "IBAN", "validator": "iban",
+     "regex": r"\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,4})?\b"},
+    {"id": "credit-card", "type": "CARD", "validator": "luhn",
+     "regex": r"(?<!\w)(?<!\d{4}-)(?:\d{4}[\s-]?){3}\d{4}(?!-\d{4})(?!\w)"},
+    {"id": "ipv4", "type": "IP", "validator": "public_ip",
+     "regex": r"(?<!\w)(?<!\d\.)\d{1,3}(?:\.\d{1,3}){3}(?!\w)"},
+    {"id": "phone", "type": "PHONE",
+     "regex": r"(?<![\w+])\+\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?!\w)"},
+    # full-length GitLab runner / deploy tokens; the gitleaks legacy shape stops after 20 chars
+    {"id": "gitlab-runner-token", "type": "SECRET", "regex": r"glrt-[0-9A-Za-z_.-]{20,}"},
+    {"id": "gitlab-deploy-token-any", "type": "SECRET", "regex": r"gldt-[0-9A-Za-z_-]{20,}"},
+    # credentials recognised by POSITION, not shape: a name says what the value is
+    {"id": "named-credential", "type": "SECRET", "secret_group": 3, "validator": "not_placeholder",
+     "regex": (r"(?i)\b((?:[a-z0-9]{1,16}[_-])?(?:secret|passwo?rd|passwd|pwd|token|api[_-]?key|apikey"
+               r"|client[_-]?secret|access[_-]?key|private[_-]?key|auth[_-]?token))"
+               r"(\s*[:=]\s*[\"']?)([A-Za-z0-9_\-./+=~]{16,})")},
+    {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
+     "regex": r"(?i)\b(Bearer|Basic|Token|APIKey)(\s+)([A-Za-z0-9._~+/=-]{16,})"},
+    # user:password@host in a URL; group 2 is the password
+]
+
+
+# ------------------------------------------------------------- rule loading --
+def _load_gitleaks() -> list[Rule]:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")   # "possible nested set" in two gitleaks regexes
+        cfg = tomllib.loads((RULES_DIR / "gitleaks.toml").read_text())
+        rules: list[Rule] = []
+        for r in cfg.get("rules", []):
+            if "regex" not in r:
+                continue
+            allow: list[tuple[re.Pattern[str], str]] = []
+            stop: list[str] = []
+            for al in r.get("allowlists", []) or []:
+                target = al.get("regexTarget", "match")
+                for arx in al.get("regexes", []) or []:
+                    try:
+                        allow.append((re.compile(_re2_to_python(arx)), target))
+                    except re.error:
+                        pass
+                stop += [s.lower() for s in al.get("stopwords", []) or []]
+            rules.append(Rule(
+                id=r["id"], type="SECRET", regex=re.compile(_re2_to_python(r["regex"])),
+                keywords=tuple(k.lower() for k in r.get("keywords", []) or ()),
+                entropy=float(r.get("entropy", 0) or 0), secret_group=int(r.get("secretGroup", 0) or 0),
+                allow_regexes=tuple(allow), stopwords=tuple(stop),
+            ))
+    return rules
+
+
+def _load_own() -> list[Rule]:
+    return [Rule(id=d["id"], type=d["type"], regex=re.compile(d["regex"]),
+                 secret_group=d.get("secret_group", 0), validator=d.get("validator"))
+            for d in OWN_RULES]
+
+
+_RULES: list[Rule] | None = None
+
+
+def rules() -> list[Rule]:
+    """Own secret rules first (longer shapes win the span), then gitleaks, then PII."""
+    global _RULES
+    if _RULES is None:
+        own = _load_own()
+        secrets = [r for r in own if r.type == "SECRET"]
+        pii = [r for r in own if r.type != "SECRET"]
+        _RULES = secrets + _load_gitleaks() + pii
+    return _RULES
+
+
+SECRET_TYPES = frozenset({"SECRET"})
+
+
+# ------------------------------------------------------------------ scanner --
+def _line_of(text: str, start: int, end: int) -> str:
+    a = text.rfind("\n", 0, start) + 1
+    b = text.find("\n", end)
+    return text[a: b if b >= 0 else len(text)]
+
+
+def _allowed(rule: Rule, text: str, m: re.Match, secret: str) -> bool:
+    """True when an allowlist says this hit is fine (i.e. skip it)."""
+    if rule.stopwords and any(s in secret.lower() for s in rule.stopwords):
         return True
-    if any(int(p) > 255 for p in parts):
-        return True  # not an IP at all
-    return (
-        a == 10 or a == 127 or a == 0
-        or (a == 192 and b == 168)
-        or (a == 172 and 16 <= b <= 31)
-        or (a == 169 and b == 254)
-    )
-
-
-def _accept(kind: str, value: str) -> bool:
-    if kind == "credit_card":
-        return _luhn_ok(re.sub(r"\D", "", value))
-    if kind == "iban":
-        return _iban_ok(value)
-    if kind == "ip":
-        return not _private_ip(value)
-    if kind == "named_credential":
-        low = value.lower()
-        return low not in {"placeholder", "changeme", "redacted", "example"} and not low.startswith("<")
-    return True
+    for rx, target in rule.allow_regexes:
+        probe = _line_of(text, m.start(), m.end()) if target == "line" else secret
+        if rx.search(probe):
+            return True
+    return False
 
 
 def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
-    """Return non-overlapping matches, leftmost and longest first."""
+    """Return non-overlapping matches, leftmost first; the first rule to claim a span wins."""
     if not text:
         return []
+    low = text.lower()
     found: list[Match] = []
     taken: list[tuple[int, int]] = []
-    for kind in _ORDER:
-        if enabled is not None and kind not in enabled:
+    for rule in rules():
+        if enabled is not None and rule.id not in enabled:
             continue
-        rx = _COMPILED[kind]
-        for m in rx.finditer(text):
-            g = VALUE_GROUP.get(kind, 0)
+        if rule.keywords and not any(k in low for k in rule.keywords):
+            continue
+        for m in rule.regex.finditer(text):
+            ngroups = m.re.groups or 0
+            g = rule.secret_group if 0 < rule.secret_group <= ngroups else (1 if ngroups >= 1 and m.group(1) else 0)
             start, end = m.start(g), m.end(g)
-            value = m.group(g)
-            if end - start == 0:
+            if end <= start:
                 continue
+            secret = m.group(g)
             if any(s < end and start < e for s, e in taken):
                 continue
-            if not _accept(kind, value):
+            if rule.entropy and shannon_entropy(secret) < rule.entropy:
                 continue
-            # a placeholder we minted ourselves is never a hit
-            if text[max(0, start - 1):start] == "<" and ":" in text[start:end + 40]:
-                pass
-            found.append(Match(kind, TYPE_OF[kind], value, start, end))
+            if rule.validator and not VALIDATORS[rule.validator](secret):
+                continue
+            if _allowed(rule, text, m, secret):
+                continue
+            # our own placeholders are never a hit
+            if text[max(0, start - 1):start] == "<" and re.match(r"[A-Z]+_c\d+", secret):
+                continue
+            found.append(Match(rule.id, rule.type, secret, start, end))
             taken.append((start, end))
     found.sort(key=lambda x: x.start)
     return found

@@ -45,13 +45,10 @@ and OpenAI plugin directories.
 
 - Apache-2.0 for the plugin. Gateway-side implementation lives in the
   ai-gateway under its own licence; this repo owns the protocol spec.
-- **Open point:** `maisecrets/detect.py` carries regex patterns copied from
-  `src/security/pii_scrubber.py` of the phase6 `ai-gateway` repository
-  (origin/main 1575685b4). That repository is phase6 property and is published
-  as mcpgate under BSL. Before this repo goes public, either replace the
-  patterns with independently derived ones (gitleaks, MIT, is a clean source
-  for the token shapes) or record a written permission from phase6. A
-  `NOTICE` file names the origin either way.
+- Detection rules: the gitleaks ruleset is vendored under its MIT licence
+  (`maisecrets/rules/`), refreshed with `scripts/sync_gitleaks.py <tag>`.
+  The own rules in `detect.py` are plain regular expressions, not protected
+  material; `NOTICE` records both origins.
 
 ## Security and privacy (before public)
 

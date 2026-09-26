@@ -1,8 +1,11 @@
 maisecrets
 Copyright 2026 Andreas Kruse (Sprinterli)
 
-This product includes regular-expression patterns for secret and PII shapes
-that were taken from the file src/security/pii_scrubber.py of the ai-gateway
-repository of phase-6 GmbH (origin/main 1575685b4, 2026-09-26). See
-docs/REPO-STANDARDS.md, section "Licensing", for the open point about their
-licence before a public release.
+This product includes the gitleaks ruleset (maisecrets/rules/gitleaks.toml),
+Copyright (c) 2019 Zachary Rice, MIT License (see maisecrets/rules/LICENSE-gitleaks),
+consumed as data. The vendored version is recorded in maisecrets/rules/GITLEAKS_VERSION.
+
+The PII and positional rules in maisecrets/detect.py (OWN_RULES) are plain
+regular expressions written for this project; some shapes match the ones the
+phase6 ai-gateway scrubber uses, because both were written by the same people
+for the same data.
