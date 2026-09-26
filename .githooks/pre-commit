@@ -22,7 +22,7 @@ if [ -n "$ADDED" ]; then
 fi
 
 # 2. manifests
-for f in plugin.json .claude-plugin/plugin.json hooks/hooks.json; do
+for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json; do
   python3 -c "import json,sys; json.load(open('$f'))" || { echo "pre-commit: $f is not valid JSON"; exit 1; }
 done
 

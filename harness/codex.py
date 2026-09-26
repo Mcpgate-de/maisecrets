@@ -84,15 +84,16 @@ def run_scenario(name: str, sc: dict) -> list[str]:
                 'supports_websockets = false\n')
         env["FAKE_OPENAI_KEY"] = "sk-dummy-maisecrets-harness-key-0000000000"
     (codex_home / "config.toml").write_text(cfg)
-    run_sh = ROOT / "hooks" / "run.sh"
-    def handler(event: str, timeout: int) -> dict:
-        return {"type": "command", "command": f'bash "{run_sh}" {event}', "timeout": timeout}
-    hooks = {"hooks": {
-        "UserPromptSubmit": [{"hooks": [handler("user-prompt", 10)]}],
-        "PreToolUse": [{"matcher": "Bash", "hooks": [handler("pre-tool", 10)]}],
-        "PostToolUse": [{"matcher": "Bash", "hooks": [handler("post-tool", 20)]}],
-    }}
-    (codex_home / "hooks.json").write_text(json.dumps(hooks, indent=1))
+    # The plugin is installed the way a user gets it, from this checkout as a local marketplace,
+    # so Codex's own plugin and hook discovery is under test. Writing hooks.json into CODEX_HOME
+    # (the first version of this harness) hid a discovery failure: with a root plugin.json in the
+    # package Codex found 0 of the 4 hooks (measured by a peer session on 0.157.1, 2026-09-26).
+    for cmd in (["codex", "plugin", "marketplace", "add", str(ROOT)],
+                ["codex", "plugin", "add", "maisecrets@maisecrets"]):
+        r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=120)
+        if r.returncode != 0:
+            print(f"[FAIL] {name}  plugin install: {' '.join(cmd[2:])}: {(r.stderr or r.stdout).strip()[:300]}")
+            return ["plugin install failed"]
     for fname, content in sc.get("files", {}).items():
         (cwd / fname).write_text(content)
     if sc.get("preload"):

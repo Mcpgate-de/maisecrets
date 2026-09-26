@@ -41,7 +41,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MANIFESTS = (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "plugin.json")
+MANIFESTS = (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json")
 CHANGELOG = ROOT / "CHANGELOG.md"
 
 TYPES_MINOR = {"feat"}

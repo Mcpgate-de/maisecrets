@@ -46,7 +46,7 @@ default:
 manifests:
   stage: validate
   script:
-    - python -c "import json; [json.load(open(f)) for f in ('plugin.json', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', 'hooks/hooks.json')]"
+    - python -c "import json; [json.load(open(f)) for f in ('.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', 'hooks/hooks.json')]"
     - python -c "import json; h=json.load(open('hooks/hooks.json'))['hooks']; assert set(h) <= {'UserPromptSubmit','PreToolUse','PostToolUse','SessionStart','Setup'}, set(h)"
     - python scripts/release.py check
 
@@ -154,7 +154,7 @@ release:
     - python3 scripts/release.py check
     - git config user.email "ci@maisecrets.local"
     - git config user.name "maisecrets release"
-    - git add -- .claude-plugin/plugin.json .claude-plugin/marketplace.json plugin.json CHANGELOG.md
+    - git add -- .claude-plugin/plugin.json .claude-plugin/marketplace.json CHANGELOG.md
     - 'git commit -q -m "chore(release): v$VERSION"'
     - git tag -a "v$VERSION" -m "maisecrets $VERSION"
     - git remote set-url origin "https://oauth2:${MAISECRETS_CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"

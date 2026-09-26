@@ -96,6 +96,15 @@ later run with the tuned rules; at 5 s/MB it takes hours.
 
 ## Codex harness (codex-cli 0.155.1, fake Responses upstream, 2026-09-26)
 
+**Discovery gap found by a peer session (Codex 0.157.1):** the installed plugin
+was enabled and Codex discovered 0 of its 4 hooks. Bisected on copies: with
+the root `plugin.json` (the portable Agent Plugins manifest) present, 0 hooks;
+without it, 4. The root manifest is gone. The first harness wrote `hooks.json`
+straight into `CODEX_HOME` and so never exercised discovery; it now installs
+the checkout as a local marketplace plugin, the way a user gets it.
+Mutation probe: with the root manifest put back, `prompt_secret` goes red
+with two leaks (request body, rollout); without it 3 of 3 green.
+
 **Real upstream, 2026-09-26 evening (`--real`, gpt-5.6-sol): 3 of 3 green.**
 The first real run found a leak the fake runs had hidden: the gitleaks
 `gitlab-pat` shape is fixed at 20 characters, the harness marker has 24, and
