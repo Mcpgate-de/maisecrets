@@ -36,11 +36,14 @@ no_secrets_in_tree:
   stage: validate
   script:
     # dogfooding: the repo itself must not carry a value the detector would hide
-    - git ls-files -z | xargs -0 cat | python -m maisecrets.cli scan | { ! grep -v -E '^(EMAIL|IP) ' ; }
+    # python:slim has no git; the checkout has no untracked files, so scan every file except .git
+    - find . -path ./.git -prune -o -type f -print0 | xargs -0 cat | python -m maisecrets.cli scan | { ! grep -v -E '^(EMAIL|IP) ' ; }
 
 lint:
   stage: validate
-  image: ghcr.io/astral-sh/ruff:latest
+  image:
+    name: ghcr.io/astral-sh/ruff:0.14.2
+    entrypoint: [""]
   script:
     - ruff check --select E,F,W --line-length 120 maisecrets hooks harness tests
 
