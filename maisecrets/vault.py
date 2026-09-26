@@ -55,7 +55,7 @@ def load_config() -> dict:
     without a settings dialog. The env path stays for clients that know the key."""
     cfg = dict(DEFAULT_CONFIG)
     try:
-        cfg.update(json.loads(CONFIG.read_text()))
+        cfg.update(json.loads(CONFIG.read_text(encoding="utf-8")))
     except (OSError, ValueError):
         pass
     env = os.environ
@@ -132,7 +132,7 @@ class JsonFileBackend:
 
     def _load(self) -> dict:
         try:
-            return json.loads(self.path.read_text())
+            return json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
 
@@ -225,7 +225,7 @@ class EncryptedFileBackend:
 
     def _load(self) -> dict:
         try:
-            return json.loads(self.path.read_text())
+            return json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
 
@@ -321,7 +321,7 @@ class Vault:
     # index -----------------------------------------------------------------
     def _load_index(self) -> dict:
         try:
-            return json.loads(INDEX.read_text())
+            return json.loads(INDEX.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {"entries": {}, "counters": {}, "by_fingerprint": {}}
 

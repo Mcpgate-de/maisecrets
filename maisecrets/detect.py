@@ -304,7 +304,7 @@ OWN_RULES: list[dict] = [
 def _load_gitleaks() -> list[Rule]:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")   # "possible nested set" in two gitleaks regexes
-        cfg = tomllib.loads((RULES_DIR / "gitleaks.toml").read_text())
+        cfg = tomllib.loads((RULES_DIR / "gitleaks.toml").read_text(encoding="utf-8"))
         rules: list[Rule] = []
         for r in cfg.get("rules", []):
             if "regex" not in r:
@@ -355,7 +355,7 @@ def presidio_region(rec_id: str) -> str:
 
 
 def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]:
-    data = json.loads((RULES_DIR / "presidio.json").read_text())
+    data = json.loads((RULES_DIR / "presidio.json").read_text(encoding="utf-8"))
     out: list[Rule] = []
     for rec in data["recognizers"]:
         if rec["id"] in PRESIDIO_SKIP or presidio_region(rec["id"]) not in regions:
@@ -374,7 +374,7 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
 
 
 def _load_detect_secrets() -> list[Rule]:
-    data = json.loads((RULES_DIR / "detect_secrets.json").read_text())
+    data = json.loads((RULES_DIR / "detect_secrets.json").read_text(encoding="utf-8"))
     kws = tuple(sorted({"key", "pass", "pwd", "secret", "contrase"}))
     out: list[Rule] = []
     for r in data["rules"]:

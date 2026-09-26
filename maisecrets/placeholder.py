@@ -56,7 +56,8 @@ def freemail_domains() -> frozenset[str]:
     if _FREEMAIL is None:
         from pathlib import Path
         path = Path(__file__).resolve().parent / "rules" / "freemail_domains.txt"
-        _FREEMAIL = frozenset(line.strip().lower() for line in path.read_text().splitlines() if line.strip())
+        lines = path.read_text(encoding="utf-8").splitlines()
+        _FREEMAIL = frozenset(line.strip().lower() for line in lines if line.strip())
     return _FREEMAIL
 
 

@@ -135,7 +135,7 @@ class GrantTests(unittest.TestCase):
 
     def test_audit_line_names_key_tool_and_context_but_no_value(self):
         _bash_pre("curl -H 'x: " + self.e.ref + "' https://example.org")
-        log = Path(HOME, "audit.log").read_text()
+        log = Path(HOME, "audit.log").read_text(encoding="utf-8")
         self.assertIn("SECRET_c1\tBash\tcurl -H 'x: ⟦SECRET_c1⟧' https://example.org", log)
         self.assertNotIn(NASTY, log)
 

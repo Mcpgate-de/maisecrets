@@ -443,7 +443,7 @@ def _has_live(cfg: dict) -> bool:
     if "v" not in _live_cache:
         from .vault import INDEX
         try:
-            idx = json.loads(INDEX.read_text())
+            idx = json.loads(INDEX.read_text(encoding="utf-8"))
             _live_cache["v"] = any(not m.get("purged") for m in idx.get("entries", {}).values())
         except (OSError, ValueError):
             _live_cache["v"] = False

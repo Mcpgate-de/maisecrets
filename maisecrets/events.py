@@ -21,7 +21,7 @@ ISSUES_URL = "https://github.com/Sprinterli/maisecrets/issues/new"
 def plugin_version() -> str:
     try:
         manifest = Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json"
-        return json.loads(manifest.read_text()).get("version", "?")
+        return json.loads(manifest.read_text(encoding="utf-8")).get("version", "?")
     except (OSError, ValueError):
         return "?"
 
