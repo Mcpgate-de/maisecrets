@@ -78,23 +78,27 @@ class GrantTests(unittest.TestCase):
                 self.assertEqual(r.stdout, want, r.stderr)
 
     @unittest.skipIf(BASH is None, "no bash")
-    def test_grant_serves_retries_within_one_command_and_a_burned_grant_kills_the_command(self):
-        new = _bash_pre("for i in 1 2 3; do printf '%s;' " + self.e.ref + "; done")["hookSpecificOutput"]
-        r = _run(new["updatedInput"]["command"])
-        self.assertEqual(r.stdout, (NASTY + ";") * 3, r.stderr)          # a retry loop resolves again
-        # the nonce of one key does not open another key
-        e2 = Vault().put(PLAIN, "SECRET", "manual", session="S1")
-        nonce = new["updatedInput"]["command"].split("--grant ")[1].split(" ")[0]
-        self.assertEqual(Vault().redeem(e2.key, nonce), (None, "no-grant"))
-        # a burned grant (uses exhausted) terminates the command instead of running it with ""
-        v = Vault()
-        v._index["grants"][nonce]["uses"] = v.GRANT_USES
-        v._save_index()
-        r = _run("printf 'matches:%s' \"$(grep -c " + '"$(' + new["updatedInput"]["command"].split("$(", 1)[1]
-                 .split(")", 1)[0] + ' || kill -TERM $$)" /dev/null)"')
-        self.assertNotEqual(r.returncode, 0)
-        self.assertNotIn("matches:", r.stdout)          # no false all-clear
-        self.assertIn("grant-used", r.stderr)
+    def test_value_is_delivered_once_and_a_missing_delivery_fails_the_whole_command(self):
+        out = _bash_pre("printf '%s' " + self.e.ref + " | tr a-z A-Z; echo tail")["hookSpecificOutput"]
+        cmd = out["updatedInput"]["command"]
+        self.assertTrue(cmd.startswith('__ms_1="$(cat '), cmd)         # read up front, in the main shell
+        self.assertNotIn(NASTY, cmd)
+        r = _run(cmd)
+        self.assertEqual(r.stdout, NASTY.upper() + "tail\n", r.stderr)   # the value reached a pipeline element
+        # the FIFO delivered once and is gone: the same command again fails closed as a whole,
+        # no "" reaches the pipeline, nothing after it runs
+        r2 = _run(cmd)
+        self.assertEqual(r2.returncode, 97)
+        self.assertEqual(r2.stdout, "")
+        self.assertIn("not delivered", r2.stderr)
+
+    def test_two_references_to_one_key_share_one_delivery(self):
+        out = _bash_pre("echo " + self.e.ref + " and '" + self.e.ref + "'")["hookSpecificOutput"]
+        cmd = out["updatedInput"]["command"]
+        self.assertEqual(cmd.count("__ms_1="), 1)
+        self.assertEqual(cmd.count("$__ms_1"), 2)
+        if BASH:
+            self.assertEqual(_run(cmd).stdout, NASTY + " and " + NASTY + "\n")
 
     def test_a_model_written_grant_or_resolver_call_is_denied(self):
         for cmd in ('python3 /x/hooks/resolve.py SECRET_c1 --grant abc', 'echo x --grant abc'):

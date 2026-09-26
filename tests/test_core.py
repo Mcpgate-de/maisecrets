@@ -158,6 +158,11 @@ class DetectTests(unittest.TestCase):
     def test_a_keyword_inside_a_product_name_before_markdown_is_not_a_credential(self):
         self.assertEqual(detect.scan("| shown next to `/maisecrets:report` | the notice"), [])
 
+    def test_two_words_of_prose_after_a_keyword_are_not_a_credential(self):
+        self.assertEqual(detect.scan('sys.stderr.write("maisecrets: bad payload")'), [])
+        self.assertEqual(detect.scan("secret: very important"), [])
+        self.assertNotEqual(detect.scan("secret: " + "Somm" + "er20" + "26 x"), [])   # a digit keeps it a value
+
     def test_a_short_prose_word_after_token_is_not_a_credential(self):
         self.assertEqual(detect.scan("the token expired yesterday"), [])
 
@@ -271,9 +276,9 @@ class HookTests(unittest.TestCase):
                               "tool_input": {"command": f'curl -H "PRIVATE-TOKEN: {e.ref}" u'}})
         cmd = out["hookSpecificOutput"]["updatedInput"]["command"]
         self.assertNotIn(GLPAT, cmd)                     # the value is never spliced into the command
-        self.assertIn("resolve.py", cmd)
-        self.assertIn(f"{e.key} --grant ", cmd)
-        self.assertTrue(cmd.startswith('curl -H "PRIVATE-TOKEN: $('))   # double-quote context: bare $(…)
+        self.assertTrue(cmd.startswith('__ms_1="$(cat '), cmd)          # read up front in the main shell
+        self.assertIn(f"value for {e.key} not delivered", cmd)
+        self.assertTrue(cmd.endswith('curl -H "PRIVATE-TOKEN: $__ms_1" u'), cmd)   # double-quote context
         self.assertNotIn("permissionDecision", out["hookSpecificOutput"])
         out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", "tool_input": {"command": "echo ⟦SECRET_c42⟧"}})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")

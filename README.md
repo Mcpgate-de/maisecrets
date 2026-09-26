@@ -251,15 +251,22 @@ A placeholder turns back into its value only here:
 - **In the session where a human typed it.** A reference minted in session A
   resolves in session B only after you paste it into a prompt there. Keys are
   counters, so an injected text could otherwise name one it never saw.
-- **Through a grant in Bash.** The hook rewrites `⟦SECRET_c1⟧` to
-  `$(python resolve.py SECRET_c1 --grant NONCE || kill -TERM $$)` in the
-  quoting context of the placeholder. The command you approve, the transcript
-  and the tool record carry no value; the command reads it, a retry loop may
-  read it again, and the nonce dies after 120 s or 20 reads. A failed resolve
-  terminates the command instead of running it with an empty value (a
-  `grep` with "" would report a false all-clear). A nonce the model copies
-  from the transcript into a later command is denied. A value with quotes or
-  `$(` arrives byte for byte instead of becoming shell syntax.
+- **Read up front in Bash.** The hook prefixes the command with
+  `__ms_1="$(cat <fifo>)" || exit 97;` and turns `⟦SECRET_c1⟧` into
+  `$__ms_1` in its quoting context. A detached process serves the value once
+  through a FIFO in the temp directory (readable from inside Codex's sandbox,
+  which can neither write the vault nor read the keychain); on Windows Git
+  Bash the resolver script reads it under a grant. The command you approve,
+  the transcript and the tool record carry no value. A missing delivery
+  ends the whole command with exit 97 before anything runs, also for
+  references inside pipelines and subshells; nothing ever runs with an empty
+  value. A FIFO path or a variable the model copies from the transcript into
+  a later command is denied. A value with quotes or `$(` arrives byte for
+  byte instead of becoming shell syntax.
+- **Codex approves nothing here.** Codex accepts a rewritten command only
+  together with `allow`, which skips its own approval prompt for that call.
+  On Codex the gates above are the whole control; on Claude Code the normal
+  permission rules still apply to the rewritten command.
 - **Inline for MCP tools.** An argument has no shell to read from, so the value
   is inserted after the same session rule. The permission prompt of the client
   then shows your own value at the point of the real call.
@@ -330,8 +337,13 @@ a to-do.
 - **A client that rejects the manifest loads nothing and says nothing.**
   Claude Code 2.1.223 did so for a manifest key it did not know. Check with
   `/hooks` that maisecrets is listed; the harness checks the debug log.
-- **The prompt hook is fail-open on timeout** (30 s in Claude Code). The
-  detector is regex only and runs in milliseconds; keep it that way.
+- **A hook that exceeds the client's timeout fails open** (10 s for the
+  prompt hook, 20 s for tool output, set in `hooks/hooks.json`). The plugin's
+  own watchdog answers fail-closed after 7 s (block, deny, or withheld
+  output), and a hook that crashes answers the same way; Claude Code ignores
+  exit 2 from `PostToolUse`, so the raw output would otherwise reach the
+  model. Codex runs the tool anyway when a hook fails, so there the watchdog
+  is the only net.
 - **Tool output above 50K characters** is spilled to a file by Claude Code
   and is not rewritten.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt

@@ -138,6 +138,11 @@ def run_scenario(name: str, sc: dict) -> list[str]:
                      if MARK not in bodies else "LEAK: the marker is in the rollout transcript")
     if MARK in final or MARK[-8:] in final:
         fails.append("LEAK: the marker (or its tail) is in the final message")
+    lines = [ln.strip() for ln in out.splitlines()]
+    failed_hooks = [ln for ln in lines if ln.startswith("hook: ") and ln.endswith("Failed")]
+    if failed_hooks:
+        # Codex runs the tool anyway when a hook fails (fail-open); a failed hook is never acceptable
+        fails.append("hook failed in codex (fail-open): " + ", ".join(sorted(set(failed_hooks))))
     if sc.get("expect_blocked"):
         if "blocked" not in out.lower() and "maisecrets" not in out:
             fails.append("prompt was not blocked (no notice in output)")

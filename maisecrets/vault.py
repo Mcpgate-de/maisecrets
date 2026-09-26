@@ -58,6 +58,8 @@ def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
         # Windows refuses to replace a file another process has open for reading (WinError 5
         # in the 12-process test on windows-latest, 2026-09-26); a reader holds it for
         # milliseconds, so retry briefly instead of failing the hook
@@ -76,12 +78,30 @@ def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
             pass
 
 
+_LOCKS: dict = {}
+
+
+def _lock_for(path: Path) -> "_Lock":
+    """One lock object per path and process, shared by every Vault in the process: a second
+    flock on a second descriptor would wait for the first (measured: two Vault objects in one
+    process deadlocked)."""
+    key = str(path)
+    if key not in _LOCKS:
+        _LOCKS[key] = _Lock(path)
+    return _LOCKS[key]
+
+
+class LockTimeout(RuntimeError):
+    pass
+
+
 class _Lock:
     """An exclusive lock per vault home, taken around each read-modify-write of the index and
-    released right after. Not held for a process's lifetime: a long-lived holder (a harness that
-    preloads in-process, a test process) starved every hook, and a Codex hook that times out
-    is fail-OPEN (measured 2026-09-26: all four hooks "Failed", the command ran with the
-    placeholder). POSIX flock; msvcrt on Windows; no lock where neither exists."""
+    released right after. Not held for a process's lifetime: a long-lived holder starved every
+    hook, and a Codex hook that times out is fail-OPEN (measured 2026-09-26). Re-entrant within
+    the process. A lock that cannot be taken within ``LOCK_DEADLINE`` raises, so the hook fails
+    closed with a reason instead of hanging into the client's timeout, which fails open."""
+    LOCK_DEADLINE = 6.0
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -92,17 +112,28 @@ class _Lock:
         self.depth += 1
         if self.depth > 1:
             return self
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        deadline = time.time() + self.LOCK_DEADLINE
         try:
-            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
-            try:
-                import fcntl
-                fcntl.flock(self.fd, fcntl.LOCK_EX)
-            except ImportError:
-                import msvcrt
-                msvcrt.locking(self.fd, msvcrt.LK_LOCK, 1)
-        except OSError:
-            self.fd = None
+            while True:
+                try:
+                    try:
+                        import fcntl
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except ImportError:
+                        import msvcrt
+                        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if time.time() > deadline:
+                        raise LockTimeout(f"vault lock busy for {self.LOCK_DEADLINE:.0f}s ({self.path})")
+                    time.sleep(0.02)
+        except BaseException:
+            os.close(fd)
+            self.depth -= 1
+            raise
+        self.fd = fd
         return self
 
     def __exit__(self, *exc) -> None:
@@ -116,10 +147,11 @@ class _Lock:
             except ImportError:
                 import msvcrt
                 msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
-            os.close(self.fd)
         except OSError:
             pass
-        self.fd = None
+        finally:
+            os.close(self.fd)
+            self.fd = None
 
 
 def load_config() -> dict:
@@ -245,19 +277,23 @@ class KeychainBackend:
                "-l", label or f"maisecrets {key}", "-D", "maisecrets placeholder", "-w", value]
         if comment:
             cmd += ["-j", comment]
-        subprocess.run(cmd, check=True, capture_output=True)
+        # no check=True: CalledProcessError prints the argument list, which holds the value, and an
+        # error text can reach the model as a block reason (Codex review, 2026-09-26)
+        r = subprocess.run(cmd, capture_output=True, timeout=5)
+        if r.returncode != 0:
+            raise RuntimeError(f"keychain add failed (rc {r.returncode})")
 
     def get(self, key: str) -> str | None:
         r = subprocess.run(
             ["security", "find-generic-password", "-s", SERVICE, "-a", key, "-w"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=5,
         )
         return r.stdout.rstrip("\n") if r.returncode == 0 else None
 
     def delete(self, key: str) -> None:
         subprocess.run(
             ["security", "delete-generic-password", "-s", SERVICE, "-a", key],
-            capture_output=True,
+            capture_output=True, timeout=5,
         )
 
 
@@ -286,7 +322,7 @@ class EncryptedFileBackend:
 
     def _openssl(self, args: list[str], data: bytes) -> bytes:
         r = subprocess.run(["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "100000", "-salt",
-                            "-pass", f"file:{self.key_file}", *args], input=data, capture_output=True)
+                            "-pass", f"file:{self.key_file}", *args], input=data, capture_output=True, timeout=5)
         if r.returncode != 0:
             raise RuntimeError("openssl failed: " + r.stderr.decode(errors="ignore")[:200])
         return r.stdout
@@ -412,7 +448,7 @@ class Vault:
     def __init__(self, cfg: dict | None = None) -> None:
         self.cfg = cfg or load_config()
         self.backend = make_backend(self.cfg)
-        self._lock = _Lock(HOME / ".lock")
+        self._lock = _lock_for(HOME / ".lock")
         self._index = self._load_index()
 
     def _exclusive(self):
@@ -422,10 +458,23 @@ class Vault:
 
     # index -----------------------------------------------------------------
     def _load_index(self) -> dict:
-        try:
-            return json.loads(INDEX.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        if not INDEX.exists():
             return {"entries": {}, "counters": {}, "by_fingerprint": {}}
+        try:
+            data = json.loads(INDEX.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            # a damaged index must not become an empty one: the counters would restart and the
+            # next put would overwrite SECRET_c1 in the store (measured by review, 2026-09-26)
+            kept = INDEX.with_name(f"index.corrupt.{int(time.time())}.json")
+            try:
+                os.replace(INDEX, kept)
+            except OSError:
+                pass
+            raise RuntimeError(f"vault index unreadable, moved to {kept.name}; nothing resolves until it is "
+                               f"repaired or removed by hand") from exc
+        if not isinstance(data, dict) or "entries" not in data:
+            raise RuntimeError("vault index has an unexpected shape")
+        return data
 
     def _save_index(self) -> None:
         atomic_write(INDEX, json.dumps(self._index, indent=1))
@@ -545,8 +594,8 @@ class Vault:
 
     # grants: one-time permission for a command to read one value ----------
     GRANT_TTL = 120
-    GRANT_USES = 20     # a retry loop or two references to one key redeem the same nonce; a command
-                        # that needs more is not a command, it is a sweep
+    GRANT_USES = 3      # the value is read once in the main shell before the command runs; a retry
+                        # of the read itself is the only reason for a second use
 
     @_mutating
     def grant(self, key: str, session: str | None, tool: str, context: str) -> tuple[str | None, str]:

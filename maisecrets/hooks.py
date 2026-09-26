@@ -16,6 +16,7 @@ import os
 import platform
 import re
 import subprocess
+import time
 import sys
 from typing import Any
 
@@ -29,8 +30,13 @@ AT_MENTION_RE = re.compile(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
 
 # ---------------------------------------------------------------- helpers --
 def client_of(payload: dict) -> str:
-    """Which agent sent this payload. Codex marks turn-scoped events with `turn_id` and
-    every event with `model`; Claude Code sends `prompt_id`/`effort` and neither of those."""
+    """Which agent sent this payload. The environment is the primary signal (Codex exports
+    CODEX_* variables to its hooks); the payload shape is the fallback: Codex marks turn-scoped
+    events with `turn_id` and every event with `model`, Claude Code sends `prompt_id`. A Codex
+    payload taken for Claude would answer with updatedToolOutput, which Codex ignores: the raw
+    output would reach the model (Codex review, 2026-09-26)."""
+    if any(k.startswith("CODEX_") for k in os.environ):
+        return "codex"
     if "turn_id" in payload or ("model" in payload and "prompt_id" not in payload):
         return "codex"
     return "claude"
@@ -133,37 +139,47 @@ def _scrub_transcript_later(path: str, values: list[str], refs: list[str], secon
 
 
 def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
-    """Best effort: rewrite the transcript lines that carry the raw prompt.
-
-    Claude Code writes the prompt as a queue-operation record before the
-    UserPromptSubmit hook runs (measured 2026-09-26), so a blocked prompt is
-    already on disk. Replacing it here is the only way to keep the value out
-    of ~/.claude/projects.
-    """
+    """Best effort: overwrite every occurrence of a value in the transcript IN PLACE with a
+    mask of the same byte length. Same inode and same mode: a writer that keeps the file open
+    keeps writing into it (os.replace lost every later record and turned 0600 into 0644;
+    review 2026-09-26). The reference is not written, its length differs; the block notice
+    named it. Plain, JSON-escaped and doubly escaped forms are covered."""
     try:
         if not path or not os.path.exists(path) or os.path.getsize(path) > 50 * 1024 * 1024:
             why = "missing" if not path else ("absent" if not os.path.exists(path) else "too large")
             _debug(f"scrub: skipped, path={why}")
             return False
-        with open(path, encoding="utf-8") as f:
-            data = f.read()
-        hits = sum(data.count(v) for v in values)
-        _debug(f"scrub: read {os.path.basename(path)} {len(data)} bytes, {hits} value hits")
-        changed = data
-        for v, r in zip(values, refs):
-            esc_v, esc_r = json.dumps(v)[1:-1], json.dumps(r)[1:-1]
-            # a hook's stdout is logged as a JSON string inside a JSON record, so the value can
-            # also sit there doubly escaped (measured with an MCP echo tool, 2026-09-26)
-            changed = changed.replace(json.dumps(esc_v)[1:-1], json.dumps(esc_r)[1:-1])
-            changed = changed.replace(esc_v, esc_r)
-        if changed == data:
-            _debug("scrub: nothing to replace")
-            return False
-        tmp = f"{path}.maisecrets.{os.getpid()}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(changed)
-        os.replace(tmp, path)
-        _debug(f"scrub: rewrote ({len(data)} -> {len(changed)} bytes)")
+        forms: list[bytes] = []
+        for v in values:
+            esc = json.dumps(v)[1:-1]
+            for form in (v, esc, json.dumps(esc)[1:-1]):
+                b = form.encode("utf-8")
+                if b and b not in forms:
+                    forms.append(b)
+        fd = os.open(path, os.O_RDWR)
+        try:
+            try:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            except ImportError:
+                pass
+            data = os.read(fd, os.path.getsize(path) + 1)
+            hits = 0
+            for b in forms:
+                n = data.count(b)
+                if n:
+                    hits += n
+                    data = data.replace(b, b"*" * len(b))
+            _debug(f"scrub: read {os.path.basename(path)} {len(data)} bytes, {hits} value hits")
+            if not hits:
+                _debug("scrub: nothing to replace")
+                return False
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.write(fd, data)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        _debug(f"scrub: masked in place ({hits} hits)")
         return True
     except OSError:
         return False
@@ -197,6 +213,7 @@ def take_pending(session: str | None = None) -> str | None:
         cands = [_pending_path(session)]
     elif d.exists():
         cands = sorted(d.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)[:1]
+    cands = [c for c in cands if time.time() - c.stat().st_mtime < 15 * 60]   # a stale prompt is not sent
     if not cands:
         return None
     text = cands[0].read_text(encoding="utf-8")
@@ -282,7 +299,7 @@ _STORE_READ_RE = re.compile(
     r"|(PasswordVault)|(vault\.enc\.json)|(\.maisecrets[/\\](vault|key|index))"
     # a resolver call with a nonce is written by this hook, never by the model; one in the
     # model's command is a replay of a nonce it read in the transcript
-    r"|(resolve\.py\b)|(--grant\b)",
+    r"|(resolve\.py\b)|(--grant\b)|(maisecrets[/\\]v-)|(__ms_\d+\b)",
 )
 
 
@@ -304,14 +321,72 @@ def _quote_state(command: str, pos: int) -> str:
 
 
 def _resolver_call(key: str, nonce: str) -> str:
-    """The command substitution that reads one value under a grant. When the resolve fails
-    (burned or expired grant), the whole command is terminated instead of running with an
-    empty string: `grep … $(…)` with an empty value reported "0 matches" as a false all-clear
-    (field report, 2026-09-26). `$$` inside a command substitution is the command's own shell."""
+    """Windows (Git Bash) only: the command substitution that reads one value under a grant."""
     from pathlib import Path as _P
     py = _P(sys.executable).as_posix()
     script = (_P(__file__).resolve().parent.parent / "hooks" / "resolve.py").as_posix()
-    return f'$("{py}" "{script}" {key} --grant {nonce} || kill -TERM $$)'
+    return f'$("{py}" "{script}" {key} --grant {nonce})'
+
+
+def _serve_value_later(fifo: str, value: str, seconds: float = 120.0) -> bool:
+    """Deliver one value once through a FIFO from a detached child. The command runs later, and
+    on Codex inside a sandbox that may neither write the vault nor read the keychain (measured:
+    resolve.py failed there and the command died); a FIFO in TMPDIR is readable from inside.
+    The value lives in the child's memory, never on disk, and is gone after one read or after
+    ``seconds``. The value reaches the child on stdin, never as an argument."""
+    code = (
+        "import json,os,sys,time\n"
+        "spec = json.load(sys.stdin)\n"
+        "try:\n"
+        "    os.mkfifo(spec['fifo'], 0o600)\n"
+        "except OSError:\n"
+        "    sys.exit(1)\n"
+        "deadline = time.time() + spec['seconds']\n"
+        "fd = None\n"
+        "while time.time() < deadline and fd is None:\n"
+        "    try:\n"
+        "        fd = os.open(spec['fifo'], os.O_WRONLY | os.O_NONBLOCK)\n"
+        "    except OSError:\n"
+        "        time.sleep(0.05)\n"
+        "if fd is not None:\n"
+        "    os.set_blocking(fd, True)\n"
+        "    try:\n"
+        "        os.write(fd, spec['value'].encode())\n"
+        "    finally:\n"
+        "        os.close(fd)\n"
+        "try:\n"
+        "    os.unlink(spec['fifo'])\n"
+        "except OSError:\n"
+        "    pass\n"
+    )
+    try:
+        child = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        child.stdin.write(json.dumps({"fifo": fifo, "value": value, "seconds": seconds}).encode())
+        child.stdin.close()
+        # the FIFO must exist before the command starts: wait for the child to create it
+        for _ in range(100):
+            if os.path.exists(fifo):
+                return True
+            time.sleep(0.01)
+        return False
+    except (OSError, ValueError):
+        return False
+
+
+def _fifo_path(nonce: str) -> str:
+    import tempfile
+    d = os.path.join(tempfile.gettempdir(), "maisecrets")
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    # a serving child that was killed leaves its FIFO behind; sweep the stale ones
+    try:
+        for name in os.listdir(d):
+            fp = os.path.join(d, name)
+            if name.startswith("v-") and time.time() - os.stat(fp).st_mtime > 300:
+                os.unlink(fp)
+    except OSError:
+        pass
+    return os.path.join(d, f"v-{nonce}")
 
 
 def _deny(reason: str) -> dict:
@@ -329,10 +404,14 @@ def _updated(payload: dict, new_input: dict) -> dict:
 
 
 def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
-    """Bash: every reference becomes ``$(resolve KEY --grant NONCE)`` in the right quoting
-    context. The value is read by the command itself at run time, so the command the user
-    approves, the transcript and the tool_use record carry no value, and no value is ever
-    spliced into shell syntax (a value with quotes or ``$(`` would otherwise become code)."""
+    """Bash: every value is read into a shell variable in the MAIN shell before the command
+    runs, and the placeholder becomes that variable in its quoting context. The read fails
+    closed for the whole command (``|| exit 97``), also inside pipelines and subshells, where
+    a ``kill $$`` behind a substitution did not reach (review, 2026-09-26). The command the
+    user approves, the transcript and the tool_use record carry no value, and no value is
+    ever spliced into shell syntax. On POSIX the value comes through a FIFO in TMPDIR served
+    by a detached child (readable from inside Codex's sandbox); on Windows Git Bash through
+    the resolver script."""
     command = tool_input.get("command", "")
     if _STORE_READ_RE.search(command):
         return _deny("maisecrets: the vault is read by the human (maisecrets get) or by a granted command, "
@@ -340,24 +419,50 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     refs = find_refs(command)
     if not refs:
         return {}
+    if platform.system() == "Windows" and client_of(payload) == "codex":
+        return _deny("maisecrets: placeholders in shell commands are not supported on Codex for Windows yet "
+                     "(PowerShell); use the value through an MCP tool or on another platform.")
     vault = Vault(cfg)
     session = payload.get("session_id")
     failed: list[str] = []
+    prelude: list[str] = []
     rewritten = command
-    for key, start, end in sorted(refs, key=lambda r: r[1], reverse=True):
-        nonce, status = vault.grant(key, session, "Bash", command)
-        if status != "ok":
-            failed.append(f"{key} ({status})")
-            continue
-        call = _resolver_call(key, nonce)
+    var_by_key: dict[str, str] = {}
+    for n, (key, start, end) in enumerate(sorted(refs, key=lambda r: r[1], reverse=True), 1):
+        if key not in var_by_key:
+            nonce, status = vault.grant(key, session, "Bash", command)
+            if status != "ok":
+                failed.append(f"{key} ({status})")
+                continue
+            var = f"__ms_{len(var_by_key) + 1}"
+            var_by_key[key] = var
+            if platform.system() == "Windows":
+                read = _resolver_call(key, nonce)
+            else:
+                value, status = vault.get(key, session)
+                if status != "ok":
+                    failed.append(f"{key} ({status})")
+                    continue
+                fifo = _fifo_path(nonce)
+                if not _serve_value_later(fifo, value):
+                    failed.append(f"{key} (value delivery unavailable)")
+                    continue
+                read = f"$(cat {shlex_quote(fifo)})"
+            prelude.append(f'{var}="{read}" || {{ echo "maisecrets: value for {key} not delivered" >&2; exit 97; }}')
+        var = var_by_key[key]
         ctx = _quote_state(command, start)
-        piece = "'\"" + call + "\"'" if ctx == "sq" else call if ctx == "dq" else '"' + call + '"'
+        piece = "'\"$" + var + "\"'" if ctx == "sq" else "$" + var if ctx == "dq" else '"$' + var + '"'
         rewritten = rewritten[:start] + piece + rewritten[end:]
     if failed:
         return _deny(_deny_reason(failed))
     new_input = dict(tool_input)
-    new_input["command"] = rewritten
+    new_input["command"] = "; ".join(reversed(prelude)) + "; " + rewritten
     return _updated(payload, new_input)
+
+
+def shlex_quote(s: str) -> str:
+    import shlex
+    return shlex.quote(s)
 
 
 def _deny_reason(failed: list[str]) -> str:
@@ -585,7 +690,39 @@ def _has_live(cfg: dict) -> bool:
     return _live_cache["v"]
 
 
-HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": post_tool}
+def _post_tool_guarded(payload: dict) -> dict:
+    """Claude Code ignores exit 2 from PostToolUse: the raw output would reach the model. So a
+    failure inside the redaction withholds the output instead (review, 2026-09-26)."""
+    try:
+        return post_tool(payload)
+    except Exception as exc:  # noqa: BLE001
+        _debug(f"post-tool: {type(exc).__name__}")
+        return _fail_closed("post-tool", payload, f"failed ({type(exc).__name__}).")
+
+
+HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post_tool_guarded}
+
+
+WATCHDOG_SECONDS = 7.0   # under the 10 s the clients give a hook; a client timeout fails OPEN
+
+
+def _fail_closed(event: str, payload: dict, why: str) -> dict:
+    """The answer that keeps the guard up when the hook itself cannot finish: block the prompt,
+    deny the tool, withhold the tool output. Never a value, never an exception text (a keychain
+    error carried the value in its argument list; Codex review, 2026-09-26)."""
+    reason = f"maisecrets {event}: {why}"
+    codex = client_of(payload) == "codex"
+    if event == "user-prompt":
+        out = {"decision": "block", "reason": reason + " The prompt was not sent; try again."}
+        if not codex:
+            out["hookSpecificOutput"] = {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}
+        return out
+    if event == "pre-tool":
+        return _deny(reason)
+    if codex:
+        return {"decision": "block", "reason": reason + " Tool output withheld."}
+    return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                   "updatedToolOutput": f"[{reason} Tool output withheld.]"}}
 
 
 def main(argv: list[str]) -> int:
@@ -595,12 +732,25 @@ def main(argv: list[str]) -> int:
     event = argv[1]
     try:
         payload = json.load(sys.stdin)
-    except ValueError as exc:
-        sys.stderr.write(f"maisecrets: bad payload: {exc}\n")
+    except ValueError:
+        sys.stderr.write("maisecrets: bad payload\n")
         return 2  # fail closed
+    import threading
+
+    def on_timeout() -> None:
+        _out(_fail_closed(event, payload, f"took longer than {WATCHDOG_SECONDS:.0f}s."))
+        _debug(f"watchdog: {event} timed out, failed closed")
+        os._exit(0)
+    watchdog = threading.Timer(WATCHDOG_SECONDS, on_timeout)
+    watchdog.daemon = True
+    watchdog.start()
     try:
         _out(HANDLERS[event](payload))
         return 0
     except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
-        sys.stderr.write(f"maisecrets {event}: {type(exc).__name__}: {exc}\n")
-        return 2
+        # the type only: an exception message may carry a value (subprocess errors list the argv)
+        _debug(f"{event}: {type(exc).__name__}")
+        _out(_fail_closed(event, payload, f"failed ({type(exc).__name__})."))
+        return 0
+    finally:
+        watchdog.cancel()

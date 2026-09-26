@@ -244,6 +244,8 @@ def _ds_value_ok(v: str) -> bool:
         return False
     if v.count(" ") >= 2:
         return False   # a sentence or an i18n label ("Add API key"), not a value
+    if " " in v and not any(c.isdigit() for c in v):
+        return False   # two words of prose ("bad payload"), not a value
     if not any(c.isdigit() for c in v) and re.fullmatch(r"[A-Za-z]+(?:[_-][A-Za-z]+)+", v):
         return False   # an identifier: secret_value, from-secret, NAME_OF_SECRET
     low = v.lower()

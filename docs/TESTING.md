@@ -68,6 +68,27 @@ grant serves retries within its lifetime; (3) one tool result came back
 empty once, cause unknown, not reproduced; (4) MCP values inline: measured the
 same day, the model sees placeholders only and the transcript is scrubbed.
 
+## Two more reviews (Codex adapter, failure modes; 2026-09-26 night)
+
+`docs/reviews/2026-09-26-codex-adapter.md` and `-failure-modes.md`. Closed
+the same night: a keychain error text carried the value in its argument
+list (no `check=True`, type-only error texts); a hook past the client's
+timeout fails open on both clients (7 s watchdog answers fail-closed;
+`PostToolUse` withholds the output on any failure, because Claude Code
+ignores exit 2 there); the resolver could not run inside Codex's sandbox
+(the value now comes through a FIFO served by a detached child, read up
+front in the main shell, `exit 97` before anything runs); `kill $$` did
+not reach pipelines or subshells (the up-front read does); `os.replace` on
+the transcript lost later records and changed the mode (in-place masking
+now); a damaged index became an empty one and would have overwritten
+`SECRET_c1` (refused and kept aside now); the lock was per process life
+(per mutation now, with a 6 s deadline that fails closed); two Vault objects
+in one process could wait for each other (one lock per path per process);
+a pending prompt older than 15 min is not sent. Open: Codex `allow` skips
+its approval prompt (documented in the README); a plugin-side confirm step;
+Codex on Windows (denied for now); an echo-and-count MCP server in the real
+Codex harness to measure retries after a block-as-output.
+
 ## Mutation probes
 
 | date | mutation | expected | observed |
