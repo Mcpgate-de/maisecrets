@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## [0.3.19] - 2026-09-26
+
+### Features
+
+- /maisecrets:send sends the kept rewritten prompt without a clipboard; a failed resolve terminates the command; a grant serves retries; a copied nonce is denied (caf0a98)
+
+### Fixes
+
+- retry the atomic replace while another process reads the index (WinError 5 under concurrency) (4f671dd)
+- the lock is taken per index mutation, not for a process's life; the Codex harness preloads in a subprocess; tests keep the open lock file; the release gate steps aside when main moved on (c723767)
+- hook processes running at once no longer break each other: per-process temp files, one lock per vault home, unique scrub temp names (6b0ab8c)
+
 ## [0.3.18] - 2026-09-26
 
 ### Fixes
