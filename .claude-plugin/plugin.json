@@ -45,8 +45,8 @@
     "report_url": {
       "type": "string",
       "title": "Issue tracker URL",
-      "description": "Shown in the block notice so a wrong detection can be reported. Leave empty to hide.",
-      "default": ""
+      "description": "Shown in the block notice next to /maisecrets:report. Empty hides it.",
+      "default": "https://github.com/Sprinterli/maisecrets/issues"
     }
   }
 }

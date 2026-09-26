@@ -36,7 +36,7 @@ SERVICE = "maisecrets" if HOME == _DEFAULT_HOME else "maisecrets@" + hashlib.sha
 
 DEFAULT_CONFIG = {
     "backend": "keychain",          # keychain (macOS) | windows-vault | encrypted-file (Linux) | jsonfile (test)
-    "report_url": "",               # shown in the block notice once the project is public
+    "report_url": "https://github.com/Sprinterli/maisecrets/issues",   # shown in the block notice
     "ttl_seconds": {"default": 86400, "CARD": 3600},
     "max_ttl_seconds": 30 * 86400,
     "renew_on_use": True,

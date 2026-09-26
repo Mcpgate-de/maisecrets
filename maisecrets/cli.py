@@ -110,6 +110,28 @@ def cmd_put(args: list[str]) -> int:
     return 0
 
 
+def cmd_report(args: list[str]) -> int:
+    """`report` lists the last detections; `report last [note]` or `report <n> [note]` builds a
+    prefilled GitHub issue link for one of them and opens it. Nothing in the link is a value."""
+    from . import events
+    evs = events.load(20)
+    if not evs:
+        print("(no detection recorded yet)")
+        return 0
+    if not args or args[0] not in ("last", *map(str, range(1, len(evs) + 1))):
+        print("n   time                 hook              client  hits")
+        for i, e in enumerate(evs, 1):
+            hits = ", ".join(f"{h['type']}/{h['kind']}" for h in e.get("hits", []))
+            print(f"{i:<3} {e.get('ts', ''):<20} {e.get('hook', ''):<17} {e.get('client', ''):<7} {hits}")
+        print("\nmaisecrets report last [note]   or   maisecrets report <n> [note]")
+        return 0
+    ev = evs[-1] if args[0] == "last" else evs[int(args[0]) - 1]
+    url = events.issue_url(ev, " ".join(args[1:]))
+    opened = events.open_in_browser(url)
+    print(("opened in the browser: " if opened else "open this link: ") + url)
+    return 0
+
+
 def cmd_expire(_: list[str]) -> int:
     print(f"purged {Vault().expire(limit=None)} expired value(s)")
     return 0
@@ -142,14 +164,16 @@ def cmd_status(_: list[str]) -> int:
 
 
 COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_resolve, "audit": cmd_audit,
-            "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config, "status": cmd_status}
+            "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
+            "status": cmd_status}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] in {"-h", "--help"}:
-        print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | audit [n] | expire\n"
-              "           | scan [text] | config | resolve <KEY> --grant <NONCE> | hook <event>")
+        print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | audit [n]\n"
+              "           | report [last|n] [note] | expire | scan [text] | config\n"
+              "           | resolve <KEY> --grant <NONCE> | hook <event>")
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])

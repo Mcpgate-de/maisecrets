@@ -166,8 +166,11 @@ def user_prompt(payload: dict) -> dict:
         reason += "\n\n" + rewritten
     if vault.backend.test_mode:
         reason += "\n(vault backend: jsonfile, TEST MODE)"
+    from . import events
+    events.record("UserPromptSubmit", client_of(payload), entries)
+    reason += " Wrong? /maisecrets:report prepares an issue without the value."
     if cfg.get("report_url"):
-        reason += f" Wrong? Report it: {cfg['report_url']}"
+        reason += f" ({cfg['report_url']})"
     if client_of(payload) == "codex":
         return {"decision": "block", "reason": reason}
     return {
@@ -405,6 +408,8 @@ def post_tool(payload: dict) -> dict:
     new_response = _walk_strings(response, redact)
     if not hit["n"]:
         return {}
+    from . import events
+    events.record("PostToolUse", client_of(payload), entries)
     if client_of(payload) == "codex":
         # Codex has no updatedToolOutput. A "block" replaces the model-visible result with the
         # reason text, so the reason IS the redacted output. Measured on codex-cli 0.155.1

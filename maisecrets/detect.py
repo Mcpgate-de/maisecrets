@@ -238,8 +238,8 @@ def _ds_value_ok(v: str) -> bool:
         return False
     if _DS_TEMPLATED.match(v) or _DS_INDIRECT.match(v):
         return False
-    if "(" in v or ")" in v:
-        return False   # a call or an expression (`re.compile(r"…`), not a value
+    if "(" in v or ")" in v or "`" in v or "|" in v:
+        return False   # a call, an expression or markdown (`re.compile(r"…`, "`/maisecrets:report` |"), not a value
     if not any(c.isalnum() for c in v):
         return False
     if v.count(" ") >= 2:

@@ -115,6 +115,9 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(placeholder.key_of("⟦DE_TAX_ID_c2⟧"), "DE_TAX_ID_c2")
         self.assertEqual(detect.scan("see ⟦DE_TAX_ID_c2⟧ above"), [])
 
+    def test_a_keyword_inside_a_product_name_before_markdown_is_not_a_credential(self):
+        self.assertEqual(detect.scan("| shown next to `/maisecrets:report` | the notice"), [])
+
     def test_a_short_prose_word_after_token_is_not_a_credential(self):
         self.assertEqual(detect.scan("the token expired yesterday"), [])
 

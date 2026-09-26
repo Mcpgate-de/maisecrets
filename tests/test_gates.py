@@ -186,5 +186,30 @@ class RedactionTests(unittest.TestCase):
         self.assertEqual(out, {})
 
 
+class ReportTests(unittest.TestCase):
+    def setUp(self):
+        _reset()
+        try:
+            os.unlink(Path(HOME, "events.log"))
+        except FileNotFoundError:
+            pass
+        hooks._clipboard = lambda text: True
+
+    def test_block_records_an_event_and_the_issue_link_carries_no_value(self):
+        from maisecrets import events
+        token = "glpat-" + "ReportProbeAbc123456789x"
+        out = hooks.user_prompt({"prompt": f"token {token}", "session_id": "S1", "transcript_path": ""})
+        self.assertIn("/maisecrets:report", out["reason"])
+        ev = events.load()[-1]
+        self.assertEqual(ev["hook"], "UserPromptSubmit")
+        self.assertEqual(ev["hits"][0]["kind"], "gitlab-pat")
+        self.assertNotIn(token, json.dumps(ev))
+        url = events.issue_url(ev, "a build id")
+        self.assertTrue(url.startswith(events.ISSUES_URL + "?"))
+        self.assertNotIn("ReportProbe", url)
+        self.assertIn("gitlab-pat", url)
+        self.assertIn("a+build+id", url)
+
+
 if __name__ == "__main__":
     unittest.main()

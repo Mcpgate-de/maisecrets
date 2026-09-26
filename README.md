@@ -87,7 +87,7 @@ Claude Code asks for these when the plugin is installed (`userConfig` in
 | `backend` | `auto` | `keychain` (macOS), `windows-vault`, `encrypted-file` (Linux), `jsonfile` (test mode) |
 | `pii_regions` | `de` | Presidio regions besides the generic ones, comma-separated |
 | `ttl_hours` | `24` | lifetime of a stored value; every use renews it, up to 30 days |
-| `report_url` | empty | shown in the block notice so a wrong detection can be reported |
+| `report_url` | GitHub issues | shown in the block notice next to `/maisecrets:report` |
 
 At the first session start, and at every start in test mode, a notice names
 the active store, its path and where to change it. `python3 -m maisecrets.cli
@@ -119,6 +119,14 @@ other users. None of them stops a process that runs as you: `security`,
 PowerShell or openssl hand the value to any such process without a dialog
 (`docs/THREAT-MODEL.md`). The gates below stand in front of the agent, not in
 front of you.
+
+## Reporting a wrong detection
+
+Every block and every redaction leaves an event in `~/.maisecrets/events.log`
+(hook, client, rule name, type, plugin version; never a value). `/maisecrets:report`
+in Claude Code, or `python3 -m maisecrets.cli report last "why it is wrong"`,
+opens a GitHub issue prefilled from the last event. The value is not in the
+event, so it cannot be in the issue; describe its shape in words.
 
 ## Gates around a resolve
 
