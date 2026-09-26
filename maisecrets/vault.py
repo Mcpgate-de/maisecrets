@@ -47,6 +47,64 @@ DEFAULT_CONFIG = {
 }
 
 
+def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
+    """Write via a per-process temp file and an atomic rename. A shared temp name
+    (``index.tmp``) let two hook processes running at once replace each other's file; the
+    second one then failed with FileNotFoundError and the hook blocked the tool call
+    (Codex with two plugin copies, 2026-09-26)."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+_PROCESS_LOCK: "_Lock | None" = None
+
+
+class _Lock:
+    """One exclusive lock per vault home, taken once per process on the first Vault and held
+    until the process ends (a hook process lives for milliseconds; a second flock in the same
+    process would wait for itself). Serialises the read-modify-write of the index between hook
+    processes that run at the same time. POSIX flock; on Windows msvcrt; else no lock."""
+
+    def __init__(self, path: Path) -> None:
+        self.fd = None
+        try:
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self.fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                import fcntl
+                fcntl.flock(self.fd, fcntl.LOCK_EX)
+            except ImportError:
+                import msvcrt
+                msvcrt.locking(self.fd, msvcrt.LK_LOCK, 1)
+        except OSError:
+            self.fd = None
+
+    def release(self) -> None:
+        if self.fd is None:
+            return
+        try:
+            try:
+                import fcntl
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+            except ImportError:
+                import msvcrt
+                msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+            os.close(self.fd)
+        except OSError:
+            pass
+        self.fd = None
+
+
 def load_config() -> dict:
     """Defaults, then ~/.maisecrets/config.json, then CLAUDE_PLUGIN_OPTION_<KEY> if a client passes
     plugin options that way. The manifest declares no `userConfig`: Claude Code 2.1.223 rejects a
@@ -139,12 +197,7 @@ class JsonFileBackend:
             return {}
 
     def _save(self, data: dict) -> None:
-        HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f)
-        os.replace(tmp, self.path)
+        atomic_write(self.path, json.dumps(data))
 
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
         d = self._load()
@@ -232,12 +285,7 @@ class EncryptedFileBackend:
             return {}
 
     def _save(self, data: dict) -> None:
-        HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f)
-        os.replace(tmp, self.path)
+        atomic_write(self.path, json.dumps(data))
 
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
         import base64
@@ -318,6 +366,9 @@ class Vault:
     def __init__(self, cfg: dict | None = None) -> None:
         self.cfg = cfg or load_config()
         self.backend = make_backend(self.cfg)
+        global _PROCESS_LOCK
+        if _PROCESS_LOCK is None:
+            _PROCESS_LOCK = _Lock(HOME / ".lock")   # released when the process ends
         self._index = self._load_index()
 
     # index -----------------------------------------------------------------
@@ -328,12 +379,7 @@ class Vault:
             return {"entries": {}, "counters": {}, "by_fingerprint": {}}
 
     def _save_index(self) -> None:
-        HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
-        tmp = INDEX.with_suffix(".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            json.dump(self._index, f, indent=1)
-        os.replace(tmp, INDEX)
+        atomic_write(INDEX, json.dumps(self._index, indent=1))
 
     def _ttl_for(self, type_: str) -> int:
         ttls = self.cfg.get("ttl_seconds", {})

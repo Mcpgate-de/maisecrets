@@ -244,6 +244,23 @@ class ReportTests(unittest.TestCase):
         self.assertNotIn("hits", url)
 
 
+class ConcurrencyTests(unittest.TestCase):
+    def test_parallel_hook_processes_do_not_lose_the_index_or_each_other(self):
+        _reset()
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); from maisecrets.vault import Vault; "
+                "e = Vault().put('parallel-value-' + sys.argv[2] + '-abcdef', 'SECRET', 'manual', session='S1'); "
+                "print(e.key)")
+        procs = [subprocess.Popen([sys.executable, "-c", code, str(ROOT), str(i)], stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, env=dict(os.environ)) for i in range(12)]
+        outs = [p.communicate(timeout=60) for p in procs]
+        errors = [err for _o, err in outs if err.strip()]
+        self.assertEqual(errors, [], errors[:2])
+        keys = sorted(o.strip() for o, _e in outs)
+        self.assertEqual(len(set(keys)), 12, keys)                        # twelve distinct references
+        live = [e for e in Vault().list() if not e.purged]
+        self.assertEqual(len(live), 12)                                    # nothing lost in the index
+
+
 class TipTests(unittest.TestCase):
     def test_one_tip_per_day_rotating_and_switchable_off(self):
         from maisecrets import tips

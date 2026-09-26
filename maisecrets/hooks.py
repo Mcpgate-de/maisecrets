@@ -159,7 +159,7 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
         if changed == data:
             _debug("scrub: nothing to replace")
             return False
-        tmp = path + ".maisecrets.tmp"
+        tmp = f"{path}.maisecrets.{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(changed)
         os.replace(tmp, path)
