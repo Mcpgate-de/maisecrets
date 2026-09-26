@@ -1,0 +1,13 @@
+{
+ "top": [
+  "cwd",
+  "hook_event_name",
+  "permission_mode",
+  "prompt",
+  "prompt_id",
+  "session_id",
+  "transcript_path"
+ ],
+ "tool_input": [],
+ "tool_response": "NoneType"
+}

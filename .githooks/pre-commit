@@ -1,0 +1,30 @@
+#!/bin/bash
+# maisecrets pre-commit: fast checks that must hold on every commit.
+#   1. no secret or PII in the staged diff (our own detector, dogfooding)
+#   2. JSON manifests parse
+#   3. unit tests (they take milliseconds)
+# Install: scripts/install-hooks.sh
+set -u
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT" || exit 1
+
+# 1. staged additions through the detector
+ADDED=$(git diff --cached --unified=0 --no-color | grep -E '^\+' | grep -vE '^\+\+\+' | sed 's/^+//')
+if [ -n "$ADDED" ]; then
+  HITS=$(printf '%s\n' "$ADDED" | python3 -m maisecrets.cli scan 2>/dev/null | grep -v -E '^(EMAIL|IP) ' || true)
+  if [ -n "$HITS" ]; then
+    echo "pre-commit: the staged diff carries values the detector treats as secrets:"
+    echo "$HITS"
+    echo "Remove them, or use a placeholder like <SECRET_c1> in tests and docs."
+    exit 1
+  fi
+fi
+
+# 2. manifests
+for f in plugin.json .claude-plugin/plugin.json hooks/hooks.json; do
+  python3 -c "import json,sys; json.load(open('$f'))" || { echo "pre-commit: $f is not valid JSON"; exit 1; }
+done
+
+# 3. unit tests
+python3 -m unittest discover -s tests -q || { echo "pre-commit: unit tests failed"; exit 1; }
+exit 0

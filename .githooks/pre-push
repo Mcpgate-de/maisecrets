@@ -1,0 +1,25 @@
+#!/bin/bash
+# maisecrets pre-push: the harness runs once per push, over the tip.
+#   - refuses tag pushes (CI creates release tags from CHANGELOG.md)
+#   - runs the unit tests
+#   - runs the hook harness when `claude` is available (it needs a login;
+#     CI cannot run it, so the push is where it must pass)
+# MAISECRETS_SKIP_HARNESS=1 skips the harness only. Nothing skips the tests.
+set -u
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT" || exit 1
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/tags/*) echo "pre-push: tag pushes are refused; CI tags releases from CHANGELOG.md"; exit 1 ;;
+  esac
+done
+if echo "$*" | grep -q -- "--tags"; then echo "pre-push: --tags refused"; exit 1; fi
+
+python3 -m unittest discover -s tests -q || { echo "pre-push: unit tests failed"; exit 1; }
+
+if [ "${MAISECRETS_SKIP_HARNESS:-0}" != "1" ] && command -v claude >/dev/null 2>&1; then
+  echo "pre-push: running the hook harness (fake upstream, 4 scenarios)"
+  python3 harness/run.py || { echo "pre-push: harness failed"; exit 1; }
+fi
+exit 0

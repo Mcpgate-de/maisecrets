@@ -1,0 +1,8 @@
+maisecrets
+Copyright 2026 Andreas Kruse (Sprinterli)
+
+This product includes regular-expression patterns for secret and PII shapes
+that were taken from the file src/security/pii_scrubber.py of the ai-gateway
+repository of phase-6 GmbH (origin/main 1575685b4, 2026-09-26). See
+docs/REPO-STANDARDS.md, section "Licensing", for the open point about their
+licence before a public release.
