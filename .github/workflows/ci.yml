@@ -29,15 +29,16 @@ jobs:
           # the token is assembled at run time so the repo scan never sees a secret shape
           T="glpat-""CiRunAbc123Def456Ghi7"
           echo "{\"prompt\":\"token $T\",\"session_id\":\"s\",\"transcript_path\":\"\"}" | bash hooks/run.sh user-prompt | python -c "import sys,json; d=json.load(sys.stdin); assert d.get('decision')=='block', d; print('blocked ok')"
-      - name: hook launcher through PowerShell (Codex on Windows, commandWindows)
+      - name: hook launcher through cmd.exe (Codex on Windows, commandWindows)
         if: runner.os == 'Windows'
         shell: cmd
         run: |
           python -c "import json,sys; T='glpat-'+'CiRunAbc123Def456Ghi7'; open('payload.json','wb').write(json.dumps({'prompt':'\u00dcbergabe token '+T,'session_id':'s','transcript_path':''},ensure_ascii=False).encode('utf-8'))"
-          type payload.json | powershell -NoProfile -ExecutionPolicy Bypass -File hooks\run.ps1 user-prompt > out.json
-          python -c "import json; d=json.load(open('out.json',encoding='utf-8')); assert d.get('decision')=='block', d; s=json.dumps(d,ensure_ascii=False); assert '\ufffd' not in s and '\u00c3' not in s, d; print('powershell launcher: blocked ok')"
           python -c "import json,sys; open('plain.json','wb').write(json.dumps({'prompt':'say hi','session_id':'s','transcript_path':''}).encode())"
-          type plain.json | powershell -NoProfile -ExecutionPolicy Bypass -File hooks\run.ps1 user-prompt > plain.out
-          python -c "import json; d=json.load(open('plain.out',encoding='utf-8')); assert d.get('decision')!='block', d; print('powershell launcher: plain prompt passes')"
+          rem the exact form Codex uses: cmd.exe /C "<commandWindows with the plugin root substituted>"
+          type payload.json | cmd.exe /C ""%CD%/hooks/run.cmd" user-prompt" > out.json
+          python -c "import json; d=json.load(open('out.json',encoding='utf-8')); assert d.get('decision')=='block', d; s=json.dumps(d,ensure_ascii=False); assert '\ufffd' not in s and '\u00c3' not in s, d; print('cmd launcher: blocked ok')"
+          type plain.json | cmd.exe /C ""%CD%/hooks/run.cmd" user-prompt" > plain.out
+          python -c "import json; d=json.load(open('plain.out',encoding='utf-8')); assert d.get('decision')!='block', d; print('cmd launcher: plain prompt passes')"
       - name: platform backend
         run: python -m unittest tests.test_platform_backend -v

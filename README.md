@@ -76,8 +76,8 @@ a feature or a fix bumps the last number). Vault backend per platform:
 Hooks run through `hooks/run.sh` (bash), which picks `python3`, `python` or
 `py -3`. Claude Code on Windows requires Git Bash, so the launcher runs there
 too. Codex on Windows has no Git Bash, so every hook also names a
-`commandWindows` entry: `hooks/run.ps1` runs the same `dispatch.py` from
-PowerShell and hands the payload through byte for byte. Install Python with
+`commandWindows` entry: `hooks/run.cmd` runs the same `dispatch.py` from
+`cmd.exe`, the shell Codex uses for a Windows hook, with the payload untouched. Install Python with
 `winget install Python.Python.3.12`. Without a Python 3.11+ either launcher
 exits 2 and prompts are blocked: fail closed.
 
@@ -360,10 +360,11 @@ a to-do.
   signed helper and is not built. See "Vault" and `docs/THREAT-MODEL.md`.
 - **Codex on Windows** runs commands in PowerShell, where the bash quoting
   contexts of the grant rewrite do not apply. The prompt block, the output
-  redaction and the inline MCP resolve run through `hooks/run.ps1`; a
+  redaction and the inline MCP resolve run through `hooks/run.cmd`; a
   placeholder in a shell command is denied with a reason. The launcher is
-  proven in the GitHub Actions Windows job (block and pass through
-  `powershell.exe` with a UTF-8 payload), not yet in a live Codex session.
+  proven in the GitHub Actions Windows job in the exact form Codex uses
+  (`cmd.exe /C`, block and pass with a UTF-8 payload), not yet in a live
+  Codex session.
 
 ## Licence
 

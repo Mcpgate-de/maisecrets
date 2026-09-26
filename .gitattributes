@@ -1,0 +1,2 @@
+# a batch file must keep CRLF on every checkout (cmd.exe parses blocks unreliably with LF)
+hooks/run.cmd text eol=crlf

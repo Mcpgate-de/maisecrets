@@ -8,7 +8,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" session-start",
             "timeout": 30,
-            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/hooks/run.ps1\" session-start"
+            "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" session-start"
           }
         ]
       }
@@ -20,7 +20,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" user-prompt",
             "timeout": 10,
-            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/hooks/run.ps1\" user-prompt"
+            "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" user-prompt"
           }
         ]
       }
@@ -33,7 +33,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" pre-tool",
             "timeout": 10,
-            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/hooks/run.ps1\" pre-tool"
+            "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" pre-tool"
           }
         ]
       }
@@ -45,7 +45,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" post-tool",
             "timeout": 20,
-            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/hooks/run.ps1\" post-tool"
+            "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" post-tool"
           }
         ]
       }
