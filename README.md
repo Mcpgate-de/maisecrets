@@ -92,7 +92,13 @@ source under claude.ai organisation settings ("Sync from GitHub" lists private
 repositories only and needs the Claude GitHub App installed on it) and sets
 the availability (available, installed by default, or required). For this
 plugin that source is the private mirror `Sprinterli/maisecrets-claude`, which
-CI keeps identical to the public repository. Claude Code then offers the plugin to
+CI keeps identical to the public repository. A private GitLab project works as
+a source too, through a GitLab configuration with an access token under
+Organization settings > Claude Code (public beta). Members never need access
+to the repository: organization sync packages the plugin. The public GitHub
+repository cannot be the organisation source (the sync accepts only private
+or internal marketplace repositories), but it may be referenced as a plugin
+source from a private one. Claude Code then offers the plugin to
 every member; a new version is picked up when the `version` in
 `.claude-plugin/plugin.json` changes, which the release job does on every
 merge to `main`. With `autoUpdate` on the marketplace entry the update lands
