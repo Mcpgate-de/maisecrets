@@ -1,7 +1,7 @@
 # maisecrets
 
 Keeps secrets and PII out of the cloud model. Works as a plugin for Claude Code
-(and Cowork), with a Codex adapter next.
+(and Cowork) and for Codex, from the same `hooks/hooks.json`.
 
 **What it does, deterministically and locally:**
 
@@ -12,16 +12,18 @@ Keeps secrets and PII out of the cloud model. Works as a plugin for Claude Code
    never reached the model. Measured: zero API requests for a blocked prompt.
 2. **The model reads a file or runs a command that outputs a secret.** A
    `PostToolUse` hook redacts the result before the model sees it.
-3. **The model uses a placeholder in a Bash command.** A `PreToolUse` hook
-   inserts the real value right before execution. The output is redacted
-   again on the way back.
+3. **The model uses a placeholder in a Bash command or a tool argument.** A
+   `PreToolUse` hook lets the command read the value once under a one-time
+   grant, or inserts it into the tool argument, right before execution. The
+   output is redacted again on the way back. See "Gates around a resolve".
 
 Everything a hook runs is readable source in this folder. No download, no
 package install, no dependency outside the Python standard library.
 
 ## Status
 
-Day-1 prototype (2026-09-26). Vault backend per platform:
+Released from `main` on every merge (`CHANGELOG.md`, tags `vX.Y.Z`, 0.x scale:
+a feature or a fix bumps the last number). Vault backend per platform:
 
 | platform | backend | where the values live |
 |---|---|---|
@@ -35,21 +37,30 @@ Hooks run through `hooks/run.sh` (bash), which picks `python3`, `python` or
 too; install Python with `winget install Python.Python.3.12`. Without a
 Python 3.11+ the launcher exits 2 and prompts are blocked: fail closed.
 
-Proven on macOS (Claude Code 2.1.283) and Debian 13 (2.1.223) with the
-harness; Windows through the GitHub Actions matrix (unit tests, launcher,
-Credential Locker round trip), not yet with a live Claude Code session.
-Codex (codex-cli 0.155.1): the same `hooks/hooks.json` works unchanged, Codex
-sets `CLAUDE_PLUGIN_ROOT` itself; `harness/codex.py` proves the three tool
-scenarios against a fake Responses upstream.
+Proven with the harness on macOS (Claude Code 2.1.283, 6 scenarios) and on
+Debian 13 (2.1.223, first version); Windows through the GitHub Actions matrix
+(unit tests, launcher, Credential Locker round trip), not yet with a live
+Claude Code session. Codex (codex-cli 0.155.1): the same `hooks/hooks.json`
+works unchanged, Codex sets `CLAUDE_PLUGIN_ROOT` itself; `harness/codex.py`
+proves the three tool scenarios against a fake Responses upstream and, with
+`--real`, against the real model (3 of 3 on 2026-09-26). `docs/TESTING.md`
+has the record.
 
-## Install (development)
+## Install
 
 ```bash
-claude --plugin-dir /path/to/maisecrets                 # one session only
-claude plugin marketplace add /path/to/maisecrets       # the repo is its own marketplace
-claude plugin install maisecrets@maisecrets             # every session (user scope)
-python3 -m unittest discover -s tests -v               # 23 tests, milliseconds
-python3 harness/run.py                                 # 4 scenarios against a fake upstream
+claude plugin marketplace add Sprinterli/maisecrets     # the GitHub repo is its own marketplace
+claude plugin install maisecrets@maisecrets             # user scope; new session or /reload-plugins
+claude plugin update maisecrets@maisecrets              # later versions
+```
+
+For development:
+
+```bash
+claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
+python3 -m unittest discover -s tests -v               # 48 tests, under a second
+python3 harness/run.py                                 # 6 scenarios against a fake upstream
+python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
 scripts/install-hooks.sh                               # git pre-commit / pre-push
 ```
 
@@ -184,6 +195,9 @@ Four sources, one scanner (`maisecrets/detect.py`):
   bounded regex; the unbounded one took 11 s on an 80 KB dotted run), phone
   with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, and
   full-length GitLab runner and deploy tokens.
+- A secret shape with a fixed length (gitleaks: `glpat-[\w-]{20}`) is
+  extended to the end of the token characters, so a longer token does not
+  leave its tail in the clear (found with a 24-char token, 2026-09-26).
 
 IBAN, credit card and IP come from Presidio's regexes with our validators
 (mod-97, Luhn, public-range check). A card number without a word like
@@ -210,6 +224,13 @@ printed: `scripts/replay_sessions.py --claude --codex`.
   other argument.
 - Codex on Windows runs commands in PowerShell, where the bash quoting
   contexts of the grant rewrite do not apply. Not tested.
+- A value with spaces or quotes is matched exactly only as the rest of a
+  `KEY=value` or `key: value` line, not inside prose.
+- Every store hands a value to any process of the same user; see "Vault"
+  and `docs/THREAT-MODEL.md`. A Touch ID gate needs a signed helper and is
+  not built.
+- A real Codex model may refuse to run a command that prints `.env` at all;
+  that is the model's own policy, not the plugin.
 
 ## Licence
 

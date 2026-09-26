@@ -80,6 +80,14 @@ later run with the tuned rules; at 5 s/MB it takes hours.
 
 ## Codex harness (codex-cli 0.155.1, fake Responses upstream, 2026-09-26)
 
+**Real upstream, 2026-09-26 evening (`--real`, gpt-5.6-sol): 3 of 3 green.**
+The first real run found a leak the fake runs had hidden: the gitleaks
+`gitlab-pat` shape is fixed at 20 characters, the harness marker has 24, and
+the last 4 reached the model in the clear. The detector now extends a secret
+match to the end of the token run, and both harnesses check the marker's tail
+as well as the whole marker. The real model also declined `print .env verbatim`
+on its own; the scenario asks for the variable names instead.
+
 `python3 harness/codex.py` runs the same three tool scenarios through
 `codex exec` with an isolated `CODEX_HOME`, a custom provider pointed at
 `harness/fake_openai.py` (Responses SSE, code-mode `exec` tool, zstd request

@@ -154,9 +154,9 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     if len(bodies) != sc["expect_requests"]:
         fails.append(f"expected {sc['expect_requests']} requests, got {len(bodies)}")
     joined = "".join(Path(b).read_text() for b in bodies)
-    for marker in (MARK, MAIL, MARK2):
+    for marker in (MARK, MAIL, MARK2, MARK[-8:]):
         if marker in joined:
-            fails.append(f"LEAK: {marker[:12]}… reached the upstream")
+            fails.append(f"LEAK: …{marker[-6:]} reached the upstream")
     for ph in sc.get("expect_placeholders", []):
         if ph not in joined:
             fails.append(f"placeholder {ph} missing in requests")

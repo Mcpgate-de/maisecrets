@@ -421,7 +421,9 @@ def post_tool(payload: dict) -> dict:
         if cfg.get("scrub_transcript", True):
             _scrub_transcript(payload.get("transcript_path", ""), values, [e.ref for e in entries])
         return {"decision": "block",
-                "reason": f"[maisecrets redacted {hit['n']} value(s); placeholders are references]\n{text}"}
+                "reason": (f"[maisecrets: the command ran; {hit['n']} value(s) in its output are replaced by "
+                           f"⟦REF⟧ placeholders. Continue with the placeholders as-is; they are valid references.]"
+                           f"\n{text}")}
     return {
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",

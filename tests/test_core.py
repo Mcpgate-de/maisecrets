@@ -45,6 +45,13 @@ class DetectTests(unittest.TestCase):
                 ms = detect.scan(f"token is {val} ok")
                 self.assertEqual([(m.kind, m.value) for m in ms], [(kind, val)])
 
+    def test_a_token_longer_than_its_fixed_shape_is_taken_whole(self):
+        long_pat = GLPAT + "6789"                       # 24 chars after the prefix, the rule says 20
+        ms = detect.scan(f"TOKEN={long_pat}\n")
+        self.assertEqual([m.value for m in ms], [long_pat])
+        ms = detect.scan(f"token {long_pat}, then text")
+        self.assertEqual([m.value for m in ms], [long_pat])
+
     def test_named_credential_keeps_the_name_and_takes_the_value(self):
         ms = detect.scan("DB_PASSWORD=" + "Sup3rSecret" + "Value1234")
         self.assertEqual(len(ms), 1)

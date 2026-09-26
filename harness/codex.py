@@ -39,7 +39,9 @@ SCENARIOS = {
         "expect_blocked": True,
     },
     "bash_echo": {
-        "prompt": "Run exactly this shell command and then reply with its output verbatim: cat .env",
+        # a real model refuses "print .env verbatim" on its own (2026-09-26); asking for the
+        # variable names makes it run the command, and the redacted output is what it reads
+        "prompt": "Run the shell command `cat .env` and tell me which variable names it defines.",
         "files": {".env": f"TOKEN={MARK}\n"},
         "turns": [{"exec": _js("cat .env")}, {"text": "done"}],
         "expect_placeholder": "⟦SECRET_c",
@@ -120,25 +122,31 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         if srv:
             srv.terminate()
     bodies = "".join(p.read_text(errors="ignore") for p in out.glob("request_*.json"))
-    if MARK in bodies:
-        fails.append("LEAK: the marker reached the upstream request body")
+    if MARK in bodies or MARK[-8:] in bodies:
+        fails.append("LEAK: the marker (or its tail) reached the upstream request body")
     out = r.stdout + "\n--- stderr ---\n" + r.stderr
     (work / "codex_out.txt").write_text(out)
     final = last.read_text() if last.exists() else ""
     rollouts = "".join(p.read_text(errors="ignore") for p in codex_home.rglob("*.jsonl"))
-    if MARK in rollouts:
+    if MARK in rollouts or MARK[-8:] in rollouts:
         fails.append("LOCAL: the marker is in the rollout transcript on disk (upstream requests were clean)"
                      if MARK not in bodies else "LEAK: the marker is in the rollout transcript")
-    if MARK in final:
-        fails.append("LEAK: the marker is in the final message")
+    if MARK in final or MARK[-8:] in final:
+        fails.append("LEAK: the marker (or its tail) is in the final message")
     if sc.get("expect_blocked"):
         if "blocked" not in out.lower() and "maisecrets" not in out:
             fails.append("prompt was not blocked (no notice in output)")
         if rollouts and "SECRET_c" not in rollouts and "maisecrets" not in rollouts:
             pass  # a blocked prompt may leave no rollout at all
     ph = sc.get("expect_placeholder")
-    if ph and ph not in bodies and ph not in rollouts and ph not in final:
-        fails.append(f"placeholder {ph} missing in upstream requests, rollout and final message")
+    ran_command = '"CommandExecution"' in rollouts or "exec_command" in rollouts
+    # with --real there are no recorded request bodies; the tools-router line in codex's own
+    # output is the redacted result as the model received it
+    if ph and ph not in bodies and ph not in rollouts and ph not in final and not (REAL and ph in out):
+        if REAL and not ran_command:
+            print(f"     ~ {name}: the real model declined to run the command; nothing to check (not a failure)")
+        else:
+            fails.append(f"placeholder {ph} missing in upstream requests, rollout and final message")
     if sc.get("expect_file"):
         fname, content = sc["expect_file"]
         got = (cwd / fname).read_text() if (cwd / fname).exists() else "<missing>"

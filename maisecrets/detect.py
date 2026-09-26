@@ -487,6 +487,9 @@ def _allowed(rule: Rule, text: str, m: re.Match, secret: str) -> bool:
     return False
 
 
+_TOKEN_CHAR_RE = re.compile(r"[A-Za-z0-9_\-]")
+
+
 def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins."""
     if not text:
@@ -540,6 +543,16 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             # our own placeholders are never a hit
             if text[max(0, start - 1):start] in ("<", "\u27e6") and re.match(r"[A-Z][A-Z_]*_c\d+", secret):
                 continue
+            if rule.type == "SECRET":
+                # a fixed-length shape (gitleaks: glpat-[\w-]{20}) stops inside a longer token and
+                # the tail would stay in the clear (4 chars of a 24-char token, 2026-09-26): the
+                # value runs to the end of the token characters
+                end2 = end
+                while end2 < len(text) and end2 - end < 128 and _TOKEN_CHAR_RE.match(text[end2]):
+                    end2 += 1
+                if end2 > end and _TOKEN_CHAR_RE.match(secret[-1]) and not any(s < end2 and end < e for s, e in taken):
+                    end = end2
+                    secret = text[start:end]
             found.append(Match(rule.id, rule.type, secret, start, end))
             taken.append((start, end))
     found.sort(key=lambda x: x.start)
