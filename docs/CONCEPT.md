@@ -311,10 +311,18 @@ app (same format; output via block feedback). Docs, untested: ChatGPT Work
 mode runs plugin hooks in the Codex runtime. OpenCode: own npm plugin, can
 rewrite the prompt (correction 2026-09-26: the current plugin API lists
 `tool.execute.before/after` as modifiable, no prompt hook). Checked in the
-docs on 2026-09-26, matrix in README "Client support": Gemini CLI has all
-three hooks, Copilot CLI two (prompt rewrite is SDK-only), Cursor two and a
-half (shell output cannot be rewritten), OpenCode two. Unchecked: Kiro. No
-adapter: Claude Chat, ChatGPT Chat, web, mobile.
+vendor docs on 2026-09-26 (README "Client support" has the marks), hook
+names per guard:
+
+| client | block a prompt | rehydrate | redact output |
+|---|---|---|---|
+| Gemini CLI | `BeforeModel` may rewrite | `BeforeTool` may rewrite | `AfterTool` may redact |
+| Cursor | `beforeSubmitPrompt` blocks | `beforeShellExecution` | `postToolUse` for MCP results only; `afterShellExecution` cannot rewrite |
+| Copilot CLI | `userPromptSubmitted` → `modifiedPrompt`, SDK hooks only | `preToolUse` → `modifiedArgs` | `postToolUse` → `modifiedResult` |
+| OpenCode | none | `tool.execute.before` | `tool.execute.after` |
+| Antigravity CLI | none (`PreInvocation` injects only) | `PreToolUse` → `overwrite` | none (`PostToolUse` expects `{}`) |
+
+Unchecked: Kiro. No adapter: Claude Chat, ChatGPT Chat, web, mobile.
 
 Antigravity CLI (`agy` 1.2.11, checked 2026-09-26 from the hook doc embedded
 in the binary): own `hooks.json` contract, named hooks in `plugins/<name>/hooks.json`
