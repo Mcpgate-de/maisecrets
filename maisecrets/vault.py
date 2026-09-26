@@ -35,7 +35,8 @@ _DEFAULT_HOME = Path.home() / ".maisecrets"
 SERVICE = "maisecrets" if HOME == _DEFAULT_HOME else "maisecrets@" + hashlib.sha256(str(HOME).encode()).hexdigest()[:8]
 
 DEFAULT_CONFIG = {
-    "backend": "keychain",          # keychain (macOS) | jsonfile (test mode, any OS)
+    "backend": "keychain",          # keychain (macOS) | encrypted-file (Linux, any OS) | jsonfile (test mode)
+    "report_url": "",               # shown in the block notice once the project is public
     "ttl_seconds": {"default": 86400, "CARD": 3600},
     "max_ttl_seconds": 30 * 86400,
     "renew_on_use": True,
@@ -144,11 +145,92 @@ class KeychainBackend:
         )
 
 
+class EncryptedFileBackend:
+    """Linux servers and anywhere without a keychain: values encrypted at rest with
+    ``openssl enc`` (AES-256-CBC, PBKDF2) plus an HMAC-SHA256 tag, key in a 0600 file.
+
+    The key file is ``~/.maisecrets/key`` or ``$MAISECRETS_KEY_FILE`` (a root-managed
+    path on a server). Without the key the vault file is noise. This is not a
+    hardware-backed store: a process running as the same user can read the key,
+    exactly as it could read the keychain on a Mac.
+    """
+    test_mode = False
+
+    def __init__(self) -> None:
+        self.path = HOME / "vault.enc.json"
+        self.key_file = Path(os.environ.get("MAISECRETS_KEY_FILE", HOME / "key"))
+
+    def _key(self) -> bytes:
+        if not self.key_file.exists():
+            self.key_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd = os.open(self.key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(os.urandom(32).hex() + "\n")
+        return self.key_file.read_bytes().strip()
+
+    def _openssl(self, args: list[str], data: bytes) -> bytes:
+        r = subprocess.run(["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "100000", "-salt",
+                            "-pass", f"file:{self.key_file}", *args], input=data, capture_output=True)
+        if r.returncode != 0:
+            raise RuntimeError("openssl failed: " + r.stderr.decode(errors="ignore")[:200])
+        return r.stdout
+
+    def _tag(self, blob: bytes) -> str:
+        import hmac
+        return hmac.new(hashlib.sha256(b"maisecrets-mac:" + self._key()).digest(), blob, "sha256").hexdigest()
+
+    def _load(self) -> dict:
+        try:
+            return json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def _save(self, data: dict) -> None:
+        HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, self.path)
+
+    def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
+        import base64
+        self._key()
+        blob = self._openssl([], value.encode())
+        d = self._load()
+        d[key] = {"c": base64.b64encode(blob).decode(), "t": self._tag(blob)}
+        self._save(d)
+
+    def get(self, key: str) -> str | None:
+        import base64
+        import hmac
+        entry = self._load().get(key)
+        if not entry:
+            return None
+        blob = base64.b64decode(entry["c"])
+        if not hmac.compare_digest(self._tag(blob), entry.get("t", "")):
+            return None   # tampered or foreign key: fail closed
+        try:
+            return self._openssl(["-d"], blob).decode()
+        except RuntimeError:
+            return None
+
+    def delete(self, key: str) -> None:
+        d = self._load()
+        d.pop(key, None)
+        self._save(d)
+
+
 def make_backend(cfg: dict):
-    """keychain on macOS; elsewhere the jsonfile test backend until the Windows store exists."""
-    if cfg.get("backend") == "keychain" and platform.system() == "Darwin":
+    """keychain on macOS; an openssl-encrypted file elsewhere; jsonfile only when asked (test mode)."""
+    backend = cfg.get("backend", "keychain")
+    if backend == "jsonfile":
+        return JsonFileBackend()
+    if backend == "encrypted-file":
+        return EncryptedFileBackend()
+    if platform.system() == "Darwin":
         return KeychainBackend()
-    return JsonFileBackend()
+    return EncryptedFileBackend()
 
 
 # ------------------------------------------------------------------- vault --

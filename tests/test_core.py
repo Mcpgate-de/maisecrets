@@ -169,6 +169,21 @@ class VaultTests(unittest.TestCase):
         self.assertNotEqual(v.SERVICE, "maisecrets")
         self.assertTrue(v.SERVICE.startswith("maisecrets@"))
 
+    def test_encrypted_file_backend_roundtrip_and_tamper(self):
+        from maisecrets.vault import EncryptedFileBackend
+        b = EncryptedFileBackend()
+        b.put("SECRET_c9", GLPAT)
+        self.assertEqual(b.get("SECRET_c9"), GLPAT)
+        raw = Path(b.path).read_text()
+        self.assertNotIn(GLPAT, raw)                       # encrypted at rest
+        self.assertEqual(os.stat(b.key_file).st_mode & 0o777, 0o600)
+        d = json.loads(raw)
+        d["SECRET_c9"]["t"] = "0" * 64                     # tamper with the tag
+        Path(b.path).write_text(json.dumps(d))
+        self.assertIsNone(b.get("SECRET_c9"))               # fail closed
+        b.delete("SECRET_c9")
+        self.assertIsNone(b.get("SECRET_c9"))
+
     def test_vault_file_is_private(self):
         self.v.put(AKIA, "SECRET", "aws-access-token")
         mode = os.stat(self.v.backend.path).st_mode & 0o777

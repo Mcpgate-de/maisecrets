@@ -153,6 +153,8 @@ def user_prompt(payload: dict) -> dict:
         reason += "\n\n" + rewritten
     if vault.backend.test_mode:
         reason += "\n(vault backend: jsonfile, TEST MODE)"
+    if cfg.get("report_url"):
+        reason += f" Wrong? Report it: {cfg['report_url']}"
     return {
         "decision": "block",
         "reason": reason,
