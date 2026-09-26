@@ -111,8 +111,12 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("content-length", 0))
         body = self.rfile.read(n)
         if self.headers.get("content-encoding", "").lower() == "zstd" or body[:4] == b"\x28\xb5\x2f\xfd":
-            from compression import zstd   # Python 3.14+
-            body = zstd.decompress(body)
+            try:
+                from compression import zstd   # Python 3.14+
+                body = zstd.decompress(body)
+            except ImportError:
+                import zstandard                # pip install zstandard (CI image has Python 3.11)
+                body = zstandard.ZstdDecompressor().decompressobj().decompress(body)
         if not self.path.startswith("/v1/responses"):
             self._json(404, {"error": {"message": f"no route {self.path}"}})
             return

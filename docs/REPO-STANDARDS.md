@@ -31,9 +31,14 @@ and OpenAI plugin directories.
 
 - `.gitlab-ci.yml`: workflow rules for MR pipelines, `main`, tags, schedules.
   Stages validate (manifests, `claude plugin validate --strict`, commit
-  subject format, no secrets in tree, ruff), test (unittest), release, mirror.
-  Runner capability tag `docker` on the netcup host. The harness does not run
-  in CI: it needs a logged-in `claude`.
+  subject format, no secrets in tree, ruff), test (unittest, the Claude Code
+  harness and the Codex harness against their fake upstreams, with an empty
+  HOME and a dummy key, versions pinned), mirror, release. Runner capability
+  tag `docker` on the netcup host.
+- Release gate: the `release` job waits until the GitHub Actions matrix
+  (Windows, macOS, Linux) is green for the tested SHA on the public mirror
+  (`scripts/wait_for_github_checks.py`, public API, no token). Windows was
+  red across four releases on 2026-09-26 because nothing waited for it.
 
 ## Versions and releases (now)
 

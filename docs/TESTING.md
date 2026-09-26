@@ -2,6 +2,10 @@
 
 ## Harness (fake Anthropic upstream, Claude Code 2.1.283)
 
+Runs in CI on every push (`harness_claude`, `harness_codex`): a real binary,
+an empty HOME, a dummy key, the fake upstream. Measured 2026-09-26: Claude
+Code needs no login when `ANTHROPIC_BASE_URL` points at the fake.
+
 Run 2026-09-26 (evening), 6 scenarios, 0 failures:
 
 | scenario | what it proves |

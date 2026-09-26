@@ -2,6 +2,11 @@
 # The hook harness is NOT here: it needs a logged-in `claude` binary. It runs
 # in the pre-push hook instead, so every pushed tip has passed it locally.
 #
+# Order on main: validate, test (unit + the two live harnesses against fake upstreams),
+# mirror (the tested SHA reaches GitHub, whose Actions matrix runs Windows/macOS/Linux),
+# release (waits for that matrix to be green, then tags). Tag pipelines mirror the tag and
+# notify the claude.ai marketplace.
+#
 # Release flow (main only, after the tests):
 #   release  derives the next version from the commit subjects since the last
 #            v* tag (scripts/release.py), writes it into the three manifests
@@ -14,8 +19,8 @@
 stages:
   - validate
   - test
-  - release
   - mirror
+  - release
 
 workflow:
   rules:
@@ -95,17 +100,46 @@ unit:
   script:
     - python -m unittest discover -s tests -v
 
+# The hook harness: a real Claude Code / Codex binary, a fake upstream, every request body
+# scanned for the marker. Both run with an empty HOME and a dummy key: the fake upstream
+# needs no login (measured 2026-09-26). Versions pinned to the ones proven locally.
+harness_claude:
+  stage: test
+  image: node:22
+  variables:
+    CLAUDE_CODE_VERSION: "2.1.283"
+    ANTHROPIC_API_KEY: "sk-ant-dummy-for-the-fake-upstream-000000000000"
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+  script:
+    - npm install --global --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+    - export HOME=$(mktemp -d)
+    - python3 harness/run.py
+
+harness_codex:
+  stage: test
+  image: node:22
+  variables:
+    CODEX_VERSION: "0.155.1"
+  script:
+    - npm install --global --no-fund --no-audit "@openai/codex@${CODEX_VERSION}"
+    - pip3 install --quiet --break-system-packages zstandard
+    - export HOME=$(mktemp -d)
+    - python3 harness/codex.py
+
 release:
   stage: release
   image: alpine:3.20
   rules:
     # not on the release commit itself (pushed with ci.skip anyway), not on tags, not on schedules
     - if: $CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_MESSAGE !~ /^chore\(release\):/
-  needs: [manifests, plugin_validate, commit_format, no_secrets_in_tree, lint, unit]
+  needs: [manifests, plugin_validate, commit_format, no_secrets_in_tree, lint, unit, harness_claude, harness_codex, mirror]
   variables:
     GIT_DEPTH: "0"
   script:
-    - apk add --no-cache git python3 >/dev/null
+    - apk add --no-cache git python3 curl >/dev/null
+    # the GitHub Actions matrix (Windows, macOS, Linux) must be green for this SHA before it is
+    # released; Windows was red across four releases on 2026-09-26 because nothing waited for it
+    - python3 scripts/wait_for_github_checks.py "$CI_COMMIT_SHA"
     - git fetch --tags --quiet origin
     - git checkout -q "$CI_COMMIT_SHA"
     # `if ! cmd` would hand `$?` the negated status (a ci-only push reported "failed with 0"
