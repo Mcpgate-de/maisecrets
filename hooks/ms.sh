@@ -8,7 +8,7 @@
 set -u
 ROOT="$(python3 - <<'PY'
 import glob, json, os
-home = os.path.expanduser("~")
+home = os.environ.get("HOME") or os.path.expanduser("~")   # Git Bash sets HOME; python.exe prefers USERPROFILE
 best, best_v = None, ()
 for pat in ("/.claude/plugins/cache/*/maisecrets/*/", "/.claude/plugins/synced/*/maisecrets*/"):
     for d in glob.glob(home + pat):
