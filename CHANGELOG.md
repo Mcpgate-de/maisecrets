@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.12] - 2026-09-26
+
+### Features
+
+- German credential labels (passwort, kennwort, geheimnis, schluessel, zugangsdaten); /maisecrets:put stores the clipboard value and hands back the placeholder (3b67aaa)
+
 ## [0.3.11] - 2026-09-26
 
 ### Fixes
