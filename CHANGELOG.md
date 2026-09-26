@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.6] - 2026-09-26
+
+### Fixes
+
+- webhook signing secrets (whsec_) are a secret shape; a bare one on its own line passed. References are numbered in text order (3a9ce0b)
+
 ## [0.3.5] - 2026-09-26
 
 ### Fixes
