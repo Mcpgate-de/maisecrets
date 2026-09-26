@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 GOLDEN = ROOT / "harness" / "golden"
 MARK = "glpat-" + "HARNESSxxx1234567890abcd"   # matches gitlab_pat; split so the repo scan stays clean
 MAIL = "harness.person@example.org"
+MARK2 = "pa$s'w\"ord`x $(echo no) y\\z"     # no known shape; quotes, $( and spaces
 PORT = 8791
 
 SCENARIOS = {
@@ -56,7 +57,8 @@ SCENARIOS = {
     # the model uses a placeholder in Bash: PreToolUse rehydrates, the command sees the value,
     # PostToolUse redacts the echo again
     "bash_rehydrate": {
-        "prompt": "use the stored token",
+        # the reference is in the prompt: a session may resolve only what a human typed into it
+        "prompt": "use the stored token ⟦SECRET_c1⟧",
         "preload": [(MARK, "SECRET", "gitlab_pat")],
         "turns": [
             {"tool": "Bash", "input": {"command": "printf 'got:%s' '⟦SECRET_c1⟧' > used.txt; cat used.txt"}},
@@ -65,6 +67,32 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_file": ("used.txt", f"got:{MARK}"),
+    },
+    # a value with quotes, $( and spaces, inside single quotes: it must arrive byte for byte
+    # (no splice into shell syntax) and come back redacted although it has no known shape
+    "bash_rehydrate_quoted": {
+        "prompt": "use the stored password ⟦SECRET_c1⟧",
+        "preload": [(MARK2, "SECRET", "manual")],
+        "turns": [
+            {"tool": "Bash", "input": {"command": "printf 'got:%s' '⟦SECRET_c1⟧' > used.txt; cat used.txt"}},
+            {"text": "done"},
+        ],
+        "expect_requests": 2,
+        "expect_placeholders": ["⟦SECRET_c1⟧"],
+        "expect_file": ("used.txt", f"got:{MARK2}"),
+    },
+    # a reference the session never saw in a prompt is not resolved
+    "bash_foreign_ref": {
+        "prompt": "run the command",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "turns": [
+            {"tool": "Bash", "input": {"command": "printf 'got:%s' '⟦SECRET_c1⟧' > used.txt; cat used.txt"}},
+            {"text": "done"},
+        ],
+        "expect_requests": 2,
+        "expect_placeholders": ["⟦SECRET_c1⟧"],
+        "expect_file": ("used.txt", "<missing>"),
+        "expect_text": "foreign-session",
     },
 }
 
@@ -100,11 +128,12 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     for fname, content in sc.get("files", {}).items():
         (cwd / fname).write_text(content)
     if sc.get("preload"):
-        sys.path.insert(0, str(ROOT))
-        os.environ["MAISECRETS_HOME"] = str(home)
-        from maisecrets.vault import Vault  # noqa: E402
-        for value, type_, kind in sc["preload"]:
-            Vault().put(value, type_, kind)
+        # in a subprocess: maisecrets.vault fixes its home at import, and this process runs
+        # several scenarios (the second preload landed in the first home, 2026-09-26)
+        code = ("import json,sys; sys.path.insert(0, sys.argv[1]); from maisecrets.vault import Vault; "
+                "[Vault().put(v, t, k) for v, t, k in json.load(sys.stdin)]")
+        subprocess.run([sys.executable, "-c", code, str(ROOT)], input=json.dumps(sc["preload"]),
+                       text=True, check=True, env=env)
     turns = json.loads(json.dumps(sc["turns"]).replace("{cwd}", str(cwd)))
     # dump hook: records every payload so golden keys can be verified
     settings = work / "settings.json"
@@ -125,7 +154,7 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     if len(bodies) != sc["expect_requests"]:
         fails.append(f"expected {sc['expect_requests']} requests, got {len(bodies)}")
     joined = "".join(Path(b).read_text() for b in bodies)
-    for marker in (MARK, MAIL):
+    for marker in (MARK, MAIL, MARK2):
         if marker in joined:
             fails.append(f"LEAK: {marker[:12]}… reached the upstream")
     for ph in sc.get("expect_placeholders", []):
@@ -138,6 +167,11 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         got = (cwd / fname).read_text() if (cwd / fname).exists() else "<missing>"
         if got != content:
             fails.append(f"rehydration: {fname} holds {got!r}")
+    if sc.get("expect_text") and sc["expect_text"] not in joined:
+        fails.append(f"expected {sc['expect_text']!r} in a request body (the deny reason reaches the model)")
+    for marker in (MARK, MARK2):
+        if marker in "".join(p.read_text(errors="ignore") for p in dump.glob("*.json")):
+            fails.append("LEAK: a hook payload (tool_input after rewrite) carried the value")
     # transcript on disk
     proj_dir = Path.home() / ".claude" / "projects" / str(cwd).replace("/", "-")
     for t in proj_dir.glob("*.jsonl"):

@@ -38,11 +38,45 @@ def cmd_get(args: list[str]) -> int:
     if not args:
         print("usage: maisecrets get <KEY>", file=sys.stderr)
         return 2
-    value, status = Vault().get(args[0])
+    value, status = Vault().get(args[0], human=True)
     if status != "ok":
         print(f"{args[0]}: {status}", file=sys.stderr)
         return 1
     print(value)
+    return 0
+
+
+def cmd_resolve(args: list[str]) -> int:
+    """Read one value under a one-time grant. The Bash hook writes this call into the command
+    in place of the placeholder; nothing else has a valid nonce. Prints the value without a
+    trailing newline so a command substitution gets it byte for byte."""
+    if len(args) != 3 or args[1] != "--grant":
+        print("usage: maisecrets resolve <KEY> --grant <NONCE>", file=sys.stderr)
+        return 2
+    value, status = Vault().redeem(args[0], args[2])
+    if status != "ok":
+        print(f"maisecrets resolve {args[0]}: {status}", file=sys.stderr)
+        return 1
+    sys.stdout.write(value)
+    sys.stdout.flush()
+    return 0
+
+
+def cmd_audit(args: list[str]) -> int:
+    """The last resolves: when, which session, which key, which tool, the command with its
+    placeholders. Values are never written here."""
+    from .vault import HOME
+    n = int(args[0]) if args else 20
+    path = HOME / "audit.log"
+    if not path.exists():
+        print("(no resolves recorded)")
+        return 0
+    lines = path.read_text(encoding="utf-8").splitlines()[-n:]
+    print("time                 session  key            tool            context")
+    for line in lines:
+        parts = line.split("\t")
+        if len(parts) == 5:
+            print(f"{parts[0]:<20} {parts[1]:<8} {parts[2]:<14} {parts[3][:15]:<15} {parts[4]}")
     return 0
 
 
@@ -107,15 +141,15 @@ def cmd_status(_: list[str]) -> int:
     return 0
 
 
-COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "expire": cmd_expire,
-            "scan": cmd_scan, "config": cmd_config, "status": cmd_status}
+COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_resolve, "audit": cmd_audit,
+            "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config, "status": cmd_status}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] in {"-h", "--help"}:
-        print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | expire | scan [text]\n"
-              "           | config | hook <event>")
+        print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | audit [n] | expire\n"
+              "           | scan [text] | config | resolve <KEY> --grant <NONCE> | hook <event>")
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])

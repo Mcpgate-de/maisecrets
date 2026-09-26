@@ -34,7 +34,7 @@ is a Jira link and a regex class, `***` is a regex quantifier; `⟦…⟧` with
 |---|---|
 | key | `TYPE_cN` |
 | type, kind | placeholder type; detector pattern name |
-| fingerprint | sha256(value)[:12], for "same value, same reference" and for records |
+| fingerprint | HMAC-SHA256(store key, value)[:16], for "same value, same reference", exact-match redaction and records |
 | display | human hint, never for secrets |
 | created, last_used, uses | audit |
 | expires, max_expires | TTL, renewed on use up to the cap |
@@ -45,13 +45,24 @@ execution time, (b) a gateway deposit, (c) `maisecrets get` for a human.
 
 ## 3. Rehydration at the client
 
-`PreToolUse` on `Bash`: every `<TYPE_cN>` in `command` is resolved. Unknown
-or expired references deny the call with a reason that names the key and the
-status. Partial resolution never happens.
+`PreToolUse` on `Bash`: every `⟦TYPE_cN⟧` in `command` is replaced by a
+command substitution that reads the value under a one-time grant
+(`$(resolve KEY --grant NONCE)`, placed in the quoting context of the
+placeholder). The value is never in the command text. Unknown, expired,
+foreign-session or capped references deny the call with a reason that names
+the key and the status. Partial resolution never happens.
 
-`PostToolUse`: every string in `tool_response` is scanned; hits become
-references (existing reference when the fingerprint is known). The response
-keeps its shape.
+`PreToolUse` on an MCP tool: every string argument is walked; references are
+resolved inline under the same session rule and cap. Gateway servers are
+included until the deposit path (§4) exists.
+
+Session rule: a reference resolves only in the session that minted it or in
+one where a human typed it into a prompt (`UserPromptSubmit` admits it).
+
+`PostToolUse`: every string in `tool_response` is scanned by shape, and every
+token (and the rest of a `KEY=value` line) is compared by keyed fingerprint
+with the live entries; hits become references (existing reference when the
+fingerprint is known). The response keeps its shape.
 
 ## 4. Deposit to a gateway (not built)
 

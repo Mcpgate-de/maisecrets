@@ -2,14 +2,16 @@
 
 ## Harness (fake Anthropic upstream, Claude Code 2.1.283)
 
-Run 2026-09-26, 4 scenarios, 0 failures:
+Run 2026-09-26 (evening), 6 scenarios, 0 failures:
 
 | scenario | what it proves |
 |---|---|
 | prompt_secret | a typed secret is blocked; 0 requests reach the upstream; the transcript on disk carries no secret |
 | read_env | a Read of `.env` reaches the model with `⟦SECRET_c1⟧` and `⟦EMAIL_c1:…⟧`, never the values |
 | bash_echo | `cat .env` output is redacted before the model sees it |
-| bash_rehydrate | `⟦SECRET_c1⟧` in a Bash command is replaced by the real value at execution; the file the command wrote holds the value, the requests hold only the placeholder |
+| bash_rehydrate | `⟦SECRET_c1⟧` in a Bash command is read under a one-time grant at execution; the file the command wrote holds the value, the requests and the rewritten `tool_input` hold no value |
+| bash_rehydrate_quoted | a value with quotes, `$(` and spaces inside single quotes arrives byte for byte, and comes back redacted by exact match although it has no known shape |
+| bash_foreign_ref | a reference the session never saw in a prompt is denied; the model reads `foreign-session` in the tool result; no file is written |
 
 Golden payload shapes captured in `harness/golden/` (top-level keys, `tool_input`
 keys, `tool_response` keys per event and tool). A later Claude Code version
@@ -23,8 +25,21 @@ that changes a shape fails the harness with "schema drift".
 
 ## Unit tests
 
-22 tests, `tests/test_core.py`, run in milliseconds. Not yet mutation-probed
-individually.
+44 tests (`tests/test_core.py`, `tests/test_gates.py`, `tests/test_platform_backend.py`),
+run in under a second. The gate tests execute the rewritten command through a
+real bash and compare bytes, so a broken quoting context or a leaked value
+fails them:
+
+| control (docs/THREAT-MODEL.md) | test that goes red without it |
+|---|---|
+| C4 session rule | `test_reference_resolves_only_in_a_session_that_saw_it`, `test_mcp_foreign_session_is_denied…` |
+| C5 one-time grant | `test_grant_is_single_use_and_bound_to_its_key` |
+| C6 quoting contexts | `test_value_arrives_byte_for_byte_in_every_quoting_context` (unquoted, single, double, two refs) |
+| C7 limiter | `test_limiter_caps_distinct_keys_per_session_and_resolves_per_hour` |
+| C8 store-read backstop | `test_agent_reads_of_the_store_are_denied` |
+| C9 audit line | `test_audit_line_names_key_tool_and_context_but_no_value` |
+| C10 keyed fingerprint | `test_index_carries_no_reversible_fingerprint` |
+| C2 exact match | `test_shapeless_value_is_redacted_by_exact_match` |
 
 ## Hook latency (end to end, fresh python process per hook, median of 7, 2026-09-26)
 

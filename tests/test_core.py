@@ -152,7 +152,8 @@ class VaultTests(unittest.TestCase):
         a = self.v.put(GLPAT, "SECRET", "gitlab-pat")
         b = self.v.put(GLPAT, "SECRET", "gitlab-pat")
         self.assertEqual(a.key, b.key)
-        self.assertEqual(self.v.get(a.key), (GLPAT, "ok"))
+        self.assertEqual(self.v.get(a.key, human=True), (GLPAT, "ok"))
+        self.assertEqual(self.v.get(a.key), (None, "no-session"))   # hooks need a session
 
     def test_counter_is_per_type(self):
         self.v.put(GLPAT, "SECRET", "gitlab-pat")
@@ -163,10 +164,10 @@ class VaultTests(unittest.TestCase):
         e = self.v.put(AKIA, "SECRET", "aws-access-token")
         self.v._index["entries"][e.key]["expires"] = 0
         self.v._save_index()
-        self.assertEqual(self.v.get(e.key), (None, "expired"))
+        self.assertEqual(self.v.get(e.key, human=True), (None, "expired"))
         self.assertTrue(self.v._index["entries"][e.key]["purged"])
         self.assertIsNone(self.v.backend.get(e.key))
-        self.assertEqual(self.v.get("SECRET_c99"), (None, "unknown"))
+        self.assertEqual(self.v.get("SECRET_c99", human=True), (None, "unknown"))
 
     def test_non_default_home_uses_its_own_keychain_service(self):
         from maisecrets import vault as v
@@ -208,7 +209,7 @@ class HookTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertNotIn(GLPAT, json.dumps(out))
         self.assertTrue(out["hookSpecificOutput"]["suppressOriginalPrompt"])
-        self.assertEqual(Vault().get("SECRET_c1"), (GLPAT, "ok"))
+        self.assertEqual(Vault().get("SECRET_c1", session="s1"), (GLPAT, "ok"))
 
     def test_prompt_without_hit_passes(self):
         self.assertEqual(hooks.user_prompt({"prompt": "say hi"}), {})
@@ -219,18 +220,24 @@ class HookTests(unittest.TestCase):
         out = hooks.user_prompt({"prompt": f"look at @{f.name}", "cwd": "/"})
         self.assertEqual(out["decision"], "block")
 
-    def test_pre_tool_rehydrates_bash_and_denies_unknown(self):
-        e = Vault().put(GLPAT, "SECRET", "gitlab-pat")
-        out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": f'curl -H "PRIVATE-TOKEN: {e.ref}" u'}})
-        self.assertEqual(out["hookSpecificOutput"]["updatedInput"]["command"], f'curl -H "PRIVATE-TOKEN: {GLPAT}" u')
+    def test_pre_tool_rewrites_bash_to_a_granted_resolve_and_denies_unknown(self):
+        e = Vault().put(GLPAT, "SECRET", "gitlab-pat", session="s1")
+        out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1",
+                              "tool_input": {"command": f'curl -H "PRIVATE-TOKEN: {e.ref}" u'}})
+        cmd = out["hookSpecificOutput"]["updatedInput"]["command"]
+        self.assertNotIn(GLPAT, cmd)                     # the value is never spliced into the command
+        self.assertIn("resolve.py", cmd)
+        self.assertIn(f"{e.key} --grant ", cmd)
+        self.assertTrue(cmd.startswith('curl -H "PRIVATE-TOKEN: $('))   # double-quote context: bare $(…)
         self.assertNotIn("permissionDecision", out["hookSpecificOutput"])
-        out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": "echo ⟦SECRET_c42⟧"}})
+        out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", "tool_input": {"command": "echo ⟦SECRET_c42⟧"}})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_pre_tool_leaves_gateway_tools_alone(self):
-        out = hooks.pre_tool({"tool_name": "mcp__phase6-ai-gateway__x", "tool_input": {"q": "⟦EMAIL_c1⟧"},
+    def test_pre_tool_resolves_gateway_tool_arguments_until_the_deposit_path_exists(self):
+        e = Vault().put("max@example.org", "EMAIL", "email", session="s1")
+        out = hooks.pre_tool({"tool_name": "mcp__phase6-ai-gateway__x", "tool_input": {"q": e.ref}, "session_id": "s1",
                               "mcp_server": {"name": "phase6-ai-gateway", "source": "user"}})
-        self.assertEqual(out, {})
+        self.assertEqual(out["hookSpecificOutput"]["updatedInput"], {"q": "max@example.org"})
 
     def test_post_tool_redacts_bash_output_keeping_shape(self):
         out = hooks.post_tool({"tool_name": "Bash", "tool_input": {"command": "cat .env"},

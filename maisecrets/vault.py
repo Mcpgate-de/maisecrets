@@ -87,8 +87,15 @@ def describe_backend(backend) -> str:
             f"or write {{\"backend\": \"encrypted-file\"}} to {CONFIG} (any mode, next call).")
 
 
-def fingerprint(value: str) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()[:12]
+FP_KEY_ENTRY = "_maisecrets_fpkey"   # backend key that holds the fingerprint key (32 random bytes, hex)
+
+
+def fingerprint(value: str, key: bytes) -> str:
+    """Keyed fingerprint. An unkeyed hash of a short value (a phone number, a PIN) can
+    be reversed by trying every candidate against the index file; the key lives in the
+    backend, so the index alone gives nothing to try against."""
+    import hmac
+    return hmac.new(key, value.encode(), "sha256").hexdigest()[:16]
 
 
 @dataclass
@@ -102,10 +109,11 @@ class Entry:
     last_used: float
     expires: float
     max_expires: float
-    session: str | None = None
+    session: str | None = None          # the session that created the entry
     uses: int = 0
     purged: bool = False
     counters: dict = field(default_factory=dict)  # unused on entries; kept for schema stability
+    sessions: list = field(default_factory=list)  # sessions allowed to resolve the entry (see Vault.get)
 
     @property
     def ref(self) -> str:
@@ -154,7 +162,10 @@ class KeychainBackend:
 
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
         # -l is the "Name" column in Keychain Access, -j the comment shown in the item's info.
-        # No -A / -T: the default ACL stays (the creating tool may read it, others are asked).
+        # The item's ACL trusts /usr/bin/security, the tool that created it, so ANY process of
+        # this user that runs `security find-generic-password` reads the value without a dialog
+        # (review 2026-09-26, docs/reviews). The keychain protects the value at rest and from
+        # other users, not from this user's other processes. The gates are in the hooks.
         # No synchronizable flag: the item never joins iCloud Keychain or the Passwords app.
         cmd = ["security", "add-generic-password", "-U", "-s", SERVICE, "-a", key,
                "-l", label or f"maisecrets {key}", "-D", "maisecrets placeholder", "-w", value]
@@ -324,15 +335,37 @@ class Vault:
         ttls = self.cfg.get("ttl_seconds", {})
         return int(ttls.get(type_, ttls.get("default", 86400)))
 
+    _fpkey_cache: bytes | None = None
+
+    def fp_key(self) -> bytes:
+        """The fingerprint key, created on first use and kept in the backend, never in the index."""
+        if self._fpkey_cache is None:
+            raw = self.backend.get(FP_KEY_ENTRY)
+            if not raw:
+                raw = os.urandom(32).hex()
+                self.backend.put(FP_KEY_ENTRY, raw, label="maisecrets fingerprint key",
+                                 comment="maisecrets: key for the fingerprints in index.json; not a placeholder value.")
+            self._fpkey_cache = bytes.fromhex(raw.strip())
+        return self._fpkey_cache
+
+    def fingerprint(self, value: str) -> str:
+        return fingerprint(value, self.fp_key())
+
+    def live_fingerprints(self) -> dict[str, str]:
+        """fingerprint -> key for every entry whose value is still stored."""
+        return {m["fingerprint"]: k for k, m in self._index["entries"].items() if not m.get("purged")}
+
     # api -------------------------------------------------------------------
     def put(self, value: str, type_: str, kind: str, session: str | None = None,
             ttl: int | None = None) -> Entry:
         """Store a value; the same live value yields the same reference."""
         self.expire()
-        fp = fingerprint(value)
+        fp = self.fingerprint(value)
         existing = self._index["by_fingerprint"].get(fp)
         if existing and not self._index["entries"][existing].get("purged"):
             e = Entry(**self._index["entries"][existing])
+            if session and session not in e.sessions:
+                e.sessions.append(session)
             self._touch(e)
             return e
         n = self._index["counters"].get(type_, 0) + 1
@@ -343,7 +376,7 @@ class Vault:
         e = Entry(key=key, type=type_, kind=kind, fingerprint=fp,
                   display=display_for(type_, value), created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
-                  session=session, uses=0)
+                  session=session, uses=0, sessions=[session] if session else [])
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
         self.backend.put(
             key, value,
@@ -356,20 +389,130 @@ class Vault:
         self._save_index()
         return e
 
-    def get(self, key: str) -> tuple[str | None, str]:
-        """Return (value, status). status: ok | expired | unknown."""
+    def status(self, key: str, session: str | None = None) -> str:
+        """ok | unknown | expired | no-session | foreign-session, without reading the value.
+
+        A reference resolves only in a session that saw it come in: the session that
+        created the entry, or one where a human typed the reference into a prompt
+        (``admit``). Keys are counters, so a reference an agent never saw is guessable;
+        without this rule an injected instruction could name ``SECRET_c1`` and have it
+        resolved (review 2026-09-26, docs/reviews/2026-09-26-agent-channel.md).
+        """
+        meta = self._index["entries"].get(key)
+        if meta is None:
+            return "unknown"
+        if meta.get("purged") or meta["expires"] < time.time():
+            return "expired"
+        if session is None:
+            return "no-session"
+        if session not in meta.get("sessions", []):
+            return "foreign-session"
+        return "ok"
+
+    def admit(self, key: str, session: str | None) -> None:
+        """A human brought the reference into this session (it was in a prompt)."""
+        meta = self._index["entries"].get(key)
+        if meta is None or not session or session in meta.get("sessions", []):
+            return
+        meta.setdefault("sessions", []).append(session)
+        self._save_index()
+
+    def get(self, key: str, session: str | None = None, human: bool = False) -> tuple[str | None, str]:
+        """Return (value, status). ``human=True`` is the CLI path: no session rule."""
         self.expire()
         meta = self._index["entries"].get(key)
         if meta is None:
             return None, "unknown"
         if meta.get("purged"):
             return None, "expired"
+        if not human:
+            st = self.status(key, session)
+            if st != "ok":
+                return None, st
         value = self.backend.get(key)
         if value is None:
             return None, "expired"
         e = Entry(**meta)
         self._touch(e)
         return value, "ok"
+
+    # grants: one-time permission for a command to read one value ----------
+    GRANT_TTL = 120
+
+    def grant(self, key: str, session: str | None, tool: str, context: str) -> tuple[str | None, str]:
+        """Mint a one-time grant for ``key`` after the session rule and the limiter passed.
+
+        Returns (nonce, status). The Bash hook puts ``resolve KEY --grant NONCE`` into the
+        command instead of the value, so the command the user approves and the transcript
+        never carry the value. The limiter caps distinct keys per session and resolves per
+        hour so many values cannot leave in one automated sweep.
+        """
+        st = self.status(key, session)
+        if st != "ok":
+            return None, st
+        st = self._limit(key, session)
+        if st != "ok":
+            return None, st
+        import secrets as _secrets
+        nonce = _secrets.token_urlsafe(16)
+        now = time.time()
+        grants = self._index.setdefault("grants", {})
+        for n in [n for n, g in grants.items() if g["expires"] < now or g.get("used")]:
+            del grants[n]
+        grants[nonce] = {"key": key, "session": session, "expires": now + self.GRANT_TTL, "used": False}
+        self._record(key, session, tool, context)
+        self._save_index()
+        return nonce, "ok"
+
+    def redeem(self, key: str, nonce: str) -> tuple[str | None, str]:
+        g = self._index.get("grants", {}).get(nonce)
+        if g is None or g["key"] != key:
+            return None, "no-grant"
+        if g.get("used"):
+            return None, "grant-used"
+        if g["expires"] < time.time():
+            return None, "grant-expired"
+        g["used"] = True
+        self._save_index()
+        return self.get(key, human=True)
+
+    def _limit(self, key: str, session: str | None) -> str:
+        now = time.time()
+        rec = [r for r in self._index.get("resolves", []) if r["ts"] > now - 3600]
+        self._index["resolves"] = rec
+        per_session = int(self.cfg.get("max_keys_per_session", 25))
+        per_hour = int(self.cfg.get("max_resolves_per_hour", 60))
+        keys_in_session = {r["key"] for r in rec if r["session"] == session}
+        if key not in keys_in_session and len(keys_in_session) >= per_session:
+            return f"limit: {per_session} distinct keys in this session this hour (max_keys_per_session)"
+        if len(rec) >= per_hour:
+            return f"limit: {per_hour} resolves in the last hour (max_resolves_per_hour)"
+        return "ok"
+
+    def _record(self, key: str, session: str | None, tool: str, context: str) -> None:
+        now = time.time()
+        self._index.setdefault("resolves", []).append({"ts": now, "session": session, "key": key})
+        try:
+            HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd = os.open(HOME / "audit.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as f:
+                stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now))
+                ctx = context.replace("\n", " ").replace("\t", " ")[:160]
+                f.write(f"{stamp}\t{(session or '-')[:8]}\t{key}\t{tool}\t{ctx}\n")
+        except OSError:
+            pass
+
+    def record_resolve(self, key: str, session: str | None, tool: str, context: str) -> str:
+        """For tools that need the value inline (MCP arguments): session rule + limiter + audit."""
+        st = self.status(key, session)
+        if st != "ok":
+            return st
+        st = self._limit(key, session)
+        if st != "ok":
+            return st
+        self._record(key, session, tool, context)
+        self._save_index()
+        return "ok"
 
     def _touch(self, e: Entry) -> None:
         now = time.time()

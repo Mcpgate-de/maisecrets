@@ -139,11 +139,15 @@ def user_prompt(payload: dict) -> dict:
                     "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True},
                 }
 
-    # 2. secrets and PII
+    # 2. references the human typed or pasted: this session may resolve them from now on
+    typed = find_refs(prompt)
     matches = detect.scan(prompt)
+    if typed or matches:
+        vault = Vault(cfg)
+        for key, _s, _e in typed:
+            vault.admit(key, session)
     if not matches:
         return {}
-    vault = Vault(cfg)
     rewritten, entries = _replace(prompt, matches, vault, session)
     copied = _clipboard(rewritten)
     if cfg.get("scrub_transcript", True):
@@ -174,50 +178,204 @@ def user_prompt(payload: dict) -> dict:
 
 
 # --------------------------------------------------------------- PreToolUse --
-def pre_tool(payload: dict) -> dict:
-    cfg = load_config()
-    tool = payload.get("tool_name", "")
-    tool_input = payload.get("tool_input") or {}
-    server = (payload.get("mcp_server") or {}).get("name", "")
+# Reads of the store by the agent itself. The value is for the command a human approved,
+# not for the agent's context. Text matching, so a backstop and not a boundary; the
+# boundary is the grant (a reference resolves only through a nonce this hook minted).
+_STORE_READ_RE = re.compile(
+    r"(maisecrets(\.cli)?(\.py)?\s+get\b)|(cli\.py\s+get\b)"
+    r"|(security\s+(find-generic-password|dump-keychain)[^\n]*maisecrets)"
+    r"|(PasswordVault)|(vault\.enc\.json)|(\.maisecrets[/\\](vault|key|index))",
+)
 
-    # Gateway tools resolve their own placeholders (deposit path, later).
-    if server and server in cfg.get("gateway_servers", []):
-        return {}
 
-    if tool != "Bash":
-        return {}
-    command = tool_input.get("command", "")
-    refs = find_refs(command)
-    if not refs:
-        return {}
-    vault = Vault(cfg)
-    missing: list[str] = []
-    resolved = command
-    for key, start, end in sorted(refs, key=lambda r: r[1], reverse=True):
-        value, status = vault.get(key)
-        if status != "ok":
-            missing.append(f"{key} ({status})")
+def _quote_state(command: str, pos: int) -> str:
+    """Bash quoting context at ``pos``: 'sq' inside single quotes, 'dq' inside double quotes, '' outside."""
+    sq = dq = False
+    i = 0
+    while i < pos:
+        c = command[i]
+        if c == "\\" and not sq:
+            i += 2
             continue
-        resolved = resolved[:start] + value + resolved[end:]
-    if missing:
-        return {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": "maisecrets: cannot run, placeholder not resolvable: " + ", ".join(missing),
-            }
-        }
-    new_input = dict(tool_input)
-    new_input["command"] = resolved
+        if c == "'" and not dq:
+            sq = not sq
+        elif c == '"' and not sq:
+            dq = not dq
+        i += 1
+    return "sq" if sq else "dq" if dq else ""
+
+
+def _resolver_call(key: str, nonce: str) -> str:
+    """The command substitution that reads one value under a one-time grant."""
+    from pathlib import Path as _P
+    py = _P(sys.executable).as_posix()
+    script = (_P(__file__).resolve().parent.parent / "hooks" / "resolve.py").as_posix()
+    return f'$("{py}" "{script}" {key} --grant {nonce})'
+
+
+def _deny(reason: str) -> dict:
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                   "permissionDecisionReason": reason}}
+
+
+def _updated(payload: dict, new_input: dict) -> dict:
     if client_of(payload) == "codex":
         # Codex accepts updatedInput only together with "allow"; its own approval policy still applies.
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
                                        "updatedInput": new_input}}
-    # Claude Code: no permissionDecision, the normal permission rules apply to the resolved command.
+    # Claude Code: no permissionDecision, the normal permission rules apply to the rewritten input.
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": new_input}}
 
 
+def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
+    """Bash: every reference becomes ``$(resolve KEY --grant NONCE)`` in the right quoting
+    context. The value is read by the command itself at run time, so the command the user
+    approves, the transcript and the tool_use record carry no value, and no value is ever
+    spliced into shell syntax (a value with quotes or ``$(`` would otherwise become code)."""
+    command = tool_input.get("command", "")
+    if _STORE_READ_RE.search(command):
+        return _deny("maisecrets: the vault is read by the human (maisecrets get) or by a granted command, "
+                     "not by the agent. Use the ⟦REF⟧ placeholder in the command instead.")
+    refs = find_refs(command)
+    if not refs:
+        return {}
+    vault = Vault(cfg)
+    session = payload.get("session_id")
+    failed: list[str] = []
+    rewritten = command
+    for key, start, end in sorted(refs, key=lambda r: r[1], reverse=True):
+        nonce, status = vault.grant(key, session, "Bash", command)
+        if status != "ok":
+            failed.append(f"{key} ({status})")
+            continue
+        call = _resolver_call(key, nonce)
+        ctx = _quote_state(command, start)
+        piece = "'\"" + call + "\"'" if ctx == "sq" else call if ctx == "dq" else '"' + call + '"'
+        rewritten = rewritten[:start] + piece + rewritten[end:]
+    if failed:
+        return _deny(_deny_reason(failed))
+    new_input = dict(tool_input)
+    new_input["command"] = rewritten
+    return _updated(payload, new_input)
+
+
+def _deny_reason(failed: list[str]) -> str:
+    hint = ""
+    if any("foreign-session" in f or "no-session" in f for f in failed):
+        hint = (" A reference resolves only in a session where a human typed it: paste the "
+                "⟦REF⟧ into a prompt to allow it here.")
+    if any("limit:" in f for f in failed):
+        hint += " Raise the cap in ~/.maisecrets/config.json if this is intended."
+    return "maisecrets: cannot run, placeholder not resolvable: " + ", ".join(failed) + hint
+
+
+def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
+    """MCP tools: the value must be in the argument (there is no shell to read it later), so it
+    is inserted after the session rule and the limiter. The permission prompt of the client then
+    shows the value; this is the user's own value at the point where the real call happens."""
+    found: list[str] = []
+
+    def collect(s: str) -> str:
+        found.extend(k for k, _a, _b in find_refs(s))
+        return s
+    _walk_strings(tool_input, collect)
+    if not found:
+        return {}
+    vault = Vault(cfg)
+    session = payload.get("session_id")
+    context = json.dumps(tool_input, ensure_ascii=False)
+    values: dict[str, str] = {}
+    failed: list[str] = []
+    for key in dict.fromkeys(found):
+        status = vault.record_resolve(key, session, tool, context)
+        if status == "ok":
+            value, status = vault.get(key, session)
+        if status != "ok":
+            failed.append(f"{key} ({status})")
+            continue
+        values[key] = value
+    if failed:
+        return _deny(_deny_reason(failed))
+
+    def substitute(s: str) -> str:
+        out = s
+        for key, start, end in sorted(find_refs(s), key=lambda r: r[1], reverse=True):
+            out = out[:start] + values[key] + out[end:]
+        return out
+    return _updated(payload, _walk_strings(tool_input, substitute))
+
+
+def pre_tool(payload: dict) -> dict:
+    cfg = load_config()
+    tool = payload.get("tool_name", "")
+    tool_input = payload.get("tool_input") or {}
+    if tool == "Bash":
+        return _pre_bash(payload, cfg, tool_input)
+    if tool.startswith("mcp__"):
+        # Gateway servers too: the deposit path (gateway resolves ⟦REF⟧ itself, PROTOCOL §4) is not
+        # built; until it is, a placeholder that reaches a gateway action is parsed as text
+        # (measured 2026-09-26 with gmail_create_draft: the recipient was split at the colon).
+        return _pre_mcp(payload, cfg, tool, tool_input)
+    return {}
+
+
 # -------------------------------------------------------------- PostToolUse --
+_TOKEN_SPLIT_RE = re.compile(r"[\s\"'`<>()\[\]{},;]+")
+_EXACT_MIN_LEN = 8
+
+
+def _candidates(token: str):
+    """The token and the pieces a value usually sits in: after KEY=, inside user:pass@host,
+    without trailing punctuation. A base64 value keeps its '=' padding because the split
+    at '=' is a second candidate, not a replacement."""
+    yield token
+    stripped = token.rstrip(".,;:)")
+    if stripped != token:
+        yield stripped
+    if "=" in token:
+        yield token.split("=", 1)[1]
+    if ":" in token or "@" in token:
+        for piece in re.split(r"[:@]", token):
+            if len(piece) >= _EXACT_MIN_LEN:
+                yield piece
+
+
+def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entries: list) -> str:
+    """Values without a known shape (a password stored with `put`, a value from a prior
+    prompt) come back from a command in plaintext unless they are matched exactly. The
+    match is by keyed fingerprint of each token, so no value is read from the store."""
+    live = vault.live_fingerprints()
+    if not live:
+        return text
+    out = text
+    seen: set[str] = set()
+    tokens = list(_TOKEN_SPLIT_RE.split(text))
+    # a value with spaces or quotes survives no tokenizer; the rest of a KEY=value line does
+    for line in text.splitlines():
+        line = line.strip()
+        tokens.append(line)
+        for sep in ("=", ":"):
+            if sep in line:
+                tokens.append(line.split(sep, 1)[1].strip())
+    for token in tokens:
+        if len(token) < _EXACT_MIN_LEN:
+            continue
+        for cand in _candidates(token):
+            if len(cand) < _EXACT_MIN_LEN or cand in seen:
+                continue
+            seen.add(cand)
+            key = live.get(vault.fingerprint(cand))
+            if key is None:
+                continue
+            vault.admit(key, session)
+            from .vault import Entry
+            e = Entry(**vault._index["entries"][key])
+            out = out.replace(cand, e.ref)
+            hit["n"] += out.count(e.ref)
+            entries.append(e)
+    return out
+
+
 def post_tool(payload: dict) -> dict:
     cfg = load_config()
     response = payload.get("tool_response")
@@ -232,15 +390,17 @@ def post_tool(payload: dict) -> dict:
     def redact(s: str) -> str:
         nonlocal vault
         matches = detect.scan(s)
-        if not matches:
+        if not matches and not _has_live(cfg):
             return s
         if vault is None:
             vault = Vault(cfg)
-        out, ents = _replace(s, matches, vault, session)
-        hit["n"] += len(matches)
-        values.extend(m.value for m in matches)
-        entries.extend(ents)
-        return out
+        out = s
+        if matches:
+            out, ents = _replace(s, matches, vault, session)
+            hit["n"] += len(matches)
+            values.extend(m.value for m in matches)
+            entries.extend(ents)
+        return _exact_redact(out, vault, session, hit, entries)
 
     new_response = _walk_strings(response, redact)
     if not hit["n"]:
@@ -267,6 +427,21 @@ def post_tool(payload: dict) -> dict:
             ),
         }
     }
+
+
+_live_cache: dict = {}
+
+
+def _has_live(cfg: dict) -> bool:
+    """Cheap pre-check from the index file: any live entry at all? (no backend read)"""
+    if "v" not in _live_cache:
+        from .vault import INDEX
+        try:
+            idx = json.loads(INDEX.read_text())
+            _live_cache["v"] = any(not m.get("purged") for m in idx.get("entries", {}).values())
+        except (OSError, ValueError):
+            _live_cache["v"] = False
+    return _live_cache["v"]
 
 
 HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": post_tool}

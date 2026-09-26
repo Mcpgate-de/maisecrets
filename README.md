@@ -65,11 +65,12 @@ at session start; otherwise `claude plugin update maisecrets@<marketplace>`.
 
 ## What the plugin runs, sends and fetches
 
-- Runs: `python3 hooks/user_prompt.py`, `hooks/pre_tool.py`, `hooks/post_tool.py`
-  on the matching hook events. Each reads one JSON payload from stdin and
-  prints one JSON object.
-- Writes: `~/.maisecrets/index.json` (metadata, never a value), the vault
-  backend, and, on a blocked prompt, the clipboard. With `scrub_transcript`
+- Runs: `bash hooks/run.sh <event>` → `hooks/dispatch.py` on the matching
+  hook events. Each reads one JSON payload from stdin and prints one JSON
+  object. A granted Bash command runs `hooks/resolve.py` once.
+- Writes: `~/.maisecrets/index.json` (metadata and keyed fingerprints, never
+  a value), `~/.maisecrets/audit.log`, the vault backend, and, on a blocked
+  prompt, the clipboard. With `scrub_transcript`
   on, it rewrites the raw prompt inside the Claude Code transcript file named
   in the hook payload, because Claude Code writes the prompt to disk before
   the hook runs.
@@ -110,7 +111,43 @@ status` prints the same at any time.
 
 Every entry has a TTL. Each use renews it, up to `max_ttl_seconds`. On
 expiry the value is deleted and the metadata stays as a record. Commands:
-`python3 -m maisecrets.cli list | get <KEY> | expire | scan | config`.
+`python3 -m maisecrets.cli list | get <KEY> | put | audit | expire | scan | config`.
+
+**What the store does and does not do.** The keychain, the Credential Locker
+and the encrypted file keep the value off the disk in plaintext and away from
+other users. None of them stops a process that runs as you: `security`,
+PowerShell or openssl hand the value to any such process without a dialog
+(`docs/THREAT-MODEL.md`). The gates below stand in front of the agent, not in
+front of you.
+
+## Gates around a resolve
+
+A placeholder turns back into its value only here:
+
+- **In the session where a human typed it.** A reference minted in session A
+  resolves in session B only after you paste it into a prompt there. Keys are
+  counters, so an injected text could otherwise name one it never saw.
+- **Through a one-time grant in Bash.** The hook rewrites `⟦SECRET_c1⟧` to
+  `$(python resolve.py SECRET_c1 --grant NONCE)` in the quoting context of the
+  placeholder. The command you approve, the transcript and the tool record
+  carry no value; the command reads it once, and the nonce dies. A value with
+  quotes or `$(` arrives byte for byte instead of becoming shell syntax.
+- **Inline for MCP tools.** An argument has no shell to read from, so the value
+  is inserted after the same session rule. The permission prompt of the client
+  then shows your own value at the point of the real call.
+- **Under a cap.** `max_keys_per_session` (25) distinct keys per session and
+  `max_resolves_per_hour` (60) in total; above that the call is denied and the
+  reason names the cap. Every resolve writes one line to `~/.maisecrets/audit.log`
+  (time, session, key, tool, command with placeholders; never a value):
+  `python3 -m maisecrets.cli audit`.
+- **Not by the agent reading the store.** A Bash command that calls
+  `maisecrets get`, `security … maisecrets` or reads the vault files is denied.
+  This is text matching, a backstop; the boundary is the grant.
+
+Recommended in your Claude Code settings, outside the plugin: the sandbox with
+`sandbox.credentials` deny for `.env` files and `~/.maisecrets`, and
+`injectHosts` for the hosts a value may go to. That closes `cat .env` and
+`printenv`, which no hook sees.
 
 ## Detection rules
 
@@ -157,9 +194,14 @@ printed: `scripts/replay_sessions.py --claude --codex`.
 - Tool output above 50K characters is spilled to a file by Claude Code and is
   not rewritten.
 - Names are not detected. Regex only, by design, for now.
-- Gateway (MCP) tool calls are passed through unchanged; a placeholder in a
-  gateway argument is resolved by the gateway once the deposit endpoint
-  exists.
+- A value that a command transforms (base64, split across lines) comes back
+  unredacted; exact match works on whole tokens and on the rest of a
+  `KEY=value` line.
+- Gateway (MCP) arguments are resolved on the client until the gateway's
+  deposit endpoint exists; the value then travels to the gateway like any
+  other argument.
+- Codex on Windows runs commands in PowerShell, where the bash quoting
+  contexts of the grant rewrite do not apply. Not tested.
 
 ## Licence
 

@@ -22,10 +22,10 @@ class PlatformBackendTests(unittest.TestCase):
         name = type(v.backend).__name__
         value = "glpat-" + "PlatformSmoke0123456789ab"
         e = v.put(value, "SECRET", "gitlab-pat")
-        self.assertEqual(v.get(e.key), (value, "ok"), name)
+        self.assertEqual(v.get(e.key, human=True), (value, "ok"), name)
         v._index["entries"][e.key]["expires"] = 0
         v._save_index()
-        self.assertEqual(v.get(e.key), (None, "expired"), name)
+        self.assertEqual(v.get(e.key, human=True), (None, "expired"), name)
         self.assertIsNone(v.backend.get(e.key), name)
         print(f"native backend on {sys.platform}: {name} ok")
 
