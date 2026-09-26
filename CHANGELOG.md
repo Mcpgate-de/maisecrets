@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.16] - 2026-09-26
+
+### Fixes
+
+- a labelled value counts from 8 characters, said in the tip and the README (97701a0)
+
 ## [0.3.15] - 2026-09-26
 
 ### Features
