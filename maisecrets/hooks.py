@@ -176,7 +176,7 @@ def _pending_path(session: str | None):
 
 def _save_pending(rewritten: str, session: str | None) -> None:
     """The rewritten prompt, kept for /maisecrets:send. Over SSH or in Remote Control there is
-    no clipboard and no visible notice (Oleg, 2026-09-26). The file holds placeholders, never
+    no clipboard and no visible notice (field report, 2026-09-26). The file holds placeholders, never
     a value; the prompt text around them is the user's own."""
     try:
         p = _pending_path(session)
@@ -307,7 +307,7 @@ def _resolver_call(key: str, nonce: str) -> str:
     """The command substitution that reads one value under a grant. When the resolve fails
     (burned or expired grant), the whole command is terminated instead of running with an
     empty string: `grep … $(…)` with an empty value reported "0 matches" as a false all-clear
-    (Oleg, 2026-09-26). `$$` inside a command substitution is the command's own shell."""
+    (field report, 2026-09-26). `$$` inside a command substitution is the command's own shell."""
     from pathlib import Path as _P
     py = _P(sys.executable).as_posix()
     script = (_P(__file__).resolve().parent.parent / "hooks" / "resolve.py").as_posix()

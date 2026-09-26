@@ -57,7 +57,7 @@ loaded next to the `--plugin-dir` checkout and answered first, so the harness
 had been exercising the released version instead of the working tree. The
 harness settings now disable `maisecrets@synced`.
 
-## Field report Oleg (Linux, Claude Code over SSH and Remote Control, 2026-09-26)
+## Field report from a colleague (Linux, Claude Code over SSH and Remote Control, 2026-09-26)
 
 Confirmed: prompt block, Bash rehydration over SSH, output redaction of
 values never seen before. Found: (1) no clipboard over SSH, no block notice

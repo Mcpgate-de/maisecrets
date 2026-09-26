@@ -107,7 +107,7 @@ The three columns are the three guards: block a prompt that carries a
 value, resolve a placeholder at execution, redact tool output before the
 model sees it. A client with ❌ or ⚠️ under prompt or redact cannot be made
 safe by this plugin; it would look protected and leak. The hook names
-behind each mark are in `docs/CONCEPT.md`, "Provider coverage".
+behind each mark are in `docs/CLIENTS.md`.
 
 ## Install
 
@@ -348,4 +348,5 @@ a to-do.
 
 ## Licence
 
-Apache-2.0. See `docs/CONCEPT.md` for the concept and the decisions.
+Apache-2.0. `docs/PROTOCOL.md` is the specification a gateway implements,
+`docs/THREAT-MODEL.md` says what is defended, `docs/TESTING.md` what was measured.

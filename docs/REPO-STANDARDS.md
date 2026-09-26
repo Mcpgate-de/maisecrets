@@ -126,7 +126,7 @@ and OpenAI plugin directories.
   LICENSE, validation in the developer portal, security scan reads the source.
 - OpenAI: verified identity, published privacy policy; for MCP plugins also
   website, support and terms URLs plus 5 positive and 3 negative test cases.
-- Domain: `maisecrets.dev` is registered (Andi, 2026-09-26) and is the
+- Domain: `maisecrets.dev` is registered (2026-09-26) and is the
   `homepage` in the manifests; it points at the product page under
   mcpgate.de. `maisecrets.io` is not registered. The OpenAI route needs a
   website with privacy and support pages behind that domain.

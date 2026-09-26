@@ -3,3 +3,6 @@ __pycache__/
 .tmp/
 harness/out/
 .gitlab-ci-local/
+
+# internal working notes never enter the public repository
+docs/internal/
