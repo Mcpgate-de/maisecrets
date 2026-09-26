@@ -120,6 +120,7 @@ harness_codex:
   image: node:22
   variables:
     CODEX_VERSION: "0.155.1"
+    MAISECRETS_CODEX_SANDBOX: "danger-full-access"   # no bubblewrap/landlock in the runner container
   script:
     - npm install --global --no-fund --no-audit "@openai/codex@${CODEX_VERSION}"
     # node:22 (Debian) has python3 but no pip; Codex sends zstd request bodies

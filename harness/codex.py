@@ -70,8 +70,11 @@ def run_scenario(name: str, sc: dict) -> list[str]:
     out = work / "out"
     out.mkdir()
     env = dict(os.environ, CODEX_HOME=str(codex_home), MAISECRETS_HOME=str(home))
+    # CI containers have no bubblewrap/landlock for Codex's Linux sandbox; the container is disposable,
+    # so the job sets MAISECRETS_CODEX_SANDBOX to danger-full-access there
+    sandbox = os.environ.get("MAISECRETS_CODEX_SANDBOX", "workspace-write")
     cfg = (f'model = "{MODEL}"\nmodel_reasoning_effort = "low"\napproval_policy = "never"\n'
-           'sandbox_mode = "workspace-write"\n')
+           f'sandbox_mode = "{sandbox}"\n')
     if REAL:
         shutil.copy(Path.home() / ".codex" / "auth.json", codex_home / "auth.json")
     else:
@@ -155,6 +158,12 @@ def run_scenario(name: str, sc: dict) -> list[str]:
     print(f"[{'OK ' if not fails else 'FAIL'}] {name}  rc={r.returncode}  work={work}")
     for f in fails:
         print("     -", f)
+    if fails:
+        # what codex itself said, marker redacted: the work dir is gone once a CI job ends
+        tail = out.replace(MARK, "<MARK>").splitlines()[-25:]
+        print("     codex output (tail):")
+        for line in tail:
+            print("       |", line[:200])
     return fails
 
 
