@@ -18,7 +18,7 @@ for pat in ("/.claude/plugins/cache/*/maisecrets/*/", "/.claude/plugins/synced/*
         except (OSError, ValueError, KeyError):
             continue
         if v > best_v and os.path.isfile(os.path.join(d, "hooks", "run.sh")):
-            best, best_v = d.rstrip("/"), v
+            best, best_v = d.replace("\\", "/").rstrip("/"), v   # one separator style, also under Git Bash
 print(best or "")
 PY
 )"

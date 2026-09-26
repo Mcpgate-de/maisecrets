@@ -631,7 +631,7 @@ class ShortcutTests(unittest.TestCase):
             self.assertTrue(wrapper.exists())
             r = subprocess.run([BASH, str(wrapper)], capture_output=True, text=True,
                                env={**os.environ, "HOME": str(home)})
-        self.assertIn("/0.3.10/hooks/run.sh pending", r.stdout, r.stderr)
+        self.assertIn("/0.3.10/hooks/run.sh pending", r.stdout.replace("\\", "/"), r.stderr)
         self.assertNotIn("$(", cmd.split("---")[2].split("\n")[1], "the ! line is a fixed path, never a substitution")
 
 
