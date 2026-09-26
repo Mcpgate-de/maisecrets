@@ -150,19 +150,11 @@ mirror:
     - apk add --no-cache git openssh-client >/dev/null
     - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     - cp .ci-known-hosts-github ~/.ssh/known_hosts
-    - 'test -s "$MAISECRETS_GITHUB_DEPLOY_KEY" -a -s "$MAISECRETS_GITHUB_ORG_DEPLOY_KEY" || { echo "a deploy key variable is empty - protected variables reach only protected refs (main, tags v*)"; exit 1; }'
-    - cp "$MAISECRETS_GITHUB_DEPLOY_KEY" ~/.ssh/key_public && chmod 600 ~/.ssh/key_public
-    - cp "$MAISECRETS_GITHUB_ORG_DEPLOY_KEY" ~/.ssh/key_org && chmod 600 ~/.ssh/key_org
+    - 'test -s "$MAISECRETS_GITHUB_DEPLOY_KEY" || { echo "deploy key variable is empty - protected variables reach only protected refs (main, tags v*)"; exit 1; }'
+    - cp "$MAISECRETS_GITHUB_DEPLOY_KEY" ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
     - git fetch --tags --quiet origin
     # main as gitlab.com has it (a release commit may have landed after this pipeline's SHA).
-    # This job is the only writer of both GitHub repos, so a plain fast-forward push is enough.
-    # Two GitHub repos: the public one is the marketplace for everyone; the private one is the
-    # source the claude.ai organisation marketplace syncs from (its GitHub App wants a private
-    # repo). A deploy key is bound to one repository, hence two keys.
-    - export GIT_SSH_COMMAND="ssh -i ~/.ssh/key_public -o IdentitiesOnly=yes"
+    # This job is the only writer of the GitHub repo, so a plain fast-forward push is enough.
     - git push ssh://git@github.com/Sprinterli/maisecrets.git "origin/main:refs/heads/main"
     - git push ssh://git@github.com/Sprinterli/maisecrets.git --tags
-    - export GIT_SSH_COMMAND="ssh -i ~/.ssh/key_org -o IdentitiesOnly=yes"
-    - git push ssh://git@github.com/Sprinterli/maisecrets-claude.git "origin/main:refs/heads/main"
-    - git push ssh://git@github.com/Sprinterli/maisecrets-claude.git --tags
-    - echo "mirrored origin/main and tags to github.com/Sprinterli/maisecrets and /maisecrets-claude"
+    - echo "mirrored origin/main and tags to github.com/Sprinterli/maisecrets"

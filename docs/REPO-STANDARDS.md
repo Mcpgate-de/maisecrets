@@ -75,13 +75,13 @@ and OpenAI plugin directories.
 
 ## Remotes (now)
 
-- Primary: `gitlab.com/Sprinterli/maisecrets`. Two mirrors, both written
-  only by the CI `mirror` job (`origin/main` and tags, one deploy key each,
-  host keys pinned in `.ci-known-hosts-github`): `github.com/Sprinterli/maisecrets`
-  (public, the marketplace for everyone) and `github.com/Sprinterli/maisecrets-claude`
-  (private, the source the claude.ai organisation marketplace syncs from:
-  its GitHub App accepts only private repositories, measured in the org
-  dialog on 2026-09-26). Nobody pushes to GitHub by hand.
+- Primary: `gitlab.com/Sprinterli/maisecrets`, private; it is also the source
+  the claude.ai organisation marketplace syncs from. Mirror:
+  `github.com/Sprinterli/maisecrets`, public, the marketplace for everyone,
+  written only by the CI `mirror` job (`origin/main` and tags, deploy key,
+  host keys pinned in `.ci-known-hosts-github`). Nobody pushes to GitHub by
+  hand. A second private GitHub mirror for the organisation sync existed for
+  two hours on 2026-09-26 and was removed once the GitLab source worked.
 
 ## Licensing (before public)
 
