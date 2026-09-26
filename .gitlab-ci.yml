@@ -1,15 +1,27 @@
 # maisecrets CI. Runs on the netcup docker runner (capability tag "docker").
 # The hook harness is NOT here: it needs a logged-in `claude` binary. It runs
 # in the pre-push hook instead, so every pushed tip has passed it locally.
+#
+# Release flow (main only, after the tests):
+#   release  derives the next version from the commit subjects since the last
+#            v* tag (scripts/release.py), writes it into the three manifests
+#            and CHANGELOG.md, commits "chore(release): vX.Y.Z", tags, pushes.
+#            Claude Code fetches a plugin update only when the version string
+#            in .claude-plugin/plugin.json changes, so this bump IS the release.
+#   mirror   pushes main and the tags to github.com (the claude.ai marketplace
+#            source) over a deploy key that can write only that repository.
 
 stages:
   - validate
   - test
+  - release
+  - mirror
 
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH == "main"
 
 default:
@@ -29,8 +41,39 @@ default:
 manifests:
   stage: validate
   script:
-    - python -c "import json; [json.load(open(f)) for f in ('plugin.json', '.claude-plugin/plugin.json', 'hooks/hooks.json')]"
+    - python -c "import json; [json.load(open(f)) for f in ('plugin.json', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', 'hooks/hooks.json')]"
     - python -c "import json; h=json.load(open('hooks/hooks.json'))['hooks']; assert set(h) <= {'UserPromptSubmit','PreToolUse','PostToolUse','SessionStart','Setup'}, set(h)"
+    - python scripts/release.py check
+
+plugin_validate:
+  stage: validate
+  # the official validator: manifest schema, component paths inside the plugin,
+  # strict keys. --strict turns its warnings (missing version, mismatch between
+  # the marketplace entry and plugin.json) into failures.
+  image: node:22-slim
+  script:
+    - npm install --global --no-fund --no-audit @anthropic-ai/claude-code
+    - claude plugin validate --strict .
+
+commit_format:
+  stage: validate
+  # every subject is `type(scope): text` with a known type; the release job
+  # derives the version from exactly these subjects
+  image: alpine:3.20
+  variables:
+    GIT_DEPTH: "0"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      variables:
+        BASE: origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+    - if: $CI_COMMIT_BRANCH == "main" && $CI_COMMIT_MESSAGE !~ /^chore\(release\):/
+      variables:
+        BASE: ""
+  script:
+    - apk add --no-cache git python3 >/dev/null
+    - git fetch --tags --quiet origin
+    - if [ -z "$BASE" ]; then BASE=$(git describe --tags --abbrev=0 --match 'v*'); fi
+    - python3 scripts/release.py check "$BASE"
 
 no_secrets_in_tree:
   stage: validate
@@ -45,9 +88,61 @@ lint:
   # The ruff image has no shell, and the docker executor needs one. Pinned pip install instead.
   script:
     - pip install --quiet --disable-pip-version-check ruff==0.14.2
-    - ruff check --select E,F,W --line-length 120 maisecrets hooks harness tests
+    - ruff check --select E,F,W --line-length 120 maisecrets hooks harness tests scripts
 
 unit:
   stage: test
   script:
     - python -m unittest discover -s tests -v
+
+release:
+  stage: release
+  image: alpine:3.20
+  rules:
+    # not on the release commit itself (pushed with ci.skip anyway), not on tags, not on schedules
+    - if: $CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_MESSAGE !~ /^chore\(release\):/
+  needs: [manifests, plugin_validate, commit_format, no_secrets_in_tree, lint, unit]
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - apk add --no-cache git python3 >/dev/null
+    - git fetch --tags --quiet origin
+    - git checkout -q "$CI_COMMIT_SHA"
+    - |
+      if ! VERSION=$(python3 scripts/release.py next); then
+        rc=$?
+        if [ "$rc" = "3" ]; then echo "nothing to release"; exit 0; fi
+        echo "release.py next failed with $rc"; exit 1
+      fi
+    - python3 scripts/release.py apply
+    - python3 scripts/release.py check
+    - git config user.email "ci@maisecrets.local"
+    - git config user.name "maisecrets release"
+    - git add -- .claude-plugin/plugin.json .claude-plugin/marketplace.json plugin.json CHANGELOG.md
+    - 'git commit -q -m "chore(release): v$VERSION"'
+    - git tag -a "v$VERSION" -m "maisecrets $VERSION"
+    - git remote set-url origin "https://oauth2:${MAISECRETS_CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    # the branch push skips CI (its content was just tested); the tag push runs the tag pipeline
+    - git push -o ci.skip origin HEAD:main
+    - git push origin "v$VERSION"
+    - echo "released v$VERSION"
+
+mirror:
+  stage: mirror
+  image: alpine:3.20
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"
+  needs: []
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - apk add --no-cache git openssh-client >/dev/null
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - cp .ci-known-hosts-github ~/.ssh/known_hosts
+    - cp "$MAISECRETS_GITHUB_DEPLOY_KEY" ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+    - git fetch --tags --quiet origin
+    # main as gitlab.com has it (a release commit may have landed after this pipeline's SHA)
+    - git push --force-with-lease=main:refs/remotes/github/main ssh://git@github.com/Sprinterli/maisecrets.git "origin/main:refs/heads/main" || git push ssh://git@github.com/Sprinterli/maisecrets.git "origin/main:refs/heads/main"
+    - git push ssh://git@github.com/Sprinterli/maisecrets.git --tags
+    - echo "mirrored origin/main and tags to github.com/Sprinterli/maisecrets"

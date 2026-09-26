@@ -27,19 +27,46 @@ and OpenAI plugin directories.
   harness when `claude` is on PATH. `MAISECRETS_SKIP_HARNESS=1` skips only the
   harness. Nothing skips the tests.
 
-## CI on gitlab.com (now, runner assignment pending)
+## CI on gitlab.com (now)
 
-- `.gitlab-ci.yml`: workflow rules for MR pipelines, `main`, schedules.
-  Stages validate (manifests, no secrets in tree, ruff) and test (unittest).
+- `.gitlab-ci.yml`: workflow rules for MR pipelines, `main`, tags, schedules.
+  Stages validate (manifests, `claude plugin validate --strict`, commit
+  subject format, no secrets in tree, ruff), test (unittest), release, mirror.
   Runner capability tag `docker` on the netcup host. The harness does not run
   in CI: it needs a logged-in `claude`.
-- Before public: pin the ruff image to a version; add a job that runs
-  `claude plugin validate` once that works without a login.
+
+## Versions and releases (now)
+
+- Claude Code fetches a plugin update only when the `version` string in
+  `.claude-plugin/plugin.json` changes (manifest reference, "version"). The
+  bump is therefore the release, and it is never typed by hand.
+- Commit subjects follow `type(scope): text`, types `feat fix perf security
+  deps docs ci test chore build style refactor`, `!` or `BREAKING CHANGE` for
+  a breaking change. CI job `commit_format` refuses anything else.
+- `scripts/release.py` derives the next version from the commits since the
+  last `v*` tag: breaking → major (minor while the major is 0), `feat` →
+  minor, `fix perf security deps` → patch, the rest → no release. It writes
+  the version into the three manifests and a generated section into
+  `CHANGELOG.md`.
+- The `release` job runs on every push to `main` after the tests, commits
+  `chore(release): vX.Y.Z` with `ci.skip`, and pushes the tag `vX.Y.Z`. The tag
+  pipeline validates again and mirrors. Nobody pushes a tag by hand: the
+  pre-push hook refuses it.
+- Difference to the ai-gateway: no changelog fragments and no build counter.
+  A plugin version is read by users and by the updater, so it is real semver,
+  derived from the commit types instead of claimed in a fragment.
+- Credentials: `MAISECRETS_CI_PUSH_TOKEN` (project access token
+  `maisecrets-ci-release`, `write_repository`, expires 2027-09-25) and
+  `MAISECRETS_GITHUB_DEPLOY_KEY` (file variable, deploy key with write access
+  on the GitHub repo only). Both protected, so only `main` and tags see them.
 
 ## Remotes (now)
 
-- Primary: `gitlab.com/Sprinterli/maisecrets`. Mirror: `github.com/Sprinterli/maisecrets`.
-  Pattern as in trading-copilot: one `origin` with two push URLs.
+- Primary: `gitlab.com/Sprinterli/maisecrets`. Mirror:
+  `github.com/Sprinterli/maisecrets`, written only by the CI `mirror` job
+  (`origin/main` and tags, over the deploy key, host keys pinned in
+  `.ci-known-hosts-github`). The GitHub repo is the source the claude.ai
+  organisation marketplace reads. Nobody pushes to GitHub by hand.
 
 ## Licensing (before public)
 

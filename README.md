@@ -53,6 +53,16 @@ python3 harness/run.py                                 # 4 scenarios against a f
 scripts/install-hooks.sh                               # git pre-commit / pre-push
 ```
 
+## Install (organisation, claude.ai)
+
+An organisation admin adds the GitHub repository as a marketplace source
+under claude.ai organisation settings and sets the availability (available,
+installed by default, or required). Claude Code then offers the plugin to
+every member; a new version is picked up when the `version` in
+`.claude-plugin/plugin.json` changes, which the release job does on every
+merge to `main`. With `autoUpdate` on the marketplace entry the update lands
+at session start; otherwise `claude plugin update maisecrets@<marketplace>`.
+
 ## What the plugin runs, sends and fetches
 
 - Runs: `python3 hooks/user_prompt.py`, `hooks/pre_tool.py`, `hooks/post_tool.py`
