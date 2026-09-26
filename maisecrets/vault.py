@@ -83,7 +83,8 @@ def describe_backend(backend) -> str:
         "JsonFileBackend": f"PLAINTEXT file {HOME / 'vault.json'} - TEST MODE, not for real secrets",
     }.get(name, name)
     return (f"maisecrets vault: {where}. Metadata: {INDEX}. "
-            f"Change the backend in the plugin options (backend) or {CONFIG}.")
+            f"To change it: /plugin configure maisecrets@maisecrets (installed plugin), "
+            f"or write {{\"backend\": \"encrypted-file\"}} to {CONFIG} (any mode, next call).")
 
 
 def fingerprint(value: str) -> str:
