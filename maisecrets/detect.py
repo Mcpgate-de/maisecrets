@@ -21,6 +21,9 @@ SECRET_PATTERNS: dict[str, str] = {
     "stripe_key": r"sk_live_[0-9a-zA-Z]{24}",
     "google_api_key": r"AIza[0-9A-Za-z-_]{35}",
     "gitlab_pat": r"glpat-[0-9A-Za-z_-]{20,}",
+    # GitLab runner authentication token (`gitlab-runner list` prints it), deploy token, CI job token
+    "gitlab_runner_token": r"glrt-[0-9A-Za-z_.-]{20,}",
+    "gitlab_deploy_token": r"gldt-[0-9A-Za-z_-]{20,}",
     "openai_key": r"sk-[a-zA-Z0-9_-]{20,}",
     "google_oauth": r"ya29\.[a-zA-Z0-9_-]{20,}",
     "jwt": r"eyJ[a-zA-Z0-9_-]{8,}\.eyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}",

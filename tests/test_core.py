@@ -28,6 +28,7 @@ from maisecrets.vault import Vault  # noqa: E402
 GLPAT = "glpat-" + "A1b2C3d4E5f6G7h8I9j0"          # 20 chars after prefix
 AKIA = "AKIA" + "ABCDEFGHIJKLMNOP"
 GHP = "ghp_" + "a" * 36
+GLRT = "glrt-" + "AbCdEfGhIjKlMnOpQrStUv.01.1a2b3c4d5"
 # canonical public test values, assembled at runtime so no literal sits in the tree
 IBAN_OK = " ".join(["DE89", "3704", "0044", "0532", "0130", "00"])
 CARD_OK = " ".join(["4111"] + ["1111"] * 3)
@@ -36,7 +37,8 @@ JWT = ".".join(["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "dozjgNry
 
 class DetectTests(unittest.TestCase):
     def test_secret_shapes_are_found_with_the_exact_value(self):
-        for kind, val in [("gitlab_pat", GLPAT), ("aws_key", AKIA), ("github_token", GHP), ("jwt", JWT)]:
+        for kind, val in [("gitlab_pat", GLPAT), ("aws_key", AKIA), ("github_token", GHP), ("jwt", JWT),
+                          ("gitlab_runner_token", GLRT)]:
             with self.subTest(kind=kind):
                 ms = detect.scan(f"token is {val} ok")
                 self.assertEqual([(m.kind, m.value) for m in ms], [(kind, val)])
