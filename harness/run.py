@@ -47,6 +47,19 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c", "⟦EMAIL_c"],
     },
+    # the model calls an MCP tool with a placeholder: PreToolUse inserts the value into the
+    # argument, the server receives it, the result comes back redacted, and the transcript on
+    # disk carries no value (the PreToolUse hook's stdout is logged there, measured 2026-09-26)
+    "mcp_rehydrate": {
+        "prompt": "echo the stored token ⟦SECRET_c1⟧",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "mcp": {"everything": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-everything@2025.9.25"]}},
+        "allowed_tools": "mcp__everything__echo",
+        "turns": [{"tool": "mcp__everything__echo", "input": {"message": "⟦SECRET_c1⟧"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": ["⟦SECRET_c1⟧"],
+        "expect_text": "Echo: ⟦SECRET_c1⟧",
+    },
     # the model runs a command whose output holds a secret
     "bash_echo": {
         "prompt": "print the env",
@@ -139,14 +152,24 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     # dump hook: records every payload so golden keys can be verified
     settings = work / "settings.json"
     dump_cmd = f"{sys.executable} \"{ROOT / 'harness' / 'dump_hook.py'}\""
-    settings.write_text(json.dumps({"hooks": {ev: [{"hooks": [{"type": "command", "command": dump_cmd}]}]
-                                              for ev in ("UserPromptSubmit", "PreToolUse", "PostToolUse")}}))
+    # the checkout under test must be the only maisecrets: a copy synced from the developer's
+    # claude.ai account has the same name and wins over --plugin-dir (the harness ran the synced
+    # release instead of the working tree for an afternoon, 2026-09-26)
+    settings.write_text(json.dumps({
+        "enabledPlugins": {"maisecrets@synced": False},
+        "hooks": {ev: [{"hooks": [{"type": "command", "command": dump_cmd}]}]
+                  for ev in ("UserPromptSubmit", "PreToolUse", "PostToolUse")}}))
     srv = start_server(turns, out)
     try:
         debug_log = work / "claude-debug.log"
+        extra: list[str] = []
+        if sc.get("mcp"):
+            (work / "mcp.json").write_text(json.dumps({"mcpServers": sc["mcp"]}))
+            extra = ["--mcp-config", str(work / "mcp.json")]
         r = subprocess.run(
             ["claude", "-p", sc["prompt"], "--plugin-dir", str(ROOT), "--settings", str(settings),
-             "--allowedTools", "Bash,Read", "--max-turns", "3", "--debug-file", str(debug_log)],
+             "--allowedTools", sc.get("allowed_tools", "Bash,Read"), "--max-turns", "3",
+             "--debug-file", str(debug_log), *extra],
             cwd=cwd, env=env, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
         )
     finally:
@@ -158,6 +181,8 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     if "invalid manifest" in dbg or not re.search(r"Registered [1-9]\d* hooks from [1-9]\d* plugins", dbg):
         fails.append("PLUGIN NOT LOADED: no hooks registered (see claude-debug.log); the manifest is rejected by this "
                      "Claude Code version")
+    if "maisecrets@synced" in dbg and "not loaded" not in dbg and "disabled" not in dbg.lower():
+        fails.append("a synced maisecrets copy is loaded next to the checkout; the run is not testing the working tree")
     bodies = sorted(glob.glob(str(out / "request_*.json")))
     if len(bodies) != sc["expect_requests"]:
         fails.append(f"expected {sc['expect_requests']} requests, got {len(bodies)}")
@@ -180,12 +205,24 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     for marker in (MARK, MARK2):
         if marker in "".join(p.read_text(errors="ignore") for p in dump.glob("*.json")):
             fails.append("LEAK: a hook payload (tool_input after rewrite) carried the value")
-    # transcript on disk
-    proj_dir = Path.home() / ".claude" / "projects" / str(cwd).replace("/", "-")
-    for t in proj_dir.glob("*.jsonl"):
-        txt = t.read_text()
-        if MARK in txt:
-            fails.append(f"transcript {t.name} still holds the secret")
+    # transcript on disk, found by session id. The first version derived the project folder
+    # from the cwd and got the name wrong (Claude Code also rewrites '_' and prepends /private
+    # on macOS), so this check silently looked at nothing until 2026-09-26.
+    session_ids = set()
+    for pf in dump.glob("*.json"):
+        sid = json.loads(pf.read_text()).get("session_id")
+        if sid:
+            session_ids.add(sid)
+    time.sleep(2)   # the blocked prompt's record is scrubbed by a detached child shortly after the session ends
+    transcripts = [t for sid in session_ids for t in (Path.home() / ".claude" / "projects").glob(f"*/{sid}.jsonl")]
+    if session_ids and not transcripts:
+        fails.append("transcript not found for the session; the on-disk check did not run")
+    for t in transcripts:
+        txt = t.read_text(errors="ignore")
+        for marker in (MARK, MARK2, MARK[-8:]):
+            if marker in txt:
+                fails.append(f"transcript {t.parent.name}/{t.name} still holds the secret (…{marker[-6:]})")
+                break
     # golden keys
     for pf in sorted(dump.glob("*.json")):
         payload = json.loads(pf.read_text())

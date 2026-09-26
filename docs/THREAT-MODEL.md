@@ -28,7 +28,7 @@ that goes red when the control is removed (`docs/TESTING.md`).
 |---|---|---|---|
 | C1 | `UserPromptSubmit` blocks a prompt with a hit, stores the value, hands back the rewritten prompt | A1 | a value with no known shape in a prompt (use `put`) |
 | C2 | `PostToolUse` redacts tool results by shape and by exact match of every live value (keyed fingerprint of each token) | A1 | a value transformed by the command (base64, split); output above 50K chars spilled by Claude Code |
-| C3 | transcript scrub after C1 and after a Codex redaction | A1, A4 | a transcript written by a client we do not scrub |
+| C3 | transcript scrub: after C1 (a detached child waits for the record Claude Code writes after the hook), after a Codex redaction, and after an MCP resolve (the client logs the hook's stdout with the inserted value) | A1, A4 | a transcript written by a client we do not scrub; a record written later than 15 s after the block |
 | C4 | session rule: a reference resolves only in a session where a human typed it or where it was minted | A2 | the human pastes a reference into a session the injection controls |
 | C5 | one-time grant for Bash: the command carries `$(resolve KEY --grant NONCE)`, never the value; the nonce dies after one read or 120 s | A2, A5's screen, transcript | MCP arguments (the value must be inline; the client's permission prompt shows it) |
 | C6 | quoting-aware rewrite: the resolver call is placed in the quoting context of the placeholder, so no value is spliced into shell syntax | injection through a value with shell characters | a shell other than bash (PowerShell on Codex for Windows: not covered yet) |

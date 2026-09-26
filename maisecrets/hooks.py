@@ -91,6 +91,47 @@ def _walk_strings(node: Any, fn) -> Any:
     return node
 
 
+def _debug(msg: str) -> None:
+    """Append a line to $MAISECRETS_DEBUG_LOG when set (harness and troubleshooting); never a value."""
+    log = os.environ.get("MAISECRETS_DEBUG_LOG")
+    if log:
+        try:
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+        except OSError:
+            pass
+
+
+def _scrub_transcript_later(path: str, values: list[str], refs: list[str], seconds: float = 15.0) -> None:
+    """Claude Code 2.1.283 writes the blocked prompt's transcript record AFTER the hook returned
+    (measured 2026-09-26: at hook time the transcript file did not exist yet), so a scrub inside
+    the hook finds nothing. A detached child polls the file for up to ``seconds`` and scrubs
+    it as soon as the raw value appears. Values reach the child on stdin, never as arguments."""
+    if not path:
+        return
+    code = (
+        "import json,os,sys,time\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "from maisecrets.hooks import _scrub_transcript, _debug\n"
+        "spec = json.load(sys.stdin)\n"
+        "deadline = time.time() + spec['seconds']\n"
+        "while time.time() < deadline:\n"
+        "    if _scrub_transcript(spec['path'], spec['values'], spec['refs']):\n"
+        "        _debug('scrub-later: done'); break\n"
+        "    time.sleep(0.2)\n"
+        "else:\n"
+        "    _debug('scrub-later: gave up')\n"
+    )
+    try:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        child = subprocess.Popen([sys.executable, "-c", code, root], stdin=subprocess.PIPE,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        child.stdin.write(json.dumps({"path": path, "values": values, "refs": refs, "seconds": seconds}).encode())
+        child.stdin.close()
+    except (OSError, ValueError):
+        _debug("scrub-later: could not start")
+
+
 def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
     """Best effort: rewrite the transcript lines that carry the raw prompt.
 
@@ -101,18 +142,28 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
     """
     try:
         if not path or not os.path.exists(path) or os.path.getsize(path) > 50 * 1024 * 1024:
+            why = "missing" if not path else ("absent" if not os.path.exists(path) else "too large")
+            _debug(f"scrub: skipped, path={why}")
             return False
         with open(path, encoding="utf-8") as f:
             data = f.read()
+        hits = sum(data.count(v) for v in values)
+        _debug(f"scrub: read {os.path.basename(path)} {len(data)} bytes, {hits} value hits")
         changed = data
         for v, r in zip(values, refs):
-            changed = changed.replace(json.dumps(v)[1:-1], json.dumps(r)[1:-1])
+            esc_v, esc_r = json.dumps(v)[1:-1], json.dumps(r)[1:-1]
+            # a hook's stdout is logged as a JSON string inside a JSON record, so the value can
+            # also sit there doubly escaped (measured with an MCP echo tool, 2026-09-26)
+            changed = changed.replace(json.dumps(esc_v)[1:-1], json.dumps(esc_r)[1:-1])
+            changed = changed.replace(esc_v, esc_r)
         if changed == data:
+            _debug("scrub: nothing to replace")
             return False
         tmp = path + ".maisecrets.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(changed)
         os.replace(tmp, path)
+        _debug(f"scrub: rewrote ({len(data)} -> {len(changed)} bytes)")
         return True
     except OSError:
         return False
@@ -150,7 +201,9 @@ def user_prompt(payload: dict) -> dict:
     rewritten, entries = _replace(prompt, matches, vault, session)
     copied = _clipboard(rewritten)
     if cfg.get("scrub_transcript", True):
-        _scrub_transcript(payload.get("transcript_path", ""), [m.value for m in matches], [e.ref for e in entries])
+        values, refs = [m.value for m in matches], [e.ref for e in entries]
+        if not _scrub_transcript(payload.get("transcript_path", ""), values, refs):
+            _scrub_transcript_later(payload.get("transcript_path", ""), values, refs)
     counts: dict[str, int] = {}
     for e in entries:
         counts[e.type] = counts.get(e.type, 0) + 1
@@ -342,6 +395,26 @@ def _candidates(token: str):
                 yield piece
 
 
+def _inserted_values(text: str, vault: Vault) -> list[tuple[str, str]]:
+    """(value, reference) for every live vault value that appears in ``text``, found by keyed
+    fingerprint of the tokens, so no value is read from the store."""
+    live = vault.live_fingerprints()
+    if not live:
+        return []
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for token in _TOKEN_SPLIT_RE.split(text):
+        for cand in _candidates(token):
+            if len(cand) < _EXACT_MIN_LEN or cand in seen:
+                continue
+            seen.add(cand)
+            key = live.get(vault.fingerprint(cand))
+            if key is not None:
+                from .vault import Entry
+                out.append((cand, Entry(**vault._index["entries"][key]).ref))
+    return out
+
+
 def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entries: list) -> str:
     """Values without a known shape (a password stored with `put`, a value from a prior
     prompt) come back from a command in plaintext unless they are matched exactly. The
@@ -405,6 +478,22 @@ def post_tool(payload: dict) -> dict:
         return _exact_redact(out, vault, session, hit, entries)
 
     new_response = _walk_strings(response, redact)
+    tool = payload.get("tool_name", "")
+    if tool.startswith("mcp__") and cfg.get("scrub_transcript", True):
+        # PreToolUse put the values into the arguments; Claude Code writes that hook's stdout
+        # (updatedInput, values included) into the transcript as a hook_success attachment
+        # (measured 2026-09-26). The executed tool_input names the values, so they can be
+        # swapped back to their references on disk.
+        if vault is None:
+            vault = Vault(cfg)
+        inserted = _inserted_values(json.dumps(payload.get("tool_input") or {}, ensure_ascii=False), vault)
+        if inserted:
+            values, refs = [v for v, _r in inserted], [r for _v, r in inserted]
+            path = payload.get("transcript_path", "")
+            # the record may not be on disk yet (Claude Code batches transcript writes); a
+            # detached child keeps looking for a while
+            _scrub_transcript(path, values, refs)
+            _scrub_transcript_later(path, values, refs)
     if not hit["n"]:
         return {}
     from . import events

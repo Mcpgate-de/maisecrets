@@ -33,6 +33,30 @@ and the harness fails a scenario when the debug log does not show
 `Registered N hooks from M plugins` with N, M ≥ 1. Debian 13 with 2.1.223
 after the fix (0.3.5, cloned from the public GitHub repo): 6 of 6 green.
 
+## The transcript check looked at nothing (2026-09-26, evening)
+
+The harness derived the transcript folder from the cwd and got the name wrong
+(Claude Code rewrites `_` and prepends `/private` on macOS), so "transcript
+on disk carries no secret" had never been checked. Found by a mutation probe
+that stayed green. The harness now finds the transcript by session id and
+fails when it finds none. What the real check then showed, both fixed:
+
+- The blocked prompt's record is written AFTER the `UserPromptSubmit` hook
+  returned (at hook time the file did not exist), so the in-hook scrub found
+  nothing. A detached child now polls the transcript for up to 15 s and
+  scrubs the record when it appears.
+- For an MCP tool call, Claude Code logs the `PreToolUse` hook's stdout,
+  which carries `updatedInput` with the value, as a `hook_success`
+  attachment. `PostToolUse` now scrubs the inserted values (found by keyed
+  fingerprint in the executed `tool_input`), doubly escaped forms included.
+  Scenario `mcp_rehydrate` (server-everything's echo tool) covers it; with
+  the scrub switched off it goes red.
+
+Also found: a maisecrets copy synced from the developer's claude.ai account
+loaded next to the `--plugin-dir` checkout and answered first, so the harness
+had been exercising the released version instead of the working tree. The
+harness settings now disable `maisecrets@synced`.
+
 ## Mutation probes
 
 | date | mutation | expected | observed |
