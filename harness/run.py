@@ -92,6 +92,9 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     for d in (cwd, out, dump):
         d.mkdir()
     home = work / "vaulthome"
+    home.mkdir()
+    # preload and hooks must agree on the backend, on every OS: pin the test backend for this home
+    (home / "config.json").write_text(json.dumps({"backend": "jsonfile"}))
     env = dict(os.environ, ANTHROPIC_BASE_URL=f"http://127.0.0.1:{PORT}", CLAUDE_CODE_MAX_RETRIES="0",
                MAISECRETS_HOME=str(home), MAISECRETS_DUMP=str(dump), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
     for fname, content in sc.get("files", {}).items():
@@ -101,7 +104,7 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         os.environ["MAISECRETS_HOME"] = str(home)
         from maisecrets.vault import Vault  # noqa: E402
         for value, type_, kind in sc["preload"]:
-            Vault({"backend": "jsonfile"}).put(value, type_, kind)
+            Vault().put(value, type_, kind)
     turns = json.loads(json.dumps(sc["turns"]).replace("{cwd}", str(cwd)))
     # dump hook: records every payload so golden keys can be verified
     settings = work / "settings.json"
