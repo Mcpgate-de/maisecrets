@@ -13,10 +13,15 @@ Three rule sources, one scanner:
    the generic and the German types are ported below; the others keep
    their pattern score and need a context word. Refresh with
    `scripts/sync_presidio.py`.
-3. **Own rules** (`OWN_RULES` below): what neither covers. Email, IBAN,
-   card and IPv4 stay ours (bounded regexes plus validators), phone with a
-   country code, and credentials recognised by position (`password=…`,
-   `Bearer …`, `user:pass@host`, `?api_key=`).
+3. **detect-secrets** (`rules/detect_secrets.json`, derived from Yelp
+   detect-secrets' KeywordDetector and BasicAuthDetector, Apache-2.0, version
+   in `rules/DETECT_SECRETS_VERSION`): credentials recognised by position
+   (`password = …`, `api_key: "…"`, `user:pass@host`). Their heuristic
+   filters (templated, indirect, sequential, dollar-prefixed) are ported.
+4. **Own rules** (`OWN_RULES` below): what none of the three covers. Email
+   stays ours (a bounded regex; the unbounded one took 11 s on an 80 KB
+   dotted run), phone with a country code, `Bearer …` outside curl,
+   `?api_key=…` in a URL, full-length GitLab runner and deploy tokens.
 
 One detector, shared by every hook and every direction. Two detectors with
 slightly different rules is how a redaction leaks.
@@ -58,6 +63,7 @@ class Rule:
     score: float = 1.0                 # presidio pattern score; 1.0 = shape alone is enough
     context: tuple[str, ...] = ()      # presidio context words; a nearby one lifts a weak score
     require_context: bool = False      # weak shape: accept only with a context word nearby
+    whole_match: bool = False          # presidio: the entity is the whole match, never a sub-group
 
 
 # ----------------------------------------------------------------- helpers --
@@ -99,6 +105,8 @@ def _iban_ok(raw: str) -> bool:
 
 
 def _public_ip(ip: str) -> bool:
+    if ":" in ip:
+        return True   # IPv6: no private-range rule here
     parts = [int(p) for p in ip.split(".")]
     if any(p > 255 for p in parts):
         return False
@@ -192,7 +200,34 @@ def _de_vat_id_ok(v: str) -> bool:
     return len(n) == 11 and n.startswith("DE") and n[2:].isdigit()
 
 
+_DS_TEMPLATED = re.compile(r"^(\{\{.*\}\}|\$\{.*\}|<.*>|%.*%|\$[A-Za-z_][A-Za-z0-9_]*)$")
+_DS_INDIRECT = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*\s*(\(.*\)|\[.*\])$")
+
+
+def _ds_value_ok(v: str) -> bool:
+    """Port of detect-secrets' heuristic filters for keyword hits."""
+    v = v.strip()
+    if len(v) < 8 or len(v) > 256:
+        return False
+    if _DS_TEMPLATED.match(v) or _DS_INDIRECT.match(v):
+        return False
+    if not any(c.isalnum() for c in v):
+        return False
+    low = v.lower()
+    if low in {"password", "changeme", "placeholder", "example", "none", "null", "true", "false", "redacted"}:
+        return False
+    # sequential or repeated strings (abcdef…, 123456…, aaaaaa…)
+    if len(set(low)) <= 2:
+        return False
+    if all(ord(low[i + 1]) - ord(low[i]) == 1 for i in range(len(low) - 1)):
+        return False
+    if low.startswith(("\u27e6", "<")) and "_c" in low:
+        return False
+    return True
+
+
 VALIDATORS = {
+    "ds_value": _ds_value_ok,
     "de_tax_id": _de_tax_id_ok,
     "de_social_security": _de_social_security_ok,
     "de_id_card": _de_id_card_ok,
@@ -211,32 +246,18 @@ VALIDATORS = {
 
 # --------------------------------------------------------------- own rules --
 OWN_RULES: list[dict] = [
-    {"id": "url-userinfo", "type": "SECRET", "secret_group": 2,
-     "regex": r"(?i)\b[a-z][a-z0-9+.-]*://([^/\s:@]{1,128}):([^/\s@]{1,256})@"},
     # ?token=… / &api_key=… in a URL
     {"id": "url-query-secret", "type": "SECRET", "secret_group": 2,
      "regex": r"(?i)[?&]((?:access_?)?token|api[_-]?key|apikey|secret|password|sig|signature)=([^&\s#\"']{8,})"},
     {"id": "email", "type": "EMAIL",
      "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})@[\w-]{1,63}\.[\w.-]{0,254}[\w-]"},
-    {"id": "iban", "type": "IBAN", "validator": "iban",
-     "regex": r"\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,4})?\b"},
-    {"id": "credit-card", "type": "CARD", "validator": "luhn",
-     "regex": r"(?<!\w)(?<!\d{4}-)(?:\d{4}[\s-]?){3}\d{4}(?!-\d{4})(?!\w)"},
-    {"id": "ipv4", "type": "IP", "validator": "public_ip",
-     "regex": r"(?<!\w)(?<!\d\.)\d{1,3}(?:\.\d{1,3}){3}(?!\w)"},
     {"id": "phone", "type": "PHONE",
      "regex": r"(?<![\w+])\+\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?!\w)"},
     # full-length GitLab runner / deploy tokens; the gitleaks legacy shape stops after 20 chars
     {"id": "gitlab-runner-token", "type": "SECRET", "regex": r"glrt-[0-9A-Za-z_.-]{20,}"},
     {"id": "gitlab-deploy-token-any", "type": "SECRET", "regex": r"gldt-[0-9A-Za-z_-]{20,}"},
-    # credentials recognised by POSITION, not shape: a name says what the value is
-    {"id": "named-credential", "type": "SECRET", "secret_group": 3, "validator": "not_placeholder",
-     "regex": (r"(?i)\b((?:[a-z0-9]{1,16}[_-])?(?:secret|passwo?rd|passwd|pwd|token|api[_-]?key|apikey"
-               r"|client[_-]?secret|access[_-]?key|private[_-]?key|auth[_-]?token))"
-               r"(\s*[:=]\s*[\"']?)([A-Za-z0-9_\-./+=~]{16,})")},
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?i)\b(Bearer|Basic|Token|APIKey)(\s+)([A-Za-z0-9._~+/=-]{16,})"},
-    # user:password@host in a URL; group 2 is the password
 ]
 
 
@@ -272,10 +293,10 @@ def _load_gitleaks() -> list[Rule]:
 ENTITY_TYPE = {"EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "CREDIT_CARD": "CARD",
                "IP_ADDRESS": "IP", "PHONE_NUMBER": "PHONE"}
 # covered by OWN_RULES with bounded regexes and validators, or not PII worth a placeholder
-PRESIDIO_SKIP = {"email", "iban", "credit-card", "ip", "url", "date", "mac-address", "uuid", "phone"}
+PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone"}
 # validator id per presidio recognizer id; a recognizer with a validator we did not port
 # keeps its pattern score and is treated as weak (context required)
-PRESIDIO_VALIDATOR = {"de-tax-id": "de_tax_id", "de-social-security": "de_social_security",
+PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip", "de-tax-id": "de_tax_id", "de-social-security": "de_social_security",
                       "de-id-card": "de_id_card", "de-passport": "de_passport",
                       "de-health-insurance": "de_health_insurance", "de-lanr": "de_lanr",
                       "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id"}
@@ -303,7 +324,20 @@ def _load_presidio(languages: tuple[str, ...] = DEFAULT_PII_LANGUAGES) -> list[R
                 type=ENTITY_TYPE.get(rec["entity"], rec["entity"]), regex=rx,
                 validator=validator, score=float(pat["score"]),
                 context=tuple(c.lower() for c in rec.get("context", [])), require_context=weak,
+                whole_match=True,
             ))
+    return out
+
+
+def _load_detect_secrets() -> list[Rule]:
+    data = json.loads((RULES_DIR / "detect_secrets.json").read_text())
+    kws = tuple(sorted({"key", "pass", "pwd", "secret", "contrase"}))
+    out: list[Rule] = []
+    for r in data["rules"]:
+        flags = re.IGNORECASE if r.get("ignorecase") else 0
+        out.append(Rule(id=r["id"], type="SECRET", regex=re.compile(r["regex"], flags),
+                        keywords=() if r["id"] == "ds-basic-auth" else kws,
+                        secret_group=int(r["group"]), validator="ds_value"))
     return out
 
 
@@ -323,7 +357,7 @@ def rules() -> list[Rule]:
         own = _load_own()
         secrets = [r for r in own if r.type == "SECRET"]
         pii = [r for r in own if r.type != "SECRET"]
-        _RULES = secrets + _load_gitleaks() + _load_presidio(_pii_languages()) + pii
+        _RULES = secrets + _load_detect_secrets() + _load_gitleaks() + _load_presidio(_pii_languages()) + pii
     return _RULES
 
 
@@ -337,6 +371,9 @@ def _pii_languages() -> tuple[str, ...]:
 
 
 SECRET_TYPES = frozenset({"SECRET"})
+# a value that is obviously a placeholder is never a secret, whichever rule matched it
+PLACEHOLDER_VALUES = frozenset({"changeme", "change_me", "password", "placeholder", "example", "redacted",
+                                "secret", "your_api_key", "xxxxxxxx", "todo", "none", "null"})
 
 
 # ------------------------------------------------------------------ scanner --
@@ -369,9 +406,15 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             continue
         if rule.keywords and not any(k in low for k in rule.keywords):
             continue
+        # a rule that cannot fire without a context word need not run its regex without one
+        if rule.context and (rule.require_context or rule.score < 0.5) and not any(c in low for c in rule.context):
+            continue
         for m in rule.regex.finditer(text):
             ngroups = m.re.groups or 0
-            g = rule.secret_group if 0 < rule.secret_group <= ngroups else (1 if ngroups >= 1 and m.group(1) else 0)
+            if rule.whole_match:
+                g = 0
+            else:
+                g = rule.secret_group if 0 < rule.secret_group <= ngroups else (1 if ngroups >= 1 and m.group(1) else 0)
             start, end = m.start(g), m.end(g)
             if end <= start:
                 continue
@@ -381,6 +424,8 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if rule.entropy and shannon_entropy(secret) < rule.entropy:
                 continue
             if rule.validator and not VALIDATORS[rule.validator](secret):
+                continue
+            if rule.type == "SECRET" and secret.strip("\"'` ").lower() in PLACEHOLDER_VALUES:
                 continue
             if rule.score < 1.0 or rule.require_context:
                 # presidio semantics: a weak shape passes only with a context word nearby

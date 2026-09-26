@@ -80,7 +80,10 @@ def main() -> int:
         old_fps: dict[str, set] = defaultdict(set)      # legacy kind -> fps
         files_with_hits: Counter = Counter()
         n_lines = n_bytes = 0
-        for f in files:
+        for i, f in enumerate(files, 1):
+            if i % 25 == 0 or i == len(files):
+                print(f"  {name}: {i}/{len(files)} files, {n_bytes / 1e6:.0f} MB, {time.time() - t0:.0f} s",
+                      file=sys.stderr, flush=True)
             try:
                 data = f.read_bytes()
             except OSError:

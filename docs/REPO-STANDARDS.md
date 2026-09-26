@@ -45,10 +45,10 @@ and OpenAI plugin directories.
 
 - Apache-2.0 for the plugin. Gateway-side implementation lives in the
   ai-gateway under its own licence; this repo owns the protocol spec.
-- Detection rules: the gitleaks ruleset is vendored under its MIT licence
-  (`maisecrets/rules/`), refreshed with `scripts/sync_gitleaks.py <tag>`.
-  The own rules in `detect.py` are plain regular expressions, not protected
-  material; `NOTICE` records both origins.
+- Detection rules: gitleaks (MIT), Presidio (MIT) and detect-secrets
+  (Apache-2.0) are vendored as data under `maisecrets/rules/`, each with its
+  licence file, version file and sync script. The six own rules in
+  `detect.py` are plain regular expressions; `NOTICE` records every origin.
 
 ## Security and privacy (before public)
 

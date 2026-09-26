@@ -72,7 +72,7 @@ expiry the value is deleted and the metadata stays as a record. Commands:
 
 ## Detection rules
 
-Two sources, one scanner (`maisecrets/detect.py`):
+Four sources, one scanner (`maisecrets/detect.py`):
 
 - **gitleaks** ruleset, vendored as data under `maisecrets/rules/` (MIT,
   version in `GITLEAKS_VERSION`, refresh with `scripts/sync_gitleaks.py vX.Y.Z`):
@@ -88,10 +88,20 @@ Two sources, one scanner (`maisecrets/detect.py`):
   (`scripts/check_validators_against_presidio.py`). A digit-only shape such as
   a Steuer-ID is reported only with a context word nearby, even when the
   checksum passes.
-- **Own rules** for what neither covers: PII with bounded regexes and
-  validators (email, IBAN mod-97, card Luhn, public IPv4, phone with country
-  code) and credentials recognised by position (`password=…`, `Bearer …`,
-  `user:pass@host`, `?api_key=…`).
+- **detect-secrets** (Yelp, Apache-2.0, version in `DETECT_SECRETS_VERSION`,
+  refresh with `scripts/sync_detect_secrets.py vX.Y.Z`): credentials
+  recognised by position (`password = …`, `api_key: "…"`, `user:pass@host`),
+  with its heuristic filters ported (templated, indirect, sequential values
+  are not secrets).
+- **Own rules**, six of them, for what none of the three covers: email (a
+  bounded regex; the unbounded one took 11 s on an 80 KB dotted run), phone
+  with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, and
+  full-length GitLab runner and deploy tokens.
+
+IBAN, credit card and IP come from Presidio's regexes with our validators
+(mod-97, Luhn, public-range check). A card number without a word like
+"card" or "Kreditkarte" nearby is not reported: Presidio scores the bare
+shape low, and a 16-digit number passes Luhn one time in ten.
 
 Measure what the rules would catch on your own recordings, values never
 printed: `scripts/replay_sessions.py --claude --codex`.

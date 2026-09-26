@@ -50,19 +50,22 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(len(ms), 1)
         self.assertEqual(ms[0].value, "Sup3rSecret" + "Value1234")
         self.assertEqual(ms[0].type, "SECRET")
+        self.assertTrue(ms[0].kind.startswith("ds-keyword"))
+        self.assertEqual(detect.scan('password = "${DB_PASSWORD}"'), [])     # templated, not a value
+        self.assertEqual(detect.scan('password: "changeme"'), [])            # placeholder
 
     def test_email_iban_card_are_pii_and_validated(self):
-        text = "mail max.mustermann@example.org iban " + IBAN_OK + " card " + CARD_OK
-        kinds = {m.kind for m in detect.scan(text)}
-        self.assertEqual(kinds, {"email", "iban", "credit-card"})
+        text = "mail max.mustermann@example.org iban " + IBAN_OK + " credit card " + CARD_OK
+        types = [m.type for m in detect.scan(text)]
+        self.assertEqual(types, ["EMAIL", "IBAN", "CARD"])
 
     def test_invalid_iban_and_luhn_failing_card_are_not_hits(self):
-        self.assertEqual([m.kind for m in detect.scan(IBAN_OK[:-1] + "1")], [])
-        self.assertEqual([m.kind for m in detect.scan(CARD_OK[:-1] + "2")], [])
+        self.assertEqual([m.type for m in detect.scan("IBAN " + IBAN_OK[:-1] + "1")], [])
+        self.assertEqual([m.type for m in detect.scan("card " + CARD_OK[:-1] + "2")], [])
 
     def test_private_ips_are_ignored_public_ips_are_hits(self):
         self.assertEqual(detect.scan("host 127.0.0.1 and 10.0.0.5 and 192.168.1.1"), [])
-        self.assertEqual([m.value for m in detect.scan("edge 93.184.216.34")], ["93.184.216.34"])
+        self.assertEqual([(m.type, m.value) for m in detect.scan("edge 93.184.216.34")], [("IP", "93.184.216.34")])
 
     def test_placeholder_is_not_a_hit(self):
         self.assertEqual(detect.scan("send to ⟦EMAIL_c1:ma•••@example.org⟧ now"), [])
@@ -70,7 +73,7 @@ class DetectTests(unittest.TestCase):
 
     def test_url_userinfo_is_a_secret_not_an_email(self):
         ms = detect.scan("postgres://etl:" + "s3cretPassw0rd" + "@db.internal:5432/x")
-        self.assertEqual([(m.kind, m.value) for m in ms], [("url-userinfo", "s3cretPassw0rd")])
+        self.assertEqual([(m.kind, m.value) for m in ms], [("ds-basic-auth", "s3cretPassw0rd")])
 
     def test_query_parameter_secret(self):
         ms = detect.scan("GET https://x/api?api_key=" + "0123456789abcdef0123")
@@ -79,7 +82,8 @@ class DetectTests(unittest.TestCase):
     def test_gitleaks_ruleset_is_loaded(self):
         ids = {r.id for r in detect.rules()}
         self.assertGreater(len(ids), 200)
-        self.assertTrue({"gitlab-pat", "aws-access-token", "private-key", "email", "iban"} <= ids)
+        self.assertTrue({"gitlab-pat", "aws-access-token", "private-key", "email", "ds-basic-auth"} <= ids)
+        self.assertTrue(any(i.startswith("iban") for i in ids))
 
     def test_german_tax_id_needs_context_and_checksum(self):
         valid = "86095742719"   # the BZSt example number

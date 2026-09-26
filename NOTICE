@@ -12,7 +12,13 @@ maisecrets/rules/LICENSE-presidio). The checksum validators for the generic
 and German entities in maisecrets/detect.py are ports of Presidio's, verified
 by scripts/check_validators_against_presidio.py.
 
-The remaining PII and positional rules in maisecrets/detect.py (OWN_RULES) are plain
+This product includes regular expressions derived from Yelp detect-secrets
+(maisecrets/rules/detect_secrets.json: the KeywordDetector and
+BasicAuthDetector patterns), Copyright Yelp, Inc., Apache License 2.0 (see
+maisecrets/rules/LICENSE-detect-secrets). Its heuristic filters for keyword
+hits are ported in maisecrets/detect.py.
+
+The remaining rules in maisecrets/detect.py (OWN_RULES) are plain
 regular expressions written for this project; some shapes match the ones the
 phase6 ai-gateway scrubber uses, because both were written by the same people
 for the same data.
