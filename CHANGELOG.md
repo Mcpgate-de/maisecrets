@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.2] - 2026-09-26
+
+### Fixes
+
+- the creating session always may resolve an entry, also for entries written before the sessions list existed (b649f66)
+
 ## [0.3.1] - 2026-09-26
 
 ### Fixes
