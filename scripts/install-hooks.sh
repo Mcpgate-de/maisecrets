@@ -18,13 +18,17 @@ cp "$ROOT/.githooks/pre-commit" "$HOOKS_DIR/pre-commit.local"
 cp "$ROOT/.githooks/pre-push"   "$HOOKS_DIR/pre-push.local"
 cp "$ROOT/.githooks/pre-commit" "$HOOKS_DIR/pre-commit"
 cp "$ROOT/.githooks/pre-push"   "$HOOKS_DIR/pre-push"
-chmod +x "$HOOKS_DIR"/pre-commit "$HOOKS_DIR"/pre-push "$HOOKS_DIR"/pre-commit.local "$HOOKS_DIR"/pre-push.local
-echo "installed into $HOOKS_DIR: pre-commit, pre-push, pre-commit.local, pre-push.local"
+cp "$ROOT/.githooks/commit-msg" "$HOOKS_DIR/commit-msg"
+cp "$ROOT/.githooks/commit-msg" "$HOOKS_DIR/commit-msg.local"
+chmod +x "$HOOKS_DIR"/pre-commit "$HOOKS_DIR"/pre-push "$HOOKS_DIR"/commit-msg "$HOOKS_DIR"/*.local
+echo "installed into $HOOKS_DIR: pre-commit, pre-push, commit-msg (+ .local copies for a delegating global hooks dir)"
 GLOBAL="$(git config --global --get core.hooksPath || true)"
 if [ -n "$GLOBAL" ]; then
   echo "note: global core.hooksPath=$GLOBAL is active."
   echo "      pre-commit runs via its delegation to pre-commit.local."
-  if [ ! -x "$GLOBAL/pre-push" ]; then
-    echo "      pre-push will NOT run until $GLOBAL/pre-push delegates to .git/hooks/pre-push.local."
-  fi
+  for h in pre-push commit-msg; do
+    if [ ! -x "$GLOBAL/$h" ]; then
+      echo "      $h will NOT run until $GLOBAL/$h delegates to .git/hooks/$h.local (CI checks the same rule)."
+    fi
+  done
 fi

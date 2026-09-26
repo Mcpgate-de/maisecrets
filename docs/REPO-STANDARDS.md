@@ -47,7 +47,14 @@ and OpenAI plugin directories.
   bump is therefore the release, and it is never typed by hand.
 - Commit subjects follow `type(scope): text`, types `feat fix perf security
   deps docs ci test chore build style refactor`, `!` or `BREAKING CHANGE` for
-  a breaking change. CI job `commit_format` refuses anything else.
+  a breaking change. CI job `commit_format` refuses anything else; the
+  `.githooks/commit-msg` hook catches it before the commit.
+- **The subject is the changelog line.** `feat fix perf security deps` are
+  rendered into `CHANGELOG.md` under the next version, so write them for the
+  user: what changed for them. `docs ci test chore build style refactor` are
+  not rendered: a repository move, a CI change or a wording fix is not a
+  release note. What operators need to know goes into this file, not into
+  the changelog.
 - `scripts/release.py` derives the next version from the commits since the
   last `v*` tag: breaking → major, `feat` → minor, `fix perf security deps`
   → patch, the rest → no release. While the major is 0 the scale shifts one

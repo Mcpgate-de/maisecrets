@@ -1,0 +1,20 @@
+#!/bin/bash
+# maisecrets commit-msg: the subject line IS the changelog line.
+#   type(scope): text   with type in feat fix perf security deps docs ci test chore build style refactor
+#   feat/fix/perf/security/deps land in CHANGELOG.md and bump the version; the others do not.
+#   Write the text for the user: what changed for them, not what you did.
+# Same rule as the CI job commit_format; this hook only catches it earlier.
+set -u
+MSG_FILE="$1"
+SUBJECT=$(head -1 "$MSG_FILE")
+case "$SUBJECT" in
+  "chore(release):"*|"Merge "*|"Revert "*) exit 0 ;;
+esac
+if ! printf '%s\n' "$SUBJECT" | grep -qE '^(feat|fix|perf|security|deps|docs|ci|test|chore|build|style|refactor)(\([^)]+\))?!?: [^ ].*$'; then
+  echo "commit-msg: the subject must read  type(scope): text  with a known type:"
+  echo "            feat fix perf security deps docs ci test chore build style refactor"
+  echo "            feat/fix/perf/security/deps become the changelog line and bump the version."
+  echo "            got: $SUBJECT"
+  exit 1
+fi
+exit 0
