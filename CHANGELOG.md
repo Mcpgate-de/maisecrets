@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.2.0] - 2026-09-26
+
+### Features
+
+- release job derives the version from commit subjects, tags, and mirrors main and tags to GitHub over a deploy key (52eacb2)
+
 ## [0.1.0] - 2026-09-26
 
 - Day-1 prototype: detector (patterns from the ai-gateway scrubber), placeholder
