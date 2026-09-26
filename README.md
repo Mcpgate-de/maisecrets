@@ -80,8 +80,8 @@ Four sources, one scanner (`maisecrets/detect.py`):
   gitleaks binary is used.
 - **Presidio** pattern recognizers, vendored as data under `maisecrets/rules/`
   (MIT, version in `PRESIDIO_VERSION`, refresh with `scripts/sync_presidio.py`):
-  country-specific PII with scores and context words. Languages are opt-in via
-  `pii_languages` in the config (default `en` and `de`: Steuer-ID,
+  country-specific PII with scores and context words. Regions are opt-in via
+  `pii_regions` in the config (default `generic` and `de`: Steuer-ID,
   Sozialversicherungsnummer, Personalausweis, Reisepass, USt-ID,
   Krankenversicherung, PLZ, Kfz, LANR, BSNR, Handelsregister). Checksums for
   the German types are ported and checked against Presidio

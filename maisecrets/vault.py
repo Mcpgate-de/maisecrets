@@ -37,6 +37,7 @@ DEFAULT_CONFIG = {
     "scrub_transcript": True,
     "block_at_mentions": True,
     "gateway_servers": ["phase6-ai-gateway", "ai-gateway-local", "ai-gateway-devops"],
+    "pii_regions": ["generic", "de"],
 }
 
 

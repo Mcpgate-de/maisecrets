@@ -52,7 +52,8 @@ for setname in ("CONFIG_DENYLIST_REGEX_TO_GROUP", "QUOTES_REQUIRED_DENYLIST_REGE
         rules.append({"id": rid, "regex": rx.pattern, "ignorecase": bool(rx.flags & re.IGNORECASE),
                       "group": group, "set": setname.split("_DENYLIST")[0].lower()})
 reserved, sub = ":/?#[]@", "!$&'()*+,;="
-rules.append({"id": "ds-basic-auth", "regex": r"://[^{}\s]+:([^{}\s]+)@".format(re.escape(reserved + sub), re.escape(reserved + sub)),
+esc = re.escape(reserved + sub)
+rules.append({"id": "ds-basic-auth", "regex": r"://[^{}\s]+:([^{}\s]+)@".format(esc, esc),
               "ignorecase": False, "group": 1, "set": "basic_auth"})
 dst = Path(__file__).resolve().parent.parent / "maisecrets" / "rules"
 json.dump({"detect_secrets_version": tag, "denylist": list(ns["DENYLIST"]), "rules": rules},

@@ -8,8 +8,8 @@ Three rule sources, one scanner:
    with `scripts/sync_gitleaks.py vX.Y.Z`.
 2. **Presidio** (`rules/presidio.json`, derived from Microsoft Presidio's
    pattern recognizers, MIT, version in `rules/PRESIDIO_VERSION`): country
-   and generic PII shapes with scores and context words. Languages are
-   opt-in (`pii_languages`, default `en` + `de`). Checksum validators for
+   and generic PII shapes with scores and context words. Regions are
+   opt-in (`pii_regions`, default `generic` + `de`). Checksum validators for
    the generic and the German types are ported below; the others keep
    their pattern score and need a context word. Refresh with
    `scripts/sync_presidio.py`.
@@ -303,14 +303,25 @@ PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip", 
 # shapes that are plain digit runs: even with a valid checksum, ask for a context word
 PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "de-plz", "de-kfz",
                            "de-handelsregister", "de-fuehrerschein", "nhs", "aba-routing", "medical-license"}
-DEFAULT_PII_LANGUAGES = ("en", "de")
+# Presidio tags every US/UK/IN/AU/… recognizer as language "en", so language is the wrong
+# switch: an Indian PAN rule produced 290 false positives in one German transcript. The
+# switch is the REGION, derived from the recognizer id; "generic" is always on.
+REGION_OF_ID = {"nhs": "uk", "aba-routing": "us", "medical-license": "us"}
+DEFAULT_PII_REGIONS = ("generic", "de")
 
 
-def _load_presidio(languages: tuple[str, ...] = DEFAULT_PII_LANGUAGES) -> list[Rule]:
+def presidio_region(rec_id: str) -> str:
+    if rec_id in REGION_OF_ID:
+        return REGION_OF_ID[rec_id]
+    head = rec_id.split("-", 1)[0]
+    return head if len(head) == 2 and rec_id.count("-") >= 1 else "generic"
+
+
+def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]:
     data = json.loads((RULES_DIR / "presidio.json").read_text())
     out: list[Rule] = []
     for rec in data["recognizers"]:
-        if rec["id"] in PRESIDIO_SKIP or rec["language"] not in languages:
+        if rec["id"] in PRESIDIO_SKIP or presidio_region(rec["id"]) not in regions:
             continue
         validator = PRESIDIO_VALIDATOR.get(rec["id"])
         weak = rec["id"] in PRESIDIO_ALWAYS_CONTEXT or (rec["validator"] and validator is None)
@@ -357,17 +368,17 @@ def rules() -> list[Rule]:
         own = _load_own()
         secrets = [r for r in own if r.type == "SECRET"]
         pii = [r for r in own if r.type != "SECRET"]
-        _RULES = secrets + _load_detect_secrets() + _load_gitleaks() + _load_presidio(_pii_languages()) + pii
+        _RULES = secrets + _load_detect_secrets() + _load_gitleaks() + _load_presidio(_pii_regions()) + pii
     return _RULES
 
 
-def _pii_languages() -> tuple[str, ...]:
+def _pii_regions() -> tuple[str, ...]:
     try:
         from .vault import load_config
-        langs = load_config().get("pii_languages")
-        return tuple(langs) if langs else DEFAULT_PII_LANGUAGES
+        regions = load_config().get("pii_regions")
+        return tuple(regions) if regions else DEFAULT_PII_REGIONS
     except Exception:  # noqa: BLE001 - config is optional
-        return DEFAULT_PII_LANGUAGES
+        return DEFAULT_PII_REGIONS
 
 
 SECRET_TYPES = frozenset({"SECRET"})

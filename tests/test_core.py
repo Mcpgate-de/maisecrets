@@ -96,10 +96,11 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(detect.scan("10115 Berlin"), [])
         self.assertEqual([m.type for m in detect.scan("PLZ 10115")], ["DE_PLZ"])
 
-    def test_presidio_languages_are_opt_in(self):
+    def test_presidio_regions_are_opt_in(self):
         ids = {r.id.split("#")[0] for r in detect.rules()}
         self.assertIn("de-tax-id", ids)
-        self.assertNotIn("pl-pesel", ids)   # not in the default languages
+        self.assertNotIn("pl-pesel", ids)   # not in the default regions
+        self.assertNotIn("in-pan", ids)     # Presidio tags it "en"; region is the switch
 
     def test_placeholder_types_with_underscores(self):
         self.assertEqual(placeholder.key_of("⟦DE_TAX_ID_c2⟧"), "DE_TAX_ID_c2")
