@@ -18,7 +18,5 @@ BasicAuthDetector patterns), Copyright Yelp, Inc., Apache License 2.0 (see
 maisecrets/rules/LICENSE-detect-secrets). Its heuristic filters for keyword
 hits are ported in maisecrets/detect.py.
 
-The remaining rules in maisecrets/detect.py (OWN_RULES) are plain
-regular expressions written for this project; some shapes match the ones the
-phase6 ai-gateway scrubber uses, because both were written by the same people
-for the same data.
+The remaining rules in maisecrets/detect.py (OWN_RULES) and the display rules
+in maisecrets/pii_display.py are written for this project.

@@ -4,10 +4,11 @@ Companion to the "Client support" table in the README. Read from the vendors' ho
 documentation on 2026-09-26 unless marked measured.
 
 One core (detector, vault, placeholder), one adapter per provider (manifest,
-hook names, block/rewrite fields). Proven: Claude Code/Cowork/Desktop Code
-(hooks: block prompt, rewrite tool I/O), Codex CLI and Codex in the ChatGPT
-app (same format; output via block feedback). Docs, untested: ChatGPT Work
-mode runs plugin hooks in the Codex runtime. OpenCode: own npm plugin, can
+hook names, block/rewrite fields). Proven by the harness: Claude Code CLI
+(hooks: block prompt, rewrite tool I/O) and Codex CLI (same format; output via
+block feedback). Same runtime, not measured: Cowork, the Claude desktop app,
+the Codex IDE extension and Codex in the ChatGPT app. Docs, untested: ChatGPT
+Work mode runs plugin hooks in the Codex runtime. OpenCode: own npm plugin, can
 rewrite the prompt (correction 2026-09-26: the current plugin API lists
 `tool.execute.before/after` as modifiable, no prompt hook). Checked in the
 vendor docs on 2026-09-26 (README "Client support" has the marks), hook
@@ -33,3 +34,13 @@ prompt hook; `PreInvocation` carries no prompt and can only inject messages.
 Two of the three guards (block a prompt, redact a result) have no hook to live
 in, so an adapter would only rehydrate and deny. Not built; `agy plugin
 validate` accepts the plugin layout but finds no hooks in it.
+
+## Sessions, subagents and headless runs
+
+A reference resolves in the session that created it or admitted it. A Claude
+Code subagent (Task) sends its parent's `session_id`, so it resolves what the
+parent may resolve; it receives the same primer at session start. A headless
+run (`claude -p`, `codex exec`) is a new session each time: a reference from
+an earlier run is `foreign-session` there, and the deny says so. A prompt
+built from untrusted text (an issue body, a log) admits every reference in it
+as typed by a human; keep such runs on a machine without a vault.

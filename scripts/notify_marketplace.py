@@ -30,10 +30,20 @@ import urllib.request
 import uuid
 
 
+CANONICAL_PROJECTS = {"Sprinterli/maisecrets", "mcpgate/maisecrets"}
+
+
 def main() -> int:
     url = os.environ.get("MAISECRETS_CLAUDE_MARKETPLACE_URL", "").strip()
     secret = os.environ.get("MAISECRETS_CLAUDE_WEBHOOK_SECRET", "").strip()
+    path = os.environ.get("CI_PROJECT_PATH", "")
     if not url or not secret:
+        if path in CANONICAL_PROJECTS:
+            # on the project that feeds an organisation, a missing variable is a broken delivery,
+            # not a fork without a marketplace (operator review, 2026-09-26)
+            print("notify_marketplace: MAISECRETS_CLAUDE_MARKETPLACE_URL / _WEBHOOK_SECRET missing on the "
+                  "canonical project; the organisation would not learn about this release")
+            return 1
         print("notify_marketplace: no marketplace URL/secret configured, nothing to notify")
         return 0
     if secret.startswith("whsec_"):
@@ -58,7 +68,15 @@ def main() -> int:
         "webhook-signature": "v1," + sig, "X-Gitlab-Event": "Push Hook"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
-            print(f"notify_marketplace: http {r.status} {r.read().decode()[:200]}")
+            body_text = r.read().decode()[:300]
+            print(f"notify_marketplace: http {r.status} {body_text}")
+            try:
+                ok = bool(json.loads(body_text).get("published"))
+            except ValueError:
+                ok = False
+            if not ok:
+                print("notify_marketplace: the endpoint did not answer published=true")
+                return 1
             return 0
     except urllib.error.HTTPError as e:
         print(f"notify_marketplace: http {e.code} {e.read().decode()[:300]}")

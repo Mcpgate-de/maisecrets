@@ -66,7 +66,7 @@ and OpenAI plugin directories.
   `chore(release): vX.Y.Z` with `ci.skip`, and pushes the tag `vX.Y.Z`. The tag
   pipeline validates again and mirrors. Nobody pushes a tag by hand: the
   pre-push hook refuses it.
-- Difference to the ai-gateway: no changelog fragments and no build counter.
+- No changelog fragments and no build counter: the commit subjects are the changelog.
   A plugin version is read by users and by the updater, so it is real semver,
   derived from the commit types instead of claimed in a fragment.
 - Credentials: `MAISECRETS_CI_PUSH_TOKEN` (project access token
@@ -103,8 +103,8 @@ and OpenAI plugin directories.
 
 ## Licensing (before public)
 
-- Apache-2.0 for the plugin. Gateway-side implementation lives in the
-  ai-gateway under its own licence; this repo owns the protocol spec.
+- Apache-2.0 for the plugin. A gateway-side implementation lives in its
+  own repository under its own licence; this repo owns the protocol spec.
 - Detection rules: gitleaks (MIT), Presidio (MIT) and detect-secrets
   (Apache-2.0) are vendored as data under `maisecrets/rules/`, each with its
   licence file, version file and sync script. The six own rules in

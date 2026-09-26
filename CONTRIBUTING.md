@@ -18,3 +18,8 @@ has the details; `docs/THREAT-MODEL.md` says what the plugin defends.
 
 Wrong detections and feature requests: `/maisecrets:report` in Claude Code
 prepares the issue, or open one on the repository's issues page.
+
+The GitHub repository is a read-only mirror of the primary repository. Open
+a pull request there; a maintainer applies it upstream, and the mirror brings
+it back with your authorship. Run `scripts/install-hooks.sh` once, so the
+pre-commit hook scans your diff and checks your commit subject.

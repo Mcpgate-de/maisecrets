@@ -7,8 +7,7 @@ implements it.
 ## 1. Placeholder
 
 `⟦TYPE_cN⟧` or `⟦TYPE_cN:display⟧` (brackets U+27E6/U+27E7, mask character
-U+2022 in the display). Chosen by measurement against real parsers in
-ai-gateway #1396: `<…>` vanishes in HTML and is a shell redirection, `[…]`
+U+2022 in the display). Chosen by measurement against real parsers: `<…>` vanishes in HTML and is a shell redirection, `[…]`
 is a Jira link and a regex class, `***` is a regex quantifier; `⟦…⟧` with
 `•` survives CommonMark, HTML, XHTML, URL query, regex and SQL LIKE.
 
@@ -22,11 +21,15 @@ is a Jira link and a regex class, `***` is a regex quantifier; `⟦…⟧` with
   empty or is itself a display (a fixed point of the mask transformation); a
   real value in token form is still scanned.
 - The earlier `<TYPE_cN>` form is recognised for rehydration, never minted.
-- Gateway side: ai-gateway MR !2374 (`src/security/pii_display.py` blob
-  `fc6e2df2…`, vendored here as `maisecrets/pii_display.py`). A client
-  reference in a rehydrate field of a gateway action is answered with
-  `UNRESOLVED_CLIENT_REFERENCE` and the API is not called
-  (`src/mcp/hooks/pii_hooks.py`, `tool_executor._answer_without_executing`).
+- The display rules (`maisecrets/pii_display.py`): e-mail shows at most two
+  characters of the local part and, for a non-freemail domain, only the
+  top-level label; phone shows the first two digits and the last two; card the
+  last four; IBAN the first and last four; IPv4 the first two octets; IPv6 the
+  first two hextets before `::`. A display hides at least three characters and
+  always carries a bullet; a value the rules cannot mask gets no display.
+- A gateway that resolves placeholders itself answers a client reference it
+  cannot resolve with an error instead of calling the API with the literal
+  text.
 
 ## 2. Vault entry
 
@@ -45,12 +48,15 @@ execution time, (b) a gateway deposit, (c) `maisecrets get` for a human.
 
 ## 3. Rehydration at the client
 
-`PreToolUse` on `Bash`: every `⟦TYPE_cN⟧` in `command` is replaced by a
-command substitution that reads the value under a one-time grant
-(`$(resolve KEY --grant NONCE)`, placed in the quoting context of the
-placeholder). The value is never in the command text. Unknown, expired,
-foreign-session or capped references deny the call with a reason that names
-the key and the status. Partial resolution never happens.
+`PreToolUse` on `Bash`: the command is prefixed with one read per key into a
+shell variable (`__ms_1="$(cat <fifo>)" || exit 97;` on POSIX, a resolver call
+under a one-time grant on Windows Git Bash), and every `⟦TYPE_cN⟧` becomes that
+variable in its quoting context. The value is never in the command text. A
+context the rewrite cannot place (a nested shell, a quoted heredoc, `$'…'`,
+backticks) and a command that would encode, slice or trace the value are
+refused with the reason. Unknown, expired, foreign-session or capped
+references deny the call with a reason that names the key and the status.
+Partial resolution never happens.
 
 `PreToolUse` on an MCP tool: every string argument is walked; references are
 resolved inline under the same session rule and cap. Gateway servers are

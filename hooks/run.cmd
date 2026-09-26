@@ -7,23 +7,24 @@ rem in the Windows matrix job). Same job as run.sh: find a Python 3.11+, run dis
 rem Fails closed: without Python exit 2 (a block in Claude Code; Codex runs the tool anyway
 rem on a failed hook, so the message names the missing piece).
 rem Usage: run.cmd <user-prompt|pre-tool|post-tool|session-start>
-setlocal EnableDelayedExpansion
 set PYTHONUTF8=1
 set "HERE=%~dp0"
 py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
 if not errorlevel 1 (
   py -3 "%HERE%dispatch.py" %*
-  exit /b !errorlevel!
+  goto :done
 )
 python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
 if not errorlevel 1 (
   python "%HERE%dispatch.py" %*
-  exit /b !errorlevel!
+  goto :done
 )
 python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
 if not errorlevel 1 (
   python3 "%HERE%dispatch.py" %*
-  exit /b !errorlevel!
+  goto :done
 )
-echo maisecrets: no Python 3.11+ found (tried py -3, python, python3); prompt blocked 1>&2
+echo maisecrets needs Python 3.11 or newer (tried py -3, python, python3). Install it with: winget install Python.Python.3.12 - then restart the client. Until then every prompt is blocked. 1>&2
 exit /b 2
+:done
+exit /b %errorlevel%

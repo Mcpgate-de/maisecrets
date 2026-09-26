@@ -2,7 +2,7 @@
 
 Form: ``⟦TYPE_cN⟧`` or ``⟦TYPE_cN:display⟧`` (U+27E6 / U+27E7, mask character
 U+2022). The brackets and the mask were chosen by measurement against real
-parsers in ai-gateway #1396: ``<…>`` vanishes in HTML and is a shell
+parsers: ``<…>`` vanishes in HTML and is a shell
 redirection, ``[…]`` is a Jira link and a regex class, ``***`` is a regex
 quantifier. ``⟦…⟧`` with ``•`` survives CommonMark, HTML, XHTML, URL query,
 regex and SQL LIKE, and models copy it character by character.

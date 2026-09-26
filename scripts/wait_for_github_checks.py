@@ -12,6 +12,7 @@ Exit 0 when every check run concluded with success, 1 on failure or timeout.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -46,12 +47,20 @@ def main(argv: list[str]) -> int:
             print("main moved on; this SHA is superseded and the newer pipeline releases")
             return 0
         try:
-            req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
-                                                       "User-Agent": "maisecrets-release"})
+            headers = {"Accept": "application/vnd.github+json", "User-Agent": "maisecrets-release"}
+            token = os.environ.get("GITHUB_TOKEN", "").strip()
+            if token:   # authenticated: 5000 requests per hour instead of 60 shared by the runner's IP
+                headers["Authorization"] = "Bearer " + token
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=30) as r:
                 data = json.load(r)
         except urllib.error.HTTPError as e:
             print(f"github {e.code}; waiting")
+            time.sleep(60)
+            continue
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+            # a DNS failure, a slow API or a half answer are "wait longer", not a red release
+            print(f"github unreachable ({type(e).__name__}); waiting")
             time.sleep(60)
             continue
         runs = data.get("check_runs", [])

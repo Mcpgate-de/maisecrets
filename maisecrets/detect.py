@@ -288,12 +288,19 @@ OWN_RULES: list[dict] = [
     {"id": "url-query-secret", "type": "SECRET", "secret_group": 2,
      "regex": r"(?i)[?&]((?:access_?)?token|api[_-]?key|apikey|secret|password|sig|signature)=([^&\s#\"']{8,})"},
     {"id": "email", "type": "EMAIL", "validator": "person_email",
-     "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})@[\w-]{1,63}\.[\w.-]{0,254}[\w-]"},
+     # the last label is alphabetic: `lodash@4.17.21`, `checkout@v4.1.1` and Homebrew's
+     # `python@3.14/3.14.7` are version pins, not addresses (review, 2026-09-26)
+     "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "phone", "type": "PHONE",
      "regex": r"(?<![\w+])\+\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?!\w)"},
     # bare token prefixes newer than the vendored rulesets live in rules/prefixes.txt (see _load_prefixes)
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
+    # the secret half of an AWS key pair has no prefix of its own; the console, a CSV export
+    # and a chat paste show it within a few lines after the AKIA… id (field report, 2026-09-26)
+    {"id": "aws-secret-after-access-key", "type": "SECRET", "secret_group": 1,
+     "regex": r"(?<![A-Z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Z0-9])(?:[^\n]*\n){0,4}?[^\n]*?"
+              r"(?<![A-Za-z0-9/+=])([A-Za-z0-9/+]{40})(?![A-Za-z0-9/+=])"},
 ]
 
 
@@ -461,15 +468,33 @@ def _has_context_word(window: str, context: tuple[str, ...]) -> bool:
     return rx.search(window) is not None
 
 
+_LABEL_ONLY_RE = re.compile(r"[:=]\s*$")
+
+
 def _matches(rule: Rule, text: str):
-    """detect-secrets keyword rules are line rules: run them per line, keep absolute offsets."""
+    """detect-secrets keyword rules are line rules: run them per line, keep absolute offsets.
+
+    A label that ends its line (``passwort:`` and the value on the next line, as a console
+    or a chat renders it) is scanned together with the next non-empty line; only a hit whose
+    value starts in that next line is taken from the pair (field report, 2026-09-26)."""
     if not rule.id.startswith("ds-keyword") or "\n" not in text:
         yield from rule.regex.finditer(text)
         return
     pos = 0
-    for line in text.split("\n"):
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
         for m in rule.regex.finditer(line):
             yield _Shifted(m, pos)
+        if _LABEL_ONLY_RE.search(line):
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j < len(lines):
+                pair = "\n".join(lines[i:j + 1])
+                for m in rule.regex.finditer(pair):
+                    g = rule.secret_group if 0 < rule.secret_group <= (rule.regex.groups or 0) else 0
+                    if m.start(g) > len(line):
+                        yield _Shifted(m, pos)
         pos += len(line) + 1
 
 

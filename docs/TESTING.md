@@ -100,16 +100,22 @@ Codex harness to measure retries after a block-as-output.
 
 ## Unit tests
 
-44 tests (`tests/test_core.py`, `tests/test_gates.py`, `tests/test_platform_backend.py`),
-run in under a second. The gate tests execute the rewritten command through a
+77 tests (`tests/test_core.py`, `tests/test_gates.py`, `tests/test_platform_backend.py`;
+the last one runs only with `MAISECRETS_NATIVE_BACKEND_TEST=1` or in CI, because it
+touches the real store), in under three seconds. The gate tests execute the rewritten command through a
 real bash and compare bytes, so a broken quoting context or a leaked value
 fails them:
 
 | control (docs/THREAT-MODEL.md) | test that goes red without it |
 |---|---|
 | C4 session rule | `test_reference_resolves_only_in_a_session_that_saw_it`, `test_mcp_foreign_session_is_denied…` |
-| C5 one-time grant | `test_grant_is_single_use_and_bound_to_its_key` |
-| C6 quoting contexts | `test_value_arrives_byte_for_byte_in_every_quoting_context` (unquoted, single, double, two refs) |
+| C5 up-front read | `test_value_is_delivered_once_and_a_missing_delivery_fails_the_whole_command`, `test_a_refused_key_leaves_no_value_waiting`, `test_the_run_dir_is_private_and_refused_when_it_is_not` |
+| C6 quoting contexts | `test_value_arrives_byte_for_byte_in_every_quoting_context`, `test_value_arrives_inside_a_command_substitution_and_an_unquoted_heredoc`, `test_contexts_the_rewrite_cannot_place_are_refused_with_the_reason` (a value with `$(touch …)` never runs), `test_a_command_that_would_transform_the_value_is_refused` |
+| C13 fail closed | `test_exactly_one_answer_leaves_the_process_when_the_watchdog_fires`, `test_fail_closed_texts_say_whether_the_tool_ran`, `test_damaged_index_stays_damaged_until_repaired`, `test_config_with_a_wrong_type_names_the_key_and_defaults_stay_untouched` |
+| C14 file tools | `test_file_tools_never_resolve_and_the_home_is_off_limits` |
+| client detection | `test_client_is_read_from_the_payload_before_the_environment` |
+| C3 transcript scrub | `test_transcript_scrub_keeps_every_record_valid_json` |
+| C2 resolved values | `test_value_in_url_path_query_prefix_and_encodings_is_redacted`, `test_a_result_above_the_cap_is_masked_without_storing` |
 | C7 limiter | `test_limiter_caps_distinct_keys_per_session_and_resolves_per_hour` |
 | C8 store-read backstop | `test_agent_reads_of_the_store_are_denied` |
 | C9 audit line | `test_audit_line_names_key_tool_and_context_but_no_value` |

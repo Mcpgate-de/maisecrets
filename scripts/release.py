@@ -83,19 +83,33 @@ def commits_since(ref: str | None) -> list[tuple[str, str, str]]:
 
 
 def classify(subject: str, body: str) -> tuple[str, str, bool]:
-    """(type or "other", text, breaking)."""
-    m = SUBJECT_RE.match(subject)
+    """(type or "other", text, breaking). A `Revert "<subject>"` takes the inner type and
+    releases like a fix of it, so a rollback needs no hand-written subject."""
+    inner = _unrevert(subject)
+    m = SUBJECT_RE.match(inner)
     breaking = "BREAKING CHANGE" in body
     if not m or m.group("type") not in KNOWN:
         return "other", subject, breaking
-    return m.group("type"), m.group("text"), breaking or bool(m.group("bang"))
+    text = m.group("text") if inner == subject else "revert: " + m.group("text")
+    return m.group("type"), text, breaking or bool(m.group("bang"))
+
+
+_REVERT_RE = re.compile(r'^Revert "(?P<inner>.+)"$')
+
+
+def _unrevert(subject: str) -> str:
+    """`git revert` writes `Revert "<subject>"`; the inner subject is what the checks see and a
+    revert releases as a patch, so a rollback needs no hand-written subject (operator review,
+    2026-09-26)."""
+    m = _REVERT_RE.match(subject)
+    return m.group("inner") if m else subject
 
 
 def bump_for(commits: list[tuple[str, str, str]]) -> str | None:
     level = None
     order = {"patch": 1, "minor": 2, "major": 3}
     for _sha, subject, body in commits:
-        if subject.startswith("chore(release):"):
+        if subject.startswith("chore(release):") or subject.startswith("Merge "):
             continue
         typ, _text, breaking = classify(subject, body)
         if breaking:
@@ -186,7 +200,7 @@ def check(base: str | None) -> int:
         for sha, subject, _body in commits_since(base):
             if subject.startswith("chore(release):") or subject.startswith("Merge "):
                 continue
-            m = SUBJECT_RE.match(subject)
+            m = SUBJECT_RE.match(_unrevert(subject))
             if not m or m.group("type") not in KNOWN:
                 bad.append(f"  {sha[:7]} {subject}")
         if bad:

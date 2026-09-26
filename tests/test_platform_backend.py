@@ -16,7 +16,16 @@ os.environ.setdefault("MAISECRETS_HOME", tempfile.mkdtemp(prefix="maisecrets-pla
 from maisecrets import vault  # noqa: E402
 
 
+@unittest.skipUnless(os.environ.get("MAISECRETS_NATIVE_BACKEND_TEST") == "1" or os.environ.get("CI"),
+                     "touches the real store of this user; set MAISECRETS_NATIVE_BACKEND_TEST=1")
 class PlatformBackendTests(unittest.TestCase):
+    def tearDown(self):
+        # the fingerprint key is a store item too; without this every run left one behind
+        try:
+            vault.Vault({"backend": "keychain"}).backend.delete(vault.FP_KEY_ENTRY)
+        except Exception:  # noqa: BLE001
+            pass
+
     def test_native_backend_round_trip(self):
         v = vault.Vault({"backend": "keychain"})   # resolves to the platform default
         name = type(v.backend).__name__
@@ -27,6 +36,10 @@ class PlatformBackendTests(unittest.TestCase):
         v._save_index()
         self.assertEqual(v.get(e.key, human=True), (None, "expired"), name)
         self.assertIsNone(v.backend.get(e.key), name)
+        # a value with an umlaut and a quote comes back equal (the keychain printed hex before)
+        e2 = v.put("pässwörd'\"" + "Q9z-2026", "SECRET", "manual")
+        self.assertEqual(v.get(e2.key, human=True)[0], "pässwörd'\"" + "Q9z-2026", name)
+        v.backend.delete(e2.key)
         print(f"native backend on {sys.platform}: {name} ok")
 
 

@@ -66,7 +66,11 @@ def cmd_audit(args: list[str]) -> int:
     """The last resolves: when, which session, which key, which tool, the command with its
     placeholders. Values are never written here."""
     from .vault import HOME
-    n = int(args[0]) if args else 20
+    try:
+        n = int(args[0]) if args else 20
+    except ValueError:
+        print("usage: audit [n]", file=sys.stderr)
+        return 2
     path = HOME / "audit.log"
     if not path.exists():
         print("(no resolves recorded)")
@@ -156,22 +160,67 @@ def cmd_config(_: list[str]) -> int:
 
 
 def cmd_status(_: list[str]) -> int:
-    from .vault import describe_backend
+    """What support needs first: version, where the plugin runs from, which Python, which
+    store, which settings come from a policy, and what the logs counted."""
+    import platform
+    from pathlib import Path as _P
+    from .vault import HOME, describe_backend
+    root = _P(__file__).resolve().parent.parent
+    version = "?"
+    try:
+        version = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")).get("version", "?")
+    except (OSError, ValueError):
+        pass
+    print(f"maisecrets {version} at {root}")
+    print(f"python {platform.python_version()} at {sys.executable}; {platform.system()} {platform.release()}")
     v = Vault()
     live = [e for e in v.list() if not e.purged]
     print(describe_backend(v.backend))
-    print(f"entries: {len(live)} live, {len(v.list()) - len(live)} expired (metadata kept)")
+    print(f"entries: {len(live)} live, {len(v.list()) - len(live)} expired (metadata kept {v.cfg.get('keep_purged_days')} days)")
+    policy = v.cfg.get("policy_keys") or []
+    print("settings from a machine policy: " + (", ".join(policy) if policy else "none"))
     from . import detect
     print(f"rules: {len(detect.rules())} (gitleaks {open(detect.RULES_DIR / 'GITLEAKS_VERSION').read().strip()}, "
           f"presidio {open(detect.RULES_DIR / 'PRESIDIO_VERSION').read().strip()}, "
           f"detect-secrets {open(detect.RULES_DIR / 'DETECT_SECRETS_VERSION').read().strip()}); "
           f"regions {v.cfg.get('pii_regions')}")
+    for name in ("events.log", "audit.log"):
+        p = HOME / name
+        try:
+            n = sum(1 for _ in open(p, encoding="utf-8")) if p.exists() else 0
+        except OSError:
+            n = 0
+        print(f"{name}: {n} lines")
+    return 0
+
+
+def cmd_wipe(args: list[str]) -> int:
+    """Delete every stored value, the metadata and the logs of this vault: offboarding."""
+    if "--yes" not in args:
+        print("maisecrets wipe deletes every stored value, the index, the audit and event logs and the "
+              "pending prompts of this user. Run `maisecrets wipe --yes` to do it.")
+        return 2
+    v = Vault()
+    n = v.wipe()
+    print(f"wiped: {n} stored value(s), index, logs. The config file stays.")
+    return 0
+
+
+def cmd_repair(_: list[str]) -> int:
+    """Rebuild a damaged index from the store; every stored value is deleted, the counters
+    continue past the highest key seen, so no new value overwrites an old one."""
+    from .vault import make_backend
+    v = Vault.__new__(Vault)
+    v.cfg = load_config()
+    v.backend = make_backend(v.cfg)
+    info = v.repair()
+    print(f"repaired: {info['keys_seen']} stored key(s) deleted, counters {info['counters']}")
     return 0
 
 
 COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_resolve, "audit": cmd_audit,
             "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
-            "status": cmd_status}
+            "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -179,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     if not argv or argv[0] in {"-h", "--help"}:
         print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | audit [n]\n"
               "           | report [last|n|bug|feature] [text] | expire | scan [text] | config\n"
-              "           | resolve <KEY> --grant <NONCE> | hook <event>")
+              "           | wipe --yes | repair | resolve <KEY> --grant <NONCE> | hook <event>")
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])

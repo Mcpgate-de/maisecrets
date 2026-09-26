@@ -81,6 +81,29 @@ class DetectTests(unittest.TestCase):
                 ms = detect.scan(f"{label}: Sommer2026!xyz")
                 self.assertEqual([(m.type, m.value) for m in ms], [("SECRET", "Sommer2026!xyz")])
 
+    def test_label_on_its_own_line_takes_the_value_from_the_next_line(self):
+        # a console or a chat renders "passwort:" and the value on the next line (field report,
+        # 2026-09-26: the AKIA id on the line above was stored, the secret below it was not)
+        sk = "q9Zr2Tk7Lm4Pv8Wx1Yc6" + "Hd3Jf5Ng0Rb/sT2uV+wZ"
+        for text in ("User: admin\npasswort:\n" + sk + "\n", "passwort:\n\n" + sk):
+            with self.subTest(text[:12]):
+                ms = detect.scan(text)
+                self.assertEqual([(m.type, m.value) for m in ms], [("SECRET", sk)])
+                self.assertEqual(text[ms[0].start:ms[0].end], sk)
+        self.assertEqual(detect.scan("passwort:\nbitte schick mir das morgen\n"), [])
+        self.assertEqual(detect.scan("env:\n  - FOO=bar\n"), [])
+
+    def test_aws_secret_key_is_taken_when_an_access_key_id_is_nearby(self):
+        akid = "AKIA" + "Q7R2T9V4X1Z6B8N3"
+        sk = "q9Zr2Tk7Lm4Pv8Wx1Yc6" + "Hd3Jf5Ng0Rb/sT2uV+wZ"
+        for text in ("Access key ID,Secret access key\n" + akid + "," + sk,
+                     "User: " + akid + "\npasswort:\n" + sk + "\n"):
+            with self.subTest(text[:10]):
+                values = [m.value for m in detect.scan(text)]
+                self.assertIn(sk, values)
+        # the 40-character shape alone is a git SHA or a hash, never a secret
+        self.assertEqual([m.value for m in detect.scan("blob " + sk)], [])
+
     def test_named_credential_keeps_the_name_and_takes_the_value(self):
         ms = detect.scan("DB_PASSWORD=" + "Sup3rSecret" + "Value1234")
         self.assertEqual(len(ms), 1)
@@ -277,7 +300,7 @@ class HookTests(unittest.TestCase):
         cmd = out["hookSpecificOutput"]["updatedInput"]["command"]
         self.assertNotIn(GLPAT, cmd)                     # the value is never spliced into the command
         self.assertTrue(cmd.startswith('__ms_1="$('), cmd)              # read up front in the main shell
-        self.assertIn(f"value for {e.key} not delivered", cmd)
+        self.assertIn(f"value for {e.key} was not delivered", cmd)
         self.assertTrue(cmd.endswith('curl -H "PRIVATE-TOKEN: $__ms_1" u'), cmd)   # double-quote context
         self.assertNotIn("permissionDecision", out["hookSpecificOutput"])
         out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", "tool_input": {"command": "echo ⟦SECRET_c42⟧"}})
@@ -285,8 +308,8 @@ class HookTests(unittest.TestCase):
 
     def test_pre_tool_resolves_gateway_tool_arguments_until_the_deposit_path_exists(self):
         e = Vault().put("max@example.org", "EMAIL", "email", session="s1")
-        out = hooks.pre_tool({"tool_name": "mcp__phase6-ai-gateway__x", "tool_input": {"q": e.ref}, "session_id": "s1",
-                              "mcp_server": {"name": "phase6-ai-gateway", "source": "user"}})
+        out = hooks.pre_tool({"tool_name": "mcp__example-gateway__x", "tool_input": {"q": e.ref}, "session_id": "s1",
+                              "mcp_server": {"name": "example-gateway", "source": "user"}})
         self.assertEqual(out["hookSpecificOutput"]["updatedInput"], {"q": "max@example.org"})
 
     def test_post_tool_redacts_bash_output_keeping_shape(self):

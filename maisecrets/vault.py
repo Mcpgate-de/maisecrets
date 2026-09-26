@@ -42,8 +42,26 @@ DEFAULT_CONFIG = {
     "renew_on_use": True,
     "scrub_transcript": True,
     "block_at_mentions": True,
-    "gateway_servers": ["phase6-ai-gateway", "ai-gateway-local", "ai-gateway-devops"],
+    "gateway_servers": [],           # MCP servers that resolve placeholders themselves (PROTOCOL §4); none by default
     "pii_regions": ["generic", "de"],
+    "max_new_entries_per_result": 100,   # above this, a tool result is masked without storing more values
+    "keep_purged_days": 30,          # metadata of an expired entry is deleted after this many days
+    "audit_max_lines": 2000,
+}
+
+# a machine-wide policy the administrator writes; its keys win over the user file and the
+# environment and cannot be changed from ~/.maisecrets (operator review, 2026-09-26)
+POLICY_PATHS = {
+    "Darwin": Path("/Library/Application Support/maisecrets/policy.json"),
+    "Windows": Path(os.environ.get("ProgramData", r"C:\\ProgramData")) / "maisecrets" / "policy.json",
+    "Linux": Path("/etc/maisecrets/policy.json"),
+}
+_CONFIG_TYPES = {
+    "backend": str, "report_url": (str, type(None)), "ttl_seconds": dict, "max_ttl_seconds": int,
+    "renew_on_use": bool, "scrub_transcript": bool, "block_at_mentions": bool, "gateway_servers": list,
+    "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
+    "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
+    "allow_plaintext_store": bool,
 }
 
 
@@ -154,17 +172,40 @@ class _Lock:
             self.fd = None
 
 
+class ConfigError(RuntimeError):
+    """A config value of the wrong type; the message names the key, never a value."""
+
+
+def _check_types(cfg: dict, source: str) -> None:
+    for key, want in _CONFIG_TYPES.items():
+        if key in cfg and not isinstance(cfg[key], want):
+            raise ConfigError(f"{source}: {key} has the wrong type")
+    ttl = cfg.get("ttl_seconds")
+    if isinstance(ttl, dict) and not all(isinstance(v, int) for v in ttl.values()):
+        raise ConfigError(f"{source}: ttl_seconds values must be integers")
+
+
 def load_config() -> dict:
     """Defaults, then ~/.maisecrets/config.json, then CLAUDE_PLUGIN_OPTION_<KEY> if a client passes
-    plugin options that way. The manifest declares no `userConfig`: Claude Code 2.1.223 rejects a
-    manifest with that key as invalid and then loads NO hook at all (measured on Debian,
-    2026-09-26), and a guard that silently vanishes on an older client is worse than a guard
-    without a settings dialog. The env path stays for clients that know the key."""
-    cfg = dict(DEFAULT_CONFIG)
+    plugin options that way, then the machine policy file, whose keys win. The manifest declares
+    no `userConfig`: Claude Code 2.1.223 rejects a manifest with that key as invalid and then
+    loads NO hook at all (measured on Debian, 2026-09-26), and a guard that silently vanishes
+    on an older client is worse than a guard without a settings dialog. A wrong type raises
+    ConfigError with the key name: a silent AttributeError later locked the user out with no
+    hint at the config (review, 2026-09-26)."""
+    import copy
+    import platform as _platform
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
     try:
-        cfg.update(json.loads(CONFIG.read_text(encoding="utf-8")))
-    except (OSError, ValueError):
-        pass
+        user = json.loads(CONFIG.read_text(encoding="utf-8"))
+    except OSError:
+        user = {}
+    except ValueError as exc:
+        raise ConfigError(f"{CONFIG.name} is not valid JSON") from exc
+    if not isinstance(user, dict):
+        raise ConfigError(f"{CONFIG.name} must hold one JSON object")
+    _check_types(user, CONFIG.name)
+    cfg.update(user)
     env = os.environ
     backend = env.get("CLAUDE_PLUGIN_OPTION_BACKEND", "").strip()
     if backend and backend != "auto":
@@ -180,6 +221,24 @@ def load_config() -> dict:
             pass
     if env.get("CLAUDE_PLUGIN_OPTION_REPORT_URL", "").strip():
         cfg["report_url"] = env["CLAUDE_PLUGIN_OPTION_REPORT_URL"].strip()
+    policy_path = POLICY_PATHS.get(_platform.system())
+    cfg["policy_keys"] = []
+    if policy_path is not None:
+        try:
+            policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        except OSError:
+            policy = {}
+        except ValueError as exc:
+            raise ConfigError(f"{policy_path} is not valid JSON") from exc
+        if isinstance(policy, dict):
+            _check_types(policy, policy_path.name)
+            cfg.update(policy)
+            cfg["policy_keys"] = sorted(policy)
+    cfg["max_ttl_seconds"] = min(int(cfg.get("max_ttl_seconds", 30 * 86400)), 30 * 86400)
+    if cfg.get("backend") == "jsonfile" and not cfg.get("allow_plaintext_store", False) \
+            and "MAISECRETS_HOME" not in env:
+        # the plaintext store is for tests and the harness, which run in their own home
+        raise ConfigError("backend jsonfile is the TEST store; set allow_plaintext_store to use it here")
     return cfg
 
 
@@ -194,8 +253,7 @@ def describe_backend(backend) -> str:
     }.get(name, name)
     return (f"maisecrets vault: {where}. Metadata: {INDEX}. "
             f"To change it: write {{\"backend\": \"encrypted-file\"}} to {CONFIG} (takes effect on the next call). "
-            "maisecrets is free and open source, brought to you by mcpgate.de - "
-            "connecting your company with its tools.")
+            "Free and open source, by mcpgate.de.")
 
 
 FP_KEY_ENTRY = "_maisecrets_fpkey"   # backend key that holds the fingerprint key (32 random bytes, hex)
@@ -239,17 +297,21 @@ class JsonFileBackend:
     def __init__(self) -> None:
         self.path = HOME / "vault.json"
 
-    def _load(self) -> dict:
+    def _load(self, for_write: bool = False) -> dict:
         try:
             return json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except OSError:
+            return {}
+        except ValueError:
+            if for_write:
+                raise RuntimeError("vault store file unreadable; not overwritten")
             return {}
 
     def _save(self, data: dict) -> None:
         atomic_write(self.path, json.dumps(data))
 
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
-        d = self._load()
+        d = self._load(for_write=True)
         d[key] = value
         self._save(d)
 
@@ -257,14 +319,28 @@ class JsonFileBackend:
         return self._load().get(key)
 
     def delete(self, key: str) -> None:
-        d = self._load()
+        d = self._load(for_write=True)
         d.pop(key, None)
         self._save(d)
+
+    def keys(self) -> list[str]:
+        return list(self._load())
 
 
 class KeychainBackend:
     """macOS login keychain via the ``security`` CLI. No sync flag is set."""
     test_mode = False
+
+    @staticmethod
+    def _q(s: str) -> str:
+        """Quote one argument for the `security -i` command reader (double quotes, backslash escapes)."""
+        return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+    def _interactive(self, line: str) -> subprocess.CompletedProcess:
+        # `security -i` reads commands from stdin, so the value never sits on a command line where
+        # `ps` of any local user shows it during the call (review, 2026-09-26)
+        return subprocess.run(["security", "-i"], input=(line + "\n").encode("utf-8"),
+                              capture_output=True, timeout=5)
 
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
         # -l is the "Name" column in Keychain Access, -j the comment shown in the item's info.
@@ -273,28 +349,60 @@ class KeychainBackend:
         # (review 2026-09-26, docs/reviews). The keychain protects the value at rest and from
         # other users, not from this user's other processes. The gates are in the hooks.
         # No synchronizable flag: the item never joins iCloud Keychain or the Passwords app.
-        cmd = ["security", "add-generic-password", "-U", "-s", SERVICE, "-a", key,
-               "-l", label or f"maisecrets {key}", "-D", "maisecrets placeholder", "-w", value]
+        # the value is stored base64-encoded with a marker: `find-generic-password -w` prints a
+        # non-ASCII value as hex, so an umlaut never came back equal (measured 2026-09-26)
+        import base64
+        stored = "b64:" + base64.b64encode(value.encode("utf-8")).decode("ascii")
+        parts = ["add-generic-password", "-U", "-s", self._q(SERVICE), "-a", self._q(key),
+                 "-l", self._q(label or f"maisecrets {key}"), "-D", self._q("maisecrets placeholder"),
+                 "-w", self._q(stored)]
         if comment:
-            cmd += ["-j", comment]
-        # no check=True: CalledProcessError prints the argument list, which holds the value, and an
-        # error text can reach the model as a block reason (Codex review, 2026-09-26)
-        r = subprocess.run(cmd, capture_output=True, timeout=5)
+            parts += ["-j", self._q(comment)]
+        # no check=True: CalledProcessError prints the argument list, and an error text can reach
+        # the model as a block reason (Codex review, 2026-09-26)
+        r = self._interactive(" ".join(parts))
         if r.returncode != 0:
             raise RuntimeError(f"keychain add failed (rc {r.returncode})")
+        if self.get(key) != value:
+            raise RuntimeError("keychain add failed (read-back differs)")
 
     def get(self, key: str) -> str | None:
         r = subprocess.run(
             ["security", "find-generic-password", "-s", SERVICE, "-a", key, "-w"],
             capture_output=True, text=True, timeout=5,
         )
-        return r.stdout.rstrip("\n") if r.returncode == 0 else None
+        if r.returncode != 0:
+            return None
+        raw = r.stdout.rstrip("\n")
+        if raw.startswith("b64:"):
+            import base64
+            try:
+                return base64.b64decode(raw[4:]).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                return None
+        return raw   # an entry written before 0.3.22
 
     def delete(self, key: str) -> None:
-        subprocess.run(
+        r = subprocess.run(
             ["security", "delete-generic-password", "-s", SERVICE, "-a", key],
             capture_output=True, timeout=5,
         )
+        # rc 44: no such item, which is the wanted end state; anything else keeps the entry
+        # unpurged so the next sweep tries again (review, 2026-09-26)
+        if r.returncode not in (0, 44):
+            raise RuntimeError(f"keychain delete failed (rc {r.returncode})")
+
+    def wipe(self) -> int:
+        """Delete every item of the service, one call per item until none is left: the store is
+        enumerated by deleting, so an item whose index entry is gone goes too."""
+        n = 0
+        for _ in range(10000):
+            r = subprocess.run(["security", "delete-generic-password", "-s", SERVICE],
+                               capture_output=True, timeout=5)
+            if r.returncode != 0:
+                break
+            n += 1
+        return n
 
 
 class EncryptedFileBackend:
@@ -331,20 +439,38 @@ class EncryptedFileBackend:
         import hmac
         return hmac.new(hashlib.sha256(b"maisecrets-mac:" + self._key()).digest(), blob, "sha256").hexdigest()
 
-    def _load(self) -> dict:
+    def _load(self, for_write: bool = False) -> dict:
         try:
             return json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except OSError:
+            return {}
+        except ValueError:
+            # a damaged vault file must not be replaced by one with a single new entry: every
+            # other value would be lost without a message (review, 2026-09-26)
+            if for_write:
+                raise RuntimeError("vault store file unreadable; not overwritten")
             return {}
 
     def _save(self, data: dict) -> None:
         atomic_write(self.path, json.dumps(data))
 
+    def keys(self) -> list[str]:
+        return list(self._load())
+
+    def wipe(self) -> int:
+        n = len(self._load())
+        for f in (self.path, self.key_file):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        return n
+
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
         import base64
         self._key()
         blob = self._openssl([], value.encode())
-        d = self._load()
+        d = self._load(for_write=True)
         d[key] = {"c": base64.b64encode(blob).decode(), "t": self._tag(blob)}
         self._save(d)
 
@@ -363,7 +489,7 @@ class EncryptedFileBackend:
             return None
 
     def delete(self, key: str) -> None:
-        d = self._load()
+        d = self._load(for_write=True)
         d.pop(key, None)
         self._save(d)
 
@@ -381,21 +507,43 @@ class WindowsVaultBackend:
                               input=stdin, capture_output=True, text=True, timeout=15)
 
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
-        # the value travels via stdin, never as a command-line argument
-        r = self._ps("$p = [Console]::In.ReadToEnd().TrimEnd(\"`r\", \"`n\"); "
+        # the value travels via stdin as base64, never as a command-line argument and never as
+        # text the console code page could re-encode (review, 2026-09-26: Windows PowerShell 5.1
+        # reads a redirected stdin in the OEM code page)
+        import base64
+        b64 = base64.b64encode(value.encode("utf-8")).decode("ascii")
+        r = self._ps("$b = [Console]::In.ReadToEnd().Trim(); "
+                     "$p = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b)); "
                      f"try {{ $old = $v.Retrieve('{SERVICE}', '{key}'); $v.Remove($old) }} catch {{}}; "
                      f"$v.Add((New-Object Windows.Security.Credentials.PasswordCredential('{SERVICE}', '{key}', $p)))",
-                     stdin=value)
+                     stdin=b64)
         if r.returncode != 0:
-            raise RuntimeError("PasswordVault add failed: " + r.stderr[:200])
+            raise RuntimeError(f"PasswordVault add failed (rc {r.returncode})")
 
     def get(self, key: str) -> str | None:
+        import base64
         r = self._ps(f"try {{ $c = $v.Retrieve('{SERVICE}', '{key}'); $c.RetrievePassword(); "
-                     "[Console]::Out.Write($c.Password) } catch { exit 3 }")
-        return r.stdout if r.returncode == 0 else None
+                     "[Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($c.Password))) } "
+                     "catch { exit 3 }")
+        if r.returncode != 0:
+            return None
+        try:
+            return base64.b64decode(r.stdout.strip()).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return None
 
     def delete(self, key: str) -> None:
         self._ps(f"try {{ $v.Remove($v.Retrieve('{SERVICE}', '{key}')) }} catch {{}}")
+
+    def keys(self) -> list[str]:
+        r = self._ps(f"try {{ $v.FindAllByResource('{SERVICE}') | ForEach-Object {{ $_.UserName }} }} catch {{}}")
+        return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()] if r.returncode == 0 else []
+
+    def wipe(self) -> int:
+        keys = self.keys()
+        for k in keys:
+            self.delete(k)
+        return len(keys)
 
 
 def make_backend(cfg: dict):
@@ -464,14 +612,11 @@ class Vault:
             data = json.loads(INDEX.read_text(encoding="utf-8"))
         except ValueError as exc:
             # a damaged index must not become an empty one: the counters would restart and the
-            # next put would overwrite SECRET_c1 in the store (measured by review, 2026-09-26)
-            kept = INDEX.with_name(f"index.corrupt.{int(time.time())}.json")
-            try:
-                os.replace(INDEX, kept)
-            except OSError:
-                pass
-            raise RuntimeError(f"vault index unreadable, moved to {kept.name}; nothing resolves until it is "
-                               f"repaired or removed by hand") from exc
+            # next put would overwrite SECRET_c1 in the store. The file stays in place, so every
+            # later call raises too (moving it away made the guard last one call; review,
+            # 2026-09-26). `maisecrets repair` rebuilds the counters from the store.
+            raise RuntimeError(f"vault index unreadable ({INDEX.name}); nothing is stored or resolved until "
+                               f"`maisecrets repair` ran or the file was fixed by hand") from exc
         if not isinstance(data, dict) or "entries" not in data:
             raise RuntimeError("vault index has an unexpected shape")
         return data
@@ -517,6 +662,12 @@ class Vault:
                 e.sessions.append(session)
             self._touch(e)
             return e
+        e = self._put_new(value, type_, kind, session, ttl)
+        self._save_index()
+        return e
+
+    def _put_new(self, value: str, type_: str, kind: str, session: str | None, ttl: int | None) -> "Entry":
+        fp = self.fingerprint(value)
         n = self._index["counters"].get(type_, 0) + 1
         self._index["counters"][type_] = n
         key = f"{type_}_c{n}"
@@ -535,8 +686,40 @@ class Vault:
         )
         self._index["entries"][key] = asdict(e)
         self._index["by_fingerprint"][fp] = key
-        self._save_index()
         return e
+
+    @_mutating
+    def put_many(self, items: list[tuple[str, str, str]], session: str | None = None) -> list["Entry | None"]:
+        """Store many values in one lock, one sweep and one index save; a tool result with
+        hundreds of addresses called put() per value and rewrote the growing index each time
+        (measured: 1000 e-mails 8.7 s, above the watchdog; review, 2026-09-26). Above
+        `max_new_entries_per_result` new values, the rest is not stored: None in the result,
+        the caller masks the value without a key."""
+        self.expire()
+        cap = int(self.cfg.get("max_new_entries_per_result", 100))
+        out: list[Entry | None] = []
+        new = 0
+        dirty = False
+        for value, type_, kind in items:
+            fp = self.fingerprint(value)
+            existing = self._index["by_fingerprint"].get(fp)
+            if existing and not self._index["entries"][existing].get("purged"):
+                e = Entry(**self._index["entries"][existing])
+                if session and session not in e.sessions:
+                    e.sessions.append(session)
+                self._touch(e, save=False)
+                dirty = True
+                out.append(e)
+                continue
+            if new >= cap:
+                out.append(None)
+                continue
+            out.append(self._put_new(value, type_, kind, session, None))
+            new += 1
+            dirty = True
+        if dirty:
+            self._save_index()
+        return out
 
     def status(self, key: str, session: str | None = None) -> str:
         """ok | unknown | expired | no-session | foreign-session, without reading the value.
@@ -619,7 +802,9 @@ class Vault:
         for n in [n for n, g in grants.items() if g["expires"] < now or g.get("uses", 0) >= self.GRANT_USES]:
             del grants[n]
         grants[nonce] = {"key": key, "session": session, "expires": now + self.GRANT_TTL, "uses": 0}
-        self._record(key, session, tool, context)
+        if not self._record(key, session, tool, context):
+            del grants[nonce]
+            return None, "audit log not writable"
         self._save_index()
         return nonce, "ok"
 
@@ -649,16 +834,33 @@ class Vault:
             return f"limit: {per_hour} resolves in the last hour (max_resolves_per_hour)"
         return "ok"
 
-    def _record(self, key: str, session: str | None, tool: str, context: str) -> None:
+    def _record(self, key: str, session: str | None, tool: str, context: str) -> bool:
+        """One audit line per resolve. False when the line could not be written: the README
+        promises the line, so a resolve without it does not happen (review, 2026-09-26)."""
         now = time.time()
         self._index.setdefault("resolves", []).append({"ts": now, "session": session, "key": key})
         try:
             HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
-            fd = os.open(HOME / "audit.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            path = HOME / "audit.log"
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8") as f:
                 stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now))
                 ctx = context.replace("\n", " ").replace("\t", " ")[:160]
                 f.write(f"{stamp}\t{(session or '-')[:8]}\t{key}\t{tool}\t{ctx}\n")
+            self._rotate_audit(path)
+            return True
+        except OSError:
+            return False
+
+    def _rotate_audit(self, path: Path) -> None:
+        """Keep the newest `audit_max_lines` lines (retention; operator review, 2026-09-26)."""
+        cap = int(self.cfg.get("audit_max_lines", 2000))
+        try:
+            if path.stat().st_size < cap * 120:
+                return
+            lines = path.read_text(encoding="utf-8").splitlines()
+            if len(lines) > cap:
+                atomic_write(path, "\n".join(lines[-cap:]) + "\n")
         except OSError:
             pass
 
@@ -671,19 +873,21 @@ class Vault:
         st = self._limit(key, session)
         if st != "ok":
             return st
-        self._record(key, session, tool, context)
+        if not self._record(key, session, tool, context):
+            return "audit log not writable"
         self._save_index()
         return "ok"
 
     @_mutating
-    def _touch(self, e: Entry) -> None:
+    def _touch(self, e: Entry, save: bool = True) -> None:
         now = time.time()
         e.last_used = now
         e.uses += 1
         if self.cfg.get("renew_on_use", True):
             e.expires = min(now + self._ttl_for(e.type), e.max_expires)
         self._index["entries"][e.key] = asdict(e)
-        self._save_index()
+        if save:
+            self._save_index()
 
     def list(self) -> list[Entry]:
         self.expire()
@@ -706,7 +910,67 @@ class Vault:
             if not meta.get("purged") and meta["expires"] < now:
                 self.backend.delete(key)
                 meta["purged"] = True
+                meta["purged_at"] = now
                 n += 1
-        if n:
+        # metadata of a purged entry (masked display, session ids) is retention too: gone after
+        # keep_purged_days; the fingerprint map goes with it (operator review, 2026-09-26)
+        keep = int(self.cfg.get("keep_purged_days", 30)) * 86400
+        old = [k for k, m in self._index["entries"].items()
+               if m.get("purged") and now - float(m.get("purged_at") or m.get("expires") or now) > keep]
+        for k in old:
+            fp = self._index["entries"][k].get("fingerprint")
+            del self._index["entries"][k]
+            if fp and self._index["by_fingerprint"].get(fp) == k:
+                del self._index["by_fingerprint"][fp]
+        if n or old:
             self._save_index()
         return n
+
+    def wipe(self) -> int:
+        """Delete every stored value of this vault's service, the metadata and the logs; the
+        step for offboarding a machine (operator review, 2026-09-26). The backend enumerates
+        itself, so an item without an index entry goes too."""
+        with self._exclusive():
+            n = self.backend.wipe() if hasattr(self.backend, "wipe") else 0
+            for key in list(self._index["entries"]):
+                try:
+                    self.backend.delete(key)
+                except RuntimeError:
+                    pass
+            self._index = {"entries": {}, "counters": {}, "by_fingerprint": {}}
+            for name in ("index.json", "audit.log", "events.log", ".announced"):
+                try:
+                    (HOME / name).unlink()
+                except OSError:
+                    pass
+            for sub in ("pending", "run"):
+                d = HOME / sub
+                if d.is_dir():
+                    for f in d.iterdir():
+                        try:
+                            f.unlink()
+                        except OSError:
+                            pass
+        return n
+
+    def repair(self) -> dict:
+        """Rebuild a damaged index from the store: every key the backend still holds gets an
+        entry that is expired at once (the value is deleted, nothing resolves), and the counters
+        are set past every key seen so no new entry can overwrite an old value."""
+        keys = self.backend.keys() if hasattr(self.backend, "keys") else []
+        counters: dict[str, int] = {}
+        for key in keys:
+            if "_c" not in key:
+                continue
+            type_, _c, num = key.rpartition("_c")
+            if num.isdigit():
+                counters[type_] = max(counters.get(type_, 0), int(num))
+        for key in keys:
+            if key != FP_KEY_ENTRY:
+                try:
+                    self.backend.delete(key)
+                except RuntimeError:
+                    pass
+        idx = {"entries": {}, "counters": counters, "by_fingerprint": {}}
+        atomic_write(INDEX, json.dumps(idx, indent=1))
+        return {"keys_seen": len(keys), "counters": counters}
