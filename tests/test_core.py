@@ -52,6 +52,23 @@ class DetectTests(unittest.TestCase):
         ms = detect.scan(f"token {long_pat}, then text")
         self.assertEqual([m.value for m in ms], [long_pat])
 
+    def test_webhook_signing_secret_on_a_bare_line_is_a_hit(self):
+        import base64
+        fake = "whsec_" + base64.b64encode(bytes(range(32))).decode()
+        ms = detect.scan("https://example.org/api/webhooks/marketplace-push/marketplace_0123\n" + fake + "\n")
+        self.assertEqual([(m.kind, m.value) for m in ms], [("webhook-signing-secret", fake)])
+
+    def test_two_secrets_in_one_text_become_two_references(self):
+        text = f"token {GLPAT} and key {AKIA} please"
+        ms = detect.scan(text)
+        self.assertEqual([m.value for m in ms], [GLPAT, AKIA])
+        hooks._clipboard = lambda t: True
+        out = hooks.user_prompt({"prompt": text, "session_id": "s2", "transcript_path": ""})
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("SECRET_c1, SECRET_c2", out["reason"])
+        self.assertNotIn(GLPAT, out["reason"])
+        self.assertNotIn(AKIA, out["reason"])
+
     def test_named_credential_keeps_the_name_and_takes_the_value(self):
         ms = detect.scan("DB_PASSWORD=" + "Sup3rSecret" + "Value1234")
         self.assertEqual(len(ms), 1)

@@ -292,6 +292,9 @@ OWN_RULES: list[dict] = [
     # full-length GitLab runner / deploy tokens; the gitleaks legacy shape stops after 20 chars
     {"id": "gitlab-runner-token", "type": "SECRET", "regex": r"glrt-[0-9A-Za-z_.-]{20,}"},
     {"id": "gitlab-deploy-token-any", "type": "SECRET", "regex": r"gldt-[0-9A-Za-z_-]{20,}"},
+    # Standard Webhooks / Svix / Stripe webhook signing secret: whsec_ + base64. Not in gitleaks
+    # 8.30; a bare one on its own line passed the detector on 2026-09-26
+    {"id": "webhook-signing-secret", "type": "SECRET", "regex": r"whsec_[A-Za-z0-9+/=_-]{24,}"},
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
 ]

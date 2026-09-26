@@ -72,13 +72,12 @@ def _clipboard_read() -> str:
 
 def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str | None) -> tuple[str, list]:
     """Replace every match with its reference, right to left so offsets hold."""
-    entries = []
+    ordered = sorted(matches, key=lambda x: x.start)
+    entries = [vault.put(m.value, m.type, m.kind, session=session) for m in ordered]   # keys in text order
     out = text
-    for m in sorted(matches, key=lambda x: x.start, reverse=True):
-        e = vault.put(m.value, m.type, m.kind, session=session)
-        entries.append(e)
+    for m, e in sorted(zip(ordered, entries), key=lambda me: me[0].start, reverse=True):
         out = out[: m.start] + e.ref + out[m.end:]
-    return out, list(reversed(entries))
+    return out, entries
 
 
 def _walk_strings(node: Any, fn) -> Any:
