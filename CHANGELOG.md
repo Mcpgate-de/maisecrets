@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.5] - 2026-09-26
+
+### Fixes
+
+- drop userConfig, which Claude Code 2.1.223 rejects as an invalid manifest and then loads no hook at all; the harness fails when the plugin did not load (29e75d9)
+
 ## [0.3.4] - 2026-09-26
 
 ### Fixes
