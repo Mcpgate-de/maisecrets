@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .tmp/
 harness/out/
+.gitlab-ci-local/
