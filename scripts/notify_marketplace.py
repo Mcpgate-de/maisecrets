@@ -40,7 +40,7 @@ def main() -> int:
         secret = secret[len("whsec_"):]
     key = base64.b64decode(secret)
     sha = os.environ.get("CI_COMMIT_SHA", "")
-    path = os.environ.get("CI_PROJECT_PATH", "mcpgate/maisecrets")
+    path = os.environ.get("CI_PROJECT_PATH", "Sprinterli/maisecrets")
     web = os.environ.get("CI_PROJECT_URL", "https://gitlab.com/" + path)
     branch = os.environ.get("CI_DEFAULT_BRANCH", "main")
     body = json.dumps({

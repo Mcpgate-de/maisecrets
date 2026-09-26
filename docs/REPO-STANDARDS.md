@@ -80,13 +80,19 @@ and OpenAI plugin directories.
 
 ## Remotes (now)
 
-- Primary: `gitlab.com/mcpgate/maisecrets`, private; it is also the source
+- Primary: `gitlab.com/Sprinterli/maisecrets`, private; it is also the source
   the claude.ai organisation marketplace syncs from. Mirror:
   `github.com/Mcpgate-de/maisecrets`, public, the marketplace for everyone,
   written only by the CI `mirror` job (`origin/main` and tags, deploy key,
   host keys pinned in `.ci-known-hosts-github`). Nobody pushes to GitHub by
   hand. A second private GitHub mirror for the organisation sync existed for
   two hours on 2026-09-26 and was removed once the GitLab source worked.
+- GitLab stays under the personal namespace on purpose: a project inside a
+  gitlab.com group on the Free tier cannot mint project access tokens, and
+  a transfer drops the existing ones (measured 2026-09-26: the release token
+  and the org-sync token were gone after the move and had to be recreated).
+  The brand lives on GitHub (`Mcpgate-de`) and on the homepage, not in the
+  GitLab path.
 
 ## Licensing (before public)
 

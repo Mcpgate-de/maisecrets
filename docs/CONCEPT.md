@@ -231,7 +231,7 @@ readable source inside the plugin.)*
 
 ## Carrier and name (2026-09-26)
 
-- **Developed privately.** Repo on gitlab.com/mcpgate (moved from Sprinterli on 2026-09-26) with a mirror to
+- **Developed privately.** Repo on gitlab.com/Sprinterli (plumbing; a move into the mcpgate group on 2026-09-26 was reverted because a group project on the Free tier cannot mint project access tokens) with a mirror to
   github.com. Plugin, vault and protocol specification live there. The
   gateway part (deposit, rehydration for read actions) implements the
   specification in the ai-gateway; phase6 is the first user.
