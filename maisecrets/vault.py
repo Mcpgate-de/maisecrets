@@ -58,7 +58,17 @@ def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
-        os.replace(tmp, path)
+        # Windows refuses to replace a file another process has open for reading (WinError 5
+        # in the 12-process test on windows-latest, 2026-09-26); a reader holds it for
+        # milliseconds, so retry briefly instead of failing the hook
+        for attempt in range(40):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == 39:
+                    raise
+                time.sleep(0.05)
     finally:
         try:
             os.unlink(tmp)
