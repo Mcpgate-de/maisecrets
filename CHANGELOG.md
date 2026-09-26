@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.15] - 2026-09-26
+
+### Features
+
+- bare token prefixes live in rules/prefixes.txt, one line each, extended by pull request; CONTRIBUTING.md (4a66d5c)
+
 ## [0.3.14] - 2026-09-26
 
 ### Fixes
