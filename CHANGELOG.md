@@ -14,6 +14,9 @@
 - Keychain values are stored base64-marked (`b64:`), so umlauts round-trip; entries written
   by earlier versions are still read.
 - Every hook run is recorded in `~/.maisecrets/hooks.log` (no value, no command).
+- Write, Edit, MultiEdit and NotebookEdit resolve a placeholder in their content like an MCP
+  argument (session rule, cap, audit line with the file name); `"resolve_in_files": false`
+  turns that off.
 - Requires Python 3.11+; without it every prompt is blocked and the message names what to
   install.
 

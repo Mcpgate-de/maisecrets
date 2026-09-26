@@ -210,7 +210,8 @@ next patch version.
 `/Library/Application Support/maisecrets/policy.json` (macOS),
 `%ProgramData%\maisecrets\policy.json` (Windows), `/etc/maisecrets/policy.json`
 (Linux). Any key from "Options" goes in it; typical: `backend`,
-`scrub_transcript`, `max_ttl_seconds`, `pii_regions`, `report_url`.
+`scrub_transcript`, `max_ttl_seconds`, `pii_regions`, `report_url`,
+`resolve_in_files`.
 `/maisecrets:status` names the keys that come from the policy. The plaintext
 `jsonfile` store is refused unless the policy or the user sets
 `allow_plaintext_store`.
@@ -370,9 +371,14 @@ A placeholder turns back into its value only here:
   `python3 script.py ⟦KEY⟧`, `docker run -e T=⟦KEY⟧ img` and a word inside
   quotes or a comment pass. A refused command is refused as a whole: split off
   the step that needs the value and run it on its own.
-- **Never in Write, Edit or a file.** A placeholder in Write/Edit is refused
-  with the reason: the file would get the literal text. Writing a value to
-  disk is a Bash command the user approves (`printf '%s' ⟦KEY⟧ > file`).
+- **Inline for Write and Edit.** A placeholder in the content of Write, Edit,
+  MultiEdit or NotebookEdit is resolved like an MCP argument, under the same
+  session rule, cap and audit line (the line names the file). The client's
+  permission prompt then shows the diff with the value: that is the moment you
+  see what goes on disk. `"resolve_in_files": false` (a policy can set it)
+  turns this off; then the file tools refuse a placeholder and the way to a
+  file is a Bash command you approve (`printf '%s' ⟦KEY⟧ > file`). The
+  maisecrets home itself is never written by the agent.
 - **Codex approves nothing here.** Codex accepts a rewritten command only
   together with `allow`, which skips its own approval prompt for that call.
   On Codex the gates above are the whole control; on Claude Code the normal
@@ -479,9 +485,8 @@ a to-do.
   counts**, also your own and your colleagues'. `git log`, `dig` and `ip addr`
   come back with placeholders. Set `"pii_regions": ["generic"]` to drop the
   German identifiers; there is no allow-list for single values yet.
-- **Placeholders resolve in Bash and MCP tool arguments only.** In Write, Edit,
-  WebFetch or a subagent prompt they stay text; Write/Edit with a placeholder
-  are refused with the reason. A subagent shares its parent's session; a
+- **Placeholders resolve in Bash, MCP tool arguments and the file tools.** In
+  WebFetch or a subagent prompt they stay text. A subagent shares its parent's session; a
   headless run (`codex exec`, `claude -p`) is a session of its own, so a
   reference from an earlier run is foreign there.
 - **A reference in a prompt is admitted as typed by a human**, also when the

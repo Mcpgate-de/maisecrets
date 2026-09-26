@@ -268,8 +268,9 @@ def take_pending(session: str | None = None) -> str | None:
 PRIMER = (
     "maisecrets: a placeholder like ⟦SECRET_c1⟧ or ⟦EMAIL_c2:ma•••@x.de⟧ stands for a value the user "
     "stored locally. Use it unchanged. In a Bash command the value is read when the command runs; in "
-    "an MCP tool argument it is inserted at call time. It is NOT resolved in Write, Edit, WebFetch or a "
-    "subagent prompt: there it stays literal text. In Bash use it as a plain argument, inside '…' or \"…\", "
+    "an MCP tool argument and in the content of Write, Edit, MultiEdit or NotebookEdit it is inserted "
+    "at call time. It is NOT resolved in WebFetch or a subagent prompt: there it stays literal text. "
+    "In Bash use it as a plain argument, inside '…' or \"…\", "
     "or in an unquoted heredoc; a command with bash -c, sh -c, ssh, eval, backticks, $'…', a quoted heredoc, "
     "base64/xxd/od, ${x:0:4} or set -x is refused, and awk needs V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. "
     "Never ask the user for the value, never print, encode or slice it, never read the maisecrets store or "
@@ -767,6 +768,12 @@ def _run_dir() -> str:
     this user, with no group or world bits."""
     import stat as _stat
     import tempfile
+    if platform.system() == "Windows":
+        # values travel through the resolver script there, never through a FIFO; the directory
+        # only serves the sweep and wipe
+        base = os.path.join(tempfile.gettempdir(), "maisecrets-" + (os.environ.get("USERNAME") or "user"))
+        os.makedirs(base, exist_ok=True)
+        return base
     xdg = os.environ.get("XDG_RUNTIME_DIR", "")
     if xdg and os.path.isdir(xdg):
         base = os.path.join(xdg, "maisecrets")
@@ -1030,11 +1037,14 @@ def _dict_keys(node: Any) -> list[str]:
 _FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 
 
-def _pre_file_tool(cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:
-    """Write/Edit never resolve a placeholder: the file would get the literal text, or the edit
-    would not match the redacted Read. Say so instead of letting the workflow fail later. The
-    maisecrets home is off limits for the agent: a config written by an injected instruction
-    could lift every cap or switch the store to plaintext (review, 2026-09-26)."""
+def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:
+    """Write/Edit/MultiEdit/NotebookEdit: a placeholder in the content is resolved like an MCP
+    argument (the value must be inline; the client's permission prompt shows the diff with it),
+    under the session rule, the limiter and an audit line that names the file. Writing a value
+    into a file on purpose is what the plugin exists for (user decision, 2026-09-26); the first
+    version refused it and sent the model to a Bash redirect. The maisecrets home is off limits
+    for the agent: a config written by an injected instruction could lift every cap or switch
+    the store to plaintext (review, 2026-09-26)."""
     from .vault import HOME
     path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
     try:
@@ -1051,20 +1061,44 @@ def _pre_file_tool(cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dic
     if inside or ".maisecrets" in path.lower():
         return _deny(f"maisecrets: {tool} on {path} is refused; the maisecrets home is changed by the human "
                      "only. Nothing was written. Tell the user what you wanted to change there.")
-    keys: list[str] = []
+    found: list[str] = []
 
     def collect(v: str) -> str:
-        keys.extend(k for k, _a, _b in find_refs(v))
+        found.extend(k for k, _a, _b in find_refs(v))
         return v
     _walk_strings(tool_input, collect)
-    if not keys:
+    if not found:
         return {}
-    names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(keys))
-    return _deny(f"maisecrets: {names} is not resolved in {tool}; the file would get the literal placeholder, "
-                 "or the edit would not match. Nothing was written. To put the value into a file, use Bash "
-                 "(for example printf '%s' ⟦KEY⟧ > file; the value then sits on disk in plaintext, say so to "
-                 "the user). To edit a line that holds a redacted value, edit the lines around it or use "
-                 "sed in Bash.")
+    if not cfg.get("resolve_in_files", True):
+        names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found))
+        return _deny(f"maisecrets: {names} is not resolved in {tool} on this machine (resolve_in_files is off). "
+                     "Nothing was written. To put the value into a file, use a Bash command the user approves, "
+                     "for example printf '%s' ⟦KEY⟧ > file.")
+    vault = Vault(cfg)
+    session = payload.get("session_id")
+    values: dict[str, str] = {}
+    failed: list[str] = []
+    for key in dict.fromkeys(found):
+        status = vault.record_resolve(key, session, tool, f"{tool} {path}")
+        if status == "ok":
+            value, status = vault.get(key, session)
+        if status != "ok":
+            failed.append(f"{key} ({status})")
+            continue
+        values[key] = value
+    if failed:
+        return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
+
+    def substitute(v: str) -> str:
+        out = v
+        for key, start, end in sorted(find_refs(v), key=lambda r: r[1], reverse=True):
+            out = out[:start] + values[key] + out[end:]
+        return out
+    if cfg.get("scrub_transcript", True):
+        # the client records this hook's updatedInput, values included, in the transcript
+        _scrub_transcript_later(payload.get("transcript_path", ""), list(values.values()),
+                                [f"⟦{k}⟧" for k in values])
+    return _updated(payload, _walk_strings(tool_input, substitute))
 
 
 def pre_tool(payload: dict) -> dict:
@@ -1074,7 +1108,7 @@ def pre_tool(payload: dict) -> dict:
     if tool == "Bash":
         return _pre_bash(payload, cfg, tool_input)
     if tool in _FILE_TOOLS:
-        return _pre_file_tool(cfg, tool, tool_input, str(payload.get("cwd") or ""))
+        return _pre_file_tool(payload, cfg, tool, tool_input, str(payload.get("cwd") or ""))
     if tool.startswith("mcp__"):
         # Gateway servers too: the deposit path (gateway resolves ⟦REF⟧ itself, PROTOCOL §4) is not
         # built; until it is, a placeholder that reaches a gateway action is parsed as text
@@ -1285,7 +1319,7 @@ def post_tool(payload: dict) -> dict:
             "additionalContext": (
                 f"maisecrets redacted {hit['n']} value(s) in this tool result. The tool ran and finished; "
                 "do not run it again to see the values. Use the ⟦TYPE_cN⟧ placeholders as they are: in a Bash "
-                "command or an MCP argument they are resolved at run time; in Write/Edit they stay literal text."
+                "command, an MCP argument or the content of Write/Edit they are resolved at run time."
             ),
         }
     }

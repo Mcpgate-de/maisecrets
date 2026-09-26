@@ -46,6 +46,7 @@ DEFAULT_CONFIG = {
     "gateway_servers": [],           # MCP servers that resolve placeholders themselves (PROTOCOL §4); none by default
     "pii_regions": ["generic", "de"],
     "max_new_entries_per_result": 100,   # above this, a tool result is masked without storing more values
+    "resolve_in_files": True,        # Write/Edit content resolves a placeholder like an MCP argument
     "keep_purged_days": 30,          # metadata of an expired entry is deleted after this many days
     "audit_max_lines": 2000,
 }
@@ -62,7 +63,7 @@ _CONFIG_TYPES = {
     "renew_on_use": bool, "scrub_transcript": bool, "block_at_mentions": bool, "gateway_servers": list,
     "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
-    "allow_plaintext_store": bool,
+    "allow_plaintext_store": bool, "resolve_in_files": bool,
 }
 
 

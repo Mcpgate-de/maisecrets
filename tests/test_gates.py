@@ -197,7 +197,7 @@ class ContextTests(unittest.TestCase):
                 self.assertEqual(r.stdout, want, r.stderr)
 
     def test_contexts_the_rewrite_cannot_place_are_refused_with_the_reason(self):
-        before = set(hooks._run_dir() and os.listdir(hooks._run_dir()))
+        before = set(os.listdir(hooks._run_dir()))
         marker_value = "x$(touch " + str(Path(_TMP, "MARKER")) + ")y"
         e2 = Vault().put(marker_value, "SECRET", "manual", session="S1")
         for name, cmd in [
@@ -228,6 +228,7 @@ class ContextTests(unittest.TestCase):
         plain = _bash_pre("curl -H 'X-Token: " + self.e.ref + "' h | jq .")["hookSpecificOutput"]
         self.assertNotIn("permissionDecision", plain)
 
+    @unittest.skipIf(os.name == "nt", "POSIX FIFO path")
     def test_a_refused_key_leaves_no_value_waiting(self):
         before = set(os.listdir(hooks._run_dir()))
         out = _bash_pre("echo " + self.e.ref + " ⟦SECRET_c99⟧")["hookSpecificOutput"]
@@ -236,6 +237,7 @@ class ContextTests(unittest.TestCase):
         self.assertIn("do not guess", out["permissionDecisionReason"])
         self.assertEqual(set(os.listdir(hooks._run_dir())) - before, set())
 
+    @unittest.skipIf(os.name == "nt", "POSIX FIFO path")
     def test_the_run_dir_is_private_and_refused_when_it_is_not(self):
         d = hooks._run_dir()
         st = os.stat(d)
@@ -260,11 +262,27 @@ class ContextTests(unittest.TestCase):
             del os.environ["CODEX_HOME"]
         self.assertEqual(hooks.client_of({}), "claude")
 
-    def test_file_tools_never_resolve_and_the_home_is_off_limits(self):
+    def test_file_tools_resolve_like_mcp_and_the_home_is_off_limits(self):
         out = hooks.pre_tool({"tool_name": "Write", "session_id": "S1",
                               "tool_input": {"file_path": "/tmp/x.env", "content": "K=" + self.e.ref}})
+        self.assertNotIn("permissionDecision", out["hookSpecificOutput"])
+        self.assertEqual(out["hookSpecificOutput"]["updatedInput"]["content"], "K=" + NASTY)
+        audit = Path(_TMP, "audit.log").read_text(encoding="utf-8")
+        self.assertIn("Write /tmp/x.env", audit)
+        self.assertNotIn(NASTY, audit)
+        out = hooks.pre_tool({"tool_name": "Edit", "session_id": "S2",
+                              "tool_input": {"file_path": "/tmp/x.env", "old_string": "a", "new_string": self.e.ref}})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("Nothing was written", out["hookSpecificOutput"]["permissionDecisionReason"])
+        Path(_TMP, "config.json").write_text(
+            '{"backend": "jsonfile", "allow_plaintext_store": true, "resolve_in_files": false}')
+        try:
+            out = hooks.pre_tool({"tool_name": "Write", "session_id": "S1",
+                                  "tool_input": {"file_path": "/tmp/x.env", "content": "K=" + self.e.ref}})
+            self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertIn("resolve_in_files", out["hookSpecificOutput"]["permissionDecisionReason"])
+        finally:
+            Path(_TMP, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
         out = hooks.pre_tool({"tool_name": "Edit", "session_id": "S1",
                               "tool_input": {"file_path": str(Path(_TMP, "config.json")),
                                              "old_string": "a", "new_string": "b"}})
@@ -336,6 +354,7 @@ class ScannerEdgeTests(unittest.TestCase):
             with self.subTest(cmd[:20]):
                 self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny")
 
+    @unittest.skipIf(os.name == "nt", "Windows uses the resolver and its grant")
     def test_no_grant_is_redeemable_after_a_posix_rewrite(self):
         _bash_pre("printf '%s' " + self.e.ref)
         v = Vault()
@@ -346,6 +365,7 @@ class ScannerEdgeTests(unittest.TestCase):
             with self.subTest(cmd):
                 self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"]["permissionDecision"], "deny")
 
+    @unittest.skipIf(os.name == "nt", "POSIX FIFO path")
     def test_a_second_key_that_cannot_be_served_takes_the_first_back(self):
         from unittest import mock
         e2 = Vault().put(PLAIN, "SECRET", "manual", session="S1")
