@@ -27,7 +27,12 @@ from .placeholder import display_for
 HOME = Path(os.environ.get("MAISECRETS_HOME", Path.home() / ".maisecrets"))
 INDEX = HOME / "index.json"
 CONFIG = HOME / "config.json"
-SERVICE = "maisecrets"
+# The keychain namespace is per service name, not per vault home. A second home
+# (tests, the harness, a latency run) minted SECRET_c1 too and a cleanup deleted
+# the real SECRET_c1 (2026-09-26). So every home other than the default gets its
+# own service name.
+_DEFAULT_HOME = Path.home() / ".maisecrets"
+SERVICE = "maisecrets" if HOME == _DEFAULT_HOME else "maisecrets@" + hashlib.sha256(str(HOME).encode()).hexdigest()[:8]
 
 DEFAULT_CONFIG = {
     "backend": "keychain",          # keychain (macOS) | jsonfile (test mode, any OS)

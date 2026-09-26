@@ -164,6 +164,11 @@ class VaultTests(unittest.TestCase):
         self.assertIsNone(self.v.backend.get(e.key))
         self.assertEqual(self.v.get("SECRET_c99"), (None, "unknown"))
 
+    def test_non_default_home_uses_its_own_keychain_service(self):
+        from maisecrets import vault as v
+        self.assertNotEqual(v.SERVICE, "maisecrets")
+        self.assertTrue(v.SERVICE.startswith("maisecrets@"))
+
     def test_vault_file_is_private(self):
         self.v.put(AKIA, "SECRET", "aws-access-token")
         mode = os.stat(self.v.backend.path).st_mode & 0o777

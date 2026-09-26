@@ -49,11 +49,34 @@ class Match:
     end: int
 
 
+class _Lazy:
+    """A regex compiled on first use. Rule loading then costs a dict, not 265 compilations."""
+    __slots__ = ("pattern", "flags", "_rx")
+
+    def __init__(self, pattern: str, flags: int = 0) -> None:
+        self.pattern, self.flags, self._rx = pattern, flags, None
+
+    def _get(self) -> re.Pattern[str]:
+        if self._rx is None:
+            self._rx = re.compile(self.pattern, self.flags)
+        return self._rx
+
+    def finditer(self, text: str):
+        return self._get().finditer(text)
+
+    def search(self, text: str):
+        return self._get().search(text)
+
+    @property
+    def groups(self) -> int:
+        return self._get().groups
+
+
 @dataclass(frozen=True)
 class Rule:
     id: str
     type: str
-    regex: re.Pattern[str]
+    regex: _Lazy
     keywords: tuple[str, ...] = ()
     entropy: float = 0.0
     secret_group: int = 0
@@ -277,13 +300,10 @@ def _load_gitleaks() -> list[Rule]:
             for al in r.get("allowlists", []) or []:
                 target = al.get("regexTarget", "match")
                 for arx in al.get("regexes", []) or []:
-                    try:
-                        allow.append((re.compile(_re2_to_python(arx)), target))
-                    except re.error:
-                        pass
+                    allow.append((_Lazy(_re2_to_python(arx)), target))
                 stop += [s.lower() for s in al.get("stopwords", []) or []]
             rules.append(Rule(
-                id=r["id"], type="SECRET", regex=re.compile(_re2_to_python(r["regex"])),
+                id=r["id"], type="SECRET", regex=_Lazy(_re2_to_python(r["regex"])),
                 keywords=tuple(k.lower() for k in r.get("keywords", []) or ()),
                 entropy=float(r.get("entropy", 0) or 0), secret_group=int(r.get("secretGroup", 0) or 0),
                 allow_regexes=tuple(allow), stopwords=tuple(stop),
@@ -329,13 +349,9 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
         validator = PRESIDIO_VALIDATOR.get(rec["id"])
         weak = rec["id"] in PRESIDIO_ALWAYS_CONTEXT or (rec["validator"] and validator is None)
         for i, pat in enumerate(rec["patterns"]):
-            try:
-                rx = re.compile(_re2_to_python(pat["regex"]))
-            except re.error:
-                continue
             out.append(Rule(
                 id=f"{rec['id']}" if len(rec["patterns"]) == 1 else f"{rec['id']}#{i}",
-                type=ENTITY_TYPE.get(rec["entity"], rec["entity"]), regex=rx,
+                type=ENTITY_TYPE.get(rec["entity"], rec["entity"]), regex=_Lazy(_re2_to_python(pat["regex"])),
                 validator=validator, score=float(pat["score"]),
                 context=tuple(c.lower() for c in rec.get("context", [])), require_context=weak,
                 whole_match=True,
@@ -349,14 +365,14 @@ def _load_detect_secrets() -> list[Rule]:
     out: list[Rule] = []
     for r in data["rules"]:
         flags = re.IGNORECASE if r.get("ignorecase") else 0
-        out.append(Rule(id=r["id"], type="SECRET", regex=re.compile(r["regex"], flags),
+        out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(r["regex"], flags),
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
                         secret_group=int(r["group"]), validator="ds_value"))
     return out
 
 
 def _load_own() -> list[Rule]:
-    return [Rule(id=d["id"], type=d["type"], regex=re.compile(d["regex"]),
+    return [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"]),
                  secret_group=d.get("secret_group", 0), validator=d.get("validator"))
             for d in OWN_RULES]
 
@@ -424,7 +440,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
         if rule.context and (rule.require_context or rule.score < 0.5) and not any(c in low for c in rule.context):
             continue
         for m in rule.regex.finditer(text):
-            ngroups = m.re.groups or 0
+            ngroups = rule.regex.groups or 0
             if rule.whole_match:
                 g = 0
             else:
