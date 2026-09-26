@@ -122,7 +122,8 @@ harness_codex:
     CODEX_VERSION: "0.155.1"
   script:
     - npm install --global --no-fund --no-audit "@openai/codex@${CODEX_VERSION}"
-    - pip3 install --quiet --break-system-packages zstandard
+    # node:22 (Debian) has python3 but no pip; Codex sends zstd request bodies
+    - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends python3-zstandard >/dev/null
     - export HOME=$(mktemp -d)
     - python3 harness/codex.py
 
