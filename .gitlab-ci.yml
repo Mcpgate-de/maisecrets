@@ -108,12 +108,12 @@ release:
     - apk add --no-cache git python3 >/dev/null
     - git fetch --tags --quiet origin
     - git checkout -q "$CI_COMMIT_SHA"
+    # `if ! cmd` would hand `$?` the negated status (a ci-only push reported "failed with 0"
+    # and went red on 2026-09-26); the status is captured on the assignment itself
     - |
-      if ! VERSION=$(python3 scripts/release.py next); then
-        rc=$?
-        if [ "$rc" = "3" ]; then echo "nothing to release"; exit 0; fi
-        echo "release.py next failed with $rc"; exit 1
-      fi
+      rc=0; VERSION=$(python3 scripts/release.py next) || rc=$?
+      if [ "$rc" = "3" ]; then echo "nothing to release"; exit 0; fi
+      if [ "$rc" != "0" ]; then echo "release.py next failed with $rc"; exit 1; fi
     - python3 scripts/release.py apply
     - python3 scripts/release.py check
     - git config user.email "ci@maisecrets.local"
