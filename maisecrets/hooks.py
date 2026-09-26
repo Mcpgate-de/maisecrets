@@ -330,7 +330,9 @@ def user_prompt(payload: dict) -> dict:
              if copied else "saved: type /maisecrets:send to send it as is (clipboard unavailable here)")
     reason = (
         f"maisecrets: {summary} detected and stored as {keys}. "
-        f"The prompt did not reach the model. The rewritten prompt is {where}."
+        f"The prompt did not reach the model. The rewritten prompt is {where}. "
+        "A placeholder resolves only in a session where maisecrets is active (the session start "
+        "says 'maisecrets <version> active'); elsewhere it stays text."
     )
     if not copied:
         reason += "\n\n" + rewritten
