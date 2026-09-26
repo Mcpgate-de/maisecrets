@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "maisecrets",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "Keeps secrets and PII out of the cloud model. Deterministic detection, local vault with TTL, placeholders that are rehydrated only where the real call happens.",
   "author": {"name": "Sprinterli"},
   "repository": "https://github.com/Sprinterli/maisecrets",

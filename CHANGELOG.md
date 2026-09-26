@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.7] - 2026-09-26
+
+### Features
+
+- notify the claude.ai organisation marketplace from the tag pipeline with a signed push event (41da293)
+
 ## [0.3.6] - 2026-09-26
 
 ### Fixes
