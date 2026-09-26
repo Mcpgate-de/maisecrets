@@ -7,6 +7,9 @@ on:
   pull_request:
 jobs:
   tests:
+    # the release commit only bumps manifests and the changelog; its content was tested one
+    # commit earlier, and the GitLab release job waits for this matrix on that commit
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
     strategy:
       fail-fast: false
       matrix:

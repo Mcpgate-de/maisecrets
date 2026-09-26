@@ -158,6 +158,14 @@ release:
     - 'git commit -q -m "chore(release): v$VERSION"'
     - git tag -a "v$VERSION" -m "maisecrets $VERSION"
     - git remote set-url origin "https://oauth2:${MAISECRETS_CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    # main may have moved on while this job waited for the GitHub matrix; then the newer
+    # pipeline releases everything and this one steps aside instead of failing on a
+    # non-fast-forward push (two red release jobs on 2026-09-26)
+    - git fetch --quiet origin main
+    - |
+      if [ "$(git rev-parse origin/main)" != "$CI_COMMIT_SHA" ]; then
+        echo "main moved on to $(git rev-parse --short origin/main); the newer pipeline releases"; exit 0
+      fi
     # the branch push skips CI (its content was just tested); the tag push runs the tag pipeline
     - git push -o ci.skip origin HEAD:main
     - git push origin "v$VERSION"
