@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.18] - 2026-09-26
+
+### Fixes
+
+- the blocked prompt and an MCP resolve are scrubbed from the transcript by a detached child that waits for the record; the harness now really checks transcripts (353643b)
+
 ## [0.3.17] - 2026-09-26
 
 ### Fixes
