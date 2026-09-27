@@ -9,7 +9,8 @@
 #
 # Order on main: validate, test (unit + the two live harnesses against fake upstreams),
 # mirror (the tested SHA reaches GitHub, whose Actions matrix runs Windows/macOS/Linux),
-# release (waits for that matrix to be green, then tags). Tag pipelines mirror the tag and
+# release (waits for that matrix to be green, then tags). Tag pipelines verify the release commit,
+# run no tests (the tree was tested on main), mirror the tag and
 # notify the claude.ai marketplace.
 #
 # Release flow (main only, after the tests):
@@ -105,13 +106,27 @@ lint:
     - pip install --quiet --disable-pip-version-check ruff==0.14.2
     - ruff check --select E,F,W --line-length 120 maisecrets hooks harness tests scripts
 
+# A release tag sits on the release commit: the tested main commit plus the four release files.
+# verify_release proves exactly that (file list, subject, author, on main, version), and the
+# release job that made the commit needs every test job of the main pipeline. The tag pipeline
+# would test a byte-identical tree a second time and learn nothing, so the test jobs do not run
+# there (the ai-gateway skips a re-run of an already tested tree the same way). Referenced by
+# every test job, never copied: a copy missed in one job re-runs it.
+.tested_before_the_tag:
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: on_success
+
 unit:
   stage: test
+  extends: .tested_before_the_tag
   script:
     - python -m unittest discover -s tests -v
 
 beliefs_can_fail_replay:
   stage: test
+  extends: .tested_before_the_tag
   # every belief in beliefs/*.toml: the owning tests go green, the guarded code is mutated as
   # declared, the tests must go red, the file is restored. A test that stays green under the
   # mutation does not carry the control it claims (borrowed from the ai-gateway beliefs layer)
@@ -123,6 +138,7 @@ beliefs_can_fail_replay:
 # needs no login (measured 2026-09-26). Versions pinned to the ones proven locally.
 harness_claude:
   stage: test
+  extends: .tested_before_the_tag
   image: node:22
   variables:
     CLAUDE_CODE_VERSION: "2.1.283"
@@ -135,6 +151,7 @@ harness_claude:
 
 harness_codex:
   stage: test
+  extends: .tested_before_the_tag
   image: node:22
   variables:
     CODEX_VERSION: "0.155.1"
@@ -222,23 +239,25 @@ verify_release:
         *) echo "release commit changes more than the release files: $changed"; exit 1 ;;
       esac
     - 'git log -1 --format=%s HEAD | grep -q "^chore(release): v" || { echo "tag is not on a release commit"; exit 1; }'
+    # the release job's identity: a tag set by hand on a look-alike commit would skip the tests
+    - 'test "$(git log -1 --format=%ae HEAD)" = "ci@maisecrets.local" || { echo "release commit not made by the release job"; exit 1; }'
     - git merge-base --is-ancestor HEAD origin/main || { echo "tag is not on main"; exit 1; }
     - 'test "v$(python3 scripts/release.py current 2>/dev/null || python3 -c "import json;print(json.load(open(\".claude-plugin/plugin.json\"))[\"version\"])")" = "$CI_COMMIT_TAG" || { echo "tag and manifest version differ"; exit 1; }'
     # the tested commit's own tests ran in the main pipeline that created this tag (the release
-    # job needs every test job); the tag pipeline runs them again and mirror/notify need them
+    # job needs every test job), so the tag pipeline does not run them again
 
 notify_marketplace:
   stage: mirror
   # the claude.ai organisation marketplace re-syncs on a signed push event; gitlab.com's own
   # webhook carries no signature and is answered 403, so the release pipeline sends it.
-  # Only after the tag is verified and the tests of the tag pipeline passed.
+  # Only after the tag is verified and mirrored.
   interruptible: false
   environment:
     name: release
     action: prepare
   rules:
     - if: $CI_COMMIT_TAG
-  needs: [verify_release, unit, harness_claude, harness_codex, plugin_validate, mirror_tag]
+  needs: [verify_release, plugin_validate, mirror_tag]
   script:
     - python scripts/notify_marketplace.py
 
@@ -274,9 +293,9 @@ mirror_tag:
   <<: *mirror_base
   rules:
     - if: $CI_COMMIT_TAG
-  # the release commit and its tag reach the public repository only after verify_release and
-  # the tag pipeline's own tests
-  needs: [verify_release, unit, harness_claude, harness_codex, plugin_validate, no_secrets_in_tree]
+  # the release commit and its tag reach the public repository only after verify_release proved
+  # that the tag is the tested main commit plus the release files
+  needs: [verify_release, plugin_validate, no_secrets_in_tree]
   script:
     - git push ssh://git@github.com/Mcpgate-de/maisecrets.git "$CI_COMMIT_SHA:refs/heads/main"
     - git push ssh://git@github.com/Mcpgate-de/maisecrets.git "refs/tags/$CI_COMMIT_TAG"

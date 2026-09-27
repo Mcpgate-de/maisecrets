@@ -140,6 +140,32 @@ class ListingManifestTests(unittest.TestCase):
         expected = " ".join(sorted(list(self.r.MANIFESTS) + ["CHANGELOG.md"])) + " "
         self.assertIn(f'"{expected}")', ci, "verify_release must list exactly the files the release commits")
 
+    def test_the_tag_pipeline_trusts_verify_release_instead_of_testing_twice(self):
+        """Every test job extends the one rule that keeps it off a tag, and nothing on the tag path
+        waits for a job that does not run there. verify_release must keep every check the skip
+        rests on: the file list, the subject, the release identity, main, the version."""
+        ci = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
+        jobs, name = {}, None
+        for line in ci.splitlines():
+            if line and not line[0].isspace() and not line.startswith("#"):
+                name = line[:-1] if line.endswith(":") else None
+                if name:
+                    jobs[name] = ""
+            elif name:
+                jobs[name] += line + "\n"
+        for name in ("unit", "beliefs_can_fail_replay", "harness_claude", "harness_codex"):
+            self.assertIn("extends: .tested_before_the_tag", jobs[name], name)
+        self.assertIn("if: $CI_COMMIT_TAG\n      when: never", jobs[".tested_before_the_tag"])
+        for name in ("mirror_tag", "notify_marketplace"):
+            needs = next(line for line in jobs[name].splitlines() if line.strip().startswith("needs:"))
+            for skipped in ("unit", "harness_claude", "harness_codex", "beliefs_can_fail_replay"):
+                self.assertNotRegex(needs, rf"\b{skipped}\b", f"{name} waits for {skipped}, which a tag never runs")
+            self.assertIn("verify_release", needs, name)
+        vr = jobs["verify_release"]
+        for check in ("git diff --name-only HEAD^ HEAD", "^chore(release): v", "ci@maisecrets.local",
+                      "git merge-base --is-ancestor HEAD origin/main", "tag and manifest version differ"):
+            self.assertIn(check, vr, check)
+
     def test_the_codex_manifest_mirrors_the_claude_one(self):
         for key in ("name", "version", "description", "author", "homepage", "repository", "license", "keywords"):
             self.assertEqual(self.claude[key], self.codex[key], key)
