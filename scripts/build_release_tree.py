@@ -54,7 +54,12 @@ def commit(ref: str, parent: str | None, message: str) -> str:
             raise SystemExit(f"git update-index failed: {r.stderr.strip()[:300]}")
         tree = _git("write-tree", env=env).strip()
     args = ["commit-tree", tree, "-m", message] + (["-p", parent] if parent else [])
-    return _git(*args).strip()
+    # the release identity when none is configured: a CI container has no git identity
+    ident = dict(os.environ)
+    for role in ("AUTHOR", "COMMITTER"):
+        ident.setdefault(f"GIT_{role}_NAME", "maisecrets release")
+        ident.setdefault(f"GIT_{role}_EMAIL", "ci@maisecrets.local")
+    return _git(*args, env=ident).strip()
 
 
 def main(argv: list[str]) -> int:
