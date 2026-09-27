@@ -1077,6 +1077,23 @@ class LockTests(unittest.TestCase):
         self.assertEqual(vault.INDEX.read_text(encoding="utf-8"), before)
         self.assertEqual(v._lock.depth, 0)
 
+    def test_a_damaged_index_met_inside_a_mutation_releases_the_lock(self):
+        """_Mutation took the lock and then re-read the index; when the read raised, `with`
+        never called __exit__, and the process kept the lock: every other hook process then
+        ran into LockTimeout, and later mutations in this process ran at depth 2, so they
+        neither re-read nor saved the index."""
+        v = Vault(dict(JSONCFG))
+        v.put("leak-fake-value-1", "SECRET", "manual", session="A")
+        vault.INDEX.write_text("{damaged", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "repair"):
+            v.put("leak-fake-value-2", "SECRET", "manual", session="A")
+        self.assertEqual((v._lock.depth, v._lock.fd), (0, None))
+        vault.INDEX.unlink()
+        v = Vault(dict(JSONCFG))
+        with v._exclusive():
+            v._index["counters"]["PROBE"] = 1
+        self.assertIn("PROBE", json.loads(vault.INDEX.read_text(encoding="utf-8"))["counters"])
+
     def test_every_index_save_runs_under_the_lock(self):
         """The AST test in test_operations.py reads the decorators; this one watches the calls."""
         saves = []
