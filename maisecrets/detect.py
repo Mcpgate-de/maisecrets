@@ -486,10 +486,19 @@ PLACEHOLDER_PARTS = ("your_", "your-", "bogus", "dummy", "example", "sample", "p
 _TEMPLATE_NAME = re.compile(r"^[A-Z]+(?:_[A-Z]+)+$")   # YOUR_PORTKEY_API_KEY: words joined by underscores, no digits
 
 
+# a placeholder word counts at the start of the value, after a character that is not a letter or a
+# digit (ghp_fake…, sk-dummy-key, <redacted>), or at the end (the AWS documentation key ends in
+# EXAMPLE). Inside a run of letters and digits it is chance: a random GitHub token holds "fAKe" or
+# "DuMmy" about once in 20,000, and it was then let through as a placeholder (found by a random
+# test token on windows-latest, 2026-09-27)
+_PARTS = "|".join(re.escape(p) for p in PLACEHOLDER_PARTS)
+_PLACEHOLDER_PART_RE = re.compile(f"(?<![a-z0-9])(?:{_PARTS})|(?:{_PARTS})$")
+
+
 def looks_like_placeholder(value: str) -> bool:
     v = value.strip("\"'` ")
     low = v.lower()
-    return low in PLACEHOLDER_VALUES or any(p in low for p in PLACEHOLDER_PARTS) or bool(_TEMPLATE_NAME.match(v))
+    return low in PLACEHOLDER_VALUES or bool(_PLACEHOLDER_PART_RE.search(low)) or bool(_TEMPLATE_NAME.match(v))
 
 
 # ------------------------------------------------------------------ scanner --

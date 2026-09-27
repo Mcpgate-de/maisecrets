@@ -1,0 +1,10 @@
+# detector-a-placeholder-word-inside-a-token-is-chance: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "detector-a-placeholder-word-inside-a-token-is-chance"
+control = "C1"
+statement = "A placeholder word (fake, dummy, sample, example, bogus) inside a run of letters and digits does not make a provider token a placeholder: a random GitHub token that holds fAKe in its body is found."
+runner = ["tests/test_detect_rules.py::PlaceholderValueTests::test_a_placeholder_word_inside_a_random_token_is_chance_not_a_placeholder"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "bool(_PLACEHOLDER_PART_RE.search(low))"
+replace = "any(p in low for p in PLACEHOLDER_PARTS)"

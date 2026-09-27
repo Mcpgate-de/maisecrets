@@ -316,11 +316,21 @@ class PlaceholderValueTests(unittest.TestCase):
                 self.assertTrue(detect.looks_like_placeholder(form), form)
 
     def test_placeholder_parts_and_template_names(self):
-        for v in ("your_token_1234", "my-dummy-key-99", "EXAMPLEKEY123", "abcfake123456", "PORTKEY_API_KEY",
-                  "<redacted-by-ops>", "xxxxxxxx1234"):
+        for v in ("your_token_1234", "my-dummy-key-99", "EXAMPLEKEY123", "abc_fake123456", "PORTKEY_API_KEY",
+                  "<redacted-by-ops>", "xxxxxxxx1234", "AKIA0000000000EXAMPLE"):
             self.assertTrue(detect.looks_like_placeholder(v), v)
         for v in ("Zq8vT3xK9mP2", "ABC_123_DEF", "Xk9mQ2vL8zz", "PORTKEY"):
             self.assertFalse(detect.looks_like_placeholder(v), v)
+
+    def test_a_placeholder_word_inside_a_random_token_is_chance_not_a_placeholder(self):
+        # a random GitHub token holds fAKe or DuMmy in its body about once in 20,000; it was let
+        # through as a placeholder (windows-latest, 2026-09-27)
+        for word in ("fAKe", "DuMmy", "SaMPle", "eXaMpLe", "BoGuS"):
+            with self.subTest(word):
+                token = "ghp_" + (rnd(8) + "Q" + word + "7" + rnd(40))[:36]
+                self.assertFalse(detect.looks_like_placeholder(token), token)
+                self.assertEqual([v for _, v in kinds(f"GITHUB_TOKEN={token}")], [token])
+                self.assertEqual(kinds(f"see {token} here"), [("github-pat", token)])
 
     def test_a_secret_shaped_placeholder_is_never_a_hit(self):
         aws_doc = "AKIA" + "IOSFODNN7" + "EXAMPLE"
