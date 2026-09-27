@@ -122,7 +122,7 @@ library reads it.
 
 ## Unit tests
 
-450 tests (`tests/test_*.py`; `tests/test_platform_backend.py` runs only with
+451 tests (`tests/test_*.py`; `tests/test_platform_backend.py` runs only with
 `MAISECRETS_NATIVE_BACKEND_TEST=1` or in CI, because it touches the real store), in about 30
 seconds (measured 2026-09-27 on an M-series laptop: 28.7 s; most of it is the subprocess matrices
 in `tests/test_cli_matrix.py`). The gate tests execute the rewritten command through a
