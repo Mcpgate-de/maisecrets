@@ -1,8 +1,7 @@
 # Threat model
 
 What the plugin defends, against whom, with which control, and where the
-control ends. Written from the reviews of 2026-09-26 in `docs/reviews/` and
-the second round applied the same day. Every control named here has a test or
+control ends. Every control named here has a test or
 a harness scenario that goes red when the control is removed
 (`docs/TESTING.md`).
 
@@ -64,7 +63,7 @@ a harness scenario that goes red when the control is removed
 - **The client's permission prompt for an MCP tool** shows the resolved
   argument. It is the person's own value at the point of the real call.
 
-## Decisions taken from the reviews
+## Decisions
 
 - Persistent pointers to `.env` values are an opt-in mode with random ids,
   keyed fingerprints and the C4–C9 gates, not yet built. Value import and a

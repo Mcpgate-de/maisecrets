@@ -26,15 +26,15 @@ class ReleaseClassificationTests(unittest.TestCase):
     def setUp(self):
         self.r = _load("release")
 
-    def test_types_bump_the_0x_scale_and_docs_release_nothing(self):
+    def test_types_decide_a_release_and_docs_release_nothing(self):
         r = self.r
         self.assertEqual(r.bump_for([("a", "feat(x): y", "")]), "minor")
         self.assertEqual(r.bump_for([("a", "fix(x): y", "")]), "patch")
         self.assertIsNone(r.bump_for([("a", "docs: y", ""), ("b", "ci(x): z", ""), ("c", "test: t", "")]))
         self.assertIsNone(r.bump_for([("a", "Merge branch x", "")]), "a merge subject releases nothing")
-        self.assertEqual(r.next_version("0.3.24", "minor"), "0.3.25", "0.x: a feature bumps the last number")
-        self.assertEqual(r.next_version("0.3.24", "major"), "0.4.0", "0.x: a break bumps the middle number")
-        self.assertEqual(r.next_version("1.2.3", "minor"), "1.3.0")
+        self.assertEqual(r.next_version("0.3.24", "minor"), "0.3.25", "a feature moves the last number")
+        self.assertEqual(r.next_version("0.3.24", "major"), "0.3.25", "a break too, without approval")
+        self.assertEqual(r.next_version("1.2.3", "minor"), "1.2.4")
 
     def test_any_revert_is_a_patch_under_reverts_and_passes_the_format_check(self):
         r = self.r

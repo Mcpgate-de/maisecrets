@@ -44,3 +44,12 @@ def tip_of_the_day(codex: bool = False) -> str | None:
     except OSError:
         pass
     return pool[idx]
+
+
+# the first session start says how to see maisecrets work. The example must be one the detector
+# finds (a@b.c is not: its top-level domain is one letter); a test holds it to that
+TRY_IT_EXAMPLE = "test@example.com"
+
+
+def try_it_line() -> str:
+    return f"Try it: send {TRY_IT_EXAMPLE} as a prompt. maisecrets stops it and shows the next step."

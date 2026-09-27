@@ -167,7 +167,13 @@ def cmd_report(args: list[str]) -> int:
 
 
 def cmd_expire(_: list[str]) -> int:
-    print(f"purged {Vault().expire(limit=None)} expired value(s)")
+    v = Vault()
+    n = v.expire(limit=None)
+    print(f"purged {n} expired value(s)")
+    if v.last_refused:
+        print(f"{v.last_refused} expired value(s) are still in the store: the store refused the delete. "
+              "The next sweep tries again.", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -213,7 +219,10 @@ def cmd_status(_: list[str]) -> int:
     def version(name: str) -> str:
         return (detect.RULES_DIR / f"{name}_VERSION").read_text(encoding="utf-8").strip()
     print(f"rules: {len(detect.rules())} (gitleaks {version('GITLEAKS')}, presidio {version('PRESIDIO')}, "
-          f"detect-secrets {version('DETECT_SECRETS')}); regions {v.cfg.get('pii_regions')}")
+          f"detect-secrets {version('DETECT_SECRETS')})")
+    active = detect.active_regions()
+    print(f"regions: {', '.join(active.regions)} ({active.source}); "
+          f"label languages: {', '.join(active.languages)}")
     for name in ("events.log", "audit.log", "hooks.log"):
         p = HOME / name
         try:

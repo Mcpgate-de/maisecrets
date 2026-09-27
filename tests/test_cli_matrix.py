@@ -136,6 +136,9 @@ class Sandbox:
     def env(self, **extra: str) -> dict:
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(_DROP_PREFIXES) and k not in _DROP}
+        # the locale tests/_isolate.py pins: without it a child reads the system setting of the
+        # machine, and a German Mac and a C-locale container expect different label languages
+        env["MAISECRETS_LOCALE"] = os.environ["MAISECRETS_LOCALE"]
         env.update({
             "HOME": str(self.user_home), "USERPROFILE": str(self.user_home),
             "MAISECRETS_HOME": str(self.home), "TMPDIR": str(self.root / "tmp"),
@@ -297,7 +300,7 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     "list": [([], "", _STORE)],
     "status": [([], "", _STORE)],
     "audit": [([], "", _ALL0), (["3"], "", _ALL0), (["x"], "", _ALL2)],
-    "expire": [([], "", _STORE)],
+    "expire": [([], "", {"ok": {"store-refuses-delete": 1, "*": 0}, "index": 1, "config": 1})],
     "forget": [([_K], "", {"ok": {"empty": 1, "store-refuses-delete": 1, "*": 0}, "index": 1, "config": 1}),
                (["NOPE_c9"], "", {"ok": 1, "index": 1, "config": 1}),
                ([], "", _ALL2)],
@@ -554,6 +557,8 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
                "status counts")
     elif command == "expire":
         expect(r.stdout == f"purged {len(newly)} expired value(s)\n", f"expire should purge {newly}")
+        refused = state in REFUSING and bool(expired)
+        expect(("still in the store" in r.stderr) == refused, "expire names a refused delete, and only that")
     return p
 
 
@@ -683,7 +688,8 @@ class StateMatrixTests(unittest.TestCase):
         self.assertIn("the store refused to delete it; nothing was changed", r.stdout)
         self.assertIn("SECRET_c1", sb.index()["entries"], "nothing looks deleted that is not")
         r = sb.run("expire")
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((r.returncode, r.stdout), (1, "purged 0 expired value(s)\n"), r.stderr)
+        self.assertIn("1 expired value(s) are still in the store", r.stderr)
         self.assertFalse(sb.index()["entries"]["SECRET_c1"].get("purged"), "a refused delete is no purge")
 
     def test_metadata_past_keep_purged_days_is_deleted_by_the_next_read(self):
@@ -826,6 +832,17 @@ class SessionStartTests(unittest.TestCase):
         self.addCleanup(sb.remove)
         return sb
 
+    def test_the_try_it_example_is_one_the_prompt_hook_stops(self):
+        from maisecrets import tips
+        self.assertIn(tips.TRY_IT_EXAMPLE, tips.try_it_line())
+        sb = self.sandbox()
+        r = sb.run("user-prompt", stdin=json.dumps({"prompt": tips.TRY_IT_EXAMPLE, "session_id": "S1",
+                                                    "transcript_path": "", "prompt_id": "p1"}))
+        out = json.loads(r.stdout)
+        self.assertEqual(out.get("decision"), "block", r.stdout + r.stderr)
+        self.assertIn("personal data was found", out.get("reason", "") + out.get("systemMessage", ""))
+        self.assertEqual([m["type"] for m in sb.index()["entries"].values()], ["EMAIL"])
+
     def test_first_start_introduces_later_starts_rotate_a_tip_then_stay_short(self):
         from maisecrets import hooks, tips
         sb = self.sandbox()
@@ -834,6 +851,7 @@ class SessionStartTests(unittest.TestCase):
         self.assertTrue(msg.startswith(f"maisecrets {VERSION} is on. It keeps passwords"), msg)
         self.assertIn("in an encrypted file", msg)
         self.assertIn("/maisecrets:status shows the details", msg)
+        self.assertIn(" " + tips.try_it_line() + " ", msg, "the first start says how to see it work")
         self.assertTrue(msg.endswith(" Tip: /maisecrets:shortcut adds /ms as a short form of /maisecrets:send."))
         self.assertEqual(out["hookSpecificOutput"], {"hookEventName": "SessionStart",
                                                      "additionalContext": hooks.PRIMER})

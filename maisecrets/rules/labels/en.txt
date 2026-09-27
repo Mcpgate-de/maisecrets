@@ -1,0 +1,8 @@
+# English credential labels that the detect-secrets denylist lacks. Always on.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# pass: only at the start of a word, so compass: and bypass: stay prose (a generated matrix of
+# 2,500 inputs missed 17 % on pass and token, 2026-09-27).
+pass	(?<![a-z])pass	pass, db_pass, Pass
+# token: MY_TOKEN keeps its underscore boundary. The exclusions follow the gitleaks allowlist
+# for generic-api-key (csrf_token, public_token, token_file, token_url): those name no secret.
+token	(?<![a-z])(?<!csrf_)(?<!csrf-)(?<!xsrf_)(?<!public_)(?<!page_)(?<!next_)token(?![_.-]?(?:file|url|uri|endpoint|type|count|limit|length|size|id|name)(?![a-z]))	token, MY_TOKEN, access_token, Token

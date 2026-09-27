@@ -359,7 +359,7 @@ PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "
 # switch: an Indian PAN rule produced 290 false positives in one German transcript. The
 # switch is the REGION, derived from the recognizer id; "generic" is always on.
 REGION_OF_ID = {"nhs": "uk", "aba-routing": "us", "medical-license": "us"}
-DEFAULT_PII_REGIONS = ("generic", "de")
+DEFAULT_PII_REGIONS = ("generic",)   # without a config: the rules of no country
 
 
 def presidio_region(rec_id: str) -> str:
@@ -388,9 +388,9 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
     return out
 
 
-# detect-secrets' denylist is English (plus Spanish contraseña). German labels are added at load
-# time so `passwort: …` is a credential too (measured 2026-09-26: `password:` hit, `passwort:` did not).
-GERMAN_KEYWORDS = ("passwort", "kennwort", "geheimnis", "schl(?:ü|ue)ssel", "zugangsdaten")
+# detect-secrets' denylist is English (plus Spanish contraseña). The labels it lacks, English
+# ones such as `pass:` and `token:` and those of other languages such as `passwort:`, come from
+# rules/labels/<language>.txt for each active label language (maisecrets/regions.py).
 # The two keyword rules whose quote is optional, and the group of that quote. Their value class
 # runs to the end of the line, spaces included, and the whole span was then judged: a password
 # followed by "and" and an address was rejected as prose, so the password reached the model
@@ -402,26 +402,19 @@ _WHITESPACE_RE = re.compile(r"\s")
 _CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
 
 
-# labels people write that the detect-secrets denylist lacks: `pass:` and `token:` / `MY_TOKEN=`
-# (a generated matrix of 2,500 inputs missed 17 % on these two, 2026-09-27). Only at the start of
-# a word, so compass: and bypass: stay prose; MY_TOKEN keeps its underscore boundary.
-# The token exclusions follow gitleaks' own allowlist for generic-api-key (csrf_token,
-# public_token, token_file, token_url …): those name no secret.
-EXTRA_KEYWORDS = ("(?<![a-z])pass",
-                  "(?<![a-z])(?<!csrf_)(?<!csrf-)(?<!xsrf_)(?<!public_)(?<!page_)(?<!next_)token"
-                  "(?![_.-]?(?:file|url|uri|endpoint|type|count|limit|length|size|id|name)(?![a-z]))")
-
-
-def _load_detect_secrets() -> list[Rule]:
+def _load_detect_secrets(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
     data = json.loads((RULES_DIR / "detect_secrets.json").read_text(encoding="utf-8"))
-    kws = tuple(sorted({"key", "pass", "pwd", "secret", "contrase", "kennw", "geheim", "schl", "zugang", "token"}))
+    from .regions import load_labels
+    labels = [lab for lang in languages for lab in load_labels(lang)]
+    # every denylist word contains one of these; each label adds its own literal
+    kws = tuple(sorted({"key", "pass", "pwd", "secret", "contrase"} | {lab.prefilter for lab in labels}))
     denylist = "|".join(data["denylist"])
     out: list[Rule] = []
     for r in data["rules"]:
         flags = re.IGNORECASE if r.get("ignorecase") else 0
         # the product's own name carries "secret": `/maisecrets:shortcut` was stored as a secret
         # named "shortcut" (field report, 2026-09-27); "mai" + keyword is never a label
-        keywords = "(?<!mai)(" + denylist + "|" + "|".join(GERMAN_KEYWORDS + EXTRA_KEYWORDS) + ")"
+        keywords = "(?<!mai)(" + "|".join([denylist] + [lab.regex for lab in labels]) + ")"
         regex = r["regex"].replace("(" + denylist + ")", keywords, 1)
         # the vendored value group must start with a word character, so `$+4jJzBixvQD9#`,
         # `@f6a-VtyEOYr!` and `-NA#C-X-gb4T%` were never values (2026-09-27); any first character
@@ -464,17 +457,25 @@ def rules() -> list[Rule]:
         own = _load_own()
         secrets = [r for r in own if r.type == "SECRET"]
         pii = [r for r in own if r.type != "SECRET"]
-        _RULES = secrets + _load_detect_secrets() + _load_gitleaks() + _load_presidio(_pii_regions()) + pii
+        active = active_regions()
+        _RULES = (secrets + _load_detect_secrets(active.languages) + _load_gitleaks()
+                  + _load_presidio(active.regions) + pii)
     return _RULES
 
 
-def _pii_regions() -> tuple[str, ...]:
+def active_regions():
+    """The regions and label languages of the config (maisecrets/regions.py)."""
+    from . import regions
     try:
         from .vault import load_config
-        regions = load_config().get("pii_regions")
-        return tuple(regions) if regions else DEFAULT_PII_REGIONS
-    except Exception:  # noqa: BLE001 - config is optional
-        return DEFAULT_PII_REGIONS
+        cfg = load_config()
+    except Exception:  # noqa: BLE001 - config is optional; a bad one is reported by the vault
+        cfg = {}
+    return regions.resolve(cfg)
+
+
+def _pii_regions() -> tuple[str, ...]:
+    return active_regions().regions
 
 
 SECRET_TYPES = frozenset({"SECRET"})

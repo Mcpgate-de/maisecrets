@@ -16,8 +16,19 @@ import random
 import string
 from dataclasses import dataclass, field
 
-LABELS = ["password", "pass", "pwd", "passwd", "Password", "PASSWORD", "passwort", "Kennwort", "token",
-          "secret", "api_key", "apikey", "API_KEY", "db_password", "MY_TOKEN", "client_secret"]
+# the detect-secrets denylist words, and the examples of each label file of the active languages
+# (maisecrets/rules/labels/*.txt): a new label file adds its words to the matrix
+DENYLIST_LABELS = ["password", "pwd", "passwd", "Password", "PASSWORD", "secret", "api_key", "apikey", "API_KEY",
+                   "db_password", "client_secret"]
+
+
+def _file_labels() -> list[str]:
+    from maisecrets import detect, regions
+    return [ex for lang in detect.active_regions().languages for lab in regions.load_labels(lang)
+            for ex in lab.examples]
+
+
+LABELS = DENYLIST_LABELS + _file_labels()
 SEPARATORS = [":", ": ", "=", " = ", ":\n", ": \n\n"]
 AFTER = ["", " and more words", " {mail}", " and {mail}", ", thanks", "\nnext line here", " (see above)"]
 CONTEXTS = ["{x}", "please use {x} for the login", "Bitte nimm {x} fuer den Zugang",

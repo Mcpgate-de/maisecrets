@@ -38,6 +38,11 @@ REMOVED = client_variables()
 for _name in REMOVED:
     del os.environ[_name]
 
+# the system setting decides the label languages and the "auto" region; the tests pin it, so a run
+# on a German Mac and one in a C-locale container expect the same rules. A test of the lookup
+# itself sets or removes MAISECRETS_LOCALE with mock.patch.dict.
+os.environ["MAISECRETS_LOCALE"] = "de_DE"
+
 if not os.environ.get(_MINE) or os.environ.get(_MINE) != os.environ.get("MAISECRETS_HOME"):
     home = tempfile.mkdtemp(prefix="maisecrets-test-home-")
     os.environ["MAISECRETS_HOME"] = home
@@ -82,7 +87,24 @@ with open(os.path.join(SITE, "sitecustomize.py"), "w", encoding="utf-8") as _f:
              f"sys.path.insert(0, {os.path.dirname(os.path.abspath(__file__))!r})\n"
              "import _platform_fakes\n"
              "_platform_fakes.install()\n"
-             "del sys.path[0]\n")
+             "del sys.path[0]\n"
+             # only the first sitecustomize on the path runs, so this one runs the next one too:
+             # Homebrew's Python adds its site-packages in its own sitecustomize, and a child
+             # without it lost every installed package (coverage among them, 2026-09-27)
+             "import os\n"
+             "_here = os.path.dirname(os.path.abspath(__file__))\n"
+             "for _d in list(sys.path):\n"
+             "    _f = os.path.join(_d, 'sitecustomize.py')\n"
+             "    if os.path.abspath(_d) != _here and os.path.isfile(_f):\n"
+             "        with open(_f, encoding='utf-8') as _src:\n"
+             "            exec(compile(_src.read(), _f, 'exec'), {'__file__': _f, '__name__': 'sitecustomize'})\n"
+             "        break\n"
+             "if os.environ.get('COVERAGE_PROCESS_START'):\n"
+             "    try:\n"
+             "        import coverage\n"
+             "        coverage.process_startup()\n"
+             "    except ImportError:\n"
+             "        pass\n")
 if SITE not in os.environ.get("PYTHONPATH", "").split(os.pathsep):
     os.environ["PYTHONPATH"] = os.pathsep.join(p for p in (SITE, os.environ.get("PYTHONPATH", "")) if p)
 import _platform_fakes  # noqa: E402

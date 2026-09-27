@@ -114,7 +114,11 @@ class ReleaseTests(unittest.TestCase):
         for subject in ("wip: x", "Update README", "feat:no space", "Feat: capital", "feat(x) y"):
             with self.subTest(subject):
                 self.assertEqual(r.classify(subject, ""), ("other", subject, False))
-        self.assertEqual(r.classify("Update README", "BREAKING CHANGE"), ("other", "Update README", True))
+        self.assertEqual(r.classify("Update README", "BREAKING CHANGE: gone"), ("other", "Update README", True))
+        # the words in a sentence are no footer: 0.4.2 became 0.5.0 by such a body (2026-09-27)
+        for body in ("A `chore:` with BREAKING CHANGE bumps the level.", "BREAKING CHANGE", "x BREAKING CHANGE: y"):
+            with self.subTest(body):
+                self.assertEqual(r.classify("fix(release): x", body), ("fix", "x", False))
         self.assertEqual(r.classify('Revert "Revert "Revert "fix: a"""', ""), ("revert", "revert: fix: a", False))
         self.assertEqual(r._unrevert('Revert "feat: x"'), "feat: x")
         self.assertEqual(r._unrevert("feat: x"), "feat: x")
@@ -129,11 +133,14 @@ class ReleaseTests(unittest.TestCase):
         for typ in ("perf", "security", "deps"):
             self.assertEqual(r.bump_for(c(f"{typ}: x")), "patch", typ)
         self.assertEqual(r.bump_for([("s", "chore: x", "BREAKING CHANGE: y")]), "major")
-        cases = [("0.4.1", "patch", "0.4.2"), ("0.4.1", "minor", "0.4.2"), ("0.4.1", "major", "0.5.0"),
-                 ("1.4.1", "patch", "1.4.2"), ("1.4.1", "minor", "1.5.0"), ("1.4.1", "major", "2.0.0")]
-        for cur, level, want in cases:
-            with self.subTest(cur=cur, level=level):
-                self.assertEqual(r.next_version(cur, level), want)
+        # only the last number moves, whatever the level; a higher one needs the owner's approval
+        for cur in ("0.5.0", "1.4.1"):
+            for level in ("patch", "minor", "major"):
+                with self.subTest(cur=cur, level=level):
+                    head, last = cur.rsplit(".", 1)
+                    self.assertEqual(r.next_version(cur, level), f"{head}.{int(last) + 1}")
+        self.assertEqual(r.next_version("0.5.7", "patch", "minor"), "0.6.0")
+        self.assertEqual(r.next_version("0.5.7", "patch", "major"), "1.0.0")
 
     def test_notes_group_by_section_in_a_fixed_order_and_skip_silent_types(self):
         commits = [("a" * 40, "deps: bump x", ""), ("b" * 40, "fix(hooks): a fix", ""),
@@ -238,15 +245,19 @@ class ReleaseTests(unittest.TestCase):
         sha = repo.commit("fix(hooks): a real fix")
         repo.commit("feat!: a break")
         rc, out = self._main("next")
-        self.assertEqual((rc, out), (0, "0.5.0\n"))
+        self.assertEqual((rc, out), (0, "0.4.2\n"), "a break without approval moves the last number")
+        with mock.patch.dict(os.environ, {"MAISECRETS_RELEASE_BUMP": "minor"}):
+            self.assertEqual(self._main("next"), (0, "0.5.0\n"))
+        with mock.patch.dict(os.environ, {"MAISECRETS_RELEASE_BUMP": "huge"}), self.assertRaises(SystemExit):
+            self._main("next")
         rc, out = self._main("notes")
         self.assertIn(f"- a real fix ({sha[:7]})", out)
         self.assertIn("### Breaking", out)
         rc, out = self._main("apply")
-        self.assertEqual((rc, out), (0, "0.4.1 -> 0.5.0: manifests and CHANGELOG.md updated\n"))
+        self.assertEqual((rc, out), (0, "0.4.1 -> 0.4.2: manifests and CHANGELOG.md updated\n"))
         for rel in self.r.MANIFESTS:
-            self.assertEqual(repo.version(rel), "0.5.0", rel)
-        self.assertIn("## [0.5.0] - ", (repo.dir / "CHANGELOG.md").read_text())
+            self.assertEqual(repo.version(rel), "0.4.2", rel)
+        self.assertIn("## [0.4.2] - ", (repo.dir / "CHANGELOG.md").read_text())
         rc, out = self._main("frobnicate")
         self.assertEqual(rc, 2)
         self.assertIn("Subcommands:", out)
