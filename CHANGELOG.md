@@ -2,7 +2,13 @@
 
 ## Unreleased
 
+## [0.3.25] - 2026-09-27
+
 - `/maisecrets:shortcut --remove` takes the personal `/ms` away and keeps it away.
+
+### Fixes
+
+- a revert releases as a patch; tests for the operations paths and the release tools (4273160)
 
 ## [0.3.24] - 2026-09-27
 
