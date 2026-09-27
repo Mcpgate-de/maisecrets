@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.32] - 2026-09-27
+
+### Fixes
+
+- no .claude-plugin/icon.svg, so the portal reads the icon URL from the manifest; a 30-character subtitle for OpenAI (16e9e0b)
+
 ## [0.3.31] - 2026-09-27
 
 ### Fixes
