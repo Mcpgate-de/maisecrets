@@ -114,9 +114,11 @@ library reads it.
 
 ## Unit tests
 
-144 tests (`tests/test_core.py`, `tests/test_skill.py`, `tests/test_gates.py`, `tests/test_operations.py`, `tests/test_release_tools.py`, `tests/test_beliefs_well_formed.py`, `tests/test_platform_backend.py`;
-the last one runs only with `MAISECRETS_NATIVE_BACKEND_TEST=1` or in CI, because it
-touches the real store), in under three seconds. The gate tests execute the rewritten command through a
+194 tests (`tests/test_core.py`, `tests/test_skill.py`, `tests/test_gates.py`, `tests/test_operations.py`, `tests/test_release_tools.py`, `tests/test_beliefs_well_formed.py`, `tests/test_platform_backend.py`, `tests/test_cli_matrix.py`;
+`test_platform_backend.py` runs only with `MAISECRETS_NATIVE_BACKEND_TEST=1` or in CI, because it
+touches the real store), in about 20 seconds. `test_cli_matrix.py` runs every command through
+`hooks/dispatch.py` in ten store states (about 280 subprocesses) and derives the command list from
+`commands/*.md`, `hooks/dispatch.py` and `cli.COMMANDS`, so a new command without a test fails it. The gate tests execute the rewritten command through a
 real bash and compare bytes, so a broken quoting context or a leaked value
 fails them:
 
