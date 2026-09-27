@@ -515,9 +515,11 @@ def _windowed(rule: Rule, kw: re.Pattern, text: str):
         line_start = text.rfind("\n", 0, k.start()) + 1
         a = max(line_start, k.start() - 50)
         # the separators may hold several line breaks (`password for prod:` + blank line +
-        # value, review 2026-09-27): the window runs 8 lines past the keyword
+        # value, review 2026-09-27). The regex allows 3 whitespace characters before the separator
+        # and 5 after it, so the value can start after 8 line breaks: the window runs to the end
+        # of the 9th line (8 cut `password\n\n\n:\n\n\n\n\n<value>` off, differential test 2026-09-27)
         b = k.end()
-        for _ in range(8):
+        for _ in range(9):
             nxt = text.find("\n", b)
             if nxt < 0:
                 b = len(text)

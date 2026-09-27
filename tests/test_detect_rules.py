@@ -495,7 +495,6 @@ class KeywordWindowTests(unittest.TestCase):
                 self.assertEqual(self._spans(detect._windowed(self.rule, self.kw, text)),
                                  self._spans(self.rule.regex.finditer(text)))
 
-    @unittest.expectedFailure   # bug: the keyword window ends one line early, fixed in a later commit
     def test_a_value_up_to_eight_line_breaks_after_its_keyword(self):
         value = "Zq8vT3xK9mP2wL7nB5"
         filler = "filler text. " * 400
