@@ -1,6 +1,6 @@
-# c16-the-skill-never-prints-a-value: the test owns the rule; this file names it and the mutation that must turn it red.
-belief = "c16-the-skill-never-prints-a-value"
-control = "C16"
+# c17-the-skill-never-prints-a-value: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c17-the-skill-never-prints-a-value"
+control = "C17"
 statement = "The secret-hygiene scan reports a secret by location, type and a per-run id; its output, which reaches the model, never holds the value."
 runner = ["tests/test_skill.py::SkillScriptTests::test_a_value_only_in_the_history_is_found_and_never_printed"]
 

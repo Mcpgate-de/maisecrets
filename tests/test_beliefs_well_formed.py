@@ -45,7 +45,7 @@ class BeliefsWellFormedTests(unittest.TestCase):
             covered.add(tomllib.loads(path.read_text(encoding="utf-8"))["control"])
         # C11 (TTL) is a data rule with no single removable line; every other control is enforced
         # by code that a mutation can remove, and each one needs a proof
-        for control in ("C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C13", "C14", "C15", "C16"):
+        for control in ("C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C13", "C14", "C15", "C16", "C17"):
             self.assertIn(control, covered, f"{control} has no belief")
 
 
