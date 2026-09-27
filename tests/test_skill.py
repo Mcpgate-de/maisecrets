@@ -468,6 +468,7 @@ class TranscriptAuditTests(unittest.TestCase):
         self.assertIn(self.token, self.session.read_text(encoding="utf-8"))
 
 
+@unittest.skipIf(os.name == "nt", "the fake agent CLIs are shell scripts; the in-process tests below run on Windows")
 class ProtectionStatusTests(unittest.TestCase):
     """The skill opens a conversation with this check and offers the install on NOT ACTIVE, so the
     verdict must follow this client's own hook run, and print nothing from the log (Ops and UX
