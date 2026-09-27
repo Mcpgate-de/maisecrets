@@ -1556,6 +1556,10 @@ def main(argv: list[str]) -> int:
     try:
         payload = json.load(sys.stdin)
     except ValueError:
+        payload = None
+    if not isinstance(payload, dict):
+        # `null`, a list or a number parse but are no payload: the handler and then the
+        # fail-closed path raised, the process exited 1, and exit 1 lets the action through
         sys.stderr.write("maisecrets: bad payload\n")
         if event == "post-tool":
             # exit 2 is ignored here and the raw output would reach the model
