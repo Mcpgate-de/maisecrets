@@ -58,7 +58,8 @@ def _refuse_native_stores(args, *a, **kw):
 
 
 _GUARD = mock.patch.object(vault, "subprocess", types.SimpleNamespace(
-    run=_refuse_native_stores, CompletedProcess=subprocess.CompletedProcess, PIPE=subprocess.PIPE))
+    run=_refuse_native_stores, CompletedProcess=subprocess.CompletedProcess, PIPE=subprocess.PIPE,
+    TimeoutExpired=subprocess.TimeoutExpired))
 
 
 def setUpModule():
@@ -561,7 +562,8 @@ class KeychainBackendTests(BackendContract, unittest.TestCase):
     def make(self):
         self.fake = FakeSecurity()
         self.sp = mock.patch.object(vault, "subprocess", types.SimpleNamespace(
-            run=lambda *a, **k: self.fake.run(*a, **k), CompletedProcess=subprocess.CompletedProcess))
+            run=lambda *a, **k: self.fake.run(*a, **k), CompletedProcess=subprocess.CompletedProcess,
+            TimeoutExpired=subprocess.TimeoutExpired))
         self.sp.start()
         self.addCleanup(self.sp.stop)
         return KeychainBackend()
@@ -621,7 +623,8 @@ class WindowsVaultBackendTests(BackendContract, unittest.TestCase):
     def make(self):
         self.fake = FakePowerShell()
         self.sp = mock.patch.object(vault, "subprocess", types.SimpleNamespace(
-            run=lambda *a, **k: self.fake.run(*a, **k), CompletedProcess=subprocess.CompletedProcess))
+            run=lambda *a, **k: self.fake.run(*a, **k), CompletedProcess=subprocess.CompletedProcess,
+            TimeoutExpired=subprocess.TimeoutExpired))
         self.sp.start()
         self.addCleanup(self.sp.stop)
         return WindowsVaultBackend()
