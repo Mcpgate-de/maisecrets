@@ -1,7 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="maisecrets">
-  <rect width="128" height="128" rx="24" fill="#1f2430"/>
-  <path d="M30 30h16v8H38v52h8v8H30zM98 30H82v8h8v52h-8v8h16z" fill="#8fd3ff"/>
-  <circle cx="52" cy="64" r="6" fill="#ffd166"/>
-  <circle cx="64" cy="64" r="6" fill="#ffd166"/>
-  <circle cx="76" cy="64" r="6" fill="#ffd166"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="128" height="128" role="img" aria-label="maisecrets by mcpgate">
+  <rect width="32" height="32" rx="6" fill="#1f2430"/>
+  <!-- Plug inside a shield outline -->
+  <path d="M16 2 L28 8 L28 18 C28 25 16 30 16 30 C16 30 4 25 4 18 L4 8 Z" fill="none" stroke="#e8913a" stroke-width="2"/>
+  <!-- Plug prongs -->
+  <rect x="12" y="10" width="2.5" height="7" rx="1" fill="#e8913a"/>
+  <rect x="17.5" y="10" width="2.5" height="7" rx="1" fill="#e8913a"/>
+  <!-- Plug base -->
+  <rect x="10" y="17" width="12" height="4" rx="2" fill="#e8913a"/>
+  <!-- Cable -->
+  <line x1="16" y1="21" x2="16" y2="26" stroke="#e8913a" stroke-width="2" stroke-linecap="round"/>
 </svg>
