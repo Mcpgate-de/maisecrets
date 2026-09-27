@@ -85,9 +85,10 @@ def _clipboard_read() -> str:
             cmd = ["pbpaste"]
         elif sysname == "Windows":
             # PowerShell writes in the console code page unless told otherwise; the value is read
-            # as UTF-8 so a character outside that page survives
+            # as UTF-8 so a character outside that page survives. [Text.Encoding]::UTF8 writes a
+            # byte order mark first (windows-latest, 2026-09-27); this encoder does not
             cmd = ["powershell", "-NoProfile", "-Command",
-                   "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw"]
+                   "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; Get-Clipboard -Raw"]
         else:
             cmd = ["xclip", "-selection", "clipboard", "-o"]
         return subprocess.run(cmd, capture_output=True, timeout=3, check=True).stdout.decode("utf-8", "replace")

@@ -472,7 +472,7 @@ class MentionAndPendingTests(unittest.TestCase):
 class ClipboardTests(unittest.TestCase):
     def test_the_clipboard_command_per_system_and_a_missing_tool_is_false(self):
         ps_read = ["powershell", "-NoProfile", "-Command",
-                   "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw"]
+                   "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; Get-Clipboard -Raw"]
         text = "x ⟦SECRET_c1⟧"
         for system, write, sent, read in (
                 ("Darwin", ["pbcopy"], text.encode(), ["pbpaste"]),
