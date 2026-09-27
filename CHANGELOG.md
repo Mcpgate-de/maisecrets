@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## [0.5.1] - 2026-09-27
+
+### Features
+
+- label languages as data files and regions from the system setting (46a7d5a)
+- the first session start says how to try maisecrets (9a40916)
+
+### Fixes
+
+- expire counts only the values it deleted (a4c23b2)
+- the commit before a release goes to the GitHub branch ci, not main (349da5e)
+- a release moves only the last number; a higher one needs approval (e92e7ab)
+
+### Other
+
+- Merge branch 'fix/release-bumps-only-the-patch' into 'main' (ac124b6)
+
 ## [0.5.0] - 2026-09-27
 
 ### Breaking
