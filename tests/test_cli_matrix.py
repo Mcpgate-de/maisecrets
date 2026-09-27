@@ -505,8 +505,10 @@ class StateMatrixTests(unittest.TestCase):
     def test_wipe_yes_deletes_values_index_and_logs_and_keeps_the_config(self):
         sb, r = self._run("live", "wipe", "--yes")
         self.assertIn("wiped: 4 stored value(s)", r.stdout)     # three values and the fingerprint key
-        for name in ("index.json", "events.log", "vault.enc.json", "key"):
+        # hooks.log carries the session ids; the notice promises the hook logs go too
+        for name in ("index.json", "events.log", "hooks.log", "vault.enc.json", "key"):
             self.assertFalse((sb.home / name).exists(), name)
+        self.assertEqual(list((sb.home / "pending").iterdir()), [], "the blocked prompt goes too")
         self.assertTrue((sb.home / "config.json").exists())
         self.assertEqual(sb.run("get", "SECRET_c1").returncode, 1)
 

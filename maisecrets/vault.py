@@ -1144,7 +1144,7 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
                 n += 1
             except RuntimeError:
                 problems.append(f"store item {key} not deleted")
-        for name in ("index.json", "audit.log", "events.log", ".announced"):
+        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced"):
             try:
                 (HOME / name).unlink()
             except FileNotFoundError:
