@@ -96,6 +96,7 @@ class DisplayExamplesTests(unittest.TestCase):
         ("2001:db8:85a3::8a2e:370:7334", "ip_address_v6"): ("2001:db8:85a3:•••", "2001:db8:•••"),
         ("2001:db8:85a3:0:0:8a2e:370:7334", "ip_address_v6"): ("2001:db8:85a3:•••", "2001:db8:•••"),
         ("::1", "ip_address_v6"): ("•••", "•••"),
+        ("2001:db8::8a2e:370:7334", "ip_address_v6"): ("2001:db8:•••", "2001:db8:•••"),
     }
 
     def test_every_rule_at_support_and_standard(self):

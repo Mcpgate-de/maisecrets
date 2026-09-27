@@ -382,6 +382,12 @@ class ContextWordTests(unittest.TestCase):
 class ScanRuleTests(unittest.TestCase):
     GLPAT = "glpat-" + rnd(20)
 
+    def test_contains_secret_asks_for_a_secret_type_only(self):
+        self.assertTrue(detect.contains_secret(f"token {self.GLPAT}"))
+        self.assertFalse(detect.contains_secret("mail anna.berg@acme.de and IBAN "
+                                                + " ".join(["DE89", "3704", "0044", "0532", "0130", "00"])))
+        self.assertFalse(detect.contains_secret(""))
+
     def test_enabled_limits_the_rules(self):
         text = f"token {self.GLPAT} mail anna.berg@acme.de"
         self.assertEqual({k for k, _ in kinds(text)}, {"gitlab-pat", "email"})
@@ -429,7 +435,8 @@ class ScanRuleTests(unittest.TestCase):
 
     def test_a_hit_from_the_label_pair_starts_in_the_next_line(self):
         # the pair would read "abc:\n<value>" as one value; only a hit that starts after the label counts
-        for text in ("pass§word: abc:\nXk9mQ2vL8zz", "sec§ret: xy1:\n\nZq8vT3xK9mP2"):
+        for text in ("pass§word: abc:\nXk9mQ2vL8zz", "sec§ret: xy1:\n\nZq8vT3xK9mP2",
+                     "pass§word: \"abc:\nXk9mQ2vL8zz\""):
             with self.subTest(text=text):
                 self.assertFalse([v for _, v in kinds(text) if "\n" in v])
 
