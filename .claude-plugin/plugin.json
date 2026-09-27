@@ -1,7 +1,7 @@
 {
   "name": "maisecrets",
   "displayName": "maisecrets",
-  "version": "0.3.26",
+  "version": "0.3.27",
   "description": "Keeps secrets and PII out of the cloud model: deterministic detection, a local vault with TTL, placeholders resolved only where the real call happens. Free and open source, by mcpgate.de.",
   "author": {
     "name": "mcpgate",

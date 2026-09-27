@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.27] - 2026-09-27
+
+### Features
+
+- privacy page and the listing URLs in the manifest (bc376f0)
+
 ## [0.3.26] - 2026-09-27
 
 ### Fixes
