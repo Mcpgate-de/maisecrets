@@ -20,6 +20,8 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tests"))
+import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 SKILL = ROOT / "skills" / "secret-hygiene"
 SCRIPTS = SKILL / "scripts"
 HAS_GIT = shutil.which("git") is not None
