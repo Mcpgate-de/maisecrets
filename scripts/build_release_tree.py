@@ -45,13 +45,14 @@ def commit(ref: str, parent: str | None, message: str) -> str:
     with tempfile.TemporaryDirectory() as d:
         env = dict(os.environ, GIT_INDEX_FILE=os.path.join(d, "index"))
         _git("read-tree", "--empty", env=env)
-        rows = _git("ls-tree", "-r", ref).splitlines()     # "<mode> blob <sha>\t<path>"
-        wanted = set(paths(ref))
-        info = "".join(row + "\n" for row in rows if row.split("\t", 1)[1] in wanted)
-        r = subprocess.run(["git", "update-index", "--index-info"], input=info, text=True, env=env,
-                           capture_output=True)
+        # NUL-separated bytes both ways: in text mode Windows writes CRLF into the pipe, and git
+        # then reads paths that end in a carriage return (the release tree test on windows-latest)
+        rows = subprocess.run(["git", "ls-tree", "-r", "-z", ref], capture_output=True, check=True).stdout
+        wanted = {p.encode() for p in paths(ref)}
+        info = b"".join(row + b"\0" for row in rows.split(b"\0") if row and row.split(b"\t", 1)[1] in wanted)
+        r = subprocess.run(["git", "update-index", "-z", "--index-info"], input=info, env=env, capture_output=True)
         if r.returncode != 0:
-            raise SystemExit(f"git update-index failed: {r.stderr.strip()[:300]}")
+            raise SystemExit(f"git update-index failed: {r.stderr.decode(errors='replace').strip()[:300]}")
         tree = _git("write-tree", env=env).strip()
     args = ["commit-tree", tree, "-m", message] + (["-p", parent] if parent else [])
     # the release identity when none is configured: a CI container has no git identity
