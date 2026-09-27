@@ -117,17 +117,19 @@ def _fifos() -> set[str]:
     return {os.path.join(d, n) for n in os.listdir(d) if n.startswith("v-")}
 
 
+_KEPT: list[subprocess.Popen] = []
+
+
 def watch_children(case: unittest.TestCase) -> None:
-    """For one test: keep every child it starts, take back every value it left waiting
-    (hooks._unserve on each FIFO it created), and fail when a child still runs afterwards. A
-    child kept here is waited for, so none is collected while running (the ResourceWarning)."""
-    started: list[subprocess.Popen] = []
+    """For one test: keep every child it starts, and take back every value it left waiting
+    (hooks._unserve on each FIFO it created). A kept child is never collected while it runs (the
+    ResourceWarning); `assert_children_ended` in the tearDownClass of the class waits for them."""
     real = subprocess.Popen
 
     class Kept(real):
         def __init__(self, *a, **kw):
             super().__init__(*a, **kw)
-            started.append(self)
+            _KEPT.append(self)
 
     before = _fifos()
     patcher = mock.patch.object(subprocess, "Popen", Kept)
@@ -136,18 +138,26 @@ def watch_children(case: unittest.TestCase) -> None:
     def check() -> None:
         patcher.stop()
         hooks._unserve(sorted(_fifos() - before))
-        alive = []
-        for p in started:
-            try:
-                p.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                alive.append(p.pid)
-                p.kill()
-                p.wait()
-        case.assertEqual(alive, [], "a value-serving child still ran after its FIFO was taken back")
         case.assertEqual(state_problems(), [])
 
     case.addCleanup(check)
+
+
+def assert_children_ended(seconds: float = 3.0) -> None:
+    """Every child the tests of a class started has ended, the value-serving ones included; one
+    that still runs is killed and named. All wait at once: a serving child polls every 50 ms."""
+    deadline = time.monotonic() + seconds
+    alive = []
+    for p in _KEPT:
+        try:
+            p.wait(timeout=max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            alive.append(p.pid)
+            p.kill()
+            p.wait()
+    _KEPT.clear()
+    if alive:
+        raise AssertionError(f"children still ran after their FIFOs were taken back: {alive}")
 
 
 # the client marker every payload of a test carries: Claude Code sends `prompt_id` on every event,

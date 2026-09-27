@@ -165,7 +165,7 @@ For development:
 
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
-python3 -m unittest discover -s tests -v               # under three seconds
+python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 7 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
 python3 scripts/replay_can_fail.py                     # 23 proofs: each control's test goes red without it

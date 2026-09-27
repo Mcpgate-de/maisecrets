@@ -349,6 +349,10 @@ class VaultTests(unittest.TestCase):
 
 
 class HookTests(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls):  # noqa: N802 - unittest hook
+        _hygiene.assert_children_ended()
+
     def setUp(self):
         import shutil
         _hygiene.watch_children(self)

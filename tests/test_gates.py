@@ -67,6 +67,10 @@ def _run(command: str) -> subprocess.CompletedProcess:
 
 
 class GrantTests(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls):  # noqa: N802 - unittest hook
+        _hygiene.assert_children_ended()
+
     def setUp(self):
         _hygiene.watch_children(self)
         _reset()
@@ -185,6 +189,10 @@ class GrantTests(unittest.TestCase):
 class ContextTests(unittest.TestCase):
     """The rewrite places a variable only where bash expands it exactly once; every other
     context is refused with the reason (review, 2026-09-26: bash -c spliced the value as code)."""
+
+    @classmethod
+    def tearDownClass(cls):  # noqa: N802 - unittest hook
+        _hygiene.assert_children_ended()
 
     def setUp(self):
         _hygiene.watch_children(self)
@@ -324,6 +332,10 @@ class ContextTests(unittest.TestCase):
 class ScannerEdgeTests(unittest.TestCase):
     """Cases the second review round found: nested-shell spellings, ordinary commands that must
     pass, here-strings, arithmetic, backslash-quoted heredocs, the value next to a letter."""
+
+    @classmethod
+    def tearDownClass(cls):  # noqa: N802 - unittest hook
+        _hygiene.assert_children_ended()
 
     def setUp(self):
         _hygiene.watch_children(self)

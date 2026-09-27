@@ -209,6 +209,10 @@ class FailClosedAnswerTests(unittest.TestCase):
 
 # ------------------------------------------------------------- answer shapes --
 class ClientShapeTests(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls):  # noqa: N802 - unittest hook
+        _hygiene.assert_children_ended()
+
     def setUp(self):
         _hygiene.watch_children(self)
         _reset()
@@ -571,6 +575,10 @@ class McpAskTests(unittest.TestCase):
 
 # --------------------------------------------------------------------- Bash --
 class BashPathTests(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls):  # noqa: N802 - unittest hook
+        _hygiene.assert_children_ended()
+
     def setUp(self):
         _hygiene.watch_children(self)
         _reset()
@@ -749,6 +757,10 @@ class PayloadMatrixTests(unittest.TestCase):
     store / garbage stdin / JSON that is not an object. The answer is one JSON object the client
     accepts (or, for a guard, exit 2 with nothing on stdout, which blocks), and no answer carries
     the stored value."""
+
+    @classmethod
+    def tearDownClass(cls):  # noqa: N802 - unittest hook
+        _hygiene.assert_children_ended()
 
     def setUp(self):
         _hygiene.watch_children(self)

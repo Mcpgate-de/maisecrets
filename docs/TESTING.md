@@ -111,12 +111,21 @@ library reads it.
 | date | mutation | expected | observed |
 |---|---|---|---|
 | 2026-09-26 | `PostToolUse` removed from `hooks/hooks.json` | read_env and bash_rehydrate go red | 5 failures: 2 leaks + 2 missing placeholders in read_env, 1 leak in bash_rehydrate. Hook restored, harness green again. |
+| 2026-09-27 | `tests/_isolate.py` keeps the client variables (suite run with `CODEX_HOME`, `CODEX_SANDBOX`, `CLAUDECODE` set) | the state check goes red | 49 failures, 4 errors, among them tearDownModule of test_core, test_gates, test_hooks_paths, test_operations. With the check off too, the suite stays green: the payload markers alone carry it. |
+| 2026-09-27 | the serving child retries a missing FIFO (`except FileNotFoundError: break` removed) | the child tests go red | `test_a_value_taken_back_ends_its_serving_child_at_once` and tearDownClass of GrantTests. |
+| 2026-09-27 | `_hygiene.watch_children` does not take the FIFOs back | tearDownClass goes red | tearDownClass of test_core.HookTests and test_gates.GrantTests. |
+| 2026-09-27 | `hooks._clipboard = lambda …` in a test; `tempfile.tempdir` set at import of test_gates | the module goes red | tearDownModule (test_gates) plus 7 and 26 tests after the leak. |
+| 2026-09-27 | `Vault.get` without the expiry check on the human path | the state matrix goes red | `store-refuses-delete`: `get` printed the expired value (exit 0). |
+| 2026-09-27 | `@_mutating` removed from `expire`, from `forget`; `wipe_everything` without its lock | the put race goes red | 3 of 3 runs each: lost writes after expire and forget, resurrected entries after wipe. |
+| 2026-09-27 | `client_of` answers `claude` for `turn_id`; `status` without the expiry; session start never Codex | the client x state x event matrix goes red | 1 failure each. |
+| 2026-09-27 | `_exact_redact` without its `seen` dedupe | the post-tool cost test goes red | 1 106 fingerprints instead of 105; the old 5 s wall-clock bound passed (0.7 s). |
 
 ## Unit tests
 
-420 tests (`tests/test_core.py`, `tests/test_skill.py`, `tests/test_gates.py`, `tests/test_operations.py`, `tests/test_release_tools.py`, `tests/test_beliefs_well_formed.py`, `tests/test_platform_backend.py`;
-the last one runs only with `MAISECRETS_NATIVE_BACKEND_TEST=1` or in CI, because it
-touches the real store), in under three seconds. The gate tests execute the rewritten command through a
+431 tests (`tests/test_*.py`; `tests/test_platform_backend.py` runs only with
+`MAISECRETS_NATIVE_BACKEND_TEST=1` or in CI, because it touches the real store), in about 30
+seconds (measured 2026-09-27 on an M-series laptop: 28.7 s; most of it is the subprocess matrices
+in `tests/test_cli_matrix.py`). The gate tests execute the rewritten command through a
 real bash and compare bytes, so a broken quoting context or a leaked value
 fails them:
 
@@ -140,6 +149,16 @@ fails them:
 | C2 exact match | `test_shapeless_value_is_redacted_by_exact_match` |
 | C16 confirm an MCP value | `test_mcp_arguments_are_resolved_in_place_keeping_the_shape`, `test_a_value_in_a_message_body_is_confirmed_with_a_warning_or_refused_on_codex` |
 | C17 skill output | `test_a_value_only_in_the_history_is_found_and_never_printed`, `test_the_redacted_copy_holds_no_value_and_the_original_is_kept`, `test_the_standalone_zip_has_one_skill_root_and_runs_without_the_plugin` |
+
+Every test module imports `tests/_isolate.py` first. It gives the process a temp vault home and
+a temp dir, removes the variables of the client that started the run (`CODEX_*`,
+`CLAUDE_CODE_*`, `CLAUDE_PLUGIN_OPTION_*`, `CLAUDECODE`, `XDG_RUNTIME_DIR`), and puts tripwires
+for `pbcopy`, `open`, `security` and `powershell` first on `PATH`. Every payload in a test
+declares its client (`prompt_id` or `turn_id`). `tests/_hygiene.py` checks in each
+`tearDownModule` that no test left `hooks._clipboard`, the temp dir or the environment
+changed, and in the `tearDownClass` of each class that rewrites commands that every
+value-serving child ended. Run the suite once inside a Codex or Claude Code session too: both
+runs must be green.
 
 ## Hook latency (end to end, fresh python process per hook, median of 7, 2026-09-26)
 
