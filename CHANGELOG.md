@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.4.1] - 2026-09-27
+
+### Fixes
+
+- an expired entry no longer breaks status, list and a new paste of the same value (f8172bf)
+
 ## [0.4.0] - 2026-09-27
 
 - **Changed for everyone:** the block notice is new (plain words, what was found, the prompt with the
