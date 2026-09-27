@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.29] - 2026-09-27
+
+### Features
+
+- a Codex manifest with the interface fields and icon; hooks.log names the desktop entry point (da5db56)
+
 ## [0.3.28] - 2026-09-27
 
 ### Features
