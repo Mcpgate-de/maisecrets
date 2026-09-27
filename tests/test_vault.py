@@ -1326,7 +1326,9 @@ class RaceAgainstPutTests(unittest.TestCase):
         "        assert Vault().forget(key) == 'ok', key\n"
         "else:\n"
         "    index = Path(os.environ['MAISECRETS_HOME']) / 'index.json'\n"
-        "    while sum(m.get('session') == 'S-w' for m in json.loads(index.read_text())['entries'].values()) < 8:\n"
+        # read_text_retry: on Windows a read while the writer's os.replace runs raises PermissionError
+        "    from maisecrets.vault import read_text_retry\n"
+        "    while sum(m.get('session') == 'S-w' for m in json.loads(read_text_retry(index))['entries'].values()) < 8:\n"
         "        time.sleep(0.002)\n"
         "    n, problems = wipe_everything(load_config())\n"
         "    assert not problems, problems\n"

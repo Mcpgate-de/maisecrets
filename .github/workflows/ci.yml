@@ -40,6 +40,11 @@ jobs:
           python -c "import json; d=json.load(open('out.json',encoding='utf-8')); assert d.get('decision')=='block', d; s=json.dumps(d,ensure_ascii=False); assert '\ufffd' not in s and '\u00c3' not in s, d; print('cmd launcher: blocked ok')"
           type plain.json | cmd.exe /C ""%CD%/hooks/run.cmd" user-prompt" > plain.out
           python -c "import json; d=json.load(open('plain.out',encoding='utf-8')); assert d.get('decision')!='block', d; print('cmd launcher: plain prompt passes')"
+      - name: platform clipboard (a placeholder and non-ASCII text round-trip)
+        if: runner.os != 'Linux'
+        env:
+          MAISECRETS_NATIVE_CLIPBOARD_TEST: "1"
+        run: python -m unittest tests.test_platform_clipboard -v
       - name: platform backend
         env:
           MAISECRETS_NATIVE_BACKEND_TEST: "1"

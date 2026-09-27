@@ -71,6 +71,23 @@ if os.name != "nt":
     if not os.environ.get("PATH", "").startswith(TRIPWIRE_BIN + os.pathsep):
         os.environ["PATH"] = TRIPWIRE_BIN + os.pathsep + os.environ.get("PATH", "")
 
+# Windows looks for clip.exe and powershell.exe in System32 before PATH, so the tripwires above
+# cannot work there. A sitecustomize on PYTHONPATH installs tests/_platform_fakes.py in every Python
+# child, and this process installs it too. It runs on every platform, so the mechanism is tested
+# where the tests are written.
+SITE = os.path.join(TMP, "site")
+os.makedirs(SITE, exist_ok=True)
+with open(os.path.join(SITE, "sitecustomize.py"), "w", encoding="utf-8") as _f:
+    _f.write("import sys\n"
+             f"sys.path.insert(0, {os.path.dirname(os.path.abspath(__file__))!r})\n"
+             "import _platform_fakes\n"
+             "_platform_fakes.install()\n"
+             "del sys.path[0]\n")
+if SITE not in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+    os.environ["PYTHONPATH"] = os.pathsep.join(p for p in (SITE, os.environ.get("PYTHONPATH", "")) if p)
+import _platform_fakes  # noqa: E402
+_platform_fakes.install()
+
 HOME = os.environ["MAISECRETS_HOME"]
 _REAL = os.path.realpath(os.path.expanduser("~/.maisecrets"))
 if os.path.realpath(HOME) == _REAL or os.path.realpath(HOME).startswith(_REAL + os.sep):

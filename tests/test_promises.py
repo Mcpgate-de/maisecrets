@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+import _isolate  # noqa: E402  first: a temp vault home, never the real one
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
@@ -338,7 +338,10 @@ class NoNetworkTests(unittest.TestCase):
         self.addCleanup(sb.remove)
         site = sb.root / "site"
         site.mkdir()
-        (site / "sitecustomize.py").write_text(_NET_TRIPWIRE, encoding="utf-8")
+        # only the first sitecustomize on the path runs: this one carries the platform fakes of
+        # tests/_isolate.py too
+        fakes = Path(_isolate.SITE, "sitecustomize.py").read_text(encoding="utf-8")
+        (site / "sitecustomize.py").write_text(_NET_TRIPWIRE + "\n" + fakes, encoding="utf-8")
         env = sb.env(PYTHONPATH=str(site))
         # the tripwire itself must work, or a green run proves nothing
         probe = subprocess.run([sys.executable, "-c", "import socket; socket.create_connection(('192.0.2.1', 9))"],

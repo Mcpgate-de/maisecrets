@@ -157,7 +157,8 @@ class Sandbox:
             argv = [sys.executable, str(script), *args]
         # the cwd is the sandbox: a value-serving child a hook leaves behind inherits it, and
         # tearDownModule finds it by it
-        r = subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=60,
+        # the child writes UTF-8 (PYTHONUTF8=1); text=True decodes with the locale, cp1252 on Windows
+        r = subprocess.run(argv, input=stdin, capture_output=True, encoding="utf-8", errors="replace", timeout=60,
                            env=env if env is not None else self.env(), cwd=str(self.root))
         trip = self.root / "tripwire"
         if trip.exists():
@@ -1053,7 +1054,14 @@ def run_pair(state: str, event: str, client: str) -> list[str]:
                 problems.append(f"{cell}: Claude Code would still send the prompt")
         elif event == "pre-tool":
             want = PAIR_PRE[state]
-            if want is None:
+            reason = hso.get("permissionDecisionReason", "")
+            if client == "codex" and os.name == "nt":
+                # Codex for Windows runs PowerShell, whose quoting the rewrite does not support: every
+                # command with a placeholder is refused, before the key is looked at (hooks._pre_bash)
+                if hso.get("permissionDecision") != "deny" or not ("Codex for Windows" in reason or
+                                                                   (want and want in reason)):
+                    problems.append(f"{cell}: expected the Codex-for-Windows deny: {hso!r}")
+            elif want is None:
                 decision = hso.get("permissionDecision")
                 if decision != ("allow" if client == "codex" else None):
                     problems.append(f"{cell}: permissionDecision {decision!r}")
@@ -1061,7 +1069,7 @@ def run_pair(state: str, event: str, client: str) -> list[str]:
                                      capture_output=True, text=True, env=env, timeout=30)
                 if got.stdout != sb.by_key.get(key):
                     problems.append(f"{cell}: the value did not arrive: {got.returncode} {got.stderr[-200:]!r}")
-            elif hso.get("permissionDecision") != "deny" or want not in hso.get("permissionDecisionReason", ""):
+            elif hso.get("permissionDecision") != "deny" or want not in reason:
                 problems.append(f"{cell}: expected a deny naming {want!r}: {hso!r}")
         else:
             text = json.dumps(out, ensure_ascii=False)
@@ -1193,7 +1201,8 @@ class EventsTests(unittest.TestCase):
         self.assertEqual(sorted(ev), ["client", "hits", "hook", "ts", "version"])
         self.assertEqual(ev["hits"], [{"key": "SECRET_c1", "type": "SECRET", "kind": "gitlab-pat"}])
         self.assertEqual((ev["hook"], ev["client"], ev["version"]), ("PostToolUse", "codex", VERSION))
-        self.assertEqual(self.events.EVENTS.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":  # Windows keeps no POSIX mode (st_mode & 0o777 is 0o666)
+            self.assertEqual(self.events.EVENTS.stat().st_mode & 0o777, 0o600)
 
     def test_no_hit_writes_nothing_and_an_unwritable_home_raises_nothing(self):
         self.events.record("UserPromptSubmit", "claude", [])

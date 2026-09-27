@@ -63,13 +63,16 @@ def _out(obj: dict) -> None:
 def _clipboard(text: str) -> bool:
     try:
         sysname = platform.system()
+        data = text.encode()
         if sysname == "Darwin":
             cmd = ["pbcopy"]
         elif sysname == "Windows":
-            cmd = ["clip"]
+            # clip.exe reads its input in the console code page unless it starts with a UTF-16
+            # byte order mark; UTF-8 bytes put three characters in place of each bracket of ⟦KEY⟧
+            cmd, data = ["clip"], ("\ufeff" + text).encode("utf-16-le")
         else:
             cmd = ["xclip", "-selection", "clipboard"]
-        subprocess.run(cmd, input=text.encode(), check=True, timeout=3)
+        subprocess.run(cmd, input=data, check=True, timeout=3)
         return True
     except (OSError, subprocess.SubprocessError):
         return False
@@ -81,10 +84,13 @@ def _clipboard_read() -> str:
         if sysname == "Darwin":
             cmd = ["pbpaste"]
         elif sysname == "Windows":
-            cmd = ["powershell", "-command", "Get-Clipboard"]
+            # PowerShell writes in the console code page unless told otherwise; the value is read
+            # as UTF-8 so a character outside that page survives
+            cmd = ["powershell", "-NoProfile", "-Command",
+                   "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw"]
         else:
             cmd = ["xclip", "-selection", "clipboard", "-o"]
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=3, check=True).stdout
+        return subprocess.run(cmd, capture_output=True, timeout=3, check=True).stdout.decode("utf-8", "replace")
     except (OSError, subprocess.SubprocessError):
         return ""
 
