@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -344,18 +345,14 @@ class ScannerEdgeTests(unittest.TestCase):
     def test_ordinary_commands_pass_and_the_value_arrives(self):
         for cmd, want in [
             ("printf '%s' " + self.e.ref + " # watch out for eval", NASTY),
-            ("VAR=" + self.e.ref + " sh -c 'printf %s \"$VAR\"'", None),   # sh -c: refused, see below
             ("printf '%s' \"${PORT:-8080}-" + self.e.ref + "\"", "8080-" + NASTY),
             ("printf '%s' \"" + self.e.ref + "b\"", NASTY + "b"),
             ("cat <<<x >/dev/null; printf '%s' " + self.e.ref, NASTY),
             ("echo $((1<<2)) >/dev/null; printf '%s' '" + self.e.ref + "'", NASTY),
             ("cat <<-EOF\n\tk: " + self.e.ref + "\n\tEOF\n", "k: " + NASTY + "\n"),
-            ("cat <<EOF\r\nk: " + self.e.ref + "\r\nEOF\r\n", None),   # CRLF: bash itself takes EOF\r as the tag
         ]:
             with self.subTest(cmd[:40]):
                 out = _bash_pre(cmd)["hookSpecificOutput"]
-                if want is None:
-                    continue
                 self.assertNotIn("permissionDecision", out, out)
                 r = _run(out["updatedInput"]["command"])
                 self.assertEqual(r.stdout, want, r.stderr)
@@ -365,6 +362,29 @@ class ScannerEdgeTests(unittest.TestCase):
                     "grep eval file.txt; curl -H 'X: " + self.e.ref + "' h", "bash script.sh " + self.e.ref):
             with self.subTest(cmd[:40]):
                 self.assertNotIn("permissionDecision", _bash_pre(cmd)["hookSpecificOutput"])
+
+    def test_an_env_prefix_into_sh_c_is_refused(self):
+        # sh -c parses $VAR a second time as code; the answer is a deny that names sh, never a rewrite
+        out = _bash_pre("VAR=" + self.e.ref + " sh -c 'printf %s \"$VAR\"'")["hookSpecificOutput"]
+        self.assertEqual(out.get("permissionDecision"), "deny", out)
+        self.assertNotIn("updatedInput", out)
+        self.assertIn("sh would parse the value a second time", out["permissionDecisionReason"])
+
+    @unittest.skipIf(BASH is None or os.name == "nt", "POSIX rewrite through bash")
+    def test_a_crlf_heredoc_is_rewritten_exactly_and_the_value_arrives(self):
+        # bash takes "EOF\r" as the tag, and the "EOF\r" line closes it; the \r stays in the body
+        cmd = "cat <<EOF\r\nk: " + self.e.ref + "\r\nEOF\r\n"
+        out = _bash_pre(cmd)["hookSpecificOutput"]
+        self.assertNotIn("permissionDecision", out, out)
+        got = out["updatedInput"]["command"]
+        prelude = re.escape('__ms_1="$(cat ') + r"[^)\s]+" + re.escape(
+            ')" || { echo "maisecrets: the value for ' + self.e.key + ' was not delivered (served for 120 s, or '
+            'read by another process); the command did not run. Run it again once; if it fails again, stop and '
+            'tell the user" >&2; exit 97; }; ')
+        self.assertRegex(got, "^" + prelude + re.escape("cat <<EOF\r\nk: ${__ms_1}\r\nEOF\r\n") + r"\Z")
+        self.assertNotIn(NASTY, got)
+        r = subprocess.run([BASH, "-c", got], capture_output=True)   # bytes: text mode would eat the \r
+        self.assertEqual(r.stdout, ("k: " + NASTY + "\r\n").encode(), r.stderr)
 
     def test_backslash_quoted_heredoc_is_refused_like_a_quoted_one(self):
         for cmd in ("cat <<\\EOF\nk: " + self.e.ref + "\nEOF\n", "cat <<E\"O\"F\nk: " + self.e.ref + "\nEOF\n",
