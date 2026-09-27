@@ -91,7 +91,8 @@ class RouteDecisionTests(unittest.TestCase):
         self.assertNotIn(VALUE, new)
         self.assertTrue(new.startswith('{ [ "${SANDBOX_RUNTIME:-}" = 1 ]'), "the guard comes before any value read")
         self.assertLess(new.index("SANDBOX_RUNTIME"), new.index("cat "), "the guard runs before the FIFO read")
-        self.assertIn("| ssh -o 'ProxyCommand=", new, "our proxy option comes first, right after ssh")
+        self.assertIn("| ssh -o ControlMaster=no -o ControlPath=none -o 'ProxyCommand=", new,
+                      "our options come first, right after ssh")
 
     def test_every_other_ssh_shape_is_refused_with_its_reason(self):
         r = self.ref
@@ -107,6 +108,8 @@ class RouteDecisionTests(unittest.TestCase):
             (f"printf '%s' {r} | ssh aux01 -o 'ProxyCommand=nc evil 22' cat", "proxy or jump"),
             (f"printf '%s' {r} | ssh -oProxyJump=bastion aux01 cat", "proxy or jump"),
             (f"printf '%s' {r} | ssh -W evil:22 aux01", "proxy or jump"),
+            (f"printf '%s' {r} | ssh -o ControlPath=~/.ssh/cm aux01 cat", "proxy or jump"),
+            (f"printf '%s' {r} | ssh -S ~/.ssh/cm aux01 cat", "proxy or jump"),
             (f"printf '%s' {r} > /tmp/x; ssh aux01 cat", "stdin"),
             (f"printf '%s' {r} | ssh a cat | ssh b cat", "only one ssh"),
             (f"echo {r}; printf '%s' x | ssh aux01 cat", "feed ssh"),
@@ -134,7 +137,7 @@ class RouteDecisionTests(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 out = _hso(_pre(cmd))
                 self.assertEqual(out["permissionDecision"], "ask", out)
-                self.assertRegex(out["updatedInput"]["command"], r"ssh -o 'ProxyCommand=")
+                self.assertRegex(out["updatedInput"]["command"], r"ssh -o ControlMaster=no -o ControlPath=none -o 'ProxyCommand=")
 
 
 @unittest.skipIf(BASH is None or os.name == "nt", "needs bash on POSIX")
@@ -174,9 +177,9 @@ class RewrittenCommandTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(Path(f"{self.log}.stdin").read_text(), VALUE)
         args = Path(f"{self.log}.args").read_text().splitlines()
-        self.assertEqual(args[0], "-o")
-        self.assertTrue(args[1].startswith("ProxyCommand=") and args[1].endswith("proxy_connect.py %h %p"), args[1])
-        self.assertEqual(args[2:], ["aux01", "grep -F -f - x"])
+        self.assertEqual(args[:4], ["-o", "ControlMaster=no", "-o", "ControlPath=none"])
+        self.assertTrue(args[5].startswith("ProxyCommand=") and args[5].endswith("proxy_connect.py %h %p"), args[5])
+        self.assertEqual(args[6:], ["aux01", "grep -F -f - x"])
         self.assertNotIn(VALUE, "\n".join(args))
 
     def test_outside_the_sandbox_the_command_stops_before_it_reads_the_value(self):

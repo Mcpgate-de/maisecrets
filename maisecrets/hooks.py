@@ -757,7 +757,8 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
 
 # ssh options that take an argument (OpenSSH 9)
 _SSH_ARG_FLAGS = set("BbcDEeFIiJLlmOoPpQRSWw")
-_SSH_REFUSED_OPTIONS = ("proxycommand", "proxyjump", "proxyusefdpass")
+_SSH_REFUSED_OPTIONS = ("proxycommand", "proxyjump", "proxyusefdpass", "controlmaster", "controlpath",
+                        "controlpersist")
 
 
 def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) -> dict | str:
@@ -821,7 +822,7 @@ def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) 
     # anywhere in the segment, also after the host: OpenSSH on Linux reads options there too (a quoted
     # -oProxyCommand after the host broke the host allowlist of an earlier design, review 2026-09-27)
     for c, val in opts:
-        if c in "JW":
+        if c in "JWSMO":        # jump host, stdio forward, and the control-socket flags
             return "ssh with its own proxy or jump host is refused; the sandbox route sets the proxy"
     later = "".join(toks[at + 1:]).lower()
     if any(o in later for o in _SSH_REFUSED_OPTIONS):
@@ -856,7 +857,10 @@ def _sandbox_guard(py: str | None = None) -> str:
 def _proxy_option() -> str:
     from pathlib import Path as _P
     helper = _P(__file__).resolve().parent.parent / "hooks" / "proxy_connect.py"
-    return " -o " + shlex_quote(f"ProxyCommand={shlex_quote(sys.executable)} {shlex_quote(str(helper))} %h %p")
+    # no shared connection either: a master socket opened outside the sandbox would carry the session
+    # past the proxy to whatever host it was opened for (Claude Code's own GIT_SSH_COMMAND sets the same)
+    return (" -o ControlMaster=no -o ControlPath=none -o "
+            + shlex_quote(f"ProxyCommand={shlex_quote(sys.executable)} {shlex_quote(str(helper))} %h %p"))
 
 
 def _resolver_call(key: str, nonce: str) -> str:
