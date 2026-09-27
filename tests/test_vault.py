@@ -29,7 +29,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 # the vault home is fixed at the first import of maisecrets.vault (another test module may have
 # imported it first); everything below takes the home from the module, never from the environment
-os.environ.setdefault("MAISECRETS_HOME", tempfile.mkdtemp(prefix="maisecrets-vault-"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 os.environ.pop("XDG_RUNTIME_DIR", None)

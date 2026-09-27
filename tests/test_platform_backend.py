@@ -5,13 +5,13 @@ touches a developer's real store (the service name is derived from the home path
 """
 import os
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-os.environ.setdefault("MAISECRETS_HOME", tempfile.mkdtemp(prefix="maisecrets-platform-"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
 from maisecrets import vault  # noqa: E402
 

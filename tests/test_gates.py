@@ -21,7 +21,8 @@ sys.path.insert(0, str(ROOT))
 
 # the vault home is fixed at the first import of maisecrets.vault (another test module may have
 # imported it first); the resolve subprocess must see the same home, so it is taken from there
-os.environ.setdefault("MAISECRETS_HOME", tempfile.mkdtemp(prefix="maisecrets-gates-"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 

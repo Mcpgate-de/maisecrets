@@ -38,7 +38,8 @@ RESOLVE = ROOT / "hooks" / "resolve.py"
 sys.path.insert(0, str(ROOT))
 # the in-process tests import maisecrets; its home is fixed at the first import and must be a
 # temp dir with the plaintext test store, never the keychain (same set-up as test_gates.py)
-os.environ.setdefault("MAISECRETS_HOME", tempfile.mkdtemp(prefix="maisecrets-matrix-home-"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 VERSION = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
