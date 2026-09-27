@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Changed for everyone:** the block notice is new (plain words, what was found, the prompt with the
+  short forms, where the values stay and for how long), and the first session start only offers
+  `/ms` (`/maisecrets:shortcut`) instead of installing it. An existing `/ms` keeps working.
+
 - **The block notice speaks plainly** and shows what was found (masked), the prompt with the short
   forms, where the values stay and for how long.
 - **`/maisecrets:list`** shows what is stored, masked; **`/maisecrets:forget <key>`** deletes one entry.
