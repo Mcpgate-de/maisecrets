@@ -297,7 +297,7 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     "list": [([], "", _STORE)],
     "status": [([], "", _STORE)],
     "audit": [([], "", _ALL0), (["3"], "", _ALL0), (["x"], "", _ALL2)],
-    "expire": [([], "", _STORE)],
+    "expire": [([], "", {"ok": {"store-refuses-delete": 1, "*": 0}, "index": 1, "config": 1})],
     "forget": [([_K], "", {"ok": {"empty": 1, "store-refuses-delete": 1, "*": 0}, "index": 1, "config": 1}),
                (["NOPE_c9"], "", {"ok": 1, "index": 1, "config": 1}),
                ([], "", _ALL2)],
@@ -554,6 +554,8 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
                "status counts")
     elif command == "expire":
         expect(r.stdout == f"purged {len(newly)} expired value(s)\n", f"expire should purge {newly}")
+        refused = state in REFUSING and bool(expired)
+        expect(("still in the store" in r.stderr) == refused, "expire names a refused delete, and only that")
     return p
 
 
@@ -683,7 +685,8 @@ class StateMatrixTests(unittest.TestCase):
         self.assertIn("the store refused to delete it; nothing was changed", r.stdout)
         self.assertIn("SECRET_c1", sb.index()["entries"], "nothing looks deleted that is not")
         r = sb.run("expire")
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((r.returncode, r.stdout), (1, "purged 0 expired value(s)\n"), r.stderr)
+        self.assertIn("1 expired value(s) are still in the store", r.stderr)
         self.assertFalse(sb.index()["entries"]["SECRET_c1"].get("purged"), "a refused delete is no purge")
 
     def test_metadata_past_keep_purged_days_is_deleted_by_the_next_read(self):

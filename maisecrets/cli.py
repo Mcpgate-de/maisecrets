@@ -167,7 +167,13 @@ def cmd_report(args: list[str]) -> int:
 
 
 def cmd_expire(_: list[str]) -> int:
-    print(f"purged {Vault().expire(limit=None)} expired value(s)")
+    v = Vault()
+    n = v.expire(limit=None)
+    print(f"purged {n} expired value(s)")
+    if v.last_refused:
+        print(f"{v.last_refused} expired value(s) are still in the store: the store refused the delete. "
+              "The next sweep tries again.", file=sys.stderr)
+        return 1
     return 0
 
 

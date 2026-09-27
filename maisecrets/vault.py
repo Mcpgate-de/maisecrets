@@ -740,6 +740,7 @@ class _Mutation:
 class Vault:
     def __init__(self, cfg: dict | None = None) -> None:
         self.cfg = cfg or load_config()
+        self.last_refused = 0      # deletes the store refused in the last expire sweep
         self.backend = make_backend(self.cfg)
         self._lock = _lock_for(HOME / ".lock")
         self._index = self._load_index()
@@ -1065,7 +1066,8 @@ class Vault:
 
     @_mutating
     def expire(self, limit: int | None = 25) -> int:
-        """Delete expired values; keep their metadata. Returns the count.
+        """Delete expired values; keep their metadata. Returns the count of values deleted;
+        `last_refused` holds the count the store refused to delete.
 
         Runs on every put/get/list, so every hook call sweeps. A keychain
         delete costs ~10 ms (measured 2026-09-26), so a sweep is capped at
@@ -1073,17 +1075,20 @@ class Vault:
         sweeps everything (SessionStart, `maisecrets expire`).
         """
         now = time.time()
-        n = 0
+        n = tried = 0
+        self.last_refused = 0
         for key, meta in self._index["entries"].items():
-            if limit is not None and n >= limit:
+            if limit is not None and tried >= limit:
                 break
             if not meta.get("purged") and meta["expires"] < now:
+                tried += 1       # a refused delete costs time too, so it counts against the cap
                 try:
                     self.backend.delete(key)
                 except RuntimeError:
                     # one item that refuses to go (a locked keychain over SSH) must not block
-                    # every hook; the entry stays unpurged and the next sweep tries again
-                    n += 1
+                    # every hook; the entry stays unpurged and the next sweep tries again. It is
+                    # not counted as purged: the value is still in the store.
+                    self.last_refused += 1
                     continue
                 meta["purged"] = True
                 meta["purged_at"] = now

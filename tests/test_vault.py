@@ -876,7 +876,8 @@ class LifeCycleTests(unittest.TestCase):
         self.clock.advance(3601)
         with mock.patch.object(JsonFileBackend, "delete", side_effect=RuntimeError("locked")):
             for _ in range(3):     # the keychain stays locked for three days
-                self.assertEqual(self.v().expire(limit=None), 1)
+                v = self.v()
+                self.assertEqual((v.expire(limit=None), v.last_refused), (0, 1), "a refused delete is no purge")
                 self.clock.advance(86400)
         self.assertFalse(self.v()._index["entries"][e.key]["purged"], "the next sweep tries again")
         self.assertEqual(self.v().get(e.key, "A"), (None, "expired"))   # purges it now
@@ -887,6 +888,16 @@ class LifeCycleTests(unittest.TestCase):
         self.clock.advance(20)
         self.v().expire(limit=None)
         self.assertNotIn(e.key, self.v()._index["entries"])
+
+    def test_a_refused_delete_counts_against_the_sweep_cap(self):
+        # a locked keychain refuses each delete after a wait; without the cap every hook call
+        # would wait for all of them
+        self.v().put_many([(f"cap-refused-fake-value-{i:02d}", "SECRET", "manual") for i in range(30)], session="A")
+        self.clock.advance(3601)
+        with mock.patch.object(JsonFileBackend, "delete", side_effect=RuntimeError("locked")) as delete:
+            v = self.v()
+            self.assertEqual((v.expire(limit=25), v.last_refused), (0, 25))
+            self.assertEqual(delete.call_count, 25)
 
     def test_a_record_without_purged_at_ages_from_its_expiry(self):
         e = self.v().put("old-record-fake-value", "SECRET", "manual", session="A")
