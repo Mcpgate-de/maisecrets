@@ -327,23 +327,29 @@ def user_prompt(payload: dict) -> dict:
         counts[e.type] = counts.get(e.type, 0) + 1
     summary = ", ".join(f"{n} {t}" for t, n in counts.items())
     keys = ", ".join(e.key for e in entries)
-    where = ("in the clipboard (paste and send), or type /maisecrets:send to send it as is"
-             if copied else "saved: type /maisecrets:send to send it as is (clipboard unavailable here)")
-    reason = (
-        f"maisecrets: {summary} detected and stored as {keys}. "
-        f"The prompt did not reach the model. The rewritten prompt is {where}. "
-        "A placeholder resolves only in a session where maisecrets is active (the session start "
-        "says 'maisecrets <version> active'); elsewhere it stays text."
-    )
+    codex = client_of(payload) == "codex"
+    # one fact per line: the first version was one long sentence and unreadable in the ChatGPT
+    # app (field report, 2026-09-27). Codex has no slash commands, so it gets no /maisecrets:…
+    lines = [f"maisecrets: {summary} detected and stored as {keys}. The prompt did not reach the model."]
+    if codex:
+        lines.append("Rewritten prompt is in the clipboard: paste it and send." if copied
+                     else "Rewritten prompt (paste it and send):")
+    else:
+        tail = ", or paste the rewritten prompt from the clipboard." if copied else "; clipboard unavailable here:"
+        lines.append("Send it as is with /maisecrets:send (or /ms)" + tail)
     if not copied:
-        reason += "\n\n" + rewritten
+        lines += ["", rewritten, ""]
+    lines.append("A placeholder resolves only in a session with maisecrets active "
+                 "(its start says 'maisecrets <version> active').")
     if vault.backend.test_mode:
-        reason += "\n(vault backend: jsonfile, TEST MODE)"
+        lines.append("(vault backend: jsonfile, TEST MODE)")
     from . import events
     events.record("UserPromptSubmit", client_of(payload), entries)
-    reason += " Wrong? /maisecrets:report prepares an issue without the value."
+    wrong = "Wrong? " + ("" if codex else "/maisecrets:report prepares an issue without the value. ")
     if cfg.get("report_url"):
-        reason += f" ({cfg['report_url']})"
+        wrong += f"({cfg['report_url']})" if not codex else f"Report at {cfg['report_url']} (never paste the value)."
+    lines.append(wrong.strip())
+    reason = "\n".join(lines)
     if client_of(payload) == "codex":
         return {"decision": "block", "reason": reason}
     return {
@@ -1309,9 +1315,9 @@ def post_tool(payload: dict) -> dict:
             _scrub_transcript(path, values, refs)
             _scrub_transcript_later(path, values, refs)
         return {"decision": "block",
-                "reason": (f"[maisecrets: the command ran and finished; this is not an error. {hit['n']} value(s) "
-                           f"in its output are replaced by placeholders. Do not run the command again; continue "
-                           f"with the placeholders as they are, they are valid references.]\n{text}")}
+                "reason": (f"[maisecrets: the command ran and finished; this is not an error.\n"
+                           f"{hit['n']} value(s) in its output are replaced by placeholders.\n"
+                           f"Do not run the command again; continue with the placeholders as they are.]\n\n{text}")}
     return {
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
