@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -24,7 +26,7 @@ import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
-from test_cli_matrix import JSONFILE, Sandbox  # noqa: E402
+from test_cli_matrix import JSONFILE, Sandbox, fake_value  # noqa: E402
 
 BASH = shutil.which("bash")
 RUN_SH = ROOT / "hooks" / "run.sh"
@@ -140,6 +142,87 @@ class RunCmdFailsClosedTests(unittest.TestCase):
         self.assertEqual(tail[1:], ["exit /b 2", ":done", "exit /b %errorlevel%"])
         exits = [ln for ln in self.lines if ln.startswith("exit ")]
         self.assertEqual(exits, ["exit /b 0", "exit /b 2", "exit /b %errorlevel%"], "no other way out")
+
+
+def _forms(value: str) -> list[str]:
+    """The byte forms a value takes in a JSONL transcript: plain, JSON-escaped, doubly escaped."""
+    once = json.dumps(value)[1:-1]
+    return list(dict.fromkeys([value, once, json.dumps(once)[1:-1]]))
+
+
+class TranscriptScrubThroughTheHooksTests(unittest.TestCase):
+    """THREAT-MODEL C3: every form of a value is masked in the client's transcript. Each case runs
+    the real hook through hooks/dispatch.py on a real transcript file; nothing is mocked. A
+    record the client writes AFTER the hook returned is scrubbed by the detached child."""
+
+    def setUp(self):
+        self.sb = Sandbox(JSONFILE, backend="jsonfile")
+        self.addCleanup(self.sb.remove)
+        self.path = self.sb.root / "transcript.jsonl"
+
+    def write(self, *records: dict) -> None:
+        with open(self.path, "a", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec) + "\n")
+
+    def hook(self, event: str, payload: dict) -> dict:
+        r = self.sb.run(event, stdin=json.dumps({**payload, "transcript_path": str(self.path)}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def assert_scrubbed(self, value: str, keep: str, wait: float = 0.0) -> None:
+        deadline = time.time() + wait
+        while True:
+            data = self.path.read_text(encoding="utf-8")
+            left = [f for f in _forms(value) if f in data]
+            if not left or time.time() >= deadline:
+                break
+            time.sleep(0.05)
+        self.assertEqual(left, [], "a form of the value is still in the transcript")
+        self.assertIn(keep, data, "the scrub masks the value only")
+        for line in data.splitlines():
+            json.loads(line)          # every record stays valid JSON
+
+    def test_c1_a_blocked_prompt_is_masked_in_an_old_and_in_the_late_record(self):
+        value = fake_value("Tp")
+        prompt = f"password: {value}"
+        self.write({"type": "user", "message": {"content": prompt}, "note": "earlier"})
+        ino = os.stat(self.path).st_ino
+        out = self.hook("user-prompt", {"prompt": prompt, "session_id": "S1", "prompt_id": "p1"})
+        self.assertEqual(out["decision"], "block")
+        self.assert_scrubbed(value, "earlier")                       # the inline scrub, before the answer
+        self.write({"type": "user", "message": {"content": prompt}, "note": "late"})
+        self.assert_scrubbed(value, "late", wait=5.0)                 # the detached child
+        self.assertEqual(os.stat(self.path).st_ino, ino, "in place: same inode")
+
+    def test_codex_post_tool_masks_the_raw_output_in_the_rollout(self):
+        value = fake_value("Cx")
+        output = f"api_key={value}\n"
+        # Codex writes the raw command output into its rollout before the hook runs
+        self.write({"type": "event_msg", "payload": {"type": "exec_command_end", "stdout": output}, "note": "raw"})
+        out = self.hook("post-tool", {"tool_name": "Bash", "session_id": "S1", "turn_id": "t1", "model": "m",
+                                      "tool_input": {"command": "cat .env"}, "tool_response": {"stdout": output}})
+        self.assertEqual(out["decision"], "block")
+        self.assertNotIn(value, json.dumps(out))
+        self.assert_scrubbed(value, "raw")
+
+    def test_an_mcp_resolve_masks_the_hook_answer_the_client_records(self):
+        # a value with a quote and a backslash, so its escaped forms differ from the plain one
+        value = 'Mq"' + fake_value("M") + "\\z"
+        r = self.sb.run("put", stdin=value)
+        key = re.search(r"stored as (\w+) ", r.stdout).group(1)
+        ref = f"⟦{key}⟧"
+        self.hook("user-prompt", {"prompt": f"use {ref}", "session_id": "S1", "prompt_id": "p1"})   # admits S1
+        out = self.hook("pre-tool", {"tool_name": "mcp__srv__echo", "session_id": "S1", "prompt_id": "p2",
+                                     "tool_input": {"token": ref}})
+        self.assertEqual(out["hookSpecificOutput"]["updatedInput"], {"token": value})
+        # Claude Code records the hook's stdout as a hook_success attachment: doubly escaped
+        self.write({"type": "attachment", "attachment": {"type": "hook_success", "stdout": json.dumps(out)},
+                    "note": "attachment"},
+                   {"type": "assistant", "content": [{"type": "tool_use", "input": {"token": value}}]})
+        data = self.path.read_text(encoding="utf-8")
+        self.assertTrue(all(f in data for f in _forms(value)[1:]), "the record carries the escaped forms")
+        self.assert_scrubbed(value, "attachment", wait=5.0)
 
 
 if __name__ == "__main__":
