@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.31] - 2026-09-27
+
+### Fixes
+
+- verify_release expects the Codex manifest in the release commit; the test reads that list too (2bdb33f)
+
 ## [0.3.30] - 2026-09-27
 
 ### Fixes
