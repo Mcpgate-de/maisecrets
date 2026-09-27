@@ -9,3 +9,4 @@ docs/internal/
 
 # macOS folder metadata: the plugin directory refuses it
 .DS_Store
+dist/

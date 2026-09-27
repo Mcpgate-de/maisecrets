@@ -18,7 +18,7 @@ done
 if echo "$*" | grep -q -- "--tags"; then echo "pre-push: --tags refused"; exit 1; fi
 
 if command -v ruff >/dev/null 2>&1; then
-  ruff check --select E,F,W --line-length 120 maisecrets hooks harness tests scripts || { echo "pre-push: lint failed"; exit 1; }
+  ruff check --select E,F,W --line-length 120 maisecrets hooks harness tests scripts skills || { echo "pre-push: lint failed"; exit 1; }
 fi
 python3 -m unittest discover -s tests -q || { echo "pre-push: unit tests failed"; exit 1; }
 python3 scripts/replay_can_fail.py || { echo "pre-push: a control's test did not go red under its mutation"; exit 1; }

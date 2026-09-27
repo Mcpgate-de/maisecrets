@@ -165,7 +165,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # under three seconds
 python3 harness/run.py                                 # 7 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
-python3 scripts/replay_can_fail.py                     # 18 proofs: each control's test goes red without it
+python3 scripts/replay_can_fail.py                     # 19 proofs: each control's test goes red without it
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 scripts/install-hooks.sh                               # git pre-commit / pre-push
 ```
@@ -269,9 +269,32 @@ run".
   file named in the hook payload, in place, because the client writes the
   prompt to disk before or after the hook runs. "For administrators" has the
   retention of each file.
+- The skill runs `skills/secret-hygiene/scripts/scan_secrets.py` (reads files and
+  `git log`) and `redact_copy.py` (writes a new file) when the model follows it; neither
+  opens a network connection.
 - Sends and fetches: nothing. No hook opens a network connection.
   `/maisecrets:report` opens your browser on a prefilled issue page; the
   Windows Credential Locker may roam through a Microsoft account.
+
+## Secret hygiene skill
+
+The hooks stop a new value from reaching the model. The `secret-hygiene` skill deals with
+values that already leaked. The model loads it when a task fits; in Claude Code it is also
+`/maisecrets:secret-hygiene`. It does three things:
+
+- **Check a repository.** `scan_secrets.py` lists the secrets in the working tree and, with
+  `--history`, in every commit on every ref. A finding is a file, a line, a type, the rule, a
+  length and a per-run id. The same id means the same value; the output never holds a value,
+  a line of the file or a hash of the value, because the model reads it.
+- **Contain a leak.** For a value that reached a chat, a commit, a log or a ticket, the skill
+  gives the rotation steps per service from `references/rotation.md`: rotate first, clean up
+  second. This part needs no shell, so it also works in a chat.
+- **Make a file safe to share.** `redact_copy.py` writes `<name>.redacted<ext>` with every
+  value replaced by `⟦TYPE_n⟧` and prints only the counts. The original is never changed.
+
+The skill is not a guard. It works only when the model follows it, and it does not stop a
+prompt. `python3 scripts/build_skill_zip.py` builds `dist/secret-hygiene.zip`, the
+standalone skill with its own copy of the detector, for a skill upload without the plugin.
 
 ## Options
 

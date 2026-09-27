@@ -37,5 +37,6 @@
     "privacyPolicyURL": "https://github.com/Mcpgate-de/maisecrets/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/Mcpgate-de/maisecrets/blob/main/LICENSE",
     "supportURL": "https://github.com/Mcpgate-de/maisecrets/issues"
-  }
+  },
+  "skills": "./skills/"
 }

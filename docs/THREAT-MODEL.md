@@ -42,6 +42,7 @@ a harness scenario that goes red when the control is removed
 | C12 | store choice: keychain (macOS, value on stdin of `security -i`, base64-marked), Credential Locker (Windows, base64 on stdin), encrypted file with 0600 key (Linux); a damaged index or store file is never overwritten | A4 | **not A3**: every store hands the value to any process of the same user without a dialog; the Credential Locker may roam through a Microsoft account |
 | C14 | file tools resolve inline like MCP (session rule, limiter, audit line with the file name, transcript scrub); `resolve_in_files: false` makes them refuse instead; MCP dict keys are refused; the maisecrets home is never written by the agent | the workflow silently writing a placeholder or destroying a redacted file; an injected config change | the value is on disk in plaintext where the user asked for it, and in the client's permission prompt |
 | C15 | machine policy: keys in the administrator's policy file win over the user file; the plaintext store needs an explicit opt-in; the model is told never to change settings | A2 or a user loosening the caps | a user with administrator rights |
+| C16 | skill output: the secret-hygiene scripts print locations, types, lengths and per-run ids, never a value, a line or a hash of a value; the redacted copy is a new file | the model reading a leaked value while it cleans up a leak | a user who opens the original file |
 
 ## What is knowingly not defended
 
