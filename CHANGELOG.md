@@ -2,9 +2,15 @@
 
 ## Unreleased
 
+## [0.3.33] - 2026-09-27
+
 - **An MCP call that gets a real value now asks you first** (Claude Code), also in auto and bypass
   mode, with a warning when the value sits in a message body or another published text. Unattended
   runs (`claude -p`) refuse it. On Codex, which cannot ask, a placeholder in such a text field is refused.
+
+### Fixes
+
+- an MCP call gets a real value only after the user confirms; Codex refuses a value in published text (bdb5589)
 
 ## [0.3.32] - 2026-09-27
 
