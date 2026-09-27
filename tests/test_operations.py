@@ -251,7 +251,7 @@ class ExpiredEntryTests(unittest.TestCase):
         hooks._clipboard = lambda t: True
         out = hooks.user_prompt({"prompt": "password: " + value, "session_id": "S1", "transcript_path": ""})
         self.assertEqual(out["decision"], "block")
-        self.assertIn("The AI did not receive it", out["reason"])
+        self.assertIn("found and kept from the AI", out["reason"])
 
     def test_a_field_from_a_newer_version_does_not_break_an_older_one(self):
         from maisecrets.vault import Entry

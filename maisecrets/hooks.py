@@ -306,44 +306,34 @@ def _hours(seconds: int) -> str:
     return f"{n} hour" + ("s" if n != 1 else "")
 
 
+def _paste_key() -> str:
+    return "⌘V" if platform.system() == "Darwin" else "Ctrl+V"
+
+
 def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: dict, vault) -> list[str]:
-    """The lines a person reads when a prompt is blocked: what stopped, what was found (masked),
-    what would be sent, where the values are and for how long, what to do next, and what the
-    model's answer will show. Plain words, one fact per line (UX reviews, 2026-09-27: "stored",
-    "resolves" and a list of keys told a non-developer nothing, and nothing said where the
-    customer's data went or for how long)."""
-    lines = ["maisecrets stopped this prompt. The AI did not receive it."]
-    by_type: dict[str, list[str]] = {}
-    for e in entries:
-        by_type.setdefault(e.type, []).append(e.ref)
-    found = []
-    for t, refs in by_type.items():
-        one, many = TYPE_WORDS.get(t, (t.lower(), t.lower()))
-        found.append(f"{len(refs)} {one if len(refs) == 1 else many} ({', '.join(refs)})")
-    lines.append("Found: " + "; ".join(found) + ".")
-    ttl = cfg.get("ttl_seconds") or {}
-    spans = sorted({ttl.get(t, ttl.get("default", 86400)) for t in by_type})
-    how_long = " or ".join(_hours(x) for x in spans)
-    store = STORE_NAMES.get(type(vault.backend).__name__, "the local store")
-    since = " after their last use" if cfg.get("renew_on_use", True) else ""
-    lines.append(f"The real values stay on this computer, in {store}, for {how_long}{since}.")
-    # the whole prompt when it is not in the clipboard: "copy the text above" must be the text
-    # (review, 2026-09-27: a cut preview lost the placeholder)
-    preview = rewritten if not copied or len(rewritten) <= NOTICE_PREVIEW else rewritten[:NOTICE_PREVIEW] + " …"
-    lines += ["The prompt with the short forms:", "", preview, ""]
-    if codex:
-        lines.append("To send it: paste it from the clipboard and send." if copied
-                     else "To send it: copy the text above and send it.")
+    """What a person reads when a prompt is blocked, and nothing more: what kind of thing was
+    found, that the AI did not get it, and the one next step, set apart by blank lines because
+    the clients show plain text. The count, the masked forms and the retention are in
+    /maisecrets:list; the report link is built by /maisecrets:report (review with the product
+    owner, 2026-09-27: the user does not need to know whether it was 1 e-mail or 13)."""
+    kinds = {e.type for e in entries}
+    secret = "SECRET" in kinds
+    personal = bool(kinds - {"SECRET"})
+    what = ("a secret and personal data were" if secret and personal
+            else "a secret was" if secret else "personal data was")
+    lines = [f"maisecrets: {what} found and kept from the AI.", ""]
+    if copied:
+        tail = " Then send it." if codex else " Then send it, or type /ms to send it at once."
+        lines.append(f"    {_paste_key()}  pastes the cleaned prompt.{tail}")
+    elif codex:
+        lines += ["    Copy the cleaned prompt from here and send it:", "", "    " + rewritten]
     else:
-        lines.append("To send it: /maisecrets:send (or /ms). To change it first: paste it from the clipboard."
-                     if copied else "To send it: /maisecrets:send (or /ms), or copy the text above.")
-    after = "" if codex else " Before a connected tool (MCP) gets a real value, you are asked."
-    lines.append("The AI's answer will show the short forms. Where it runs a command, writes a file or calls a "
-                 "tool for you, maisecrets puts the real values in." + after)
-    if not codex:
-        lines.append("Wrong detection? /maisecrets:report prepares a report without the value.")
-    elif cfg.get("report_url"):
-        lines.append(f"Wrong detection? Report it at {cfg['report_url']} (never paste the value).")
+        lines += ["    Type /ms to send the cleaned prompt, or copy it from here:", "", "    " + rewritten]
+    lines.append("")
+    if codex:
+        lines.append("maisecrets by mcpgate.de")
+    else:
+        lines.append("Something wrong? /maisecrets:report · maisecrets by mcpgate.de")
     return lines
 
 

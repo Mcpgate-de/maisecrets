@@ -115,7 +115,7 @@ class GrantTests(unittest.TestCase):
         hooks._clipboard = lambda text: False                       # SSH: no clipboard
         token = "glpat-" + "PendingProbeAbc123456789x"
         out = hooks.user_prompt({"prompt": f"deploy with {token} now", "session_id": "S7", "transcript_path": ""})
-        self.assertIn("/maisecrets:send", out["reason"])
+        self.assertIn("/ms", out["reason"])
         self.assertNotIn(token, out["reason"])
         text = hooks.take_pending("S7")
         self.assertEqual(text, "deploy with ⟦SECRET_c2⟧ now")
@@ -613,6 +613,25 @@ class McpTests(unittest.TestCase):
 class NoticeTests(unittest.TestCase):
     def setUp(self):
         _reset()
+
+    def test_the_notice_names_the_kind_and_one_step_and_nothing_more(self):
+        from unittest import mock
+        hooks._clipboard = lambda t: True
+        mail = hooks.user_prompt({"prompt": "write to anna.schmidt@firma-xyz.de", "session_id": "K1",
+                                  "transcript_path": "", "prompt_id": "p"})["reason"].split("\n")
+        self.assertEqual(mail[0], "maisecrets: personal data was found and kept from the AI.")
+        self.assertEqual(mail[1], "", "the step stands apart")
+        self.assertRegex(mail[2], r"^    (⌘V|Ctrl\+V)  pastes the cleaned prompt\.")
+        self.assertEqual(mail[-1], "Something wrong? /maisecrets:report · maisecrets by mcpgate.de")
+        self.assertNotIn("github.com", "\n".join(mail))
+        self.assertNotIn("EMAIL_c", "\n".join(mail), "no masked forms without the prompt around them")
+        both = hooks.user_prompt({"prompt": "mail anna.schmidt@firma-xyz.de token glpat-" + "Q" * 3
+                                  + "abcdefghij1234567890", "session_id": "K2", "transcript_path": "",
+                                  "prompt_id": "p"})["reason"]
+        self.assertIn("a secret and personal data were found", both)
+        for system, key in (("Darwin", "⌘V"), ("Windows", "Ctrl+V"), ("Linux", "Ctrl+V")):
+            with mock.patch.object(hooks.platform, "system", return_value=system):
+                self.assertEqual(hooks._paste_key(), key)
 
     def test_without_a_clipboard_the_whole_prompt_is_shown_and_codex_gets_no_empty_line(self):
         long_tail = " and more words" * 40
