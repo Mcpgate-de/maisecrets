@@ -1,7 +1,7 @@
 ---
 description: Report to the maisecrets maintainers as a prefilled GitHub issue - a false positive (last detection), a bug, or a feature request. Carries no value.
 argument-hint: [last | bug <text> | feature <text>]
-allowed-tools: Bash(bash *maisecrets*report*)
+allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" report *)
 ---
 
 Run exactly this command and show the user the URL it prints, then stop:

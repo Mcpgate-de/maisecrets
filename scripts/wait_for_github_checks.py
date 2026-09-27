@@ -12,7 +12,6 @@ Exit 0 when every check run concluded with success, 1 on failure or timeout.
 from __future__ import annotations
 
 import json
-import os
 import sys
 import time
 import urllib.error
@@ -47,10 +46,9 @@ def main(argv: list[str]) -> int:
             print("main moved on; this SHA is superseded and the newer pipeline releases")
             return 0
         try:
+            # unauthenticated on purpose: no credential is read from the machine (the plugin
+            # directory's scan treats that as a finding), and 60 requests per hour cover a wait
             headers = {"Accept": "application/vnd.github+json", "User-Agent": "maisecrets-release"}
-            token = os.environ.get("GITHUB_TOKEN", "").strip()
-            if token:   # authenticated: 5000 requests per hour instead of 60 shared by the runner's IP
-                headers["Authorization"] = "Bearer " + token
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=30) as r:
                 data = json.load(r)

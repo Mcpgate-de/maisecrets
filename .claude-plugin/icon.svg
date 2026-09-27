@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="maisecrets">
+  <rect width="128" height="128" rx="24" fill="#1f2430"/>
+  <path d="M30 30h16v8H38v52h8v8H30zM98 30H82v8h8v52h-8v8h16z" fill="#8fd3ff"/>
+  <circle cx="52" cy="64" r="6" fill="#ffd166"/>
+  <circle cx="64" cy="64" r="6" fill="#ffd166"/>
+  <circle cx="76" cy="64" r="6" fill="#ffd166"/>
+</svg>

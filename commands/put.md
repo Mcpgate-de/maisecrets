@@ -1,6 +1,6 @@
 ---
 description: Store the value in your clipboard in the maisecrets vault and get a placeholder back (for a password without a recognisable shape). The value never reaches the model.
-allowed-tools: Bash(bash *maisecrets*put*)
+allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" put *)
 ---
 
 The user has copied a secret to the clipboard. Run exactly this command and show the user its
