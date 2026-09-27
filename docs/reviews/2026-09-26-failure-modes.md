@@ -110,7 +110,7 @@ these cases:**
 - under `trap '' TERM`.
 
 The killed parent does not stop its forked children. Example:
-`curl -u "u:$(…)" url | jq` runs curl with an empty password. The false all-clear from the field report
+`curl -u "u:$(…)" url` piped into `jq` runs curl with an empty password. The false all-clear from the field report
 comes back as `grep -c "⟦X⟧" f | head`. The unit test at `test_gates.py:93` passes only because the command
 that prints is in the main shell. Git Bash: ASSUMED to behave like bash (not measured).
 

