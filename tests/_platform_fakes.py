@@ -66,7 +66,8 @@ def _main(argv: list) -> int:
     clip = os.environ.get("MS_TEST_CLIP")
     if tool == "clip" and clip:
         data = sys.stdin.buffer.read()
-        text = data[2:].decode("utf-16-le") if data[:2] == b"\xff\xfe" else data.decode("utf-8")
+        # as clip.exe does: UTF-16 (NUL bytes in ASCII text) is Unicode; a byte order mark stays in
+        text = data.decode("utf-16-le") if b"\x00" in data else data.decode("utf-8")
         with open(clip, "w", encoding="utf-8") as f:
             f.write(text)
         return 0

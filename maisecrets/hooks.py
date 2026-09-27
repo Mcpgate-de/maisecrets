@@ -67,9 +67,10 @@ def _clipboard(text: str) -> bool:
         if sysname == "Darwin":
             cmd = ["pbcopy"]
         elif sysname == "Windows":
-            # clip.exe reads its input in the console code page unless it starts with a UTF-16
-            # byte order mark; UTF-8 bytes put three characters in place of each bracket of ⟦KEY⟧
-            cmd, data = ["clip"], ("\ufeff" + text).encode("utf-16-le")
+            # clip.exe reads UTF-8 bytes in the console code page, and each bracket of ⟦KEY⟧
+            # became three characters. It takes UTF-16 as Unicode; with a byte order mark it keeps
+            # the mark in the clipboard (windows-latest, 2026-09-27), so none is sent
+            cmd, data = ["clip"], text.encode("utf-16-le")
         else:
             cmd = ["xclip", "-selection", "clipboard"]
         subprocess.run(cmd, input=data, check=True, timeout=3)

@@ -83,7 +83,7 @@ class PlatformFakeTests(unittest.TestCase):
             clip, trip = Path(d, "clip"), Path(d, "trip")
             text = "Übergabe ⟦SECRET_c1⟧"
             code = ("import subprocess, sys\n"
-                    "subprocess.run(['clip'], input=('\\ufeff' + sys.argv[1]).encode('utf-16-le'), check=True)\n"
+                    "subprocess.run(['clip'], input=sys.argv[1].encode('utf-16-le'), check=True)\n"
                     "out = subprocess.run(['powershell', '-Command', 'Get-Clipboard -Raw'], capture_output=True,"
                     " check=True).stdout\n"
                     "sys.stdout.buffer.write(out)\n")

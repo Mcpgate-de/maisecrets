@@ -476,8 +476,8 @@ class ClipboardTests(unittest.TestCase):
         text = "x ⟦SECRET_c1⟧"
         for system, write, sent, read in (
                 ("Darwin", ["pbcopy"], text.encode(), ["pbpaste"]),
-                # clip.exe reads UTF-16 with a byte order mark as Unicode, anything else in the code page
-                ("Windows", ["clip"], ("\ufeff" + text).encode("utf-16-le"), ps_read),
+                # clip.exe takes UTF-16 as Unicode, UTF-8 in the code page; a byte order mark stays in
+                ("Windows", ["clip"], text.encode("utf-16-le"), ps_read),
                 ("Linux", ["xclip", "-selection", "clipboard"], text.encode(),
                  ["xclip", "-selection", "clipboard", "-o"])):
             with self.subTest(system):
