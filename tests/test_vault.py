@@ -438,7 +438,6 @@ AWKWARD = [
 
 class BackendContract:
     """One contract, run against every backend."""
-    store_file: str | None = None
 
     def make(self):
         raise NotImplementedError
@@ -496,9 +495,12 @@ class BackendContract:
         self.assertIsNone(self.backend.get(e.key))
         self.assertFalse(vault.INDEX.exists())
 
+
+class FileStoreContract:
+    """The part of the contract that only a backend with its own store file has."""
+    store_file = ""
+
     def test_a_corrupt_store_file_is_never_overwritten(self):
-        if self.store_file is None:
-            self.skipTest("no store file")
         self.backend.put("SECRET_c1", "fake-before")
         path = HOME / self.store_file
         path.write_text("{damaged", encoding="utf-8")
@@ -510,7 +512,7 @@ class BackendContract:
         self.assertEqual(self.backend.keys(), [])
 
 
-class JsonFileBackendTests(BackendContract, unittest.TestCase):
+class JsonFileBackendTests(FileStoreContract, BackendContract, unittest.TestCase):
     store_file = "vault.json"
 
     def make(self):
@@ -518,7 +520,7 @@ class JsonFileBackendTests(BackendContract, unittest.TestCase):
 
 
 @unittest.skipIf(shutil.which("openssl") is None, "no openssl")
-class EncryptedFileBackendTests(BackendContract, unittest.TestCase):
+class EncryptedFileBackendTests(FileStoreContract, BackendContract, unittest.TestCase):
     store_file = "vault.enc.json"
 
     def make(self):
@@ -1117,6 +1119,51 @@ class LockTests(unittest.TestCase):
             v.forget(e.key)
         self.assertGreaterEqual(len(saves), 9)
         self.assertNotIn(0, saves, "an index save outside the lock")
+
+
+class BackendTimeoutTests(unittest.TestCase):
+    """A store call that hits its timeout raised subprocess.TimeoutExpired out of vault.py: the
+    sweep and forget catch RuntimeError only, and the exception text lists the argv, which holds
+    the stored value on the keychain's long-value path (CLI test agent, 2026-09-27)."""
+    VALUE = "timeout-fake-value-" + "Q7" * 3000     # long: the keychain puts it on argv
+
+    def _timing_out(self, args, *a, **kw):
+        raise subprocess.TimeoutExpired(args, kw.get("timeout", 5))
+
+    def _check(self, name: str, op, word: str) -> None:
+        import traceback
+        with self.subTest(name), mock.patch.object(vault, "subprocess", types.SimpleNamespace(
+                run=self._timing_out, CompletedProcess=subprocess.CompletedProcess,
+                TimeoutExpired=subprocess.TimeoutExpired)):
+            with self.assertRaises(RuntimeError) as cm:
+                op()
+            text = "".join(traceback.format_exception(cm.exception))
+            self.assertIn(word, str(cm.exception))
+            self.assertIn("timed out", str(cm.exception))
+            stored = base64.b64encode(self.VALUE.encode()).decode()
+            for secret in (self.VALUE[:40], stored[:40]):
+                self.assertNotIn(secret, text)
+
+    def test_every_keychain_call_that_times_out_raises_a_runtime_error_without_the_value(self):
+        b = KeychainBackend()
+        for name, op in [("put long", lambda: b.put("SECRET_c1", self.VALUE)),
+                         ("put short", lambda: b.put("SECRET_c1", "short-fake-value")),
+                         ("get", lambda: b.get("SECRET_c1")), ("delete", lambda: b.delete("SECRET_c1")),
+                         ("keys", b.keys), ("wipe", b.wipe)]:
+            self._check(name, op, "keychain")
+
+    def test_every_credential_locker_call_that_times_out_raises_a_runtime_error(self):
+        b = WindowsVaultBackend()
+        for name, op in [("put", lambda: b.put("SECRET_c1", self.VALUE)), ("get", lambda: b.get("SECRET_c1")),
+                         ("delete", lambda: b.delete("SECRET_c1")), ("keys", b.keys),
+                         ("get_many", lambda: b.get_many(["SECRET_c1"])), ("wipe", b.wipe)]:
+            self._check(name, op, "Credential Locker")
+
+    def test_an_openssl_call_that_times_out_raises_a_runtime_error(self):
+        _reset()
+        b = EncryptedFileBackend()
+        self._check("put", lambda: b.put("SECRET_c1", self.VALUE), "openssl")
+        _reset()
 
 
 class ConcurrencyTests(unittest.TestCase):
