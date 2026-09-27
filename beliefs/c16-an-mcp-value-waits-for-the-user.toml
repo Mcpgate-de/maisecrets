@@ -1,0 +1,10 @@
+# c16-an-mcp-value-waits-for-the-user: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c16-an-mcp-value-waits-for-the-user"
+control = "C16"
+statement = "An MCP call that gets a real value stops at a permission prompt in Claude Code; the reason names the fields, never the value."
+runner = ["tests/test_gates.py::McpTests::test_mcp_arguments_are_resolved_in_place_keeping_the_shape"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if client_of(payload) == \"codex\":\n        return _updated(payload, new_input)\n    names = "
+replace = "    if True:\n        return _updated(payload, new_input)\n    names = "

@@ -58,7 +58,10 @@ SCENARIOS = {
         "turns": [{"tool": "mcp__everything__echo", "input": {"message": "⟦SECRET_c1⟧"}}, {"text": "done"}],
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c1⟧"],
-        "expect_text": "Echo: ⟦SECRET_c1⟧",
+        # an MCP call that would get a real value asks the user first; with -p nobody can answer,
+        # so Claude Code refuses it and the model reads the reason, which names the key and not the
+        # value (measured 2026-09-27, also with --permission-mode bypassPermissions)
+        "expect_text": "this call gets the real value of \u27e6SECRET_c1\u27e7 in message of mcp__everything__echo",
     },
     # the model runs a command whose output holds a secret
     "bash_echo": {

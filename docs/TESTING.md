@@ -100,7 +100,7 @@ runs the owning tests green, applies the mutation, runs them again and demands r
 restores the file; it runs in the pre-push hook and in the CI job `beliefs_can_fail_replay`
 on every push. `tests/test_beliefs_well_formed.py` keeps the layer honest statically: every
 named test exists, every anchor occurs exactly once, every code-enforced control (C1–C10,
-C13–C15) has a belief. `scripts/derived_counts.py` measures the numbers this document and the
+C13–C16) has a belief. `scripts/derived_counts.py` measures the numbers this document and the
 README state (test count, scenario counts, proof count) and refuses a stale one; it runs in
 the `manifests` job. Both ideas come from the ai-gateway's beliefs layer, cut to the size of
 this repository: no provenance vocabulary, no shards, TOML instead of YAML so the standard
@@ -114,7 +114,7 @@ library reads it.
 
 ## Unit tests
 
-111 tests (`tests/test_core.py`, `tests/test_gates.py`, `tests/test_operations.py`, `tests/test_release_tools.py`, `tests/test_beliefs_well_formed.py`, `tests/test_platform_backend.py`;
+112 tests (`tests/test_core.py`, `tests/test_gates.py`, `tests/test_operations.py`, `tests/test_release_tools.py`, `tests/test_beliefs_well_formed.py`, `tests/test_platform_backend.py`;
 the last one runs only with `MAISECRETS_NATIVE_BACKEND_TEST=1` or in CI, because it
 touches the real store), in under three seconds. The gate tests execute the rewritten command through a
 real bash and compare bytes, so a broken quoting context or a leaked value
@@ -138,6 +138,7 @@ fails them:
 | C9 audit line | `test_audit_line_names_key_tool_and_context_but_no_value` |
 | C10 keyed fingerprint | `test_index_carries_no_reversible_fingerprint` |
 | C2 exact match | `test_shapeless_value_is_redacted_by_exact_match` |
+| C16 confirm an MCP value | `test_mcp_arguments_are_resolved_in_place_keeping_the_shape`, `test_a_value_in_a_message_body_is_confirmed_with_a_warning_or_refused_on_codex` |
 
 ## Hook latency (end to end, fresh python process per hook, median of 7, 2026-09-26)
 

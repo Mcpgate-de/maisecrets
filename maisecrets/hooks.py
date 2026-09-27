@@ -822,6 +822,22 @@ def _deny(reason: str) -> dict:
                                    "permissionDecisionReason": reason}}
 
 
+# MCP argument names that carry text a tool publishes or stores for people to read. A value in
+# one of them leaves with the message (review by an ops user, 2026-09-27: a real address went
+# into a Slack post); Codex refuses it, Claude Code asks with a warning.
+FREE_TEXT_FIELDS = {"text", "message", "msg", "body", "content", "comment", "description", "markdown", "html",
+                    "summary", "title", "subject", "note", "notes", "caption", "reply", "blocks", "attachments",
+                    "richtext", "memo", "headline", "answer"}
+
+
+def _ask(new_input: dict, reason: str) -> dict:
+    """Claude Code: put the value in and let the user confirm the call. The permission prompt
+    shows the rewritten input and the reason to the user, not to the model (hooks reference,
+    PreToolUse decision control); a hook's "ask" also forces the prompt in auto mode."""
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                   "permissionDecisionReason": reason, "updatedInput": new_input}}
+
+
 def _updated(payload: dict, new_input: dict) -> dict:
     if client_of(payload) == "codex":
         # Codex accepts updatedInput only together with "allow", and "allow" skips its approval prompt
@@ -1006,6 +1022,14 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
     if in_keys:
         return _deny(f"maisecrets: ⟦{in_keys[0]}⟧ is used as a field name, where it is not resolved. "
                      "The call did not run. Put the placeholder into a value, not into a key.")
+    fields = _ref_fields(tool_input)
+    text_fields = [f for f in fields if is_text_field(f)]
+    if text_fields and client_of(payload) == "codex":
+        return _deny(f"maisecrets: {', '.join('⟦' + k + '⟧' for k in dict.fromkeys(found))} is in "
+                     f"{', '.join(text_fields)} of {tool}, text the tool publishes or stores. maisecrets does "
+                     "not put a real value there on Codex, because Codex cannot ask the user first. The call "
+                     "did not run. Put the placeholder only in the field that needs the value (a recipient, "
+                     "an id, a token), or ask the user to add the value themselves.")
     vault = Vault(cfg)
     session = payload.get("session_id")
     context = json.dumps(tool_input, ensure_ascii=False)
@@ -1034,7 +1058,48 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
         # with a quote, a comma or fewer than 8 characters (review, 2026-09-26).
         refs = [f"⟦{k}⟧" for k in values]
         _scrub_transcript_later(payload.get("transcript_path", ""), list(values.values()), refs)
-    return _updated(payload, _walk_strings(tool_input, substitute))
+    new_input = _walk_strings(tool_input, substitute)
+    if client_of(payload) == "codex":
+        return _updated(payload, new_input)
+    names = ", ".join(f"⟦{k}⟧" for k in values)
+    warn = (f" WARNING: {', '.join(text_fields)} is text that the tool publishes or stores; the real value "
+            "goes out with it." if text_fields else "")
+    return _ask(new_input, f"maisecrets: this call gets the real value of {names} in {', '.join(fields)} "
+                           f"of {tool}.{warn} Check the target and the value before you allow it.")
+
+
+def _ref_fields(node: Any, path: str = "") -> list[str]:
+    """Paths of the string fields that hold a placeholder (`messages[0].text`), once each. A
+    string that is itself a JSON object or array is walked too, so `{"params": "{\"text\": …}"}`
+    names `params.text` (review, 2026-09-27: the list index cut the path to `messages`)."""
+    out: list[str] = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            out.extend(_ref_fields(v, f"{path}.{k}" if path else str(k)))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            out.extend(_ref_fields(v, f"{path}[{i}]"))
+    elif isinstance(node, str) and find_refs(node):
+        inner = None
+        if node.lstrip()[:1] in ("{", "["):
+            try:
+                inner = json.loads(node)
+            except ValueError:
+                inner = None
+        nested = _ref_fields(inner, path) if isinstance(inner, (dict, list)) else []
+        out.extend(nested or [path or "(input)"])
+    return list(dict.fromkeys(out))
+
+
+def is_text_field(path: str) -> bool:
+    """The last word of the last key names published text: `text`, `messageText`, `text_body`,
+    `Body`. Whole words only, so `context`, `plaintext` and `httpStatus` are not text fields
+    (second review, 2026-09-27)."""
+    keys = [k for k in re.split(r"[.\[\]]", path) if k and not k.isdigit()]
+    if not keys:
+        return False
+    words = [w.lower() for w in re.findall(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])", keys[-1])]
+    return bool(words) and (words[-1] in FREE_TEXT_FIELDS or words[0] in FREE_TEXT_FIELDS)
 
 
 def _dict_keys(node: Any) -> list[str]:

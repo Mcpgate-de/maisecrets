@@ -165,7 +165,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # under three seconds
 python3 harness/run.py                                 # 7 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
-python3 scripts/replay_can_fail.py                     # 18 proofs: each control's test goes red without it
+python3 scripts/replay_can_fail.py                     # 20 proofs: each control's test goes red without it
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 scripts/install-hooks.sh                               # git pre-commit / pre-push
 ```
@@ -403,9 +403,16 @@ A placeholder turns back into its value only here:
   together with `allow`, which skips its own approval prompt for that call.
   On Codex the gates above are the whole control; on Claude Code the normal
   permission rules still apply to the rewritten command.
-- **Inline for MCP tools.** An argument has no shell to read from, so the value
-  is inserted after the same session rule. The permission prompt of the client
-  then shows your own value at the point of the real call.
+- **Inline for MCP tools, after you confirm.** An argument has no shell to read
+  from, so the value is inserted after the same session rule, and in Claude Code
+  every such call stops at a permission prompt, also in auto and bypass mode. The
+  prompt shows the call with the real value and names the fields; a field that
+  carries published text (`text`, `message`, `body`, `comment`, `description`,
+  `subject` …) gets a warning, because the value goes out with the message. In an
+  unattended run (`claude -p`) nobody can confirm, so the call is refused and the
+  model reads the reason, never the value. Codex cannot ask: there a placeholder
+  in such a text field is refused, and one in another field (a recipient, an id)
+  resolves without a prompt.
 - **Under a cap.** `max_keys_per_session` (25) distinct keys per session and
   `max_resolves_per_hour` (60) in total; above that the call is denied and the
   reason names the cap. Every resolve writes one line to `~/.maisecrets/audit.log`
