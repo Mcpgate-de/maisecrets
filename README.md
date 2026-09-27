@@ -148,6 +148,9 @@ codex plugin marketplace add https://github.com/Mcpgate-de/maisecrets.git
 codex plugin add maisecrets@maisecrets
 ```
 
+Codex reads `.codex-plugin/plugin.json` (listing texts, icon) and the hooks from
+`hooks/hooks.json`.
+
 Codex skips a plugin's hooks until you review and trust them once: open `/hooks`
 in Codex and trust the maisecrets entries. Until then nothing is protected and
 the plugin cannot tell you so, because no hook of it runs. A workspace admin
@@ -225,7 +228,8 @@ value is deleted after `keep_purged_days` (30). `audit.log` holds one line per
 resolve (time, session, key, tool, the command with placeholders; capped at
 `audit_max_lines`). `events.log` holds the last 200 detections (rule name and
 type). `pending/` holds a blocked prompt with placeholders for 15 minutes.
-`hooks.log` holds one line per hook run (capped at 2000). The FIFOs a value
+`hooks.log` holds one line per hook run (capped at 2000); the client column names
+the entry point, `claude/local-agent` for a Cowork session. The FIFOs a value
 is delivered through live in `$XDG_RUNTIME_DIR/maisecrets` or
 `maisecrets-<uid>` in the temp directory, for up to 120 s. The values live in
 the store of the platform; on macOS a value longer than about 2.8 KB (a private

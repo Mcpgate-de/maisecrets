@@ -29,6 +29,15 @@ AT_MENTION_RE = re.compile(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
 
 
 # ---------------------------------------------------------------- helpers --
+def _client_label(payload: dict) -> str:
+    """The client, plus the entry point when the host names one: the Claude desktop app starts
+    Cowork sessions with CLAUDE_CODE_ENTRYPOINT=local-agent (read from its bundle, 2026-09-27),
+    so a hooks.log line can tell a Cowork run from a terminal run."""
+    client = client_of(payload)
+    entry = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "")
+    return f"{client}/{entry}" if client == "claude" and entry and entry != "cli" else client
+
+
 def client_of(payload: dict) -> str:
     """Which agent sent this payload. The payload shape decides: Claude Code sends `prompt_id`
     on every event, Codex marks turn-scoped events with `turn_id` and every event with `model`.
@@ -1423,7 +1432,7 @@ def _run_log(event: str, payload: dict, how: str, decision: str, ms: int) -> Non
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
         tool = str(payload.get("tool_name", "-"))[:40]
         sess = str(payload.get("session_id") or "-")[:8]
-        line = f"{stamp}\t{event}\t{client_of(payload)}\t{sess}\t{tool}\t{decision}\t{ms}ms\t{how}\n"
+        line = f"{stamp}\t{event}\t{_client_label(payload)}\t{sess}\t{tool}\t{decision}\t{ms}ms\t{how}\n"
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(line)

@@ -124,6 +124,17 @@ and OpenAI plugin directories.
 
 - Claude: public GitHub repo, `.claude-plugin/plugin.json`, README ≥ 40 words,
   LICENSE, validation in the developer portal, security scan reads the source.
+  The icon rule is stated only by the portal's `ICON_MISSING` finding, not in the
+  manifest reference: `icon` in plugin.json, or `.claude-plugin/icon.svg|png`, or
+  `assets/icon.*`, square, at least 128 px; without one the publisher's GitHub
+  avatar is shown. The plugin sets all three. An upload of a zip to a claude.ai
+  account shows a generic tile; only the directory listing renders the icon.
+- Codex: `.codex-plugin/plugin.json` is the compatibility manifest (a root
+  `plugin.json` made Codex 0.157 find none of the hooks). Its `interface` block
+  carries `composerIcon` and `logo` (square PNG, 512 px, like the examples in
+  github.com/openai/plugins), the listing texts and the URLs. Codex reads
+  `hooks/hooks.json` only while the manifest defines no `hooks` key. The release
+  script bumps this manifest with the other two; `test_release_tools` checks it.
 - OpenAI: verified identity, published privacy policy; for MCP plugins also
   website, support and terms URLs plus 5 positive and 3 negative test cases.
 - Domain: `maisecrets.dev` is registered (2026-09-26) and is the

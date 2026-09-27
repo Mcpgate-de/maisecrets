@@ -262,6 +262,23 @@ class ContextTests(unittest.TestCase):
             del os.environ["CODEX_HOME"]
         self.assertEqual(hooks.client_of({}), "claude")
 
+    def test_the_run_log_label_names_the_desktop_entry_point(self):
+        """The Claude desktop app starts Cowork sessions with CLAUDE_CODE_ENTRYPOINT=local-agent;
+        a terminal session sets cli or nothing. Only the label changes, never the client."""
+        saved = os.environ.pop("CLAUDE_CODE_ENTRYPOINT", None)
+        try:
+            self.assertEqual(hooks._client_label({"prompt_id": "p"}), "claude")
+            os.environ["CLAUDE_CODE_ENTRYPOINT"] = "cli"
+            self.assertEqual(hooks._client_label({"prompt_id": "p"}), "claude")
+            os.environ["CLAUDE_CODE_ENTRYPOINT"] = "local-agent"
+            self.assertEqual(hooks._client_label({"prompt_id": "p"}), "claude/local-agent")
+            self.assertEqual(hooks._client_label({"turn_id": "t"}), "codex",
+                             "a Codex run carries no Claude entry point")
+        finally:
+            os.environ.pop("CLAUDE_CODE_ENTRYPOINT", None)
+            if saved is not None:
+                os.environ["CLAUDE_CODE_ENTRYPOINT"] = saved
+
     def test_file_tools_resolve_like_mcp_and_the_home_is_off_limits(self):
         out = hooks.pre_tool({"tool_name": "Write", "session_id": "S1",
                               "tool_input": {"file_path": "/tmp/x.env", "content": "K=" + self.e.ref}})

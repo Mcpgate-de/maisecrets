@@ -97,3 +97,56 @@ class GitHubWaitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ListingManifestTests(unittest.TestCase):
+    """What each directory reads before it shows the plugin. Anthropic's portal names its icon
+    rule in the ICON_MISSING finding: `icon` in plugin.json, or .claude-plugin/icon.svg|png, or
+    assets/icon.*, square, at least 128 px. OpenAI reads .codex-plugin/plugin.json and shows
+    interface.composerIcon and interface.logo (every example in github.com/openai/plugins ships
+    a square PNG or SVG between 32 and 1024 px). The release script must bump every manifest,
+    or the Codex listing would fall behind the Claude one."""
+
+    def setUp(self):
+        self.r = _load("release")
+        self.claude = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+        self.codex = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _png_size(path: Path) -> tuple[int, int]:
+        head = path.read_bytes()[:24]
+        assert head[:8] == b"\x89PNG\r\n\x1a\n", f"{path} is not a PNG"
+        return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+    def test_every_manifest_is_bumped_by_the_release_and_agrees_now(self):
+        self.assertIn(".codex-plugin/plugin.json", self.r.MANIFESTS)
+        versions = {rel: self.r.manifest_version(rel) for rel in self.r.MANIFESTS}
+        self.assertEqual(len(set(versions.values())), 1, versions)
+        for rel in self.r.MANIFESTS:
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            self.assertEqual(1, len(self.r.re.findall(r'"version":\s*"\d+\.\d+\.\d+"', text)), rel)
+
+    def test_the_codex_manifest_mirrors_the_claude_one(self):
+        for key in ("name", "version", "description", "author", "homepage", "repository", "license", "keywords"):
+            self.assertEqual(self.claude[key], self.codex[key], key)
+        ui = self.codex["interface"]
+        self.assertEqual(self.claude["privacyPolicyUrl"], ui["privacyPolicyURL"])
+        self.assertEqual(self.claude["supportUrl"], ui["supportURL"])
+        self.assertNotIn("hooks", self.codex,
+                         "Codex discovers hooks/hooks.json only while the manifest defines no hooks")
+
+    def test_the_icon_is_where_each_directory_looks(self):
+        # Anthropic: the manifest field, the .claude-plugin file, the assets file (all three named by the portal)
+        icon = ROOT / self.claude["icon"]
+        self.assertTrue(icon.is_file(), self.claude["icon"])
+        self.assertTrue((ROOT / ".claude-plugin/icon.svg").is_file())
+        self.assertTrue(list((ROOT / "assets").glob("icon.*")))
+        w, h = self._png_size(icon)
+        self.assertEqual(w, h, "square")
+        self.assertGreaterEqual(w, 128)
+        # OpenAI: both interface paths, relative to the plugin root with a ./ prefix
+        for key in ("composerIcon", "logo"):
+            rel = self.codex["interface"][key]
+            self.assertTrue(rel.startswith("./"), rel)
+            self.assertTrue((ROOT / rel).is_file(), rel)
+        self.assertRegex(self.codex["interface"]["brandColor"], r"^#[0-9A-Fa-f]{6}$")
