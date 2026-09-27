@@ -225,5 +225,47 @@ class TranscriptScrubThroughTheHooksTests(unittest.TestCase):
         self.assert_scrubbed(value, "attachment", wait=5.0)
 
 
+class _RefusingStore:
+    """A store that holds one item and refuses to let it go, the way a locked keychain does
+    (RuntimeError) or a file store in a folder that is not writable (PermissionError)."""
+    test_mode = False
+
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+
+    def wipe(self) -> int:
+        raise self.exc
+
+    def keys(self) -> list[str]:
+        return ["SECRET_c1"]
+
+    def get(self, key: str) -> str | None:
+        return "x" if key == "SECRET_c1" else None
+
+    def delete(self, key: str) -> None:
+        raise self.exc
+
+
+class RefusedWipeTests(unittest.TestCase):
+    """README: `wipe` reports when an item refused to go. The CLI must say so and exit non-zero,
+    never print a clean "wiped" alone."""
+
+    def wipe(self, store: object) -> tuple[int, str]:
+        import contextlib
+        import io
+        from unittest import mock
+        from maisecrets import cli, vault
+        buf = io.StringIO()
+        with mock.patch.object(vault, "make_backend", lambda cfg: store), contextlib.redirect_stdout(buf):
+            rc = cli.main(["wipe", "--yes"])
+        return rc, buf.getvalue()
+
+    def test_a_locked_store_is_reported_and_the_exit_code_says_so(self):
+        rc, out = self.wipe(_RefusingStore(RuntimeError("locked")))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("NOT complete: store: RuntimeError; store item SECRET_c1 not deleted.", out)
+        self.assertIn("A value may still be in the store; check it by hand.", out)
+
+
 if __name__ == "__main__":
     unittest.main()
