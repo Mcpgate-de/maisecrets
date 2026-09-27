@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.3.24] - 2026-09-27
+
+### Features
+
+- the first session start installs a personal /ms once, unless one exists or shortcut is off (503cf08)
+
+### Fixes
+
+- the plugin's own command names are never a labelled secret (a6b1f6c)
+
 ## [0.3.23] - 2026-09-26
 
 - The first session start installs a personal `/ms` for `/maisecrets:send` (unless one exists
