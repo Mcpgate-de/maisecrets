@@ -28,13 +28,19 @@ Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "json
 
 from maisecrets import hooks  # noqa: E402
 from maisecrets.vault import HOME, INDEX, Vault  # noqa: E402
+import _hygiene  # noqa: E402
+from _hygiene import CLAUDE  # noqa: E402
 
-os.environ["MAISECRETS_HOME"] = str(HOME)
 _TMP = str(HOME)
-# the value FIFOs live under the temp dir (or $XDG_RUNTIME_DIR); the tests must never touch
-# the directory the installed plugin uses on this machine
-os.environ.pop("XDG_RUNTIME_DIR", None)
-tempfile.tempdir = _TMP
+# the value FIFOs live under the temp dir _isolate made, without $XDG_RUNTIME_DIR: the tests never
+# touch the directory the installed plugin uses on this machine
+
+
+def tearDownModule():  # noqa: N802 - unittest hook
+    _hygiene.assert_pristine()
+    alive = _hygiene.wait_for_no_serving_child()
+    if alive:
+        raise AssertionError(f"value-serving children still run after the module: {alive}")
 
 BASH = shutil.which("bash")
 # quotes, a command substitution, a backtick, a backslash and spaces: everything a splice would break on
@@ -52,8 +58,8 @@ def _reset() -> None:
     hooks._live_cache.clear()
 
 
-def _bash_pre(command: str, session: str = "S1") -> dict:
-    return hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": command}, "session_id": session})
+def _bash_pre(command: str, session: str = "S1", client: dict = CLAUDE) -> dict:
+    return hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": command}, "session_id": session, **client})
 
 
 def _run(command: str) -> subprocess.CompletedProcess:
@@ -62,6 +68,7 @@ def _run(command: str) -> subprocess.CompletedProcess:
 
 class GrantTests(unittest.TestCase):
     def setUp(self):
+        _hygiene.watch_children(self)
         _reset()
         self.e = Vault().put(NASTY, "SECRET", "manual", session="S1")
 
@@ -113,9 +120,10 @@ class GrantTests(unittest.TestCase):
                 self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_blocked_prompt_is_kept_for_send_and_taken_once(self):
-        hooks._clipboard = lambda text: False                       # SSH: no clipboard
+        _hygiene.patch(self, hooks, "_clipboard", lambda text: False)     # SSH: no clipboard
         token = "glpat-" + "PendingProbeAbc123456789x"
-        out = hooks.user_prompt({"prompt": f"deploy with {token} now", "session_id": "S7", "transcript_path": ""})
+        out = hooks.user_prompt({"prompt": f"deploy with {token} now", "session_id": "S7", "transcript_path": "",
+                                 **CLAUDE})
         self.assertIn("/ms", out["reason"])
         self.assertNotIn(token, out["reason"])
         text = hooks.take_pending("S7")
@@ -128,10 +136,10 @@ class GrantTests(unittest.TestCase):
         self.assertIn("foreign-session", out["permissionDecisionReason"])
         self.assertIn("paste", out["permissionDecisionReason"])
         # no session id at all: nothing resolves
-        out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": "echo " + self.e.ref}})
+        out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": "echo " + self.e.ref}, **CLAUDE})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         # a human types the reference into S2: from now on S2 may resolve it
-        hooks.user_prompt({"prompt": "use " + self.e.ref, "session_id": "S2", "transcript_path": ""})
+        hooks.user_prompt({"prompt": "use " + self.e.ref, "session_id": "S2", "transcript_path": "", **CLAUDE})
         out = _bash_pre("echo " + self.e.ref, session="S2")["hookSpecificOutput"]
         self.assertIn("updatedInput", out)
 
@@ -179,6 +187,7 @@ class ContextTests(unittest.TestCase):
     context is refused with the reason (review, 2026-09-26: bash -c spliced the value as code)."""
 
     def setUp(self):
+        _hygiene.watch_children(self)
         _reset()
         self.e = Vault().put(NASTY, "SECRET", "manual", session="S1")
 
@@ -251,61 +260,56 @@ class ContextTests(unittest.TestCase):
             os.chmod(d, 0o700)
 
     def test_client_is_read_from_the_payload_before_the_environment(self):
-        os.environ["CODEX_HOME"] = "/tmp/x"
-        try:
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"CODEX_HOME": "/tmp/x"}):
             self.assertEqual(hooks.client_of({"prompt_id": "p"}), "claude")
             self.assertEqual(hooks.client_of({"turn_id": "t"}), "codex")
             self.assertEqual(hooks.client_of({}), "codex")
             out = hooks.pre_tool({"tool_name": "Bash", "prompt_id": "p", "session_id": "S1",
                                   "tool_input": {"command": "echo " + self.e.ref}})["hookSpecificOutput"]
             self.assertNotIn("permissionDecision", out, "a Claude payload is never auto-approved")
-        finally:
-            del os.environ["CODEX_HOME"]
-        self.assertEqual(hooks.client_of({}), "claude")
+        with _hygiene.without_client_env():
+            self.assertEqual(hooks.client_of({}), "claude")
 
     def test_the_run_log_label_names_the_desktop_entry_point(self):
         """The Claude desktop app starts Cowork sessions with CLAUDE_CODE_ENTRYPOINT=local-agent;
         a terminal session sets cli or nothing. Only the label changes, never the client."""
-        saved = os.environ.pop("CLAUDE_CODE_ENTRYPOINT", None)
-        try:
+        from unittest import mock
+        with _hygiene.without_client_env():
             self.assertEqual(hooks._client_label({"prompt_id": "p"}), "claude")
             os.environ["CLAUDE_CODE_ENTRYPOINT"] = "cli"
             self.assertEqual(hooks._client_label({"prompt_id": "p"}), "claude")
-            os.environ["CLAUDE_CODE_ENTRYPOINT"] = "local-agent"
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "local-agent"}):
             self.assertEqual(hooks._client_label({"prompt_id": "p"}), "claude/local-agent")
             self.assertEqual(hooks._client_label({"turn_id": "t"}), "codex",
                              "a Codex run carries no Claude entry point")
-        finally:
-            os.environ.pop("CLAUDE_CODE_ENTRYPOINT", None)
-            if saved is not None:
-                os.environ["CLAUDE_CODE_ENTRYPOINT"] = saved
 
     def test_file_tools_resolve_like_mcp_and_the_home_is_off_limits(self):
-        out = hooks.pre_tool({"tool_name": "Write", "session_id": "S1",
+        out = hooks.pre_tool({"tool_name": "Write", "session_id": "S1", **CLAUDE,
                               "tool_input": {"file_path": "/tmp/x.env", "content": "K=" + self.e.ref}})
         self.assertNotIn("permissionDecision", out["hookSpecificOutput"])
         self.assertEqual(out["hookSpecificOutput"]["updatedInput"]["content"], "K=" + NASTY)
         audit = Path(_TMP, "audit.log").read_text(encoding="utf-8")
         self.assertIn("Write /tmp/x.env", audit)
         self.assertNotIn(NASTY, audit)
-        out = hooks.pre_tool({"tool_name": "Edit", "session_id": "S2",
+        out = hooks.pre_tool({"tool_name": "Edit", "session_id": "S2", **CLAUDE,
                               "tool_input": {"file_path": "/tmp/x.env", "old_string": "a", "new_string": self.e.ref}})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("Nothing was written", out["hookSpecificOutput"]["permissionDecisionReason"])
         Path(_TMP, "config.json").write_text(
             '{"backend": "jsonfile", "allow_plaintext_store": true, "resolve_in_files": false}')
         try:
-            out = hooks.pre_tool({"tool_name": "Write", "session_id": "S1",
+            out = hooks.pre_tool({"tool_name": "Write", "session_id": "S1", **CLAUDE,
                                   "tool_input": {"file_path": "/tmp/x.env", "content": "K=" + self.e.ref}})
             self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
             self.assertIn("resolve_in_files", out["hookSpecificOutput"]["permissionDecisionReason"])
         finally:
             Path(_TMP, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
-        out = hooks.pre_tool({"tool_name": "Edit", "session_id": "S1",
+        out = hooks.pre_tool({"tool_name": "Edit", "session_id": "S1", **CLAUDE,
                               "tool_input": {"file_path": str(Path(_TMP, "config.json")),
                                              "old_string": "a", "new_string": "b"}})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
-        harmless = {"tool_name": "Write", "tool_input": {"file_path": "/tmp/y", "content": "hi"}}
+        harmless = {"tool_name": "Write", "tool_input": {"file_path": "/tmp/y", "content": "hi"}, **CLAUDE}
         self.assertEqual(hooks.pre_tool(harmless), {})
         out = _bash_pre("echo x > ~/.maisecrets/config.json")["hookSpecificOutput"]
         self.assertEqual(out["permissionDecision"], "deny")
@@ -322,6 +326,7 @@ class ScannerEdgeTests(unittest.TestCase):
     pass, here-strings, arithmetic, backslash-quoted heredocs, the value next to a letter."""
 
     def setUp(self):
+        _hygiene.watch_children(self)
         _reset()
         self.e = Vault().put(NASTY, "SECRET", "manual", session="S1")
 
@@ -443,9 +448,9 @@ class FailClosedTests(unittest.TestCase):
         self.assertIn("took longer", obj["reason"])
 
     def test_fail_closed_texts_say_whether_the_tool_ran(self):
-        pre = hooks._fail_closed("pre-tool", {}, "x")["hookSpecificOutput"]
+        pre = hooks._fail_closed("pre-tool", CLAUDE, "x")["hookSpecificOutput"]
         self.assertIn("did NOT run", pre["permissionDecisionReason"])
-        post = hooks._fail_closed("post-tool", {}, "x")["hookSpecificOutput"]
+        post = hooks._fail_closed("post-tool", CLAUDE, "x")["hookSpecificOutput"]
         self.assertIn("ran and finished", post["updatedToolOutput"])
         self.assertIn("ran and finished", hooks._fail_closed("post-tool", {"turn_id": "t"}, "x")["reason"])
 
@@ -487,8 +492,9 @@ class FailClosedTests(unittest.TestCase):
         import io
         from unittest import mock
         buf = io.StringIO()
+        # a broken stdin carries no client marker: the client is Claude Code by the environment
         with mock.patch.object(hooks.sys, "stdin", io.StringIO("{not json")), \
-                mock.patch.object(hooks.sys, "stdout", buf):
+                mock.patch.object(hooks.sys, "stdout", buf), _hygiene.without_client_env():
             rc = hooks.main(["hook", "post-tool"])
         self.assertEqual(rc, 0)
         self.assertIn("withheld", json.loads(buf.getvalue())["hookSpecificOutput"]["updatedToolOutput"])
@@ -565,7 +571,7 @@ class McpTests(unittest.TestCase):
         self.e = Vault().put(PLAIN, "SECRET", "manual", session="S1")
 
     def test_mcp_arguments_are_resolved_in_place_keeping_the_shape(self):
-        payload = {"tool_name": "mcp__x__y", "session_id": "S1",
+        payload = {"tool_name": "mcp__x__y", "session_id": "S1", **CLAUDE,
                    "tool_input": {"to": "a " + self.e.ref, "n": 1, "list": [self.e.ref, 2]}}
         out = hooks.pre_tool(payload)["hookSpecificOutput"]
         self.assertEqual(out["updatedInput"], {"to": "a " + PLAIN, "n": 1, "list": [PLAIN, 2]})
@@ -605,7 +611,7 @@ class McpTests(unittest.TestCase):
         self.assertEqual(ok["updatedInput"], {"to": PLAIN})
 
     def test_mcp_foreign_session_is_denied_and_nothing_is_partially_resolved(self):
-        out = hooks.pre_tool({"tool_name": "mcp__x__y", "session_id": "S9",
+        out = hooks.pre_tool({"tool_name": "mcp__x__y", "session_id": "S9", **CLAUDE,
                               "tool_input": {"to": self.e.ref}})["hookSpecificOutput"]
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertNotIn("updatedInput", out)
@@ -617,7 +623,7 @@ class NoticeTests(unittest.TestCase):
 
     def test_the_notice_names_the_kind_and_one_step_and_nothing_more(self):
         from unittest import mock
-        hooks._clipboard = lambda t: True
+        _hygiene.patch(self, hooks, "_clipboard", lambda t: True)
         mail = hooks.user_prompt({"prompt": "write to anna.schmidt@firma-xyz.de", "session_id": "K1",
                                   "transcript_path": "", "prompt_id": "p"})["reason"].split("\n")
         self.assertEqual(mail[0], "maisecrets: personal data was found and kept from the AI.")
@@ -637,7 +643,7 @@ class NoticeTests(unittest.TestCase):
     def test_without_a_clipboard_the_whole_prompt_is_shown_and_codex_gets_no_empty_line(self):
         long_tail = " and more words" * 40
         prompt = "check glpat-" + "Q" * 3 + "abcdefghij1234567890" + long_tail + " end-marker"
-        hooks._clipboard = lambda t: False
+        _hygiene.patch(self, hooks, "_clipboard", lambda t: False)
         for payload, codex in (({"prompt": prompt, "session_id": "N1", "transcript_path": "", "prompt_id": "p"}, False),
                                ({"prompt": prompt, "session_id": "N2", "transcript_path": "", "turn_id": "t"}, True)):
             reason = hooks.user_prompt(payload)["reason"]
@@ -653,7 +659,7 @@ class RedactionTests(unittest.TestCase):
 
     def test_shapeless_value_is_redacted_by_exact_match(self):
         e = Vault().put(NASTY, "SECRET", "manual", session="S1")
-        out = hooks.post_tool({"tool_name": "Bash", "session_id": "S1",
+        out = hooks.post_tool({"tool_name": "Bash", "session_id": "S1", **CLAUDE,
                                "tool_response": {"stdout": "PW=" + NASTY + "\ngot:" + NASTY + "\n", "stderr": ""}})
         text = json.dumps(out)
         self.assertNotIn(NASTY, text)
@@ -670,7 +676,7 @@ class RedactionTests(unittest.TestCase):
         self.assertNotIn(Vault().fp_key().hex(), idx)
 
     def test_output_without_live_entries_is_untouched(self):
-        out = hooks.post_tool({"tool_name": "Bash", "session_id": "S1",
+        out = hooks.post_tool({"tool_name": "Bash", "session_id": "S1", **CLAUDE,
                                "tool_response": {"stdout": "nothing here 12345678", "stderr": ""}})
         self.assertEqual(out, {})
 
@@ -794,12 +800,12 @@ class ReportTests(unittest.TestCase):
             os.unlink(Path(HOME, "events.log"))
         except FileNotFoundError:
             pass
-        hooks._clipboard = lambda text: True
+        _hygiene.patch(self, hooks, "_clipboard", lambda text: True)
 
     def test_block_records_an_event_and_the_issue_link_carries_no_value(self):
         from maisecrets import events
         token = "glpat-" + "ReportProbeAbc123456789x"
-        out = hooks.user_prompt({"prompt": f"token {token}", "session_id": "S1", "transcript_path": ""})
+        out = hooks.user_prompt({"prompt": f"token {token}", "session_id": "S1", "transcript_path": "", **CLAUDE})
         self.assertIn("/maisecrets:report", out["reason"])
         ev = events.load()[-1]
         self.assertEqual(ev["hook"], "UserPromptSubmit")

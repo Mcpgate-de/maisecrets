@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _isolate  # noqa: E402,F401  first: no client environment, a temp home and temp dir
 sys.path.insert(0, str(ROOT))
 BELIEFS = sorted((ROOT / "beliefs").glob("*.toml"))
 

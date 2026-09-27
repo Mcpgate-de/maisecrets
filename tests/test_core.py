@@ -18,14 +18,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-# isolate the vault for every test run
-_TMP = tempfile.mkdtemp(prefix="maisecrets-test-")
-os.environ["MAISECRETS_HOME"] = _TMP
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+# this module set its own MAISECRETS_HOME after another module had fixed the vault home, so its
+# reset deleted files in a directory the vault did not use (suite review, 2026-09-27)
+_TMP = _isolate.HOME
 # tests never touch the real keychain
+Path(_TMP).mkdir(parents=True, exist_ok=True)
 Path(_TMP, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
 from maisecrets import detect, hooks, placeholder  # noqa: E402
-from maisecrets.vault import Vault  # noqa: E402
+from maisecrets.vault import HOME, Vault  # noqa: E402
+import _hygiene  # noqa: E402
+from _hygiene import CLAUDE  # noqa: E402
+
+assert str(HOME) == _TMP, "the vault home is the one _isolate made"
+
+
+def tearDownModule():  # noqa: N802 - unittest hook
+    _hygiene.assert_pristine()
 
 GLPAT = "glpat-" + "A1b2C3d4E5f6G7h8I9j0"          # 20 chars after prefix
 AKIA = "AKIA" + "ABCDEFGHIJKLMNOP"
@@ -68,8 +79,8 @@ class DetectTests(unittest.TestCase):
         text = f"token {GLPAT} and key {AKIA} please"
         ms = detect.scan(text)
         self.assertEqual([m.value for m in ms], [GLPAT, AKIA])
-        hooks._clipboard = lambda t: True
-        out = hooks.user_prompt({"prompt": text, "session_id": "s2", "transcript_path": ""})
+        _hygiene.patch(self, hooks, "_clipboard", lambda t: True)
+        out = hooks.user_prompt({"prompt": text, "session_id": "s2", "transcript_path": "", **CLAUDE})
         self.assertEqual(out["decision"], "block")
         self.assertIn("maisecrets: a secret was found and kept from the AI.", out["reason"])
         self.assertIn("pastes the cleaned prompt", out["reason"], "the one next step, with the clipboard")
@@ -282,10 +293,9 @@ class PlaceholderTests(unittest.TestCase):
 
 class VaultTests(unittest.TestCase):
     def setUp(self):
-        import shutil
-        for f in Path(_TMP).glob("*"):
-            if f.name not in ("config.json", ".lock"):   # keep the jsonfile pin and the open lock file
-                shutil.rmtree(f) if f.is_dir() else f.unlink()
+        # the vault files only: the home is shared with the other modules of this process
+        for name in ("index.json", "vault.json", "audit.log", "events.log"):
+            Path(_TMP, name).unlink(missing_ok=True)
         self.v = Vault({"backend": "jsonfile", "ttl_seconds": {"default": 60},
                         "max_ttl_seconds": 120, "renew_on_use": True})
 
@@ -341,30 +351,33 @@ class VaultTests(unittest.TestCase):
 class HookTests(unittest.TestCase):
     def setUp(self):
         import shutil
-        for f in Path(_TMP).glob("*"):
-            if f.name not in ("config.json", ".lock"):   # keep the jsonfile pin and the open lock file
-                shutil.rmtree(f) if f.is_dir() else f.unlink()
-        hooks._clipboard = lambda text: True  # no real clipboard in tests
+        _hygiene.watch_children(self)
+        # the vault files only: the home is shared with the other modules of this process
+        for name in ("index.json", "vault.json", "audit.log", "events.log", "hooks.log"):
+            Path(_TMP, name).unlink(missing_ok=True)
+        shutil.rmtree(Path(_TMP, "pending"), ignore_errors=True)
+        hooks._live_cache.clear()
+        _hygiene.patch(self, hooks, "_clipboard", lambda text: True)  # no real clipboard in tests
 
     def test_prompt_with_secret_is_blocked_and_stored(self):
-        out = hooks.user_prompt({"prompt": f"check {GLPAT} in CI", "session_id": "s1"})
+        out = hooks.user_prompt({"prompt": f"check {GLPAT} in CI", "session_id": "s1", **CLAUDE})
         self.assertEqual(out["decision"], "block")
         self.assertNotIn(GLPAT, json.dumps(out))
         self.assertTrue(out["hookSpecificOutput"]["suppressOriginalPrompt"])
         self.assertEqual(Vault().get("SECRET_c1", session="s1"), (GLPAT, "ok"))
 
     def test_prompt_without_hit_passes(self):
-        self.assertEqual(hooks.user_prompt({"prompt": "say hi"}), {})
+        self.assertEqual(hooks.user_prompt({"prompt": "say hi", **CLAUDE}), {})
 
     def test_at_mention_of_existing_file_is_blocked(self):
         with tempfile.NamedTemporaryFile(suffix=".env", delete=False) as f:
             f.write(b"X=1")
-        out = hooks.user_prompt({"prompt": f"look at @{f.name}", "cwd": "/"})
+        out = hooks.user_prompt({"prompt": f"look at @{f.name}", "cwd": "/", **CLAUDE})
         self.assertEqual(out["decision"], "block")
 
     def test_pre_tool_rewrites_bash_to_a_granted_resolve_and_denies_unknown(self):
         e = Vault().put(GLPAT, "SECRET", "gitlab-pat", session="s1")
-        out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1",
+        out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", **CLAUDE,
                               "tool_input": {"command": f'curl -H "PRIVATE-TOKEN: {e.ref}" u'}})
         cmd = out["hookSpecificOutput"]["updatedInput"]["command"]
         self.assertNotIn(GLPAT, cmd)                     # the value is never spliced into the command
@@ -372,17 +385,19 @@ class HookTests(unittest.TestCase):
         self.assertIn(f"value for {e.key} was not delivered", cmd)
         self.assertTrue(cmd.endswith('curl -H "PRIVATE-TOKEN: ${__ms_1}" u'), cmd)   # double-quote context
         self.assertNotIn("permissionDecision", out["hookSpecificOutput"])
-        out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", "tool_input": {"command": "echo ⟦SECRET_c42⟧"}})
+        out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", **CLAUDE,
+                              "tool_input": {"command": "echo ⟦SECRET_c42⟧"}})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_pre_tool_resolves_gateway_tool_arguments_until_the_deposit_path_exists(self):
         e = Vault().put("max@example.org", "EMAIL", "email", session="s1")
         out = hooks.pre_tool({"tool_name": "mcp__example-gateway__x", "tool_input": {"q": e.ref}, "session_id": "s1",
+                              **CLAUDE,
                               "mcp_server": {"name": "example-gateway", "source": "user"}})
         self.assertEqual(out["hookSpecificOutput"]["updatedInput"], {"q": "max@example.org"})
 
     def test_post_tool_redacts_bash_output_keeping_shape(self):
-        out = hooks.post_tool({"tool_name": "Bash", "tool_input": {"command": "cat .env"},
+        out = hooks.post_tool({"tool_name": "Bash", "tool_input": {"command": "cat .env"}, **CLAUDE,
                                "tool_response": {"stdout": f"TOKEN={GLPAT}\n", "stderr": "",
                                                  "interrupted": False, "isImage": False}})
         upd = out["hookSpecificOutput"]["updatedToolOutput"]
@@ -391,14 +406,13 @@ class HookTests(unittest.TestCase):
         self.assertIn("⟦SECRET_c1⟧", upd["stdout"])
 
     def test_post_tool_without_hit_returns_nothing(self):
-        self.assertEqual(hooks.post_tool({"tool_response": {"stdout": "all good"}}), {})
+        self.assertEqual(hooks.post_tool({"tool_response": {"stdout": "all good"}, **CLAUDE}), {})
 
     def test_main_fails_closed_on_bad_payload(self):
-        sys.stdin = io.StringIO("not json")
+        from unittest import mock
         buf = io.StringIO()
-        with redirect_stdout(buf):
+        with mock.patch.object(sys, "stdin", io.StringIO("not json")), redirect_stdout(buf):
             rc = hooks.main(["hook", "user-prompt"])
-        sys.stdin = sys.__stdin__
         self.assertEqual(rc, 2)
 
 
