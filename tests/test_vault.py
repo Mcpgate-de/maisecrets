@@ -1328,7 +1328,10 @@ class RaceAgainstPutTests(unittest.TestCase):
         "    index = Path(os.environ['MAISECRETS_HOME']) / 'index.json'\n"
         # read_text_retry: on Windows a read while the writer's os.replace runs raises PermissionError
         "    from maisecrets.vault import read_text_retry\n"
-        "    while sum(m.get('session') == 'S-w' for m in json.loads(read_text_retry(index))['entries'].values()) < 8:\n"
+        "    def writes():\n"
+        "        entries = json.loads(read_text_retry(index))['entries']\n"
+        "        return sum(m.get('session') == 'S-w' for m in entries.values())\n"
+        "    while writes() < 8:\n"
         "        time.sleep(0.002)\n"
         "    n, problems = wipe_everything(load_config())\n"
         "    assert not problems, problems\n"
