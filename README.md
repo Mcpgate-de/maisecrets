@@ -168,7 +168,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 7 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
-python3 scripts/replay_can_fail.py                     # 26 proofs: each control's test goes red without it
+python3 scripts/replay_can_fail.py                     # 27 proofs: each control's test goes red without it
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 scripts/install-hooks.sh                               # git pre-commit / pre-push
 ```
@@ -289,10 +289,12 @@ values that already leaked. The model loads it when a task fits; in Claude Code 
   `--history`, in every commit on every ref. A finding is a file, a line, a type, the rule, a
   length and a per-run id. The same id means the same value; the output never holds a value,
   a line of the file or a hash of the value, because the model reads it.
-- **Install the protection.** Every task starts with `protection_status.py`, which reads the run
-  log: when no maisecrets hook ran for the current prompt, the answer opens with an offer to
-  install the plugin, and runs the install commands only after a yes. This is how the skill,
-  which a store can list alone, brings the hooks along.
+- **Install the protection.** A conversation starts with `protection_status.py`. It says ACTIVE
+  only when a hook of the same agent ran for the call that started it. Otherwise the answer
+  opens with an offer that names the source and the step the user must do, and the install
+  commands run only after a yes. There is no offer in a web or mobile chat, and none without a
+  Python 3.11 for the hooks. This is how the skill, which a store can list alone, brings the
+  hooks along.
 - **Check what the agents already received.** `audit_transcripts.py` reads the local Claude Code
   and Codex sessions and lists every secret that sat in a prompt, a tool result or a model answer,
   so it reached Anthropic or OpenAI: by type, rule, dates and sessions, never by value. On request

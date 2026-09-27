@@ -1,0 +1,10 @@
+# skill-a-hook-run-of-another-client-is-not-active: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "skill-a-hook-run-of-another-client-is-not-active"
+control = "C17"
+statement = "The skill's protection check says ACTIVE only for a pre-tool hook run of the same client in the last seconds: an open Claude Code window does not make an unprotected Codex session look protected."
+runner = ["tests/test_skill.py::ProtectionStatusTests::test_a_run_of_another_client_an_other_event_or_an_old_run_is_not_active"]
+
+[proof]
+file = "skills/secret-hygiene/scripts/protection_status.py"
+find = "        if client and parts[2].split(\"/\", 1)[0] != client:\n            continue\n"
+replace = ""

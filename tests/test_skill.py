@@ -5,6 +5,7 @@ the skill tells the model to, and searches every byte of output for the token.""
 from __future__ import annotations
 
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -18,6 +19,7 @@ import time
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -454,60 +456,149 @@ class TranscriptAuditTests(unittest.TestCase):
 
 
 class ProtectionStatusTests(unittest.TestCase):
-    """The skill opens every task with this check and offers the install when it says NOT
-    ACTIVE, so the verdict must follow the run log, and print nothing from it."""
+    """The skill opens a conversation with this check and offers the install on NOT ACTIVE, so the
+    verdict must follow this client's own hook run, and print nothing from the log (Ops and UX
+    reviews, 2026-09-27)."""
 
     def setUp(self):
         self.home = Path(tempfile.mkdtemp(prefix="maisecrets-status-"))
+        self.bindir = self.home / "bin"
+        self.bindir.mkdir()
+        self.fake("python3", "#!/bin/sh\necho 3.12\n")      # the Python the hooks would use
 
     def tearDown(self):
         shutil.rmtree(self.home, ignore_errors=True)
 
-    def status(self):
-        env = dict(_clean_env(), MAISECRETS_HOME=str(self.home), PATH="/usr/bin:/bin")
-        return subprocess.run([sys.executable, str(SCRIPTS / "protection_status.py")], capture_output=True,
-                              text=True, env=env, timeout=60)
+    def fake(self, name: str, body: str) -> None:
+        (self.bindir / name).write_text(body, encoding="utf-8")
+        (self.bindir / name).chmod(0o755)
 
-    def write_log(self, seconds_ago: int, marker: str = "S1"):
+    def cli(self, name: str, installed: bool) -> None:
+        """A fake agent CLI whose `plugin list --json` answers as the real one does."""
+        if name == "codex":
+            rows = [{"pluginId": "maisecrets@maisecrets", "enabled": True}] if installed else []
+            out = json.dumps({"installed": rows, "available": []})
+        else:
+            out = json.dumps([{"id": "maisecrets@maisecrets", "enabled": True}] if installed else [])
+        self.fake(name, f"#!/bin/sh\ncat <<'EOF'\n{out}\nEOF\n")
+
+    def log(self, seconds_ago: int, event: str = "pre-tool", client: str = "codex", session: str = "S1"):
         import datetime as dt
         when = (dt.datetime.now() - dt.timedelta(seconds=seconds_ago)).isoformat(timespec="seconds")
-        (self.home / "hooks.log").write_text(f"{when}\tuser-prompt\tcodex\t{marker}\t-\tpass\t3ms\tok\n",
-                                             encoding="utf-8")
+        with open(self.home / "hooks.log", "a", encoding="utf-8") as f:
+            f.write(f"{when}\t{event}\t{client}\t{session}\tBash\tpass\t3ms\tok\n")
 
-    def status_with(self, *clis):
-        """A PATH that holds only fake agent CLIs, so the test does not depend on this machine."""
-        bindir = self.home / "bin"
-        bindir.mkdir(exist_ok=True)
-        for cli in clis:
-            (bindir / cli).write_text("#!/bin/sh\necho none\n")
-            (bindir / cli).chmod(0o755)
-        env = dict(_clean_env(), MAISECRETS_HOME=str(self.home), PATH=f"{bindir}{os.pathsep}/usr/bin:/bin")
+    def status(self, **env: str):
+        full = {k: v for k, v in _clean_env().items() if not k.startswith("CODEX_") and k != "CLAUDECODE"}
+        full.update(MAISECRETS_HOME=str(self.home), PATH=f"{self.bindir}{os.pathsep}/usr/bin:/bin", **env)
         return subprocess.run([sys.executable, str(SCRIPTS / "protection_status.py")], capture_output=True,
-                              text=True, env=env, timeout=60)
+                              text=True, env=full, timeout=60)
 
-    def test_no_log_is_not_active_and_names_the_install(self):
-        r = self.status_with("codex")
+    def test_this_clients_pre_tool_run_a_moment_ago_is_active_and_nothing_of_the_log_is_printed(self):
+        self.log(3, session="session-abc123")
+        r = self.status(CODEX_THREAD_ID="t")
+        self.assertEqual((r.returncode, r.stdout.splitlines()[0]), (0, "maisecrets protection: ACTIVE for Codex."))
+        self.assertNotIn("session-abc123", r.stdout)
+
+    def test_a_run_of_another_client_an_other_event_or_an_old_run_is_not_active(self):
+        self.cli("codex", installed=False)
+        for why, args in (("another client", dict(client="claude/cli")), ("a prompt, not the tool call",
+                          dict(event="user-prompt")), ("two minutes old", dict(seconds_ago=120))):
+            with self.subTest(why):
+                (self.home / "hooks.log").unlink(missing_ok=True)
+                self.log(**{"seconds_ago": 3, **args})
+                r = self.status(CODEX_THREAD_ID="t")
+                self.assertEqual(r.returncode, 1, r.stdout)
+                self.assertIn("NOT ACTIVE", r.stdout)
+
+    def test_an_unknown_agent_is_active_only_as_not_confirmed(self):
+        self.log(3, client="claude/cli")
+        r = self.status()
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("not confirmed", r.stdout)
+
+    def test_not_active_names_the_commands_of_the_clis_here_and_their_undo(self):
+        self.cli("codex", installed=False)
+        r = self.status(CODEX_THREAD_ID="t")
         self.assertEqual(r.returncode, 1)
-        self.assertIn("NOT ACTIVE", r.stdout)
         self.assertIn("codex plugin marketplace add https://github.com/Mcpgate-de/maisecrets.git", r.stdout)
+        self.assertIn("codex plugin add maisecrets@maisecrets", r.stdout)
+        self.assertIn("Undo: codex plugin remove maisecrets@maisecrets", r.stdout)
         self.assertNotIn("claude plugin", r.stdout, "no Claude Code here, so no Claude Code command")
 
-    def test_without_an_agent_cli_nothing_is_offered(self):
-        """A web or mobile chat, or a hosted sandbox, has neither CLI: no install can work there."""
-        r = self.status_with()
+    def test_an_installed_plugin_whose_hooks_did_not_run_gets_the_last_step_not_an_install(self):
+        self.cli("codex", installed=True)
+        r = self.status(CODEX_THREAD_ID="t")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("installed, but its hooks did not run", r.stdout)
+        self.assertIn("type /hooks in the chat box", r.stdout)
+        self.assertNotIn("plugin marketplace add", r.stdout)
+
+    def test_without_an_agent_nothing_is_offered(self):
+        """A web or mobile chat, or a hosted sandbox: no agent CLI and no agent environment."""
+        r = self.status()
         self.assertEqual(r.returncode, 2)
         self.assertIn("NOT AVAILABLE HERE", r.stdout)
         self.assertNotIn("plugin marketplace add", r.stdout)
 
-    def test_a_hook_run_a_moment_ago_is_active_and_nothing_of_the_log_is_printed(self):
-        self.write_log(20, marker="session-abc123")
-        r = self.status()
-        self.assertEqual(r.returncode, 0, r.stdout)
-        self.assertIn("ACTIVE (codex hooks ran", r.stdout)
-        self.assertNotIn("session-abc123", r.stdout)
-
-    def test_an_old_hook_run_is_not_active(self):
-        self.write_log(3600)
-        r = self.status_with("codex")
+    def test_inside_an_agent_without_its_cli_on_path_the_app_install_is_named(self):
+        r = self.status(CODEX_THREAD_ID="t")
         self.assertEqual(r.returncode, 1)
-        self.assertIn("60 min ago", r.stdout)
+        self.assertIn("not on this computer's PATH", r.stdout)
+
+    def test_a_timezone_stamp_does_not_crash_the_check(self):
+        (self.home / "hooks.log").write_text("2026-09-27T12:00:00+14:00\tpre-tool\tcodex\tS\tBash\n",
+                                             encoding="utf-8")
+        self.cli("codex", installed=False)
+        r = self.status(CODEX_THREAD_ID="t")
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
+
+class ProtectionStatusPythonTests(unittest.TestCase):
+    """With no Python 3.11+ for the hooks, an install blocks every prompt: nothing is offered."""
+
+    def load(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("protection_status", SCRIPTS / "protection_status.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_an_old_python_everywhere_is_cannot_protect_yet_and_offers_no_install(self):
+        mod = self.load()
+        old = subprocess.CompletedProcess([], 0, stdout="3.9\n", stderr="")
+        with mock.patch.object(mod.shutil, "which", side_effect=lambda n: f"/fake/{n}"), \
+                mock.patch.object(mod.subprocess, "run", return_value=old), \
+                mock.patch.object(mod, "installed", return_value=False), \
+                mock.patch.object(mod, "last_pre_tool", return_value=None), \
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "t"}), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(mod.main(), 3)
+        self.assertIn("CANNOT PROTECT YET", out.getvalue())
+        self.assertNotIn("plugin marketplace add", out.getvalue())
+
+    def test_the_search_follows_run_sh_and_takes_the_first_new_enough_python(self):
+        mod = self.load()
+        run_sh = (ROOT / "hooks" / "run.sh").read_text(encoding="utf-8")
+        for name in mod.PYTHONS:
+            self.assertIn(name, run_sh, "the check must search what the launcher searches")
+        versions = {"python3": "3.9", "python": "3.12"}
+
+        def run(argv, **kw):
+            return subprocess.CompletedProcess(argv, 0, stdout=versions.get(Path(argv[0]).name, "") + "\n", stderr="")
+        with mock.patch.object(mod.shutil, "which", side_effect=lambda n: f"/fake/{n}" if n in versions else None), \
+                mock.patch.object(mod.subprocess, "run", side_effect=run):
+            self.assertEqual(mod.hook_python(), (True, "python 3.12"))
+
+    def test_installed_runs_the_full_path_so_a_cmd_file_works_on_windows(self):
+        mod = self.load()
+        seen = []
+
+        def run(argv, **kw):
+            seen.append(argv[0])
+            return subprocess.CompletedProcess(argv, 0, stdout='{"installed": []}', stderr="")
+        with mock.patch.object(mod.shutil, "which", return_value="C:/npm/codex.cmd"), \
+                mock.patch.object(mod.subprocess, "run", side_effect=run):
+            self.assertIs(mod.installed("codex"), False)
+        self.assertEqual(seen, ["C:/npm/codex.cmd"])
