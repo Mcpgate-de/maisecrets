@@ -114,9 +114,12 @@ library reads it.
 
 ## Unit tests
 
-144 tests (`tests/test_core.py`, `tests/test_skill.py`, `tests/test_gates.py`, `tests/test_operations.py`, `tests/test_release_tools.py`, `tests/test_beliefs_well_formed.py`, `tests/test_platform_backend.py`;
+228 tests (`tests/test_core.py`, `tests/test_skill.py`, `tests/test_gates.py`, `tests/test_operations.py`, `tests/test_release_tools.py`, `tests/test_beliefs_well_formed.py`, `tests/test_vault.py`, `tests/test_platform_backend.py`;
 the last one runs only with `MAISECRETS_NATIVE_BACKEND_TEST=1` or in CI, because it
-touches the real store), in under three seconds. The gate tests execute the rewritten command through a
+touches the real store), in about twelve seconds (measured 2026-09-27). `tests/test_vault.py` moves a
+clock from paste to purge, runs every backend through one contract (the keychain and the Credential
+Locker against an emulator; the real binaries are refused), and runs two processes against one index.
+The gate tests execute the rewritten command through a
 real bash and compare bytes, so a broken quoting context or a leaked value
 fails them:
 

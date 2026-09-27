@@ -83,10 +83,22 @@ def _reset() -> None:
     vault.CONFIG.write_text(BASE_CONFIG, encoding="utf-8")
 
 
+FAKE_BIN = HOME / "fake-bin"
+NATIVE_MARK = HOME / "a-native-store-binary-ran"
+
+
 def _child_env(home: Path) -> dict:
+    """A child sees only this vault home, no GIT_* variable, and a `security` and `powershell`
+    first on PATH that leave a mark and fail: a child that reaches for a native store is seen."""
+    FAKE_BIN.mkdir(exist_ok=True)
+    for name in ("security", "powershell"):
+        script = FAKE_BIN / name
+        script.write_text(f'#!/bin/sh\ntouch "{NATIVE_MARK}"\nexit 99\n', encoding="utf-8")
+        script.chmod(0o755)
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["MAISECRETS_HOME"] = str(home)
     env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    env["PATH"] = str(FAKE_BIN) + os.pathsep + env.get("PATH", "")
     return env
 
 
@@ -1220,6 +1232,7 @@ class ConcurrencyTests(unittest.TestCase):
             self.assertEqual(values, sorted(["race-fake-seed"] + [f"race-fake-{t}-{i:03d}"
                                                                   for t in "ab" for i in range(n)]))
             self.assertEqual([p.name for p in home.iterdir() if p.name.endswith(".tmp")], [])
+            self.assertFalse(NATIVE_MARK.exists(), "a child ran a native store binary")
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
