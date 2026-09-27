@@ -1,6 +1,6 @@
 ---
 name: secret-hygiene
-description: Find, contain and clean up secrets that already leaked. Use when the user asks whether a repository, its git history or a file contains passwords, API keys, tokens or private keys; when the user says a key or password was pasted into a chat, committed, pushed, logged or shared; or when the user wants a log, config or stack trace made safe to post in an issue, ticket or chat. Never shows a secret value.
+description: Find, contain and clean up secrets that already leaked. Use when the user asks whether a repository, its git history, a file or their past AI agent sessions contain passwords, API keys, tokens or private keys; when the user says a key or password was pasted into a chat, committed, pushed, logged or shared; or when the user wants a log, config or stack trace made safe to post in an issue, ticket or chat. Never shows a secret value.
 ---
 
 # Secret hygiene
@@ -52,6 +52,23 @@ maisecrets hooks do that, in Claude Code, Cowork and Codex, when the plugin is i
    - The value is a test fixture or a placeholder: say so, and suggest a clearly fake value.
 6. Suggest a guard against the next leak: a pre-commit secret scan (for example gitleaks),
    and the maisecrets plugin for the agent itself.
+
+## Check what the AI agents already received
+
+Claude Code and Codex keep every session on this computer. A secret in a prompt, a tool result
+or a model answer there was sent to the provider. This is the fastest way to answer "what did
+my agents already leak?".
+
+1. Run `python3 scripts/audit_transcripts.py --out <file>`. Add `--days 30` for a quick look,
+   `--claude` or `--codex` for one agent, `--pii` for personal data. On a machine with many
+   sessions it takes minutes: tell the user, and run it in the background if you can.
+2. Report the values under "REACHED THE PROVIDER" first, `shape` before `guess`: each one was
+   sent to Anthropic or OpenAI and must be rotated ("Contain a leak"). Values only in local
+   records did not provably reach a provider.
+3. Only when the user asks, offer to clean the local copies: `--scrub` lists the files, and
+   only `--scrub --yes`, after the user's explicit yes, replaces the values. Say every time
+   that this cleans only this computer: the provider keeps what it received, so rotation
+   comes first.
 
 ## Contain a leak
 

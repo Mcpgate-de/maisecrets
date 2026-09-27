@@ -6,5 +6,5 @@ runner = ["tests/test_core.py::DetectTests::test_label_on_its_own_line_takes_the
 
 [proof]
 file = "maisecrets/detect.py"
-find = "        if _LABEL_ONLY_RE.search(line):\n"
+find = "        if _LABEL_ONLY_RE.search(line) and not _CODE_CONDITION_RE.search(line):\n"
 replace = "        if False:\n"

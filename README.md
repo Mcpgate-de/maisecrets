@@ -292,6 +292,11 @@ values that already leaked. The model loads it when a task fits; in Claude Code 
   `--history`, in every commit on every ref. A finding is a file, a line, a type, the rule, a
   length and a per-run id. The same id means the same value; the output never holds a value,
   a line of the file or a hash of the value, because the model reads it.
+- **Check what the agents already received.** `audit_transcripts.py` reads the local Claude Code
+  and Codex sessions and lists every secret that sat in a prompt, a tool result or a model answer,
+  so it reached Anthropic or OpenAI: by type, rule, dates and sessions, never by value. On request
+  it replaces the values in the local files (`--scrub`, then `--scrub --yes`), which does not
+  take back what the provider received.
 - **Contain a leak.** For a value that reached a chat, a commit, a log or a ticket, the skill
   gives the rotation steps per service from `references/rotation.md`: rotate first, clean up
   second. This part needs no shell, so it also works in a chat.

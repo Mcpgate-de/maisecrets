@@ -5,6 +5,7 @@ the skill tells the model to, and searches every byte of output for the token.""
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import secrets
 import shutil
@@ -12,6 +13,7 @@ import string
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -52,7 +54,8 @@ class SkillFileTests(unittest.TestCase):
         self.assertEqual(fields["name"], SKILL.name, "the folder name must match the skill name")
         self.assertTrue(fields["description"] and "\n" not in fields["description"])
         self.assertLessEqual(len(fields["description"]), 1024)
-        for rel in ("scripts/scan_secrets.py", "scripts/redact_copy.py", "references/rotation.md"):
+        for rel in ("scripts/scan_secrets.py", "scripts/redact_copy.py", "scripts/audit_transcripts.py",
+                    "references/rotation.md"):
             self.assertIn(rel, text, rel)
             self.assertTrue((SKILL / rel).is_file(), rel)
 
@@ -233,3 +236,71 @@ class SkillZipTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TranscriptAuditTests(unittest.TestCase):
+    """The audit reads agent transcripts, which hold everything a session saw. It must name what
+    reached the provider without printing it, and scrub only after a yes."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="maisecrets-audit-"))
+        self.claude = self.dir / "claude"
+        self.codex = self.dir / "codex"
+        self.token, self.other = _token(), _token()
+        proj = self.claude / "projects" / "-Users-x-repo"
+        proj.mkdir(parents=True)
+        rows = [
+            {"type": "user", "timestamp": "2026-09-20T10:00:00Z", "message": {"content": f"use {self.token} please"}},
+            {"type": "user", "timestamp": "2026-09-21T10:00:00Z",
+             "message": {"content": [{"type": "tool_result", "content": f"GITHUB_TOKEN={self.token}"}]}},
+            {"type": "attachment", "timestamp": "2026-09-21T10:00:01Z", "attachment": {"type": "hook_success",
+                                                                                      "content": self.other}},
+        ]
+        self.session = proj / "abcdef12-0000.jsonl"
+        self.session.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        old = time.time() - 3600
+        os.utime(self.session, (old, old))
+        (self.codex / "sessions" / "2026").mkdir(parents=True)
+        (self.codex / "sessions" / "2026" / "rollout-x.jsonl").write_text(json.dumps(
+            {"type": "response_item", "timestamp": "2026-09-22T09:00:00Z",
+             "payload": {"type": "function_call_output", "output": f"token={self.token}"}}) + "\n", encoding="utf-8")
+        self.env = dict(_clean_env(), PYTHONUTF8="1", CLAUDE_CONFIG_DIR=str(self.claude), CODEX_HOME=str(self.codex))
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def audit(self, *args):
+        return subprocess.run([sys.executable, str(SCRIPTS / "audit_transcripts.py"), *args], capture_output=True,
+                              text=True, encoding="utf-8", env=self.env, timeout=120)
+
+    def test_the_report_names_what_reached_the_provider_and_no_value(self):
+        r = self.audit()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("Reached the AI provider: 1 distinct value(s). Only in local records: 1.", r.stdout)
+        row = next(line for line in r.stdout.splitlines() if line.startswith("  S1"))
+        self.assertIn("to Anthropic/OpenAI", row)
+        self.assertIn("in 2 session(s)", row)
+        self.assertIn("prompt", row)
+        self.assertIn("tool result", row)
+        self.assertIn("2026-09-20..2026-09-22", row)
+        for part in (self.token, self.token[4:], self.other, self.other[4:]):
+            self.assertNotIn(part, r.stdout + r.stderr)
+
+    def test_scrub_asks_first_then_keeps_every_line_valid_json(self):
+        dry = self.audit("--scrub", "--claude")
+        self.assertIn("Nothing was changed", dry.stdout)
+        self.assertIn(self.token, self.session.read_text(encoding="utf-8"))
+        done = self.audit("--scrub", "--yes", "--claude")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        text = self.session.read_text(encoding="utf-8")
+        self.assertNotIn(self.token, text)
+        self.assertIn("⟦SCRUBBED_S", text)
+        for line in text.splitlines():
+            json.loads(line)
+        self.assertIn("provider keeps what it received", done.stdout)
+        self.assertNotIn(self.token, done.stdout)
+
+    def test_a_running_session_is_not_scrubbed(self):
+        os.utime(self.session, None)
+        self.audit("--scrub", "--yes", "--claude")
+        self.assertIn(self.token, self.session.read_text(encoding="utf-8"))

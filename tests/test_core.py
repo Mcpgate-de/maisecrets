@@ -110,6 +110,14 @@ class DetectTests(unittest.TestCase):
         self.assertGreater(len(whole), 100)
         self.assertEqual(window, whole)
 
+    def test_a_condition_that_ends_in_a_colon_is_not_a_label(self):
+        for code in ('if kind != "SECRET":\n    continue\n', 'elif token == "x":\n    return value\n',
+                     "while password:\n    retry_after_delay()\n"):
+            with self.subTest(code[:12]):
+                self.assertEqual(detect.scan(code), [])
+        value = "Tr0ub4dor" + "&3xyz"   # a real label on its own line still takes the next line
+        self.assertEqual([m.value for m in detect.scan("passwort:\n" + value)], [value])
+
     def test_german_credential_labels_are_keywords_too(self):
         for label in ("passwort", "Kennwort", "Schlüssel", "zugangsdaten"):
             with self.subTest(label):

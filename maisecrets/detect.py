@@ -473,6 +473,10 @@ def _has_context_word(window: str, context: tuple[str, ...]) -> bool:
 
 
 _LABEL_ONLY_RE = re.compile(r"[:=]\s*$")
+# a line of code that ends in a colon is a condition, not a label: `if kind != "SECRET":` and
+# `continue` on the next line was taken for a labelled secret (twice in this repository's own
+# pre-commit check, 2026-09-27)
+_CODE_CONDITION_RE = re.compile(r"(?:==|!=|<=|>=|\bif\b|\belif\b|\bwhile\b|\bcase\b|\bfor\b|\bdef\b|\bclass\b)")
 
 
 # gitleaks' generic-api-key starts with a lazy `[\w.-]{0,50}?` before its keyword, so the regex
@@ -529,7 +533,7 @@ def _matches(rule: Rule, text: str):
             continue
         for m in rule.regex.finditer(line):
             yield _Shifted(m, pos)
-        if _LABEL_ONLY_RE.search(line):
+        if _LABEL_ONLY_RE.search(line) and not _CODE_CONDITION_RE.search(line):
             j = i + 1
             while j < len(lines) and not lines[j].strip():
                 j += 1
