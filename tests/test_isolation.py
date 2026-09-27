@@ -97,7 +97,9 @@ class PlatformFakeTests(unittest.TestCase):
     def test_without_a_test_file_and_for_the_store_each_call_trips_and_fails(self):
         with tempfile.TemporaryDirectory() as d:
             trip = Path(d, "trip")
-            env = {k: v for k, v in os.environ.items() if k != "MS_TEST_CLIP"}
+            # outside CI: there the store stays real on purpose
+            env = {k: v for k, v in os.environ.items()
+                   if k not in ("MS_TEST_CLIP", "CI", "MAISECRETS_NATIVE_BACKEND_TEST")}
             env["MS_TEST_TRIPWIRE"] = str(trip)
             code = ("import subprocess\n"
                     "a = subprocess.run(['clip'], input=b'x').returncode\n"

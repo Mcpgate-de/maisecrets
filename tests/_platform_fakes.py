@@ -10,8 +10,9 @@ module on PYTHONPATH through a sitecustomize, so every Python child of a test im
 - any other `powershell` call (the Credential Locker store) notes the call and fails.
 - `os.startfile` (the browser on Windows) appends the URL to $MS_TEST_OPENED.
 
-MAISECRETS_NATIVE_BACKEND_TEST=1 keeps the real powershell, MAISECRETS_NATIVE_CLIPBOARD_TEST=1 the
-real clip and powershell: the native tests use the real tools on purpose.
+The store stays real in CI and with MAISECRETS_NATIVE_BACKEND_TEST=1, as on POSIX; the clipboard
+stays real only with MAISECRETS_NATIVE_CLIPBOARD_TEST=1. The native tests use the real tools on
+purpose.
 """
 import os
 import subprocess
@@ -26,13 +27,15 @@ def _tripwire_path() -> str:
                                                               "tripwire")
 
 
-def _faked() -> set:
-    names = {"clip", "powershell"}
-    if os.environ.get("MAISECRETS_NATIVE_CLIPBOARD_TEST") == "1":
-        names = set()
-    elif os.environ.get("MAISECRETS_NATIVE_BACKEND_TEST") == "1":
-        names.discard("powershell")
-    return names
+def _faked(name: str, rest: list) -> bool:
+    """Whether this call goes to the fake. The clipboard is always faked, except in the native
+    clipboard test. The store (any other powershell call) is real in CI and in the native backend
+    test, as security and powershell are on POSIX (tests/_isolate.py)."""
+    if name == "clip" or (name == "powershell" and "Get-Clipboard" in " ".join(map(str, rest))):
+        return os.environ.get("MAISECRETS_NATIVE_CLIPBOARD_TEST") != "1"
+    if name == "powershell":
+        return not (os.environ.get("CI") or os.environ.get("MAISECRETS_NATIVE_BACKEND_TEST") == "1")
+    return False
 
 
 def _name(args) -> str:
@@ -42,8 +45,8 @@ def _name(args) -> str:
 
 
 def _init(self, args, *a, **kw):
-    if not kw.get("shell") and _name(args) in _faked():
-        rest = list(args[1:]) if isinstance(args, (list, tuple)) else []
+    rest = list(args[1:]) if isinstance(args, (list, tuple)) else []
+    if not kw.get("shell") and _faked(_name(args), rest):
         args = [sys.executable, FAKE, _name(args), *rest]
     _REAL_INIT(self, args, *a, **kw)
 

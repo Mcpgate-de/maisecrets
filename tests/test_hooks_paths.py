@@ -261,6 +261,7 @@ class ClientShapeTests(unittest.TestCase):
         self.assertEqual(codex["permissionDecision"], "deny" if os.name == "nt" else "allow")
         for out in (claude, codex):
             self.assertNotIn(PLAIN, json.dumps(out))
+        for out in (claude,) if os.name == "nt" else (claude, codex):   # a Codex deny has no command
             if BASH:
                 self.assertEqual(_run(out["updatedInput"]["command"]).stdout, PLAIN)
 
@@ -755,8 +756,11 @@ def _dispatch(event: str, stdin: str, home: str | None = None, **extra_env: str)
                                                                   "XDG_RUNTIME_DIR", "MAISECRETS_DEBUG_LOG")}
     # the run dir of the child is the one of this process; its serving children inherit the cwd,
     # which is how tearDownModule finds one that outlived its FIFO
+    # MS_TEST_CLIP: on Windows clip.exe is found in System32 before PATH, and tests/_platform_fakes.py
+    # writes the sink file instead
     env.update({"MAISECRETS_HOME": home, "TMPDIR": tempfile.gettempdir(),
-                "PATH": _FAKEBIN + os.pathsep + env.get("PATH", "")})
+                "PATH": _FAKEBIN + os.pathsep + env.get("PATH", ""),
+                "MS_TEST_CLIP": os.path.join(_FAKEBIN, "clipboard")})
     env.update(extra_env)
     return subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), event], input=stdin,
                           capture_output=True, text=True, env=env, timeout=60, cwd=tempfile.gettempdir())
