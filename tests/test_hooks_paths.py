@@ -176,6 +176,17 @@ class FailClosedAnswerTests(unittest.TestCase):
                 check(obj)
                 self.assertIn("took longer", json.dumps(obj))
 
+    def test_no_watchdog_thread_outlives_a_hook_run(self):
+        # a daemon timer thread still running at interpreter shutdown can crash the process; a hook
+        # ended with signal 11 after its answer on a macOS runner (2026-09-27)
+        import threading
+        bash = '{"tool_name": "Bash", "tool_input": {"command": "true"}, "prompt_id": "p"}'
+        for event, payload in (("pre-tool", bash), ("user-prompt", '{"prompt": "hi", "prompt_id": "p"}')):
+            with self.subTest(event), mock.patch.dict(hooks.HANDLERS, {event: lambda p: {}}):
+                self._main(event, payload)
+                timers = [t for t in threading.enumerate() if isinstance(t, threading.Timer) and t.is_alive()]
+                self.assertEqual(timers, [])
+
     def test_a_wrong_event_name_is_a_usage_error(self):
         for argv in (["hook"], ["hook", "session-end"], ["hook", "pre-tool", "x"]):
             with self.subTest(argv), mock.patch.object(hooks.sys, "stderr", io.StringIO()) as err:

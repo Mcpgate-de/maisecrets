@@ -64,6 +64,12 @@ and OpenAI plugin directories.
   a sentence. It writes
   the version into the three manifests and a generated section into
   `CHANGELOG.md`.
+- The GitHub branch `release` holds only the runtime files of each release
+  (`scripts/build_release_tree.py`, one commit per release, pushed by `mirror_tag`). The
+  tests, CI files, release scripts and developer docs are left out: the plugin never runs
+  them, and the Anthropic directory blocked two versions on literals in the tests.
+  `tests/test_release_tree.py` names the developer-only files; every other tracked file
+  ships.
 - The `release` job runs on every push to `main` after the tests, commits
   `chore(release): vX.Y.Z` with `ci.skip`, and pushes the tag `vX.Y.Z`. The tag
   pipeline validates again and mirrors. Nobody pushes a tag by hand: the

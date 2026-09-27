@@ -319,3 +319,17 @@ mirror_tag:
     - git push ssh://git@github.com/Mcpgate-de/maisecrets.git "$CI_COMMIT_SHA:refs/heads/main"
     - git push ssh://git@github.com/Mcpgate-de/maisecrets.git "refs/tags/$CI_COMMIT_TAG"
     - echo "mirrored release $CI_COMMIT_TAG ($CI_COMMIT_SHA) to github.com/Mcpgate-de/maisecrets"
+    # the branch release holds only the runtime files (scripts/build_release_tree.py): the directory
+    # checks every file it gets and blocked two versions on literals in the test files (2026-09-27).
+    # Each release is one commit on top of the last one; the directory tracks this branch.
+    - apk add --no-cache python3 >/dev/null
+    - git config user.email "ci@maisecrets.local"
+    - git config user.name "maisecrets release"
+    - |
+      parent=""
+      if git fetch --quiet ssh://git@github.com/Mcpgate-de/maisecrets.git refs/heads/release 2>/dev/null; then
+        parent=$(git rev-parse FETCH_HEAD)
+      fi
+      rel=$(python3 scripts/build_release_tree.py commit "$CI_COMMIT_SHA" $parent -m "maisecrets $CI_COMMIT_TAG: the runtime files of $CI_COMMIT_SHORT_SHA")
+      git push ssh://git@github.com/Mcpgate-de/maisecrets.git "$rel:refs/heads/release"
+      echo "pushed $rel to release ($(python3 scripts/build_release_tree.py list "$CI_COMMIT_SHA" | wc -l) files)"
