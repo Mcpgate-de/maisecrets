@@ -358,6 +358,23 @@ class ScannerEdgeTests(unittest.TestCase):
                 self.assertEqual(out.get("permissionDecision"), "deny", out)
         self.assertFalse(marker.exists())
 
+    def test_a_command_word_hidden_by_quotes_a_variable_or_a_runner_is_still_refused(self):
+        # review, 2026-09-27: \ssh, s''sh and b''ash '-c' were not recognised as command words, and
+        # passed every rule on them; a variable as the command word and xargs are only known at run time
+        r = self.e.ref
+        for cmd in ("\\ssh host 'echo " + r + "'", "s''sh host echo " + r, "'s'sh host echo " + r,
+                    "b''ash -c 'echo " + r + "'", "bash '-c' 'echo " + r + "'", "ba\\sh -c 'echo " + r + "'",
+                    "S=ssh; $S host echo " + r, "$(which bash) -c 'echo " + r + "'",
+                    "printf '%s' " + r + " | xargs -0 ssh host echo", "printf '%s' " + r + " | xargs -I{} sh -c {}",
+                    "find . -exec bash -c 'echo " + r + "' \\;", "printf '%s' " + r + " | parallel sh -c"):
+            with self.subTest(cmd[:40]):
+                out = _bash_pre(cmd)["hookSpecificOutput"]
+                self.assertEqual(out.get("permissionDecision"), "deny", out)
+        # the real words, not a word inside quotes: these pass
+        for cmd in ("echo 'ssh host' " + r, "grep 'bash -c' " + r, "printf '%s' " + r + " | xargs -0 echo"):
+            with self.subTest(cmd[:40]):
+                self.assertNotEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny", cmd)
+
     @unittest.skipIf(BASH is None, "no bash")
     def test_ordinary_commands_pass_and_the_value_arrives(self):
         for cmd, want in [
