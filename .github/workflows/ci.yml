@@ -3,7 +3,8 @@
 name: ci
 on:
   push:
-    branches: [main]
+    # ci: the tested commit of a release, before the release commit reaches main
+    branches: [main, ci]
   pull_request:
 jobs:
   tests:

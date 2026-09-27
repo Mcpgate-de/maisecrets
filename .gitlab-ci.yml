@@ -293,9 +293,20 @@ mirror:
   # the public repository is an install source: nothing reaches it before the tests passed,
   # and only the tested commit is pushed (origin/main may already hold a newer, untested one)
   needs: [unit, harness_claude, harness_codex, plugin_validate, no_secrets_in_tree]
+  # When a release is due, the tested commit goes to the branch ci only: the GitHub matrix runs
+  # there, and GitHub main gets the release commit from mirror_tag. Pushed to main, the commit
+  # with the old version in its manifest was checked by the Anthropic directory as 0.4.2 while
+  # the release was 0.5.0 (2026-09-27). Without a release the commit goes to main as before.
   script:
-    - git push ssh://git@github.com/Mcpgate-de/maisecrets.git "$CI_COMMIT_SHA:refs/heads/main"
-    - echo "mirrored $CI_COMMIT_SHA to github.com/Mcpgate-de/maisecrets main"
+    - apk add --no-cache python3 >/dev/null
+    - git checkout -q "$CI_COMMIT_SHA"
+    - |
+      rc=0; python3 scripts/release.py next >/dev/null || rc=$?
+      if [ "$rc" = "0" ]; then target=ci
+      elif [ "$rc" = "3" ]; then target=main
+      else echo "release.py next failed with $rc"; exit 1; fi
+      git push ssh://git@github.com/Mcpgate-de/maisecrets.git "$CI_COMMIT_SHA:refs/heads/$target"
+      echo "mirrored $CI_COMMIT_SHA to github.com/Mcpgate-de/maisecrets $target"
 
 mirror_tag:
   <<: *mirror_base
