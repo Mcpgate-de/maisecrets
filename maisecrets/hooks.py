@@ -1454,8 +1454,11 @@ def _has_live(cfg: dict) -> bool:
         try:
             idx = json.loads(INDEX.read_text(encoding="utf-8"))
             _live_cache["v"] = any(not m.get("purged") for m in idx.get("entries", {}).values())
-        except (OSError, ValueError):
+        except OSError:
             _live_cache["v"] = False
+        except ValueError:
+            # a damaged index is not an empty one: the vault opens and fails, the output is withheld
+            _live_cache["v"] = True
     return _live_cache["v"]
 
 
