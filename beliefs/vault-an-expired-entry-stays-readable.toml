@@ -1,0 +1,10 @@
+# vault-an-expired-entry-stays-readable: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "vault-an-expired-entry-stays-readable"
+control = "C11"
+statement = "An index record with fields the Entry class does not know (purged_at from expire, or a newer version's field) is read, not refused: status, list, a new paste and the prompt hook keep working."
+runner = ["tests/test_operations.py::ExpiredEntryTests::test_status_list_a_new_paste_and_the_prompt_hook_survive_an_expired_entry"]
+
+[proof]
+file = "maisecrets/vault.py"
+find = "        return cls(**{k: v for k, v in meta.items() if k in names})\n"
+replace = "        return cls(**meta)\n"

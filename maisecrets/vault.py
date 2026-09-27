@@ -20,7 +20,7 @@ import re
 import platform
 import subprocess
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from .placeholder import display_for
@@ -328,6 +328,18 @@ class Entry:
     purged: bool = False
     counters: dict = field(default_factory=dict)  # unused on entries; kept for schema stability
     sessions: list = field(default_factory=list)  # sessions allowed to resolve the entry (see Vault.get)
+    # no purged_at field: from_meta drops it, so the proof below can remove the filter and
+    # the owning test sees the TypeError of the field report again
+
+    @classmethod
+    def from_meta(cls, meta: dict) -> "Entry":
+        """An Entry from an index record, ignoring fields this version does not know. expire wrote
+        `purged_at` into the index while Entry had no such field, so every read of an expired
+        entry raised TypeError: /maisecrets:status and list failed, and a value pasted again after
+        it expired blocked the prompt (field report, 2026-09-27). A record written by a newer
+        version must not break an older one either."""
+        names = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in meta.items() if k in names})
 
     @property
     def ref(self) -> str:
@@ -767,7 +779,7 @@ class Vault:
         fp = self.fingerprint(value)
         existing = self._index["by_fingerprint"].get(fp)
         if existing and not self._index["entries"][existing].get("purged"):
-            e = Entry(**self._index["entries"][existing])
+            e = Entry.from_meta(self._index["entries"][existing])
             if session and session not in e.sessions:
                 e.sessions.append(session)
             self._touch(e)
@@ -814,7 +826,7 @@ class Vault:
             fp = self.fingerprint(value)
             existing = self._index["by_fingerprint"].get(fp)
             if existing and not self._index["entries"][existing].get("purged"):
-                e = Entry(**self._index["entries"][existing])
+                e = Entry.from_meta(self._index["entries"][existing])
                 if session and session not in e.sessions:
                     e.sessions.append(session)
                 self._touch(e, save=False)
@@ -883,7 +895,7 @@ class Vault:
         value = self.backend.get(key)
         if value is None:
             return None, "expired"
-        e = Entry(**meta)
+        e = Entry.from_meta(meta)
         self._touch(e)
         return value, "ok"
 
@@ -1003,7 +1015,7 @@ class Vault:
 
     def list(self) -> list[Entry]:
         self.expire()
-        return [Entry(**m) for m in self._index["entries"].values()]
+        return [Entry.from_meta(m) for m in self._index["entries"].values()]
 
     @_mutating
     def forget(self, key: str) -> str:

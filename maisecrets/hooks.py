@@ -1303,7 +1303,7 @@ def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]
     for key in live:
         value = found.get(key)
         if value:
-            out.append((value, Entry(**vault._index["entries"][key]).ref))
+            out.append((value, Entry.from_meta(vault._index["entries"][key]).ref))
     return out
 
 
@@ -1323,7 +1323,7 @@ def _inserted_values(text: str, vault: Vault) -> list[tuple[str, str]]:
             key = live.get(vault.fingerprint(cand))
             if key is not None:
                 from .vault import Entry
-                out.append((cand, Entry(**vault._index["entries"][key]).ref))
+                out.append((cand, Entry.from_meta(vault._index["entries"][key]).ref))
     return out
 
 
@@ -1366,7 +1366,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
                 continue
             vault.admit(key, session)
             from .vault import Entry
-            e = Entry(**vault._index["entries"][key])
+            e = Entry.from_meta(vault._index["entries"][key])
             n = out.count(cand)
             out = out.replace(cand, e.ref)
             hit["n"] += n

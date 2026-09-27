@@ -3,6 +3,7 @@ keychain dump parser, the MCP transcript scrub, and the cost of the post-tool pa
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import sys
 import tempfile
@@ -221,4 +222,41 @@ class VaultLockTests(unittest.TestCase):
         self.assertEqual(Vault().get(e.key, "S1")[1], "ok", "nothing looks deleted that is not")
         self.assertEqual(Vault().forget(e.key), "ok")
         self.assertEqual(Vault().get(e.key, "S1")[1], "unknown")
+
+
+class ExpiredEntryTests(unittest.TestCase):
+    """expire wrote purged_at into the index while Entry had no such field: every read of an
+    expired entry raised TypeError (field report, 2026-09-27). Each path a person takes after a
+    value expired must keep working."""
+
+    def test_status_list_a_new_paste_and_the_prompt_hook_survive_an_expired_entry(self):
+        import io
+        from contextlib import redirect_stdout
+        from maisecrets import cli, hooks
+        from maisecrets.vault import INDEX, Vault
+        v = Vault()
+        value = "Zq8" + "vLm2Rt9Wx4Kp"
+        e = v.put(value, "SECRET", "manual", session="S1")
+        data = json.loads(INDEX.read_text(encoding="utf-8"))
+        data["entries"][e.key]["expires"] = time.time() - 10
+        INDEX.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(Vault().expire(limit=None), 1)
+        self.assertIn("purged_at", json.loads(INDEX.read_text(encoding="utf-8"))["entries"][e.key])
+        for fn in (cli.cmd_list, cli.cmd_status):
+            with self.subTest(fn.__name__):
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(fn([]), 0)
+        again = Vault().put(value, "SECRET", "manual", session="S1")
+        self.assertEqual(Vault().get(again.key, "S1")[1], "ok", "a value pasted again after expiry is stored")
+        hooks._clipboard = lambda t: True
+        out = hooks.user_prompt({"prompt": "password: " + value, "session_id": "S1", "transcript_path": ""})
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("The AI did not receive it", out["reason"])
+
+    def test_a_field_from_a_newer_version_does_not_break_an_older_one(self):
+        from maisecrets.vault import Entry
+        e = Entry.from_meta({"key": "SECRET_c1", "type": "SECRET", "kind": "k", "fingerprint": "f", "display": None,
+                             "created": 1.0, "last_used": 1.0, "expires": 2.0, "max_expires": 3.0,
+                             "field_from_the_future": 1})
+        self.assertEqual(e.key, "SECRET_c1")
 
