@@ -266,6 +266,29 @@ class RefusedWipeTests(unittest.TestCase):
         self.assertIn("NOT complete: store: RuntimeError; store item SECRET_c1 not deleted.", out)
         self.assertIn("A value may still be in the store; check it by hand.", out)
 
+    def test_a_file_store_that_cannot_be_written_is_reported_not_a_traceback(self):
+        # the file stores raise OSError, not RuntimeError: a folder without write permission
+        # ended the wipe with a PermissionError traceback and no "NOT complete" (2026-09-27)
+        rc, out = self.wipe(_RefusingStore(PermissionError(13, "Permission denied")))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("NOT complete: store: PermissionError; store item SECRET_c1 not deleted.", out)
+
+    def test_an_encrypted_file_that_does_not_go_is_not_counted_as_wiped(self):
+        from unittest import mock
+        from maisecrets import vault
+        store = vault.EncryptedFileBackend.__new__(vault.EncryptedFileBackend)
+        store.path = Path(self.sb_home()) / "vault.enc.json"
+        store.key_file = store.path.with_name("key")
+        store.path.write_text('{"SECRET_c1": "x"}', encoding="utf-8")
+        with mock.patch.object(Path, "unlink", side_effect=PermissionError(13, "Permission denied")):
+            with self.assertRaises(RuntimeError, msg="a wipe that deleted nothing must not return a count"):
+                store.wipe()
+
+    def sb_home(self) -> str:
+        sb = Sandbox(JSONFILE, backend="jsonfile")
+        self.addCleanup(sb.remove)
+        return str(sb.home)
+
 
 if __name__ == "__main__":
     unittest.main()

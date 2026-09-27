@@ -575,8 +575,11 @@ class EncryptedFileBackend:
         for f in (self.path, self.key_file):
             try:
                 f.unlink()
-            except OSError:
+            except FileNotFoundError:
                 pass
+            except OSError as exc:
+                # a file that stays holds the values: never count it as wiped
+                raise RuntimeError(f"{f.name} not deleted ({type(exc).__name__})") from exc
         return n
 
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
@@ -1130,19 +1133,21 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
     problems: list[str] = []
     n = 0
     with _lock_for(HOME / ".lock"):
+        # a file store raises OSError (a folder that is not writable), the platform stores
+        # RuntimeError; either one is a problem to report, never a traceback (2026-09-27)
         try:
             n = backend.wipe() if hasattr(backend, "wipe") else 0
-        except RuntimeError as exc:
+        except (RuntimeError, OSError) as exc:
             problems.append(f"store: {type(exc).__name__}")
         try:
             keys = backend.keys() if hasattr(backend, "keys") else []
-        except RuntimeError:
+        except (RuntimeError, OSError):
             keys = []
         for key in keys:
             try:
                 backend.delete(key)
                 n += 1
-            except RuntimeError:
+            except (RuntimeError, OSError):
                 problems.append(f"store item {key} not deleted")
         for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced"):
             try:
