@@ -8,7 +8,7 @@ import time
 
 from . import detect
 from .hooks import main as hook_main
-from .vault import Vault, load_config
+from .vault import ConfigError, Vault, load_config
 
 
 def _age(ts: float) -> str:
@@ -353,7 +353,16 @@ def main(argv: list[str] | None = None) -> int:
     if fn is None:
         print(f"unknown command {argv[0]}", file=sys.stderr)
         return 2
-    return fn(argv[1:])
+    # a damaged index or a wrong policy printed a Python traceback to the person who ran
+    # /maisecrets:list; the message of these two errors names the file and the fix, never a value
+    try:
+        return fn(argv[1:])
+    except ConfigError as exc:
+        print(f"maisecrets {argv[0]}: configuration error: {exc}. Fix the file named there.", file=sys.stderr)
+        return 1
+    except RuntimeError as exc:
+        print(f"maisecrets {argv[0]}: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

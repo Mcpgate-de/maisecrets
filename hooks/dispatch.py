@@ -51,8 +51,14 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         print(json.dumps({"systemMessage": f"maisecrets: configuration error: {exc}. Every prompt is blocked "
                                            "until the file is fixed."}))
         sys.exit(0)
-    v = Vault(cfg)
-    v.expire(limit=None)
+    try:
+        v = Vault(cfg)
+        v.expire(limit=None)
+    except RuntimeError as exc:
+        # a damaged index: the message names `maisecrets repair`; a traceback here gave the
+        # client no JSON and the person no hint
+        print(json.dumps({"systemMessage": f"maisecrets: {exc}."}))
+        sys.exit(0)
     # a blocked prompt older than 15 minutes is never sent; the file goes too (retention)
     pending = HOME / "pending"
     if pending.is_dir():
