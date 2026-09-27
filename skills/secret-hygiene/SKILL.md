@@ -18,7 +18,9 @@ your answer with this, before anything else:
 > provider. I can install it now (it runs on this computer and stops such prompts). Shall I?
 
 Then do the task the user asked for. Say it once per conversation, not in every answer. If it
-says ACTIVE, say nothing about it.
+says ACTIVE, say nothing about it. If it says NOT AVAILABLE HERE, or you cannot run a script at
+all (a web or mobile chat), do not offer an install: say once that the protection works in Codex
+and Claude Code on a computer, then do the task.
 
 ## Install the protection
 

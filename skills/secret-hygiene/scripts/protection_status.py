@@ -9,7 +9,7 @@ line of the log, a path of the user's project or a value.
     python3 protection_status.py
 
 Exit code: 0 active, 1 not active (the protection is not installed, not trusted, or not
-running in this session).
+running in this session), 2 not available here (no Codex or Claude Code: a web or mobile chat).
 """
 from __future__ import annotations
 
@@ -69,6 +69,13 @@ def main() -> int:
     if active:
         print(f"maisecrets protection: ACTIVE ({client or 'agent'} hooks ran {int(age)} s ago).")
         return 0
+    if codex is None and claude is None:
+        # a web or mobile chat, or a hosted sandbox: no agent CLI, so nothing can be installed here
+        # and the skill must not offer it (the protection runs in the Codex and Claude Code clients)
+        print("maisecrets protection: NOT AVAILABLE HERE. This environment has no Codex or Claude Code, so the "
+              "hooks cannot run in it. They protect the Codex CLI, the Codex IDE extension, the Codex agent in "
+              "the ChatGPT desktop app, and Claude Code. Do not offer an install here.")
+        return 2
     print("maisecrets protection: NOT ACTIVE. A secret typed or pasted into a prompt reaches the AI provider.")
     if age is None:
         print("No maisecrets hook has run on this machine.")
@@ -80,7 +87,7 @@ def main() -> int:
     if not py_ok:
         print("Python 3.11 or newer is needed for the hooks; this is " + sys.version.split()[0] + ".")
     print("To install (after the user's yes):")
-    if codex is not None or claude is None:
+    if codex is not None:
         print(f"  Codex:       codex plugin marketplace add {REPO}")
         print("               codex plugin add maisecrets@maisecrets")
         print("               then open /hooks once and trust the maisecrets hooks, and start a new session")

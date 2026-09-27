@@ -474,11 +474,30 @@ class ProtectionStatusTests(unittest.TestCase):
         (self.home / "hooks.log").write_text(f"{when}\tuser-prompt\tcodex\t{marker}\t-\tpass\t3ms\tok\n",
                                              encoding="utf-8")
 
+    def status_with(self, *clis):
+        """A PATH that holds only fake agent CLIs, so the test does not depend on this machine."""
+        bindir = self.home / "bin"
+        bindir.mkdir(exist_ok=True)
+        for cli in clis:
+            (bindir / cli).write_text("#!/bin/sh\necho none\n")
+            (bindir / cli).chmod(0o755)
+        env = dict(_clean_env(), MAISECRETS_HOME=str(self.home), PATH=f"{bindir}{os.pathsep}/usr/bin:/bin")
+        return subprocess.run([sys.executable, str(SCRIPTS / "protection_status.py")], capture_output=True,
+                              text=True, env=env, timeout=60)
+
     def test_no_log_is_not_active_and_names_the_install(self):
-        r = self.status()
+        r = self.status_with("codex")
         self.assertEqual(r.returncode, 1)
         self.assertIn("NOT ACTIVE", r.stdout)
         self.assertIn("codex plugin marketplace add https://github.com/Mcpgate-de/maisecrets.git", r.stdout)
+        self.assertNotIn("claude plugin", r.stdout, "no Claude Code here, so no Claude Code command")
+
+    def test_without_an_agent_cli_nothing_is_offered(self):
+        """A web or mobile chat, or a hosted sandbox, has neither CLI: no install can work there."""
+        r = self.status_with()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("NOT AVAILABLE HERE", r.stdout)
+        self.assertNotIn("plugin marketplace add", r.stdout)
 
     def test_a_hook_run_a_moment_ago_is_active_and_nothing_of_the_log_is_printed(self):
         self.write_log(20, marker="session-abc123")
@@ -489,6 +508,6 @@ class ProtectionStatusTests(unittest.TestCase):
 
     def test_an_old_hook_run_is_not_active(self):
         self.write_log(3600)
-        r = self.status()
+        r = self.status_with("codex")
         self.assertEqual(r.returncode, 1)
         self.assertIn("60 min ago", r.stdout)
