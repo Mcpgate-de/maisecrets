@@ -136,6 +136,9 @@ class Sandbox:
     def env(self, **extra: str) -> dict:
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(_DROP_PREFIXES) and k not in _DROP}
+        # the locale tests/_isolate.py pins: without it a child reads the system setting of the
+        # machine, and a German Mac and a C-locale container expect different label languages
+        env["MAISECRETS_LOCALE"] = os.environ["MAISECRETS_LOCALE"]
         env.update({
             "HOME": str(self.user_home), "USERPROFILE": str(self.user_home),
             "MAISECRETS_HOME": str(self.home), "TMPDIR": str(self.root / "tmp"),
