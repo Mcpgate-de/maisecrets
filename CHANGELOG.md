@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.4.0] - 2026-09-27
+
 - **Changed for everyone:** the block notice is new (plain words, what was found, the prompt with the
   short forms, where the values stay and for how long), and the first session start only offers
   `/ms` (`/maisecrets:shortcut`) instead of installing it. An existing `/ms` keeps working.
@@ -14,6 +16,27 @@
   installed, and Codex gets tips that work there.
 - **The `secret-hygiene` skill** finds leaked secrets in a repository and its history (date, author,
   pushed or not, provider), guides the rotation, and writes redacted copies of files to share.
+
+### Breaking
+
+- the secret-hygiene skill, a plain block notice, /maisecrets:list and /maisecrets:forget (a77f8ad)
+
+### Features
+
+- audit the local Claude Code and Codex transcripts for secrets that already reached the provider (df96aba)
+- a plain block notice that shows what was found and what would be sent; /maisecrets:list and /maisecrets:forget; the skill reports date, author, pushed state, provider and every skip (91e5b79)
+- secret-hygiene finds leaked secrets by location, guides the rotation, writes redacted copies (fb5ef18)
+
+### Fixes
+
+- the skill tests run in CI and a skipped test is no proof; the release waits for the beliefs replay (2750b3b)
+- review findings - a ++ line is content, labels in a sentence, expire keeps its lock, the scrub keeps bytes and mode; feat(skill): the ChatGPT listing and a flat zip (37c330b)
+- the scan runs on every core, keyword rules only near their keywords, no size limit; fix(beliefs): each replay run gets a fresh bytecode cache (2b969e2)
+
+### Other
+
+- Merge branch 'main' into feat/secret-hygiene-skill (d22334e)
+- Merge remote-tracking branch 'origin/main' into feat/secret-hygiene-skill (de7f2df)
 
 ## [0.3.33] - 2026-09-27
 
