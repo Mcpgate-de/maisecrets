@@ -74,8 +74,8 @@ placeholder in a command as above.
 
 ## Status
 
-Released from `main` on every merge (`CHANGELOG.md`, tags `vX.Y.Z`, 0.x scale:
-a feature or a fix bumps the last number). Vault backend per platform:
+Released from `main` on every merge (`CHANGELOG.md`, tags `vX.Y.Z`). A release
+moves only the last number; a higher one needs the owner's approval. Vault backend per platform:
 
 | platform | backend | where the values live |
 |---|---|---|

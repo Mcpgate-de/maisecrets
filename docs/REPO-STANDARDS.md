@@ -55,11 +55,13 @@ and OpenAI plugin directories.
   not rendered: a repository move, a CI change or a wording fix is not a
   release note. What operators need to know goes into this file, not into
   the changelog.
-- `scripts/release.py` derives the next version from the commits since the
-  last `v*` tag: breaking → major, `feat` → minor, `fix perf security deps`
-  → patch, the rest → no release. While the major is 0 the scale shifts one
-  step down (breaking → 0.x+1.0, everything else → 0.x.y+1), so a 0.x
-  release is small and the middle number stays a compatibility signal. It writes
+- `scripts/release.py` decides from the commits since the last `v*` tag
+  whether there is a release (`feat fix perf security deps`, a breaking
+  change, an untyped subject). A release moves only the last number. The
+  middle or first number moves only with the owner's approval: the CI variable
+  `MAISECRETS_RELEASE_BUMP=minor` or `=major` on that one pipeline. A breaking
+  change is the `!` or a footer line `BREAKING CHANGE: …`, never the words in
+  a sentence. It writes
   the version into the three manifests and a generated section into
   `CHANGELOG.md`.
 - The `release` job runs on every push to `main` after the tests, commits

@@ -12,16 +12,17 @@ Commit subject format (checked by ``check`` in CI):
     type(scope)!: subject          type: feat fix perf security deps docs
                                          ci test chore build style refactor
 
-Bump rules, applied to all commits since the last ``v*`` tag:
+Whether there is a release, from all commits since the last ``v*`` tag:
 
-    breaking (``!`` or "BREAKING CHANGE")   major
-    feat                                    minor
-    fix, perf, security, deps               patch
-    While the major is 0 (Cargo's reading of semver): breaking -> minor,
-    feat/fix -> patch. So 0.3.0 + feat = 0.3.1, 0.3.0 + feat! = 0.4.0.
-    docs, ci, test, chore, build, style,
-    refactor                                none
-    a subject without a known type          patch   (listed under "Other")
+    feat, fix, perf, security, deps, a breaking change, an untyped subject   release
+    docs, ci, test, chore, build, style, refactor                            none
+
+A release moves only the last number: 0.5.0 + anything = 0.5.1. A breaking change (``!`` after
+the type, or a footer line ``BREAKING CHANGE: …``) is listed under "Breaking" and still moves only
+the last number. The middle or first number moves only when the owner approves it: the CI
+variable MAISECRETS_RELEASE_BUMP=minor or =major on that one pipeline. 0.4.2 went to 0.5.0 by
+itself: a commit body said "a chore: with BREAKING CHANGE bumps the break level" in a sentence,
+and the text search took it for a breaking change (2026-09-27).
 
 ``chore(release): …`` commits are ignored. No releasable commit: exit 3.
 
@@ -96,13 +97,15 @@ def classify(subject: str, body: str) -> tuple[str, str, bool]:
     if reverted:
         return "revert", ("revert: " if reverted % 2 else "re-apply: ") + inner, False
     m = SUBJECT_RE.match(subject)
-    breaking = "BREAKING CHANGE" in body
+    # the conventional-commits footer, at the start of a line; the words in a sentence are none
+    breaking = bool(_BREAKING_FOOTER_RE.search(body))
     if not m or m.group("type") not in KNOWN:
         return "other", subject, breaking
     return m.group("type"), m.group("text"), breaking or bool(m.group("bang"))
 
 
 _REVERT_RE = re.compile(r'^Revert "(?P<inner>.+)"$')
+_BREAKING_FOOTER_RE = re.compile(r"^BREAKING[ -]CHANGE: ", re.M)
 
 
 def _unrevert(subject: str) -> str:
@@ -133,14 +136,13 @@ def bump_for(commits: list[tuple[str, str, str]]) -> str | None:
     return level
 
 
-def next_version(current: str, level: str) -> str:
+def next_version(current: str, level: str, approved: str | None = None) -> str:
+    """Only the last number moves. ``approved`` ("minor" or "major", from the CI variable
+    MAISECRETS_RELEASE_BUMP) moves a higher one; ``level`` only says that there is a release."""
     major, minor, patch = (int(p) for p in current.split("."))
-    if major == 0:
-        # 0.x: the middle number marks a break, the last number everything compatible
-        level = {"major": "minor", "minor": "patch", "patch": "patch"}[level]
-    if level == "major":
+    if approved == "major":
         return f"{major + 1}.0.0"
-    if level == "minor":
+    if approved == "minor":
         return f"{major}.{minor + 1}.0"
     return f"{major}.{minor}.{patch + 1}"
 
@@ -152,7 +154,11 @@ def plan() -> tuple[str, str, list[tuple[str, str, str]]] | None:
     level = bump_for(commits)
     if level is None:
         return None
-    return current, next_version(current, level), commits
+    import os
+    approved = os.environ.get("MAISECRETS_RELEASE_BUMP", "").strip().lower() or None
+    if approved not in (None, "minor", "major"):
+        raise SystemExit(f"MAISECRETS_RELEASE_BUMP must be minor or major, not {approved!r}")
+    return current, next_version(current, level, approved), commits
 
 
 def render_notes(version: str, commits: list[tuple[str, str, str]]) -> str:
