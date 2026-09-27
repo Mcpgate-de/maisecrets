@@ -1,5 +1,5 @@
-"""The generated detection matrix is a gate: every combination finds its exact value, keeps the
-e-mail address after it apart, and no counter-example is a hit. See tests/detection_matrix.py."""
+"""The generated detection matrix is a gate: every combination gives exactly its value and the
+e-mail address after it, nothing else, and no counter-example gives any hit. See tests/detection_matrix.py."""
 import sys
 import unittest
 from pathlib import Path
@@ -12,22 +12,23 @@ import detection_matrix as dm  # noqa: E402
 
 
 class DetectionMatrixTests(unittest.TestCase):
-    def test_every_combination_finds_its_exact_value_and_the_mail_after_it(self):
+    def test_every_combination_gives_exactly_its_secret_and_its_mail_in_order(self):
+        # the complete result, not "the expected hit is among them": an extra SECRET, a split or
+        # widened value, a hit of another type, or a lost mail all fail (Codex review, 2026-09-27)
         cases = dm.cases()
         self.assertGreaterEqual(len(cases), 2000, "a population test must fail on a thin population")
         wrong = []
         for c in cases:
-            got = detect.scan(c.text)
-            if not any(m.type == "SECRET" and m.value == c.secret for m in got):
-                wrong.append(("secret", c.combo, c.text))
-            elif c.mail and not any(m.type == "EMAIL" and m.value == c.mail for m in got):
-                wrong.append(("mail", c.combo, c.text))
+            got = [(m.type, m.value) for m in detect.scan(c.text)]
+            want = [("SECRET", c.secret)] + ([("EMAIL", c.mail)] if c.mail else [])
+            if got != want:
+                wrong.append((c.combo, c.text, got))
         self.assertEqual(wrong[:5], [], f"{len(wrong)} of {len(cases)} combinations fail")
 
-    def test_no_counter_example_is_a_secret(self):
+    def test_no_counter_example_gives_any_hit(self):
         for text, why in dm.NEGATIVES:
             with self.subTest(why=why):
-                self.assertEqual([m.kind for m in detect.scan(text) if m.type == "SECRET"], [], text)
+                self.assertEqual([(m.type, m.kind, m.value) for m in detect.scan(text)], [], text)
 
 
 if __name__ == "__main__":
