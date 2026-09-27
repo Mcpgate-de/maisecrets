@@ -126,6 +126,16 @@ class ListingManifestTests(unittest.TestCase):
             text = (ROOT / rel).read_text(encoding="utf-8")
             self.assertEqual(1, len(self.r.re.findall(r'"version":\s*"\d+\.\d+\.\d+"', text)), rel)
 
+    def test_the_release_job_stages_every_manifest_it_bumps(self):
+        """release.py apply rewrites every entry of MANIFESTS in the working tree, but the release
+        job commits only what its `git add` line names: v0.3.29 bumped two manifests and left the
+        Codex one at 0.3.28 (2026-09-27). The list in the job must cover MANIFESTS."""
+        ci = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
+        adds = [line for line in ci.splitlines() if line.strip().startswith("- git add -- ")]
+        self.assertEqual(1, len(adds), adds)
+        for rel in self.r.MANIFESTS:
+            self.assertIn(f" {rel} ", adds[0] + " ", rel)
+
     def test_the_codex_manifest_mirrors_the_claude_one(self):
         for key in ("name", "version", "description", "author", "homepage", "repository", "license", "keywords"):
             self.assertEqual(self.claude[key], self.codex[key], key)

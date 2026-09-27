@@ -182,7 +182,7 @@ release:
     - python3 scripts/release.py check
     - git config user.email "ci@maisecrets.local"
     - git config user.name "maisecrets release"
-    - git add -- .claude-plugin/plugin.json .claude-plugin/marketplace.json CHANGELOG.md
+    - git add -- .claude-plugin/plugin.json .claude-plugin/marketplace.json .codex-plugin/plugin.json CHANGELOG.md
     - 'git commit -q -m "chore(release): v$VERSION"'
     - git tag -a "v$VERSION" -m "maisecrets $VERSION"
     - git remote set-url origin "https://oauth2:${MAISECRETS_CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
