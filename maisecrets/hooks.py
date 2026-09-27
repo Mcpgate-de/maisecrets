@@ -1633,4 +1633,8 @@ def main(argv: list[str]) -> int:
         answer(_fail_closed(event, payload, f"failed ({type(exc).__name__})."), f"failed {type(exc).__name__}")
         return 0
     finally:
+        # cancel, then wait: a daemon timer thread that still runs while the interpreter shuts down
+        # can crash the process, and one hook ended with signal 11 after its answer on a macOS
+        # runner (2026-09-27)
         watchdog.cancel()
+        watchdog.join(timeout=1)
