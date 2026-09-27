@@ -736,7 +736,6 @@ class FalsePositiveCorpusTests(unittest.TestCase):
     def test_code_with_credential_names_is_not_a_hit(self):
         self._check(self.CODE)
 
-    @unittest.expectedFailure   # bug: a dotted reference is taken for a value, fixed in a later commit
     def test_references_to_a_credential_are_not_a_hit(self):
         self._check(self.REFERENCES)
 

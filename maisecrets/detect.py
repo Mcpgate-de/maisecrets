@@ -229,6 +229,10 @@ def _de_vat_id_ok(v: str) -> bool:
 
 _DS_TEMPLATED = re.compile(r"^(\{\{.*\}\}|\$\{.*\}|<.*>|%.*%|\$[A-Za-z_][A-Za-z0-9_]*)$")
 _DS_INDIRECT = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*\s*(\(.*\)|\[.*\])$")
+# words joined by `.`, `_` or `-`, optionally ending where the regex cut the line (`:` of a
+# condition, `;` of a statement, `[` before a quoted key): `settings.API_KEY`, `self._password`,
+# `os.environ[`, `confirm_password:` were taken for values (false-positive corpus, 2026-09-27)
+_DS_REFERENCE = re.compile(r"_*[A-Za-z]+(?:[._-]+[A-Za-z]+)+_*[:;\[]?")
 
 
 def _ds_value_ok(v: str) -> bool:
@@ -246,8 +250,8 @@ def _ds_value_ok(v: str) -> bool:
         return False   # a sentence or an i18n label ("Add API key"), not a value
     if " " in v and not any(c.isdigit() for c in v):
         return False   # two words of prose ("bad payload"), not a value
-    if not any(c.isdigit() for c in v) and re.fullmatch(r"[A-Za-z]+(?:[_-][A-Za-z]+)+", v):
-        return False   # an identifier: secret_value, from-secret, NAME_OF_SECRET
+    if not any(c.isdigit() for c in v) and _DS_REFERENCE.fullmatch(v):
+        return False   # an identifier or a reference to one: NAME_OF_SECRET, self._password, os.environ[
     low = v.lower()
     if low in {"password", "changeme", "placeholder", "example", "none", "null", "true", "false", "redacted"}:
         return False
