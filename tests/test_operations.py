@@ -169,3 +169,24 @@ class CostTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReadRetryTests(unittest.TestCase):
+    def test_a_reader_waits_out_a_replace_in_progress_and_gives_up_last(self):
+        from unittest import mock
+        from maisecrets import vault
+        calls = {"n": 0}
+
+        def flaky(self, encoding=None):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise PermissionError(13, "Permission denied")
+            return '{"ok": 1}'
+        with mock.patch.object(Path, "read_text", flaky), mock.patch.object(vault.time, "sleep"):
+            self.assertEqual(vault.read_text_retry(Path("index.json")), '{"ok": 1}')
+        self.assertEqual(calls["n"], 3)
+        with mock.patch.object(Path, "read_text", side_effect=PermissionError(13, "x")), \
+                mock.patch.object(vault.time, "sleep"):
+            with self.assertRaises(PermissionError):
+                vault.read_text_retry(Path("index.json"), attempts=3)
+

@@ -99,6 +99,21 @@ def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
             pass
 
 
+def read_text_retry(path: Path, attempts: int = 40) -> str:
+    """Read a file that another hook process may be replacing right now. Windows raises
+    PermissionError for the reader while os.replace runs on the same name (the 12-process test
+    on windows-latest, 2026-09-27; the writer side got its retry on 2026-09-26). The window is
+    milliseconds, so retry briefly; the last attempt raises."""
+    for attempt in range(attempts):
+        try:
+            return path.read_text(encoding="utf-8")
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.05)
+    raise AssertionError("unreachable")
+
+
 _LOCKS: dict = {}
 
 
@@ -314,7 +329,7 @@ class JsonFileBackend:
 
     def _load(self, for_write: bool = False) -> dict:
         try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            return json.loads(read_text_retry(self.path))
         except OSError:
             return {}
         except ValueError:
@@ -498,7 +513,7 @@ class EncryptedFileBackend:
 
     def _load(self, for_write: bool = False) -> dict:
         try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            return json.loads(read_text_retry(self.path))
         except OSError:
             return {}
         except ValueError:
@@ -689,7 +704,7 @@ class Vault:
         if not INDEX.exists():
             return {"entries": {}, "counters": {}, "by_fingerprint": {}}
         try:
-            data = json.loads(INDEX.read_text(encoding="utf-8"))
+            data = json.loads(read_text_retry(INDEX))
         except ValueError as exc:
             # a damaged index must not become an empty one: the counters would restart and the
             # next put would overwrite SECRET_c1 in the store. The file stays in place, so every
