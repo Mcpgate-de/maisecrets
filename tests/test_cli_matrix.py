@@ -829,6 +829,17 @@ class SessionStartTests(unittest.TestCase):
         self.addCleanup(sb.remove)
         return sb
 
+    def test_the_try_it_example_is_one_the_prompt_hook_stops(self):
+        from maisecrets import tips
+        self.assertIn(tips.TRY_IT_EXAMPLE, tips.try_it_line())
+        sb = self.sandbox()
+        r = sb.run("user-prompt", stdin=json.dumps({"prompt": tips.TRY_IT_EXAMPLE, "session_id": "S1",
+                                                    "transcript_path": "", "prompt_id": "p1"}))
+        out = json.loads(r.stdout)
+        self.assertEqual(out.get("decision"), "block", r.stdout + r.stderr)
+        self.assertIn("personal data was found", out.get("reason", "") + out.get("systemMessage", ""))
+        self.assertEqual([m["type"] for m in sb.index()["entries"].values()], ["EMAIL"])
+
     def test_first_start_introduces_later_starts_rotate_a_tip_then_stay_short(self):
         from maisecrets import hooks, tips
         sb = self.sandbox()
@@ -837,6 +848,7 @@ class SessionStartTests(unittest.TestCase):
         self.assertTrue(msg.startswith(f"maisecrets {VERSION} is on. It keeps passwords"), msg)
         self.assertIn("in an encrypted file", msg)
         self.assertIn("/maisecrets:status shows the details", msg)
+        self.assertIn(" " + tips.try_it_line() + " ", msg, "the first start says how to see it work")
         self.assertTrue(msg.endswith(" Tip: /maisecrets:shortcut adds /ms as a short form of /maisecrets:send."))
         self.assertEqual(out["hookSpecificOutput"], {"hookEventName": "SessionStart",
                                                      "additionalContext": hooks.PRIMER})

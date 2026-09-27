@@ -79,8 +79,9 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         pass
     marker = HOME / ".announced"
     if v.backend.test_mode or not marker.exists():
+        from maisecrets.tips import try_it_line  # noqa: E402
         more = "" if codex else " /maisecrets:status shows the details, /maisecrets:list what is stored."
-        out["systemMessage"] = f"maisecrets {version} is on. " + intro_line(v.backend) + more
+        out["systemMessage"] = f"maisecrets {version} is on. " + intro_line(v.backend) + more + " " + try_it_line()
         try:
             marker.write_text(type(v.backend).__name__ + "\n")
         except OSError:
