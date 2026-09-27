@@ -87,6 +87,7 @@ class Rule:
     context: tuple[str, ...] = ()      # presidio context words; a nearby one lifts a weak score
     require_context: bool = False      # weak shape: accept only with a context word nearby
     whole_match: bool = False          # presidio: the entity is the whole match, never a sub-group
+    quote_group: int = 0               # detect-secrets: group of the optional opening quote
 
 
 # ----------------------------------------------------------------- helpers --
@@ -385,6 +386,15 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
 # detect-secrets' denylist is English (plus Spanish contraseña). German labels are added at load
 # time so `passwort: …` is a credential too (measured 2026-09-26: `password:` hit, `passwort:` did not).
 GERMAN_KEYWORDS = ("passwort", "kennwort", "geheimnis", "schl(?:ü|ue)ssel", "zugangsdaten")
+# The two keyword rules whose quote is optional, and the group of that quote. Their value class
+# runs to the end of the line, spaces included, and the whole span was then judged: a password
+# followed by "and" and an address was rejected as prose, so the password reached the model
+# (field report, 2026-09-27). An unquoted value ends at the first whitespace; only a quoted one
+# holds spaces. A cut value that is one capitalised word ("secret: Developers, Webhooks, …",
+# "a secret: PostToolUse must …", both in this repository) is the start of a sentence.
+_DS_QUOTE_GROUP = {"ds-keyword-colon": 3, "ds-keyword-equal-signs": 4}
+_WHITESPACE_RE = re.compile(r"\s")
+_CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
 
 
 def _load_detect_secrets() -> list[Rule]:
@@ -400,7 +410,8 @@ def _load_detect_secrets() -> list[Rule]:
         regex = r["regex"].replace("(" + denylist + ")", keywords, 1)
         out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(regex, flags),
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
-                        secret_group=int(r["group"]), validator="ds_value"))
+                        secret_group=int(r["group"]), validator="ds_value",
+                        quote_group=_DS_QUOTE_GROUP.get(r["id"], 0)))
     return out
 
 
@@ -624,6 +635,14 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if end <= start:
                 continue
             secret = m.group(g)
+            if rule.quote_group and not m.group(rule.quote_group):
+                cut = _WHITESPACE_RE.search(secret)
+                if cut:
+                    # the regex never ends a value on a comma; the cut keeps that rule
+                    secret = secret[:cut.start()].rstrip(",")
+                    end = start + len(secret)
+                    if _CAPITALISED_WORD_RE.fullmatch(secret):
+                        continue
             if any(s < end and start < e for s, e in taken):
                 continue
             if rule.entropy and shannon_entropy(secret) < rule.entropy:
