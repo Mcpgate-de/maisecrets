@@ -161,7 +161,7 @@ def render_notes(version: str, commits: list[tuple[str, str, str]]) -> str:
         if subject.startswith("chore(release):"):
             continue
         typ, text, breaking = classify(subject, body)
-        if typ in TYPES_NONE:
+        if typ in TYPES_NONE and not breaking:   # `refactor!:` is the reason for its release
             continue
         section = "Breaking" if breaking else SECTION.get(typ, "Other")
         groups.setdefault(section, []).append(f"- {text} ({sha[:7]})")
