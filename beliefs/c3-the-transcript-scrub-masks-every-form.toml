@@ -1,0 +1,10 @@
+# c3-the-transcript-scrub-masks-every-form: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c3-the-transcript-scrub-masks-every-form"
+control = "C3"
+statement = "Every byte form of a value in the transcript is masked in place and each JSONL record stays valid."
+runner = ["tests/test_gates.py::FailClosedTests::test_transcript_scrub_keeps_every_record_valid_json"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "                        data = data.replace(b, b\"*\" * len(b))\n"
+replace = "                        pass\n"

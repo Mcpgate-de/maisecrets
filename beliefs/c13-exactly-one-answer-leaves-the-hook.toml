@@ -1,0 +1,10 @@
+# c13-exactly-one-answer-leaves-the-hook: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-exactly-one-answer-leaves-the-hook"
+control = "C13"
+statement = "The watchdog and the handler never both print; one JSON object leaves the process."
+runner = ["tests/test_gates.py::FailClosedTests::test_exactly_one_answer_leaves_the_process_when_the_watchdog_fires"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "            if answered[\"v\"]:\n                return\n"
+replace = "            if False:\n                return\n"

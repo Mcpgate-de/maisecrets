@@ -1,0 +1,10 @@
+# c1-a-prompt-with-a-hit-is-blocked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-prompt-with-a-hit-is-blocked"
+control = "C1"
+statement = "A prompt that carries a detected value is blocked, stored and answered with a placeholder; the value never reaches the model."
+runner = ["tests/test_core.py::HookTests::test_prompt_with_secret_is_blocked_and_stored"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    matches = detect.scan(prompt)\n"
+replace = "    matches = []\n"

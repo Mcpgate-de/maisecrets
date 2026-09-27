@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""Replay every belief's proof: mutate the guarded code, run the owning tests, demand RED.
+
+`beliefs/*.toml` names, per documented control, the tests that own it and one mutation
+(file, find, replace) that removes the control. A test that stays green under that mutation
+proves nothing about the control (docs/TESTING.md said "every control has a test that goes
+red without it"; before this script that sentence was prose). Borrowed from the ai-gateway's
+beliefs layer, cut to what a repository this size needs: no provenance vocabulary, no shards.
+
+    python3 scripts/replay_can_fail.py             # every belief
+    python3 scripts/replay_can_fail.py --belief X  # one
+    python3 scripts/replay_can_fail.py --list
+
+Each belief: the owning tests run once unmutated and must pass (a red baseline is not
+evidence about the mutation), then the file is mutated, the tests run again and must fail,
+and the file is restored on every exit, signals included. Serial by design: it owns the
+working tree for the length of one replay; never run it inside the test suite.
+"""
+from __future__ import annotations
+
+import argparse
+import signal
+import subprocess
+import sys
+import tomllib
+from contextlib import contextmanager
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+BELIEFS = ROOT / "beliefs"
+
+
+def load() -> list[dict]:
+    out = []
+    for path in sorted(BELIEFS.glob("*.toml")):
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        data["_path"] = path
+        out.append(data)
+    return out
+
+
+def unittest_id(test_id: str) -> str:
+    """tests/test_gates.py::Class::method -> tests.test_gates.Class.method"""
+    file, _, rest = test_id.partition("::")
+    module = file[:-3].replace("/", ".") if file.endswith(".py") else file.replace("/", ".")
+    return module + ("." + rest.replace("::", ".") if rest else "")
+
+
+def run_tests(ids: list[str]) -> int:
+    cmd = [sys.executable, "-m", "unittest", "-q"] + [unittest_id(t) for t in ids]
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=600)
+    return r.returncode
+
+
+@contextmanager
+def restored_on_any_exit(target: Path, original: str):
+    """Put the file back on every exit: a SIGTERM from a cancelled CI job would otherwise
+    leave the mutation in the tree, indistinguishable from an edit."""
+    previous = {}
+
+    def restore_and_die(signum, _frame):
+        target.write_text(original, encoding="utf-8")
+        signal.signal(signum, previous.get(signum, signal.SIG_DFL))
+        raise SystemExit(128 + signum)
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        try:
+            previous[sig] = signal.signal(sig, restore_and_die)
+        except (ValueError, OSError):
+            pass
+    try:
+        yield
+    finally:
+        target.write_text(original, encoding="utf-8")
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
+def replay(belief: dict) -> tuple[bool, str]:
+    proof = belief["proof"]
+    target = ROOT / proof["file"]
+    original = target.read_text(encoding="utf-8")
+    n = original.count(proof["find"])
+    if n != 1:
+        return False, f"anchor occurs {n} times in {proof['file']} (must be exactly once)"
+    if run_tests(belief["runner"]) != 0:
+        return False, "the owning tests are red before the mutation; no evidence"
+    with restored_on_any_exit(target, original):
+        mutated = original.replace(proof["find"], proof["replace"], 1)
+        target.write_text(mutated, encoding="utf-8")
+        # a mutation that breaks the syntax turns every test red for the wrong reason
+        if target.suffix == ".py":
+            try:
+                compile(mutated, str(target), "exec")
+            except SyntaxError as exc:
+                return False, f"the mutation does not compile ({exc.msg}, line {exc.lineno}); a red proves nothing"
+        rc = run_tests(belief["runner"])
+    if target.read_text(encoding="utf-8") != original:
+        return False, "the file was not restored"
+    if rc == 0:
+        return False, "the owning tests stayed GREEN under the mutation: they do not carry this belief"
+    return True, "red under the mutation, green restored"
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--belief")
+    ap.add_argument("--list", action="store_true")
+    args = ap.parse_args(argv)
+    beliefs = load()
+    if args.belief:
+        beliefs = [b for b in beliefs if b["belief"] == args.belief]
+        if not beliefs:
+            print(f"no belief named {args.belief}")
+            return 2
+    if args.list:
+        for b in beliefs:
+            print(f"{b['belief']:<55} {b['control']:<12} {b['proof']['file']}")
+        return 0
+    if not beliefs:
+        print("no beliefs found; nothing was proven")
+        return 1
+    failures = 0
+    for b in beliefs:
+        ok, why = replay(b)
+        failures += not ok
+        print(f"[{'OK ' if ok else 'FAIL'}] {b['belief']}: {why}")
+    print(f"{len(beliefs) - failures} of {len(beliefs)} beliefs proven; failures: {failures}")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

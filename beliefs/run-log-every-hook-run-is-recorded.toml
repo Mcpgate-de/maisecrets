@@ -1,0 +1,10 @@
+# run-log-every-hook-run-is-recorded: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "run-log-every-hook-run-is-recorded"
+control = "operations"
+statement = "Every hook run leaves one line in hooks.log with event, client, session, tool, decision and duration, never a value."
+runner = ["tests/test_gates.py::ScannerEdgeTests::test_hooks_log_records_every_run_without_values"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        _run_log(event, payload, how, decision, ms)\n"
+replace = "        pass\n"

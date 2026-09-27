@@ -449,6 +449,22 @@ class FailClosedTests(unittest.TestCase):
         self.assertIn("max_ttl_seconds", out["reason"])
         self.assertNotIn("locked store", out["reason"])
 
+    def test_policy_keys_win_over_the_user_file(self):
+        from unittest import mock
+        from maisecrets import vault as vmod
+        with mock.patch.dict(vmod.POLICY_PATHS, {__import__("platform").system(): Path(_TMP, "policy.json")}):
+            Path(_TMP, "policy.json").write_text('{"max_keys_per_session": 3, "scrub_transcript": false}')
+            Path(_TMP, "config.json").write_text(
+                '{"backend": "jsonfile", "allow_plaintext_store": true, "max_keys_per_session": 99}')
+            try:
+                cfg = vmod.load_config()
+            finally:
+                Path(_TMP, "policy.json").unlink()
+                Path(_TMP, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
+        self.assertEqual(cfg["max_keys_per_session"], 3)
+        self.assertFalse(cfg["scrub_transcript"])
+        self.assertEqual(sorted(cfg["policy_keys"]), ["max_keys_per_session", "scrub_transcript"])
+
     def test_post_tool_with_a_broken_payload_withholds_instead_of_failing_open(self):
         import io
         from unittest import mock

@@ -1,0 +1,10 @@
+# c8-the-agent-never-reads-the-store: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c8-the-agent-never-reads-the-store"
+control = "C8"
+statement = "A Bash command that reads or changes the store, the vault home or a delivery path is denied, and the resolver replay in every spelling."
+runner = ["tests/test_gates.py::GrantTests::test_agent_reads_of_the_store_are_denied", "tests/test_gates.py::ScannerEdgeTests::test_no_grant_is_redeemable_after_a_posix_rewrite"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    matched = _store_read_match(command)\n"
+replace = "    matched = None\n"

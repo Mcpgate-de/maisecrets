@@ -1,0 +1,10 @@
+# c5-a-late-refusal-takes-served-values-back: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c5-a-late-refusal-takes-served-values-back"
+control = "C5"
+statement = "When a later key refuses the command, a value already waiting in a FIFO is taken back."
+runner = ["tests/test_gates.py::ScannerEdgeTests::test_a_second_key_that_cannot_be_served_takes_the_first_back"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    for f in fifos:\n        try:\n            os.unlink(f)\n"
+replace = "    for f in []:\n        try:\n            os.unlink(f)\n"

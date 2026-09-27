@@ -55,6 +55,8 @@ manifests:
     - python -c "import json; [json.load(open(f)) for f in ('.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', 'hooks/hooks.json')]"
     - python -c "import json; h=json.load(open('hooks/hooks.json'))['hooks']; assert set(h) <= {'UserPromptSubmit','PreToolUse','PostToolUse','SessionStart','Setup'}, set(h)"
     - python scripts/release.py check
+    # the numbers the docs state, measured again (test count, scenario counts, proof count)
+    - python scripts/derived_counts.py
 
 plugin_validate:
   stage: validate
@@ -107,6 +109,14 @@ unit:
   stage: test
   script:
     - python -m unittest discover -s tests -v
+
+beliefs_can_fail_replay:
+  stage: test
+  # every belief in beliefs/*.toml: the owning tests go green, the guarded code is mutated as
+  # declared, the tests must go red, the file is restored. A test that stays green under the
+  # mutation does not carry the control it claims (borrowed from the ai-gateway beliefs layer)
+  script:
+    - python scripts/replay_can_fail.py
 
 # The hook harness: a real Claude Code / Codex binary, a fake upstream, every request body
 # scanned for the marker. Both run with an empty HOME and a dummy key: the fake upstream

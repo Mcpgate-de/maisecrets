@@ -1,0 +1,10 @@
+# c14-the-vault-home-is-never-written-by-the-agent: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-the-vault-home-is-never-written-by-the-agent"
+control = "C14"
+statement = "Write, Edit and the other file tools refuse a path under the maisecrets home."
+runner = ["tests/test_gates.py::ContextTests::test_file_tools_resolve_like_mcp_and_the_home_is_off_limits"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if inside or \".maisecrets\" in path.lower():\n"
+replace = "    if False:\n"

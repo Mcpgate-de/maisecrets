@@ -1,0 +1,10 @@
+# c2-a-resolved-value-is-caught-in-every-form: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-a-resolved-value-is-caught-in-every-form"
+control = "C2"
+statement = "A value this session resolved is redacted as a substring in plain, base64, hex, URL-encoded and JSON-escaped form."
+runner = ["tests/test_gates.py::ResolvedValueRedactionTests::test_value_in_url_path_query_prefix_and_encodings_is_redacted"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        for form in _derived_forms(value):\n"
+replace = "        for form in []:\n"

@@ -1,0 +1,10 @@
+# c6-a-command-word-that-reparses-or-encodes-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c6-a-command-word-that-reparses-or-encodes-is-refused"
+control = "C6"
+statement = "A nested shell, an interpreter with inline code, an encoder, a slice or a trace in a command that carries a placeholder is refused."
+runner = ["tests/test_gates.py::ScannerEdgeTests::test_nested_shell_spellings_are_refused_and_a_value_never_runs", "tests/test_gates.py::ContextTests::test_a_command_that_would_transform_the_value_is_refused"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    why = _refusal_for(command, ctxs)\n"
+replace = "    why = None\n"

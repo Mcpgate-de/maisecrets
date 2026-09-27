@@ -1,0 +1,10 @@
+# c7-the-limiter-caps-keys-per-session: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c7-the-limiter-caps-keys-per-session"
+control = "C7"
+statement = "More than max_keys_per_session distinct keys in one session are refused."
+runner = ["tests/test_gates.py::GrantTests::test_limiter_caps_distinct_keys_per_session_and_resolves_per_hour"]
+
+[proof]
+file = "maisecrets/vault.py"
+find = "        if key not in keys_in_session and len(keys_in_session) >= per_session:\n"
+replace = "        if False:\n"

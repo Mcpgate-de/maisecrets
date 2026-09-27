@@ -1,0 +1,10 @@
+# c2-tool-output-is-redacted-before-the-model: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-tool-output-is-redacted-before-the-model"
+control = "C2"
+statement = "A tool result is redacted by shape and by exact match of every live value before the model sees it."
+runner = ["tests/test_gates.py::RedactionTests::test_shapeless_value_is_redacted_by_exact_match"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    new_response = _walk_strings(response, redact)\n"
+replace = "    new_response = response\n"

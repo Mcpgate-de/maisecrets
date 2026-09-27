@@ -1,0 +1,10 @@
+# c4-a-reference-resolves-only-where-it-came-in: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c4-a-reference-resolves-only-where-it-came-in"
+control = "C4"
+statement = "A reference resolves only in the session that minted it, admitted it from a prompt, or saw the value in a tool result."
+runner = ["tests/test_gates.py::GrantTests::test_reference_resolves_only_in_a_session_that_saw_it"]
+
+[proof]
+file = "maisecrets/vault.py"
+find = "        if session not in allowed:\n            return \"foreign-session\"\n"
+replace = "        if False:\n            return \"foreign-session\"\n"

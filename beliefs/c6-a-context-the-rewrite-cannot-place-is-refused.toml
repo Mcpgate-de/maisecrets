@@ -1,0 +1,10 @@
+# c6-a-context-the-rewrite-cannot-place-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c6-a-context-the-rewrite-cannot-place-is-refused"
+control = "C6"
+statement = "A placeholder in $'\u2026', backticks, a quoted heredoc, a heredoc with a substitution or arithmetic is refused."
+runner = ["tests/test_gates.py::ContextTests::test_contexts_the_rewrite_cannot_place_are_refused_with_the_reason"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        why = _REFUSED_CONTEXT.get(ctxs[a])\n"
+replace = "        why = None\n"

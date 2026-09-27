@@ -1,0 +1,10 @@
+# c10-the-index-holds-keyed-fingerprints-only: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c10-the-index-holds-keyed-fingerprints-only"
+control = "C10"
+statement = "The index carries HMAC fingerprints keyed with a value that lives in the store, so the index alone reverses nothing."
+runner = ["tests/test_gates.py::RedactionTests::test_index_carries_no_reversible_fingerprint"]
+
+[proof]
+file = "maisecrets/vault.py"
+find = "def fingerprint(value: str, key: bytes) -> str:\n"
+replace = "def fingerprint(value: str, key: bytes) -> str:\n    return hashlib.sha256(value.encode()).hexdigest()[:16]\n"

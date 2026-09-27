@@ -1,0 +1,10 @@
+# c9-every-resolve-writes-an-audit-line: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c9-every-resolve-writes-an-audit-line"
+control = "C9"
+statement = "Every resolve writes one audit line with time, session, key, tool and the command with placeholders, never a value."
+runner = ["tests/test_gates.py::GrantTests::test_audit_line_names_key_tool_and_context_but_no_value"]
+
+[proof]
+file = "maisecrets/vault.py"
+find = "                f.write(f\"{stamp}\\t{(session or '-')[:8]}\\t{key}\\t{tool}\\t{ctx}\\n\")\n"
+replace = "                pass\n"
