@@ -261,10 +261,12 @@ def load_config() -> dict:
             policy = {}
         except ValueError as exc:
             raise ConfigError(f"{policy_path} is not valid JSON") from exc
-        if isinstance(policy, dict):
-            _check_types(policy, policy_path.name)
-            cfg.update(policy)
-            cfg["policy_keys"] = sorted(policy)
+        if not isinstance(policy, dict):
+            # valid JSON of another shape was skipped silently: no policy applied at all
+            raise ConfigError(f"{policy_path} must hold one JSON object")
+        _check_types(policy, policy_path.name)
+        cfg.update(policy)
+        cfg["policy_keys"] = sorted(policy)
     cfg["max_ttl_seconds"] = min(int(cfg.get("max_ttl_seconds", 30 * 86400)), 30 * 86400)
     if cfg.get("backend") == "jsonfile" and not cfg.get("allow_plaintext_store", False):
         # the plaintext store is for tests and the harness, which say so in their own config
