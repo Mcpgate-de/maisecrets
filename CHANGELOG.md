@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## [0.5.2] - 2026-09-27
+
+### Features
+
+- each release also goes to a GitHub branch with only the runtime files (4554787)
+- no install offer where no agent CLI exists (a web or mobile chat) (0d7dbfb)
+- every task starts with a protection check, and the skill installs the hooks after a yes (0b241fb)
+
+### Fixes
+
+- the release tree builder passes NUL-separated bytes to git (2294a44)
+- the release tree builder uses the release identity when git has none (93f1b9b)
+- the hook waits for its watchdog thread before it ends (7c4c63f)
+- the zip folders can be opened, and the offer text comes with the verdict (00c909a)
+- the protection check follows this agent's own hook run, and the offer asks first (6a50c95)
+
+### Other
+
+- Merge branch 'fix/release-tree-binary-on-windows' into 'main' (00eda11)
+- Merge branch 'fix/hook-waits-for-its-watchdog' into 'main' (e9c7762)
+- Merge branch 'feat/skill-installs-the-protection-2' into 'main' (a74d9d8)
+
 ## [0.5.1] - 2026-09-27
 
 ### Features
