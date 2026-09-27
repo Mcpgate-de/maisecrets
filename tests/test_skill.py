@@ -58,7 +58,7 @@ class SkillFileTests(unittest.TestCase):
         self.assertTrue(fields["description"] and "\n" not in fields["description"])
         self.assertLessEqual(len(fields["description"]), 1024)
         for rel in ("scripts/scan_secrets.py", "scripts/redact_copy.py", "scripts/audit_transcripts.py",
-                    "references/rotation.md"):
+                    "scripts/protection_status.py", "references/rotation.md"):
             self.assertIn(rel, text, rel)
             self.assertTrue((SKILL / rel).is_file(), rel)
 
@@ -70,8 +70,9 @@ class SkillListingTests(unittest.TestCase):
         text = (SKILL / "agents" / "openai.yaml").read_text(encoding="utf-8")
         fields = {}
         for line in text.splitlines()[1:]:
-            key, _sep, val = line.strip().partition(": ")
-            fields[key] = val.strip('"')
+            if line.startswith("  ") and not line.startswith("    "):
+                key, _sep, val = line.strip().partition(": ")
+                fields[key] = val.strip('"')
         self.assertIn("maisecrets", fields["display_name"])
         self.assertLessEqual(len(fields["short_description"]), 64)
         for key in ("icon_small", "icon_large"):
@@ -450,3 +451,44 @@ class TranscriptAuditTests(unittest.TestCase):
         os.utime(self.session, None)
         self.audit("--scrub", "--yes", "--claude")
         self.assertIn(self.token, self.session.read_text(encoding="utf-8"))
+
+
+class ProtectionStatusTests(unittest.TestCase):
+    """The skill opens every task with this check and offers the install when it says NOT
+    ACTIVE, so the verdict must follow the run log, and print nothing from it."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix="maisecrets-status-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def status(self):
+        env = dict(_clean_env(), MAISECRETS_HOME=str(self.home), PATH="/usr/bin:/bin")
+        return subprocess.run([sys.executable, str(SCRIPTS / "protection_status.py")], capture_output=True,
+                              text=True, env=env, timeout=60)
+
+    def write_log(self, seconds_ago: int, marker: str = "S1"):
+        import datetime as dt
+        when = (dt.datetime.now() - dt.timedelta(seconds=seconds_ago)).isoformat(timespec="seconds")
+        (self.home / "hooks.log").write_text(f"{when}\tuser-prompt\tcodex\t{marker}\t-\tpass\t3ms\tok\n",
+                                             encoding="utf-8")
+
+    def test_no_log_is_not_active_and_names_the_install(self):
+        r = self.status()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("NOT ACTIVE", r.stdout)
+        self.assertIn("codex plugin marketplace add https://github.com/Mcpgate-de/maisecrets.git", r.stdout)
+
+    def test_a_hook_run_a_moment_ago_is_active_and_nothing_of_the_log_is_printed(self):
+        self.write_log(20, marker="session-abc123")
+        r = self.status()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("ACTIVE (codex hooks ran", r.stdout)
+        self.assertNotIn("session-abc123", r.stdout)
+
+    def test_an_old_hook_run_is_not_active(self):
+        self.write_log(3600)
+        r = self.status()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("60 min ago", r.stdout)

@@ -289,6 +289,10 @@ values that already leaked. The model loads it when a task fits; in Claude Code 
   `--history`, in every commit on every ref. A finding is a file, a line, a type, the rule, a
   length and a per-run id. The same id means the same value; the output never holds a value,
   a line of the file or a hash of the value, because the model reads it.
+- **Install the protection.** Every task starts with `protection_status.py`, which reads the run
+  log: when no maisecrets hook ran for the current prompt, the answer opens with an offer to
+  install the plugin, and runs the install commands only after a yes. This is how the skill,
+  which a store can list alone, brings the hooks along.
 - **Check what the agents already received.** `audit_transcripts.py` reads the local Claude Code
   and Codex sessions and lists every secret that sat in a prompt, a tool result or a model answer,
   so it reached Anthropic or OpenAI: by type, rule, dates and sessions, never by value. On request
