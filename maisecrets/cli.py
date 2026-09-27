@@ -172,7 +172,9 @@ def cmd_expire(_: list[str]) -> int:
 
 
 def cmd_scan(args: list[str]) -> int:
-    text = " ".join(args) if args else sys.stdin.read()
+    # bytes, decoded with replacement: the CI scan of the repo pipes every file in, a PNG among
+    # them, and a strict decode crashed without output, which read as "nothing found" (2026-09-27)
+    text = " ".join(args) if args else sys.stdin.buffer.read().decode("utf-8", errors="replace")
     for m in detect.scan(text):
         print(f"{m.type:<7} {m.kind:<18} at {m.start}-{m.end} (len {len(m.value)})")
     return 0

@@ -39,11 +39,15 @@ def _value(rnd: random.Random, shape: str) -> str:
             if any(c.isdigit() for c in v) and any(c.isalpha() for c in v):
                 return v
     if shape == "two-letters":
-        a, b = rnd.sample(string.ascii_lowercase, 2)
+        # not x: a run of x is a placeholder mask on purpose (xxxxxxxx)
+        a, b = rnd.sample(string.ascii_lowercase.replace("x", ""), 2)
         return "".join(rnd.choice(a + b) for _ in range(rnd.randint(12, 20)))
     if shape == "special":
+        # a value wrapped in %…% reads as a Windows variable and one opening with $NAME as a shell
+        # variable, on purpose, so the first character is neither % nor $
         pool = string.ascii_letters + string.digits + "!#$%&*+-_@"
-        return "".join(rnd.choice(pool) for _ in range(rnd.randint(10, 18))) + rnd.choice("!#$%")
+        first = rnd.choice(pool.replace("%", "").replace("$", ""))
+        return first + "".join(rnd.choice(pool) for _ in range(rnd.randint(9, 17))) + rnd.choice("!#$")
     if shape == "german":
         return rnd.choice(["Sommer", "Winter", "Fruehling"]) + str(rnd.randint(2020, 2030)) + rnd.choice("!?#")
     raise ValueError(shape)

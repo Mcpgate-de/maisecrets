@@ -97,7 +97,9 @@ no_secrets_in_tree:
     # dogfooding: the repo itself must not carry a value the detector would hide
     # python:slim has no git; the checkout has no untracked files, so scan every file except .git
     # maisecrets/rules/ is the vendored ruleset and carries secret shapes by design
-    - find . \( -path ./.git -o -path ./maisecrets/rules \) -prune -o -type f -print0 | xargs -0 cat | python -m maisecrets.cli scan | { ! grep -E '^SECRET ' ; }
+    # each file on its own, with its exit code: a crash printed nothing and passed as "nothing
+    # found", and one concatenated stream paired a label with the next file's text (2026-09-27)
+    - python scripts/scan_tree.py
 
 lint:
   stage: validate

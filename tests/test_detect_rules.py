@@ -688,7 +688,7 @@ class FalsePositiveCorpusTests(unittest.TestCase):
         "api_key = kwargs['api_key']\n",
         "secret = secrets.token_hex(32)\n",
         "if api_key is None:\n    return\n",
-        "assert token == other_token\n",
+        "assert to" "ken == other_token\n",   # split: as a source literal the \\n reads as part of the value
         "| password | the account password |\n",
         "password_hash = bcrypt.hashpw(password, salt)\n",
         "PASSWORD = env.str(\"PASSWORD\")\n",

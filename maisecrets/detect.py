@@ -243,6 +243,8 @@ def _ds_value_ok(v: str) -> bool:
         return False
     if _DS_TEMPLATED.match(v) or _DS_INDIRECT.match(v):
         return False
+    if re.match(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?![\w])", v):
+        return False   # a shell variable: $PASSWORD, ${DB_PASSWORD}
     if "(" in v or ")" in v or "`" in v or "|" in v:
         return False   # a call, an expression or markdown (`re.compile(r"…`, "`/maisecrets:report` |"), not a value
     if not any(c.isalnum() for c in v):
@@ -400,17 +402,32 @@ _WHITESPACE_RE = re.compile(r"\s")
 _CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
 
 
+# labels people write that the detect-secrets denylist lacks: `pass:` and `token:` / `MY_TOKEN=`
+# (a generated matrix of 2,500 inputs missed 17 % on these two, 2026-09-27). Only at the start of
+# a word, so compass: and bypass: stay prose; MY_TOKEN keeps its underscore boundary.
+# The token exclusions follow gitleaks' own allowlist for generic-api-key (csrf_token,
+# public_token, token_file, token_url …): those name no secret.
+EXTRA_KEYWORDS = ("(?<![a-z])pass",
+                  "(?<![a-z])(?<!csrf_)(?<!csrf-)(?<!xsrf_)(?<!public_)(?<!page_)(?<!next_)token"
+                  "(?![_.-]?(?:file|url|uri|endpoint|type|count|limit|length|size|id|name)(?![a-z]))")
+
+
 def _load_detect_secrets() -> list[Rule]:
     data = json.loads((RULES_DIR / "detect_secrets.json").read_text(encoding="utf-8"))
-    kws = tuple(sorted({"key", "pass", "pwd", "secret", "contrase", "kennw", "geheim", "schl", "zugang"}))
+    kws = tuple(sorted({"key", "pass", "pwd", "secret", "contrase", "kennw", "geheim", "schl", "zugang", "token"}))
     denylist = "|".join(data["denylist"])
     out: list[Rule] = []
     for r in data["rules"]:
         flags = re.IGNORECASE if r.get("ignorecase") else 0
         # the product's own name carries "secret": `/maisecrets:shortcut` was stored as a secret
         # named "shortcut" (field report, 2026-09-27); "mai" + keyword is never a label
-        keywords = "(?<!mai)(" + denylist + "|" + "|".join(GERMAN_KEYWORDS) + ")"
+        keywords = "(?<!mai)(" + denylist + "|" + "|".join(GERMAN_KEYWORDS + EXTRA_KEYWORDS) + ")"
         regex = r["regex"].replace("(" + denylist + ")", keywords, 1)
+        # the vendored value group must start with a word character, so `$+4jJzBixvQD9#`,
+        # `@f6a-VtyEOYr!` and `-NA#C-X-gb4T%` were never values (2026-09-27); any first character
+        # a character a password starts with may start one (not {, [, (, \\, /, <: code and paths), and
+        # _ds_value_ok refuses a shell variable ($VAR, ${VAR}) as before
+        regex = regex.replace("(?=\\w+)", "(?=[\\w!#$%&*+\\-@^~?.])")
         out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(regex, flags),
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
                         secret_group=int(r["group"]), validator="ds_value",
