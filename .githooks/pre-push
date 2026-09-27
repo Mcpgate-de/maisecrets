@@ -16,6 +16,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 done
 if echo "$*" | grep -q -- "--tags"; then echo "pre-push: --tags refused"; exit 1; fi
 
+if command -v ruff >/dev/null 2>&1; then
+  ruff check --select E,F,W --line-length 120 maisecrets hooks harness tests scripts || { echo "pre-push: lint failed"; exit 1; }
+fi
 python3 -m unittest discover -s tests -q || { echo "pre-push: unit tests failed"; exit 1; }
 
 if [ "${MAISECRETS_SKIP_HARNESS:-0}" != "1" ] && command -v claude >/dev/null 2>&1; then

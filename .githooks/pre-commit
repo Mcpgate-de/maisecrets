@@ -2,7 +2,7 @@
 # maisecrets pre-commit: fast checks that must hold on every commit.
 #   1. no secret or PII in the staged diff (our own detector, dogfooding)
 #   2. JSON manifests parse
-#   3. unit tests (they take milliseconds)
+#   3. lint as the CI job runs it, 4. manifests agree, 5. plugin validator, 6. unit tests
 # Install: scripts/install-hooks.sh
 set -u
 ROOT="$(git rev-parse --show-toplevel)"

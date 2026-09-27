@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `/maisecrets:shortcut --remove` takes the personal `/ms` away and keeps it away.
+
 ## [0.3.24] - 2026-09-27
 
 ### Features

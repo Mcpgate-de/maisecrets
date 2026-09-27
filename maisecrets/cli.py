@@ -255,9 +255,39 @@ def install_shortcut(name: str = "ms", only_if_absent: bool = False) -> "tuple[s
     return str(target), str(wrapper)
 
 
+def remove_shortcut(name: str = "ms") -> list[str]:
+    """Undo install_shortcut: delete the command file (only when it is ours), the wrapper, and
+    leave a marker so the next session start does not install it again."""
+    from pathlib import Path as _P
+    from .vault import HOME
+    removed: list[str] = []
+    commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
+    target = commands / f"{name}.md"
+    try:
+        if target.exists() and "maisecrets/bin/ms.sh" in target.read_text(encoding="utf-8"):
+            target.unlink()
+            removed.append(str(target))
+    except OSError:
+        pass
+    wrapper = HOME / "bin" / "ms.sh"
+    if wrapper.exists():
+        wrapper.unlink()
+        removed.append(str(wrapper))
+    HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+    (HOME / ".shortcut").write_text("removed\n", encoding="utf-8")
+    return removed
+
+
 def cmd_shortcut(args: list[str]) -> int:
+    if "--remove" in args:
+        removed = remove_shortcut(next((a for a in args if a != "--remove" and a.isalnum()), "ms"))
+        print("removed: " + (", ".join(removed) if removed else "nothing (no maisecrets shortcut found)"))
+        print("The session start will not install it again; run `shortcut` to get it back.")
+        return 0
     name = (args[0] if args and args[0].isalnum() else "ms")
     target, wrapper = install_shortcut(name)
+    from .vault import HOME
+    (HOME / ".shortcut").write_text("installed\n", encoding="utf-8")
     print(f"installed /{name}: {target} -> {wrapper}.")
     print("Start a new session (or /reload-plugins) to use it.")
     return 0

@@ -1,6 +1,6 @@
 ---
 description: Install a short personal /ms command for /maisecrets:send (works over SSH and in Remote Control).
-argument-hint: [name]
+argument-hint: [name | --remove]
 allowed-tools: Bash(bash *maisecrets*shortcut*)
 ---
 
@@ -12,4 +12,5 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" shortcut $ARGUMENTS
 
 It writes `~/.claude/commands/ms.md` (or the name given) and a small wrapper in
 `~/.maisecrets/bin/` that finds the installed plugin at run time, so the shortcut survives
-plugin updates. The user then types `/ms` after a blocked prompt.
+plugin updates. The user then types `/ms` after a blocked prompt. `--remove` takes it away
+again and keeps it away.

@@ -655,6 +655,17 @@ class ShortcutTests(unittest.TestCase):
         self.assertIn("/ms", json.loads(r.stdout)["systemMessage"], r.stderr)
         self.assertIn("ms.sh", (cfg_dir / "commands" / "ms.md").read_text())
         self.assertEqual(marker.read_text().strip(), "installed")
+        # the way back: remove, and a later session start does not bring it back
+        from maisecrets import cli
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(cli.cmd_shortcut(["--remove"]), 0)
+        self.assertFalse((cfg_dir / "commands" / "ms.md").exists())
+        self.assertFalse(Path(_TMP, "bin", "ms.sh").exists())
+        self.assertEqual(marker.read_text().strip(), "removed")
+        with mock.patch.dict(os.environ, env):
+            subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "session-start"],
+                           input="{}", capture_output=True, text=True, env={**os.environ, **env})
+        self.assertFalse((cfg_dir / "commands" / "ms.md").exists(), "removed stays removed")
 
 
 class ReportTests(unittest.TestCase):
