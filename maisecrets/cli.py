@@ -232,24 +232,32 @@ Remote Control show neither the blocked prompt nor a slash command's expansion),
 """
 
 
-def cmd_shortcut(args: list[str]) -> int:
-    """Install a personal `/ms` command for this user: `~/.claude/commands/ms.md` plus the
-    stable wrapper `~/.maisecrets/bin/ms.sh`, which finds the newest installed plugin copy at
-    run time (the plugin folder moves with every version). Field request, 2026-09-26."""
+def install_shortcut(name: str = "ms", only_if_absent: bool = False) -> "tuple[str, str] | None":
+    """Write the personal `/ms` command (`~/.claude/commands/ms.md`) and the stable wrapper
+    `~/.maisecrets/bin/ms.sh`, which finds the newest installed plugin copy at run time (the
+    plugin folder moves with every version). With ``only_if_absent`` an existing command file
+    of that name is left alone (it may be the user's own). Returns (command file, wrapper) or
+    None when nothing was written. Field request, 2026-09-26."""
     from pathlib import Path as _P
     from .vault import HOME
-    name = (args[0] if args and args[0].isalnum() else "ms")
     root = _P(__file__).resolve().parent.parent
-    wrapper_src = root / "hooks" / "ms.sh"
+    commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
+    target = commands / f"{name}.md"
+    if only_if_absent and target.exists():
+        return None
     bin_dir = HOME / "bin"
     bin_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     wrapper = bin_dir / "ms.sh"
-    wrapper.write_text(wrapper_src.read_text(encoding="utf-8"), encoding="utf-8")
+    wrapper.write_text((root / "hooks" / "ms.sh").read_text(encoding="utf-8"), encoding="utf-8")
     wrapper.chmod(0o700)
-    commands = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude")) / "commands"
     commands.mkdir(parents=True, exist_ok=True)
-    target = commands / f"{name}.md"
     target.write_text(SHORTCUT_COMMAND, encoding="utf-8")
+    return str(target), str(wrapper)
+
+
+def cmd_shortcut(args: list[str]) -> int:
+    name = (args[0] if args and args[0].isalnum() else "ms")
+    target, wrapper = install_shortcut(name)
     print(f"installed /{name}: {target} -> {wrapper}.")
     print("Start a new session (or /reload-plugins) to use it.")
     return 0

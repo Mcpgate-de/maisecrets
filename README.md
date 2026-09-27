@@ -330,9 +330,12 @@ A bare password in prose, such as "use Sommer2026 for the login", is not
 detected. That is a limit of pattern detection, not a setting.
 
 **Sending a blocked prompt.** `/maisecrets:send` sends the rewritten prompt as
-it is, without the clipboard; `/maisecrets:shortcut` installs a personal `/ms`
-for it (a fixed wrapper in `~/.maisecrets/bin` that finds the installed plugin
-at run time, so it survives updates). The answer starts with `Sent: ` and the
+it is, without the clipboard. A plugin cannot register a command without its
+namespace, so the first session start writes a personal `/ms` for it into
+`~/.claude/commands` (a fixed wrapper in `~/.maisecrets/bin` finds the
+installed plugin at run time, so it survives updates); an existing `/ms` is
+left alone, `"shortcut": false` turns this off, `/maisecrets:shortcut [name]`
+installs it by hand. The answer starts with `Sent: ` and the
 text that went out, because Remote Control shows neither a blocked prompt nor
 a slash command's expansion; the block notice itself is not shown there
 either (reported to the vendor).

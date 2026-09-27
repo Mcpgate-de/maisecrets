@@ -4,8 +4,8 @@
 
 ## [0.3.23] - 2026-09-26
 
-- `/maisecrets:shortcut` installs a personal `/ms` for `/maisecrets:send`; the answer to a
-  sent prompt starts with `Sent: ` and the text, so Remote Control users see what went out.
+- The first session start installs a personal `/ms` for `/maisecrets:send` (unless one exists
+  or `"shortcut": false`); `/maisecrets:shortcut [name]` does it by hand.
 - `/maisecrets:put` explains the SSH case (no clipboard: use a label in a prompt).
 
 ### Features

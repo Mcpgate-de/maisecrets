@@ -634,6 +634,28 @@ class ShortcutTests(unittest.TestCase):
         self.assertIn("/0.3.10/hooks/run.sh pending", r.stdout.replace("\\", "/"), r.stderr)
         self.assertNotIn("$(", cmd.split("---")[2].split("\n")[1], "the ! line is a fixed path, never a substitution")
 
+    def test_session_start_installs_the_shortcut_once_and_keeps_a_users_own(self):
+        from unittest import mock
+        cfg_dir = Path(tempfile.mkdtemp(prefix="maisecrets-cfg-"))
+        (cfg_dir / "commands").mkdir()
+        (cfg_dir / "commands" / "ms.md").write_text("# mine\n")
+        marker = Path(_TMP, ".shortcut")
+        marker.unlink(missing_ok=True)
+        env = {"CLAUDE_CONFIG_DIR": str(cfg_dir), "CLAUDE_PLUGIN_ROOT": str(ROOT)}
+        with mock.patch.dict(os.environ, env):
+            r = subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "session-start"],
+                               input="{}", capture_output=True, text=True, env={**os.environ, **env})
+        self.assertEqual((cfg_dir / "commands" / "ms.md").read_text(), "# mine\n", "a user's own /ms stays")
+        self.assertEqual(marker.read_text().strip(), "kept")
+        (cfg_dir / "commands" / "ms.md").unlink()
+        marker.unlink()
+        with mock.patch.dict(os.environ, env):
+            r = subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "session-start"],
+                               input="{}", capture_output=True, text=True, env={**os.environ, **env})
+        self.assertIn("/ms", json.loads(r.stdout)["systemMessage"], r.stderr)
+        self.assertIn("ms.sh", (cfg_dir / "commands" / "ms.md").read_text())
+        self.assertEqual(marker.read_text().strip(), "installed")
+
 
 class ReportTests(unittest.TestCase):
     def setUp(self):

@@ -70,6 +70,18 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         out["systemMessage"] = f"maisecrets {version} active." + (f" {tip}" if tip else "")
     if cfg.get("config_warning"):
         out["systemMessage"] = out.get("systemMessage", "") + f" Warning: {cfg['config_warning']}."
+    # the personal /ms shortcut, once, unless the user has one or turned it off (a plugin cannot
+    # register a command without its namespace; only ~/.claude/commands can)
+    if cfg.get("shortcut", True) and not (HOME / ".shortcut").exists() and "CLAUDE_PLUGIN_ROOT" in os.environ:
+        try:
+            from maisecrets.cli import install_shortcut  # noqa: E402
+            done = install_shortcut("ms", only_if_absent=True)
+            (HOME / ".shortcut").write_text("installed\n" if done else "kept\n", encoding="utf-8")
+            if done:
+                out["systemMessage"] = (out.get("systemMessage", "") +
+                                        " /ms (short for /maisecrets:send) is set up from the next session on.")
+        except OSError:
+            pass
     # the model reads what a placeholder is once per session, before it meets one
     out["hookSpecificOutput"] = {"hookEventName": "SessionStart", "additionalContext": PRIMER}
     print(json.dumps(out))
