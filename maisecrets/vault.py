@@ -342,6 +342,23 @@ class JsonFileBackend:
         return list(self._load())
 
 
+def parse_keychain_dump(text: str, service: str) -> list[str]:
+    """The account names of every item of ``service`` in a `security dump-keychain` listing
+    (attributes only). An item starts at a `keychain:` line; inside it the attributes are
+    alphabetical, so "acct" comes before "svce"."""
+    out: list[str] = []
+    acct = None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("keychain:"):
+            acct = None
+        elif line.startswith('"acct"<blob>='):
+            acct = line.split("=", 1)[1].strip('"')
+        elif line.startswith('"svce"<blob>=') and line.split("=", 1)[1].strip('"') == service and acct:
+            out.append(acct)
+    return out
+
+
 class KeychainBackend:
     """macOS login keychain via the ``security`` CLI. No sync flag is set."""
     test_mode = False
@@ -426,17 +443,7 @@ class KeychainBackend:
         r = subprocess.run(["security", "dump-keychain"], capture_output=True, text=True, timeout=20)
         if r.returncode != 0:
             return []
-        out: list[str] = []
-        acct = None
-        for line in r.stdout.splitlines():
-            line = line.strip()
-            if line.startswith("keychain:"):
-                acct = None
-            elif line.startswith('"acct"<blob>='):
-                acct = line.split("=", 1)[1].strip('"')
-            elif line.startswith('"svce"<blob>=') and line.split("=", 1)[1].strip('"') == SERVICE and acct:
-                out.append(acct)
-        return out
+        return parse_keychain_dump(r.stdout, SERVICE)
 
     def wipe(self) -> int:
         """Delete every item of the service, one call per item until none is left: the store is

@@ -45,7 +45,7 @@ MANIFESTS = (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json")
 CHANGELOG = ROOT / "CHANGELOG.md"
 
 TYPES_MINOR = {"feat"}
-TYPES_PATCH = {"fix", "perf", "security", "deps"}
+TYPES_PATCH = {"fix", "perf", "security", "deps", "revert"}   # a revert is the rollback path: always a patch
 TYPES_NONE = {"docs", "ci", "test", "chore", "build", "style", "refactor"}
 KNOWN = TYPES_MINOR | TYPES_PATCH | TYPES_NONE
 SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(\((?P<scope>[^)]+)\))?(?P<bang>!)?: (?P<text>\S.*)$")
