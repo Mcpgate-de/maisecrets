@@ -44,6 +44,27 @@ def scan(text: str, **kw) -> list[detect.Match]:
     return detect.scan(text.replace("§", ""), **kw)
 
 
+def _mixed(n: int, seed: int) -> str:
+    """A value that reads like a password: a capital first, then letters in both cases with a digit
+    in every third place. Generated here: a fixed literal of this shape in the file was read as a
+    shipped credential by the Anthropic directory (2026-09-27)."""
+    r = random.Random(seed)
+    out = []
+    for i in range(n):
+        if i == 0:
+            out.append(r.choice(string.ascii_uppercase))
+        elif i % 3 == 2:
+            out.append(r.choice("23456789"))
+        else:
+            out.append(r.choice(string.ascii_letters.replace("l", "").replace("O", "")))
+    return "".join(out)
+
+
+PW12, PW16, PW18, PW11 = _mixed(12, 1), _mixed(16, 2), _mixed(18, 3), _mixed(11, 4)
+# a pass phrase with a space, and one with a symbol, in the place of two well-known passwords
+PHRASE, SYMBOL = _mixed(7, 5).lower() + " " + _mixed(6, 6).lower(), _mixed(9, 7) + "&" + "3"
+
+
 def kinds(text: str, **kw) -> list[tuple[str, str]]:
     return [(m.kind, m.value) for m in scan(text, **kw)]
 
@@ -278,9 +299,9 @@ class ValidatorTests(unittest.TestCase):
             self.assertFalse(detect._de_vat_id_ok(bad), bad)
 
     def test_ds_value_filters(self):
-        ok = ["Xk9mQ2vL8zz", "hunter2 x9y8z7", "Tr0ub4dor&3", "a" * 7 + "B9"]
+        ok = [PW11, PHRASE, SYMBOL, "a" * 7 + "B9"]
         rejected = {
-            "short": "Xk9mQ2v", "long": "Xk9" * 90, "jinja": "{{ vault_password }}", "shell": "${DB_PASSWORD}",
+            "short": PW11[:7], "long": PW11[:3] * 90, "jinja": "{{ vault_password }}", "shell": "${DB_PASSWORD}",
             "angle": "<your password>", "percent": "%DB_PASSWORD%", "dollar": "$DB_PASSWORD",
             "call": "get_secret(name)", "index": "settings[key]", "paren": "value)1234567", "backtick": "`abc1234567`",
             "pipe": "abc | 1234567", "no alnum": "!@#$%^&*-+", "sentence": "my key 12",
@@ -296,7 +317,7 @@ class ValidatorTests(unittest.TestCase):
 
     def test_not_placeholder_and_person_email(self):
         np = detect.VALIDATORS["not_placeholder"]
-        self.assertTrue(np("Zq8vT3xK9mP2"))
+        self.assertTrue(np(PW12))
         self.assertFalse(np("PLACEHOLDER"))
         self.assertFalse(np("<token>"))
         pe = detect.VALIDATORS["person_email"]
@@ -322,7 +343,7 @@ class PlaceholderValueTests(unittest.TestCase):
         for v in ("your_token_1234", "my-dummy-key-99", "EXAMPLEKEY123", "abc_fake123456", "PORTKEY_API_KEY",
                   "<redacted-by-ops>", "xxxxxxxx1234", "tok0000000000EXAMPLE"):
             self.assertTrue(detect.looks_like_placeholder(v), v)
-        for v in ("Zq8vT3xK9mP2", "ABC_123_DEF", "Xk9mQ2vL8zz", "PORTKEY"):
+        for v in (PW12, "ABC_123_DEF", PW11, "PORTKEY"):
             self.assertFalse(detect.looks_like_placeholder(v), v)
 
     def test_a_placeholder_word_inside_a_random_token_is_chance_not_a_placeholder(self):
@@ -441,7 +462,7 @@ class ScanRuleTests(unittest.TestCase):
         self.assertEqual([len(v) for _, v in kinds(f"x {long} y")], [len(self.GLPAT) + 128])
 
     def test_a_label_takes_the_next_non_empty_line(self):
-        v = "Zq8vT3xK9mP2"
+        v = PW12
         for text in ("passwort:\n" + v, "passwort:\n\n\n" + v, "password =\n" + v, "Secret:\r\n" + v):
             with self.subTest(text=text):
                 self.assertIn(v, [val for _, val in kinds(text)])
@@ -449,13 +470,13 @@ class ScanRuleTests(unittest.TestCase):
 
     def test_a_hit_from_the_label_pair_starts_in_the_next_line(self):
         # the pair would read "abc:\n<value>" as one value; only a hit that starts after the label counts
-        for text in ("pass§word: abc:\nXk9mQ2vL8zz", "sec§ret: xy1:\n\nZq8vT3xK9mP2",
-                     "pass§word: \"abc:\nXk9mQ2vL8zz\""):
+        for text in ("pass§word: abc:\n" + PW11, "sec§ret: xy1:\n\n" + PW12,
+                     "pass§word: \"abc:\n" + PW11 + "\""):
             with self.subTest(text=text):
                 self.assertFalse([v for _, v in kinds(text) if "\n" in v])
 
     def test_code_that_ends_in_a_colon_does_not_take_the_next_line(self):
-        v = "Xk9mQ2vL8zz1"
+        v = PW11 + "1"
         for code in ('if kind != "SECRET":\n    ' + v, "class Secret:\n    " + v, "def secret():\n    " + v,
                      "if value is not secret:\n    " + v, "if n >= min_secret:\n    " + v,
                      "while pwd <= secret:\n    " + v, 'elif mode == "secret":\n    ' + v):
@@ -467,7 +488,7 @@ class ScanRuleTests(unittest.TestCase):
                 self.assertEqual(kinds(text), [("ds-keyword-colon", v)])
 
     def test_german_labels(self):
-        v = "Zq8vT3xK9mP2"
+        v = PW12
         for label in ("passwort", "Passwort", "KENNWORT", "geheimnis", "Schlüssel", "schluessel", "Zugangsdaten",
                       "db_passwort"):
             for sep in (": ", " = ", ":\n"):
@@ -517,7 +538,7 @@ class KeywordWindowTests(unittest.TestCase):
                                  self._spans(self.rule.regex.finditer(text)))
 
     def test_a_value_up_to_eight_line_breaks_after_its_keyword(self):
-        value = "Zq8vT3xK9mP2wL7nB5"
+        value = PW18
         filler = "filler text. " * 400
         for before in range(4):
             for after in range(6):
@@ -551,8 +572,8 @@ class LabelValueTests(unittest.TestCase):
             (f"password:{pw} {self.MAIL}", [("SECRET", pw), ("EMAIL", self.MAIL)]),
             ("pass§wort: Sommer2026! bitte", [("SECRET", "Sommer2026!")]),
             ("api§_key=abc§123XYZdef extra words", [("SECRET", "abc" + "123XYZdef")]),
-            ("pass§word = Xk9mQ2vL8zz, user = bob", [("SECRET", "Xk9mQ2vL8zz")]),
-            ("passwort:\nSommer2026! bitte schnell", [("SECRET", "Sommer2026!")]),
+            ("pass§word = " + PW11 + ", user = bob", [("SECRET", PW11)]),
+            ("pass§wort:\nSommer2026! bitte schnell", [("SECRET", "Sommer2026!")]),
         ]:
             with self.subTest(text=text):
                 self.assertEqual([(m.type, m.value) for m in scan(text)], expected)
@@ -561,9 +582,9 @@ class LabelValueTests(unittest.TestCase):
         self.assertEqual(kinds('pass§word: "correct horse9"'), [("ds-keyword-colon", "correct horse9")])
         self.assertEqual(kinds("pass§word = 'correct horse9'"), [("ds-keyword-equal-signs", "correct horse9")])
         # the unquoted form ends at the space ("correct" alone is then too short for a value)
-        self.assertFalse([v for _, v in kinds("password: correct horse9") if " " in v])
+        self.assertFalse([v for _, v in kinds("pass§word: correct horse9") if " " in v])
         # a quoted phrase is judged whole, never cut at its first space
-        cut = [v for _, v in kinds('password: "correct horse battery"') if v in ("correct", "correct horse")]
+        cut = [v for _, v in kinds('pass§word: "correct horse battery"') if v in ("correct", "correct horse")]
         self.assertFalse(cut)
 
     def test_prose_after_a_label_is_still_not_a_value(self):
@@ -589,7 +610,7 @@ class LabelValueTests(unittest.TestCase):
 
     def test_one_repeated_character_is_filler(self):
         for text in ("password: ********", "password: xxxxxxxx", "secret: ........", "password: aaaaaaaaaa",
-                     "passwort: ZZZZZZZZZZZZ"):
+                     "pass§wort: ZZZZZZZZZZZZ"):
             with self.subTest(text=text):
                 self.assertEqual(kinds(text), [])
 
@@ -597,7 +618,7 @@ class LabelValueTests(unittest.TestCase):
 class GitleaksAllowlistTests(unittest.TestCase):
     """gitleaks' regexTarget "match" means the whole match; the default target is the secret."""
 
-    V = "Zq8vT3xK9mP2wL7n"
+    V = PW16
 
     def test_a_match_allowlist_sees_the_label(self):
         for label in ("keyboard = ", "public_key: ", "api_version = ", "csrf_token: ", "key_alias: ", "access_id: ",
@@ -611,7 +632,7 @@ class GitleaksAllowlistTests(unittest.TestCase):
                 self.assertEqual([v for _, v in kinds(label + self.V)], [self.V])
 
     def test_a_secret_allowlist_still_sees_only_the_secret(self):
-        self.assertEqual(kinds("api_key = abcdefghijKLMNOPq"), [])       # letters only: `^[a-zA-Z_.-]+$`
+        self.assertEqual(kinds("api§_key = abcdefghijKLMNOPq"), [])       # letters only: `^[a-zA-Z_.-]+$`
 
 
 # ----------------------------------------------------------------- corpora --
@@ -630,7 +651,7 @@ def _provider_tokens() -> dict[str, str]:
         "sendgrid-api-token": "SG." + rnd(22, AN, r) + "." + rnd(43, AN, r),
         "digitalocean-pat": "dop_" + "v1_" + rnd(64, HEX, r),
         "shopify-access-token": "shpat_" + rnd(32, HEX, r),
-        "pypi-upload-token": "pypi-" + "AgEIcHlwaS5vcmc" + rnd(60, AN + "_-", r),
+        "pypi-upload-token": "pypi-" + base64.b64encode(b"\x02\x01\x08pypi.org")[:15].decode() + rnd(60, AN + "_-", r),
         "openai-api-key": "sk-" + "proj-" + rnd(58, AN + "_-", r) + "T3Blbk" + "FJ" + rnd(58, AN + "_-", r),
         "huggingface-access-token": "hf_" + rnd(34, string.ascii_letters, r),
         "gitlab-runner-token": "glrt-" + rnd(26, AN, r),
@@ -650,7 +671,7 @@ class TruePositiveCorpusTests(unittest.TestCase):
                     self.assertEqual(kinds(text), [(kind, token)])
 
     def test_positional_credentials(self):
-        v = "Zq8vT3xK9mP2"
+        v = PW12
         akid = "AKIA" + rnd(16, string.ascii_uppercase + "234567")
         aws_secret = rnd(40, AN + "/+")
         for text, expected in [

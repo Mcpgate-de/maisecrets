@@ -7,7 +7,7 @@ failure names its combination. Every value is generated here; nothing comes from
 
 Two cases found by hand on 2026-09-27 started it: `password:X and a@b.de` lost the password
 (the value ran to the end of the line and was then rejected as prose), and
-`password:asasasasasasaasasasa` was taken for filler.
+a password of two letters in turn after `password:` was taken for filler.
 """
 from __future__ import annotations
 

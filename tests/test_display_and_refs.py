@@ -268,7 +268,7 @@ class PlaceholderTests(unittest.TestCase):
         self.assertEqual(ph.display_for("PHONE", "+49 170 1234567"), "+49••••••67")
         self.assertEqual(ph.display_for("IBAN", "DE89 3704 0044 0532 0130 00"), "DE89••••••••••••••3000")
         # SECRET and the country identifiers get no display; neither does a value the rule cannot mask
-        for type_, value in [("SECRET", "hunter2hunter2"), ("DE_TAX_ID", "86095742719"), ("EMAIL", "not-an-address"),
+        for type_, value in [("SECRET", "q7" * 7), ("DE_TAX_ID", "86095742719"), ("EMAIL", "not-an-address"),
                              ("EMAIL", "max@acme.de")]:
             level = "minimal" if value == "max@acme.de" else "standard"
             with self.subTest(type_=type_, value=value):

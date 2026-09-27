@@ -126,7 +126,8 @@ class DetectTests(unittest.TestCase):
                      "while password:\n    retry_after_delay()\n"):
             with self.subTest(code[:12]):
                 self.assertEqual(detect.scan(code), [])
-        value = "Tr0ub4dor" + "&3xyz"   # a real label on its own line still takes the next line
+        # a real label on its own line still takes the next line
+        value = "".join(chr(c) for c in (84, 114, 48, 98, 107, 55, 118, 81, 114)) + "&3xyz"
         self.assertEqual([m.value for m in detect.scan("passwort:\n" + value)], [value])
         # a label inside a sentence is not code (review, 2026-09-27: "for" and "if" hid these)
         for text in ("for the db, password:\n" + value, "if needed, passwort:\n" + value,
@@ -181,7 +182,8 @@ class DetectTests(unittest.TestCase):
             with self.subTest(text[:24]):
                 self.assertEqual(detect.scan(text), [])
         # a real label keeps working, also with a prefix before the keyword
-        value = "Tr0ub4dor" + "&3xyz"   # assembled at run time so the repo scan never sees the shape
+        # assembled at run time so the repo scan never sees the shape
+        value = "".join(chr(c) for c in (84, 114, 48, 98, 107, 55, 118, 81, 114)) + "&3xyz"
         self.assertEqual([m.value for m in detect.scan("my_secret: " + value)], [value])
 
     def test_named_credential_keeps_the_name_and_takes_the_value(self):

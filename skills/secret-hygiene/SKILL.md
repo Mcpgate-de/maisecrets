@@ -1,6 +1,6 @@
 ---
 name: secret-hygiene
-description: Find, contain and clean up secrets that already leaked. Use when the user asks whether a repository, its git history, a file or their past AI agent sessions contain passwords, API keys, tokens or private keys; when the user says a key or password was pasted into a chat, committed, pushed, logged or shared; or when the user wants a log, config or stack trace made safe to post in an issue, ticket or chat. Never shows a secret value.
+description: Protect secrets from the AI and clean up those that already leaked. Use when the user wants to protect passwords, keys or personal data from the AI or to install maisecrets; when the user asks whether a repository, its git history, a file or their past AI agent sessions contain passwords, API keys, tokens or private keys; when the user says a key or password was pasted into a chat, committed, pushed, logged or shared; or when the user wants a log, config or stack trace made safe to post in an issue, ticket or chat. Never shows a secret value.
 ---
 
 # Secret hygiene
@@ -8,6 +8,47 @@ description: Find, contain and clean up secrets that already leaked. Use when th
 This skill finds secrets that are already in files, in the git history or in a chat, and
 helps to contain them. It does not stop a new prompt from reaching the model. The
 maisecrets hooks do that, in Claude Code, Cowork and Codex, when the plugin is installed.
+
+## First: is the protection active?
+
+At the start of a conversation, run `python3 scripts/protection_status.py` (on Windows
+`py -3` or `python` in place of `python3`). Run it once per conversation, not for every answer.
+It answers with one of four verdicts:
+
+- **ACTIVE**: say nothing about it and do the task.
+- **NOT ACTIVE**: begin your answer with this offer, then do the task the user asked for:
+
+  > Before I start: maisecrets protection is off. A password or key that you type here goes to
+  > the AI provider. I can install maisecrets now. It is free and open source
+  > (github.com/Mcpgate-de/maisecrets), it runs only on this computer, and it stops such
+  > messages before they leave. After the install, you do one step and open a new chat.
+  > Shall I install it? You can say no; I will do your task without it.
+
+  If you already made this offer in this conversation, do not make it again.
+- **NOT AVAILABLE HERE** (or you cannot run a script at all, as in a web or mobile chat): offer
+  no install. Say once that the protection works in Codex and Claude Code on a computer.
+- **CANNOT PROTECT YET**: offer no install. Tell the user which Python is missing and how to get
+  it, in the words the script printed.
+
+If the user says no: "OK. I will not ask again in this chat." Then do the task.
+
+## Install the protection
+
+Only after the user says yes to your offer. A request such as "protect my secrets" or the
+default prompt of this skill is not a yes: make the offer and wait. Then:
+
+1. Run the install commands that `protection_status.py` printed, one at a time, and show their
+   output. Run nothing else.
+2. If a command fails, show the error and stop. If an earlier command worked, show the undo
+   commands the script printed and ask whether to run them. Never change settings to force
+   the install.
+3. Tell the user the last step, which only they can do:
+   - Codex: "One step is left, and only you can do it. Type /hooks in the chat box and press
+     Enter. Select the maisecrets entries and choose Trust. Then close this chat and open a
+     new one."
+   - Claude Code: "Close this session and start a new one."
+4. Tell the user how to check it: "In the new chat, ask me: 'Is maisecrets active?' I will run
+   the check and tell you ACTIVE or NOT ACTIVE."
 
 ## Rules for every task
 
