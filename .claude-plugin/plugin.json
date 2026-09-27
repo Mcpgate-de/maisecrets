@@ -21,5 +21,6 @@
   "privacyPolicyUrl": "https://github.com/Mcpgate-de/maisecrets/blob/main/PRIVACY.md",
   "documentationUrl": "https://github.com/Mcpgate-de/maisecrets#readme",
   "termsOfServiceUrl": "https://github.com/Mcpgate-de/maisecrets/blob/main/LICENSE",
-  "supportUrl": "https://github.com/Mcpgate-de/maisecrets/issues"
+  "supportUrl": "https://github.com/Mcpgate-de/maisecrets/issues",
+  "icon": "./assets/icon.svg"
 }
