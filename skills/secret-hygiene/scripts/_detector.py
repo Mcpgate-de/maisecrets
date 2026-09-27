@@ -120,10 +120,14 @@ def pool(enabled):
 
 def parse_log(raw: str):
     """Units of `git log -p -U0 --format='commit %h %ad %an'`: (commit, date, author, path,
-    [(line number, added text)]), in log order."""
+    [(line number, added text)]), in log order. A file's path is read only from its header
+    block (after `diff --git`, before the first `@@`): an added line whose text starts with
+    `++ ` shows up as `+++ …` and was taken for a header, which printed its text as a path
+    (review, 2026-09-27)."""
     units = []
     commit, date, author, path, lines = "", "", "", "", []
     new_line = 0
+    header = False
 
     def flush():
         nonlocal lines
@@ -132,20 +136,27 @@ def parse_log(raw: str):
         lines = []
     for row in raw.splitlines():
         if row.startswith("commit "):
+            # only the --format line is unprefixed and starts so; diff content is prefixed
             flush()
+            header = False
             parts = row.split(" ", 3)
             commit = parts[1]
             date = parts[2] if len(parts) > 2 else ""
             author = parts[3] if len(parts) > 3 else ""
-        elif row.startswith("+++ "):
+            path = ""
+        elif row.startswith("diff --git "):
             flush()
+            header = True
+            path = ""
+        elif header and row.startswith("+++ "):
             path = row[6:] if row.startswith("+++ b/") else row[4:]
         elif row.startswith("@@"):
+            header = False
             try:
                 new_line = int(row.split("+", 1)[1].split(",")[0].split(" ")[0])
             except (IndexError, ValueError):
                 new_line = 0
-        elif row.startswith("+") and not row.startswith("+++"):
+        elif not header and row.startswith("+"):
             lines.append((new_line, row[1:]))
             new_line += 1
     flush()

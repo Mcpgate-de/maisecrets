@@ -28,14 +28,17 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
 
     def _is_codex() -> bool:
         """SessionStart has no prompt_id or turn_id, and Claude Code may send `model`, so the
-        payload rule of client_of does not decide here. Claude Code sets CLAUDECODE=1 for its
-        hooks; a Codex transcript lives under CODEX_HOME (default ~/.codex)."""
-        if os.environ.get("CLAUDECODE") == "1":
-            return False
+        payload rule of client_of does not decide here. The transcript path decides first (a
+        Codex rollout lives under CODEX_HOME, default ~/.codex, also when Codex was started
+        from a Claude Code shell that exports CLAUDECODE); then Claude Code's CLAUDECODE=1;
+        then any CODEX_ variable (review, 2026-09-27)."""
         path = str(payload.get("transcript_path") or "")
         home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
-        return bool(path) and os.path.abspath(path).startswith(os.path.abspath(home) + os.sep) \
-            or any(k.startswith("CODEX_") for k in os.environ)
+        if path:
+            return os.path.abspath(path).startswith(os.path.abspath(home) + os.sep)
+        if os.environ.get("CLAUDECODE") == "1":
+            return False
+        return any(k.startswith("CODEX_") for k in os.environ)
     codex = _is_codex()
     from maisecrets.vault import intro_line  # noqa: E402
     import time

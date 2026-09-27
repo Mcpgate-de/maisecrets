@@ -610,6 +610,23 @@ class McpTests(unittest.TestCase):
         self.assertNotIn("updatedInput", out)
 
 
+class NoticeTests(unittest.TestCase):
+    def setUp(self):
+        _reset()
+
+    def test_without_a_clipboard_the_whole_prompt_is_shown_and_codex_gets_no_empty_line(self):
+        long_tail = " and more words" * 40
+        prompt = "check glpat-" + "Q" * 3 + "abcdefghij1234567890" + long_tail + " end-marker"
+        hooks._clipboard = lambda t: False
+        for payload, codex in (({"prompt": prompt, "session_id": "N1", "transcript_path": "", "prompt_id": "p"}, False),
+                               ({"prompt": prompt, "session_id": "N2", "transcript_path": "", "turn_id": "t"}, True)):
+            reason = hooks.user_prompt(payload)["reason"]
+            with self.subTest(codex=codex):
+                self.assertIn("end-marker", reason, "the text to copy is the whole prompt")
+                self.assertNotIn("Wrong detection?\n", reason + "\n") if codex else None
+                self.assertFalse(reason.rstrip().endswith("Wrong detection?"))
+
+
 class RedactionTests(unittest.TestCase):
     def setUp(self):
         _reset()

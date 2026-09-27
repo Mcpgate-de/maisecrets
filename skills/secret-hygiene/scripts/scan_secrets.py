@@ -218,6 +218,13 @@ class Pushed:
         return self._cache[commit]
 
 
+def _safe_author(detect, name: str) -> str:
+    """A git author name is text anybody can set: one that looks like a secret is not printed."""
+    if any(m.type == "SECRET" for m in detect.scan(name)):
+        return "(an author name that looks like a secret)"
+    return name
+
+
 BATCH = 150   # commits per worker job
 
 
@@ -270,7 +277,7 @@ def scan_history(detect, cwd: Path, ids: Ids, pii: bool, max_commits: int) -> tu
                 continue
             rule, sure = _classify(kind, inner)
             seen[key] = {"id": key[0], "where": f"{p}:{lineno}", "commit": c, "date": d,
-                         "first": d, "author": a, "pushed": pushed.of(c), "type": mtype,
+                         "first": d, "author": _safe_author(detect, a), "pushed": pushed.of(c), "type": mtype,
                          "rule": rule, "sure": sure, "len": len(value), "commits": 1}
     return list(seen.values()), len(shas), total
 

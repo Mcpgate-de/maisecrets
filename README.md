@@ -304,7 +304,9 @@ values that already leaked. The model loads it when a task fits; in Claude Code 
   value replaced by `⟦TYPE_n⟧` and prints only the counts. The original is never changed.
 
 The skill is not a guard. It works only when the model follows it, and it does not stop a
-prompt. `python3 scripts/build_skill_zip.py` builds `dist/secret-hygiene.zip`, the
+prompt. The history scan reads what each commit added; a value that entered only while a merge
+conflict was resolved is not seen (`git log -p` shows no merge diff), and a file path that is
+itself a secret is printed as it is. `python3 scripts/build_skill_zip.py` builds `dist/secret-hygiene.zip`, the
 standalone skill with its own copy of the detector, for a skill upload without the plugin.
 
 ## Options

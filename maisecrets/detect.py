@@ -476,14 +476,18 @@ _LABEL_ONLY_RE = re.compile(r"[:=]\s*$")
 # a line of code that ends in a colon is a condition, not a label: `if kind != "SECRET":` and
 # `continue` on the next line was taken for a labelled secret (twice in this repository's own
 # pre-commit check, 2026-09-27)
-_CODE_CONDITION_RE = re.compile(r"(?:==|!=|<=|>=|\bif\b|\belif\b|\bwhile\b|\bcase\b|\bfor\b|\bdef\b|\bclass\b)")
+# Code syntax only: a comparison operator, or a line that opens a block with a keyword and has
+# no space between the keyword and the rest of a sentence. "for the db, password:" and "if
+# needed, passwort:" are labels in a sentence and must still take the next line (review,
+# 2026-09-27: matching the bare words hid them).
+_CODE_CONDITION_RE = re.compile(r"(?:==|!=|<=|>=|\bis not\b|^\s*(?:def|class)\s+\w+\s*[(:])")
 
 
 # gitleaks' generic-api-key starts with a lazy `[\w.-]{0,50}?` before its keyword, so the regex
 # engine tries up to 50 prefixes at every position of the text: 80 % of a log scan's time
 # (2026-09-27). Its keywords are found by a plain search first, and the rule runs only in a
 # window around each: from 50 characters before the keyword (the prefix cannot cross a line) to
-# the end of the NEXT line (a separator may hold one line break; the window then ends after a
+# the end of the 8th line after it (the separators may hold line breaks; the window ends after a
 # newline, which the value's terminator class takes the same way as in the whole text).
 _WINDOWED = {"generic-api-key": re.compile(r"(?i)access|auth|api|credential|creds|key|passw(?:or)?d|secret|token")}
 
@@ -493,9 +497,15 @@ def _windowed(rule: Rule, kw: re.Pattern, text: str):
     for k in kw.finditer(text):
         line_start = text.rfind("\n", 0, k.start()) + 1
         a = max(line_start, k.start() - 50)
-        e1 = text.find("\n", k.end())
-        e2 = text.find("\n", e1 + 1) if e1 >= 0 else -1
-        b = len(text) if e1 < 0 or e2 < 0 else e2 + 1
+        # the separators may hold several line breaks (`password for prod:` + blank line +
+        # value, review 2026-09-27): the window runs 8 lines past the keyword
+        b = k.end()
+        for _ in range(8):
+            nxt = text.find("\n", b)
+            if nxt < 0:
+                b = len(text)
+                break
+            b = nxt + 1
         if spans and a <= spans[-1][1]:
             spans[-1][1] = max(spans[-1][1], b)
         else:

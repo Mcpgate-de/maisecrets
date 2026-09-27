@@ -60,6 +60,22 @@ class SkillFileTests(unittest.TestCase):
             self.assertTrue((SKILL / rel).is_file(), rel)
 
 
+class SkillListingTests(unittest.TestCase):
+    def test_the_chatgpt_listing_names_the_skill_and_its_icons_exist(self):
+        """ChatGPT shows a skill's name and icon from agents/openai.yaml; without it the upload
+        showed the folder name and a generic icon (2026-09-27)."""
+        text = (SKILL / "agents" / "openai.yaml").read_text(encoding="utf-8")
+        fields = {}
+        for line in text.splitlines()[1:]:
+            key, _sep, val = line.strip().partition(": ")
+            fields[key] = val.strip('"')
+        self.assertIn("maisecrets", fields["display_name"])
+        self.assertLessEqual(len(fields["short_description"]), 64)
+        for key in ("icon_small", "icon_large"):
+            self.assertTrue((SKILL / fields[key]).is_file(), fields[key])
+        self.assertRegex(fields["brand_color"], r"^#[0-9A-Fa-f]{6}$")
+
+
 @unittest.skipUnless(HAS_GIT, "git is needed for the history scan")
 class SkillScriptTests(unittest.TestCase):
     def setUp(self):
@@ -157,6 +173,32 @@ class SkillScriptTests(unittest.TestCase):
         self.assertIn(".env:1", out.read_text(encoding="utf-8"))
         self.assertNotIn(self.token, out.read_text(encoding="utf-8"))
 
+    def test_an_added_line_that_starts_with_plus_plus_is_content_not_a_path(self):
+        (self.repo / "notes.txt").write_text(f"++ token={self.token}\n", encoding="utf-8")
+        _git(self.repo, "add", ".")
+        _git(self.repo, "commit", "-qm", "notes")
+        r = _run(SCRIPTS / "scan_secrets.py", ".", "--history", cwd=self.repo)
+        self.assertNotIn(self.token, r.stdout + r.stderr)
+        self.assertNotIn(self.token[4:], r.stdout)
+        history = [line for line in r.stdout.splitlines() if " commit " in line]
+        self.assertTrue(any(line.endswith("notes.txt:1") for line in history), r.stdout)
+
+    def test_an_author_name_that_looks_like_a_secret_is_not_printed(self):
+        _git(self.repo, "config", "user.name", self.token)
+        (self.repo / "b.cfg").write_text(f"token = {_token()}\n", encoding="utf-8")
+        _git(self.repo, "add", ".")
+        _git(self.repo, "commit", "-qm", "b")
+        r = _run(SCRIPTS / "scan_secrets.py", ".", "--history", cwd=self.repo)
+        self.assertNotIn(self.token, r.stdout)
+        self.assertIn("an author name that looks like a secret", r.stdout)
+
+    def test_redact_never_writes_over_the_original_even_with_force(self):
+        src = self.repo / "log.txt"
+        src.write_text(f"key {self.token}\n", encoding="utf-8")
+        r = _run(SCRIPTS / "redact_copy.py", "log.txt", "--out", "log.txt", "--force", cwd=self.repo)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn(self.token, src.read_text(encoding="utf-8"))
+
     def test_a_clean_tree_exits_zero(self):
         r = _run(SCRIPTS / "scan_secrets.py", ".", cwd=self.repo)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -212,10 +254,19 @@ class SkillZipTests(unittest.TestCase):
         spec.loader.exec_module(mod)
         work = Path(tempfile.mkdtemp(prefix="maisecrets-skillzip-"))
         try:
+            flat = mod.build(work / "flat.zip", flat=True)
+            with zipfile.ZipFile(flat) as z:
+                names = z.namelist()
+                self.assertIn("name: maisecrets-secret-hygiene\n", z.read("SKILL.md").decode(),
+                              "the standalone ChatGPT skill carries the brand in its name")
+                self.assertIn("SKILL.md", names, "the ChatGPT upload reads SKILL.md at the zip root")
+                self.assertIn("scripts/", names, "directory entries are written")
+                self.assertIn("scripts/maisecrets/detect.py", names)
             out = mod.build(work / "secret-hygiene.zip")
             with zipfile.ZipFile(out) as z:
                 names = z.namelist()
                 self.assertEqual({n.split("/", 1)[0] for n in names}, {"secret-hygiene"})
+                self.assertIn("secret-hygiene/", names)
                 self.assertIn("secret-hygiene/SKILL.md", names)
                 self.assertIn("secret-hygiene/scripts/maisecrets/detect.py", names)
                 self.assertIn("secret-hygiene/scripts/maisecrets/rules/gitleaks.toml", names)
@@ -299,6 +350,24 @@ class TranscriptAuditTests(unittest.TestCase):
             json.loads(line)
         self.assertIn("provider keeps what it received", done.stdout)
         self.assertNotIn(self.token, done.stdout)
+
+    def test_scrub_keeps_other_lines_byte_for_byte_and_the_file_mode(self):
+        extra = (b'{"type":"system","n":1.0e5}\r\n' + b'not json at all \xff\xfe\n'
+                 + ("half line token=" + self.token + "\n").encode())
+        with open(self.session, "ab") as fh:
+            fh.write(extra)
+        os.chmod(self.session, 0o600)
+        old = time.time() - 3600
+        os.utime(self.session, (old, old))
+        report = self.audit("--claude")
+        self.assertNotIn(self.token, report.stdout)
+        done = self.audit("--scrub", "--yes", "--claude")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        raw = self.session.read_bytes()
+        self.assertIn(b'{"type":"system","n":1.0e5}\r\n', raw, "an unchanged line stays byte for byte")
+        self.assertIn(b"not json at all \xff\xfe\n", raw)
+        self.assertNotIn(self.token.encode(), raw, "a line that is not JSON is cleaned as text")
+        self.assertEqual(self.session.stat().st_mode & 0o777, 0o600)
 
     def test_a_running_session_is_not_scrubbed(self):
         os.utime(self.session, None)

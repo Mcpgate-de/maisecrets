@@ -1006,7 +1006,6 @@ class Vault:
         return [Entry(**m) for m in self._index["entries"].values()]
 
     @_mutating
-    @_mutating
     def forget(self, key: str) -> str:
         """Delete one entry at the user's request: the value from the store and the metadata
         from the index, fingerprint included. "ok", "unknown", or "store" when the store refused
@@ -1026,6 +1025,7 @@ class Vault:
         self._save_index()
         return "ok"
 
+    @_mutating
     def expire(self, limit: int | None = 25) -> int:
         """Delete expired values; keep their metadata. Returns the count.
 

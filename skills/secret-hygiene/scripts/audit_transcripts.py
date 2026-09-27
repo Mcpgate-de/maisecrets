@@ -105,17 +105,19 @@ def worker_jsonl(job: tuple) -> tuple:
         try:
             rec = json.loads(line)
         except ValueError:
-            continue
-        if not isinstance(rec, dict):
-            continue
-        text = "\n".join(strings_of(rec))
+            rec = None
+        if isinstance(rec, dict):
+            text = "\n".join(strings_of(rec))
+            kind = kind_of(client, rec)
+            stamp = str(rec.get("timestamp") or "")[:10]
+        else:
+            # a cut or damaged line is still scanned: skipping it hid its value (review, 2026-09-27)
+            text, kind, stamp = line, "local record", ""
         if not text:
             continue
         hits = _detector.scan_text(detect, text, enabled)
         if not hits:
             continue
-        kind = kind_of(client, rec)
-        stamp = str(rec.get("timestamp") or "")[:10]
         for m in hits:
             inner = None
             if m.type == "SECRET":
@@ -268,41 +270,90 @@ def scrub(per_file: dict[str, set], ids: dict[str, str], yes: bool) -> int:
               "with --scrub --yes to replace the values in them. This cleans only this computer; the provider "
               "keeps what it received.")
         return 1
-    changed = 0
+    changed, left, moved = 0, 0, []
     for path, values, active in targets:
         if active:
             continue
-        tags = {v: f"⟦SCRUBBED_{ids[v]}⟧" for v in values}
-        order = sorted(tags, key=len, reverse=True)
-        out_lines = []
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    out_lines.append(line)
-                    continue
-
-                def clean(node):
-                    if isinstance(node, str):
-                        for v in order:
-                            if v in node:
-                                node = node.replace(v, tags[v])
-                        return node
-                    if isinstance(node, list):
-                        return [clean(x) for x in node]
-                    if isinstance(node, dict):
-                        return {k: clean(x) for k, x in node.items()}
-                    return node
-                new = clean(rec)
-                compact = json.dumps(new, ensure_ascii=False, separators=(",", ":")) + "\n"
-                out_lines.append(compact if new != rec else line)
-        tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
-        tmp.write_text("".join(out_lines), encoding="utf-8")
-        os.replace(tmp, path)
+        n_left = _scrub_file(path, values, ids)
+        if n_left is None:
+            moved.append(path)
+            continue
+        left += n_left
         changed += 1
+    for path in moved:
+        print(f"  skipped {path}: it changed while this ran (a session is writing to it)")
+    if left:
+        print(f"{left} line(s) could not be cleaned (not valid JSON or not UTF-8) and still hold a value.")
     print(f"Replaced the values in {changed} file(s). The provider keeps what it received: rotate the values.")
     return 0
+
+
+def _scrub_file(path: Path, values: set, ids: dict) -> int | None:
+    """Replace the values in one transcript, line by line, in bytes: an unchanged line is copied
+    byte for byte (CRLF, number spelling and invalid UTF-8 stay as they were), a changed line is
+    written as compact JSON, a line that is not JSON gets a plain text replacement. The file mode
+    is kept. Returns the count of lines that still hold a value, or None when the file changed
+    while it was read (a session wrote to it; review, 2026-09-27)."""
+    tags = {v: f"⟦SCRUBBED_{ids[v]}⟧" for v in values}
+    order = sorted(tags, key=len, reverse=True)
+    before = path.stat()
+    raw = path.read_bytes()
+    out: list[bytes] = []
+    left = 0
+
+    def clean(node):
+        if isinstance(node, str):
+            for v in order:
+                if v in node:
+                    node = node.replace(v, tags[v])
+            return node
+        if isinstance(node, list):
+            return [clean(x) for x in node]
+        if isinstance(node, dict):
+            return {k: clean(x) for k, x in node.items()}
+        return node
+    for line in raw.splitlines(keepends=True):
+        body = line.rstrip(b"\r\n")
+        end = line[len(body):]
+        try:
+            text = body.decode("utf-8")
+        except UnicodeDecodeError:
+            out.append(line)
+            left += any(v.encode("utf-8") in body for v in order)
+            continue
+        if not any(v in text for v in order):
+            out.append(line)
+            continue
+        try:
+            rec = json.loads(text)
+            new = json.dumps(clean(rec), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        except (ValueError, UnicodeEncodeError):
+            plain = text
+            for v in order:
+                plain = plain.replace(v, tags[v])
+            try:
+                new = plain.encode("utf-8")
+            except UnicodeEncodeError:
+                out.append(line)
+                left += 1
+                continue
+        out.append(new + end)
+        if any(v.encode("utf-8") in new for v in order):
+            left += 1
+    now = path.stat()
+    if (now.st_size, now.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
+        return None
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, before.st_mode & 0o777)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(b"".join(out))
+        os.chmod(tmp, before.st_mode & 0o777)
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return left
 
 
 if __name__ == "__main__":

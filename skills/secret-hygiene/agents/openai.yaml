@@ -1,0 +1,7 @@
+interface:
+  display_name: "maisecrets Secret Hygiene"
+  short_description: "Find leaked secrets and contain them, never showing a value"
+  icon_small: "./assets/icon-small.svg"
+  icon_large: "./assets/icon-large.png"
+  brand_color: "#E8913A"
+  default_prompt: "Check this repository, its git history and my past agent sessions for leaked secrets, and tell me what to rotate first."

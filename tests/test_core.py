@@ -117,6 +117,18 @@ class DetectTests(unittest.TestCase):
                 self.assertEqual(detect.scan(code), [])
         value = "Tr0ub4dor" + "&3xyz"   # a real label on its own line still takes the next line
         self.assertEqual([m.value for m in detect.scan("passwort:\n" + value)], [value])
+        # a label inside a sentence is not code (review, 2026-09-27: "for" and "if" hid these)
+        for text in ("for the db, password:\n" + value, "if needed, passwort:\n" + value,
+                     "class notes, secret:\n" + value):
+            with self.subTest(text[:16]):
+                self.assertEqual([m.value for m in detect.scan(text)], [value])
+
+    def test_a_value_after_a_blank_line_is_found_in_long_text_too(self):
+        value = "Ab3dEf6hIj9kLm2n"
+        for filler in ("", "x" * 5000 + "\n"):
+            with self.subTest(len(filler)):
+                text = filler + "password for prod:\n\n" + value + "\n" + "y" * 200
+                self.assertIn(value, [m.value for m in detect.scan(text)])
 
     def test_german_credential_labels_are_keywords_too(self):
         for label in ("passwort", "Kennwort", "Schlüssel", "zugangsdaten"):

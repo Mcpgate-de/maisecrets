@@ -190,3 +190,35 @@ class ReadRetryTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 vault.read_text_retry(Path("index.json"), attempts=3)
 
+
+class VaultLockTests(unittest.TestCase):
+    def test_every_method_that_saves_the_index_holds_the_lock_once(self):
+        """expire lost its lock when forget was inserted between it and its decorator, and forget
+        got two (review, 2026-09-27). Every Vault method that calls _save_index is decorated
+        with _mutating exactly once, except the lock helpers themselves."""
+        import ast
+        tree = ast.parse((ROOT / "maisecrets" / "vault.py").read_text(encoding="utf-8"))
+        vault = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Vault")
+        checked = 0
+        for fn in [n for n in vault.body if isinstance(n, ast.FunctionDef)]:
+            saves = any(isinstance(c, ast.Call) and getattr(c.func, "attr", "") == "_save_index"
+                        for c in ast.walk(fn))
+            if not saves or fn.name in ("_save_index", "__init__", "repair"):
+                continue
+            names = [d.id for d in fn.decorator_list if isinstance(d, ast.Name)]
+            with self.subTest(fn.name):
+                self.assertEqual(names.count("_mutating"), 1, fn.name)
+            checked += 1
+        self.assertGreaterEqual(checked, 5, "a population test must fail on an empty population")
+
+    def test_forget_keeps_the_entry_when_the_store_refuses(self):
+        from unittest import mock
+        from maisecrets.vault import Vault
+        v = Vault()
+        e = v.put("xK9mQ2vL7pR4zzQ", "SECRET", "manual", session="S1")
+        with mock.patch.object(type(v.backend), "delete", side_effect=RuntimeError("locked")):
+            self.assertEqual(Vault().forget(e.key), "store")
+        self.assertEqual(Vault().get(e.key, "S1")[1], "ok", "nothing looks deleted that is not")
+        self.assertEqual(Vault().forget(e.key), "ok")
+        self.assertEqual(Vault().get(e.key, "S1")[1], "unknown")
+

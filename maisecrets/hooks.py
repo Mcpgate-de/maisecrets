@@ -327,7 +327,9 @@ def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: 
     store = STORE_NAMES.get(type(vault.backend).__name__, "the local store")
     since = " after their last use" if cfg.get("renew_on_use", True) else ""
     lines.append(f"The real values stay on this computer, in {store}, for {how_long}{since}.")
-    preview = rewritten if len(rewritten) <= NOTICE_PREVIEW else rewritten[:NOTICE_PREVIEW] + " …"
+    # the whole prompt when it is not in the clipboard: "copy the text above" must be the text
+    # (review, 2026-09-27: a cut preview lost the placeholder)
+    preview = rewritten if not copied or len(rewritten) <= NOTICE_PREVIEW else rewritten[:NOTICE_PREVIEW] + " …"
     lines += ["The prompt with the short forms:", "", preview, ""]
     if codex:
         lines.append("To send it: paste it from the clipboard and send." if copied
@@ -338,10 +340,10 @@ def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: 
     after = "" if codex else " Before a connected tool (MCP) gets a real value, you are asked."
     lines.append("The AI's answer will show the short forms. Where it runs a command, writes a file or calls a "
                  "tool for you, maisecrets puts the real values in." + after)
-    wrong = "Wrong detection? " + ("" if codex else "/maisecrets:report prepares a report without the value.")
-    if cfg.get("report_url") and codex:
-        wrong += f"Report it at {cfg['report_url']} (never paste the value)."
-    lines.append(wrong.strip())
+    if not codex:
+        lines.append("Wrong detection? /maisecrets:report prepares a report without the value.")
+    elif cfg.get("report_url"):
+        lines.append(f"Wrong detection? Report it at {cfg['report_url']} (never paste the value).")
     return lines
 
 
