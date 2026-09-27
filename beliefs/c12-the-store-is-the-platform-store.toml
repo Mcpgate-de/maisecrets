@@ -1,0 +1,10 @@
+# c12-the-store-is-the-platform-store: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c12-the-store-is-the-platform-store"
+control = "C12"
+statement = "make_backend picks the keychain on macOS, the Credential Locker on Windows and the encrypted file elsewhere; only the name jsonfile gives the plaintext store, never a default or an unknown name."
+runner = ["tests/test_vault.py::BackendChoiceTests::test_the_store_is_the_platform_store_and_never_silently_the_plaintext_one"]
+
+[proof]
+file = "maisecrets/vault.py"
+find = "        return WindowsVaultBackend()\n    return EncryptedFileBackend()\n"
+replace = "        return WindowsVaultBackend()\n    return JsonFileBackend()\n"

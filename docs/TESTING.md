@@ -100,7 +100,7 @@ runs the owning tests green, applies the mutation, runs them again and demands r
 restores the file; it runs in the pre-push hook and in the CI job `beliefs_can_fail_replay`
 on every push. `tests/test_beliefs_well_formed.py` keeps the layer honest statically: every
 named test exists, every anchor occurs exactly once, every code-enforced control (C1–C10,
-C13–C17) has a belief. `scripts/derived_counts.py` measures the numbers this document and the
+C12–C17) has a belief. `scripts/derived_counts.py` measures the numbers this document and the
 README state (test count, scenario counts, proof count) and refuses a stale one; it runs in
 the `manifests` job. Both ideas come from the ai-gateway's beliefs layer, cut to the size of
 this repository: no provenance vocabulary, no shards, TOML instead of YAML so the standard

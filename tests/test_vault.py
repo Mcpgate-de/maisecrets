@@ -265,6 +265,25 @@ class BackendChoiceTests(unittest.TestCase):
             with self.subTest(system), mock.patch.object(vault.platform, "system", return_value=system):
                 self.assertIsInstance(vault.make_backend({"backend": "keychain"}), cls)
 
+    def test_the_store_is_the_platform_store_and_never_silently_the_plaintext_one(self):
+        """THREAT-MODEL C12: keychain on macOS, Credential Locker on Windows, the encrypted file
+        elsewhere. Only the literal name jsonfile gives the plaintext store; no default, no
+        unknown or misspelt name and no platform falls back to it."""
+        want = {"Darwin": KeychainBackend, "Windows": WindowsVaultBackend, "Linux": EncryptedFileBackend,
+                "FreeBSD": EncryptedFileBackend, "": EncryptedFileBackend}
+        for system, cls in want.items():
+            for cfg in ({}, {"backend": "keychain"}, {"backend": "json-file"}, {"backend": "JSONFILE"},
+                        {"backend": None}, {"backend": "plaintext"}, {"allow_plaintext_store": True}):
+                with self.subTest(system=system, cfg=cfg), \
+                        mock.patch.object(vault.platform, "system", return_value=system):
+                    b = vault.make_backend(cfg)
+                    self.assertIs(type(b), cls)
+                    self.assertFalse(b.test_mode, "a platform store is never the test store")
+        for system in want:
+            with self.subTest(explicit=system), mock.patch.object(vault.platform, "system", return_value=system):
+                self.assertIs(type(vault.make_backend({"backend": "encrypted-file"})), EncryptedFileBackend)
+                self.assertTrue(vault.make_backend({"backend": "jsonfile"}).test_mode)
+
     def test_a_test_home_never_shares_the_keychain_namespace_of_the_real_one(self):
         self.assertNotEqual(vault.SERVICE, "maisecrets")
         self.assertEqual(vault.SERVICE, "maisecrets@" + hashlib.sha256(str(HOME).encode()).hexdigest()[:8])
