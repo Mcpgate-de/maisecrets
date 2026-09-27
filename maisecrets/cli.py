@@ -210,14 +210,15 @@ def cmd_status(_: list[str]) -> int:
     policy = v.cfg.get("policy_keys") or []
     print("settings from a machine policy: " + (", ".join(policy) if policy else "none"))
     from . import detect
-    print(f"rules: {len(detect.rules())} (gitleaks {open(detect.RULES_DIR / 'GITLEAKS_VERSION').read().strip()}, "
-          f"presidio {open(detect.RULES_DIR / 'PRESIDIO_VERSION').read().strip()}, "
-          f"detect-secrets {open(detect.RULES_DIR / 'DETECT_SECRETS_VERSION').read().strip()}); "
-          f"regions {v.cfg.get('pii_regions')}")
+    def version(name: str) -> str:
+        return (detect.RULES_DIR / f"{name}_VERSION").read_text(encoding="utf-8").strip()
+    print(f"rules: {len(detect.rules())} (gitleaks {version('GITLEAKS')}, presidio {version('PRESIDIO')}, "
+          f"detect-secrets {version('DETECT_SECRETS')}); regions {v.cfg.get('pii_regions')}")
     for name in ("events.log", "audit.log", "hooks.log"):
         p = HOME / name
         try:
-            n = sum(1 for _ in open(p, encoding="utf-8")) if p.exists() else 0
+            with open(p, "rb") as f:
+                n = sum(1 for _ in f)
         except OSError:
             n = 0
         print(f"{name}: {n} lines")
