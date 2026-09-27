@@ -20,6 +20,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _detector  # noqa: E402
 
 
+NOT_REPLACED = ("names, postal addresses, birth dates, phone numbers without a country code, and "
+                "passwords written in a normal sentence")
+LABELS = {"SECRET": "secret", "EMAIL": "e-mail address", "IBAN": "IBAN", "PHONE": "phone number",
+          "CARD": "card number", "IP": "IP address"}
+
+
+def _same(mtype: str, value: str) -> str:
+    """One tag for one value: an IBAN, card or phone number written with and without spaces is
+    the same value (a support thread carried both; review, 2026-09-27)."""
+    if mtype in ("IBAN", "CARD", "PHONE"):
+        return mtype + ":" + "".join(ch for ch in value if ch.isalnum()).upper()
+    return mtype + ":" + value
+
+
 def redact(detect, text: str, secrets_only: bool) -> tuple[str, Counter]:
     tags: dict[str, str] = {}
     per_type: Counter = Counter()
@@ -28,11 +42,12 @@ def redact(detect, text: str, secrets_only: bool) -> tuple[str, Counter]:
         keep = secrets_only and m.type != "SECRET"
         if keep:
             continue
-        if m.value not in tags:
+        key = _same(m.type, m.value)
+        if key not in tags:
             per_type[m.type] += 1
-            tags[m.value] = f"⟦{m.type}_{per_type[m.type]}⟧"
+            tags[key] = f"⟦{m.type}_{per_type[m.type]}⟧"
         out.append(text[last:m.start])
-        out.append(tags[m.value])
+        out.append(tags[_same(m.type, m.value)])
         last = m.end
     out.append(text[last:])
     return "".join(out), per_type
@@ -60,9 +75,24 @@ def main(argv: list[str]) -> int:
     text = src.read_bytes().decode("utf-8", errors="replace")
     clean, per_type = redact(detect, text, args.secrets_only)
     dst.write_text(clean, encoding="utf-8")
-    counts = ", ".join(f"{n} {t}" for t, n in sorted(per_type.items())) or "nothing"
-    print(f"Wrote {dst}. Replaced: {counts}. The original is unchanged; do not open it.")
+    def label(t: str, n: int) -> str:
+        word = LABELS.get(t, t.lower())
+        return f"{n} {word}{'es' if n != 1 and word.endswith('s') else ('s' if n != 1 else '')}"
+    counts = ", ".join(label(t, n) for t, n in sorted(per_type.items())) or "nothing"
+    print(f"Wrote {dst}. Replaced: {counts}. The original is unchanged.")
+    print(f"NOT replaced: {NOT_REPLACED}. Read the copy before you share it.")
+    if _inside_git(dst.parent):
+        print("The copy is inside a git repository. Do not commit it; delete it after use.")
     return 0
+
+
+def _inside_git(folder: Path) -> bool:
+    import subprocess
+    try:
+        r = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=folder, capture_output=True, text=True)
+    except OSError:
+        return False
+    return r.returncode == 0 and r.stdout.strip() == "true"
 
 
 if __name__ == "__main__":

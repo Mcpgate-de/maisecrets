@@ -71,7 +71,10 @@ class DetectTests(unittest.TestCase):
         hooks._clipboard = lambda t: True
         out = hooks.user_prompt({"prompt": text, "session_id": "s2", "transcript_path": ""})
         self.assertEqual(out["decision"], "block")
-        self.assertIn("SECRET_c1, SECRET_c2", out["reason"])
+        self.assertIn("Found: 2 secrets (⟦SECRET_c1⟧, ⟦SECRET_c2⟧).", out["reason"])
+        self.assertIn("The AI did not receive it.", out["reason"])
+        self.assertIn("token ⟦SECRET_c1⟧ and key ⟦SECRET_c2⟧ please", out["reason"], "what would be sent")
+        self.assertIn("for 1 day after their last use", out["reason"])
         self.assertNotIn(GLPAT, out["reason"])
         self.assertNotIn(AKIA, out["reason"])
 
@@ -108,7 +111,9 @@ class DetectTests(unittest.TestCase):
         # "maisecrets" carries the keyword; a command name of 8+ characters after the colon looked
         # like a labelled value (field report, 2026-09-27)
         for text in ("/maisecrets:shortcut", "/maisecrets:shortcut ms", "run /maisecrets:configure now",
-                     "maisecrets: 1 SECRET detected and stored as SECRET_c19. The prompt did not reach the model."):
+                     "maisecrets: 1 SECRET detected and stored as SECRET_c19. The prompt did not reach the model.",
+                     "maisecrets stopped this prompt. The AI did not receive it.",
+                     "Found: 1 secret (⟦SECRET_c19⟧). To send it: /maisecrets:send (or /ms)."):
             with self.subTest(text[:24]):
                 self.assertEqual(detect.scan(text), [])
         # a real label keeps working, also with a prefix before the keyword

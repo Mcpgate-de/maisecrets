@@ -289,6 +289,62 @@ PRIMER = (
 
 
 # --------------------------------------------------------- UserPromptSubmit --
+TYPE_WORDS = {"SECRET": ("secret", "secrets"), "EMAIL": ("e-mail address", "e-mail addresses"),
+              "IBAN": ("IBAN", "IBANs"), "CARD": ("card number", "card numbers"),
+              "PHONE": ("phone number", "phone numbers"), "IP": ("IP address", "IP addresses")}
+STORE_NAMES = {"KeychainBackend": "the macOS Keychain", "WindowsVaultBackend": "the Windows Credential Locker",
+               "EncryptedFileBackend": "an encrypted file in ~/.maisecrets",
+               "JsonFileBackend": "a PLAIN TEXT test file"}
+NOTICE_PREVIEW = 400
+
+
+def _hours(seconds: int) -> str:
+    if seconds % 86400 == 0 and seconds >= 86400:
+        n = seconds // 86400
+        return f"{n} day" + ("s" if n != 1 else "")
+    n = max(1, round(seconds / 3600))
+    return f"{n} hour" + ("s" if n != 1 else "")
+
+
+def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: dict, vault) -> list[str]:
+    """The lines a person reads when a prompt is blocked: what stopped, what was found (masked),
+    what would be sent, where the values are and for how long, what to do next, and what the
+    model's answer will show. Plain words, one fact per line (UX reviews, 2026-09-27: "stored",
+    "resolves" and a list of keys told a non-developer nothing, and nothing said where the
+    customer's data went or for how long)."""
+    lines = ["maisecrets stopped this prompt. The AI did not receive it."]
+    by_type: dict[str, list[str]] = {}
+    for e in entries:
+        by_type.setdefault(e.type, []).append(e.ref)
+    found = []
+    for t, refs in by_type.items():
+        one, many = TYPE_WORDS.get(t, (t.lower(), t.lower()))
+        found.append(f"{len(refs)} {one if len(refs) == 1 else many} ({', '.join(refs)})")
+    lines.append("Found: " + "; ".join(found) + ".")
+    ttl = cfg.get("ttl_seconds") or {}
+    spans = sorted({ttl.get(t, ttl.get("default", 86400)) for t in by_type})
+    how_long = " or ".join(_hours(x) for x in spans)
+    store = STORE_NAMES.get(type(vault.backend).__name__, "the local store")
+    since = " after their last use" if cfg.get("renew_on_use", True) else ""
+    lines.append(f"The real values stay on this computer, in {store}, for {how_long}{since}.")
+    preview = rewritten if len(rewritten) <= NOTICE_PREVIEW else rewritten[:NOTICE_PREVIEW] + " …"
+    lines += ["The prompt with the short forms:", "", preview, ""]
+    if codex:
+        lines.append("To send it: paste it from the clipboard and send." if copied
+                     else "To send it: copy the text above and send it.")
+    else:
+        lines.append("To send it: /maisecrets:send (or /ms). To change it first: paste it from the clipboard."
+                     if copied else "To send it: /maisecrets:send (or /ms), or copy the text above.")
+    after = "" if codex else " Before a connected tool (MCP) gets a real value, you are asked."
+    lines.append("The AI's answer will show the short forms. Where it runs a command, writes a file or calls a "
+                 "tool for you, maisecrets puts the real values in." + after)
+    wrong = "Wrong detection? " + ("" if codex else "/maisecrets:report prepares a report without the value.")
+    if cfg.get("report_url") and codex:
+        wrong += f"Report it at {cfg['report_url']} (never paste the value)."
+    lines.append(wrong.strip())
+    return lines
+
+
 def user_prompt(payload: dict) -> dict:
     cfg = load_config()
     prompt = payload.get("prompt", "")
@@ -331,33 +387,10 @@ def user_prompt(payload: dict) -> dict:
         # is written after the hook returns, so the delayed child always starts (review, 2026-09-26)
         _scrub_transcript(payload.get("transcript_path", ""), values, refs)
         _scrub_transcript_later(payload.get("transcript_path", ""), values, refs)
-    counts: dict[str, int] = {}
-    for e in entries:
-        counts[e.type] = counts.get(e.type, 0) + 1
-    summary = ", ".join(f"{n} {t}" for t, n in counts.items())
-    keys = ", ".join(e.key for e in entries)
     codex = client_of(payload) == "codex"
-    # one fact per line: the first version was one long sentence and unreadable in the ChatGPT
-    # app (field report, 2026-09-27). Codex has no slash commands, so it gets no /maisecrets:…
-    lines = [f"maisecrets: {summary} detected and stored as {keys}. The prompt did not reach the model."]
-    if codex:
-        lines.append("Rewritten prompt is in the clipboard: paste it and send." if copied
-                     else "Rewritten prompt (paste it and send):")
-    else:
-        tail = ", or paste the rewritten prompt from the clipboard." if copied else "; clipboard unavailable here:"
-        lines.append("Send it as is with /maisecrets:send (or /ms)" + tail)
-    if not copied:
-        lines += ["", rewritten, ""]
-    lines.append("A placeholder resolves only in a session with maisecrets active "
-                 "(its start says 'maisecrets <version> active').")
-    if vault.backend.test_mode:
-        lines.append("(vault backend: jsonfile, TEST MODE)")
+    lines = block_notice(entries, rewritten, copied, codex, cfg, vault)
     from . import events
     events.record("UserPromptSubmit", client_of(payload), entries)
-    wrong = "Wrong? " + ("" if codex else "/maisecrets:report prepares an issue without the value. ")
-    if cfg.get("report_url"):
-        wrong += f"({cfg['report_url']})" if not codex else f"Report at {cfg['report_url']} (never paste the value)."
-    lines.append(wrong.strip())
     reason = "\n".join(lines)
     if client_of(payload) == "codex":
         return {"decision": "block", "reason": reason}

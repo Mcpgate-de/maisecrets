@@ -61,8 +61,14 @@ You paste a token into the prompt by accident:
 
 ```
 > please check why glpat-EXAMPLEEXAMPLE1234567 fails in CI
-maisecrets: 1 SECRET detected and stored as SECRET_c3. The prompt did not
-reach the model. The rewritten prompt is in the clipboard: paste and send again.
+maisecrets stopped this prompt. The AI did not receive it.
+Found: 1 secret (⟦SECRET_c3⟧).
+The real values stay on this computer, in the macOS Keychain, for 1 day after their last use.
+The prompt with the short forms:
+
+please check why ⟦SECRET_c3⟧ fails in CI
+
+To send it: /maisecrets:send (or /ms). To change it first: paste it from the clipboard.
 ```
 
 Zero requests left the machine for that prompt. The rewritten prompt reads

@@ -13,49 +13,70 @@ maisecrets hooks do that, in Claude Code, Cowork and Codex, when the plugin is i
 
 - Never print, `cat`, open or quote a file or a value that may hold a secret. Use the
   scripts below: their output has locations and types, never values.
-- Never ask the user to paste a secret. If the user pastes one, do not repeat it. Treat it
-  as leaked and follow "Contain a leak".
-- When a finding needs a fix in a file, change the file without showing the value, and
-  move the value to an environment variable or a secret manager.
+- Never ask the user to paste a secret. If the user pastes one, do not repeat it.
+- Change nothing without the user's yes. Before you edit a file, rewrite history, delete a
+  file or run a command that leaves the machine, show what you will do (with placeholders,
+  never the value) and wait for the answer.
+- Say what you do not know. A scan finds what its rules match; say so when you report
+  "nothing found".
 - The scripts need Python 3.11 or newer. They live in `scripts/` next to this file; in
   Claude Code that folder is `${CLAUDE_SKILL_DIR}/scripts`.
 
 ## Check a repository
 
-1. Run `python3 scripts/scan_secrets.py <repo> --history`. Add `--pii` when the user also
-   asks about personal data such as e-mail addresses or IBANs.
-2. Read the result. `tracked` means git holds the file. `still in tree` means the value is
-   in the current files. `only in history` means an old commit still holds it. The same id
-   means the same value.
-3. Tell the user what was found, grouped by id, with the file and the commit. Do not guess
-   what a value is.
-4. For each finding, propose the fix:
-   - The value is live: follow "Contain a leak" first. Deleting the file does not help,
-     because the value stays in the history and in every clone.
-   - The file must not be in git: add it to `.gitignore`, run `git rm --cached <file>`,
-     and commit.
-   - The value is only in the history and was pushed: rotate it. Rewriting the history
-     (`git filter-repo`) is a second step, it needs a force push and every collaborator
-     must clone again. Ask the user before a history rewrite or a force push.
+1. Scan the files first: `python3 scripts/scan_secrets.py <repo>`. Add `--pii` when the user
+   also asks about personal data such as e-mail addresses or IBANs.
+2. Then scan the history: `python3 scripts/scan_secrets.py <repo> --history --out <file>`.
+   `--out` writes the full report to a file the user can keep and prints only the summary.
+   On a large repository the history scan can take many minutes: tell the user, and run it
+   in the background if your tools allow that.
+3. Read the result:
+   - `shape` means the value has a provider's token format, `guess` means a keyword such as
+     `password =` stands next to it and it can be noise.
+   - `tracked` means git holds the file. `pushed` means the commit is on a remote branch
+     (as of the last `git fetch`), `local only` means it never left this clone.
+   - The same id means the same value. `value also at` names where it still is today.
+   - If the report says the history scan stopped early, or names files it did NOT scan
+     because they are too large, "nothing found" is not proven for those. Offer to scan again
+     with `--max-commits` or `--max-mb` raised.
+4. Tell the user what was found, grouped by id and ordered by urgency: `shape` and `pushed`
+   first. Give file, line, commit, date and author. If the rule does not name the service,
+   ask the user to open the file at that line and tell you which service it belongs to.
+5. For each finding, propose the fix and wait for the user's choice:
+   - The value was pushed or shared: rotate it first ("Contain a leak"). Deleting the file
+     does not help, because the value stays in the history and in every clone.
+   - The file must not be in git: add it to `.gitignore` and run `git rm --cached <file>`.
+   - The value is only in the history: rotate it if it was pushed. Rewriting the history
+     (`git filter-repo`) is a second step; it needs a force push and every collaborator must
+     clone again.
    - The value is a test fixture or a placeholder: say so, and suggest a clearly fake value.
-5. Suggest a guard against the next leak: a pre-commit secret scan (for example gitleaks),
+6. Suggest a guard against the next leak: a pre-commit secret scan (for example gitleaks),
    and the maisecrets plugin for the agent itself.
 
 ## Contain a leak
 
-Use this when a value reached a chat, a commit, a push, a log, a ticket or a screenshot. It
-needs no shell, so it also works in a chat without tools.
+Use this when a value may have reached a chat, a commit, a push, a log, a ticket or a
+screenshot. It needs no shell, so it also works in a chat without tools.
 
-1. Ask which service the value belongs to and where it went. Do not ask for the value.
-2. Rotate first, clean up second: a value that anybody may have seen stays valid until the
-   issuer revokes it. Removing it from the chat or the repository does not revoke it.
-3. Give the steps for that service from `references/rotation.md`. If the service is not
+1. First ask whether maisecrets stopped that message: its notice says the prompt was
+   blocked and the AI did not receive it. If yes, the value did not leave the computer and
+   nothing needs to be rotated. Say so plainly.
+2. Otherwise ask which service the value belongs to and where it went. Do not ask for the
+   value.
+3. Rotate first, clean up second. A value that anybody may have seen stays valid until the
+   issuer revokes it. Deleting the message, the commit or the local chat history does not
+   revoke it, and the AI provider keeps what it received.
+4. Give the steps for that service from `references/rotation.md`. If the service is not
    listed, give the generic steps from the same file.
-4. After the rotation, check the service's audit log for use of the old value in the time
-   between the leak and the rotation.
-5. Then clean up: remove the value from the file or the history (see "Check a repository"),
-   ask the chat or ticket owner to delete the message, and update every place that uses the
-   new value.
+5. Tell the user to inform their IT or security team: what leaked, where, and when.
+6. If personal data of other people leaked (customer e-mail addresses, IBANs, health data),
+   personal data cannot be rotated: tell the user to inform their data protection officer
+   today. The GDPR can require a notice to the authority within 72 hours.
+7. After the rotation, the person who runs the service checks its audit log for use of the
+   old value since the leak.
+8. Then clean up, each step only after the user's yes: remove the value from the file or
+   the history (see "Check a repository"), ask the chat or ticket owner to delete the
+   message, and update every place that uses the new value.
 
 ## Make a file safe to share
 
@@ -63,5 +84,8 @@ needs no shell, so it also works in a chat without tools.
    original and prints only the counts. Add `--secrets-only` to keep personal data.
 2. Tell the user the path of the copy. Do not open the original. If the user wants to check
    the copy, open the copy only.
-3. Say that detection is by rules and can miss a value, so the user should read the copy
-   before posting it.
+3. Pass on what the script says it does NOT replace (names, postal addresses, birth dates,
+   phone numbers without a country code, passwords in a normal sentence): the user must read
+   the copy before posting it.
+4. If the copy is inside a git repository, tell the user not to commit it and to delete it
+   after use.

@@ -26,12 +26,19 @@ def _token() -> str:
     return "ghp_" + "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(36))
 
 
+def _clean_env() -> dict:
+    """The environment without GIT_*: inside a git hook, GIT_INDEX_FILE, GIT_DIR and the author
+    variables point at the repository being committed, and a test repository would inherit them
+    (the author of a test commit became the committer of the real one; 2026-09-27)."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, env=_clean_env())
 
 
 def _run(script: Path, *args: str, cwd: Path) -> subprocess.CompletedProcess:
-    env = dict(os.environ, PYTHONUTF8="1")
+    env = dict(_clean_env(), PYTHONUTF8="1")
     return subprocess.run([sys.executable, str(script), *args], cwd=cwd, capture_output=True,
                           text=True, encoding="utf-8", env=env, timeout=120)
 
@@ -81,6 +88,70 @@ class SkillScriptTests(unittest.TestCase):
         for part in (self.token, self.token[4:], self.token[-12:]):
             self.assertNotIn(part, r.stdout + r.stderr)
 
+    def test_a_history_finding_says_when_who_and_whether_it_was_pushed(self):
+        r = _run(SCRIPTS / "scan_secrets.py", ".", "--history", cwd=self.repo)
+        row = next(line for line in r.stdout.splitlines() if "commit " in line and line.startswith("  S"))
+        self.assertRegex(row, r"commit [0-9a-f]{7,} \d{4}-\d{2}-\d{2} by t")
+        self.assertIn("no remote", row)
+        self.assertIn("github-pat", row, "a keyword match on a provider token is named by the provider")
+        self.assertIn("shape", row)
+
+    def test_a_pushed_commit_is_marked_pushed_and_a_new_one_local_only(self):
+        remote = self.dir / "remote.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True, capture_output=True, env=_clean_env())
+        _git(self.repo, "remote", "add", "origin", str(remote))
+        _git(self.repo, "push", "-q", "origin", "HEAD:refs/heads/main")
+        _git(self.repo, "fetch", "-q", "origin")
+        (self.repo / "later.cfg").write_text(f"token = {_token()}\n", encoding="utf-8")
+        _git(self.repo, "add", ".")
+        _git(self.repo, "commit", "-qm", "three")
+        r = _run(SCRIPTS / "scan_secrets.py", ".", "--history", cwd=self.repo)
+        rows = [line for line in r.stdout.splitlines() if "commit " in line and line.startswith("  S")]
+        self.assertTrue(any("pushed" in row and ".env:1" in row for row in rows), r.stdout)
+        self.assertTrue(any("local only" in row and "later.cfg:1" in row for row in rows), r.stdout)
+
+    def test_a_cut_history_scan_says_so_and_does_not_exit_clean(self):
+        clean = self.dir / "clean"
+        clean.mkdir()
+        _git(clean, "init", "-q")
+        _git(clean, "config", "user.email", "t@example.org")
+        _git(clean, "config", "user.name", "t")
+        for i in range(3):
+            (clean / "f.txt").write_text(f"{i}\n", encoding="utf-8")
+            _git(clean, "add", ".")
+            _git(clean, "commit", "-qm", str(i))
+        r = _run(SCRIPTS / "scan_secrets.py", ".", "--history", "--max-commits", "1", cwd=clean)
+        self.assertEqual(r.returncode, 3, r.stdout)
+        self.assertIn("stopped after 1 of 3 commits", r.stdout)
+
+    def test_a_file_too_large_to_scan_is_named_not_passed_over(self):
+        big = self.repo / "dump.sql"
+        big.write_text("x" * 2_100_000 + f"\ntoken = {self.token}\n", encoding="utf-8")
+        _git(self.repo, "add", ".")
+        _git(self.repo, "commit", "-qm", "dump")
+        r = _run(SCRIPTS / "scan_secrets.py", ".", "--history", cwd=self.repo)
+        self.assertIn("NOT scanned, larger than 2 MB", r.stdout)
+        self.assertIn("dump.sql", r.stdout)
+        self.assertIn("dump.sql in commit", r.stdout)
+
+    def test_a_folder_without_git_still_reports_its_files(self):
+        plain = self.dir / "plain"
+        plain.mkdir()
+        (plain / "a.env").write_text(f"GITHUB_TOKEN={self.token}\n", encoding="utf-8")
+        r = _run(SCRIPTS / "scan_secrets.py", str(plain), "--history", cwd=self.dir)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("a.env:1", r.stdout)
+        self.assertIn("not a git repository", r.stdout)
+        self.assertNotIn(self.token, r.stdout)
+
+    def test_the_full_report_can_go_to_a_file_and_the_model_sees_the_summary(self):
+        out = self.dir / "report.txt"
+        r = _run(SCRIPTS / "scan_secrets.py", ".", "--history", "--out", str(out), cwd=self.repo)
+        self.assertNotIn(".env:1", r.stdout)
+        self.assertIn("Summary:", r.stdout)
+        self.assertIn(".env:1", out.read_text(encoding="utf-8"))
+        self.assertNotIn(self.token, out.read_text(encoding="utf-8"))
+
     def test_a_clean_tree_exits_zero(self):
         r = _run(SCRIPTS / "scan_secrets.py", ".", cwd=self.repo)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -90,7 +161,7 @@ class SkillScriptTests(unittest.TestCase):
         r = _run(SCRIPTS / "scan_secrets.py", ".", "--history", cwd=self.repo)
         ids = {line.split()[0] for line in r.stdout.splitlines() if line.startswith("  S")}
         self.assertEqual(ids, {"S1"}, r.stdout)
-        self.assertIn("still in tree", r.stdout)
+        self.assertIn("value also at", r.stdout)
         self.assertNotIn(self.token, r.stdout)
 
     def test_the_redacted_copy_holds_no_value_and_the_original_is_kept(self):
@@ -103,12 +174,29 @@ class SkillScriptTests(unittest.TestCase):
         self.assertNotIn(self.token, copy + r.stdout + r.stderr)
         self.assertNotIn("anna.schmidt", copy + r.stdout)
         self.assertEqual(copy.count("⟦SECRET_1⟧"), 2, "the same value gets the same tag")
+        self.assertIn("NOT replaced: names", r.stdout)
+        self.assertIn("inside a git repository", r.stdout)
         self.assertEqual(src.read_bytes(), before)
         again = _run(SCRIPTS / "redact_copy.py", "log.txt", cwd=self.repo)
         self.assertEqual(again.returncode, 2, "an existing copy is not overwritten without --force")
         same = _run(SCRIPTS / "redact_copy.py", "log.txt", "--out", "log.txt", cwd=self.repo)
         self.assertEqual(same.returncode, 2, "the original is never the output")
         self.assertEqual(src.read_bytes(), before)
+
+
+class RedactSameValueTests(unittest.TestCase):
+    def test_an_iban_with_and_without_spaces_gets_one_tag(self):
+        work = Path(tempfile.mkdtemp(prefix="maisecrets-redact-"))
+        try:
+            text = "IBAN DE89 3704 0044 0532 0130 00 and DE89370400440532013000\n"
+            (work / "t.txt").write_text(text, encoding="utf-8")
+            r = _run(SCRIPTS / "redact_copy.py", "t.txt", cwd=work)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            copy = (work / "t.redacted.txt").read_text(encoding="utf-8")
+            self.assertEqual(copy.count("⟦IBAN_1⟧"), 2, copy)
+            self.assertNotIn("0532", copy)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 @unittest.skipUnless(HAS_GIT, "git is needed for the history scan")

@@ -21,18 +21,41 @@ def _age(ts: float) -> str:
 
 
 def cmd_list(_: list[str]) -> int:
+    """What is stored, masked: the same view a person gets from /maisecrets:list. No value."""
     v = Vault()
     rows = v.list()
     if not rows:
-        print("(vault is empty)")
+        print("Nothing is stored.")
         return 0
-    print(f"{'key':<14} {'type':<7} {'kind':<18} {'age':>5} {'uses':>4} {'expires':>8}  display")
+    live = [e for e in rows if not e.purged]
+    print(f"{len(live)} value(s) stored, {len(rows) - len(live)} expired (only the masked form is kept).")
+    print(f"{'key':<14} {'type':<7} {'kind':<18} {'age':>5} {'uses':>4} {'expires in':>10}  shown as")
     for e in sorted(rows, key=lambda x: x.created):
-        exp = "purged" if e.purged else f"{int(max(0, e.expires - time.time()) // 3600)}h"
-        print(f"{e.key:<14} {e.type:<7} {e.kind:<18} {_age(e.created):>5} {e.uses:>4} {exp:>8}  {e.display or ''}")
+        exp = "expired" if e.purged else f"{int(max(0, e.expires - time.time()) // 3600)}h"
+        print(f"{e.key:<14} {e.type:<7} {e.kind:<18} {_age(e.created):>5} {e.uses:>4} {exp:>10}  {e.display or '-'}")
     if v.backend.test_mode:
         print("\nbackend: jsonfile (TEST MODE, plaintext under ~/.maisecrets/)")
+    print("\nTo delete one: /maisecrets:forget <key>. To delete everything: /maisecrets:status shows how.")
     return 0
+
+
+def cmd_forget(args: list[str]) -> int:
+    if not args:
+        print("usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets:list shows them)", file=sys.stderr)
+        return 2
+    v, rc = Vault(), 0
+    for raw in args:
+        key = raw.strip("⟦⟧").split(":", 1)[0]
+        status = v.forget(key)
+        if status == "ok":
+            print(f"{key}: deleted. A placeholder for it no longer resolves anywhere.")
+        elif status == "unknown":
+            print(f"{key}: not found (see /maisecrets:list)")
+            rc = 1
+        else:
+            print(f"{key}: the store refused to delete it; nothing was changed")
+            rc = 1
+    return rc
 
 
 def cmd_get(args: list[str]) -> int:
@@ -313,7 +336,8 @@ def cmd_repair(_: list[str]) -> int:
 
 COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_resolve, "audit": cmd_audit,
             "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
-            "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut}
+            "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut,
+            "forget": cmd_forget}
 
 
 def main(argv: list[str] | None = None) -> int:

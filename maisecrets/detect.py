@@ -486,7 +486,13 @@ def _matches(rule: Rule, text: str):
         return
     pos = 0
     lines = text.split("\n")
+    low = text.lower().split("\n") if rule.keywords else None
     for i, line in enumerate(lines):
+        # the regex needs one of the rule's keywords in this line (every denylist word contains
+        # one); skipping the other lines cut a history scan from 71 s to a fraction (2026-09-27)
+        if low is not None and len(low) == len(lines) and not any(k in low[i] for k in rule.keywords):
+            pos += len(line) + 1
+            continue
         for m in rule.regex.finditer(line):
             yield _Shifted(m, pos)
         if _LABEL_ONLY_RE.search(line):
