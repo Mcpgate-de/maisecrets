@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## [0.3.28] - 2026-09-27
+
+### Features
+
+- the mcpgate mark as the plugin icon (7594fb5)
+
+### Fixes
+
+- a PNG as the manifest icon (cce176d)
+- the icon in every place a listing looks for it (5cbb758)
+- block and redaction notices one fact per line, and no slash commands on Codex (953da8b)
+
 ## [0.3.27] - 2026-09-27
 
 ### Features
