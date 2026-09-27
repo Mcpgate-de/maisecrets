@@ -127,8 +127,10 @@ and OpenAI plugin directories.
   The icon rule is stated only by the portal's `ICON_MISSING` finding, not in the
   manifest reference: `icon` in plugin.json, or `.claude-plugin/icon.svg|png`, or
   `assets/icon.*`, square, at least 128 px; without one the publisher's GitHub
-  avatar is shown. The plugin sets all three. An upload of a zip to a claude.ai
-  account shows a generic tile; only the directory listing renders the icon.
+  avatar is shown. The plugin sets all three; `icon` is the raw GitHub URL of
+  `assets/icon.png` on `main`, because the portal's listing preview renders a URL
+  and shows only a letter for a path inside the plugin. An upload of a zip to a
+  claude.ai account shows a generic tile.
 - Codex: `.codex-plugin/plugin.json` is the compatibility manifest (a root
   `plugin.json` made Codex 0.157 find none of the hooks). Its `interface` block
   carries `composerIcon` and `logo` (square PNG, 512 px, like the examples in

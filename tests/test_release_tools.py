@@ -136,8 +136,13 @@ class ListingManifestTests(unittest.TestCase):
                          "Codex discovers hooks/hooks.json only while the manifest defines no hooks")
 
     def test_the_icon_is_where_each_directory_looks(self):
-        # Anthropic: the manifest field, the .claude-plugin file, the assets file (all three named by the portal)
-        icon = ROOT / self.claude["icon"]
+        # Anthropic: the manifest field, the .claude-plugin file, the assets file (all three named by the portal).
+        # The field is a URL: the portal's listing preview renders a URL and shows a letter for a repo
+        # path ("This icon is given as a path inside your plugin. This page can't display it", 2026-09-27).
+        # The URL must point at a file on the tracked branch of this repository, so it moves with it.
+        prefix = "https://raw.githubusercontent.com/Mcpgate-de/maisecrets/main/"
+        self.assertTrue(self.claude["icon"].startswith(prefix), self.claude["icon"])
+        icon = ROOT / self.claude["icon"][len(prefix):]
         self.assertTrue(icon.is_file(), self.claude["icon"])
         self.assertTrue((ROOT / ".claude-plugin/icon.svg").is_file())
         self.assertTrue(list((ROOT / "assets").glob("icon.*")))
