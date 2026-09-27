@@ -219,7 +219,7 @@ next patch version.
 `/Library/Application Support/maisecrets/policy.json` (macOS),
 `%ProgramData%\maisecrets\policy.json` (Windows), `/etc/maisecrets/policy.json`
 (Linux). Any key from "Options" goes in it; typical: `backend`,
-`scrub_transcript`, `max_ttl_seconds`, `pii_regions`, `report_url`,
+`scrub_transcript`, `max_ttl_seconds`, `regions`, `report_url`,
 `resolve_in_files`.
 `/maisecrets:status` names the keys that come from the policy. The plaintext
 `jsonfile` store is refused unless the policy or the user sets
@@ -328,7 +328,7 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
   "renew_on_use": true,
   "scrub_transcript": true,
   "block_at_mentions": true,
-  "pii_regions": ["generic", "de"],
+  "regions": ["auto"],
   "max_keys_per_session": 25,
   "max_resolves_per_hour": 60,
   "report_url": "https://github.com/Mcpgate-de/maisecrets/issues"
@@ -336,9 +336,22 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
 ```
 
 `backend`: `keychain` (macOS), `windows-vault`, `encrypted-file` (Linux and
-any other), `jsonfile` (test mode, plaintext). `pii_regions`: Presidio
-regions besides the generic ones. `tips`: `false` turns off the one-line tip
-that appears once a day at session start.
+any other), `jsonfile` (test mode, plaintext). `tips`: `false` turns off the
+one-line tip that appears once a day at session start.
+
+`regions`: country codes, for example `["de", "us"]`. Each country adds its
+Presidio rules for personal data, such as a German tax ID or a US social
+security number. The entry `auto` is the country of your system setting (on
+macOS and Windows the system setting, not `LANG`). The default is `["auto"]`.
+An empty list keeps the generic rules only. The old key `pii_regions` still
+works.
+
+Credential labels come in languages. English labels (`password:`, `pass:`,
+`token:`) are always on. maisecrets adds the labels of your system language
+and of each region, for example `passwort:` and `kennwort:` for German. The
+labels are data files in `maisecrets/rules/labels/`, one file per language.
+A new language is one new file. `/maisecrets:status` shows the regions, where
+they came from, and the label languages.
 
 Every entry has a TTL. Each use renews it, up to `max_ttl_seconds`. On
 expiry the value is deleted and the metadata stays as a record. Commands:
@@ -474,8 +487,9 @@ Four sources, one scanner (`maisecrets/detect.py`):
   gitleaks binary is used.
 - **Presidio** pattern recognizers, vendored as data under `maisecrets/rules/`
   (MIT, version in `PRESIDIO_VERSION`, refresh with `scripts/sync_presidio.py`):
-  country-specific PII with scores and context words. Regions are opt-in via
-  `pii_regions` in the config (default `generic` and `de`: Steuer-ID,
+  country-specific PII with scores and context words. The config key
+  `regions` selects them (default: the country of the system setting; `de`
+  gives Steuer-ID,
   Sozialversicherungsnummer, Personalausweis, Reisepass, USt-ID,
   Krankenversicherung, PLZ, Kfz, LANR, BSNR, Handelsregister). Checksums for
   the German types are ported and checked against Presidio
@@ -544,8 +558,8 @@ a to-do.
   helper and is not built. See "Vault" and `docs/THREAT-MODEL.md`.
 - **Every e-mail address, phone number with a country code and public IP
   counts**, also your own and your colleagues'. `git log`, `dig` and `ip addr`
-  come back with placeholders. Set `"pii_regions": ["generic"]` to drop the
-  German identifiers; there is no allow-list for single values yet.
+  come back with placeholders. Set `"regions": []` to drop the country
+  identifiers; there is no allow-list for single values yet.
 - **Placeholders resolve in Bash, MCP tool arguments and the file tools.** In
   WebFetch or a subagent prompt they stay text. A subagent shares its parent's session; a
   headless run (`codex exec`, `claude -p`) is a session of its own, so a
