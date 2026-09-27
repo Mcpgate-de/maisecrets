@@ -204,7 +204,8 @@ class FailClosedAnswerTests(unittest.TestCase):
         self.assertEqual(last[1:4], ["pre-tool", "claude", "session-"])
         self.assertEqual(len(last[4]), 40)
         self.assertEqual(last[5:], ["pass", "3ms", "ok"])
-        self.assertEqual(os.stat(log).st_mode & 0o777, 0o600)
+        if os.name != "nt":  # Windows keeps no POSIX mode (st_mode & 0o777 is 0o666)
+            self.assertEqual(os.stat(log).st_mode & 0o777, 0o600)
 
 
 # ------------------------------------------------------------- answer shapes --
@@ -256,9 +257,11 @@ class ClientShapeTests(unittest.TestCase):
         claude = _hso(_bash_pre("printf '%s' " + self.e.ref, prompt_id="p"))
         codex = _hso(_bash_pre("printf '%s' " + self.e.ref, turn_id="t"))
         self.assertNotIn("permissionDecision", claude)
-        self.assertEqual(codex["permissionDecision"], "allow")
+        # Codex for Windows runs PowerShell: a command with a placeholder is refused there
+        self.assertEqual(codex["permissionDecision"], "deny" if os.name == "nt" else "allow")
         for out in (claude, codex):
             self.assertNotIn(PLAIN, json.dumps(out))
+        for out in (claude,) if os.name == "nt" else (claude, codex):   # a Codex deny has no command
             if BASH:
                 self.assertEqual(_run(out["updatedInput"]["command"]).stdout, PLAIN)
 
@@ -364,7 +367,9 @@ class TranscriptScrubTests(unittest.TestCase):
         self.assertNotIn(PLAIN, data)
         self.assertEqual(data, "not json " + "*" * len(PLAIN) + "\n{\"broken\": \"" + "*" * len(PLAIN) + "\n\n")
         st = os.stat(self.path)
-        self.assertEqual((st.st_ino, st.st_mode & 0o777), (ino, 0o600))
+        self.assertEqual(st.st_ino, ino)
+        if os.name != "nt":  # Windows keeps no POSIX mode (st_mode & 0o777 is 0o666)
+            self.assertEqual(st.st_mode & 0o777, 0o600)
 
     def test_a_value_on_the_window_boundary_of_a_large_transcript_is_scrubbed(self):
         chunk = 8 * 1024 * 1024
@@ -438,7 +443,8 @@ class MentionAndPendingTests(unittest.TestCase):
     def test_a_pending_prompt_expires_after_15_minutes_and_two_sessions_are_not_mixed(self):
         hooks._save_pending("text of A ⟦SECRET_c1⟧", "A")
         p = hooks._pending_path("A")
-        self.assertEqual(os.stat(p).st_mode & 0o777, 0o600)
+        if os.name != "nt":  # Windows keeps no POSIX mode (st_mode & 0o777 is 0o666)
+            self.assertEqual(os.stat(p).st_mode & 0o777, 0o600)
         old = time.time() - 16 * 60
         os.utime(p, (old, old))
         self.assertIsNone(hooks.take_pending("A"), "a stale prompt is never sent")
@@ -465,21 +471,26 @@ class MentionAndPendingTests(unittest.TestCase):
 
 class ClipboardTests(unittest.TestCase):
     def test_the_clipboard_command_per_system_and_a_missing_tool_is_false(self):
-        for system, write, read in (("Darwin", ["pbcopy"], ["pbpaste"]), ("Windows", ["clip"],
-                                    ["powershell", "-command", "Get-Clipboard"]),
-                                    ("Linux", ["xclip", "-selection", "clipboard"],
-                                     ["xclip", "-selection", "clipboard", "-o"])):
+        ps_read = ["powershell", "-NoProfile", "-Command",
+                   "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; Get-Clipboard -Raw"]
+        text = "x ⟦SECRET_c1⟧"
+        for system, write, sent, read in (
+                ("Darwin", ["pbcopy"], text.encode(), ["pbpaste"]),
+                # clip.exe takes UTF-16 as Unicode, UTF-8 in the code page; a byte order mark stays in
+                ("Windows", ["clip"], text.encode("utf-16-le"), ps_read),
+                ("Linux", ["xclip", "-selection", "clipboard"], text.encode(),
+                 ["xclip", "-selection", "clipboard", "-o"])):
             with self.subTest(system):
                 calls = []
 
                 def fake_run(cmd, **kw):
-                    calls.append(cmd)
-                    return subprocess.CompletedProcess(cmd, 0, stdout="from clipboard")
+                    calls.append((cmd, kw.get("input")))
+                    return subprocess.CompletedProcess(cmd, 0, stdout="from clipboard ⟦K⟧".encode())
                 with mock.patch.object(hooks.platform, "system", return_value=system), \
                         mock.patch.object(hooks.subprocess, "run", fake_run):
-                    self.assertTrue(_CLIPBOARD("x"))
-                    self.assertEqual(_CLIPBOARD_READ(), "from clipboard")
-                self.assertEqual(calls, [write, read])
+                    self.assertTrue(_CLIPBOARD(text))
+                    self.assertEqual(_CLIPBOARD_READ(), "from clipboard ⟦K⟧", "the read is UTF-8")
+                self.assertEqual(calls, [(write, sent), (read, None)])
         with mock.patch.object(hooks.subprocess, "run", side_effect=OSError("absent")):
             self.assertFalse(_CLIPBOARD("x"))
             self.assertEqual(_CLIPBOARD_READ(), "")
@@ -745,8 +756,11 @@ def _dispatch(event: str, stdin: str, home: str | None = None, **extra_env: str)
                                                                   "XDG_RUNTIME_DIR", "MAISECRETS_DEBUG_LOG")}
     # the run dir of the child is the one of this process; its serving children inherit the cwd,
     # which is how tearDownModule finds one that outlived its FIFO
+    # MS_TEST_CLIP: on Windows clip.exe is found in System32 before PATH, and tests/_platform_fakes.py
+    # writes the sink file instead
     env.update({"MAISECRETS_HOME": home, "TMPDIR": tempfile.gettempdir(),
-                "PATH": _FAKEBIN + os.pathsep + env.get("PATH", "")})
+                "PATH": _FAKEBIN + os.pathsep + env.get("PATH", ""),
+                "MS_TEST_CLIP": os.path.join(_FAKEBIN, "clipboard")})
     env.update(extra_env)
     return subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), event], input=stdin,
                           capture_output=True, text=True, env=env, timeout=60, cwd=tempfile.gettempdir())
@@ -809,8 +823,8 @@ class PayloadMatrixTests(unittest.TestCase):
         self.assertEqual(set(claude["hookSpecificOutput"]), {"hookEventName", "updatedInput"})
         codex = self._one(_dispatch("pre-tool", json.dumps(
             {"tool_name": "Bash", "tool_input": {"command": cmd}, "session_id": "SM", "turn_id": "t", "model": "m"})))
-        self.assertEqual(codex["hookSpecificOutput"]["permissionDecision"], "allow")
-        for out in (claude, codex):      # each rewrite waits for one read; take it, and check the bytes
+        self.assertEqual(codex["hookSpecificOutput"]["permissionDecision"], "deny" if os.name == "nt" else "allow")
+        for out in (claude,) if os.name == "nt" else (claude, codex):   # each rewrite waits for one read
             if BASH:
                 self.assertEqual(_run(out["hookSpecificOutput"]["updatedInput"]["command"]).stdout, PLAIN)
         self.assertEqual(self._one(_dispatch("pre-tool", '{"tool_name": "Bash", "prompt_id": "p"}')), {})

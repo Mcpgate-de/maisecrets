@@ -1244,6 +1244,10 @@ class ConcurrencyTests(unittest.TestCase):
         "    e = v.put(f'race-fake-{tag}-{i:03d}', 'SECRET', 'manual', session='S-' + tag)\n"
         "    if i % 3 == 0:\n"
         "        v.record_resolve(e.key, 'S-' + tag, 'Bash', 'x')\n"
+        # a waiter polls the lock every 20 ms and a writer in a tight loop takes it back at once:
+        # on windows-latest one child waited the whole 6 s deadline (2026-09-27). A hook writes
+        # once per event, so each child pauses one poll interval between its writes
+        "    time.sleep(0.025)\n"
         "print('done')\n"
     )
 
@@ -1326,7 +1330,12 @@ class RaceAgainstPutTests(unittest.TestCase):
         "        assert Vault().forget(key) == 'ok', key\n"
         "else:\n"
         "    index = Path(os.environ['MAISECRETS_HOME']) / 'index.json'\n"
-        "    while sum(m.get('session') == 'S-w' for m in json.loads(index.read_text())['entries'].values()) < 8:\n"
+        # read_text_retry: on Windows a read while the writer's os.replace runs raises PermissionError
+        "    from maisecrets.vault import read_text_retry\n"
+        "    def writes():\n"
+        "        entries = json.loads(read_text_retry(index))['entries']\n"
+        "        return sum(m.get('session') == 'S-w' for m in entries.values())\n"
+        "    while writes() < 8:\n"
         "        time.sleep(0.002)\n"
         "    n, problems = wipe_everything(load_config())\n"
         "    assert not problems, problems\n"

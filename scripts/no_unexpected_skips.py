@@ -2,15 +2,16 @@
 """Fail when the unit suite skipped a test that CI must run.
 
 A skipped test reads as green: without git in the image the skill's history tests were all
-skipped and nothing noticed (2026-09-27). The only skip CI accepts is the native-store test,
-which needs a real keychain or Credential Locker.
+skipped and nothing noticed (2026-09-27). CI accepts two skips: the native-store test, which
+needs a real keychain or Credential Locker, and the native clipboard test, which overwrites the
+clipboard and runs in its own step on the macOS and Windows runners.
 
     python scripts/no_unexpected_skips.py unit.log
 """
 import re
 import sys
 
-ALLOWED = ("MAISECRETS_NATIVE_BACKEND_TEST",)
+ALLOWED = ("MAISECRETS_NATIVE_BACKEND_TEST", "MAISECRETS_NATIVE_CLIPBOARD_TEST")
 
 
 def main(path: str) -> int:
