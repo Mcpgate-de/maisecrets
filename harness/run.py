@@ -105,12 +105,13 @@ SCENARIOS = {
         "prompt": "grep the mail log for ⟦SECRET_c1⟧",
         "preload": [(MARK, "SECRET", "gitlab_pat")],
         "turns": [
-            {"tool": "Bash", "input": {"command": "printf '%s' ⟦SECRET_c1⟧ | ssh aux01 'grep -F -f - /var/log/mail.log'"}},
+            {"tool": "Bash",
+             "input": {"command": "printf '%s' ⟦SECRET_c1⟧ | ssh aux01 'grep -F -f - /var/log/mail.log'"}},
             {"text": "done"},
         ],
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c1⟧"],
-        "expect_text": "on stdin to ssh aux01, which runs: grep -F -f - /var/log/mail.log",
+        "expect_text": "on stdin to ssh aux01: ssh aux01 grep -F -f - /var/log/mail.log",
     },
     # a reference the session never saw in a prompt is not resolved
     "bash_foreign_ref": {

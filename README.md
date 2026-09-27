@@ -462,14 +462,35 @@ A placeholder turns back into its value only here:
                "network": {"allowedDomains": ["aux01.example.com"], "strictAllowlist": true}}}
   ```
 
-  maisecrets puts its own `ProxyCommand` first on the ssh line
-  (`hooks/proxy_connect.py`), because plain ssh has no network in the
-  sandbox. Outside the sandbox the command stops before the value is read. A
-  value inside ssh's arguments, a remote shell (`ssh host`, `ssh host bash`),
-  and an own proxy or jump host (`-J`, `ProxyCommand`) stay refused, and so
-  does ssh on Codex. The remote command itself can pass the value on: read it
-  before you allow. `"ssh_via_sandbox": false` switches the route off.
-  Measured on macOS and Debian 13 with Claude Code 2.1.283.
+  maisecrets puts its own options first on the ssh line: a `ProxyCommand`
+  (`hooks/proxy_connect.py`, because plain ssh has no network in the
+  sandbox) and `ControlMaster=no`, `ControlPath=none`. Outside the sandbox the
+  command stops before the value is read. Refused, with the reason:
+
+  - a value inside ssh's arguments, a here-string or a heredoc into ssh;
+  - a remote side that reads its program from stdin or passes the value on:
+    no remote command, `bash`, `sh -s`, `python3` alone, `| sh`, `$SHELL`,
+    `eval`, another `ssh`, `xargs sh -c`, and encoders such as `base64`;
+  - an own proxy, jump host, shared connection, config file, host name or
+    local command (`-J`, `-W`, `-S`, `-M`, `-F`, `-o ProxyCommand`,
+    `-o HostName`, `-o LocalCommand`, …);
+  - ssh on Codex, which has no host allowlist.
+
+  What to know before you set it up:
+
+  - The allowlist needs the host name ssh connects to, not the alias:
+    `ssh -G aux01 | grep ^hostname` shows it.
+  - Jump hosts (`ProxyJump` in `~/.ssh/config`) and connection sharing are
+    off on this route: the sandbox proxy is the only way out.
+  - The sandbox has no terminal and limits writes. Use a key without a
+    passphrase prompt or an agent, and connect once outside the sandbox so
+    the host key is in `~/.ssh/known_hosts`. `sudo ssh` drops the proxy
+    variables and fails.
+  - The remote command itself can pass the value on: read it before you
+    allow.
+
+  `"ssh_via_sandbox": false` switches the route off. Measured on macOS and
+  Debian 13 with Claude Code 2.1.283.
 - **Inline for Write and Edit.** A placeholder in the content of Write, Edit,
   MultiEdit or NotebookEdit is resolved like an MCP argument, under the same
   session rule, cap and audit line (the line names the file). The client's

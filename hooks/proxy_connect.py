@@ -9,8 +9,9 @@ the proxy login, so the proxy refuses it. This helper sends the login from HTTPS
 
     ssh -o ProxyCommand='python3 proxy_connect.py %h %p' host …
 
-It talks only to a proxy on this machine (localhost, 127.0.0.1, ::1): the login of the sandbox
-proxy never goes to another host. Exit 1 with the proxy's status line when the proxy refuses.
+It talks only to the sandbox proxy on this machine (localhost, 127.0.0.1, ::1, with a login of
+the form srt.…): the login never goes to another host, and a company proxy on localhost is not
+used. Exit 1 with the proxy's status line when the proxy refuses.
 """
 from __future__ import annotations
 
@@ -27,7 +28,9 @@ LOCAL = {"localhost", "127.0.0.1", "::1"}
 def proxy() -> tuple[str, int, str | None]:
     url = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
     u = urlsplit(url)
-    if u.scheme != "http" or u.hostname not in LOCAL or not u.port:
+    # the sandbox runtime's own proxy: local, with a login of the form srt.… (Claude Code 2.1.283);
+    # a company proxy on localhost (cntlm, px) would connect anywhere and must not be used
+    if u.scheme != "http" or u.hostname not in LOCAL or not u.port or not (u.username or "").startswith("srt."):
         raise SystemExit("maisecrets proxy_connect: no local sandbox proxy in HTTPS_PROXY; "
                          "this ssh route works only inside the Claude Code sandbox")
     auth = None
@@ -59,7 +62,8 @@ def main(argv: list[str]) -> int:
         reply += chunk
     status = reply.split(b"\r\n", 1)[0].decode(errors="replace")
     if status.split(" ")[1:2] != ["200"]:
-        print(f"maisecrets proxy_connect: the sandbox proxy refused {target}: {status}", file=sys.stderr)
+        print(f"maisecrets proxy_connect: the sandbox proxy refused {target}: {status}. Add the host as ssh "
+              f"resolves it (ssh -G <host> | grep ^hostname) to sandbox.network.allowedDomains.", file=sys.stderr)
         return 1
     s.settimeout(None)
     stdin, stdout = sys.stdin.fileno(), sys.stdout.fileno()

