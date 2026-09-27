@@ -29,8 +29,7 @@ The full threat model is in `docs/THREAT-MODEL.md`. The short form:
 
 ## Reviews
 
-Five defensive reviews of 2026-09-26 (macOS store, Windows and Linux stores,
-the agent channel, the Codex adapter, failure modes) are in `docs/reviews/`,
-and a second round of four (repository visitor, operator, code, agent and
-tool) was applied the same day. Each finding lists what was verified and what
-was assumed. The items they closed are in `CHANGELOG.md`.
+Defensive reviews of the stores, the agent channel, the Codex adapter and the failure modes ran
+on 2026-09-26 and 2026-09-27. Their findings are fixed in the code, each with a test, and named
+in `CHANGELOG.md` and the commit messages. `docs/THREAT-MODEL.md` lists the controls and where
+each one ends.

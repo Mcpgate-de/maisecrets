@@ -434,7 +434,7 @@ class KeychainBackend:
         # -l is the "Name" column in Keychain Access, -j the comment shown in the item's info.
         # The item's ACL trusts /usr/bin/security, the tool that created it, so ANY process of
         # this user that runs `security find-generic-password` reads the value without a dialog
-        # (review 2026-09-26, docs/reviews). The keychain protects the value at rest and from
+        # (review 2026-09-26). The keychain protects the value at rest and from
         # other users, not from this user's other processes. The gates are in the hooks.
         # No synchronizable flag: the item never joins iCloud Keychain or the Passwords app.
         # the value is stored base64-encoded with a marker: `find-generic-password -w` prints a
@@ -875,7 +875,7 @@ class Vault:
         created the entry, or one where a human typed the reference into a prompt
         (``admit``). Keys are counters, so a reference an agent never saw is guessable;
         without this rule an injected instruction could name ``SECRET_c1`` and have it
-        resolved (review 2026-09-26, docs/reviews/2026-09-26-agent-channel.md).
+        resolved (review of the agent channel, 2026-09-26).
         """
         meta = self._index["entries"].get(key)
         if meta is None:
