@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.3.30] - 2026-09-27
+
+### Fixes
+
+- a reader retries while another hook process replaces the index or the store (Windows PermissionError) (bfb211c)
+- the release job stages the Codex manifest it bumps; a test reads the job's git add line (c67483a)
+- the manifest icon is the URL of the PNG on main, which the listing preview renders (bc7f087)
+
 ## [0.3.29] - 2026-09-27
 
 ### Features
