@@ -33,7 +33,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
-os.environ.pop("XDG_RUNTIME_DIR", None)
 
 from maisecrets import vault  # noqa: E402
 from maisecrets.vault import (  # noqa: E402
@@ -69,6 +68,8 @@ def setUpModule():
 
 def tearDownModule():
     _GUARD.stop()
+    import _hygiene
+    _hygiene.assert_pristine()
 
 
 def _reset() -> None:
@@ -1255,6 +1256,137 @@ class ConcurrencyTests(unittest.TestCase):
             self.assertFalse(NATIVE_MARK.exists(), "a child ran a native store binary")
         finally:
             shutil.rmtree(home, ignore_errors=True)
+
+
+class RaceAgainstPutTests(unittest.TestCase):
+    """One process puts while another expires, forgets or wipes, against one index. The lock makes
+    each call one read-modify-write; without it a stale index is saved over the other's work: an
+    entry is lost, or an index entry names a value that is gone (suite review, 2026-09-27)."""
+
+    # process A: puts only. Its own sweep is off, so the expired seeds are left for process B.
+    WRITER = (
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "from maisecrets.vault import JsonFileBackend, Vault\n"
+        "_put = JsonFileBackend.put\n"
+        "def slow_put(self, *a, **k):\n"
+        "    time.sleep(0.003)\n"
+        "    return _put(self, *a, **k)\n"
+        "JsonFileBackend.put = slow_put\n"
+        "Vault.expire = lambda self, limit=25: 0\n"
+        "n, go = int(sys.argv[1]), Path(sys.argv[2])\n"
+        "while not go.exists():\n"
+        "    time.sleep(0.002)\n"
+        "for i in range(n):\n"
+        "    e = Vault().put(f'race-fake-w-{i:03d}', 'SECRET', 'manual', session='S-w')\n"
+        "    print(e.key, i, flush=True)\n"
+    )
+    # process B: a slow delete (a keychain call takes ~10 ms) widens the window a lock must cover
+    OTHER = (
+        "import json, os, sys, time\n"
+        "from pathlib import Path\n"
+        "from maisecrets.vault import JsonFileBackend, Vault, load_config, wipe_everything\n"
+        "_delete = JsonFileBackend.delete\n"
+        "def slow_delete(self, *a, **k):\n"
+        "    time.sleep(0.003)\n"
+        "    return _delete(self, *a, **k)\n"
+        "JsonFileBackend.delete = slow_delete\n"
+        "mode, go, keys = sys.argv[1], Path(sys.argv[2]), sys.argv[3:]\n"
+        "while not go.exists():\n"
+        "    time.sleep(0.002)\n"
+        "time.sleep(0.02)\n"
+        "if mode == 'expire':\n"
+        "    for _ in range(3):\n"
+        "        Vault().expire(limit=None)\n"
+        "elif mode == 'forget':\n"
+        "    for key in keys:\n"
+        "        assert Vault().forget(key) == 'ok', key\n"
+        "else:\n"
+        "    index = Path(os.environ['MAISECRETS_HOME']) / 'index.json'\n"
+        "    while sum(m.get('session') == 'S-w' for m in json.loads(index.read_text())['entries'].values()) < 8:\n"
+        "        time.sleep(0.002)\n"
+        "    n, problems = wipe_everything(load_config())\n"
+        "    assert not problems, problems\n"
+        "print('done')\n"
+    )
+    SEEDS, N = 10, 25
+
+    def _race(self, mode: str, expired_seeds: bool = False) -> tuple[Path, dict, dict, dict[str, int], list[str]]:
+        home = Path(tempfile.mkdtemp(prefix="race-", dir=HOME))
+        self.addCleanup(shutil.rmtree, home, True)
+        (home / "config.json").write_text(BASE_CONFIG, encoding="utf-8")
+        env = _child_env(home)
+        seed = subprocess.run([sys.executable, "-c",
+                               "import json, sys, time\nfrom maisecrets.vault import INDEX, Vault\n"
+                               "keys = [Vault().put(f'race-fake-seed-{i:02d}', 'SECRET', 'manual', session='S0').key "
+                               "for i in range(int(sys.argv[1]))]\n"
+                               "if sys.argv[2] == '1':\n"
+                               "    data = json.loads(INDEX.read_text())\n"
+                               "    for k in keys:\n"
+                               "        data['entries'][k]['expires'] = time.time() - 10\n"
+                               "    INDEX.write_text(json.dumps(data))\n"
+                               "print(' '.join(keys))\n", str(self.SEEDS), "1" if expired_seeds else "0"],
+                              env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(seed.returncode, 0, seed.stderr)
+        seeds = seed.stdout.split()
+        go = home / "go"
+        procs = [subprocess.Popen([sys.executable, "-c", self.WRITER, str(self.N), str(go)], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True),
+                 subprocess.Popen([sys.executable, "-c", self.OTHER, mode, str(go), *seeds], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)]
+        time.sleep(0.1)          # both children import maisecrets and wait for the go file
+        go.touch()
+        outs = []
+        for p in procs:
+            out, err = p.communicate(timeout=60)
+            self.assertEqual(p.returncode, 0, err[-800:])
+            outs.append(out)
+        last: dict[str, int] = {}
+        for line in outs[0].split("\n"):
+            if line:
+                key, i = line.split()
+                last[key] = int(i)
+        index = json.loads((home / "index.json").read_text(encoding="utf-8")) if (home / "index.json").exists() \
+            else {"entries": {}, "by_fingerprint": {}, "counters": {}}
+        store = json.loads((home / "vault.json").read_text(encoding="utf-8"))
+        live = sorted(k for k, m in index["entries"].items() if not m.get("purged"))
+        # no value without a live entry, no live entry without its value
+        self.assertEqual(sorted(k for k in store if k != FP_KEY_ENTRY), live)
+        self.assertEqual([p.name for p in home.iterdir() if p.name.endswith(".tmp")], [])
+        self.assertFalse(NATIVE_MARK.exists(), "a child ran a native store binary")
+        return home, index, store, last, seeds
+
+    def _all_writes_kept(self, index: dict, store: dict, last: dict[str, int]) -> None:
+        self.assertEqual(sorted(last.values()), list(range(self.N)))
+        for key, i in last.items():
+            self.assertIn(key, index["entries"], "an entry the writer put was lost")
+            self.assertEqual(store.get(key), f"race-fake-w-{i:03d}")
+
+    def test_put_against_expire_loses_no_entry_and_purges_every_expired_one(self):
+        _home, index, store, last, seeds = self._race("expire", expired_seeds=True)
+        self._all_writes_kept(index, store, last)
+        for key in seeds:
+            self.assertTrue(index["entries"][key].get("purged"), key)
+            self.assertNotIn(key, store, "an expired value came back")
+        self.assertEqual(index["counters"], {"SECRET": self.SEEDS + self.N})
+
+    def test_put_against_forget_loses_no_entry_and_brings_no_forgotten_one_back(self):
+        _home, index, store, last, seeds = self._race("forget")
+        self._all_writes_kept(index, store, last)
+        for key in seeds:
+            self.assertNotIn(key, index["entries"], "a forgotten entry came back")
+        self.assertEqual(len(index["by_fingerprint"]), self.N)
+        self.assertEqual(index["counters"], {"SECRET": self.SEEDS + self.N})
+
+    def test_put_against_wipe_keeps_exactly_the_writes_after_the_wipe(self):
+        _home, index, store, last, _seeds = self._race("wipe")
+        self.assertFalse(any(m.get("session") == "S0" for m in index["entries"].values()), "a wiped entry came back")
+        kept = sorted(last[k] for k in index["entries"])
+        # the writes after the wipe, all of them, and none from before it
+        self.assertEqual(kept, list(range(self.N - len(kept), self.N)))
+        self.assertLessEqual(len(kept), self.N - 8, "the wipe ran after the eighth write")
+        for key in index["entries"]:
+            self.assertEqual(store[key], f"race-fake-w-{last[key]:03d}")
 
 
 if __name__ == "__main__":

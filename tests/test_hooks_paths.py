@@ -36,11 +36,18 @@ Path(os.environ["MAISECRETS_HOME"], "config.json").write_text(JSONFILE_CFG)
 
 from maisecrets import hooks  # noqa: E402
 from maisecrets.vault import HOME, ConfigError, Vault  # noqa: E402
+import _hygiene  # noqa: E402
+from _hygiene import CLAUDE  # noqa: E402
 
-os.environ["MAISECRETS_HOME"] = str(HOME)
 _TMP = str(HOME)
-os.environ.pop("XDG_RUNTIME_DIR", None)
-tempfile.tempdir = _TMP
+
+
+def tearDownModule():  # noqa: N802 - unittest hook
+    _hygiene.assert_pristine()
+    # the children a hook subprocess started run with its working directory, under the temp dir
+    alive = _hygiene.wait_for_no_serving_child(cwd_root=_isolate.TMP)
+    if alive:
+        raise AssertionError(f"value-serving children still run after the module: {alive}")
 
 # captured at import, before another module replaces hooks._clipboard with a lambda
 _CLIPBOARD = hooks._clipboard
@@ -69,10 +76,17 @@ def _reset() -> None:
     hooks._live_cache.clear()
 
 
-def _bash_pre(command: str, session: str = "S1", **extra) -> dict:
-    payload = {"tool_name": "Bash", "tool_input": {"command": command}, "session_id": session}
+def _marked(payload: dict, extra: dict) -> dict:
+    """The payload with its client marker: the caller's prompt_id or turn_id, else Claude's."""
+    if not {"prompt_id", "turn_id"} & extra.keys():
+        payload.update(CLAUDE)
     payload.update(extra)
-    return hooks.pre_tool(payload)
+    return payload
+
+
+def _bash_pre(command: str, session: str = "S1", **extra) -> dict:
+    return hooks.pre_tool(_marked({"tool_name": "Bash", "tool_input": {"command": command}, "session_id": session},
+                                  extra))
 
 
 def _run(command: str) -> subprocess.CompletedProcess:
@@ -195,7 +209,12 @@ class FailClosedAnswerTests(unittest.TestCase):
 
 # ------------------------------------------------------------- answer shapes --
 class ClientShapeTests(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls):  # noqa: N802 - unittest hook
+        _hygiene.assert_children_ended()
+
     def setUp(self):
+        _hygiene.watch_children(self)
         _reset()
         self.e = Vault().put(PLAIN, "SECRET", "manual", session="S1")
 
@@ -215,7 +234,7 @@ class ClientShapeTests(unittest.TestCase):
         typed = hooks.user_prompt({"prompt": "print " + self.e.ref, "session_id": "U3", "prompt_id": "p"})
         self.assertEqual(typed["hookSpecificOutput"]["additionalContext"], hooks.PRIMER)
         self.assertEqual(Vault().status(self.e.key, "U3"), "ok", "a typed reference admits the session")
-        self.assertEqual(hooks.user_prompt({"prompt": "hello", "session_id": "U3"}), {})
+        self.assertEqual(hooks.user_prompt({"prompt": "hello", "session_id": "U3", **CLAUDE}), {})
 
     def test_the_notice_names_the_kind_and_the_step_per_client(self):
         v = Vault()
@@ -265,8 +284,10 @@ class ClientShapeTests(unittest.TestCase):
         self.assertEqual(new["meta"]["deep"], [["x", self.e.ref + " tail"]])
         self.assertEqual(new["exit"], 0)
         self.assertIn("replaced 2 value(s) in this mcp__x__y result", out["systemMessage"])
-        self.assertEqual(hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "tool_response": None}), {})
-        self.assertEqual(hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "tool_response": [1, 2.5]}), {})
+        self.assertEqual(hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "tool_response": None,
+                                          **CLAUDE}), {})
+        self.assertEqual(hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "tool_response": [1, 2.5],
+                                          **CLAUDE}), {})
 
 
 # ---------------------------------------------------------------- redaction --
@@ -370,11 +391,12 @@ class TranscriptScrubTests(unittest.TestCase):
         dbg.unlink(missing_ok=True)
         with mock.patch.dict(os.environ, {"MAISECRETS_DEBUG_LOG": str(dbg)}):
             real_popen = subprocess.Popen
-            argvs = []
+            argvs, children = [], []
 
             def spy(argv, **kw):
                 argvs.append(argv)
-                return real_popen(argv, **kw)
+                children.append(real_popen(argv, **kw))
+                return children[-1]
             with mock.patch.object(hooks.subprocess, "Popen", spy):
                 hooks._scrub_transcript_later(str(late), [PLAIN], ["⟦X⟧"], seconds=5.0)
             time.sleep(0.5)
@@ -388,6 +410,7 @@ class TranscriptScrubTests(unittest.TestCase):
             while time.time() < deadline and "scrub-later: done" not in (dbg.read_text() if dbg.exists() else ""):
                 time.sleep(0.1)
             self.assertIn("scrub-later: done", dbg.read_text())
+            self.assertEqual(children[0].wait(timeout=5), 0, "the child ends once the record is scrubbed")
             with mock.patch.object(hooks.subprocess, "Popen", side_effect=OSError("no fork")):
                 hooks._scrub_transcript_later(str(late), [PLAIN], ["⟦X⟧"])
             self.assertIn("scrub-later: could not start", dbg.read_text())
@@ -407,10 +430,10 @@ class MentionAndPendingTests(unittest.TestCase):
                 self.assertEqual(out["decision"], "block")
                 self.assertIn("would inline the file without scanning", out["reason"])
                 self.assertTrue(out["hookSpecificOutput"]["suppressOriginalPrompt"])
-        self.assertEqual(hooks.user_prompt({"prompt": "see @nothing-here.env", "cwd": str(self.dir)}), {})
-        self.assertEqual(hooks.user_prompt({"prompt": "mail me@example", "cwd": str(self.dir)}), {})
+        self.assertEqual(hooks.user_prompt({"prompt": "see @nothing-here.env", "cwd": str(self.dir), **CLAUDE}), {})
+        self.assertEqual(hooks.user_prompt({"prompt": "mail me@example", "cwd": str(self.dir), **CLAUDE}), {})
         _cfg({"block_at_mentions": False})
-        self.assertEqual(hooks.user_prompt({"prompt": "see @notes.env", "cwd": str(self.dir)}), {})
+        self.assertEqual(hooks.user_prompt({"prompt": "see @notes.env", "cwd": str(self.dir), **CLAUDE}), {})
 
     def test_a_pending_prompt_expires_after_15_minutes_and_two_sessions_are_not_mixed(self):
         hooks._save_pending("text of A ⟦SECRET_c1⟧", "A")
@@ -472,9 +495,7 @@ class FileToolTests(unittest.TestCase):
         self.work = tempfile.mkdtemp(prefix="maisecrets-work-", dir=str(Path(_TMP).parent))
 
     def _pre(self, tool: str, tool_input: dict, **extra) -> dict:
-        payload = {"tool_name": tool, "session_id": "S1", "tool_input": tool_input}
-        payload.update(extra)
-        return hooks.pre_tool(payload)
+        return hooks.pre_tool(_marked({"tool_name": tool, "session_id": "S1", "tool_input": tool_input}, extra))
 
     def test_multiedit_and_notebookedit_resolve_nested_and_codex_allows(self):
         out = _hso(self._pre("MultiEdit", {"file_path": "/w/a.env", "edits": [
@@ -518,9 +539,8 @@ class McpAskTests(unittest.TestCase):
         self.e = Vault().put(PLAIN, "SECRET", "manual", session="S1")
 
     def _pre(self, tool_input, **extra) -> dict:
-        payload = {"tool_name": "mcp__svc__act", "session_id": "S1", "tool_input": tool_input, "transcript_path": ""}
-        payload.update(extra)
-        return hooks.pre_tool(payload)
+        return hooks.pre_tool(_marked({"tool_name": "mcp__svc__act", "session_id": "S1", "tool_input": tool_input,
+                                       "transcript_path": ""}, extra))
 
     def test_the_ask_names_the_fields_the_tool_and_never_the_value(self):
         params = json.dumps({"body": "hi " + self.e.ref}, ensure_ascii=False)
@@ -555,7 +575,12 @@ class McpAskTests(unittest.TestCase):
 
 # --------------------------------------------------------------------- Bash --
 class BashPathTests(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls):  # noqa: N802 - unittest hook
+        _hygiene.assert_children_ended()
+
     def setUp(self):
+        _hygiene.watch_children(self)
         _reset()
         self.e = Vault().put(NASTY, "SECRET", "manual", session="S1")
         self.p = Vault().put(PLAIN, "SECRET", "manual", session="S1")
@@ -676,6 +701,31 @@ class RunDirTests(unittest.TestCase):
         for f in (fresh, other):
             os.unlink(f)
 
+    @unittest.skipIf(os.name == "nt", "POSIX FIFO path")
+    def test_a_value_taken_back_ends_its_serving_child_at_once(self):
+        """_unserve deletes the FIFO of a refused command; the child retried the open for its full
+        120 s with the value in memory (suite review, 2026-09-27). Now it ends at once, served or
+        taken back, and a served value arrives once."""
+        children = []
+        real = subprocess.Popen
+
+        def keep(*a, **kw):
+            children.append(real(*a, **kw))
+            return children[-1]
+        self.addCleanup(lambda: [(c.kill(), c.wait()) for c in children if c.poll() is None])
+        for take_back in (True, False):
+            with self.subTest(take_back=take_back):
+                fifo = hooks._fifo_path(hooks.key_nonce())
+                with mock.patch.object(hooks.subprocess, "Popen", keep):
+                    self.assertTrue(hooks._serve_value_later(fifo, PLAIN, seconds=30.0))
+                if take_back:
+                    hooks._unserve([fifo])
+                else:
+                    with open(fifo, encoding="utf-8") as f:
+                        self.assertEqual(f.read(), PLAIN)
+                self.assertEqual(children[-1].wait(timeout=2), 0)
+                self.assertFalse(os.path.exists(fifo))
+
 
 # ------------------------------------------------------ payload shape matrix --
 _FAKEBIN = tempfile.mkdtemp(prefix="fakebin-", dir=_TMP)
@@ -693,10 +743,13 @@ def _dispatch(event: str, stdin: str, home: str | None = None, **extra_env: str)
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("GIT_", "CODEX_")) and k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
                                                                   "XDG_RUNTIME_DIR", "MAISECRETS_DEBUG_LOG")}
-    env.update({"MAISECRETS_HOME": home, "TMPDIR": _TMP, "PATH": _FAKEBIN + os.pathsep + env.get("PATH", "")})
+    # the run dir of the child is the one of this process; its serving children inherit the cwd,
+    # which is how tearDownModule finds one that outlived its FIFO
+    env.update({"MAISECRETS_HOME": home, "TMPDIR": tempfile.gettempdir(),
+                "PATH": _FAKEBIN + os.pathsep + env.get("PATH", "")})
     env.update(extra_env)
     return subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), event], input=stdin,
-                          capture_output=True, text=True, env=env, timeout=60)
+                          capture_output=True, text=True, env=env, timeout=60, cwd=tempfile.gettempdir())
 
 
 class PayloadMatrixTests(unittest.TestCase):
@@ -705,7 +758,12 @@ class PayloadMatrixTests(unittest.TestCase):
     accepts (or, for a guard, exit 2 with nothing on stdout, which blocks), and no answer carries
     the stored value."""
 
+    @classmethod
+    def tearDownClass(cls):  # noqa: N802 - unittest hook
+        _hygiene.assert_children_ended()
+
     def setUp(self):
+        _hygiene.watch_children(self)
         _reset()
         self.e = Vault().put(PLAIN, "SECRET", "manual", session="SM")
         self.broken = tempfile.mkdtemp(prefix="broken-", dir=_TMP)

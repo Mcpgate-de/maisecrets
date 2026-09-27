@@ -40,20 +40,27 @@ sys.path.insert(0, str(ROOT))
 # the in-process tests import maisecrets; its home is fixed at the first import and must be a
 # temp dir with the plaintext test store, never the keychain (same set-up as test_gates.py)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+import _isolate  # noqa: E402  first: a temp vault home, never the real one
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
+import _hygiene  # noqa: E402
 VERSION = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
 
 # a policy file lives in /Library or /etc; the subprocess gets the path through this wrapper,
-# which patches POLICY_PATHS and then runs dispatch.py as __main__ (the code has no env override)
-_POLICY_WRAPPER = (
+# which patches POLICY_PATHS and then runs dispatch.py as __main__ (the code has no env override).
+# The same wrapper makes the store refuse every delete, as a locked keychain over SSH does.
+_WRAPPER = (
     "import platform, runpy, sys\n"
     "from pathlib import Path\n"
     "sys.path.insert(0, sys.argv[1])\n"
     "import maisecrets.vault as v\n"
-    "v.POLICY_PATHS[platform.system()] = Path(sys.argv[2])\n"
-    "sys.argv = [sys.argv[3]] + sys.argv[4:]\n"
+    "if sys.argv[2]:\n"
+    "    v.POLICY_PATHS[platform.system()] = Path(sys.argv[2])\n"
+    "if sys.argv[3] == '1':\n"
+    "    def _refuse(self, key):\n"
+    "        raise RuntimeError('the store refused the delete (test fault)')\n"
+    "    v.EncryptedFileBackend.delete = v.JsonFileBackend.delete = _refuse\n"
+    "sys.argv = [sys.argv[4]] + sys.argv[5:]\n"
     "runpy.run_path(sys.argv[0], run_name='__main__')\n"
 )
 
@@ -85,7 +92,7 @@ class Sandbox:
     """One temp world: vault home, user home, tmp, fake tools, optional policy file."""
 
     def __init__(self, config: dict | None = None, policy: object | None = None,
-                 backend: str = "encrypted-file") -> None:
+                 backend: str = "encrypted-file", refuse_delete: bool = False) -> None:
         self.root = Path(tempfile.mkdtemp(prefix="maisecrets-matrix-"))
         self.home = self.root / "ms"
         self.user_home = self.root / "home"
@@ -99,6 +106,7 @@ class Sandbox:
         self.clip = self.root / "clip"
         self.opened = self.root / "opened"
         self.policy: Path | None = None
+        self.refuse_delete = refuse_delete
         self.values: list[str] = []
         self.by_key: dict[str, str] = {}
         # the backend is forced through the environment as well: a config file with a wrong type
@@ -119,6 +127,7 @@ class Sandbox:
         new.home, new.user_home, new.bin = new.root / "ms", new.root / "home", new.root / "bin"
         new.clip, new.opened = new.root / "clip", new.root / "opened"
         new.policy = (new.root / "policy.json") if self.policy else None
+        new.refuse_delete = self.refuse_delete
         new.values = list(self.values)
         new.by_key = dict(self.by_key)
         new.backend = self.backend
@@ -141,12 +150,15 @@ class Sandbox:
 
     def run(self, *args: str, stdin: str = "", env: dict | None = None,
             script: Path = DISPATCH) -> subprocess.CompletedProcess:
-        if self.policy is not None and script == DISPATCH:
-            argv = [sys.executable, "-c", _POLICY_WRAPPER, str(ROOT), str(self.policy), str(script), *args]
+        if (self.policy is not None or self.refuse_delete) and script == DISPATCH:
+            argv = [sys.executable, "-c", _WRAPPER, str(ROOT), str(self.policy or ""),
+                    "1" if self.refuse_delete else "0", str(script), *args]
         else:
             argv = [sys.executable, str(script), *args]
+        # the cwd is the sandbox: a value-serving child a hook leaves behind inherits it, and
+        # tearDownModule finds it by it
         r = subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=60,
-                           env=env if env is not None else self.env())
+                           env=env if env is not None else self.env(), cwd=str(self.root))
         trip = self.root / "tripwire"
         if trip.exists():
             raise AssertionError(f"a sandbox process called the platform store: {trip.read_text()}")
@@ -190,11 +202,15 @@ class Sandbox:
         self.by_key[newest] = value
         return value
 
-    def expire_all(self) -> None:
+    def backdate(self) -> None:
+        """Every entry past its expiry, as the index says after the TTL; no sweep has run yet."""
         data = self.index()
         for meta in data["entries"].values():
             meta["expires"] = time.time() - 10
         self.write_index(data)
+
+    def expire_all(self) -> None:
+        self.backdate()
         r = self.run("expire")
         if r.returncode != 0:
             raise AssertionError(f"seed expire failed: {r.stdout} {r.stderr}")
@@ -229,6 +245,12 @@ def _seed_expired_unpurged(sb: Sandbox) -> None:
     sb.write_index(data)
 
 
+def _seed_expired_unswept(sb: Sandbox) -> None:
+    """Past its expiry, value still in the store: the state between the TTL and the next sweep."""
+    sb.put()
+    sb.backdate()
+
+
 def _seed_old_purged(sb: Sandbox) -> None:
     _seed_expired(sb)
     data = sb.index()
@@ -247,6 +269,9 @@ def _seed_damaged(sb: Sandbox) -> None:
 STATES = {
     "empty": (ENC, None, "encrypted-file", lambda sb: None, "ok"),
     "live": (ENC, None, "encrypted-file", _seed_live, "ok"),
+    "expired-unswept": (ENC, None, "encrypted-file", _seed_expired_unswept, "ok"),
+    # an expired entry whose delete the store refuses: it stays unpurged, the value stays stored
+    "store-refuses-delete": (ENC, None, "encrypted-file", _seed_expired_unswept, "ok"),
     "expired-purged": (ENC, None, "encrypted-file", _seed_expired, "ok"),
     "expired-not-yet-purged": (ENC, None, "encrypted-file", _seed_expired_unpurged, "ok"),
     "purged-past-retention": (ENC, None, "encrypted-file", _seed_old_purged, "ok"),
@@ -272,7 +297,7 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     "status": [([], "", _STORE)],
     "audit": [([], "", _ALL0), (["3"], "", _ALL0), (["x"], "", _ALL2)],
     "expire": [([], "", _STORE)],
-    "forget": [([_K], "", {"ok": {"empty": 1, "*": 0}, "index": 1, "config": 1}),
+    "forget": [([_K], "", {"ok": {"empty": 1, "store-refuses-delete": 1, "*": 0}, "index": 1, "config": 1}),
                (["NOPE_c9"], "", {"ok": 1, "index": 1, "config": 1}),
                ([], "", _ALL2)],
     "wipe": [([], "", _ALL2), (["--yes"], "", {"ok": 0, "index": 0, "config": 1})],
@@ -291,13 +316,14 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
 }
 
 _BASES: dict[str, Sandbox] = {}
+REFUSING = {"store-refuses-delete"}
 
 
 def base_state(name: str) -> Sandbox:
     """The seeded world of one state, built once; every run works on a copy."""
     if name not in _BASES:
         config, policy, backend, seed, _kind = STATES[name]
-        sb = Sandbox(config, policy, backend)
+        sb = Sandbox(config, policy, backend, refuse_delete=name in REFUSING)
         seed(sb)
         _BASES[name] = sb
     return _BASES[name]
@@ -306,6 +332,11 @@ def base_state(name: str) -> Sandbox:
 def tearDownModule() -> None:  # noqa: N802 - unittest hook
     for sb in _BASES.values():
         sb.remove()
+    _hygiene.assert_pristine()
+    # a child a hook subprocess left behind runs with the sandbox as its working directory
+    alive = _hygiene.wait_for_no_serving_child(cwd_root=_isolate.TMP)
+    if alive:
+        raise AssertionError(f"value-serving children still run after the module: {alive}")
 
 
 def seeded_key(sb: Sandbox) -> str:
@@ -402,6 +433,10 @@ def _retained(state: str, index: dict) -> dict:
 def transition_problems(state: str, command: str, args: list[str], r: subprocess.CompletedProcess,
                         before: SimpleNamespace, after: SimpleNamespace) -> list[str]:
     """What each state-changing command must print in this state, and what the home holds after."""
+    if state in REFUSING:
+        # a store that refuses every delete has its own answers (forget reports the refusal, the
+        # entry stays counted); RefusingStoreTests checks them, the generic transitions do not apply
+        return []
     if command not in _STATE_CHANGING:
         return []
     kind = STATES[state][4]
@@ -482,6 +517,11 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
     # list, status and expire sweep: an expired value leaves the store, old metadata goes
     expect(sorted(after_entries) == sorted(ret), f"after {command} the index holds {sorted(after_entries)}")
     for k in expired:
+        if state in REFUSING:
+            # the store refused the delete: the entry stays for the next sweep, and get refuses it
+            expect(not after_entries.get(k, {}).get("purged") and k in (after.store or []),
+                   f"{k} looks purged although the store refused the delete")
+            continue
         expect(after_entries.get(k, {}).get("purged") is True, f"{k} is not purged")
         expect(k not in (after.store or []), f"the expired {k} is still in the store")
     for k in live:
@@ -589,6 +629,12 @@ class StateMatrixTests(unittest.TestCase):
         self.assertTrue(exp["purged"] and exp["purged_at"])
         (due,) = base_state("expired-not-yet-purged").index()["entries"].values()
         self.assertTrue(due["expires"] < time.time() and not due.get("purged"))
+        for name in ("expired-unswept", "store-refuses-delete"):
+            (unswept,) = base_state(name).index()["entries"].values()
+            self.assertLess(unswept["expires"], time.time(), name)
+            self.assertFalse(unswept.get("purged"), name)
+            self.assertIn('"SECRET_c1"', (base_state(name).home / "vault.enc.json").read_text(), name)
+        self.assertTrue(base_state("store-refuses-delete").refuse_delete)
         (old,) = base_state("purged-past-retention").index()["entries"].values()
         self.assertGreater(time.time() - old["purged_at"], 30 * 86400)
         self.assertRaises(ValueError, base_state("damaged-index").index)
@@ -607,6 +653,30 @@ class StateMatrixTests(unittest.TestCase):
         self.assertRegex(r.stdout, r"SECRET_c1\s+SECRET\s+manual\s+\S+\s+0\s+expired")
         sb, r = self._run("expired-purged", "status")
         self.assertIn("entries: 0 live, 1 expired (metadata kept 30 days)", r.stdout)
+
+    def test_an_expired_entry_before_its_sweep_is_expired_to_every_command(self):
+        sb, r = self._run("expired-unswept", "list")
+        self.assertIn("0 value(s) stored, 1 expired", r.stdout)
+        self.assertNotIn('"SECRET_c1"', (sb.home / "vault.enc.json").read_text(), "the read swept the value")
+        sb, r = self._run("expired-unswept", "get", "SECRET_c1")
+        self.assertEqual((r.returncode, r.stdout), (1, ""))
+        self.assertIn("SECRET_c1: expired", r.stderr)
+
+    def test_a_store_that_refuses_the_delete_keeps_the_entry_and_never_hands_out_the_value(self):
+        """The sweep leaves an entry the store will not delete unpurged, and `get` skipped the
+        expiry on the human path: `maisecrets get` printed a value past its TTL (suite review,
+        2026-09-27)."""
+        sb, r = self._run("store-refuses-delete", "get", "SECRET_c1")
+        self.assertEqual((r.returncode, r.stdout), (1, ""), r.stderr)
+        self.assertIn("SECRET_c1: expired", r.stderr)
+        self.assertFalse(any(v in r.stdout + r.stderr for v in sb.values))
+        r = sb.run("forget", "SECRET_c1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("the store refused to delete it; nothing was changed", r.stdout)
+        self.assertIn("SECRET_c1", sb.index()["entries"], "nothing looks deleted that is not")
+        r = sb.run("expire")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(sb.index()["entries"]["SECRET_c1"].get("purged"), "a refused delete is no purge")
 
     def test_metadata_past_keep_purged_days_is_deleted_by_the_next_read(self):
         sb, r = self._run("purged-past-retention", "list")
@@ -894,6 +964,134 @@ class HookEventTests(unittest.TestCase):
         self.assertIn("its output is withheld", json.loads(r.stdout)["hookSpecificOutput"]["updatedToolOutput"])
 
 
+# ----------------------------------------------------- client x state x event --
+PAIR_STATES = ("empty", "live", "expired-unswept", "expired-purged", "damaged-index", "policy")
+PAIR_EVENTS = ("session-start", "user-prompt", "pre-tool", "post-tool")
+# what a Bash reference to the newest key of each state gets: the value, or a deny that names why
+PAIR_PRE = {"empty": "(unknown)", "live": None, "expired-unswept": "(expired)", "expired-purged": "(expired)",
+            "damaged-index": "did NOT run", "policy": "(foreign-session)"}
+
+
+def pair_cells() -> list[tuple[str, str, str]]:
+    """Every state with every event, the client alternating: each pair of the three factors
+    (client-state, client-event, state-event) occurs in 24 runs instead of 48."""
+    return [(state, event, ("claude", "codex")[(i + j) % 2])
+            for i, state in enumerate(PAIR_STATES) for j, event in enumerate(PAIR_EVENTS)]
+
+
+def newest_key(sb: Sandbox) -> str:
+    try:
+        entries = sb.index()["entries"]
+    except (OSError, ValueError):
+        return "SECRET_c1"
+    return max(entries, key=lambda k: entries[k]["created"]) if entries else "SECRET_c1"
+
+
+def run_pair(state: str, event: str, client: str) -> list[str]:
+    """One hook event from one client in one store state, through hooks/dispatch.py."""
+    sb = base_state(state).copy()
+    try:
+        cell = f"{state} / {event} / {client}"
+        marker = {"prompt_id": "p"} if client == "claude" else {"turn_id": "t", "model": "m"}
+        env = sb.env()
+        key = newest_key(sb)
+        fresh = fake_value("Pr")
+        if event == "session-start":
+            if client == "codex":
+                env["CODEX_HOME"] = str(sb.user_home / ".codex")
+                path = sb.user_home / ".codex" / "sessions" / "r.jsonl"
+            else:
+                env["CLAUDECODE"] = "1"
+                path = sb.user_home / ".claude" / "projects" / "p" / "t.jsonl"
+            payload = {"session_id": "S1", "transcript_path": str(path), "source": "startup"}
+            if client == "codex":
+                payload["model"] = "m"
+        elif event == "user-prompt":
+            payload = dict(marker, prompt=f"password: {fresh}", session_id="S1", transcript_path="")
+        elif event == "pre-tool":
+            payload = dict(marker, tool_name="Bash", tool_input={"command": f"printf '%s' ⟦{key}⟧"}, session_id="S1")
+        else:
+            # a value past its TTL is no longer one the store protects: the put of the fresh value
+            # sweeps it first, so only a live stored value is expected back as a placeholder
+            stored = "" if state.startswith("expired") else sb.by_key.get(key, "")
+            payload = dict(marker, tool_name="Bash", session_id="S1", transcript_path="",
+                           tool_response={"stdout": f"password: {fresh} and {stored}\n", "stderr": ""})
+        r = sb.run(event, stdin=json.dumps(payload), env=env)
+        problems = []
+        if r.returncode != 0 or "Traceback" in r.stdout + r.stderr:
+            return [f"{cell}: exit {r.returncode}: {(r.stdout + r.stderr)[-300:]!r}"]
+        if any(v in r.stdout + r.stderr for v in sb.values + [fresh]):
+            problems.append(f"{cell}: a value is in the answer")
+        try:
+            out = json.loads(r.stdout)
+        except ValueError:
+            return problems + [f"{cell}: not one JSON object: {r.stdout[:200]!r}"]
+        hso = out.get("hookSpecificOutput") or {}
+        damaged = state == "damaged-index"
+        if event == "session-start":
+            msg = out.get("systemMessage", "")
+            if damaged:
+                if "maisecrets repair" not in msg:
+                    problems.append(f"{cell}: the message does not name repair: {msg!r}")
+            elif hso != {"hookEventName": "SessionStart", "additionalContext": hooks_primer()}:
+                problems.append(f"{cell}: no primer: {hso!r}")
+            elif (client == "codex") == ("/maisecrets:" in msg):
+                problems.append(f"{cell}: a slash command is {'named to Codex' if client == 'codex' else 'missing'}")
+        elif event == "user-prompt":
+            if out.get("decision") != "block":
+                problems.append(f"{cell}: not blocked: {out!r}")
+            if client == "codex" and set(out) != {"decision", "reason"}:
+                problems.append(f"{cell}: Codex got fields it rejects: {sorted(out)}")
+            if client == "claude" and hso.get("suppressOriginalPrompt") is not True:
+                problems.append(f"{cell}: Claude Code would still send the prompt")
+        elif event == "pre-tool":
+            want = PAIR_PRE[state]
+            if want is None:
+                decision = hso.get("permissionDecision")
+                if decision != ("allow" if client == "codex" else None):
+                    problems.append(f"{cell}: permissionDecision {decision!r}")
+                got = subprocess.run(["bash", "-c", hso.get("updatedInput", {}).get("command", "exit 9")],
+                                     capture_output=True, text=True, env=env, timeout=30)
+                if got.stdout != sb.by_key.get(key):
+                    problems.append(f"{cell}: the value did not arrive: {got.returncode} {got.stderr[-200:]!r}")
+            elif hso.get("permissionDecision") != "deny" or want not in hso.get("permissionDecisionReason", ""):
+                problems.append(f"{cell}: expected a deny naming {want!r}: {hso!r}")
+        else:
+            text = json.dumps(out, ensure_ascii=False)
+            if damaged:
+                if "withheld" not in text:
+                    problems.append(f"{cell}: the output was not withheld: {text[:200]!r}")
+            elif client == "codex" and (out.get("decision") != "block" or "⟦" not in out.get("reason", "")):
+                problems.append(f"{cell}: Codex did not get the redacted text as the block reason")
+            elif client == "claude" and "⟦" not in json.dumps(hso.get("updatedToolOutput"), ensure_ascii=False):
+                problems.append(f"{cell}: Claude Code did not get updatedToolOutput")
+        return problems
+    finally:
+        sb.remove()
+
+
+def hooks_primer() -> str:
+    from maisecrets import hooks
+    return hooks.PRIMER
+
+
+class ClientStateEventTests(unittest.TestCase):
+    """The client (Claude Code or Codex payload) crossed with the store states for the four hook
+    events, pairwise: the payload decides the answer shape, the state decides the outcome, and no
+    run prints a value or leaves a value-serving child behind (suite review, 2026-09-27)."""
+    RUNS = {"session-start", "user-prompt", "pre-tool", "post-tool"}
+
+    def test_every_pair_of_client_state_and_event(self):
+        from concurrent.futures import ThreadPoolExecutor
+        cells = pair_cells()
+        self.assertEqual(len({(s, c) for s, _e, c in cells}), 12)
+        self.assertEqual(len({(e, c) for _s, e, c in cells}), 8)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            problems = [p for ps in pool.map(lambda c: run_pair(*c), cells) for p in ps]
+        self.assertEqual(problems, [], f"{len(problems)} of {len(cells)} cells wrong:\n" + "\n".join(problems[:12]))
+        self.assertEqual(_hygiene.wait_for_no_serving_child(cwd_root=_isolate.TMP), [])
+
+
 # ------------------------------------------------------------------ resolve --
 _GRANT = ("import sys; sys.path.insert(0, sys.argv[1]); from maisecrets.vault import Vault; v = Vault(); "
           "e = v.put(sys.stdin.read(), 'SECRET', 'manual', session='S1'); "
@@ -1162,3 +1360,24 @@ class ZzDispatchCoverageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefusingStoreTests(unittest.TestCase):
+    """A store that refuses every delete: nothing may look deleted that is not, and an expired
+    value must not come back."""
+
+    def test_forget_reports_the_refusal_and_keeps_the_entry(self):
+        sb = base_state("store-refuses-delete")
+        r = sb.run("forget", "SECRET_c1")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("refused", r.stdout)
+        self.assertIn("SECRET_c1", sb.index()["entries"])
+
+    def test_an_expired_value_that_could_not_be_deleted_is_not_handed_out(self):
+        sb = base_state("store-refuses-delete")
+        r = sb.run("get", "SECRET_c1")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("expired", r.stdout + r.stderr)
+        for v in sb.values:
+            self.assertNotIn(v, r.stdout + r.stderr)
+

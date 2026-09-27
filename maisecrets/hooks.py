@@ -757,7 +757,9 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0) -> bool:
     on Codex inside a sandbox that may neither write the vault nor read the keychain (measured:
     resolve.py failed there and the command died); a FIFO in TMPDIR is readable from inside.
     The value lives in the child's memory, never on disk, and is gone after one read or after
-    ``seconds``. The value reaches the child on stdin, never as an argument."""
+    ``seconds``. The value reaches the child on stdin, never as an argument. A FIFO that is gone
+    (`_unserve`, `wipe`) ends the child at once: it retried the open for the full ``seconds``
+    with the value in its memory (suite review, 2026-09-27)."""
     code = (
         "import json,os,sys,time\n"
         "spec = json.load(sys.stdin)\n"
@@ -770,6 +772,8 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0) -> bool:
         "while time.time() < deadline and fd is None:\n"
         "    try:\n"
         "        fd = os.open(spec['fifo'], os.O_WRONLY | os.O_NONBLOCK)\n"
+        "    except FileNotFoundError:\n"
+        "        break\n"
         "    except OSError:\n"
         "        time.sleep(0.05)\n"
         "if fd is not None:\n"

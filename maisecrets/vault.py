@@ -909,7 +909,10 @@ class Vault:
         meta = self._index["entries"].get(key)
         if meta is None:
             return None, "unknown"
-        if meta.get("purged"):
+        # past its expiry but not purged: the store refused the delete, or the sweep cap left it
+        # for the next call; the human path skips `status`, so it printed the value (suite
+        # review, 2026-09-27)
+        if meta.get("purged") or meta["expires"] < time.time():
             return None, "expired"
         if not human:
             st = self.status(key, session)

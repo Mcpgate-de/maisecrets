@@ -13,7 +13,6 @@ import os
 import random
 import string
 import sys
-import tempfile
 import unittest
 import uuid
 from pathlib import Path
@@ -22,11 +21,11 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-if "maisecrets.vault" not in sys.modules:
-    # never the real store and never the keychain: the jsonfile backend in a temp home
-    _TMP = tempfile.mkdtemp(prefix="maisecrets-test-")
-    os.environ["MAISECRETS_HOME"] = _TMP
-    Path(_TMP, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _isolate  # noqa: E402  first: a temp vault home, never the real one
+# never the real store and never the keychain: the jsonfile backend in the temp home
+Path(_isolate.HOME).mkdir(parents=True, exist_ok=True)
+Path(_isolate.HOME, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
 from maisecrets import detect, hooks  # noqa: E402
 
