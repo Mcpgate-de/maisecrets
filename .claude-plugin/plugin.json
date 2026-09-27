@@ -17,5 +17,9 @@
     "redaction",
     "vault"
   ],
-  "homepage": "https://maisecrets.dev"
+  "homepage": "https://maisecrets.dev",
+  "privacyPolicyUrl": "https://github.com/Mcpgate-de/maisecrets/blob/main/PRIVACY.md",
+  "documentationUrl": "https://github.com/Mcpgate-de/maisecrets#readme",
+  "termsOfServiceUrl": "https://github.com/Mcpgate-de/maisecrets/blob/main/LICENSE",
+  "supportUrl": "https://github.com/Mcpgate-de/maisecrets/issues"
 }
