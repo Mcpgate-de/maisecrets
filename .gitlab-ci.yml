@@ -218,7 +218,7 @@ verify_release:
     - |
       changed=$(git diff --name-only HEAD^ HEAD | sort | tr '\n' ' ')
       case "$changed" in
-        ".claude-plugin/marketplace.json .claude-plugin/plugin.json CHANGELOG.md ") echo "release commit changes only the release files" ;;
+        ".claude-plugin/marketplace.json .claude-plugin/plugin.json .codex-plugin/plugin.json CHANGELOG.md ") echo "release commit changes only the release files" ;;
         *) echo "release commit changes more than the release files: $changed"; exit 1 ;;
       esac
     - 'git log -1 --format=%s HEAD | grep -q "^chore(release): v" || { echo "tag is not on a release commit"; exit 1; }'

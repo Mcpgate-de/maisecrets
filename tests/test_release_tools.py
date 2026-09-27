@@ -135,6 +135,10 @@ class ListingManifestTests(unittest.TestCase):
         self.assertEqual(1, len(adds), adds)
         for rel in self.r.MANIFESTS:
             self.assertIn(f" {rel} ", adds[0] + " ", rel)
+        # verify_release compares the release commit's sorted file list with a fixed string;
+        # v0.3.30 failed there after the Codex manifest joined (2026-09-27)
+        expected = " ".join(sorted(list(self.r.MANIFESTS) + ["CHANGELOG.md"])) + " "
+        self.assertIn(f'"{expected}")', ci, "verify_release must list exactly the files the release commits")
 
     def test_the_codex_manifest_mirrors_the_claude_one(self):
         for key in ("name", "version", "description", "author", "homepage", "repository", "license", "keywords"):
