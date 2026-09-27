@@ -390,7 +390,10 @@ def _load_detect_secrets() -> list[Rule]:
     out: list[Rule] = []
     for r in data["rules"]:
         flags = re.IGNORECASE if r.get("ignorecase") else 0
-        regex = r["regex"].replace("(" + denylist + ")", "(" + denylist + "|" + "|".join(GERMAN_KEYWORDS) + ")", 1)
+        # the product's own name carries "secret": `/maisecrets:shortcut` was stored as a secret
+        # named "shortcut" (field report, 2026-09-27); "mai" + keyword is never a label
+        keywords = "(?<!mai)(" + denylist + "|" + "|".join(GERMAN_KEYWORDS) + ")"
+        regex = r["regex"].replace("(" + denylist + ")", keywords, 1)
         out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(regex, flags),
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
                         secret_group=int(r["group"]), validator="ds_value"))

@@ -104,6 +104,17 @@ class DetectTests(unittest.TestCase):
         # the 40-character shape alone is a git SHA or a hash, never a secret
         self.assertEqual([m.value for m in detect.scan("blob " + sk)], [])
 
+    def test_the_plugins_own_command_names_are_never_a_secret(self):
+        # "maisecrets" carries the keyword; a command name of 8+ characters after the colon looked
+        # like a labelled value (field report, 2026-09-27)
+        for text in ("/maisecrets:shortcut", "/maisecrets:shortcut ms", "run /maisecrets:configure now",
+                     "maisecrets: 1 SECRET detected and stored as SECRET_c19. The prompt did not reach the model."):
+            with self.subTest(text[:24]):
+                self.assertEqual(detect.scan(text), [])
+        # a real label keeps working, also with a prefix before the keyword
+        value = "Tr0ub4dor" + "&3xyz"   # assembled at run time so the repo scan never sees the shape
+        self.assertEqual([m.value for m in detect.scan("my_secret: " + value)], [value])
+
     def test_named_credential_keeps_the_name_and_takes_the_value(self):
         ms = detect.scan("DB_PASSWORD=" + "Sup3rSecret" + "Value1234")
         self.assertEqual(len(ms), 1)
