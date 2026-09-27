@@ -131,10 +131,12 @@ class RuleLoaderTests(unittest.TestCase):
         self.assertTrue(all(r.validator == "ds_value" and r.type == "SECRET" for r in rules))
         basic = [r for r in rules if r.id == "ds-basic-auth"][0]
         self.assertEqual(basic.keywords, ())
-        colon = [r for r in rules if r.id == "ds-keyword-colon"][0]
+        self.assertNotIn("kennw", detect._load_detect_secrets(("en",))[0].keywords)
+        colon = [r for r in detect._load_detect_secrets(("en", "de")) if r.id == "ds-keyword-colon"][0]
         self.assertIn("kennw", colon.keywords)
-        for kw in detect.GERMAN_KEYWORDS:
-            self.assertIn(kw, colon.regex.pattern)
+        from maisecrets.regions import load_labels
+        for lab in load_labels("de"):
+            self.assertIn(lab.regex, colon.regex.pattern)
 
     def test_prefix_rules_skip_comments_and_blank_lines(self):
         rules = detect._load_prefixes()
@@ -156,12 +158,13 @@ class RuleLoaderTests(unittest.TestCase):
         self.assertIs(detect.rules(), detect.rules())
 
     def test_a_broken_config_falls_back_to_the_default_regions(self):
+        # the tests pin MAISECRETS_LOCALE=de_DE (tests/_isolate.py), so "auto" is de
         with mock.patch("maisecrets.vault.load_config", side_effect=RuntimeError("broken")):
-            self.assertEqual(detect._pii_regions(), detect.DEFAULT_PII_REGIONS)
-        with mock.patch("maisecrets.vault.load_config", return_value={"pii_regions": ["generic", "us"]}):
+            self.assertEqual(detect._pii_regions(), ("generic", "de"))
+        with mock.patch("maisecrets.vault.load_config", return_value={"regions": ["us"]}):
             self.assertEqual(detect._pii_regions(), ("generic", "us"))
-        with mock.patch("maisecrets.vault.load_config", return_value={"pii_regions": []}):
-            self.assertEqual(detect._pii_regions(), detect.DEFAULT_PII_REGIONS)
+        with mock.patch("maisecrets.vault.load_config", return_value={"regions": []}):
+            self.assertEqual(detect._pii_regions(), ("generic",))
 
     def test_shannon_entropy(self):
         self.assertEqual(detect.shannon_entropy(""), 0.0)

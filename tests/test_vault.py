@@ -197,7 +197,7 @@ class ConfigTests(unittest.TestCase):
                                           "CLAUDE_PLUGIN_OPTION_REPORT_URL": " https://example.invalid/r "}):
             cfg = vault.load_config()
         self.assertEqual(cfg["backend"], "encrypted-file", "auto keeps the file's choice")
-        self.assertEqual(cfg["pii_regions"], ["generic", "de", "at"])
+        self.assertEqual((cfg["regions"], cfg["regions_from"]), (["de", "at"], "plugin option"))
         self.assertEqual(cfg["ttl_seconds"]["default"], 5400)
         self.assertEqual(cfg["report_url"], "https://example.invalid/r")
         with mock.patch.dict(os.environ, {"CLAUDE_PLUGIN_OPTION_TTL_HOURS": "soon",

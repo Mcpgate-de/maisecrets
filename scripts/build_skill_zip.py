@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILL = ROOT / "skills" / "secret-hygiene"
-DETECTOR = ("maisecrets/__init__.py", "maisecrets/detect.py")
+DETECTOR = ("maisecrets/__init__.py", "maisecrets/detect.py", "maisecrets/regions.py")
 OPENAI_NAME = "maisecrets-secret-hygiene"
 
 
@@ -28,9 +28,10 @@ def members() -> list[tuple[Path, str]]:
             out.append((path, f"secret-hygiene/{path.relative_to(SKILL).as_posix()}"))
     for rel in DETECTOR:
         out.append((ROOT / rel, f"secret-hygiene/scripts/{rel}"))
-    for path in sorted((ROOT / "maisecrets" / "rules").iterdir()):
+    rules = ROOT / "maisecrets" / "rules"
+    for path in sorted(rules.rglob("*")):
         if path.is_file():
-            out.append((path, f"secret-hygiene/scripts/maisecrets/rules/{path.name}"))
+            out.append((path, f"secret-hygiene/scripts/maisecrets/rules/{path.relative_to(rules).as_posix()}"))
     out.append((ROOT / "LICENSE", "secret-hygiene/LICENSE"))
     out.append((ROOT / "NOTICE", "secret-hygiene/NOTICE"))
     return out

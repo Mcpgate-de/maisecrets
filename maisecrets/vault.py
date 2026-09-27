@@ -44,7 +44,9 @@ DEFAULT_CONFIG = {
     "scrub_transcript": True,
     "block_at_mentions": True,
     "gateway_servers": [],           # MCP servers that resolve placeholders themselves (PROTOCOL §4); none by default
-    "pii_regions": ["generic", "de"],
+    # country codes for the PII rules and the label languages; "auto" is the country of the system
+    # setting (maisecrets/regions.py). pii_regions is the old name and still read.
+    "regions": ["auto"],
     "max_new_entries_per_result": 100,   # above this, a tool result is masked without storing more values
     "resolve_in_files": True,        # Write/Edit content resolves a placeholder like an MCP argument
     "shortcut": True,                # the first SessionStart names /maisecrets:shortcut once; it installs nothing
@@ -62,7 +64,7 @@ POLICY_PATHS = {
 _CONFIG_TYPES = {
     "backend": str, "report_url": (str, type(None)), "ttl_seconds": dict, "max_ttl_seconds": int,
     "renew_on_use": bool, "scrub_transcript": bool, "block_at_mentions": bool, "gateway_servers": list,
-    "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
+    "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool,
 }
@@ -203,6 +205,16 @@ def _check_types(cfg: dict, source: str) -> None:
         raise ConfigError(f"{source}: ttl_seconds values must be integers")
 
 
+def _old_region_key(layer: dict) -> dict:
+    """pii_regions (up to 0.4) named the Presidio regions with "generic" in the list. A layer that
+    sets it and not `regions` sets `regions` to the same countries."""
+    if "pii_regions" in layer and "regions" not in layer:
+        layer = dict(layer)
+        layer["regions"] = [r for r in layer["pii_regions"] if str(r).lower() != "generic"]
+    layer = {k: v for k, v in layer.items() if k != "pii_regions"}
+    return layer
+
+
 def load_config() -> dict:
     """Defaults, then ~/.maisecrets/config.json, then CLAUDE_PLUGIN_OPTION_<KEY> if a client passes
     plugin options that way, then the machine policy file, whose keys win. The manifest declares
@@ -236,14 +248,17 @@ def load_config() -> dict:
         cfg["config_warning"] = (cfg["config_warning"] + "; " if cfg["config_warning"] else "") + \
             f"{CONFIG.name}: unknown key(s) {', '.join(unknown)} ignored"
         user = {k: v for k, v in user.items() if k in _CONFIG_TYPES}
+    user = _old_region_key(user)
     cfg.update(user)
+    cfg["regions_from"] = "config.json" if "regions" in user else "default"
     env = os.environ
     backend = env.get("CLAUDE_PLUGIN_OPTION_BACKEND", "").strip()
     if backend and backend != "auto":
         cfg["backend"] = backend
     regions = env.get("CLAUDE_PLUGIN_OPTION_PII_REGIONS", "").strip()
     if regions:
-        cfg["pii_regions"] = ["generic"] + [r.strip().lower() for r in regions.split(",") if r.strip()]
+        cfg["regions"] = [r.strip().lower() for r in regions.split(",") if r.strip() and r.strip().lower() != "generic"]
+        cfg["regions_from"] = "plugin option"
     ttl = env.get("CLAUDE_PLUGIN_OPTION_TTL_HOURS", "").strip()
     if ttl:
         try:
@@ -265,8 +280,12 @@ def load_config() -> dict:
             # valid JSON of another shape was skipped silently: no policy applied at all
             raise ConfigError(f"{policy_path} must hold one JSON object")
         _check_types(policy, policy_path.name)
+        policy_keys = sorted(policy)
+        policy = _old_region_key(policy)
         cfg.update(policy)
-        cfg["policy_keys"] = sorted(policy)
+        cfg["policy_keys"] = policy_keys
+        if "regions" in policy:
+            cfg["regions_from"] = "machine policy"
     cfg["max_ttl_seconds"] = min(int(cfg.get("max_ttl_seconds", 30 * 86400)), 30 * 86400)
     if cfg.get("backend") == "jsonfile" and not cfg.get("allow_plaintext_store", False):
         # the plaintext store is for tests and the harness, which say so in their own config

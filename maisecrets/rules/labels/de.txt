@@ -1,0 +1,7 @@
+# German credential labels (measured 2026-09-26: password: was found, passwort: was not).
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+pass	passwort	passwort, Passwort, db_passwort
+kennw	kennwort	kennwort, Kennwort
+geheim	geheimnis	geheimnis, Geheimnis
+schl	schl(?:ü|ue)ssel	schlüssel, Schluessel, api_schlüssel
+zugang	zugangsdaten	zugangsdaten, Zugangsdaten

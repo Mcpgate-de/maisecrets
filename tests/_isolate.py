@@ -38,6 +38,11 @@ REMOVED = client_variables()
 for _name in REMOVED:
     del os.environ[_name]
 
+# the system setting decides the label languages and the "auto" region; the tests pin it, so a run
+# on a German Mac and one in a C-locale container expect the same rules. A test of the lookup
+# itself sets or removes MAISECRETS_LOCALE with mock.patch.dict.
+os.environ["MAISECRETS_LOCALE"] = "de_DE"
+
 if not os.environ.get(_MINE) or os.environ.get(_MINE) != os.environ.get("MAISECRETS_HOME"):
     home = tempfile.mkdtemp(prefix="maisecrets-test-home-")
     os.environ["MAISECRETS_HOME"] = home

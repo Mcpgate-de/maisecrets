@@ -219,7 +219,10 @@ def cmd_status(_: list[str]) -> int:
     def version(name: str) -> str:
         return (detect.RULES_DIR / f"{name}_VERSION").read_text(encoding="utf-8").strip()
     print(f"rules: {len(detect.rules())} (gitleaks {version('GITLEAKS')}, presidio {version('PRESIDIO')}, "
-          f"detect-secrets {version('DETECT_SECRETS')}); regions {v.cfg.get('pii_regions')}")
+          f"detect-secrets {version('DETECT_SECRETS')})")
+    active = detect.active_regions()
+    print(f"regions: {', '.join(active.regions)} ({active.source}); "
+          f"label languages: {', '.join(active.languages)}")
     for name in ("events.log", "audit.log", "hooks.log"):
         p = HOME / name
         try:
