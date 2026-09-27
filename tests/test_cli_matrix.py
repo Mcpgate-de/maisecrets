@@ -482,14 +482,21 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
         expect(set(after.files) <= {".lock", "config.json", "pending", "vault.json"}, f"wipe left {after.files}")
         return p
     if command == "repair":
-        m = re.fullmatch(r"repaired: (\d+) stored key\(s\) deleted, counters (\{.*\})\n", r.stdout)
+        m = re.fullmatch(r"repaired: (\d+) stored value\(s\) deleted, counters (\{.*\})\n", r.stdout)
         expect(m is not None, "repair output")
         want: dict = {}
-        for k in before.store or []:
+        # a key an old placeholder still names is never handed out again: the store, every key the
+        # old index names (a purged one too) and the old counters all count
+        old_index = before.index if isinstance(before.index, dict) else {}
+        for k in list(before.store or []) + list(old_index.get("entries", {})):
             type_, _c, num = k.rpartition("_c")
-            if num.isdigit():
+            if _c and num.isdigit():
                 want[type_] = max(want.get(type_, 0), int(num))
+        for type_, num in old_index.get("counters", {}).items():
+            want[type_] = max(want.get(type_, 0), num)
+        values = [k for k in before.store or [] if k != "_maisecrets_fpkey"]
         if m:
+            expect(int(m.group(1)) == len(values), f"repair count, expected {len(values)}")
             expect(ast.literal_eval(m.group(2)) == want, f"repair counters, expected {want}")
         expect(after.index == {"entries": {}, "counters": want, "by_fingerprint": {}}, "repair index")
         want_store = ["_maisecrets_fpkey"] if before.store is not None else None   # the fingerprint key stays

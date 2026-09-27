@@ -332,7 +332,7 @@ def cmd_repair(_: list[str]) -> int:
     except RuntimeError as exc:
         print(f"repair refused: {exc}", file=sys.stderr)
         return 1
-    print(f"repaired: {info['keys_seen']} stored key(s) deleted, counters {info['counters']}")
+    print(f"repaired: {info['deleted']} stored value(s) deleted, counters {info['counters']}")
     return 0
 
 

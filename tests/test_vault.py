@@ -847,6 +847,29 @@ class LifeCycleTests(unittest.TestCase):
         self.assertEqual(self.v().forget(third.key), "ok")
         self.assertEqual(self.v().put(value, "SECRET", "manual", session="C").key, "SECRET_c4")
 
+    def test_repair_never_hands_out_a_key_an_old_placeholder_still_names(self):
+        # the store keeps only live values; after a purge the key lives on in the index and in old
+        # transcripts. A repair that counted the store alone went back to 0 and gave the old key
+        # to the next value, so an old placeholder resolved to it.
+        for gone in ("purged", "forgotten from the index"):
+            with self.subTest(gone):
+                for p in list(vault.INDEX.parent.iterdir()) if vault.INDEX.parent.exists() else []:
+                    if p.is_file():
+                        p.unlink()
+                old = [self.v().put(f"repair-old-fake-value-{i}", "SECRET", "manual", session="A") for i in range(3)]
+                self.clock.advance(3601)
+                self.v().expire(limit=None)
+                if gone != "purged":
+                    self.clock.advance(86400 + 1)
+                    self.v().expire(limit=None)
+                    self.assertNotIn(old[0].key, self.v()._index["entries"], "only the counters name it now")
+                self.assertNotIn(old[0].key, self.v().backend.keys(), "the store no longer names it")
+                self.v().repair()
+                fresh = self.v().put("repair-new-fake-value", "SECRET", "manual", session="B")
+                self.assertNotIn(fresh.key, [e.key for e in old])
+                self.assertEqual(fresh.key, "SECRET_c4")
+                self.assertNotEqual(self.v().get(old[0].key, "B")[0], "repair-new-fake-value")
+
     def test_a_purge_that_waited_on_a_locked_store_counts_its_retention_from_the_purge(self):
         v = self.v()
         e = v.put("locked-store-fake-value", "SECRET", "manual", session="A")

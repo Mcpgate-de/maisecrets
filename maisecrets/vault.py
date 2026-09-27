@@ -1110,21 +1110,41 @@ class Vault:
             raise RuntimeError("this store cannot be enumerated; repair is not possible here")
         keys = self.backend.keys()
         counters: dict[str, int] = {}
+
+        def seen(type_: str, num: int) -> None:
+            counters[type_] = max(counters.get(type_, 0), num)
         for key in keys:
-            if "_c" not in key:
-                continue
-            type_, _c, num = key.rpartition("_c")
-            if num.isdigit():
-                counters[type_] = max(counters.get(type_, 0), int(num))
+            type_, sep, num = key.rpartition("_c")
+            if sep and num.isdigit():
+                seen(type_, int(num))
+        # the store holds only live values: a key whose value expired lives on in the index and in
+        # old transcripts. Counters from the store alone went back below it, and the next value got
+        # the old key, so an old placeholder resolved to the new value (review, 2026-09-27). Every
+        # key the index names, readable or not, and its own counters count too.
+        try:
+            raw = INDEX.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            raw = ""
+        for type_, num in re.findall(r"\b([A-Z][A-Z0-9_]*)_c(\d+)\b", raw):
+            seen(type_, int(num))
+        try:
+            old = json.loads(raw).get("counters", {})
+            for type_, num in (old.items() if isinstance(old, dict) else []):
+                if isinstance(type_, str) and isinstance(num, int):
+                    seen(type_, num)
+        except (ValueError, AttributeError):
+            pass
+        deleted = 0
         for key in keys:
             if key != FP_KEY_ENTRY:
                 try:
                     self.backend.delete(key)
+                    deleted += 1
                 except RuntimeError:
                     pass
         idx = {"entries": {}, "counters": counters, "by_fingerprint": {}}
         atomic_write(INDEX, json.dumps(idx, indent=1))
-        return {"keys_seen": len(keys), "counters": counters}
+        return {"keys_seen": len(keys), "deleted": deleted, "counters": counters}
 
 
 def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[str]]:
