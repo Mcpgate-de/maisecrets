@@ -1,0 +1,22 @@
+maisecrets
+Copyright 2026 Andreas Kruse (Sprinterli)
+
+This product includes the gitleaks ruleset (maisecrets/rules/gitleaks.toml),
+Copyright (c) 2019 Zachary Rice, MIT License (see maisecrets/rules/LICENSE-gitleaks),
+consumed as data. The vendored version is recorded in maisecrets/rules/GITLEAKS_VERSION.
+
+This product includes PII detection patterns derived from Microsoft Presidio
+(maisecrets/rules/presidio.json: regexes, scores and context words of its
+pattern recognizers), Copyright (c) Microsoft Corporation, MIT License (see
+maisecrets/rules/LICENSE-presidio). The checksum validators for the generic
+and German entities in maisecrets/detect.py are ports of Presidio's, verified
+by scripts/check_validators_against_presidio.py.
+
+This product includes regular expressions derived from Yelp detect-secrets
+(maisecrets/rules/detect_secrets.json: the KeywordDetector and
+BasicAuthDetector patterns), Copyright Yelp, Inc., Apache License 2.0 (see
+maisecrets/rules/LICENSE-detect-secrets). Its heuristic filters for keyword
+hits are ported in maisecrets/detect.py.
+
+The remaining rules in maisecrets/detect.py (OWN_RULES) and the display rules
+in maisecrets/pii_display.py are written for this project.

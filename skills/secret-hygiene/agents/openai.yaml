@@ -1,0 +1,9 @@
+interface:
+  display_name: "maisecrets Secret Hygiene"
+  short_description: "Keep secrets from the AI, find and contain leaked ones"
+  icon_small: "./assets/icon-small.svg"
+  icon_large: "./assets/icon-large.png"
+  brand_color: "#E8913A"
+  default_prompt: "Check whether maisecrets protects this computer, and ask me before you install anything. Then check this repository and my past agent sessions for leaked secrets."
+policy:
+  allow_implicit_invocation: true

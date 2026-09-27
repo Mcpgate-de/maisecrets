@@ -1,0 +1,8 @@
+# Bare token prefixes that the vendored rulesets (gitleaks, detect-secrets) do not know yet.
+# One rule per line:  <id>  <regex>   - the whole match is the secret; anchor on the prefix.
+# Add a line by pull request when a real token of a service went through undetected. Keep the
+# tail length at the service's minimum so a short look-alike is not a hit. No test values here.
+gitlab-runner-token          glrt-[0-9A-Za-z_.-]{20,}
+gitlab-deploy-token-any      gldt-[0-9A-Za-z_-]{20,}
+webhook-signing-secret       whsec_[A-Za-z0-9+/=_-]{24,}
+cloudflare-user-api-token    cfut_[A-Za-z0-9_-]{30,}
