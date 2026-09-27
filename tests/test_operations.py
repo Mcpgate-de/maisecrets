@@ -212,6 +212,37 @@ class VaultLockTests(unittest.TestCase):
             checked += 1
         self.assertGreaterEqual(checked, 5, "a population test must fail on an empty population")
 
+    def test_the_index_writers_outside_mutating_hold_the_lock_at_every_call_site(self):
+        """repair is exempt above (it cannot load the index it rebuilds), so its lock is the
+        caller's: every call of `.repair(` in the package sits in `with _lock_for(...)`. The
+        module-level writer wipe_everything takes the lock itself."""
+        import ast
+
+        def locked(node, parents) -> bool:
+            while node in parents:
+                node = parents[node]
+                if isinstance(node, ast.With) and any(
+                        isinstance(i.context_expr, ast.Call) and getattr(i.context_expr.func, "id", "") == "_lock_for"
+                        for i in node.items):
+                    return True
+            return False
+        calls = 0
+        for path in sorted((ROOT / "maisecrets").glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "repair":
+                    calls += 1
+                    with self.subTest(f"{path.name}:{node.lineno}"):
+                        self.assertTrue(locked(node, parents), f"{path.name}:{node.lineno} repair without the lock")
+                if isinstance(node, ast.FunctionDef) and node.name == "wipe_everything":
+                    unlinks = [c for c in ast.walk(node) if isinstance(c, ast.Call)
+                               and getattr(c.func, "attr", "") in ("unlink", "wipe", "delete")]
+                    self.assertTrue(unlinks)
+                    for c in unlinks:
+                        self.assertTrue(locked(c, parents), f"wipe_everything:{c.lineno} outside the lock")
+        self.assertGreaterEqual(calls, 1, "a population test must fail on an empty population")
+
     def test_forget_keeps_the_entry_when_the_store_refuses(self):
         from unittest import mock
         from maisecrets.vault import Vault
