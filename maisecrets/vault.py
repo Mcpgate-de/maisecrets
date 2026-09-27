@@ -261,10 +261,12 @@ def load_config() -> dict:
             policy = {}
         except ValueError as exc:
             raise ConfigError(f"{policy_path} is not valid JSON") from exc
-        if isinstance(policy, dict):
-            _check_types(policy, policy_path.name)
-            cfg.update(policy)
-            cfg["policy_keys"] = sorted(policy)
+        if not isinstance(policy, dict):
+            # valid JSON of another shape was skipped silently: no policy applied at all
+            raise ConfigError(f"{policy_path} must hold one JSON object")
+        _check_types(policy, policy_path.name)
+        cfg.update(policy)
+        cfg["policy_keys"] = sorted(policy)
     cfg["max_ttl_seconds"] = min(int(cfg.get("max_ttl_seconds", 30 * 86400)), 30 * 86400)
     if cfg.get("backend") == "jsonfile" and not cfg.get("allow_plaintext_store", False):
         # the plaintext store is for tests and the harness, which say so in their own config
@@ -401,6 +403,16 @@ def parse_keychain_dump(text: str, service: str) -> list[str]:
     return out
 
 
+def _run_store(what: str, args: list[str], **kw) -> subprocess.CompletedProcess:
+    """subprocess.run for a store call. A call that hits its timeout raised TimeoutExpired, which
+    passed every `except RuntimeError` of the sweep, forget and wipe, and whose text lists the
+    argv, the value included on the keychain's long-value path (CLI test agent, 2026-09-27)."""
+    try:
+        return subprocess.run(args, **kw)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"{what} call timed out") from None
+
+
 class KeychainBackend:
     """macOS login keychain via the ``security`` CLI. No sync flag is set."""
     test_mode = False
@@ -415,7 +427,7 @@ class KeychainBackend:
     def _interactive(self, line: str) -> subprocess.CompletedProcess:
         # `security -i` reads commands from stdin, so the value never sits on a command line where
         # `ps` of any local user shows it during the call (review, 2026-09-26)
-        return subprocess.run(["security", "-i"], input=(line + "\n").encode("utf-8"),
+        return _run_store("keychain", ["security", "-i"], input=(line + "\n").encode("utf-8"),
                               capture_output=True, timeout=5)
 
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
@@ -444,7 +456,7 @@ class KeychainBackend:
             # command (review, 2026-09-26: a 4096-bit PEM key). A long value goes on the
             # command line instead: the value is then visible to `ps` of any local user for the
             # milliseconds of the call, the trade documented in the README
-            r = subprocess.run(["security", "add-generic-password", "-U", "-s", SERVICE, "-a", key,
+            r = _run_store("keychain", ["security", "add-generic-password", "-U", "-s", SERVICE, "-a", key,
                                 "-l", label or f"maisecrets {key}", "-D", "maisecrets placeholder",
                                 "-w", stored] + (["-j", comment] if comment else []),
                                capture_output=True, timeout=5)
@@ -454,7 +466,8 @@ class KeychainBackend:
             raise RuntimeError("keychain add failed (read-back differs)")
 
     def get(self, key: str) -> str | None:
-        r = subprocess.run(
+        r = _run_store(
+            "keychain",
             ["security", "find-generic-password", "-s", SERVICE, "-a", key, "-w"],
             capture_output=True, text=True, timeout=5,
         )
@@ -470,7 +483,8 @@ class KeychainBackend:
         return raw   # an entry written before 0.3.22
 
     def delete(self, key: str) -> None:
-        r = subprocess.run(
+        r = _run_store(
+            "keychain",
             ["security", "delete-generic-password", "-s", SERVICE, "-a", key],
             capture_output=True, timeout=5,
         )
@@ -482,7 +496,7 @@ class KeychainBackend:
     def keys(self) -> list[str]:
         """Every account of the service, from the attribute dump (no secrets are printed without
         -d), so a damaged index can be rebuilt and an orphan item found (review, 2026-09-26)."""
-        r = subprocess.run(["security", "dump-keychain"], capture_output=True, text=True, timeout=20)
+        r = _run_store("keychain", ["security", "dump-keychain"], capture_output=True, text=True, timeout=20)
         if r.returncode != 0:
             return []
         return parse_keychain_dump(r.stdout, SERVICE)
@@ -494,7 +508,7 @@ class KeychainBackend:
         happen."""
         n = 0
         for _ in range(10000):
-            r = subprocess.run(["security", "delete-generic-password", "-s", SERVICE],
+            r = _run_store("keychain", ["security", "delete-generic-password", "-s", SERVICE],
                                capture_output=True, timeout=5)
             if r.returncode == 44:
                 break
@@ -528,7 +542,7 @@ class EncryptedFileBackend:
         return self.key_file.read_bytes().strip()
 
     def _openssl(self, args: list[str], data: bytes) -> bytes:
-        r = subprocess.run(["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "100000", "-salt",
+        r = _run_store("openssl", ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "100000", "-salt",
                             "-pass", f"file:{self.key_file}", *args], input=data, capture_output=True, timeout=5)
         if r.returncode != 0:
             raise RuntimeError("openssl failed: " + r.stderr.decode(errors="ignore")[:200])
@@ -602,8 +616,9 @@ class WindowsVaultBackend:
                 " | Out-Null; $v = New-Object Windows.Security.Credentials.PasswordVault; ")
 
     def _ps(self, script: str, stdin: str = "") -> subprocess.CompletedProcess:
-        return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", self._PRELUDE + script],
-                              input=stdin, capture_output=True, text=True, timeout=15)
+        return _run_store("Credential Locker",
+                          ["powershell", "-NoProfile", "-NonInteractive", "-Command", self._PRELUDE + script],
+                          input=stdin, capture_output=True, text=True, timeout=15)
 
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
         # the value travels via stdin as base64, never as a command-line argument and never as
@@ -702,7 +717,12 @@ class _Mutation:
     def __enter__(self):
         self.vault._lock.__enter__()
         if self.vault._lock.depth == 1:
-            self.vault._index = self.vault._load_index()
+            try:
+                self.vault._index = self.vault._load_index()
+            except BaseException:
+                # `with` calls __exit__ only after __enter__ returned: a damaged index kept the lock
+                self.vault._lock.__exit__(None, None, None)
+                raise
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
