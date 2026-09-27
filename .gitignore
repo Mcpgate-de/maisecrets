@@ -6,3 +6,6 @@ harness/out/
 
 # internal working notes never enter the public repository
 docs/internal/
+
+# macOS folder metadata: the plugin directory refuses it
+.DS_Store
