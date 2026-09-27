@@ -1,0 +1,85 @@
+"""A generated matrix of inputs with known answers for the detector.
+
+Each case combines a label, a separator, a value shape, what follows the value and the text
+around it, and says exactly which span is the secret (and which is an e-mail address). The
+cases are drawn from the full product with a fixed seed, so a run is reproducible and a
+failure names its combination. Every value is generated here; nothing comes from real data.
+
+Two cases found by hand on 2026-09-27 started it: `password:X and a@b.de` lost the password
+(the value ran to the end of the line and was then rejected as prose), and
+`password:asasasasasasaasasasa` was taken for filler.
+"""
+from __future__ import annotations
+
+import itertools
+import random
+import string
+from dataclasses import dataclass, field
+
+LABELS = ["password", "pass", "pwd", "passwd", "Password", "PASSWORD", "passwort", "Kennwort", "token",
+          "secret", "api_key", "apikey", "API_KEY", "db_password", "MY_TOKEN", "client_secret"]
+SEPARATORS = [":", ": ", "=", " = ", ":\n", ": \n\n"]
+AFTER = ["", " and more words", " {mail}", " and {mail}", ", thanks", "\nnext line here", " (see above)"]
+CONTEXTS = ["{x}", "please use {x} for the login", "Bitte nimm {x} fuer den Zugang",
+            "2026-09-27 12:00:01 INFO request {x}", "- {x}", "> {x}"]
+
+
+@dataclass
+class Case:
+    text: str
+    secret: str | None            # the exact value that must be found as a SECRET, or None
+    mail: str | None = None       # an e-mail address that must be found as EMAIL
+    combo: tuple = field(default_factory=tuple)
+
+
+def _value(rnd: random.Random, shape: str) -> str:
+    if shape == "mixed":
+        while True:
+            v = "".join(rnd.choice(string.ascii_letters + string.digits) for _ in range(rnd.randint(10, 24)))
+            if any(c.isdigit() for c in v) and any(c.isalpha() for c in v):
+                return v
+    if shape == "two-letters":
+        a, b = rnd.sample(string.ascii_lowercase, 2)
+        return "".join(rnd.choice(a + b) for _ in range(rnd.randint(12, 20)))
+    if shape == "special":
+        pool = string.ascii_letters + string.digits + "!#$%&*+-_@"
+        return "".join(rnd.choice(pool) for _ in range(rnd.randint(10, 18))) + rnd.choice("!#$%")
+    if shape == "german":
+        return rnd.choice(["Sommer", "Winter", "Fruehling"]) + str(rnd.randint(2020, 2030)) + rnd.choice("!?#")
+    raise ValueError(shape)
+
+
+def _mail(rnd: random.Random) -> str:
+    return rnd.choice(["anna", "a.kruse", "max.m"]) + "@" + rnd.choice(["firma-xyz.de", "example.org"])
+
+
+def cases(n: int = 2500, seed: int = 27) -> list[Case]:
+    rnd = random.Random(seed)
+    shapes = ["mixed", "two-letters", "special", "german"]
+    product = list(itertools.product(LABELS, SEPARATORS, shapes, AFTER, CONTEXTS))
+    rnd.shuffle(product)
+    out = []
+    for label, sep, shape, after, ctx in product[:n]:
+        value = _value(rnd, shape)
+        mail = _mail(rnd) if "{mail}" in after else None
+        x = f"{label}{sep}{value}{after.format(mail=mail) if mail else after}"
+        out.append(Case(ctx.format(x=x), value, mail, (label, sep, shape, after, ctx)))
+    return out
+
+
+# inputs where nothing may be a SECRET, with the reason
+NEGATIVES = [
+    ("password: ********", "a mask"),
+    ("password: xxxxxxxx", "a mask"),
+    ("secret: ........", "a mask"),
+    ("password: changeme", "a placeholder word"),
+    ("password: <your-password>", "a placeholder"),
+    ("token: ${API_TOKEN}", "a template"),
+    ("password: $DB_PASSWORD", "a variable"),
+    ("api_key" + " = os.environ['API_KEY']", "code reading a variable"),   # assembled: the repo scan flags it
+    ('if kind != "SECRET":\n    continue', "a code condition"),
+    ("enter your password: below", "prose"),
+    ("Add API key", "a UI label"),
+    ("the secret_key_base setting", "an identifier"),
+    ("password reset link sent to the user", "prose"),
+]
