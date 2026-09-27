@@ -5,10 +5,11 @@ had expired: 144 tests were green, because no test ran the commands against a st
 expired entry (field report, 2026-09-27). This module closes that class of gap:
 
 * a population test derives the command names from commands/*.md, hooks/dispatch.py and
-  cli.COMMANDS, and fails when a name has no run here;
+  cli.COMMANDS, and fails when no test here dispatched the name through the real entry point;
 * a state matrix runs each command as `python3 hooks/dispatch.py <cmd>` in a fresh
   MAISECRETS_HOME for each store state, and requires a defined exit code, no traceback and no
-  stored value in the output.
+  stored value in the output; for list, status, audit, expire, forget, wipe and repair it also
+  requires the exact output of that state and the index and store after it.
 
 Only generated values. The subprocess gets a temp HOME, a temp CLAUDE_CONFIG_DIR, a temp TMPDIR,
 no GIT_/CODEX_/CLAUDE_PLUGIN_OPTION_ variables, and fake pbcopy/pbpaste/xclip/open on PATH, so no
@@ -69,6 +70,10 @@ _FAKE_TOOLS = {
 }
 _DROP_PREFIXES = ("GIT_", "CODEX_", "CLAUDE_PLUGIN_OPTION_", "MAISECRETS_")
 _DROP = {"CLAUDECODE", "CLAUDE_CONFIG_DIR", "XDG_RUNTIME_DIR", "CLAUDE_CODE_ENTRYPOINT"}
+
+
+# every command name a test in this process ran through hooks/dispatch.py or hooks/resolve.py
+DISPATCHED: set[str] = set()
 
 
 def fake_value(prefix: str = "Fk") -> str:
@@ -145,6 +150,10 @@ class Sandbox:
         trip = self.root / "tripwire"
         if trip.exists():
             raise AssertionError(f"a sandbox process called the platform store: {trip.read_text()}")
+        # what the entry point actually handled: a name that fell through to the dispatcher's
+        # usage error ran nothing and covers nothing
+        if script in (DISPATCH, RESOLVE) and "usage: dispatch.py" not in r.stderr:
+            DISPATCHED.add("resolve" if script == RESOLVE else (args[0] if args else ""))
         return r
 
     # state helpers ---------------------------------------------------------
@@ -212,6 +221,14 @@ def _seed_expired(sb: Sandbox) -> None:
         raise AssertionError("seed: the entry is not purged")
 
 
+def _seed_expired_unpurged(sb: Sandbox) -> None:
+    sb.put()
+    data = sb.index()
+    for meta in data["entries"].values():
+        meta["expires"] = time.time() - 10
+    sb.write_index(data)
+
+
 def _seed_old_purged(sb: Sandbox) -> None:
     _seed_expired(sb)
     data = sb.index()
@@ -231,6 +248,7 @@ STATES = {
     "empty": (ENC, None, "encrypted-file", lambda sb: None, "ok"),
     "live": (ENC, None, "encrypted-file", _seed_live, "ok"),
     "expired-purged": (ENC, None, "encrypted-file", _seed_expired, "ok"),
+    "expired-not-yet-purged": (ENC, None, "encrypted-file", _seed_expired_unpurged, "ok"),
     "purged-past-retention": (ENC, None, "encrypted-file", _seed_old_purged, "ok"),
     "damaged-index": (ENC, None, "encrypted-file", _seed_damaged, "index"),
     "config-wrong-type": ({"backend": "encrypted-file", "tips": "yes"}, None, "encrypted-file",
@@ -317,6 +335,7 @@ def run_cell(state: str, command: str, args: list[str], stdin: str, spec: dict) 
             stdin = stdin.replace(k, v)
         clip_value = fake_value("Cl")      # what the user copied before the command ran
         sb.clip.write_text(clip_value, encoding="utf-8")
+        before = snapshot(sb)
         r = sb.run(command, *args, stdin=stdin)
         out = r.stdout + r.stderr
         cell = f"{state}: {command} {' '.join(args)}"
@@ -338,9 +357,156 @@ def run_cell(state: str, command: str, args: list[str], stdin: str, spec: dict) 
             clip = sb.clip.read_text(encoding="utf-8")
             if any(v in clip for v in values) or "⟦" not in clip:
                 problems.append(f"{cell}: the clipboard holds {clip[:3]}..., not the reference")
+        if r.returncode == want:
+            problems += [f"{cell}: {p}" for p in transition_problems(state, command, args, r, before, snapshot(sb))]
         return problems
     finally:
         sb.remove()
+
+
+def snapshot(sb: Sandbox) -> SimpleNamespace:
+    """What a command may change: the index (raw and parsed), the store items, the files."""
+    raw = (sb.home / "index.json").read_text(encoding="utf-8") if (sb.home / "index.json").exists() else None
+    try:
+        index = json.loads(raw) if raw is not None else None
+    except ValueError:
+        index = None
+    store = None
+    for name in ("vault.enc.json", "vault.json"):
+        if (sb.home / name).exists():
+            store = sorted(json.loads((sb.home / name).read_text(encoding="utf-8")))
+    pending = sorted(p.name for p in (sb.home / "pending").iterdir()) if (sb.home / "pending").is_dir() else []
+    files = sorted(p.name for p in sb.home.iterdir())
+    return SimpleNamespace(raw=raw, index=index, store=store, pending=pending, files=files)
+
+
+_KEEP_DAYS = {"policy": 3}
+_NOTICE = ("maisecrets wipe deletes every stored value, the index, the audit, event and hook logs and the "
+           "pending prompts of this user. Run `wipe --yes` to do it.\n")
+_STATE_CHANGING = {"list", "status", "audit", "expire", "forget", "wipe", "repair"}
+
+
+def _retained(state: str, index: dict) -> dict:
+    """key -> purged, for the entries a read keeps: an expired value is purged, and the metadata
+    of a purged one goes after keep_purged_days."""
+    keep = _KEEP_DAYS.get(state, 30) * 86400
+    out = {}
+    for k, m in index["entries"].items():
+        purged = bool(m.get("purged")) or m["expires"] < time.time()
+        if m.get("purged") and time.time() - float(m.get("purged_at") or m["expires"]) > keep:
+            continue
+        out[k] = purged
+    return out
+
+
+def transition_problems(state: str, command: str, args: list[str], r: subprocess.CompletedProcess,
+                        before: SimpleNamespace, after: SimpleNamespace) -> list[str]:
+    """What each state-changing command must print in this state, and what the home holds after."""
+    if command not in _STATE_CHANGING:
+        return []
+    kind = STATES[state][4]
+    p: list[str] = []
+
+    def expect(cond: bool, what: str) -> None:
+        if not cond:
+            p.append(f"{what}: stdout {r.stdout[-300:]!r} stderr {r.stderr[-300:]!r}")
+
+    def unchanged(what: str) -> None:
+        expect((after.raw, after.store, after.pending) == (before.raw, before.store, before.pending),
+               f"{what} changed the index, the store or the pending prompts")
+
+    usage = r.returncode == 2
+    if command == "audit":
+        # no state has an audit.log; audit reads nothing else and changes nothing
+        expect(r.stdout == ("" if usage else "(no resolves recorded)\n"), "audit output")
+        expect(r.stderr == ("usage: audit [n]\n" if usage else ""), "audit stderr")
+        unchanged("audit")
+        return p
+    if usage:
+        text = {"forget": ("", "usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets:list shows them)\n"),
+                "wipe": (_NOTICE, "")}[command]
+        expect((r.stdout, r.stderr) == text, f"{command} usage")
+        unchanged(f"{command} without its argument")
+        expect(after.files == before.files, "files appeared or went")
+        return p
+    if kind == "config":
+        head = f"maisecrets {VERSION} at {ROOT}\n" if command == "status" else ""
+        expect(r.stdout == head, "a configuration error prints nothing else on stdout")
+        expect(r.stderr.startswith(f"maisecrets {command}: configuration error: "), "names the configuration error")
+        expect(after.files == ["config.json"], "a configuration error creates nothing")
+        return p
+    if kind == "index" and command not in ("wipe", "repair"):
+        expect(f"maisecrets {command}: vault index unreadable (index.json)" in r.stderr, "names the unreadable index")
+        expect("maisecrets repair" in r.stderr, "names repair")
+        unchanged(f"{command} on a damaged index")
+        return p
+    if command == "wipe":
+        n = len(before.store or [])
+        expect(r.stdout == f"wiped: {n} stored value(s), index, logs. The config file stays.\n", "wipe count")
+        expect(not after.store and after.pending == [] and after.index is None, "wipe left a value or the index")
+        expect(set(after.files) <= {".lock", "config.json", "pending", "vault.json"}, f"wipe left {after.files}")
+        return p
+    if command == "repair":
+        m = re.fullmatch(r"repaired: (\d+) stored key\(s\) deleted, counters (\{.*\})\n", r.stdout)
+        expect(m is not None, "repair output")
+        want: dict = {}
+        for k in before.store or []:
+            type_, _c, num = k.rpartition("_c")
+            if num.isdigit():
+                want[type_] = max(want.get(type_, 0), int(num))
+        if m:
+            expect(ast.literal_eval(m.group(2)) == want, f"repair counters, expected {want}")
+        expect(after.index == {"entries": {}, "counters": want, "by_fingerprint": {}}, "repair index")
+        want_store = ["_maisecrets_fpkey"] if before.store is not None else None   # the fingerprint key stays
+        expect(after.store == want_store, f"repair left {after.store} in the store")
+        return p
+    # an ok state from here: forget, list, status, expire
+    ret = _retained(state, before.index) if before.index else {}
+    newly = sorted(k for k, purged in ret.items() if purged and not before.index["entries"][k].get("purged"))
+    live = sorted(k for k, purged in ret.items() if not purged)
+    expired = sorted(k for k, purged in ret.items() if purged)
+    after_entries = (after.index or {}).get("entries", {})
+    if command == "forget":
+        key = args[0]
+        if key in (before.index or {}).get("entries", {}):
+            expect(r.stdout == f"{key}: deleted. A placeholder for it no longer resolves anywhere.\n", "forget")
+            expect(key not in after_entries and key not in (after.store or []), f"{key} is still there")
+            expect(key not in (after.index or {}).get("by_fingerprint", {}).values(), "the fingerprint stays")
+            others = sorted(k for k in ret if k != key)
+            expect(sorted(after_entries) == others, f"forget left {sorted(after_entries)}, expected {others}")
+        else:
+            expect(r.stdout == f"{key}: not found (see /maisecrets:list)\n", "forget of an unknown key")
+            expect(after.store == before.store and after_entries == (before.index or {}).get("entries", {}),
+                   "forget of an unknown key changed the store")
+        return p
+    # list, status and expire sweep: an expired value leaves the store, old metadata goes
+    expect(sorted(after_entries) == sorted(ret), f"after {command} the index holds {sorted(after_entries)}")
+    for k in expired:
+        expect(after_entries.get(k, {}).get("purged") is True, f"{k} is not purged")
+        expect(k not in (after.store or []), f"the expired {k} is still in the store")
+    for k in live:
+        expect(not after_entries[k].get("purged") and k in (after.store or []), f"{k} was lost")
+    if command == "list":
+        if not ret:
+            expect(r.stdout == "Nothing is stored.\n", "list of nothing")
+        else:
+            lines = r.stdout.splitlines()
+            expect(lines[0] == f"{len(live)} value(s) stored, {len(expired)} expired (only the masked form is kept).",
+                   "list headline")
+            rows = [ln for ln in lines[2:] if re.match(r"[A-Z]+_c\d+ ", ln)]
+            expect(sorted(ln.split()[0] for ln in rows) == sorted(ret), "list rows")
+            for ln in rows:
+                k, typ = ln.split()[:2]
+                expect(typ == before.index["entries"][k]["type"], f"{k} row type")
+                expect((ln.split()[5] == "expired") == (k in expired), f"{k} row expiry")
+            expect(("TEST MODE" in r.stdout) == (STATES[state][2] == "jsonfile"), "list names the test store")
+    elif command == "status":
+        kept = _KEEP_DAYS.get(state, 30)
+        expect(f"\nentries: {len(live)} live, {len(expired)} expired (metadata kept {kept} days)\n" in r.stdout,
+               "status counts")
+    elif command == "expire":
+        expect(r.stdout == f"purged {len(newly)} expired value(s)\n", f"expire should purge {newly}")
+    return p
 
 
 def all_cells() -> list[tuple[str, str, list[str], str, dict]]:
@@ -380,21 +546,6 @@ def hook_events() -> set[str]:
 
 
 class PopulationTests(unittest.TestCase):
-    def test_every_command_has_a_run_here(self):
-        """A new command in commands/*.md, dispatch.py, cli.COMMANDS or the hook handlers fails
-        this test until a test runs it through the real entry point."""
-        md = set().union(*commands_in_markdown().values())
-        derived = md | commands_in_dispatch() | cli_commands() | hook_events()
-        covered = set(MATRIX)
-        for cls in (SessionStartTests, HookEventTests, ResolveTests):
-            # a class that claims a command must name it in its own source
-            import inspect
-            src = inspect.getsource(cls)
-            for name in cls.RUNS:
-                self.assertIn(f'"{name}"', src, f"{cls.__name__} claims {name} but never names it")
-            covered |= cls.RUNS
-        self.assertEqual(sorted(derived - covered), [], "commands without a run in tests/test_cli_matrix.py")
-
     def test_the_derivation_finds_a_command_in_every_slash_command(self):
         found = commands_in_markdown()
         self.assertGreaterEqual(len(found), 8)
@@ -436,6 +587,8 @@ class StateMatrixTests(unittest.TestCase):
         self.assertFalse(any(m.get("purged") for m in live.values()))
         (exp,) = base_state("expired-purged").index()["entries"].values()
         self.assertTrue(exp["purged"] and exp["purged_at"])
+        (due,) = base_state("expired-not-yet-purged").index()["entries"].values()
+        self.assertTrue(due["expires"] < time.time() and not due.get("purged"))
         (old,) = base_state("purged-past-retention").index()["entries"].values()
         self.assertGreater(time.time() - old["purged_at"], 30 * 86400)
         self.assertRaises(ValueError, base_state("damaged-index").index)
@@ -590,8 +743,6 @@ def _start(case: unittest.TestCase, sb: Sandbox, payload: object = None, stdin: 
 
 
 class SessionStartTests(unittest.TestCase):
-    RUNS = {"session-start"}
-
     def sandbox(self, config: dict | None = None, **kw) -> Sandbox:
         sb = Sandbox(config if config is not None else ENC, **kw)
         self.addCleanup(sb.remove)
@@ -702,8 +853,6 @@ class SessionStartTests(unittest.TestCase):
 
 # -------------------------------------------------------------- hook events --
 class HookEventTests(unittest.TestCase):
-    RUNS = {"user-prompt", "pre-tool", "post-tool"}
-
     def setUp(self):
         self.sb = Sandbox(JSONFILE, backend="jsonfile")
         self.addCleanup(self.sb.remove)
@@ -753,8 +902,6 @@ _GRANT = ("import sys; sys.path.insert(0, sys.argv[1]); from maisecrets.vault im
 
 class ResolveTests(unittest.TestCase):
     """hooks/resolve.py: the command the Bash hook writes in place of a placeholder on Windows."""
-    RUNS = {"resolve"}
-
     def setUp(self):
         self.sb = Sandbox(JSONFILE, backend="jsonfile")
         self.addCleanup(self.sb.remove)
@@ -976,6 +1123,41 @@ class CliUnitTests(unittest.TestCase):
             removed = cli.remove_shortcut()
         self.assertEqual(own.read_text(), "my own command\n")
         self.assertNotIn(str(own), removed)
+
+
+def derived_commands() -> set[str]:
+    md = set().union(*commands_in_markdown().values())
+    return md | commands_in_dispatch() | cli_commands() | hook_events()
+
+
+_RUNNERS = (StateMatrixTests, SessionStartTests, HookEventTests, ResolveTests)
+
+
+class ZzDispatchCoverageTests(unittest.TestCase):
+    """Sorted last on purpose: it reads what the other classes of this module dispatched.
+
+    A class used to claim a command by naming it in its source, and a name in the source is not
+    a run (Codex review of the suite, 2026-09-27). Sandbox.run records each command the real
+    entry point handled; this test compares that record with the derived population."""
+
+    def test_every_command_was_dispatched_by_a_test_here(self):
+        missing = derived_commands() - DISPATCHED
+        if missing:
+            # a filtered run (-k) did not run the classes that dispatch; run them now, so the
+            # answer does not depend on the order or the selection of the tests
+            loader = unittest.TestLoader()     # a fresh one: the default carries the -k patterns
+            suite = unittest.TestSuite(loader.loadTestsFromTestCase(c) for c in _RUNNERS)
+            suite.run(unittest.TestResult())
+            missing = derived_commands() - DISPATCHED
+        self.assertEqual(sorted(missing), [], "commands no test in tests/test_cli_matrix.py dispatched")
+
+    def test_the_record_holds_only_what_ran(self):
+        sb = Sandbox(JSONFILE, backend="jsonfile")
+        self.addCleanup(sb.remove)
+        sb.run("no-such-command", stdin="{}")
+        self.assertNotIn("no-such-command", DISPATCHED, "a usage error covers nothing")
+        sb.run("pending")
+        self.assertIn("pending", DISPATCHED)
 
 
 if __name__ == "__main__":
