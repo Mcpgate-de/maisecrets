@@ -2,9 +2,15 @@
 
 ## Unreleased
 
+## [0.4.2] - 2026-09-27
+
 - **The block notice is three lines:** what kind of thing was found, the one next step (⌘V or
   Ctrl+V, or /ms), and where to report a wrong detection. What is stored and for how long is in
   `/maisecrets:list`.
+
+### Features
+
+- a three-line block notice - the kind found, the one next step, the report (efa93cd)
 
 ## [0.4.1] - 2026-09-27
 
