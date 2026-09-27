@@ -4,6 +4,7 @@ Each test builds a throwaway git repository with a generated token, runs the scr
 the skill tells the model to, and searches every byte of output for the token."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -229,6 +230,79 @@ class SkillScriptTests(unittest.TestCase):
         same = _run(SCRIPTS / "redact_copy.py", "log.txt", "--out", "log.txt", cwd=self.repo)
         self.assertEqual(same.returncode, 2, "the original is never the output")
         self.assertEqual(src.read_bytes(), before)
+
+
+def _digest_parts(value: str) -> list[str]:
+    """Every hex digest of the value a script could print: md5, sha1, sha256, sha512, whole and as
+    an 8 to 16 character prefix."""
+    out = []
+    for alg in ("md5", "sha1", "sha256", "sha512"):
+        h = hashlib.new(alg, value.encode("utf-8")).hexdigest()
+        out += [h] + [h[:n] for n in range(8, 17)]
+    return out
+
+
+@unittest.skipUnless(HAS_GIT, "git is needed for the history scan")
+class NeverALineOrAHashTests(unittest.TestCase):
+    """THREAT-MODEL C17: the scripts print locations, types, lengths and per-run ids, never a
+    value, a line or a hash of a value. A non-secret sentinel shares the line with the value: a
+    script that printed the line would print the sentinel."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="maisecrets-c17-"))
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.token = _token()
+        self.sentinel = "Sentinel" + secrets.token_hex(6)
+        self.line = f"note {self.sentinel} GITHUB_TOKEN={self.token}"
+        self.repo = self.dir / "repo"
+        self.repo.mkdir()
+        _git(self.repo, "init", "-q")
+        _git(self.repo, "config", "user.email", "t@example.org")
+        _git(self.repo, "config", "user.name", "t")
+        (self.repo / "old.env").write_text(self.line + "\n", encoding="utf-8")
+        _git(self.repo, "add", ".")
+        _git(self.repo, "commit", "-qm", "one")
+        (self.repo / "old.env").unlink()
+        (self.repo / "now.log").write_text(self.line + "\n", encoding="utf-8")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "two")
+        self.claude, self.codex = self.dir / "claude", self.dir / "codex"
+        proj = self.claude / "projects" / "-x"
+        proj.mkdir(parents=True)
+        (self.codex / "sessions").mkdir(parents=True)
+        session = proj / "s.jsonl"
+        session.write_text(json.dumps({"type": "user", "timestamp": "2026-09-20T10:00:00Z",
+                                       "message": {"content": self.line}}) + "\n", encoding="utf-8")
+        old = time.time() - 3600
+        os.utime(session, (old, old))
+
+    def outputs(self) -> dict[str, str]:
+        out: dict[str, str] = {}
+        report, audit_report = self.dir / "report.txt", self.dir / "audit.txt"
+        for name, args in (("tree", ["."]), ("history", [".", "--history"]),
+                           ("history --out", [".", "--history", "--out", str(report)])):
+            r = _run(SCRIPTS / "scan_secrets.py", *args, cwd=self.repo)
+            self.assertEqual(r.returncode, 1, f"{name} found nothing: {r.stdout}")
+            out[f"scan {name}"] = r.stdout + r.stderr
+        out["scan report file"] = report.read_text(encoding="utf-8")
+        r = _run(SCRIPTS / "redact_copy.py", "now.log", cwd=self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        out["redact"] = r.stdout + r.stderr
+        env = dict(_clean_env(), PYTHONUTF8="1", CLAUDE_CONFIG_DIR=str(self.claude), CODEX_HOME=str(self.codex))
+        r = subprocess.run([sys.executable, str(SCRIPTS / "audit_transcripts.py"), "--out", str(audit_report)],
+                           capture_output=True, text=True, encoding="utf-8", env=env, timeout=120)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        out["audit"] = r.stdout + r.stderr
+        out["audit report file"] = audit_report.read_text(encoding="utf-8")
+        return out
+
+    def test_no_output_holds_the_value_its_line_or_a_hash_of_it(self):
+        parts = [self.token, self.token[4:], self.sentinel] + _digest_parts(self.token) + _digest_parts(self.line)
+        for name, text in self.outputs().items():
+            with self.subTest(name):
+                self.assertTrue(text.strip(), "an empty output proves nothing")
+                low = text.lower()
+                self.assertEqual([p for p in parts if p.lower() in low], [], text[-600:])
 
 
 class RedactSameValueTests(unittest.TestCase):
