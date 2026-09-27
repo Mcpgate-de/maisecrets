@@ -367,7 +367,8 @@ class TranscriptAuditTests(unittest.TestCase):
         self.assertIn(b'{"type":"system","n":1.0e5}\r\n', raw, "an unchanged line stays byte for byte")
         self.assertIn(b"not json at all \xff\xfe\n", raw)
         self.assertNotIn(self.token.encode(), raw, "a line that is not JSON is cleaned as text")
-        self.assertEqual(self.session.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":   # Windows has no Unix mode bits (windows-latest, 2026-09-27)
+            self.assertEqual(self.session.stat().st_mode & 0o777, 0o600)
 
     def test_a_running_session_is_not_scrubbed(self):
         os.utime(self.session, None)

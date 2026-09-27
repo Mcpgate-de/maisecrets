@@ -19,6 +19,7 @@ working tree for the length of one replay; never run it inside the test suite.
 from __future__ import annotations
 
 import argparse
+import re
 import signal
 import subprocess
 import sys
@@ -52,11 +53,19 @@ def run_tests(ids: list[str]) -> int:
     match), so the tests ran the unmutated code and stayed green (2026-09-27)."""
     import os
     import tempfile
-    cmd = [sys.executable, "-m", "unittest", "-q"] + [unittest_id(t) for t in ids]
+    cmd = [sys.executable, "-m", "unittest", "-v"] + [unittest_id(t) for t in ids]
     with tempfile.TemporaryDirectory(prefix="maisecrets-pyc-") as cache:
         env = dict(os.environ, PYTHONPYCACHEPREFIX=cache)
         r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=600, env=env)
+    # a skipped owning test is no evidence either way: without git in the CI image the skill's
+    # tests were skipped, the replay read the skip as green and failed C17 for the wrong reason,
+    # and read it as "green before the mutation" too (2026-09-27)
+    if re.search(r"\.\.\. skipped ", r.stderr):
+        return SKIPPED
     return r.returncode
+
+
+SKIPPED = -1
 
 
 @contextmanager
@@ -89,7 +98,10 @@ def replay(belief: dict) -> tuple[bool, str]:
     n = original.count(proof["find"])
     if n != 1:
         return False, f"anchor occurs {n} times in {proof['file']} (must be exactly once)"
-    if run_tests(belief["runner"]) != 0:
+    first = run_tests(belief["runner"])
+    if first == SKIPPED:
+        return False, "an owning test was skipped here (a missing tool?); a skip is no evidence"
+    if first != 0:
         return False, "the owning tests are red before the mutation; no evidence"
     with restored_on_any_exit(target, original):
         mutated = original.replace(proof["find"], proof["replace"], 1)
@@ -101,6 +113,8 @@ def replay(belief: dict) -> tuple[bool, str]:
             except SyntaxError as exc:
                 return False, f"the mutation does not compile ({exc.msg}, line {exc.lineno}); a red proves nothing"
         rc = run_tests(belief["runner"])
+    if rc == SKIPPED:
+        return False, "an owning test was skipped under the mutation; a skip is no evidence"
     if target.read_text(encoding="utf-8") != original:
         return False, "the file was not restored"
     if rc == 0:
