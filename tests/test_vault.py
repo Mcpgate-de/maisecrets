@@ -1244,6 +1244,10 @@ class ConcurrencyTests(unittest.TestCase):
         "    e = v.put(f'race-fake-{tag}-{i:03d}', 'SECRET', 'manual', session='S-' + tag)\n"
         "    if i % 3 == 0:\n"
         "        v.record_resolve(e.key, 'S-' + tag, 'Bash', 'x')\n"
+        # a waiter polls the lock every 20 ms and a writer in a tight loop takes it back at once:
+        # on windows-latest one child waited the whole 6 s deadline (2026-09-27). A hook writes
+        # once per event, so each child pauses one poll interval between its writes
+        "    time.sleep(0.025)\n"
         "print('done')\n"
     )
 
