@@ -6,23 +6,27 @@ import os
 import json
 import shutil
 import sys
-import tempfile
 import time
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-os.environ.setdefault("MAISECRETS_HOME", tempfile.mkdtemp(prefix="maisecrets-ops-"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
-os.environ.pop("XDG_RUNTIME_DIR", None)
 
 from maisecrets import hooks, vault as vmod  # noqa: E402
 from maisecrets.vault import HOME, Vault, parse_keychain_dump, wipe_everything  # noqa: E402
+import _hygiene  # noqa: E402
+from _hygiene import CLAUDE  # noqa: E402
 
-tempfile.tempdir = str(HOME)
 _TMP = str(HOME)
+
+
+def tearDownModule():  # noqa: N802 - unittest hook
+    _hygiene.assert_pristine()
 
 
 def _reset() -> None:
@@ -150,6 +154,10 @@ class CostTests(unittest.TestCase):
         _reset()
 
     def test_post_tool_over_a_megabyte_with_25_resolved_keys_stays_far_below_the_watchdog(self):
+        """The cost is counted, not timed: one keyed fingerprint per distinct candidate, however
+        often a token repeats. A wall-clock bound of 5 s held on any machine and failed on a busy
+        runner at the same code (suite review, 2026-09-27); the count is the same everywhere."""
+        from unittest import mock
         v = Vault()
         keys = []
         for i in range(25):
@@ -159,11 +167,21 @@ class CostTests(unittest.TestCase):
         filler = ("lorem ipsum dolor sit amet " * 40 + "\n") * 950
         text = filler + " ".join(f"token {e.key}=resolved-value-{i:02d}-QzT9xW" for i, e in enumerate(keys))
         self.assertGreater(len(text), 1_000_000)
-        started = time.time()
-        out = hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p",
-                               "tool_response": {"stdout": text}})
-        took = time.time() - started
-        self.assertLess(took, 5.0, f"post-tool took {took:.1f}s on 1 MB; the watchdog fires at 16 s")
+        calls = {"n": 0}
+        real = Vault.fingerprint
+
+        def counted(self, value):
+            calls["n"] += 1
+            return real(self, value)
+        started = time.monotonic()
+        with mock.patch.object(Vault, "fingerprint", counted):
+            out = hooks.post_tool({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p",
+                                   "tool_response": {"stdout": text}})
+        took = time.monotonic() - started
+        # 105 distinct candidates in this text (measured 2026-09-27); without the dedupe 1 106
+        self.assertLess(calls["n"], 500, "a repeated token or line was fingerprinted again")
+        watchdog = hooks.WATCHDOG_SECONDS["post-tool"]
+        self.assertLess(took, watchdog, f"post-tool took {took:.1f}s on 1 MB; the watchdog fires at {watchdog} s")
         redacted = out["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
         self.assertNotIn("QzT9xW", redacted)
 
@@ -212,6 +230,37 @@ class VaultLockTests(unittest.TestCase):
             checked += 1
         self.assertGreaterEqual(checked, 5, "a population test must fail on an empty population")
 
+    def test_the_index_writers_outside_mutating_hold_the_lock_at_every_call_site(self):
+        """repair is exempt above (it cannot load the index it rebuilds), so its lock is the
+        caller's: every call of `.repair(` in the package sits in `with _lock_for(...)`. The
+        module-level writer wipe_everything takes the lock itself."""
+        import ast
+
+        def locked(node, parents) -> bool:
+            while node in parents:
+                node = parents[node]
+                if isinstance(node, ast.With) and any(
+                        isinstance(i.context_expr, ast.Call) and getattr(i.context_expr.func, "id", "") == "_lock_for"
+                        for i in node.items):
+                    return True
+            return False
+        calls = 0
+        for path in sorted((ROOT / "maisecrets").glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "repair":
+                    calls += 1
+                    with self.subTest(f"{path.name}:{node.lineno}"):
+                        self.assertTrue(locked(node, parents), f"{path.name}:{node.lineno} repair without the lock")
+                if isinstance(node, ast.FunctionDef) and node.name == "wipe_everything":
+                    unlinks = [c for c in ast.walk(node) if isinstance(c, ast.Call)
+                               and getattr(c.func, "attr", "") in ("unlink", "wipe", "delete")]
+                    self.assertTrue(unlinks)
+                    for c in unlinks:
+                        self.assertTrue(locked(c, parents), f"wipe_everything:{c.lineno} outside the lock")
+        self.assertGreaterEqual(calls, 1, "a population test must fail on an empty population")
+
     def test_forget_keeps_the_entry_when_the_store_refuses(self):
         from unittest import mock
         from maisecrets.vault import Vault
@@ -248,8 +297,8 @@ class ExpiredEntryTests(unittest.TestCase):
                     self.assertEqual(fn([]), 0)
         again = Vault().put(value, "SECRET", "manual", session="S1")
         self.assertEqual(Vault().get(again.key, "S1")[1], "ok", "a value pasted again after expiry is stored")
-        hooks._clipboard = lambda t: True
-        out = hooks.user_prompt({"prompt": "password: " + value, "session_id": "S1", "transcript_path": ""})
+        _hygiene.patch(self, hooks, "_clipboard", lambda t: True)
+        out = hooks.user_prompt({"prompt": "password: " + value, "session_id": "S1", "transcript_path": "", **CLAUDE})
         self.assertEqual(out["decision"], "block")
         self.assertIn("found and kept from the AI", out["reason"])
 

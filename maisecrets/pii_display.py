@@ -103,7 +103,10 @@ def _mask_ipv4(value: str, level: str) -> str:
 def _mask_ipv6(value: str, level: str) -> str:
     keep = 3 if level == SUPPORT else 2
     # only the hextets before a `::` are the routing prefix; the host part never shows
-    head = [h for h in value.split("::", 1)[0].split(":") if h and BULLET not in h][:keep]
+    if BULLET not in value:
+        # a value that is only its prefix (`2a00:1450::`) would show whole: hide one hextet more
+        keep = min(keep, len([h for h in value.split(":") if h]) - 1)
+    head = [h for h in value.split("::", 1)[0].split(":") if h and BULLET not in h][:max(keep, 0)]
     return (":".join(head) + ":" + BULLET * 3) if head else BULLET * 3
 
 

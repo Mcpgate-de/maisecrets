@@ -261,10 +261,12 @@ def load_config() -> dict:
             policy = {}
         except ValueError as exc:
             raise ConfigError(f"{policy_path} is not valid JSON") from exc
-        if isinstance(policy, dict):
-            _check_types(policy, policy_path.name)
-            cfg.update(policy)
-            cfg["policy_keys"] = sorted(policy)
+        if not isinstance(policy, dict):
+            # valid JSON of another shape was skipped silently: no policy applied at all
+            raise ConfigError(f"{policy_path} must hold one JSON object")
+        _check_types(policy, policy_path.name)
+        cfg.update(policy)
+        cfg["policy_keys"] = sorted(policy)
     cfg["max_ttl_seconds"] = min(int(cfg.get("max_ttl_seconds", 30 * 86400)), 30 * 86400)
     if cfg.get("backend") == "jsonfile" and not cfg.get("allow_plaintext_store", False):
         # the plaintext store is for tests and the harness, which say so in their own config
@@ -401,6 +403,16 @@ def parse_keychain_dump(text: str, service: str) -> list[str]:
     return out
 
 
+def _run_store(what: str, args: list[str], **kw) -> subprocess.CompletedProcess:
+    """subprocess.run for a store call. A call that hits its timeout raised TimeoutExpired, which
+    passed every `except RuntimeError` of the sweep, forget and wipe, and whose text lists the
+    argv, the value included on the keychain's long-value path (CLI test agent, 2026-09-27)."""
+    try:
+        return subprocess.run(args, **kw)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"{what} call timed out") from None
+
+
 class KeychainBackend:
     """macOS login keychain via the ``security`` CLI. No sync flag is set."""
     test_mode = False
@@ -415,7 +427,7 @@ class KeychainBackend:
     def _interactive(self, line: str) -> subprocess.CompletedProcess:
         # `security -i` reads commands from stdin, so the value never sits on a command line where
         # `ps` of any local user shows it during the call (review, 2026-09-26)
-        return subprocess.run(["security", "-i"], input=(line + "\n").encode("utf-8"),
+        return _run_store("keychain", ["security", "-i"], input=(line + "\n").encode("utf-8"),
                               capture_output=True, timeout=5)
 
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
@@ -444,7 +456,7 @@ class KeychainBackend:
             # command (review, 2026-09-26: a 4096-bit PEM key). A long value goes on the
             # command line instead: the value is then visible to `ps` of any local user for the
             # milliseconds of the call, the trade documented in the README
-            r = subprocess.run(["security", "add-generic-password", "-U", "-s", SERVICE, "-a", key,
+            r = _run_store("keychain", ["security", "add-generic-password", "-U", "-s", SERVICE, "-a", key,
                                 "-l", label or f"maisecrets {key}", "-D", "maisecrets placeholder",
                                 "-w", stored] + (["-j", comment] if comment else []),
                                capture_output=True, timeout=5)
@@ -454,7 +466,8 @@ class KeychainBackend:
             raise RuntimeError("keychain add failed (read-back differs)")
 
     def get(self, key: str) -> str | None:
-        r = subprocess.run(
+        r = _run_store(
+            "keychain",
             ["security", "find-generic-password", "-s", SERVICE, "-a", key, "-w"],
             capture_output=True, text=True, timeout=5,
         )
@@ -470,7 +483,8 @@ class KeychainBackend:
         return raw   # an entry written before 0.3.22
 
     def delete(self, key: str) -> None:
-        r = subprocess.run(
+        r = _run_store(
+            "keychain",
             ["security", "delete-generic-password", "-s", SERVICE, "-a", key],
             capture_output=True, timeout=5,
         )
@@ -482,7 +496,7 @@ class KeychainBackend:
     def keys(self) -> list[str]:
         """Every account of the service, from the attribute dump (no secrets are printed without
         -d), so a damaged index can be rebuilt and an orphan item found (review, 2026-09-26)."""
-        r = subprocess.run(["security", "dump-keychain"], capture_output=True, text=True, timeout=20)
+        r = _run_store("keychain", ["security", "dump-keychain"], capture_output=True, text=True, timeout=20)
         if r.returncode != 0:
             return []
         return parse_keychain_dump(r.stdout, SERVICE)
@@ -494,7 +508,7 @@ class KeychainBackend:
         happen."""
         n = 0
         for _ in range(10000):
-            r = subprocess.run(["security", "delete-generic-password", "-s", SERVICE],
+            r = _run_store("keychain", ["security", "delete-generic-password", "-s", SERVICE],
                                capture_output=True, timeout=5)
             if r.returncode == 44:
                 break
@@ -528,7 +542,7 @@ class EncryptedFileBackend:
         return self.key_file.read_bytes().strip()
 
     def _openssl(self, args: list[str], data: bytes) -> bytes:
-        r = subprocess.run(["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "100000", "-salt",
+        r = _run_store("openssl", ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "100000", "-salt",
                             "-pass", f"file:{self.key_file}", *args], input=data, capture_output=True, timeout=5)
         if r.returncode != 0:
             raise RuntimeError("openssl failed: " + r.stderr.decode(errors="ignore")[:200])
@@ -561,8 +575,11 @@ class EncryptedFileBackend:
         for f in (self.path, self.key_file):
             try:
                 f.unlink()
-            except OSError:
+            except FileNotFoundError:
                 pass
+            except OSError as exc:
+                # a file that stays holds the values: never count it as wiped
+                raise RuntimeError(f"{f.name} not deleted ({type(exc).__name__})") from exc
         return n
 
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
@@ -602,8 +619,9 @@ class WindowsVaultBackend:
                 " | Out-Null; $v = New-Object Windows.Security.Credentials.PasswordVault; ")
 
     def _ps(self, script: str, stdin: str = "") -> subprocess.CompletedProcess:
-        return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", self._PRELUDE + script],
-                              input=stdin, capture_output=True, text=True, timeout=15)
+        return _run_store("Credential Locker",
+                          ["powershell", "-NoProfile", "-NonInteractive", "-Command", self._PRELUDE + script],
+                          input=stdin, capture_output=True, text=True, timeout=15)
 
     def put(self, key: str, value: str, label: str | None = None, comment: str | None = None) -> None:
         # the value travels via stdin as base64, never as a command-line argument and never as
@@ -702,7 +720,12 @@ class _Mutation:
     def __enter__(self):
         self.vault._lock.__enter__()
         if self.vault._lock.depth == 1:
-            self.vault._index = self.vault._load_index()
+            try:
+                self.vault._index = self.vault._load_index()
+            except BaseException:
+                # `with` calls __exit__ only after __enter__ returned: a damaged index kept the lock
+                self.vault._lock.__exit__(None, None, None)
+                raise
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -886,7 +909,10 @@ class Vault:
         meta = self._index["entries"].get(key)
         if meta is None:
             return None, "unknown"
-        if meta.get("purged"):
+        # past its expiry but not purged: the store refused the delete, or the sweep cap left it
+        # for the next call; the human path skips `status`, so it printed the value (suite
+        # review, 2026-09-27)
+        if meta.get("purged") or meta["expires"] < time.time():
             return None, "expired"
         if not human:
             st = self.status(key, session)
@@ -1084,21 +1110,41 @@ class Vault:
             raise RuntimeError("this store cannot be enumerated; repair is not possible here")
         keys = self.backend.keys()
         counters: dict[str, int] = {}
+
+        def seen(type_: str, num: int) -> None:
+            counters[type_] = max(counters.get(type_, 0), num)
         for key in keys:
-            if "_c" not in key:
-                continue
-            type_, _c, num = key.rpartition("_c")
-            if num.isdigit():
-                counters[type_] = max(counters.get(type_, 0), int(num))
+            type_, sep, num = key.rpartition("_c")
+            if sep and num.isdigit():
+                seen(type_, int(num))
+        # the store holds only live values: a key whose value expired lives on in the index and in
+        # old transcripts. Counters from the store alone went back below it, and the next value got
+        # the old key, so an old placeholder resolved to the new value (review, 2026-09-27). Every
+        # key the index names, readable or not, and its own counters count too.
+        try:
+            raw = INDEX.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            raw = ""
+        for type_, num in re.findall(r"\b([A-Z][A-Z0-9_]*)_c(\d+)\b", raw):
+            seen(type_, int(num))
+        try:
+            old = json.loads(raw).get("counters", {})
+            for type_, num in (old.items() if isinstance(old, dict) else []):
+                if isinstance(type_, str) and isinstance(num, int):
+                    seen(type_, num)
+        except (ValueError, AttributeError):
+            pass
+        deleted = 0
         for key in keys:
             if key != FP_KEY_ENTRY:
                 try:
                     self.backend.delete(key)
+                    deleted += 1
                 except RuntimeError:
                     pass
         idx = {"entries": {}, "counters": counters, "by_fingerprint": {}}
         atomic_write(INDEX, json.dumps(idx, indent=1))
-        return {"keys_seen": len(keys), "counters": counters}
+        return {"keys_seen": len(keys), "deleted": deleted, "counters": counters}
 
 
 def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[str]]:
@@ -1110,21 +1156,23 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
     problems: list[str] = []
     n = 0
     with _lock_for(HOME / ".lock"):
+        # a file store raises OSError (a folder that is not writable), the platform stores
+        # RuntimeError; either one is a problem to report, never a traceback (2026-09-27)
         try:
             n = backend.wipe() if hasattr(backend, "wipe") else 0
-        except RuntimeError as exc:
+        except (RuntimeError, OSError) as exc:
             problems.append(f"store: {type(exc).__name__}")
         try:
             keys = backend.keys() if hasattr(backend, "keys") else []
-        except RuntimeError:
+        except (RuntimeError, OSError):
             keys = []
         for key in keys:
             try:
                 backend.delete(key)
                 n += 1
-            except RuntimeError:
+            except (RuntimeError, OSError):
                 problems.append(f"store item {key} not deleted")
-        for name in ("index.json", "audit.log", "events.log", ".announced"):
+        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced"):
             try:
                 (HOME / name).unlink()
             except FileNotFoundError:

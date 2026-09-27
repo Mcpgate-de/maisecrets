@@ -1,0 +1,10 @@
+# vault-repair-never-reuses-a-key: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "vault-repair-never-reuses-a-key"
+control = "C11"
+statement = "After repair, a new value never gets a key that an old placeholder still names: the counters count the store, every key the old index names, and the old index counters."
+runner = ["tests/test_vault.py::LifeCycleTests::test_repair_never_hands_out_a_key_an_old_placeholder_still_names"]
+
+[proof]
+file = "maisecrets/vault.py"
+find = "            raw = INDEX.read_text(encoding=\"utf-8\", errors=\"replace\")\n"
+replace = "            raw = \"\"\n"

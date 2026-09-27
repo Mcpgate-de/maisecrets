@@ -97,7 +97,9 @@ no_secrets_in_tree:
     # dogfooding: the repo itself must not carry a value the detector would hide
     # python:slim has no git; the checkout has no untracked files, so scan every file except .git
     # maisecrets/rules/ is the vendored ruleset and carries secret shapes by design
-    - find . \( -path ./.git -o -path ./maisecrets/rules \) -prune -o -type f -print0 | xargs -0 cat | python -m maisecrets.cli scan | { ! grep -E '^SECRET ' ; }
+    # each file on its own, with its exit code: a crash printed nothing and passed as "nothing
+    # found", and one concatenated stream paired a label with the next file's text (2026-09-27)
+    - python scripts/scan_tree.py
 
 lint:
   stage: validate
@@ -122,9 +124,10 @@ unit:
   stage: test
   extends: .tested_before_the_tag
   # python:3.12-slim has no git: the skill's history tests were skipped here and a skip reads as
-  # green (2026-09-27, 14 skipped); the job installs git and refuses a skip it does not expect
+  # green (2026-09-27, 14 skipped); the job installs git and refuses a skip it does not expect.
+  # procps gives ps: the test hygiene lists live value-serving children with it
   script:
-    - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git >/dev/null
+    - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git procps >/dev/null
     - python -m unittest discover -s tests -v 2>&1 | tee unit.log
     - python scripts/no_unexpected_skips.py unit.log
 
@@ -135,7 +138,7 @@ beliefs_can_fail_replay:
   # declared, the tests must go red, the file is restored. A test that stays green under the
   # mutation does not carry the control it claims (borrowed from the ai-gateway beliefs layer)
   script:
-    - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git >/dev/null
+    - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git procps >/dev/null
     - python scripts/replay_can_fail.py
 
 # The hook harness: a real Claude Code / Codex binary, a fake upstream, every request body

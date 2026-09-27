@@ -8,7 +8,7 @@ import time
 
 from . import detect
 from .hooks import main as hook_main
-from .vault import Vault, load_config
+from .vault import ConfigError, Vault, load_config
 
 
 def _age(ts: float) -> str:
@@ -172,7 +172,9 @@ def cmd_expire(_: list[str]) -> int:
 
 
 def cmd_scan(args: list[str]) -> int:
-    text = " ".join(args) if args else sys.stdin.read()
+    # bytes, decoded with replacement: the CI scan of the repo pipes every file in, a PNG among
+    # them, and a strict decode crashed without output, which read as "nothing found" (2026-09-27)
+    text = " ".join(args) if args else sys.stdin.buffer.read().decode("utf-8", errors="replace")
     for m in detect.scan(text):
         print(f"{m.type:<7} {m.kind:<18} at {m.start}-{m.end} (len {len(m.value)})")
     return 0
@@ -208,14 +210,15 @@ def cmd_status(_: list[str]) -> int:
     policy = v.cfg.get("policy_keys") or []
     print("settings from a machine policy: " + (", ".join(policy) if policy else "none"))
     from . import detect
-    print(f"rules: {len(detect.rules())} (gitleaks {open(detect.RULES_DIR / 'GITLEAKS_VERSION').read().strip()}, "
-          f"presidio {open(detect.RULES_DIR / 'PRESIDIO_VERSION').read().strip()}, "
-          f"detect-secrets {open(detect.RULES_DIR / 'DETECT_SECRETS_VERSION').read().strip()}); "
-          f"regions {v.cfg.get('pii_regions')}")
+    def version(name: str) -> str:
+        return (detect.RULES_DIR / f"{name}_VERSION").read_text(encoding="utf-8").strip()
+    print(f"rules: {len(detect.rules())} (gitleaks {version('GITLEAKS')}, presidio {version('PRESIDIO')}, "
+          f"detect-secrets {version('DETECT_SECRETS')}); regions {v.cfg.get('pii_regions')}")
     for name in ("events.log", "audit.log", "hooks.log"):
         p = HOME / name
         try:
-            n = sum(1 for _ in open(p, encoding="utf-8")) if p.exists() else 0
+            with open(p, "rb") as f:
+                n = sum(1 for _ in f)
         except OSError:
             n = 0
         print(f"{name}: {n} lines")
@@ -330,7 +333,7 @@ def cmd_repair(_: list[str]) -> int:
     except RuntimeError as exc:
         print(f"repair refused: {exc}", file=sys.stderr)
         return 1
-    print(f"repaired: {info['keys_seen']} stored key(s) deleted, counters {info['counters']}")
+    print(f"repaired: {info['deleted']} stored value(s) deleted, counters {info['counters']}")
     return 0
 
 
@@ -353,7 +356,16 @@ def main(argv: list[str] | None = None) -> int:
     if fn is None:
         print(f"unknown command {argv[0]}", file=sys.stderr)
         return 2
-    return fn(argv[1:])
+    # a damaged index or a wrong policy printed a Python traceback to the person who ran
+    # /maisecrets:list; the message of these two errors names the file and the fix, never a value
+    try:
+        return fn(argv[1:])
+    except ConfigError as exc:
+        print(f"maisecrets {argv[0]}: configuration error: {exc}. Fix the file named there.", file=sys.stderr)
+        return 1
+    except RuntimeError as exc:
+        print(f"maisecrets {argv[0]}: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

@@ -1,0 +1,77 @@
+"""Every test module imports this first: the vault home is a temp directory this module made.
+
+The modules used `os.environ.setdefault("MAISECRETS_HOME", tmp)`, so a MAISECRETS_HOME set on the
+machine won, and the reset helpers then deleted the index, the store and the logs in it (Codex
+review of the suite, 2026-09-27). This module makes one temp home per test process, reuses it only
+when it made it itself, and refuses a home that is the real ~/.maisecrets.
+
+It also removes the environment of the client that started the tests, for this process and every
+child it starts. The code reads that environment: `client_of` takes a payload without `prompt_id`
+or `turn_id` for Codex when any CODEX_ variable is set, the session start reads CLAUDECODE and
+CODEX_HOME, the run log reads CLAUDE_CODE_ENTRYPOINT, and CLAUDE_PLUGIN_OPTION_BACKEND overrides
+the store in config.json. Inside a Codex session 28 tests failed and 5 errored, and a Claude Code
+session with a plugin option could send the tests to the keychain (Codex review, 2026-09-27). A
+test that needs one of these variables sets it itself, with mock.patch.dict.
+
+The temp dir of the process is a temp directory of its own too (tempfile.tempdir and TMPDIR), with
+no XDG_RUNTIME_DIR: the value FIFOs live in <tempdir>/maisecrets-<uid>, and the installed plugin on
+this machine uses the real one. test_gates.py set this at its import, so only the modules imported
+after it had it (Codex review, 2026-09-27); here every module has it, in any order.
+"""
+import os
+import tempfile
+
+_MINE = "MAISECRETS_TEST_HOME_OWNED"
+_MINE_TMP = "MAISECRETS_TEST_TMP_OWNED"
+
+# the client environment the code reads (see above); prefixes and names
+CLIENT_PREFIXES = ("CODEX_", "CLAUDE_CODE_", "CLAUDE_PLUGIN_OPTION_")
+CLIENT_NAMES = ("CLAUDECODE", "XDG_RUNTIME_DIR", "MAISECRETS_KEY_FILE", "MAISECRETS_DEBUG_LOG")
+
+
+def client_variables(environ=os.environ) -> list[str]:
+    """The names in ``environ`` that would change what the code under test does."""
+    return sorted(k for k in environ if k.startswith(CLIENT_PREFIXES) or k in CLIENT_NAMES)
+
+
+REMOVED = client_variables()
+for _name in REMOVED:
+    del os.environ[_name]
+
+if not os.environ.get(_MINE) or os.environ.get(_MINE) != os.environ.get("MAISECRETS_HOME"):
+    home = tempfile.mkdtemp(prefix="maisecrets-test-home-")
+    os.environ["MAISECRETS_HOME"] = home
+    os.environ[_MINE] = home
+
+if not os.environ.get(_MINE_TMP) or os.environ.get(_MINE_TMP) != os.environ.get("TMPDIR"):
+    tmp = tempfile.mkdtemp(prefix="maisecrets-test-tmp-")
+    os.environ["TMPDIR"] = tmp
+    os.environ[_MINE_TMP] = tmp
+TMP = os.environ["TMPDIR"]
+tempfile.tempdir = TMP
+# a shortcut test that forgets its own CLAUDE_CONFIG_DIR writes here, never into ~/.claude
+os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(TMP, "claude-config")
+
+# tripwires first on PATH, for this process and every child: a test that forgot to replace the
+# clipboard, the browser or the store reaches a script that notes the call and fails, not the
+# real tool. `_hygiene.state_problems` reports the note. The native store tools stay reachable
+# where the native backend test runs on purpose (CI, MAISECRETS_NATIVE_BACKEND_TEST=1).
+TRIPWIRE = os.path.join(TMP, "tripwire")
+TRIPWIRE_BIN = os.path.join(TMP, "tripwire-bin")
+if os.name != "nt":
+    _tools = ["pbcopy", "pbpaste", "xclip", "open", "xdg-open"]
+    if not (os.environ.get("CI") or os.environ.get("MAISECRETS_NATIVE_BACKEND_TEST") == "1"):
+        _tools += ["security", "powershell"]
+    os.makedirs(TRIPWIRE_BIN, exist_ok=True)
+    for _tool in _tools:
+        _path = os.path.join(TRIPWIRE_BIN, _tool)
+        with open(_path, "w", encoding="utf-8") as _f:
+            _f.write(f'#!/bin/sh\necho "{_tool} $*" >> "{TRIPWIRE}"\nexit 1\n')
+        os.chmod(_path, 0o755)
+    if not os.environ.get("PATH", "").startswith(TRIPWIRE_BIN + os.pathsep):
+        os.environ["PATH"] = TRIPWIRE_BIN + os.pathsep + os.environ.get("PATH", "")
+
+HOME = os.environ["MAISECRETS_HOME"]
+_REAL = os.path.realpath(os.path.expanduser("~/.maisecrets"))
+if os.path.realpath(HOME) == _REAL or os.path.realpath(HOME).startswith(_REAL + os.sep):
+    raise SystemExit(f"refusing to run tests against the real vault home {HOME}")

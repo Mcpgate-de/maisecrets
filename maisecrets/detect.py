@@ -80,13 +80,14 @@ class Rule:
     keywords: tuple[str, ...] = ()
     entropy: float = 0.0
     secret_group: int = 0
-    allow_regexes: tuple[tuple[re.Pattern[str], str], ...] = ()   # (pattern, target: match|line)
+    allow_regexes: tuple[tuple[re.Pattern[str], str], ...] = ()   # (pattern, target: secret|match|line)
     stopwords: tuple[str, ...] = ()
     validator: str | None = None
     score: float = 1.0                 # presidio pattern score; 1.0 = shape alone is enough
     context: tuple[str, ...] = ()      # presidio context words; a nearby one lifts a weak score
     require_context: bool = False      # weak shape: accept only with a context word nearby
     whole_match: bool = False          # presidio: the entity is the whole match, never a sub-group
+    quote_group: int = 0               # detect-secrets: group of the optional opening quote
 
 
 # ----------------------------------------------------------------- helpers --
@@ -229,6 +230,10 @@ def _de_vat_id_ok(v: str) -> bool:
 
 _DS_TEMPLATED = re.compile(r"^(\{\{.*\}\}|\$\{.*\}|<.*>|%.*%|\$[A-Za-z_][A-Za-z0-9_]*)$")
 _DS_INDIRECT = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*\s*(\(.*\)|\[.*\])$")
+# words joined by `.`, `_` or `-`, optionally ending where the regex cut the line (`:` of a
+# condition, `;` of a statement, `[` before a quoted key): `settings.API_KEY`, `self._password`,
+# `os.environ[`, `confirm_password:` were taken for values (false-positive corpus, 2026-09-27)
+_DS_REFERENCE = re.compile(r"_*[A-Za-z]+(?:[._-]+[A-Za-z]+)+_*[:;\[]?")
 
 
 def _ds_value_ok(v: str) -> bool:
@@ -238,6 +243,8 @@ def _ds_value_ok(v: str) -> bool:
         return False
     if _DS_TEMPLATED.match(v) or _DS_INDIRECT.match(v):
         return False
+    if re.match(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?![\w])", v):
+        return False   # a shell variable: $PASSWORD, ${DB_PASSWORD}
     if "(" in v or ")" in v or "`" in v or "|" in v:
         return False   # a call, an expression or markdown (`re.compile(r"…`, "`/maisecrets:report` |"), not a value
     if not any(c.isalnum() for c in v):
@@ -246,13 +253,15 @@ def _ds_value_ok(v: str) -> bool:
         return False   # a sentence or an i18n label ("Add API key"), not a value
     if " " in v and not any(c.isdigit() for c in v):
         return False   # two words of prose ("bad payload"), not a value
-    if not any(c.isdigit() for c in v) and re.fullmatch(r"[A-Za-z]+(?:[_-][A-Za-z]+)+", v):
-        return False   # an identifier: secret_value, from-secret, NAME_OF_SECRET
+    if not any(c.isdigit() for c in v) and _DS_REFERENCE.fullmatch(v):
+        return False   # an identifier or a reference to one: NAME_OF_SECRET, self._password, os.environ[
     low = v.lower()
     if low in {"password", "changeme", "placeholder", "example", "none", "null", "true", "false", "redacted"}:
         return False
-    # sequential or repeated strings (abcdef…, 123456…, aaaaaa…)
-    if len(set(low)) <= 2:
+    # sequential strings (abcdef…, 123456…) and one repeated character (********, xxxxxxxx);
+    # two distinct characters after a label are a value (`password:asasasas…`, field report,
+    # 2026-09-27: `<= 2` dropped it as filler)
+    if len(set(low)) <= 1:
         return False
     if all(ord(low[i + 1]) - ord(low[i]) == 1 for i in range(len(low) - 1)):
         return False
@@ -317,7 +326,8 @@ def _load_gitleaks() -> list[Rule]:
             allow: list[tuple[re.Pattern[str], str]] = []
             stop: list[str] = []
             for al in r.get("allowlists", []) or []:
-                target = al.get("regexTarget", "match")
+                # gitleaks: no regexTarget means the secret, "match" the whole match, "line" the line
+                target = al.get("regexTarget", "secret")
                 for arx in al.get("regexes", []) or []:
                     allow.append((_Lazy(_re2_to_python(arx)), target))
                 stop += [s.lower() for s in al.get("stopwords", []) or []]
@@ -381,22 +391,47 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
 # detect-secrets' denylist is English (plus Spanish contraseña). German labels are added at load
 # time so `passwort: …` is a credential too (measured 2026-09-26: `password:` hit, `passwort:` did not).
 GERMAN_KEYWORDS = ("passwort", "kennwort", "geheimnis", "schl(?:ü|ue)ssel", "zugangsdaten")
+# The two keyword rules whose quote is optional, and the group of that quote. Their value class
+# runs to the end of the line, spaces included, and the whole span was then judged: a password
+# followed by "and" and an address was rejected as prose, so the password reached the model
+# (field report, 2026-09-27). An unquoted value ends at the first whitespace; only a quoted one
+# holds spaces. A cut value that is one capitalised word ("secret: Developers, Webhooks, …",
+# "a secret: PostToolUse must …", both in this repository) is the start of a sentence.
+_DS_QUOTE_GROUP = {"ds-keyword-colon": 3, "ds-keyword-equal-signs": 4}
+_WHITESPACE_RE = re.compile(r"\s")
+_CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
+
+
+# labels people write that the detect-secrets denylist lacks: `pass:` and `token:` / `MY_TOKEN=`
+# (a generated matrix of 2,500 inputs missed 17 % on these two, 2026-09-27). Only at the start of
+# a word, so compass: and bypass: stay prose; MY_TOKEN keeps its underscore boundary.
+# The token exclusions follow gitleaks' own allowlist for generic-api-key (csrf_token,
+# public_token, token_file, token_url …): those name no secret.
+EXTRA_KEYWORDS = ("(?<![a-z])pass",
+                  "(?<![a-z])(?<!csrf_)(?<!csrf-)(?<!xsrf_)(?<!public_)(?<!page_)(?<!next_)token"
+                  "(?![_.-]?(?:file|url|uri|endpoint|type|count|limit|length|size|id|name)(?![a-z]))")
 
 
 def _load_detect_secrets() -> list[Rule]:
     data = json.loads((RULES_DIR / "detect_secrets.json").read_text(encoding="utf-8"))
-    kws = tuple(sorted({"key", "pass", "pwd", "secret", "contrase", "kennw", "geheim", "schl", "zugang"}))
+    kws = tuple(sorted({"key", "pass", "pwd", "secret", "contrase", "kennw", "geheim", "schl", "zugang", "token"}))
     denylist = "|".join(data["denylist"])
     out: list[Rule] = []
     for r in data["rules"]:
         flags = re.IGNORECASE if r.get("ignorecase") else 0
         # the product's own name carries "secret": `/maisecrets:shortcut` was stored as a secret
         # named "shortcut" (field report, 2026-09-27); "mai" + keyword is never a label
-        keywords = "(?<!mai)(" + denylist + "|" + "|".join(GERMAN_KEYWORDS) + ")"
+        keywords = "(?<!mai)(" + denylist + "|" + "|".join(GERMAN_KEYWORDS + EXTRA_KEYWORDS) + ")"
         regex = r["regex"].replace("(" + denylist + ")", keywords, 1)
+        # the vendored value group must start with a word character, so `$+4jJzBixvQD9#`,
+        # `@f6a-VtyEOYr!` and `-NA#C-X-gb4T%` were never values (2026-09-27); any first character
+        # a character a password starts with may start one (not {, [, (, \\, /, <: code and paths), and
+        # _ds_value_ok refuses a shell variable ($VAR, ${VAR}) as before
+        regex = regex.replace("(?=\\w+)", "(?=[\\w!#$%&*+\\-@^~?.])")
         out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(regex, flags),
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
-                        secret_group=int(r["group"]), validator="ds_value"))
+                        secret_group=int(r["group"]), validator="ds_value",
+                        quote_group=_DS_QUOTE_GROUP.get(r["id"], 0)))
     return out
 
 
@@ -498,9 +533,11 @@ def _windowed(rule: Rule, kw: re.Pattern, text: str):
         line_start = text.rfind("\n", 0, k.start()) + 1
         a = max(line_start, k.start() - 50)
         # the separators may hold several line breaks (`password for prod:` + blank line +
-        # value, review 2026-09-27): the window runs 8 lines past the keyword
+        # value, review 2026-09-27). The regex allows 3 whitespace characters before the separator
+        # and 5 after it, so the value can start after 8 line breaks: the window runs to the end
+        # of the 9th line (8 cut `password\n\n\n:\n\n\n\n\n<value>` off, differential test 2026-09-27)
         b = k.end()
-        for _ in range(8):
+        for _ in range(9):
             nxt = text.find("\n", b)
             if nxt < 0:
                 b = len(text)
@@ -584,7 +621,12 @@ def _allowed(rule: Rule, text: str, m: re.Match, secret: str) -> bool:
     if rule.stopwords and any(s in secret.lower() for s in rule.stopwords):
         return True
     for rx, target in rule.allow_regexes:
-        probe = _line_of(text, m.start(), m.end()) if target == "line" else secret
+        # "match" is the whole match: `keyboard = …`, `public_key: …`, `api_version = …` are allowed
+        # by their label, which the secret alone never shows (false-positive corpus, 2026-09-27)
+        if target == "line":
+            probe = _line_of(text, m.start(), m.end())
+        else:
+            probe = m.group(0) if target == "match" else secret
         if rx.search(probe):
             return True
     return False
@@ -620,6 +662,14 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if end <= start:
                 continue
             secret = m.group(g)
+            if rule.quote_group and not m.group(rule.quote_group):
+                cut = _WHITESPACE_RE.search(secret)
+                if cut:
+                    # the regex never ends a value on a comma; the cut keeps that rule
+                    secret = secret[:cut.start()].rstrip(",")
+                    end = start + len(secret)
+                    if _CAPITALISED_WORD_RE.fullmatch(secret):
+                        continue
             if any(s < end and start < e for s, e in taken):
                 continue
             if rule.entropy and shannon_entropy(secret) < rule.entropy:

@@ -6,5 +6,5 @@ runner = ["tests/test_gates.py::FailClosedTests::test_policy_keys_win_over_the_u
 
 [proof]
 file = "maisecrets/vault.py"
-find = "            cfg.update(policy)\n"
-replace = "            pass\n"
+find = "        cfg.update(policy)\n"
+replace = "        pass\n"

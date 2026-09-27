@@ -757,7 +757,9 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0) -> bool:
     on Codex inside a sandbox that may neither write the vault nor read the keychain (measured:
     resolve.py failed there and the command died); a FIFO in TMPDIR is readable from inside.
     The value lives in the child's memory, never on disk, and is gone after one read or after
-    ``seconds``. The value reaches the child on stdin, never as an argument."""
+    ``seconds``. The value reaches the child on stdin, never as an argument. A FIFO that is gone
+    (`_unserve`, `wipe`) ends the child at once: it retried the open for the full ``seconds``
+    with the value in its memory (suite review, 2026-09-27)."""
     code = (
         "import json,os,sys,time\n"
         "spec = json.load(sys.stdin)\n"
@@ -770,6 +772,8 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0) -> bool:
         "while time.time() < deadline and fd is None:\n"
         "    try:\n"
         "        fd = os.open(spec['fifo'], os.O_WRONLY | os.O_NONBLOCK)\n"
+        "    except FileNotFoundError:\n"
+        "        break\n"
         "    except OSError:\n"
         "        time.sleep(0.05)\n"
         "if fd is not None:\n"
@@ -1251,6 +1255,10 @@ def _candidates(token: str):
             for piece in _FINE_SPLIT_RE.split(dec):
                 if len(piece) >= _EXACT_MIN_LEN and piece != dec:
                     yield piece
+            # a value with an encoded separator (`?t=pa%40ss…`) splits apart once decoded
+            for piece in _FINE_SPLIT_RE.split(token):
+                if "%" in piece and unquote(piece) != piece:
+                    yield unquote(piece)
     if "\\" in token:
         try:
             dec = json.loads('"' + token + '"')
@@ -1357,13 +1365,33 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
             vault.admit(key, session)
             from .vault import Entry
             e = Entry.from_meta(vault._index["entries"][key])
-            n = out.count(cand)
-            out = out.replace(cand, e.ref)
+            # a URL-decoded or JSON-unescaped candidate is not in the text; its encoded form is
+            raw = cand if cand in out else _raw_form(token, cand)
+            n = out.count(raw)
+            out = out.replace(raw, e.ref)
             hit["n"] += n
             entries.append(e)
-            if values is not None and cand not in values:
-                values.append(cand)
+            if values is not None and raw not in values:
+                values.append(raw)
     return out
+
+
+def _raw_form(token: str, cand: str) -> str:
+    """The piece of ``token`` that decodes to ``cand`` (URL-encoded or JSON-escaped), shortest
+    first; the whole token when no piece does, so the encoded value never stays in the text."""
+    from urllib.parse import unquote
+    pieces = [token, token.rstrip(".,;:)")] + ([token.split("=", 1)[1]] if "=" in token else [])
+    pieces += _FINE_SPLIT_RE.split(token)
+    for p in sorted(dict.fromkeys(pieces), key=len):
+        if "%" in p and unquote(p) == cand:
+            return p
+        if "\\" in p:
+            try:
+                if json.loads('"' + p + '"') == cand:
+                    return p
+            except ValueError:
+                pass
+    return token
 
 
 def post_tool(payload: dict) -> dict:
@@ -1444,8 +1472,11 @@ def _has_live(cfg: dict) -> bool:
         try:
             idx = json.loads(INDEX.read_text(encoding="utf-8"))
             _live_cache["v"] = any(not m.get("purged") for m in idx.get("entries", {}).values())
-        except (OSError, ValueError):
+        except OSError:
             _live_cache["v"] = False
+        except ValueError:
+            # a damaged index is not an empty one: the vault opens and fails, the output is withheld
+            _live_cache["v"] = True
     return _live_cache["v"]
 
 
@@ -1546,6 +1577,10 @@ def main(argv: list[str]) -> int:
     try:
         payload = json.load(sys.stdin)
     except ValueError:
+        payload = None
+    if not isinstance(payload, dict):
+        # `null`, a list or a number parse but are no payload: the handler and then the
+        # fail-closed path raised, the process exited 1, and exit 1 lets the action through
         sys.stderr.write("maisecrets: bad payload\n")
         if event == "post-tool":
             # exit 2 is ignored here and the raw output would reach the model

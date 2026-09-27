@@ -1,5 +1,5 @@
-# c12-the-client-is-read-from-the-payload: the test owns the rule; this file names it and the mutation that must turn it red.
-belief = "c12-the-client-is-read-from-the-payload"
+# client-the-client-is-read-from-the-payload: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "client-the-client-is-read-from-the-payload"
 control = "client detection"
 statement = "A payload with prompt_id is Claude Code whatever the environment says; only a payload without a marker falls back to the environment."
 runner = ["tests/test_gates.py::ContextTests::test_client_is_read_from_the_payload_before_the_environment"]
