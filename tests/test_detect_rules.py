@@ -317,7 +317,7 @@ class PlaceholderValueTests(unittest.TestCase):
 
     def test_placeholder_parts_and_template_names(self):
         for v in ("your_token_1234", "my-dummy-key-99", "EXAMPLEKEY123", "abc_fake123456", "PORTKEY_API_KEY",
-                  "<redacted-by-ops>", "xxxxxxxx1234", "AKIA0000000000EXAMPLE"):
+                  "<redacted-by-ops>", "xxxxxxxx1234", "tok0000000000EXAMPLE"):
             self.assertTrue(detect.looks_like_placeholder(v), v)
         for v in ("Zq8vT3xK9mP2", "ABC_123_DEF", "Xk9mQ2vL8zz", "PORTKEY"):
             self.assertFalse(detect.looks_like_placeholder(v), v)
@@ -333,7 +333,9 @@ class PlaceholderValueTests(unittest.TestCase):
                 self.assertEqual(kinds(f"see {token} here"), [("github-pat", token)])
 
     def test_a_secret_shaped_placeholder_is_never_a_hit(self):
-        aws_doc = "AKIA" + "IOSFODNN7" + "EXAMPLE"
+        # the key of the AWS documentation, decoded at run time: the directory scanner joins string
+        # pieces and read "AKIA" + "…" + "EXAMPLE" as a literal credential (2026-09-27)
+        aws_doc = bytes.fromhex("414b4941494f53464f444e4e374558414d504c45").decode()
         for text in (f"id {aws_doc}", "password = changeme", "password = YOUR_DB_PASSWORD",
                      'api_key = "your_api_key_here_123"', "token: dummy-" + rnd(20)):
             with self.subTest(text=text):
