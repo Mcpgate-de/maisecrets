@@ -578,7 +578,6 @@ class GitleaksAllowlistTests(unittest.TestCase):
 
     V = "Zq8vT3xK9mP2wL7n"
 
-    @unittest.expectedFailure   # bug: a match allowlist sees only the secret, fixed in a later commit
     def test_a_match_allowlist_sees_the_label(self):
         for label in ("keyboard = ", "public_key: ", "api_version = ", "csrf_token: ", "key_alias: ", "access_id: ",
                       "author = "):

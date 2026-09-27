@@ -80,7 +80,7 @@ class Rule:
     keywords: tuple[str, ...] = ()
     entropy: float = 0.0
     secret_group: int = 0
-    allow_regexes: tuple[tuple[re.Pattern[str], str], ...] = ()   # (pattern, target: match|line)
+    allow_regexes: tuple[tuple[re.Pattern[str], str], ...] = ()   # (pattern, target: secret|match|line)
     stopwords: tuple[str, ...] = ()
     validator: str | None = None
     score: float = 1.0                 # presidio pattern score; 1.0 = shape alone is enough
@@ -324,7 +324,8 @@ def _load_gitleaks() -> list[Rule]:
             allow: list[tuple[re.Pattern[str], str]] = []
             stop: list[str] = []
             for al in r.get("allowlists", []) or []:
-                target = al.get("regexTarget", "match")
+                # gitleaks: no regexTarget means the secret, "match" the whole match, "line" the line
+                target = al.get("regexTarget", "secret")
                 for arx in al.get("regexes", []) or []:
                     allow.append((_Lazy(_re2_to_python(arx)), target))
                 stop += [s.lower() for s in al.get("stopwords", []) or []]
@@ -603,7 +604,12 @@ def _allowed(rule: Rule, text: str, m: re.Match, secret: str) -> bool:
     if rule.stopwords and any(s in secret.lower() for s in rule.stopwords):
         return True
     for rx, target in rule.allow_regexes:
-        probe = _line_of(text, m.start(), m.end()) if target == "line" else secret
+        # "match" is the whole match: `keyboard = …`, `public_key: …`, `api_version = …` are allowed
+        # by their label, which the secret alone never shows (false-positive corpus, 2026-09-27)
+        if target == "line":
+            probe = _line_of(text, m.start(), m.end())
+        else:
+            probe = m.group(0) if target == "match" else secret
         if rx.search(probe):
             return True
     return False
