@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.26] - 2026-09-27
+
+### Fixes
+
+- exact allowed-tools per command, a plugin icon, no environment token in the GitHub wait (6bbbaa3)
+
 ## [0.3.25] - 2026-09-27
 
 - `/maisecrets:shortcut --remove` takes the personal `/ms` away and keeps it away.
