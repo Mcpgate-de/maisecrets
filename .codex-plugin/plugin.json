@@ -19,7 +19,7 @@
   ],
   "interface": {
     "displayName": "maisecrets",
-    "shortDescription": "Keeps secrets and PII out of the cloud model",
+    "shortDescription": "Secrets and PII stay local",
     "longDescription": "A hook blocks a prompt that carries a secret or personal data, stores the value in a local vault with a TTL, and hands the model a placeholder. The placeholder resolves only where the real call happens: in the shell, in an MCP argument, in a file write. Tool output is redacted before it reaches the model. Nothing leaves the machine. Free and open source, by mcpgate.de.",
     "developerName": "mcpgate",
     "category": "Security",

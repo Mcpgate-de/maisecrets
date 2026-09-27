@@ -127,7 +127,8 @@ and OpenAI plugin directories.
   The icon rule is stated only by the portal's `ICON_MISSING` finding, not in the
   manifest reference: `icon` in plugin.json, or `.claude-plugin/icon.svg|png`, or
   `assets/icon.*`, square, at least 128 px; without one the publisher's GitHub
-  avatar is shown. The plugin sets all three; `icon` is the raw GitHub URL of
+  avatar is shown. The plugin sets `icon` and `assets/icon.*` but no
+  `.claude-plugin/icon.*`, which the portal showed ahead of the field; `icon` is the raw GitHub URL of
   `assets/icon.png` on `main`, because the portal's listing preview renders a URL
   and shows only a letter for a path inside the plugin. An upload of a zip to a
   claude.ai account shows a generic tile.

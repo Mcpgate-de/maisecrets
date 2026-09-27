@@ -158,7 +158,9 @@ class ListingManifestTests(unittest.TestCase):
         self.assertTrue(self.claude["icon"].startswith(prefix), self.claude["icon"])
         icon = ROOT / self.claude["icon"][len(prefix):]
         self.assertTrue(icon.is_file(), self.claude["icon"])
-        self.assertTrue((ROOT / ".claude-plugin/icon.svg").is_file())
+        # no .claude-plugin/icon.*: the portal showed that file ahead of the manifest URL and could
+        # not render it ("given as a path inside your plugin", 2026-09-27)
+        self.assertFalse(list((ROOT / ".claude-plugin").glob("icon.*")))
         self.assertTrue(list((ROOT / "assets").glob("icon.*")))
         w, h = self._png_size(icon)
         self.assertEqual(w, h, "square")
@@ -169,3 +171,4 @@ class ListingManifestTests(unittest.TestCase):
             self.assertTrue(rel.startswith("./"), rel)
             self.assertTrue((ROOT / rel).is_file(), rel)
         self.assertRegex(self.codex["interface"]["brandColor"], r"^#[0-9A-Fa-f]{6}$")
+        self.assertLessEqual(len(self.codex["interface"]["shortDescription"]), 30, "the OpenAI form allows 30")
