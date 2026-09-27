@@ -2,6 +2,55 @@
 
 ## Unreleased
 
+## [0.5.0] - 2026-09-27
+
+### Breaking
+
+- a breaking change of a silent type is listed under Breaking (ab8927d)
+
+### Features
+
+- pass and token are labels, a value may start with a symbol, the matrix is a gate; fix(ci): the repo scan checks each file and its own exit code (5168298)
+
+### Fixes
+
+- the skip gate accepts the native clipboard test (c681f9b)
+- clip gets UTF-16 without a byte order mark (c5658b7)
+- a placeholder word inside a random token is chance (daea5bb)
+- read the clipboard without a byte order mark (adf4b59)
+- the clipboard keeps ⟦ ⟧, and the tests never reach the real clipboard (990c45c)
+- the unit and beliefs jobs install procps for ps (77f10b6)
+- status closes the files it reads (5370e91)
+- repair never gives a new value the key of an old placeholder (0bf9d0a)
+- get refuses an entry past its expiry that the sweep has not purged (86bfca7)
+- a value-serving child ends when its FIFO is taken back (ba1197b)
+- a file store that refuses is reported, never a traceback (f96bead)
+- wipe --yes deletes hooks.log as the notice says (a967d0d)
+- a prefix-only IPv6 address no longer shows whole (b962e32)
+- a gitleaks "match" allowlist sees the whole match (8f9bbfb)
+- the keyword window ends one line too early (860ba9e)
+- two distinct characters after a label are a value (178ebb1)
+- an unquoted value after a label ends at the first whitespace (17603ad)
+- a dotted reference after a credential label is not a value (51dde31)
+- a store call that times out raises RuntimeError without the argv (d8f28f0)
+- a stored value that comes back URL-encoded or JSON-escaped is replaced (c36fdef)
+- a damaged vault index withholds the tool output instead of passing it raw (3e8e971)
+- a payload that is JSON but no object is blocked instead of let through (c23f154)
+- release the lock when the index read inside a mutation raises (de86fb5)
+- a policy file that is not one JSON object fails closed (9ebcd60)
+- CLI and session start print a traceback on a damaged index or a bad policy (5af6016)
+
+### Other
+
+- Merge branch 'fix/windows-tests' into 'main' (822d85f)
+- Merge branch 'test/broad-coverage' into 'main' (3927b78)
+- Merge branch 'worktree-agent-ad7d100b64b11e581' into test/broad-coverage (81b1370)
+- Merge branch 'test/detection-matrix' into test/broad-coverage (727462b)
+- Merge branch 'worktree-agent-a2b325182b96548dd' into test/broad-coverage (c0d7c5a)
+- Merge branch 'worktree-agent-a6a8b806dc28f22d5' into test/broad-coverage (ef51017)
+- Merge branch 'worktree-agent-ae2d480d350f472c4' into test/broad-coverage (ed8d1f3)
+- Merge branch 'worktree-agent-a596d168a13bf9617' into test/broad-coverage (d43d2c2)
+
 ## [0.4.2] - 2026-09-27
 
 - **The block notice is three lines:** what kind of thing was found, the one next step (⌘V or
