@@ -1,0 +1,10 @@
+# c18-ssh-gets-a-value-only-inside-the-sandbox: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c18-ssh-gets-a-value-only-inside-the-sandbox"
+control = "C18"
+statement = "A command that sends a value to ssh starts with a guard: outside the Claude Code sandbox, or with an open network, it stops with exit 97 before the value is read and before ssh runs."
+runner = ["tests/test_ssh_route.py::RewrittenCommandTests::test_outside_the_sandbox_the_command_stops_before_it_reads_the_value"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        prelude.insert(0, _sandbox_guard())\n"
+replace = ""

@@ -662,17 +662,20 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
     piped = False
     cur: list[str] = []
     heredoc = False
+    start = 0                       # offset of the first character of the current segment
 
     def flush(next_piped: bool) -> None:
         nonlocal cur, piped, heredoc
         text = "".join(cur).strip()
         if text:
-            segs.append({"text": text, "piped": piped, "heredoc": heredoc})
+            segs.append({"text": text, "piped": piped, "heredoc": heredoc, "start": start, "end": i})
         cur, piped, heredoc = [], next_piped, False
 
     i = 0
     while i < len(masked):
         ch = masked[i]
+        if not cur:
+            start = i
         if masked.startswith("<<", i) and not masked.startswith("<<<", i):
             heredoc = True
         if ch in ";\n()" :
@@ -750,6 +753,110 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
     if m:
         return f"the parameter expansion {m.group(0)}… would slice or rewrite the value"
     return None
+
+
+# ssh options that take an argument (OpenSSH 9)
+_SSH_ARG_FLAGS = set("BbcDEeFIiJLlmOoPpQRSWw")
+_SSH_REFUSED_OPTIONS = ("proxycommand", "proxyjump", "proxyusefdpass")
+
+
+def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) -> dict | str:
+    """The one way a value may reach ssh: on stdin, through the Claude Code sandbox, after the
+    user confirms. Returns the plan, or the reason the command is refused.
+
+    Two review rounds broke a host allowlist that read the destination from the command text (a
+    quoted -oProxyCommand after the host reached another host). The sandbox needs no such proof:
+    no command reaches the network directly, and its proxy admits only the allowed hosts
+    (measured 2026-09-27 on macOS and Debian 13: 200 for an allowed host, 403 for another). What
+    the sandbox cannot see is the remote side, which may pass the value on; so the user reads the
+    remote command and confirms. The value never sits in ssh's arguments, where the remote
+    shell would parse it as code."""
+    import shlex
+    segs = _segments(command, ctxs)
+    ssh_idx = [n for n, seg in enumerate(segs) if seg["cmd"] == "ssh"]
+    if len(ssh_idx) != 1:
+        return "only one ssh per command can take a value"
+    j = ssh_idx[0]
+    seg = segs[j]
+    if any(seg["start"] <= a < seg["end"] for _k, a, _b in refs):
+        return ("ssh would put the value into the remote command line, where the remote shell parses it; "
+                "pipe it in instead: printf '%s' ⟦KEY⟧ | ssh host 'grep -F -f - …'")
+    k = j
+    while k > 0 and segs[k]["piped"]:
+        k -= 1
+    if k == j:
+        return "the value reaches ssh only on stdin: printf '%s' ⟦KEY⟧ | ssh host '…'"
+    lo, hi = segs[k]["start"], segs[j - 1]["end"]
+    if any(not lo <= a < hi for _k, a, _b in refs):
+        return "every placeholder must sit in the commands that feed ssh on stdin"
+    blanked = command[:seg["start"]] + " " * (seg["end"] - seg["start"]) + command[seg["end"]:]
+    other = _refusal_for(blanked, _shell_contexts(blanked))
+    if other:
+        return other
+    try:
+        toks = shlex.split(command[seg["start"]:seg["end"]])
+    except ValueError:
+        return "the ssh command line cannot be read"
+    at = next((n for n, t in enumerate(toks) if os.path.basename(t) == "ssh"), None)
+    if at is None:
+        return "the ssh command line cannot be read"
+    i, opts = at + 1, []
+    while i < len(toks) and toks[i].startswith("-") and toks[i] != "--":
+        letters, i, took_next = toks[i][1:], i + 1, False
+        for n, c in enumerate(letters):
+            if c in _SSH_ARG_FLAGS:
+                val = letters[n + 1:]
+                if not val and i < len(toks):
+                    val, took_next = toks[i], True
+                opts.append((c, val))
+                break
+            opts.append((c, None))
+        if took_next:
+            i += 1
+    if i < len(toks) and toks[i] == "--":
+        i += 1
+    if i >= len(toks):
+        return "the ssh command names no host"
+    dest, remote = toks[i], toks[i + 1:]
+    # anywhere in the segment, also after the host: OpenSSH on Linux reads options there too (a quoted
+    # -oProxyCommand after the host broke the host allowlist of an earlier design, review 2026-09-27)
+    for c, val in opts:
+        if c in "JW":
+            return "ssh with its own proxy or jump host is refused; the sandbox route sets the proxy"
+    later = "".join(toks[at + 1:]).lower()
+    if any(o in later for o in _SSH_REFUSED_OPTIONS):
+        return "ssh with its own proxy or jump host is refused; the sandbox route sets the proxy"
+    try:
+        first = shlex.split(" ".join(remote))[:1]
+    except ValueError:
+        first = remote[:1]
+    if not first or os.path.basename(first[0]) in SHELLS | {"exec", "eval", "source", "."}:
+        return "the remote side would run the value as shell code; name the command that reads it, e.g. grep -F -f -"
+    # the ProxyCommand goes right after the ssh word: ssh uses the first value of an option
+    m = re.search(r"(?:^|(?<=[\s/]))ssh(?=\s|$)", command[seg["start"]:seg["end"]])
+    if not m:
+        return "the ssh command line cannot be read"
+    return {"insert_at": seg["start"] + m.end(), "dest": dest, "remote": " ".join(remote)}
+
+
+def _sandbox_guard(py: str | None = None) -> str:
+    """The first step of a command that sends a value over ssh: stop before the value is read
+    unless the command runs in the Claude Code sandbox. SANDBOX_RUNTIME=1 is set there, and a
+    direct TCP connection fails (macOS: not permitted; Linux: network unreachable). Outside the
+    sandbox the connection to 1.1.1.1:443 succeeds, and the command stops with exit 97."""
+    py = shlex_quote(py or sys.executable)
+    probe = ("import socket,sys; s=socket.socket(); s.settimeout(3); "
+             "sys.exit(0 if s.connect_ex((\"1.1.1.1\", 443)) else 1)")
+    return (f'{{ [ "${{SANDBOX_RUNTIME:-}}" = 1 ] && {py} -c {shlex_quote(probe)}; }} || '
+            '{ echo "maisecrets: this command sends a value over ssh and runs only inside the Claude Code '
+            'sandbox (sandbox.enabled with network.allowedDomains). The value was not read; the command '
+            'did not run." >&2; exit 97; }')
+
+
+def _proxy_option() -> str:
+    from pathlib import Path as _P
+    helper = _P(__file__).resolve().parent.parent / "hooks" / "proxy_connect.py"
+    return " -o " + shlex_quote(f"ProxyCommand={shlex_quote(sys.executable)} {shlex_quote(str(helper))} %h %p")
 
 
 def _resolver_call(key: str, nonce: str) -> str:
@@ -922,6 +1029,17 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                          "The command did not run. Pass the placeholder as a plain argument of the "
                          "command that needs it.")
     why = _refusal_for(command, ctxs)
+    ssh_plan, ssh_refused = None, False
+    if why == "ssh hands the command line to another shell" and not windows and client_of(payload) == "claude" \
+            and cfg.get("ssh_via_sandbox", True):
+        route = _ssh_route(command, ctxs, refs)
+        if isinstance(route, dict):
+            ssh_plan, why = route, None
+        else:
+            why, ssh_refused = route, True
+    if why and ssh_refused:
+        return _deny(f"maisecrets: {keys} is refused in this command: {why}. The command did not run. "
+                     "A value reaches ssh only on stdin, inside the Claude Code sandbox, after the user confirms.")
     if why:
         return _deny(f"maisecrets: {keys} is refused in this command: {why}. The command did not run. "
                      "Use the placeholder only as a plain argument of the tool that needs the value; "
@@ -994,8 +1112,21 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         else:
             piece = '"${' + var + '}"'
         rewritten = rewritten[:start] + piece + rewritten[end:]
+    if ssh_plan:
+        # the offset is before every placeholder (they all sit left of ssh), so it still holds
+        at = ssh_plan["insert_at"]
+        shift = len(rewritten) - len(command)
+        rewritten = rewritten[:at + shift] + _proxy_option() + rewritten[at + shift:]
+        prelude.insert(0, _sandbox_guard())
     new_input = dict(tool_input)
     new_input["command"] = "; ".join(prelude) + "; " + rewritten
+    if ssh_plan:
+        remote = ssh_plan["remote"]
+        return _ask(new_input, f"maisecrets: this command sends the value of {keys} on stdin to ssh "
+                               f"{ssh_plan['dest']}, which runs: {remote[:300]}. It runs only inside the Claude "
+                               "Code sandbox, so the connection reaches only a host your sandbox allows. The "
+                               "remote command can still pass the value on: allow it only if you trust that "
+                               "host and that command.")
     return _updated(payload, new_input)
 
 
