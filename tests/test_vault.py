@@ -209,6 +209,15 @@ class ConfigTests(unittest.TestCase):
                 with self.assertRaises(ConfigError):
                     vault.load_config()
 
+    def test_a_policy_that_is_not_one_json_object_fails_closed(self):
+        """A policy of `[...]` or `"..."` was valid JSON and was ignored without a word: the
+        administrator's keys vanished while an invalid-JSON policy refused to start."""
+        for text in ('["backend", "keychain"]', '"keychain"', "42", "null"):
+            with self.subTest(text):
+                self.policy.write_text(text, encoding="utf-8")
+                with self.assertRaisesRegex(ConfigError, "one JSON object"):
+                    vault.load_config()
+
     def test_no_file_can_raise_the_ttl_ceiling_above_30_days(self):
         self._user({"max_ttl_seconds": 90 * 86400})
         self.assertEqual(vault.load_config()["max_ttl_seconds"], 30 * 86400)
