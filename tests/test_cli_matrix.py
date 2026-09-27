@@ -1,0 +1,979 @@
+"""Every command through the real entry point, against every store state.
+
+0.4.0 shipped with /maisecrets:status and /maisecrets:list crashing as soon as one stored value
+had expired: 144 tests were green, because no test ran the commands against a store with an
+expired entry (field report, 2026-09-27). This module closes that class of gap:
+
+* a population test derives the command names from commands/*.md, hooks/dispatch.py and
+  cli.COMMANDS, and fails when a name has no run here;
+* a state matrix runs each command as `python3 hooks/dispatch.py <cmd>` in a fresh
+  MAISECRETS_HOME for each store state, and requires a defined exit code, no traceback and no
+  stored value in the output.
+
+Only generated values. The subprocess gets a temp HOME, a temp CLAUDE_CONFIG_DIR, a temp TMPDIR,
+no GIT_/CODEX_/CLAUDE_PLUGIN_OPTION_ variables, and fake pbcopy/pbpaste/xclip/open on PATH, so no
+run reads the real clipboard, opens a browser, or touches ~/.maisecrets, ~/.claude or ~/.codex.
+"""
+from __future__ import annotations
+
+import ast
+import json
+import os
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+from types import SimpleNamespace
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parent.parent
+DISPATCH = ROOT / "hooks" / "dispatch.py"
+RESOLVE = ROOT / "hooks" / "resolve.py"
+sys.path.insert(0, str(ROOT))
+# the in-process tests import maisecrets; its home is fixed at the first import and must be a
+# temp dir with the plaintext test store, never the keychain (same set-up as test_gates.py)
+os.environ.setdefault("MAISECRETS_HOME", tempfile.mkdtemp(prefix="maisecrets-matrix-home-"))
+Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
+Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
+VERSION = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+
+# a policy file lives in /Library or /etc; the subprocess gets the path through this wrapper,
+# which patches POLICY_PATHS and then runs dispatch.py as __main__ (the code has no env override)
+_POLICY_WRAPPER = (
+    "import platform, runpy, sys\n"
+    "from pathlib import Path\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "import maisecrets.vault as v\n"
+    "v.POLICY_PATHS[platform.system()] = Path(sys.argv[2])\n"
+    "sys.argv = [sys.argv[3]] + sys.argv[4:]\n"
+    "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+)
+
+_FAKE_TOOLS = {
+    "pbcopy": 'cat > "$MS_TEST_CLIP"\n',
+    "pbpaste": 'cat "$MS_TEST_CLIP" 2>/dev/null\n',
+    "xclip": 'case " $* " in *" -o "*) cat "$MS_TEST_CLIP" 2>/dev/null ;; *) cat > "$MS_TEST_CLIP" ;; esac\n',
+    "open": 'printf "%s\\n" "$*" >> "$MS_TEST_OPENED"\n',
+    "xdg-open": 'printf "%s\\n" "$*" >> "$MS_TEST_OPENED"\n',
+    # tripwires: a sandbox process must never reach the real keychain or Credential Locker (a
+    # run with a temp HOME opened a macOS "no keychain found" dialog on 2026-09-27)
+    "security": 'echo "security $*" >> "$MS_TEST_TRIPWIRE"; exit 1\n',
+    "powershell": 'echo "powershell $*" >> "$MS_TEST_TRIPWIRE"; exit 1\n',
+}
+_DROP_PREFIXES = ("GIT_", "CODEX_", "CLAUDE_PLUGIN_OPTION_", "MAISECRETS_")
+_DROP = {"CLAUDECODE", "CLAUDE_CONFIG_DIR", "XDG_RUNTIME_DIR", "CLAUDE_CODE_ENTRYPOINT"}
+
+
+def fake_value(prefix: str = "Fk") -> str:
+    """A generated value no rule and no person has ever seen."""
+    return prefix + secrets.token_hex(10)
+
+
+class Sandbox:
+    """One temp world: vault home, user home, tmp, fake tools, optional policy file."""
+
+    def __init__(self, config: dict | None = None, policy: object | None = None,
+                 backend: str = "encrypted-file") -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="maisecrets-matrix-"))
+        self.home = self.root / "ms"
+        self.user_home = self.root / "home"
+        self.bin = self.root / "bin"
+        for d in (self.home, self.user_home, self.bin, self.root / "tmp"):
+            d.mkdir(mode=0o700)
+        for name, body in _FAKE_TOOLS.items():
+            p = self.bin / name
+            p.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+            p.chmod(0o700)
+        self.clip = self.root / "clip"
+        self.opened = self.root / "opened"
+        self.policy: Path | None = None
+        self.values: list[str] = []
+        self.by_key: dict[str, str] = {}
+        # the backend is forced through the environment as well: a config file with a wrong type
+        # is ignored as a whole, and the default on macOS is the keychain
+        self.backend = backend
+        if config is not None:
+            (self.home / "config.json").write_text(json.dumps(config), encoding="utf-8")
+        if policy is not None:
+            self.policy = self.root / "policy.json"
+            self.policy.write_text(policy if isinstance(policy, str) else json.dumps(policy), encoding="utf-8")
+
+    def copy(self) -> "Sandbox":
+        """A fresh copy of this world, so a mutating command never sees another's result."""
+        new = Sandbox.__new__(Sandbox)
+        new.root = Path(tempfile.mkdtemp(prefix="maisecrets-matrix-"))
+        shutil.rmtree(new.root)
+        shutil.copytree(self.root, new.root, symlinks=True)
+        new.home, new.user_home, new.bin = new.root / "ms", new.root / "home", new.root / "bin"
+        new.clip, new.opened = new.root / "clip", new.root / "opened"
+        new.policy = (new.root / "policy.json") if self.policy else None
+        new.values = list(self.values)
+        new.by_key = dict(self.by_key)
+        new.backend = self.backend
+        return new
+
+    def env(self, **extra: str) -> dict:
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith(_DROP_PREFIXES) and k not in _DROP}
+        env.update({
+            "HOME": str(self.user_home), "USERPROFILE": str(self.user_home),
+            "MAISECRETS_HOME": str(self.home), "TMPDIR": str(self.root / "tmp"),
+            "CLAUDE_CONFIG_DIR": str(self.user_home / ".claude"),
+            "PATH": str(self.bin) + os.pathsep + env.get("PATH", ""),
+            "MS_TEST_CLIP": str(self.clip), "MS_TEST_OPENED": str(self.opened),
+            "MS_TEST_TRIPWIRE": str(self.root / "tripwire"), "CLAUDE_PLUGIN_OPTION_BACKEND": self.backend,
+            "CLAUDE_PLUGIN_ROOT": str(ROOT), "PYTHONUTF8": "1",
+        })
+        env.update(extra)
+        return env
+
+    def run(self, *args: str, stdin: str = "", env: dict | None = None,
+            script: Path = DISPATCH) -> subprocess.CompletedProcess:
+        if self.policy is not None and script == DISPATCH:
+            argv = [sys.executable, "-c", _POLICY_WRAPPER, str(ROOT), str(self.policy), str(script), *args]
+        else:
+            argv = [sys.executable, str(script), *args]
+        r = subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=60,
+                           env=env if env is not None else self.env())
+        trip = self.root / "tripwire"
+        if trip.exists():
+            raise AssertionError(f"a sandbox process called the platform store: {trip.read_text()}")
+        return r
+
+    # state helpers ---------------------------------------------------------
+    def index(self) -> dict:
+        return json.loads((self.home / "index.json").read_text(encoding="utf-8"))
+
+    def write_index(self, data: dict) -> None:
+        (self.home / "index.json").write_text(json.dumps(data), encoding="utf-8")
+
+    def put(self, type_: str = "SECRET") -> str:
+        """Store a generated value through `put` (stdin) and return its key."""
+        value = fake_value()
+        r = self.run("put", f"--type={type_}", stdin=value + "\n")
+        m = re.search(r"stored as (\w+) ", r.stdout)
+        if r.returncode != 0 or not m:
+            raise AssertionError(f"seed put failed: {r.returncode} {r.stdout} {r.stderr}")
+        self.values.append(value)
+        self.by_key[m.group(1)] = value
+        return m.group(1)
+
+    def block_prompt(self, session: str = "S1") -> str:
+        """A prompt with a labelled value through the real UserPromptSubmit hook: an entry, an
+        event and a pending prompt, as a person would leave them."""
+        value = fake_value("Pw")
+        r = self.run("user-prompt", stdin=json.dumps({"prompt": f"password: {value}", "session_id": session,
+                                                      "transcript_path": "", "prompt_id": "p1"}))
+        out = json.loads(r.stdout)
+        if out.get("decision") != "block":
+            raise AssertionError(f"seed prompt not blocked: {r.stdout} {r.stderr}")
+        self.values.append(value)
+        # the notice names no key since 0.4.2; the newest entry in the index is the one just stored
+        entries = self.index()["entries"]
+        newest = max(entries, key=lambda k: entries[k]["created"])
+        self.by_key[newest] = value
+        return value
+
+    def expire_all(self) -> None:
+        data = self.index()
+        for meta in data["entries"].values():
+            meta["expires"] = time.time() - 10
+        self.write_index(data)
+        r = self.run("expire")
+        if r.returncode != 0:
+            raise AssertionError(f"seed expire failed: {r.stdout} {r.stderr}")
+
+    def remove(self) -> None:
+        shutil.rmtree(self.root, ignore_errors=True)
+
+
+# ------------------------------------------------------------------ states --
+ENC = {"backend": "encrypted-file"}
+JSONFILE = {"backend": "jsonfile", "allow_plaintext_store": True}
+
+
+def _seed_live(sb: Sandbox) -> None:
+    sb.put()
+    sb.put("EMAIL")
+    sb.block_prompt()
+
+
+def _seed_expired(sb: Sandbox) -> None:
+    sb.put()
+    sb.expire_all()
+    if not all(m.get("purged") and m.get("purged_at") for m in sb.index()["entries"].values()):
+        raise AssertionError("seed: the entry is not purged")
+
+
+def _seed_old_purged(sb: Sandbox) -> None:
+    _seed_expired(sb)
+    data = sb.index()
+    for meta in data["entries"].values():
+        meta["purged_at"] = time.time() - 40 * 86400    # keep_purged_days is 30 by default
+    sb.write_index(data)
+
+
+def _seed_damaged(sb: Sandbox) -> None:
+    sb.put()
+    (sb.home / "index.json").write_text('{"entries": {', encoding="utf-8")
+
+
+# name -> (config.json, policy file, backend, seed, kind). The kind decides the expected exit
+# codes: "ok" works, "index" has an unreadable index, "config" has a configuration that does not load
+STATES = {
+    "empty": (ENC, None, "encrypted-file", lambda sb: None, "ok"),
+    "live": (ENC, None, "encrypted-file", _seed_live, "ok"),
+    "expired-purged": (ENC, None, "encrypted-file", _seed_expired, "ok"),
+    "purged-past-retention": (ENC, None, "encrypted-file", _seed_old_purged, "ok"),
+    "damaged-index": (ENC, None, "encrypted-file", _seed_damaged, "index"),
+    "config-wrong-type": ({"backend": "encrypted-file", "tips": "yes"}, None, "encrypted-file",
+                          lambda sb: sb.put(), "ok"),
+    "policy": (ENC, {"keep_purged_days": 3, "max_keys_per_session": 5}, "encrypted-file",
+               lambda sb: sb.put(), "ok"),
+    "policy-wrong-type": (ENC, {"keep_purged_days": "thirty"}, "encrypted-file", lambda sb: None, "config"),
+    "jsonfile": (JSONFILE, None, "jsonfile", _seed_live, "ok"),
+    "jsonfile-not-allowed": ({"backend": "jsonfile"}, None, "jsonfile", lambda sb: None, "config"),
+}
+
+# command -> invocations (args, stdin, expected exit code per state kind). A dict in a slot
+# overrides the code per state ("*" is the rest). KEY becomes the first seeded key; SCANVALUE
+# and PUTVALUE become fresh generated values.
+_K = "KEY"
+_ALL0 = {"ok": 0, "index": 0, "config": 0}
+_ALL2 = {"ok": 2, "index": 2, "config": 2}
+_STORE = {"ok": 0, "index": 1, "config": 1}
+MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
+    "list": [([], "", _STORE)],
+    "status": [([], "", _STORE)],
+    "audit": [([], "", _ALL0), (["3"], "", _ALL0), (["x"], "", _ALL2)],
+    "expire": [([], "", _STORE)],
+    "forget": [([_K], "", {"ok": {"empty": 1, "*": 0}, "index": 1, "config": 1}),
+               (["NOPE_c9"], "", {"ok": 1, "index": 1, "config": 1}),
+               ([], "", _ALL2)],
+    "wipe": [([], "", _ALL2), (["--yes"], "", {"ok": 0, "index": 0, "config": 1})],
+    "repair": [([], "", {"ok": 0, "index": 0, "config": 1})],
+    "report": [([], "", _ALL0), (["last", "a build id"], "", _ALL0), (["1"], "", _ALL0),
+               (["bug", "the notice is long"], "", _ALL0), (["feature", "ask first"], "", _ALL0)],
+    "config": [([], "", {"ok": 0, "index": 0, "config": 1})],
+    # the labels are assembled so the repo's own pre-commit scan does not take the fixtures for secrets
+    "scan": [(["pass" "word: SCANVALUE"], "", _ALL0), ([], "api" "_key=SCANVALUE", _ALL0)],
+    "get": [([_K], "", {"ok": {"live": 0, "jsonfile": 0, "config-wrong-type": 0, "policy": 0, "*": 1},
+                        "index": 1, "config": 1}),
+            ([], "", _ALL2)],
+    "put": [(["--type=SECRET"], "PUTVALUE", _STORE), (["--clipboard"], "", _STORE), ([], "", _ALL2)],
+    "shortcut": [([], "", _ALL0), (["--remove"], "", _ALL0)],
+    "pending": [([], "", _ALL0)],
+}
+
+_BASES: dict[str, Sandbox] = {}
+
+
+def base_state(name: str) -> Sandbox:
+    """The seeded world of one state, built once; every run works on a copy."""
+    if name not in _BASES:
+        config, policy, backend, seed, _kind = STATES[name]
+        sb = Sandbox(config, policy, backend)
+        seed(sb)
+        _BASES[name] = sb
+    return _BASES[name]
+
+
+def tearDownModule() -> None:  # noqa: N802 - unittest hook
+    for sb in _BASES.values():
+        sb.remove()
+
+
+def seeded_key(sb: Sandbox) -> str:
+    try:
+        keys = sorted(sb.index()["entries"])
+    except (OSError, ValueError):
+        keys = []
+    return keys[0] if keys else "SECRET_c1"
+
+
+def _expected(state: str, spec: dict) -> int:
+    want = spec[STATES[state][4]]
+    if isinstance(want, dict):
+        return want.get(state, want["*"])
+    return want
+
+
+def run_cell(state: str, command: str, args: list[str], stdin: str, spec: dict) -> list[str]:
+    """Run one command in one state; return the problems found (empty when the cell is right)."""
+    sb = base_state(state).copy()
+    try:
+        key = seeded_key(sb)
+        args = [key if a == _K else a for a in args]
+        fresh = {"SCANVALUE": fake_value("Sc"), "PUTVALUE": fake_value("Pt")}
+        for k, v in fresh.items():
+            args = [a.replace(k, v) for a in args]
+            stdin = stdin.replace(k, v)
+        clip_value = fake_value("Cl")      # what the user copied before the command ran
+        sb.clip.write_text(clip_value, encoding="utf-8")
+        r = sb.run(command, *args, stdin=stdin)
+        out = r.stdout + r.stderr
+        cell = f"{state}: {command} {' '.join(args)}"
+        problems = []
+        want = _expected(state, spec)
+        if r.returncode != want:
+            problems.append(f"{cell}: exit {r.returncode}, expected {want}: {out[-400:]!r}")
+        if "Traceback" in out:
+            problems.append(f"{cell}: printed a traceback: {out[-400:]!r}")
+        values = sb.values + list(fresh.values()) + [clip_value]
+        if command == "get" and r.returncode == 0:
+            # the one command that prints a value: exactly the value of the key asked for
+            if r.stdout != sb.by_key.get(key, "?") + "\n":
+                problems.append(f"{cell}: get did not print exactly the value of {key}")
+            values.remove(sb.by_key.get(key, "?")) if sb.by_key.get(key) in values else None
+        if any(v in out for v in values):
+            problems.append(f"{cell}: printed a value")
+        if command == "put" and r.returncode == 0:
+            clip = sb.clip.read_text(encoding="utf-8")
+            if any(v in clip for v in values) or "⟦" not in clip:
+                problems.append(f"{cell}: the clipboard holds {clip[:3]}..., not the reference")
+        return problems
+    finally:
+        sb.remove()
+
+
+def all_cells() -> list[tuple[str, str, list[str], str, dict]]:
+    return [(state, command, args, stdin, spec)
+            for state in STATES for command, invs in MATRIX.items() for args, stdin, spec in invs]
+
+
+# ------------------------------------------------------------ populations --
+def commands_in_markdown() -> dict[str, set[str]]:
+    """What each slash command runs: `bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" <cmd> ...`."""
+    return {md.name: set(re.findall(r'hooks/run\.sh"\s+([a-z][\w-]*)', md.read_text(encoding="utf-8")))
+            for md in sorted((ROOT / "commands").glob("*.md"))}
+
+
+def commands_in_dispatch() -> set[str]:
+    """Every string dispatch.py compares sys.argv[1] with, read from its syntax tree."""
+    tree = ast.parse(DISPATCH.read_text(encoding="utf-8"))
+    names = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare) or ast.unparse(node.left) != "sys.argv[1]":
+            continue
+        for comp in node.comparators:
+            for c in ast.walk(comp):
+                if isinstance(c, ast.Constant) and isinstance(c.value, str):
+                    names.add(c.value)
+    return names
+
+
+def cli_commands() -> set[str]:
+    from maisecrets import cli
+    return set(cli.COMMANDS)
+
+
+def hook_events() -> set[str]:
+    from maisecrets import hooks
+    return set(hooks.HANDLERS)
+
+
+class PopulationTests(unittest.TestCase):
+    def test_every_command_has_a_run_here(self):
+        """A new command in commands/*.md, dispatch.py, cli.COMMANDS or the hook handlers fails
+        this test until a test runs it through the real entry point."""
+        md = set().union(*commands_in_markdown().values())
+        derived = md | commands_in_dispatch() | cli_commands() | hook_events()
+        covered = set(MATRIX)
+        for cls in (SessionStartTests, HookEventTests, ResolveTests):
+            # a class that claims a command must name it in its own source
+            import inspect
+            src = inspect.getsource(cls)
+            for name in cls.RUNS:
+                self.assertIn(f'"{name}"', src, f"{cls.__name__} claims {name} but never names it")
+            covered |= cls.RUNS
+        self.assertEqual(sorted(derived - covered), [], "commands without a run in tests/test_cli_matrix.py")
+
+    def test_the_derivation_finds_a_command_in_every_slash_command(self):
+        found = commands_in_markdown()
+        self.assertGreaterEqual(len(found), 8)
+        for name, cmds in found.items():
+            self.assertTrue(cmds, f"commands/{name} names no run.sh command the test can see")
+        self.assertIn("session-start", commands_in_dispatch())
+        self.assertIn("pending", commands_in_dispatch())
+
+    def test_every_slash_command_runs_a_command_the_dispatcher_knows(self):
+        """A slash command whose name the dispatcher lacks falls through to the hook usage error."""
+        known = commands_in_dispatch()
+        for name, cmds in commands_in_markdown().items():
+            self.assertEqual(sorted(cmds - known), [], f"commands/{name}")
+
+    def test_every_cli_command_is_reachable_and_every_dispatched_one_exists(self):
+        dispatched = commands_in_dispatch() - {"pending", "session-start"}
+        self.assertEqual(sorted(dispatched - cli_commands()), [], "dispatch.py sends these to cli.main")
+        # resolve is reached through hooks/resolve.py, which the Bash hook writes into a command
+        self.assertEqual(sorted(cli_commands() - dispatched), ["resolve"])
+
+
+class StateMatrixTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        for name in STATES:        # seeded one after the other; the cells then run in parallel
+            base_state(name)
+
+    def test_every_command_in_every_store_state(self):
+        from concurrent.futures import ThreadPoolExecutor
+        cells = all_cells()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            problems = [p for ps in pool.map(lambda c: run_cell(*c), cells) for p in ps]
+        self.assertEqual(problems, [], f"{len(problems)} of {len(cells)} cells wrong:\n" + "\n".join(problems[:15]))
+
+    def test_the_states_hold_what_they_claim(self):
+        """A seed that silently failed would make every cell of its state vacuous."""
+        live = base_state("live").index()["entries"]
+        self.assertEqual(sorted(live), ["EMAIL_c1", "SECRET_c1", "SECRET_c2"])
+        self.assertFalse(any(m.get("purged") for m in live.values()))
+        (exp,) = base_state("expired-purged").index()["entries"].values()
+        self.assertTrue(exp["purged"] and exp["purged_at"])
+        (old,) = base_state("purged-past-retention").index()["entries"].values()
+        self.assertGreater(time.time() - old["purged_at"], 30 * 86400)
+        self.assertRaises(ValueError, base_state("damaged-index").index)
+        self.assertTrue((base_state("jsonfile").home / "vault.json").exists())
+        self.assertTrue((base_state("live").home / "vault.enc.json").exists())
+        self.assertTrue((base_state("live").home / "events.log").exists())
+
+    def _run(self, state: str, *args: str, stdin: str = "") -> tuple[Sandbox, subprocess.CompletedProcess]:
+        sb = base_state(state).copy()
+        self.addCleanup(sb.remove)
+        return sb, sb.run(*args, stdin=stdin)
+
+    def test_list_and_status_show_an_expired_entry_as_expired(self):
+        sb, r = self._run("expired-purged", "list")
+        self.assertIn("0 value(s) stored, 1 expired", r.stdout)
+        self.assertRegex(r.stdout, r"SECRET_c1\s+SECRET\s+manual\s+\S+\s+0\s+expired")
+        sb, r = self._run("expired-purged", "status")
+        self.assertIn("entries: 0 live, 1 expired (metadata kept 30 days)", r.stdout)
+
+    def test_metadata_past_keep_purged_days_is_deleted_by_the_next_read(self):
+        sb, r = self._run("purged-past-retention", "list")
+        self.assertEqual(r.stdout.strip(), "Nothing is stored.")
+        self.assertEqual(sb.index()["entries"], {})
+        self.assertEqual(sb.index()["by_fingerprint"], {})
+
+    def test_status_names_the_policy_keys_and_the_config_warning(self):
+        _sb, r = self._run("policy", "status")
+        self.assertIn("settings from a machine policy: keep_purged_days, max_keys_per_session", r.stdout)
+        self.assertIn("metadata kept 3 days", r.stdout)
+        _sb, r = self._run("config-wrong-type", "status")
+        self.assertIn("WARNING: config.json: tips has the wrong type; the file was ignored", r.stdout)
+        _sb, r = self._run("empty", "status")
+        self.assertIn("settings from a machine policy: none", r.stdout)
+        self.assertIn("encrypted file", r.stdout)
+
+    def test_the_test_store_says_so(self):
+        _sb, r = self._run("jsonfile", "list")
+        self.assertIn("backend: jsonfile (TEST MODE", r.stdout)
+        _sb, r = self._run("jsonfile", "status")
+        self.assertIn("PLAINTEXT file", r.stdout)
+        _sb, r = self._run("live", "list")
+        self.assertNotIn("TEST MODE", r.stdout)
+
+    def test_a_damaged_index_names_repair_and_repair_brings_the_store_back(self):
+        sb, r = self._run("damaged-index", "list")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("maisecrets repair", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        r = sb.run("repair")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("counters {'SECRET': 1}", r.stdout)
+        self.assertEqual(sb.run("list").stdout.strip(), "Nothing is stored.")
+        r = sb.run("put", stdin=fake_value())
+        self.assertIn("stored as SECRET_c2 ", r.stdout, "the counter continues past the old key")
+
+    def test_a_configuration_error_names_the_file_and_changes_nothing(self):
+        for state, where in (("policy-wrong-type", "policy.json: keep_purged_days has the wrong type"),
+                             ("jsonfile-not-allowed", "backend jsonfile is the TEST store")):
+            with self.subTest(state):
+                sb, r = self._run(state, "put", stdin=fake_value())
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("configuration error", r.stderr)
+                self.assertIn(where, r.stderr)
+                self.assertNotIn("Traceback", r.stderr)
+                self.assertFalse((sb.home / "index.json").exists())
+
+    def test_wipe_yes_deletes_values_index_and_logs_and_keeps_the_config(self):
+        sb, r = self._run("live", "wipe", "--yes")
+        self.assertIn("wiped: 4 stored value(s)", r.stdout)     # three values and the fingerprint key
+        for name in ("index.json", "events.log", "vault.enc.json", "key"):
+            self.assertFalse((sb.home / name).exists(), name)
+        self.assertTrue((sb.home / "config.json").exists())
+        self.assertEqual(sb.run("get", "SECRET_c1").returncode, 1)
+
+    def test_report_opens_a_link_that_names_the_rule_and_carries_no_value(self):
+        sb, r = self._run("live", "report", "last", "a build id")
+        self.assertIn("opened in the browser: https://github.com/Mcpgate-de/maisecrets/issues/new?", r.stdout)
+        opened = sb.opened.read_text(encoding="utf-8")
+        self.assertIn("ds-keyword-colon", opened)
+        self.assertIn("a+build+id", opened)
+        self.assertFalse(any(v in opened for v in sb.values))
+        _sb, r = self._run("live", "report")
+        self.assertRegex(r.stdout, r"1\s+\S+\s+UserPromptSubmit\s+claude\s+SECRET/ds-keyword-colon")
+
+    def test_put_from_the_clipboard_swaps_the_value_for_the_reference(self):
+        sb = base_state("empty").copy()
+        self.addCleanup(sb.remove)
+        value = fake_value("Cb")
+        sb.clip.write_text(value + "\n", encoding="utf-8")
+        r = sb.run("put", "--clipboard", "--type=email")
+        self.assertIn("stored as EMAIL_c1 (22 chars); reference ⟦EMAIL_c1⟧ is in the clipboard", r.stdout)
+        self.assertEqual(sb.clip.read_text(encoding="utf-8"), "⟦EMAIL_c1⟧")
+        self.assertEqual(sb.run("get", "EMAIL_c1").stdout, value + "\n")
+        sb.clip.write_text("", encoding="utf-8")
+        r = sb.run("put", "--clipboard")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no value", r.stderr)
+
+    def test_forget_deletes_the_value_and_the_placeholder_stops_resolving(self):
+        sb, r = self._run("live", "forget", "⟦SECRET_c1⟧", "EMAIL_c1:x")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual(r.stdout.count("deleted"), 2)
+        self.assertEqual(sorted(sb.index()["entries"]), ["SECRET_c2"])
+        self.assertIn("unknown", sb.run("get", "SECRET_c1").stderr)
+
+    def test_audit_prints_the_newest_rows_and_skips_malformed_ones(self):
+        sb = base_state("empty").copy()
+        self.addCleanup(sb.remove)
+        rows = [f"2026-09-27T10:00:0{i}\tS1\tSECRET_c{i}\tBash\techo ⟦SECRET_c{i}⟧" for i in range(1, 4)]
+        (sb.home / "audit.log").write_text("\n".join(rows[:2] + ["broken line"] + rows[2:]) + "\n", encoding="utf-8")
+        out = sb.run("audit", "2").stdout.splitlines()
+        self.assertEqual(out[0].split(), ["time", "session", "key", "tool", "context"])
+        self.assertEqual(len(out), 2, out)          # the header and the newest valid row
+        self.assertIn("SECRET_c3", out[1])
+
+    def test_shortcut_installs_under_the_config_dir_and_refuses_a_path_as_a_name(self):
+        sb = base_state("empty").copy()
+        self.addCleanup(sb.remove)
+        r = sb.run("shortcut", "../evil")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("installed /ms:", r.stdout)
+        commands = sb.user_home / ".claude" / "commands"
+        self.assertEqual(sorted(p.name for p in commands.iterdir()), ["ms.md"])
+        self.assertFalse((sb.user_home / ".claude" / "evil.md").exists())
+        self.assertEqual((sb.home / ".shortcut").read_text().strip(), "installed")
+        r = sb.run("shortcut", "--remove")
+        self.assertIn("ms.md", r.stdout)
+        self.assertFalse((commands / "ms.md").exists())
+        self.assertEqual((sb.home / ".shortcut").read_text().strip(), "removed")
+
+    def test_pending_hands_out_the_blocked_prompt_once(self):
+        sb, r = self._run("live", "pending")
+        self.assertEqual(r.stdout.strip(), "password: ⟦SECRET_c2⟧")
+        self.assertEqual(sb.run("pending").stdout.strip(), "(maisecrets: no blocked prompt is waiting)")
+
+    def test_scan_prints_positions_not_the_text(self):
+        value = fake_value("Sc")
+        _sb, r = self._run("empty", "scan", f"password: {value}")
+        self.assertRegex(r.stdout, r"^SECRET\s+\S+\s+at 10-32 \(len 22\)$")
+
+
+# ----------------------------------------------------------- session start --
+def _start(case: unittest.TestCase, sb: Sandbox, payload: object = None, stdin: str | None = None,
+           **env: str) -> dict:
+    text = stdin if stdin is not None else json.dumps(payload if payload is not None else {})
+    r = sb.run("session-start", stdin=text, env=sb.env(**env))
+    case.assertEqual(r.returncode, 0, r.stderr)
+    case.assertNotIn("Traceback", r.stdout + r.stderr)
+    return json.loads(r.stdout)
+
+
+class SessionStartTests(unittest.TestCase):
+    RUNS = {"session-start"}
+
+    def sandbox(self, config: dict | None = None, **kw) -> Sandbox:
+        sb = Sandbox(config if config is not None else ENC, **kw)
+        self.addCleanup(sb.remove)
+        return sb
+
+    def test_first_start_introduces_later_starts_rotate_a_tip_then_stay_short(self):
+        from maisecrets import hooks, tips
+        sb = self.sandbox()
+        out = _start(self, sb, CLAUDECODE="1")
+        msg = out["systemMessage"]
+        self.assertTrue(msg.startswith(f"maisecrets {VERSION} is on. It keeps passwords"), msg)
+        self.assertIn("in an encrypted file", msg)
+        self.assertIn("/maisecrets:status shows the details", msg)
+        self.assertTrue(msg.endswith(" Tip: /maisecrets:shortcut adds /ms as a short form of /maisecrets:send."))
+        self.assertEqual(out["hookSpecificOutput"], {"hookEventName": "SessionStart",
+                                                     "additionalContext": hooks.PRIMER})
+        self.assertEqual((sb.home / ".announced").read_text().strip(), "EncryptedFileBackend")
+        self.assertEqual((sb.home / ".shortcut").read_text().strip(), "offered")
+        self.assertFalse((sb.user_home / ".claude" / "commands").exists(), "the offer installs nothing")
+        second = _start(self, sb, CLAUDECODE="1")["systemMessage"]
+        self.assertEqual(second, f"maisecrets {VERSION} is on. {tips.TIPS[0]}")
+        third = _start(self, sb, CLAUDECODE="1")
+        self.assertEqual(third["systemMessage"], f"maisecrets {VERSION} is on.")
+        self.assertEqual(third["hookSpecificOutput"]["additionalContext"], hooks.PRIMER)
+
+    def test_the_tip_comes_from_the_pool_of_the_client(self):
+        from maisecrets import tips
+        for client, env, pool in (("claude", {"CLAUDECODE": "1"}, tips.TIPS),
+                                  ("codex", {"CODEX_THREAD_ID": "t1"}, tips.TIPS_CODEX)):
+            with self.subTest(client):
+                sb = self.sandbox()
+                (sb.home / ".announced").write_text("EncryptedFileBackend\n")
+                (sb.home / ".shortcut").write_text("offered\n")
+                (sb.home / ".tip").write_text("2000-01-01 1\n")
+                msg = _start(self, sb, **env)["systemMessage"]
+                self.assertEqual(msg, f"maisecrets {VERSION} is on. {pool[2]}")
+        self.assertNotEqual(tips.TIPS[2], tips.TIPS_CODEX[2], "the case above must tell the pools apart")
+
+    def test_codex_is_told_from_claude_code_by_transcript_then_claudecode_then_codex_vars(self):
+        cases = [
+            # (name, transcript path under the sandbox root or None, env, codex?)
+            ("rollout under CODEX_HOME although CLAUDECODE=1", "codex/sessions/r.jsonl",
+             {"CODEX_HOME": "codex", "CLAUDECODE": "1"}, True),
+            ("rollout under the default ~/.codex", "home/.codex/sessions/r.jsonl", {}, True),
+            ("Claude transcript although a CODEX_ variable is set", "home/.claude/projects/p/t.jsonl",
+             {"CODEX_THREAD_ID": "t1"}, False),
+            ("a sibling folder that only shares the prefix", "codex-other/r.jsonl", {"CODEX_HOME": "codex"}, False),
+            ("no transcript: CLAUDECODE=1 wins over a CODEX_ variable", None,
+             {"CLAUDECODE": "1", "CODEX_THREAD_ID": "t1"}, False),
+            ("no transcript: a CODEX_ variable", None, {"CODEX_THREAD_ID": "t1"}, True),
+            ("no transcript, no hint", None, {}, False),
+        ]
+        for name, transcript, env, codex in cases:
+            with self.subTest(name):
+                sb = self.sandbox()
+                env = {k: (str(sb.root / v) if k == "CODEX_HOME" else v) for k, v in env.items()}
+                payload = {"transcript_path": str(sb.root / transcript)} if transcript else {}
+                msg = _start(self, sb, payload, **env)["systemMessage"]
+                self.assertEqual("/maisecrets:" not in msg, codex, msg)
+                self.assertEqual((sb.home / ".shortcut").exists(), not codex)
+
+    def test_the_test_store_introduces_itself_at_every_start(self):
+        sb = self.sandbox(JSONFILE, backend="jsonfile")
+        for _ in range(2):
+            self.assertIn("in a PLAIN TEXT test file", _start(self, sb, CLAUDECODE="1")["systemMessage"])
+
+    def test_shortcut_false_in_the_config_means_no_offer(self):
+        sb = self.sandbox({"backend": "encrypted-file", "shortcut": False})
+        msg = _start(self, sb, CLAUDECODE="1")["systemMessage"]
+        self.assertNotIn("/maisecrets:shortcut", msg)
+        self.assertFalse((sb.home / ".shortcut").exists())
+
+    def test_a_config_warning_is_shown_and_a_config_error_blocks(self):
+        sb = self.sandbox({"backend": "encrypted-file", "colour": 1, "shortcut": False})
+        msg = _start(self, sb, CLAUDECODE="1")["systemMessage"]
+        self.assertTrue(msg.endswith(" Warning: config.json: unknown key(s) colour ignored."), msg)
+        sb = self.sandbox(policy={"keep_purged_days": "thirty"})
+        out = _start(self, sb, CLAUDECODE="1")
+        self.assertEqual(out, {"systemMessage": "maisecrets: configuration error: policy.json: keep_purged_days "
+                                                "has the wrong type. Every prompt is blocked until the file is fixed."})
+        self.assertFalse((sb.home / ".announced").exists())
+
+    def test_a_damaged_index_is_reported_at_session_start_not_crashed(self):
+        sb = self.sandbox()
+        (sb.home / "index.json").write_text('{"entries": {', encoding="utf-8")
+        out = _start(self, sb, CLAUDECODE="1")
+        self.assertIn("vault index unreadable", out["systemMessage"])
+        self.assertIn("maisecrets repair", out["systemMessage"])
+        self.assertEqual((sb.home / "index.json").read_text(), '{"entries": {', "the damaged file stays")
+
+    def test_a_payload_that_is_not_an_object_counts_as_empty(self):
+        for text in ("not json", "[1, 2]"):
+            with self.subTest(text):
+                sb = self.sandbox()
+                self.assertIn("is on. It keeps", _start(self, sb, stdin=text, CLAUDECODE="1")["systemMessage"])
+
+    def test_session_start_purges_every_expired_value(self):
+        sb = self.sandbox()
+        keys = [sb.put() for _ in range(3)]
+        sb.write_index({**sb.index(), "entries": {k: {**m, "expires": time.time() - 5}
+                                                  for k, m in sb.index()["entries"].items()}})
+        _start(self, sb, CLAUDECODE="1")
+        entries = sb.index()["entries"]
+        self.assertTrue(all(entries[k]["purged"] for k in keys))
+        stored = json.loads((sb.home / "vault.enc.json").read_text())
+        self.assertEqual(sorted(stored), ["_maisecrets_fpkey"])
+
+
+# -------------------------------------------------------------- hook events --
+class HookEventTests(unittest.TestCase):
+    RUNS = {"user-prompt", "pre-tool", "post-tool"}
+
+    def setUp(self):
+        self.sb = Sandbox(JSONFILE, backend="jsonfile")
+        self.addCleanup(self.sb.remove)
+
+    def test_user_prompt_blocks_and_records_an_event_without_the_value(self):
+        value = fake_value("Up")
+        r = self.sb.run("user-prompt", stdin=json.dumps({"prompt": f"password: {value}", "session_id": "S1",
+                                                         "transcript_path": "", "prompt_id": "p"}))
+        out = json.loads(r.stdout)
+        self.assertEqual(out["decision"], "block")
+        self.assertNotIn(value, r.stdout + r.stderr)
+        events = (self.sb.home / "events.log").read_text()
+        self.assertIn('"hook": "UserPromptSubmit"', events)
+        self.assertNotIn(value, events)
+        log = (self.sb.home / "hooks.log").read_text()
+        self.assertRegex(log, r"\tuser-prompt\tclaude\tS1\t-\tblock\t\d+ms\tok\n")
+
+    def test_pre_tool_and_post_tool_answer_through_the_dispatcher(self):
+        r = self.sb.run("pre-tool", stdin=json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"},
+                                                      "session_id": "S1", "prompt_id": "p"}))
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "{}"))
+        value = fake_value("Po")
+        r = self.sb.run("post-tool", stdin=json.dumps({"tool_name": "Bash", "session_id": "S1", "prompt_id": "p",
+                                                       "tool_response": {"stdout": f"api_key={value}"}}))
+        self.assertEqual(r.returncode, 0)
+        self.assertNotIn(value, r.stdout)
+        self.assertEqual(json.loads(r.stdout)["hookSpecificOutput"]["updatedToolOutput"],
+                         {"stdout": "api_key=⟦SECRET_c1⟧"})
+
+    def test_an_unknown_event_and_a_bad_payload_fail_closed(self):
+        for args in (("bogus",), ()):
+            r = self.sb.run(*args, stdin="{}")
+            self.assertEqual(r.returncode, 2, args)
+            self.assertIn("usage: dispatch.py", r.stderr)
+        r = self.sb.run("user-prompt", stdin="not json")
+        self.assertEqual(r.returncode, 2)
+        r = self.sb.run("post-tool", stdin="not json")
+        self.assertEqual(r.returncode, 0, "exit 2 is ignored after a tool; the answer must withhold instead")
+        self.assertIn("its output is withheld", json.loads(r.stdout)["hookSpecificOutput"]["updatedToolOutput"])
+
+
+# ------------------------------------------------------------------ resolve --
+_GRANT = ("import sys; sys.path.insert(0, sys.argv[1]); from maisecrets.vault import Vault; v = Vault(); "
+          "e = v.put(sys.stdin.read(), 'SECRET', 'manual', session='S1'); "
+          "n, st = v.grant(e.key, 'S1', 'Bash', 'echo ' + e.ref); print(e.key, n, st)")
+
+
+class ResolveTests(unittest.TestCase):
+    """hooks/resolve.py: the command the Bash hook writes in place of a placeholder on Windows."""
+    RUNS = {"resolve"}
+
+    def setUp(self):
+        self.sb = Sandbox(JSONFILE, backend="jsonfile")
+        self.addCleanup(self.sb.remove)
+        # quotes, a substitution, a backtick, a backslash, spaces and a newline
+        self.value = "pa$s'w\"ord`x $(echo no) y\\z\n" + fake_value("Rs")
+        r = subprocess.run([sys.executable, "-c", _GRANT, str(ROOT)], input=self.value, capture_output=True,
+                           text=True, env=self.sb.env(), timeout=60)
+        self.key, self.nonce, status = r.stdout.split()
+        self.assertEqual(status, "ok", r.stderr)
+
+    def resolve(self, *args: str) -> subprocess.CompletedProcess:
+        return self.sb.run(*args, script=RESOLVE)
+
+    def test_a_grant_reads_the_value_byte_for_byte_and_is_used_up(self):
+        for _ in range(3):
+            r = self.resolve(self.key, "--grant", self.nonce)
+            self.assertEqual((r.returncode, r.stdout), (0, self.value))
+        r = self.resolve(self.key, "--grant", self.nonce)
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.stdout, "")
+        self.assertIn(f"maisecrets resolve {self.key}: grant-used", r.stderr)
+        self.assertNotIn(self.value, r.stderr)
+
+    def test_a_wrong_nonce_a_wrong_key_or_bad_arguments_read_nothing(self):
+        for args, rc, word in (((self.key, "--grant", "x" * 22), 1, "no-grant"),
+                               (("EMAIL_c1", "--grant", self.nonce), 1, "no-grant"),
+                               ((self.key, self.nonce), 2, "usage"),
+                               ((self.key, "--nonce", self.nonce), 2, "usage"),
+                               ((), 2, "usage")):
+            with self.subTest(args=args):
+                r = self.resolve(*args)
+                self.assertEqual((r.returncode, r.stdout), (rc, ""))
+                self.assertIn(word, r.stderr)
+        self.assertEqual(self.resolve(self.key, "--grant", self.nonce).stdout, self.value, "the grant is intact")
+
+    def test_an_expired_grant_reads_nothing(self):
+        data = self.sb.index()
+        data["grants"][self.nonce]["expires"] = time.time() - 1
+        self.sb.write_index(data)
+        r = self.resolve(self.key, "--grant", self.nonce)
+        self.assertEqual((r.returncode, r.stdout), (1, ""))
+        self.assertIn("grant-expired", r.stderr)
+
+    def test_the_audit_names_the_grant_and_never_the_value(self):
+        r = self.sb.run("audit")
+        self.assertRegex(r.stdout, rf"\n\S+\s+S1\s+{self.key}\s+Bash\s+echo ⟦{self.key}⟧")
+        self.assertNotIn(self.value.split("\n")[1], (self.sb.home / "audit.log").read_text())
+
+
+# ------------------------------------------------------------------- events --
+class EventsTests(unittest.TestCase):
+    def setUp(self):
+        from maisecrets import events
+        self.events = events
+        self.dir = Path(tempfile.mkdtemp(prefix="maisecrets-events-"))
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        for name, val in (("EVENTS", self.dir / "events.log"), ("HOME", self.dir)):
+            p = mock.patch.object(events, name, val)
+            p.start()
+            self.addCleanup(p.stop)
+
+    @staticmethod
+    def hit(i: int = 1, **kw) -> SimpleNamespace:
+        base = {"key": f"SECRET_c{i}", "type": "SECRET", "kind": "gitlab-pat",
+                "value": fake_value("Ev"), "display": "glp…" + fake_value("Ds")}
+        return SimpleNamespace(**{**base, **kw})
+
+    def test_the_log_keeps_the_newest_KEEP_events(self):  # noqa: N802
+        ev = self.events
+        for i in range(ev.KEEP + 5):
+            ev.record("UserPromptSubmit", "claude", [self.hit(i)])
+        lines = ev.EVENTS.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), ev.KEEP)
+        self.assertEqual(json.loads(lines[0])["hits"][0]["key"], "SECRET_c5")
+        self.assertEqual(json.loads(lines[-1])["hits"][0]["key"], f"SECRET_c{ev.KEEP + 4}")
+
+    def test_an_event_holds_key_type_and_kind_and_never_the_value_or_its_display(self):
+        h = self.hit()
+        self.events.record("PostToolUse", "codex", [h])
+        text = self.events.EVENTS.read_text(encoding="utf-8")
+        self.assertNotIn(h.value, text)
+        self.assertNotIn(h.display, text)
+        ev = json.loads(text)
+        self.assertEqual(sorted(ev), ["client", "hits", "hook", "ts", "version"])
+        self.assertEqual(ev["hits"], [{"key": "SECRET_c1", "type": "SECRET", "kind": "gitlab-pat"}])
+        self.assertEqual((ev["hook"], ev["client"], ev["version"]), ("PostToolUse", "codex", VERSION))
+        self.assertEqual(self.events.EVENTS.stat().st_mode & 0o777, 0o600)
+
+    def test_no_hit_writes_nothing_and_an_unwritable_home_raises_nothing(self):
+        self.events.record("UserPromptSubmit", "claude", [])
+        self.assertFalse(self.events.EVENTS.exists())
+        blocker = self.dir / "file"
+        blocker.write_text("x")
+        with mock.patch.object(self.events, "HOME", blocker), \
+                mock.patch.object(self.events, "EVENTS", blocker / "events.log"):
+            self.events.record("UserPromptSubmit", "claude", [self.hit()])
+            self.assertEqual(self.events.load(), [])
+
+    def test_load_returns_the_last_n_and_skips_a_broken_line(self):
+        good = [json.dumps({"hits": [], "n": i}) for i in range(4)]
+        self.events.EVENTS.write_text("\n".join(good[:2] + ["{broken"] + good[2:]) + "\n", encoding="utf-8")
+        self.assertEqual([e["n"] for e in self.events.load(2)], [2, 3])
+        self.assertEqual([e["n"] for e in self.events.load()], [0, 1, 2, 3])
+
+    def test_issue_url_names_the_first_rule_and_says_how_to_describe_a_shape(self):
+        import urllib.parse
+        ev = {"ts": "2026-09-27T10:00:00", "hook": "UserPromptSubmit", "client": "claude", "version": "9.9.9",
+              "hits": [{"type": "SECRET", "kind": "gitlab-pat"}, {"type": "EMAIL", "kind": "email"}]}
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.events.issue_url(ev)).query)
+        self.assertEqual(q["title"], ["False positive: gitlab-pat (SECRET)"])
+        self.assertEqual(q["labels"], ["false-positive"])
+        body = q["body"][0]
+        self.assertIn("- hits: SECRET via `gitlab-pat`, EMAIL via `email`", body)
+        self.assertIn("- plugin version: 9.9.9", body)
+        self.assertIn("describe the shape of the text, not the value itself", body)
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.events.issue_url({}, "my note")).query)
+        self.assertEqual(q["title"], ["False positive: ? (?)"])
+        self.assertIn("my note", q["body"][0])
+
+    def test_a_bug_or_feature_link_without_text_asks_for_it(self):
+        import urllib.parse
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.events.generic_issue_url("bug", "  ")).query)
+        self.assertEqual(q["title"], ["Bug: (describe it)"])
+        self.assertIn("## What happened\n(describe it here)", q["body"][0])
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.events.generic_issue_url("feature", "x" * 90)).query)
+        self.assertEqual(q["title"], ["Feature: " + "x" * 70])
+        self.assertEqual(q["labels"], ["enhancement"])
+        self.assertIn(f"plugin version: {VERSION}", q["body"][0])
+
+    def test_plugin_version_reads_the_manifest_and_falls_back(self):
+        self.assertEqual(self.events.plugin_version(), VERSION)
+        with mock.patch("pathlib.Path.read_text", side_effect=OSError):
+            self.assertEqual(self.events.plugin_version(), "?")
+
+    def test_open_in_browser_uses_the_opener_of_each_platform(self):
+        url = "https://example.invalid/x"
+        for system, argv in (("Darwin", ["open", url]), ("Linux", ["xdg-open", url])):
+            with self.subTest(system), mock.patch.object(self.events.platform, "system", return_value=system), \
+                    mock.patch("subprocess.run") as run:
+                self.assertTrue(self.events.open_in_browser(url))
+                self.assertEqual(run.call_args.args[0], argv)
+        with mock.patch.object(self.events.platform, "system", return_value="Windows"), \
+                mock.patch.object(os, "startfile", create=True) as start:
+            self.assertTrue(self.events.open_in_browser(url))
+            start.assert_called_once_with(url)
+        with mock.patch.object(self.events.platform, "system", return_value="Linux"), \
+                mock.patch("subprocess.run", side_effect=OSError):
+            self.assertFalse(self.events.open_in_browser(url))
+
+
+# --------------------------------------------------------------------- tips --
+class TipsTests(unittest.TestCase):
+    def setUp(self):
+        from maisecrets import tips
+        self.tips = tips
+        self.dir = Path(tempfile.mkdtemp(prefix="maisecrets-tips-"))
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        for p in (mock.patch.object(tips, "HOME", self.dir), mock.patch.object(tips, "load_config", lambda: {})):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_codex_gets_a_tip_from_its_own_pool_and_no_slash_command(self):
+        (self.dir / ".tip").write_text("2000-01-01 1\n")
+        self.assertEqual(self.tips.tip_of_the_day(codex=True), self.tips.TIPS_CODEX[2])
+        for tip in self.tips.TIPS_CODEX:
+            self.assertNotIn("/maisecrets:", tip)
+
+    def test_the_rotation_wraps_and_a_damaged_state_starts_at_the_first_tip(self):
+        (self.dir / ".tip").write_text(f"2000-01-01 {len(self.tips.TIPS) - 1}\n")
+        self.assertEqual(self.tips.tip_of_the_day(), self.tips.TIPS[0])
+        self.assertEqual((self.dir / ".tip").read_text(), time.strftime("%Y-%m-%d") + " 0\n")
+        (self.dir / ".tip").write_text("garbage")
+        self.assertEqual(self.tips.tip_of_the_day(), self.tips.TIPS[0])
+
+    def test_an_unwritable_home_still_gives_the_tip(self):
+        blocker = self.dir / "file"
+        blocker.write_text("x")
+        with mock.patch.object(self.tips, "HOME", blocker):
+            self.assertEqual(self.tips.tip_of_the_day(), self.tips.TIPS[0])
+
+
+# ---------------------------------------------------------------- cli units --
+class CliUnitTests(unittest.TestCase):
+    def call(self, fn, *args):
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = fn(*args)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_main_answers_help_unknown_and_hook(self):
+        from maisecrets import cli
+        for argv in ([], ["-h"], ["--help"]):
+            rc, out, _ = self.call(cli.main, argv)
+            self.assertEqual(rc, 0)
+            self.assertIn("maisecrets status | list", out)
+        rc, _, err = self.call(cli.main, ["frobnicate"])
+        self.assertEqual((rc, err.strip()), (2, "unknown command frobnicate"))
+        rc, _, err = self.call(cli.main, ["hook", "bogus"])
+        self.assertEqual(rc, 2)
+        self.assertIn("usage: dispatch.py", err)
+
+    def test_age_is_minutes_then_hours_then_days(self):
+        from maisecrets.cli import _age
+        now = time.time()
+        self.assertEqual([_age(now - 120), _age(now - 7200), _age(now - 3 * 86400)], ["2m", "2h", "3d"])
+
+    def test_the_shortcut_never_overwrites_or_deletes_a_command_of_the_user(self):
+        from maisecrets import cli
+        cfg = Path(tempfile.mkdtemp(prefix="maisecrets-cfg-"))
+        self.addCleanup(shutil.rmtree, cfg, True)
+        own = cfg / "commands" / "ms.md"
+        own.parent.mkdir(parents=True)
+        own.write_text("my own command\n")
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(cfg)}):
+            self.assertIsNone(cli.install_shortcut(only_if_absent=True))
+            self.assertEqual(own.read_text(), "my own command\n")
+            removed = cli.remove_shortcut()
+        self.assertEqual(own.read_text(), "my own command\n")
+        self.assertNotIn(str(own), removed)
+
+
+if __name__ == "__main__":
+    unittest.main()
