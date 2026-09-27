@@ -341,6 +341,19 @@ class SkillZipTests(unittest.TestCase):
                 self.assertIn("SKILL.md", names, "the ChatGPT upload reads SKILL.md at the zip root")
                 self.assertIn("scripts/", names, "directory entries are written")
                 self.assertIn("scripts/maisecrets/detect.py", names)
+                # the default ZipInfo mode is 0600 without the directory bit: unzip made folders
+                # nobody could enter (found in a Codex test, 2026-09-27)
+                import stat
+                for info in z.infolist():
+                    mode = info.external_attr >> 16
+                    with self.subTest(info.filename):
+                        if info.filename.endswith("/"):
+                            self.assertTrue(stat.S_ISDIR(mode) and mode & 0o755 == 0o755, oct(mode))
+                        else:
+                            self.assertTrue(stat.S_ISREG(mode) and mode & 0o644 == 0o644, oct(mode))
+            if shutil.which("unzip"):
+                subprocess.run(["unzip", "-q", str(flat), "-d", str(work / "unzipped")], check=True)
+                self.assertTrue((work / "unzipped" / "scripts" / "maisecrets" / "rules" / "gitleaks.toml").is_file())
             out = mod.build(work / "secret-hygiene.zip")
             with zipfile.ZipFile(out) as z:
                 names = z.namelist()

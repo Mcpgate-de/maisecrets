@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -46,14 +47,22 @@ def build(out: Path, flat: bool = False) -> Path:
     rows = [(src, arc.split("/", 1)[1] if flat else arc) for src, arc in members()]
     dirs = sorted({"/".join(arc.split("/")[:i]) + "/" for _src, arc in rows for i in range(1, arc.count("/") + 1)})
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        # ZipInfo defaults to mode 0600 with no directory bit: unzip then made folders that nobody
+        # could enter, and the scripts could not read their rules (found in a Codex test,
+        # 2026-09-27). Folders are 0755 directories, a written file 0644
         for d in dirs:
-            z.writestr(zipfile.ZipInfo(d), "")
+            info = zipfile.ZipInfo(d)
+            info.external_attr = (0o40755 << 16) | 0x10
+            z.writestr(info, "")
         for src, arc in rows:
             if flat and arc == "SKILL.md":
                 # ChatGPT skills share one namespace and the skill stands alone there: it carries
                 # the brand. In the plugin Claude Code shows it as maisecrets:secret-hygiene.
                 text = src.read_text(encoding="utf-8")
-                z.writestr(arc, text.replace("\nname: secret-hygiene\n", f"\nname: {OPENAI_NAME}\n", 1))
+                info = zipfile.ZipInfo(arc, date_time=time.localtime(src.stat().st_mtime)[:6])
+                info.external_attr = 0o100644 << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                z.writestr(info, text.replace("\nname: secret-hygiene\n", f"\nname: {OPENAI_NAME}\n", 1))
                 continue
             z.write(src, arc)
     return out
