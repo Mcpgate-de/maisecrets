@@ -573,7 +573,7 @@ class LabelValueTests(unittest.TestCase):
             ("pass§wort: Sommer2026! bitte", [("SECRET", "Sommer2026!")]),
             ("api§_key=abc§123XYZdef extra words", [("SECRET", "abc" + "123XYZdef")]),
             ("pass§word = " + PW11 + ", user = bob", [("SECRET", PW11)]),
-            ("passwort:\nSommer2026! bitte schnell", [("SECRET", "Sommer2026!")]),
+            ("pass§wort:\nSommer2026! bitte schnell", [("SECRET", "Sommer2026!")]),
         ]:
             with self.subTest(text=text):
                 self.assertEqual([(m.type, m.value) for m in scan(text)], expected)
@@ -582,9 +582,9 @@ class LabelValueTests(unittest.TestCase):
         self.assertEqual(kinds('pass§word: "correct horse9"'), [("ds-keyword-colon", "correct horse9")])
         self.assertEqual(kinds("pass§word = 'correct horse9'"), [("ds-keyword-equal-signs", "correct horse9")])
         # the unquoted form ends at the space ("correct" alone is then too short for a value)
-        self.assertFalse([v for _, v in kinds("password: correct horse9") if " " in v])
+        self.assertFalse([v for _, v in kinds("pass§word: correct horse9") if " " in v])
         # a quoted phrase is judged whole, never cut at its first space
-        cut = [v for _, v in kinds('password: "correct horse battery"') if v in ("correct", "correct horse")]
+        cut = [v for _, v in kinds('pass§word: "correct horse battery"') if v in ("correct", "correct horse")]
         self.assertFalse(cut)
 
     def test_prose_after_a_label_is_still_not_a_value(self):
@@ -610,7 +610,7 @@ class LabelValueTests(unittest.TestCase):
 
     def test_one_repeated_character_is_filler(self):
         for text in ("password: ********", "password: xxxxxxxx", "secret: ........", "password: aaaaaaaaaa",
-                     "passwort: ZZZZZZZZZZZZ"):
+                     "pass§wort: ZZZZZZZZZZZZ"):
             with self.subTest(text=text):
                 self.assertEqual(kinds(text), [])
 
@@ -632,7 +632,7 @@ class GitleaksAllowlistTests(unittest.TestCase):
                 self.assertEqual([v for _, v in kinds(label + self.V)], [self.V])
 
     def test_a_secret_allowlist_still_sees_only_the_secret(self):
-        self.assertEqual(kinds("api_key = abcdefghijKLMNOPq"), [])       # letters only: `^[a-zA-Z_.-]+$`
+        self.assertEqual(kinds("api§_key = abcdefghijKLMNOPq"), [])       # letters only: `^[a-zA-Z_.-]+$`
 
 
 # ----------------------------------------------------------------- corpora --
