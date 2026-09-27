@@ -290,5 +290,102 @@ class RefusedWipeTests(unittest.TestCase):
         return str(sb.home)
 
 
+# loaded by every Python the hook starts (PYTHONPATH): each way out to the network writes the
+# tripwire and raises, so an attempt fails the test even when the hook swallowed the error
+_NET_TRIPWIRE = '''
+import os, socket, http.client, urllib.request
+
+def _trip(what):
+    def refuse(*a, **kw):
+        with open(os.environ["MS_TEST_TRIPWIRE"], "a") as f:
+            f.write("network: %s %r\\n" % (what, a[1:2] or a[:1]))
+        raise OSError("maisecrets test: no network")
+    return refuse
+
+socket.socket.connect = _trip("socket.connect")
+socket.socket.connect_ex = _trip("socket.connect_ex")
+socket.socket.sendto = _trip("socket.sendto")
+socket.create_connection = _trip("socket.create_connection")
+socket.getaddrinfo = _trip("socket.getaddrinfo")
+http.client.HTTPConnection.connect = _trip("http.client.connect")
+urllib.request.urlopen = _trip("urllib.request.urlopen")
+'''
+
+
+def _payloads(ref: str) -> list[tuple[str, dict]]:
+    """One payload per hook event, each one on the path that does the most work."""
+    value = fake_value("Nw")
+    return [
+        ("session-start", {"transcript_path": ""}),
+        ("user-prompt", {"prompt": f"password: {value}", "session_id": "S1", "prompt_id": "p1"}),
+        ("user-prompt", {"prompt": f"use {ref}", "session_id": "S1", "prompt_id": "p2"}),
+        ("pre-tool", {"tool_name": "Bash", "tool_input": {"command": f"printf %s {ref}"}, "session_id": "S1",
+                      "prompt_id": "p3"}),
+        ("pre-tool", {"tool_name": "mcp__srv__echo", "tool_input": {"token": ref}, "session_id": "S1",
+                      "prompt_id": "p4"}),
+        ("post-tool", {"tool_name": "Bash", "session_id": "S1", "prompt_id": "p5",
+                       "tool_response": {"stdout": f"api_key={fake_value('Po')}"}}),
+        ("post-tool", {"tool_name": "Bash", "session_id": "S1", "turn_id": "t", "model": "m",
+                       "tool_response": {"stdout": f"api_key={fake_value('Pc')}"}}),
+    ]
+
+
+class NoNetworkTests(unittest.TestCase):
+    """PRIVACY.md: no hook opens a network connection."""
+
+    def test_no_hook_entry_point_reaches_for_the_network_as_a_subprocess(self):
+        sb = Sandbox(JSONFILE, backend="jsonfile")
+        self.addCleanup(sb.remove)
+        site = sb.root / "site"
+        site.mkdir()
+        (site / "sitecustomize.py").write_text(_NET_TRIPWIRE, encoding="utf-8")
+        env = sb.env(PYTHONPATH=str(site))
+        # the tripwire itself must work, or a green run proves nothing
+        probe = subprocess.run([sys.executable, "-c", "import socket; socket.create_connection(('192.0.2.1', 9))"],
+                               env=env, capture_output=True, text=True, timeout=30)
+        self.assertIn("no network", probe.stderr)
+        (sb.root / "tripwire").unlink()
+        key = re.search(r"stored as (\w+) ", sb.run("put", stdin=fake_value("Rf"), env=env).stdout).group(1)
+        transcript = sb.root / "t.jsonl"
+        transcript.write_text("{}\n", encoding="utf-8")
+        for event, payload in _payloads(f"⟦{key}⟧"):
+            with self.subTest(event):
+                # Sandbox.run fails the test when the tripwire file exists
+                r = sb.run(event, stdin=json.dumps({**payload, "transcript_path": str(transcript)}), env=env)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertNotIn("Traceback", r.stderr)
+        r = sb.run(key, "--grant", "x" * 22, env=env, script=ROOT / "hooks" / "resolve.py")
+        self.assertIn("no-grant", r.stderr)
+
+    def test_no_hook_reaches_for_the_network_in_process(self):
+        import socket
+        import http.client
+        import urllib.request
+        from unittest import mock
+        from maisecrets import hooks
+        from maisecrets.vault import Vault
+        tried: list[str] = []
+
+        def refuse(what):
+            def f(*a, **kw):
+                tried.append(what)
+                raise OSError("no network")
+            return f
+        e = Vault().put(fake_value("Ip"), "SECRET", "manual", session="S1")
+        handlers = {"user-prompt": hooks.user_prompt, "pre-tool": hooks.pre_tool, "post-tool": hooks.post_tool}
+        with mock.patch.object(socket.socket, "connect", refuse("connect")), \
+                mock.patch.object(socket.socket, "connect_ex", refuse("connect_ex")), \
+                mock.patch.object(socket, "create_connection", refuse("create_connection")), \
+                mock.patch.object(socket, "getaddrinfo", refuse("getaddrinfo")), \
+                mock.patch.object(http.client.HTTPConnection, "connect", refuse("http")), \
+                mock.patch.object(urllib.request, "urlopen", refuse("urlopen")), \
+                mock.patch.object(hooks, "_clipboard", lambda text: False):
+            for event, payload in _payloads(e.ref):
+                if event in handlers:
+                    with self.subTest(event):
+                        self.assertIsInstance(handlers[event](dict(payload, transcript_path="")), dict)
+        self.assertEqual(tried, [])
+
+
 if __name__ == "__main__":
     unittest.main()
