@@ -256,8 +256,10 @@ def _ds_value_ok(v: str) -> bool:
     low = v.lower()
     if low in {"password", "changeme", "placeholder", "example", "none", "null", "true", "false", "redacted"}:
         return False
-    # sequential or repeated strings (abcdef…, 123456…, aaaaaa…)
-    if len(set(low)) <= 2:
+    # sequential strings (abcdef…, 123456…) and one repeated character (********, xxxxxxxx);
+    # two distinct characters after a label are a value (`password:asasasas…`, field report,
+    # 2026-09-27: `<= 2` dropped it as filler)
+    if len(set(low)) <= 1:
         return False
     if all(ord(low[i + 1]) - ord(low[i]) == 1 for i in range(len(low) - 1)):
         return False

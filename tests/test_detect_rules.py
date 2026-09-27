@@ -561,9 +561,8 @@ class LabelValueTests(unittest.TestCase):
         # at the end of the line nothing was cut: one word is still the value
         self.assertEqual(kinds("pass§wort: Sommerwiese"), [("ds-keyword-colon", "Sommerwiese")])
 
-    @unittest.expectedFailure   # bug: two distinct characters are filler, fixed in a later commit
     def test_two_distinct_characters_are_a_value(self):
-        for text, value in [("password:asasasasasasaasasasa", "asasasasasasaasasasa"),
+        for text, value in [("pass§word:asasasasasasaasasasa", "asasasasasasaasasasa"),
                             ("pass§wort: abababab12", "abababab12")]:
             with self.subTest(text=text):
                 self.assertEqual([m.value for m in scan(text)], [value])
