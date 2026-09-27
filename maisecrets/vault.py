@@ -47,7 +47,7 @@ DEFAULT_CONFIG = {
     "pii_regions": ["generic", "de"],
     "max_new_entries_per_result": 100,   # above this, a tool result is masked without storing more values
     "resolve_in_files": True,        # Write/Edit content resolves a placeholder like an MCP argument
-    "shortcut": True,                # SessionStart installs a personal /ms once (unless one exists)
+    "shortcut": True,                # the first SessionStart names /maisecrets:shortcut once; it installs nothing
     "keep_purged_days": 30,          # metadata of an expired entry is deleted after this many days
     "audit_max_lines": 2000,
 }
@@ -284,6 +284,21 @@ def describe_backend(backend) -> str:
     return (f"maisecrets vault: {where}. Metadata: {INDEX}. "
             f"To change it: write {{\"backend\": \"encrypted-file\"}} to {CONFIG} (takes effect on the next call). "
             "Free and open source, by mcpgate.de.")
+
+
+def intro_line(backend) -> str:
+    """The first session start, for a person: what maisecrets does and where values stay. The
+    paths, the backend switch and the file names are in /maisecrets:status (UX review,
+    2026-09-27: JSON and file paths at the first start told a non-developer to change a setting
+    their IT owns)."""
+    where = {
+        "KeychainBackend": "in the macOS Keychain",
+        "WindowsVaultBackend": "in the Windows Credential Locker",
+        "EncryptedFileBackend": "in an encrypted file",
+        "JsonFileBackend": "in a PLAIN TEXT test file (test mode, not for real secrets)",
+    }.get(type(backend).__name__, "in the local store")
+    return (f"It keeps passwords, keys and personal data out of the AI: a prompt that holds one is "
+            f"stopped, and the value stays on this computer, {where}.")
 
 
 FP_KEY_ENTRY = "_maisecrets_fpkey"   # backend key that holds the fingerprint key (32 random bytes, hex)

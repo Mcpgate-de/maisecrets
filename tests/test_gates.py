@@ -621,6 +621,7 @@ class RedactionTests(unittest.TestCase):
         text = json.dumps(out)
         self.assertNotIn(NASTY, text)
         self.assertEqual(out["hookSpecificOutput"]["updatedToolOutput"]["stdout"], f"PW={e.ref}\ngot:{e.ref}\n")
+        self.assertIn(f"replaced 2 value(s) in this Bash result before the AI saw it: {e.ref}", out["systemMessage"])
 
     def test_index_carries_no_reversible_fingerprint(self):
         import hashlib
@@ -700,38 +701,53 @@ class ShortcutTests(unittest.TestCase):
         self.assertIn("/0.3.10/hooks/run.sh pending", r.stdout.replace("\\", "/"), r.stderr)
         self.assertNotIn("$(", cmd.split("---")[2].split("\n")[1], "the ! line is a fixed path, never a substitution")
 
-    def test_session_start_installs_the_shortcut_once_and_keeps_a_users_own(self):
-        from unittest import mock
+    def test_session_start_offers_the_shortcut_once_and_installs_nothing(self):
+        """Writing ~/.claude/commands without a question was a change behind the user's back, and
+        Codex cannot use /ms (UX review, 2026-09-27): the session start only names the command."""
         cfg_dir = Path(tempfile.mkdtemp(prefix="maisecrets-cfg-"))
-        (cfg_dir / "commands").mkdir()
-        (cfg_dir / "commands" / "ms.md").write_text("# mine\n")
         marker = Path(_TMP, ".shortcut")
         marker.unlink(missing_ok=True)
-        env = {"CLAUDE_CONFIG_DIR": str(cfg_dir), "CLAUDE_PLUGIN_ROOT": str(ROOT)}
-        with mock.patch.dict(os.environ, env):
+        base = {k: v for k, v in os.environ.items() if not k.startswith("CODEX_")}
+        claude = {**base, "CLAUDE_CONFIG_DIR": str(cfg_dir), "CLAUDE_PLUGIN_ROOT": str(ROOT), "CLAUDECODE": "1"}
+
+        def start(env):
             r = subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "session-start"],
-                               input="{}", capture_output=True, text=True, env={**os.environ, **env})
-        self.assertEqual((cfg_dir / "commands" / "ms.md").read_text(), "# mine\n", "a user's own /ms stays")
-        self.assertEqual(marker.read_text().strip(), "kept")
-        (cfg_dir / "commands" / "ms.md").unlink()
+                               input="{}", capture_output=True, text=True, env=env)
+            return json.loads(r.stdout).get("systemMessage", "")
+        first = start(claude)
+        self.assertIn("/maisecrets:shortcut adds /ms", first)
+        self.assertFalse((cfg_dir / "commands" / "ms.md").exists(), "nothing is installed")
+        self.assertEqual(marker.read_text().strip(), "offered")
+        self.assertNotIn("/maisecrets:shortcut", start(claude), "offered once")
         marker.unlink()
-        with mock.patch.dict(os.environ, env):
-            r = subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "session-start"],
-                               input="{}", capture_output=True, text=True, env={**os.environ, **env})
-        self.assertIn("/ms", json.loads(r.stdout)["systemMessage"], r.stderr)
-        self.assertIn("ms.sh", (cfg_dir / "commands" / "ms.md").read_text())
-        self.assertEqual(marker.read_text().strip(), "installed")
-        # the way back: remove, and a later session start does not bring it back
+        codex = {k: v for k, v in claude.items() if k != "CLAUDECODE"}
+        codex["CODEX_HOME"] = str(cfg_dir)
+        msg = start(codex)
+        self.assertNotIn("/maisecrets:", msg, "Codex has no slash commands for plugins")
+        self.assertFalse(marker.exists())
+
+    def test_the_first_session_start_speaks_plainly(self):
+        Path(_TMP, ".announced").unlink(missing_ok=True)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CODEX_")}
+        env.update({"CLAUDE_PLUGIN_ROOT": str(ROOT), "CLAUDECODE": "1"})
+        r = subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "session-start"],
+                           input="{}", capture_output=True, text=True, env=env)
+        msg = json.loads(r.stdout)["systemMessage"]
+        self.assertIn("is on. It keeps passwords, keys and personal data out of the AI", msg)
+        for jargon in ("config.json", "Metadata:", '{"backend"', "mcpgate.de"):
+            self.assertNotIn(jargon, msg)
+
+    def test_shortcut_can_be_removed_and_stays_removed(self):
+        from unittest import mock
+        cfg_dir = Path(tempfile.mkdtemp(prefix="maisecrets-cfg-"))
+        env = {"CLAUDE_CONFIG_DIR": str(cfg_dir), "CLAUDE_PLUGIN_ROOT": str(ROOT)}
         from maisecrets import cli
         with mock.patch.dict(os.environ, env):
+            self.assertEqual(cli.cmd_shortcut([]), 0)
+            self.assertTrue((cfg_dir / "commands" / "ms.md").exists())
             self.assertEqual(cli.cmd_shortcut(["--remove"]), 0)
         self.assertFalse((cfg_dir / "commands" / "ms.md").exists())
-        self.assertFalse(Path(_TMP, "bin", "ms.sh").exists())
-        self.assertEqual(marker.read_text().strip(), "removed")
-        with mock.patch.dict(os.environ, env):
-            subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "session-start"],
-                           input="{}", capture_output=True, text=True, env={**os.environ, **env})
-        self.assertFalse((cfg_dir / "commands" / "ms.md").exists(), "removed stays removed")
+        self.assertEqual(Path(_TMP, ".shortcut").read_text().strip(), "removed")
 
 
 class ReportTests(unittest.TestCase):

@@ -29,10 +29,11 @@ import _detector  # noqa: E402
 
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".tox", "dist", "build", ".next",
              ".mypy_cache", ".pytest_cache", ".ruff_cache", "vendor", "target"}
-# generated files: large, rarely hand-written, full of hashes that look like keys
-SKIP_FILES = ("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock", "poetry.lock", "*.min.js",
-              "*.min.css", "*.map", "*.svg")
-MAX_BYTES = 2_000_000
+# no size limit and no list of "generated" files: a data dump, a log and a bundled script are
+# where leaks sit (a 2 MB limit dropped a JWT in a SQL dump; review, 2026-09-27). Only a file
+# that is binary (a NUL byte in its first 4 KiB) is passed over, and the report names it.
+SKIP_FILES: tuple = ()
+MAX_BYTES = 0      # 0: no limit; --max-mb sets one for a quick first look
 # rules that match a keyword next to a value, not a provider's token format: they can be noise
 GUESS_RULES = {"generic-api-key", "url-query-secret"}
 
@@ -55,20 +56,43 @@ class Ids:
         return self._ids[value]
 
 
-def _wanted(match, pii: bool) -> bool:
-    return pii or match.type == "SECRET"
+def _wanted_type(mtype: str, pii: bool) -> bool:
+    return pii or mtype == "SECRET"
 
 
-def _classify(detect, match) -> tuple[str, str]:
+def _classify(kind: str, inner: str | None) -> tuple[str, str]:
     """(rule, sure) where sure is 'shape' for a provider's token format and 'guess' for a keyword
     match. A keyword match whose value is itself a provider token (`TOKEN=ghp_…`) is named by the
     provider: the report then says which service to rotate (ops review, 2026-09-27)."""
-    if not _is_guess(match.kind):
-        return match.kind, "shape"
-    for inner in detect.scan(match.value):
-        if inner.type == "SECRET" and not _is_guess(inner.kind):
-            return inner.kind, "shape"
-    return match.kind, "guess"
+    if not _is_guess(kind):
+        return kind, "shape"
+    if inner and not _is_guess(inner):
+        return inner, "shape"
+    return kind, "guess"
+
+
+PARALLEL_BYTES = 1_000_000   # below this the scan stays in one process: starting workers costs more
+SPLIT_BYTES = 2_000_000      # a file above this is scanned in pieces on several cores (no content is skipped)
+
+
+def run_jobs(jobs, total_bytes: int):
+    """Yield (tag, matches) for every job (tag, text), in job order, on every core when there is
+    enough text to be worth it."""
+    if total_bytes < PARALLEL_BYTES:
+        _detector._worker_init(ENABLED)
+        for job in jobs:
+            yield _detector.worker_scan(job)
+        return
+    import os
+    with _detector.pool(ENABLED) as ex:
+        window = 4 * (os.cpu_count() or 2)
+        pending = []
+        for job in jobs:
+            pending.append(ex.submit(_detector.worker_scan, job))
+            if len(pending) >= window:
+                yield pending.pop(0).result()
+        for f in pending:
+            yield f.result()
 
 
 def _files(paths: list[Path]):
@@ -84,12 +108,11 @@ def _files(paths: list[Path]):
 
 
 def _read(path: Path) -> str | None:
+    """The text of a file, "" when it cannot be read, None when it is binary."""
     try:
-        if path.stat().st_size > MAX_BYTES:
-            return None
         raw = path.read_bytes()
     except OSError:
-        return None
+        return ""
     if b"\x00" in raw[:4096]:
         return None
     return raw.decode("utf-8", errors="replace")
@@ -112,33 +135,68 @@ def _tracked(cwd: Path) -> set[str] | None:
     return {str((root / p).resolve()) for p in r.stdout.decode(errors="replace").split("\0") if p}
 
 
-SKIPPED: list[str] = []      # files and file changes over MAX_BYTES; the report names them
+ENABLED: set | None = None   # the rule ids that run; None runs every rule (--pii)
+SKIPPED: list[str] = []      # files and file changes over --max-mb; the report names them
+BINARY: list[str] = []       # binary files, passed over; the report counts them
 
 
 def scan_tree(detect, paths: list[Path], ids: Ids, pii: bool) -> list[dict]:
     tracked = _tracked(paths[0] if paths[0].is_dir() else paths[0].parent)
-    out = []
+    files, total = [], 0
     for path in _files(paths):
         try:
-            if path.stat().st_size > MAX_BYTES:
-                SKIPPED.append(str(path))
-                continue
+            size = path.stat().st_size
         except OSError:
             continue
-        text = _read(path)
-        if not text:
+        if MAX_BYTES and size > MAX_BYTES:
+            SKIPPED.append(str(path))
             continue
+        files.append(path)
+        total += size
+
+    def jobs():
+        for path in files:
+            text = _read(path)
+            if text is None:
+                BINARY.append(str(path))
+                continue
+            if not text:
+                continue
+            if len(text) <= SPLIT_BYTES:
+                yield (str(path), 0), text
+                continue
+            # a large file goes to several cores in overlapping line pieces
+            lines = text.split("\n")
+            offs = [0]
+            for line in lines:
+                offs.append(offs[-1] + len(line) + 1)
+            step = max(1, len(lines) * SPLIT_BYTES // len(text))
+            i = 0
+            while i < len(lines):
+                j = min(len(lines), i + step)
+                yield (str(path), offs[i]), text[offs[i]:offs[j] - 1 if j < len(lines) else len(text)]
+                if j >= len(lines):
+                    break
+                i = j - _detector.CHUNK_OVERLAP
+    out = []
+    by_path: dict[str, dict] = {}
+    for (tag, base), found in run_jobs(jobs(), total):
+        for start, end, mtype, kind, value, inner in found:
+            by_path.setdefault(tag, {})[(start + base, end + base)] = (mtype, kind, value, inner)
+    for tag in [str(p) for p in files if str(p) in by_path]:
+        path = Path(tag)
+        text = _read(path) or ""
         starts = _detector.line_starts(text)
-        for m in detect.scan(text):
-            if not _wanted(m, pii):
+        for (start, _end), (mtype, kind, value, inner) in sorted(by_path[tag].items()):
+            if not _wanted_type(mtype, pii):
                 continue
             if tracked is None:
                 state = "no git"
             else:
                 state = "tracked" if str(path.resolve()) in tracked else "untracked"
-            rule, sure = _classify(detect, m)
-            out.append({"id": ids.of(m.value), "where": f"{path}:{_detector.line_of(starts, m.start)}",
-                        "type": m.type, "rule": rule, "sure": sure, "len": len(m.value), "git": state})
+            rule, sure = _classify(kind, inner)
+            out.append({"id": ids.of(value), "where": f"{path}:{_detector.line_of(starts, start)}",
+                        "type": mtype, "rule": rule, "sure": sure, "len": len(value), "git": state})
     return out
 
 
@@ -160,67 +218,61 @@ class Pushed:
         return self._cache[commit]
 
 
+BATCH = 150   # commits per worker job
+
+
 def scan_history(detect, cwd: Path, ids: Ids, pii: bool, max_commits: int) -> tuple[list[dict], int, int]:
     """Added lines of every commit on every ref, newest first. One row per value and file: the
     newest commit that added it, its date and author, whether it was pushed, and how many commits
-    added it. Returns (rows, commits scanned, commits in total)."""
-    total = int(_git(cwd, "rev-list", "--all", "--count").stdout.decode().strip() or 0)
-    r = _git(cwd, "log", "-p", "--all", "--no-color", "--no-ext-diff", "-U0", f"--max-count={max_commits}",
-             "--date=short", "--format=commit %h %ad %an")
-    if r.returncode != 0:
-        raise RuntimeError("git log failed")
+    added it. Each worker runs git log for its own batch of commits. Returns (rows, commits
+    scanned, commits in total)."""
+    listed = _git(cwd, "rev-list", "--all")
+    if listed.returncode != 0:
+        raise RuntimeError("git rev-list failed")
+    shas = listed.stdout.decode().split()
+    total = len(shas)
+    if max_commits:
+        shas = shas[:max_commits]
     pushed = Pushed(cwd)
     seen: dict[tuple[str, str], dict] = {}
-    commit, date, author, path, lines = "", "", "", "", []
-    scanned = 0
+    # small batches on a short history: one commit with a data dump must not hold a whole
+    # batch on one core while the others wait (217 commits took 50 s in two batches of 150)
+    batch = max(1, min(BATCH, len(shas) // (8 * (os.cpu_count() or 2)) or 1))
+    jobs = [(i, str(cwd), shas[i:i + batch], MAX_BYTES) for i in range(0, len(shas), batch)]
 
-    def flush():
-        if not lines or _skipped(os.path.basename(path)):
-            lines.clear()
+    def results():
+        if len(shas) <= 20:
+            _detector._worker_init(ENABLED)
+            for job in jobs:
+                yield _detector.worker_history(job)
             return
-        text = "\n".join(t for _, t in lines)
-        if len(text) > MAX_BYTES:
-            # a data dump in one commit made a 217-commit history take 71 s (2026-09-27); the
-            # same size limit as for a file in the tree, and the report names what it skipped
-            SKIPPED.append(f"{path} in commit {commit}")
-            lines.clear()
-            return
-        starts = _detector.line_starts(text)
-        for m in detect.scan(text):
-            if not _wanted(m, pii):
+        import os
+        with _detector.pool(ENABLED) as ex:
+            window = 2 * (os.cpu_count() or 2)
+            pending = []
+            for job in jobs:
+                pending.append(ex.submit(_detector.worker_history, job))
+                if len(pending) >= window:
+                    yield pending.pop(0).result()
+            for f in pending:
+                yield f.result()
+    for _idx, rows, skipped, rc in results():
+        if rc != 0:
+            raise RuntimeError("git log failed")
+        SKIPPED.extend(skipped)
+        for c, d, a, p, lineno, mtype, kind, value, inner in rows:
+            if not _wanted_type(mtype, pii):
                 continue
-            key = (ids.of(m.value), path)
+            key = (ids.of(value), p)
             if key in seen:
                 seen[key]["commits"] += 1
-                seen[key]["first"] = date
+                seen[key]["first"] = d
                 continue
-            lineno = lines[_detector.line_of(starts, m.start) - 1][0]
-            rule, sure = _classify(detect, m)
-            seen[key] = {"id": key[0], "where": f"{path}:{lineno}", "commit": commit, "date": date,
-                         "first": date, "author": author, "pushed": pushed.of(commit), "type": m.type,
-                         "rule": rule, "sure": sure, "len": len(m.value), "commits": 1}
-        lines.clear()
-
-    new_line = 0
-    for raw in r.stdout.decode("utf-8", errors="replace").splitlines():
-        if raw.startswith("commit "):
-            flush()
-            scanned += 1
-            parts = raw.split(" ", 3)
-            commit, date, author = parts[1], parts[2] if len(parts) > 2 else "", parts[3] if len(parts) > 3 else ""
-        elif raw.startswith("+++ "):
-            flush()
-            path = raw[6:] if raw.startswith("+++ b/") else raw[4:]
-        elif raw.startswith("@@"):
-            try:
-                new_line = int(raw.split("+", 1)[1].split(",")[0].split(" ")[0])
-            except (IndexError, ValueError):
-                new_line = 0
-        elif raw.startswith("+") and not raw.startswith("+++"):
-            lines.append((new_line, raw[1:]))
-            new_line += 1
-    flush()
-    return list(seen.values()), scanned, total
+            rule, sure = _classify(kind, inner)
+            seen[key] = {"id": key[0], "where": f"{p}:{lineno}", "commit": c, "date": d,
+                         "first": d, "author": a, "pushed": pushed.of(c), "type": mtype,
+                         "rule": rule, "sure": sure, "len": len(value), "commits": 1}
+    return list(seen.values()), len(shas), total
 
 
 def report(tree: list[dict], hist: list[dict] | None, history_note: str) -> list[str]:
@@ -244,7 +296,9 @@ def report(tree: list[dict], hist: list[dict] | None, history_note: str) -> list
     if SKIPPED:
         mb = f"{MAX_BYTES / 1_000_000:g}"
         shown = "; ".join(SKIPPED[:5]) + (f"; and {len(SKIPPED) - 5} more" if len(SKIPPED) > 5 else "")
-        out.append(f"NOT scanned, larger than {mb} MB (raise with --max-mb): {shown}.")
+        out.append(f"NOT scanned, larger than {mb} MB (--max-mb): {shown}.")
+    if BINARY:
+        out.append(f"Passed over {len(BINARY)} binary file(s) in the working tree.")
     rows = tree + (hist or [])
     ids = {f["id"] for f in rows}
     sure = Counter(f["sure"] for f in {f["id"]: f for f in rows}.values())
@@ -262,15 +316,17 @@ def main(argv: list[str]) -> int:
     ap.add_argument("paths", nargs="*", default=["."])
     ap.add_argument("--history", action="store_true", help="also scan every commit on every ref")
     ap.add_argument("--pii", action="store_true", help="also list personal data (e-mail, IBAN, phone ...)")
-    ap.add_argument("--max-commits", type=int, default=5000)
+    ap.add_argument("--max-commits", type=int, default=0, help="scan only the newest N commits (default: all)")
     ap.add_argument("--out", help="write the full report to this file and print only the summary")
-    ap.add_argument("--max-mb", type=float, default=2.0,
-                    help="skip a file, or a file change in one commit, larger than this (default 2); "
-                         "the report names every skip")
+    ap.add_argument("--max-mb", type=float, default=0,
+                    help="skip a file, or a file change in one commit, larger than this, for a quick first "
+                         "look (default: no limit); the report names every skip")
     args = ap.parse_args(argv)
     global MAX_BYTES
     MAX_BYTES = int(args.max_mb * 1_000_000)
     detect = _detector.load()
+    global ENABLED
+    ENABLED = None if args.pii else _detector.secret_rules(detect)
     paths = [Path(p) for p in args.paths]
     for p in paths:
         if not p.exists():
@@ -286,8 +342,8 @@ def main(argv: list[str]) -> int:
         else:
             try:
                 hist, scanned, total = scan_history(detect, cwd, ids, args.pii, args.max_commits)
-            except RuntimeError:
-                print("secret-hygiene: git log failed; the history was not scanned")
+            except RuntimeError as exc:
+                print(f"secret-hygiene: {exc}; the history was not scanned")
                 return 2
             if scanned < total:
                 incomplete = True

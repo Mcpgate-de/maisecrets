@@ -475,12 +475,46 @@ def _has_context_word(window: str, context: tuple[str, ...]) -> bool:
 _LABEL_ONLY_RE = re.compile(r"[:=]\s*$")
 
 
+# gitleaks' generic-api-key starts with a lazy `[\w.-]{0,50}?` before its keyword, so the regex
+# engine tries up to 50 prefixes at every position of the text: 80 % of a log scan's time
+# (2026-09-27). Its keywords are found by a plain search first, and the rule runs only in a
+# window around each: from 50 characters before the keyword (the prefix cannot cross a line) to
+# the end of the NEXT line (a separator may hold one line break; the window then ends after a
+# newline, which the value's terminator class takes the same way as in the whole text).
+_WINDOWED = {"generic-api-key": re.compile(r"(?i)access|auth|api|credential|creds|key|passw(?:or)?d|secret|token")}
+
+
+def _windowed(rule: Rule, kw: re.Pattern, text: str):
+    spans: list[list[int]] = []
+    for k in kw.finditer(text):
+        line_start = text.rfind("\n", 0, k.start()) + 1
+        a = max(line_start, k.start() - 50)
+        e1 = text.find("\n", k.end())
+        e2 = text.find("\n", e1 + 1) if e1 >= 0 else -1
+        b = len(text) if e1 < 0 or e2 < 0 else e2 + 1
+        if spans and a <= spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], b)
+        else:
+            spans.append([a, b])
+    last_end = -1
+    for a, b in spans:
+        for m in rule.regex.finditer(text[a:b]):
+            if m.start() + a < last_end:
+                continue
+            last_end = m.end() + a
+            yield _Shifted(m, a)
+
+
 def _matches(rule: Rule, text: str):
     """detect-secrets keyword rules are line rules: run them per line, keep absolute offsets.
 
     A label that ends its line (``passwort:`` and the value on the next line, as a console
     or a chat renders it) is scanned together with the next non-empty line; only a hit whose
     value starts in that next line is taken from the pair (field report, 2026-09-26)."""
+    kw = _WINDOWED.get(rule.id)
+    if kw is not None and len(text) > 4096:
+        yield from _windowed(rule, kw, text)
+        return
     if not rule.id.startswith("ds-keyword") or "\n" not in text:
         yield from rule.regex.finditer(text)
         return

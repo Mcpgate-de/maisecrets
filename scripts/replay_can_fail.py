@@ -47,8 +47,15 @@ def unittest_id(test_id: str) -> str:
 
 
 def run_tests(ids: list[str]) -> int:
+    """Each run gets a fresh bytecode cache. A mutation of the same length written in the same
+    second as the green run's compile left a .pyc that Python took for current (size and mtime
+    match), so the tests ran the unmutated code and stayed green (2026-09-27)."""
+    import os
+    import tempfile
     cmd = [sys.executable, "-m", "unittest", "-q"] + [unittest_id(t) for t in ids]
-    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=600)
+    with tempfile.TemporaryDirectory(prefix="maisecrets-pyc-") as cache:
+        env = dict(os.environ, PYTHONPYCACHEPREFIX=cache)
+        r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=600, env=env)
     return r.returncode
 
 

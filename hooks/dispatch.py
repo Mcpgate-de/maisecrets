@@ -21,10 +21,23 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     import json
     from maisecrets.vault import HOME, Vault  # noqa: E402
     try:
-        json.load(sys.stdin)
+        payload = json.load(sys.stdin)
     except ValueError:
-        pass
-    from maisecrets.vault import describe_backend  # noqa: E402
+        payload = {}
+    payload = payload if isinstance(payload, dict) else {}
+
+    def _is_codex() -> bool:
+        """SessionStart has no prompt_id or turn_id, and Claude Code may send `model`, so the
+        payload rule of client_of does not decide here. Claude Code sets CLAUDECODE=1 for its
+        hooks; a Codex transcript lives under CODEX_HOME (default ~/.codex)."""
+        if os.environ.get("CLAUDECODE") == "1":
+            return False
+        path = str(payload.get("transcript_path") or "")
+        home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+        return bool(path) and os.path.abspath(path).startswith(os.path.abspath(home) + os.sep) \
+            or any(k.startswith("CODEX_") for k in os.environ)
+    codex = _is_codex()
+    from maisecrets.vault import intro_line  # noqa: E402
     import time
     from maisecrets.hooks import PRIMER  # noqa: E402
     from maisecrets.vault import ConfigError, load_config  # noqa: E402
@@ -57,29 +70,27 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         pass
     marker = HOME / ".announced"
     if v.backend.test_mode or not marker.exists():
-        out["systemMessage"] = f"maisecrets {version} active. " + describe_backend(v.backend)
+        more = "" if codex else " /maisecrets:status shows the details, /maisecrets:list what is stored."
+        out["systemMessage"] = f"maisecrets {version} is on. " + intro_line(v.backend) + more
         try:
             marker.write_text(type(v.backend).__name__ + "\n")
         except OSError:
             pass
     else:
         from maisecrets.tips import tip_of_the_day  # noqa: E402
-        tip = tip_of_the_day()
+        tip = tip_of_the_day(codex=codex)
         # one short line every session, so a lost hook registration is visible by its absence
         # (operator review, 2026-09-26); the tip rotates, the version does not
-        out["systemMessage"] = f"maisecrets {version} active." + (f" {tip}" if tip else "")
+        out["systemMessage"] = f"maisecrets {version} is on." + (f" {tip}" if tip else "")
     if cfg.get("config_warning"):
         out["systemMessage"] = out.get("systemMessage", "") + f" Warning: {cfg['config_warning']}."
-    # the personal /ms shortcut, once, unless the user has one or turned it off (a plugin cannot
-    # register a command without its namespace; only ~/.claude/commands can)
-    if cfg.get("shortcut", True) and not (HOME / ".shortcut").exists() and "CLAUDE_PLUGIN_ROOT" in os.environ:
+    # /ms is offered once, not installed: writing ~/.claude/commands without a question was a
+    # change behind the user's back, and Codex cannot use it (UX review, 2026-09-27)
+    if not codex and cfg.get("shortcut", True) and not (HOME / ".shortcut").exists():
+        out["systemMessage"] = (out.get("systemMessage", "") +
+                                " Tip: /maisecrets:shortcut adds /ms as a short form of /maisecrets:send.")
         try:
-            from maisecrets.cli import install_shortcut  # noqa: E402
-            done = install_shortcut("ms", only_if_absent=True)
-            (HOME / ".shortcut").write_text("installed\n" if done else "kept\n", encoding="utf-8")
-            if done:
-                out["systemMessage"] = (out.get("systemMessage", "") +
-                                        " /ms (short for /maisecrets:send) is set up from the next session on.")
+            (HOME / ".shortcut").write_text("offered\n", encoding="utf-8")
         except OSError:
             pass
     # the model reads what a placeholder is once per session, before it meets one

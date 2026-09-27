@@ -124,15 +124,17 @@ class SkillScriptTests(unittest.TestCase):
         self.assertEqual(r.returncode, 3, r.stdout)
         self.assertIn("stopped after 1 of 3 commits", r.stdout)
 
-    def test_a_file_too_large_to_scan_is_named_not_passed_over(self):
+    def test_a_large_file_is_scanned_whole_and_a_limit_is_named(self):
         big = self.repo / "dump.sql"
-        big.write_text("x" * 2_100_000 + f"\ntoken = {self.token}\n", encoding="utf-8")
+        big.write_text("INSERT INTO t VALUES (1);\n" * 90_000 + f"token = {self.token}\n", encoding="utf-8")
         _git(self.repo, "add", ".")
         _git(self.repo, "commit", "-qm", "dump")
         r = _run(SCRIPTS / "scan_secrets.py", ".", "--history", cwd=self.repo)
-        self.assertIn("NOT scanned, larger than 2 MB", r.stdout)
-        self.assertIn("dump.sql", r.stdout)
-        self.assertIn("dump.sql in commit", r.stdout)
+        self.assertIn("dump.sql:90001", r.stdout, "no default size limit: the value at the end is found")
+        self.assertNotIn("NOT scanned", r.stdout)
+        cut = _run(SCRIPTS / "scan_secrets.py", ".", "--history", "--max-mb", "1", cwd=self.repo)
+        self.assertIn("NOT scanned, larger than 1 MB", cut.stdout)
+        self.assertIn("dump.sql in commit", cut.stdout)
 
     def test_a_folder_without_git_still_reports_its_files(self):
         plain = self.dir / "plain"

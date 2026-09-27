@@ -37,8 +37,8 @@ maisecrets hooks do that, in Claude Code, Cowork and Codex, when the plugin is i
      (as of the last `git fetch`), `local only` means it never left this clone.
    - The same id means the same value. `value also at` names where it still is today.
    - If the report says the history scan stopped early, or names files it did NOT scan
-     because they are too large, "nothing found" is not proven for those. Offer to scan again
-     with `--max-commits` or `--max-mb` raised.
+     because they are larger than a `--max-mb` limit, "nothing found" is not proven for those.
+     Offer to scan again with `--max-commits` raised or without `--max-mb`.
 4. Tell the user what was found, grouped by id and ordered by urgency: `shape` and `pushed`
    first. Give file, line, commit, date and author. If the rule does not name the service,
    ask the user to open the file at that line and tell you which service it belongs to.

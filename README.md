@@ -171,7 +171,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # under three seconds
 python3 harness/run.py                                 # 7 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
-python3 scripts/replay_can_fail.py                     # 21 proofs: each control's test goes red without it
+python3 scripts/replay_can_fail.py                     # 22 proofs: each control's test goes red without it
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 scripts/install-hooks.sh                               # git pre-commit / pre-push
 ```
@@ -367,11 +367,12 @@ detected. That is a limit of pattern detection, not a setting.
 
 **Sending a blocked prompt.** `/maisecrets:send` sends the rewritten prompt as
 it is, without the clipboard. A plugin cannot register a command without its
-namespace, so the first session start writes a personal `/ms` for it into
-`~/.claude/commands` (a fixed wrapper in `~/.maisecrets/bin` finds the
-installed plugin at run time, so it survives updates); an existing `/ms` is
-left alone, `"shortcut": false` turns this off, `/maisecrets:shortcut [name]`
-installs it by hand. The answer starts with `Sent: ` and the
+namespace, so `/maisecrets:shortcut [name]` writes a personal `/ms` for it
+into `~/.claude/commands` when you ask for it (a fixed wrapper in
+`~/.maisecrets/bin` finds the installed plugin at run time, so it survives
+updates); an existing `/ms` is left alone, `--remove` takes it away. The first
+session start only names the command, once; `"shortcut": false` turns that
+off. Codex gets no offer, because it has no plugin slash commands. The answer starts with `Sent: ` and the
 text that went out, because Remote Control shows neither a blocked prompt nor
 a slash command's expansion; the block notice itself is not shown there
 either (reported to the vendor).

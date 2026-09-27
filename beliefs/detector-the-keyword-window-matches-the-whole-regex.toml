@@ -1,0 +1,10 @@
+# detector-the-keyword-window-matches-the-whole-regex: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "detector-the-keyword-window-matches-the-whole-regex"
+control = "C1"
+statement = "On long text, generic-api-key runs only in windows around its keywords, and finds exactly the matches the regex finds on the whole text."
+runner = ["tests/test_core.py::DetectTests::test_the_keyword_window_finds_exactly_what_the_whole_regex_finds"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "        a = max(line_start, k.start() - 50)\n"
+replace = "        a = max(line_start, k.start() - 10)\n"

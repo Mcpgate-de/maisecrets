@@ -1425,7 +1425,11 @@ def post_tool(payload: dict) -> dict:
                 "reason": (f"[maisecrets: the command ran and finished; this is not an error.\n"
                            f"{hit['n']} value(s) in its output are replaced by placeholders.\n"
                            f"Do not run the command again; continue with the placeholders as they are.]\n\n{text}")}
+    shown = ", ".join(dict.fromkeys(refs)) if refs else "values that are already stored"
     return {
+        # the person sees what was replaced, not only the model (UX review, 2026-09-27)
+        "systemMessage": f"maisecrets replaced {hit['n']} value(s) in this {payload.get('tool_name') or 'tool'} "
+                         f"result before the AI saw it: {shown}.",
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
             "updatedToolOutput": new_response,

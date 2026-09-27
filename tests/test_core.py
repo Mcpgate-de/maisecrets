@@ -78,6 +78,38 @@ class DetectTests(unittest.TestCase):
         self.assertNotIn(GLPAT, out["reason"])
         self.assertNotIn(AKIA, out["reason"])
 
+    def test_the_keyword_window_finds_exactly_what_the_whole_regex_finds(self):
+        """generic-api-key runs in windows around its keywords on long text (6x faster on 157 MB of
+        real logs and history, the same 902 matches; 2026-09-27). Border cases: a value at the end
+        of a line, of the text, after a separator on the next line, a long base64 value, a keyword
+        50 characters into a word, and noise between."""
+        import random
+        rnd = random.Random(7)
+        alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+        def tok(n: int) -> str:
+            return "".join(rnd.choice(alphabet) for _ in range(n))
+        pieces = []
+        for i in range(400):
+            pieces.append(rnd.choice([
+                f"GET /api/v1/items?id={i} 200",
+                f"client_secret = {tok(24)}",
+                f"access_token:\n  {tok(32)}",
+                f"{'x' * 45}_apikey={tok(18)};",
+                f"auth => '{tok(40)}'",
+                f"password: {tok(12)}{'=' * (i % 3)}",
+                f"key = {tok(8)}",
+                f"token={tok(200)}",
+                "nothing to see here " * 3,
+            ]))
+        text = "\n".join(pieces) + "\nsecret: " + tok(30)
+        rule = [r for r in detect.rules() if r.id == "generic-api-key"][0]
+        whole = [(m.start(), m.end()) for m in rule.regex.finditer(text)]
+        kw = detect._WINDOWED["generic-api-key"]
+        window = [(m.start(), m.end()) for m in detect._windowed(rule, kw, text)]
+        self.assertGreater(len(whole), 100)
+        self.assertEqual(window, whole)
+
     def test_german_credential_labels_are_keywords_too(self):
         for label in ("passwort", "Kennwort", "Schlüssel", "zugangsdaten"):
             with self.subTest(label):

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **The block notice speaks plainly** and shows what was found (masked), the prompt with the short
+  forms, where the values stay and for how long.
+- **`/maisecrets:list`** shows what is stored, masked; **`/maisecrets:forget <key>`** deletes one entry.
+- **You see every redaction**: one line names the values replaced in a tool result.
+- **The session start is shorter** and names no file paths; `/ms` is offered once instead of being
+  installed, and Codex gets tips that work there.
+- **The `secret-hygiene` skill** finds leaked secrets in a repository and its history (date, author,
+  pushed or not, provider), guides the rotation, and writes redacted copies of files to share.
+
 ## [0.3.33] - 2026-09-27
 
 - **An MCP call that gets a real value now asks you first** (Claude Code), also in auto and bypass
