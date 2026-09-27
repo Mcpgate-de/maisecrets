@@ -157,7 +157,6 @@ class DisplayInvariantTests(unittest.TestCase):
         g = _Gen(seed)
         return [getattr(g, kind)() for _ in range(self.N)]
 
-    @unittest.expectedFailure   # bug: a prefix-only IPv6 address shows whole, fixed in a later commit
     def test_a_display_hides_part_of_the_value_and_never_shows_it_whole(self):
         for seed, kind in enumerate(TYPES):
             for value in self._values(kind, seed):
@@ -201,7 +200,6 @@ class DisplayInvariantTests(unittest.TestCase):
         self.assertFalse(pd.is_display("+49••••••1234567", "phone"))
         self.assertFalse(pd.is_display("8.8.4.•", "ip_address_v6"))
 
-    @unittest.expectedFailure   # bug: a prefix-only IPv6 address shows whole, fixed in a later commit
     def test_a_prefix_only_ipv6_address_does_not_show_whole(self):
         # `2a00:1450::` is two hextets and a zero host part: two shown hextets are the whole value
         for value in ("2a00:1450::", "f501::", "2a00:1450:4001::"):
