@@ -102,15 +102,16 @@ pull requests are welcome there.
 
 ## Client support
 
-✅ proven by the harness in this repo · ☑️ possible per the vendor's hook docs
-(read 2026-09-26, not measured) · ⚠️ partly · ❌ no hook
+✅ proven by the harness in this repo or seen live · ☑️ same runtime or possible per the
+vendor's hook docs, not measured · ⚠️ partly · ❌ no hook
 
 | client | prompt | rehydrate | redact | adapter |
 |---|:---:|:---:|:---:|---|
 | Claude Code CLI | ✅ | ✅ | ✅ | built |
 | Cowork, Claude desktop app | ☑️ | ☑️ | ☑️ | same hooks and manifest; not measured by the harness |
 | Codex CLI | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks; on Windows a shell placeholder is denied (PowerShell rewrite not built) |
-| Codex IDE extension, Codex in the ChatGPT desktop app | ☑️ | ☑️ | ☑️ | same plugin runtime; not measured by the harness |
+| Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | same plugin runtime; block, rewrite and redaction seen live (2026-09-27), not in the harness |
+| Codex IDE extension | ☑️ | ☑️ | ☑️ | same plugin runtime; not measured |
 | Gemini CLI | ☑️ | ☑️ | ☑️ | not planned |
 | Cursor | ☑️ | ☑️ | ⚠️ MCP only | waits for a shell-output hook |
 | Copilot CLI | ⚠️ SDK only | ☑️ | ☑️ | waits for a prompt hook |
