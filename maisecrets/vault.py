@@ -704,7 +704,12 @@ class _Mutation:
     def __enter__(self):
         self.vault._lock.__enter__()
         if self.vault._lock.depth == 1:
-            self.vault._index = self.vault._load_index()
+            try:
+                self.vault._index = self.vault._load_index()
+            except BaseException:
+                # `with` calls __exit__ only after __enter__ returned: a damaged index kept the lock
+                self.vault._lock.__exit__(None, None, None)
+                raise
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
