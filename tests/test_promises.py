@@ -51,6 +51,23 @@ exit 0
 """
 
 
+def assert_refuses(case: unittest.TestCase, event: str, r: subprocess.CompletedProcess) -> None:
+    """A hook that cannot work refuses in the form both clients read: JSON on stdout and exit 0.
+    Exit 2 blocks in Claude Code only; Codex runs the tool when a hook exits 2 (harness/codex.py)."""
+    case.assertEqual(r.returncode, 0, r.stderr)
+    out = json.loads(r.stdout)
+    if event == "user-prompt":
+        case.assertEqual(out["decision"], "block")
+    elif event == "pre-tool":
+        case.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        case.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PreToolUse")
+    elif event == "post-tool":
+        case.assertEqual(out["decision"], "block")
+        case.assertIn("withheld", out["hookSpecificOutput"]["updatedToolOutput"])
+    else:
+        case.assertIn("systemMessage", out)
+
+
 @unittest.skipIf(BASH is None, "no bash")
 class LauncherFailsClosedTests(unittest.TestCase):
     """README: maisecrets needs Python 3.9+. Without it every hook must refuse, never pass."""
@@ -100,8 +117,8 @@ class LauncherFailsClosedTests(unittest.TestCase):
                     self.assertEqual(r.returncode, 0)
                     self.assertTrue(json.loads(r.stdout)["systemMessage"].endswith("every prompt is blocked."))
                 else:
-                    self.assertEqual((r.returncode, r.stdout), (2, ""), "exit 2 blocks the prompt or the tool")
-                    self.assertIn("Until then every prompt is blocked.", r.stderr)
+                    assert_refuses(self, event, r)
+                    self.assertIn("Until then every prompt is blocked.", r.stdout)
 
     def test_no_python_on_the_path_blocks_every_event(self):
         self.check_all_events("none")
@@ -153,7 +170,7 @@ class MovedPluginFolderFailsClosedTests(unittest.TestCase):
                     self.assertEqual(r.returncode, 0)
                     self.assertIn("folder is gone", json.loads(r.stdout)["systemMessage"])
                 else:
-                    self.assertEqual((r.returncode, r.stdout), (2, ""), "exit 2 blocks the prompt or the tool")
+                    assert_refuses(self, event, r)
 
     def test_a_present_plugin_folder_runs_the_launcher(self):
         # the fallback must not replace the launcher: with the real root, the launcher answers
@@ -187,10 +204,8 @@ class BrokenImportFailsClosedTests(unittest.TestCase):
                     out = json.loads(r.stdout)
                     self.assertEqual(out["decision"], "block")
                     self.assertIn("withheld", out["hookSpecificOutput"]["updatedToolOutput"])
-                elif event == "session-start":
-                    self.assertEqual(r.returncode, 0)
                 else:
-                    self.assertEqual((r.returncode, r.stdout), (2, ""), "exit 2 blocks the prompt or the tool")
+                    assert_refuses(self, event, r)
 
 
 class RunCmdFailsClosedTests(unittest.TestCase):

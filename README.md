@@ -162,7 +162,8 @@ off until `/reload-plugins` or a new session. No code of the plugin runs then, s
 maisecrets cannot warn you itself. The harness measures this on every run
 (scenario `plugin_folder_moved`, Claude Code 2.1.283: no hook runs, the tool
 runs; anthropics/claude-code#97847). A client that runs the hook command anyway
-gets a refusal: the command tests for the launcher first and blocks without it.
+gets a refusal on macOS and Linux: the command tests for the launcher first and
+blocks without it. The Windows command (`commandWindows`) has no such test yet.
 
 - Installed from this GitHub marketplace (the commands above), a previous version
   stays for 14 days, "so a session that already loaded the old version keeps

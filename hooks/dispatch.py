@@ -25,8 +25,15 @@ def _refuse_without_the_code(why: str) -> None:
         import json
         print(json.dumps({"systemMessage": msg + " Until then every prompt is blocked."}))
         sys.exit(0)
-    sys.stderr.write(msg + " Until then every prompt is blocked.\n")
-    sys.exit(2)
+    import json
+    text = msg + " Until then every prompt is blocked."
+    # JSON, not exit 2: Codex runs the tool when a hook exits 2 (harness/codex.py); both clients read this
+    if event == "pre-tool":
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                 "permissionDecisionReason": text}}))
+    else:
+        print(json.dumps({"decision": "block", "reason": text}))
+    sys.exit(0)
 
 
 try:

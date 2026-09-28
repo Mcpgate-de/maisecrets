@@ -31,5 +31,14 @@ case "${1:-}" in
     printf '{"systemMessage":"%s Until then every prompt is blocked."}' "$MSG"
     exit 0 ;;
 esac
+# JSON, not exit 2: Codex runs the tool when a hook exits 2 (harness/codex.py); both clients read this
+case "${1:-}" in
+  pre-tool)
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s Until then every prompt is blocked."}}' "$MSG"
+    exit 0 ;;
+  user-prompt)
+    printf '{"decision":"block","reason":"%s Until then every prompt is blocked."}' "$MSG"
+    exit 0 ;;
+esac
 echo "$MSG Until then every prompt is blocked." >&2
-exit 2   # fail closed: without the detector nothing may pass
+exit 2   # any other use of the launcher (a CLI command): fail closed
