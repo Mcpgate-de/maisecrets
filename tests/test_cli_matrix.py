@@ -336,6 +336,8 @@ def base_state(name: str) -> Sandbox:
 def tearDownModule() -> None:  # noqa: N802 - unittest hook
     for sb in _BASES.values():
         sb.remove()
+    # pytest-xdist can run this before more tests of the module: they must seed a new base
+    _BASES.clear()
     _hygiene.assert_pristine()
     # a child a hook subprocess left behind runs with the sandbox as its working directory
     alive = _hygiene.wait_for_no_serving_child(cwd_root=_isolate.TMP)

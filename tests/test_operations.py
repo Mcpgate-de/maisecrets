@@ -47,6 +47,7 @@ class StoreIntegrityTests(unittest.TestCase):
         Vault().put("first-value-0001-xyz", "SECRET", "manual", session="S1")
         store = Path(_TMP, "vault.json")
         store.write_text("{not json", encoding="utf-8")
+        self.addCleanup(store.unlink, missing_ok=True)   # the next test in this process must not read it
         with self.assertRaises(RuntimeError):
             Vault().put("second-value-0002-xyz", "SECRET", "manual", session="S1")
         self.assertEqual(store.read_text(encoding="utf-8"), "{not json", "a put must not replace a damaged store")

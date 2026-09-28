@@ -538,6 +538,7 @@ class FileStoreContract:
         self.backend.put("SECRET_c1", "fake-before")
         path = HOME / self.store_file
         path.write_text("{damaged", encoding="utf-8")
+        self.addCleanup(path.unlink, missing_ok=True)   # the next test in this process must not read it
         for op in (lambda: self.backend.put("SECRET_c2", "fake-after"), lambda: self.backend.delete("SECRET_c1")):
             with self.assertRaises(RuntimeError):
                 op()

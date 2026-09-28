@@ -344,7 +344,7 @@ class WaitForChecksTests(unittest.TestCase):
                                   ("0123abcd\trefs/heads/main\n", None, True), ("", None, False),
                                   (None, OSError("no git"), False),
                                   (None, subprocess.TimeoutExpired("git", 30), False)):
-            with self.subTest(stdout=stdout, exc=exc), mock.patch("subprocess.run", run_with(stdout, exc)):
+            with self.subTest(stdout=stdout, exc=repr(exc)), mock.patch("subprocess.run", run_with(stdout, exc)):
                 self.assertEqual(self.w._main_moved("cafe1234beef"), want)
 
 
