@@ -106,6 +106,20 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual(a.regions, ("generic", "uk", "jp"))
         self.assertEqual(a.languages, ("en",), "no ja.txt: a Japanese system gets English labels")
 
+    def test_each_region_with_a_label_file_turns_its_language_on(self):
+        for region, want in [("it", ("en", "it")), ("fr", ("en", "fr")), ("lu", ("en", "fr")),
+                             ("be", ("en", "nl", "fr")), ("nl", ("en", "nl")), ("br", ("en", "pt")),
+                             ("pt", ("en", "pt")), ("dk", ("en", "da")), ("no", ("en", "nb")),
+                             ("cz", ("en", "cs")), ("se", ("en", "sv")), ("kr", ("en", "ko"))]:
+            with self.subTest(region):
+                self.assertEqual(self.resolve({"regions": [region]}, "C").languages, want)
+        # a Norwegian system setting names the language "no" or "nb"; the file is nb.txt
+        for loc in ("no_NO", "nb_NO"):
+            self.assertEqual(self.resolve({"regions": []}, loc).languages, ("en", "nb"), loc)
+        every = {x for r in regions.REGION_LANGUAGE for x in regions._region_languages(r)}
+        self.assertEqual(every - set(regions.label_languages_available()), set(),
+                         "a region names a language that has no label file")
+
     def test_an_empty_list_is_the_generic_rules_only(self):
         self.assertEqual(self.resolve({"regions": []}, "de_DE").regions, ("generic",))
 
