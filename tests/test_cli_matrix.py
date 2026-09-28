@@ -149,7 +149,12 @@ class Sandbox:
             "MS_TEST_CLIP": str(self.clip), "MS_TEST_OPENED": str(self.opened),
             "MS_TEST_TRIPWIRE": str(self.root / "tripwire"), "CLAUDE_PLUGIN_OPTION_BACKEND": self.backend,
             "CLAUDE_PLUGIN_ROOT": str(ROOT), "PYTHONUTF8": "1",
+            # a local desktop for the fake opener in self.bin: without a display, or over ssh, the report opens
+            # no browser (a Linux CI runner has neither a display nor a browser)
+            "DISPLAY": ":0",
         })
+        for k in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "WAYLAND_DISPLAY"):
+            env.pop(k, None)
         env.update(extra)
         return env
 
