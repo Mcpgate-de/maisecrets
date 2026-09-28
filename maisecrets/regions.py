@@ -29,7 +29,7 @@ REGION_LANGUAGE = {
     "us": "en", "uk": "en", "au": "en", "ca": "en", "in": "en", "ng": "en", "ph": "en", "sg": "en",
     "za": "en", "ie": "en", "nz": "en",
     "es": "es", "it": "it", "fi": "fi", "se": "sv", "pl": "pl", "tr": "tr", "kr": "ko", "th": "th",
-    "fr": "fr", "lu": "fr", "be": ("nl", "fr"), "nl": "nl",
+    "fr": "fr", "lu": "fr", "be": ("nl", "fr"), "nl": "nl", "pt": "pt", "br": "pt", "dk": "da",
 }
 
 
