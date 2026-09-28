@@ -1055,7 +1055,8 @@ READ_ONLY_REMOTE = {"grep", "egrep", "fgrep", "zgrep", "zegrep", "zfgrep", "xzgr
 # prefix of one of these counts too (Codex review, 2026-09-28: --rotate and --vacuum-time passed)
 _JOURNALCTL_STATEFUL = ("--rotate", "--vacuum-size", "--vacuum-files", "--vacuum-time", "--flush", "--sync",
                         "--relinquish-var", "--smart-relinquish-var", "--setup-keys", "--update-catalog",
-                        "--cursor-file", "--force", "--interval", "--verify-key", "--new-id128")
+                        "--cursor-file", "--force", "--interval", "--verify-key", "--new-id128",
+                        "--synchronize-on-exit")
 
 
 # wrappers the session approval allows in front of a read-only command, with no option of their own

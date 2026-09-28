@@ -166,10 +166,12 @@ class SessionApprovalTests(unittest.TestCase):
         sealed = os.path.dirname(values[0])
         self.assertEqual(os.path.basename(sealed), "sealed")
         self.assertEqual(stat.S_IMODE(os.stat(sealed).st_mode), 0o300)
-        with self.assertRaises(PermissionError):
-            os.listdir(sealed)
-        run = os.path.dirname(sealed)
-        self.assertEqual(glob.glob(os.path.join(run, "*", "v-*")) + glob.glob(os.path.join(sealed, "*")), [])
+        if os.geteuid() != 0:
+            # root ignores the mode (the CI container runs as root); the hooks run as the user
+            with self.assertRaises(PermissionError):
+                os.listdir(sealed)
+            run = os.path.dirname(sealed)
+            self.assertEqual(glob.glob(os.path.join(run, "*", "v-*")) + glob.glob(os.path.join(sealed, "*")), [])
         # a second ask does not open the directory for a moment: it stays 0300 all the time
         second = self.pre(self.READ, host="aux02")
         self.assertEqual(stat.S_IMODE(os.stat(sealed).st_mode), 0o300)
@@ -213,7 +215,8 @@ class SessionApprovalTests(unittest.TestCase):
                        # second review round: commands that change state
                        "sudo date -s @0", "sudo hostname review-host", "sudo journalctl --rotate",
                        "sudo journalctl --vacuum-time=1s", "sudo journalctl --vac=1s",
-                       "journalctl --cursor-file=/tmp/c"):
+                       "journalctl --cursor-file=/tmp/c", "journalctl -f --synchronize-on-exit=yes",
+                       "journalctl -f --synch=yes"):
             with self.subTest(remote):
                 out = self.pre(remote)
                 self.assertNotEqual(out.get("permissionDecision", "none"), "none", remote)
