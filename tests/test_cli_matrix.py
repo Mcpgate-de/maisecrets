@@ -850,6 +850,15 @@ class StateMatrixTests(unittest.TestCase):
         self.assertEqual(sb.run("pending", env=sb.env(CLAUDE_CODE_SESSION_ID="SA")).stdout.strip(),
                          "(maisecrets: no blocked prompt is waiting)", "handed out once")
 
+    def test_a_session_id_is_a_name_never_a_path(self):
+        sb = base_state("live").copy()
+        self.addCleanup(sb.remove)
+        sb.block_prompt(session="SA")
+        for bad in ("../pending/SA", "SA/../SA", ".hidden", "a b"):
+            with self.subTest(bad):
+                r = sb.run("pending", env=sb.env(CLAUDE_CODE_SESSION_ID=bad))
+                self.assertEqual(r.stdout.strip(), "(maisecrets: no blocked prompt is waiting)")
+
     def test_scan_prints_positions_not_the_text(self):
         value = fake_value("Sc")
         _sb, r = self._run("empty", "scan", f"password: {value}")

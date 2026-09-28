@@ -677,3 +677,19 @@ class ReadOnlyBehindSudoTests(unittest.TestCase):
                        "sudo -n -s", "sudo -n sh -c 'grep x'"):
             with self.subTest(remote):
                 self.assertFalse(hooks._remote_is_read_only(remote))
+
+
+class SessionIdTests(unittest.TestCase):
+    def test_a_command_that_sets_the_session_id_is_refused(self):
+        _reset()
+        for command in ('CLAUDE_CODE_SESSION_ID=abc bash "$CLAUDE_PLUGIN_ROOT/hooks/run.sh" pending',
+                        "export CLAUDE_CODE_SESSION_ID=abc; bash run.sh pending",
+                        "env CLAUDE_CODE_SESSION_ID=abc python3 hooks/dispatch.py pending"):
+            with self.subTest(command):
+                out = hooks.pre_tool({"tool_name": "Bash", "session_id": "S1", **CLAUDE,
+                                      "tool_input": {"command": command}})
+                self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        # reading the variable is ordinary
+        out = hooks.pre_tool({"tool_name": "Bash", "session_id": "S1", **CLAUDE,
+                              "tool_input": {"command": "echo $CLAUDE_CODE_SESSION_ID"}})
+        self.assertEqual(out, {})

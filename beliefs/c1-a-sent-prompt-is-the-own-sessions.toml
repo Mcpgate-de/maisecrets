@@ -2,7 +2,8 @@
 belief = "c1-a-sent-prompt-is-the-own-sessions"
 control = "C1"
 statement = "/ms and /maisecrets:send hand out the blocked prompt of their own session and never another session's; two sessions with a waiting prompt do not block each other."
-runner = ["tests/test_cli_matrix.py::StateMatrixTests::test_pending_takes_the_prompt_of_its_own_session_when_two_wait"]
+runner = ["tests/test_cli_matrix.py::StateMatrixTests::test_pending_takes_the_prompt_of_its_own_session_when_two_wait",
+          "tests/test_cli_matrix.py::StateMatrixTests::test_a_session_id_is_a_name_never_a_path"]
 
 [proof]
 file = "hooks/dispatch.py"

@@ -313,9 +313,14 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
         return False
 
 
+_SESSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+
+
 def _pending_path(session: str | None):
+    """The session id becomes a file name: only its own shape, never a path (Codex review, 2026-09-28)."""
     from .vault import HOME
-    return HOME / "pending" / (f"{session or 'nosession'}.txt")
+    name = session if session and _SESSION_ID_RE.fullmatch(session) else "nosession"
+    return HOME / "pending" / f"{name}.txt"
 
 
 def _save_pending(rewritten: str, session: str | None) -> None:
@@ -341,7 +346,7 @@ def take_pending(session: str | None = None) -> str | None:
     cands = []
     if session:
         own = _pending_path(session)
-        cands = [own] if own.exists() else []
+        cands = [own] if own.exists() and _SESSION_ID_RE.fullmatch(session) else []
     elif d.exists():
         fresh = [c for c in d.glob("*.txt") if time.time() - c.stat().st_mtime < 15 * 60]
         if len(fresh) > 1:
@@ -1548,6 +1553,11 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     bad_args = _args_call_refusal(command)
     if bad_args:
         return _deny(bad_args)
+    if re.search(r"(?<![\w])CLAUDE_CODE_SESSION_ID\s*=", command):
+        # /ms reads the blocked prompt of the session the client names; a command that names another one
+        # would take that session's text (Codex review, 2026-09-28)
+        return _deny("maisecrets: this command sets the session id, which selects another session's blocked "
+                     "prompt. The command did not run. /ms sends the blocked prompt of this session.")
     matched = _store_read_match(command)
     if matched:
         # said as what the user does next, not as a check to stay inside: "do not rephrase … to get around
