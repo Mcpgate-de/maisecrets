@@ -44,8 +44,9 @@ from _hygiene import CLAUDE, CODEX  # noqa: E402
 CODEX_P = {**CODEX, "model": "m"}
 
 # a value read into a variable, and the whole command ends when it is not delivered
-_READ = re.compile(r'__ms_(\d+)="\$\(cat ([^)"]+)\)" \|\| \{ echo "maisecrets: the value for ([A-Z_]+_c\d+) was not '
-                   r'delivered[^"]*" >&2; exit 97; \}; ')
+# the FIFO path is one shell word ending in v-<token>: a path with `; command` in it is not a read
+_READ = re.compile(r'__ms_(\d+)="\$\(cat ([^\s)"\';|&`$]+/v-[A-Za-z0-9_-]+)\)" \|\| \{ echo "maisecrets: the value '
+                   r'for ([A-Z_]+_c\d+) was not delivered[^"]*" >&2; exit 97; \}; ')
 # the sandbox guard of the ssh route: the value is read only after it passed
 _GUARD = re.compile(r'\S+ \S+/hooks/sandbox_probe\.py \|\| \{ echo "maisecrets: [^"]*" >&2; exit 97; \}; ')
 # the options the ssh route puts after `ssh`: no shared connection, the plugin's own proxy

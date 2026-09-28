@@ -128,7 +128,9 @@ def run_scenario(name: str, sc: dict) -> list[str]:
             srv.terminate()
     bodies = "".join(p.read_text(errors="ignore") for p in out.glob("request_*.json"))
     # every built-in tool Codex offered must be classified (harness/inventory.py)
-    from inventory import unclassified
+    from inventory import offered, unclassified
+    if sorted(out.glob("request_*.json")) and "exec" not in offered(sorted(out.glob("request_*.json"))):
+        fails.append("no tool list found in the request bodies: the inventory check read nothing")
     for tool in unclassified("codex", sorted(out.glob("request_*.json"))):
         fails.append(f"UNCLASSIFIED TOOL {tool}: add it to tests/client_tools.json with its class")
     if MARK in bodies or MARK[-8:] in bodies:
