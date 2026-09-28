@@ -26,8 +26,8 @@ a harness scenario that goes red when the control is removed
 
 | # | control | defends against | ends where |
 |---|---|---|---|
-| C1 | `UserPromptSubmit` blocks a prompt with a hit (a detector shape, or a value the store holds, by keyed fingerprint of each token and, for a value this session resolved, as a substring), stores the value, hands back the rewritten prompt | A1 | a value with no known shape that is not stored (use `put`); a stored value with spaces that this session did not resolve; a resolved value shorter than 8 characters |
-| C2 | `PostToolUse` redacts tool results by shape and by exact match of every live value (keyed fingerprint of each token) | A1 | a value transformed by the command (base64, split); output above 50K chars spilled by Claude Code |
+| C1 | `UserPromptSubmit` blocks a prompt with a hit (a detector shape, or a value the store holds, by keyed fingerprint of each token and, for a value this session resolved, as a substring), stores the value, hands back the rewritten prompt | A1 | a value with no known shape that is not stored (use `put`); a stored value with spaces that this session did not resolve; a resolved value shorter than 8 characters. A stored ordinary word of 8 characters or more blocks every prompt that contains it |
+| C2 | `PostToolUse` redacts tool results by shape and by exact match of every live value (keyed fingerprint of each token, and of the text a hex or base64 token decodes to) | A1 | a value of another session that the command transformed inside a longer token or split (a value this session resolved is matched in every encoding as a substring); output above 50K chars spilled by Claude Code |
 | C3 | transcript scrub: after C1 (a detached child waits for the record Claude Code writes after the hook), after a Codex redaction, and after an MCP resolve (the client logs the hook's stdout with the inserted value) | A1, A4 | a transcript written by a client we do not scrub; a record written later than 15 s after the block |
 | C4 | session rule: a reference resolves only in a session where a human typed it, where it was minted, or where the value appeared in a tool result (redaction admits it) | A2 naming a key it never saw | the human pastes a reference into a session the injection controls; a headless prompt built from untrusted text admits what it names; a value read from a file is resolvable in that session (no worse than without the plugin) |
 | C5 | up-front read for Bash: the command starts with `__ms_1="$(cat <fifo>)" \|\| exit 97`; every key is checked before a detached child serves the value once through a FIFO in a directory only this user can enter (`$XDG_RUNTIME_DIR/maisecrets` or `maisecrets-<uid>` in the temp directory; owner and mode checked, no symlink), never in the command text; Windows Git Bash reads it under a grant | A2, A4, A5's screen, transcript | A3: another process of the same user can read the FIFO while the command waits to start (up to 120 s); MCP arguments (the value must be inline; the client's permission prompt shows it); on Codex `allow` skips its approval prompt; the grant is a boundary on Windows only |
@@ -50,10 +50,13 @@ a harness scenario that goes red when the control is removed
 Three goals hold over every path, each with its own tests and a mutation per path
 (`docs/TESTING.md`, `beliefs/inv-*.toml`):
 
-- **I1** A stored value never reaches a hook output the model or the person reads. The one
-  exception is `updatedInput` of a resolving PreToolUse answer, the delivery the user allows.
+- **I1** A stored value never reaches a hook output the model or the person reads, within the
+  ends of C1 and C2 (a short or spaced value in a prompt, another session's value transformed
+  inside a longer token). The one exception is `updatedInput` of a resolving PreToolUse answer,
+  the delivery the user allows.
 - **I3** No tool of the agent reads a file of the vault home or the value run directory, within
-  the end of C8 (Bash is a text match).
+  the end of C8 (Bash is a text match). Codex `apply_patch` is outside the matcher and is not
+  measured; it belongs to the Codex design (C5).
 - **I4** Every value the detector finds can be masked in a transcript in every record shape the
   clients write.
 
