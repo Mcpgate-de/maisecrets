@@ -1,0 +1,10 @@
+# c6-a-command-word-hidden-by-quotes-is-still-a-command-word: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c6-a-command-word-hidden-by-quotes-is-still-a-command-word"
+control = "C6"
+statement = "The command-word rules read the words as the shell does: \\ssh, s''sh and b''ash '-c' are ssh and bash -c, and a value next to them is refused."
+runner = ["tests/test_gates.py::ScannerEdgeTests::test_a_command_word_hidden_by_quotes_a_variable_or_a_runner_is_still_refused"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "                words = _shlex.split(command[seg[\"start\"]:seg[\"end\"]]) or words\n"
+replace = "                pass\n"

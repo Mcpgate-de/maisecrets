@@ -587,6 +587,23 @@ class LabelValueTests(unittest.TestCase):
         cut = [v for _, v in kinds('pass§word: "correct horse battery"') if v in ("correct", "correct horse")]
         self.assertFalse(cut)
 
+    def test_a_short_value_glued_to_its_label_counts(self):
+        # field report, 2026-09-27: a 7-letter password glued to "pass:" passed; 8 characters were the floor
+        for text, value in (("pass§:" + PW11[:7], PW11[:7]), ("pass§word=" + PW11[:6], PW11[:6]),
+                            ("a@b.c pass§:" + PW11[:7].lower(), PW11[:7].lower())):
+            with self.subTest(text=text):
+                self.assertEqual([v for _, v in kinds(text)], [value])
+        # with a space between them the floor stays 8: "password: string" is prose in API docs
+        self.assertEqual(kinds("pass§word: " + PW11[:7]), [])
+        self.assertEqual(kinds("pass§:" + PW11[:5]), [], "5 characters are too few in any case")
+        # a colon inside our own placeholder is no label
+        self.assertEqual(kinds("api§_key: ⟦SECRET_c5:ab•••⟧"), [])
+        # a type, a keyword or a camelCase name glued to a label is code, not a value (final review, 2026-09-28)
+        for text in ("pass§word:string", "{pass§word:string, tok§en:number}", "pass§word:boolean", "sec§ret=config",
+                     "api§_key=apiKey", "auth§_token=Bearer"):
+            with self.subTest(text=text):
+                self.assertEqual(kinds(text), [])
+
     def test_prose_after_a_label_is_still_not_a_value(self):
         for text in ("secret: very important", "api_key: Add API key", '"api_key_label": "Add API key"',
                      "the token expired yesterday"):

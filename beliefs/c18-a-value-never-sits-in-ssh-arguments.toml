@@ -1,0 +1,10 @@
+# c18-a-value-never-sits-in-ssh-arguments: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c18-a-value-never-sits-in-ssh-arguments"
+control = "C18"
+statement = "A placeholder inside the ssh command line, where the remote shell would parse the value, is refused; only a value on stdin may reach ssh."
+runner = ["tests/test_ssh_route.py::RouteDecisionTests::test_every_other_ssh_shape_is_refused_with_its_reason"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if any(seg[\"start\"] <= a < seg[\"end\"] for _k, a, _b in refs):\n"
+replace = "    if False:\n"

@@ -98,6 +98,21 @@ SCENARIOS = {
         "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_file": ("used.txt", f"got:{MARK2}"),
     },
+    # ssh gets a value only on stdin, inside the sandbox, after the user confirms; in -p nobody can
+    # answer the ask, so Claude Code refuses the call and the model reads the reason, which names
+    # the host and the remote command but never the value
+    "bash_ssh_asks": {
+        "prompt": "grep the mail log for ⟦SECRET_c1⟧",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "turns": [
+            {"tool": "Bash",
+             "input": {"command": "printf '%s' ⟦SECRET_c1⟧ | ssh aux01 'grep -F -f - /var/log/mail.log'"}},
+            {"text": "done"},
+        ],
+        "expect_requests": 2,
+        "expect_placeholders": ["⟦SECRET_c1⟧"],
+        "expect_text": "on stdin to ssh aux01: ssh aux01 'grep -F -f - /var/log/mail.log'",
+    },
     # a reference the session never saw in a prompt is not resolved
     "bash_foreign_ref": {
         "prompt": "run the command",

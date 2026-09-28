@@ -64,8 +64,10 @@ class ReleaseTreeTests(unittest.TestCase):
                       "docs/TESTING.md", "docs/REPO-STANDARDS.md"}
 
     def test_every_tracked_file_ships_unless_it_is_named_developer_only(self):
-        tracked = subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True,
-                                 cwd=ROOT).stdout.split("\n")
+        # the files of the commit the tree was built from; `git ls-files` also lists what is only
+        # staged, and a pre-commit run then compared two different sets
+        tracked = subprocess.run(["git", "ls-tree", "-r", "--name-only", "HEAD"], capture_output=True, text=True,
+                                 check=True, cwd=ROOT).stdout.split("\n")
         want = sorted(p for p in tracked if p and not p.startswith(self.DEV_ONLY_PREFIXES)
                       and p not in self.DEV_ONLY_FILES)
         self.assertEqual(sorted(self.files), want)

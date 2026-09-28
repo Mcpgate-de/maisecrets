@@ -27,6 +27,7 @@ Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
 from test_cli_matrix import JSONFILE, Sandbox, fake_value  # noqa: E402
+import _hygiene  # noqa: E402
 
 BASH = shutil.which("bash")
 RUN_SH = ROOT / "hooks" / "run.sh"
@@ -361,6 +362,9 @@ class NoNetworkTests(unittest.TestCase):
         self.assertIn("no-grant", r.stderr)
 
     def test_no_hook_reaches_for_the_network_in_process(self):
+        # the pre-tool payload serves a value that nobody reads: take it back after the test, or its
+        # serving child waits 120 s and the next module that counts children finds it (2026-09-27)
+        _hygiene.watch_children(self)
         import socket
         import http.client
         import urllib.request

@@ -1,0 +1,10 @@
+# c18-the-guard-needs-a-closed-direct-network: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c18-the-guard-needs-a-closed-direct-network"
+control = "C18"
+statement = "The guard fails when a direct TCP connection succeeds, even with the sandbox environment and a proxy that answers 407: outside the sandbox the network is open."
+runner = ["tests/test_ssh_route.py::GuardProbeTests::test_an_open_direct_network_fails"]
+
+[proof]
+file = "hooks/sandbox_probe.py"
+find = "            if s.connect_ex(target) == 0:\n"
+replace = "            if False:\n"

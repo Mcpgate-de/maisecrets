@@ -1,0 +1,10 @@
+# c18-ssh-in-any-other-form-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c18-ssh-in-any-other-form-is-refused"
+control = "C18"
+statement = "With a value in the command, ssh in a function body, a group, an if or behind wrapper options, scp, sftp or autossh as the command, rsync over ssh with the value in its arguments, a variable that names an ssh command (GIT_SSH_COMMAND, RSYNC_RSH) and git -c core.sshCommand are refused."
+runner = ["tests/test_gates.py::ScannerEdgeTests::test_a_command_word_hidden_by_quotes_a_variable_or_a_runner_is_still_refused"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        if sg[\"cmd\"] in (\"scp\", \"sftp\", \"autossh\", \"mosh\"):\n"
+replace = "        if False:\n"
