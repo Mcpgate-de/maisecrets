@@ -168,7 +168,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 9 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
-python3 scripts/replay_can_fail.py                     # 39 proofs: each control's test goes red without it
+python3 scripts/replay_can_fail.py                     # 41 proofs: each control's test goes red without it
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -499,6 +499,20 @@ A placeholder turns back into its value only here:
 
   `"ssh_via_sandbox": false` switches the route off. Measured on macOS and
   Debian 13 with Claude Code 2.1.283.
+
+  **One approval per session (opt-in).** A search over many hosts asks for
+  every command. Set `"ssh_approval": "per-session"` in
+  `~/.maisecrets/config.json`: the first ssh use of a value asks once, and
+  names this scope. After you allow it, the same value goes on stdin to ssh
+  without a prompt for the rest of the session, at most 8 hours. The session
+  approval covers only remote commands that read and print (`grep`, `zgrep`,
+  `cat`, `tail`, `journalctl`, `sort`, `uniq -c` and the like), with no `>`,
+  no `tee` and no `sort -o`. Any other remote command asks every time. The
+  sandbox, the stdin rule and `allowedDomains` stay as they are: a host
+  outside the list still gets a 403. The approval is recorded when the
+  command you allowed reads the value, not when the prompt appears, so a
+  declined prompt approves nothing. Measured in the macOS sandbox against a
+  real host with Claude Code 2.1.283. The default is `"per-command"`.
 - **Inline for Write and Edit.** A placeholder in the content of Write, Edit,
   MultiEdit or NotebookEdit is resolved like an MCP argument, under the same
   session rule, cap and audit line (the line names the file). The client's

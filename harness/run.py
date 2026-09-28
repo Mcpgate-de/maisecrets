@@ -170,7 +170,8 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     home = work / "vaulthome"
     home.mkdir()
     # preload and hooks must agree on the backend, on every OS: pin the test backend for this home
-    (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True}))
+    (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True,
+                                                  **sc.get("config", {})}))
     env = dict(os.environ, ANTHROPIC_BASE_URL=f"http://127.0.0.1:{PORT}", CLAUDE_CODE_MAX_RETRIES="0",
                MAISECRETS_HOME=str(home), MAISECRETS_DUMP=str(dump), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
     for fname, content in sc.get("files", {}).items():
@@ -205,7 +206,7 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             ["claude", "-p", sc["prompt"].replace("{cwd}", str(cwd)), "--plugin-dir", str(ROOT),
              "--settings", str(settings),
              "--allowedTools", sc.get("allowed_tools", "Bash,Read"), "--max-turns", "3",
-             "--debug-file", str(debug_log), *extra],
+             "--debug-file", str(debug_log), *extra, *sc.get("extra_args", [])],
             cwd=cwd, env=env, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
         )
     finally:
@@ -236,6 +237,15 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         got = (cwd / fname).read_text() if (cwd / fname).exists() else "<missing>"
         if got != content:
             fails.append(f"rehydration: {fname} holds {got!r}")
+    if sc.get("expect_home_json"):
+        # a record the hooks wrote into the vault home: (file, a key path that must exist)
+        fname, path = sc["expect_home_json"]
+        try:
+            node = json.loads((home / fname).read_text())
+            for part in path:
+                node = node[part]
+        except (OSError, ValueError, KeyError, TypeError):
+            fails.append(f"{fname} in the vault home has no {'/'.join(path)}")
     if sc.get("expect_no_file") and (cwd / sc["expect_no_file"]).exists():
         fails.append(f"{sc['expect_no_file']} exists: a shell ran text from the arguments as code")
     if sc.get("expect_text") and sc["expect_text"] not in joined:

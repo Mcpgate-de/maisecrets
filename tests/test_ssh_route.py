@@ -50,7 +50,7 @@ def _reset() -> None:
     # every test sets the test store again: another module may have changed the shared config.json
     # after this one was imported, and the vault then reached for the keychain
     Path(HOME, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
-    for f in ("index.json", "vault.json", "audit.log"):
+    for f in ("index.json", "vault.json", "audit.log", "ssh-approvals.json"):
         try:
             os.unlink(Path(HOME, f))
         except FileNotFoundError:
@@ -68,6 +68,137 @@ def _pre(command: str, client: dict = CLAUDE, cfg: dict | None = None) -> dict:
 
 def _hso(out: dict) -> dict:
     return out.get("hookSpecificOutput", {})
+
+
+def _read_fifos(command: str) -> list[str]:
+    """What the approved command does first: read each value from its FIFO."""
+    import re as _re
+    out = []
+    for fifo in _re.findall(r"\$\(cat '([^']+)'\)", command) or _re.findall(r"\$\(cat ([^ )]+)\)", command):
+        with open(fifo, encoding="utf-8") as f:
+            out.append(f.read())
+    return out
+
+
+def _wait_approved(session: str, key: str, want: bool = True, seconds: float = 5.0) -> bool:
+    from maisecrets import ssh_approval
+    import time as _t
+    end = _t.time() + seconds
+    while _t.time() < end:
+        if ssh_approval.approved(session, [key]) == want:
+            return True
+        _t.sleep(0.05)
+    return ssh_approval.approved(session, [key]) == want
+
+
+@unittest.skipIf(os.name == "nt", "the sandbox route is POSIX only")
+class SessionApprovalTests(unittest.TestCase):
+    """ssh_approval: "per-session": one confirm per value and session, read-only remote commands only.
+    The approval exists only after the approved command read the value from its FIFO."""
+    PER_SESSION = {"ssh_approval": "per-session"}
+    READ = "grep -F -f - /var/log/mail.log"
+
+    @classmethod
+    def tearDownClass(cls):  # noqa: N802 - unittest hook
+        _hygiene.assert_children_ended()
+
+    def setUp(self):
+        _hygiene.watch_children(self)
+        _reset()
+        self.ref = Vault().put(VALUE, "SECRET", "manual", session="S1").ref
+        self.key = self.ref.strip("⟦⟧")
+        cfg = {**hooks.load_config(), **self.PER_SESSION}
+        patcher = mock.patch.object(hooks, "load_config", return_value=cfg)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def pre(self, remote: str, host: str = "aux01", session: str = "S1") -> dict:
+        payload = {"tool_name": "Bash", "tool_input": {"command": f"printf '%s' {self.ref} | ssh {host} '{remote}'"},
+                   "session_id": session, **CLAUDE}
+        out = _hso(hooks.pre_tool(payload))
+        cmd = (out.get("updatedInput") or {}).get("command", "")
+        self.addCleanup(hooks._unserve, __import__("re").findall(r"\$\(cat '([^']+)'\)", cmd))
+        return out
+
+    def approve_once(self) -> None:
+        first = self.pre(self.READ)
+        self.assertEqual(first["permissionDecision"], "ask")
+        self.assertIn("without asking again", first["permissionDecisionReason"])
+        self.assertFalse(_wait_approved("S1", self.key, want=True, seconds=0.3), "no approval before the read")
+        self.assertEqual(_read_fifos(first["updatedInput"]["command"]), [VALUE])   # the user said yes: it runs
+        self.assertTrue(_wait_approved("S1", self.key), "the read of the value confirms the approval")
+
+    def test_the_first_use_asks_and_names_the_session_scope(self):
+        out = self.pre(self.READ)
+        self.assertEqual(out["permissionDecision"], "ask")
+        self.assertIn("rest of this session", out["permissionDecisionReason"])
+        self.assertIn("read-only remote commands", out["permissionDecisionReason"])
+
+    def test_after_one_approval_the_next_read_only_commands_run_without_an_ask(self):
+        self.approve_once()
+        for remote, host in ((self.READ, "aux01"), ("zgrep -c -F -f - /var/log/mail.log.1.gz", "prod01"),
+                             ("sudo journalctl -u postfix | grep -F -f - | sort | uniq -c", "aux02")):
+            with self.subTest(remote):
+                out = self.pre(remote, host)
+                self.assertNotIn("permissionDecision", out, "the client's own permission rules decide")
+                new = out["updatedInput"]["command"]
+                self.assertNotIn(VALUE, new)
+                self.assertIn("sandbox_probe.py", new.split(";", 1)[0], "the sandbox guard still runs first")
+                self.assertIn("ProxyCommand=", new)
+
+    def test_an_ask_that_was_declined_approves_nothing(self):
+        out = self.pre(self.READ)                      # the user says no: the command never reads the FIFO
+        hooks._unserve(__import__("re").findall(r"\$\(cat '([^']+)'\)", out["updatedInput"]["command"]))
+        self.assertFalse(_wait_approved("S1", self.key, want=True, seconds=0.5))
+        self.assertEqual(self.pre(self.READ).get("permissionDecision"), "ask")
+
+    def test_a_remote_command_that_can_write_still_asks_every_time(self):
+        self.approve_once()
+        for remote in ("cat > /tmp/x", "grep -F -f - x | tee /tmp/y", "sort -o /tmp/x", "awk -f /tmp/p"):
+            with self.subTest(remote):
+                out = self.pre(remote)
+                self.assertEqual(out.get("permissionDecision"), "ask", remote)
+                self.assertNotIn("without asking again", out["permissionDecisionReason"])
+
+    def test_the_approval_holds_only_in_its_own_session(self):
+        self.approve_once()
+        Vault().put(VALUE, "SECRET", "manual", session="S2")
+        self.assertEqual(self.pre(self.READ, session="S2").get("permissionDecision"), "ask")
+
+    def test_a_token_is_used_once_and_ends(self):
+        from maisecrets import ssh_approval
+        token = ssh_approval.remember_pending("S1", [self.key])
+        with mock.patch.object(ssh_approval.time, "time", return_value=ssh_approval.time.time() + 16 * 60):
+            self.assertEqual(ssh_approval.confirm(token), [], "too late: a token ends after 15 minutes")
+        fresh = ssh_approval.remember_pending("S1", [self.key])
+        self.assertEqual(ssh_approval.confirm(fresh), [self.key], "in time, it approves")
+        self.assertEqual(ssh_approval.confirm(fresh), [], "and only once")
+        self.assertEqual(ssh_approval.confirm("made-up-token"), [])
+
+    def test_the_approval_ends_after_its_hours(self):
+        from maisecrets import ssh_approval
+        self.approve_once()
+        self.assertTrue(ssh_approval.approved("S1", [self.key]), "approved now: the test below can fail")
+        later = ssh_approval.time.time() + (ssh_approval.APPROVAL_HOURS * 3600 + 60)
+        with mock.patch.object(ssh_approval.time, "time", return_value=later):
+            self.assertFalse(ssh_approval.approved("S1", [self.key]))
+
+    def test_without_the_option_every_command_asks_and_no_token_is_given(self):
+        from maisecrets import ssh_approval
+        cfg = {**hooks.load_config(), "ssh_approval": "per-command"}
+        with mock.patch.object(hooks, "load_config", return_value=cfg):
+            first = self.pre(self.READ)
+            _read_fifos(first["updatedInput"]["command"])
+            out = self.pre(self.READ)
+        self.assertEqual(out.get("permissionDecision"), "ask")
+        self.assertNotIn("without asking again", out["permissionDecisionReason"])
+        self.assertFalse(ssh_approval.approved("S1", [self.key]))
+
+    def test_the_store_file_holds_no_value(self):
+        self.approve_once()
+        text = (Path(HOME) / "ssh-approvals.json").read_text(encoding="utf-8")
+        self.assertNotIn(VALUE, text)
+        self.assertEqual(stat.S_IMODE(os.stat(Path(HOME) / "ssh-approvals.json").st_mode), 0o600)
 
 
 @unittest.skipIf(os.name == "nt", "the sandbox route is POSIX only")

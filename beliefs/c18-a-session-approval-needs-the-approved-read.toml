@@ -1,0 +1,10 @@
+# c18-a-session-approval-needs-the-approved-read: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c18-a-session-approval-needs-the-approved-read"
+control = "C18"
+statement = "With ssh_approval per-session, a value is approved for the session only when the command the user allowed reads it from its FIFO; an ask alone, or a declined ask, approves nothing."
+runner = ["tests/test_ssh_route.py::SessionApprovalTests::test_after_one_approval_the_next_read_only_commands_run_without_an_ask"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        \"            ssh_approval.confirm(spec['approve'])\\n\"\n"
+replace = "        \"            pass\\n\"\n"

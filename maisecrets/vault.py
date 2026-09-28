@@ -51,6 +51,7 @@ DEFAULT_CONFIG = {
     "resolve_in_files": True,        # Write/Edit content resolves a placeholder like an MCP argument
     "shortcut": True,                # the first SessionStart names /maisecrets:shortcut once; it installs nothing
     "ssh_via_sandbox": True,         # a value may go to ssh on stdin inside the Claude Code sandbox, after a confirm
+    "ssh_approval": "per-command",   # "per-session": one confirm per value and session, read-only remote commands
     "keep_purged_days": 30,          # metadata of an expired entry is deleted after this many days
     "audit_max_lines": 2000,
 }
@@ -68,6 +69,7 @@ _CONFIG_TYPES = {
     "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
+    "ssh_approval": str,
 }
 
 
