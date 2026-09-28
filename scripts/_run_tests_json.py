@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run unittest ids and write each test's outcome as JSON: {id: "pass"|"fail"|"skip"}.
+"""Run unittest ids and write each test's outcome as JSON: {id: "pass"|"fail"|"skip"|"broken"}.
 
 The replay needs the outcome per test, not one exit code: an invariant belief demands that
 each of its tests goes red under at least one mutation. Parsing `unittest -v` text differs
@@ -38,7 +38,11 @@ class _Recorder(unittest.TextTestResult):
 
     def addError(self, test, err):
         super().addError(test, err)
-        # an error in setUpClass arrives as a _ErrorHolder whose id names the class
+        if not isinstance(test, unittest.TestCase):
+            # an error in setUpClass or setUpModule arrives as a _ErrorHolder: no test of that
+            # class ran, so none of them was red on its own evidence
+            self.outcomes[test.id()] = "broken"
+            return
         self._set(test, "fail")
 
     def addSkip(self, test, reason):
@@ -68,9 +72,11 @@ def main(argv: list[str]) -> int:
     result = runner.run(suite)
     outcomes = dict(result.outcomes)
     for tid in ids:
-        # a test that never reported (an import error, a class-level error) is red, not absent
+        # a test that never reported (an import error, a class-level error) did not run: "broken",
+        # which the replay refuses as evidence, never "fail" (review, 2026-09-28: an import error under
+        # a mutation counted as a kill of every owning test)
         if tid not in outcomes and not any(k.startswith(tid + ".") for k in outcomes):
-            outcomes[tid] = "fail"
+            outcomes[tid] = "broken"
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(outcomes, fh)
     return 0 if result.wasSuccessful() else 1

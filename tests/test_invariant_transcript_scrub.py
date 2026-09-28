@@ -98,6 +98,9 @@ def records(value: str, keep: str) -> list[dict]:
             {"hookSpecificOutput": {"updatedInput": {"token": value}}})}, "k": keep},
         {"type": "queue-operation", "operation": "enqueue", "content": text, "k": keep},
         {"type": "event_msg", "payload": {"type": "exec_command_end", "stdout": text + "\n"}, "k": keep},
+        # Codex writes the command and its raw output here before the PostToolUse hook runs
+        {"type": "event_msg", "payload": {"type": "item_completed", "item": {
+            "type": "CommandExecution", "command": f"echo {value}", "aggregated_output": text}}, "k": keep},
         {"type": "response_item",
          "payload": {"type": "function_call", "arguments": json.dumps({"cmd": f"echo {value}"})}, "k": keep},
         {"type": "response_item",

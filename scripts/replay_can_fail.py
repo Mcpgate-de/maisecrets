@@ -65,16 +65,19 @@ def run_tests(ids: list[str]) -> tuple[int, dict[str, str]]:
                 outcomes = json.load(fh)
         except (OSError, ValueError):
             # the runner itself died (the mutation broke an import); every test counts as red
-            outcomes = {unittest_id(t): "fail" for t in ids}
+            outcomes = {unittest_id(t): "broken" for t in ids}
     # a skipped owning test is no evidence either way: without git in the CI image the skill's
     # tests were skipped, the replay read the skip as green and failed C17 for the wrong reason,
     # and read it as "green before the mutation" too (2026-09-27)
     if "skip" in outcomes.values():
         return SKIPPED, outcomes
+    if "broken" in outcomes.values():
+        return BROKEN, outcomes
     return (1 if "fail" in outcomes.values() or r.returncode else 0), outcomes
 
 
 SKIPPED = -1
+BROKEN = -2
 
 
 @contextmanager
@@ -145,6 +148,9 @@ def _replay_one(belief: dict, proof: dict) -> tuple[bool, str, set[str]]:
         return False, "the file was not restored", set()
     if rc == SKIPPED:
         return False, "an owning test was skipped under the mutation; a skip is no evidence", set()
+    if rc == BROKEN:
+        return False, ("the mutation broke an import or a class set-up, so the owning tests did not run; "
+                       "a red there proves nothing"), set()
     red = {tid for tid, o in outcomes.items() if o == "fail"}
     if rc == 0:
         return False, "the owning tests stayed GREEN under the mutation: they do not carry this belief", red
@@ -161,6 +167,8 @@ def replay(belief: dict) -> tuple[bool, str]:
     first, _ = run_tests(belief["runner"])
     if first == SKIPPED:
         return False, "an owning test was skipped here (a missing tool?); a skip is no evidence"
+    if first == BROKEN:
+        return False, "an owning test cannot run here (an import or a class set-up fails); no evidence"
     if first != 0:
         return False, "the owning tests are red before the mutation; no evidence"
     killed: set[str] = set()

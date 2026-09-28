@@ -87,25 +87,28 @@ def encoded(value: str) -> list[str]:
             quote(value, safe=""), quote_plus(value), json.dumps(value)[1:-1]]
 
 
-def model_strings(obj, path: str = "") -> list[tuple[str, str]]:
-    """(field path, text) for every string in a hook answer except the allowed delivery."""
+def model_strings(obj, path: str = "", delivery: bool = False) -> list[tuple[str, str]]:
+    """(field path, text) for every string in a hook answer. With ``delivery`` (a PreToolUse
+    answer) the one allowed delivery, `hookSpecificOutput.updatedInput`, is left out; the same
+    name anywhere else is text like any other."""
     out: list[tuple[str, str]] = []
     if isinstance(obj, dict):
         for k, v in obj.items():
-            if k in DELIVERY:
+            here = f"{path}.{k}" if path else k
+            if delivery and here == "hookSpecificOutput.updatedInput":
                 continue
-            out += model_strings(v, f"{path}.{k}" if path else k)
+            out += model_strings(v, here, delivery)
     elif isinstance(obj, list):
         for i, v in enumerate(obj):
-            out += model_strings(v, f"{path}[{i}]")
+            out += model_strings(v, f"{path}[{i}]", delivery)
     elif isinstance(obj, str):
         out.append((path, obj))
     return out
 
 
-def leaks(values: list[str], obj) -> list[str]:
+def leaks(values: list[str], obj, delivery: bool = False) -> list[str]:
     found = []
-    for field, text in model_strings(obj):
+    for field, text in model_strings(obj, delivery=delivery):
         for value in values:
             for f in forms(value):
                 if f in text:
@@ -234,6 +237,12 @@ class PostToolOutputTests(unittest.TestCase):
             "json": json.dumps({"config": {"token": value}}),
             "url-encoded": f"t={quote(value + '/+', safe='')}",
             "punctuation": f"({value}), [{value}].",
+            # another session's value that a command encoded: no store read, the decoded token is fingerprinted
+            "base64": "out " + base64.b64encode(value.encode()).decode() + " end",
+            "base64 url-safe": "out " + base64.urlsafe_b64encode(value.encode()).decode().rstrip("=") + " end",
+            "hex": "out " + value.encode().hex() + " end",
+            "HEX": "out " + value.encode().hex().upper() + " end",
+            "json twice": json.dumps({"text": json.dumps({"token": value + '"q'})}),
         }
         self._check(texts, [value])
 
@@ -276,7 +285,7 @@ class RefusalTextTests(unittest.TestCase):
         for label, (tool, tool_input) in cases.items():
             for client in CLIENTS:
                 out = self._pre(client, tool, tool_input)
-                bad += [f"{label} / {client}: {x}" for x in leaks(w.all_values, out)]
+                bad += [f"{label} / {client}: {x}" for x in leaks(w.all_values, out, delivery=True)]
         self.assertEqual(bad, [], f"{len(bad)} leaks:\n" + "\n".join(bad[:15]))
 
     def test_a_blocked_prompt_carries_no_value_in_its_answer_or_its_pending_copy(self):
@@ -351,13 +360,17 @@ class SessionStartTextTests(unittest.TestCase):
 
     def test_the_session_start_answer_carries_no_stored_value(self):
         w = _World()
+        # a stored value with the shape of a key name (lower case, digits, underscore)
+        keyish = "mq" + secrets.token_hex(4)
+        w.v.put(keyish, "SECRET", "manual", session="S0")
+        w.values["keyish"] = keyish
         env = dict(os.environ, MAISECRETS_HOME=str(HOME), PYTHONUTF8="1")
         env.pop("CLAUDECODE", None)
         bad = []
         for config in ({"backend": "jsonfile", "allow_plaintext_store": True},
                        # a value pasted into the configuration by mistake: the warning names the key only
                        {"backend": "jsonfile", "allow_plaintext_store": True, "ttl_hours": w.values["resolved"],
-                        w.values["live"]: 1}):
+                        w.values["live"]: 1, keyish: 1}):
             (HOME / "config.json").write_text(json.dumps(config), encoding="utf-8")
             try:
                 r = subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "session-start"],
