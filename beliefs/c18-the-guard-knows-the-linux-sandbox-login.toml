@@ -1,0 +1,10 @@
+# c18-the-guard-knows-the-linux-sandbox-login: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c18-the-guard-knows-the-linux-sandbox-login"
+control = "C18"
+statement = "The sandbox guard accepts the Linux sandbox login `srt` alone as well as the macOS form `srt.<…>`, and refuses look-alikes; a guard that knew only `srt.` refused every ssh in the Linux sandbox."
+runner = ["tests/test_ssh_route.py::GuardProbeTests::test_the_linux_login_form_srt_alone_passes_and_look_alikes_do_not"]
+
+[proof]
+file = "hooks/sandbox_probe.py"
+find = "    if u.hostname not in LOCAL or not port or not (user == \"srt\" or user.startswith(\"srt.\")):\n"
+replace = "    if u.hostname not in LOCAL or not port or not user.startswith(\"srt.\"):\n"

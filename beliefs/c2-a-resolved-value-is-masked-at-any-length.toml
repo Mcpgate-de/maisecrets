@@ -1,0 +1,10 @@
+# c2-a-resolved-value-is-masked-at-any-length: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-a-resolved-value-is-masked-at-any-length"
+control = "C2"
+statement = "A value this session itself put into a call is masked in the tool output at any length; the 8-character floor applies only to guesses, and a 6-character password came back in plain text without this."
+runner = ["tests/test_gates.py::ResolvedValueRedactionTests::test_a_short_value_the_session_put_in_comes_back_masked"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        if value and 4 <= len(value) < _EXACT_MIN_LEN:\n"
+replace = "        if False:\n"

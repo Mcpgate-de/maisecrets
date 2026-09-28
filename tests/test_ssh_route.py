@@ -512,6 +512,14 @@ class GuardProbeTests(unittest.TestCase):
     def test_the_sandbox_proxy_with_no_direct_network_passes(self):
         self.assertTrue(self.with_proxy("407 Proxy Authentication Required", closed_network=True))
 
+    def test_the_linux_login_form_srt_alone_passes_and_look_alikes_do_not(self):
+        # Claude Code 2.1.283 on Debian 13 logs in as `srt` alone (macOS: `srt.<…>`); the guard refused
+        # every ssh in the Linux sandbox (measured on the netcup worker, 2026-09-28)
+        self.assertTrue(self.with_proxy("407 Proxy Authentication Required", closed_network=True, user="srt"))
+        for user in ("srtx", "srt_", "xsrt", "srt-u"):
+            with self.subTest(user=user):
+                self.assertFalse(self.with_proxy("407 Proxy Authentication Required", closed_network=True, user=user))
+
     def test_a_proxy_that_lets_a_wrong_login_through_fails(self):
         self.assertFalse(self.with_proxy("200 Connection Established", closed_network=True))
 
@@ -578,6 +586,14 @@ class ProxyHelperTests(unittest.TestCase):
         self.assertTrue(head.startswith("CONNECT aux01:22 HTTP/1.1\r\n"), head)
         self.assertIn("Proxy-Authorization: Basic " + base64.b64encode(b"srt.user:s@cret").decode(), head)
 
+    def test_the_linux_login_form_srt_alone_is_used(self):
+        p = _Proxy("200 Connection Established")
+        p.start()
+        r = self.run_helper(f"http://srt:{'p' * 32}@localhost:{p.port}", b"SSH-2.0-test\r\n")
+        p.join(5)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, b"SSH-2.0-test\r\n")
+
     def test_a_refusal_ends_with_exit_1_and_names_the_status(self):
         p = _Proxy("403 Forbidden")
         p.start()
@@ -589,7 +605,8 @@ class ProxyHelperTests(unittest.TestCase):
     def test_a_proxy_that_is_not_on_this_machine_never_gets_the_login(self):
         for url in ("http://srt.u:p@proxy.example.org:3128", "https://srt.u:p@localhost:3128", "",
                     "http://srt.u:p@localhost", "http://cntlm:p@localhost:3128", "http://localhost:3128",
-                    "http://srt.u:p@localhost:notaport"):
+                    "http://srt.u:p@localhost:notaport", "http://srtx:p@localhost:3128",
+                    "http://srtuser:p@localhost:3128"):
             with self.subTest(url=url):
                 r = self.run_helper(url)
                 self.assertNotEqual(r.returncode, 0)

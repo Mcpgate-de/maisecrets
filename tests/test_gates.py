@@ -828,6 +828,58 @@ class RedactionTests(unittest.TestCase):
         self.assertEqual(out, {})
 
 
+class StorePathTests(unittest.TestCase):
+    """External review, 2026-09-28: Read, Grep and Glob were not checked at all, so the agent could read the
+    key and the ciphertext of the file store and decode them outside every gate around a resolve."""
+
+    def pre(self, tool: str, tool_input: dict, cwd: str = "/tmp") -> str:
+        out = hooks.pre_tool({"tool_name": tool, "tool_input": tool_input, "session_id": "S1", **CLAUDE, "cwd": cwd})
+        return out.get("hookSpecificOutput", {}).get("permissionDecision", "pass")
+
+    def test_the_read_tools_are_in_the_matcher(self):
+        hooks_json = json.loads((Path(__file__).resolve().parent.parent / "hooks" / "hooks.json").read_text())
+        matcher = hooks_json["hooks"]["PreToolUse"][0]["matcher"]
+        for tool in ("Read", "Grep", "Glob"):
+            self.assertRegex(tool, "^(?:" + matcher + ")$")
+
+    def test_a_read_of_the_store_or_its_value_directory_is_refused(self):
+        home = str(hooks.HOME) if hasattr(hooks, "HOME") else os.environ["MAISECRETS_HOME"]
+        link = Path(tempfile.mkdtemp(prefix="maisecrets-link-")) / "l"
+        self.addCleanup(shutil.rmtree, link.parent, True)
+        os.symlink(home, link)
+        for tool, ti in (("Read", {"file_path": home + "/key"}), ("Read", {"file_path": str(link) + "/vault.enc.json"}),
+                         ("Grep", {"pattern": "x", "path": home}), ("Glob", {"pattern": home + "/*"}),
+                         ("Grep", {"pattern": "x", "glob": home + "/*.json"}),
+                         ("Read", {"file_path": os.path.relpath(home + "/key", "/tmp")}),
+                         ("mcp__fs__read_file", {"path": home + "/vault.enc.json"})):
+            with self.subTest(tool=tool, ti=ti):
+                self.assertEqual(self.pre(tool, ti), "deny")
+
+    def test_another_spelling_or_a_grep_over_a_parent_is_refused(self):
+        # Codex review, 2026-09-28: an uppercase spelling passed on a case-insensitive file system, and a Grep
+        # over the store's parent directory searched the store
+        home = os.environ["MAISECRETS_HOME"]
+        Path(home, "key").write_text("x", encoding="utf-8")
+        self.addCleanup(lambda: Path(home, "key").unlink(missing_ok=True))
+        mixed = home[:-3] + home[-3:].swapcase()
+        if os.path.exists(mixed):                      # a case-insensitive file system (macOS by default)
+            self.assertEqual(self.pre("Read", {"file_path": mixed + "/key"}), "deny")
+        self.assertEqual(self.pre("Grep", {"pattern": "x", "path": os.path.dirname(home)}), "deny")
+        self.assertEqual(self.pre("Glob", {"pattern": "*", "path": os.path.dirname(home)}), "pass", "names only")
+        self.assertEqual(self.pre("Grep", {"pattern": "x"}, cwd=os.path.dirname(home)), "deny", "no path: the cwd")
+
+    def test_ordinary_reads_pass(self):
+        # a folder that does not hold the store: on Linux the test home lies in /tmp, so a Grep over /tmp is
+        # rightly refused there
+        elsewhere = tempfile.mkdtemp(prefix="maisecrets-elsewhere-")
+        self.addCleanup(shutil.rmtree, elsewhere, True)
+        for tool, ti in (("Read", {"file_path": "/etc/hosts"}), ("Glob", {"pattern": "**/*.py"}),
+                         ("Grep", {"pattern": "maisecrets", "path": elsewhere}),
+                         ("mcp__x__y", {"text": "the store is in ~/.maisecrets"})):
+            with self.subTest(tool=tool, ti=ti):
+                self.assertEqual(self.pre(tool, ti), "pass")
+
+
 class ResolvedValueRedactionTests(unittest.TestCase):
     def setUp(self):
         _reset()
@@ -852,6 +904,27 @@ class ResolvedValueRedactionTests(unittest.TestCase):
                 self.assertNotIn(raw, out)
                 self.assertNotIn(base64.b64encode(raw.encode()).decode(), out)
                 self.assertIn(self.e.ref, out)
+
+    def test_a_short_value_the_session_put_in_comes_back_masked(self):
+        # external review, 2026-09-28: a password shorter than 8 characters stored with `put` came back to the
+        # model in plain text after it was used, because every exact match started at 8 characters
+        for raw in ("A7x!42", "Kq9#vT", "8812"):
+            with self.subTest(raw):
+                e = self.v.put(raw, "SECRET", "manual", session="S1")
+                self.assertEqual(self.v.record_resolve(e.key, "S1", "Bash", "{}"), "ok")
+                for text in ("pw=" + raw + " done", "x" + raw + "y"):
+                    out = self._post(text)
+                    self.assertNotIn(raw, out)
+                    self.assertIn(e.ref, out)
+
+    def test_a_value_of_one_to_three_characters_does_not_break_the_words_around_it(self):
+        # Codex review: a resolved `a` turned `status: a database` into masks inside every word
+        e = self.v.put("a", "SECRET", "manual", session="S1")
+        self.assertEqual(self.v.record_resolve(e.key, "S1", "Bash", "{}"), "ok")
+        self.assertEqual(self._post("status: a database"), "status: " + e.ref + " database")
+        e2 = self.v.put("i", "SECRET", "manual", session="S1")
+        self.assertEqual(self.v.record_resolve(e2.key, "S1", "Bash", "{}"), "ok")
+        self.assertEqual(self._post("çiğ and i ok"), "çiğ and " + e2.ref + " ok", "a letter is a letter in any script")
 
     def test_a_result_above_the_cap_is_masked_without_storing(self):
         _reset()

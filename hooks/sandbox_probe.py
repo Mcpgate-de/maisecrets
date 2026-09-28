@@ -3,7 +3,7 @@
 
 Four signals, all needed (measured 2026-09-27 and 2026-09-28, Claude Code 2.1.283, macOS and Debian 13):
 1. SANDBOX_RUNTIME=1;
-2. HTTPS_PROXY is a proxy on this machine with a login of the sandbox runtime's form, srt.…;
+2. HTTPS_PROXY is a proxy on this machine with a login of the sandbox runtime's form, srt or srt.…;
 3. three direct TCP connections fail (no command reaches the network directly in the sandbox);
 4. the proxy refuses a wrong login with 407.
 One failed connection proved little: a company firewall blocks 1.1.1.1, an offline laptop fails every
@@ -30,7 +30,10 @@ def inside(env: dict | None = None) -> bool:
         port = u.port
     except ValueError:
         return False
-    if u.hostname not in LOCAL or not port or not (u.username or "").startswith("srt."):
+    # the sandbox runtime's login: `srt.<…>` on macOS, `srt` alone on Linux (Claude Code 2.1.283,
+    # measured on Debian 13, 2026-09-28: the guard refused every ssh in the Linux sandbox)
+    user = u.username or ""
+    if u.hostname not in LOCAL or not port or not (user == "srt" or user.startswith("srt.")):
         return False
     for target in TARGETS:
         s = socket.socket()
