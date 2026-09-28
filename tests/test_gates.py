@@ -850,10 +850,13 @@ class StorePathTests(unittest.TestCase):
         for tool, ti in (("Read", {"file_path": home + "/key"}), ("Read", {"file_path": str(link) + "/vault.enc.json"}),
                          ("Grep", {"pattern": "x", "path": home}), ("Glob", {"pattern": home + "/*"}),
                          ("Grep", {"pattern": "x", "glob": home + "/*.json"}),
-                         ("Read", {"file_path": os.path.relpath(home + "/key", "/tmp")}),
+                         ("Read", {"file_path": os.path.join("..", os.path.basename(home), "key"),
+                                   "__cwd": os.path.join(os.path.dirname(home), "x")}),
                          ("mcp__fs__read_file", {"path": home + "/vault.enc.json"})):
             with self.subTest(tool=tool, ti=ti):
-                self.assertEqual(self.pre(tool, ti), "deny")
+                ti = dict(ti)
+                cwd = ti.pop("__cwd", "/tmp")
+                self.assertEqual(self.pre(tool, ti, cwd=cwd), "deny")
 
     def test_another_spelling_or_a_grep_over_a_parent_is_refused(self):
         # Codex review, 2026-09-28: an uppercase spelling passed on a case-insensitive file system, and a Grep
