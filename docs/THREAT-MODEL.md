@@ -22,6 +22,24 @@ a harness scenario that goes red when the control is removed
 | A4 another user or a copy of the disk | reads files it can reach | read values |
 | A5 the person | everything | none; needs to see and control |
 
+## Core protection and rehydration policy
+
+Two layers, kept apart on purpose (`maisecrets/rehydration.py`).
+
+- **Core protection** keeps a value out of the model: C1 to C3 on the way in and back, C4 to C9 around
+  every resolve, and the capability checks of C6, C14 and C18. A form where the value could turn into
+  code, or a path a client cannot take, is refused on every setting. Nothing below loosens it.
+- **The rehydration policy** decides only whether maisecrets adds its own confirm where a value is put
+  into a call that can take it. `automatic`, the default, adds none: the client's permission rules
+  decide, as without the plugin, but the model sees the placeholder. `confirm` asks on Claude Code and
+  refuses on Codex. `block` refuses. C16 holds it; the matrix per path and client is
+  `tests/test_rehydration_matrix.py`.
+
+The policy is not a boundary against A2. With `automatic`, an agent under injection that holds a
+placeholder of its session can put the value into a call that the client's rules allow, like any
+command the user lets it run. C4 (only placeholders a human gave this session), C7 (the caps) and C9
+(the audit line) still apply; a stricter control is `confirm` or the client's own rules.
+
 ## Controls
 
 | # | control | defends against | ends where |
@@ -39,10 +57,10 @@ a harness scenario that goes red when the control is removed
 | C10 | keyed fingerprints: the index holds HMAC(key, value); the key lives in the store, never in the index | A4 guessing short PII from `index.json` | A3 can read the key |
 | C11 | TTL with renewal cap; expiry deletes the value and keeps metadata | A4, stale mappings | the person can set 30 days |
 | C12 | store choice: keychain (macOS, value on stdin of `security -i`, base64-marked), Credential Locker (Windows, base64 on stdin), encrypted file with 0600 key (Linux); a damaged index or store file is never overwritten | A4 | **not A3**: every store hands the value to any process of the same user without a dialog; the Credential Locker may roam through a Microsoft account |
-| C14 | file tools resolve inline like MCP (session rule, limiter, audit line with the file name, transcript scrub); `resolve_in_files: false` makes them refuse instead; MCP dict keys are refused; the maisecrets home is never written by the agent | the workflow silently writing a placeholder or destroying a redacted file; an injected config change | the value is on disk in plaintext where the user asked for it, and in the client's permission prompt |
+| C14 | file tools resolve inline like MCP (session rule, limiter, audit line with the file name, transcript scrub); `resolve_in_files: false` blocks them (C16); MCP dict keys are refused; the maisecrets home is never written by the agent | the workflow silently writing a placeholder or destroying a redacted file; an injected config change | the value is on disk in plaintext where the user asked for it, and in the client's permission prompt when the client's rules show one |
 | C15 | machine policy: keys in the administrator's policy file win over the user file; the plaintext store needs an explicit opt-in; the model is told never to change settings | A2 or a user loosening the caps | a user with administrator rights |
-| C16 | an MCP call that gets a real value returns `ask` with the rewritten input (Claude Code), with a warning for a published-text field; Codex, which cannot ask, refuses a value in such a field | A1 steering a value into a message, a post or a comment | a user who allows the prompt without reading it; a text field whose name is not on the list (Codex); Bash and Write/Edit, which follow the client's own permission rules |
-| C18 | ssh gets a value only on stdin, inside the Claude Code sandbox, after the user confirms: the command starts with a guard, `hooks/sandbox_probe.py` (`SANDBOX_RUNTIME=1`, the sandbox proxy's `srt.` login, no direct network, and a proxy that refuses a wrong login with 407; else exit 97 before the value is read), ssh gets `hooks/proxy_connect.py` as its first `ProxyCommand`, and the hook asks with the host and the remote command; a value in ssh's arguments, a remote shell, an own proxy or jump host are refused; Codex keeps the refusal. Opt-in `ssh_approval: per-session`: one ask per value and session, recorded only when the allowed command reads the value from its FIFO, which sits in a directory nobody can list (mode 0300) so only the command that holds its name can read it; the store keeps only token hashes; for read-only remote commands only, each a bare command word (`maisecrets/ssh_approval.py`) | A1 sending a value to a host of its choice over ssh | the remote command, which may pass the value on (the user reads it at the prompt; with the session approval only the first one, and later ones are limited to commands that read and print); the hosts in `sandbox.network.allowedDomains`, which the user chose; with the session approval, a program that runs as the user outside the sandbox, which can write the approval store like any file of the user; A3, a local process that fakes the sandbox environment and its proxy on a machine with no direct network |
+| C16 | rehydration policy, one decision per path (Bash, ssh, MCP, file tools): `automatic` (default) gives no decision on Claude Code, so its permission rules apply, and `allow` on Codex, the only decision that carries a rewritten input there; `confirm` returns `ask` with the rewritten input on Claude Code (also in auto and bypass mode; a warning for a published-text field) and refuses on Codex before anything is resolved; `block`, a value that is none of the three, and `resolve_in_files: false` for the file tools refuse before anything is resolved; a user file that is not valid JSON falls back to `confirm`; every rewrite goes through `_rehydrated` (a test names the call sites) | the person who wants a second look before a value leaves; a typo in the setting granting more | with `automatic`, nothing of ours between an allowed call and its destination (see "Core protection and rehydration policy"); a user who allows a `confirm` prompt without reading it; on Codex an MCP tool still needs Codex's own approval (codex-cli 0.158.0), whether a shell command does is not measured |
+| C18 | ssh gets a value only on stdin, inside the Claude Code sandbox (with `rehydration: confirm`, after the user confirms): the command starts with a guard, `hooks/sandbox_probe.py` (`SANDBOX_RUNTIME=1`, the sandbox proxy's `srt.` login, no direct network, and a proxy that refuses a wrong login with 407; else exit 97 before the value is read), ssh gets `hooks/proxy_connect.py` as its first `ProxyCommand`, and under `confirm` the hook asks with the host and the remote command; a value in ssh's arguments, a remote shell, an own proxy or jump host are refused; Codex keeps the refusal. Opt-in `ssh_approval: per-session`, under `confirm`: one ask per value and session, recorded only when the allowed command reads the value from its FIFO, which sits in a directory nobody can list (mode 0300) so only the command that holds its name can read it; the store keeps only token hashes; for read-only remote commands only, each a bare command word (`maisecrets/ssh_approval.py`) | A2 sending a value to a host of its choice over ssh | the remote command, which may pass the value on (with `automatic` nothing of ours reads it; under `confirm` the user reads it at the prompt, with the session approval only the first one, and later ones are limited to commands that read and print); the hosts in `sandbox.network.allowedDomains`, which the user chose; with the session approval, a program that runs as the user outside the sandbox, which can write the approval store like any file of the user; A3, a local process that fakes the sandbox environment and its proxy on a machine with no direct network |
 | C17 | skill output: the secret-hygiene scripts print locations, types, lengths and per-run ids, never a value, a line or a hash of a value; the redacted copy is a new file | the model reading a leaked value while it cleans up a leak | a user who opens the original file |
 
 ## Invariants
@@ -88,6 +106,10 @@ Four goals hold over every path, each with its own tests and a mutation per path
   not exist on native Windows. The README recommends the settings.
 - **The client's permission prompt for an MCP tool** shows the resolved
   argument. It is the person's own value at the point of the real call.
+- **Where a value goes after an allowed call.** With `rehydration: automatic`
+  maisecrets does not judge the destination: a value the person asked to send
+  over Slack goes to Slack. A per-destination policy (a public sink, an unknown
+  host) is a later layer on top of C16, not part of the core.
 
 ## Decisions
 

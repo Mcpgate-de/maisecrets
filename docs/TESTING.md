@@ -13,9 +13,10 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | Claude Code harness | `python3 harness/run.py` | pre-push hook (needs `claude`), GitLab `harness_claude` |
 | Codex harness | `python3 harness/codex.py` | GitLab `harness_codex` |
 | native store and clipboard | `MAISECRETS_NATIVE_BACKEND_TEST=1`, `MAISECRETS_NATIVE_CLIPBOARD_TEST=1` | GitHub runners only: they use the real keychain and clipboard |
-| ssh through the sandbox | `MAISECRETS_E2E_HOST=<ssh alias> MAISECRETS_E2E_IP=<address> python3 harness/sandbox/ssh_e2e.py` | by hand before a release that touches the ssh route, on macOS and on Linux: the real Claude Code sandbox against a real host |
+| Codex with a real model | `python3 harness/codex.py --real` | by hand: `mcp_text_field_rehydrate` needs a real model, which calls an MCP tool the fake upstream cannot script |
+| ssh through the sandbox | `MAISECRETS_E2E_HOST=<ssh alias> MAISECRETS_E2E_IP=<address> python3 harness/sandbox/ssh_e2e.py` | by hand before a release that touches the ssh route, on macOS and on Linux: the real Claude Code sandbox against a real host, under `rehydration: automatic` (cases 0a to 0f) and `confirm` |
 
-593 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
+601 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
 the tested commit of a release (branch `ci`) and on a push to main without a release.
 
 ## What makes a test count
@@ -41,6 +42,17 @@ the tested commit of a release (branch `ci`) and on a push to main without a rel
   helpers, so a form the product forgets stays red.
 - **No unexpected skip.** `scripts/no_unexpected_skips.py` fails the CI job on any skip except
   the two native tests.
+- **The rehydration matrix.** `tests/test_rehydration_matrix.py` holds one hand-written table:
+  path (Bash, ssh, MCP, an MCP published-text field, file tools) × client (Claude Code, Codex) ×
+  policy (`automatic`, `confirm`, `block`) → defer, allow, ask or deny, and a second table for the
+  Windows capabilities. Each cell drives the real `pre_tool` with a stored value and checks the
+  decision, where the value went (a real bash for Bash), that no reason names it, and that a refusal
+  wrote no audit line. It also checks the default, a setting that is no policy, the shapes refused
+  under every policy, and, by the syntax tree of `hooks.py`, that every rewrite goes through the
+  policy. The code's own table (`rehydration.outcome`) is never read by the test. Five C16 beliefs
+  mutate it. The harness proves the same on the real clients: `mcp_rehydrate`,
+  `mcp_rehydrate_confirm`, `bash_ssh_automatic`, `bash_ssh_asks` (Claude Code) and
+  `bash_rehydrate_confirm`, `mcp_text_field_rehydrate` (Codex).
 - **Generated inputs with known answers.** `tests/detection_matrix.py` builds 2,500 cases from
   labels (the denylist and `maisecrets/rules/labels/*.txt`), separators, value shapes and
   context; the gate compares the full result per case. The matrix takes the label files of the

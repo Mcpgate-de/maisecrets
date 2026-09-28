@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Behaviour change: maisecrets adds no approval of its own by default.** A value still never
+  reaches the model, and a form where it could turn into code is still refused. What changed: an
+  MCP call and an ssh command that get a real value no longer ask first, and on Codex a value in a
+  published-text field (`text`, `message`, `body` …) now goes in. Your client's permission rules
+  decide, as for any other call. To keep the 0.5.9 behaviour, set `"rehydration": "confirm"` in
+  `~/.maisecrets/config.json` or in the machine policy; `"block"` turns rehydration off.
+
 ## [0.5.9] - 2026-09-28
 
 - **Codex:** `hooks/hooks.json` changed in this release, so Codex asks once in `/hooks` to trust
