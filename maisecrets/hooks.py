@@ -2042,8 +2042,10 @@ def _derived_forms(value: str) -> list[str]:
     forms = [value]
     for f in (base64.b64encode(raw).decode(), base64.urlsafe_b64encode(raw).decode()):
         forms += [f, f.rstrip("=")]
-    forms += [raw.hex(), raw.hex().upper(), quote(value, safe=""), quote_plus(value),
-              json.dumps(value)[1:-1], json.dumps(value, ensure_ascii=False)[1:-1]]
+    escaped = [json.dumps(value)[1:-1], json.dumps(value, ensure_ascii=False)[1:-1]]
+    # JSON inside a JSON string (an MCP result whose text is a JSON document) escapes twice
+    forms += [raw.hex(), raw.hex().upper(), quote(value, safe=""), quote_plus(value), *escaped,
+              *(json.dumps(e)[1:-1] for e in escaped)]
     return [f for f in dict.fromkeys(forms) if len(f) >= _EXACT_MIN_LEN]
 
 
