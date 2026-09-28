@@ -1,0 +1,10 @@
+# c6-slash-command-arguments-never-run-as-code: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c6-slash-command-arguments-never-run-as-code"
+control = "C6"
+statement = "A slash command's arguments reach the CLI only in the exact heredoc form of its command file; a call that ends the heredoc early or changes the form is refused before it runs."
+runner = ["tests/test_gates.py::ContextTests::test_the_codex_review_shapes_are_refused"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    bad_args = _args_call_refusal(command)\n"
+replace = "    bad_args = None\n"

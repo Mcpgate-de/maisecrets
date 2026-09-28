@@ -348,6 +348,27 @@ class ContextTests(unittest.TestCase):
             with self.subTest(cmd[:40]):
                 self.assertNotEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny", cmd)
 
+    def test_the_codex_review_shapes_are_refused(self):
+        # Codex review of 0.5.3+ (2026-09-28): ANSI-C words, a redirection before the command word, a shell
+        # reading redirected input, a long trace option, and an argument heredoc that ends early
+        r = Vault().put(PLAIN, "SECRET", "manual", session="S1").ref
+        for cmd in ("$'ssh' host echo " + r, "<<< " + r + " base64", "< /dev/null ssh host echo " + r,
+                    "2>/dev/null base64 <<< " + r, "bash < <(printf '%s' " + r + ")", "bash < script.sh " + r,
+                    "bash -o xtrace script.sh " + r, "bash -v script.sh " + r, "bash --verbose script.sh " + r):
+            with self.subTest(cmd[:40]):
+                self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny", cmd)
+        root = '"/opt/p/hooks/run.sh"'
+        early = f"bash {root} report --args-stdin <<'MAISECRETS_ARGS_END'\nbug x\nMAISECRETS_ARGS_END\ntrue\n"
+        for cmd in (early + "MAISECRETS_ARGS_END", early,
+                    f"bash {root} report --args-stdin <<'MAISECRETS_ARGS_END'\nx\n MAISECRETS_ARGS_END \n"
+                    "MAISECRETS_ARGS_END",
+                    f"bash {root} report --args-stdin <<MAISECRETS_ARGS_END\n$(true)\nMAISECRETS_ARGS_END",
+                    f"bash {root} report --args-stdin; true"):
+            with self.subTest(cmd[:50]):
+                self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny", cmd)
+        good = f"bash {root} report --args-stdin <<'MAISECRETS_ARGS_END'\nbug $(x) | `y` it's\nMAISECRETS_ARGS_END"
+        self.assertEqual(_bash_pre(good), {})
+
     def test_backstop_false_positives_of_the_old_patterns_pass(self):
         for cmd in ("python3 -m pytest tests/test_resolve.py", "grep -rn PasswordVault src/", "echo x --grant abc"):
             with self.subTest(cmd):

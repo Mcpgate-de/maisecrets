@@ -157,10 +157,13 @@ def create_with_gh(title: str, body: str, label: str) -> str | None:
     repo = github_repo(tracker())
     if not gh or not repo:
         return None
-    base = [gh, "issue", "create", "-R", repo, "--title", title, "--body-file", "-"]
+    # the host and the repository come from report_url alone: GH_HOST or GH_REPO in the environment
+    # sent the issue to another host (Codex review, 2026-09-28)
+    env = {k: v for k, v in os.environ.items() if k not in ("GH_HOST", "GH_REPO")} | {"GH_HOST": "github.com"}
+    base = [gh, "issue", "create", "-R", f"github.com/{repo}", "--title", title, "--body-file", "-"]
     for argv in (base + ["--label", label], base):   # the label may not exist in the repo
         try:
-            r = subprocess.run(argv, input=body, capture_output=True, text=True, timeout=60)
+            r = subprocess.run(argv, input=body, capture_output=True, text=True, timeout=60, env=env)
         except (OSError, subprocess.TimeoutExpired):
             return None
         if r.returncode == 0 and r.stdout.strip():

@@ -1319,14 +1319,18 @@ class EventsTests(unittest.TestCase):
         self.assertIn("prefilled link: https://github.com/", text)
         seen = {}
         def fake(argv, **kw):
-            seen["argv"], seen["input"] = argv, kw.get("input")
+            seen["argv"], seen["input"], seen["env"] = argv, kw.get("input"), kw.get("env") or {}
             return subprocess.CompletedProcess(argv, 0, stdout="https://github.com/o/r/issues/7\n")
-        with mock.patch("shutil.which", return_value="/usr/bin/gh"), mock.patch("subprocess.run", fake), \
+        with mock.patch.dict(os.environ, {"GH_HOST": "ghe.example.invalid", "GH_REPO": "other/repo"}), \
+                mock.patch("shutil.which", return_value="/usr/bin/gh"), mock.patch("subprocess.run", fake), \
                 mock.patch.object(self.events, "open_in_browser") as opener, redirect_stdout(io.StringIO()) as o2:
             cli.cmd_report(["bug", "--create", "a", "text"])
         opener.assert_not_called()
         self.assertIn("created: https://github.com/o/r/issues/7", o2.getvalue())
-        self.assertEqual(seen["argv"][:6], ["/usr/bin/gh", "issue", "create", "-R", "Mcpgate-de/maisecrets", "--title"])
+        self.assertEqual(seen["argv"][:6], ["/usr/bin/gh", "issue", "create", "-R", "github.com/Mcpgate-de/maisecrets",
+                                            "--title"])
+        self.assertEqual(seen["env"]["GH_HOST"], "github.com", "the host comes from report_url, not the environment")
+        self.assertNotIn("GH_REPO", seen["env"])
         self.assertIn("--body-file", seen["argv"])
         self.assertIn("a text", seen["input"], "the body goes on stdin")
 

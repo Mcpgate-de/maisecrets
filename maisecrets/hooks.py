@@ -704,6 +704,8 @@ def _quote_state(command: str, pos: int) -> str:
 
 
 _ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z_0-9]*=")
+# a redirection word: group 1 is a target glued to the operator
+_REDIR_RE = re.compile(r"^(?:\d+|&)?(?:<<<|<<-?|<>|<&|>&|>>|>\||<|>)(.*)$")
 
 
 def _segments(command: str, ctxs: list[str]) -> list[dict]:
@@ -769,8 +771,14 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
                 pass
         # leading assignments, shell keywords and wrappers: the command word is behind them. `{ ssh …; }`,
         # `if …; then ssh …`, `! ssh` and `env -i ssh` hid ssh from every rule (security review, 2026-09-28)
-        while words and (_ASSIGN_RE.match(words[0]) or words[0] in SHELL_KEYWORDS
+        while words and (_ASSIGN_RE.match(words[0]) or words[0] in SHELL_KEYWORDS or _REDIR_RE.match(words[0])
                          or os.path.basename(words[0]) in WRAPPERS):
+            m = _REDIR_RE.match(words[0])
+            if m:
+                # a redirection before the command word, with its target glued on or as the next word
+                # (Codex review, 2026-09-28)
+                words = words[1:] if m.group(1) else words[2:]
+                continue
             w = os.path.basename(words[0])
             words = words[1:]
             if w in ENVS and _env_splits(words):
@@ -837,6 +845,11 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
     parse the value a second time, or a step that would encode, slice or trace it. Command
     words only, so `python3 script.py ⟦K⟧` and `docker run -e T=⟦K⟧ img` pass."""
     plain = "".join(ch if ctx in ("", "dq", "hd") else " " for ch, ctx in zip(command, ctxs))
+    unquoted = "".join(ch if ctx == "" else " " for ch, ctx in zip(command, ctxs))
+    if "ansi" in ctxs or any(ch == "$" and ctx == "" and command[i + 1:i + 2] == '"'
+                             for i, (ch, ctx) in enumerate(zip(command, ctxs))):
+        # the rewrite refuses a value inside $'…'; a command word in it is hidden as well (Codex review, 2026-09-28)
+        return "$'…' quoting hides the command words from the check"
     segs = _segments(command, ctxs)
     reach = _value_reaches(command, ctxs, segs)
     for seg, reached in zip(segs, reach):
@@ -856,10 +869,14 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
             if inner:
                 return f"{cmd} would hand the value to {inner} as an argument"
         if cmd in SHELLS:
-            if any(INLINE_CODE_FLAGS.match(f) and "c" in f for f in flags) or seg["heredoc"] or seg["piped"]:
+            redirected = re.search(r"<", unquoted[seg["start"]:seg["end"]]) or "<(" in unquoted
+            if any(INLINE_CODE_FLAGS.match(f) and "c" in f for f in flags) or seg["heredoc"] or seg["piped"] \
+                    or redirected:
+                # input from a redirection or a process substitution is read as code too (Codex review, 2026-09-28)
                 return f"{cmd} would parse the value a second time as shell code"
-            if any(re.fullmatch(r"-[A-Za-z]*x[A-Za-z]*", f) for f in flags):
-                return f"{cmd} -x would trace the value"
+            if any(re.fullmatch(r"[-+][A-Za-z]*[xv][A-Za-z]*", f) for f in flags) or \
+                    any(w in ("xtrace", "verbose", "--verbose", "--debugger") for w in words[1:]):
+                return f"{cmd} with tracing would print the value"
         if cmd in REMOTE_OR_EVAL:
             return f"{cmd} hands the command line to another shell"
         if cmd in (".", "source") and (seg["piped"] or seg["heredoc"] or any(w in _STDIN_FILES for w in words[1:])):
@@ -1254,6 +1271,26 @@ def _updated(payload: dict, new_input: dict) -> dict:
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": new_input}}
 
 
+_ARGS_END = "MAISECRETS_ARGS_END"
+_ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" (?:audit|forget|put --clipboard|report|shortcut) "
+                           r"--args-stdin <<'" + _ARGS_END + r"'\n(.*)\n" + _ARGS_END + r"\n?\Z", re.S)
+
+
+def _args_call_refusal(command: str) -> str | None:
+    """A slash command passes its arguments in a quoted heredoc. The delimiter is fixed in the
+    command file, so a line equal to it in the arguments would end the heredoc early and the rest
+    would run as commands (Codex review, 2026-09-28). The call must have exactly the form of the
+    command file, with the delimiter only on its last line."""
+    if "--args-stdin" not in command:
+        return None
+    m = _ARGS_CALL_RE.match(command)
+    if not m or any(line.strip() == _ARGS_END for line in m.group(1).split("\n")):
+        return ("maisecrets: a maisecrets command with --args-stdin must have exactly the form of its command "
+                f"file, and its arguments must not contain a line {_ARGS_END}. The command did not run. Tell the "
+                "user to write the arguments without that line; do not rephrase the command.")
+    return None
+
+
 def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     """Bash: every value is read into a shell variable in the MAIN shell before the command
     runs, and the placeholder becomes that variable in its quoting context. The read fails
@@ -1269,6 +1306,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     the limiter before anything is recorded or served, so a refused command leaves no audit
     line and no value waiting (reviews, 2026-09-26)."""
     command = tool_input.get("command", "")
+    bad_args = _args_call_refusal(command)
+    if bad_args:
+        return _deny(bad_args)
     matched = _store_read_match(command)
     if matched:
         return _deny(f"maisecrets: this command touches {matched}, which the agent never reads or changes; "
