@@ -60,7 +60,7 @@ default prompt of this skill is not a yes: make the offer and wait. Then:
   never the value) and wait for the answer.
 - Say what you do not know. A scan finds what its rules match; say so when you report
   "nothing found".
-- The scripts need Python 3.11 or newer. They live in `scripts/` next to this file; in
+- The scripts need Python 3.9 or newer (the stock python3 of macOS works). They live in `scripts/` next to this file; in
   Claude Code that folder is `${CLAUDE_SKILL_DIR}/scripts`.
 
 ## Check a repository

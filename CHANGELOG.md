@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## [0.5.4] - 2026-09-28
+
+### Features
+
+- run on Python 3.9, the stock python3 of macOS (d4a95b9)
+
+### Fixes
+
+- the second Codex round, shell input and trace settings anywhere (41e3978)
+- four findings from the Codex review of the 0.5.3 follow-ups (9964898)
+- four points from testing 0.5.2 (encoder rule, arguments, browser, report) (16881b6)
+- env -S in its real words, and a backslash-newline joins the line (2ebd713)
+
+### Other
+
+- Merge branch 'fix/tests-under-xdist' into 'main' (465df55)
+
 ## [0.5.3] - 2026-09-28
 
 ### Features

@@ -84,13 +84,13 @@ moves only the last number; a higher one needs the owner's approval. Vault backe
 | Linux | `encrypted-file` | `openssl` AES-256-CBC + PBKDF2 + HMAC tag, key file 0600 |
 | any | `jsonfile` | plaintext 0600, TEST MODE only |
 
-Hooks run through `hooks/run.sh` (bash), which looks for a Python 3.11+ as
+Hooks run through `hooks/run.sh` (bash), which looks for a Python 3.9+ as
 `python3`, `python`, `py -3`, a versioned name, or the Homebrew, `/usr/local`
 and python.org paths. Claude Code on Windows requires Git Bash, so the
 launcher runs there too. Codex on Windows has no Git Bash, so every hook also
 names a `commandWindows` entry: `hooks/run.cmd` runs the same `dispatch.py`
 from `cmd.exe`, the shell Codex uses for a Windows hook. Without a Python
-3.11+ the launcher blocks every prompt and every tool call and withholds every
+3.9+ the launcher blocks every prompt and every tool call and withholds every
 tool result, and its message names what to install: fail closed, with a cause.
 
 Proven with the harness on macOS (Claude Code 2.1.283) and on Debian 13
@@ -130,8 +130,8 @@ behind each mark are in `docs/CLIENTS.md`.
 
 ## Requirements
 
-Python 3.11 or newer on the PATH the client gives its hooks (`python3 --version`).
-A stock Mac ships 3.9: `brew install python` or the python.org installer.
+Python 3.9 or newer on the PATH the client gives its hooks (`python3 --version`).
+The stock `python3` of macOS (3.9) is enough; nothing to install on a Mac.
 Windows: `winget install Python.Python.3.12`. Linux: your package manager, plus
 `openssl` for the vault and `xclip` if you want the clipboard. Without it the
 plugin blocks every prompt and names the missing piece.
@@ -166,9 +166,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 8 scenarios against a fake upstream
+python3 harness/run.py                                 # 9 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
-python3 scripts/replay_can_fail.py                     # 34 proofs: each control's test goes red without it
+python3 scripts/replay_can_fail.py                     # 38 proofs: each control's test goes red without it
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 scripts/install-hooks.sh                               # git pre-commit / pre-push
 ```
@@ -241,9 +241,10 @@ milliseconds of the call, because the stdin form has a line limit. Nothing leave
 opens a network connection. Two exceptions to state to a data-protection
 officer: the Windows Credential Locker can roam through a Microsoft account on
 a machine that is not domain-joined (set `backend` to `encrypted-file` by
-policy if that matters), and `/maisecrets:report` opens the browser on a
-prefilled issue at `report_url` (set it to your tracker, or to `null` to turn
-reporting off).
+policy if that matters), and `/maisecrets:report` prints an issue text and a
+link to `report_url`. It opens a browser only on a local desktop, and it files
+the issue only with `--create` through the GitHub CLI. Set `report_url` to your
+tracker, or set it to `null` to turn reporting off.
 
 **Diagnosis.** `/maisecrets:status` prints version, plugin folder, Python,
 store, policy keys and log counts. `/maisecrets:audit` prints the last
@@ -276,7 +277,8 @@ run".
   `git log`) and `redact_copy.py` (writes a new file) when the model follows it; neither
   opens a network connection.
 - Sends and fetches: nothing. No hook opens a network connection.
-  `/maisecrets:report` opens your browser on a prefilled issue page; the
+  `/maisecrets:report` prints the issue text and a prefilled link, and it
+  files the issue only with `--create` (GitHub CLI, to `report_url`); the
   Windows Credential Locker may roam through a Microsoft account.
 
 ## Secret hygiene skill
@@ -293,7 +295,7 @@ values that already leaked. The model loads it when a task fits; in Claude Code 
   only when a hook of the same agent ran for the call that started it. Otherwise the answer
   opens with an offer that names the source and the step the user must do, and the install
   commands run only after a yes. There is no offer in a web or mobile chat, and none without a
-  Python 3.11 for the hooks. This is how the skill, which a store can list alone, brings the
+  Python 3.9 for the hooks. This is how the skill, which a store can list alone, brings the
   hooks along.
 - **Check what the agents already received.** `audit_transcripts.py` reads the local Claude Code
   and Codex sessions and lists every secret that sat in a prompt, a tool result or a model answer,
@@ -404,9 +406,14 @@ either (reported to the vendor).
 
 Every block and every redaction leaves an event in `~/.maisecrets/events.log`
 (hook, client, rule name, type, plugin version; never a value). In Claude Code,
-`/maisecrets:report last <why it is wrong>` opens a GitHub issue prefilled from
-the last event; `/maisecrets:report bug <what happened>` and
-`/maisecrets:report feature <what it should do>` open one without an event.
+`/maisecrets:report last <why it is wrong>` prepares an issue from the last
+event; `/maisecrets:report bug <what happened>` and
+`/maisecrets:report feature <what it should do>` prepare one without an event.
+The command prints the text and a prefilled link, so it also works over ssh and
+in Remote Control. It opens a browser only on a local desktop, never in an ssh
+session. Add `--create` to file the issue at once with the GitHub CLI (`gh`,
+logged in). The arguments reach the CLI in a quoted heredoc, so a shell never
+reads a reported command as code.
 The CLI form is `python3 -m maisecrets.cli report …`. The value is not in the
 event, so it cannot be in the issue; describe its shape in words.
 

@@ -461,9 +461,35 @@ ENCODERS = {"base64", "base32", "xxd", "od", "hexdump", "uuencode", "rev", "b2su
 SHELL_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "while", "until", "do", "done", "case",
                   "esac", "coproc", "function", "select", "in"}
 # the options of a wrapper that take the next word as their argument; every other option takes none
-# env -S / --split-string, after env's own options and NAME=value words
-_ENV_SPLIT_RE = re.compile(r"(?:^|\s)env\s+(?:(?:(?:-[uCP]|--unset|--chdir)\s+\S+|-\S*|\S+=\S*)\s+)*?"
-                           r"(?:-[a-zA-Z]*S|--split-string)")
+ENVS = {"env", "genv"}
+
+
+def _env_splits(args: list[str]) -> bool:
+    """Whether env, given these words after its name, builds its command from a string (-S,
+    --split-string or a prefix of it such as --sp). -u, -C and -P take an argument: in `-uS` the S
+    is a variable name. Real words, so `/usr/bin/env '-S'` and `\\env -S` count (review, 2026-09-28)."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--" or not a.startswith("-") or a == "-":
+            return False
+        if a.startswith("--"):
+            name = a.split("=", 1)[0]
+            if len(name) > 2 and "--split-string".startswith(name):
+                return True
+            i += 2 if name in ("--unset", "--chdir") and "=" not in a else 1
+            continue
+        for j, letter in enumerate(a[1:], 1):
+            if letter == "S":
+                return True
+            if letter in "uCP":
+                i += 1 if a[j + 1:] else 2
+                break
+        else:
+            i += 1
+    return False
+
+
 WRAPPER_ARG_OPTIONS = {
     "env": ("-u", "--unset", "-C", "--chdir", "-S", "--split-string", "-P"),
     "sudo": ("-u", "-g", "-h", "-p", "-C", "-U", "-T", "-r", "-t", "-D", "--user", "--group", "--host"),
@@ -477,7 +503,7 @@ WRAPPER_ARG_OPTIONS = {
     "caffeinate": ("-t", "-w"),
     "command": (),
 }
-WRAPPERS = {"env", "command", "exec", "nice", "time", "nohup", "sudo", "doas", "builtin", "timeout", "stdbuf",
+WRAPPERS = {"env", "genv", "command", "exec", "nice", "time", "nohup", "sudo", "doas", "builtin", "timeout", "stdbuf",
             "caffeinate", "ionice", "chronic"}
 _SLICE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
 
@@ -678,6 +704,8 @@ def _quote_state(command: str, pos: int) -> str:
 
 
 _ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z_0-9]*=")
+# a redirection word: group 1 is a target glued to the operator
+_REDIR_RE = re.compile(r"^(?:\d+|&)?(?:<<<|<<-?|<>|<&|>&|>>|>\||<|>)(.*)$")
 
 
 def _segments(command: str, ctxs: list[str]) -> list[dict]:
@@ -687,6 +715,10 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
     shell by a substring regex; review, 2026-09-26). Each segment: its words with leading
     assignments and wrappers (env, sudo, nice, …) removed, its command word (basename),
     whether it is fed by a pipe and whether it announces a heredoc."""
+    # a backslash before a newline continues the line: `bash \<newline>-c '…'` is `bash -c '…'`, and a
+    # split there hid -c from every rule (review, 2026-09-28). Two spaces keep every offset.
+    command = re.sub(r"(?<!\\)((?:\\\\)*)\\\n", lambda m: m.group(0) if ctxs[m.end() - 2] not in ("", "dq")
+                     else m.group(1) + "  ", command)
     masked = "".join(ch if ctx == "" else ("\n" if ch == "\n" else "Q") for ch, ctx in zip(command, ctxs))
     segs: list[dict] = []
     piped = False
@@ -739,13 +771,25 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
                 pass
         # leading assignments, shell keywords and wrappers: the command word is behind them. `{ ssh …; }`,
         # `if …; then ssh …`, `! ssh` and `env -i ssh` hid ssh from every rule (security review, 2026-09-28)
-        while words and (_ASSIGN_RE.match(words[0]) or words[0] in SHELL_KEYWORDS
+        while words and (_ASSIGN_RE.match(words[0]) or words[0] in SHELL_KEYWORDS or _REDIR_RE.match(words[0])
                          or os.path.basename(words[0]) in WRAPPERS):
+            m = _REDIR_RE.match(words[0])
+            if m:
+                # a redirection before the command word, with its target glued on or as the next word
+                # (Codex review, 2026-09-28)
+                words = words[1:] if m.group(1) else words[2:]
+                continue
             w = os.path.basename(words[0])
             words = words[1:]
+            if w in ENVS and _env_splits(words):
+                seg["env_split"] = True
             if w == "case":
                 # `case WORD in`: the word is matched, not run
                 words = words[words.index("in") + 1:] if "in" in words else []
+                continue
+            if w == "function" and words:
+                # `function f { base64; }`: the name is not the command word (review, 2026-09-28)
+                words = words[1:]
                 continue
             if w in SHELL_KEYWORDS or _ASSIGN_RE.match(w):
                 continue
@@ -760,14 +804,58 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
     return segs
 
 
+_REF_RE = re.compile(r"⟦[^⟦⟧]*⟧")
+
+
+def _value_reaches(command: str, ctxs: list[str], segs: list[dict]) -> list[bool]:
+    """Which parts of the command can read the value: a part that holds it, and a part fed by a
+    pipe after one that holds it. The encoder rule asks this, so that base64 on a remote script
+    next to `printf ⟦K⟧ | ssh` is not refused (feedback on 0.5.2, 2026-09-28). A value that can come
+    back anywhere else makes every part a reader: a variable, a file, a heredoc, a process
+    substitution, a function, an alias, read or mapfile."""
+    refs = [m.start() for m in _REF_RE.finditer(command)]
+    held = [any(sg["start"] <= r < sg["end"] for r in refs) for sg in segs]
+    masked = "".join(ch if ctx == "" else "Q" for ch, ctx in zip(command, ctxs))
+    everywhere = bool(refs) and (
+        any(sg["heredoc"] for sg in segs) or "<(" in masked or ">(" in masked
+        or re.search(r"\(\s*\)|(?:^|[\s;&|({])(?:function|alias|read|mapfile|readarray|tee|source|\.)(?:\s|$)",
+                     masked)
+        or any(h and re.search(r"[<>]", masked[sg["start"]:sg["end"]]) for h, sg in zip(held, segs)))
+    if not everywhere:
+        # an assignment keeps the value for later parts: X=⟦K⟧, export X=⟦K⟧, X=$(printf ⟦K⟧)
+        for m in re.finditer(r"(?:^|[\s;&|({])[A-Za-z_][A-Za-z_0-9]*\+?=", masked):
+            end, depth = m.end(), 0
+            while end < len(masked) and (depth or not masked[end].isspace()) and (depth or masked[end] not in ";&|"):
+                depth += masked[end] == "("
+                depth -= masked[end] == ")" and depth > 0
+                end += 1
+            if any(m.end() <= r < end for r in refs):
+                everywhere = True
+                break
+    if everywhere:
+        return [True] * len(segs)
+    reach: list[bool] = []
+    for k, sg in enumerate(segs):
+        reach.append(held[k] or (sg["piped"] and any(held[:k])))
+    return reach
+
+
 def _refusal_for(command: str, ctxs: list[str]) -> str | None:
     """Why a command that carries placeholders is refused: a shell or an interpreter that would
     parse the value a second time, or a step that would encode, slice or trace it. Command
     words only, so `python3 script.py ⟦K⟧` and `docker run -e T=⟦K⟧ img` pass."""
     plain = "".join(ch if ctx in ("", "dq", "hd") else " " for ch, ctx in zip(command, ctxs))
-    for seg in _segments(command, ctxs):
+    unquoted = "".join(ch if ctx == "" else " " for ch, ctx in zip(command, ctxs))
+    if "ansi" in ctxs or any(ch == "$" and ctx == "" and command[i + 1:i + 2] == '"'
+                             for i, (ch, ctx) in enumerate(zip(command, ctxs))):
+        # the rewrite refuses a value inside $'…'; a command word in it is hidden as well (Codex review, 2026-09-28)
+        return "$'…' quoting hides the command words from the check"
+    segs = _segments(command, ctxs)
+    reach = _value_reaches(command, ctxs, segs)
+    for seg, reached in zip(segs, reach):
         words, cmd = seg["words"], seg["cmd"]
-        if _ENV_SPLIT_RE.search(seg["text"]):
+        if seg.get("env_split") or (cmd in ARG_RUNNERS and any(
+                os.path.basename(w) in ENVS and _env_splits(words[k + 1:]) for k, w in enumerate(words))):
             # env -S builds its command from a string: the command word is hidden (final review, 2026-09-28)
             return "env -S builds the command from a string, so its command word cannot be checked"
         if not words:
@@ -781,19 +869,29 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
             if inner:
                 return f"{cmd} would hand the value to {inner} as an argument"
         if cmd in SHELLS:
-            if any(INLINE_CODE_FLAGS.match(f) and "c" in f for f in flags) or seg["heredoc"] or seg["piped"]:
+            # input redirected anywhere in the command can reach the shell: `exec <…; bash`, `{ bash; } <…`
+            # (Codex review, 2026-09-28). With a value in the command, any input redirection counts.
+            redirected = "<" in unquoted or any(sg["heredoc"] for sg in segs)
+            if any(INLINE_CODE_FLAGS.match(f) and "c" in f for f in flags) or seg["heredoc"] or seg["piped"] \
+                    or redirected:
+                # input from a redirection or a process substitution is read as code too (Codex review, 2026-09-28)
                 return f"{cmd} would parse the value a second time as shell code"
-            if any(re.fullmatch(r"-[A-Za-z]*x[A-Za-z]*", f) for f in flags):
-                return f"{cmd} -x would trace the value"
+            if any(re.fullmatch(r"[-+][A-Za-z]*[xv][A-Za-z]*", f) for f in flags) or \
+                    any(w in ("xtrace", "verbose", "--xtrace", "--verbose", "--debugger") for w in words[1:]) or \
+                    re.search(r"(?:^|\s)(?:SHELLOPTS|BASHOPTS)=|xtrace|verbose", unquoted):
+                # a trace can also come from the environment: SHELLOPTS=xtrace (Codex review, 2026-09-28)
+                return f"{cmd} with tracing would print the value"
         if cmd in REMOTE_OR_EVAL:
             return f"{cmd} hands the command line to another shell"
+        if cmd in (".", "source") and (seg["piped"] or seg["heredoc"] or any(w in _STDIN_FILES for w in words[1:])):
+            return f"{cmd} would run the value as shell code"
         if cmd in INLINE_INTERPRETERS and any(INLINE_CODE_FLAGS.match(f) for f in flags):
             return f"{cmd} with inline code would parse the value as program text"
-        if cmd in ENCODERS:
+        if cmd in ENCODERS and reached:
             return f"{cmd} would encode the value"
         if cmd in ("awk", "gawk", "mawk", "nawk") and "-v" in words:
             return "awk -v changes backslashes in the value; use V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …' instead"
-        if cmd == "openssl" and len(words) > 1 and words[1] in ("enc", "base64", "dgst"):
+        if cmd == "openssl" and reached and len(words) > 1 and words[1] in ("enc", "base64", "dgst"):
             return f"openssl {words[1]} would encode the value"
         if cmd == "set" and any(re.fullmatch(r"-[a-wyz]*x[a-z]*", f) for f in flags):
             return "set -x would trace the value"
@@ -923,7 +1021,8 @@ def _remote_refusal(remote: str) -> str | None:
             return f"the remote {cmd} would read the value as its program"
         if cmd in ARG_RUNNERS or (cmd == "find" and any(w in ("-exec", "-execdir", "-ok", "-okdir") for w in words)):
             inner = next((os.path.basename(w) for w in words[1:] if os.path.basename(w) in
-                          SHELLS | REMOTE_OR_EVAL | INLINE_INTERPRETERS), None)
+                          SHELLS | REMOTE_OR_EVAL | INLINE_INTERPRETERS | {"scp", "sftp", "autossh", "rsync"}),
+                         None)
             if inner:
                 return f"the remote {cmd} would hand the value to {inner}"
     return None
@@ -1176,6 +1275,26 @@ def _updated(payload: dict, new_input: dict) -> dict:
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": new_input}}
 
 
+_ARGS_END = "MAISECRETS_ARGS_END"
+_ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" (?:audit|forget|put --clipboard|report|shortcut) "
+                           r"--args-stdin <<'" + _ARGS_END + r"'\n(.*)\n" + _ARGS_END + r"\n?\Z", re.S)
+
+
+def _args_call_refusal(command: str) -> str | None:
+    """A slash command passes its arguments in a quoted heredoc. The delimiter is fixed in the
+    command file, so a line equal to it in the arguments would end the heredoc early and the rest
+    would run as commands (Codex review, 2026-09-28). The call must have exactly the form of the
+    command file, with the delimiter only on its last line."""
+    if "--args-stdin" not in command:
+        return None
+    m = _ARGS_CALL_RE.match(command)
+    if not m or any(line.strip() == _ARGS_END for line in m.group(1).split("\n")):
+        return ("maisecrets: a maisecrets command with --args-stdin must have exactly the form of its command "
+                f"file, and its arguments must not contain a line {_ARGS_END}. The command did not run. Tell the "
+                "user to write the arguments without that line; do not rephrase the command.")
+    return None
+
+
 def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     """Bash: every value is read into a shell variable in the MAIN shell before the command
     runs, and the placeholder becomes that variable in its quoting context. The read fails
@@ -1191,6 +1310,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     the limiter before anything is recorded or served, so a refused command leaves no audit
     line and no value waiting (reviews, 2026-09-26)."""
     command = tool_input.get("command", "")
+    bad_args = _args_call_refusal(command)
+    if bad_args:
+        return _deny(bad_args)
     matched = _store_read_match(command)
     if matched:
         return _deny(f"maisecrets: this command touches {matched}, which the agent never reads or changes; "
