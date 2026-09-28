@@ -98,11 +98,11 @@ def records(value: str, keep: str) -> list[dict]:
             {"hookSpecificOutput": {"updatedInput": {"token": value}}})}, "k": keep},
         {"type": "queue-operation", "operation": "enqueue", "content": text, "k": keep},
         {"type": "event_msg", "payload": {"type": "exec_command_end", "stdout": text + "\n"}, "k": keep},
-        {"type": "response_item", "payload": {"type": "function_call", "arguments": json.dumps({"cmd": f"echo {value}"})},
-         "k": keep},
-        {"type": "response_item", "payload": {"type": "custom_tool_call",
-                                              "input": f"await tools.exec_command({{cmd: {json.dumps('echo ' + value)}}})"},
-         "k": keep},
+        {"type": "response_item",
+         "payload": {"type": "function_call", "arguments": json.dumps({"cmd": f"echo {value}"})}, "k": keep},
+        {"type": "response_item",
+         "payload": {"type": "custom_tool_call",
+                     "input": f"await tools.exec_command({{cmd: {json.dumps('echo ' + value)}}})"}, "k": keep},
     ]
 
 

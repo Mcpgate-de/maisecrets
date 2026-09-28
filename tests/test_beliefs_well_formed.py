@@ -46,7 +46,8 @@ class BeliefsWellFormedTests(unittest.TestCase):
                     self.assertTrue(target.exists(), proof["file"])
                     text = target.read_text(encoding="utf-8")
                     self.assertEqual(text.count(proof["find"]), 1, f"{path.name}: anchor must occur exactly once")
-                    self.assertNotEqual(proof["find"], proof["replace"], "a mutation that changes nothing proves nothing")
+                    self.assertNotEqual(proof["find"], proof["replace"],
+                                        "a mutation that changes nothing proves nothing")
                 if b.get("kind") == "invariant":
                     # one goal over every path: one test and one mutation would be a mechanism belief
                     self.assertGreaterEqual(len(b["runner"]), 2, f"{path.name}: an invariant needs several tests")
