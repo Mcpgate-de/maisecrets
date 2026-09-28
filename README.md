@@ -144,6 +144,24 @@ claude plugin install maisecrets@maisecrets             # user scope; new sessio
 claude plugin update maisecrets@maisecrets              # later versions
 ```
 
+**Updates and open sessions.** A hook runs from the plugin folder of its version.
+When Claude Code cannot find that folder, it shows `Plugin directory does not
+exist` and runs the tool without the hook: every protection of that session is
+off until `/reload-plugins` or a new session. No code of the plugin runs then, so
+maisecrets cannot warn you itself.
+
+- Installed from this GitHub marketplace (the commands above), a previous version
+  stays for 14 days, "so a session that already loaded the old version keeps
+  running" ([Claude Code docs](https://code.claude.com/docs/en/plugins/loading#cleanup-of-previous-versions)).
+  This is the install path we recommend.
+- Synced from claude.ai, the previous folder moved to `~/.claude/plugins/.trash`
+  when another Claude Code session started and synced (observed with Claude Code
+  2.1.283 on 2026-09-28; not documented). A session that was open then lost its
+  hooks. After an update, run `/reload-plugins` in every open session.
+- For a team, an admin can roll out this marketplace with managed settings
+  (`extraKnownMarketplaces` with `autoUpdate: true`, and `enabledPlugins`), so
+  nobody has to type a command ([Claude Code docs](https://code.claude.com/docs/en/plugins/org)).
+
 Codex (CLI, IDE extension, and the Codex agent inside the ChatGPT desktop app):
 
 ```bash
