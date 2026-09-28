@@ -1,0 +1,89 @@
+# inv-a-stored-value-never-reaches-model-output: an invariant belief. One goal over every path to it; each mutation removes one path's guard and must turn at least one owning test red, and each owning test must be red under at least one mutation.
+belief = "inv-a-stored-value-never-reaches-model-output"
+kind = "invariant"
+control = "I1"
+statement = "A stored value never reaches a hook output the model or the person reads, within the ends of C1 and C2 (docs/THREAT-MODEL.md): no tool result in any shape or client, a resolved value in any encoding and another session's value as a hex or base64 token, no deny, ask or block reason, no fail-closed answer, no prompt that goes on to the model, no session-start message. The only exception is updatedInput of a resolving PreToolUse answer."
+runner = [
+  "tests/test_invariant_model_output.py::PostToolOutputTests::test_a_resolved_value_is_gone_in_every_encoding_shape_and_client",
+  "tests/test_invariant_model_output.py::PostToolOutputTests::test_a_live_value_is_gone_in_every_token_position_shape_and_client",
+  "tests/test_invariant_model_output.py::RefusalTextTests::test_no_pre_tool_answer_carries_a_value",
+  "tests/test_invariant_model_output.py::RefusalTextTests::test_a_blocked_prompt_carries_no_value_in_its_answer_or_its_pending_copy",
+  "tests/test_invariant_model_output.py::RefusalTextTests::test_a_prompt_that_goes_to_the_model_carries_no_stored_value",
+  "tests/test_invariant_model_output.py::FailClosedTextTests::test_a_crash_with_the_value_in_its_message_answers_without_it",
+  "tests/test_invariant_model_output.py::SessionStartTextTests::test_the_session_start_answer_carries_no_stored_value",
+  "tests/test_invariant_model_output.py::PopulationTests::test_every_output_field_the_hooks_can_write_is_classified",
+  "tests/test_invariant_model_output.py::PopulationTests::test_the_matrix_reaches_every_text_field_the_hooks_write",
+]
+
+[[proof]]
+path = "the encodings of a value this session resolved"
+file = "maisecrets/hooks.py"
+find = "        for form in sorted(forms, key=len, reverse=True):\n"
+replace = "        for form in []:\n"
+
+[[proof]]
+path = "JSON escaped twice (a JSON document in an MCP text)"
+file = "maisecrets/hooks.py"
+find = "*escaped,\n              *(json.dumps(e)[1:-1] for e in escaped)]"
+replace = "*escaped]"
+
+[[proof]]
+path = "the fingerprint match of a live value"
+file = "maisecrets/hooks.py"
+find = "            if key is None:\n                continue\n            vault.admit(key, session)"
+replace = "            if True:\n                continue\n            vault.admit(key, session)"
+
+[[proof]]
+path = "the Codex block reason carries the redacted output"
+file = "maisecrets/hooks.py"
+find = "        text = new_response if isinstance(new_response, str) else json.dumps(new_response, ensure_ascii=False)"
+replace = "        text = response if isinstance(response, str) else json.dumps(response, ensure_ascii=False)"
+
+[[proof]]
+path = "a deny reason that quotes the command"
+file = "maisecrets/hooks.py"
+find = "return _deny(f\"maisecrets: this command touches {matched}, which"
+replace = "return _deny(f\"maisecrets: this command {command} touches {matched}, which"
+
+[[proof]]
+path = "the block notice shows the cleaned prompt"
+file = "maisecrets/hooks.py"
+find = "    lines = block_notice(entries, rewritten, copied, codex, cfg, vault)"
+replace = "    lines = block_notice(entries, prompt, copied, codex, cfg, vault)"
+
+[[proof]]
+path = "a stored value typed into a prompt"
+file = "maisecrets/hooks.py"
+find = "    if vault is not None and _has_live(cfg):\n        # a value the store already holds"
+replace = "    if False:\n        # a value the store already holds"
+
+[[proof]]
+path = "the fail-closed answer names the type, not the message"
+file = "maisecrets/hooks.py"
+find = "        answer(_fail_closed(event, payload, f\"failed ({type(exc).__name__}).\"), f\"failed"
+replace = "        answer(_fail_closed(event, payload, f\"failed ({exc}).\"), f\"failed"
+
+[[proof]]
+path = "the configuration warning names only a typo of a real key"
+file = "maisecrets/vault.py"
+find = "        named = [k for k in unknown if difflib.get_close_matches(k, list(_CONFIG_TYPES), n=1, cutoff=0.8)]"
+replace = "        named = list(unknown)"
+
+[[proof]]
+path = "a new output field outside the classification"
+file = "maisecrets/hooks.py"
+find = "\"permissionDecisionReason\": reason}}\n\n\n# MCP argument"
+replace = "\"permissionDecisionReason\": reason, \"updatedPermissions\": []}}\n\n\n# MCP argument"
+
+[[proof]]
+path = "the person's notice of a redaction"
+file = "maisecrets/hooks.py"
+find = "        \"systemMessage\": f\"maisecrets replaced {hit['n']} value(s)"
+replace = "        \"note\": f\"maisecrets replaced {hit['n']} value(s)"
+
+[[proof]]
+path = "another session's value, encoded as hex or base64 by a command"
+file = "maisecrets/hooks.py"
+find = "    yield from _decoded(token)\n"
+replace = "    yield from ()\n"
+

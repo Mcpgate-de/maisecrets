@@ -1,0 +1,71 @@
+# inv-every-detected-value-can-be-scrubbed: an invariant belief. One goal over every path to it; each mutation removes one path's guard and must turn at least one owning test red, and each owning test must be red under at least one mutation.
+belief = "inv-every-detected-value-can-be-scrubbed"
+kind = "invariant"
+control = "I4"
+statement = "Every value the detector finds is masked in a transcript in every record shape Claude Code and Codex write, in a UTF-8 and an ASCII JSON writer, escaped once and twice, across the scrub's read window, and through the hooks that own the scrub; every line stays valid JSON, the rest of each record stays, and the file keeps its size and inode."
+runner = [
+  "tests/test_invariant_transcript_scrub.py::ScrubTests::test_the_population_covers_every_placeholder_type_and_the_hard_shapes",
+  "tests/test_invariant_transcript_scrub.py::ScrubTests::test_every_detected_value_is_scrubbed_from_every_record_and_writer",
+  "tests/test_invariant_transcript_scrub.py::ScrubTests::test_a_value_across_the_read_window_is_scrubbed",
+  "tests/test_invariant_transcript_scrub.py::ThroughTheHooksTests::test_the_hooks_scrub_one_value_of_each_type_in_every_record",
+]
+
+[[proof]]
+path = "the mask itself"
+file = "maisecrets/hooks.py"
+find = "                        data = data.replace(b, b\"*\" * len(b))\n"
+replace = "                        pass\n"
+
+[[proof]]
+path = "the mask keeps the byte length (in place)"
+file = "maisecrets/hooks.py"
+find = "                        data = data.replace(b, b\"*\" * len(b))\n"
+replace = "                        data = data.replace(b, b\"*\")\n"
+
+[[proof]]
+path = "a value escaped twice (the hook's stdout, a function-call argument)"
+file = "maisecrets/hooks.py"
+find = "        cands = [json.dumps(esc_a)[1:-1], json.dumps(esc_u, ensure_ascii=False)[1:-1], esc_a, esc_u, v]"
+replace = "        cands = [esc_a, esc_u, v]"
+
+[[proof]]
+path = "a value outside ASCII from an ASCII writer"
+file = "maisecrets/hooks.py"
+find = "        cands = [json.dumps(esc_a)[1:-1], json.dumps(esc_u, ensure_ascii=False)[1:-1], esc_a, esc_u, v]"
+replace = "        cands = [json.dumps(esc_u, ensure_ascii=False)[1:-1], esc_u, v]"
+
+[[proof]]
+path = "the escaped forms before the plain one"
+file = "maisecrets/hooks.py"
+find = "    forms.sort(key=len, reverse=True)\n"
+replace = "    forms.sort(key=len)\n"
+
+[[proof]]
+path = "a value of digits only"
+file = "maisecrets/hooks.py"
+find = "        digits = sorted({v.encode() for v in values if v and v.isdigit() and len(v) >= 6}, key=len, reverse=True)"
+replace = "        digits = []"
+
+[[proof]]
+path = "the read window ends at a record boundary"
+file = "maisecrets/hooks.py"
+find = "                if cut > 0:\n"
+replace = "                if False:\n"
+
+[[proof]]
+path = "the blocked prompt's scrub before the answer"
+file = "maisecrets/hooks.py"
+find = "        _scrub_transcript(payload.get(\"transcript_path\", \"\"), values, refs)\n        _scrub_transcript_later(payload.get(\"transcript_path\", \"\"), values, refs)"
+replace = "        _scrub_transcript_later(payload.get(\"transcript_path\", \"\"), values, refs)"
+
+[[proof]]
+path = "the Codex rollout after a redaction"
+file = "maisecrets/hooks.py"
+find = "            _scrub_transcript(path, values, refs)\n"
+replace = "            pass\n"
+
+[[proof]]
+path = "the population reaches every placeholder type"
+file = "maisecrets/detect.py"
+find = "    \"de_tax_id\": _de_tax_id_ok,"
+replace = "    \"de_tax_id\": lambda v: False,"

@@ -19,7 +19,6 @@ working tree for the length of one replay; never run it inside the test suite.
 from __future__ import annotations
 
 import argparse
-import re
 import signal
 import subprocess
 import sys
@@ -47,25 +46,38 @@ def unittest_id(test_id: str) -> str:
     return module + ("." + rest.replace("::", ".") if rest else "")
 
 
-def run_tests(ids: list[str]) -> int:
-    """Each run gets a fresh bytecode cache. A mutation of the same length written in the same
+def run_tests(ids: list[str]) -> tuple[int, dict[str, str]]:
+    """Run the owning tests once; return the exit code and each test's outcome.
+
+    Each run gets a fresh bytecode cache. A mutation of the same length written in the same
     second as the green run's compile left a .pyc that Python took for current (size and mtime
     match), so the tests ran the unmutated code and stayed green (2026-09-27)."""
+    import json
     import os
     import tempfile
-    cmd = [sys.executable, "-m", "unittest", "-v"] + [unittest_id(t) for t in ids]
     with tempfile.TemporaryDirectory(prefix="maisecrets-pyc-") as cache:
+        report = os.path.join(cache, "outcomes.json")
+        cmd = [sys.executable, str(ROOT / "scripts" / "_run_tests_json.py"), report] + [unittest_id(t) for t in ids]
         env = dict(os.environ, PYTHONPYCACHEPREFIX=cache)
         r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=600, env=env)
+        try:
+            with open(report, encoding="utf-8") as fh:
+                outcomes = json.load(fh)
+        except (OSError, ValueError):
+            # the runner itself died (the mutation broke an import); every test counts as red
+            outcomes = {unittest_id(t): "broken" for t in ids}
     # a skipped owning test is no evidence either way: without git in the CI image the skill's
     # tests were skipped, the replay read the skip as green and failed C17 for the wrong reason,
     # and read it as "green before the mutation" too (2026-09-27)
-    if re.search(r"\.\.\. skipped ", r.stderr):
-        return SKIPPED
-    return r.returncode
+    if "skip" in outcomes.values():
+        return SKIPPED, outcomes
+    if "broken" in outcomes.values():
+        return BROKEN, outcomes
+    return (1 if "fail" in outcomes.values() or r.returncode else 0), outcomes
 
 
 SKIPPED = -1
+BROKEN = -2
 
 
 @contextmanager
@@ -91,34 +103,89 @@ def restored_on_any_exit(target: Path, original: str):
             signal.signal(sig, handler)
 
 
-def replay(belief: dict) -> tuple[bool, str]:
+def proofs_of(belief: dict) -> list[dict]:
+    """`[proof]` (a mechanism belief: one guard, one mutation) or `[[proof]]` (an invariant
+    belief: one goal, a mutation per path to it)."""
     proof = belief["proof"]
+    return proof if isinstance(proof, list) else [proof]
+
+
+def is_invariant(belief: dict) -> bool:
+    return belief.get("kind") == "invariant"
+
+
+def _check_mutation(target: Path, mutated: str) -> str | None:
+    # a mutation that breaks the syntax turns every test red for the wrong reason
+    if target.suffix == ".py":
+        try:
+            compile(mutated, str(target), "exec")
+        except SyntaxError as exc:
+            return f"the mutation does not compile ({exc.msg}, line {exc.lineno}); a red proves nothing"
+    if target.suffix == ".json":
+        import json
+        try:
+            json.loads(mutated)
+        except ValueError as exc:
+            return f"the mutation is not valid JSON ({exc}); a red proves nothing"
+    return None
+
+
+def _replay_one(belief: dict, proof: dict) -> tuple[bool, str, set[str]]:
+    """Apply one mutation, run the owning tests, restore. Returns (red, why, the red test ids)."""
     target = ROOT / proof["file"]
     original = target.read_text(encoding="utf-8")
     n = original.count(proof["find"])
     if n != 1:
-        return False, f"anchor occurs {n} times in {proof['file']} (must be exactly once)"
-    first = run_tests(belief["runner"])
-    if first == SKIPPED:
-        return False, "an owning test was skipped here (a missing tool?); a skip is no evidence"
-    if first != 0:
-        return False, "the owning tests are red before the mutation; no evidence"
+        return False, f"anchor occurs {n} times in {proof['file']} (must be exactly once)", set()
     with restored_on_any_exit(target, original):
         mutated = original.replace(proof["find"], proof["replace"], 1)
         target.write_text(mutated, encoding="utf-8")
-        # a mutation that breaks the syntax turns every test red for the wrong reason
-        if target.suffix == ".py":
-            try:
-                compile(mutated, str(target), "exec")
-            except SyntaxError as exc:
-                return False, f"the mutation does not compile ({exc.msg}, line {exc.lineno}); a red proves nothing"
-        rc = run_tests(belief["runner"])
-    if rc == SKIPPED:
-        return False, "an owning test was skipped under the mutation; a skip is no evidence"
+        bad = _check_mutation(target, mutated)
+        if bad:
+            return False, bad, set()
+        rc, outcomes = run_tests(belief["runner"])
     if target.read_text(encoding="utf-8") != original:
-        return False, "the file was not restored"
+        return False, "the file was not restored", set()
+    if rc == SKIPPED:
+        return False, "an owning test was skipped under the mutation; a skip is no evidence", set()
+    if rc == BROKEN:
+        return False, ("the mutation broke an import or a class set-up, so the owning tests did not run; "
+                       "a red there proves nothing"), set()
+    red = {tid for tid, o in outcomes.items() if o == "fail"}
     if rc == 0:
-        return False, "the owning tests stayed GREEN under the mutation: they do not carry this belief"
+        return False, "the owning tests stayed GREEN under the mutation: they do not carry this belief", red
+    return True, "red", red
+
+
+def replay(belief: dict) -> tuple[bool, str]:
+    proofs = proofs_of(belief)
+    for proof in proofs:
+        target = ROOT / proof["file"]
+        n = target.read_text(encoding="utf-8").count(proof["find"])
+        if n != 1:
+            return False, f"anchor occurs {n} times in {proof['file']} (must be exactly once)"
+    first, _ = run_tests(belief["runner"])
+    if first == SKIPPED:
+        return False, "an owning test was skipped here (a missing tool?); a skip is no evidence"
+    if first == BROKEN:
+        return False, "an owning test cannot run here (an import or a class set-up fails); no evidence"
+    if first != 0:
+        return False, "the owning tests are red before the mutation; no evidence"
+    killed: set[str] = set()
+    for i, proof in enumerate(proofs, 1):
+        ok, why, red = _replay_one(belief, proof)
+        killed |= red
+        if not ok:
+            label = proof.get("path", f"mutation {i}")
+            return False, (f"{label} ({proof['file']}): {why}" if len(proofs) > 1 else why)
+    if is_invariant(belief):
+        # a test that no mutation turns red proves nothing about the goal; it is ballast that
+        # reads like coverage
+        idle = [t for t in belief["runner"]
+                if not any(k == unittest_id(t) or k.startswith(unittest_id(t) + ".") for k in killed)]
+        if idle:
+            return False, "no mutation turns these owning tests red: " + ", ".join(idle)
+        return True, f"red under each of {len(proofs)} mutations, every owning test killed, green restored"
     return True, "red under the mutation, green restored"
 
 
@@ -135,7 +202,8 @@ def main(argv: list[str]) -> int:
             return 2
     if args.list:
         for b in beliefs:
-            print(f"{b['belief']:<55} {b['control']:<12} {b['proof']['file']}")
+            files = ", ".join(sorted({p["file"] for p in proofs_of(b)}))
+            print(f"{b['belief']:<55} {b['control']:<12} {files}")
         return 0
     if not beliefs:
         print("no beliefs found; nothing was proven")

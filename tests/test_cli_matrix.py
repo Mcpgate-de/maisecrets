@@ -921,9 +921,9 @@ class SessionStartTests(unittest.TestCase):
         self.assertFalse((sb.home / ".shortcut").exists())
 
     def test_a_config_warning_is_shown_and_a_config_error_blocks(self):
-        sb = self.sandbox({"backend": "encrypted-file", "colour": 1, "shortcut": False})
+        sb = self.sandbox({"backend": "encrypted-file", "shortcutt": 1, "shortcut": False})
         msg = _start(self, sb, CLAUDECODE="1")["systemMessage"]
-        self.assertTrue(msg.endswith(" Warning: config.json: unknown key(s) colour ignored."), msg)
+        self.assertTrue(msg.endswith(" Warning: config.json: unknown key(s) shortcutt ignored."), msg)
         sb = self.sandbox(policy={"keep_purged_days": "thirty"})
         out = _start(self, sb, CLAUDECODE="1")
         self.assertEqual(out, {"systemMessage": "maisecrets: configuration error: policy.json: keep_purged_days "
