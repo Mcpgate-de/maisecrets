@@ -47,6 +47,10 @@ CODEX_P = {**CODEX, "model": "m"}
 # the FIFO path is one shell word ending in v-<token>: a path with `; command` in it is not a read
 _READ = re.compile(r'__ms_(\d+)="\$\(cat (/[A-Za-z0-9._/-]+/v-[A-Za-z0-9_-]+)\)" \|\| \{ echo "maisecrets: the value '
                    r'for ([A-Z_]+_c\d+) was not delivered[^"]*" >&2; exit 97; \}; ')
+# Windows Git Bash reads a value through the plugin's own resolver under a one-time grant
+_READ_WIN = re.compile(r'__ms_(\d+)="\$\("([^"]+)" "([^"]+/hooks/resolve\.py)" ([A-Z_]+_c\d+) '
+                       r'--grant ([A-Za-z0-9_-]+)\)" '
+                       r'\|\| \{ echo "maisecrets: the value for \4 was not delivered[^"]*" >&2; exit 97; \}; ')
 # the sandbox guard of the ssh route: the value is read only after it passed
 _GUARD = re.compile(r'\S+ \S+/hooks/sandbox_probe\.py \|\| \{ echo "maisecrets: [^"]*" >&2; exit 97; \}; ')
 # the options the ssh route puts after `ssh`: no shared connection, the plugin's own proxy
@@ -71,11 +75,21 @@ def undo_bash(original: str, rewritten: str, run_dir: str) -> list[str]:
     keys: dict[str, str] = {}
     while True:
         m = _READ.match(rest)
-        if not m:
+        w = None if m else _READ_WIN.match(rest)
+        if not m and not w:
             break
-        n, path, key = m.groups()
-        if "/../" in path or "/./" in path or os.path.dirname(os.path.realpath(path)) != os.path.realpath(run_dir):
-            problems.append(f"a value is read from {path}, outside the run directory")
+        if m:
+            n, path, key = m.groups()
+            if "/../" in path or "/./" in path or \
+                    os.path.dirname(os.path.realpath(path)) != os.path.realpath(run_dir):
+                problems.append(f"a value is read from {path}, outside the run directory")
+        else:
+            n, py, script, key, _nonce = w.groups()
+            if Path(script).resolve() != (ROOT / "hooks" / "resolve.py").resolve():
+                problems.append(f"a value is read by {script}, not by the plugin's resolver")
+            if Path(py).resolve() != Path(sys.executable).resolve():
+                problems.append(f"the resolver runs under {py}, not the hook's Python")
+            m = w
         if n in keys:
             problems.append(f"__ms_{n} is read twice")
         keys[n] = key
@@ -215,6 +229,7 @@ class ClaudeRewriteTests(unittest.TestCase):
                     self.assertNotIn("updatedInput", h)
 
 
+@unittest.skipIf(os.name == "nt", "Codex on Windows refuses a shell placeholder (PowerShell quoting is not built)")
 class CodexExceptionTests(unittest.TestCase):
     """docs/THREAT-MODEL.md C5: on Codex a rewrite carries "allow", which skips Codex's approval
     prompt. This records the exception; when it stops being true, remove it from the docs."""
