@@ -449,6 +449,7 @@ REMOTE_OR_EVAL = {"ssh", "eval", "su", "expect", "script", "sshpass", "plink", "
 # commands that run other commands with arguments they build from their input
 ARG_RUNNERS = {"xargs", "parallel", "watch", "flock", "chroot", "nsenter", "unshare", "setsid", "runuser",
                "strace", "ltrace", "gdb", "script", "busybox", "systemd-run", "toybox"}
+_SSH_WORD_RE = re.compile(r"(?:^|[=/\s'\"])(?:ssh|scp|sftp|rsync|autossh|mosh)(?:\s|$|['\"])")
 # a variable in front of a fixed path is a known command word: "$HOME/bin/tool", ${REPO}/bin/x
 _FIXED_TAIL_RE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z_0-9]*\}?(?:/[^/$`\s]+)+$")
 # arguments that name stdin as the file to run
@@ -456,6 +457,22 @@ _STDIN_FILES = {"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}
 # clients that read statements from stdin when no statement is given
 _SQL_CLIENTS = {"mysql", "mariadb", "psql", "sqlite3", "mongo", "mongosh", "redis-cli", "clickhouse-client"}
 ENCODERS = {"base64", "base32", "xxd", "od", "hexdump", "uuencode", "rev", "b2sum", "cksum"}
+SHELL_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "while", "until", "do", "done", "case",
+                  "esac", "coproc", "function", "select", "in"}
+# the options of a wrapper that take the next word as their argument; every other option takes none
+WRAPPER_ARG_OPTIONS = {
+    "env": ("-u", "--unset", "-C", "--chdir", "-S", "--split-string", "-P"),
+    "sudo": ("-u", "-g", "-h", "-p", "-C", "-U", "-T", "-r", "-t", "-D", "--user", "--group", "--host"),
+    "doas": ("-u", "-C"),
+    "timeout": ("-s", "--signal", "-k", "--kill-after"),
+    "nice": ("-n", "--adjustment"),
+    "ionice": ("-c", "-n", "-p", "--class", "--classdata"),
+    "stdbuf": ("-i", "-o", "-e"),
+    "exec": ("-a",),
+    "time": ("-f", "-o", "--format", "--output"),
+    "caffeinate": ("-t", "-w"),
+    "command": (),
+}
 WRAPPERS = {"env", "command", "exec", "nice", "time", "nohup", "sudo", "doas", "builtin", "timeout", "stdbuf",
             "caffeinate", "ionice", "chronic"}
 _SLICE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
@@ -715,17 +732,20 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
                 words = _shlex.split(command[seg["start"]:seg["end"]]) or words
             except ValueError:
                 pass
-        # leading assignments and wrappers
-        while words and (_ASSIGN_RE.match(words[0]) or os.path.basename(words[0]) in WRAPPERS):
+        # leading assignments, shell keywords and wrappers: the command word is behind them. `{ ssh …; }`,
+        # `if …; then ssh …`, `! ssh` and `env -i ssh` hid ssh from every rule (security review, 2026-09-28)
+        while words and (_ASSIGN_RE.match(words[0]) or words[0] in SHELL_KEYWORDS
+                         or os.path.basename(words[0]) in WRAPPERS):
             w = os.path.basename(words[0])
             words = words[1:]
-            if w in ("sudo", "doas", "timeout", "nice", "ionice", "stdbuf", "env"):
-                # their own options, with the one argument some take
-                while words and words[0].startswith("-"):
-                    takes_arg = words[0] in ("-u", "-g", "-h", "-p", "-C", "-n", "-i", "-e", "-o", "-s")
-                    words = words[2:] if takes_arg else words[1:]
-                if w == "timeout" and words and re.fullmatch(r"[0-9.]+[smhd]?", words[0]):
-                    words = words[1:]
+            if w in SHELL_KEYWORDS or _ASSIGN_RE.match(w):
+                continue
+            takes = WRAPPER_ARG_OPTIONS.get(w, ())
+            while words and words[0].startswith("-") and words[0] != "-":
+                opt = words[0]
+                words = words[2:] if opt in takes else words[1:]
+            if w == "timeout" and words and re.fullmatch(r"[0-9.]+[smhd]?", words[0]):
+                words = words[1:]
         seg["words"] = words
         seg["cmd"] = os.path.basename(words[0]) if words else ""
     return segs
@@ -778,6 +798,16 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
                     return f"{os.path.basename(w)} -c would parse the value a second time as shell code"
     if re.search(r"(?<![\w-])PS4=", plain):
         return "a custom PS4 would trace the value"
+    # ssh and its relatives anywhere else (a function body, an assignment such as GIT_SSH_COMMAND,
+    # an argument of another command): the route checks only the one plain form
+    try:
+        import shlex as _shlex
+        tokens = _shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    if any(_SSH_WORD_RE.search(t) for t in tokens):
+        return ("ssh, scp, sftp, rsync or autossh appears in this command in a form that cannot be checked; "
+                "a value reaches ssh only as printf '%s' ⟦KEY⟧ | ssh host '…'")
     m = _SLICE_RE.search(plain)
     if m:
         return f"the parameter expansion {m.group(0)}… would slice or rewrite the value"
@@ -851,6 +881,11 @@ def _remote_refusal(remote: str) -> str | None:
             return f"the remote {cmd} would send the value back encoded, where the output redaction cannot see it"
         if cmd in SHELLS and ("-s" in flags or not any(INLINE_CODE_FLAGS.match(f) and "c" in f for f in flags)):
             return f"the remote {cmd} would read the value as shell code"
+        if cmd in SHELLS:
+            code = next((words[n + 1] for n, w in enumerate(words[:-1]) if INLINE_CODE_FLAGS.match(w) and "c" in w), "")
+            inner = _remote_refusal(code) if code else None
+            if inner:
+                return inner
         if cmd in INLINE_INTERPRETERS and not [w for w in words[1:] if w != "-" and not w.startswith("-")] \
                 and not any(INLINE_CODE_FLAGS.match(f) for f in flags):
             return f"the remote {cmd} would read the value as its program"
@@ -918,8 +953,8 @@ def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) 
         i += 1
     remote = toks[i:]
     for c, val in opts:
-        if c in _SSH_REFUSED_FLAGS or (c == "o" and val and
-                                       re.split(r"[=\s]", val.strip(), maxsplit=1)[0].lower() in _SSH_REFUSED_OPTIONS):
+        key = re.split(r"[=\s]", val.strip(), maxsplit=1)[0].strip("\"'").lower() if c == "o" and val else ""
+        if c in _SSH_REFUSED_FLAGS or key in _SSH_REFUSED_OPTIONS or key.startswith("canonical"):
             return ("ssh with its own proxy, jump host, shared connection, config file, host name or local "
                     "command is refused; the sandbox route sets the connection itself")
     why = _remote_refusal(" ".join(shlex.quote(t) if n else t for n, t in enumerate(remote)) if remote else "")
@@ -936,7 +971,7 @@ def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) 
         w += 1
     ssh_span = next((sp for sp in spans[w:] if os.path.basename(sp[2]) == "ssh"), None)
     if ssh_span is None or "Q" in ssh_span[2]:
-        return "the ssh command line cannot be read"
+        return "write ssh as a plain word, not quoted or escaped: printf '%s' ⟦KEY⟧ | ssh host '…'"
     # the line as written, from the ssh word on: redirections such as 2>&1 stay whole
     line = command[seg["start"] + ssh_span[0]:seg["end"]].strip()
     return {"insert_at": seg["start"] + ssh_span[1], "dest": dest, "line": line}
@@ -944,19 +979,27 @@ def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) 
 
 def _sandbox_guard(py: str | None = None) -> str:
     """The first step of a command that sends a value over ssh: stop before the value is read
-    unless the command runs in the Claude Code sandbox. Three signals, all needed: SANDBOX_RUNTIME=1,
-    a proxy login of the sandbox runtime's form in HTTPS_PROXY (srt.…), and three direct TCP
-    connections that all fail. One failed connection proved little: a company firewall blocks
-    1.1.1.1, and an offline laptop fails every connection (edge-case review, 2026-09-27)."""
+    unless the command runs in the Claude Code sandbox. Four signals, all needed: SANDBOX_RUNTIME=1,
+    a proxy login of the sandbox runtime's form in HTTPS_PROXY (srt.…), three direct TCP connections
+    that all fail, and a proxy that refuses a wrong login with 407. One failed connection proved
+    little: a company firewall blocks 1.1.1.1, and an offline laptop fails every connection; a
+    copied environment on an offline machine with a local proxy passed the first three (reviews,
+    2026-09-27 and 2026-09-28)."""
     py = shlex_quote(py or sys.executable)
-    probe = ("import os,socket,sys; from urllib.parse import urlsplit\n"
+    probe = ("import base64,os,socket,sys; from urllib.parse import urlsplit\n"
              "u = urlsplit(os.environ.get('HTTPS_PROXY') or '')\n"
              "local = u.hostname in ('localhost', '127.0.0.1', '::1')\n"
              "if not (local and (u.username or '').startswith('srt.')): sys.exit(1)\n"
              "for a in (('1.1.1.1', 443), ('8.8.8.8', 53), ('9.9.9.9', 443)):\n"
              "    s = socket.socket(); s.settimeout(2)\n"
              "    if s.connect_ex(a) == 0: sys.exit(1)\n"
-             "sys.exit(0)")
+             # the sandbox proxy refuses a wrong login with 407 (measured 2026-09-28); a local proxy that
+             # lets it through is another proxy, and an offline machine with a copied environment fails here
+             "s = socket.create_connection((u.hostname, u.port), 5)\n"
+             "wrong = base64.b64encode(b'srt.maisecrets:' + b'wrong')\n"
+             "s.sendall(b'CONNECT maisecrets-probe.invalid:9 HTTP/1.1\\r\\nHost: maisecrets-probe.invalid:9\\r\\n'\n"
+             "          b'Proxy-Authorization: Basic ' + wrong + b'\\r\\n\\r\\n')\n"
+             "sys.exit(0 if s.recv(64).split(b' ')[1:2] == [b'407'] else 1)")
     return (f'{{ [ "${{SANDBOX_RUNTIME:-}}" = 1 ] && {py} -c {shlex_quote(probe)}; }} || '
             '{ echo "maisecrets: this command sends a value over ssh and runs only inside the Claude Code '
             'sandbox (sandbox.enabled with network.allowedDomains). The value was not read; the command '

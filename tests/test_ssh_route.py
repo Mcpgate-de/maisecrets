@@ -143,6 +143,13 @@ class RouteDecisionTests(unittest.TestCase):
             (f"printf '%s' {r} | ssh aux01 mysql", "statements"),
             (f"printf '%s' {r} | ssh aux01 'psql -h db'", "statements"),
             (f"printf '%s' {r} | ssh aux01 'openssl base64'", "encoded"),
+            # security review, 2026-09-28: quoted option names, canonicalisation, code inside sh -c
+            (f"printf '%s' {r} | ssh -o '\"HostName\" github.com' gitlab.com 'grep -F -f - x'", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh -o '\"LocalCommand\" tee /tmp/x' aux01 cat", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh -o CanonicalizeHostname=yes -o CanonicalDomains=x.org aux01 cat",
+             "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh aux01 'sh -c \"cat | sh\"'", "shell code"),
+            (f"printf '%s' {r} | \\ssh aux01 cat", "plain word"),
             (f"printf '%s' {r} > /tmp/x; ssh aux01 cat", "stdin"),
             (f"printf '%s' {r} | ssh a cat | ssh b cat", "only one ssh"),
             (f"echo {r}; printf '%s' x | ssh aux01 cat", "feed ssh"),

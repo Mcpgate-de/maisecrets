@@ -371,10 +371,17 @@ class ScannerEdgeTests(unittest.TestCase):
                 out = _bash_pre(cmd)["hookSpecificOutput"]
                 self.assertEqual(out.get("permissionDecision"), "deny", out)
         # the real words, not a word inside quotes: these pass
-        for cmd in ("watch -n 5 grep " + r + " /tmp/x", "parallel grep " + r + " ::: a b"):
+        # ssh anywhere in the command with a value, also as a plain word: the safety net refuses it
+        for cmd in ("watch -n 5 grep " + r + " /tmp/x", "parallel grep " + r + " ::: a b", "echo 'ssh host' " + r,
+                    "{ ssh host 'echo " + r + "'; }", "f(){ ssh \"$@\"; }; f host 'echo " + r + "'",
+                    "if true; then ssh host 'echo " + r + "'; fi", "! ssh host 'echo " + r + "'",
+                    "env -i ssh host 'echo " + r + "'", "command -p ssh host 'echo " + r + "'",
+                    "exec -a x ssh host 'echo " + r + "'", "time -p ssh host 'echo " + r + "'",
+                    "printf '%s' " + r + " | scp /dev/stdin host:/tmp/x", "rsync -e ssh " + r + " host:/tmp/",
+                    "GIT_SSH_COMMAND='ssh -o SetEnv=X=" + r + "' git push"):
             with self.subTest(cmd[:40]):
                 self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny", cmd)
-        for cmd in ("echo 'ssh host' " + r, "grep 'bash -c' " + r, "printf '%s' " + r + " | xargs -0 echo",
+        for cmd in ("grep 'bash -c' " + r, "printf '%s' " + r + " | xargs -0 echo",
                     '"$HOME/bin/tool" --token ' + r, "${REPO}/bin/deploy " + r, "watch -x grep " + r + " /tmp/x"):
             with self.subTest(cmd[:40]):
                 self.assertNotEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny", cmd)
