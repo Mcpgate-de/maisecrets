@@ -102,9 +102,9 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual((a.regions, a.languages), (("generic", "us"), ("en", "de")))
 
     def test_codes_are_normalised_and_a_language_without_a_label_file_adds_nothing(self):
-        a = self.resolve({"regions": [" GB ", "generic", "auto", "uk", "it"]}, "it_IT")
-        self.assertEqual(a.regions, ("generic", "uk", "it"))
-        self.assertEqual(a.languages, ("en",), "no it.txt: Italian PII rules, English labels")
+        a = self.resolve({"regions": [" GB ", "generic", "auto", "uk", "jp"]}, "ja_JP")
+        self.assertEqual(a.regions, ("generic", "uk", "jp"))
+        self.assertEqual(a.languages, ("en",), "no ja.txt: a Japanese system gets English labels")
 
     def test_an_empty_list_is_the_generic_rules_only(self):
         self.assertEqual(self.resolve({"regions": []}, "de_DE").regions, ("generic",))
@@ -157,7 +157,7 @@ class LabelFileTests(unittest.TestCase):
     def test_every_label_file_parses_and_each_example_matches_its_label(self):
         import re
         langs = regions.label_languages_available()
-        self.assertEqual(langs, ["de", "en"])
+        self.assertEqual(langs, ["de", "en", "es", "it"])
         for lang in langs:
             labels = regions.load_labels(lang)
             self.assertTrue(labels, lang)
