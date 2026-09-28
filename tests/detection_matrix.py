@@ -29,7 +29,8 @@ def _file_labels() -> list[str]:
 
 
 LABELS = DENYLIST_LABELS + _file_labels()
-SEPARATORS = [":", ": ", "=", " = ", ":\n", ": \n\n"]
+# " : " and "\u00a0: " are French typography, and a common way to type a label anywhere
+SEPARATORS = [":", ": ", "=", " = ", ":\n", ": \n\n", " : ", "\u00a0: "]
 AFTER = ["", " and more words", " {mail}", " and {mail}", ", thanks", "\nnext line here", " (see above)"]
 CONTEXTS = ["{x}", "please use {x} for the login", "Bitte nimm {x} fuer den Zugang",
             "2026-09-27 12:00:01 INFO request {x}", "- {x}", "> {x}"]

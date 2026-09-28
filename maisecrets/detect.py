@@ -414,6 +414,10 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
 # holds spaces. A cut value that is one capitalised word ("secret: Developers, Webhooks, …",
 # "a secret: PostToolUse must …", both in this repository) is the start of a sentence.
 _DS_QUOTE_GROUP = {"ds-keyword-colon": 3, "ds-keyword-equal-signs": 4}
+# the end of the label in the vendored colon rules, and the same with up to three spaces, tabs,
+# no-break or narrow no-break spaces before the colon
+_COLON_AFTER_LABEL = "([]\\'\"]{0,2})?:"
+_COLON_AFTER_LABEL_SPACED = "([]\\'\"]{0,2})?[ \\t\u00a0\u202f]{0,3}:"
 _WHITESPACE_RE = re.compile(r"\s")
 _CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
 
@@ -437,6 +441,10 @@ def _load_detect_secrets(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
         # a character a password starts with may start one (not {, [, (, \\, /, <: code and paths), and
         # _ds_value_ok refuses a shell variable ($VAR, ${VAR}) as before
         regex = regex.replace("(?=\\w+)", "(?=[\\w!#$%&*+\\-@^~?.])")
+        # French typography puts a space (often a no-break space) before the colon, and people type
+        # `password : x` in every language; the vendored colon rules allowed none, so
+        # `mot de passe : <value>` and `password : <value>` were no hit (2026-09-28)
+        regex = regex.replace(_COLON_AFTER_LABEL, _COLON_AFTER_LABEL_SPACED, 1)
         out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(regex, flags),
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
                         secret_group=int(r["group"]), validator="ds_value",
