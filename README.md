@@ -388,7 +388,11 @@ Credential labels come in languages. English labels (`password:`, `pass:`,
 `token:`) are always on. maisecrets adds the labels of your system language
 and of each region, for example `passwort:` and `kennwort:` for German. The
 labels are data files in `maisecrets/rules/labels/`, one file per language.
-A new language is one new file. `/maisecrets:status` shows the regions, where
+A new language is one new file. Files exist for Czech, Danish, Dutch,
+English, Finnish, French, German, Italian, Korean, Norwegian (Bokmål),
+Polish, Portuguese, Spanish, Swedish, Thai and Turkish. Each word comes from
+a reviewed translation of an open-source project, and
+`docs/label-sources.md` names the source of each word. `/maisecrets:status` shows the regions, where
 they came from, and the label languages.
 
 Every entry has a TTL. Each use renews it, up to `max_ttl_seconds`. On

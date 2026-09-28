@@ -24,7 +24,7 @@ import tempfile
 # folders and files of the plugin at run time, and the documents a user reads
 RUNTIME = (".claude-plugin/", ".codex-plugin/", "hooks/", "maisecrets/", "commands/", "skills/", "assets/",
            "LICENSE", "NOTICE", "README.md", "PRIVACY.md", "SECURITY.md", "CHANGELOG.md",
-           "docs/CLIENTS.md", "docs/PROTOCOL.md", "docs/THREAT-MODEL.md")
+           "docs/CLIENTS.md", "docs/PROTOCOL.md", "docs/THREAT-MODEL.md", "docs/label-sources.md")
 
 
 def _git(*args: str, env: dict | None = None, text: bool = True) -> str:
