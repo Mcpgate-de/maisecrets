@@ -1,0 +1,10 @@
+# manifest-every-frontmatter-parses-as-yaml: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "manifest-every-frontmatter-parses-as-yaml"
+control = "operations"
+statement = "Every command and skill frontmatter parses as YAML with text values; the directory check refused an unquoted argument-hint that starts a YAML list (FRONTMATTER_YAML_INVALID, 2026-09-28)."
+runner = ["tests/test_frontmatter.py::PluginLintTests::test_the_plugin_passes_every_check", "tests/test_frontmatter.py::PluginLintTests::test_every_frontmatter_parses_as_yaml_with_text_values"]
+
+[proof]
+file = "commands/report.md"
+find = "argument-hint: \"[last | bug <text> | feature <text>] [--create]\"\n"
+replace = "argument-hint: [last | bug <text> | feature <text>] [--create]\n"

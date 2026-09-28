@@ -105,8 +105,10 @@ lint:
   stage: validate
   # The ruff image has no shell, and the docker executor needs one. Pinned pip install instead.
   script:
-    - pip install --quiet --disable-pip-version-check ruff==0.14.2
+    - pip install --quiet --disable-pip-version-check ruff==0.14.2 pyyaml==6.0.3
     - ruff check --select E,F,W --line-length 120 maisecrets hooks harness tests scripts skills
+    # the plugin files as a directory check reads them (frontmatter YAML, manifests, hook paths)
+    - python scripts/lint_plugin.py
 
 # A release tag sits on the release commit: the tested main commit plus the four release files.
 # verify_release proves exactly that (file list, subject, author, on main, version), and the
@@ -128,6 +130,8 @@ unit:
   # procps gives ps: the test hygiene lists live value-serving children with it
   script:
     - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git procps >/dev/null
+    # PyYAML parses the command and skill frontmatter as the directory check does (test_frontmatter)
+    - pip install --quiet --disable-pip-version-check pyyaml==6.0.3
     - python -m unittest discover -s tests -v 2>&1 | tee unit.log
     - python scripts/no_unexpected_skips.py unit.log
 
@@ -138,6 +142,8 @@ unit_python39:
   image: python:3.9-slim
   script:
     - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git procps >/dev/null
+    # PyYAML parses the command and skill frontmatter as the directory check does (test_frontmatter)
+    - pip install --quiet --disable-pip-version-check pyyaml==6.0.3
     - python -m unittest discover -s tests -v 2>&1 | tee unit.log
     - python scripts/no_unexpected_skips.py unit.log "tomllib is Python 3.11+"
 
@@ -149,6 +155,8 @@ beliefs_can_fail_replay:
   # mutation does not carry the control it claims (borrowed from the ai-gateway beliefs layer)
   script:
     - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git procps >/dev/null
+    # the frontmatter belief runs the YAML test: without PyYAML it skips, and a skip is no evidence
+    - pip install --quiet --disable-pip-version-check pyyaml==6.0.3
     - python scripts/replay_can_fail.py
 
 # The hook harness: a real Claude Code / Codex binary, a fake upstream, every request body

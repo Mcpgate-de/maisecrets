@@ -461,6 +461,16 @@ ENCODERS = {"base64", "base32", "xxd", "od", "hexdump", "uuencode", "rev", "b2su
 SHELL_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "while", "until", "do", "done", "case",
                   "esac", "coproc", "function", "select", "in"}
 # the options of a wrapper that take the next word as their argument; every other option takes none
+# a part that feeds its input to a later shell, a group closer with a redirection, and trace settings
+# from outside the shell's own words (reviews of 0.5.4, 2026-09-28)
+_EXEC_RE = re.compile(r"^(?:(?:command|builtin)\s+)*exec\b")
+_CLOSER_RE = re.compile(r"^(?:(?:\}|\)|done|fi|esac)(?![A-Za-z0-9_])|\d*<)")   # `( bash )<f` leaves `<f`
+_TRACE_RE = re.compile(
+    r"(?:^|[\s;&|(])(?:SHELLOPTS|BASHOPTS)="                                     # an assignment
+    r"|(?:^|[\s;&|(])(?:export|declare|typeset|readonly)\b[^;&|\n]*\b(?:SHELLOPTS|BASHOPTS)\b"
+    r"|(?:^|[\s;&|(])set\b[^;&|\n]*\s[-+]o\s+(?:xtrace|verbose)\b"             # set … -o xtrace
+    r"|(?:^|[\s;&|(])set\b[^;&|\n]*\s-[A-Za-z]*[xv][A-Za-z]*(?=\s|$|[;&|])"      # set … -x / -v
+    r"|(?:^|[\s;&|(])shopt\b[^;&|\n]*\b(?:xtrace|verbose)\b")
 ENVS = {"env", "genv"}
 
 
@@ -869,17 +879,25 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
             if inner:
                 return f"{cmd} would hand the value to {inner} as an argument"
         if cmd in SHELLS:
-            # input redirected anywhere in the command can reach the shell: `exec <…; bash`, `{ bash; } <…`
-            # (Codex review, 2026-09-28). With a value in the command, any input redirection counts.
-            redirected = "<" in unquoted or any(sg["heredoc"] for sg in segs)
+            # input that reaches the shell: a redirection in its own part, an `exec <…` before it, or a
+            # redirection on a group around it (`{ bash; } <…`, `( bash ) <…`) (Codex review, 2026-09-28).
+            # A `<` of another command, such as `mysql … < dump.sql && bash post.sh`, does not count
+            # (final review of 0.5.4).
+            redirected = "<" in unquoted[seg["start"]:seg["end"]] or any(
+                "<" in unquoted[sg["start"]:sg["end"]] and (
+                    (_EXEC_RE.match(sg["text"]) and sg["start"] < seg["start"])
+                    or (sg["start"] > seg["start"] and (not sg["words"] or _CLOSER_RE.match(sg["text"]))))
+                for sg in segs)
             if any(INLINE_CODE_FLAGS.match(f) and "c" in f for f in flags) or seg["heredoc"] or seg["piped"] \
                     or redirected:
                 # input from a redirection or a process substitution is read as code too (Codex review, 2026-09-28)
                 return f"{cmd} would parse the value a second time as shell code"
             if any(re.fullmatch(r"[-+][A-Za-z]*[xv][A-Za-z]*", f) for f in flags) or \
                     any(w in ("xtrace", "verbose", "--xtrace", "--verbose", "--debugger") for w in words[1:]) or \
-                    re.search(r"(?:^|\s)(?:SHELLOPTS|BASHOPTS)=|xtrace|verbose", unquoted):
-                # a trace can also come from the environment: SHELLOPTS=xtrace (Codex review, 2026-09-28)
+                    _TRACE_RE.search(unquoted):
+                # a trace from elsewhere: SHELLOPTS=… or BASHOPTS=…, or set -o xtrace / set -x before the
+                # shell (Codex review, 2026-09-28). The word verbose in another command does not count
+                # (final review of 0.5.4).
                 return f"{cmd} with tracing would print the value"
         if cmd in REMOTE_OR_EVAL:
             return f"{cmd} hands the command line to another shell"

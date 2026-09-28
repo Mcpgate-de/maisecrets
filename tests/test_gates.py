@@ -357,7 +357,14 @@ class ContextTests(unittest.TestCase):
                     "bash -o xtrace script.sh " + r, "bash -v script.sh " + r, "bash --verbose script.sh " + r,
                     # second review round, redirection on an outer construct, and trace settings from elsewhere
                     "exec <<< " + r + "; bash", "{ bash; } <<< " + r, "zsh --xtrace script.sh " + r,
-                    "env SHELLOPTS=xtrace bash script.sh " + r, "SHELLOPTS=xtrace bash script.sh " + r):
+                    "env SHELLOPTS=xtrace bash script.sh " + r, "SHELLOPTS=xtrace bash script.sh " + r,
+                    "( bash ) <<< " + r, "for i in 1; do bash; done <<< " + r, "exec < cmds.txt; T=" + r + " bash",
+                    "export SHELLOPTS=xtrace; bash s.sh " + r, "set -o xtrace; bash s.sh " + r,
+                    "set -x; bash s.sh " + r,
+                    # third review round: no space before the redirection, an exec behind a prefix, shopt
+                    "{ bash; }< f " + r, "for i in 1; do bash; done<<< " + r, "( bash )<f " + r,
+                    "command exec < f; T=" + r + " bash", "shopt -so xtrace; export SHELLOPTS; bash s.sh " + r,
+                    "set -o pipefail -o verbose; export SHELLOPTS; bash s.sh " + r):
             with self.subTest(cmd[:40]):
                 self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny", cmd)
         root = '"/opt/p/hooks/run.sh"'
@@ -369,6 +376,16 @@ class ContextTests(unittest.TestCase):
                     f"bash {root} report --args-stdin; true"):
             with self.subTest(cmd[:50]):
                 self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny", cmd)
+        # final review of 0.5.4: a `<` or the word verbose in another command does not reach the shell
+        for cmd in ("API_KEY=" + r + " bash ./deploy.sh && npm test -- --verbose",
+                    "TOKEN=" + r + " bash deploy.sh 2>&1 | grep -v verbose",
+                    "TOKEN=" + r + " bash d.sh --log-level=verbose",
+                    "TOKEN=" + r + " ./scripts/xtrace_report.sh && bash lint.sh",
+                    "mysql -p" + r + " db < dump.sql && bash post.sh", "TOKEN=" + r + " bash ./run.sh; sort < list.txt",
+                    "curl -H 'X: " + r + "' https://x && diff <(sort a) b && bash check.sh",
+                    "exec >log; TOKEN=" + r + " bash d.sh", "set -euo pipefail; TOKEN=" + r + " bash d.sh"):
+            with self.subTest(cmd[:50]):
+                self.assertNotEqual(_bash_pre(cmd).get("hookSpecificOutput", {}).get("permissionDecision"), "deny", cmd)
         good = f"bash {root} report --args-stdin <<'MAISECRETS_ARGS_END'\nbug $(x) | `y` it's\nMAISECRETS_ARGS_END"
         self.assertEqual(_bash_pre(good), {})
 
