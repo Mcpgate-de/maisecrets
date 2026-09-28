@@ -13,6 +13,7 @@ sandbox logs in to its proxy as `srt`, macOS as `srt.<…>`; only this run showe
 3. a write command still asks; a host outside allowedDomains gets 403 from the sandbox proxy
 4. an ops user's forms: sudo -n before a reader needs no second ask; sudo su -, a second hop and a
    remote encoder are refused, each with the form that works
+5. a loop over hosts in one command: no second ask, and the exact value arrives on every pass
 A synthetic random value only; the remote file is removed at the end.
 """
 import json
@@ -115,6 +116,16 @@ try:
     hop_why = hop.get("permissionDecisionReason", "")
     check("4c a second hop is refused and names one ssh per host",
           hop.get("permissionDecision") == "deny" and "one ssh command per host" in hop_why, hop_why[:200])
+    # many hosts in one command: the value is read once and goes to every host of the loop; the run needs
+    # one approval and one resolve. One real host here, so the loop visits it twice.
+    loop = hook(f"for h in {HOST} {HOST}; do printf '%s' KEY | ssh -o BatchMode=yes $h "
+                f"'grep -c -x -F -f - {remote_file}'; done")
+    check("5a a loop over hosts after the approval gets no ask", "permissionDecision" not in loop,
+          loop.get("permissionDecision"))
+    out5 = in_sandbox("s5", loop["updatedInput"]["command"], [IP])
+    check("5b in the sandbox the exact value arrived on every pass of the loop",
+          [ln for ln in out5.splitlines() if ln.strip() == "1"] == ["1", "1"], out5[-400:])
+    check("5c the value never shows in the loop's output", value not in out5)
     b64 = hook(f"printf '%s' KEY | ssh -o BatchMode=yes {HOST} 'echo aGk= | base64 -d | bash'")
     check("4d a remote encoder is refused and names the stdin way",
           b64.get("permissionDecision") == "deny" and "pipe it on stdin" in b64.get("permissionDecisionReason", ""),
