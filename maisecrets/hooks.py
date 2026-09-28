@@ -869,13 +869,17 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
             if inner:
                 return f"{cmd} would hand the value to {inner} as an argument"
         if cmd in SHELLS:
-            redirected = re.search(r"<", unquoted[seg["start"]:seg["end"]]) or "<(" in unquoted
+            # input redirected anywhere in the command can reach the shell: `exec <…; bash`, `{ bash; } <…`
+            # (Codex review, 2026-09-28). With a value in the command, any input redirection counts.
+            redirected = "<" in unquoted or any(sg["heredoc"] for sg in segs)
             if any(INLINE_CODE_FLAGS.match(f) and "c" in f for f in flags) or seg["heredoc"] or seg["piped"] \
                     or redirected:
                 # input from a redirection or a process substitution is read as code too (Codex review, 2026-09-28)
                 return f"{cmd} would parse the value a second time as shell code"
             if any(re.fullmatch(r"[-+][A-Za-z]*[xv][A-Za-z]*", f) for f in flags) or \
-                    any(w in ("xtrace", "verbose", "--verbose", "--debugger") for w in words[1:]):
+                    any(w in ("xtrace", "verbose", "--xtrace", "--verbose", "--debugger") for w in words[1:]) or \
+                    re.search(r"(?:^|\s)(?:SHELLOPTS|BASHOPTS)=|xtrace|verbose", unquoted):
+                # a trace can also come from the environment: SHELLOPTS=xtrace (Codex review, 2026-09-28)
                 return f"{cmd} with tracing would print the value"
         if cmd in REMOTE_OR_EVAL:
             return f"{cmd} hands the command line to another shell"

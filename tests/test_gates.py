@@ -354,7 +354,10 @@ class ContextTests(unittest.TestCase):
         r = Vault().put(PLAIN, "SECRET", "manual", session="S1").ref
         for cmd in ("$'ssh' host echo " + r, "<<< " + r + " base64", "< /dev/null ssh host echo " + r,
                     "2>/dev/null base64 <<< " + r, "bash < <(printf '%s' " + r + ")", "bash < script.sh " + r,
-                    "bash -o xtrace script.sh " + r, "bash -v script.sh " + r, "bash --verbose script.sh " + r):
+                    "bash -o xtrace script.sh " + r, "bash -v script.sh " + r, "bash --verbose script.sh " + r,
+                    # second review round, redirection on an outer construct, and trace settings from elsewhere
+                    "exec <<< " + r + "; bash", "{ bash; } <<< " + r, "zsh --xtrace script.sh " + r,
+                    "env SHELLOPTS=xtrace bash script.sh " + r, "SHELLOPTS=xtrace bash script.sh " + r):
             with self.subTest(cmd[:40]):
                 self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny", cmd)
         root = '"/opt/p/hooks/run.sh"'
