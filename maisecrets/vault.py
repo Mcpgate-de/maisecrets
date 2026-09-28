@@ -248,8 +248,15 @@ def load_config() -> dict:
         cfg["config_warning"] = f"{exc}; the file was ignored"
     unknown = sorted(k for k in user if k not in _CONFIG_TYPES)
     if unknown:
+        # a key is named only when it is a typo of a real one: a value pasted into the file as a
+        # key went into the session-start message (invariant I1, 2026-09-28), and a value can have
+        # the shape of a key name
+        import difflib
+        named = [k for k in unknown if difflib.get_close_matches(k, list(_CONFIG_TYPES), n=1, cutoff=0.8)]
+        other = len(unknown) - len(named)
+        what = ", ".join(named + ([f"{other} more that are not near a known key"] if other else []))
         cfg["config_warning"] = (cfg["config_warning"] + "; " if cfg["config_warning"] else "") + \
-            f"{CONFIG.name}: unknown key(s) {', '.join(unknown)} ignored"
+            f"{CONFIG.name}: unknown key(s) {what} ignored"
         user = {k: v for k, v in user.items() if k in _CONFIG_TYPES}
     user = _old_region_key(user)
     cfg.update(user)

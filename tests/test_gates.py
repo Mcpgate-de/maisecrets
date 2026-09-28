@@ -684,8 +684,13 @@ class FailClosedTests(unittest.TestCase):
             cfg = vmod.load_config()
             self.assertIn("ttl_seconds", cfg["config_warning"])
             self.assertEqual(cfg["ttl_seconds"], vmod.DEFAULT_CONFIG["ttl_seconds"])
-            Path(_TMP, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true, "colour": 1}')
-            self.assertIn("colour", vmod.load_config()["config_warning"])
+            Path(_TMP, "config.json").write_text(
+                '{"backend": "jsonfile", "allow_plaintext_store": true, "shortcutt": 1, "colour": 1}')
+            # a typo of a real key is named; any other key is only counted, it may be a pasted value
+            warning = vmod.load_config()["config_warning"]
+            self.assertIn("shortcutt", warning)
+            self.assertNotIn("colour", warning)
+            self.assertIn("1 more", warning)
             self.assertEqual(vmod.load_config()["backend"], "jsonfile")
         finally:
             Path(_TMP, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
