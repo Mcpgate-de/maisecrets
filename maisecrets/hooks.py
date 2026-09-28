@@ -416,7 +416,8 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
     ("the maisecrets home directory", r"(?i:\.maisecrets)(?![\w-])|MAISECRETS_HOME"),
     ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"
                            r"|(?<![\w-])resolve\s+\S+\s+--grant\b|cmd_resolve|\.redeem\("),
-    ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\]v-|__ms_\d+\b"
+    ("the ssh approval store", r"ssh-approvals|ssh_approval"),
+    ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\](?:v-|sealed)|__ms_\d+\b"
                               r"|XDG_RUNTIME_DIR[^\n]*maisecrets"),
 ]
 _STORE_READ_RE = re.compile("|".join(f"(?P<p{i}>{rx})" for i, (_n, rx) in enumerate(_STORE_READ_PATTERNS)))
@@ -1046,6 +1047,67 @@ def _remote_refusal(remote: str) -> str | None:
     return None
 
 
+# remote commands that only read and print: the session approval covers these alone (ssh_approval.py)
+READ_ONLY_REMOTE = {"grep", "egrep", "fgrep", "zgrep", "zegrep", "zfgrep", "xzgrep", "bzgrep", "rg", "cat", "zcat",
+                    "xzcat", "bzcat", "head", "tail", "journalctl", "wc", "sort", "uniq", "cut", "tr", "jq",
+                    "ls", "stat", "uptime", "df", "du", "true"}
+# journalctl options that change state or write a file; getopt takes an unambiguous prefix, so a
+# prefix of one of these counts too (Codex review, 2026-09-28: --rotate and --vacuum-time passed)
+_JOURNALCTL_STATEFUL = ("--rotate", "--vacuum-size", "--vacuum-files", "--vacuum-time", "--flush", "--sync",
+                        "--relinquish-var", "--smart-relinquish-var", "--setup-keys", "--update-catalog",
+                        "--cursor-file", "--force", "--interval", "--verify-key", "--new-id128",
+                        "--synchronize-on-exit")
+
+
+# wrappers the session approval allows in front of a read-only command, with no option of their own
+_READ_ONLY_WRAPPERS = {"sudo", "nice", "command"}
+# the only options of sort and uniq the session approval allows: none of them writes a file or runs a
+# program (Codex review, 2026-09-28: `sort --out=FILE`, an abbreviation, wrote the value to a file)
+_SORT_OK = re.compile(r"^(?:-[bdfghinrsuMV]+|-k\S*|-t\S?|--(?:numeric-sort|reverse|unique|ignore-case|"
+                      r"human-numeric-sort|version-sort|month-sort|general-numeric-sort|ignore-leading-blanks|"
+                      r"dictionary-order|stable))$")
+_UNIQ_OK = re.compile(r"^(?:-[cdiuz]+|-[fsw]\d*|\d+|--(?:count|repeated|unique|ignore-case))$")
+
+
+def _remote_is_read_only(remote: str) -> bool:
+    """Whether every part of the remote command only reads and prints. Each part is a bare command
+    word from READ_ONLY_REMOTE, at most behind sudo, nice or command without options: no path, no
+    assignment such as PATH=, since a command named grep in /tmp is not grep (Codex review,
+    2026-09-28). No output redirection, tee, subshell or expansion, and none of the options with
+    which a reader writes a file or runs a program."""
+    import shlex
+    rctx = _shell_contexts(remote)
+    unquoted = "".join(ch if ctx == "" else " " for ch, ctx in zip(remote, rctx))
+    if any(c in unquoted for c in "><()&") or "`" in remote or "$" in remote:
+        return False
+    segs = _segments(remote, rctx)
+    if not segs:
+        return False
+    for sg in segs:
+        try:
+            raw = shlex.split(remote[sg["start"]:sg["end"]])
+        except ValueError:
+            return False
+        while raw and raw[0] in _READ_ONLY_WRAPPERS:
+            raw = raw[1:]
+        if not raw or raw[0] not in READ_ONLY_REMOTE:
+            return False             # a path, an assignment, a wrapper option or another command
+        cmd, args = raw[0], raw[1:]
+        if cmd == "sort" and not all(_SORT_OK.match(a) for a in args):
+            return False
+        if cmd == "uniq" and not all(_UNIQ_OK.match(a) for a in args):
+            return False
+        if cmd == "rg" and any(a.startswith("--pre") or a.startswith("--se") for a in args):
+            return False
+        if cmd == "journalctl":
+            for a in args:
+                name = a.split("=", 1)[0]
+                if name.startswith("--") and len(name) > 2 and \
+                        any(o.startswith(name) for o in _JOURNALCTL_STATEFUL):
+                    return False
+    return True
+
+
 def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) -> dict | str:
     """The one way a value may reach ssh: on stdin, through the Claude Code sandbox, after the
     user confirms. Returns the plan, or the reason the command is refused.
@@ -1136,7 +1198,7 @@ def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) 
         return "write ssh as a plain word, not quoted or escaped: printf '%s' ⟦KEY⟧ | ssh host '…'"
     # the line as written, from the ssh word on: redirections such as 2>&1 stay whole
     line = command[seg["start"] + ssh_span[0]:seg["end"]].strip()
-    return {"insert_at": seg["start"] + ssh_span[1], "dest": dest, "line": line}
+    return {"insert_at": seg["start"] + ssh_span[1], "dest": dest, "line": line, "remote": " ".join(remote)}
 
 
 def _sandbox_guard(py: str | None = None) -> str:
@@ -1168,14 +1230,17 @@ def _resolver_call(key: str, nonce: str) -> str:
     return f'$("{py}" "{script}" {key} --grant {nonce})'
 
 
-def _serve_value_later(fifo: str, value: str, seconds: float = 120.0) -> bool:
+def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: str | None = None) -> bool:
     """Deliver one value once through a FIFO from a detached child. The command runs later, and
     on Codex inside a sandbox that may neither write the vault nor read the keychain (measured:
     resolve.py failed there and the command died); a FIFO in TMPDIR is readable from inside.
     The value lives in the child's memory, never on disk, and is gone after one read or after
     ``seconds``. The value reaches the child on stdin, never as an argument. A FIFO that is gone
     (`_unserve`, `wipe`) ends the child at once: it retried the open for the full ``seconds``
-    with the value in its memory (suite review, 2026-09-27)."""
+    with the value in its memory (suite review, 2026-09-27). With ``approve``, the child confirms that
+    ssh session-approval token once the value was read. That FIFO sits in the sealed directory, which
+    nobody can list: only the command that holds its name can open it, and only the rewritten command
+    the user allowed holds that name (ssh_approval.py)."""
     code = (
         "import json,os,sys,time\n"
         "spec = json.load(sys.stdin)\n"
@@ -1198,6 +1263,13 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0) -> bool:
         "        os.write(fd, spec['value'].encode())\n"
         "    finally:\n"
         "        os.close(fd)\n"
+        "    if spec.get('approve'):\n"
+        "        try:\n"
+        "            sys.path.insert(0, spec['root'])\n"
+        "            from maisecrets import ssh_approval\n"
+        "            ssh_approval.confirm(spec['approve'])\n"
+        "        except Exception:\n"
+        "            pass\n"
         "try:\n"
         "    os.unlink(spec['fifo'])\n"
         "except OSError:\n"
@@ -1206,7 +1278,9 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0) -> bool:
     try:
         child = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        child.stdin.write(json.dumps({"fifo": fifo, "value": value, "seconds": seconds}).encode())
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        child.stdin.write(json.dumps({"fifo": fifo, "value": value, "seconds": seconds, "approve": approve,
+                                      "root": root}).encode())
         child.stdin.close()
         # the FIFO must exist before the command starts: wait for the child to create it
         for _ in range(100):
@@ -1247,6 +1321,28 @@ def _run_dir() -> str:
     if not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or (st.st_mode & 0o077):
         raise RuntimeError(base)
     return base
+
+
+def _sealed_dir() -> str:
+    """<run dir>/sealed with mode 0300: its owner can create and open a file whose name they know,
+    but nobody can list it. A blind reader (`cat …/v-*` in a parallel tool call) found the value FIFO
+    of an open ask and confirmed the session approval with it (Codex review, 2026-09-28). A code the
+    command writes back cannot be the proof: the Claude Code sandbox denies writes there (measured
+    on macOS with Claude Code 2.1.283: "Operation not permitted")."""
+    import stat as _stat
+    d = os.path.join(_run_dir(), "sealed")
+    try:
+        os.mkdir(d, 0o700)
+    except FileExistsError:
+        pass
+    st = os.lstat(d)
+    if not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+        raise RuntimeError(d)
+    # never readable again once made: a sweep that opened it for a moment let a blind reader list it
+    # (Codex review, 2026-09-28). Each serving child removes its own FIFO; wipe clears the rest
+    if _stat.S_IMODE(st.st_mode) != 0o300:
+        os.chmod(d, 0o300)
+    return d
 
 
 def _fifo_path(nonce: str) -> str:
@@ -1361,6 +1457,16 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
             ssh_plan, why = route, None
         else:
             why, ssh_refused = route, True
+    # ssh_approval "per-session": an approved value runs without an ask; a first use asks once and gives
+    # its token to the serving child, which confirms it when the approved command reads the value
+    ssh_auto, ssh_token = False, None
+    if ssh_plan and cfg.get("ssh_approval") == "per-session" and _remote_is_read_only(ssh_plan["remote"]):
+        from . import ssh_approval
+        names = sorted({k for k, _a, _b in refs})
+        if ssh_approval.approved(payload.get("session_id"), names):
+            ssh_auto = True
+        else:
+            ssh_token = ssh_approval.remember_pending(payload.get("session_id"), names)
     if why and ssh_refused:
         return _deny(f"maisecrets: {keys} is refused in this command: {why}. The command did not run. "
                      "A value reaches ssh only on stdin, inside the Claude Code sandbox, after the user confirms.")
@@ -1415,7 +1521,11 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                 return _deny(f"maisecrets: the value for ⟦{key}⟧ has no safe place to wait: the run directory "
                              f"{exc} is missing, not private, or not a directory. The command did not run. "
                              "Tell the user to check it; do not retry.")
-            if not _serve_value_later(fifo, value or ""):
+            approve = None if served else ssh_token
+            if approve:
+                # the first use: its FIFO sits where nobody can list it, so reading it proves the yes
+                fifo = os.path.join(_sealed_dir(), os.path.basename(fifo))
+            if not _serve_value_later(fifo, value or "", approve=approve):
                 _unserve(served)
                 return _deny(f"maisecrets: the value for ⟦{key}⟧ could not be prepared for delivery "
                              "(delivery unavailable). The command did not run. Retry once; if this "
@@ -1445,11 +1555,20 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     new_input = dict(tool_input)
     new_input["command"] = "; ".join(prelude) + "; " + rewritten
     if ssh_plan:
-        return _ask(new_input, f"maisecrets: this command sends the value of {keys} on stdin to ssh "
-                               f"{ssh_plan['dest']}: {ssh_plan['line'][:400]}. It runs only inside the Claude "
-                               "Code sandbox, so the connection reaches only a host your sandbox allows. The "
-                               "remote command can still pass the value on: allow it only if you trust that "
-                               "host and that command.")
+        base = (f"maisecrets: this command sends the value of {keys} on stdin to ssh "
+                f"{ssh_plan['dest']}: {ssh_plan['line'][:400]}. It runs only inside the Claude "
+                "Code sandbox, so the connection reaches only a host your sandbox allows. ")
+        if ssh_auto:
+            # approved once in this session: the normal permission rules of the client decide
+            return _updated(payload, new_input)
+        if ssh_token:
+            from . import ssh_approval
+            return _ask(new_input, base + "If you allow it, these values go on stdin to ssh without asking again "
+                                   f"for the rest of this session (at most {ssh_approval.APPROVAL_HOURS} hours), to "
+                                   "hosts your sandbox allows and only with read-only remote commands (grep, cat, "
+                                   "tail, journalctl and the like). Allow it only if you trust those hosts.")
+        return _ask(new_input, base + "The remote command can still pass the value on: allow it only if you trust "
+                                      "that host and that command.")
     return _updated(payload, new_input)
 
 
