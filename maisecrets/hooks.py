@@ -511,6 +511,10 @@ _STORE_READ_RE = re.compile("|".join(f"(?P<p{i}>{rx})" for i, (_n, rx) in enumer
 
 def _store_read_match(command: str) -> str | None:
     """The name of the backstop pattern a command matches, or None."""
+    for d in _store_dir_spellings():
+        # a home set by environment variable has no `.maisecrets` in its name (invariant I3, 2026-09-28)
+        if re.search(re.escape(d) + r"(?![\w.-])", command):
+            return "the maisecrets home directory"
     m = _STORE_READ_RE.search(command)
     if not m:
         return None
@@ -1816,6 +1820,13 @@ _READ_TOOLS = ("Read", "Grep", "Glob", "LS", "NotebookRead")
 _PATH_FIELDS = ("file_path", "path", "notebook_path", "directory", "dir", "root", "cwd")
 
 
+def _store_dir_spellings() -> list[str]:
+    """The protected directories as the configured path and as the real path, longest first."""
+    from .vault import HOME
+    names = {str(HOME).rstrip(os.sep)} | set(_protected_dirs())
+    return sorted((n for n in names if len(n) > 1), key=len, reverse=True)
+
+
 def _protected_dirs() -> list[str]:
     """The vault home and the value run directory, as real paths: a tool that reads them bypasses every
     gate around a resolve (external review, 2026-09-28: Read was not checked at all)."""
@@ -1859,6 +1870,8 @@ def _touches_store(path: str, cwd: str = "", contains: bool = False) -> bool:
         if parent == probe:
             break
         probe = parent
+    if _hardlinked_into(real, protected):
+        return True
     if contains and os.path.isdir(real):
         me = _identity(real)
         for d in protected:
@@ -1871,6 +1884,40 @@ def _touches_store(path: str, cwd: str = "", contains: bool = False) -> bool:
                     break
                 q = parent
     return False
+
+
+def _hardlinked_into(real: str, protected: list[str]) -> bool:
+    """A second name of a store file outside the store (`ln`) has no protected parent: the
+    file's own identity decides (invariant I3, 2026-09-28). Only a file with more than one
+    link is compared, so an ordinary read costs one stat."""
+    try:
+        st = os.stat(real)
+    except OSError:
+        return False
+    if st.st_nlink < 2 or not os.path.isfile(real):
+        return False
+    me = (st.st_dev, st.st_ino)
+    for d in protected:
+        for top, dirs, files in os.walk(d):
+            if top.count(os.sep) - d.count(os.sep) >= 2:
+                dirs[:] = []
+            for name in files:
+                if _identity(os.path.join(top, name)) == me:
+                    return True
+    return False
+
+
+def _uri_path(v: str) -> str:
+    """The local path of a `file:` URI (`file:///p`, `file://localhost/p`, percent-encoded), else the string.
+    An MCP file server takes a URI where a path is expected; `file:///…/vault.json` passed the path check
+    (invariant I3, 2026-09-28)."""
+    if v[:5].lower() != "file:":
+        return v
+    from urllib.parse import unquote, urlparse
+    u = urlparse(v)
+    if u.netloc not in ("", "localhost"):
+        return v
+    return unquote(u.path)
 
 
 def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
@@ -1892,7 +1939,8 @@ def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
                 hits.append("pattern")
     else:
         def look(v: str) -> str:
-            if ("/" in v or "\\" in v or v.startswith("~")) and _touches_store(v, cwd):
+            path = _uri_path(v)
+            if ("/" in path or "\\" in path or path.startswith("~")) and _touches_store(path, cwd):
                 hits.append(v[:80])
             return v
         _walk_strings(tool_input, look)
@@ -1921,7 +1969,9 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         home = os.path.realpath(str(HOME))
         if platform.system() in ("Darwin", "Windows"):   # case-insensitive file systems (APFS, NTFS)
             real, home = real.lower(), home.lower()
-        inside = bool(path) and real.startswith(home + os.sep)
+        inside = bool(path) and (real == home or real.startswith(home + os.sep))
+        # the run directory and a hard link are known by identity only (invariant I3, 2026-09-28)
+        inside = inside or _touches_store(path, cwd)
     except (OSError, ValueError):
         inside = False
     if inside or ".maisecrets" in path.lower():
