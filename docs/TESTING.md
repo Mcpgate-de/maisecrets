@@ -15,7 +15,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | native store and clipboard | `MAISECRETS_NATIVE_BACKEND_TEST=1`, `MAISECRETS_NATIVE_CLIPBOARD_TEST=1` | GitHub runners only: they use the real keychain and clipboard |
 | ssh through the sandbox | `MAISECRETS_E2E_HOST=<ssh alias> MAISECRETS_E2E_IP=<address> python3 harness/sandbox/ssh_e2e.py` | by hand before a release that touches the ssh route, on macOS and on Linux: the real Claude Code sandbox against a real host |
 
-575 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
+576 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
 the tested commit of a release (branch `ci`) and on a push to main without a release.
 
 ## What makes a test count
@@ -33,7 +33,7 @@ the tested commit of a release (branch `ci`) and on a push to main without a rel
   | invariant | module | the population it covers |
   |---|---|---|
   | I1 a stored value never reaches output the model or the person reads | `test_invariant_model_output.py` | every hook event, both clients, six tool-response shapes, the encodings of an own oracle for a resolved value and for another session's value as its own token, every refusal, the fail-closed answers, the prompt that goes on, the session-start message; every output field is classified |
-  | I3 no agent tool reads vault material | `test_invariant_store_reads.py` | every tool that reads a path (checked against the matcher), twelve spellings of a store path, searches over a parent, MCP paths and file URIs, Bash with the default and the configured home; and the other side, a path next to the store passes |
+  | I3 no agent tool reads vault material | `test_invariant_store_reads.py` | every tool that reads a path, from `tests/client_tools.json` (the harness checks that list against the real client's tool list on every run; checked against the matcher), twelve spellings of a store path, searches over a parent, MCP paths and file URIs, Bash with the default and the configured home; and the other side, a path next to the store passes |
   | I4 every detected value can be scrubbed from a transcript | `test_invariant_transcript_scrub.py` | every value the detector returns on the matrix, the token corpus and one PII value per type, in ten record shapes and two JSON writers, across the read window, and through the hooks |
 
   Each oracle is the test's own: it builds the encodings and escapes without the product's

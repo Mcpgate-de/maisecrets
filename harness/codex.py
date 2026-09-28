@@ -127,6 +127,10 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         if srv:
             srv.terminate()
     bodies = "".join(p.read_text(errors="ignore") for p in out.glob("request_*.json"))
+    # every built-in tool Codex offered must be classified (harness/inventory.py)
+    from inventory import unclassified
+    for tool in unclassified("codex", sorted(out.glob("request_*.json"))):
+        fails.append(f"UNCLASSIFIED TOOL {tool}: add it to tests/client_tools.json with its class")
     if MARK in bodies or MARK[-8:] in bodies:
         fails.append("LEAK: the marker (or its tail) reached the upstream request body")
     out = r.stdout + "\n--- stderr ---\n" + r.stderr

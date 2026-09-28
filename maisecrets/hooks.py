@@ -1818,6 +1818,9 @@ _FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 # tools that read files by path; they carry no placeholder, but they could read the store itself
 _READ_TOOLS = ("Read", "Grep", "Glob", "LS", "NotebookRead")
 _PATH_FIELDS = ("file_path", "path", "notebook_path", "directory", "dir", "root", "cwd")
+# Claude Code's resource tools read an MCP resource by URI; a filesystem server serves file: URIs, and
+# the names carry no mcp__ prefix, so the matcher did not reach them (tool inventory, 2026-09-28)
+_MCP_RESOURCE_TOOLS = ("ReadMcpResourceTool", "ReadMcpResourceDirTool")
 
 
 def _store_dir_spellings() -> list[str]:
@@ -2026,11 +2029,11 @@ def pre_tool(payload: dict) -> dict:
     tool_input = payload.get("tool_input") or {}
     if tool == "Bash":
         return _pre_bash(payload, cfg, tool_input)
-    if tool in _READ_TOOLS or tool.startswith("mcp__"):
+    if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS or tool.startswith("mcp__"):
         refused = _store_path_refusal(tool, tool_input, str(payload.get("cwd") or ""))
         if refused:
             return refused
-        if tool in _READ_TOOLS:
+        if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS:
             return {}
     if tool in _FILE_TOOLS:
         return _pre_file_tool(payload, cfg, tool, tool_input, str(payload.get("cwd") or ""))

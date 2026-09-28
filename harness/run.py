@@ -244,6 +244,12 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     if len(bodies) != sc["expect_requests"]:
         fails.append(f"expected {sc['expect_requests']} requests, got {len(bodies)}")
     joined = "".join(Path(b).read_text() for b in bodies)
+    # every built-in tool the real client offered must be classified (harness/inventory.py)
+    from inventory import offered, unclassified
+    if bodies and "Bash" not in offered([Path(b) for b in bodies]):
+        fails.append("no tool list found in the request bodies: the inventory check read nothing")
+    for tool in unclassified("claude-code", [Path(b) for b in bodies]):
+        fails.append(f"UNCLASSIFIED TOOL {tool}: add it to tests/client_tools.json with its class")
     for marker in (MARK, MAIL, MARK2, MARK[-8:]):
         if marker in joined:
             fails.append(f"LEAK: …{marker[-6:]} reached the upstream")
