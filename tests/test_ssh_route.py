@@ -184,6 +184,9 @@ class RouteDecisionTests(unittest.TestCase):
                     f"printf '%s' {self.ref} | env PATH=/opt/ssh:/usr/bin ssh aux01 'grep -F -f - x'",
                     f"printf '%s' {self.ref} | ssh aux01 \"psql -h db -c 'select 1'\"",
                     f"printf '%s' {self.ref} | ssh aux01 'grep -F -f - x' 2>&1",
+                    f"printf '%s' {self.ref} | exec -a ssh ssh aux01 'grep -F -f - x'",
+                    f"printf '%s' {self.ref} | {{ ssh aux01 'grep -F -f - x'; }}",
+                    f"printf '%s' {self.ref} | env -i ssh aux01 'grep -F -f - x'",
                     f"printf '%s' {self.ref} | sudo -u ops ssh -p 2222 -i ~/.ssh/k aux01 'grep -F -f - x'",
                     f"printf '%s' {self.ref} | /usr/bin/ssh -tt -l ops aux01 'cat > /tmp/f'",
                     f"printf '%s' {self.ref} | tr a-z A-Z | ssh aux01 -- 'grep -w -F -f - x'"):
@@ -194,6 +197,7 @@ class RouteDecisionTests(unittest.TestCase):
                 # the options follow the ssh command word, never a word inside quotes or an assignment
                 self.assertRegex(new, r"[\s/]ssh -o ControlMaster=no -o ControlPath=none -o 'ProxyCommand=")
                 self.assertNotIn("a ssh -o", new)
+                self.assertNotIn("-a ssh -o", new, "the options follow the command word, not an option argument")
                 self.assertNotIn("/opt/ssh -o", new)
 
 

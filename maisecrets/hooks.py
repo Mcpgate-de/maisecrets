@@ -965,11 +965,18 @@ def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) 
     masked = "".join(ch if ctx == "" else "Q" for ch, ctx in zip(command[seg["start"]:seg["end"]],
                                                                   ctxs[seg["start"]:seg["end"]]))
     spans = [(m.start(), m.end(), m.group(0)) for m in re.finditer(r"\S+", masked)]
+    # skip what _segments skips: assignments, keywords, wrappers with their options and option arguments
     w = 0
-    while w < len(spans) and (_ASSIGN_RE.match(spans[w][2]) or os.path.basename(spans[w][2]) in WRAPPERS
-                              or (w and spans[w][2].startswith("-") and os.path.basename(spans[w - 1][2]) in WRAPPERS)):
+    while w < len(spans) and (_ASSIGN_RE.match(spans[w][2]) or spans[w][2] in SHELL_KEYWORDS
+                              or os.path.basename(spans[w][2]) in WRAPPERS):
+        wrapper = os.path.basename(spans[w][2])
         w += 1
-    ssh_span = next((sp for sp in spans[w:] if os.path.basename(sp[2]) == "ssh"), None)
+        if wrapper in WRAPPERS:
+            while w < len(spans) and spans[w][2].startswith("-") and spans[w][2] != "-":
+                w += 2 if spans[w][2] in WRAPPER_ARG_OPTIONS.get(wrapper, ()) else 1
+            if wrapper == "timeout" and w < len(spans) and re.fullmatch(r"[0-9.]+[smhd]?", spans[w][2]):
+                w += 1
+    ssh_span = spans[w] if w < len(spans) and os.path.basename(spans[w][2]) == "ssh" else None
     if ssh_span is None or "Q" in ssh_span[2]:
         return "write ssh as a plain word, not quoted or escaped: printf '%s' ⟦KEY⟧ | ssh host '…'"
     # the line as written, from the ssh word on: redirections such as 2>&1 stay whole
