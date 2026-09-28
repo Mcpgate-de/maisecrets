@@ -223,6 +223,15 @@ _STRICTNESS = {"automatic": 0, "confirm": 1, "block": 2}
 _SAFETY_KEYS = ("rehydration", "resolve_in_files", "ssh_via_sandbox")
 
 
+def _looks_misspelled(key: str) -> bool:
+    """A near miss of a safety key ("rehydraton"), not a longer key of a newer version that starts with
+    one ("rehydration_mcp"): an older plugin reading a newer policy only warns about that (review round 4)."""
+    import difflib
+    if any(key.startswith(k + "_") for k in _SAFETY_KEYS):
+        return False
+    return bool(difflib.get_close_matches(key, list(_SAFETY_KEYS), n=1, cutoff=0.8))
+
+
 def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
     """A user file ignored for a wrong type still said what it wanted: a stricter rehydration policy,
     or a route switched off, stays; a looser one is the default anyway. A rehydration value that is
@@ -294,7 +303,7 @@ def load_config() -> dict:
         cfg["config_warning"] = (cfg["config_warning"] + "; " if cfg["config_warning"] else "") + \
             f"{CONFIG.name}: unknown key(s) {what} ignored"
         user = {k: v for k, v in user.items() if k in _CONFIG_TYPES}
-        if any(difflib.get_close_matches(k, list(_SAFETY_KEYS), n=1, cutoff=0.8) for k in named):
+        if any(_looks_misspelled(k) for k in named):
             # "rehydraton": "block" is a stricter wish spelled wrong: dropping it would loosen. The file's
             # own rehydration key must not undo it (review round 3: "resolve_in_file": false next to it)
             user.pop("rehydration", None)
@@ -339,7 +348,7 @@ def load_config() -> dict:
         import difflib
         unknown_policy = sorted(k for k in policy if k not in _CONFIG_TYPES and not k.startswith(("_", "$")))
         policy = {k: v for k, v in policy.items() if k in _CONFIG_TYPES}
-        typo = [k for k in unknown_policy if difflib.get_close_matches(k, list(_SAFETY_KEYS), n=1, cutoff=0.8)]
+        typo = [k for k in unknown_policy if _looks_misspelled(k)]
         if unknown_policy:
             # a key of a newer version or a management tool is ignored with a warning; "_" and "$" keys
             # are comments and schema links
@@ -1079,6 +1088,7 @@ class Vault:
     def _limit_all(self, keys: list[str], session: str | None) -> list[str]:
         """The limiter for every key of one call together: two new keys at a cap of one passed one by
         one, and the first was recorded before the second was refused (review, 2026-09-29)."""
+        keys = list(dict.fromkeys(keys))     # one resolve per key, whatever the caller passes
         failed = [f"{k} ({st})" for k in keys for st in [self._limit(k, session)] if st != "ok"]
         if failed:
             return failed
@@ -1088,8 +1098,10 @@ class Vault:
         per_hour = int(self.cfg.get("max_resolves_per_hour", 60))
         known = {r["key"] for r in rec if r["session"] == session}
         new = [k for k in dict.fromkeys(keys) if k not in known]
-        if len(known) + len(new) > per_session:
-            return [f"{new[per_session - len(known)]} (limit: {per_session} distinct keys in this session this "
+        if new and len(known) + len(new) > per_session:
+            # a cap lowered below the keys already known: the first new key is over it (review round 4:
+            # IndexError when the call named only known keys)
+            return [f"{new[max(0, per_session - len(known))]} (limit: {per_session} distinct keys in this session this "
                     "hour (max_keys_per_session))"]
         if len(rec) + len(keys) > per_hour:
             return [f"{keys[per_hour - len(rec)]} (limit: {per_hour} resolves in the last hour "

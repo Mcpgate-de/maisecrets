@@ -235,10 +235,11 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(vault.load_config()["rehydration"], "automatic", "a comment key blocks nothing")
         # a schema link, a tool's comment or a key of a newer version: a warning, and the policy still works
         self.policy.write_text(json.dumps({"rehydration": "confirm", "$schema": "x", "comment": "y",
-                                           "max_resolves_per_day": 9}))
+                                           "max_resolves_per_day": 9, "rehydration_mcp": "automatic"}))
         cfg = vault.load_config()
         self.assertEqual((cfg["rehydration"], cfg.get("rehydration_fallback", False)), ("confirm", False))
-        self.assertIn("2 unknown key(s) ignored", cfg["config_warning"])
+        self.assertIn("3 unknown key(s) ignored", cfg["config_warning"])
+        self.assertNotIn("misspelled", cfg["config_warning"], "a longer key of a newer version is no typo")
         # a valid policy setting is the administrator's, never explained as the user's broken file
         self._user("{not json")
         self.policy.write_text(json.dumps({"rehydration": "block"}))
@@ -266,6 +267,23 @@ class ConfigTests(unittest.TestCase):
             self.assertIn("cannot be read", cfg["config_warning"])
         finally:
             vault.CONFIG.rmdir()
+
+    def test_the_limiter_counts_a_key_once_per_call(self):
+        v = vault.Vault()
+        v.cfg["max_resolves_per_hour"] = 1
+        e = v.put("limit-once-" + "value-1", "SECRET", "manual", session="S1")
+        self.assertEqual(v._limit_all([e.key, e.key], "S1"), [], "one key named twice is one resolve")
+        f = v.put("limit-once-" + "value-2", "SECRET", "manual", session="S1")
+        self.assertIn("max_resolves_per_hour", v._limit_all([e.key, f.key], "S1")[0])
+        # a cap lowered below the keys this session already used: known keys still pass, a new one is named
+        v.cfg["max_resolves_per_hour"] = 60
+        v._record(e.key, "S1", "t", "c")
+        v._record(f.key, "S1", "t", "c")
+        v.cfg["max_keys_per_session"] = 1
+        self.assertEqual(v._limit_all([e.key, f.key], "S1"), [])
+        g = v.put("limit-once-" + "value-3", "SECRET", "manual", session="S1")
+        got = v._limit_all([e.key, g.key], "S1")
+        self.assertTrue(got and got[0].startswith(g.key) and "max_keys_per_session" in got[0], got)
 
     def test_the_plugin_options_from_the_environment(self):
         self._user({"backend": "encrypted-file"})
