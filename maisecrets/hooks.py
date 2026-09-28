@@ -181,6 +181,48 @@ def _scrub_forms(values: list[str]) -> list[bytes]:
     return forms
 
 
+def _json_string_spans(line: bytes) -> list[tuple[int, int]]:
+    """The byte spans of the string contents in one JSON line, escapes skipped."""
+    spans, i, n = [], 0, len(line)
+    while i < n:
+        if line[i] == 0x22:                       # a quote opens a string
+            j = i + 1
+            while j < n and line[j] != 0x22:
+                j += 2 if line[j] == 0x5C else 1  # a backslash escapes the next byte
+            spans.append((i + 1, min(j, n)))
+            i = j + 1
+        else:
+            i += 1
+    return spans
+
+
+def _mask_digits_in_strings(data: bytes, digits: list[bytes]) -> tuple[bytes, int]:
+    """Mask a value that is only digits where it sits inside a JSON string and no other digit stands next
+    to it. A JSON number, a longer digit run and the four hex digits of a \\u escape stay untouched.
+    Plain replacement skipped every all-digit value, so a detected tax ID stayed in the transcript
+    (external review, 2026-09-28)."""
+    buf, hits = bytearray(data), 0
+    start = 0
+    while start < len(buf):
+        end = buf.find(b"\n", start)
+        end = len(buf) if end < 0 else end
+        line = bytes(buf[start:end])
+        if any(d in line for d in digits):
+            for a, b in _json_string_spans(line):
+                for d in digits:
+                    k = line.find(d, a, b)
+                    while k >= 0:
+                        before = line[k - 1:k]
+                        after = line[k + len(d):k + len(d) + 1]
+                        esc = line.rfind(b"\\u", max(a, k - 5), k)
+                        if not before.isdigit() and not after.isdigit() and not (esc >= 0 and k - esc <= 5):
+                            buf[start + k:start + k + len(d)] = b"*" * len(d)
+                            hits += 1
+                        k = line.find(d, k + len(d), b)
+        start = end + 1
+    return bytes(buf), hits
+
+
 def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
     """Best effort: overwrite every occurrence of a value in the transcript IN PLACE with a
     mask of the same byte length. Same inode and same mode: a writer that keeps the file open
@@ -193,9 +235,10 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
             _debug(f"scrub: skipped, path={'missing' if not path else 'absent'}")
             return False
         forms = _scrub_forms(values)
-        if not forms:
+        digits = sorted({v.encode() for v in values if v and v.isdigit() and len(v) >= 6}, key=len, reverse=True)
+        if not forms and not digits:
             return False
-        overlap = max(len(b) for b in forms)
+        overlap = max(len(b) for b in forms + digits)
         chunk = 8 * 1024 * 1024
         fd = os.open(path, os.O_RDWR)
         try:
@@ -223,6 +266,9 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
                     if n:
                         n_here += n
                         data = data.replace(b, b"*" * len(b))
+                if digits:
+                    data, n = _mask_digits_in_strings(data, digits)
+                    n_here += n
                 if n_here:
                     hits += n_here
                     os.lseek(fd, pos, os.SEEK_SET)

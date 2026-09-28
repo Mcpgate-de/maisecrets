@@ -1,0 +1,10 @@
+# c3-an-all-digit-value-is-scrubbed-from-the-transcript: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c3-an-all-digit-value-is-scrubbed-from-the-transcript"
+control = "C3"
+statement = "A detected value that is only digits (a tax ID) is masked in the client's transcript where it sits inside a JSON string, while JSON numbers and longer digit runs stay as they are."
+runner = ["tests/test_hooks_paths.py::TranscriptScrubTests::test_an_all_digit_value_is_scrubbed_inside_strings_and_json_numbers_stay"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "                if digits:\n                    data, n = _mask_digits_in_strings(data, digits)\n"
+replace = "                if False:\n                    data, n = _mask_digits_in_strings(data, digits)\n"

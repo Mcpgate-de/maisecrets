@@ -369,6 +369,20 @@ class TranscriptScrubTests(unittest.TestCase):
         self.assertFalse(hooks._scrub_transcript("", [PLAIN], ["⟦X⟧"]))
         self.assertFalse(hooks._scrub_transcript(str(Path(_TMP, "absent.jsonl")), [PLAIN], ["⟦X⟧"]))
 
+    def test_an_all_digit_value_is_scrubbed_inside_strings_and_json_numbers_stay(self):
+        # external review, 2026-09-28: every all-digit value was skipped, so a detected tax ID stayed in the transcript
+        recs = [{"message": {"content": "Steuer-ID: 12345678901 bitte"}, "ts": 12345678901},
+                {"text": "id 912345678901, x12345678901y, \\u0031", "num": [12345678901]}, {"k": "12345678901"}]
+        self.path.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+        self.assertTrue(hooks._scrub_transcript(str(self.path), ["12345678901"], ["⟦ID_c1⟧"]))
+        lines = self.path.read_text(encoding="utf-8").splitlines()
+        got = [json.loads(line) for line in lines]          # every record is still valid JSON
+        self.assertEqual(got[0]["message"]["content"], "Steuer-ID: *********** bitte")
+        self.assertEqual(got[0]["ts"], 12345678901, "a JSON number is not a detected value")
+        self.assertEqual(got[1]["text"], "id 912345678901, x***********y, \\u0031", "a longer digit run stays")
+        self.assertEqual(got[1]["num"], [12345678901])
+        self.assertEqual(got[2]["k"], "***********")
+
     def test_malformed_lines_are_scrubbed_in_place_keeping_inode_and_mode(self):
         self.path.write_text("not json " + PLAIN + "\n{\"broken\": \"" + PLAIN + "\n\n", encoding="utf-8")
         os.chmod(self.path, 0o600)
