@@ -371,7 +371,11 @@ class ScannerEdgeTests(unittest.TestCase):
                 out = _bash_pre(cmd)["hookSpecificOutput"]
                 self.assertEqual(out.get("permissionDecision"), "deny", out)
         # the real words, not a word inside quotes: these pass
-        for cmd in ("echo 'ssh host' " + r, "grep 'bash -c' " + r, "printf '%s' " + r + " | xargs -0 echo"):
+        for cmd in ("watch -n 5 grep " + r + " /tmp/x", "parallel grep " + r + " ::: a b"):
+            with self.subTest(cmd[:40]):
+                self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny", cmd)
+        for cmd in ("echo 'ssh host' " + r, "grep 'bash -c' " + r, "printf '%s' " + r + " | xargs -0 echo",
+                    '"$HOME/bin/tool" --token ' + r, "${REPO}/bin/deploy " + r, "watch -x grep " + r + " /tmp/x"):
             with self.subTest(cmd[:40]):
                 self.assertNotEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny", cmd)
 

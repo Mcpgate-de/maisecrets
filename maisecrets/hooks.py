@@ -448,7 +448,13 @@ INLINE_CODE_FLAGS = re.compile(r"^-(?:[A-Za-z]*[ceE][A-Za-z]*|-eval|-command|-ex
 REMOTE_OR_EVAL = {"ssh", "eval", "su", "expect", "script", "sshpass", "plink", "mosh", "screen", "tmux"}
 # commands that run other commands with arguments they build from their input
 ARG_RUNNERS = {"xargs", "parallel", "watch", "flock", "chroot", "nsenter", "unshare", "setsid", "runuser",
-               "strace", "ltrace", "gdb", "script"}
+               "strace", "ltrace", "gdb", "script", "busybox", "systemd-run", "toybox"}
+# a variable in front of a fixed path is a known command word: "$HOME/bin/tool", ${REPO}/bin/x
+_FIXED_TAIL_RE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z_0-9]*\}?(?:/[^/$`\s]+)+$")
+# arguments that name stdin as the file to run
+_STDIN_FILES = {"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}
+# clients that read statements from stdin when no statement is given
+_SQL_CLIENTS = {"mysql", "mariadb", "psql", "sqlite3", "mongo", "mongosh", "redis-cli", "clickhouse-client"}
 ENCODERS = {"base64", "base32", "xxd", "od", "hexdump", "uuencode", "rev", "b2sum", "cksum"}
 WRAPPERS = {"env", "command", "exec", "nice", "time", "nohup", "sudo", "doas", "builtin", "timeout", "stdbuf",
             "caffeinate", "ionice", "chronic"}
@@ -690,7 +696,8 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
             flush(not two)
             i += 2 if two else 1
             continue
-        if ch == "&":
+        if ch == "&" and not ((i and masked[i - 1] in "<>") or masked.startswith("&>", i)):
+            # a redirection is no separator: 2>&1, <&3, &>file (the ask showed "2>" for 2>&1)
             flush(False)
             i += 2 if masked.startswith("&&", i) else 1
             continue
@@ -733,9 +740,12 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
         words, cmd = seg["words"], seg["cmd"]
         if not words:
             continue
-        if "$" in words[0] or "`" in words[0]:
-            return "the command word is built from a variable or a substitution and is only known when it runs"
+        if ("$" in words[0] or "`" in words[0]) and not _FIXED_TAIL_RE.match(words[0]):
+            return ("the command word is built from a variable or a substitution and is only known when it runs; "
+                    "write the path out, or keep the variable only in front of a fixed path ($HOME/bin/tool)")
         flags = [w for w in words[1:] if w.startswith("-")]
+        if cmd in ("watch", "parallel") and not (cmd == "watch" and any(f in ("-x", "--exec") for f in flags)):
+            return f"{cmd} runs its command through sh -c, which would parse the value a second time"
         if cmd in ARG_RUNNERS or (cmd == "find" and any(w in ("-exec", "-execdir", "-ok", "-okdir") for w in words)):
             inner = next((os.path.basename(w) for w in words[1:] if os.path.basename(w) in
                           SHELLS | REMOTE_OR_EVAL | INLINE_INTERPRETERS), None)
@@ -812,8 +822,27 @@ def _remote_refusal(remote: str) -> str | None:
     for seg in _segments(remote, rctx):
         words, cmd = seg["words"], seg["cmd"]
         if not words:
+            if seg["text"].strip():
+                # only a wrapper and its options: sudo -s, sudo -i, env starts a login shell on stdin
+                return "the remote wrapper would start a shell that reads the value as shell code"
             continue
+        # a redirection glued to the command word: bash</dev/stdin
+        cmd = os.path.basename(re.split(r"[<>]", words[0])[0]) or cmd
+        if re.search(r"<\s*/dev/(?:stdin|fd/0)", seg["text"]) and cmd in SHELLS | INLINE_INTERPRETERS:
+            return f"the remote {cmd} would read the value as its program"
         flags = [w for w in words[1:] if w.startswith("-")]
+        args = [w for w in words[1:] if not w.startswith("-") or w == "-"]
+        if cmd in ("source", ".") and (not args or args[0] in _STDIN_FILES):
+            return "the remote shell would run the value as shell code"
+        if cmd in ("crontab", "at", "batch"):
+            return f"the remote {cmd} would store the value as code that runs later"
+        query_flags = ("-e", "-c", "--execute", "--command", "--eval", "-f", "--file")
+        if cmd in _SQL_CLIENTS and not any(f.split("=", 1)[0] in query_flags for f in flags):
+            return f"the remote {cmd} would read the value as statements; give the query with -e or -c"
+        if cmd == "openssl" and args and args[0] in ("enc", "base64", "dgst"):
+            return f"the remote openssl {args[0]} would send the value back encoded"
+        if cmd in SHELLS | INLINE_INTERPRETERS and args and args[0] in _STDIN_FILES:
+            return f"the remote {cmd} would read the value as its program"
         if "$" in words[0] or "`" in words[0]:
             return "the remote command word is built from a variable and is only known when it runs"
         if cmd in REMOTE_OR_EVAL:
@@ -873,7 +902,7 @@ def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) 
         toks = shlex.split(text)
     except ValueError:
         return "the ssh command line cannot be read"
-    at = next((n for n, t in enumerate(toks) if os.path.basename(t) == "ssh"), None)
+    at = next((n for n, t in enumerate(toks) if os.path.basename(t) == "ssh" and not _ASSIGN_RE.match(t)), None)
     if at is None:
         return "the ssh command line cannot be read"
     opts: list = []
@@ -908,7 +937,9 @@ def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) 
     ssh_span = next((sp for sp in spans[w:] if os.path.basename(sp[2]) == "ssh"), None)
     if ssh_span is None or "Q" in ssh_span[2]:
         return "the ssh command line cannot be read"
-    return {"insert_at": seg["start"] + ssh_span[1], "dest": dest, "line": " ".join(toks[at:])}
+    # the line as written, from the ssh word on: redirections such as 2>&1 stay whole
+    line = command[seg["start"] + ssh_span[0]:seg["end"]].strip()
+    return {"insert_at": seg["start"] + ssh_span[1], "dest": dest, "line": line}
 
 
 def _sandbox_guard(py: str | None = None) -> str:

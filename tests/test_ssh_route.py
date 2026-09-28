@@ -130,6 +130,19 @@ class RouteDecisionTests(unittest.TestCase):
             (f"printf '%s' {r} | ssh aux01 'xxd -p'", "encoded"),
             (f"printf '%s' {r} | ssh aux01 'ssh other cat'", "another shell or host"),
             (f"ssh aux01 'grep -F -f - x' <<< {r}", "here-string"),
+            # second review round, 2026-09-28
+            (f"printf '%s' {r} | ssh aux01 'sudo -s'", "start a shell"),
+            (f"printf '%s' {r} | ssh aux01 'busybox sh'", "hand the value to sh"),
+            (f"printf '%s' {r} | ssh aux01 'bash</dev/stdin'", "its program"),
+            (f"printf '%s' {r} | ssh aux01 'source /dev/stdin'", "shell code"),
+            (f"printf '%s' {r} | ssh aux01 '. /dev/stdin'", "shell code"),
+            (f"printf '%s' {r} | ssh aux01 'python3 /dev/stdin'", "its program"),
+            (f"printf '%s' {r} | ssh aux01 'systemd-run --pipe sh'", "hand the value to sh"),
+            (f"printf '%s' {r} | ssh aux01 'crontab -'", "runs later"),
+            (f"printf '%s' {r} | ssh aux01 'at now'", "runs later"),
+            (f"printf '%s' {r} | ssh aux01 mysql", "statements"),
+            (f"printf '%s' {r} | ssh aux01 'psql -h db'", "statements"),
+            (f"printf '%s' {r} | ssh aux01 'openssl base64'", "encoded"),
             (f"printf '%s' {r} > /tmp/x; ssh aux01 cat", "stdin"),
             (f"printf '%s' {r} | ssh a cat | ssh b cat", "only one ssh"),
             (f"echo {r}; printf '%s' x | ssh aux01 cat", "feed ssh"),
@@ -142,6 +155,11 @@ class RouteDecisionTests(unittest.TestCase):
                 self.assertEqual(out.get("permissionDecision"), "deny", out)
                 self.assertIn(why, out["permissionDecisionReason"])
                 self.assertNotIn("updatedInput", out)
+
+    def test_the_ask_names_the_real_host_and_the_line_as_written(self):
+        out = _hso(_pre(f"printf '%s' {self.ref} | env PATH=/opt/ssh:/usr/bin ssh aux01 'grep -F -f - x' 2>&1"))
+        reason = out["permissionDecisionReason"]
+        self.assertIn("to ssh aux01: ssh aux01 'grep -F -f - x' 2>&1.", reason)
 
     def test_codex_windows_and_the_switched_off_setting_keep_the_refusal(self):
         cmd = f"printf '%s' {self.ref} | ssh aux01 'grep -F -f - x'"
@@ -157,6 +175,8 @@ class RouteDecisionTests(unittest.TestCase):
                     f"printf '%s' {self.ref} | ssh aux01 \"sh -c 'grep -F -f - x'\"",
                     f"printf '%s' {self.ref} | env MSG='a ssh b' ssh aux01 'grep -F -f - x'",
                     f"printf '%s' {self.ref} | env PATH=/opt/ssh:/usr/bin ssh aux01 'grep -F -f - x'",
+                    f"printf '%s' {self.ref} | ssh aux01 \"psql -h db -c 'select 1'\"",
+                    f"printf '%s' {self.ref} | ssh aux01 'grep -F -f - x' 2>&1",
                     f"printf '%s' {self.ref} | sudo -u ops ssh -p 2222 -i ~/.ssh/k aux01 'grep -F -f - x'",
                     f"printf '%s' {self.ref} | /usr/bin/ssh -tt -l ops aux01 'cat > /tmp/f'",
                     f"printf '%s' {self.ref} | tr a-z A-Z | ssh aux01 -- 'grep -w -F -f - x'"):

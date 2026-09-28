@@ -76,6 +76,8 @@ class DetectTests(unittest.TestCase):
                 self.assertEqual([(m.kind, m.value) for m in detect.scan(text)], [("cloudflare-user-api-token", cf)])
 
     def test_two_secrets_in_one_text_become_two_references(self):
+        # the vault home is shared by every module: count only what this test adds
+        before = {e.key for e in Vault().list()}
         text = f"token {GLPAT} and key {AKIA} please"
         ms = detect.scan(text)
         self.assertEqual([m.value for m in ms], [GLPAT, AKIA])
@@ -85,7 +87,7 @@ class DetectTests(unittest.TestCase):
         self.assertIn("maisecrets: a secret was found and kept from the AI.", out["reason"])
         self.assertIn("pastes the cleaned prompt", out["reason"], "the one next step, with the clipboard")
         # the two references exist, the notice does not need to list them
-        self.assertEqual(sorted(e.key for e in Vault().list()), ["SECRET_c1", "SECRET_c2"])
+        self.assertEqual(len({e.key for e in Vault().list()} - before), 2)
         self.assertNotIn(GLPAT, out["reason"])
         self.assertNotIn(AKIA, out["reason"])
 

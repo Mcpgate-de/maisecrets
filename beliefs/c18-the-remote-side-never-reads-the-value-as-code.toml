@@ -1,0 +1,10 @@
+# c18-the-remote-side-never-reads-the-value-as-code: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c18-the-remote-side-never-reads-the-value-as-code"
+control = "C18"
+statement = "A remote command that would read the value from stdin as a program (a shell, an interpreter, source, crontab, a SQL client without a query), hand it to another shell or host, or encode it is refused."
+runner = ["tests/test_ssh_route.py::RouteDecisionTests::test_every_other_ssh_shape_is_refused_with_its_reason"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    why = _remote_refusal(\" \".join(shlex.quote(t) if n else t for n, t in enumerate(remote)) if remote else \"\")\n"
+replace = "    why = None\n"
