@@ -6,15 +6,22 @@ on:
     # ci: the tested commit of a release, before the release commit reaches main
     branches: [main, ci]
   pull_request:
+# a newer push to the same ref makes the older run worthless: it is cancelled, not finished
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   tests:
     # the release commit only bumps manifests and the changelog; its content was tested one
     # commit earlier, and the GitLab release job waits for this matrix on that commit
     if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
     strategy:
-      fail-fast: false
+      # one red platform stops the other: the release gate needs both green, so the rest of a red
+      # run only costs minutes. Linux runs on GitLab (unit on 3.12 and 3.9, the harness, the native
+      # file store), so GitHub keeps the two platforms GitLab does not have.
+      fail-fast: true
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -25,8 +32,6 @@ jobs:
         run: |
           python -m pip install --quiet --disable-pip-version-check pyyaml==6.0.3
           python scripts/lint_plugin.py
-      - name: unit tests
-        run: python -m unittest discover -s tests -v
       - name: hook launcher through bash (Git Bash on Windows)
         shell: bash
         run: |
@@ -45,6 +50,10 @@ jobs:
           python -c "import json; d=json.load(open('out.json',encoding='utf-8')); assert d.get('decision')=='block', d; s=json.dumps(d,ensure_ascii=False); assert '\ufffd' not in s and '\u00c3' not in s, d; print('cmd launcher: blocked ok')"
           type plain.json | cmd.exe /C ""%CD%/hooks/run.cmd" user-prompt" > plain.out
           python -c "import json; d=json.load(open('plain.out',encoding='utf-8')); assert d.get('decision')!='block', d; print('cmd launcher: plain prompt passes')"
+      # after the launcher checks (seconds), and stop at the first failure: a red run needs one
+      # traceback, not the other 130 seconds
+      - name: unit tests
+        run: python -m unittest discover -s tests -v -f
       - name: platform clipboard (a placeholder and non-ASCII text round-trip)
         if: runner.os != 'Linux'
         env:

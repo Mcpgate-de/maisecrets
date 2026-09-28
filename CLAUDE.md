@@ -23,7 +23,7 @@ output. `README.md` says what it does for users; `docs/` holds the design.
   needs the maintainer's approval (`MAISECRETS_RELEASE_BUMP`).
 - **Commit subjects** follow `type(scope): text`; `feat fix perf security deps` become the
   changelog line, so write them for the user.
-- **Commit often, push rarely.** Each push runs the GitLab pipeline and three GitHub runners. Collect
+- **Commit often, push rarely.** Each push runs the GitLab pipeline and two GitHub runners. Collect
   commits and push them together.
 
 ## Where the code lives
@@ -41,6 +41,7 @@ output. `README.md` says what it does for users; `docs/` holds the design.
 ```bash
 python3 -m unittest discover -s tests          # also with /usr/bin/python3 (3.9, the oldest supported)
 python3 scripts/replay_can_fail.py             # each belief's test must go red under its mutation
+python3 scripts/scan_tree.py                   # no secret shape in the tree, test literals included
 python3 scripts/derived_counts.py              # the numbers stated in the docs
 python3 scripts/lint_plugin.py                 # frontmatter YAML, manifests, hook paths, command names
 ruff check --select E,F,W --line-length 120 maisecrets hooks harness tests scripts skills

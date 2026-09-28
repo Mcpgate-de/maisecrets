@@ -18,10 +18,24 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def count_tests() -> int:
-    r = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
-                       cwd=ROOT, capture_output=True, text=True, timeout=600)
-    m = re.search(r"^Ran (\d+) tests?", r.stderr, re.M)
-    return int(m.group(1)) if m else -1
+    """The tests `unittest discover -s tests` loads, counted without running them: running the
+    suite to read "Ran N" took 59 s in CI and ran the suite a second time in the pre-push hook
+    (2026-09-28). A module that fails to import is a _FailedTest, so it cannot shrink the count
+    silently; it fails the run instead."""
+    code = ("import sys, unittest\n"
+            "suite = unittest.defaultTestLoader.discover('tests')\n"
+            "def walk(s):\n"
+            "    for t in s:\n"
+            "        yield from (walk(t) if isinstance(t, unittest.TestSuite) else [t])\n"
+            "tests = list(walk(suite))\n"
+            "broken = [t.id() for t in tests if type(t).__name__ == '_FailedTest']\n"
+            "print(-1 if broken else len(tests))\n"
+            "print(*broken, sep='\\n', file=sys.stderr)\n")
+    r = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, timeout=120)
+    try:
+        return int(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return -1
 
 
 def count_scenarios(path: str, marker: str) -> int:
