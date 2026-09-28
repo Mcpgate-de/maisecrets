@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
 import random
 import string
@@ -823,3 +824,16 @@ class FalsePositiveCorpusTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GitleaksJsonTests(unittest.TestCase):
+    """The detector reads gitleaks.json, because tomllib is Python 3.11+ and the stock python3 of
+    macOS is 3.9. The JSON must hold exactly the rules of the vendored gitleaks.toml."""
+
+    @unittest.skipIf(sys.version_info < (3, 11), "tomllib is Python 3.11+")
+    def test_the_json_rules_equal_the_vendored_toml(self):
+        import tomllib
+        rules = Path(__file__).resolve().parent.parent / "maisecrets" / "rules"
+        self.assertEqual(json.loads((rules / "gitleaks.json").read_text(encoding="utf-8")),
+                         tomllib.loads((rules / "gitleaks.toml").read_text(encoding="utf-8")),
+                         "run scripts/sync_gitleaks.py: it writes both")

@@ -113,6 +113,22 @@ SCENARIOS = {
         "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_text": "on stdin to ssh aux01: ssh aux01 'grep -F -f - /var/log/mail.log'",
     },
+    # a slash command with shell syntax in its arguments: only the command's own allowed-tools
+    # rule may admit the call, and the text must arrive as text (feedback on 0.5.2, 2026-09-28)
+    "report_args_stay_text": {
+        "prompt": "/maisecrets:report bug it broke $(touch {cwd}/ran) | `touch {cwd}/ran` it's odd",
+        "allowed_tools": "Read",
+        "env": {"SSH_CONNECTION": "harness 1 harness 22"},   # no browser on the machine that runs this
+        "turns": [
+            {"tool": "Bash", "input": {"command": "bash \"{root}/hooks/run.sh\" report --args-stdin "
+                                                  "<<'MAISECRETS_ARGS_END'\nbug it broke $(touch {cwd}/ran) | "
+                                                  "`touch {cwd}/ran` it's odd\nMAISECRETS_ARGS_END"}},
+            {"text": "done"},
+        ],
+        "expect_requests": 2,
+        "expect_text": "Title: Bug: it broke $(touch ",
+        "expect_no_file": "ran",
+    },
     # a reference the session never saw in a prompt is not resolved
     "bash_foreign_ref": {
         "prompt": "run the command",
@@ -166,7 +182,8 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                 "[Vault().put(v, t, k) for v, t, k in json.load(sys.stdin)]")
         subprocess.run([sys.executable, "-c", code, str(ROOT)], input=json.dumps(sc["preload"]),
                        text=True, check=True, env=env)
-    turns = json.loads(json.dumps(sc["turns"]).replace("{cwd}", str(cwd)))
+    turns = json.loads(json.dumps(sc["turns"]).replace("{cwd}", str(cwd)).replace("{root}", str(ROOT)))
+    env.update(sc.get("env", {}))
     # dump hook: records every payload so golden keys can be verified
     settings = work / "settings.json"
     dump_cmd = f"{sys.executable} \"{ROOT / 'harness' / 'dump_hook.py'}\""
@@ -185,7 +202,8 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             (work / "mcp.json").write_text(json.dumps({"mcpServers": sc["mcp"]}))
             extra = ["--mcp-config", str(work / "mcp.json")]
         r = subprocess.run(
-            ["claude", "-p", sc["prompt"], "--plugin-dir", str(ROOT), "--settings", str(settings),
+            ["claude", "-p", sc["prompt"].replace("{cwd}", str(cwd)), "--plugin-dir", str(ROOT),
+             "--settings", str(settings),
              "--allowedTools", sc.get("allowed_tools", "Bash,Read"), "--max-turns", "3",
              "--debug-file", str(debug_log), *extra],
             cwd=cwd, env=env, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
@@ -218,6 +236,8 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         got = (cwd / fname).read_text() if (cwd / fname).exists() else "<missing>"
         if got != content:
             fails.append(f"rehydration: {fname} holds {got!r}")
+    if sc.get("expect_no_file") and (cwd / sc["expect_no_file"]).exists():
+        fails.append(f"{sc['expect_no_file']} exists: a shell ran text from the arguments as code")
     if sc.get("expect_text") and sc["expect_text"] not in joined:
         fails.append(f"expected {sc['expect_text']!r} in a request body (the deny reason reaches the model)")
     for marker in (MARK, MARK2):

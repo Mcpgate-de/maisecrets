@@ -7,8 +7,12 @@ The user has copied a secret to the clipboard. Run exactly this command and show
 output, then stop:
 
 ```
-bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" put --clipboard $ARGUMENTS
+bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" put --clipboard --args-stdin <<'MAISECRETS_ARGS_END'
+$ARGUMENTS
+MAISECRETS_ARGS_END
 ```
+
+The arguments go in the quoted heredoc as they are, so the shell never reads them as code. Do not move them onto the command line, and do not add quotes.
 
 The output names the placeholder (such as ⟦SECRET_c4⟧) and tells the user it is now in the
 clipboard in place of the value. Ask the user to paste that placeholder into their next message

@@ -1,0 +1,10 @@
+# c6-an-encoder-sees-every-path-of-the-value: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c6-an-encoder-sees-every-path-of-the-value"
+control = "C6"
+statement = "An encoder is refused wherever the value can reach it: a pipe, a group, a variable, a file, a heredoc, a process substitution or a function. Only a part that never holds the value may encode."
+runner = ["tests/test_gates.py::ContextTests::test_an_encoder_is_refused_only_where_the_value_can_reach_it"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if everywhere:\n        return [True] * len(segs)\n"
+replace = "    if False:\n        return [True] * len(segs)\n"

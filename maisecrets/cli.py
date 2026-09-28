@@ -139,15 +139,15 @@ def cmd_put(args: list[str]) -> int:
 
 
 def cmd_report(args: list[str]) -> int:
-    """`report` lists the last detections; `report last [note]` or `report <n> [note]` builds a
-    prefilled GitHub issue link for one of them; `report bug <text>` and `report feature <text>`
-    build one without an event. Every link opens in the browser; nothing in it is a value."""
+    """`report` lists the last detections; `report last [note]` or `report <n> [note]` prepares a
+    false-positive issue for one of them; `report bug <text>` and `report feature <text>` prepare
+    one without an event. It prints the text and a prefilled link, opens the link only on a local
+    desktop, and with --create files the issue through the GitHub CLI. Nothing in it is a value."""
     from . import events
+    create = "--create" in args
+    args = [a for a in args if a != "--create"]
     if args and args[0] in ("bug", "feature"):
-        url = events.generic_issue_url(args[0], " ".join(args[1:]))
-        opened = events.open_in_browser(url)
-        print(("opened in the browser: " if opened else "open this link: ") + url)
-        return 0
+        return _report_out(events, *events.generic_issue_parts(args[0], " ".join(args[1:])), create=create)
     evs = events.load(20)
     if not evs:
         print("(no detection recorded yet)")
@@ -157,12 +157,36 @@ def cmd_report(args: list[str]) -> int:
         for i, e in enumerate(evs, 1):
             hits = ", ".join(f"{h['type']}/{h['kind']}" for h in e.get("hits", []))
             print(f"{i:<3} {e.get('ts', ''):<20} {e.get('hook', ''):<17} {e.get('client', ''):<7} {hits}")
-        print("\nmaisecrets report last [note] | report <n> [note] | report bug <text> | report feature <text>")
+        print("\nmaisecrets report last [note] | report <n> [note] | report bug <text> | report feature <text>"
+              "  (add --create to file it with the GitHub CLI)")
         return 0
     ev = evs[-1] if args[0] == "last" else evs[int(args[0]) - 1]
-    url = events.issue_url(ev, " ".join(args[1:]))
-    opened = events.open_in_browser(url)
-    print(("opened in the browser: " if opened else "open this link: ") + url)
+    return _report_out(events, *events.issue_parts(ev, " ".join(args[1:])), create=create)
+
+
+def _report_out(events, title: str, body: str, label: str, create: bool) -> int:
+    url, broken = events.tracker_or_error()
+    if url is None and not broken:
+        print("reporting is turned off here (report_url is null in the policy or the config)")
+        return 0
+    # the text itself first: over ssh or Remote Control a link is the same copy problem as before
+    print(f"Title: {title}\nLabel: {label}\n\n{body}\n")
+    if broken:
+        print(f"no link and no issue: the configuration cannot be read ({broken}). Copy the text above.")
+        return 0
+    if create:
+        made = events.create_with_gh(title, body, label)
+        if made:
+            print(f"created: {made}")
+            return 0
+        why = ("the tracker is not a GitHub repository" if not events.github_repo(events.tracker())
+               else "install gh and run `gh auth login`")
+        print(f"could not create it with the GitHub CLI ({why}); copy the text above or use the link.",
+              file=sys.stderr)
+    url = events.link(title, body, label)
+    opened = not create and events.open_in_browser(url)
+    prefilled = bool(events.github_repo(url))
+    print(("opened in the browser: " if opened else "prefilled link: " if prefilled else "tracker: ") + url)
     return 0
 
 
@@ -352,6 +376,17 @@ COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_res
             "forget": cmd_forget}
 
 
+def _stdin_words() -> list[str]:
+    """The words of the slash-command arguments on stdin. shlex only splits; a text that it
+    cannot split (an apostrophe in a report) falls back to plain whitespace words."""
+    import shlex
+    text = sys.stdin.read() if not sys.stdin.isatty() else ""
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] in {"-h", "--help"}:
@@ -361,6 +396,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])
+    if "--args-stdin" in argv[1:]:
+        # a slash command passes its arguments in a quoted heredoc: spliced into the bash line,
+        # `$(…)` or a pipe in a report text ran as code (feedback on 0.5.2, 2026-09-28)
+        argv = [a for a in argv if a != "--args-stdin"] + _stdin_words()
     fn = COMMANDS.get(argv[0])
     if fn is None:
         print(f"unknown command {argv[0]}", file=sys.stderr)

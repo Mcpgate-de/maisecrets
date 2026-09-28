@@ -538,6 +538,7 @@ class FileStoreContract:
         self.backend.put("SECRET_c1", "fake-before")
         path = HOME / self.store_file
         path.write_text("{damaged", encoding="utf-8")
+        self.addCleanup(path.unlink, missing_ok=True)   # the next test in this process must not read it
         for op in (lambda: self.backend.put("SECRET_c2", "fake-after"), lambda: self.backend.delete("SECRET_c1")):
             with self.assertRaises(RuntimeError):
                 op()
@@ -1207,7 +1208,7 @@ class BackendTimeoutTests(unittest.TestCase):
                 TimeoutExpired=subprocess.TimeoutExpired)):
             with self.assertRaises(RuntimeError) as cm:
                 op()
-            text = "".join(traceback.format_exception(cm.exception))
+            text = "".join(traceback.format_exception(type(cm.exception), cm.exception, cm.exception.__traceback__))
             self.assertIn(word, str(cm.exception))
             self.assertIn("timed out", str(cm.exception))
             stored = base64.b64encode(self.VALUE.encode()).decode()

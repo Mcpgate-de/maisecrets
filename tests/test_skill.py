@@ -570,7 +570,7 @@ class ProtectionStatusTests(unittest.TestCase):
 
 
 class ProtectionStatusPythonTests(unittest.TestCase):
-    """With no Python 3.11+ for the hooks, an install blocks every prompt: nothing is offered."""
+    """With no Python 3.9+ for the hooks, an install blocks every prompt: nothing is offered."""
 
     def load(self):
         import importlib.util
@@ -581,7 +581,7 @@ class ProtectionStatusPythonTests(unittest.TestCase):
 
     def test_an_old_python_everywhere_is_cannot_protect_yet_and_offers_no_install(self):
         mod = self.load()
-        old = subprocess.CompletedProcess([], 0, stdout="3.9\n", stderr="")
+        old = subprocess.CompletedProcess([], 0, stdout="3.8\n", stderr="")
         with mock.patch.object(mod.shutil, "which", side_effect=lambda n: f"/fake/{n}"), \
                 mock.patch.object(mod.subprocess, "run", return_value=old), \
                 mock.patch.object(mod, "installed", return_value=False), \
@@ -597,7 +597,7 @@ class ProtectionStatusPythonTests(unittest.TestCase):
         run_sh = (ROOT / "hooks" / "run.sh").read_text(encoding="utf-8")
         for name in mod.PYTHONS:
             self.assertIn(name, run_sh, "the check must search what the launcher searches")
-        versions = {"python3": "3.9", "python": "3.12"}
+        versions = {"python3": "3.8", "python": "3.12"}
 
         def run(argv, **kw):
             return subprocess.CompletedProcess(argv, 0, stdout=versions.get(Path(argv[0]).name, "") + "\n", stderr="")
