@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [0.5.5] - 2026-09-28
+
+### Fixes
+
+- a plugin linter; the report frontmatter parses as YAML again (d2ad842)
+- the shell rule counts only input and traces that reach the shell (c85b8a4)
+
+### Other
+
+- Merge branch 'fix/shell-rule-scope' into 'main' (f0c5ca0)
+
 ## [0.5.4] - 2026-09-28
 
 ### Features
