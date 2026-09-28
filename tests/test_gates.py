@@ -828,6 +828,41 @@ class RedactionTests(unittest.TestCase):
         self.assertEqual(out, {})
 
 
+class StorePathTests(unittest.TestCase):
+    """External review, 2026-09-28: Read, Grep and Glob were not checked at all, so the agent could read the
+    key and the ciphertext of the file store and decode them outside every gate around a resolve."""
+
+    def pre(self, tool: str, tool_input: dict, cwd: str = "/tmp") -> str:
+        out = hooks.pre_tool({"tool_name": tool, "tool_input": tool_input, "session_id": "S1", **CLAUDE, "cwd": cwd})
+        return out.get("hookSpecificOutput", {}).get("permissionDecision", "pass")
+
+    def test_the_read_tools_are_in_the_matcher(self):
+        hooks_json = json.loads((Path(__file__).resolve().parent.parent / "hooks" / "hooks.json").read_text())
+        matcher = hooks_json["hooks"]["PreToolUse"][0]["matcher"]
+        for tool in ("Read", "Grep", "Glob"):
+            self.assertRegex(tool, "^(?:" + matcher + ")$")
+
+    def test_a_read_of_the_store_or_its_value_directory_is_refused(self):
+        home = str(hooks.HOME) if hasattr(hooks, "HOME") else os.environ["MAISECRETS_HOME"]
+        link = Path(tempfile.mkdtemp(prefix="maisecrets-link-")) / "l"
+        self.addCleanup(shutil.rmtree, link.parent, True)
+        os.symlink(home, link)
+        for tool, ti in (("Read", {"file_path": home + "/key"}), ("Read", {"file_path": str(link) + "/vault.enc.json"}),
+                         ("Grep", {"pattern": "x", "path": home}), ("Glob", {"pattern": home + "/*"}),
+                         ("Grep", {"pattern": "x", "glob": home + "/*.json"}),
+                         ("Read", {"file_path": os.path.relpath(home + "/key", "/tmp")}),
+                         ("mcp__fs__read_file", {"path": home + "/vault.enc.json"})):
+            with self.subTest(tool=tool, ti=ti):
+                self.assertEqual(self.pre(tool, ti), "deny")
+
+    def test_ordinary_reads_pass(self):
+        for tool, ti in (("Read", {"file_path": "/etc/hosts"}), ("Glob", {"pattern": "**/*.py"}),
+                         ("Grep", {"pattern": "maisecrets", "path": "/tmp"}),
+                         ("mcp__x__y", {"text": "the store is in ~/.maisecrets"})):
+            with self.subTest(tool=tool, ti=ti):
+                self.assertEqual(self.pre(tool, ti), "pass")
+
+
 class ResolvedValueRedactionTests(unittest.TestCase):
     def setUp(self):
         _reset()

@@ -1,0 +1,10 @@
+# c6-a-read-tool-never-reads-the-store: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c6-a-read-tool-never-reads-the-store"
+control = "C6"
+statement = "Read, Grep, Glob and an MCP path argument that name the vault home or the value run directory, also through a symlink or a relative path, are refused before they run."
+runner = ["tests/test_gates.py::StorePathTests::test_a_read_of_the_store_or_its_value_directory_is_refused"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if not hits:\n        return None\n    return _deny(f\"maisecrets: {tool} would read the maisecrets store"
+replace = "    if True:\n        return None\n    return _deny(f\"maisecrets: {tool} would read the maisecrets store"

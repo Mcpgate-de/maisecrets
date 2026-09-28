@@ -1725,6 +1725,57 @@ def _dict_keys(node: Any) -> list[str]:
 
 
 _FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+# tools that read files by path; they carry no placeholder, but they could read the store itself
+_READ_TOOLS = ("Read", "Grep", "Glob", "LS", "NotebookRead")
+_PATH_FIELDS = ("file_path", "path", "notebook_path", "directory", "dir", "root", "cwd")
+
+
+def _protected_dirs() -> list[str]:
+    """The vault home and the value run directory, as real paths: a tool that reads them bypasses every
+    gate around a resolve (external review, 2026-09-28: Read was not checked at all)."""
+    import tempfile
+    from .vault import HOME
+    dirs = [str(HOME)]
+    xdg = os.environ.get("XDG_RUNTIME_DIR", "")
+    dirs.append(os.path.join(xdg, "maisecrets") if xdg else "")
+    dirs.append(os.path.join(tempfile.gettempdir(), f"maisecrets-{os.getuid()}") if hasattr(os, "getuid") else "")
+    return [os.path.realpath(os.path.expanduser(d)) for d in dirs if d]
+
+
+def _touches_store(path: str, cwd: str = "") -> bool:
+    if not isinstance(path, str) or not path.strip():
+        return False
+    p = os.path.expanduser(path.strip())
+    if not os.path.isabs(p):
+        p = os.path.join(cwd or os.getcwd(), p)
+    real = os.path.realpath(p)
+    return any(real == d or real.startswith(d + os.sep) for d in _protected_dirs())
+
+
+def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
+    """Refuse a read tool, or an MCP argument, that names a path in the vault home or the run directory.
+    A path is only what the field names: a Grep pattern or a free text is not read as a path."""
+    hits: list[str] = []
+    if tool in _READ_TOOLS:
+        hits = [f for f in _PATH_FIELDS if _touches_store(tool_input.get(f, ""), cwd)]
+        pattern = tool_input.get("pattern") if tool == "Glob" else tool_input.get("glob")
+        if isinstance(pattern, str) and pattern:
+            # a Glob names its directory in the pattern too: the part before the first wildcard
+            fixed = re.split(r"[*?\[{]", pattern, maxsplit=1)[0]
+            base = os.path.join(tool_input.get("path") or "", fixed) if tool_input.get("path") else fixed
+            if fixed and _touches_store(base.rstrip("/") or "/", cwd):
+                hits.append("pattern")
+    else:
+        def look(v: str) -> str:
+            if ("/" in v or "\\" in v or v.startswith("~")) and _touches_store(v, cwd):
+                hits.append(v[:80])
+            return v
+        _walk_strings(tool_input, look)
+    if not hits:
+        return None
+    return _deny(f"maisecrets: {tool} would read the maisecrets store or its value directory, which the agent never "
+                 "reads. The call did not run. If this is a false positive, tell the user; do not rephrase the call "
+                 "to get around the check.")
 
 
 def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:
@@ -1797,6 +1848,12 @@ def pre_tool(payload: dict) -> dict:
     tool_input = payload.get("tool_input") or {}
     if tool == "Bash":
         return _pre_bash(payload, cfg, tool_input)
+    if tool in _READ_TOOLS or tool.startswith("mcp__"):
+        refused = _store_path_refusal(tool, tool_input, str(payload.get("cwd") or ""))
+        if refused:
+            return refused
+        if tool in _READ_TOOLS:
+            return {}
     if tool in _FILE_TOOLS:
         return _pre_file_tool(payload, cfg, tool, tool_input, str(payload.get("cwd") or ""))
     if tool.startswith("mcp__"):
