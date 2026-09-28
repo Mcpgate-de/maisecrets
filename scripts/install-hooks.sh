@@ -10,18 +10,22 @@
 # Never write core.hooksPath here: on 2026-09-26 an earlier version of this
 # script resolved `git rev-parse --git-path hooks` to the GLOBAL directory and
 # overwrote the universal hook. Restored from a transcript copy, 1867 bytes.
+#
+# Each installed hook is a two-line wrapper that runs the hook of the tree that is checked out:
+# a copy went stale when .githooks changed (2026-09-28: the installed pre-push lacked the scan
+# that .githooks/pre-push had), and all worktrees share this one hooks directory, so the wrapper
+# runs the version of the worktree that commits or pushes.
 set -eu
-ROOT="$(git rev-parse --show-toplevel)"
-HOOKS_DIR="$ROOT/.git/hooks"
+# the common git directory: in a worktree `.git` is a file, and `$ROOT/.git/hooks` does not exist
+HOOKS_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/hooks"
 mkdir -p "$HOOKS_DIR"
-cp "$ROOT/.githooks/pre-commit" "$HOOKS_DIR/pre-commit.local"
-cp "$ROOT/.githooks/pre-push"   "$HOOKS_DIR/pre-push.local"
-cp "$ROOT/.githooks/pre-commit" "$HOOKS_DIR/pre-commit"
-cp "$ROOT/.githooks/pre-push"   "$HOOKS_DIR/pre-push"
-cp "$ROOT/.githooks/commit-msg" "$HOOKS_DIR/commit-msg"
-cp "$ROOT/.githooks/commit-msg" "$HOOKS_DIR/commit-msg.local"
-chmod +x "$HOOKS_DIR"/pre-commit "$HOOKS_DIR"/pre-push "$HOOKS_DIR"/commit-msg "$HOOKS_DIR"/*.local
-echo "installed into $HOOKS_DIR: pre-commit, pre-push, commit-msg (+ .local copies for a delegating global hooks dir)"
+for h in pre-commit pre-push commit-msg; do
+  for name in "$h" "$h.local"; do
+    printf '#!/bin/bash\n# installed by scripts/install-hooks.sh: runs the hook of the checked-out tree\nexec "$(git rev-parse --show-toplevel)/.githooks/%s" "$@"\n' "$h" > "$HOOKS_DIR/$name"
+    chmod +x "$HOOKS_DIR/$name"
+  done
+done
+echo "installed into $HOOKS_DIR: pre-commit, pre-push, commit-msg (+ .local for a delegating global hooks dir), each running .githooks/<hook> of the checked-out tree"
 GLOBAL="$(git config --global --get core.hooksPath || true)"
 if [ -n "$GLOBAL" ]; then
   echo "note: global core.hooksPath=$GLOBAL is active."
