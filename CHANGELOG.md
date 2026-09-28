@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## [0.5.6] - 2026-09-28
+
+### Features
+
+- ssh_approval per-session, one approval per value and session (e0b9bc3)
+
+### Fixes
+
+- journalctl --synchronize-on-exit is not read-only (bcd1a4a)
+- the sealed directory stays sealed; stateful commands leave the read-only list (150dc88)
+- the Codex review of the ssh session approval (be8be6a)
+
+### Other
+
+- Merge branch 'feat/ssh-session-approval' into 'main' (78f0e8c)
+
 ## [0.5.5] - 2026-09-28
 
 ### Fixes
