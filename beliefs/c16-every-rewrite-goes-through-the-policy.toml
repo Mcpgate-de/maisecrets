@@ -1,0 +1,10 @@
+# c16-every-rewrite-goes-through-the-policy: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c16-every-rewrite-goes-through-the-policy"
+control = "C16"
+statement = "Every hook answer that carries a rewritten input is decided by the rehydration policy of its path; no path returns a rewrite on its own."
+runner = ["tests/test_rehydration_matrix.py::DecisionSitesTests::test_every_rewrite_decision_goes_through_the_policy"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    return _rehydrated(payload, cfg, \"mcp\", new_input,\n"
+replace = "    return _updated(payload, new_input) or _rehydrated(payload, cfg, \"mcp\", new_input,\n"

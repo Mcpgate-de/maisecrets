@@ -50,8 +50,9 @@ DEFAULT_CONFIG = {
     "max_new_entries_per_result": 100,   # above this, a tool result is masked without storing more values
     "resolve_in_files": True,        # Write/Edit content resolves a placeholder like an MCP argument
     "shortcut": True,                # the first SessionStart names /maisecrets:shortcut once; it installs nothing
-    "ssh_via_sandbox": True,         # a value may go to ssh on stdin inside the Claude Code sandbox, after a confirm
-    "ssh_approval": "per-command",   # "per-session": one confirm per value and session, read-only remote commands
+    "ssh_via_sandbox": True,         # a value may go to ssh on stdin inside the Claude Code sandbox
+    "ssh_approval": "per-command",   # under rehydration "confirm": "per-session" is one confirm per value and session
+    "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "keep_purged_days": 30,          # metadata of an expired entry is deleted after this many days
     "audit_max_lines": 2000,
 }
@@ -69,7 +70,7 @@ _CONFIG_TYPES = {
     "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
-    "ssh_approval": str,
+    "ssh_approval": str, "rehydration": str,
 }
 
 
@@ -243,9 +244,11 @@ def load_config() -> dict:
         # warning is shown at session start and in the block notice.
         user = {}
         cfg["config_warning"] = f"{CONFIG.name} is not valid JSON and was ignored"
+        cfg["rehydration"] = "confirm"   # the file may have asked for confirm: an ignored file loosens nothing
     except ConfigError as exc:
         user = {}
         cfg["config_warning"] = f"{exc}; the file was ignored"
+        cfg["rehydration"] = "confirm"
     unknown = sorted(k for k in user if k not in _CONFIG_TYPES)
     if unknown:
         # a key is named only when it is a typo of a real one: a value pasted into the file as a

@@ -160,7 +160,10 @@ class ConfigTests(unittest.TestCase):
                     self.assertIn("ignored", cfg["config_warning"])
                     self.assertNotIn(str(wrong), cfg["config_warning"].replace(key, ""))
                     self.assertTrue(cfg["renew_on_use"], "the fallback is the strict defaults")
-                    if key in vault.DEFAULT_CONFIG:
+                    if key == "rehydration":
+                        # the ignored file may have asked for confirm: the fallback loosens nothing
+                        self.assertEqual(cfg[key], "confirm")
+                    elif key in vault.DEFAULT_CONFIG:
                         self.assertEqual(cfg[key], vault.DEFAULT_CONFIG[key])
                     checked += 1
         self.assertGreaterEqual(checked, len(vault.DEFAULT_CONFIG))
@@ -188,8 +191,11 @@ class ConfigTests(unittest.TestCase):
                 cfg = vault.load_config()
                 self.assertIn(want, cfg["config_warning"])
                 self.assertEqual(cfg["backend"], "keychain")
+                self.assertEqual(cfg["rehydration"], "confirm", "an ignored file loosens nothing")
         vault.CONFIG.unlink()
-        self.assertEqual(vault.load_config()["config_warning"], "", "no file is not a problem")
+        cfg = vault.load_config()
+        self.assertEqual(cfg["config_warning"], "", "no file is not a problem")
+        self.assertEqual(cfg["rehydration"], "automatic", "and no file is the default")
 
     def test_the_plugin_options_from_the_environment(self):
         self._user({"backend": "encrypted-file"})

@@ -72,9 +72,24 @@ SCENARIOS = {
         "turns": [{"tool": "mcp__everything__echo", "input": {"message": "⟦SECRET_c1⟧"}}, {"text": "done"}],
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c1⟧"],
-        # an MCP call that would get a real value asks the user first; with -p nobody can answer,
-        # so Claude Code refuses it and the model reads the reason, which names the key and not the
-        # value (measured 2026-09-27, also with --permission-mode bypassPermissions)
+        # rehydration "automatic" (the default): no ask of ours, the allowed tool runs, and `message` is
+        # a published-text field, which adds no ask either. The proof that the server got the value is
+        # the PostToolUse payload, which carries the rewritten input (the hook reads it; the model does
+        # not: the request bodies are checked for the value like in every scenario)
+        "value_goes_to": "mcp__everything__echo",
+    },
+    # rehydration "confirm": the call asks first; with -p nobody can answer, so Claude Code refuses
+    # it and the model reads the reason, which names the key and not the value (measured 2026-09-27,
+    # also with --permission-mode bypassPermissions)
+    "mcp_rehydrate_confirm": {
+        "prompt": "echo the stored token ⟦SECRET_c1⟧",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "config": {"rehydration": "confirm"},
+        "mcp": {"everything": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-everything@2025.9.25"]}},
+        "allowed_tools": "mcp__everything__echo",
+        "turns": [{"tool": "mcp__everything__echo", "input": {"message": "⟦SECRET_c1⟧"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_text": "this call gets the real value of \u27e6SECRET_c1\u27e7 in message of mcp__everything__echo",
     },
     # the model runs a command whose output holds a secret
@@ -112,12 +127,13 @@ SCENARIOS = {
         "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_file": ("used.txt", f"got:{MARK2}"),
     },
-    # ssh gets a value only on stdin, inside the sandbox, after the user confirms; in -p nobody can
-    # answer the ask, so Claude Code refuses the call and the model reads the reason, which names
-    # the host and the remote command but never the value
+    # rehydration "confirm": ssh gets a value only on stdin, inside the sandbox, after the user
+    # confirms; in -p nobody can answer the ask, so Claude Code refuses the call and the model reads
+    # the reason, which names the host and the remote command but never the value
     "bash_ssh_asks": {
         "prompt": "grep the mail log for ⟦SECRET_c1⟧",
         "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "config": {"rehydration": "confirm"},
         "turns": [
             {"tool": "Bash",
              "input": {"command": "printf '%s' ⟦SECRET_c1⟧ | ssh aux01 'grep -F -f - /var/log/mail.log'"}},
@@ -126,6 +142,21 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_text": "on stdin to ssh aux01: ssh aux01 'grep -F -f - /var/log/mail.log'",
+    },
+    # rehydration "automatic": no ask, the allowed command runs, and outside the sandbox its guard stops
+    # it with exit 97 before the value is read (the route in the real sandbox: harness/sandbox/ssh_e2e.py)
+    "bash_ssh_automatic": {
+        "prompt": "grep the mail log for ⟦SECRET_c1⟧",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "allowed_tools": "Bash",
+        "turns": [
+            {"tool": "Bash",
+             "input": {"command": "printf '%s' ⟦SECRET_c1⟧ | ssh aux01 'grep -F -f - /var/log/mail.log'"}},
+            {"text": "done"},
+        ],
+        "expect_requests": 2,
+        "expect_placeholders": ["⟦SECRET_c1⟧"],
+        "expect_text": "runs only inside the Claude Code sandbox",
     },
     # a slash command with shell syntax in its arguments: only the command's own allowed-tools
     # rule may admit the call, and the text must arrive as text (feedback on 0.5.2, 2026-09-28)
@@ -276,9 +307,24 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         fails.append(f"{sc['expect_no_file']} exists: a shell ran text from the arguments as code")
     if sc.get("expect_text") and sc["expect_text"] not in joined:
         fails.append(f"expected {sc['expect_text']!r} in a request body (the deny reason reaches the model)")
-    for marker in (MARK, MARK2):
-        if marker in "".join(p.read_text(errors="ignore") for p in dump.glob("*.json")):
+    # a hook payload may carry the value only where the scenario sends it on purpose: the PostToolUse of
+    # that tool gets the rewritten input. Everywhere else a value in a payload is a leak.
+    goes_to = sc.get("value_goes_to")
+    delivered = False
+    for pf in dump.glob("*.json"):
+        text = pf.read_text(errors="ignore")
+        payload = json.loads(text)
+        if goes_to and payload.get("hook_event_name") == "PostToolUse" and payload.get("tool_name") == goes_to:
+            # dump_hook.py masks every detected shape, so the value shows as <SECRET_REDACTED>; the placeholder
+            # would show as itself. The tool's own answer echoing it proves the server got the value.
+            got = json.dumps([payload.get("tool_input"), payload.get("tool_response")], ensure_ascii=False)
+            delivered = delivered or (got.count("<SECRET_REDACTED>") >= 2 and "\u27e6SECRET_c1\u27e7" not in got)
+            continue
+        if any(marker in text for marker in (MARK, MARK2)):
             fails.append("LEAK: a hook payload (tool_input after rewrite) carried the value")
+            break
+    if goes_to and not delivered:
+        fails.append(f"rehydration: {goes_to} did not get the real value (no PostToolUse with it)")
     # transcript on disk, found by session id. The first version derived the project folder
     # from the cwd and got the name wrong (Claude Code also rewrites '_' and prepends /private
     # on macOS), so this check silently looked at nothing until 2026-09-26.

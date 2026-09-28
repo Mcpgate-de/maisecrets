@@ -54,17 +54,47 @@ SCENARIOS = {
         "expect_placeholder": "⟦SECRET_c1⟧",
         "expect_file": ("used.txt", f"got:{MARK}"),
     },
+    # rehydration "automatic" on an MCP text field (`message`): Codex gets "allow" with the value in the
+    # argument, the server echoes it, and the echo comes back to the model redacted. Needs a real model:
+    # the fake upstream has no MCP tool call (--real only)
+    "mcp_text_field_rehydrate": {
+        "prompt": "Call the echo tool of the everything MCP server once with the message ⟦SECRET_c1⟧ and "
+                  "tell me what it answered.",
+        "preload": True,
+        "real_only": True,
+        "mcp": {"everything": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-everything@2025.9.25"]}},
+        "expect_placeholder": "⟦SECRET_c1⟧",
+        "expect_text": "Echo: \u27e6SECRET_c1\u27e7",
+        # the echo alone would also read so if the placeholder had stayed text: the proof is hooks.log,
+        # a pre-tool "rewrite" and a post-tool "block" (it found the real value in the answer and replaced it)
+        "value_goes_to": "mcp__everything__echo",
+    },
+    # rehydration "confirm": Codex cannot ask with a rewritten input, so the hook refuses the command
+    # and it does not run; the model reads the reason, which names the key, not the value
+    "bash_rehydrate_confirm": {
+        "prompt": ("Run exactly this shell command, do not change it: "
+                   "printf 'got:%s' '⟦SECRET_c1⟧' > used.txt; cat used.txt"),
+        "preload": True,
+        "config": {"rehydration": "confirm"},
+        "turns": [{"exec": _js("printf 'got:%s' '⟦SECRET_c1⟧' > used.txt; cat used.txt")}, {"text": "done"}],
+        "expect_file": ("used.txt", "<missing>"),
+        "expect_text": "Codex cannot ask",
+    },
 }
 
 
 def run_scenario(name: str, sc: dict) -> list[str]:
     fails: list[str] = []
+    if sc.get("real_only") and not REAL:
+        print(f"[SKIP] {name}  needs --real")
+        return []
     work = Path(tempfile.mkdtemp(prefix=f"maisecrets-codex-{name}-"))
     cwd = work / "proj"
     cwd.mkdir()
     home = work / "vaulthome"
     home.mkdir()
-    (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True}))
+    (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True,
+                                                  **sc.get("config", {})}))
     codex_home = work / "codex_home"
     codex_home.mkdir()
     out = work / "out"
@@ -83,6 +113,11 @@ def run_scenario(name: str, sc: dict) -> list[str]:
                 f'base_url = "http://127.0.0.1:{PORT}/v1"\nwire_api = "responses"\nenv_key = "FAKE_OPENAI_KEY"\n'
                 'supports_websockets = false\n')
         env["FAKE_OPENAI_KEY"] = "sk-dummy-maisecrets-harness-key-0000000000"
+    for server, spec in sc.get("mcp", {}).items():
+        # the user's own approval for the tool: a hook's "allow" does not skip Codex's MCP approval
+        # (codex-cli 0.158.0, measured 2026-09-28: "MCP tool call requires approval")
+        cfg += (f'[mcp_servers.{server}]\ncommand = {json.dumps(spec["command"])}\nargs = {json.dumps(spec["args"])}\n'
+                'default_tools_approval_mode = "approve"\n')
     (codex_home / "config.toml").write_text(cfg)
     # The plugin is installed the way a user gets it, from this checkout as a local marketplace,
     # so Codex's own plugin and hook discovery is under test. Writing hooks.json into CODEX_HOME
@@ -168,6 +203,18 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         got = (cwd / fname).read_text() if (cwd / fname).exists() else "<missing>"
         if got != content:
             fails.append(f"rehydration: {fname} holds {got!r}")
+    if sc.get("value_goes_to"):
+        log = (home / "hooks.log").read_text(errors="ignore") if (home / "hooks.log").exists() else ""
+        rows = [ln.split("\t") for ln in log.splitlines()]
+        tool = sc["value_goes_to"]
+        if not any(r[1:2] == ["pre-tool"] and tool in r and "rewrite" in r for r in rows) or \
+                not any(r[1:2] == ["post-tool"] and tool in r and "block" in r for r in rows):
+            fails.append(f"rehydration: {tool} did not get the real value (hooks.log has no rewrite and redaction)")
+    if sc.get("expect_text") and not any(sc["expect_text"] in t for t in (bodies, rollouts, out)):
+        if REAL and not ran_command and "maisecrets" not in rollouts:
+            print(f"     ~ {name}: the real model declined to run the command; nothing to check (not a failure)")
+        else:
+            fails.append(f"expected {sc['expect_text']!r} in the requests, the rollout or the codex output")
     print(f"[{'OK ' if not fails else 'FAIL'}] {name}  rc={r.returncode}  work={work}")
     for f in fails:
         print("     -", f)
