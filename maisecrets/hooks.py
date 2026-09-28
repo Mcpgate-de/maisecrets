@@ -2079,6 +2079,41 @@ def _candidates(token: str):
             dec = None
         if dec and dec != token:
             yield dec
+    yield from _decoded(token)
+
+
+_HEX_RE = re.compile(r"(?:[0-9a-fA-F]{2}){6,}")
+_B64_RE = re.compile(r"[A-Za-z0-9+/_-]{12,}={0,2}")
+
+
+def _decoded(token: str):
+    """The text a hex or base64 token decodes to. A stored value that another session put in
+    and a command printed as `| base64` or `xxd -p` reached the model: the encoded forms were
+    checked only for values this session resolved (invariant I1, 2026-09-28). Decoding needs
+    no store read; the fingerprint decides."""
+    import base64
+    import binascii
+    t = token.rstrip(".,;:)")
+    out = []
+    if _HEX_RE.fullmatch(t):
+        try:
+            out.append(bytes.fromhex(t))
+        except ValueError:
+            pass
+    if _B64_RE.fullmatch(t):
+        padded = t + "=" * (-len(t) % 4)
+        for alt in (b"+/", b"-_"):
+            try:
+                out.append(base64.b64decode(padded, altchars=alt, validate=True))
+            except (binascii.Error, ValueError):
+                pass
+    for raw in out:
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if len(text) >= _EXACT_MIN_LEN and text.isprintable():
+            yield text
 
 
 def _derived_forms(value: str) -> list[str]:
