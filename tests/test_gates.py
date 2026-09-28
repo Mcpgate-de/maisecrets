@@ -853,6 +853,17 @@ class ResolvedValueRedactionTests(unittest.TestCase):
                 self.assertNotIn(base64.b64encode(raw.encode()).decode(), out)
                 self.assertIn(self.e.ref, out)
 
+    def test_a_short_value_the_session_put_in_comes_back_masked(self):
+        # external review, 2026-09-28: a password shorter than 8 characters stored with `put` came back to the
+        # model in plain text after it was used, because every exact match started at 8 characters
+        for raw in ("A7x!42", "Kq9#vT", "8812"):
+            with self.subTest(raw):
+                e = self.v.put(raw, "SECRET", "manual", session="S1")
+                self.assertEqual(self.v.record_resolve(e.key, "S1", "Bash", "{}"), "ok")
+                out = self._post("pw=" + raw + " done")
+                self.assertNotIn(raw, out)
+                self.assertIn(e.ref, out)
+
     def test_a_result_above_the_cap_is_masked_without_storing(self):
         _reset()
         emails = " ".join(f"user{i}@corp-example.org" for i in range(130))

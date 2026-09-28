@@ -1914,7 +1914,13 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
     values this session itself resolved are matched as substrings in every derived form."""
     out = text
     for value, ref in resolved or []:
-        for form in _derived_forms(value):
+        # a value this session itself put in is no guess: it goes at any length. The 8-character floor of
+        # _derived_forms is for the encoded forms and the fingerprint search below; a 6-character password
+        # stored with `put` came back to the model in plain text (external review, 2026-09-28)
+        forms = _derived_forms(value)
+        if value and value not in forms:
+            forms.append(value)
+        for form in sorted(forms, key=len, reverse=True):
             if form in out:
                 n = out.count(form)
                 out = out.replace(form, ref)
