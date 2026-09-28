@@ -45,7 +45,7 @@ CODEX_P = {**CODEX, "model": "m"}
 
 # a value read into a variable, and the whole command ends when it is not delivered
 # the FIFO path is one shell word ending in v-<token>: a path with `; command` in it is not a read
-_READ = re.compile(r'__ms_(\d+)="\$\(cat ([^\s)"\';|&`$]+/v-[A-Za-z0-9_-]+)\)" \|\| \{ echo "maisecrets: the value '
+_READ = re.compile(r'__ms_(\d+)="\$\(cat (/[A-Za-z0-9._/-]+/v-[A-Za-z0-9_-]+)\)" \|\| \{ echo "maisecrets: the value '
                    r'for ([A-Z_]+_c\d+) was not delivered[^"]*" >&2; exit 97; \}; ')
 # the sandbox guard of the ssh route: the value is read only after it passed
 _GUARD = re.compile(r'\S+ \S+/hooks/sandbox_probe\.py \|\| \{ echo "maisecrets: [^"]*" >&2; exit 97; \}; ')
@@ -74,7 +74,7 @@ def undo_bash(original: str, rewritten: str, run_dir: str) -> list[str]:
         if not m:
             break
         n, path, key = m.groups()
-        if os.path.dirname(os.path.realpath(path)) != os.path.realpath(run_dir):
+        if "/../" in path or "/./" in path or os.path.dirname(os.path.realpath(path)) != os.path.realpath(run_dir):
             problems.append(f"a value is read from {path}, outside the run directory")
         if n in keys:
             problems.append(f"__ms_{n} is read twice")
