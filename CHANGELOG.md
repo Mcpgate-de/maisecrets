@@ -2,8 +2,47 @@
 
 ## Unreleased
 
+## [0.5.9] - 2026-09-28
+
 - **Codex:** `hooks/hooks.json` changed in this release, so Codex asks once in `/hooks` to trust
   the hooks again.
+
+### Features
+
+- sudo -n before a read-only remote command counts as read-only (a1711d2)
+- Norwegian and Czech credential labels, regions no and cz (85a8649)
+- Portuguese and Danish credential labels, regions pt, br and dk (161762c)
+- French and Dutch credential labels, regions fr, lu, be and nl (b7da1cf)
+- Korean and Thai credential labels (6cff625)
+- Polish and Turkish credential labels (46d578e)
+- Finnish and Swedish credential labels (02c2f1b)
+- Spanish and Italian credential labels (1b2ca9c)
+
+### Fixes
+
+- the context window is cut from the original text, then lowered (1d2918c)
+- Turkish labels in capitals, such as ŞİFRE: (ce1aef5)
+- a refusal about the store says what the user does next (1aad280)
+- a second hop names one ssh per host; the sandbox e2e runs an ops user's forms (e64bec6)
+- a false-positive report names the forget command and deletes nothing itself (6a1ea89)
+- a refusal names the form that works, and the primer says what to do (e5f806a)
+- /ms sends the blocked prompt of its own session, also when two sessions wait (f90cc47)
+- a hook command that finds no launcher refuses; Claude Code still skips a moved plugin (f6b2cb8)
+- a space before the colon of a label, as French typography writes it (a8fad39)
+
+### Security
+
+- every fail-closed answer has the shape of the client that asked (481810d)
+- a hook that cannot work refuses in JSON, which Codex reads too (12b8400)
+- a session id is a name, never a path, and a command cannot set it (e1bae80)
+- an entry point that cannot import the plugin's code refuses instead of passing (1793d1c)
+- an MCP resource read that names the store is refused (fd2e23a)
+
+### Other
+
+- Merge branch 'fix/i2-windows-form' into 'main' (287f6d2)
+- Merge branch 'feat/label-languages-l10n' into 'main' (69a4d9d)
+- Merge branch 'ci/faster-matrix-and-prepush-scan' into 'main' (fbd732a)
 
 ## [0.5.8] - 2026-09-28
 
