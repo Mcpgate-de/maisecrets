@@ -1089,6 +1089,8 @@ class Vault:
         """The limiter for every key of one call together: two new keys at a cap of one passed one by
         one, and the first was recorded before the second was refused (review, 2026-09-29)."""
         keys = list(dict.fromkeys(keys))     # one resolve per key, whatever the caller passes
+        if not keys:
+            return []                         # nothing to resolve is under every cap, also a lowered one
         failed = [f"{k} ({st})" for k in keys for st in [self._limit(k, session)] if st != "ok"]
         if failed:
             return failed

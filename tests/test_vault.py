@@ -284,6 +284,8 @@ class ConfigTests(unittest.TestCase):
         g = v.put("limit-once-" + "value-3", "SECRET", "manual", session="S1")
         got = v._limit_all([e.key, g.key], "S1")
         self.assertTrue(got and got[0].startswith(g.key) and "max_keys_per_session" in got[0], got)
+        v.cfg["max_resolves_per_hour"] = 1                 # lowered below the resolves of the last hour
+        self.assertEqual(v._limit_all([], "S1"), [], "no keys: no IndexError")
 
     def test_the_plugin_options_from_the_environment(self):
         self._user({"backend": "encrypted-file"})
