@@ -2,8 +2,19 @@
 
 [maisecrets.dev](https://maisecrets.dev) · by [mcpgate](https://mcpgate.de) · Apache-2.0 · free
 
-Keeps secrets and PII out of the cloud model. Works as a plugin for Claude Code
-(and Cowork) and for Codex, from the same `hooks/hooks.json`.
+An AI agent sees what you type and what its tools print: passwords, tokens, a
+customer's e-mail address. maisecrets intercepts detected secrets and personal
+data before they reach the cloud model. The real value goes back in only where
+the call happens, and only after you allow it. maisecrets itself sends no
+prompt, value or telemetry to a server.
+
+```bash
+claude plugin marketplace add Mcpgate-de/maisecrets
+claude plugin install maisecrets@maisecrets     # then start a new session
+```
+
+It works as a plugin for Claude Code (and Cowork) and for Codex, from the same
+`hooks/hooks.json`. Codex and the other install paths: see [Install](#install).
 
 **What it does, deterministically and locally:**
 
@@ -144,6 +155,24 @@ claude plugin install maisecrets@maisecrets             # user scope; new sessio
 claude plugin update maisecrets@maisecrets              # later versions
 ```
 
+**Updates and open sessions.** A hook runs from the plugin folder of its version.
+When Claude Code cannot find that folder, it shows `Plugin directory does not
+exist` and runs the tool without the hook: every protection of that session is
+off until `/reload-plugins` or a new session. No code of the plugin runs then, so
+maisecrets cannot warn you itself.
+
+- Installed from this GitHub marketplace (the commands above), a previous version
+  stays for 14 days, "so a session that already loaded the old version keeps
+  running" ([Claude Code docs](https://code.claude.com/docs/en/plugins/loading#cleanup-of-previous-versions)).
+  This is the install path we recommend.
+- Synced from claude.ai, the previous folder moved to `~/.claude/plugins/.trash`
+  when another Claude Code session started and synced (observed with Claude Code
+  2.1.283 on 2026-09-28; not documented). A session that was open then lost its
+  hooks. After an update, run `/reload-plugins` in every open session.
+- For a team, an admin can roll out this marketplace with managed settings
+  (`extraKnownMarketplaces` with `autoUpdate: true`, and `enabledPlugins`), so
+  nobody has to type a command ([Claude Code docs](https://code.claude.com/docs/en/plugins/org)).
+
 Codex (CLI, IDE extension, and the Codex agent inside the ChatGPT desktop app):
 
 ```bash
@@ -168,7 +197,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 9 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
-python3 scripts/replay_can_fail.py                     # 42 proofs: each control's test goes red without it
+python3 scripts/replay_can_fail.py                     # 46 proofs: each control's test goes red without it
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -238,8 +267,8 @@ is delivered through live in `$XDG_RUNTIME_DIR/maisecrets` or
 `maisecrets-<uid>` in the temp directory, for up to 120 s. The values live in
 the store of the platform; on macOS a value longer than about 2.8 KB (a private
 key) is passed to `security` on its command line, visible to `ps` for the
-milliseconds of the call, because the stdin form has a line limit. Nothing leaves the machine: no hook
-opens a network connection. Two exceptions to state to a data-protection
+milliseconds of the call, because the stdin form has a line limit. maisecrets itself sends nothing to a
+server: no hook opens a network connection. Two exceptions to state to a data-protection
 officer: the Windows Credential Locker can roam through a Microsoft account on
 a machine that is not domain-joined (set `backend` to `encrypted-file` by
 policy if that matters), and `/maisecrets:report` prints an issue text and a
@@ -511,8 +540,9 @@ A placeholder turns back into its value only here:
   sandbox, the stdin rule and `allowedDomains` stay as they are: a host
   outside the list still gets a 403. The approval is recorded when the
   command you allowed reads the value, not when the prompt appears, so a
-  declined prompt approves nothing. Measured in the macOS sandbox against a
-  real host with Claude Code 2.1.283. The default is `"per-command"`.
+  declined prompt approves nothing. Measured in the macOS and the Linux
+  (bubblewrap) sandbox against a real host with Claude Code 2.1.283
+  (`harness/sandbox/ssh_e2e.py`). The default is `"per-command"`.
 - **Inline for Write and Edit.** A placeholder in the content of Write, Edit,
   MultiEdit or NotebookEdit is resolved like an MCP argument, under the same
   session rule, cap and audit line (the line names the file). The client's

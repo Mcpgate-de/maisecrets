@@ -10,7 +10,7 @@ the proxy login, so the proxy refuses it. This helper sends the login from HTTPS
     ssh -o ProxyCommand='python3 proxy_connect.py %h %p' host …
 
 It talks only to the sandbox proxy on this machine (localhost, 127.0.0.1, ::1, with a login of
-the form srt.…): the login never goes to another host, and a company proxy on localhost is not
+the form srt or srt.…): the login never goes to another host, and a company proxy on localhost is not
 used. Exit 1 with the proxy's status line when the proxy refuses.
 """
 from __future__ import annotations
@@ -34,7 +34,9 @@ def proxy() -> tuple[str, int, str | None]:
         port = None
     # the sandbox runtime's own proxy: local, with a login of the form srt.… (Claude Code 2.1.283);
     # a company proxy on localhost (cntlm, px) would connect anywhere and must not be used
-    if u.scheme != "http" or u.hostname not in LOCAL or not port or not (u.username or "").startswith("srt."):
+    # `srt` alone on Linux (Claude Code 2.1.283 on Debian 13, 2026-09-28)
+    user = u.username or ""
+    if u.scheme != "http" or u.hostname not in LOCAL or not port or not (user == "srt" or user.startswith("srt.")):
         raise SystemExit("maisecrets proxy_connect: no local sandbox proxy in HTTPS_PROXY; "
                          "this ssh route works only inside the Claude Code sandbox")
     auth = None

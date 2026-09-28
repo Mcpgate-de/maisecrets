@@ -11,8 +11,8 @@
     {
       "name": "maisecrets",
       "source": "./",
-      "description": "Keeps secrets and PII out of the cloud model: deterministic detection, a local vault with TTL, placeholders resolved only where the real call happens. Free and open source, by mcpgate.de.",
-      "version": "0.5.6",
+      "description": "Intercepts detected secrets and PII before they reach the cloud model: deterministic detection, a local vault with TTL, placeholders resolved only where the real call happens. Free and open source, by mcpgate.de.",
+      "version": "0.5.7",
       "category": "security"
     }
   ]

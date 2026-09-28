@@ -181,6 +181,76 @@ def _scrub_forms(values: list[str]) -> list[bytes]:
     return forms
 
 
+def _json_string_spans(line: bytes) -> list[tuple[int, int]]:
+    """The byte spans of the string contents in one JSON line, escapes skipped."""
+    spans, i, n = [], 0, len(line)
+    while i < n:
+        if line[i] == 0x22:                       # a quote opens a string
+            j = i + 1
+            while j < n and line[j] != 0x22:
+                j += 2 if line[j] == 0x5C else 1  # a backslash escapes the next byte
+            spans.append((i + 1, min(j, n)))
+            i = j + 1
+        else:
+            i += 1
+    return spans
+
+
+def _mask_digits_in_strings(data: bytes, digits: list[bytes]) -> tuple[bytes, int]:
+    """Mask a value that is only digits where it sits inside a JSON string and no other digit stands next
+    to it. A JSON number, a longer digit run and the four hex digits of a \\u escape stay untouched.
+    Plain replacement skipped every all-digit value, so a detected tax ID stayed in the transcript
+    (external review, 2026-09-28)."""
+    buf, hits = bytearray(data), 0
+    start = 0
+    while start < len(buf):
+        end = buf.find(b"\n", start)
+        end = len(buf) if end < 0 else end
+        line = bytes(buf[start:end])
+        if any(d in line for d in digits):
+            for a, b in _json_string_spans(line):
+                for d in digits:
+                    k = line.find(d, a, b)
+                    while k >= 0:
+                        before = line[k - 1:k]
+                        after = line[k + len(d):k + len(d) + 1]
+                        esc = line.rfind(b"\\u", max(a, k - 5), k)
+                        if not before.isdigit() and not after.isdigit() and not (esc >= 0 and k - esc <= 5):
+                            buf[start + k:start + k + len(d)] = b"*" * len(d)
+                            hits += 1
+                        k = line.find(d, k + len(d), b)
+        start = end + 1
+    return bytes(buf), hits
+
+
+def _scrub_digits_by_line(fd: int, digits: list[bytes]) -> int:
+    """The all-digit pass, one whole JSONL line at a time, however long: inside an 8 MiB window a record
+    that started in the previous window had no opening quote, and a value after it stayed (Codex review,
+    2026-09-28). A changed line is written back at its own offset."""
+    hits, pos, buf = 0, 0, b""
+    os.lseek(fd, 0, os.SEEK_SET)
+    while True:
+        data = os.read(fd, 1 << 20)
+        buf += data
+        while True:
+            nl = buf.find(b"\n")
+            if nl < 0 and data:
+                break
+            line = buf if nl < 0 else buf[:nl]
+            if line and any(d in line for d in digits):
+                masked, n = _mask_digits_in_strings(line, digits)
+                if n:
+                    here = os.lseek(fd, 0, os.SEEK_CUR)      # os.pwrite is POSIX only (Windows has none)
+                    os.lseek(fd, pos, os.SEEK_SET)
+                    os.write(fd, masked)
+                    os.lseek(fd, here, os.SEEK_SET)
+                    hits += n
+            if nl < 0:
+                return hits
+            pos += nl + 1
+            buf = buf[nl + 1:]
+
+
 def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
     """Best effort: overwrite every occurrence of a value in the transcript IN PLACE with a
     mask of the same byte length. Same inode and same mode: a writer that keeps the file open
@@ -193,11 +263,14 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
             _debug(f"scrub: skipped, path={'missing' if not path else 'absent'}")
             return False
         forms = _scrub_forms(values)
-        if not forms:
+        digits = sorted({v.encode() for v in values if v and v.isdigit() and len(v) >= 6}, key=len, reverse=True)
+        if not forms and not digits:
             return False
-        overlap = max(len(b) for b in forms)
+        overlap = max((len(b) for b in forms), default=0)
         chunk = 8 * 1024 * 1024
-        fd = os.open(path, os.O_RDWR)
+        # binary on Windows: text mode turns \r\n into \n on read, and the in-place write lands at the wrong
+        # offset (the GitHub Windows runner, 2026-09-28: the scrubbed records were no longer valid JSON)
+        fd = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0))
         try:
             try:
                 import fcntl
@@ -228,6 +301,8 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
                     os.lseek(fd, pos, os.SEEK_SET)
                     os.write(fd, data)
                 pos += len(data)
+            if digits:
+                hits += _scrub_digits_by_line(fd, digits)
             if hits:
                 os.fsync(fd)
         finally:
@@ -1725,6 +1800,96 @@ def _dict_keys(node: Any) -> list[str]:
 
 
 _FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+# tools that read files by path; they carry no placeholder, but they could read the store itself
+_READ_TOOLS = ("Read", "Grep", "Glob", "LS", "NotebookRead")
+_PATH_FIELDS = ("file_path", "path", "notebook_path", "directory", "dir", "root", "cwd")
+
+
+def _protected_dirs() -> list[str]:
+    """The vault home and the value run directory, as real paths: a tool that reads them bypasses every
+    gate around a resolve (external review, 2026-09-28: Read was not checked at all)."""
+    import tempfile
+    from .vault import HOME
+    dirs = [str(HOME)]
+    xdg = os.environ.get("XDG_RUNTIME_DIR", "")
+    dirs.append(os.path.join(xdg, "maisecrets") if xdg else "")
+    dirs.append(os.path.join(tempfile.gettempdir(), f"maisecrets-{os.getuid()}") if hasattr(os, "getuid") else "")
+    return [os.path.realpath(os.path.expanduser(d)) for d in dirs if d]
+
+
+def _identity(path: str) -> tuple[int, int] | None:
+    try:
+        st = os.stat(path)
+        return st.st_dev, st.st_ino
+    except OSError:
+        return None
+
+
+def _abs(path: str, cwd: str) -> str:
+    p = os.path.expanduser(path.strip())
+    return os.path.realpath(p if os.path.isabs(p) else os.path.join(cwd or os.getcwd(), p))
+
+
+def _touches_store(path: str, cwd: str = "", contains: bool = False) -> bool:
+    """Whether the path lies in a protected directory, compared by file identity (device and inode) of the
+    path and each of its parents: on a case-insensitive file system another spelling is the same directory
+    (Codex review, 2026-09-28). With ``contains``, a protected directory below the path counts too: a
+    recursive Grep over a parent reads the store."""
+    if not isinstance(path, str) or not path.strip():
+        return False
+    real = _abs(path, cwd)
+    protected = [d for d in _protected_dirs() if os.path.isdir(d)]
+    ids = {_identity(d) for d in protected} - {None}
+    probe = real
+    while True:
+        if _identity(probe) in ids or any(probe == d for d in protected):
+            return True
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            break
+        probe = parent
+    if contains and os.path.isdir(real):
+        me = _identity(real)
+        for d in protected:
+            q = d
+            while True:
+                if _identity(q) == me:
+                    return True
+                parent = os.path.dirname(q)
+                if parent == q:
+                    break
+                q = parent
+    return False
+
+
+def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
+    """Refuse a read tool, or an MCP argument, that names a path in the vault home or the run directory.
+    A path is only what the field names: a Grep pattern or a free text is not read as a path."""
+    hits: list[str] = []
+    if tool in _READ_TOOLS:
+        hits = [f for f in _PATH_FIELDS if _touches_store(tool_input.get(f, ""), cwd, contains=tool == "Grep")]
+        # Grep without a path searches the working directory (Codex review, 2026-09-28)
+        if tool == "Grep" and not any(tool_input.get(f) for f in _PATH_FIELDS) \
+                and _touches_store(cwd, cwd, contains=True):
+            hits.append("cwd")
+        pattern = tool_input.get("pattern") if tool == "Glob" else tool_input.get("glob")
+        if isinstance(pattern, str) and pattern:
+            # a Glob names its directory in the pattern too: the part before the first wildcard
+            fixed = re.split(r"[*?\[{]", pattern, maxsplit=1)[0]
+            base = os.path.join(tool_input.get("path") or "", fixed) if tool_input.get("path") else fixed
+            if fixed and _touches_store(base.rstrip("/") or "/", cwd):
+                hits.append("pattern")
+    else:
+        def look(v: str) -> str:
+            if ("/" in v or "\\" in v or v.startswith("~")) and _touches_store(v, cwd):
+                hits.append(v[:80])
+            return v
+        _walk_strings(tool_input, look)
+    if not hits:
+        return None
+    return _deny(f"maisecrets: {tool} would read the maisecrets store or its value directory, which the agent never "
+                 "reads. The call did not run. If this is a false positive, tell the user; do not rephrase the call "
+                 "to get around the check.")
 
 
 def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:
@@ -1797,6 +1962,12 @@ def pre_tool(payload: dict) -> dict:
     tool_input = payload.get("tool_input") or {}
     if tool == "Bash":
         return _pre_bash(payload, cfg, tool_input)
+    if tool in _READ_TOOLS or tool.startswith("mcp__"):
+        refused = _store_path_refusal(tool, tool_input, str(payload.get("cwd") or ""))
+        if refused:
+            return refused
+        if tool in _READ_TOOLS:
+            return {}
     if tool in _FILE_TOOLS:
         return _pre_file_tool(payload, cfg, tool, tool_input, str(payload.get("cwd") or ""))
     if tool.startswith("mcp__"):
@@ -1914,7 +2085,22 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
     values this session itself resolved are matched as substrings in every derived form."""
     out = text
     for value, ref in resolved or []:
-        for form in _derived_forms(value):
+        # a value this session itself put in is no guess: it goes at any length. The 8-character floor of
+        # _derived_forms is for the encoded forms and the fingerprint search below; a 6-character password
+        # stored with `put` came back to the model in plain text (external review, 2026-09-28)
+        forms = _derived_forms(value)
+        if value and 4 <= len(value) < _EXACT_MIN_LEN:
+            forms.append(value)       # 4 to 7 characters: everywhere, also between letters
+        if value and len(value) < 4:
+            # under 4 characters only where no letter or digit stands next to it: a plain substring replace
+            # of `a` broke every word of the output (Codex review, 2026-09-28)
+            pattern = re.compile(r"(?<![^\W_])" + re.escape(value) + r"(?![^\W_])")   # any letter or digit
+            out, n = pattern.subn(lambda _m: ref, out)
+            if n:
+                hit["n"] += n
+                if values is not None and value not in values:
+                    values.append(value)
+        for form in sorted(forms, key=len, reverse=True):
             if form in out:
                 n = out.count(form)
                 out = out.replace(form, ref)

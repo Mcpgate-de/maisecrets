@@ -1,7 +1,7 @@
 {
   "name": "maisecrets",
-  "version": "0.5.6",
-  "description": "Keeps secrets and PII out of the cloud model: deterministic detection, a local vault with TTL, placeholders resolved only where the real call happens. Free and open source, by mcpgate.de.",
+  "version": "0.5.7",
+  "description": "Intercepts detected secrets and PII before they reach the cloud model: deterministic detection, a local vault with TTL, placeholders resolved only where the real call happens. Free and open source, by mcpgate.de.",
   "author": {
     "name": "mcpgate",
     "url": "https://mcpgate.de"
@@ -19,8 +19,8 @@
   ],
   "interface": {
     "displayName": "maisecrets",
-    "shortDescription": "Secrets and PII stay local",
-    "longDescription": "A hook blocks a prompt that carries a secret or personal data, stores the value in a local vault with a TTL, and hands the model a placeholder. The placeholder resolves only where the real call happens: in the shell, in an MCP argument, in a file write. Tool output is redacted before it reaches the model. Nothing leaves the machine. Free and open source, by mcpgate.de.",
+    "shortDescription": "Intercepts secrets and PII",
+    "longDescription": "A hook blocks a prompt that carries a secret or personal data, stores the value in a local vault with a TTL, and hands the model a placeholder. The placeholder resolves only where the real call happens: in the shell, in an MCP argument, in a file write. Tool output is redacted before it reaches the model. maisecrets itself sends no prompt, value or telemetry to a server. Free and open source, by mcpgate.de.",
     "developerName": "mcpgate",
     "category": "Security",
     "capabilities": [],
@@ -35,7 +35,7 @@
     "screenshots": [],
     "websiteURL": "https://maisecrets.dev",
     "privacyPolicyURL": "https://github.com/Mcpgate-de/maisecrets/blob/main/PRIVACY.md",
-    "termsOfServiceURL": "https://github.com/Mcpgate-de/maisecrets/blob/main/LICENSE",
+    "termsOfServiceURL": "https://mcpgate.de/terms/#maisecrets",
     "supportURL": "https://github.com/Mcpgate-de/maisecrets/issues"
   },
   "skills": "./skills/"
