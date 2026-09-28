@@ -855,6 +855,18 @@ class StorePathTests(unittest.TestCase):
             with self.subTest(tool=tool, ti=ti):
                 self.assertEqual(self.pre(tool, ti), "deny")
 
+    def test_another_spelling_or_a_grep_over_a_parent_is_refused(self):
+        # Codex review, 2026-09-28: an uppercase spelling passed on a case-insensitive file system, and a Grep
+        # over the store's parent directory searched the store
+        home = os.environ["MAISECRETS_HOME"]
+        Path(home, "key").write_text("x", encoding="utf-8")
+        self.addCleanup(lambda: Path(home, "key").unlink(missing_ok=True))
+        mixed = home[:-3] + home[-3:].swapcase()
+        if os.path.exists(mixed):                      # a case-insensitive file system (macOS by default)
+            self.assertEqual(self.pre("Read", {"file_path": mixed + "/key"}), "deny")
+        self.assertEqual(self.pre("Grep", {"pattern": "x", "path": os.path.dirname(home)}), "deny")
+        self.assertEqual(self.pre("Glob", {"pattern": "*", "path": os.path.dirname(home)}), "pass", "names only")
+
     def test_ordinary_reads_pass(self):
         for tool, ti in (("Read", {"file_path": "/etc/hosts"}), ("Glob", {"pattern": "**/*.py"}),
                          ("Grep", {"pattern": "maisecrets", "path": "/tmp"}),
@@ -895,9 +907,16 @@ class ResolvedValueRedactionTests(unittest.TestCase):
             with self.subTest(raw):
                 e = self.v.put(raw, "SECRET", "manual", session="S1")
                 self.assertEqual(self.v.record_resolve(e.key, "S1", "Bash", "{}"), "ok")
-                out = self._post("pw=" + raw + " done")
-                self.assertNotIn(raw, out)
-                self.assertIn(e.ref, out)
+                for text in ("pw=" + raw + " done", "x" + raw + "y"):
+                    out = self._post(text)
+                    self.assertNotIn(raw, out)
+                    self.assertIn(e.ref, out)
+
+    def test_a_value_of_one_to_three_characters_does_not_break_the_words_around_it(self):
+        # Codex review: a resolved `a` turned `status: a database` into masks inside every word
+        e = self.v.put("a", "SECRET", "manual", session="S1")
+        self.assertEqual(self.v.record_resolve(e.key, "S1", "Bash", "{}"), "ok")
+        self.assertEqual(self._post("status: a database"), "status: " + e.ref + " database")
 
     def test_a_result_above_the_cap_is_masked_without_storing(self):
         _reset()

@@ -383,6 +383,17 @@ class TranscriptScrubTests(unittest.TestCase):
         self.assertEqual(got[1]["num"], [12345678901])
         self.assertEqual(got[2]["k"], "***********")
 
+    def test_an_all_digit_value_after_a_record_longer_than_the_window_is_scrubbed(self):
+        # Codex review, 2026-09-28: a string over 8 MiB moved the value into the next window, which began
+        # mid-string without its opening quote, and the value stayed
+        recs = [{"a": "x" * (9 * 1024 * 1024) + " id 123456 end", "n": 123456}, {"k": "tail 123456"}]
+        self.path.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+        self.assertTrue(hooks._scrub_transcript(str(self.path), ["123456"], ["⟦X⟧"]))
+        got = [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
+        self.assertTrue(got[0]["a"].endswith(" id ****** end"))
+        self.assertEqual(got[0]["n"], 123456)
+        self.assertEqual(got[1]["k"], "tail ******")
+
     def test_malformed_lines_are_scrubbed_in_place_keeping_inode_and_mode(self):
         self.path.write_text("not json " + PLAIN + "\n{\"broken\": \"" + PLAIN + "\n\n", encoding="utf-8")
         os.chmod(self.path, 0o600)

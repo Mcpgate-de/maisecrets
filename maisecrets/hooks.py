@@ -223,6 +223,31 @@ def _mask_digits_in_strings(data: bytes, digits: list[bytes]) -> tuple[bytes, in
     return bytes(buf), hits
 
 
+def _scrub_digits_by_line(fd: int, digits: list[bytes]) -> int:
+    """The all-digit pass, one whole JSONL line at a time, however long: inside an 8 MiB window a record
+    that started in the previous window had no opening quote, and a value after it stayed (Codex review,
+    2026-09-28). A changed line is written back at its own offset."""
+    hits, pos, buf = 0, 0, b""
+    os.lseek(fd, 0, os.SEEK_SET)
+    while True:
+        data = os.read(fd, 1 << 20)
+        buf += data
+        while True:
+            nl = buf.find(b"\n")
+            if nl < 0 and data:
+                break
+            line = buf if nl < 0 else buf[:nl]
+            if line and any(d in line for d in digits):
+                masked, n = _mask_digits_in_strings(line, digits)
+                if n:
+                    os.pwrite(fd, masked, pos)
+                    hits += n
+            if nl < 0:
+                return hits
+            pos += nl + 1
+            buf = buf[nl + 1:]
+
+
 def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
     """Best effort: overwrite every occurrence of a value in the transcript IN PLACE with a
     mask of the same byte length. Same inode and same mode: a writer that keeps the file open
@@ -238,7 +263,7 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
         digits = sorted({v.encode() for v in values if v and v.isdigit() and len(v) >= 6}, key=len, reverse=True)
         if not forms and not digits:
             return False
-        overlap = max(len(b) for b in forms + digits)
+        overlap = max((len(b) for b in forms), default=0)
         chunk = 8 * 1024 * 1024
         fd = os.open(path, os.O_RDWR)
         try:
@@ -266,14 +291,13 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
                     if n:
                         n_here += n
                         data = data.replace(b, b"*" * len(b))
-                if digits:
-                    data, n = _mask_digits_in_strings(data, digits)
-                    n_here += n
                 if n_here:
                     hits += n_here
                     os.lseek(fd, pos, os.SEEK_SET)
                     os.write(fd, data)
                 pos += len(data)
+            if digits:
+                hits += _scrub_digits_by_line(fd, digits)
             if hits:
                 os.fsync(fd)
         finally:
@@ -1788,14 +1812,49 @@ def _protected_dirs() -> list[str]:
     return [os.path.realpath(os.path.expanduser(d)) for d in dirs if d]
 
 
-def _touches_store(path: str, cwd: str = "") -> bool:
+def _identity(path: str) -> tuple[int, int] | None:
+    try:
+        st = os.stat(path)
+        return st.st_dev, st.st_ino
+    except OSError:
+        return None
+
+
+def _abs(path: str, cwd: str) -> str:
+    p = os.path.expanduser(path.strip())
+    return os.path.realpath(p if os.path.isabs(p) else os.path.join(cwd or os.getcwd(), p))
+
+
+def _touches_store(path: str, cwd: str = "", contains: bool = False) -> bool:
+    """Whether the path lies in a protected directory, compared by file identity (device and inode) of the
+    path and each of its parents: on a case-insensitive file system another spelling is the same directory
+    (Codex review, 2026-09-28). With ``contains``, a protected directory below the path counts too: a
+    recursive Grep over a parent reads the store."""
     if not isinstance(path, str) or not path.strip():
         return False
-    p = os.path.expanduser(path.strip())
-    if not os.path.isabs(p):
-        p = os.path.join(cwd or os.getcwd(), p)
-    real = os.path.realpath(p)
-    return any(real == d or real.startswith(d + os.sep) for d in _protected_dirs())
+    real = _abs(path, cwd)
+    protected = [d for d in _protected_dirs() if os.path.isdir(d)]
+    ids = {_identity(d) for d in protected} - {None}
+    probe = real
+    while True:
+        if _identity(probe) in ids or any(probe == d for d in protected):
+            return True
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            break
+        probe = parent
+    if contains and os.path.isdir(real):
+        me = _identity(real)
+        for d in protected:
+            q = d
+            while True:
+                if _identity(q) == me:
+                    return True
+                parent = os.path.dirname(q)
+                if parent == q:
+                    break
+                q = parent
+    return False
 
 
 def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
@@ -1803,7 +1862,7 @@ def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
     A path is only what the field names: a Grep pattern or a free text is not read as a path."""
     hits: list[str] = []
     if tool in _READ_TOOLS:
-        hits = [f for f in _PATH_FIELDS if _touches_store(tool_input.get(f, ""), cwd)]
+        hits = [f for f in _PATH_FIELDS if _touches_store(tool_input.get(f, ""), cwd, contains=tool == "Grep")]
         pattern = tool_input.get("pattern") if tool == "Glob" else tool_input.get("glob")
         if isinstance(pattern, str) and pattern:
             # a Glob names its directory in the pattern too: the part before the first wildcard
@@ -2021,8 +2080,17 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
         # _derived_forms is for the encoded forms and the fingerprint search below; a 6-character password
         # stored with `put` came back to the model in plain text (external review, 2026-09-28)
         forms = _derived_forms(value)
-        if value and value not in forms:
-            forms.append(value)
+        if value and 4 <= len(value) < _EXACT_MIN_LEN:
+            forms.append(value)       # 4 to 7 characters: everywhere, also between letters
+        if value and len(value) < 4:
+            # under 4 characters only where no letter or digit stands next to it: a plain substring replace
+            # of `a` broke every word of the output (Codex review, 2026-09-28)
+            pattern = re.compile(r"(?<![A-Za-z0-9])" + re.escape(value) + r"(?![A-Za-z0-9])")
+            out, n = pattern.subn(lambda _m: ref, out)
+            if n:
+                hit["n"] += n
+                if values is not None and value not in values:
+                    values.append(value)
         for form in sorted(forms, key=len, reverse=True):
             if form in out:
                 n = out.count(form)
