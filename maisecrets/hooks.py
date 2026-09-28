@@ -1553,11 +1553,12 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     bad_args = _args_call_refusal(command)
     if bad_args:
         return _deny(bad_args)
-    if re.search(r"(?<![\w])CLAUDE_CODE_SESSION_ID\s*=", command):
+    if re.search(r"(?<![\w])CLAUDE_CODE_SESSION_ID\s*=|\bunset\b[^\n;|&]*\bCLAUDE_CODE_SESSION_ID\b"
+                 r"|\benv\b[^\n;|&]*\s-u\s*CLAUDE_CODE_SESSION_ID\b", command):
         # /ms reads the blocked prompt of the session the client names; a command that names another one
         # would take that session's text (Codex review, 2026-09-28)
-        return _deny("maisecrets: this command sets the session id, which selects another session's blocked "
-                     "prompt. The command did not run. /ms sends the blocked prompt of this session.")
+        return _deny("maisecrets: this command sets or clears the session id, which selects the blocked prompt "
+                     "of another session. The command did not run. /ms sends the blocked prompt of this session.")
     matched = _store_read_match(command)
     if matched:
         # said as what the user does next, not as a check to stay inside: "do not rephrase … to get around
@@ -2497,11 +2498,10 @@ def main(argv: list[str]) -> int:
         # `null`, a list or a number parse but are no payload: the handler and then the
         # fail-closed path raised, the process exited 1, and exit 1 lets the action through
         sys.stderr.write("maisecrets: bad payload\n")
-        if event == "post-tool":
-            # exit 2 is ignored here and the raw output would reach the model
-            _out(_fail_closed("post-tool", {}, "got a payload that is not JSON."))
-            return 0
-        return 2  # fail closed
+        # an answer in JSON for every event: exit 2 is ignored after a tool, and Codex runs the tool on
+        # exit 2 before one (Codex review, 2026-09-28)
+        _out(_fail_closed(event, {}, "got a payload that is not JSON."))
+        return 0
     import threading
     started = time.time()
     lock = threading.Lock()

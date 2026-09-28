@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -f \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" ]; then bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" post-tool; else printf '%s' '{\"decision\":\"block\",\"reason\":\"[maisecrets: its folder is gone (a plugin update moved it while this session was open). Run /reload-plugins. Until then maisecrets blocks this. The tool ran; its output is withheld.]\",\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"updatedToolOutput\":\"[maisecrets: its folder is gone (a plugin update moved it while this session was open). Run /reload-plugins. Until then maisecrets blocks this. The tool ran; its output is withheld.]\"}}'; fi",
+            "command": "if [ -f \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" ]; then bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" post-tool; else p=$(cat); case \"$p\" in *'\"turn_id\"'*) printf '%s' '{\"decision\": \"block\", \"reason\": \"[maisecrets: its folder is gone (a plugin update moved it while this session was open). Run /reload-plugins. Until then maisecrets blocks this. The tool ran; its output is withheld.]\"}';; *) printf '%s' '{\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"updatedToolOutput\": \"[maisecrets: its folder is gone (a plugin update moved it while this session was open). Run /reload-plugins. Until then maisecrets blocks this. The tool ran; its output is withheld.]\"}}';; esac; fi",
             "timeout": 20,
             "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" post-tool"
           }

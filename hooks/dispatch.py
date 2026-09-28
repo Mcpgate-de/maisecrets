@@ -18,8 +18,10 @@ def _refuse_without_the_code(why: str) -> None:
     if event == "post-tool":
         import json
         text = f"[{msg} The tool ran and finished; its output is withheld, do not run it again.]"
-        print(json.dumps({"decision": "block", "reason": text,
-                          "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": text}}))
+        # one shape per client: Codex's strict schema drops an answer with Claude's updatedToolOutput
+        codex = '"turn_id"' in sys.stdin.read()
+        print(json.dumps({"decision": "block", "reason": text} if codex else
+                         {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": text}}))
         sys.exit(0)
     if event == "session-start":
         import json

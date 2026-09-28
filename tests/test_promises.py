@@ -62,7 +62,9 @@ def assert_refuses(case: unittest.TestCase, event: str, r: subprocess.CompletedP
         case.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         case.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PreToolUse")
     elif event == "post-tool":
-        case.assertEqual(out["decision"], "block")
+        # Claude Code's shape for a Claude payload; Codex's strict schema drops an answer that carries
+        # Claude's updatedToolOutput, so a Codex payload (turn_id) gets decision/reason only
+        case.assertEqual(set(out), {"hookSpecificOutput"}, out)
         case.assertIn("withheld", out["hookSpecificOutput"]["updatedToolOutput"])
     else:
         case.assertIn("systemMessage", out)
@@ -110,7 +112,6 @@ class LauncherFailsClosedTests(unittest.TestCase):
                     # Claude Code ignores exit 2 after a tool: the JSON itself must withhold
                     self.assertEqual(r.returncode, 0)
                     out = json.loads(r.stdout)
-                    self.assertEqual(out["decision"], "block")
                     self.assertIn("Tool output withheld", out["hookSpecificOutput"]["updatedToolOutput"])
                     self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
                 elif event == "session-start":
@@ -162,10 +163,7 @@ class MovedPluginFolderFailsClosedTests(unittest.TestCase):
                 self.assertIn("/reload-plugins", r.stdout + r.stderr)
                 if event == "post-tool":
                     # exit 2 is ignored after a tool ran: the JSON itself must withhold the output
-                    self.assertEqual(r.returncode, 0)
-                    out = json.loads(r.stdout)
-                    self.assertEqual(out["decision"], "block")
-                    self.assertIn("withheld", out["hookSpecificOutput"]["updatedToolOutput"])
+                    assert_refuses(self, event, r)
                 elif event == "session-start":
                     self.assertEqual(r.returncode, 0)
                     self.assertIn("folder is gone", json.loads(r.stdout)["systemMessage"])
@@ -199,13 +197,7 @@ class BrokenImportFailsClosedTests(unittest.TestCase):
                                    input='{"prompt": "x"}', capture_output=True, text=True, timeout=30)
                 self.assertIn("cannot load its own code (ImportError)", r.stdout + r.stderr)
                 self.assertNotIn("half-synced", r.stdout + r.stderr, "the type only, never the message")
-                if event == "post-tool":
-                    self.assertEqual(r.returncode, 0)
-                    out = json.loads(r.stdout)
-                    self.assertEqual(out["decision"], "block")
-                    self.assertIn("withheld", out["hookSpecificOutput"]["updatedToolOutput"])
-                else:
-                    assert_refuses(self, event, r)
+                assert_refuses(self, event, r)
 
 
 class RunCmdFailsClosedTests(unittest.TestCase):
@@ -492,3 +484,35 @@ class NoNetworkTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CodexShapedRefusalTests(unittest.TestCase):
+    """Codex reads PostToolUse through a strict schema: an answer with Claude's updatedToolOutput is
+    dropped as a whole, and the output reaches the model (Codex review, 2026-09-28). Each fail-closed
+    path answers a Codex payload (turn_id) with decision/reason only."""
+
+    CODEX_PAYLOAD = '{"turn_id": "t", "model": "m", "tool_name": "Bash", "tool_response": {"stdout": "x"}}'
+
+    def check(self, r: subprocess.CompletedProcess) -> None:
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)
+        self.assertEqual(set(out), {"decision", "reason"}, out)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("withheld", out["reason"])
+
+    def test_a_missing_launcher_answers_codex_in_its_shape(self):
+        data = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        command = next(h["command"] for g in data["hooks"]["PostToolUse"] for h in g["hooks"])
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+        env["CLAUDE_PLUGIN_ROOT"] = str(Path(tempfile.mkdtemp(prefix="maisecrets-moved-")) / "gone")
+        self.check(subprocess.run(["sh", "-c", command], input=self.CODEX_PAYLOAD, capture_output=True, text=True,
+                                  env=env, timeout=30))
+
+    def test_a_broken_import_answers_codex_in_its_shape(self):
+        root = Path(tempfile.mkdtemp(prefix="maisecrets-broken-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        shutil.copytree(ROOT / "hooks", root / "hooks")
+        (root / "maisecrets").mkdir()
+        (root / "maisecrets" / "__init__.py").write_text("raise ImportError('x')\n", encoding="utf-8")
+        self.check(subprocess.run([sys.executable, str(root / "hooks" / "dispatch.py"), "post-tool"],
+                                  input=self.CODEX_PAYLOAD, capture_output=True, text=True, timeout=30))

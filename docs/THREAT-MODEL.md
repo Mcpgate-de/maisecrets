@@ -73,6 +73,11 @@ Four goals hold over every path, each with its own tests and a mutation per path
   account on a non-domain machine. The Linux key file is readable by its
   owner, as it must be. A user-presence gate (Touch ID) needs a signed helper
   application on the data-protection keychain; it is not built.
+- **A2 taking another session's blocked prompt.** `/ms` reads the prompt of the session the client
+  names; a command that sets or clears that id is refused by text match, so an obfuscated one
+  passes (the C8 class). The prompt holds placeholders, never a value.
+- **A compromised release.** A hook runs as the user and sees every value, like any plugin or
+  package with that access; a pinned, reviewed version is the admin's control.
 - **A3 reading a waiting FIFO.** The same class as `security
   find-generic-password`; the run directory keeps other users out, not the
   user's own processes.

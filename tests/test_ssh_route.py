@@ -684,7 +684,9 @@ class SessionIdTests(unittest.TestCase):
         _reset()
         for command in ('CLAUDE_CODE_SESSION_ID=abc bash "$CLAUDE_PLUGIN_ROOT/hooks/run.sh" pending',
                         "export CLAUDE_CODE_SESSION_ID=abc; bash run.sh pending",
-                        "env CLAUDE_CODE_SESSION_ID=abc python3 hooks/dispatch.py pending"):
+                        "env CLAUDE_CODE_SESSION_ID=abc python3 hooks/dispatch.py pending",
+                        "unset CLAUDE_CODE_SESSION_ID; bash run.sh pending",
+                        "env -u CLAUDE_CODE_SESSION_ID bash run.sh pending"):
             with self.subTest(command):
                 out = hooks.pre_tool({"tool_name": "Bash", "session_id": "S1", **CLAUDE,
                                       "tool_input": {"command": command}})
