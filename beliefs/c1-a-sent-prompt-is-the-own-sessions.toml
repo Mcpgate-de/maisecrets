@@ -1,0 +1,10 @@
+# c1-a-sent-prompt-is-the-own-sessions: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-sent-prompt-is-the-own-sessions"
+control = "C1"
+statement = "/ms and /maisecrets:send hand out the blocked prompt of their own session and never another session's; two sessions with a waiting prompt do not block each other."
+runner = ["tests/test_cli_matrix.py::StateMatrixTests::test_pending_takes_the_prompt_of_its_own_session_when_two_wait"]
+
+[proof]
+file = "hooks/dispatch.py"
+find = "    text = take_pending(os.environ.get(\"CLAUDE_CODE_SESSION_ID\") or None)"
+replace = "    text = take_pending()"

@@ -8,7 +8,10 @@ from maisecrets.hooks import main  # noqa: E402
 
 if len(sys.argv) >= 2 and sys.argv[1] == "pending":
     from maisecrets.hooks import take_pending  # noqa: E402
-    text = take_pending()
+    # Claude Code gives a command the id of its session, the same id its hooks get (measured with the
+    # harness, 2026-09-28): with two blocked prompts waiting, /ms found neither and pointed to the
+    # clipboard, which does not exist over SSH or in Remote Control (field report on 0.5.8)
+    text = take_pending(os.environ.get("CLAUDE_CODE_SESSION_ID") or None)
     print(text if text is not None else "(maisecrets: no blocked prompt is waiting)")
     sys.exit(0)
 

@@ -819,6 +819,25 @@ class StateMatrixTests(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "password: ⟦SECRET_c2⟧")
         self.assertEqual(sb.run("pending").stdout.strip(), "(maisecrets: no blocked prompt is waiting)")
 
+    def test_pending_takes_the_prompt_of_its_own_session_when_two_wait(self):
+        sb = base_state("live").copy()          # the base is shared: every run works on a copy
+        self.addCleanup(sb.remove)
+        a = sb.block_prompt(session="SA")
+        b = sb.block_prompt(session="SB")
+        # without a session id the command cannot tell them apart and says so
+        self.assertIn("two sessions are waiting", sb.run("pending").stdout)
+        r = sb.run("pending", env=sb.env(CLAUDE_CODE_SESSION_ID="SB"))
+        self.assertIn("password: ", r.stdout)
+        self.assertNotIn(a, r.stdout)
+        self.assertNotIn(b, r.stdout, "the pending prompt holds placeholders, never the value")
+        # a session with no prompt of its own never gets another session's
+        r = sb.run("pending", env=sb.env(CLAUDE_CODE_SESSION_ID="SC"))
+        self.assertEqual(r.stdout.strip(), "(maisecrets: no blocked prompt is waiting)")
+        r = sb.run("pending", env=sb.env(CLAUDE_CODE_SESSION_ID="SA"))
+        self.assertIn("password: ", r.stdout)
+        self.assertEqual(sb.run("pending", env=sb.env(CLAUDE_CODE_SESSION_ID="SA")).stdout.strip(),
+                         "(maisecrets: no blocked prompt is waiting)", "handed out once")
+
     def test_scan_prints_positions_not_the_text(self):
         value = fake_value("Sc")
         _sb, r = self._run("empty", "scan", f"password: {value}")

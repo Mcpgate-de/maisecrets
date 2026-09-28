@@ -333,12 +333,15 @@ def _save_pending(rewritten: str, session: str | None) -> None:
 
 
 def take_pending(session: str | None = None) -> str | None:
-    """Return and delete the pending prompt: the session's own, else the newest one."""
+    """Return and delete the pending prompt. With a session id, that session's own and nothing else:
+    another session's prompt holds another conversation's text. Without one (a client that names no
+    session to a command), the only fresh prompt, and a notice when two sessions wait."""
     from .vault import HOME
     d = HOME / "pending"
     cands = []
-    if session and _pending_path(session).exists():
-        cands = [_pending_path(session)]
+    if session:
+        own = _pending_path(session)
+        cands = [own] if own.exists() else []
     elif d.exists():
         fresh = [c for c in d.glob("*.txt") if time.time() - c.stat().st_mtime < 15 * 60]
         if len(fresh) > 1:
