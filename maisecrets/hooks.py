@@ -461,9 +461,35 @@ ENCODERS = {"base64", "base32", "xxd", "od", "hexdump", "uuencode", "rev", "b2su
 SHELL_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "while", "until", "do", "done", "case",
                   "esac", "coproc", "function", "select", "in"}
 # the options of a wrapper that take the next word as their argument; every other option takes none
-# env -S / --split-string, after env's own options and NAME=value words
-_ENV_SPLIT_RE = re.compile(r"(?:^|\s)env\s+(?:(?:(?:-[uCP]|--unset|--chdir)\s+\S+|-\S*|\S+=\S*)\s+)*?"
-                           r"(?:-[a-zA-Z]*S|--split-string)")
+ENVS = {"env", "genv"}
+
+
+def _env_splits(args: list[str]) -> bool:
+    """Whether env, given these words after its name, builds its command from a string (-S,
+    --split-string or a prefix of it such as --sp). -u, -C and -P take an argument: in `-uS` the S
+    is a variable name. Real words, so `/usr/bin/env '-S'` and `\\env -S` count (review, 2026-09-28)."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--" or not a.startswith("-") or a == "-":
+            return False
+        if a.startswith("--"):
+            name = a.split("=", 1)[0]
+            if len(name) > 2 and "--split-string".startswith(name):
+                return True
+            i += 2 if name in ("--unset", "--chdir") and "=" not in a else 1
+            continue
+        for j, letter in enumerate(a[1:], 1):
+            if letter == "S":
+                return True
+            if letter in "uCP":
+                i += 1 if a[j + 1:] else 2
+                break
+        else:
+            i += 1
+    return False
+
+
 WRAPPER_ARG_OPTIONS = {
     "env": ("-u", "--unset", "-C", "--chdir", "-S", "--split-string", "-P"),
     "sudo": ("-u", "-g", "-h", "-p", "-C", "-U", "-T", "-r", "-t", "-D", "--user", "--group", "--host"),
@@ -477,7 +503,7 @@ WRAPPER_ARG_OPTIONS = {
     "caffeinate": ("-t", "-w"),
     "command": (),
 }
-WRAPPERS = {"env", "command", "exec", "nice", "time", "nohup", "sudo", "doas", "builtin", "timeout", "stdbuf",
+WRAPPERS = {"env", "genv", "command", "exec", "nice", "time", "nohup", "sudo", "doas", "builtin", "timeout", "stdbuf",
             "caffeinate", "ionice", "chronic"}
 _SLICE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
 
@@ -687,6 +713,10 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
     shell by a substring regex; review, 2026-09-26). Each segment: its words with leading
     assignments and wrappers (env, sudo, nice, …) removed, its command word (basename),
     whether it is fed by a pipe and whether it announces a heredoc."""
+    # a backslash before a newline continues the line: `bash \<newline>-c '…'` is `bash -c '…'`, and a
+    # split there hid -c from every rule (review, 2026-09-28). Two spaces keep every offset.
+    command = re.sub(r"(?<!\\)((?:\\\\)*)\\\n", lambda m: m.group(0) if ctxs[m.end() - 2] not in ("", "dq")
+                     else m.group(1) + "  ", command)
     masked = "".join(ch if ctx == "" else ("\n" if ch == "\n" else "Q") for ch, ctx in zip(command, ctxs))
     segs: list[dict] = []
     piped = False
@@ -743,6 +773,8 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
                          or os.path.basename(words[0]) in WRAPPERS):
             w = os.path.basename(words[0])
             words = words[1:]
+            if w in ENVS and _env_splits(words):
+                seg["env_split"] = True
             if w == "case":
                 # `case WORD in`: the word is matched, not run
                 words = words[words.index("in") + 1:] if "in" in words else []
@@ -767,7 +799,8 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
     plain = "".join(ch if ctx in ("", "dq", "hd") else " " for ch, ctx in zip(command, ctxs))
     for seg in _segments(command, ctxs):
         words, cmd = seg["words"], seg["cmd"]
-        if _ENV_SPLIT_RE.search(seg["text"]):
+        if seg.get("env_split") or (cmd in ARG_RUNNERS and any(
+                os.path.basename(w) in ENVS and _env_splits(words[k + 1:]) for k, w in enumerate(words))):
             # env -S builds its command from a string: the command word is hidden (final review, 2026-09-28)
             return "env -S builds the command from a string, so its command word cannot be checked"
         if not words:
@@ -923,7 +956,8 @@ def _remote_refusal(remote: str) -> str | None:
             return f"the remote {cmd} would read the value as its program"
         if cmd in ARG_RUNNERS or (cmd == "find" and any(w in ("-exec", "-execdir", "-ok", "-okdir") for w in words)):
             inner = next((os.path.basename(w) for w in words[1:] if os.path.basename(w) in
-                          SHELLS | REMOTE_OR_EVAL | INLINE_INTERPRETERS), None)
+                          SHELLS | REMOTE_OR_EVAL | INLINE_INTERPRETERS | {"scp", "sftp", "autossh", "rsync"}),
+                         None)
             if inner:
                 return f"the remote {cmd} would hand the value to {inner}"
     return None
