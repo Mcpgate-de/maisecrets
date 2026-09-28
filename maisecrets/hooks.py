@@ -1526,7 +1526,7 @@ def _args_call_refusal(command: str) -> str | None:
     if not m or any(line.strip() == _ARGS_END for line in m.group(1).split("\n")):
         return ("maisecrets: a maisecrets command with --args-stdin must have exactly the form of its command "
                 f"file, and its arguments must not contain a line {_ARGS_END}. The command did not run. Tell the "
-                "user to write the arguments without that line; do not rephrase the command.")
+                "user to write the arguments without that line.")
     return None
 
 
@@ -1550,9 +1550,12 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         return _deny(bad_args)
     matched = _store_read_match(command)
     if matched:
-        return _deny(f"maisecrets: this command touches {matched}, which the agent never reads or changes; "
-                     "the human uses the maisecrets CLI for that. The command did not run. If this is a "
-                     "false positive, tell the user; do not rephrase the command to get around the check.")
+        # said as what the user does next, not as a check to stay inside: "do not rephrase … to get around
+        # the check" next to an ops request read like an attempt to get around a control (ops review, 2026-09-28)
+        return _deny(f"maisecrets: this command touches {matched}, the user's own store. The user manages it "
+                     "with /maisecrets:list and /maisecrets:forget. The command did not run. If the task needs "
+                     "something from there, tell the user what; if this is a false positive, "
+                     "/maisecrets:report records it.")
     ctxs = _shell_contexts(command)
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
     if not refs:
@@ -1983,9 +1986,9 @@ def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
         _walk_strings(tool_input, look)
     if not hits:
         return None
-    return _deny(f"maisecrets: {tool} would read the maisecrets store or its value directory, which the agent never "
-                 "reads. The call did not run. If this is a false positive, tell the user; do not rephrase the call "
-                 "to get around the check.")
+    return _deny(f"maisecrets: {tool} would read the maisecrets store or its value directory, the user's own store. "
+                 "The user manages it with /maisecrets:list and /maisecrets:forget. The call did not run. If this is "
+                 "a false positive, /maisecrets:report records it.")
 
 
 def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:

@@ -42,8 +42,8 @@ replace = "        text = response if isinstance(response, str) else json.dumps(
 [[proof]]
 path = "a deny reason that quotes the command"
 file = "maisecrets/hooks.py"
-find = "return _deny(f\"maisecrets: this command touches {matched}, which"
-replace = "return _deny(f\"maisecrets: this command {command} touches {matched}, which"
+find = "return _deny(f\"maisecrets: this command touches {matched}, the user's own store."
+replace = "return _deny(f\"maisecrets: this command {command} touches {matched}, the user's own store."
 
 [[proof]]
 path = "the block notice shows the cleaned prompt"
