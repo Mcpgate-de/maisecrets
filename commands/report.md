@@ -1,6 +1,6 @@
 ---
 description: Report to the maisecrets maintainers - a false positive (last detection), a bug, or a feature request. Prints the issue text and a prefilled link; --create files it with the GitHub CLI. Carries no value.
-argument-hint: [last | bug <text> | feature <text>] [--create]
+argument-hint: "[last | bug <text> | feature <text>] [--create]"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" report *)
 ---
 

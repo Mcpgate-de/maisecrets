@@ -1,6 +1,6 @@
 ---
 description: Install a short personal /ms command for /maisecrets:send (works over SSH and in Remote Control).
-argument-hint: [name | --remove]
+argument-hint: "[name | --remove]"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" shortcut *)
 ---
 
