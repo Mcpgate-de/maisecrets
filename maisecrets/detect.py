@@ -670,9 +670,9 @@ _TOKEN_CHAR_RE = re.compile(r"[A-Za-z0-9_\-]")
 
 
 def _lower(text: str) -> str:
-    """Lower case for the prefilters. The Turkish capital İ lowers to i plus a combining dot, so
-    `ŞİFRE:` held no `ifre` (Codex review, 2026-09-28); the dot is dropped. Only membership tests
-    use this text, never offsets."""
+    """Lower case for the prefilters and context words. The Turkish capital İ lowers to i plus a
+    combining dot, so `ŞİFRE:` held no `ifre` (Codex review, 2026-09-28); the dot is dropped. The
+    result is not the length of the input: never take an offset of the original into it."""
     return text.lower().replace("i\u0307", "i")
 
 
@@ -733,7 +733,9 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue
             if rule.score < 1.0 or rule.require_context:
                 # presidio semantics: a weak shape passes only with a context WORD nearby
-                window = low[max(0, start - 80):min(len(low), end + 40)]
+                # cut from the original text, then lowered: a lowered text is not the same length (the
+                # Turkish İ lowers to two characters), so its offsets are not the original's
+                window = _lower(text[max(0, start - 80):min(len(text), end + 40)])
                 has_context = _has_context_word(window, rule.context)
                 if rule.require_context and not has_context:
                     continue
