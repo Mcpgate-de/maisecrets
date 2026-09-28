@@ -819,6 +819,18 @@ class StateMatrixTests(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "password: ⟦SECRET_c2⟧")
         self.assertEqual(sb.run("pending").stdout.strip(), "(maisecrets: no blocked prompt is waiting)")
 
+    def test_a_false_positive_report_names_the_value_to_forget_and_deletes_nothing(self):
+        sb = base_state("live").copy()
+        self.addCleanup(sb.remove)
+        sb.block_prompt(session="SR")
+        entries = sb.index()["entries"]
+        newest = max(entries, key=lambda k: entries[k]["created"])
+        before = set(entries)
+        r = sb.run("report", "last", "a product word, not a password")
+        self.assertIn(f"/maisecrets:forget {newest}", r.stdout)
+        # the events are shared by all sessions, and a model can run this command: nothing goes by itself
+        self.assertEqual(set(sb.index()["entries"]), before)
+
     def test_pending_takes_the_prompt_of_its_own_session_when_two_wait(self):
         sb = base_state("live").copy()          # the base is shared: every run works on a copy
         self.addCleanup(sb.remove)
