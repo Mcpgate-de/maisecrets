@@ -152,6 +152,31 @@ class LabelLanguageTests(unittest.TestCase):
                 self.assertTrue(all(r == [("SECRET", value)] for r in on), lang)
                 self.assertTrue(any(r == [] for r in off), f"{lang}: English alone finds every label")
 
+    def test_no_label_opens_the_keyword_rule_on_ordinary_technical_lines(self):
+        # A label's prefilter decides on which lines the keyword rule runs at all. `acc` and `api`
+        # (French clé d'accès, clé API) were in almost every log line: with French on, a 1 MB log
+        # took 2.2 s instead of 0.9 s (2026-09-28). No timing here: the lines a prefilter opens
+        # that English and German do not open already are counted on a fixed technical corpus.
+        rnd = random.Random(11)
+        words = ("GET POST PUT request response status ok error warn info debug user id path items "
+                 "api v1 v2 endpoint client server session cache config access accept account "
+                 "application acceptance accurate update delete create list detail page limit offset "
+                 "token_file csrf_token count timeout retry connection database query index table "
+                 "column value default enabled disabled true false null build test deploy release "
+                 "service container image pod node cluster namespace region zone bucket object key_id "
+                 "Anfrage Antwort Benutzer Zugriff Konto Datei Ordner Seite Fehler Warnung passed").split()
+        lines = [" ".join(rnd.choice(words) for _ in range(rnd.randint(6, 14))).lower() for _ in range(4000)]
+        base = {lab.prefilter for lang in ("en", "de") for lab in regions.load_labels(lang)}
+        base |= {"key", "pass", "pwd", "secret", "contrase"}      # the literals of the denylist
+        closed = [ln for ln in lines if not any(b in ln for b in base)]
+        self.assertGreater(len(closed), 1000, "the corpus must leave the rule closed on most lines")
+        for lang in _other_languages():
+            for lab in regions.load_labels(lang):
+                opened = sum(lab.prefilter in ln for ln in closed)
+                with self.subTest(lang=lang, prefilter=lab.prefilter):
+                    self.assertLessEqual(opened / len(closed), 0.005,
+                                         f"{lang}: the prefilter {lab.prefilter!r} opens {opened} ordinary lines")
+
     def test_prose_with_the_label_word_gives_no_hit(self):
         for lang, sentences in PROSE.items():
             for text, got in zip(sentences, _scan(("en", lang), sentences)):
