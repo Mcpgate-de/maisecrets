@@ -92,6 +92,30 @@ def _input(path: str, ref: str) -> tuple[str, dict]:
     return "Write", {"file_path": "/tmp/maisecrets-matrix.env", "content": "K=" + ref}
 
 
+def _side_effects() -> dict:
+    """What a resolve leaves behind: audit lines, approval tokens, value FIFOs waiting in the run dir."""
+    audit = Path(HOME, "audit.log")
+    approvals = Path(HOME, "ssh-approvals.json")
+    try:
+        run = sorted(n for n in os.listdir(hooks._run_dir()) if n.startswith("v-"))
+    except OSError:
+        run = []
+    try:
+        sealed = sorted(os.listdir(os.path.join(hooks._run_dir(), "sealed")))
+    except OSError:
+        sealed = []    # mode 0300: its owner cannot list it either; the approvals file names the token
+    return {"audit": audit.read_text(encoding="utf-8").strip() if audit.exists() else "",
+            "pending": approvals.read_text(encoding="utf-8") if approvals.exists() else "",
+            "fifos": run + sealed}
+
+
+def _nothing_left(case: unittest.TestCase, before: dict, what: str) -> None:
+    after = _side_effects()
+    case.assertEqual(after["audit"], "", f"{what}: a refusal wrote an audit line")
+    case.assertFalse('"pending": {"' in after["pending"], f"{what}: a refusal left an approval token")
+    case.assertEqual(sorted(set(after["fifos"]) - set(before["fifos"])), [], f"{what}: a refusal left a value waiting")
+
+
 def _decision(hso: dict) -> str:
     return hso.get("permissionDecision", "defer" if "updatedInput" in hso else "none")
 
@@ -137,16 +161,15 @@ class RehydrationMatrixTests(unittest.TestCase):
         _reset()
         ref = Vault().put(VALUE, "SECRET", "manual", session="S1").ref
         tool, tool_input = _input(path, ref)
+        before = _side_effects()
         hso = self.pre(tool, tool_input, client, rehydration=pol, **cfg)
         got = _decision(hso)
         self.assertEqual(got, want, f"{path}/{client}/{pol}: {hso.get('permissionDecisionReason', '')[:200]}")
         self.assertNotIn(VALUE, hso.get("permissionDecisionReason", ""), "a reason never names the value")
         if want == "deny":
             self.assertNotIn("updatedInput", hso)
-            # a refusal comes before the resolve: no audit line, nothing served
-            audit = Path(HOME, "audit.log")
-            self.assertFalse(audit.exists() and audit.read_text(encoding="utf-8").strip(),
-                             f"{path}/{client}/{pol}: a refusal resolved something")
+            # a refusal comes before the resolve: no audit line, no token, nothing served
+            _nothing_left(self, before, f"{path}/{client}/{pol}")
             return
         new = hso["updatedInput"]
         if want == "ask":
@@ -227,6 +250,22 @@ class RehydrationMatrixTests(unittest.TestCase):
         hso = self.pre(tool, tool_input, "claude", rehydration="confirm")
         self.assertNotIn("without asking again", hso["permissionDecisionReason"], "per-command: no session scope")
 
+    def test_a_good_key_next_to_a_refused_one_resolves_nothing(self):
+        good = Vault().put(VALUE, "SECRET", "manual", session="S1").ref
+        foreign = Vault().put(VALUE + "-2", "SECRET", "manual", session="S9").ref
+        shapes = {"mcp": ("mcp__svc__lookup", {"id": good, "other": foreign}),
+                  "file": ("Write", {"file_path": "/tmp/maisecrets-matrix.env", "content": good + "\n" + foreign}),
+                  "bash": ("Bash", {"command": f"printf '%s %s' {good} {foreign}"})}
+        for path, (tool, tool_input) in shapes.items():
+            for client in CLIENTS:
+                for pol in ("automatic", "confirm"):
+                    with self.subTest(path=path, client=client, policy=pol):
+                        before = _side_effects()
+                        hso = self.pre(tool, tool_input, client, rehydration=pol)
+                        self.assertEqual(hso.get("permissionDecision"), "deny")
+                        self.assertNotIn("updatedInput", hso)
+                        _nothing_left(self, before, f"{path}/{client}/{pol}")
+
     @unittest.skipIf(os.name == "nt", "the ssh route is POSIX only")
     def test_a_key_the_session_may_not_resolve_leaves_no_approval_token(self):
         ref = Vault().put(VALUE, "SECRET", "manual", session="S9").ref   # minted in another session
@@ -245,10 +284,27 @@ class RehydrationMatrixTests(unittest.TestCase):
                     with self.subTest(shape=name, client=client, policy=pol):
                         _reset()
                         ref = Vault().put(VALUE, "SECRET", "manual", session="S1").ref
-                        hso = self.pre(tool, make(ref), client, rehydration=pol)
+                        before = _side_effects()
+                        hso = self.pre(tool, make(ref), client, rehydration=pol,
+                                       ssh_approval="per-session")
                         self.assertEqual(hso.get("permissionDecision"), "deny", hso)
+                        _nothing_left(self, before, f"{name}/{client}/{pol}")
                         self.assertNotIn("updatedInput", hso)
                         self.assertNotIn(VALUE, hso.get("permissionDecisionReason", ""))
+
+
+class RefusalReasonTests(unittest.TestCase):
+    """The reason names the real cause: the fallback for an unreadable config, or the user's own setting."""
+
+    def test_the_refusal_names_the_fallback_only_when_the_fallback_set_it(self):
+        from maisecrets import rehydration
+        base = {"rehydration": "block", "config_warning": "config.json: tips has the wrong type; the file was ignored"}
+        got = rehydration.refusal({**base, "rehydration_fallback": True}, "mcp", "claude", "⟦K⟧", "No.")
+        self.assertIn("while the maisecrets settings cannot be read as written", got)
+        # the file itself said block, or confirm on Codex: fixing the typo would change nothing
+        self.assertIn("set to block", rehydration.refusal(base, "mcp", "claude", "⟦K⟧", "No."))
+        got = rehydration.refusal({**base, "rehydration": "confirm"}, "mcp", "codex", "⟦K⟧", "No.")
+        self.assertIn("Codex cannot ask", got)
 
 
 class DecisionSitesTests(unittest.TestCase):
@@ -272,6 +328,12 @@ class DecisionSitesTests(unittest.TestCase):
         })
         src = Path(ROOT, "maisecrets", "hooks.py").read_text(encoding="utf-8")
         self.assertEqual(src.count('"permissionDecision": "allow"'), 1, "allow is written in _updated only")
+        # a rewrite built by hand next to them would skip the policy: updatedInput lives in _ask and _updated
+        def builds_a_rewrite(fn) -> bool:
+            return any(isinstance(n, ast.Dict) and any(isinstance(k, ast.Constant) and k.value == "updatedInput"
+                                                       for k in n.keys) for n in ast.walk(fn))
+        owners = sorted(fn.name for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef) and builds_a_rewrite(fn))
+        self.assertEqual(owners, ["_ask", "_updated"])
 
 
 def _strings(node) -> list[str]:

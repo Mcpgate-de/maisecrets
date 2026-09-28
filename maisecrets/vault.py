@@ -220,15 +220,18 @@ def _old_region_key(layer: dict) -> dict:
 
 
 _STRICTNESS = {"automatic": 0, "confirm": 1, "block": 2}
+_SAFETY_KEYS = ("rehydration", "resolve_in_files", "ssh_via_sandbox")
 
 
 def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
     """A user file ignored for a wrong type still said what it wanted: a stricter rehydration policy,
     or a route switched off, stays; a looser one is the default anyway. A rehydration value that is
-    no policy is block (review, 2026-09-29: the fallback turned block into confirm)."""
+    no policy is block (review, 2026-09-29: the fallback turned block into confirm); a list or an
+    object there raised TypeError and locked the client (review round 2)."""
     want = parsed.get("rehydration", cfg["rehydration"])
-    if want not in _STRICTNESS:
+    if not isinstance(want, str) or want not in _STRICTNESS:
         want = "block"
+        cfg["rehydration_fallback"] = True     # the setting is ours, not the file's: the refusal says so
     if _STRICTNESS[want] > _STRICTNESS.get(cfg["rehydration"], 2):
         cfg["rehydration"] = want
     for key in ("resolve_in_files", "ssh_via_sandbox"):
@@ -253,8 +256,14 @@ def load_config() -> dict:
         if not isinstance(user, dict):
             raise ConfigError(f"{CONFIG.name} must hold one JSON object")
         _check_types(user, CONFIG.name)
-    except OSError:
+    except FileNotFoundError:
         user = {}
+    except OSError as exc:
+        # a file that exists and cannot be read may say block: it loosens nothing (review, 2026-09-29)
+        user = {}
+        cfg["config_warning"] = f"{CONFIG.name} cannot be read ({type(exc).__name__}) and was ignored"
+        cfg["rehydration"] = "block"
+        cfg["rehydration_fallback"] = True
     except ValueError:
         # the user file is advisory: a typo must not lock the user out of the client (review,
         # 2026-09-26). The defaults are the strict values, so the fallback loosens nothing; the
@@ -263,13 +272,16 @@ def load_config() -> dict:
         cfg["config_warning"] = f"{CONFIG.name} is not valid JSON and was ignored"
         # the file may have set block: an ignored file loosens nothing, so nothing is rehydrated until it is fixed
         cfg["rehydration"] = "block"
-        cfg["config_ignored"] = True
+        cfg["rehydration_fallback"] = True
     except ConfigError as exc:
-        parsed = user if isinstance(user, dict) else {}
-        user = {}
         cfg["config_warning"] = f"{exc}; the file was ignored"
-        cfg["config_ignored"] = True
-        _keep_the_stricter(cfg, parsed)
+        if isinstance(user, dict):
+            _keep_the_stricter(cfg, user)
+        else:
+            # JSON that is no object cannot be read either (it may wrap a block): the same as invalid JSON
+            cfg["rehydration"] = "block"
+            cfg["rehydration_fallback"] = True
+        user = {}
     unknown = sorted(k for k in user if k not in _CONFIG_TYPES)
     if unknown:
         # a key is named only when it is a typo of a real one: a value pasted into the file as a
@@ -281,6 +293,10 @@ def load_config() -> dict:
         what = ", ".join(named + ([f"{other} more that are not near a known key"] if other else []))
         cfg["config_warning"] = (cfg["config_warning"] + "; " if cfg["config_warning"] else "") + \
             f"{CONFIG.name}: unknown key(s) {what} ignored"
+        if any(difflib.get_close_matches(k, list(_SAFETY_KEYS), n=1, cutoff=0.8) for k in named):
+            # "rehydraton": "block" is a stricter wish spelled wrong: dropping it would loosen
+            cfg["rehydration"] = "block"
+            cfg["rehydration_fallback"] = True
         user = {k: v for k, v in user.items() if k in _CONFIG_TYPES}
     user = _old_region_key(user)
     cfg.update(user)
@@ -306,14 +322,29 @@ def load_config() -> dict:
     if policy_path is not None:
         try:
             policy = json.loads(policy_path.read_text(encoding="utf-8"))
-        except OSError:
+        except FileNotFoundError:
             policy = {}
+        except OSError as exc:
+            # an administrator's file that exists and cannot be read is not "no policy": it fails closed
+            # like a policy that is not valid JSON (review, 2026-09-29)
+            raise ConfigError(f"{policy_path} cannot be read ({type(exc).__name__})") from exc
         except ValueError as exc:
             raise ConfigError(f"{policy_path} is not valid JSON") from exc
         if not isinstance(policy, dict):
             # valid JSON of another shape was skipped silently: no policy applied at all
             raise ConfigError(f"{policy_path} must hold one JSON object")
         _check_types(policy, policy_path.name)
+        unknown_policy = sorted(k for k in policy if k not in _CONFIG_TYPES and not k.startswith("_"))
+        if unknown_policy:
+            # an administrator's key spelled wrong ("rehydraton") would be dropped silently; its intent is
+            # unknown, so rehydration stops until it is fixed. A key that starts with "_" is a comment.
+            cfg["config_warning"] = (cfg["config_warning"] + "; " if cfg["config_warning"] else "") + \
+                f"{policy_path.name}: {len(unknown_policy)} unknown key(s); rehydration is blocked until fixed"
+            policy = {k: v for k, v in policy.items() if k in _CONFIG_TYPES}
+            policy["rehydration"] = "block"
+            cfg["rehydration_fallback"] = True
+        elif "rehydration" in policy:
+            cfg["rehydration_fallback"] = False   # the administrator's setting, not our fallback
         policy_keys = sorted(policy)
         policy = _old_region_key(policy)
         cfg.update(policy)

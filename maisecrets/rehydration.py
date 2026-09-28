@@ -58,9 +58,9 @@ def refusal(cfg: dict, path: str, client: str, names: str, did_not: str) -> str 
                 f"{did_not} To put the value into a file, use a Bash command the user approves, "
                 "for example printf '%s' ⟦KEY⟧ > file.")
     raw = cfg.get("rehydration", DEFAULT)
-    if cfg.get("config_ignored") and "rehydration" not in (cfg.get("policy_keys") or []):
-        # an ignored config file falls back to the stricter setting: name the cause, not the setting
-        return (f"maisecrets: {names} is not resolved while the maisecrets config is ignored "
+    if cfg.get("rehydration_fallback"):
+        # the fallback for a config it cannot read as written set block, not the user: name the cause
+        return (f"maisecrets: {names} is not resolved while the maisecrets settings cannot be read as written "
                 f"({cfg['config_warning']}). {did_not} Tell the user to fix the file; /maisecrets:status names it.")
     if raw not in POLICIES:
         return (f"maisecrets: {names} is not resolved: the rehydration setting is not one of "

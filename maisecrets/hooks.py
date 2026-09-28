@@ -1618,11 +1618,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     vault = Vault(cfg)
     session = payload.get("session_id")
     uniq = list(dict.fromkeys(k for k, _a, _b in refs))
-    # phase 1: session rule and limiter for every key, before anything is recorded
-    failed = [f"{k} ({st})" for k in uniq for st in [vault.status(k, session)] if st != "ok"]
-    if failed:
-        return _deny(_deny_reason(failed))
-    failed = [f"{k} ({st})" for k in uniq for st in [vault._limit(k, session)] if st != "ok"]
+    failed = _precheck(vault, uniq, session)
     if failed:
         return _deny(_deny_reason(failed))
     # automatic: no ask of our own. confirm: an ask per command, or with ssh_approval "per-session" an
@@ -1748,6 +1744,14 @@ def shlex_quote(s: str) -> str:
     return shlex.quote(s)
 
 
+def _precheck(vault: Vault, keys: list[str], session: str | None) -> list[str]:
+    """Phase 1 of every resolve: the session rule, then the limiter, for every key, before anything is
+    recorded or served. A call with a good key and a bad one wrote the good key's audit line before
+    the refusal on MCP and file tools (review, 2026-09-29); Bash had this order already."""
+    failed = [f"{k} ({st})" for k in keys for st in [vault.status(k, session)] if st != "ok"]
+    return failed or [f"{k} ({st})" for k in keys for st in [vault._limit(k, session)] if st != "ok"]
+
+
 def _deny_reason(failed: list[str]) -> str:
     """The text the model reads when a placeholder cannot be resolved. Each status names the
     one next step and forbids the wrong ones: guessing another key, asking the user for the
@@ -1799,7 +1803,9 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
     session = payload.get("session_id")
     context = json.dumps(tool_input, ensure_ascii=False)
     values: dict[str, str] = {}
-    failed: list[str] = []
+    failed = _precheck(vault, list(dict.fromkeys(found)), session)
+    if failed:
+        return _deny(_deny_reason(failed))
     for key in dict.fromkeys(found):
         status = vault.record_resolve(key, session, tool, context)
         if status == "ok":
@@ -2062,7 +2068,9 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     vault = Vault(cfg)
     session = payload.get("session_id")
     values: dict[str, str] = {}
-    failed: list[str] = []
+    failed = _precheck(vault, list(dict.fromkeys(found)), session)
+    if failed:
+        return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
     for key in dict.fromkeys(found):
         status = vault.record_resolve(key, session, tool, f"{tool} {path}")
         if status == "ok":

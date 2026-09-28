@@ -111,7 +111,7 @@ from `cmd.exe`, the shell Codex uses for a Windows hook. Without a Python
 tool result, and its message names what to install: fail closed, with a cause.
 
 Proven with the harness on macOS (Claude Code 2.1.283) and on Debian 13
-(2.1.223), 7 scenarios each, on every push in CI; Windows through the GitHub
+(2.1.223), the scenarios of `harness/run.py`, on every push in CI; Windows through the GitHub
 Actions matrix (unit tests, both launchers, Credential Locker round trip), not
 yet with a live Claude Code session. Codex (codex-cli 0.155.1): the same
 `hooks/hooks.json`, Codex sets `CLAUDE_PLUGIN_ROOT` itself; `harness/codex.py`
@@ -561,9 +561,9 @@ A placeholder turns back into its value only here:
   (`harness/sandbox/ssh_e2e.py`). The default is `"per-command"`.
 - **Inline for Write and Edit.** A placeholder in the content of Write, Edit,
   MultiEdit or NotebookEdit is resolved like an MCP argument, under the same
-  session rule, cap and audit line (the line names the file). The client's
-  permission prompt then shows the diff with the value: that is the moment you
-  see what goes on disk. `"resolve_in_files": false` (a policy can set it)
+  session rule, cap and audit line (the line names the file). When your
+  permission rules ask (or with `rehydration: confirm`), the prompt shows the
+  diff with the value: that is the moment you see what goes on disk. `"resolve_in_files": false` (a policy can set it)
   turns this off; then the file tools refuse a placeholder and the way to a
   file is a Bash command you approve (`printf '%s' ⟦KEY⟧ > file`). The
   maisecrets home itself is never written by the agent.
@@ -601,7 +601,8 @@ value is put into a call. `~/.maisecrets/config.json`, or the machine policy:
 It covers Bash, ssh, MCP tools and Write/Edit alike. `"resolve_in_files": false`
 blocks the file tools alone; `"ssh_approval": "per-session"` works under
 `confirm`. A value that is none of the three blocks. A `config.json` that is not
-valid JSON blocks rehydration until it is fixed (it may have said `block`), and
+valid JSON, or holds no JSON object, blocks rehydration until it is fixed (it may
+have said `block`), and
 one ignored for a wrong type keeps what it made stricter (`rehydration`,
 `resolve_in_files: false`, `ssh_via_sandbox: false`), so a typo never loosens
 a setting. The refusal and `/maisecrets:status` name the file. In an unattended run (`claude -p`) nobody can answer a confirm, so the

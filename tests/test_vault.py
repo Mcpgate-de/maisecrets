@@ -191,28 +191,68 @@ class ConfigTests(unittest.TestCase):
                 cfg = vault.load_config()
                 self.assertIn(want, cfg["config_warning"])
                 self.assertEqual(cfg["backend"], "keychain")
-                if want == "not valid JSON":
-                    self.assertEqual(cfg["rehydration"], "block", "an unreadable file may have said block")
+                # invalid JSON and JSON that is no object: the file may have said block
+                self.assertEqual(cfg["rehydration"], "block", "an unreadable file may have said block")
+                self.assertTrue(cfg["rehydration_fallback"])
         vault.CONFIG.unlink()
         cfg = vault.load_config()
         self.assertEqual(cfg["config_warning"], "", "no file is not a problem")
         self.assertEqual(cfg["rehydration"], "automatic", "and no file is the default")
 
     def test_a_file_ignored_for_a_wrong_type_keeps_what_it_made_stricter(self):
-        for user, want in (({"rehydration": "block", "tips": "yes"}, ("block", True, True)),
-                           ({"rehydration": "confirm", "tips": "yes"}, ("confirm", True, True)),
+        # user file -> (rehydration, resolve_in_files, ssh_via_sandbox, block set by the fallback)
+        for user, want in (({"rehydration": "block", "tips": "yes"}, ("block", True, True, False)),
+                           ({"rehydration": "confirm", "tips": "yes"}, ("confirm", True, True, False)),
                            ({"resolve_in_files": False, "ssh_via_sandbox": False, "tips": "yes"},
-                            ("automatic", False, False)),
+                            ("automatic", False, False, False)),
                            ({"rehydration": "automatic", "resolve_in_files": True, "tips": "yes"},
-                            ("automatic", True, True)),
-                           ({"rehydration": "strict", "tips": "yes"}, ("block", True, True))):
+                            ("automatic", True, True, False)),
+                           ({"rehydration": "strict", "tips": "yes"}, ("block", True, True, True)),
+                           # a per-path object or a list: no TypeError, and no lock-out of the client
+                           ({"rehydration": {"mcp": "confirm"}}, ("block", True, True, True)),
+                           ({"rehydration": ["block"]}, ("block", True, True, True))):
             with self.subTest(user):
                 self._user(user)
                 cfg = vault.load_config()
                 self.assertIn("ignored", cfg["config_warning"])
-                self.assertTrue(cfg["config_ignored"])
-                self.assertEqual((cfg["rehydration"], cfg["resolve_in_files"], cfg["ssh_via_sandbox"]), want)
+                self.assertEqual((cfg["rehydration"], cfg["resolve_in_files"], cfg["ssh_via_sandbox"],
+                                  cfg.get("rehydration_fallback", False)), want)
                 self.assertTrue(cfg["renew_on_use"], "a looser or other key of the file is not taken")
+
+    def test_a_settings_file_that_cannot_be_read_as_written_never_loosens_rehydration(self):
+        # a policy file that exists and cannot be read is not "no policy": the hooks fail closed
+        self.policy.mkdir()                     # IsADirectoryError, an OSError that is not "missing"
+        with self.assertRaises(vault.ConfigError) as ctx:
+            vault.load_config()
+        self.assertIn("cannot be read", str(ctx.exception))
+        self.policy.rmdir()
+        # an administrator's key spelled wrong: its intent is unknown, rehydration stops; "_" is a comment
+        self.policy.write_text(json.dumps({"rehydraton": "block", "_note": "rollout 3"}))
+        cfg = vault.load_config()
+        self.assertEqual((cfg["rehydration"], cfg["rehydration_fallback"]), ("block", True))
+        self.assertIn("1 unknown key(s)", cfg["config_warning"])
+        self.policy.write_text(json.dumps({"_note": "rollout 3"}))
+        self.assertEqual(vault.load_config()["rehydration"], "automatic", "a comment key blocks nothing")
+        # a valid policy setting is the administrator's, never explained as the user's broken file
+        self._user("{not json")
+        self.policy.write_text(json.dumps({"rehydration": "block"}))
+        cfg = vault.load_config()
+        self.assertEqual((cfg["rehydration"], cfg["rehydration_fallback"]), ("block", False))
+        self.policy.unlink()
+        # the user file: a safety key spelled wrong is a stricter wish, another typo is not
+        self._user({"rehydraton": "block"})
+        self.assertEqual(vault.load_config()["rehydration"], "block")
+        self._user({"renew_on_uses": False})
+        self.assertEqual(vault.load_config()["rehydration"], "automatic")
+        # a user file that exists and cannot be read
+        vault.CONFIG.unlink()
+        vault.CONFIG.mkdir()
+        try:
+            cfg = vault.load_config()
+            self.assertEqual((cfg["rehydration"], cfg["rehydration_fallback"]), ("block", True))
+            self.assertIn("cannot be read", cfg["config_warning"])
+        finally:
+            vault.CONFIG.rmdir()
 
     def test_the_plugin_options_from_the_environment(self):
         self._user({"backend": "encrypted-file"})

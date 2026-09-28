@@ -81,6 +81,10 @@ SCENARIOS = {
         "approval": "on-request",
         "expect_file": ("used.txt", "<missing>"),
         "expect_hook": ("pre-tool", "Bash", "rewrite"),
+        # the command ran and the sandbox refused the write; a call Codex rejected before it ran, or a
+        # model that stopped, would leave the file missing too (review round 2)
+        "expect_ran_and_refused": ("used.txt: Operation not permitted", "used.txt: Read-only file system",
+                                   "used.txt: Permission denied"),
     },
     # rehydration "confirm": Codex cannot ask with a rewritten input, so the hook refuses the command
     # and it does not run; the model reads the reason, which names the key, not the value
@@ -222,6 +226,10 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         rows = [ln.split("\t") for ln in log.splitlines()]
         if not any(r[1:2] == [event] and tool in r and outcome in r for r in rows):
             fails.append(f"hooks.log has no {event} {outcome} for {tool}: the scenario did not reach the rewrite")
+    if sc.get("expect_ran_and_refused"):
+        seen = rollouts + out
+        if not any(t in seen for t in sc["expect_ran_and_refused"]) or "cat: used.txt" not in seen:
+            fails.append("no sign that the command ran and the sandbox refused the write")
     if sc.get("value_goes_to"):
         log = (home / "hooks.log").read_text(errors="ignore") if (home / "hooks.log").exists() else ""
         rows = [ln.split("\t") for ln in log.splitlines()]
