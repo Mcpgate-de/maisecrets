@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## [0.5.7] - 2026-09-28
+
+### Fixes
+
+- the transcript scrub opens the file in binary mode on Windows (c1a8b56)
+- Grep without a path, Windows digit scrub, Unicode word boundary (4aa1eb6)
+- the Codex review of the read gate, short values and the digit scrub (e07b32f)
+- a detected value of only digits is scrubbed from the transcript (8f537bd)
+- Read, Grep and Glob never read the store (96f92f3)
+- a short value the session put in comes back masked (1d8cfa3)
+- the ssh route works in the Linux sandbox (335ee7c)
+
+### Other
+
+- Merge branch 'fix/windows-binary-scrub' into 'main' (2301d89)
+- Merge branch 'fix/linux-sandbox-proxy-login' into 'main' (46a3b62)
+
 ## [0.5.6] - 2026-09-28
 
 ### Features
