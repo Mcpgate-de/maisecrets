@@ -15,7 +15,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | native store and clipboard | `MAISECRETS_NATIVE_BACKEND_TEST=1`, `MAISECRETS_NATIVE_CLIPBOARD_TEST=1` | GitHub runners only: they use the real keychain and clipboard |
 | ssh through the sandbox | `MAISECRETS_E2E_HOST=<ssh alias> MAISECRETS_E2E_IP=<address> python3 harness/sandbox/ssh_e2e.py` | by hand before a release that touches the ssh route, on macOS and on Linux: the real Claude Code sandbox against a real host |
 
-577 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
+585 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
 the tested commit of a release (branch `ci`) and on a push to main without a release.
 
 ## What makes a test count
@@ -28,17 +28,17 @@ the tested commit of a release (branch `ci`) and on a push to main without a rel
   several tests and a mutation per path (`[[proof]]`, each with a `path`). The replay runs the
   tests green once, then each mutation, and demands that every mutation turns at least one test
   red and that every test is red under at least one mutation; a test that no mutation reaches is
-  named as ballast. The three invariants:
+  named as ballast. The four invariants:
 
   | invariant | module | the population it covers |
   |---|---|---|
   | I1 a stored value never reaches output the model or the person reads | `test_invariant_model_output.py` | every hook event, both clients, six tool-response shapes, the encodings of an own oracle for a resolved value and for another session's value as its own token, every refusal, the fail-closed answers, the prompt that goes on, the session-start message; every output field is classified |
+  | I2 a rewrite never grants more than the call (Claude Code; Codex is the named exception) | `test_invariant_rewrite_grants_no_more.py` | 20 Bash command shapes (quotes, heredoc, assignments, loops, subshells, ssh with sudo), MCP inputs nested and as JSON text, Write and Edit; an own checker that knows the delivery forms as text; a call without a placeholder gets no grant |
   | I3 no agent tool reads vault material | `test_invariant_store_reads.py` | every tool that reads a path, from `tests/client_tools.json` (the harness checks that list against the real client's tool list on every run; checked against the matcher), twelve spellings of a store path, searches over a parent, MCP paths and file URIs, Bash with the default and the configured home; and the other side, a path next to the store passes |
   | I4 every detected value can be scrubbed from a transcript | `test_invariant_transcript_scrub.py` | every value the detector returns on the matrix, the token corpus and one PII value per type, in ten record shapes and two JSON writers, across the read window, and through the hooks |
 
   Each oracle is the test's own: it builds the encodings and escapes without the product's
-  helpers, so a form the product forgets stays red. I2, the invariant for a Codex rewrite, waits for
-  the Codex design (C5).
+  helpers, so a form the product forgets stays red.
 - **No unexpected skip.** `scripts/no_unexpected_skips.py` fails the CI job on any skip except
   the two native tests.
 - **Generated inputs with known answers.** `tests/detection_matrix.py` builds 2,500 cases from

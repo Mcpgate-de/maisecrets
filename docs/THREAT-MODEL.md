@@ -47,7 +47,7 @@ a harness scenario that goes red when the control is removed
 
 ## Invariants
 
-Three goals hold over every path, each with its own tests and a mutation per path
+Four goals hold over every path, each with its own tests and a mutation per path
 (`docs/TESTING.md`, `beliefs/inv-*.toml`):
 
 - **I1** A stored value never reaches a hook output the model or the person reads, within the
@@ -60,7 +60,10 @@ Three goals hold over every path, each with its own tests and a mutation per pat
 - **I4** Every value the detector finds can be masked in a transcript in every record shape the
   clients write.
 
-I2, "a Codex rewrite never grants more than the original call", waits for the Codex design.
+- **I2** On Claude Code a rewrite never grants more than the call the model wrote: no `allow`, the
+  original input back when each value becomes its placeholder again, and in Bash only the reads of
+  the values and, for ssh, the guard and the options that narrow it. On Codex a rewrite carries
+  `allow` (C5); a test records that exception and fails when it changes.
 
 ## What is knowingly not defended
 

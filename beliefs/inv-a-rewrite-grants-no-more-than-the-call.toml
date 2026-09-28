@@ -1,0 +1,47 @@
+# inv-a-rewrite-grants-no-more-than-the-call: an invariant belief. One goal over every path to it; each mutation removes one path's guard and must turn at least one owning test red, and each owning test must be red under at least one mutation.
+belief = "inv-a-rewrite-grants-no-more-than-the-call"
+kind = "invariant"
+control = "I2"
+statement = "On Claude Code a rewrite never grants more than the call the model wrote: no permissionDecision allow; MCP, Write and Edit get back the original input when each value becomes its placeholder again; Bash gets only the reads of the values (each ending the command with exit 97 when it fails) and, for ssh, the sandbox guard and the options that narrow ssh. A call without a placeholder gets no grant. Codex gets allow with a rewrite: the named exception of THREAT-MODEL C5, recorded by a test that fails when it changes."
+runner = [
+  "tests/test_invariant_rewrite_grants_no_more.py::ClaudeRewriteTests::test_no_bash_rewrite_grants_more_than_the_command",
+  "tests/test_invariant_rewrite_grants_no_more.py::ClaudeRewriteTests::test_no_mcp_or_file_rewrite_grants_more_than_the_input",
+  "tests/test_invariant_rewrite_grants_no_more.py::ClaudeRewriteTests::test_a_call_without_a_placeholder_is_not_answered_with_a_grant",
+  "tests/test_invariant_rewrite_grants_no_more.py::CodexExceptionTests::test_codex_gets_allow_with_a_rewrite_and_the_rewrite_itself_adds_nothing",
+]
+
+[[proof]]
+path = "Claude Code gets allow with a rewrite"
+file = "maisecrets/hooks.py"
+find = "    return {\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"updatedInput\": new_input}}"
+replace = "    return {\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"allow\", \"updatedInput\": new_input}}"
+
+[[proof]]
+path = "a value that is not delivered lets the command run on"
+file = "maisecrets/hooks.py"
+find = "once; if it fails again, stop and tell the user\" >&2; exit 97; }}')"
+replace = "once; if it fails again, stop and tell the user\" >&2; true; }}')"
+
+[[proof]]
+path = "an MCP rewrite adds a field"
+file = "maisecrets/hooks.py"
+find = "    new_input = _walk_strings(tool_input, substitute)"
+replace = "    new_input = {**_walk_strings(tool_input, substitute), \"via\": \"maisecrets\"}"
+
+[[proof]]
+path = "an ssh rewrite without the sandbox guard"
+file = "maisecrets/hooks.py"
+find = "        prelude.insert(0, _sandbox_guard())"
+replace = "        pass"
+
+[[proof]]
+path = "a Bash call without a placeholder is answered with a grant"
+file = "maisecrets/hooks.py"
+find = "    refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != \"comment\"]\n    if not refs:\n        return {}"
+replace = "    refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != \"comment\"]\n    if not refs:\n        return _updated(payload, tool_input)"
+
+[[proof]]
+path = "the Codex exception changes (the canary)"
+file = "maisecrets/hooks.py"
+find = "        return {\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"allow\",\n                                       \"updatedInput\": new_input}}"
+replace = "        return {\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"ask\",\n                                       \"permissionDecisionReason\": \"x\", \"updatedInput\": new_input}}"
