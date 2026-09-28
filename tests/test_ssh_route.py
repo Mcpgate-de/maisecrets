@@ -640,6 +640,7 @@ class RefusalNamesAWayTests(unittest.TestCase):
         self.assertEqual(h.get("permissionDecision"), "deny", remote)
         return h["permissionDecisionReason"]
 
+    @unittest.skipIf(os.name == "nt", "the sandbox route is POSIX only")
     def test_a_remote_su_names_sudo_before_the_reading_command(self):
         for remote in ("sudo su -", "su - root", "sudo -i", "sudo bash"):
             with self.subTest(remote):
@@ -647,6 +648,7 @@ class RefusalNamesAWayTests(unittest.TestCase):
                 self.assertIn("sudo zgrep -F -f - FILE", text)
                 self.assertNotIn("is refused", text)
 
+    @unittest.skipIf(os.name == "nt", "the sandbox route is POSIX only")
     def test_a_second_hop_names_one_ssh_per_host(self):
         for remote in ("ssh aux01 zgrep -F -f - /var/log/x", "sshpass -p x ssh aux01 true"):
             with self.subTest(remote):
@@ -654,6 +656,7 @@ class RefusalNamesAWayTests(unittest.TestCase):
                 self.assertIn("one ssh command per host", text)
                 self.assertNotIn("put sudo in front", text)
 
+    @unittest.skipIf(os.name == "nt", "the sandbox route is POSIX only")
     def test_every_refused_remote_form_names_the_stdin_way(self):
         for remote in ("echo aGk= | base64 -d | bash", "ssh aux01 zgrep -F -f - /var/log/x", "bash", "python3"):
             with self.subTest(remote):
