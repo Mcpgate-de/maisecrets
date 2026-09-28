@@ -1913,11 +1913,14 @@ def _uri_path(v: str) -> str:
     (invariant I3, 2026-09-28)."""
     if v[:5].lower() != "file:":
         return v
-    from urllib.parse import unquote, urlparse
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
     u = urlparse(v)
     if u.netloc not in ("", "localhost"):
         return v
-    return unquote(u.path)
+    # url2pathname decodes and, on Windows, turns `/C:/Users/…` into `C:\\Users\\…`: an unquoted
+    # `/C:/…` named no store on the Windows runner (2026-09-28)
+    return url2pathname(u.path)
 
 
 def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
