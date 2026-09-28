@@ -6,5 +6,5 @@ runner = ["tests/test_gates.py::ScannerEdgeTests::test_a_command_word_hidden_by_
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "    if any(_SSH_WORD_RE.search(t) for t in tokens):\n"
-replace = "    if False:\n"
+find = "        if any(_SSH_WORD_RE.match(t) for t in shell_words):\n"
+replace = "        if False:\n"

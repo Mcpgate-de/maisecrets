@@ -449,7 +449,9 @@ REMOTE_OR_EVAL = {"ssh", "eval", "su", "expect", "script", "sshpass", "plink", "
 # commands that run other commands with arguments they build from their input
 ARG_RUNNERS = {"xargs", "parallel", "watch", "flock", "chroot", "nsenter", "unshare", "setsid", "runuser",
                "strace", "ltrace", "gdb", "script", "busybox", "systemd-run", "toybox"}
-_SSH_WORD_RE = re.compile(r"(?:^|[=/\s'\"])(?:ssh|scp|sftp|rsync|autossh|mosh)(?:\s|$|['\"])")
+# a word that starts a command line of one of these tools: ssh, /usr/bin/ssh, GIT_SSH_COMMAND=ssh …,
+# "ssh -p 22" as an argument; not a sentence that mentions ssh
+_SSH_WORD_RE = re.compile(r"^(?:[A-Za-z_][\w.-]*=)?(?:\S*/)?(?:ssh|scp|sftp|rsync|autossh|mosh)(?:\s|$)")
 # a variable in front of a fixed path is a known command word: "$HOME/bin/tool", ${REPO}/bin/x
 _FIXED_TAIL_RE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z_0-9]*\}?(?:/[^/$`\s]+)+$")
 # arguments that name stdin as the file to run
@@ -798,16 +800,33 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
                     return f"{os.path.basename(w)} -c would parse the value a second time as shell code"
     if re.search(r"(?<![\w-])PS4=", plain):
         return "a custom PS4 would trace the value"
-    # ssh and its relatives anywhere else (a function body, an assignment such as GIT_SSH_COMMAND,
-    # an argument of another command): the route checks only the one plain form
-    try:
-        import shlex as _shlex
-        tokens = _shlex.split(command)
-    except ValueError:
-        tokens = command.split()
-    if any(_SSH_WORD_RE.search(t) for t in tokens):
-        return ("ssh, scp, sftp, rsync or autossh appears in this command in a form that cannot be checked; "
-                "a value reaches ssh only as printf '%s' ⟦KEY⟧ | ssh host '…'")
+    # ssh and its relatives in another form, in the parts of the command that carry a value or are piped
+    # together with one: an assignment such as GIT_SSH_COMMAND='ssh …', an argument such as rsync -e ssh
+    # or -e "ssh -p 22", scp or sftp as the command. A word that only mentions ssh in a sentence does
+    # not count, and neither does a part without a value (differential test against 0.5.2, 2026-09-28)
+    import shlex as _shlex
+    segs = _segments(command, ctxs)
+    offsets = [a for _k, a, _b in find_refs(command) if ctxs[a] != "comment"]
+    with_value = {n for n, sg in enumerate(segs) if any(sg["start"] <= a < sg["end"] for a in offsets)}
+    related = set(with_value)
+    for n in sorted(with_value):
+        k = n
+        while k > 0 and segs[k]["piped"]:
+            k -= 1
+            related.add(k)
+        k = n + 1
+        while k < len(segs) and segs[k]["piped"]:
+            related.add(k)
+            k += 1
+    for n in sorted(related):
+        part = command[segs[n]["start"]:segs[n]["end"]]
+        try:
+            shell_words = _shlex.split(part)
+        except ValueError:
+            shell_words = part.split()
+        if any(_SSH_WORD_RE.match(t) for t in shell_words):
+            return ("ssh, scp, sftp, rsync or autossh appears here in a form that cannot be checked; "
+                    "a value reaches ssh only as printf '%s' ⟦KEY⟧ | ssh host '…'")
     m = _SLICE_RE.search(plain)
     if m:
         return f"the parameter expansion {m.group(0)}… would slice or rewrite the value"
