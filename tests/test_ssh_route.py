@@ -170,8 +170,11 @@ class SessionApprovalTests(unittest.TestCase):
             os.listdir(sealed)
         run = os.path.dirname(sealed)
         self.assertEqual(glob.glob(os.path.join(run, "*", "v-*")) + glob.glob(os.path.join(sealed, "*")), [])
+        # a second ask does not open the directory for a moment: it stays 0300 all the time
+        second = self.pre(self.READ, host="aux02")
+        self.assertEqual(stat.S_IMODE(os.stat(sealed).st_mode), 0o300)
         self.assertFalse(_wait_approved("S1", self.key, want=True, seconds=0.3))
-        hooks._unserve(values)
+        hooks._unserve(values + _fifo_paths(second["updatedInput"]["command"])[0])
 
     def test_the_store_holds_no_usable_token_and_the_hook_refuses_commands_that_name_it(self):
         from maisecrets import ssh_approval
@@ -206,7 +209,11 @@ class SessionApprovalTests(unittest.TestCase):
         self.approve_once()
         for remote in ("/tmp/grep -F -f - x", "PATH=/tmp grep -F -f - x", "sudo /tmp/grep -F -f - x",
                        "sudo -u root grep -F -f - x", "grep -F -f - x | sort --out=/tmp/leak",
-                       "grep -F -f - x | sort --compress-program=sh", "rg --pre=sh -F -f - x", "./grep -F -f - x"):
+                       "grep -F -f - x | sort --compress-program=sh", "rg --pre=sh -F -f - x", "./grep -F -f - x",
+                       # second review round: commands that change state
+                       "sudo date -s @0", "sudo hostname review-host", "sudo journalctl --rotate",
+                       "sudo journalctl --vacuum-time=1s", "sudo journalctl --vac=1s",
+                       "journalctl --cursor-file=/tmp/c"):
             with self.subTest(remote):
                 out = self.pre(remote)
                 self.assertNotEqual(out.get("permissionDecision", "none"), "none", remote)

@@ -1050,7 +1050,12 @@ def _remote_refusal(remote: str) -> str | None:
 # remote commands that only read and print: the session approval covers these alone (ssh_approval.py)
 READ_ONLY_REMOTE = {"grep", "egrep", "fgrep", "zgrep", "zegrep", "zfgrep", "xzgrep", "bzgrep", "rg", "cat", "zcat",
                     "xzcat", "bzcat", "head", "tail", "journalctl", "wc", "sort", "uniq", "cut", "tr", "jq",
-                    "ls", "stat", "date", "hostname", "uptime", "df", "du", "true"}
+                    "ls", "stat", "uptime", "df", "du", "true"}
+# journalctl options that change state or write a file; getopt takes an unambiguous prefix, so a
+# prefix of one of these counts too (Codex review, 2026-09-28: --rotate and --vacuum-time passed)
+_JOURNALCTL_STATEFUL = ("--rotate", "--vacuum-size", "--vacuum-files", "--vacuum-time", "--flush", "--sync",
+                        "--relinquish-var", "--smart-relinquish-var", "--setup-keys", "--update-catalog",
+                        "--cursor-file", "--force", "--interval", "--verify-key", "--new-id128")
 
 
 # wrappers the session approval allows in front of a read-only command, with no option of their own
@@ -1093,6 +1098,12 @@ def _remote_is_read_only(remote: str) -> bool:
             return False
         if cmd == "rg" and any(a.startswith("--pre") or a.startswith("--se") for a in args):
             return False
+        if cmd == "journalctl":
+            for a in args:
+                name = a.split("=", 1)[0]
+                if name.startswith("--") and len(name) > 2 and \
+                        any(o.startswith(name) for o in _JOURNALCTL_STATEFUL):
+                    return False
     return True
 
 
@@ -1326,16 +1337,9 @@ def _sealed_dir() -> str:
     st = os.lstat(d)
     if not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
         raise RuntimeError(d)
-    # a killed serving child leaves its FIFO: sweep the stale ones while the directory is readable
-    os.chmod(d, 0o700)
-    try:
-        for name in os.listdir(d):
-            fp = os.path.join(d, name)
-            if time.time() - os.lstat(fp).st_mtime > 300:
-                os.unlink(fp)
-    except OSError:
-        pass
-    finally:
+    # never readable again once made: a sweep that opened it for a moment let a blind reader list it
+    # (Codex review, 2026-09-28). Each serving child removes its own FIFO; wipe clears the rest
+    if _stat.S_IMODE(st.st_mode) != 0o300:
         os.chmod(d, 0o300)
     return d
 
