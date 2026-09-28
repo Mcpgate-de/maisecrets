@@ -177,6 +177,13 @@ class LabelLanguageTests(unittest.TestCase):
                     self.assertLessEqual(opened / len(closed), 0.005,
                                          f"{lang}: the prefilter {lab.prefilter!r} opens {opened} ordinary lines")
 
+    def test_turkish_capitals_are_labels_too(self):
+        # İ lowers to i plus a combining dot; the prefilter must still see ifre and kimlik
+        value = "Qz" + "".join(random.Random(9).choice("abcdefgh23456789") for _ in range(12))
+        for label in ("ŞİFRE", "Şİfre", "KİMLİK DOĞRULAMA BİLGİLERİ", "PAROLA"):
+            with self.subTest(label):
+                self.assertEqual(_scan(("en", "tr"), [f"{label}: {value}"]), [[("SECRET", value)]])
+
     def test_prose_with_the_label_word_gives_no_hit(self):
         for lang, sentences in PROSE.items():
             for text, got in zip(sentences, _scan(("en", lang), sentences)):

@@ -605,7 +605,7 @@ def _matches(rule: Rule, text: str):
         return
     pos = 0
     lines = text.split("\n")
-    low = text.lower().split("\n") if rule.keywords else None
+    low = _lower(text).split("\n") if rule.keywords else None
     for i, line in enumerate(lines):
         # the regex needs one of the rule's keywords in this line (every denylist word contains
         # one); skipping the other lines cut a history scan from 71 s to a fraction (2026-09-27)
@@ -669,11 +669,18 @@ def _allowed(rule: Rule, text: str, m: re.Match, secret: str) -> bool:
 _TOKEN_CHAR_RE = re.compile(r"[A-Za-z0-9_\-]")
 
 
+def _lower(text: str) -> str:
+    """Lower case for the prefilters. The Turkish capital İ lowers to i plus a combining dot, so
+    `ŞİFRE:` held no `ifre` (Codex review, 2026-09-28); the dot is dropped. Only membership tests
+    use this text, never offsets."""
+    return text.lower().replace("i\u0307", "i")
+
+
 def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins."""
     if not text:
         return []
-    low = text.lower()
+    low = _lower(text)
     found: list[Match] = []
     taken: list[tuple[int, int]] = []
     for rule in rules():
