@@ -449,9 +449,8 @@ REMOTE_OR_EVAL = {"ssh", "eval", "su", "expect", "script", "sshpass", "plink", "
 # commands that run other commands with arguments they build from their input
 ARG_RUNNERS = {"xargs", "parallel", "watch", "flock", "chroot", "nsenter", "unshare", "setsid", "runuser",
                "strace", "ltrace", "gdb", "script", "busybox", "systemd-run", "toybox"}
-# a word that starts a command line of one of these tools: ssh, /usr/bin/ssh, GIT_SSH_COMMAND=ssh …,
-# "ssh -p 22" as an argument; not a sentence that mentions ssh
-_SSH_WORD_RE = re.compile(r"^(?:[A-Za-z_][\w.-]*=)?(?:\S*/)?(?:ssh|scp|sftp|rsync|autossh|mosh)(?:\s|$)")
+# variables that name the ssh command another tool runs
+_SSH_VAR_RE = re.compile(r"(?<![\w])(?:GIT_SSH_COMMAND|GIT_SSH|RSYNC_RSH|CVS_RSH)=")
 # a variable in front of a fixed path is a known command word: "$HOME/bin/tool", ${REPO}/bin/x
 _FIXED_TAIL_RE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z_0-9]*\}?(?:/[^/$`\s]+)+$")
 # arguments that name stdin as the file to run
@@ -713,7 +712,8 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
         if ch == "|":
             two = masked.startswith("||", i)
             flush(not two)
-            i += 2 if two else 1
+            # |& pipes stderr as well: still a pipe (final review, 2026-09-28)
+            i += 2 if two or masked.startswith("|&", i) else 1
             continue
         if ch == "&" and not ((i and masked[i - 1] in "<>") or masked.startswith("&>", i)):
             # a redirection is no separator: 2>&1, <&3, &>file (the ask showed "2>" for 2>&1)
@@ -740,6 +740,10 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
                          or os.path.basename(words[0]) in WRAPPERS):
             w = os.path.basename(words[0])
             words = words[1:]
+            if w == "case":
+                # `case WORD in`: the word is matched, not run
+                words = words[words.index("in") + 1:] if "in" in words else []
+                continue
             if w in SHELL_KEYWORDS or _ASSIGN_RE.match(w):
                 continue
             takes = WRAPPER_ARG_OPTIONS.get(w, ())
@@ -762,9 +766,6 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
         words, cmd = seg["words"], seg["cmd"]
         if not words:
             continue
-        if ("$" in words[0] or "`" in words[0]) and not _FIXED_TAIL_RE.match(words[0]):
-            return ("the command word is built from a variable or a substitution and is only known when it runs; "
-                    "write the path out, or keep the variable only in front of a fixed path ($HOME/bin/tool)")
         flags = [w for w in words[1:] if w.startswith("-")]
         if cmd in ("watch", "parallel") and not (cmd == "watch" and any(f in ("-x", "--exec") for f in flags)):
             return f"{cmd} runs its command through sh -c, which would parse the value a second time"
@@ -800,13 +801,15 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
                     return f"{os.path.basename(w)} -c would parse the value a second time as shell code"
     if re.search(r"(?<![\w-])PS4=", plain):
         return "a custom PS4 would trace the value"
-    # ssh and its relatives in another form, in the parts of the command that carry a value or are piped
-    # together with one: an assignment such as GIT_SSH_COMMAND='ssh …', an argument such as rsync -e ssh
-    # or -e "ssh -p 22", scp or sftp as the command. A word that only mentions ssh in a sentence does
-    # not count, and neither does a part without a value (differential test against 0.5.2, 2026-09-28)
-    import shlex as _shlex
+    # ssh in another form, in the parts of the command that carry a value or are piped with one: scp, sftp,
+    # autossh or mosh as the command; rsync with a remote shell and the value in its own arguments; a
+    # variable that names an ssh command (GIT_SSH_COMMAND, RSYNC_RSH, …) or git -c core.sshCommand anywhere.
+    # A word that only mentions ssh (ansible -c ssh, a path ending in /rsync) does not count (final
+    # review and differential test against 0.5.2, 2026-09-28)
     segs = _segments(command, ctxs)
     offsets = [a for _k, a, _b in find_refs(command) if ctxs[a] != "comment"]
+    if offsets and _SSH_VAR_RE.search(plain):
+        return "a variable that names an ssh command would hand the value to ssh in a form that cannot be checked"
     with_value = {n for n, sg in enumerate(segs) if any(sg["start"] <= a < sg["end"] for a in offsets)}
     related = set(with_value)
     for n in sorted(with_value):
@@ -819,14 +822,18 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
             related.add(k)
             k += 1
     for n in sorted(related):
-        part = command[segs[n]["start"]:segs[n]["end"]]
-        try:
-            shell_words = _shlex.split(part)
-        except ValueError:
-            shell_words = part.split()
-        if any(_SSH_WORD_RE.match(t) for t in shell_words):
-            return ("ssh, scp, sftp, rsync or autossh appears here in a form that cannot be checked; "
+        sg = segs[n]
+        words = sg["words"]
+        if sg["cmd"] in ("scp", "sftp", "autossh", "mosh"):
+            return (f"{sg['cmd']} hands its arguments to a remote shell; "
                     "a value reaches ssh only as printf '%s' ⟦KEY⟧ | ssh host '…'")
+        if sg["cmd"] == "git" and any(w.lower().startswith("core.sshcommand=") for w in words):
+            return "git -c core.sshCommand would hand the value to ssh in a form that cannot be checked"
+        if sg["cmd"] == "rsync" and n in with_value:
+            remote_spec = any(re.match(r"^(?:[^\s/@:]+@)?[\w.-]+:(?!//)", w) for w in words[1:])
+            rsh = any(w in ("-e", "--rsh") or w.startswith(("--rsh=", "-e")) for w in words[1:])
+            if remote_spec or rsh:
+                return "rsync over ssh hands its arguments to a remote shell; pass the value another way"
     m = _SLICE_RE.search(plain)
     if m:
         return f"the parameter expansion {m.group(0)}… would slice or rewrite the value"
@@ -972,11 +979,17 @@ def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) 
         i += 1
     remote = toks[i:]
     for c, val in opts:
-        key = re.split(r"[=\s]", val.strip(), maxsplit=1)[0].strip("\"'").lower() if c == "o" and val else ""
+        if c == "o" and val and ("$" in val or "`" in val):
+            return "an ssh option holds an expansion whose result is only known when it runs"
+        key = re.split(r"[=\s]+", val.strip(" \t=\"'"), maxsplit=1)[0].strip("\"'").lower() if c == "o" and val else ""
         if c in _SSH_REFUSED_FLAGS or key in _SSH_REFUSED_OPTIONS or key.startswith("canonical"):
             return ("ssh with its own proxy, jump host, shared connection, config file, host name or local "
                     "command is refused; the sandbox route sets the connection itself")
-    why = _remote_refusal(" ".join(shlex.quote(t) if n else t for n, t in enumerate(remote)) if remote else "")
+    # ssh joins the remote words with spaces and the remote shell parses the result again, so the check
+    # reads exactly that string (final review, 2026-09-28: quoting each word hid a `;` or a `|`)
+    if any("$" in t or "`" in t for t in remote):
+        return "the remote command holds an expansion ($ or a backtick) whose result is only known when it runs"
+    why = _remote_refusal(" ".join(remote))
     if why:
         return why
     # the insertion point: the end of the ssh command word, found among the plain words of the masked
@@ -1004,29 +1017,11 @@ def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) 
 
 
 def _sandbox_guard(py: str | None = None) -> str:
-    """The first step of a command that sends a value over ssh: stop before the value is read
-    unless the command runs in the Claude Code sandbox. Four signals, all needed: SANDBOX_RUNTIME=1,
-    a proxy login of the sandbox runtime's form in HTTPS_PROXY (srt.…), three direct TCP connections
-    that all fail, and a proxy that refuses a wrong login with 407. One failed connection proved
-    little: a company firewall blocks 1.1.1.1, and an offline laptop fails every connection; a
-    copied environment on an offline machine with a local proxy passed the first three (reviews,
-    2026-09-27 and 2026-09-28)."""
-    py = shlex_quote(py or sys.executable)
-    probe = ("import base64,os,socket,sys; from urllib.parse import urlsplit\n"
-             "u = urlsplit(os.environ.get('HTTPS_PROXY') or '')\n"
-             "local = u.hostname in ('localhost', '127.0.0.1', '::1')\n"
-             "if not (local and (u.username or '').startswith('srt.')): sys.exit(1)\n"
-             "for a in (('1.1.1.1', 443), ('8.8.8.8', 53), ('9.9.9.9', 443)):\n"
-             "    s = socket.socket(); s.settimeout(2)\n"
-             "    if s.connect_ex(a) == 0: sys.exit(1)\n"
-             # the sandbox proxy refuses a wrong login with 407 (measured 2026-09-28); a local proxy that
-             # lets it through is another proxy, and an offline machine with a copied environment fails here
-             "s = socket.create_connection((u.hostname, u.port), 5)\n"
-             "wrong = base64.b64encode(b'srt.maisecrets:' + b'wrong')\n"
-             "s.sendall(b'CONNECT maisecrets-probe.invalid:9 HTTP/1.1\\r\\nHost: maisecrets-probe.invalid:9\\r\\n'\n"
-             "          b'Proxy-Authorization: Basic ' + wrong + b'\\r\\n\\r\\n')\n"
-             "sys.exit(0 if s.recv(64).split(b' ')[1:2] == [b'407'] else 1)")
-    return (f'{{ [ "${{SANDBOX_RUNTIME:-}}" = 1 ] && {py} -c {shlex_quote(probe)}; }} || '
+    """The first step of a command that sends a value over ssh: hooks/sandbox_probe.py exits 0 only
+    inside the Claude Code sandbox; otherwise the command stops with exit 97 before the value is read."""
+    from pathlib import Path as _P
+    probe = _P(__file__).resolve().parent.parent / "hooks" / "sandbox_probe.py"
+    return (f'{shlex_quote(py or sys.executable)} {shlex_quote(str(probe))} || '
             '{ echo "maisecrets: this command sends a value over ssh and runs only inside the Claude Code '
             'sandbox (sandbox.enabled with network.allowedDomains). The value was not read; the command '
             'did not run." >&2; exit 97; }')

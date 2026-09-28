@@ -1,0 +1,10 @@
+# c18-the-guard-needs-the-sandbox-proxy: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c18-the-guard-needs-the-sandbox-proxy"
+control = "C18"
+statement = "The guard passes only when the proxy refuses a wrong login with 407: a local proxy that lets it through, on a machine with no direct network and a copied environment, does not pass."
+runner = ["tests/test_ssh_route.py::GuardProbeTests::test_a_proxy_that_lets_a_wrong_login_through_fails"]
+
+[proof]
+file = "hooks/sandbox_probe.py"
+find = "    return reply.split(b\" \")[1:2] == [b\"407\"]\n"
+replace = "    return True\n"

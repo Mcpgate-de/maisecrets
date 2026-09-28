@@ -236,6 +236,22 @@ _DS_INDIRECT = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*\s*(\(.*\)|\[.*\])$")
 _DS_REFERENCE = re.compile(r"_*[A-Za-z]+(?:[._-]+[A-Za-z]+)+_*[:;\[]?")
 
 
+# a short glued value that is a type or a keyword of code or config, or a camelCase identifier:
+# password:string, {token:number}, secret=config, api_key=apiKey, auth_token=Bearer (final review,
+# 2026-09-28: the 6-character floor for glued values took these for secrets)
+_SHORT_WORDS = frozenset({
+    "string", "number", "boolean", "object", "integer", "bigint", "symbol", "unknown", "config", "bearer", "secret",
+    "tokens", "hidden", "masked", "optional", "default", "require", "undefined", "double", "decimal", "varchar",
+    "binary", "buffer", "array", "values", "string[]", "never", "nullable", "boolean[]", "option", "settings",
+    "private", "public", "enabled", "disabled"})
+_CAMEL_RE = re.compile(r"^[a-z]+(?:[A-Z][a-z0-9]*)+$")
+
+
+def _short_word(v: str) -> bool:
+    w = v.strip().rstrip(",;})]")
+    return w.lower() in _SHORT_WORDS or bool(_CAMEL_RE.match(w))
+
+
 def _ds_value_ok(v: str, min_len: int = 8) -> bool:
     """Port of detect-secrets' heuristic filters for keyword hits."""
     v = v.strip()
@@ -691,7 +707,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                         # a value glued to its label, with no space after the colon, is typed on purpose: 6 characters
                         # count. With a space between them 8 stay the floor, against prose such as
                         # "password: string" (field report, 2026-09-27: a 7-letter password passed)
-                        ok = _ds_value_ok(secret, min_len=6)
+                        ok = _ds_value_ok(secret, min_len=6) and (len(secret.strip()) >= 8 or not _short_word(secret))
                     else:
                         ok = VALIDATORS[rule.validator](secret)
                 except (ValueError, IndexError, TypeError):

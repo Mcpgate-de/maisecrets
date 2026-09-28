@@ -123,7 +123,9 @@ class ConfigTests(unittest.TestCase):
     def tearDown(self):
         for p in reversed(self.patches):
             p.stop()
-        vault.CONFIG.unlink(missing_ok=True)
+        # put the test store back instead of deleting the shared config: a module after this one then
+        # reached for the real keychain (final review, 2026-09-28, module order reversed)
+        vault.CONFIG.write_text('{"backend": "jsonfile", "allow_plaintext_store": true}', encoding="utf-8")
 
     def test_the_default_is_auto(self):
         vault.CONFIG.unlink(missing_ok=True)

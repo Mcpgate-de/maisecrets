@@ -598,6 +598,11 @@ class LabelValueTests(unittest.TestCase):
         self.assertEqual(kinds("pass§:" + PW11[:5]), [], "5 characters are too few in any case")
         # a colon inside our own placeholder is no label
         self.assertEqual(kinds("api§_key: ⟦SECRET_c5:ab•••⟧"), [])
+        # a type, a keyword or a camelCase name glued to a label is code, not a value (final review, 2026-09-28)
+        for text in ("pass§word:string", "{pass§word:string, tok§en:number}", "pass§word:boolean", "sec§ret=config",
+                     "api§_key=apiKey", "auth§_token=Bearer"):
+            with self.subTest(text=text):
+                self.assertEqual(kinds(text), [])
 
     def test_prose_after_a_label_is_still_not_a_value(self):
         for text in ("secret: very important", "api_key: Add API key", '"api_key_label": "Add API key"',

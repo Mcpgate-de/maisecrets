@@ -26,17 +26,21 @@ LOCAL = {"localhost", "127.0.0.1", "::1"}
 
 
 def proxy() -> tuple[str, int, str | None]:
-    url = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
+    url = os.environ.get("HTTPS_PROXY") or ""
     u = urlsplit(url)
+    try:
+        port = u.port
+    except ValueError:           # a port that is not a number: no proxy, and no traceback
+        port = None
     # the sandbox runtime's own proxy: local, with a login of the form srt.… (Claude Code 2.1.283);
     # a company proxy on localhost (cntlm, px) would connect anywhere and must not be used
-    if u.scheme != "http" or u.hostname not in LOCAL or not u.port or not (u.username or "").startswith("srt."):
+    if u.scheme != "http" or u.hostname not in LOCAL or not port or not (u.username or "").startswith("srt."):
         raise SystemExit("maisecrets proxy_connect: no local sandbox proxy in HTTPS_PROXY; "
                          "this ssh route works only inside the Claude Code sandbox")
     auth = None
     if u.username is not None:
         auth = base64.b64encode(f"{unquote(u.username)}:{unquote(u.password or '')}".encode()).decode()
-    return u.hostname, u.port, auth
+    return u.hostname, port, auth
 
 
 def main(argv: list[str]) -> int:

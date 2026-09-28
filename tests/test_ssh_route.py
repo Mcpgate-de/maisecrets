@@ -90,8 +90,8 @@ class RouteDecisionTests(unittest.TestCase):
         self.assertIn("sandbox", reason)
         new = out["updatedInput"]["command"]
         self.assertNotIn(VALUE, new)
-        self.assertTrue(new.startswith('{ [ "${SANDBOX_RUNTIME:-}" = 1 ]'), "the guard comes before any value read")
-        self.assertLess(new.index("SANDBOX_RUNTIME"), new.index("cat "), "the guard runs before the FIFO read")
+        self.assertIn("sandbox_probe.py", new.split(";", 1)[0], "the guard is the first step")
+        self.assertLess(new.index("sandbox_probe.py"), new.index("cat "), "the guard runs before the FIFO read")
         self.assertIn("| ssh -o ControlMaster=no -o ControlPath=none -o 'ProxyCommand=", new,
                       "our options come first, right after ssh")
 
@@ -125,7 +125,7 @@ class RouteDecisionTests(unittest.TestCase):
             (f"printf '%s' {r} | ssh aux01 'cd /tmp && bash'", "shell code"),
             (f"printf '%s' {r} | ssh aux01 'grep x f; cat | sh'", "shell code"),
             (f"printf '%s' {r} | ssh aux01 'xargs -I{{}} sh -c {{}}'", "hand the value to sh"),
-            (f"printf '%s' {r} | ssh aux01 '$SHELL'", "variable"),
+            (f"printf '%s' {r} | ssh aux01 '$SHELL'", "expansion"),
             (f"printf '%s' {r} | ssh aux01 base64", "encoded"),
             (f"printf '%s' {r} | ssh aux01 'xxd -p'", "encoded"),
             (f"printf '%s' {r} | ssh aux01 'ssh other cat'", "another shell or host"),
@@ -150,6 +150,13 @@ class RouteDecisionTests(unittest.TestCase):
              "own proxy, jump host"),
             (f"printf '%s' {r} | ssh aux01 'sh -c \"cat | sh\"'", "shell code"),
             (f"printf '%s' {r} | \\ssh aux01 cat", "plain word"),
+            # final review, 2026-09-28: ssh joins the remote words, so a separator in its own word counts
+            (f"printf '%s' {r} | ssh aux01 echo 'x; bash'", "shell code"),
+            (f"printf '%s' {r} | ssh aux01 cat '|' sh", "shell code"),
+            (f"printf '%s' {r} | ssh aux01 cat '&&' bash", "shell code"),
+            (f"printf '%s' {r} | ssh aux01 cat $(printf x)", "expansion"),
+            (f"printf '%s' {r} | ssh -o =HostName=other.example aux01 cat", "own proxy, jump host"),
+            (f"printf '%s' {r} | ssh -o '$X' aux01 cat", "expansion"),
             (f"printf '%s' {r} > /tmp/x; ssh aux01 cat", "stdin"),
             (f"printf '%s' {r} | ssh a cat | ssh b cat", "only one ssh"),
             (f"echo {r}; printf '%s' x | ssh aux01 cat", "feed ssh"),
@@ -222,9 +229,10 @@ class RewrittenCommandTests(unittest.TestCase):
         for f in self.bin.iterdir():
             f.chmod(f.stat().st_mode | stat.S_IEXEC)
 
-    def rewrite(self, probe: str) -> str:
+    def rewrite(self, probe: str | None) -> str:
         real = hooks.__dict__["_sandbox_guard_real"]
-        with mock.patch.object(hooks, "_sandbox_guard", lambda: real(str(self.bin / probe))):
+        py = str(self.bin / probe) if probe else None
+        with mock.patch.object(hooks, "_sandbox_guard", lambda: real(py)):
             out = _hso(_pre(f"printf '%s' {self.ref} | ssh aux01 'grep -F -f - x'"))
         self.assertEqual(out["permissionDecision"], "ask")
         return out["updatedInput"]["command"]
@@ -244,8 +252,8 @@ class RewrittenCommandTests(unittest.TestCase):
         self.assertNotIn(VALUE, "\n".join(args))
 
     def test_outside_the_sandbox_the_command_stops_before_it_reads_the_value(self):
-        for name, probe, env in (("no SANDBOX_RUNTIME", "sandboxed", {}),
-                                 ("SANDBOX_RUNTIME set but the network is open", "open", {"SANDBOX_RUNTIME": "1"})):
+        for name, probe, env in (("the real probe without SANDBOX_RUNTIME", None, {}),
+                                 ("a probe that finds no sandbox", "open", {"SANDBOX_RUNTIME": "1"})):
             with self.subTest(name):
                 r = self.run_bash(self.rewrite(probe), **env)
                 self.assertEqual(r.returncode, 97, r.stderr)
@@ -257,19 +265,51 @@ class RewrittenCommandTests(unittest.TestCase):
 hooks.__dict__.setdefault("_sandbox_guard_real", hooks._sandbox_guard)
 
 
-@unittest.skipIf(BASH is None or os.name == "nt", "needs bash on POSIX")
 class GuardProbeTests(unittest.TestCase):
-    """The real guard: without the sandbox runtime's proxy it stops before any connection."""
+    """hooks/sandbox_probe.py: all four signals are needed (reviews, 2026-09-27 and 2026-09-28)."""
 
-    def test_a_proxy_of_another_form_stops_the_guard_without_a_connection(self):
-        guard = hooks._sandbox_guard()
-        for proxy in ("", "http://cntlm:p@localhost:3128", "http://srt.x:p@proxy.example.org:8080", "http://localhost:1"):
-            with self.subTest(proxy=proxy):
-                env = {**os.environ, "SANDBOX_RUNTIME": "1", "HTTPS_PROXY": proxy}
-                r = subprocess.run([BASH, "-c", guard + "; echo reached"], capture_output=True, text=True, env=env,
-                                   timeout=30)
-                self.assertEqual(r.returncode, 97, r.stderr)
-                self.assertNotIn("reached", r.stdout)
+    def load(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("sandbox_probe", ROOT / "hooks" / "sandbox_probe.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def env(self, port: int, user: str = "srt.u") -> dict:
+        return {"SANDBOX_RUNTIME": "1", "HTTPS_PROXY": f"http://{user}:p@127.0.0.1:{port}"}
+
+    def with_proxy(self, status: str, closed_network: bool, **env_kw) -> bool:
+        mod = self.load()
+        p = _Proxy(status)
+        p.start()
+        real = socket.socket.connect_ex
+        def blocked(self_, addr):
+            return 101 if closed_network and addr[0] not in ("127.0.0.1", "::1") else real(self_, addr)
+        with mock.patch.object(socket.socket, "connect_ex", blocked):
+            if not closed_network:
+                with mock.patch.object(socket.socket, "connect_ex", lambda self_, addr: 0):
+                    return mod.inside(self.env(p.port, **env_kw))
+            return mod.inside(self.env(p.port, **env_kw))
+
+    def test_the_sandbox_proxy_with_no_direct_network_passes(self):
+        self.assertTrue(self.with_proxy("407 Proxy Authentication Required", closed_network=True))
+
+    def test_a_proxy_that_lets_a_wrong_login_through_fails(self):
+        self.assertFalse(self.with_proxy("200 Connection Established", closed_network=True))
+
+    def test_an_open_direct_network_fails(self):
+        mod = self.load()
+        with mock.patch.object(socket.socket, "connect_ex", lambda self_, addr: 0):
+            self.assertFalse(mod.inside(self.env(1)))
+
+    def test_the_environment_signals_are_needed(self):
+        mod = self.load()
+        for env in ({}, {"SANDBOX_RUNTIME": "1"}, {"SANDBOX_RUNTIME": "1", "HTTPS_PROXY": "http://cntlm:p@localhost:3128"},
+                    {"SANDBOX_RUNTIME": "1", "HTTPS_PROXY": "http://srt.x:p@proxy.example.org:8080"},
+                    {"SANDBOX_RUNTIME": "1", "HTTPS_PROXY": "http://srt.x:p@localhost:notaport"},
+                    {"SANDBOX_RUNTIME": "0", "HTTPS_PROXY": "http://srt.x:p@localhost:1"}):
+            with self.subTest(env=env), mock.patch.object(socket.socket, "connect_ex", lambda self_, addr: 101):
+                self.assertFalse(mod.inside(env))
 
 
 class _Proxy(threading.Thread):
@@ -331,7 +371,8 @@ class ProxyHelperTests(unittest.TestCase):
 
     def test_a_proxy_that_is_not_on_this_machine_never_gets_the_login(self):
         for url in ("http://srt.u:p@proxy.example.org:3128", "https://srt.u:p@localhost:3128", "",
-                    "http://srt.u:p@localhost", "http://cntlm:p@localhost:3128", "http://localhost:3128"):
+                    "http://srt.u:p@localhost", "http://cntlm:p@localhost:3128", "http://localhost:3128",
+                    "http://srt.u:p@localhost:notaport"):
             with self.subTest(url=url):
                 r = self.run_helper(url)
                 self.assertNotEqual(r.returncode, 0)

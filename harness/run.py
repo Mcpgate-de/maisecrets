@@ -111,7 +111,7 @@ SCENARIOS = {
         ],
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c1⟧"],
-        "expect_text": "on stdin to ssh aux01: ssh aux01 grep -F -f - /var/log/mail.log",
+        "expect_text": "on stdin to ssh aux01: ssh aux01 'grep -F -f - /var/log/mail.log'",
     },
     # a reference the session never saw in a prompt is not resolved
     "bash_foreign_ref": {
