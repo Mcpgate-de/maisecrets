@@ -658,3 +658,15 @@ class RefusalNamesAWayTests(unittest.TestCase):
             self.assertNotIn(word, hooks.PRIMER)
 
 
+
+class ReadOnlyBehindSudoTests(unittest.TestCase):
+    def test_sudo_and_sudo_n_before_a_reader_are_read_only_and_other_sudo_options_are_not(self):
+        for remote in ("sudo zgrep -hcF -f - /var/log/mail.log", "sudo -n zgrep -F -f - /var/log/mail.log*",
+                       "sudo -n tail -n 100 /var/log/syslog"):
+            with self.subTest(remote):
+                self.assertTrue(hooks._remote_is_read_only(remote))
+        # -u, -s, -i and -E change more than who reads: another user, a shell, the environment
+        for remote in ("sudo -u postgres zgrep -F -f - f", "sudo -s", "sudo -i", "sudo -E zgrep -F -f - f",
+                       "sudo -n -s", "sudo -n sh -c 'grep x'"):
+            with self.subTest(remote):
+                self.assertFalse(hooks._remote_is_read_only(remote))

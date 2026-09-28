@@ -1189,7 +1189,7 @@ _UNIQ_OK = re.compile(r"^(?:-[cdiuz]+|-[fsw]\d*|\d+|--(?:count|repeated|unique|i
 
 def _remote_is_read_only(remote: str) -> bool:
     """Whether every part of the remote command only reads and prints. Each part is a bare command
-    word from READ_ONLY_REMOTE, at most behind sudo, nice or command without options: no path, no
+    word from READ_ONLY_REMOTE, at most behind sudo (or sudo -n), nice or command without other options: no path, no
     assignment such as PATH=, since a command named grep in /tmp is not grep (Codex review,
     2026-09-28). No output redirection, tee, subshell or expansion, and none of the options with
     which a reader writes a file or runs a program."""
@@ -1207,7 +1207,9 @@ def _remote_is_read_only(remote: str) -> bool:
         except ValueError:
             return False
         while raw and raw[0] in _READ_ONLY_WRAPPERS:
-            raw = raw[1:]
+            # sudo -n (never ask for a password) is how ops scripts call sudo, so a missing rule fails
+            # instead of hanging; it changes who reads, not what the command does (field report on 0.5.8)
+            raw = raw[2:] if raw[0] == "sudo" and raw[1:2] == ["-n"] else raw[1:]
         if not raw or raw[0] not in READ_ONLY_REMOTE:
             return False             # a path, an assignment, a wrapper option or another command
         cmd, args = raw[0], raw[1:]
