@@ -242,7 +242,7 @@ class ContextTests(unittest.TestCase):
             with self.subTest(cmd[:30]):
                 out = _bash_pre(cmd)["hookSpecificOutput"]
                 self.assertEqual(out.get("permissionDecision"), "deny", out)
-                self.assertIn("refused in this command", out["permissionDecisionReason"])
+                self.assertIn("cannot be placed in this command", out["permissionDecisionReason"])
         # a plain pipeline stays allowed
         plain = _bash_pre("curl -H 'X-Token: " + self.e.ref + "' h | jq .")["hookSpecificOutput"]
         self.assertNotIn("permissionDecision", plain)

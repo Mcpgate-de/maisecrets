@@ -361,16 +361,22 @@ def take_pending(session: str | None = None) -> str | None:
 
 
 PRIMER = (
+    # Written as what to do, not as a list of what is refused: a primer of prohibitions next to an
+    # ordinary ops request (base64, sudo) read like an attempt to get around a control, and a model
+    # safeguard paused the session (field report on 0.5.8, 2026-09-28)
     "maisecrets: a placeholder like ⟦SECRET_c1⟧ or ⟦EMAIL_c2:ma•••@x.de⟧ stands for a value the user "
-    "stored locally. Use it unchanged. In a Bash command the value is read when the command runs; in "
-    "an MCP tool argument and in the content of Write, Edit, MultiEdit or NotebookEdit it is inserted "
-    "at call time. It is NOT resolved in WebFetch or a subagent prompt: there it stays literal text. "
-    "In Bash use it as a plain argument, inside '…' or \"…\", "
-    "or in an unquoted heredoc; a command with bash -c, sh -c, ssh, eval, backticks, $'…', a quoted heredoc, "
-    "base64/xxd/od, ${x:0:4} or set -x is refused, and awk needs V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. "
-    "Never ask the user for the value, never print, encode or slice it, never read the maisecrets store or "
-    "its files, never change its settings. When the user asks for the value in a file or a command, use the "
-    "placeholder there as they asked; the hook inserts the value at run time."
+    "stored on this computer. Use the placeholder unchanged where the value belongs; maisecrets puts the "
+    "value in when the call runs. In an MCP tool argument and in the content of Write, Edit, MultiEdit or "
+    "NotebookEdit it goes in at call time; WebFetch and a subagent prompt keep it as plain text. In Bash, "
+    "give it as a plain argument, inside '…' or \"…\", or in an unquoted heredoc; the shell reads the value "
+    "when the command runs. For awk, pass it as V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. To give a value to a "
+    "remote host, pipe it on stdin to the command that reads it, for example "
+    "printf '%s' ⟦KEY⟧ | ssh host 'sudo zgrep -F -f - /var/log/app.log' (inside the Claude Code sandbox, "
+    "one host per command; the user confirms it). A form that would run the value as code or change it "
+    "(a nested shell, eval, backticks, $'…', a quoted heredoc, an encoder, a slice, set -x) gets an answer "
+    "that names a form that works. The value stays with the user: to use it, use the placeholder; the user "
+    "manages the stored values and the settings. When the user asks for the value in a file or a command, "
+    "put the placeholder there as they asked."
 )
 
 
@@ -1083,6 +1089,24 @@ def _ssh_options(toks: list[str], i: int, opts: list) -> int:
     return i
 
 
+def _ssh_way(why: str) -> str:
+    """The form that works for what the refused remote command wanted to do. The answer names a way,
+    not only the rule: an ops user needs root-only logs, and "the remote su would hand the value to
+    another shell" left no way forward (field report on 0.5.8, 2026-09-28)."""
+    base = ("To give a value to a remote host, pipe it on stdin to the command that reads it, inside the "
+            "Claude Code sandbox, one host per command: printf '%s' ⟦KEY⟧ | ssh HOST 'zgrep -F -f - FILE'. "
+            "The user confirms it.")
+    if re.search(r"\b(?:su|sudo|login shell|shell|wrapper)\b", why):
+        return ("To read a file only root can read, put sudo in front of the command that reads it, not su "
+                "or a shell: printf '%s' ⟦KEY⟧ | ssh HOST 'sudo zgrep -F -f - FILE'. " + base)
+    if re.search(r"\b(?:ssh|another shell or host|jump|proxy)\b", why):
+        return "For a host behind another host, run one ssh command per host. " + base
+    if "encoded" in why:
+        return ("Keep the encoder out of the remote command that gets the value; a script can go as the "
+                "command's own text instead of through base64. " + base)
+    return base
+
+
 def _remote_refusal(remote: str) -> str | None:
     """Why the remote command would run the value as code, pass it on, or show it encoded. The
     value arrives on its stdin, so a command that reads data there is fine (grep -F -f -, cat > f,
@@ -1120,7 +1144,8 @@ def _remote_refusal(remote: str) -> str | None:
         if cmd in REMOTE_OR_EVAL:
             return f"the remote {cmd} would hand the value to another shell or host"
         if cmd in ENCODERS:
-            return f"the remote {cmd} would send the value back encoded, where the output redaction cannot see it"
+            return (f"the remote {cmd} could send the value back encoded, where the output redaction "
+                    "cannot see it")
         if cmd in SHELLS and ("-s" in flags or not any(INLINE_CODE_FLAGS.match(f) and "c" in f for f in flags)):
             return f"the remote {cmd} would read the value as shell code"
         if cmd in SHELLS:
@@ -1561,12 +1586,12 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         else:
             ssh_token = ssh_approval.remember_pending(payload.get("session_id"), names)
     if why and ssh_refused:
-        return _deny(f"maisecrets: {keys} is refused in this command: {why}. The command did not run. "
-                     "A value reaches ssh only on stdin, inside the Claude Code sandbox, after the user confirms.")
+        return _deny(f"maisecrets: {keys} cannot go to the remote host in this form: {why}. The command did "
+                     "not run. " + _ssh_way(why))
     if why:
-        return _deny(f"maisecrets: {keys} is refused in this command: {why}. The command did not run. "
-                     "Use the placeholder only as a plain argument of the tool that needs the value; "
-                     "run a wrapper's inner command directly, and do not encode, slice or trace the value.")
+        return _deny(f"maisecrets: {keys} cannot be placed in this command: {why}. The command did not run. "
+                     "Give the placeholder as a plain argument of the tool that needs the value; for a "
+                     "wrapper such as bash -c or eval, run its inner command directly.")
     vault = Vault(cfg)
     session = payload.get("session_id")
     uniq = list(dict.fromkeys(k for k, _a, _b in refs))
