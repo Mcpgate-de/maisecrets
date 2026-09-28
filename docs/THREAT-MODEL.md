@@ -33,8 +33,8 @@ a harness scenario that goes red when the control is removed
 | C5 | up-front read for Bash: the command starts with `__ms_1="$(cat <fifo>)" \|\| exit 97`; every key is checked before a detached child serves the value once through a FIFO in a directory only this user can enter (`$XDG_RUNTIME_DIR/maisecrets` or `maisecrets-<uid>` in the temp directory; owner and mode checked, no symlink), never in the command text; Windows Git Bash reads it under a grant | A2, A4, A5's screen, transcript | A3: another process of the same user can read the FIFO while the command waits to start (up to 120 s); MCP arguments (the value must be inline; the client's permission prompt shows it); on Codex `allow` skips its approval prompt; the grant is a boundary on Windows only |
 | C6 | context-aware rewrite: a scanner tracks `'…'`, `"…"`, `$(…)`, heredocs, comments; the variable is placed in the placeholder's context; a nested shell (`bash -c`, `ssh`, `eval`, `su -c`, an interpreter with inline code), a quoted heredoc, `$'…'`, backticks, arithmetic, `awk -v` and a command word that encodes, slices or traces the value are refused with the reason; a failed read ends the whole command before it runs | injection through a value with shell characters; a command running with ""; the value leaving as base64/hex/xtrace | a transform applied in a later command that carries no placeholder (C2 catches the plain and encoded forms of values this session resolved); PowerShell (Codex on Windows is denied); a command word the hook cannot read (a variable such as `$S`, a script file), whose command the client's permission prompt shows |
 | C7 | limiter: distinct keys per session and resolves per hour, deny above the cap | A2 in bulk | the caps count every hook process of this user in the last hour (the records live in the index); a direct store read by A2 is C8's job |
-| C13 | fail-closed on the plugin's own failure: a 7 s watchdog answers block/deny/withhold before the client's timeout, a crashing hook answers the same, error texts carry types only, a damaged index is refused | the plugin's own faults turning into fail-open | a client that kills the hook earlier than 7 s |
-| C8 | store backstop: Bash commands that read or change the store (`maisecrets get`, `security … maisecrets`, `~/.maisecrets`, a delivery path) and Write/Edit under `~/.maisecrets` are denied, the reason names the pattern; Read, Grep, Glob, LS, NotebookRead, the editing tools and an MCP path argument (also a `file:` URI) under the vault home or the value directory are denied by file identity (symlink, relative path, another case and a hard link to a store file resolved); Bash names the default and the configured home | A2 | Bash: text matching, so an obfuscated command passes. The agent runs as the same user: a command that builds the path at run time can still read the file store (key and ciphertext side by side) or ask the keychain. This is a backstop, not a boundary; a hard boundary needs a broker process, and the Claude Code sandbox rule that denies reads of `~/.maisecrets` (README) is the strongest step today |
+| C13 | fail-closed on the plugin's own failure: a 7 s watchdog answers block/deny/withhold before the client's timeout, a crashing hook answers the same, and so does an entry point that cannot import the plugin's code, error texts carry types only, a damaged index is refused | the plugin's own faults turning into fail-open | a client that kills the hook earlier than 7 s; a client that runs no hook at all: Claude Code for a plugin whose folder moved while the session was open (anthropics/claude-code#97847, measured by the harness scenario `plugin_folder_moved`) |
+| C8 | store backstop: Bash commands that read or change the store (`maisecrets get`, `security … maisecrets`, `~/.maisecrets`, a delivery path) and Write/Edit under `~/.maisecrets` are denied, the reason names the pattern; Read, Grep, Glob, LS, NotebookRead, the editing tools, an MCP path argument (also a `file:` URI) and an MCP resource read (`ReadMcpResourceTool`, `ReadMcpResourceDirTool`) under the vault home or the value directory are denied by file identity (symlink, relative path, another case and a hard link to a store file resolved); Bash names the default and the configured home | A2 | Bash: text matching, so an obfuscated command passes. The agent runs as the same user: a command that builds the path at run time can still read the file store (key and ciphertext side by side) or ask the keychain. This is a backstop, not a boundary; a hard boundary needs a broker process, and the Claude Code sandbox rule that denies reads of `~/.maisecrets` (README) is the strongest step today |
 | C9 | audit line per resolve: time, session, key, tool, command with placeholders | A5 sees what left | the log is on the same disk |
 | C10 | keyed fingerprints: the index holds HMAC(key, value); the key lives in the store, never in the index | A4 guessing short PII from `index.json` | A3 can read the key |
 | C11 | TTL with renewal cap; expiry deletes the value and keeps metadata | A4, stale mappings | the person can set 30 days |
@@ -47,7 +47,7 @@ a harness scenario that goes red when the control is removed
 
 ## Invariants
 
-Three goals hold over every path, each with its own tests and a mutation per path
+Four goals hold over every path, each with its own tests and a mutation per path
 (`docs/TESTING.md`, `beliefs/inv-*.toml`):
 
 - **I1** A stored value never reaches a hook output the model or the person reads, within the
@@ -60,7 +60,10 @@ Three goals hold over every path, each with its own tests and a mutation per pat
 - **I4** Every value the detector finds can be masked in a transcript in every record shape the
   clients write.
 
-I2, "a Codex rewrite never grants more than the original call", waits for the Codex design.
+- **I2** On Claude Code a rewrite never grants more than the call the model wrote: no `allow`, the
+  original input back when each value becomes its placeholder again, and in Bash only the reads of
+  the values and, for ssh, the guard and the options that narrow it. On Codex a rewrite carries
+  `allow` (C5); a test records that exception and fails when it changes.
 
 ## What is knowingly not defended
 
@@ -70,6 +73,11 @@ I2, "a Codex rewrite never grants more than the original call", waits for the Co
   account on a non-domain machine. The Linux key file is readable by its
   owner, as it must be. A user-presence gate (Touch ID) needs a signed helper
   application on the data-protection keychain; it is not built.
+- **A2 taking another session's blocked prompt.** `/ms` reads the prompt of the session the client
+  names; a command that sets or clears that id is refused by text match, so an obfuscated one
+  passes (the C8 class). The prompt holds placeholders, never a value.
+- **A compromised release.** A hook runs as the user and sees every value, like any plugin or
+  package with that access; a pinned, reviewed version is the admin's control.
 - **A3 reading a waiting FIFO.** The same class as `security
   find-generic-password`; the run directory keeps other users out, not the
   user's own processes.

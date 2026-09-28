@@ -1,0 +1,9 @@
+# Dutch credential labels.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+# wachtwoord: no word start, because Dutch joins compounds (beheerderswachtwoord).
+wachtwoord	wachtwoord	wachtwoord, Wachtwoord, db_wachtwoord, nieuw wachtwoord, beheerderswachtwoord
+# sleutel alone is an ordinary word (key): only the two-word labels and the compound count.
+sleutel	(?<![^\W\d_])(?:geheime[ _-]|api[ _-]?)sleutel	geheime sleutel, Geheime sleutel, API-sleutel
+inloggegevens	(?<![^\W\d_])inloggegevens	inloggegevens, Inloggegevens

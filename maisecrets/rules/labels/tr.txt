@@ -1,0 +1,12 @@
+# Turkish credential labels.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+parola	(?<![^\W\d_])parola	parola, Parola, db_parola
+# şifre: not şifreleme (encryption, `şifreleme: AES-256-GCM`), şifrelenmiş or şifreli (encrypted),
+# and not deşifre (the word start).
+ifre	(?<![^\W\d_])(?:ş|s)ifre(?!l[eiı])	şifre, Şifre, sifre, SIFRE, db_sifre
+# anahtar alone is an ordinary word (key): only the two-word labels count; anahtarı is the form
+# in a compound (erişim anahtarı).
+anahtar	(?<![^\W\d_])(?:gizli[ _-](?:eri(?:ş|s)im[ _-])?|eri(?:ş|s)im[ _-]|api[ _-])anahtar(?:ı|i)?	gizli anahtar, Erişim anahtarı, erisim anahtari, API anahtarı, gizli erişim anahtarı
+kimlik	(?<![^\W\d_])kimlik[ _-]do(?:ğ|g)rulama[ _-]bilgileri	kimlik doğrulama bilgileri, Kimlik dogrulama bilgileri

@@ -1,0 +1,9 @@
+# Italian credential labels. Italian interfaces write password, which the denylist has already.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+# chiave alone is an ordinary word (parola chiave: keyword) and segreto alone is too: only the
+# labels of two or more words count.
+chiave	(?<![^\W\d_])chiave[ _-](?:di[ _-]accesso|segreta|api)	chiave di accesso, Chiave segreta, chiave API, chiave_segreta
+segreto	(?<![^\W\d_])segreto[ _-]del[ _-]client	segreto del client, Segreto del client
+credenziali	(?<![^\W\d_])credenziali	credenziali, Credenziali, db_credenziali

@@ -122,7 +122,7 @@ vendor's hook docs, not measured · ⚠️ partly · ❌ no hook
 | client | prompt | rehydrate | redact | adapter |
 |---|:---:|:---:|:---:|---|
 | Claude Code CLI | ✅ | ✅ | ✅ | built |
-| Cowork, Claude desktop app | ☑️ | ☑️ | ☑️ | same hooks and manifest; not measured by the harness |
+| Cowork, Claude desktop app | ✅ | ✅ | ✅ | same hooks and manifest; a blocked prompt, an MCP call that resolves with its ask and warning, and a redacted Bash output seen live in the desktop app (2026-09-28); not in the harness |
 | Codex CLI | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks; on Windows a shell placeholder is denied (PowerShell rewrite not built) |
 | Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | same plugin runtime; block, rewrite and redaction seen live (2026-09-27), not in the harness |
 | Codex IDE extension | ☑️ | ☑️ | ☑️ | same plugin runtime; not measured |
@@ -159,7 +159,11 @@ claude plugin update maisecrets@maisecrets              # later versions
 When Claude Code cannot find that folder, it shows `Plugin directory does not
 exist` and runs the tool without the hook: every protection of that session is
 off until `/reload-plugins` or a new session. No code of the plugin runs then, so
-maisecrets cannot warn you itself.
+maisecrets cannot warn you itself. The harness measures this on every run
+(scenario `plugin_folder_moved`, Claude Code 2.1.283: no hook runs, the tool
+runs; anthropics/claude-code#97847). A client that runs the hook command anyway
+gets a refusal on macOS and Linux: the command tests for the launcher first and
+blocks without it. The Windows command (`commandWindows`) has no such test yet.
 
 - Installed from this GitHub marketplace (the commands above), a previous version
   stays for 14 days, "so a session that already loaded the old version keeps
@@ -195,9 +199,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 9 scenarios against a fake upstream
+python3 harness/run.py                                 # 10 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
-python3 scripts/replay_can_fail.py                     # 49 proofs: each control's test, and each path of the three invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 53 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -388,7 +392,11 @@ Credential labels come in languages. English labels (`password:`, `pass:`,
 `token:`) are always on. maisecrets adds the labels of your system language
 and of each region, for example `passwort:` and `kennwort:` for German. The
 labels are data files in `maisecrets/rules/labels/`, one file per language.
-A new language is one new file. `/maisecrets:status` shows the regions, where
+A new language is one new file. Files exist for Czech, Danish, Dutch,
+English, Finnish, French, German, Italian, Korean, Norwegian (Bokmål),
+Polish, Portuguese, Spanish, Swedish, Thai and Turkish. Each word comes from
+a reviewed translation of an open-source project, and
+`docs/label-sources.md` names the source of each word. `/maisecrets:status` shows the regions, where
 they came from, and the label languages.
 
 Every entry has a TTL. Each use renews it, up to `max_ttl_seconds`. On
