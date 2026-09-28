@@ -240,7 +240,10 @@ def _scrub_digits_by_line(fd: int, digits: list[bytes]) -> int:
             if line and any(d in line for d in digits):
                 masked, n = _mask_digits_in_strings(line, digits)
                 if n:
-                    os.pwrite(fd, masked, pos)
+                    here = os.lseek(fd, 0, os.SEEK_CUR)      # os.pwrite is POSIX only (Windows has none)
+                    os.lseek(fd, pos, os.SEEK_SET)
+                    os.write(fd, masked)
+                    os.lseek(fd, here, os.SEEK_SET)
                     hits += n
             if nl < 0:
                 return hits
@@ -1863,6 +1866,10 @@ def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
     hits: list[str] = []
     if tool in _READ_TOOLS:
         hits = [f for f in _PATH_FIELDS if _touches_store(tool_input.get(f, ""), cwd, contains=tool == "Grep")]
+        # Grep without a path searches the working directory (Codex review, 2026-09-28)
+        if tool == "Grep" and not any(tool_input.get(f) for f in _PATH_FIELDS) \
+                and _touches_store(cwd, cwd, contains=True):
+            hits.append("cwd")
         pattern = tool_input.get("pattern") if tool == "Glob" else tool_input.get("glob")
         if isinstance(pattern, str) and pattern:
             # a Glob names its directory in the pattern too: the part before the first wildcard
@@ -2085,7 +2092,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
         if value and len(value) < 4:
             # under 4 characters only where no letter or digit stands next to it: a plain substring replace
             # of `a` broke every word of the output (Codex review, 2026-09-28)
-            pattern = re.compile(r"(?<![A-Za-z0-9])" + re.escape(value) + r"(?![A-Za-z0-9])")
+            pattern = re.compile(r"(?<![^\W_])" + re.escape(value) + r"(?![^\W_])")   # any letter or digit
             out, n = pattern.subn(lambda _m: ref, out)
             if n:
                 hit["n"] += n

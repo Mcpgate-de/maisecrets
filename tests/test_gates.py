@@ -866,10 +866,15 @@ class StorePathTests(unittest.TestCase):
             self.assertEqual(self.pre("Read", {"file_path": mixed + "/key"}), "deny")
         self.assertEqual(self.pre("Grep", {"pattern": "x", "path": os.path.dirname(home)}), "deny")
         self.assertEqual(self.pre("Glob", {"pattern": "*", "path": os.path.dirname(home)}), "pass", "names only")
+        self.assertEqual(self.pre("Grep", {"pattern": "x"}, cwd=os.path.dirname(home)), "deny", "no path: the cwd")
 
     def test_ordinary_reads_pass(self):
+        # a folder that does not hold the store: on Linux the test home lies in /tmp, so a Grep over /tmp is
+        # rightly refused there
+        elsewhere = tempfile.mkdtemp(prefix="maisecrets-elsewhere-")
+        self.addCleanup(shutil.rmtree, elsewhere, True)
         for tool, ti in (("Read", {"file_path": "/etc/hosts"}), ("Glob", {"pattern": "**/*.py"}),
-                         ("Grep", {"pattern": "maisecrets", "path": "/tmp"}),
+                         ("Grep", {"pattern": "maisecrets", "path": elsewhere}),
                          ("mcp__x__y", {"text": "the store is in ~/.maisecrets"})):
             with self.subTest(tool=tool, ti=ti):
                 self.assertEqual(self.pre(tool, ti), "pass")
@@ -917,6 +922,9 @@ class ResolvedValueRedactionTests(unittest.TestCase):
         e = self.v.put("a", "SECRET", "manual", session="S1")
         self.assertEqual(self.v.record_resolve(e.key, "S1", "Bash", "{}"), "ok")
         self.assertEqual(self._post("status: a database"), "status: " + e.ref + " database")
+        e2 = self.v.put("i", "SECRET", "manual", session="S1")
+        self.assertEqual(self.v.record_resolve(e2.key, "S1", "Bash", "{}"), "ok")
+        self.assertEqual(self._post("çiğ and i ok"), "çiğ and " + e2.ref + " ok", "a letter is a letter in any script")
 
     def test_a_result_above_the_cap_is_masked_without_storing(self):
         _reset()
