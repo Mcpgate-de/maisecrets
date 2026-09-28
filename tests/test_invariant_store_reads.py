@@ -146,7 +146,7 @@ class FileToolTests(unittest.TestCase):
     def test_every_reading_tool_refuses_every_spelling_of_a_store_path(self):
         spellings = self.spellings()
         bad = []
-        with mock.patch.dict(os.environ, {"HOME": str(self.s.home.parent)}):
+        with mock.patch.dict(os.environ, {"HOME": str(self.s.home.parent), "USERPROFILE": str(self.s.home.parent)}):
             for tool, field in READERS.items():
                 for label, (path, cwd) in spellings.items():
                     tool_input = {field: path}
@@ -186,14 +186,16 @@ class FileToolTests(unittest.TestCase):
             "path": {"path": str(f)},
             "nested list": {"args": {"paths": ["/tmp/a", str(f)]}},
             "tilde": {"file": "~/" + s.home.name + "/" + f.name},
-            "file URI": {"uri": "file://" + str(f)},
-            "file URI encoded": {"uri": "file://" + str(f).replace(".", "%2E")},
-            "file URI with localhost": {"uri": "file://localhost" + str(f)},
+            # as_uri() is `file:///C:/…` on Windows and `file:///var/…` elsewhere
+            "file URI": {"uri": f.as_uri()},
+            "file URI encoded": {"uri": f.as_uri().replace(".", "%2E")},
+            "file URI with localhost": {"uri": "file://localhost" + f.as_uri()[len("file://"):]},
             "symlink": {"path": str(s.outside / "l")},
         }
         os.symlink(f, s.outside / "l")
         bad = []
-        with mock.patch.dict(os.environ, {"HOME": str(s.home.parent)}):
+        # `~` comes from USERPROFILE on Windows and from HOME elsewhere
+        with mock.patch.dict(os.environ, {"HOME": str(s.home.parent), "USERPROFILE": str(s.home.parent)}):
             for label, ti in cases.items():
                 for client in CLIENTS:
                     if not deny(pre("mcp__fs__read_file", ti, "/", client)):
