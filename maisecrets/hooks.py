@@ -1749,7 +1749,7 @@ def _precheck(vault: Vault, keys: list[str], session: str | None) -> list[str]:
     recorded or served. A call with a good key and a bad one wrote the good key's audit line before
     the refusal on MCP and file tools (review, 2026-09-29); Bash had this order already."""
     failed = [f"{k} ({st})" for k in keys for st in [vault.status(k, session)] if st != "ok"]
-    return failed or [f"{k} ({st})" for k in keys for st in [vault._limit(k, session)] if st != "ok"]
+    return failed or vault._limit_all(keys, session)
 
 
 def _deny_reason(failed: list[str]) -> str:

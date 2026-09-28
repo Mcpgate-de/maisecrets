@@ -293,11 +293,13 @@ def load_config() -> dict:
         what = ", ".join(named + ([f"{other} more that are not near a known key"] if other else []))
         cfg["config_warning"] = (cfg["config_warning"] + "; " if cfg["config_warning"] else "") + \
             f"{CONFIG.name}: unknown key(s) {what} ignored"
+        user = {k: v for k, v in user.items() if k in _CONFIG_TYPES}
         if any(difflib.get_close_matches(k, list(_SAFETY_KEYS), n=1, cutoff=0.8) for k in named):
-            # "rehydraton": "block" is a stricter wish spelled wrong: dropping it would loosen
+            # "rehydraton": "block" is a stricter wish spelled wrong: dropping it would loosen. The file's
+            # own rehydration key must not undo it (review round 3: "resolve_in_file": false next to it)
+            user.pop("rehydration", None)
             cfg["rehydration"] = "block"
             cfg["rehydration_fallback"] = True
-        user = {k: v for k, v in user.items() if k in _CONFIG_TYPES}
     user = _old_region_key(user)
     cfg.update(user)
     cfg["regions_from"] = "config.json" if "regions" in user else "default"
@@ -334,13 +336,18 @@ def load_config() -> dict:
             # valid JSON of another shape was skipped silently: no policy applied at all
             raise ConfigError(f"{policy_path} must hold one JSON object")
         _check_types(policy, policy_path.name)
-        unknown_policy = sorted(k for k in policy if k not in _CONFIG_TYPES and not k.startswith("_"))
+        import difflib
+        unknown_policy = sorted(k for k in policy if k not in _CONFIG_TYPES and not k.startswith(("_", "$")))
+        policy = {k: v for k, v in policy.items() if k in _CONFIG_TYPES}
+        typo = [k for k in unknown_policy if difflib.get_close_matches(k, list(_SAFETY_KEYS), n=1, cutoff=0.8)]
         if unknown_policy:
-            # an administrator's key spelled wrong ("rehydraton") would be dropped silently; its intent is
-            # unknown, so rehydration stops until it is fixed. A key that starts with "_" is a comment.
+            # a key of a newer version or a management tool is ignored with a warning; "_" and "$" keys
+            # are comments and schema links
             cfg["config_warning"] = (cfg["config_warning"] + "; " if cfg["config_warning"] else "") + \
-                f"{policy_path.name}: {len(unknown_policy)} unknown key(s); rehydration is blocked until fixed"
-            policy = {k: v for k, v in policy.items() if k in _CONFIG_TYPES}
+                f"{policy_path.name}: {len(unknown_policy)} unknown key(s) ignored" + \
+                ("; a safety key looks misspelled, rehydration is blocked until fixed" if typo else "")
+        if typo:
+            # an administrator's "rehydraton": "block" dropped silently would loosen; its intent is unknown
             policy["rehydration"] = "block"
             cfg["rehydration_fallback"] = True
         elif "rehydration" in policy:
@@ -1068,6 +1075,26 @@ class Vault:
         if len(rec) >= per_hour:
             return f"limit: {per_hour} resolves in the last hour (max_resolves_per_hour)"
         return "ok"
+
+    def _limit_all(self, keys: list[str], session: str | None) -> list[str]:
+        """The limiter for every key of one call together: two new keys at a cap of one passed one by
+        one, and the first was recorded before the second was refused (review, 2026-09-29)."""
+        failed = [f"{k} ({st})" for k in keys for st in [self._limit(k, session)] if st != "ok"]
+        if failed:
+            return failed
+        now = time.time()
+        rec = [r for r in self._index.get("resolves", []) if r["ts"] > now - 3600]
+        per_session = int(self.cfg.get("max_keys_per_session", 25))
+        per_hour = int(self.cfg.get("max_resolves_per_hour", 60))
+        known = {r["key"] for r in rec if r["session"] == session}
+        new = [k for k in dict.fromkeys(keys) if k not in known]
+        if len(known) + len(new) > per_session:
+            return [f"{new[per_session - len(known)]} (limit: {per_session} distinct keys in this session this "
+                    "hour (max_keys_per_session))"]
+        if len(rec) + len(keys) > per_hour:
+            return [f"{keys[per_hour - len(rec)]} (limit: {per_hour} resolves in the last hour "
+                    "(max_resolves_per_hour))"]
+        return []
 
     def _record(self, key: str, session: str | None, tool: str, context: str) -> bool:
         """One audit line per resolve. False when the line could not be written: the README

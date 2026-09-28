@@ -16,7 +16,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | Codex with a real model | `python3 harness/codex.py --real` | by hand: `mcp_text_field_rehydrate` and `allow_keeps_the_codex_sandbox` need a real model (an MCP call and a sandbox the fake upstream cannot script) |
 | ssh through the sandbox | `MAISECRETS_E2E_HOST=<ssh alias> MAISECRETS_E2E_IP=<address> python3 harness/sandbox/ssh_e2e.py` | by hand before a release that touches the ssh route, on macOS and on Linux: the real Claude Code sandbox against a real host, under `rehydration: automatic` (cases 0a to 0f) and `confirm` |
 
-606 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
+607 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
 the tested commit of a release (branch `ci`) and on a push to main without a release.
 
 ## What makes a test count
@@ -47,8 +47,10 @@ the tested commit of a release (branch `ci`) and on a push to main without a rel
   policy (`automatic`, `confirm`, `block`) → defer, allow, ask or deny, and a second table for the
   Windows capabilities. Each cell drives the real `pre_tool` with a stored value and checks the
   decision, where the value went (a real bash for Bash on POSIX; on Windows the decision only), that
-  no reason names it, and that a refusal left nothing behind: no audit line, no approval token, no
-  value waiting in the run directory. It also checks the default, a setting that is no policy, the
+  no reason names it, and that a refusal left nothing behind that a test can see: no audit line, no
+  approval token, no value waiting in the run directory (the sealed first-use directory cannot be
+  listed; the approval store names its token). An ssh rewrite is not run here: its bytes are proven
+  in the real sandbox by `harness/sandbox/ssh_e2e.py`. It also checks the default, a setting that is no policy, the
   shapes refused under every policy, a good key next to a refused one, and, by the syntax tree of
   `hooks.py`, every call site that returns a rewrite and every function that builds one. The code's own table (`rehydration.outcome`) is never read by the test. Five C16 beliefs
   mutate the policy and its call sites. The harness proves the same on the real clients: `mcp_rehydrate`,

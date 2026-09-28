@@ -261,6 +261,12 @@ next patch version.
 (Linux). Any key from "Options" goes in it; typical: `backend`,
 `scrub_transcript`, `max_ttl_seconds`, `regions`, `report_url`,
 `resolve_in_files`, `rehydration`.
+Every user must be able to read the file and its folder (for example 0644 and
+0755): a policy maisecrets cannot read makes every hook fail closed, because it
+cannot tell what the policy says. A key it does not know is ignored with a
+warning; a key that starts with `_` or `$` is a comment or a schema link. A key
+that looks like a misspelled `rehydration`, `resolve_in_files` or
+`ssh_via_sandbox` blocks rehydration until it is fixed.
 `/maisecrets:status` names the keys that come from the policy. The plaintext
 `jsonfile` store is refused unless the policy or the user sets
 `allow_plaintext_store`.

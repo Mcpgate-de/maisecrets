@@ -266,6 +266,21 @@ class RehydrationMatrixTests(unittest.TestCase):
                         self.assertNotIn("updatedInput", hso)
                         _nothing_left(self, before, f"{path}/{client}/{pol}")
 
+    def test_two_new_keys_over_the_cap_resolve_nothing(self):
+        # each key alone is under the cap, both together are over it
+        a = Vault().put(VALUE, "SECRET", "manual", session="S1").ref
+        b = Vault().put(VALUE + "-2", "SECRET", "manual", session="S1").ref
+        for cap in ({"max_keys_per_session": 1}, {"max_resolves_per_hour": 1}):
+            for tool, tool_input in (("mcp__svc__lookup", {"id": a, "other": b}),
+                                     ("Write", {"file_path": "/tmp/maisecrets-matrix.env", "content": a + b}),
+                                     ("Bash", {"command": f"printf '%s %s' {a} {b}"})):
+                with self.subTest(cap=cap, tool=tool):
+                    before = _side_effects()
+                    hso = self.pre(tool, tool_input, "claude", **cap)
+                    self.assertEqual(hso.get("permissionDecision"), "deny")
+                    self.assertIn("limit:", hso["permissionDecisionReason"])
+                    _nothing_left(self, before, f"{tool} {cap}")
+
     @unittest.skipIf(os.name == "nt", "the ssh route is POSIX only")
     def test_a_key_the_session_may_not_resolve_leaves_no_approval_token(self):
         ref = Vault().put(VALUE, "SECRET", "manual", session="S9").ref   # minted in another session

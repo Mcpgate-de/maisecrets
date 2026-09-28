@@ -156,7 +156,9 @@ SCENARIOS = {
         ],
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c1⟧"],
-        "expect_text": "runs only inside the Claude Code sandbox",
+        # the guard's own stderr, not the ask reason, which also names the sandbox (Codex review round 3)
+        "expect_text": "maisecrets: this command sends a value over ssh and runs only inside the Claude Code",
+        "expect_no_text": "on stdin to ssh aux01",
     },
     # a slash command with shell syntax in its arguments: only the command's own allowed-tools
     # rule may admit the call, and the text must arrive as text (feedback on 0.5.2, 2026-09-28)
@@ -305,6 +307,8 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             fails.append(f"{fname} in the vault home has no {'/'.join(path)}")
     if sc.get("expect_no_file") and (cwd / sc["expect_no_file"]).exists():
         fails.append(f"{sc['expect_no_file']} exists: a shell ran text from the arguments as code")
+    if sc.get("expect_no_text") and sc["expect_no_text"] in joined:
+        fails.append(f"{sc['expect_no_text']!r} in a request body: maisecrets asked where it should not")
     if sc.get("expect_text") and sc["expect_text"] not in joined:
         fails.append(f"expected {sc['expect_text']!r} in a request body (the deny reason reaches the model)")
     # a hook payload may carry the value only where the scenario sends it on purpose: the PostToolUse of

@@ -233,6 +233,12 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("1 unknown key(s)", cfg["config_warning"])
         self.policy.write_text(json.dumps({"_note": "rollout 3"}))
         self.assertEqual(vault.load_config()["rehydration"], "automatic", "a comment key blocks nothing")
+        # a schema link, a tool's comment or a key of a newer version: a warning, and the policy still works
+        self.policy.write_text(json.dumps({"rehydration": "confirm", "$schema": "x", "comment": "y",
+                                           "max_resolves_per_day": 9}))
+        cfg = vault.load_config()
+        self.assertEqual((cfg["rehydration"], cfg.get("rehydration_fallback", False)), ("confirm", False))
+        self.assertIn("2 unknown key(s) ignored", cfg["config_warning"])
         # a valid policy setting is the administrator's, never explained as the user's broken file
         self._user("{not json")
         self.policy.write_text(json.dumps({"rehydration": "block"}))
@@ -242,6 +248,13 @@ class ConfigTests(unittest.TestCase):
         # the user file: a safety key spelled wrong is a stricter wish, another typo is not
         self._user({"rehydraton": "block"})
         self.assertEqual(vault.load_config()["rehydration"], "block")
+        # the file's own rehydration key does not undo it (review round 3)
+        for user in ({"rehydration": "automatic", "resolve_in_file": False},
+                     {"rehydration": "confirm", "ssh_via_sandbx": False}):
+            with self.subTest(user):
+                self._user(user)
+                cfg = vault.load_config()
+                self.assertEqual((cfg["rehydration"], cfg["rehydration_fallback"]), ("block", True))
         self._user({"renew_on_uses": False})
         self.assertEqual(vault.load_config()["rehydration"], "automatic")
         # a user file that exists and cannot be read

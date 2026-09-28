@@ -28,8 +28,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
-# the asks these tests hold belong to rehydration "confirm"; the default "automatic" has its own class
-# (AutomaticRouteTests) and the whole matrix is in tests/test_rehydration_matrix.py
+# the asks these tests hold belong to rehydration "confirm"; the default "automatic" and the whole matrix
+# are in tests/test_rehydration_matrix.py, the real sandbox in harness/sandbox/ssh_e2e.py (cases 0a-0f)
 TEST_CONFIG = '{"backend": "jsonfile", "allow_plaintext_store": true, "rehydration": "confirm"}'
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text(TEST_CONFIG)
 
