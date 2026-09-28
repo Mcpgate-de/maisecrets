@@ -400,7 +400,8 @@ def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: 
     /maisecrets:list; the report link is built by /maisecrets:report (review with the product
     owner, 2026-09-27: the user does not need to know whether it was 1 e-mail or 13)."""
     kinds = {e.type for e in entries}
-    secret = "SECRET" in kinds
+    # a value this session resolved matches without an entry of its own; it was stored as a secret
+    secret = "SECRET" in kinds or not kinds
     personal = bool(kinds - {"SECRET"})
     what = ("a secret and personal data were" if secret and personal
             else "a secret was" if secret else "personal data was")
@@ -442,22 +443,32 @@ def user_prompt(payload: dict) -> dict:
     # 2. references the human typed or pasted: this session may resolve them from now on
     typed = find_refs(prompt)
     matches = detect.scan(prompt)
-    if typed or matches:
+    vault = None
+    if typed or matches or _has_live(cfg):
         vault = Vault(cfg)
         for key, _s, _e in typed:
             vault.admit(key, session)
-    if not matches:
+    rewritten, entries = _replace(prompt, matches, vault, session) if matches else (prompt, [])
+    values = [m.value for m in matches]
+    stored = {"n": 0}
+    if vault is not None and _has_live(cfg):
+        # a value the store already holds has a known shape: its fingerprint. Without this a stored
+        # password typed again, or a value without a detector shape next to a detected one, went to
+        # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
+        # from 8 characters; a shorter one would block ordinary words in a prompt.
+        resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]
+        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values)
+    if not matches and not stored["n"]:
         if typed:
             # the model has never seen the bracket syntax; without this it asks the user for the
             # value, and that value is blocked again (agent review, 2026-09-26)
             return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                            "additionalContext": PRIMER}}
         return {}
-    rewritten, entries = _replace(prompt, matches, vault, session)
     copied = _clipboard(rewritten)
     _save_pending(rewritten, session)
     if cfg.get("scrub_transcript", True):
-        values, refs = [m.value for m in matches], [e.ref for e in entries]
+        refs = [e.ref for e in entries] + [r for v, r in _resolved_values(vault, session) if v in values]
         # the inline scrub can hit an OLDER record of the same value; the record of this prompt
         # is written after the hook returns, so the delayed child always starts (review, 2026-09-26)
         _scrub_transcript(payload.get("transcript_path", ""), values, refs)
@@ -500,6 +511,10 @@ _STORE_READ_RE = re.compile("|".join(f"(?P<p{i}>{rx})" for i, (_n, rx) in enumer
 
 def _store_read_match(command: str) -> str | None:
     """The name of the backstop pattern a command matches, or None."""
+    for d in _store_dir_spellings():
+        # a home set by environment variable has no `.maisecrets` in its name (invariant I3, 2026-09-28)
+        if re.search(re.escape(d) + r"(?![\w.-])", command):
+            return "the maisecrets home directory"
     m = _STORE_READ_RE.search(command)
     if not m:
         return None
@@ -1805,6 +1820,13 @@ _READ_TOOLS = ("Read", "Grep", "Glob", "LS", "NotebookRead")
 _PATH_FIELDS = ("file_path", "path", "notebook_path", "directory", "dir", "root", "cwd")
 
 
+def _store_dir_spellings() -> list[str]:
+    """The protected directories as the configured path and as the real path, longest first."""
+    from .vault import HOME
+    names = {str(HOME).rstrip(os.sep)} | set(_protected_dirs())
+    return sorted((n for n in names if len(n) > 1), key=len, reverse=True)
+
+
 def _protected_dirs() -> list[str]:
     """The vault home and the value run directory, as real paths: a tool that reads them bypasses every
     gate around a resolve (external review, 2026-09-28: Read was not checked at all)."""
@@ -1848,6 +1870,8 @@ def _touches_store(path: str, cwd: str = "", contains: bool = False) -> bool:
         if parent == probe:
             break
         probe = parent
+    if _hardlinked_into(real, protected):
+        return True
     if contains and os.path.isdir(real):
         me = _identity(real)
         for d in protected:
@@ -1860,6 +1884,43 @@ def _touches_store(path: str, cwd: str = "", contains: bool = False) -> bool:
                     break
                 q = parent
     return False
+
+
+def _hardlinked_into(real: str, protected: list[str]) -> bool:
+    """A second name of a store file outside the store (`ln`) has no protected parent: the
+    file's own identity decides (invariant I3, 2026-09-28). Only a file with more than one
+    link is compared, so an ordinary read costs one stat."""
+    try:
+        st = os.stat(real)
+    except OSError:
+        return False
+    if st.st_nlink < 2 or not os.path.isfile(real):
+        return False
+    me = (st.st_dev, st.st_ino)
+    for d in protected:
+        for top, dirs, files in os.walk(d):
+            if top.count(os.sep) - d.count(os.sep) >= 2:
+                dirs[:] = []
+            for name in files:
+                if _identity(os.path.join(top, name)) == me:
+                    return True
+    return False
+
+
+def _uri_path(v: str) -> str:
+    """The local path of a `file:` URI (`file:///p`, `file://localhost/p`, percent-encoded), else the string.
+    An MCP file server takes a URI where a path is expected; `file:///…/vault.json` passed the path check
+    (invariant I3, 2026-09-28)."""
+    if v[:5].lower() != "file:":
+        return v
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
+    u = urlparse(v)
+    if u.netloc not in ("", "localhost"):
+        return v
+    # url2pathname decodes and, on Windows, turns `/C:/Users/…` into `C:\\Users\\…`: an unquoted
+    # `/C:/…` named no store on the Windows runner (2026-09-28)
+    return url2pathname(u.path)
 
 
 def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
@@ -1881,7 +1942,8 @@ def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
                 hits.append("pattern")
     else:
         def look(v: str) -> str:
-            if ("/" in v or "\\" in v or v.startswith("~")) and _touches_store(v, cwd):
+            path = _uri_path(v)
+            if ("/" in path or "\\" in path or path.startswith("~")) and _touches_store(path, cwd):
                 hits.append(v[:80])
             return v
         _walk_strings(tool_input, look)
@@ -1910,7 +1972,9 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         home = os.path.realpath(str(HOME))
         if platform.system() in ("Darwin", "Windows"):   # case-insensitive file systems (APFS, NTFS)
             real, home = real.lower(), home.lower()
-        inside = bool(path) and real.startswith(home + os.sep)
+        inside = bool(path) and (real == home or real.startswith(home + os.sep))
+        # the run directory and a hard link are known by identity only (invariant I3, 2026-09-28)
+        inside = inside or _touches_store(path, cwd)
     except (OSError, ValueError):
         inside = False
     if inside or ".maisecrets" in path.lower():
@@ -2018,6 +2082,41 @@ def _candidates(token: str):
             dec = None
         if dec and dec != token:
             yield dec
+    yield from _decoded(token)
+
+
+_HEX_RE = re.compile(r"(?:[0-9a-fA-F]{2}){6,}")
+_B64_RE = re.compile(r"[A-Za-z0-9+/_-]{12,}={0,2}")
+
+
+def _decoded(token: str):
+    """The text a hex or base64 token decodes to. A stored value that another session put in
+    and a command printed as `| base64` or `xxd -p` reached the model: the encoded forms were
+    checked only for values this session resolved (invariant I1, 2026-09-28). Decoding needs
+    no store read; the fingerprint decides."""
+    import base64
+    import binascii
+    t = token.rstrip(".,;:)")
+    out = []
+    if _HEX_RE.fullmatch(t):
+        try:
+            out.append(bytes.fromhex(t))
+        except ValueError:
+            pass
+    if _B64_RE.fullmatch(t):
+        padded = t + "=" * (-len(t) % 4)
+        for alt in (b"+/", b"-_"):
+            try:
+                out.append(base64.b64decode(padded, altchars=alt, validate=True))
+            except (binascii.Error, ValueError):
+                pass
+    for raw in out:
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if len(text) >= _EXACT_MIN_LEN and text.isprintable():
+            yield text
 
 
 def _derived_forms(value: str) -> list[str]:
@@ -2031,8 +2130,10 @@ def _derived_forms(value: str) -> list[str]:
     forms = [value]
     for f in (base64.b64encode(raw).decode(), base64.urlsafe_b64encode(raw).decode()):
         forms += [f, f.rstrip("=")]
-    forms += [raw.hex(), raw.hex().upper(), quote(value, safe=""), quote_plus(value),
-              json.dumps(value)[1:-1], json.dumps(value, ensure_ascii=False)[1:-1]]
+    escaped = [json.dumps(value)[1:-1], json.dumps(value, ensure_ascii=False)[1:-1]]
+    # JSON inside a JSON string (an MCP result whose text is a JSON document) escapes twice
+    forms += [raw.hex(), raw.hex().upper(), quote(value, safe=""), quote_plus(value), *escaped,
+              *(json.dumps(e)[1:-1] for e in escaped)]
     return [f for f in dict.fromkeys(forms) if len(f) >= _EXACT_MIN_LEN]
 
 

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## [0.5.8] - 2026-09-28
+
+### Fixes
+
+- recognise a Windows file URI that names the store (3cca981)
+- name an unknown key only when it is a typo of a real one (55f491f)
+- catch a value JSON-escaped twice in an MCP result (3e46e48)
+
+### Security
+
+- catch another session's value that a command printed as hex or base64 (431ad59)
+- refuse a hard link, a file URI and a configured home path into the store (356bbfc)
+- block a prompt that carries a value the store already holds (fabbd5f)
+
+### Other
+
+- Merge branch 'fix/windows-invariant-paths' into 'main' (21d9ff5)
+- Merge branch 'feat/invariant-beliefs' into 'main' (ad2711b)
+
 ## [0.5.7] - 2026-09-28
 
 ### Fixes
