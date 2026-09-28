@@ -3,7 +3,10 @@ anchor that occurs exactly once, or the replay in CI would prove nothing. Static
 the mutation itself is replayed by scripts/replay_can_fail.py, never inside the suite."""
 import importlib
 import sys
-import tomllib
+try:
+    import tomllib
+except ImportError:     # Python < 3.11: the belief files are checked on the CI Pythons
+    tomllib = None
 import unittest
 from pathlib import Path
 
@@ -15,6 +18,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 BELIEFS = sorted((ROOT / "beliefs").glob("*.toml"))
 
 
+@unittest.skipIf(tomllib is None, "tomllib is Python 3.11+; the other CI Pythons check the belief files")
 class BeliefsWellFormedTests(unittest.TestCase):
     def test_there_are_beliefs(self):
         self.assertGreaterEqual(len(BELIEFS), 10, "a population test must fail on an empty population")

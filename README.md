@@ -84,13 +84,13 @@ moves only the last number; a higher one needs the owner's approval. Vault backe
 | Linux | `encrypted-file` | `openssl` AES-256-CBC + PBKDF2 + HMAC tag, key file 0600 |
 | any | `jsonfile` | plaintext 0600, TEST MODE only |
 
-Hooks run through `hooks/run.sh` (bash), which looks for a Python 3.11+ as
+Hooks run through `hooks/run.sh` (bash), which looks for a Python 3.9+ as
 `python3`, `python`, `py -3`, a versioned name, or the Homebrew, `/usr/local`
 and python.org paths. Claude Code on Windows requires Git Bash, so the
 launcher runs there too. Codex on Windows has no Git Bash, so every hook also
 names a `commandWindows` entry: `hooks/run.cmd` runs the same `dispatch.py`
 from `cmd.exe`, the shell Codex uses for a Windows hook. Without a Python
-3.11+ the launcher blocks every prompt and every tool call and withholds every
+3.9+ the launcher blocks every prompt and every tool call and withholds every
 tool result, and its message names what to install: fail closed, with a cause.
 
 Proven with the harness on macOS (Claude Code 2.1.283) and on Debian 13
@@ -130,8 +130,8 @@ behind each mark are in `docs/CLIENTS.md`.
 
 ## Requirements
 
-Python 3.11 or newer on the PATH the client gives its hooks (`python3 --version`).
-A stock Mac ships 3.9: `brew install python` or the python.org installer.
+Python 3.9 or newer on the PATH the client gives its hooks (`python3 --version`).
+The stock `python3` of macOS (3.9) is enough; nothing to install on a Mac.
 Windows: `winget install Python.Python.3.12`. Linux: your package manager, plus
 `openssl` for the vault and `xclip` if you want the clipboard. Without it the
 plugin blocks every prompt and names the missing piece.
@@ -295,7 +295,7 @@ values that already leaked. The model loads it when a task fits; in Claude Code 
   only when a hook of the same agent ran for the call that started it. Otherwise the answer
   opens with an offer that names the source and the step the user must do, and the install
   commands run only after a yes. There is no offer in a web or mobile chat, and none without a
-  Python 3.11 for the hooks. This is how the skill, which a store can list alone, brings the
+  Python 3.9 for the hooks. This is how the skill, which a store can list alone, brings the
   hooks along.
 - **Check what the agents already received.** `audit_transcripts.py` reads the local Claude Code
   and Codex sessions and lists every secret that sat in a prompt, a tool result or a model answer,

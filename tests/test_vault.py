@@ -1208,7 +1208,7 @@ class BackendTimeoutTests(unittest.TestCase):
                 TimeoutExpired=subprocess.TimeoutExpired)):
             with self.assertRaises(RuntimeError) as cm:
                 op()
-            text = "".join(traceback.format_exception(cm.exception))
+            text = "".join(traceback.format_exception(type(cm.exception), cm.exception, cm.exception.__traceback__))
             self.assertIn(word, str(cm.exception))
             self.assertIn("timed out", str(cm.exception))
             stored = base64.b64encode(self.VALUE.encode()).decode()

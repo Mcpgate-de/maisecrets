@@ -131,6 +131,16 @@ unit:
     - python -m unittest discover -s tests -v 2>&1 | tee unit.log
     - python scripts/no_unexpected_skips.py unit.log
 
+# the stock python3 of macOS is 3.9, and the hooks run with the first python3 on the PATH: the
+# oldest supported Python gets the whole suite too (a colleague's first prompt was blocked, 2026-09-28)
+unit_python39:
+  extends: unit
+  image: python:3.9-slim
+  script:
+    - apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends git procps >/dev/null
+    - python -m unittest discover -s tests -v 2>&1 | tee unit.log
+    - python scripts/no_unexpected_skips.py unit.log "tomllib is Python 3.11+"
+
 beliefs_can_fail_replay:
   stage: test
   extends: .tested_before_the_tag
@@ -181,7 +191,7 @@ release:
   rules:
     # not on the release commit itself (pushed with ci.skip anyway), not on tags, not on schedules
     - if: $CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_MESSAGE !~ /^chore\(release\):/
-  needs: [manifests, plugin_validate, commit_format, no_secrets_in_tree, lint, unit, beliefs_can_fail_replay, harness_claude, harness_codex, mirror]
+  needs: [manifests, plugin_validate, commit_format, no_secrets_in_tree, lint, unit, unit_python39, beliefs_can_fail_replay, harness_claude, harness_codex, mirror]
   variables:
     GIT_DEPTH: "0"
   script:
@@ -292,7 +302,7 @@ mirror:
     - if: $CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"
   # the public repository is an install source: nothing reaches it before the tests passed,
   # and only the tested commit is pushed (origin/main may already hold a newer, untested one)
-  needs: [unit, harness_claude, harness_codex, plugin_validate, no_secrets_in_tree]
+  needs: [unit, unit_python39, harness_claude, harness_codex, plugin_validate, no_secrets_in_tree]
   # When a release is due, the tested commit goes to the branch ci only: the GitHub matrix runs
   # there, and GitHub main gets the release commit from mirror_tag. Pushed to main, the commit
   # with the old version in its manifest was checked by the Anthropic directory as 0.4.2 while

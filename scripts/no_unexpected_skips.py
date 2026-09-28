@@ -6,7 +6,10 @@ skipped and nothing noticed (2026-09-27). CI accepts two skips: the native-store
 needs a real keychain or Credential Locker, and the native clipboard test, which overwrites the
 clipboard and runs in its own step on the macOS and Windows runners.
 
-    python scripts/no_unexpected_skips.py unit.log
+    python scripts/no_unexpected_skips.py unit.log [allowed reason ...]
+
+The job on the oldest Python adds "tomllib is Python 3.11+": two checks of tooling files need
+tomllib and run on the other Pythons.
 """
 import re
 import sys
@@ -14,10 +17,11 @@ import sys
 ALLOWED = ("MAISECRETS_NATIVE_BACKEND_TEST", "MAISECRETS_NATIVE_CLIPBOARD_TEST")
 
 
-def main(path: str) -> int:
+def main(path: str, *extra: str) -> int:
     text = open(path, encoding="utf-8", errors="replace").read()
+    allowed = ALLOWED + extra
     bad = [line.strip() for line in text.splitlines()
-           if re.search(r"\.\.\. skipped ", line) and not any(a in line for a in ALLOWED)]
+           if re.search(r"\.\.\. skipped ", line) and not any(a in line for a in allowed)]
     if not re.search(r"^Ran \d+ tests?", text, re.M):
         print("no unittest summary in the log: the suite did not run")
         return 1
@@ -27,4 +31,4 @@ def main(path: str) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1]))
+    sys.exit(main(*sys.argv[1:]))

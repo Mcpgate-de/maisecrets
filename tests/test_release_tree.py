@@ -50,7 +50,10 @@ class ReleaseTreeTests(unittest.TestCase):
             os.chdir(cwd)
         cls.tree = Path(tempfile.mkdtemp(prefix="maisecrets-release-tree-"))
         with tarfile.open(fileobj=io.BytesIO(data)) as t:
-            t.extractall(cls.tree, filter="data")
+            if sys.version_info >= (3, 12):
+                t.extractall(cls.tree, filter="data")
+            else:
+                t.extractall(cls.tree)   # our own git archive, not an untrusted tar
 
     @classmethod
     def tearDownClass(cls):

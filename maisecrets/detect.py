@@ -31,7 +31,6 @@ from __future__ import annotations
 import json
 import math
 import re
-import tomllib
 import warnings
 from collections import Counter
 from dataclasses import dataclass
@@ -334,7 +333,8 @@ OWN_RULES: list[dict] = [
 def _load_gitleaks() -> list[Rule]:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")   # "possible nested set" in two gitleaks regexes
-        cfg = tomllib.loads((RULES_DIR / "gitleaks.toml").read_text(encoding="utf-8"))
+        # gitleaks.json is the same rules as JSON, for a Python without tomllib; a test keeps the two equal
+        cfg = json.loads((RULES_DIR / "gitleaks.json").read_text(encoding="utf-8"))
         rules: list[Rule] = []
         for r in cfg.get("rules", []):
             if "regex" not in r:

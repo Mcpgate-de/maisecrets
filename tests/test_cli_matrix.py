@@ -1280,7 +1280,9 @@ class EventsTests(unittest.TestCase):
     def test_open_in_browser_uses_the_opener_of_each_platform(self):
         url = "https://example.invalid/x"
         desktop = {k: v for k, v in os.environ.items() if not k.startswith("SSH_")} | {"DISPLAY": ":0"}
-        self.enterContext(mock.patch.dict(os.environ, desktop, clear=True))
+        patcher = mock.patch.dict(os.environ, desktop, clear=True)   # enterContext is Python 3.11+
+        patcher.start()
+        self.addCleanup(patcher.stop)
         for system, argv in (("Darwin", ["open", url]), ("Linux", ["xdg-open", url])):
             with self.subTest(system), mock.patch.object(self.events.platform, "system", return_value=system), \
                     mock.patch("subprocess.run") as run:

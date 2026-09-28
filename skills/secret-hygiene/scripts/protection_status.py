@@ -15,7 +15,7 @@ Exit codes:
     0  ACTIVE
     1  NOT ACTIVE, and an install is possible here: offer it
     2  NOT AVAILABLE HERE: no agent on this computer (a web or mobile chat); offer nothing
-    3  CANNOT PROTECT YET: no Python 3.11 or newer for the hooks; offer nothing
+    3  CANNOT PROTECT YET: no Python 3.9 or newer for the hooks; offer nothing
 """
 from __future__ import annotations
 
@@ -35,8 +35,9 @@ OFFER = ("Before I start: maisecrets protection is off. A password or key that y
          "You can say no; I will do your task without it.")
 CODEX_SOURCE = "https://github.com/Mcpgate-de/maisecrets.git"
 CLAUDE_SOURCE = "Mcpgate-de/maisecrets"
-# the order of hooks/run.sh: the hooks run with the first of these that is 3.11 or newer
-PYTHONS = ["python3", "python", "py -3", "python3.14", "python3.13", "python3.12", "python3.11",
+# the order of hooks/run.sh: the hooks run with the first of these that is 3.9 or newer
+PYTHONS = ["python3", "python", "py -3", "python3.14", "python3.13", "python3.12", "python3.11", "python3.10",
+           "python3.9",
            "/opt/homebrew/bin/python3", "/usr/local/bin/python3",
            "/Library/Frameworks/Python.framework/Versions/Current/bin/python3"]
 
@@ -79,7 +80,7 @@ def last_pre_tool(client: str | None) -> float | None:
 
 
 def hook_python() -> tuple[bool, str]:
-    """(a 3.11+ Python exists for the hooks, what was found), searched as hooks/run.sh does."""
+    """(a 3.9+ Python exists for the hooks, what was found), searched as hooks/run.sh does."""
     found = []
     for name in PYTHONS:
         argv = name.split()
@@ -95,7 +96,7 @@ def hook_python() -> tuple[bool, str]:
         if r.returncode != 0 or not version:
             continue
         major, minor = (int(x) for x in version.split(".")[:2])
-        if (major, minor) >= (3, 11):
+        if (major, minor) >= (3, 9):
             return True, f"{name} {version}"
         found.append(f"{name} {version}")
     return False, ", ".join(found) or "none"
@@ -133,7 +134,7 @@ def main() -> int:
         return 2
     ok, found = hook_python()
     if not ok:
-        print("maisecrets protection: CANNOT PROTECT YET. The hooks need Python 3.11 or newer "
+        print("maisecrets protection: CANNOT PROTECT YET. The hooks need Python 3.9 or newer "
               f"(found: {found}).")
         print("Install a newer Python first (macOS: brew install python, or python.org; Windows: "
               "winget install Python.Python.3.12), then ask again. Do not install maisecrets before "

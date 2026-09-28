@@ -38,12 +38,12 @@ EVENTS = ("user-prompt", "pre-tool", "post-tool", "session-start")
 ABSOLUTE_PYTHONS = ("/opt/homebrew/bin/python3", "/usr/local/bin/python3",
                     "/Library/Frameworks/Python.framework/Versions/Current/bin/python3")
 
-# a python3 that says it is 3.9: it fails the version probe, prints 3.9 for the version query,
+# a python3 that says it is 3.8: it fails the version probe, prints 3.8 for the version query,
 # and records any other call (a run of dispatch.py) in the tripwire
-_PY39 = """#!/bin/sh
+_PY38 = """#!/bin/sh
 case "$2" in
-  *"version_info >= (3, 11)"*) exit 1 ;;
-  *"print('%d.%d'"*) echo 3.9; exit 0 ;;
+  *"version_info >= (3, 9)"*) exit 1 ;;
+  *"print('%d.%d'"*) echo 3.8; exit 0 ;;
 esac
 echo "python3 $*" >> "$MS_TEST_TRIPWIRE"
 exit 0
@@ -52,7 +52,7 @@ exit 0
 
 @unittest.skipIf(BASH is None, "no bash")
 class LauncherFailsClosedTests(unittest.TestCase):
-    """README: maisecrets needs Python 3.11+. Without it every hook must refuse, never pass."""
+    """README: maisecrets needs Python 3.9+. Without it every hook must refuse, never pass."""
 
     def setUp(self):
         self.sb = Sandbox(JSONFILE, backend="jsonfile")
@@ -86,7 +86,7 @@ class LauncherFailsClosedTests(unittest.TestCase):
             with self.subTest(event):
                 r = self.launch(event)
                 self.assertNotIn("dispatch.py ran", r.stderr)
-                self.assertIn(f"maisecrets needs Python 3.11 or newer on the PATH of the client (found: {found})",
+                self.assertIn(f"maisecrets needs Python 3.9 or newer on the PATH of the client (found: {found})",
                               r.stdout + r.stderr)
                 if event == "post-tool":
                     # Claude Code ignores exit 2 after a tool: the JSON itself must withhold
@@ -107,14 +107,14 @@ class LauncherFailsClosedTests(unittest.TestCase):
 
     def test_a_python_older_than_3_11_blocks_every_event_and_is_named(self):
         fake = self.tools / "python3"
-        fake.write_text(_PY39, encoding="utf-8")
+        fake.write_text(_PY38, encoding="utf-8")
         fake.chmod(0o700)
-        self.check_all_events("python3 is 3.9")
+        self.check_all_events("python3 is 3.8")
 
 
 class RunCmdFailsClosedTests(unittest.TestCase):
     """run.cmd cannot run on this OS; its logic is read from the file: each interpreter runs
-    dispatch.py only after it passed the 3.11 probe, post-tool withholds with exit 0, and every
+    dispatch.py only after it passed the 3.9 probe, post-tool withholds with exit 0, and every
     other event ends in exit /b 2."""
 
     def setUp(self):
@@ -127,7 +127,7 @@ class RunCmdFailsClosedTests(unittest.TestCase):
             interp = self.lines[i].split('"%HERE%dispatch.py"')[0].strip()
             self.assertEqual(self.lines[i - 1], "if not errorlevel 1 (", self.lines[i])
             self.assertEqual(self.lines[i - 2],
-                             f'{interp} -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1')
+                             f'{interp} -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" >nul 2>&1')
             self.assertEqual(self.lines[i + 1], "goto :done")
 
     def test_without_python_post_tool_withholds_and_everything_else_exits_2(self):
@@ -139,7 +139,7 @@ class RunCmdFailsClosedTests(unittest.TestCase):
         self.assertIn("Tool output withheld", out["hookSpecificOutput"]["updatedToolOutput"])
         self.assertEqual(branch[-1], "exit /b 0")
         tail = self.lines[self.lines.index(")", start) + 1:]
-        self.assertTrue(tail[0].startswith("echo maisecrets needs Python 3.11") and tail[0].endswith("1>&2"), tail[0])
+        self.assertTrue(tail[0].startswith("echo maisecrets needs Python 3.9") and tail[0].endswith("1>&2"), tail[0])
         self.assertEqual(tail[1:], ["exit /b 2", ":done", "exit /b %errorlevel%"])
         exits = [ln for ln in self.lines if ln.startswith("exit ")]
         self.assertEqual(exits, ["exit /b 0", "exit /b 2", "exit /b %errorlevel%"], "no other way out")
