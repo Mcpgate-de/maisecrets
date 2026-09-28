@@ -779,6 +779,10 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
                 # `case WORD in`: the word is matched, not run
                 words = words[words.index("in") + 1:] if "in" in words else []
                 continue
+            if w == "function" and words:
+                # `function f { base64; }`: the name is not the command word (review, 2026-09-28)
+                words = words[1:]
+                continue
             if w in SHELL_KEYWORDS or _ASSIGN_RE.match(w):
                 continue
             takes = WRAPPER_ARG_OPTIONS.get(w, ())
@@ -792,12 +796,50 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
     return segs
 
 
+_REF_RE = re.compile(r"⟦[^⟦⟧]*⟧")
+
+
+def _value_reaches(command: str, ctxs: list[str], segs: list[dict]) -> list[bool]:
+    """Which parts of the command can read the value: a part that holds it, and a part fed by a
+    pipe after one that holds it. The encoder rule asks this, so that base64 on a remote script
+    next to `printf ⟦K⟧ | ssh` is not refused (feedback on 0.5.2, 2026-09-28). A value that can come
+    back anywhere else makes every part a reader: a variable, a file, a heredoc, a process
+    substitution, a function, an alias, read or mapfile."""
+    refs = [m.start() for m in _REF_RE.finditer(command)]
+    held = [any(sg["start"] <= r < sg["end"] for r in refs) for sg in segs]
+    masked = "".join(ch if ctx == "" else "Q" for ch, ctx in zip(command, ctxs))
+    everywhere = bool(refs) and (
+        any(sg["heredoc"] for sg in segs) or "<(" in masked or ">(" in masked
+        or re.search(r"\(\s*\)|(?:^|[\s;&|({])(?:function|alias|read|mapfile|readarray|tee|source|\.)(?:\s|$)",
+                     masked)
+        or any(h and re.search(r"[<>]", masked[sg["start"]:sg["end"]]) for h, sg in zip(held, segs)))
+    if not everywhere:
+        # an assignment keeps the value for later parts: X=⟦K⟧, export X=⟦K⟧, X=$(printf ⟦K⟧)
+        for m in re.finditer(r"(?:^|[\s;&|({])[A-Za-z_][A-Za-z_0-9]*\+?=", masked):
+            end, depth = m.end(), 0
+            while end < len(masked) and (depth or not masked[end].isspace()) and (depth or masked[end] not in ";&|"):
+                depth += masked[end] == "("
+                depth -= masked[end] == ")" and depth > 0
+                end += 1
+            if any(m.end() <= r < end for r in refs):
+                everywhere = True
+                break
+    if everywhere:
+        return [True] * len(segs)
+    reach: list[bool] = []
+    for k, sg in enumerate(segs):
+        reach.append(held[k] or (sg["piped"] and any(held[:k])))
+    return reach
+
+
 def _refusal_for(command: str, ctxs: list[str]) -> str | None:
     """Why a command that carries placeholders is refused: a shell or an interpreter that would
     parse the value a second time, or a step that would encode, slice or trace it. Command
     words only, so `python3 script.py ⟦K⟧` and `docker run -e T=⟦K⟧ img` pass."""
     plain = "".join(ch if ctx in ("", "dq", "hd") else " " for ch, ctx in zip(command, ctxs))
-    for seg in _segments(command, ctxs):
+    segs = _segments(command, ctxs)
+    reach = _value_reaches(command, ctxs, segs)
+    for seg, reached in zip(segs, reach):
         words, cmd = seg["words"], seg["cmd"]
         if seg.get("env_split") or (cmd in ARG_RUNNERS and any(
                 os.path.basename(w) in ENVS and _env_splits(words[k + 1:]) for k, w in enumerate(words))):
@@ -820,13 +862,15 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
                 return f"{cmd} -x would trace the value"
         if cmd in REMOTE_OR_EVAL:
             return f"{cmd} hands the command line to another shell"
+        if cmd in (".", "source") and (seg["piped"] or seg["heredoc"] or any(w in _STDIN_FILES for w in words[1:])):
+            return f"{cmd} would run the value as shell code"
         if cmd in INLINE_INTERPRETERS and any(INLINE_CODE_FLAGS.match(f) for f in flags):
             return f"{cmd} with inline code would parse the value as program text"
-        if cmd in ENCODERS:
+        if cmd in ENCODERS and reached:
             return f"{cmd} would encode the value"
         if cmd in ("awk", "gawk", "mawk", "nawk") and "-v" in words:
             return "awk -v changes backslashes in the value; use V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …' instead"
-        if cmd == "openssl" and len(words) > 1 and words[1] in ("enc", "base64", "dgst"):
+        if cmd == "openssl" and reached and len(words) > 1 and words[1] in ("enc", "base64", "dgst"):
             return f"openssl {words[1]} would encode the value"
         if cmd == "set" and any(re.fullmatch(r"-[a-wyz]*x[a-z]*", f) for f in flags):
             return "set -x would trace the value"

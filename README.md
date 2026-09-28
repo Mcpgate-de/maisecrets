@@ -166,9 +166,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 8 scenarios against a fake upstream
+python3 harness/run.py                                 # 9 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
-python3 scripts/replay_can_fail.py                     # 35 proofs: each control's test goes red without it
+python3 scripts/replay_can_fail.py                     # 36 proofs: each control's test goes red without it
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 scripts/install-hooks.sh                               # git pre-commit / pre-push
 ```
@@ -241,9 +241,10 @@ milliseconds of the call, because the stdin form has a line limit. Nothing leave
 opens a network connection. Two exceptions to state to a data-protection
 officer: the Windows Credential Locker can roam through a Microsoft account on
 a machine that is not domain-joined (set `backend` to `encrypted-file` by
-policy if that matters), and `/maisecrets:report` opens the browser on a
-prefilled issue at `report_url` (set it to your tracker, or to `null` to turn
-reporting off).
+policy if that matters), and `/maisecrets:report` prints an issue text and a
+link to `report_url`. It opens a browser only on a local desktop, and it files
+the issue only with `--create` through the GitHub CLI. Set `report_url` to your
+tracker, or set it to `null` to turn reporting off.
 
 **Diagnosis.** `/maisecrets:status` prints version, plugin folder, Python,
 store, policy keys and log counts. `/maisecrets:audit` prints the last
@@ -276,7 +277,8 @@ run".
   `git log`) and `redact_copy.py` (writes a new file) when the model follows it; neither
   opens a network connection.
 - Sends and fetches: nothing. No hook opens a network connection.
-  `/maisecrets:report` opens your browser on a prefilled issue page; the
+  `/maisecrets:report` prints the issue text and a prefilled link, and it
+  files the issue only with `--create` (GitHub CLI, to `report_url`); the
   Windows Credential Locker may roam through a Microsoft account.
 
 ## Secret hygiene skill
@@ -404,9 +406,14 @@ either (reported to the vendor).
 
 Every block and every redaction leaves an event in `~/.maisecrets/events.log`
 (hook, client, rule name, type, plugin version; never a value). In Claude Code,
-`/maisecrets:report last <why it is wrong>` opens a GitHub issue prefilled from
-the last event; `/maisecrets:report bug <what happened>` and
-`/maisecrets:report feature <what it should do>` open one without an event.
+`/maisecrets:report last <why it is wrong>` prepares an issue from the last
+event; `/maisecrets:report bug <what happened>` and
+`/maisecrets:report feature <what it should do>` prepare one without an event.
+The command prints the text and a prefilled link, so it also works over ssh and
+in Remote Control. It opens a browser only on a local desktop, never in an ssh
+session. Add `--create` to file the issue at once with the GitHub CLI (`gh`,
+logged in). The arguments reach the CLI in a quoted heredoc, so a shell never
+reads a reported command as code.
 The CLI form is `python3 -m maisecrets.cli report …`. The value is not in the
 event, so it cannot be in the issue; describe its shape in words.
 

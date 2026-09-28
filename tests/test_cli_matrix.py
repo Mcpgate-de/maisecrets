@@ -18,6 +18,7 @@ run reads the real clipboard, opens a browser, or touches ~/.maisecrets, ~/.clau
 from __future__ import annotations
 
 import ast
+import io
 import json
 import os
 import re
@@ -30,6 +31,7 @@ import time
 import unittest
 from pathlib import Path
 
+from contextlib import redirect_stderr, redirect_stdout
 from types import SimpleNamespace
 from unittest import mock
 
@@ -1272,6 +1274,8 @@ class EventsTests(unittest.TestCase):
 
     def test_open_in_browser_uses_the_opener_of_each_platform(self):
         url = "https://example.invalid/x"
+        desktop = {k: v for k, v in os.environ.items() if not k.startswith("SSH_")} | {"DISPLAY": ":0"}
+        self.enterContext(mock.patch.dict(os.environ, desktop, clear=True))
         for system, argv in (("Darwin", ["open", url]), ("Linux", ["xdg-open", url])):
             with self.subTest(system), mock.patch.object(self.events.platform, "system", return_value=system), \
                     mock.patch("subprocess.run") as run:
@@ -1284,6 +1288,86 @@ class EventsTests(unittest.TestCase):
         with mock.patch.object(self.events.platform, "system", return_value="Linux"), \
                 mock.patch("subprocess.run", side_effect=OSError):
             self.assertFalse(self.events.open_in_browser(url))
+
+    def test_no_browser_over_ssh_or_without_a_display_and_the_opener_gets_no_terminal(self):
+        # feedback on 0.5.2: over ssh xdg-open started w3m, which took over the Claude Code terminal
+        url = "https://example.invalid/x"
+        base = {k: v for k, v in os.environ.items()
+                if not k.startswith("SSH_") and k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+        for system, env in (("Linux", base), ("Linux", base | {"DISPLAY": ":0", "SSH_CONNECTION": "a 1 b 22"}),
+                            ("Darwin", base | {"SSH_TTY": "/dev/ttys001"})):
+            with self.subTest(system, env=sorted(set(env) - set(base))), mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(self.events.platform, "system", return_value=system), \
+                    mock.patch("subprocess.run") as run:
+                self.assertFalse(self.events.open_in_browser(url))
+                run.assert_not_called()
+        with mock.patch.dict(os.environ, base | {"DISPLAY": ":0"}, clear=True), \
+                mock.patch.object(self.events.platform, "system", return_value="Linux"), \
+                mock.patch("subprocess.run") as run:
+            self.assertTrue(self.events.open_in_browser(url))
+            for stream in ("stdin", "stdout", "stderr"):
+                self.assertEqual(run.call_args.kwargs[stream], subprocess.DEVNULL, stream)
+
+    def test_report_prints_the_text_and_creates_only_on_request_through_an_argument_list(self):
+        from maisecrets import cli
+        out = io.StringIO()
+        with mock.patch.object(self.events, "open_in_browser", return_value=False), redirect_stdout(out):
+            cli.cmd_report(["bug", "the", "hook", "refused", "$(touch", "x)"])
+        text = out.getvalue()
+        self.assertIn("Title: Bug: the hook refused $(touch x)", text)
+        self.assertIn("## What happened\nthe hook refused $(touch x)", text, "the text itself, not only a link")
+        self.assertIn("prefilled link: https://github.com/", text)
+        seen = {}
+        def fake(argv, **kw):
+            seen["argv"], seen["input"] = argv, kw.get("input")
+            return subprocess.CompletedProcess(argv, 0, stdout="https://github.com/o/r/issues/7\n")
+        with mock.patch("shutil.which", return_value="/usr/bin/gh"), mock.patch("subprocess.run", fake), \
+                mock.patch.object(self.events, "open_in_browser") as opener, redirect_stdout(io.StringIO()) as o2:
+            cli.cmd_report(["bug", "--create", "a", "text"])
+        opener.assert_not_called()
+        self.assertIn("created: https://github.com/o/r/issues/7", o2.getvalue())
+        self.assertEqual(seen["argv"][:6], ["/usr/bin/gh", "issue", "create", "-R", "Mcpgate-de/maisecrets", "--title"])
+        self.assertIn("--body-file", seen["argv"])
+        self.assertIn("a text", seen["input"], "the body goes on stdin")
+
+    def test_report_follows_report_url_null_another_tracker_or_a_fork(self):
+        from maisecrets import cli
+        def run(url, create=False):
+            out = io.StringIO()
+            with mock.patch.object(self.events, "tracker", return_value=url), \
+                    mock.patch.object(self.events, "open_in_browser", return_value=False), \
+                    mock.patch("shutil.which", return_value="/usr/bin/gh"), mock.patch("subprocess.run") as gh, \
+                    redirect_stdout(out), redirect_stderr(io.StringIO()):
+                cli.cmd_report(["bug", "--create", "x"] if create else ["bug", "x"])
+            return out.getvalue(), gh
+        text, gh = run(None, create=True)
+        self.assertIn("reporting is turned off", text)
+        self.assertNotIn("Title:", text)
+        gh.assert_not_called()
+        text, gh = run("https://tracker.example.org/new", create=True)
+        self.assertIn("tracker: https://tracker.example.org/new", text)
+        gh.assert_not_called()   # gh files only to a GitHub repository, never past the policy's tracker
+        text, _ = run("https://github.com/acme/fork/issues")
+        self.assertIn("prefilled link: https://github.com/acme/fork/issues/new?", text)
+
+    def test_slash_command_arguments_arrive_on_stdin_and_are_never_run(self):
+        # feedback on 0.5.2: $ARGUMENTS spliced into the bash line ran `$(…)` in a report text
+        marker = Path(tempfile.mkdtemp(prefix="maisecrets-args-")) / "ran"
+        self.addCleanup(shutil.rmtree, marker.parent, True)
+        for name in ("audit", "forget", "put", "report", "shortcut"):
+            md = (ROOT / "commands" / f"{name}.md").read_text(encoding="utf-8")
+            self.assertNotRegex(md, r"run\.sh\" [a-z -]*\$ARGUMENTS", name)
+            self.assertIn("--args-stdin <<'MAISECRETS_ARGS_END'\n$ARGUMENTS\nMAISECRETS_ARGS_END", md, name)
+        md = (ROOT / "commands" / "report.md").read_text(encoding="utf-8")
+        block = md.split("```\n", 2)[1].split("```", 1)[0]
+        args = f"bug it failed $(touch {marker}) | `touch {marker}` ; touch {marker} it's odd"
+        line = block.replace("${CLAUDE_PLUGIN_ROOT}", str(ROOT)).replace("$ARGUMENTS", args)
+        env = {**os.environ, "SSH_CONNECTION": "x"}   # no browser
+        r = subprocess.run([shutil.which("bash") or "bash", "-c", line], capture_output=True, text=True, env=env,
+                           timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(marker.exists(), "a shell read the report text as code")
+        self.assertIn(f"$(touch {marker})", r.stdout, "the text arrives as it was written")
 
 
 # --------------------------------------------------------------------- tips --

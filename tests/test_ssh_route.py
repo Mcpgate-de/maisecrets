@@ -95,6 +95,15 @@ class RouteDecisionTests(unittest.TestCase):
         self.assertIn("| ssh -o ControlMaster=no -o ControlPath=none -o 'ProxyCommand=", new,
                       "our options come first, right after ssh")
 
+    def test_base64_on_a_part_that_never_holds_the_value_does_not_refuse_the_route(self):
+        # feedback on 0.5.2: base64 encoded only the remote script, the value went on stdin
+        for cmd in (f"S=$(printf %s 'grep -c x /var/log/syslog' | base64); printf '%s' {self.ref} | "
+                    "ssh aux01 'grep -F -f - /var/log/mail.log'",
+                    f"echo Z3JlcA== | base64 -d > /tmp/s; printf '%s' {self.ref} | "
+                    "ssh aux01 'grep -F -f - /var/log/x'"):
+            with self.subTest(cmd[:40]):
+                self.assertEqual(_hso(_pre(cmd)).get("permissionDecision"), "ask", cmd)
+
     def test_every_other_ssh_shape_is_refused_with_its_reason(self):
         r = self.ref
         cases = [
