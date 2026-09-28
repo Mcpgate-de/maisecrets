@@ -64,6 +64,7 @@ class ReleaseTreeTests(unittest.TestCase):
     # turns this red
     DEV_ONLY_PREFIXES = ("tests/", "scripts/", "harness/", "beliefs/", ".github/", ".githooks/")
     DEV_ONLY_FILES = {".gitlab-ci.yml", ".gitignore", ".gitattributes", ".ci-known-hosts-github", "CONTRIBUTING.md",
+                      "CLAUDE.md",
                       "docs/TESTING.md", "docs/REPO-STANDARDS.md"}
 
     def test_every_tracked_file_ships_unless_it_is_named_developer_only(self):
