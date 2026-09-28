@@ -1211,7 +1211,14 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
             if d.is_dir():
                 for f in d.iterdir():
                     try:
-                        f.unlink()
+                        if f.name == "sealed" and f.is_dir() and not f.is_symlink():
+                            # the ssh first-use FIFOs: mode 0300, readable only for the sweep
+                            os.chmod(f, 0o700)
+                            for g in f.iterdir():
+                                g.unlink()
+                            f.rmdir()
+                        else:
+                            f.unlink()
                     except OSError:
                         problems.append(f"{f.name} not deleted")
     return n, problems

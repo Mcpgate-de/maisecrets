@@ -543,9 +543,9 @@ class ScannerEdgeTests(unittest.TestCase):
         calls = {"n": 0}
         real = hooks._serve_value_later
 
-        def flaky(fifo, value, seconds=120.0, approve=None):
+        def flaky(fifo, value, seconds=120.0, **kw):
             calls["n"] += 1
-            return real(fifo, value, seconds, approve=approve) if calls["n"] == 1 else False
+            return real(fifo, value, seconds, **kw) if calls["n"] == 1 else False
         with mock.patch.object(hooks, "_serve_value_later", flaky):
             out = _bash_pre("echo " + self.e.ref + " " + e2.ref)["hookSpecificOutput"]
         self.assertEqual(out.get("permissionDecision"), "deny")

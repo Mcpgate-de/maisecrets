@@ -416,7 +416,8 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
     ("the maisecrets home directory", r"(?i:\.maisecrets)(?![\w-])|MAISECRETS_HOME"),
     ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"
                            r"|(?<![\w-])resolve\s+\S+\s+--grant\b|cmd_resolve|\.redeem\("),
-    ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\]v-|__ms_\d+\b"
+    ("the ssh approval store", r"ssh-approvals|ssh_approval"),
+    ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\](?:v-|sealed)|__ms_\d+\b"
                               r"|XDG_RUNTIME_DIR[^\n]*maisecrets"),
 ]
 _STORE_READ_RE = re.compile("|".join(f"(?P<p{i}>{rx})" for i, (_n, rx) in enumerate(_STORE_READ_PATTERNS)))
@@ -1052,10 +1053,23 @@ READ_ONLY_REMOTE = {"grep", "egrep", "fgrep", "zgrep", "zegrep", "zfgrep", "xzgr
                     "ls", "stat", "date", "hostname", "uptime", "df", "du", "true"}
 
 
+# wrappers the session approval allows in front of a read-only command, with no option of their own
+_READ_ONLY_WRAPPERS = {"sudo", "nice", "command"}
+# the only options of sort and uniq the session approval allows: none of them writes a file or runs a
+# program (Codex review, 2026-09-28: `sort --out=FILE`, an abbreviation, wrote the value to a file)
+_SORT_OK = re.compile(r"^(?:-[bdfghinrsuMV]+|-k\S*|-t\S?|--(?:numeric-sort|reverse|unique|ignore-case|"
+                      r"human-numeric-sort|version-sort|month-sort|general-numeric-sort|ignore-leading-blanks|"
+                      r"dictionary-order|stable))$")
+_UNIQ_OK = re.compile(r"^(?:-[cdiuz]+|-[fsw]\d*|\d+|--(?:count|repeated|unique|ignore-case))$")
+
+
 def _remote_is_read_only(remote: str) -> bool:
-    """Whether every part of the remote command only reads and prints: a command from
-    READ_ONLY_REMOTE, no output redirection, no tee, no subshell or expansion, and none of the
-    options with which a reader writes a file or runs a program (sort -o, uniq IN OUT, rg --pre)."""
+    """Whether every part of the remote command only reads and prints. Each part is a bare command
+    word from READ_ONLY_REMOTE, at most behind sudo, nice or command without options: no path, no
+    assignment such as PATH=, since a command named grep in /tmp is not grep (Codex review,
+    2026-09-28). No output redirection, tee, subshell or expansion, and none of the options with
+    which a reader writes a file or runs a program."""
+    import shlex
     rctx = _shell_contexts(remote)
     unquoted = "".join(ch if ctx == "" else " " for ch, ctx in zip(remote, rctx))
     if any(c in unquoted for c in "><()&") or "`" in remote or "$" in remote:
@@ -1064,15 +1078,20 @@ def _remote_is_read_only(remote: str) -> bool:
     if not segs:
         return False
     for sg in segs:
-        words, cmd = sg["words"], sg["cmd"]
-        if cmd not in READ_ONLY_REMOTE:
+        try:
+            raw = shlex.split(remote[sg["start"]:sg["end"]])
+        except ValueError:
             return False
-        args = words[1:]
-        if cmd == "sort" and any(a in ("-o", "--output") or a.startswith(("-o", "--output=")) for a in args):
+        while raw and raw[0] in _READ_ONLY_WRAPPERS:
+            raw = raw[1:]
+        if not raw or raw[0] not in READ_ONLY_REMOTE:
+            return False             # a path, an assignment, a wrapper option or another command
+        cmd, args = raw[0], raw[1:]
+        if cmd == "sort" and not all(_SORT_OK.match(a) for a in args):
             return False
-        if cmd == "uniq" and [a for a in args if not a.startswith("-")]:
+        if cmd == "uniq" and not all(_UNIQ_OK.match(a) for a in args):
             return False
-        if cmd == "rg" and any(a.startswith("--pre") for a in args):
+        if cmd == "rg" and any(a.startswith("--pre") or a.startswith("--se") for a in args):
             return False
     return True
 
@@ -1207,8 +1226,9 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: s
     ``seconds``. The value reaches the child on stdin, never as an argument. A FIFO that is gone
     (`_unserve`, `wipe`) ends the child at once: it retried the open for the full ``seconds``
     with the value in its memory (suite review, 2026-09-27). With ``approve``, the child confirms that
-    ssh session-approval token once the value was read: the read proves that the user allowed the
-    command (ssh_approval.py)."""
+    ssh session-approval token once the value was read. That FIFO sits in the sealed directory, which
+    nobody can list: only the command that holds its name can open it, and only the rewritten command
+    the user allowed holds that name (ssh_approval.py)."""
     code = (
         "import json,os,sys,time\n"
         "spec = json.load(sys.stdin)\n"
@@ -1289,6 +1309,35 @@ def _run_dir() -> str:
     if not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or (st.st_mode & 0o077):
         raise RuntimeError(base)
     return base
+
+
+def _sealed_dir() -> str:
+    """<run dir>/sealed with mode 0300: its owner can create and open a file whose name they know,
+    but nobody can list it. A blind reader (`cat …/v-*` in a parallel tool call) found the value FIFO
+    of an open ask and confirmed the session approval with it (Codex review, 2026-09-28). A code the
+    command writes back cannot be the proof: the Claude Code sandbox denies writes there (measured
+    on macOS with Claude Code 2.1.283: "Operation not permitted")."""
+    import stat as _stat
+    d = os.path.join(_run_dir(), "sealed")
+    try:
+        os.mkdir(d, 0o700)
+    except FileExistsError:
+        pass
+    st = os.lstat(d)
+    if not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+        raise RuntimeError(d)
+    # a killed serving child leaves its FIFO: sweep the stale ones while the directory is readable
+    os.chmod(d, 0o700)
+    try:
+        for name in os.listdir(d):
+            fp = os.path.join(d, name)
+            if time.time() - os.lstat(fp).st_mtime > 300:
+                os.unlink(fp)
+    except OSError:
+        pass
+    finally:
+        os.chmod(d, 0o300)
+    return d
 
 
 def _fifo_path(nonce: str) -> str:
@@ -1467,7 +1516,11 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                 return _deny(f"maisecrets: the value for ⟦{key}⟧ has no safe place to wait: the run directory "
                              f"{exc} is missing, not private, or not a directory. The command did not run. "
                              "Tell the user to check it; do not retry.")
-            if not _serve_value_later(fifo, value or "", approve=None if served else ssh_token):
+            approve = None if served else ssh_token
+            if approve:
+                # the first use: its FIFO sits where nobody can list it, so reading it proves the yes
+                fifo = os.path.join(_sealed_dir(), os.path.basename(fifo))
+            if not _serve_value_later(fifo, value or "", approve=approve):
                 _unserve(served)
                 return _deny(f"maisecrets: the value for ⟦{key}⟧ could not be prepared for delivery "
                              "(delivery unavailable). The command did not run. Retry once; if this "

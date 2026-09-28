@@ -71,13 +71,24 @@ def _hso(out: dict) -> dict:
 
 
 def _read_fifos(command: str) -> list[str]:
-    """What the approved command does first: read each value from its FIFO."""
+    """What the approved command does first: write its one-time code, if it has one, then read
+    each value from its FIFO."""
     import re as _re
+    for code, ack in _re.findall(r"printf '%s' (\S+) > (\S+) \|\|", command):
+        with open(ack.strip("'"), "w", encoding="utf-8") as f:
+            f.write(code.strip("'"))
     out = []
     for fifo in _re.findall(r"\$\(cat '([^']+)'\)", command) or _re.findall(r"\$\(cat ([^ )]+)\)", command):
         with open(fifo, encoding="utf-8") as f:
             out.append(f.read())
     return out
+
+
+def _fifo_paths(command: str) -> tuple[list[str], list[str]]:
+    import re as _re
+    values = _re.findall(r"\$\(cat '([^']+)'\)", command) or _re.findall(r"\$\(cat ([^ )]+)\)", command)
+    acks = [a.strip("'") for _c, a in _re.findall(r"printf '%s' (\S+) > (\S+) \|\|", command)]
+    return values, acks
 
 
 def _wait_approved(session: str, key: str, want: bool = True, seconds: float = 5.0) -> bool:
@@ -117,7 +128,7 @@ class SessionApprovalTests(unittest.TestCase):
                    "session_id": session, **CLAUDE}
         out = _hso(hooks.pre_tool(payload))
         cmd = (out.get("updatedInput") or {}).get("command", "")
-        self.addCleanup(hooks._unserve, __import__("re").findall(r"\$\(cat '([^']+)'\)", cmd))
+        self.addCleanup(lambda c=cmd: hooks._unserve(sum(_fifo_paths(c), [])))
         return out
 
     def approve_once(self) -> None:
@@ -146,9 +157,66 @@ class SessionApprovalTests(unittest.TestCase):
                 self.assertIn("sandbox_probe.py", new.split(";", 1)[0], "the sandbox guard still runs first")
                 self.assertIn("ProxyCommand=", new)
 
+    def test_a_blind_reader_cannot_find_the_first_use_fifo(self):
+        # Codex review: a parallel tool call that read `…/v-*` got the value of an open ask and confirmed the
+        # approval. The first-use FIFO sits in a directory nobody can list; only its name opens it
+        import glob
+        out = self.pre(self.READ)
+        values, _acks = _fifo_paths(out["updatedInput"]["command"])
+        sealed = os.path.dirname(values[0])
+        self.assertEqual(os.path.basename(sealed), "sealed")
+        self.assertEqual(stat.S_IMODE(os.stat(sealed).st_mode), 0o300)
+        with self.assertRaises(PermissionError):
+            os.listdir(sealed)
+        run = os.path.dirname(sealed)
+        self.assertEqual(glob.glob(os.path.join(run, "*", "v-*")) + glob.glob(os.path.join(sealed, "*")), [])
+        self.assertFalse(_wait_approved("S1", self.key, want=True, seconds=0.3))
+        hooks._unserve(values)
+
+    def test_the_store_holds_no_usable_token_and_the_hook_refuses_commands_that_name_it(self):
+        from maisecrets import ssh_approval
+        token = ssh_approval.remember_pending("S1", [self.key])
+        text = (Path(HOME) / "ssh-approvals.json").read_text(encoding="utf-8")
+        self.assertNotIn(token, text, "only a hash of the token is stored")
+        stored = next(iter(__import__("json").loads(text)["pending"]))
+        self.assertEqual(ssh_approval.confirm(stored), [], "the stored hash does not confirm")
+        for cmd in ("find / -name ssh-approvals.json -exec cat {} +",
+                    "python3 -c 'from maisecrets import ssh_approval; ssh_approval.confirm(1)'"):
+            with self.subTest(cmd):
+                out = _hso(hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": cmd},
+                                           "session_id": "S1", **CLAUDE}))
+                self.assertEqual(out.get("permissionDecision"), "deny", cmd)
+
+    def test_two_confirms_of_one_token_approve_once(self):
+        from maisecrets import ssh_approval
+        token = ssh_approval.remember_pending("S1", [self.key])
+        got, barrier = [], threading.Barrier(4)
+
+        def go():
+            barrier.wait()
+            got.append(ssh_approval.confirm(token))
+        threads = [threading.Thread(target=go) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(sorted(map(len, got)), [0, 0, 0, 1])
+
+    def test_a_look_alike_read_only_command_is_not_read_only(self):
+        self.approve_once()
+        for remote in ("/tmp/grep -F -f - x", "PATH=/tmp grep -F -f - x", "sudo /tmp/grep -F -f - x",
+                       "sudo -u root grep -F -f - x", "grep -F -f - x | sort --out=/tmp/leak",
+                       "grep -F -f - x | sort --compress-program=sh", "rg --pre=sh -F -f - x", "./grep -F -f - x"):
+            with self.subTest(remote):
+                out = self.pre(remote)
+                self.assertNotEqual(out.get("permissionDecision", "none"), "none", remote)
+                if out.get("permissionDecision") == "ask":
+                    self.assertNotIn("without asking again", out["permissionDecisionReason"])
+
     def test_an_ask_that_was_declined_approves_nothing(self):
         out = self.pre(self.READ)                      # the user says no: the command never reads the FIFO
-        hooks._unserve(__import__("re").findall(r"\$\(cat '([^']+)'\)", out["updatedInput"]["command"]))
+        values, acks = _fifo_paths(out["updatedInput"]["command"])
+        hooks._unserve(values + acks)
         self.assertFalse(_wait_approved("S1", self.key, want=True, seconds=0.5))
         self.assertEqual(self.pre(self.READ).get("permissionDecision"), "ask")
 

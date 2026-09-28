@@ -1,0 +1,10 @@
+# c18-a-session-approval-fifo-cannot-be-listed: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c18-a-session-approval-fifo-cannot-be-listed"
+control = "C18"
+statement = "With ssh_approval per-session, the first use's value FIFO sits in a directory nobody can list (mode 0300), so only the command the user allowed, which holds its name, can read it and confirm the approval; a blind reader finds nothing."
+runner = ["tests/test_ssh_route.py::SessionApprovalTests::test_a_blind_reader_cannot_find_the_first_use_fifo"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    finally:\n        os.chmod(d, 0o300)\n"
+replace = "    finally:\n        os.chmod(d, 0o700)\n"

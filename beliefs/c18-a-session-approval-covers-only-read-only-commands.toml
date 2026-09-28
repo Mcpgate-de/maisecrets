@@ -6,5 +6,5 @@ runner = ["tests/test_ssh_route.py::SessionApprovalTests::test_a_remote_command_
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "        if cmd not in READ_ONLY_REMOTE:\n            return False\n"
-replace = "        if False:\n            return False\n"
+find = "        if not raw or raw[0] not in READ_ONLY_REMOTE:\n"
+replace = "        if not raw:\n"
