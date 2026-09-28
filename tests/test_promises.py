@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -110,6 +111,58 @@ class LauncherFailsClosedTests(unittest.TestCase):
         fake.write_text(_PY38, encoding="utf-8")
         fake.chmod(0o700)
         self.check_all_events("python3 is 3.8")
+
+
+class MovedPluginFolderFailsClosedTests(unittest.TestCase):
+    """A plugin update moves the folder of an open session (anthropics/claude-code#97847). The client
+    still runs the command of hooks/hooks.json with the old ${CLAUDE_PLUGIN_ROOT}; `bash <missing
+    file>` exits 127, which the client reads as no objection, so every hook failed open and an
+    address went to the model (field report on 0.5.8, 2026-09-28). Each command runs here exactly as
+    the client runs it, through a shell, with a root that does not exist."""
+
+    def commands(self) -> dict[str, str]:
+        data = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        out = {}
+        for groups in data["hooks"].values():
+            for group in groups:
+                for hook in group["hooks"]:
+                    event = next(e for e in EVENTS if f" {e};" in hook["command"] or hook["command"].endswith(f" {e}"))
+                    out[event] = hook["command"]
+        self.assertEqual(sorted(out), sorted(EVENTS), "every event has one command")
+        return out
+
+    def run_command(self, command: str, root: Path) -> subprocess.CompletedProcess:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+        env["CLAUDE_PLUGIN_ROOT"] = str(root)
+        return subprocess.run(["sh", "-c", command], input='{"prompt": "x"}', capture_output=True, text=True,
+                              env=env, timeout=30)
+
+    def test_a_missing_plugin_folder_blocks_every_event(self):
+        gone = Path(tempfile.mkdtemp(prefix="maisecrets-moved-")) / "maisecrets"
+        for event, command in self.commands().items():
+            with self.subTest(event):
+                r = self.run_command(command, gone)
+                self.assertIn("/reload-plugins", r.stdout + r.stderr)
+                if event == "post-tool":
+                    # exit 2 is ignored after a tool ran: the JSON itself must withhold the output
+                    self.assertEqual(r.returncode, 0)
+                    out = json.loads(r.stdout)
+                    self.assertEqual(out["decision"], "block")
+                    self.assertIn("withheld", out["hookSpecificOutput"]["updatedToolOutput"])
+                elif event == "session-start":
+                    self.assertEqual(r.returncode, 0)
+                    self.assertIn("folder is gone", json.loads(r.stdout)["systemMessage"])
+                else:
+                    self.assertEqual((r.returncode, r.stdout), (2, ""), "exit 2 blocks the prompt or the tool")
+
+    def test_a_present_plugin_folder_runs_the_launcher(self):
+        # the fallback must not replace the launcher: with the real root, the launcher answers
+        for event, command in self.commands().items():
+            if event != "user-prompt":
+                continue
+            r = self.run_command(command, ROOT)
+            self.assertNotIn("folder is gone", r.stdout + r.stderr)
+            self.assertEqual(r.returncode, 0, r.stderr)
 
 
 class RunCmdFailsClosedTests(unittest.TestCase):

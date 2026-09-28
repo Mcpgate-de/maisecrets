@@ -159,7 +159,10 @@ claude plugin update maisecrets@maisecrets              # later versions
 When Claude Code cannot find that folder, it shows `Plugin directory does not
 exist` and runs the tool without the hook: every protection of that session is
 off until `/reload-plugins` or a new session. No code of the plugin runs then, so
-maisecrets cannot warn you itself.
+maisecrets cannot warn you itself. The harness measures this on every run
+(scenario `plugin_folder_moved`, Claude Code 2.1.283: no hook runs, the tool
+runs; anthropics/claude-code#97847). A client that runs the hook command anyway
+gets a refusal: the command tests for the launcher first and blocks without it.
 
 - Installed from this GitHub marketplace (the commands above), a previous version
   stays for 14 days, "so a session that already loaded the old version keeps
@@ -195,9 +198,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 9 scenarios against a fake upstream
+python3 harness/run.py                                 # 10 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
-python3 scripts/replay_can_fail.py                     # 49 proofs: each control's test, and each path of the three invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 50 proofs: each control's test, and each path of the three invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push

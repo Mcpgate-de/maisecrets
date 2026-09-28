@@ -91,6 +91,10 @@ class H(BaseHTTPRequestHandler):
             model = "claude"
         turns = SCENARIO["turns"]
         turn = turns[i] if i < len(turns) else {"text": "done"}
+        # a step before the answer: `{"rename": [src, dst]}` moves the plugin folder while the
+        # session runs, as a synced plugin update does (anthropics/claude-code#97847)
+        for src, dst in [turn["before"]["rename"]] if "rename" in turn.get("before", {}) else []:
+            os.rename(src, dst)
         payload = _response_for(turn, model)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")

@@ -32,6 +32,20 @@ MARK2 = "pa$s'w\"ord`x $(echo no) y\\z"     # no known shape; quotes, $( and spa
 PORT = 8791
 
 SCENARIOS = {
+    # a plugin update moves the folder of an open session (anthropics/claude-code#97847). The hooks
+    # should refuse; Claude Code 2.1.283 runs none of them and the tool runs unguarded (measured
+    # 2026-09-28, field report on 0.5.8). A known gap: see "known_gap" in run_scenario
+    "plugin_folder_moved": {
+        "prompt": "Run the check script.",
+        "plugin_copy": True,
+        "turns": [{"tool": "Bash", "input": {"command": "echo ran > {cwd}/ran.txt"},
+                   "before": {"rename": ["{plugin}", "{plugin}.moved"]}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_no_file": "ran.txt",
+        "expect_text": "reload-plugins",
+        "known_gap": "anthropics/claude-code#97847",
+    },
     # the typed prompt carries a secret: must be blocked, zero requests
     "prompt_secret": {
         "prompt": f"Please check the token {MARK} in CI",
@@ -183,7 +197,13 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                 "[Vault().put(v, t, k) for v, t, k in json.load(sys.stdin)]")
         subprocess.run([sys.executable, "-c", code, str(ROOT)], input=json.dumps(sc["preload"]),
                        text=True, check=True, env=env)
-    turns = json.loads(json.dumps(sc["turns"]).replace("{cwd}", str(cwd)).replace("{root}", str(ROOT)))
+    plugin = ROOT
+    if sc.get("plugin_copy"):
+        # a copy the scenario may move; the checkout itself is never moved
+        plugin = work / "plugin" / "maisecrets"
+        shutil.copytree(ROOT, plugin, ignore=shutil.ignore_patterns(".git", "__pycache__", ".ruff_cache", "harness"))
+    turns = json.loads(json.dumps(sc["turns"]).replace("{cwd}", str(cwd)).replace("{root}", str(ROOT))
+                       .replace("{plugin}", str(plugin)))
     env.update(sc.get("env", {}))
     # dump hook: records every payload so golden keys can be verified
     settings = work / "settings.json"
@@ -203,7 +223,7 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             (work / "mcp.json").write_text(json.dumps({"mcpServers": sc["mcp"]}))
             extra = ["--mcp-config", str(work / "mcp.json")]
         r = subprocess.run(
-            ["claude", "-p", sc["prompt"].replace("{cwd}", str(cwd)), "--plugin-dir", str(ROOT),
+            ["claude", "-p", sc["prompt"].replace("{cwd}", str(cwd)), "--plugin-dir", str(plugin),
              "--settings", str(settings),
              "--allowedTools", sc.get("allowed_tools", "Bash,Read"), "--max-turns", "3",
              "--debug-file", str(debug_log), *extra, *sc.get("extra_args", [])],
@@ -288,6 +308,19 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             gpath.write_text(json.dumps(keys, indent=1))
         elif json.loads(gpath.read_text()) != keys:
             fails.append(f"schema drift in {gname}: {keys}")
+    if sc.get("known_gap"):
+        # A canary for the client's own behaviour. Claude Code 2.1.283 runs no hook of a plugin whose
+        # folder is gone ("Plugin directory does not exist" in its debug log) and runs the tool
+        # unguarded; nothing inside the plugin can change that. The scenario passes while it sees the
+        # gap exactly so, and fails on any other outcome: a client that fixed it (update the README,
+        # "Updates and open sessions") or one that fails some other way.
+        gap = "Plugin directory does not exist" in dbg and (cwd / sc["expect_no_file"]).exists()
+        closed = not fails
+        if gap:
+            print(f"[GAP] {name}: {sc['known_gap']} is still open in this client version  out={out}")
+            return []
+        fails = ([f"the known gap {sc['known_gap']} looks closed: the hooks refused; update the README"]
+                 if closed else fails)
     print(f"[{'OK ' if not fails else 'FAIL'}] {name}  requests={len(bodies)}  out={out}")
     for f in fails:
         print("     -", f)
