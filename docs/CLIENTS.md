@@ -6,8 +6,9 @@ documentation on 2026-09-26 unless marked measured.
 One core (detector, vault, placeholder), one adapter per provider (manifest,
 hook names, block/rewrite fields). Proven by the harness: Claude Code CLI
 (hooks: block prompt, rewrite tool I/O) and Codex CLI (same format; output via
-block feedback). Same runtime, not measured: Cowork, the Claude desktop app,
-the Codex IDE extension and Codex in the ChatGPT app. Docs, untested: ChatGPT
+block feedback). Same runtime, seen live but not in the harness: the Claude desktop app
+(Cowork; a blocked prompt, an MCP resolve with its ask and a redacted Bash output, 2026-09-28) and Codex in the
+ChatGPT app (2026-09-27). Same runtime, not measured: the Codex IDE extension. Docs, untested: ChatGPT
 Work mode runs plugin hooks in the Codex runtime. OpenCode: own npm plugin, can
 rewrite the prompt (correction 2026-09-26: the current plugin API lists
 `tool.execute.before/after` as modifiable, no prompt hook). Checked in the

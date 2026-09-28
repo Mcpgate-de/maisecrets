@@ -122,7 +122,7 @@ vendor's hook docs, not measured · ⚠️ partly · ❌ no hook
 | client | prompt | rehydrate | redact | adapter |
 |---|:---:|:---:|:---:|---|
 | Claude Code CLI | ✅ | ✅ | ✅ | built |
-| Cowork, Claude desktop app | ☑️ | ☑️ | ☑️ | same hooks and manifest; not measured by the harness |
+| Cowork, Claude desktop app | ✅ | ✅ | ✅ | same hooks and manifest; a blocked prompt, an MCP call that resolves with its ask and warning, and a redacted Bash output seen live in the desktop app (2026-09-28); not in the harness |
 | Codex CLI | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks; on Windows a shell placeholder is denied (PowerShell rewrite not built) |
 | Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | same plugin runtime; block, rewrite and redaction seen live (2026-09-27), not in the harness |
 | Codex IDE extension | ☑️ | ☑️ | ☑️ | same plugin runtime; not measured |
