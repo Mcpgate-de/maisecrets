@@ -268,7 +268,9 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
             return False
         overlap = max((len(b) for b in forms), default=0)
         chunk = 8 * 1024 * 1024
-        fd = os.open(path, os.O_RDWR)
+        # binary on Windows: text mode turns \r\n into \n on read, and the in-place write lands at the wrong
+        # offset (the GitHub Windows runner, 2026-09-28: the scrubbed records were no longer valid JSON)
+        fd = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0))
         try:
             try:
                 import fcntl
