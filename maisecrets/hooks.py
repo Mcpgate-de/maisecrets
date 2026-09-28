@@ -400,7 +400,8 @@ def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: 
     /maisecrets:list; the report link is built by /maisecrets:report (review with the product
     owner, 2026-09-27: the user does not need to know whether it was 1 e-mail or 13)."""
     kinds = {e.type for e in entries}
-    secret = "SECRET" in kinds
+    # a value this session resolved matches without an entry of its own; it was stored as a secret
+    secret = "SECRET" in kinds or not kinds
     personal = bool(kinds - {"SECRET"})
     what = ("a secret and personal data were" if secret and personal
             else "a secret was" if secret else "personal data was")
@@ -442,22 +443,32 @@ def user_prompt(payload: dict) -> dict:
     # 2. references the human typed or pasted: this session may resolve them from now on
     typed = find_refs(prompt)
     matches = detect.scan(prompt)
-    if typed or matches:
+    vault = None
+    if typed or matches or _has_live(cfg):
         vault = Vault(cfg)
         for key, _s, _e in typed:
             vault.admit(key, session)
-    if not matches:
+    rewritten, entries = _replace(prompt, matches, vault, session) if matches else (prompt, [])
+    values = [m.value for m in matches]
+    stored = {"n": 0}
+    if vault is not None and _has_live(cfg):
+        # a value the store already holds has a known shape: its fingerprint. Without this a stored
+        # password typed again, or a value without a detector shape next to a detected one, went to
+        # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
+        # from 8 characters; a shorter one would block ordinary words in a prompt.
+        resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]
+        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values)
+    if not matches and not stored["n"]:
         if typed:
             # the model has never seen the bracket syntax; without this it asks the user for the
             # value, and that value is blocked again (agent review, 2026-09-26)
             return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                            "additionalContext": PRIMER}}
         return {}
-    rewritten, entries = _replace(prompt, matches, vault, session)
     copied = _clipboard(rewritten)
     _save_pending(rewritten, session)
     if cfg.get("scrub_transcript", True):
-        values, refs = [m.value for m in matches], [e.ref for e in entries]
+        refs = [e.ref for e in entries] + [r for v, r in _resolved_values(vault, session) if v in values]
         # the inline scrub can hit an OLDER record of the same value; the record of this prompt
         # is written after the hook returns, so the delayed child always starts (review, 2026-09-26)
         _scrub_transcript(payload.get("transcript_path", ""), values, refs)
