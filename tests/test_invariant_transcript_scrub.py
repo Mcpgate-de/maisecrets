@@ -176,21 +176,41 @@ class ScrubTests(unittest.TestCase):
         self.assertEqual(bad, [], f"{len(bad)} problems:\n" + "\n".join(bad[:20]))
 
     def test_a_value_across_the_read_window_is_scrubbed(self):
-        # the scrub reads 8 MiB windows; records sit on both sides of every byte near the edge
-        value = next(v for t, v, _s in POPULATION if t == "SECRET" and len(v) >= 20)
+        # The scrub reads windows of 8 MiB plus an overlap of the longest form and ends each window
+        # at its last newline. A value is placed exactly across the mark 8 MiB + overlap, where a
+        # window that did not end at a newline would cut it in two.
+        # The value is fixed and plain, so the overlap is its length; a value taken from the
+        # population moved when the population changed, and the test stopped reaching the edge.
+        value = "Wz" + "k4R9" * 6 + "Qe"
+        overlap = max(len(f) for f in json_forms(value))
         keep = "KEEP-edge"
-        pad = WRITERS["js"]({"type": "pad", "k": keep, "p": "x" * 4000})
-        rec = WRITERS["js"]({"type": "user", "message": {"content": f"a {value} b"}, "k": keep})
-        lines, size = [], 0
-        edge = 8 * 1024 * 1024
-        while size < edge - 3000:
-            lines.append(pad)
-            size += len(pad) + 1
-        filler = 1
-        while size < edge + 3000:
-            lines.append(rec[:-1] + ',"f":"' + "y" * filler + '"}')
-            size += len(lines[-1].encode()) + 1
-            filler = filler % 7 + 1
+        dump = WRITERS["js"]
+        head = dump({"type": "user", "message": {"content": "a " + value + " b"}, "k": keep})
+        at = head.index(value)                      # the value's offset inside its record
+        lines: list[str] = []
+        size = 0
+
+        def pad_to(offset: int) -> None:
+            """Pad records until the next record starts where its value begins at ``offset``."""
+            nonlocal size
+            target = offset - at
+            empty = len(dump({"type": "pad", "k": keep, "p": ""})) + 1
+            while target - size > 4000 + empty:
+                line = dump({"type": "pad", "k": keep, "p": "x" * 4000})
+                lines.append(line)
+                size += len(line) + 1
+            rest = target - size - empty
+            assert rest >= 0, "the edges are too close for the pad"
+            line = dump({"type": "pad", "k": keep, "p": "x" * rest})
+            lines.append(line)
+            size += len(line) + 1
+            assert size == target
+        chunk = 8 * 1024 * 1024
+        # a record whose value runs across the end of a window that did not end at a newline
+        pad_to(chunk + overlap - len(value) // 2)
+        lines.append(head)
+        size += len(head) + 1
+        lines.append(dump({"type": "pad", "k": keep, "p": "end"}))
         t = _Transcript(lines)
         try:
             hooks._scrub_transcript(t.path, [value], ["ref"])
