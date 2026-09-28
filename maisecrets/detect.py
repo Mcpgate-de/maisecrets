@@ -414,6 +414,10 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
 # holds spaces. A cut value that is one capitalised word ("secret: Developers, Webhooks, …",
 # "a secret: PostToolUse must …", both in this repository) is the start of a sentence.
 _DS_QUOTE_GROUP = {"ds-keyword-colon": 3, "ds-keyword-equal-signs": 4}
+# the end of the label in the vendored colon rules, and the same with up to three spaces, tabs,
+# no-break or narrow no-break spaces before the colon
+_COLON_AFTER_LABEL = "([]\\'\"]{0,2})?:"
+_COLON_AFTER_LABEL_SPACED = "([]\\'\"]{0,2})?[ \\t\u00a0\u202f]{0,3}:"
 _WHITESPACE_RE = re.compile(r"\s")
 _CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
 
@@ -437,6 +441,10 @@ def _load_detect_secrets(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
         # a character a password starts with may start one (not {, [, (, \\, /, <: code and paths), and
         # _ds_value_ok refuses a shell variable ($VAR, ${VAR}) as before
         regex = regex.replace("(?=\\w+)", "(?=[\\w!#$%&*+\\-@^~?.])")
+        # French typography puts a space (often a no-break space) before the colon, and people type
+        # `password : x` in every language; the vendored colon rules allowed none, so
+        # `mot de passe : <value>` and `password : <value>` were no hit (2026-09-28)
+        regex = regex.replace(_COLON_AFTER_LABEL, _COLON_AFTER_LABEL_SPACED, 1)
         out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(regex, flags),
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
                         secret_group=int(r["group"]), validator="ds_value",
@@ -597,7 +605,7 @@ def _matches(rule: Rule, text: str):
         return
     pos = 0
     lines = text.split("\n")
-    low = text.lower().split("\n") if rule.keywords else None
+    low = _lower(text).split("\n") if rule.keywords else None
     for i, line in enumerate(lines):
         # the regex needs one of the rule's keywords in this line (every denylist word contains
         # one); skipping the other lines cut a history scan from 71 s to a fraction (2026-09-27)
@@ -661,11 +669,18 @@ def _allowed(rule: Rule, text: str, m: re.Match, secret: str) -> bool:
 _TOKEN_CHAR_RE = re.compile(r"[A-Za-z0-9_\-]")
 
 
+def _lower(text: str) -> str:
+    """Lower case for the prefilters and context words. The Turkish capital İ lowers to i plus a
+    combining dot, so `ŞİFRE:` held no `ifre` (Codex review, 2026-09-28); the dot is dropped. The
+    result is not the length of the input: never take an offset of the original into it."""
+    return text.lower().replace("i\u0307", "i")
+
+
 def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins."""
     if not text:
         return []
-    low = text.lower()
+    low = _lower(text)
     found: list[Match] = []
     taken: list[tuple[int, int]] = []
     for rule in rules():
@@ -718,7 +733,9 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue
             if rule.score < 1.0 or rule.require_context:
                 # presidio semantics: a weak shape passes only with a context WORD nearby
-                window = low[max(0, start - 80):min(len(low), end + 40)]
+                # cut from the original text, then lowered: a lowered text is not the same length (the
+                # Turkish İ lowers to two characters), so its offsets are not the original's
+                window = _lower(text[max(0, start - 80):min(len(text), end + 40)])
                 has_context = _has_context_word(window, rule.context)
                 if rule.require_context and not has_context:
                     continue

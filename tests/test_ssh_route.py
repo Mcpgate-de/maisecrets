@@ -621,3 +621,77 @@ class ProxyHelperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefusalNamesAWayTests(unittest.TestCase):
+    """A refused remote form names the form that works, and the primer says what to do, not a list of
+    prohibitions: "the remote su would hand the value to another shell" left an ops user with no way to
+    read a root-only log, and a primer of prohibitions next to an ordinary ops request made a model
+    safeguard pause the session (field report on 0.5.8, 2026-09-28)."""
+
+    def setUp(self):
+        _reset()
+        self.ref = Vault().put("ops-" + "way-" + "value-9", "SECRET", "manual", session="S1").ref
+
+    def deny_text(self, remote: str) -> str:
+        out = hooks.pre_tool({"tool_name": "Bash", "session_id": "S1", **CLAUDE,
+                              "tool_input": {"command": f"printf '%s' {self.ref} | ssh prod01 '{remote}'"}})
+        h = out.get("hookSpecificOutput") or {}
+        self.assertEqual(h.get("permissionDecision"), "deny", remote)
+        return h["permissionDecisionReason"]
+
+    def test_a_remote_su_names_sudo_before_the_reading_command(self):
+        for remote in ("sudo su -", "su - root", "sudo -i", "sudo bash"):
+            with self.subTest(remote):
+                text = self.deny_text(remote)
+                self.assertIn("sudo zgrep -F -f - FILE", text)
+                self.assertNotIn("is refused", text)
+
+    def test_a_second_hop_names_one_ssh_per_host(self):
+        for remote in ("ssh aux01 zgrep -F -f - /var/log/x", "sshpass -p x ssh aux01 true"):
+            with self.subTest(remote):
+                text = self.deny_text(remote)
+                self.assertIn("one ssh command per host", text)
+                self.assertNotIn("put sudo in front", text)
+
+    def test_every_refused_remote_form_names_the_stdin_way(self):
+        for remote in ("echo aGk= | base64 -d | bash", "ssh aux01 zgrep -F -f - /var/log/x", "bash", "python3"):
+            with self.subTest(remote):
+                self.assertIn("pipe it on stdin to the command that reads it", self.deny_text(remote))
+
+    def test_the_primer_says_what_to_do(self):
+        self.assertIn("pipe it on stdin", hooks.PRIMER)
+        for word in ("is refused", "Never ", "never print"):
+            self.assertNotIn(word, hooks.PRIMER)
+
+
+
+class ReadOnlyBehindSudoTests(unittest.TestCase):
+    def test_sudo_and_sudo_n_before_a_reader_are_read_only_and_other_sudo_options_are_not(self):
+        for remote in ("sudo zgrep -hcF -f - /var/log/mail.log", "sudo -n zgrep -F -f - /var/log/mail.log*",
+                       "sudo -n tail -n 100 /var/log/syslog"):
+            with self.subTest(remote):
+                self.assertTrue(hooks._remote_is_read_only(remote))
+        # -u, -s, -i and -E change more than who reads: another user, a shell, the environment
+        for remote in ("sudo -u postgres zgrep -F -f - f", "sudo -s", "sudo -i", "sudo -E zgrep -F -f - f",
+                       "sudo -n -s", "sudo -n sh -c 'grep x'"):
+            with self.subTest(remote):
+                self.assertFalse(hooks._remote_is_read_only(remote))
+
+
+class SessionIdTests(unittest.TestCase):
+    def test_a_command_that_sets_the_session_id_is_refused(self):
+        _reset()
+        for command in ('CLAUDE_CODE_SESSION_ID=abc bash "$CLAUDE_PLUGIN_ROOT/hooks/run.sh" pending',
+                        "export CLAUDE_CODE_SESSION_ID=abc; bash run.sh pending",
+                        "env CLAUDE_CODE_SESSION_ID=abc python3 hooks/dispatch.py pending",
+                        "unset CLAUDE_CODE_SESSION_ID; bash run.sh pending",
+                        "env -u CLAUDE_CODE_SESSION_ID bash run.sh pending"):
+            with self.subTest(command):
+                out = hooks.pre_tool({"tool_name": "Bash", "session_id": "S1", **CLAUDE,
+                                      "tool_input": {"command": command}})
+                self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        # reading the variable is ordinary
+        out = hooks.pre_tool({"tool_name": "Bash", "session_id": "S1", **CLAUDE,
+                              "tool_input": {"command": "echo $CLAUDE_CODE_SESSION_ID"}})
+        self.assertEqual(out, {})

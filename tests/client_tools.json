@@ -1,0 +1,63 @@
+{
+  "about": "Every built-in tool a client offers the model, with the class that decides its guard. harness/run.py and harness/codex.py read the tool list of the real client from each request body and fail on a name that is not here; tests/test_invariant_store_reads.py (I3) reads the classes. Classes: reads-path and edits-path take a local path (the PreToolUse matcher must reach them and the store refuses them); shell is Bash; mcp-resource reads a resource by URI (a file: URI can name the store); no-path takes no local path, and `why` says so. MCP tools (mcp__*) are matched by their prefix and are not listed.",
+  "claude-code": {
+    "seen_in": "2.1.283",
+    "tools": {
+      "Read": {"class": "reads-path", "field": "file_path"},
+      "NotebookRead": {"class": "reads-path", "field": "notebook_path", "why": "older clients"},
+      "Grep": {"class": "reads-path", "field": "path", "why": "older clients"},
+      "Glob": {"class": "reads-path", "field": "path", "why": "older clients"},
+      "LS": {"class": "reads-path", "field": "path", "why": "older clients"},
+      "Edit": {"class": "edits-path", "field": "file_path", "why": "reads the file before it changes it; the result shows a piece of it"},
+      "MultiEdit": {"class": "edits-path", "field": "file_path", "why": "older clients"},
+      "NotebookEdit": {"class": "edits-path", "field": "notebook_path"},
+      "Write": {"class": "edits-path", "field": "file_path"},
+      "Bash": {"class": "shell"},
+      "ReadMcpResourceTool": {"class": "mcp-resource", "field": "uri", "why": "a filesystem server serves file: URIs"},
+      "ReadMcpResourceDirTool": {"class": "mcp-resource", "field": "uri", "why": "lists and reads resources under a URI"},
+      "ListMcpResourcesTool": {"class": "no-path", "why": "lists the resource names a server offers, no content"},
+      "Agent": {"class": "no-path", "why": "a subagent's own tool calls pass the same hooks"},
+      "Task": {"class": "no-path", "why": "older name of Agent"},
+      "Workflow": {"class": "no-path", "why": "the agents it starts pass the same hooks"},
+      "ListAgents": {"class": "no-path", "why": "lists agents"},
+      "SendMessage": {"class": "no-path", "why": "a message to another agent or session"},
+      "TaskStop": {"class": "no-path", "why": "stops a task"},
+      "CronCreate": {"class": "no-path", "why": "schedules a prompt, which passes the prompt hook when it runs"},
+      "CronDelete": {"class": "no-path", "why": "removes a schedule"},
+      "CronList": {"class": "no-path", "why": "lists schedules"},
+      "ScheduleWakeup": {"class": "no-path", "why": "schedules the next turn"},
+      "RemoteTrigger": {"class": "no-path", "why": "starts a remote routine"},
+      "EnterWorktree": {"class": "no-path", "why": "creates or enters a git worktree; reads no file content"},
+      "ExitWorktree": {"class": "no-path", "why": "leaves a git worktree"},
+      "Skill": {"class": "no-path", "why": "loads a skill the user installed"},
+      "SlashCommand": {"class": "no-path", "why": "runs a command file the user installed"},
+      "ReportFindings": {"class": "no-path", "why": "reports review findings to the host UI"},
+      "WaitForMcpServers": {"class": "no-path", "why": "waits for MCP servers to connect"},
+      "WebFetch": {"class": "no-path", "why": "fetches http and https only"},
+      "WebSearch": {"class": "no-path", "why": "searches the web"},
+      "TodoWrite": {"class": "no-path", "why": "writes the task list only"},
+      "BashOutput": {"class": "no-path", "why": "returns output of a Bash call the hooks saw; PostToolUse redacts it"},
+      "KillShell": {"class": "no-path", "why": "stops a shell"},
+      "ExitPlanMode": {"class": "no-path", "why": "no file"}
+    }
+  },
+  "codex": {
+    "seen_in": "0.158.0",
+    "tools": {
+      "exec": {"class": "shell", "why": "code mode: the nested tools.exec_command reaches the hooks as Bash"},
+      "exec_command": {"class": "shell", "why": "reaches the hooks as Bash"},
+      "write_stdin": {"class": "no-path", "why": "input to a running command"},
+      "apply_patch": {"class": "unmeasured", "why": "not in the matcher and not measured; waits for the Codex design (THREAT-MODEL C5)"},
+      "spawn_agent": {"class": "no-path", "why": "a subagent's own tool calls pass the same hooks"},
+      "send_message": {"class": "no-path", "why": "a message to an agent"},
+      "followup_task": {"class": "no-path", "why": "a follow-up task"},
+      "interrupt_agent": {"class": "no-path", "why": "stops an agent"},
+      "list_agents": {"class": "no-path", "why": "lists agents"},
+      "wait": {"class": "no-path", "why": "waits"},
+      "wait_agent": {"class": "no-path", "why": "waits for an agent"},
+      "request_user_input": {"class": "no-path", "why": "asks the user"},
+      "collaboration": {"class": "no-path", "why": "the namespace of the agent tools"},
+      "functions": {"class": "no-path", "why": "the namespace of the function tools"}
+    }
+  }
+}

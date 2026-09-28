@@ -829,7 +829,13 @@ class PayloadMatrixTests(unittest.TestCase):
         return json.loads(r.stdout)          # exactly one object
 
     def _blocks_by_exit(self, r: subprocess.CompletedProcess) -> None:
-        self.assertEqual((r.returncode, r.stdout), (2, ""), r.stderr)
+        """A refusal is JSON on stdout with exit 0, which both clients read; Codex runs the tool when a
+        hook exits 2 (Codex review, 2026-09-28)."""
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)
+        refused = out.get("decision") == "block" or \
+            (out.get("hookSpecificOutput") or {}).get("permissionDecision") == "deny"
+        self.assertTrue(refused, out)
 
     def test_user_prompt_matrix(self):
         base = {"transcript_path": "", "cwd": _TMP}

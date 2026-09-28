@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Codex:** `hooks/hooks.json` changed in this release, so Codex asks once in `/hooks` to trust
+  the hooks again.
+
 ## [0.5.8] - 2026-09-28
 
 ### Fixes

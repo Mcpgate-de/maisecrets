@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -48,6 +49,25 @@ esac
 echo "python3 $*" >> "$MS_TEST_TRIPWIRE"
 exit 0
 """
+
+
+def assert_refuses(case: unittest.TestCase, event: str, r: subprocess.CompletedProcess) -> None:
+    """A hook that cannot work refuses in the form both clients read: JSON on stdout and exit 0.
+    Exit 2 blocks in Claude Code only; Codex runs the tool when a hook exits 2 (harness/codex.py)."""
+    case.assertEqual(r.returncode, 0, r.stderr)
+    out = json.loads(r.stdout)
+    if event == "user-prompt":
+        case.assertEqual(out["decision"], "block")
+    elif event == "pre-tool":
+        case.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        case.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PreToolUse")
+    elif event == "post-tool":
+        # Claude Code's shape for a Claude payload; Codex's strict schema drops an answer that carries
+        # Claude's updatedToolOutput, so a Codex payload (turn_id) gets decision/reason only
+        case.assertEqual(set(out), {"hookSpecificOutput"}, out)
+        case.assertIn("withheld", out["hookSpecificOutput"]["updatedToolOutput"])
+    else:
+        case.assertIn("systemMessage", out)
 
 
 @unittest.skipIf(BASH is None, "no bash")
@@ -92,15 +112,14 @@ class LauncherFailsClosedTests(unittest.TestCase):
                     # Claude Code ignores exit 2 after a tool: the JSON itself must withhold
                     self.assertEqual(r.returncode, 0)
                     out = json.loads(r.stdout)
-                    self.assertEqual(out["decision"], "block")
                     self.assertIn("Tool output withheld", out["hookSpecificOutput"]["updatedToolOutput"])
                     self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
                 elif event == "session-start":
                     self.assertEqual(r.returncode, 0)
                     self.assertTrue(json.loads(r.stdout)["systemMessage"].endswith("every prompt is blocked."))
                 else:
-                    self.assertEqual((r.returncode, r.stdout), (2, ""), "exit 2 blocks the prompt or the tool")
-                    self.assertIn("Until then every prompt is blocked.", r.stderr)
+                    assert_refuses(self, event, r)
+                    self.assertIn("Until then every prompt is blocked.", r.stdout)
 
     def test_no_python_on_the_path_blocks_every_event(self):
         self.check_all_events("none")
@@ -110,6 +129,80 @@ class LauncherFailsClosedTests(unittest.TestCase):
         fake.write_text(_PY38, encoding="utf-8")
         fake.chmod(0o700)
         self.check_all_events("python3 is 3.8")
+
+
+_NO_POSIX_SH = shutil.which("sh") is None or os.name == "nt"
+_POSIX_ONLY = "the POSIX hook command runs through sh; the Windows command is commandWindows"
+
+
+@unittest.skipIf(_NO_POSIX_SH, _POSIX_ONLY)
+class MovedPluginFolderFailsClosedTests(unittest.TestCase):
+    """A plugin update moves the folder of an open session (anthropics/claude-code#97847). The client
+    still runs the command of hooks/hooks.json with the old ${CLAUDE_PLUGIN_ROOT}; `bash <missing
+    file>` exits 127, which the client reads as no objection, so every hook failed open and an
+    address went to the model (field report on 0.5.8, 2026-09-28). Each command runs here exactly as
+    the client runs it, through a shell, with a root that does not exist."""
+
+    def commands(self) -> dict[str, str]:
+        data = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        out = {}
+        for groups in data["hooks"].values():
+            for group in groups:
+                for hook in group["hooks"]:
+                    event = next(e for e in EVENTS if f" {e};" in hook["command"] or hook["command"].endswith(f" {e}"))
+                    out[event] = hook["command"]
+        self.assertEqual(sorted(out), sorted(EVENTS), "every event has one command")
+        return out
+
+    def run_command(self, command: str, root: Path) -> subprocess.CompletedProcess:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+        env["CLAUDE_PLUGIN_ROOT"] = str(root)
+        return subprocess.run(["sh", "-c", command], input='{"prompt": "x"}', capture_output=True, text=True,
+                              env=env, timeout=30)
+
+    def test_a_missing_plugin_folder_blocks_every_event(self):
+        gone = Path(tempfile.mkdtemp(prefix="maisecrets-moved-")) / "maisecrets"
+        for event, command in self.commands().items():
+            with self.subTest(event):
+                r = self.run_command(command, gone)
+                self.assertIn("/reload-plugins", r.stdout + r.stderr)
+                if event == "post-tool":
+                    # exit 2 is ignored after a tool ran: the JSON itself must withhold the output
+                    assert_refuses(self, event, r)
+                elif event == "session-start":
+                    self.assertEqual(r.returncode, 0)
+                    self.assertIn("folder is gone", json.loads(r.stdout)["systemMessage"])
+                else:
+                    assert_refuses(self, event, r)
+
+    def test_a_present_plugin_folder_runs_the_launcher(self):
+        # the fallback must not replace the launcher: with the real root, the launcher answers
+        for event, command in self.commands().items():
+            if event != "user-prompt":
+                continue
+            r = self.run_command(command, ROOT)
+            self.assertNotIn("folder is gone", r.stdout + r.stderr)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+
+class BrokenImportFailsClosedTests(unittest.TestCase):
+    """The entry point cannot import the plugin's code (a half-synced folder, a missing module): every
+    hook event must refuse as the launcher does without Python. Exit 1 lets the prompt or the tool
+    through (ops review, 2026-09-28)."""
+
+    def test_a_broken_package_blocks_every_event(self):
+        root = Path(tempfile.mkdtemp(prefix="maisecrets-broken-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        shutil.copytree(ROOT / "hooks", root / "hooks")
+        (root / "maisecrets").mkdir()
+        (root / "maisecrets" / "__init__.py").write_text("raise ImportError('half-synced')\n", encoding="utf-8")
+        for event in EVENTS:
+            with self.subTest(event):
+                r = subprocess.run([sys.executable, str(root / "hooks" / "dispatch.py"), event],
+                                   input='{"prompt": "x"}', capture_output=True, text=True, timeout=30)
+                self.assertIn("cannot load its own code (ImportError)", r.stdout + r.stderr)
+                self.assertNotIn("half-synced", r.stdout + r.stderr, "the type only, never the message")
+                assert_refuses(self, event, r)
 
 
 class RunCmdFailsClosedTests(unittest.TestCase):
@@ -396,3 +489,36 @@ class NoNetworkTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CodexShapedRefusalTests(unittest.TestCase):
+    """Codex reads PostToolUse through a strict schema: an answer with Claude's updatedToolOutput is
+    dropped as a whole, and the output reaches the model (Codex review, 2026-09-28). Each fail-closed
+    path answers a Codex payload (turn_id) with decision/reason only."""
+
+    CODEX_PAYLOAD = '{"turn_id": "t", "model": "m", "tool_name": "Bash", "tool_response": {"stdout": "x"}}'
+
+    def check(self, r: subprocess.CompletedProcess) -> None:
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)
+        self.assertEqual(set(out), {"decision", "reason"}, out)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("withheld", out["reason"])
+
+    @unittest.skipIf(_NO_POSIX_SH, _POSIX_ONLY)
+    def test_a_missing_launcher_answers_codex_in_its_shape(self):
+        data = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        command = next(h["command"] for g in data["hooks"]["PostToolUse"] for h in g["hooks"])
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+        env["CLAUDE_PLUGIN_ROOT"] = str(Path(tempfile.mkdtemp(prefix="maisecrets-moved-")) / "gone")
+        self.check(subprocess.run(["sh", "-c", command], input=self.CODEX_PAYLOAD, capture_output=True, text=True,
+                                  env=env, timeout=30))
+
+    def test_a_broken_import_answers_codex_in_its_shape(self):
+        root = Path(tempfile.mkdtemp(prefix="maisecrets-broken-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        shutil.copytree(ROOT / "hooks", root / "hooks")
+        (root / "maisecrets").mkdir()
+        (root / "maisecrets" / "__init__.py").write_text("raise ImportError('x')\n", encoding="utf-8")
+        self.check(subprocess.run([sys.executable, str(root / "hooks" / "dispatch.py"), "post-tool"],
+                                  input=self.CODEX_PAYLOAD, capture_output=True, text=True, timeout=30))

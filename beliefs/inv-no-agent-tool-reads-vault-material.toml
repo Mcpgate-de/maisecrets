@@ -2,11 +2,12 @@
 belief = "inv-no-agent-tool-reads-vault-material"
 kind = "invariant"
 control = "I3"
-statement = "No tool of the agent reads a file of the vault home or the value run directory: every reading and editing tool refuses every spelling of such a path (absolute, relative, tilde, dot-dot, doubled slash, symlink, hard link, another case), a search that covers the store, an MCP argument with the path or a file URI, and a Bash command that names the default or the configured home. A path outside the store still passes."
+statement = "No tool of the agent reads a file of the vault home or the value run directory: every reading and editing tool refuses every spelling of such a path (absolute, relative, tilde, dot-dot, doubled slash, symlink, hard link, another case), a search that covers the store, an MCP argument or an MCP resource read with the path or a file URI, and a Bash command that names the default or the configured home. A path outside the store still passes."
 runner = [
   "tests/test_invariant_store_reads.py::FileToolTests::test_every_reading_tool_refuses_every_spelling_of_a_store_path",
   "tests/test_invariant_store_reads.py::FileToolTests::test_a_search_that_covers_the_store_is_refused",
   "tests/test_invariant_store_reads.py::FileToolTests::test_an_mcp_argument_that_names_the_store_is_refused",
+  "tests/test_invariant_store_reads.py::FileToolTests::test_a_resource_read_that_names_the_store_is_refused",
   "tests/test_invariant_store_reads.py::FileToolTests::test_a_path_outside_the_store_still_passes",
   "tests/test_invariant_store_reads.py::BashTests::test_a_command_that_names_the_store_is_refused",
   "tests/test_invariant_store_reads.py::BashTests::test_a_command_near_the_store_still_runs",
@@ -69,10 +70,10 @@ find = "    m = _STORE_READ_RE.search(command)"
 replace = "    m = None"
 
 [[proof]]
-path = "a reading tool the matcher does not reach"
+path = "a reading tool the matcher does not reach (ReadMcpResourceTool out of the matcher)"
 file = "hooks/hooks.json"
-find = "\"Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|LS|NotebookRead|mcp__.*\""
-replace = "\"Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|NotebookRead|mcp__.*\""
+find = "\"Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceTool|ReadMcpResourceDirTool|mcp__.*\""
+replace = "\"Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceDirTool|mcp__.*\""
 
 [[proof]]
 path = "a tool the hooks handle that this invariant does not list"
@@ -91,3 +92,9 @@ path = "a path next to the configured home in Bash"
 file = "maisecrets/hooks.py"
 find = "re.escape(d) + r\"(?![\\w.-])\", command)"
 replace = "re.escape(d), command)"
+
+[[proof]]
+path = "a resource read by URI (ReadMcpResourceTool, ReadMcpResourceDirTool)"
+file = "maisecrets/hooks.py"
+find = "    if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS or tool.startswith(\"mcp__\"):"
+replace = "    if tool in _READ_TOOLS or tool.startswith(\"mcp__\"):"

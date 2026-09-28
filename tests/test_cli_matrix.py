@@ -819,6 +819,46 @@ class StateMatrixTests(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "password: ⟦SECRET_c2⟧")
         self.assertEqual(sb.run("pending").stdout.strip(), "(maisecrets: no blocked prompt is waiting)")
 
+    def test_a_false_positive_report_names_the_value_to_forget_and_deletes_nothing(self):
+        sb = base_state("live").copy()
+        self.addCleanup(sb.remove)
+        sb.block_prompt(session="SR")
+        entries = sb.index()["entries"]
+        newest = max(entries, key=lambda k: entries[k]["created"])
+        before = set(entries)
+        r = sb.run("report", "last", "a product word, not a password")
+        self.assertIn(f"/maisecrets:forget {newest}", r.stdout)
+        # the events are shared by all sessions, and a model can run this command: nothing goes by itself
+        self.assertEqual(set(sb.index()["entries"]), before)
+
+    def test_pending_takes_the_prompt_of_its_own_session_when_two_wait(self):
+        sb = base_state("live").copy()          # the base is shared: every run works on a copy
+        self.addCleanup(sb.remove)
+        a = sb.block_prompt(session="SA")
+        b = sb.block_prompt(session="SB")
+        # without a session id the command cannot tell them apart and says so
+        self.assertIn("two sessions are waiting", sb.run("pending").stdout)
+        r = sb.run("pending", env=sb.env(CLAUDE_CODE_SESSION_ID="SB"))
+        self.assertIn("password: ", r.stdout)
+        self.assertNotIn(a, r.stdout)
+        self.assertNotIn(b, r.stdout, "the pending prompt holds placeholders, never the value")
+        # a session with no prompt of its own never gets another session's
+        r = sb.run("pending", env=sb.env(CLAUDE_CODE_SESSION_ID="SC"))
+        self.assertEqual(r.stdout.strip(), "(maisecrets: no blocked prompt is waiting)")
+        r = sb.run("pending", env=sb.env(CLAUDE_CODE_SESSION_ID="SA"))
+        self.assertIn("password: ", r.stdout)
+        self.assertEqual(sb.run("pending", env=sb.env(CLAUDE_CODE_SESSION_ID="SA")).stdout.strip(),
+                         "(maisecrets: no blocked prompt is waiting)", "handed out once")
+
+    def test_a_session_id_is_a_name_never_a_path(self):
+        sb = base_state("live").copy()
+        self.addCleanup(sb.remove)
+        sb.block_prompt(session="SA")
+        for bad in ("../pending/SA", "SA/../SA", ".hidden", "a b"):
+            with self.subTest(bad):
+                r = sb.run("pending", env=sb.env(CLAUDE_CODE_SESSION_ID=bad))
+                self.assertEqual(r.stdout.strip(), "(maisecrets: no blocked prompt is waiting)")
+
     def test_scan_prints_positions_not_the_text(self):
         value = fake_value("Sc")
         _sb, r = self._run("empty", "scan", f"password: {value}")
@@ -993,7 +1033,7 @@ class HookEventTests(unittest.TestCase):
             self.assertEqual(r.returncode, 2, args)
             self.assertIn("usage: dispatch.py", r.stderr)
         r = self.sb.run("user-prompt", stdin="not json")
-        self.assertEqual(r.returncode, 2)
+        self.assertEqual((r.returncode, json.loads(r.stdout)["decision"]), (0, "block"))
         r = self.sb.run("post-tool", stdin="not json")
         self.assertEqual(r.returncode, 0, "exit 2 is ignored after a tool; the answer must withhold instead")
         self.assertIn("its output is withheld", json.loads(r.stdout)["hookSpecificOutput"]["updatedToolOutput"])

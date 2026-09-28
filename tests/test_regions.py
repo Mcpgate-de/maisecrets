@@ -102,9 +102,23 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual((a.regions, a.languages), (("generic", "us"), ("en", "de")))
 
     def test_codes_are_normalised_and_a_language_without_a_label_file_adds_nothing(self):
-        a = self.resolve({"regions": [" GB ", "generic", "auto", "uk", "it"]}, "it_IT")
-        self.assertEqual(a.regions, ("generic", "uk", "it"))
-        self.assertEqual(a.languages, ("en",), "no it.txt: Italian PII rules, English labels")
+        a = self.resolve({"regions": [" GB ", "generic", "auto", "uk", "jp"]}, "ja_JP")
+        self.assertEqual(a.regions, ("generic", "uk", "jp"))
+        self.assertEqual(a.languages, ("en",), "no ja.txt: a Japanese system gets English labels")
+
+    def test_each_region_with_a_label_file_turns_its_language_on(self):
+        for region, want in [("it", ("en", "it")), ("fr", ("en", "fr")), ("lu", ("en", "fr")),
+                             ("be", ("en", "nl", "fr")), ("nl", ("en", "nl")), ("br", ("en", "pt")),
+                             ("pt", ("en", "pt")), ("dk", ("en", "da")), ("no", ("en", "nb")),
+                             ("cz", ("en", "cs")), ("se", ("en", "sv")), ("kr", ("en", "ko"))]:
+            with self.subTest(region):
+                self.assertEqual(self.resolve({"regions": [region]}, "C").languages, want)
+        # a Norwegian system setting names the language "no" or "nb"; the file is nb.txt
+        for loc in ("no_NO", "nb_NO"):
+            self.assertEqual(self.resolve({"regions": []}, loc).languages, ("en", "nb"), loc)
+        every = {x for r in regions.REGION_LANGUAGE for x in regions._region_languages(r)}
+        self.assertEqual(every - set(regions.label_languages_available()), set(),
+                         "a region names a language that has no label file")
 
     def test_an_empty_list_is_the_generic_rules_only(self):
         self.assertEqual(self.resolve({"regions": []}, "de_DE").regions, ("generic",))
@@ -157,7 +171,8 @@ class LabelFileTests(unittest.TestCase):
     def test_every_label_file_parses_and_each_example_matches_its_label(self):
         import re
         langs = regions.label_languages_available()
-        self.assertEqual(langs, ["de", "en"])
+        self.assertEqual(langs, ["cs", "da", "de", "en", "es", "fi", "fr", "it", "ko", "nb", "nl", "pl", "pt", "sv",
+                                 "th", "tr"])
         for lang in langs:
             labels = regions.load_labels(lang)
             self.assertTrue(labels, lang)

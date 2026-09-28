@@ -313,9 +313,14 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
         return False
 
 
+_SESSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+
+
 def _pending_path(session: str | None):
+    """The session id becomes a file name: only its own shape, never a path (Codex review, 2026-09-28)."""
     from .vault import HOME
-    return HOME / "pending" / (f"{session or 'nosession'}.txt")
+    name = session if session and _SESSION_ID_RE.fullmatch(session) else "nosession"
+    return HOME / "pending" / f"{name}.txt"
 
 
 def _save_pending(rewritten: str, session: str | None) -> None:
@@ -333,12 +338,15 @@ def _save_pending(rewritten: str, session: str | None) -> None:
 
 
 def take_pending(session: str | None = None) -> str | None:
-    """Return and delete the pending prompt: the session's own, else the newest one."""
+    """Return and delete the pending prompt. With a session id, that session's own and nothing else:
+    another session's prompt holds another conversation's text. Without one (a client that names no
+    session to a command), the only fresh prompt, and a notice when two sessions wait."""
     from .vault import HOME
     d = HOME / "pending"
     cands = []
-    if session and _pending_path(session).exists():
-        cands = [_pending_path(session)]
+    if session:
+        own = _pending_path(session)
+        cands = [own] if own.exists() and _SESSION_ID_RE.fullmatch(session) else []
     elif d.exists():
         fresh = [c for c in d.glob("*.txt") if time.time() - c.stat().st_mtime < 15 * 60]
         if len(fresh) > 1:
@@ -358,16 +366,22 @@ def take_pending(session: str | None = None) -> str | None:
 
 
 PRIMER = (
+    # Written as what to do, not as a list of what is refused: a primer of prohibitions next to an
+    # ordinary ops request (base64, sudo) read like an attempt to get around a control, and a model
+    # safeguard paused the session (field report on 0.5.8, 2026-09-28)
     "maisecrets: a placeholder like ⟦SECRET_c1⟧ or ⟦EMAIL_c2:ma•••@x.de⟧ stands for a value the user "
-    "stored locally. Use it unchanged. In a Bash command the value is read when the command runs; in "
-    "an MCP tool argument and in the content of Write, Edit, MultiEdit or NotebookEdit it is inserted "
-    "at call time. It is NOT resolved in WebFetch or a subagent prompt: there it stays literal text. "
-    "In Bash use it as a plain argument, inside '…' or \"…\", "
-    "or in an unquoted heredoc; a command with bash -c, sh -c, ssh, eval, backticks, $'…', a quoted heredoc, "
-    "base64/xxd/od, ${x:0:4} or set -x is refused, and awk needs V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. "
-    "Never ask the user for the value, never print, encode or slice it, never read the maisecrets store or "
-    "its files, never change its settings. When the user asks for the value in a file or a command, use the "
-    "placeholder there as they asked; the hook inserts the value at run time."
+    "stored on this computer. Use the placeholder unchanged where the value belongs; maisecrets puts the "
+    "value in when the call runs. In an MCP tool argument and in the content of Write, Edit, MultiEdit or "
+    "NotebookEdit it goes in at call time; WebFetch and a subagent prompt keep it as plain text. In Bash, "
+    "give it as a plain argument, inside '…' or \"…\", or in an unquoted heredoc; the shell reads the value "
+    "when the command runs. For awk, pass it as V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. To give a value to a "
+    "remote host, pipe it on stdin to the command that reads it, for example "
+    "printf '%s' ⟦KEY⟧ | ssh host 'sudo zgrep -F -f - /var/log/app.log' (inside the Claude Code sandbox, "
+    "one host per command; the user confirms it). A form that would run the value as code or change it "
+    "(a nested shell, eval, backticks, $'…', a quoted heredoc, an encoder, a slice, set -x) gets an answer "
+    "that names a form that works. The value stays with the user: to use it, use the placeholder; the user "
+    "manages the stored values and the settings. When the user asks for the value in a file or a command, "
+    "put the placeholder there as they asked."
 )
 
 
@@ -1080,6 +1094,25 @@ def _ssh_options(toks: list[str], i: int, opts: list) -> int:
     return i
 
 
+def _ssh_way(why: str) -> str:
+    """The form that works for what the refused remote command wanted to do. The answer names a way,
+    not only the rule: an ops user needs root-only logs, and "the remote su would hand the value to
+    another shell" left no way forward (field report on 0.5.8, 2026-09-28)."""
+    base = ("To give a value to a remote host, pipe it on stdin to the command that reads it, inside the "
+            "Claude Code sandbox, one host per command: printf '%s' ⟦KEY⟧ | ssh HOST 'zgrep -F -f - FILE'. "
+            "The user confirms it.")
+    # the second hop first: its reason names "another shell or host" too
+    if re.search(r"\bremote (?:ssh|sshpass|plink|mosh|autossh|scp|sftp|rsync)\b|\bjump\b|\bproxy\b", why):
+        return "For a host behind another host, run one ssh command per host. " + base
+    if re.search(r"\b(?:su|sudo|login shell|shell|wrapper)\b", why):
+        return ("To read a file only root can read, put sudo in front of the command that reads it, not su "
+                "or a shell: printf '%s' ⟦KEY⟧ | ssh HOST 'sudo zgrep -F -f - FILE'. " + base)
+    if "encoded" in why:
+        return ("Keep the encoder out of the remote command that gets the value; a script can go as the "
+                "command's own text instead of through base64. " + base)
+    return base
+
+
 def _remote_refusal(remote: str) -> str | None:
     """Why the remote command would run the value as code, pass it on, or show it encoded. The
     value arrives on its stdin, so a command that reads data there is fine (grep -F -f -, cat > f,
@@ -1117,7 +1150,8 @@ def _remote_refusal(remote: str) -> str | None:
         if cmd in REMOTE_OR_EVAL:
             return f"the remote {cmd} would hand the value to another shell or host"
         if cmd in ENCODERS:
-            return f"the remote {cmd} would send the value back encoded, where the output redaction cannot see it"
+            return (f"the remote {cmd} could send the value back encoded, where the output redaction "
+                    "cannot see it")
         if cmd in SHELLS and ("-s" in flags or not any(INLINE_CODE_FLAGS.match(f) and "c" in f for f in flags)):
             return f"the remote {cmd} would read the value as shell code"
         if cmd in SHELLS:
@@ -1161,7 +1195,7 @@ _UNIQ_OK = re.compile(r"^(?:-[cdiuz]+|-[fsw]\d*|\d+|--(?:count|repeated|unique|i
 
 def _remote_is_read_only(remote: str) -> bool:
     """Whether every part of the remote command only reads and prints. Each part is a bare command
-    word from READ_ONLY_REMOTE, at most behind sudo, nice or command without options: no path, no
+    word from READ_ONLY_REMOTE, at most behind sudo (or sudo -n), nice or command without other options: no path, no
     assignment such as PATH=, since a command named grep in /tmp is not grep (Codex review,
     2026-09-28). No output redirection, tee, subshell or expansion, and none of the options with
     which a reader writes a file or runs a program."""
@@ -1179,7 +1213,9 @@ def _remote_is_read_only(remote: str) -> bool:
         except ValueError:
             return False
         while raw and raw[0] in _READ_ONLY_WRAPPERS:
-            raw = raw[1:]
+            # sudo -n (never ask for a password) is how ops scripts call sudo, so a missing rule fails
+            # instead of hanging; it changes who reads, not what the command does (field report on 0.5.8)
+            raw = raw[2:] if raw[0] == "sudo" and raw[1:2] == ["-n"] else raw[1:]
         if not raw or raw[0] not in READ_ONLY_REMOTE:
             return False             # a path, an assignment, a wrapper option or another command
         cmd, args = raw[0], raw[1:]
@@ -1495,7 +1531,7 @@ def _args_call_refusal(command: str) -> str | None:
     if not m or any(line.strip() == _ARGS_END for line in m.group(1).split("\n")):
         return ("maisecrets: a maisecrets command with --args-stdin must have exactly the form of its command "
                 f"file, and its arguments must not contain a line {_ARGS_END}. The command did not run. Tell the "
-                "user to write the arguments without that line; do not rephrase the command.")
+                "user to write the arguments without that line.")
     return None
 
 
@@ -1517,11 +1553,20 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     bad_args = _args_call_refusal(command)
     if bad_args:
         return _deny(bad_args)
+    if re.search(r"(?<![\w])CLAUDE_CODE_SESSION_ID\s*=|\bunset\b[^\n;|&]*\bCLAUDE_CODE_SESSION_ID\b"
+                 r"|\benv\b[^\n;|&]*\s-u\s*CLAUDE_CODE_SESSION_ID\b", command):
+        # /ms reads the blocked prompt of the session the client names; a command that names another one
+        # would take that session's text (Codex review, 2026-09-28)
+        return _deny("maisecrets: this command sets or clears the session id, which selects the blocked prompt "
+                     "of another session. The command did not run. /ms sends the blocked prompt of this session.")
     matched = _store_read_match(command)
     if matched:
-        return _deny(f"maisecrets: this command touches {matched}, which the agent never reads or changes; "
-                     "the human uses the maisecrets CLI for that. The command did not run. If this is a "
-                     "false positive, tell the user; do not rephrase the command to get around the check.")
+        # said as what the user does next, not as a check to stay inside: "do not rephrase … to get around
+        # the check" next to an ops request read like an attempt to get around a control (ops review, 2026-09-28)
+        return _deny(f"maisecrets: this command touches {matched}, the user's own store. The user manages it "
+                     "with /maisecrets:list and /maisecrets:forget. The command did not run. If the task needs "
+                     "something from there, tell the user what; if this is a false positive, "
+                     "/maisecrets:report records it.")
     ctxs = _shell_contexts(command)
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
     if not refs:
@@ -1558,12 +1603,12 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         else:
             ssh_token = ssh_approval.remember_pending(payload.get("session_id"), names)
     if why and ssh_refused:
-        return _deny(f"maisecrets: {keys} is refused in this command: {why}. The command did not run. "
-                     "A value reaches ssh only on stdin, inside the Claude Code sandbox, after the user confirms.")
+        return _deny(f"maisecrets: {keys} cannot go to the remote host in this form: {why}. The command did "
+                     "not run. " + _ssh_way(why))
     if why:
-        return _deny(f"maisecrets: {keys} is refused in this command: {why}. The command did not run. "
-                     "Use the placeholder only as a plain argument of the tool that needs the value; "
-                     "run a wrapper's inner command directly, and do not encode, slice or trace the value.")
+        return _deny(f"maisecrets: {keys} cannot be placed in this command: {why}. The command did not run. "
+                     "Give the placeholder as a plain argument of the tool that needs the value; for a "
+                     "wrapper such as bash -c or eval, run its inner command directly.")
     vault = Vault(cfg)
     session = payload.get("session_id")
     uniq = list(dict.fromkeys(k for k, _a, _b in refs))
@@ -1818,6 +1863,9 @@ _FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 # tools that read files by path; they carry no placeholder, but they could read the store itself
 _READ_TOOLS = ("Read", "Grep", "Glob", "LS", "NotebookRead")
 _PATH_FIELDS = ("file_path", "path", "notebook_path", "directory", "dir", "root", "cwd")
+# Claude Code's resource tools read an MCP resource by URI; a filesystem server serves file: URIs, and
+# the names carry no mcp__ prefix, so the matcher did not reach them (tool inventory, 2026-09-28)
+_MCP_RESOURCE_TOOLS = ("ReadMcpResourceTool", "ReadMcpResourceDirTool")
 
 
 def _store_dir_spellings() -> list[str]:
@@ -1949,9 +1997,9 @@ def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
         _walk_strings(tool_input, look)
     if not hits:
         return None
-    return _deny(f"maisecrets: {tool} would read the maisecrets store or its value directory, which the agent never "
-                 "reads. The call did not run. If this is a false positive, tell the user; do not rephrase the call "
-                 "to get around the check.")
+    return _deny(f"maisecrets: {tool} would read the maisecrets store or its value directory, the user's own store. "
+                 "The user manages it with /maisecrets:list and /maisecrets:forget. The call did not run. If this is "
+                 "a false positive, /maisecrets:report records it.")
 
 
 def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:
@@ -2026,11 +2074,11 @@ def pre_tool(payload: dict) -> dict:
     tool_input = payload.get("tool_input") or {}
     if tool == "Bash":
         return _pre_bash(payload, cfg, tool_input)
-    if tool in _READ_TOOLS or tool.startswith("mcp__"):
+    if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS or tool.startswith("mcp__"):
         refused = _store_path_refusal(tool, tool_input, str(payload.get("cwd") or ""))
         if refused:
             return refused
-        if tool in _READ_TOOLS:
+        if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS:
             return {}
     if tool in _FILE_TOOLS:
         return _pre_file_tool(payload, cfg, tool, tool_input, str(payload.get("cwd") or ""))
@@ -2450,11 +2498,10 @@ def main(argv: list[str]) -> int:
         # `null`, a list or a number parse but are no payload: the handler and then the
         # fail-closed path raised, the process exited 1, and exit 1 lets the action through
         sys.stderr.write("maisecrets: bad payload\n")
-        if event == "post-tool":
-            # exit 2 is ignored here and the raw output would reach the model
-            _out(_fail_closed("post-tool", {}, "got a payload that is not JSON."))
-            return 0
-        return 2  # fail closed
+        # an answer in JSON for every event: exit 2 is ignored after a tool, and Codex runs the tool on
+        # exit 2 before one (Codex review, 2026-09-28)
+        _out(_fail_closed(event, {}, "got a payload that is not JSON."))
+        return 0
     import threading
     started = time.time()
     lock = threading.Lock()

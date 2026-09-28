@@ -4,11 +4,53 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from maisecrets.hooks import main  # noqa: E402
+HOOK_EVENTS = ("user-prompt", "pre-tool", "post-tool", "session-start")
+
+
+def _refuse_without_the_code(why: str) -> None:
+    """The plugin's own code cannot be loaded (a half-synced folder, a missing module): answer as the
+    launcher does without Python. A failed import ended the process with exit 1, which the client
+    reads as no objection, so every prompt and tool went through (ops review, 2026-09-28). Nothing of
+    maisecrets is imported here, and the text carries the exception type only."""
+    event = sys.argv[1] if len(sys.argv) == 2 else ""
+    msg = (f"maisecrets cannot load its own code ({why}); the plugin folder may be half updated. "
+           "Run /reload-plugins or start a new session.")
+    if event == "post-tool":
+        import json
+        text = f"[{msg} The tool ran and finished; its output is withheld, do not run it again.]"
+        # one shape per client: Codex's strict schema drops an answer with Claude's updatedToolOutput
+        codex = '"turn_id"' in sys.stdin.read()
+        print(json.dumps({"decision": "block", "reason": text} if codex else
+                         {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": text}}))
+        sys.exit(0)
+    if event == "session-start":
+        import json
+        print(json.dumps({"systemMessage": msg + " Until then every prompt is blocked."}))
+        sys.exit(0)
+    import json
+    text = msg + " Until then every prompt is blocked."
+    # JSON, not exit 2: Codex runs the tool when a hook exits 2 (harness/codex.py); both clients read this
+    if event == "pre-tool":
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                 "permissionDecisionReason": text}}))
+    else:
+        print(json.dumps({"decision": "block", "reason": text}))
+    sys.exit(0)
+
+
+try:
+    from maisecrets.hooks import main  # noqa: E402
+except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
+    if len(sys.argv) == 2 and sys.argv[1] in HOOK_EVENTS:
+        _refuse_without_the_code(type(exc).__name__)
+    raise
 
 if len(sys.argv) >= 2 and sys.argv[1] == "pending":
     from maisecrets.hooks import take_pending  # noqa: E402
-    text = take_pending()
+    # Claude Code gives a command the id of its session, the same id its hooks get (measured with the
+    # harness, 2026-09-28): with two blocked prompts waiting, /ms found neither and pointed to the
+    # clipboard, which does not exist over SSH or in Remote Control (field report on 0.5.8)
+    text = take_pending(os.environ.get("CLAUDE_CODE_SESSION_ID") or None)
     print(text if text is not None else "(maisecrets: no blocked prompt is waiting)")
     sys.exit(0)
 

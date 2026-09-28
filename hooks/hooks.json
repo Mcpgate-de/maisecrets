@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" session-start",
+            "command": "if [ -f \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" ]; then bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" session-start; else printf '%s' '{\"systemMessage\":\"maisecrets: its folder is gone (a plugin update moved it while this session was open). Run /reload-plugins. Until then maisecrets blocks this.\"}'; fi",
             "timeout": 30,
             "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" session-start"
           }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" user-prompt",
+            "command": "if [ -f \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" ]; then bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" user-prompt; else printf '%s' '{\"decision\": \"block\", \"reason\": \"maisecrets: its folder is gone (a plugin update moved it while this session was open). Run /reload-plugins. Until then maisecrets blocks this.\"}'; fi",
             "timeout": 10,
             "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" user-prompt"
           }
@@ -27,11 +27,11 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|LS|NotebookRead|mcp__.*",
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceTool|ReadMcpResourceDirTool|mcp__.*",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" pre-tool",
+            "command": "if [ -f \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" ]; then bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" pre-tool; else printf '%s' '{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"maisecrets: its folder is gone (a plugin update moved it while this session was open). Run /reload-plugins. Until then maisecrets blocks this.\"}}'; fi",
             "timeout": 10,
             "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" pre-tool"
           }
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" post-tool",
+            "command": "if [ -f \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" ]; then bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" post-tool; else p=$(cat); case \"$p\" in *'\"turn_id\"'*) printf '%s' '{\"decision\": \"block\", \"reason\": \"[maisecrets: its folder is gone (a plugin update moved it while this session was open). Run /reload-plugins. Until then maisecrets blocks this. The tool ran; its output is withheld.]\"}';; *) printf '%s' '{\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"updatedToolOutput\": \"[maisecrets: its folder is gone (a plugin update moved it while this session was open). Run /reload-plugins. Until then maisecrets blocks this. The tool ran; its output is withheld.]\"}}';; esac; fi",
             "timeout": 20,
             "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" post-tool"
           }

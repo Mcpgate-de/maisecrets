@@ -421,7 +421,8 @@ class HookTests(unittest.TestCase):
         buf = io.StringIO()
         with mock.patch.object(sys, "stdin", io.StringIO("not json")), redirect_stdout(buf):
             rc = hooks.main(["hook", "user-prompt"])
-        self.assertEqual(rc, 2)
+        # a refusal in JSON, exit 0: Codex runs the tool on exit 2
+        self.assertEqual(rc, 0)
 
 
 if __name__ == "__main__":

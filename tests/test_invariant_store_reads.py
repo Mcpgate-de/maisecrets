@@ -42,28 +42,15 @@ from _hygiene import CLAUDE, CODEX  # noqa: E402
 
 CLIENTS = {"claude": CLAUDE, "codex": {**CODEX, "model": "m"}}
 
-# Every tool of the clients that takes a path, and the field it reads. The matcher must reach each
-# one. Codex: its nested shell arrives as Bash; `apply_patch` is not measured (the Codex design is
-# open, docs/THREAT-MODEL.md C5), so it is not claimed here.
-READERS = {
-    "Read": "file_path", "NotebookRead": "notebook_path", "Grep": "path", "Glob": "path", "LS": "path",
-    # these read the file before they change it, and the result shows a piece of it
-    "Edit": "file_path", "MultiEdit": "file_path", "NotebookEdit": "notebook_path",
-    "Write": "file_path",
-}
-# tools that take no local path, and why they need no guard here
-NO_PATH = {
-    "WebFetch": "fetches http and https only",
-    "WebSearch": "searches the web",
-    "Task": "a subagent's own tool calls pass the same hooks",
-    "Agent": "a subagent's own tool calls pass the same hooks",
-    "TodoWrite": "writes the task list only",
-    "BashOutput": "returns output of a Bash call the hooks saw; PostToolUse redacts it",
-    "KillShell": "stops a shell",
-    "ExitPlanMode": "no file",
-    "SlashCommand": "runs a command file the user installed",
-    "Skill": "loads a skill the user installed",
-}
+# The tool population comes from tests/client_tools.json, which the harness checks against the tool
+# list of the real client on every run: a tool the client adds and nobody classified fails there, so
+# this module no longer depends on a list written by hand. Codex: its shell arrives as Bash;
+# `apply_patch` is "unmeasured" (the Codex design is open, docs/THREAT-MODEL.md C5).
+INVENTORY = json.loads((ROOT / "tests" / "client_tools.json").read_text(encoding="utf-8"))
+_CLAUDE_TOOLS = INVENTORY["claude-code"]["tools"]
+READERS = {name: t["field"] for name, t in _CLAUDE_TOOLS.items() if t["class"] in ("reads-path", "edits-path")}
+RESOURCE_READERS = {name: t["field"] for name, t in _CLAUDE_TOOLS.items() if t["class"] == "mcp-resource"}
+NO_PATH = {name: t["why"] for name, t in _CLAUDE_TOOLS.items() if t["class"] == "no-path"}
 
 
 def deny(out: dict) -> bool:
@@ -202,6 +189,21 @@ class FileToolTests(unittest.TestCase):
                         bad.append(f"{label} / {client}: {ti}")
         self.assertEqual(bad, [], "\n".join(bad))
 
+    def test_a_resource_read_that_names_the_store_is_refused(self):
+        s = self.s
+        f = s.files[0]
+        bad = []
+        for tool in RESOURCE_READERS:
+            for uri in (f.as_uri(), "file://localhost" + f.as_uri()[len("file://"):], s.home.as_uri()):
+                for client in CLIENTS:
+                    if not deny(pre(tool, {"server": "fs", "uri": uri}, "/", client)):
+                        bad.append(f"{tool} / {client}: {uri}")
+            # a resource outside the store is no business of the guard
+            if deny(pre(tool, {"server": "fs", "uri": (s.outside / "notes.txt").as_uri()}, "/")):
+                bad.append(f"{tool}: a resource outside the store was refused")
+        self.assertTrue(RESOURCE_READERS, "the inventory must name the resource tools")
+        self.assertEqual(bad, [], "\n".join(bad))
+
     def test_a_path_outside_the_store_still_passes(self):
         # the guard is only worth something if it leaves the rest alone
         s = self.s
@@ -267,15 +269,19 @@ class PopulationTests(unittest.TestCase):
     def test_every_tool_that_reads_a_path_is_in_the_matcher(self):
         hooks_json = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         matchers = [m.get("matcher", "") for m in hooks_json["hooks"]["PreToolUse"]]
-        missing = [t for t in list(READERS) + ["Bash", "mcp__fs__read_file"]
-                   if not any(re.fullmatch(m, t) for m in matchers)]
+        guarded = [name for name, t in _CLAUDE_TOOLS.items() if t["class"] not in ("no-path",)]
+        missing = [t for t in guarded + ["mcp__fs__read_file"] if not any(re.fullmatch(m, t) for m in matchers)]
         self.assertEqual(missing, [], "a tool the matcher does not reach meets no guard")
-        self.assertEqual(set(READERS) & set(NO_PATH), set())
+        classes = {t["class"] for t in _CLAUDE_TOOLS.values()}
+        self.assertEqual(classes - {"reads-path", "edits-path", "shell", "mcp-resource", "no-path"}, set())
+        self.assertTrue(all(t.get("why") for t in _CLAUDE_TOOLS.values() if t["class"] == "no-path"),
+                        "a tool without a guard must say why it needs none")
 
     def test_the_hook_code_knows_no_reading_tool_this_module_does_not(self):
         # a tool name the hook code handles by name is a tool that reads or writes: it must be here
-        named = set(hooks._READ_TOOLS) | set(hooks._FILE_TOOLS)
-        self.assertEqual(named - set(READERS), set(), "a tool the hooks handle is missing from READERS")
+        named = set(hooks._READ_TOOLS) | set(hooks._FILE_TOOLS) | set(hooks._MCP_RESOURCE_TOOLS)
+        self.assertEqual(named - set(READERS) - set(RESOURCE_READERS), set(),
+                         "a tool the hooks handle is missing from tests/client_tools.json")
 
 
 if __name__ == "__main__":

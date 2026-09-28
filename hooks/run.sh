@@ -23,13 +23,29 @@ MSG="maisecrets needs Python 3.9 or newer on the PATH of the client (found: ${FO
 case "${1:-}" in
   post-tool)
     # Claude Code ignores exit 2 here and would show the raw output to the model: answer
-    # fail-closed with the JSON the hook itself would give (review, 2026-09-26)
-    # both shapes: updatedToolOutput for Claude Code, decision/reason for Codex
-    printf '{"decision":"block","reason":"[%s Tool output withheld; the tool ran and finished, do not run it again.]","hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"[%s Tool output withheld; the tool ran and finished, do not run it again.]"}}' "$MSG" "$MSG"
+    # fail-closed with the JSON the hook itself would give (review, 2026-09-26). One shape per
+    # client: Codex's strict schema dropped an answer that carried Claude's updatedToolOutput
+    # (Codex review, 2026-09-28); Codex sends turn_id in its payload.
+    P="$(cat)"
+    case "$P" in
+      *'"turn_id"'*)
+        printf '{"decision":"block","reason":"[%s Tool output withheld; the tool ran and finished, do not run it again.]"}' "$MSG" ;;
+      *)
+        printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"[%s Tool output withheld; the tool ran and finished, do not run it again.]"}}' "$MSG" ;;
+    esac
     exit 0 ;;
   session-start)
     printf '{"systemMessage":"%s Until then every prompt is blocked."}' "$MSG"
     exit 0 ;;
 esac
+# JSON, not exit 2: Codex runs the tool when a hook exits 2 (harness/codex.py); both clients read this
+case "${1:-}" in
+  pre-tool)
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s Until then every prompt is blocked."}}' "$MSG"
+    exit 0 ;;
+  user-prompt)
+    printf '{"decision":"block","reason":"%s Until then every prompt is blocked."}' "$MSG"
+    exit 0 ;;
+esac
 echo "$MSG Until then every prompt is blocked." >&2
-exit 2   # fail closed: without the detector nothing may pass
+exit 2   # any other use of the launcher (a CLI command): fail closed

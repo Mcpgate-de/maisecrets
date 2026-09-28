@@ -1,0 +1,10 @@
+# c13-a-moved-plugin-folder-fails-closed: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-a-moved-plugin-folder-fails-closed"
+control = "C13"
+statement = "When the plugin folder of an open session is gone (a plugin update moved it), every hook command still refuses: the prompt and the tool are blocked, the tool output is withheld."
+runner = ["tests/test_promises.py::MovedPluginFolderFailsClosedTests::test_a_missing_plugin_folder_blocks_every_event"]
+
+[proof]
+file = "hooks/hooks.json"
+find = "pre-tool; else printf"
+replace = "pre-tool; else exit 0; printf"
