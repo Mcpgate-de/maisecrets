@@ -13,12 +13,15 @@ beliefs layer, cut to what a repository this size needs: no provenance vocabular
 
 Each belief: the owning tests run once unmutated and must pass (a red baseline is not
 evidence about the mutation), then the file is mutated, the tests run again and must fail,
-and the file is restored on every exit, signals included. Serial by design: it owns the
-working tree for the length of one replay; never run it inside the test suite.
+and the file is restored on every exit, signals included. With --jobs 1 the replay owns this
+working tree for its length; with more (the default: one per CPU, up to 8, or
+MAISECRETS_REPLAY_JOBS) each worker replays in a private copy and this tree is never mutated.
+Never run it inside the test suite.
 """
 from __future__ import annotations
 
 import argparse
+import shutil
 import signal
 import subprocess
 import sys
@@ -46,7 +49,7 @@ def unittest_id(test_id: str) -> str:
     return module + ("." + rest.replace("::", ".") if rest else "")
 
 
-def run_tests(ids: list[str]) -> tuple[int, dict[str, str]]:
+def run_tests(ids: list[str], root: Path = ROOT) -> tuple[int, dict[str, str]]:
     """Run the owning tests once; return the exit code and each test's outcome.
 
     Each run gets a fresh bytecode cache. A mutation of the same length written in the same
@@ -57,9 +60,9 @@ def run_tests(ids: list[str]) -> tuple[int, dict[str, str]]:
     import tempfile
     with tempfile.TemporaryDirectory(prefix="maisecrets-pyc-") as cache:
         report = os.path.join(cache, "outcomes.json")
-        cmd = [sys.executable, str(ROOT / "scripts" / "_run_tests_json.py"), report] + [unittest_id(t) for t in ids]
+        cmd = [sys.executable, str(root / "scripts" / "_run_tests_json.py"), report] + [unittest_id(t) for t in ids]
         env = dict(os.environ, PYTHONPYCACHEPREFIX=cache)
-        r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=600, env=env)
+        r = subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=600, env=env)
         try:
             with open(report, encoding="utf-8") as fh:
                 outcomes = json.load(fh)
@@ -130,9 +133,9 @@ def _check_mutation(target: Path, mutated: str) -> str | None:
     return None
 
 
-def _replay_one(belief: dict, proof: dict) -> tuple[bool, str, set[str]]:
+def _replay_one(belief: dict, proof: dict, root: Path = ROOT) -> tuple[bool, str, set[str]]:
     """Apply one mutation, run the owning tests, restore. Returns (red, why, the red test ids)."""
-    target = ROOT / proof["file"]
+    target = root / proof["file"]
     original = target.read_text(encoding="utf-8")
     n = original.count(proof["find"])
     if n != 1:
@@ -143,7 +146,7 @@ def _replay_one(belief: dict, proof: dict) -> tuple[bool, str, set[str]]:
         bad = _check_mutation(target, mutated)
         if bad:
             return False, bad, set()
-        rc, outcomes = run_tests(belief["runner"])
+        rc, outcomes = run_tests(belief["runner"], root)
     if target.read_text(encoding="utf-8") != original:
         return False, "the file was not restored", set()
     if rc == SKIPPED:
@@ -157,14 +160,14 @@ def _replay_one(belief: dict, proof: dict) -> tuple[bool, str, set[str]]:
     return True, "red", red
 
 
-def replay(belief: dict) -> tuple[bool, str]:
+def replay(belief: dict, root: Path = ROOT) -> tuple[bool, str]:
     proofs = proofs_of(belief)
     for proof in proofs:
-        target = ROOT / proof["file"]
+        target = root / proof["file"]
         n = target.read_text(encoding="utf-8").count(proof["find"])
         if n != 1:
             return False, f"anchor occurs {n} times in {proof['file']} (must be exactly once)"
-    first, _ = run_tests(belief["runner"])
+    first, _ = run_tests(belief["runner"], root)
     if first == SKIPPED:
         return False, "an owning test was skipped here (a missing tool?); a skip is no evidence"
     if first == BROKEN:
@@ -173,7 +176,7 @@ def replay(belief: dict) -> tuple[bool, str]:
         return False, "the owning tests are red before the mutation; no evidence"
     killed: set[str] = set()
     for i, proof in enumerate(proofs, 1):
-        ok, why, red = _replay_one(belief, proof)
+        ok, why, red = _replay_one(belief, proof, root)
         killed |= red
         if not ok:
             label = proof.get("path", f"mutation {i}")
@@ -189,10 +192,61 @@ def replay(belief: dict) -> tuple[bool, str]:
     return True, "red under the mutation, green restored"
 
 
+_COPY_IGNORE = (".git", "__pycache__", ".ruff_cache", ".pytest_cache", "*.pyc", ".coverage*")
+
+
+def _tree_copy(tmp: str, n: int) -> Path:
+    """A private copy of the tree for one worker: a replay mutates files, so two replays in one
+    tree would see each other's mutations. The copy has no .git; a belief whose tests need the
+    repository history goes red at its baseline and says so."""
+    dest = Path(tmp) / f"tree-{n}"
+    shutil.copytree(ROOT, dest, ignore=shutil.ignore_patterns(*_COPY_IGNORE), symlinks=True)
+    return dest
+
+
+def replay_all(beliefs: list[dict], jobs: int) -> list[tuple[dict, bool, str]]:
+    """Each belief in a worker of its own. With one job the replay runs in this tree, as it did
+    before; with more, every worker owns a copy, and this tree is never mutated at all."""
+    if jobs <= 1 or len(beliefs) <= 1:
+        return [(b, *replay(b)) for b in beliefs]
+    import queue
+    import tempfile
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    jobs = min(jobs, len(beliefs))
+    with tempfile.TemporaryDirectory(prefix="maisecrets-replay-") as tmp:
+        roots: queue.Queue = queue.Queue()
+        for n in range(jobs):
+            roots.put(_tree_copy(tmp, n))
+        lock = threading.Lock()
+
+        def one(b: dict) -> tuple[dict, bool, str]:
+            root = roots.get()
+            try:
+                ok, why = replay(b, root)
+            finally:
+                roots.put(root)
+            with lock:
+                print(f"[{'OK ' if ok else 'FAIL'}] {b['belief']}: {why}", flush=True)
+            return b, ok, why
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            return list(pool.map(one, beliefs))
+
+
+def default_jobs() -> int:
+    """MAISECRETS_REPLAY_JOBS, else one per CPU up to 8. Each job is one test process at a time."""
+    import os
+    env = os.environ.get("MAISECRETS_REPLAY_JOBS", "")
+    if env.isdigit() and int(env) > 0:
+        return int(env)
+    return max(1, min(8, os.cpu_count() or 1))
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--belief")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--jobs", type=int, default=None, help="parallel workers (default: one per CPU, up to 8)")
     args = ap.parse_args(argv)
     beliefs = load()
     if args.belief:
@@ -208,12 +262,17 @@ def main(argv: list[str]) -> int:
     if not beliefs:
         print("no beliefs found; nothing was proven")
         return 1
-    failures = 0
-    for b in beliefs:
-        ok, why = replay(b)
-        failures += not ok
-        print(f"[{'OK ' if ok else 'FAIL'}] {b['belief']}: {why}")
-    print(f"{len(beliefs) - failures} of {len(beliefs)} beliefs proven; failures: {failures}")
+    jobs = args.jobs if args.jobs is not None else default_jobs()
+    results = replay_all(beliefs, jobs)
+    failures = sum(not ok for _b, ok, _why in results)
+    if jobs <= 1 or len(beliefs) <= 1:
+        for b, ok, why in results:
+            print(f"[{'OK ' if ok else 'FAIL'}] {b['belief']}: {why}")
+    else:
+        for b, ok, why in results:
+            if not ok:
+                print(f"failed: {b['belief']}: {why}")
+    print(f"{len(beliefs) - failures} of {len(beliefs)} beliefs proven; failures: {failures} ({jobs} job(s))")
     return 1 if failures else 0
 
 
