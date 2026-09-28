@@ -165,6 +165,34 @@ class MovedPluginFolderFailsClosedTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
 
 
+class BrokenImportFailsClosedTests(unittest.TestCase):
+    """The entry point cannot import the plugin's code (a half-synced folder, a missing module): every
+    hook event must refuse as the launcher does without Python. Exit 1 lets the prompt or the tool
+    through (ops review, 2026-09-28)."""
+
+    def test_a_broken_package_blocks_every_event(self):
+        root = Path(tempfile.mkdtemp(prefix="maisecrets-broken-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        shutil.copytree(ROOT / "hooks", root / "hooks")
+        (root / "maisecrets").mkdir()
+        (root / "maisecrets" / "__init__.py").write_text("raise ImportError('half-synced')\n", encoding="utf-8")
+        for event in EVENTS:
+            with self.subTest(event):
+                r = subprocess.run([sys.executable, str(root / "hooks" / "dispatch.py"), event],
+                                   input='{"prompt": "x"}', capture_output=True, text=True, timeout=30)
+                self.assertIn("cannot load its own code (ImportError)", r.stdout + r.stderr)
+                self.assertNotIn("half-synced", r.stdout + r.stderr, "the type only, never the message")
+                if event == "post-tool":
+                    self.assertEqual(r.returncode, 0)
+                    out = json.loads(r.stdout)
+                    self.assertEqual(out["decision"], "block")
+                    self.assertIn("withheld", out["hookSpecificOutput"]["updatedToolOutput"])
+                elif event == "session-start":
+                    self.assertEqual(r.returncode, 0)
+                else:
+                    self.assertEqual((r.returncode, r.stdout), (2, ""), "exit 2 blocks the prompt or the tool")
+
+
 class RunCmdFailsClosedTests(unittest.TestCase):
     """run.cmd cannot run on this OS; its logic is read from the file: each interpreter runs
     dispatch.py only after it passed the 3.9 probe, post-tool withholds with exit 0, and every

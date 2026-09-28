@@ -4,7 +4,37 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from maisecrets.hooks import main  # noqa: E402
+HOOK_EVENTS = ("user-prompt", "pre-tool", "post-tool", "session-start")
+
+
+def _refuse_without_the_code(why: str) -> None:
+    """The plugin's own code cannot be loaded (a half-synced folder, a missing module): answer as the
+    launcher does without Python. A failed import ended the process with exit 1, which the client
+    reads as no objection, so every prompt and tool went through (ops review, 2026-09-28). Nothing of
+    maisecrets is imported here, and the text carries the exception type only."""
+    event = sys.argv[1] if len(sys.argv) == 2 else ""
+    msg = (f"maisecrets cannot load its own code ({why}); the plugin folder may be half updated. "
+           "Run /reload-plugins or start a new session.")
+    if event == "post-tool":
+        import json
+        text = f"[{msg} The tool ran and finished; its output is withheld, do not run it again.]"
+        print(json.dumps({"decision": "block", "reason": text,
+                          "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": text}}))
+        sys.exit(0)
+    if event == "session-start":
+        import json
+        print(json.dumps({"systemMessage": msg + " Until then every prompt is blocked."}))
+        sys.exit(0)
+    sys.stderr.write(msg + " Until then every prompt is blocked.\n")
+    sys.exit(2)
+
+
+try:
+    from maisecrets.hooks import main  # noqa: E402
+except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
+    if len(sys.argv) == 2 and sys.argv[1] in HOOK_EVENTS:
+        _refuse_without_the_code(type(exc).__name__)
+    raise
 
 if len(sys.argv) >= 2 and sys.argv[1] == "pending":
     from maisecrets.hooks import take_pending  # noqa: E402
