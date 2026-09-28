@@ -2,7 +2,7 @@
 """Wait until the GitHub Actions matrix on the public mirror is green for one commit.
 
 The release job runs after the mirror job pushed the tested SHA to github.com, so
-the Actions workflow (windows-latest, macos-latest, ubuntu-latest) is running or done.
+the Actions workflow (windows-latest, macos-latest) is running or done.
 The repository is public: the check-runs API needs no token (60 requests per hour
 per address; a 403 is treated as "wait longer").
 

@@ -1,7 +1,8 @@
 """Round trip on the native backend of THIS machine (keychain, Credential Locker, encrypted file).
 
-Runs in CI on macOS, Windows and Linux runners. Uses its own vault home so it never
-touches a developer's real store (the service name is derived from the home path).
+Runs in CI on the macOS and Windows runners of GitHub and on the Linux runner of GitLab. Uses its
+own vault home so it never touches a developer's real store (the service name is derived from the
+home path).
 """
 import os
 import sys

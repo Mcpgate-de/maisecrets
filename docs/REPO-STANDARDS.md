@@ -36,7 +36,7 @@ and OpenAI plugin directories.
   HOME and a dummy key, versions pinned), mirror, release. Runner capability
   tag `docker` on the netcup host.
 - Release gate: the `release` job waits until the GitHub Actions matrix
-  (Windows, macOS, Linux) is green for the tested SHA on the public mirror
+  (Windows, macOS; Linux runs on GitLab) is green for the tested SHA on the public mirror
   (`scripts/wait_for_github_checks.py`, public API, no token). Windows was
   red across four releases on 2026-09-26 because nothing waited for it.
 

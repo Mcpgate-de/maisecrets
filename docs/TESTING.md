@@ -6,7 +6,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 
 | suite | command | where it runs |
 |---|---|---|
-| unit tests | `python3 -m unittest discover -s tests` | pre-push hook, GitLab `unit`, GitHub on Windows, macOS, Linux |
+| unit tests | `python3 -m unittest discover -s tests` | pre-push hook, GitLab `unit` (Linux, 3.12 and 3.9), GitHub on Windows and macOS |
 | beliefs | `python3 scripts/replay_can_fail.py` | pre-push hook, GitLab `beliefs_can_fail_replay` |
 | stated numbers | `python3 scripts/derived_counts.py` | pre-push hook, GitLab `manifests` |
 | repository scan | `python3 scripts/scan_tree.py` | GitLab `no_secrets_in_tree` |
