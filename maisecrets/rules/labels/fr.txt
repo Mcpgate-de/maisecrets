@@ -1,0 +1,14 @@
+# French credential labels.
+# Fields, tab-separated: a lowercase literal every match contains, the regex, examples.
+# (?<![^\W\d_]) is the start of a word: no letter of any script before it, while _ and a digit may
+# stand there (db_...). The sources of every word: docs/label-sources.md.
+# mot de passe: the English pass takes passe at a word start already; the line keeps the French
+# label complete, and the match then starts at mot.
+passe	(?<![^\W\d_])mot[ _-]de[ _-]passe	mot de passe, Mot de passe, mot_de_passe, nouveau mot de passe
+# clé alone is an ordinary word (mot clé: keyword): only the labels of two or more words count.
+acc	(?<![^\W\d_])cl(?:é|e)[ _-]d['’ _-]?acc(?:è|e)s(?:[ _-]secr(?:è|e)te)?	clé d'accès, cle d'acces, Clé d’accès secrète, cle_d_acces
+secr	(?<![^\W\d_])cl(?:é|e)[ _-]secr(?:è|e)te	clé secrète, Cle secrete, cle_secrete
+api	(?<![^\W\d_])cl(?:é|e)[ _-]api	clé API, Cle API, cle_api
+secret	(?<![^\W\d_])secret[ _-]client	secret client, Secret client
+# identifiants, plural: the credentials. The singular identifiant is the user name, not a secret.
+identifiants	(?<![^\W\d_])identifiants	identifiants, Identifiants

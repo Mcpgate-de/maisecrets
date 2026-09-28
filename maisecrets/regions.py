@@ -22,13 +22,20 @@ DEFAULT_REGIONS = ["auto"]
 
 # Presidio names the United Kingdom "uk"; a locale names it "GB"
 _COUNTRY_ALIAS = {"gb": "uk"}
-# the language of a region, for the label files; a region not listed adds PII rules only
+# the language of a region, for the label files; a region not listed adds PII rules only.
+# A region with two label languages lists both (Belgium: Dutch and French).
 REGION_LANGUAGE = {
     "de": "de", "at": "de", "ch": "de", "li": "de",
     "us": "en", "uk": "en", "au": "en", "ca": "en", "in": "en", "ng": "en", "ph": "en", "sg": "en",
     "za": "en", "ie": "en", "nz": "en",
     "es": "es", "it": "it", "fi": "fi", "se": "sv", "pl": "pl", "tr": "tr", "kr": "ko", "th": "th",
+    "fr": "fr", "lu": "fr", "be": ("nl", "fr"), "nl": "nl",
 }
+
+
+def _region_languages(region: str) -> tuple[str, ...]:
+    langs = REGION_LANGUAGE.get(region, ())
+    return (langs,) if isinstance(langs, str) else tuple(langs)
 
 
 @dataclass(frozen=True)
@@ -120,7 +127,7 @@ def resolve(cfg: dict) -> Active:
         elif r and r != "generic":
             regions.append(r)
     regions = list(dict.fromkeys(regions))
-    languages = ["en"] + ([lang] if lang else []) + [REGION_LANGUAGE[r] for r in regions if r in REGION_LANGUAGE]
+    languages = ["en"] + ([lang] if lang else []) + [x for r in regions for x in _region_languages(r)]
     available = set(label_languages_available())
     return Active(regions=("generic", *regions),
                   languages=tuple(x for x in dict.fromkeys(languages) if x in available),
