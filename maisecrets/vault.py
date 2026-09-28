@@ -219,6 +219,23 @@ def _old_region_key(layer: dict) -> dict:
     return layer
 
 
+_STRICTNESS = {"automatic": 0, "confirm": 1, "block": 2}
+
+
+def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
+    """A user file ignored for a wrong type still said what it wanted: a stricter rehydration policy,
+    or a route switched off, stays; a looser one is the default anyway. A rehydration value that is
+    no policy is block (review, 2026-09-29: the fallback turned block into confirm)."""
+    want = parsed.get("rehydration", cfg["rehydration"])
+    if want not in _STRICTNESS:
+        want = "block"
+    if _STRICTNESS[want] > _STRICTNESS.get(cfg["rehydration"], 2):
+        cfg["rehydration"] = want
+    for key in ("resolve_in_files", "ssh_via_sandbox"):
+        if parsed.get(key) is False:
+            cfg[key] = False
+
+
 def load_config() -> dict:
     """Defaults, then ~/.maisecrets/config.json, then CLAUDE_PLUGIN_OPTION_<KEY> if a client passes
     plugin options that way, then the machine policy file, whose keys win. The manifest declares
@@ -244,11 +261,15 @@ def load_config() -> dict:
         # warning is shown at session start and in the block notice.
         user = {}
         cfg["config_warning"] = f"{CONFIG.name} is not valid JSON and was ignored"
-        cfg["rehydration"] = "confirm"   # the file may have asked for confirm: an ignored file loosens nothing
+        # the file may have set block: an ignored file loosens nothing, so nothing is rehydrated until it is fixed
+        cfg["rehydration"] = "block"
+        cfg["config_ignored"] = True
     except ConfigError as exc:
+        parsed = user if isinstance(user, dict) else {}
         user = {}
         cfg["config_warning"] = f"{exc}; the file was ignored"
-        cfg["rehydration"] = "confirm"
+        cfg["config_ignored"] = True
+        _keep_the_stricter(cfg, parsed)
     unknown = sorted(k for k in user if k not in _CONFIG_TYPES)
     if unknown:
         # a key is named only when it is a typo of a real one: a value pasted into the file as a

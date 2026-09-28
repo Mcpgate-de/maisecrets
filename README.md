@@ -6,8 +6,9 @@ An AI agent sees what you type and what its tools print: passwords, tokens, a
 customer's e-mail address. maisecrets intercepts detected secrets and personal
 data before they reach the cloud model. The real value goes back in only where
 the call happens, and the model never sees it there either. By default
-maisecrets adds no approval of its own: what you can do with a value, your
-client's permission rules decide, as before. maisecrets itself sends no
+maisecrets adds no approval of its own: in Claude Code your permission rules
+decide, as before; in Codex maisecrets answers `allow`, and Codex's sandbox and
+its approval of MCP tools still apply. maisecrets itself sends no
 prompt, value or telemetry to a server.
 
 ```bash
@@ -205,7 +206,7 @@ For development:
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 12 scenarios against a fake upstream
-python3 harness/codex.py [--real]                      # 5 scenarios through codex exec (one needs --real)
+python3 harness/codex.py [--real]                      # 6 scenarios through codex exec (two need --real)
 python3 scripts/replay_can_fail.py                     # 56 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
@@ -567,11 +568,15 @@ A placeholder turns back into its value only here:
   file is a Bash command you approve (`printf '%s' ⟦KEY⟧ > file`). The
   maisecrets home itself is never written by the agent.
 - **Codex gets "allow".** Codex accepts a rewritten input only together with
-  `allow`. For an MCP tool that does not skip Codex's own approval: the call
-  still needs the tool's approval in Codex (measured with codex-cli 0.158.0,
-  `harness/codex.py --real mcp_text_field_rehydrate`). Whether it skips the
-  approval of a shell command is not measured. On Claude Code the hook gives
-  no decision, so the normal permission rules apply to the rewritten call.
+  `allow`. Measured with codex-cli 0.158.0 (`harness/codex.py --real`): the call
+  of an MCP tool still needs the tool's approval in Codex
+  (`mcp_text_field_rehydrate`), and a shell command still runs in Codex's
+  sandbox: in a read-only sandbox the write is refused although the hook
+  rewrote it (`allow_keeps_the_codex_sandbox`). Whether `allow` skips Codex's
+  approval of an escalated shell command is not measured: `codex exec` offers
+  no escalation. Codex 0.155.1 documented that it does, so on Codex treat the
+  rewrite of a shell command as approved by maisecrets. On Claude Code the hook
+  gives no decision, so the normal permission rules apply to the rewritten call.
 - **Inline for MCP tools.** An argument has no shell to read from, so the value
   is inserted after the same session rule, cap and audit line, into every field
   that holds the placeholder. A field that carries published text (`text`,
@@ -595,9 +600,11 @@ value is put into a call. `~/.maisecrets/config.json`, or the machine policy:
 
 It covers Bash, ssh, MCP tools and Write/Edit alike. `"resolve_in_files": false`
 blocks the file tools alone; `"ssh_approval": "per-session"` works under
-`confirm`. A value that is none of the three blocks, and a `config.json` that
-is not valid JSON falls back to `confirm`, so a typo never loosens a stricter
-setting. In an unattended run (`claude -p`) nobody can answer a confirm, so the
+`confirm`. A value that is none of the three blocks. A `config.json` that is not
+valid JSON blocks rehydration until it is fixed (it may have said `block`), and
+one ignored for a wrong type keeps what it made stricter (`rehydration`,
+`resolve_in_files: false`, `ssh_via_sandbox: false`), so a typo never loosens
+a setting. The refusal and `/maisecrets:status` name the file. In an unattended run (`claude -p`) nobody can answer a confirm, so the
 call is refused and the model reads the reason, never the value. The whole
 matrix, path by path: `tests/test_rehydration_matrix.py`.
 - **Under a cap.** `max_keys_per_session` (25) distinct keys per session and

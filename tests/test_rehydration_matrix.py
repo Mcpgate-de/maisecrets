@@ -149,6 +149,11 @@ class RehydrationMatrixTests(unittest.TestCase):
                              f"{path}/{client}/{pol}: a refusal resolved something")
             return
         new = hso["updatedInput"]
+        if want == "ask":
+            # the ask says what the user allows: the key and, for a published-text field, the warning
+            reason = hso["permissionDecisionReason"]
+            self.assertIn(ref, reason)
+            self.assertEqual("WARNING" in reason, path == "mcp_text", f"{path}: the published-text warning")
         if tool == "Bash":
             # the command carries no value: the shell reads it from a FIFO in the main shell
             self.assertNotIn(VALUE, new["command"])
@@ -212,6 +217,26 @@ class RehydrationMatrixTests(unittest.TestCase):
         self.check_cell("ssh", "claude", "automatic", "defer", ssh_approval="per-session")
         self.assertFalse(Path(HOME, "ssh-approvals.json").exists())
         self.check_cell("ssh", "claude", "confirm", "ask", ssh_approval="per-session")
+        # confirm with per-session: the first use offers the session scope and leaves a pending token
+        self.assertTrue(Path(HOME, "ssh-approvals.json").exists(), "the per-session branch ran")
+        _reset()
+        ref = Vault().put(VALUE, "SECRET", "manual", session="S1").ref
+        tool, tool_input = _input("ssh", ref)
+        hso = self.pre(tool, tool_input, "claude", rehydration="confirm", ssh_approval="per-session")
+        self.assertIn("without asking again", hso["permissionDecisionReason"])
+        hso = self.pre(tool, tool_input, "claude", rehydration="confirm")
+        self.assertNotIn("without asking again", hso["permissionDecisionReason"], "per-command: no session scope")
+
+    @unittest.skipIf(os.name == "nt", "the ssh route is POSIX only")
+    def test_a_key_the_session_may_not_resolve_leaves_no_approval_token(self):
+        ref = Vault().put(VALUE, "SECRET", "manual", session="S9").ref   # minted in another session
+        tool, tool_input = _input("ssh", ref)
+        hso = self.pre(tool, tool_input, "claude", rehydration="confirm", ssh_approval="per-session")
+        self.assertEqual(hso.get("permissionDecision"), "deny")
+        self.assertIn("foreign-session", hso["permissionDecisionReason"])
+        store = Path(HOME, "ssh-approvals.json")
+        self.assertFalse(store.exists() and '"pending": {}' not in store.read_text(encoding="utf-8"),
+                         "a refused key left a pending approval token")
 
     def test_an_unsupported_shape_is_refused_under_every_policy(self):
         for name, (tool, make) in UNSUPPORTED.items():

@@ -1507,8 +1507,8 @@ def _ask(new_input: dict, reason: str) -> dict:
 
 def _updated(payload: dict, new_input: dict) -> dict:
     if client_of(payload) == "codex":
-        # Codex accepts updatedInput only together with "allow", and "allow" skips its approval prompt
-        # for this call (codex-cli 0.155.1; README "Codex approves nothing here").
+        # Codex accepts updatedInput only together with "allow". It does not skip Codex's own approval
+        # of an MCP tool (codex-cli 0.158.0, 2026-09-28); for a shell command see README "Codex gets allow".
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
                                        "updatedInput": new_input}}
     # Claude Code: no permissionDecision, the normal permission rules apply to the rewritten input.
@@ -1615,18 +1615,6 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     stop = rehydration.refusal(cfg, path, client_of(payload), keys, "The command did not run.")
     if stop:
         return _deny(stop)
-    # automatic: no ask of our own. confirm: an ask per command, or with ssh_approval "per-session" an
-    # approved value runs without an ask and a first use asks once and gives its token to the serving
-    # child, which confirms it when the approved command reads the value
-    ssh_auto, ssh_token = rehydration.policy(cfg, "ssh") == "automatic", None
-    if ssh_plan and not ssh_auto and cfg.get("ssh_approval") == "per-session" \
-            and _remote_is_read_only(ssh_plan["remote"]):
-        from . import ssh_approval
-        names = sorted({k for k, _a, _b in refs})
-        if ssh_approval.approved(payload.get("session_id"), names):
-            ssh_auto = True
-        else:
-            ssh_token = ssh_approval.remember_pending(payload.get("session_id"), names)
     vault = Vault(cfg)
     session = payload.get("session_id")
     uniq = list(dict.fromkeys(k for k, _a, _b in refs))
@@ -1637,6 +1625,19 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     failed = [f"{k} ({st})" for k in uniq for st in [vault._limit(k, session)] if st != "ok"]
     if failed:
         return _deny(_deny_reason(failed))
+    # automatic: no ask of our own. confirm: an ask per command, or with ssh_approval "per-session" an
+    # approved value runs without an ask and a first use asks once and gives its token to the serving
+    # child, which confirms it when the approved command reads the value. After phase 1: a key
+    # this session may not resolve leaves no pending token (review, 2026-09-29)
+    ssh_auto, ssh_token = rehydration.policy(cfg, "ssh") == "automatic", None
+    if ssh_plan and not ssh_auto and cfg.get("ssh_approval") == "per-session" \
+            and _remote_is_read_only(ssh_plan["remote"]):
+        from . import ssh_approval
+        names = sorted({k for k, _a, _b in refs})
+        if ssh_approval.approved(payload.get("session_id"), names):
+            ssh_auto = True
+        else:
+            ssh_token = ssh_approval.remember_pending(payload.get("session_id"), names)
     # phase 2: record (audit line, limiter) and fetch; a failure here has recorded nothing served
     plan: dict[str, tuple[str | None, str | None]] = {}    # key -> (nonce, value)
     for key in uniq:

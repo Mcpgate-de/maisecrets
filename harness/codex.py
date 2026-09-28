@@ -69,6 +69,19 @@ SCENARIOS = {
         # a pre-tool "rewrite" and a post-tool "block" (it found the real value in the answer and replaced it)
         "value_goes_to": "mcp__everything__echo",
     },
+    # the hook's "allow" carries the rewritten command, not more: Codex's own sandbox still holds. In a
+    # read-only sandbox the write is refused although the hook rewrote the command (codex-cli 0.158.0,
+    # 2026-09-29). Whether "allow" skips an escalation approval cannot be seen here: codex exec offers none.
+    "allow_keeps_the_codex_sandbox": {
+        "prompt": ("Run exactly this shell command once, do not change it: "
+                   "printf 'got:%s' '⟦SECRET_c1⟧' > used.txt; cat used.txt"),
+        "preload": True,
+        "real_only": True,
+        "sandbox": "read-only",
+        "approval": "on-request",
+        "expect_file": ("used.txt", "<missing>"),
+        "expect_hook": ("pre-tool", "Bash", "rewrite"),
+    },
     # rehydration "confirm": Codex cannot ask with a rewritten input, so the hook refuses the command
     # and it does not run; the model reads the reason, which names the key, not the value
     "bash_rehydrate_confirm": {
@@ -102,8 +115,8 @@ def run_scenario(name: str, sc: dict) -> list[str]:
     env = dict(os.environ, CODEX_HOME=str(codex_home), MAISECRETS_HOME=str(home))
     # CI containers have no bubblewrap/landlock for Codex's Linux sandbox; the container is disposable,
     # so the job sets MAISECRETS_CODEX_SANDBOX to danger-full-access there
-    sandbox = os.environ.get("MAISECRETS_CODEX_SANDBOX", "workspace-write")
-    cfg = (f'model = "{MODEL}"\nmodel_reasoning_effort = "low"\napproval_policy = "never"\n'
+    sandbox = sc.get("sandbox") or os.environ.get("MAISECRETS_CODEX_SANDBOX", "workspace-write")
+    cfg = (f'model = "{MODEL}"\nmodel_reasoning_effort = "low"\napproval_policy = "{sc.get("approval", "never")}"\n'
            f'sandbox_mode = "{sandbox}"\n')
     if REAL:
         shutil.copy(Path.home() / ".codex" / "auth.json", codex_home / "auth.json")
@@ -203,6 +216,12 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         got = (cwd / fname).read_text() if (cwd / fname).exists() else "<missing>"
         if got != content:
             fails.append(f"rehydration: {fname} holds {got!r}")
+    if sc.get("expect_hook"):
+        log = (home / "hooks.log").read_text(errors="ignore") if (home / "hooks.log").exists() else ""
+        event, tool, outcome = sc["expect_hook"]
+        rows = [ln.split("\t") for ln in log.splitlines()]
+        if not any(r[1:2] == [event] and tool in r and outcome in r for r in rows):
+            fails.append(f"hooks.log has no {event} {outcome} for {tool}: the scenario did not reach the rewrite")
     if sc.get("value_goes_to"):
         log = (home / "hooks.log").read_text(errors="ignore") if (home / "hooks.log").exists() else ""
         rows = [ln.split("\t") for ln in log.splitlines()]

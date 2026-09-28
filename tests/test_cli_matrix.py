@@ -717,9 +717,9 @@ class StateMatrixTests(unittest.TestCase):
         self.assertIn("settings from a machine policy: none", r.stdout)
         self.assertIn("rehydration: automatic (no ask of maisecrets; the client's permission rules decide)\n",
                       r.stdout)
-        # an ignored file falls back to confirm, and status says so
+        # a file ignored for a wrong type that set no rehydration: the default stays
         _sb, r = self._run("config-wrong-type", "status")
-        self.assertIn("rehydration: confirm (", r.stdout)
+        self.assertIn("rehydration: automatic (", r.stdout)
         self.assertIn("encrypted file", r.stdout)
 
     def test_the_test_store_says_so(self):

@@ -161,8 +161,8 @@ class ConfigTests(unittest.TestCase):
                     self.assertNotIn(str(wrong), cfg["config_warning"].replace(key, ""))
                     self.assertTrue(cfg["renew_on_use"], "the fallback is the strict defaults")
                     if key == "rehydration":
-                        # the ignored file may have asked for confirm: the fallback loosens nothing
-                        self.assertEqual(cfg[key], "confirm")
+                        # a rehydration value that is no policy: the fallback is block, never looser
+                        self.assertEqual(cfg[key], "block")
                     elif key in vault.DEFAULT_CONFIG:
                         self.assertEqual(cfg[key], vault.DEFAULT_CONFIG[key])
                     checked += 1
@@ -191,11 +191,28 @@ class ConfigTests(unittest.TestCase):
                 cfg = vault.load_config()
                 self.assertIn(want, cfg["config_warning"])
                 self.assertEqual(cfg["backend"], "keychain")
-                self.assertEqual(cfg["rehydration"], "confirm", "an ignored file loosens nothing")
+                if want == "not valid JSON":
+                    self.assertEqual(cfg["rehydration"], "block", "an unreadable file may have said block")
         vault.CONFIG.unlink()
         cfg = vault.load_config()
         self.assertEqual(cfg["config_warning"], "", "no file is not a problem")
         self.assertEqual(cfg["rehydration"], "automatic", "and no file is the default")
+
+    def test_a_file_ignored_for_a_wrong_type_keeps_what_it_made_stricter(self):
+        for user, want in (({"rehydration": "block", "tips": "yes"}, ("block", True, True)),
+                           ({"rehydration": "confirm", "tips": "yes"}, ("confirm", True, True)),
+                           ({"resolve_in_files": False, "ssh_via_sandbox": False, "tips": "yes"},
+                            ("automatic", False, False)),
+                           ({"rehydration": "automatic", "resolve_in_files": True, "tips": "yes"},
+                            ("automatic", True, True)),
+                           ({"rehydration": "strict", "tips": "yes"}, ("block", True, True))):
+            with self.subTest(user):
+                self._user(user)
+                cfg = vault.load_config()
+                self.assertIn("ignored", cfg["config_warning"])
+                self.assertTrue(cfg["config_ignored"])
+                self.assertEqual((cfg["rehydration"], cfg["resolve_in_files"], cfg["ssh_via_sandbox"]), want)
+                self.assertTrue(cfg["renew_on_use"], "a looser or other key of the file is not taken")
 
     def test_the_plugin_options_from_the_environment(self):
         self._user({"backend": "encrypted-file"})
