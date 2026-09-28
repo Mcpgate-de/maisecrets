@@ -461,6 +461,9 @@ ENCODERS = {"base64", "base32", "xxd", "od", "hexdump", "uuencode", "rev", "b2su
 SHELL_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "while", "until", "do", "done", "case",
                   "esac", "coproc", "function", "select", "in"}
 # the options of a wrapper that take the next word as their argument; every other option takes none
+# env -S / --split-string, after env's own options and NAME=value words
+_ENV_SPLIT_RE = re.compile(r"(?:^|\s)env\s+(?:(?:(?:-[uCP]|--unset|--chdir)\s+\S+|-\S*|\S+=\S*)\s+)*?"
+                           r"(?:-[a-zA-Z]*S|--split-string)")
 WRAPPER_ARG_OPTIONS = {
     "env": ("-u", "--unset", "-C", "--chdir", "-S", "--split-string", "-P"),
     "sudo": ("-u", "-g", "-h", "-p", "-C", "-U", "-T", "-r", "-t", "-D", "--user", "--group", "--host"),
@@ -764,6 +767,9 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
     plain = "".join(ch if ctx in ("", "dq", "hd") else " " for ch, ctx in zip(command, ctxs))
     for seg in _segments(command, ctxs):
         words, cmd = seg["words"], seg["cmd"]
+        if _ENV_SPLIT_RE.search(seg["text"]):
+            # env -S builds its command from a string: the command word is hidden (final review, 2026-09-28)
+            return "env -S builds the command from a string, so its command word cannot be checked"
         if not words:
             continue
         flags = [w for w in words[1:] if w.startswith("-")]
@@ -771,7 +777,7 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
             return f"{cmd} runs its command through sh -c, which would parse the value a second time"
         if cmd in ARG_RUNNERS or (cmd == "find" and any(w in ("-exec", "-execdir", "-ok", "-okdir") for w in words)):
             inner = next((os.path.basename(w) for w in words[1:] if os.path.basename(w) in
-                          SHELLS | REMOTE_OR_EVAL | INLINE_INTERPRETERS), None)
+                          SHELLS | REMOTE_OR_EVAL | INLINE_INTERPRETERS | {"scp", "sftp", "autossh", "rsync"}), None)
             if inner:
                 return f"{cmd} would hand the value to {inner} as an argument"
         if cmd in SHELLS:

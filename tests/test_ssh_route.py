@@ -298,9 +298,8 @@ class GuardProbeTests(unittest.TestCase):
         self.assertFalse(self.with_proxy("200 Connection Established", closed_network=True))
 
     def test_an_open_direct_network_fails(self):
-        mod = self.load()
-        with mock.patch.object(socket.socket, "connect_ex", lambda self_, addr: 0):
-            self.assertFalse(mod.inside(self.env(1)))
+        # a proxy that answers 407 as the sandbox proxy does: only the network signal decides here
+        self.assertFalse(self.with_proxy("407 Proxy Authentication Required", closed_network=False))
 
     def test_the_environment_signals_are_needed(self):
         mod = self.load()

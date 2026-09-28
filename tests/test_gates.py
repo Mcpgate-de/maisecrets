@@ -380,6 +380,10 @@ class ScannerEdgeTests(unittest.TestCase):
                     "GIT_SSH_COMMAND='ssh -o SetEnv=X=" + r + "' git push",
                     "export GIT_SSH_COMMAND='ssh -o SendEnv=X'; X=" + r + " git push",
                     "printf '%s' " + r + " |& bash",
+                    "printf '%s' " + r + " | env -S 'ssh aux01 bash'",
+                    "printf '%s' " + r + " | env --split-string=bash",
+                    "printf '%s' " + r + " | env -u HOME -S bash",
+                    "printf '%s' " + r + " | xargs -0 scp x host:/tmp",
                     "printf '%s' " + r + " | git -c core.sshCommand=ssh push"):
             with self.subTest(cmd[:40]):
                 self.assertEqual(_bash_pre(cmd)["hookSpecificOutput"].get("permissionDecision"), "deny", cmd)
