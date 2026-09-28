@@ -11,6 +11,8 @@ sandbox logs in to its proxy as `srt`, macOS as `srt.<…>`; only this run showe
    the host prints 1 only when the exact value arrived; the approval then exists
 2. the second command gets no ask; it runs in the sandbox; the host prints 1 again
 3. a write command still asks; a host outside allowedDomains gets 403 from the sandbox proxy
+4. an ops user's forms: sudo -n before a reader needs no second ask; sudo su -, a second hop and a
+   remote encoder are refused, each with the form that works
 A synthetic random value only; the remote file is removed at the end.
 """
 import json
@@ -99,6 +101,24 @@ try:
     out3 = in_sandbox("s3", other["updatedInput"]["command"], [IP])
     check("3d the sandbox proxy refuses the host outside allowedDomains (403)", "403" in out3, out3[-400:])
     check("3e the value never shows in any sandbox output", value not in out1 + out2 + out3)
+
+    # an ops user's cases (field report on 0.5.8, 2026-09-28): root-only logs through sudo, and the
+    # forms that stay refused with a way named. Hook answers only: the host may have no sudo rule.
+    sudo = hook(f"printf '%s' KEY | ssh -o BatchMode=yes {HOST} 'sudo -n zgrep -hcF -f - /var/log/syslog'")
+    check("4a sudo -n before a reader is read-only: no ask after the approval", "permissionDecision" not in sudo,
+          sudo.get("permissionDecision"))
+    su = hook(f"printf '%s' KEY | ssh -o BatchMode=yes {HOST} 'sudo su -'")
+    su_why = su.get("permissionDecisionReason", "")
+    check("4b sudo su - is refused and names sudo before the reader",
+          su.get("permissionDecision") == "deny" and "sudo zgrep -F -f - FILE" in su_why, su_why[:200])
+    hop = hook(f"printf '%s' KEY | ssh -o BatchMode=yes {HOST} 'ssh aux01 zgrep -F -f - /var/log/x'")
+    hop_why = hop.get("permissionDecisionReason", "")
+    check("4c a second hop is refused and names one ssh per host",
+          hop.get("permissionDecision") == "deny" and "one ssh command per host" in hop_why, hop_why[:200])
+    b64 = hook(f"printf '%s' KEY | ssh -o BatchMode=yes {HOST} 'echo aGk= | base64 -d | bash'")
+    check("4d a remote encoder is refused and names the stdin way",
+          b64.get("permissionDecision") == "deny" and "pipe it on stdin" in b64.get("permissionDecisionReason", ""),
+          b64.get("permissionDecisionReason", "")[:200])
 finally:
     subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, f"rm -f {remote_file} {remote_file}.w"], timeout=30)
     left = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, f"ls {remote_file}* 2>/dev/null | wc -l"],

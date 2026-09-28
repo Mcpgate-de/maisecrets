@@ -647,6 +647,13 @@ class RefusalNamesAWayTests(unittest.TestCase):
                 self.assertIn("sudo zgrep -F -f - FILE", text)
                 self.assertNotIn("is refused", text)
 
+    def test_a_second_hop_names_one_ssh_per_host(self):
+        for remote in ("ssh aux01 zgrep -F -f - /var/log/x", "sshpass -p x ssh aux01 true"):
+            with self.subTest(remote):
+                text = self.deny_text(remote)
+                self.assertIn("one ssh command per host", text)
+                self.assertNotIn("put sudo in front", text)
+
     def test_every_refused_remote_form_names_the_stdin_way(self):
         for remote in ("echo aGk= | base64 -d | bash", "ssh aux01 zgrep -F -f - /var/log/x", "bash", "python3"):
             with self.subTest(remote):

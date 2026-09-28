@@ -1096,11 +1096,12 @@ def _ssh_way(why: str) -> str:
     base = ("To give a value to a remote host, pipe it on stdin to the command that reads it, inside the "
             "Claude Code sandbox, one host per command: printf '%s' ⟦KEY⟧ | ssh HOST 'zgrep -F -f - FILE'. "
             "The user confirms it.")
+    # the second hop first: its reason names "another shell or host" too
+    if re.search(r"\bremote (?:ssh|sshpass|plink|mosh|autossh|scp|sftp|rsync)\b|\bjump\b|\bproxy\b", why):
+        return "For a host behind another host, run one ssh command per host. " + base
     if re.search(r"\b(?:su|sudo|login shell|shell|wrapper)\b", why):
         return ("To read a file only root can read, put sudo in front of the command that reads it, not su "
                 "or a shell: printf '%s' ⟦KEY⟧ | ssh HOST 'sudo zgrep -F -f - FILE'. " + base)
-    if re.search(r"\b(?:ssh|another shell or host|jump|proxy)\b", why):
-        return "For a host behind another host, run one ssh command per host. " + base
     if "encoded" in why:
         return ("Keep the encoder out of the remote command that gets the value; a script can go as the "
                 "command's own text instead of through base64. " + base)
