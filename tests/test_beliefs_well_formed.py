@@ -39,12 +39,23 @@ class BeliefsWellFormedTests(unittest.TestCase):
                     for part in rest.split("::"):
                         self.assertTrue(hasattr(obj, part), f"{test_id}: {part} not found")
                         obj = getattr(obj, part)
-                proof = b["proof"]
-                target = ROOT / proof["file"]
-                self.assertTrue(target.exists(), proof["file"])
-                text = target.read_text(encoding="utf-8")
-                self.assertEqual(text.count(proof["find"]), 1, f"{path.name}: anchor must occur exactly once")
-                self.assertNotEqual(proof["find"], proof["replace"], "a mutation that changes nothing proves nothing")
+                proofs = b["proof"] if isinstance(b["proof"], list) else [b["proof"]]
+                self.assertTrue(proofs, "a belief without a mutation proves nothing")
+                for proof in proofs:
+                    target = ROOT / proof["file"]
+                    self.assertTrue(target.exists(), proof["file"])
+                    text = target.read_text(encoding="utf-8")
+                    self.assertEqual(text.count(proof["find"]), 1, f"{path.name}: anchor must occur exactly once")
+                    self.assertNotEqual(proof["find"], proof["replace"], "a mutation that changes nothing proves nothing")
+                if b.get("kind") == "invariant":
+                    # one goal over every path: one test and one mutation would be a mechanism belief
+                    self.assertGreaterEqual(len(b["runner"]), 2, f"{path.name}: an invariant needs several tests")
+                    self.assertGreaterEqual(len(proofs), 2, f"{path.name}: an invariant needs several mutations")
+                    for proof in proofs:
+                        self.assertIn("path", proof, f"{path.name}: each mutation names the path it removes")
+                else:
+                    self.assertNotIn("kind", b, f"{path.name}: the only kind is \"invariant\"")
+                    self.assertIsInstance(b["proof"], dict, f"{path.name}: several mutations make an invariant")
 
     def test_every_documented_control_with_code_has_a_belief(self):
         covered = set()
