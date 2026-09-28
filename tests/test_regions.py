@@ -157,7 +157,8 @@ class LabelFileTests(unittest.TestCase):
     def test_every_label_file_parses_and_each_example_matches_its_label(self):
         import re
         langs = regions.label_languages_available()
-        self.assertEqual(langs, ["da", "de", "en", "es", "fi", "fr", "it", "ko", "nl", "pl", "pt", "sv", "th", "tr"])
+        self.assertEqual(langs, ["cs", "da", "de", "en", "es", "fi", "fr", "it", "ko", "nb", "nl", "pl", "pt", "sv",
+                                 "th", "tr"])
         for lang in langs:
             labels = regions.load_labels(lang)
             self.assertTrue(labels, lang)

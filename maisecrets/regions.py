@@ -29,8 +29,11 @@ REGION_LANGUAGE = {
     "us": "en", "uk": "en", "au": "en", "ca": "en", "in": "en", "ng": "en", "ph": "en", "sg": "en",
     "za": "en", "ie": "en", "nz": "en",
     "es": "es", "it": "it", "fi": "fi", "se": "sv", "pl": "pl", "tr": "tr", "kr": "ko", "th": "th",
-    "fr": "fr", "lu": "fr", "be": ("nl", "fr"), "nl": "nl", "pt": "pt", "br": "pt", "dk": "da",
+    "fr": "fr", "lu": "fr", "be": ("nl", "fr"), "nl": "nl", "pt": "pt", "br": "pt", "dk": "da", "no": "nb",
+    "cz": "cs",
 }
+# a system language whose label file has another name: "no" (Norwegian) is written as Bokmål, nb.txt
+_LANGUAGE_ALIAS = {"no": "nb"}
 
 
 def _region_languages(region: str) -> tuple[str, ...]:
@@ -127,6 +130,7 @@ def resolve(cfg: dict) -> Active:
         elif r and r != "generic":
             regions.append(r)
     regions = list(dict.fromkeys(regions))
+    lang = _LANGUAGE_ALIAS.get(lang, lang) if lang else None
     languages = ["en"] + ([lang] if lang else []) + [x for r in regions for x in _region_languages(r)]
     available = set(label_languages_available())
     return Active(regions=("generic", *regions),
