@@ -446,7 +446,37 @@ INLINE_INTERPRETERS = {"python", "python2", "python3", "perl", "ruby", "node", "
                        "deno", "bun"}
 INLINE_CODE_FLAGS = re.compile(r"^-(?:[A-Za-z]*[ceE][A-Za-z]*|-eval|-command|-exec)$")
 REMOTE_OR_EVAL = {"ssh", "eval", "su", "expect", "script", "sshpass", "plink", "mosh", "screen", "tmux"}
+# commands that run other commands with arguments they build from their input
+ARG_RUNNERS = {"xargs", "parallel", "watch", "flock", "chroot", "nsenter", "unshare", "setsid", "runuser",
+               "strace", "ltrace", "gdb", "script", "busybox", "systemd-run", "toybox"}
+# variables that name the ssh command another tool runs
+_SSH_VAR_RE = re.compile(r"(?<![\w])(?:GIT_SSH_COMMAND|GIT_SSH|RSYNC_RSH|CVS_RSH)=")
+# a variable in front of a fixed path is a known command word: "$HOME/bin/tool", ${REPO}/bin/x
+_FIXED_TAIL_RE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z_0-9]*\}?(?:/[^/$`\s]+)+$")
+# arguments that name stdin as the file to run
+_STDIN_FILES = {"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}
+# clients that read statements from stdin when no statement is given
+_SQL_CLIENTS = {"mysql", "mariadb", "psql", "sqlite3", "mongo", "mongosh", "redis-cli", "clickhouse-client"}
 ENCODERS = {"base64", "base32", "xxd", "od", "hexdump", "uuencode", "rev", "b2sum", "cksum"}
+SHELL_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "while", "until", "do", "done", "case",
+                  "esac", "coproc", "function", "select", "in"}
+# the options of a wrapper that take the next word as their argument; every other option takes none
+# env -S / --split-string, after env's own options and NAME=value words
+_ENV_SPLIT_RE = re.compile(r"(?:^|\s)env\s+(?:(?:(?:-[uCP]|--unset|--chdir)\s+\S+|-\S*|\S+=\S*)\s+)*?"
+                           r"(?:-[a-zA-Z]*S|--split-string)")
+WRAPPER_ARG_OPTIONS = {
+    "env": ("-u", "--unset", "-C", "--chdir", "-S", "--split-string", "-P"),
+    "sudo": ("-u", "-g", "-h", "-p", "-C", "-U", "-T", "-r", "-t", "-D", "--user", "--group", "--host"),
+    "doas": ("-u", "-C"),
+    "timeout": ("-s", "--signal", "-k", "--kill-after"),
+    "nice": ("-n", "--adjustment"),
+    "ionice": ("-c", "-n", "-p", "--class", "--classdata"),
+    "stdbuf": ("-i", "-o", "-e"),
+    "exec": ("-a",),
+    "time": ("-f", "-o", "--format", "--output"),
+    "caffeinate": ("-t", "-w"),
+    "command": (),
+}
 WRAPPERS = {"env", "command", "exec", "nice", "time", "nohup", "sudo", "doas", "builtin", "timeout", "stdbuf",
             "caffeinate", "ionice", "chronic"}
 _SLICE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
@@ -662,17 +692,20 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
     piped = False
     cur: list[str] = []
     heredoc = False
+    start = 0                       # offset of the first character of the current segment
 
     def flush(next_piped: bool) -> None:
         nonlocal cur, piped, heredoc
         text = "".join(cur).strip()
         if text:
-            segs.append({"text": text, "piped": piped, "heredoc": heredoc})
+            segs.append({"text": text, "piped": piped, "heredoc": heredoc, "start": start, "end": i})
         cur, piped, heredoc = [], next_piped, False
 
     i = 0
     while i < len(masked):
         ch = masked[i]
+        if not cur:
+            start = i
         if masked.startswith("<<", i) and not masked.startswith("<<<", i):
             heredoc = True
         if ch in ";\n()" :
@@ -682,28 +715,46 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
         if ch == "|":
             two = masked.startswith("||", i)
             flush(not two)
-            i += 2 if two else 1
+            # |& pipes stderr as well: still a pipe (final review, 2026-09-28)
+            i += 2 if two or masked.startswith("|&", i) else 1
             continue
-        if ch == "&":
+        if ch == "&" and not ((i and masked[i - 1] in "<>") or masked.startswith("&>", i)):
+            # a redirection is no separator: 2>&1, <&3, &>file (the ask showed "2>" for 2>&1)
             flush(False)
             i += 2 if masked.startswith("&&", i) else 1
             continue
         cur.append(ch)
         i += 1
     flush(False)
+    import shlex as _shlex
     for seg in segs:
         words = seg["text"].split()
-        # leading assignments and wrappers
-        while words and (_ASSIGN_RE.match(words[0]) or os.path.basename(words[0]) in WRAPPERS):
+        # the real words, with quotes and backslashes removed as the shell removes them: `\ssh`,
+        # `s''sh` and `b''ash '-c'` were not recognised and passed every rule on command words
+        # (review, 2026-09-27). A heredoc body line is all 'Q' in the masked text and keeps its mask.
+        if set(seg["text"]) - set("Q \t"):
+            try:
+                words = _shlex.split(command[seg["start"]:seg["end"]]) or words
+            except ValueError:
+                pass
+        # leading assignments, shell keywords and wrappers: the command word is behind them. `{ ssh …; }`,
+        # `if …; then ssh …`, `! ssh` and `env -i ssh` hid ssh from every rule (security review, 2026-09-28)
+        while words and (_ASSIGN_RE.match(words[0]) or words[0] in SHELL_KEYWORDS
+                         or os.path.basename(words[0]) in WRAPPERS):
             w = os.path.basename(words[0])
             words = words[1:]
-            if w in ("sudo", "doas", "timeout", "nice", "ionice", "stdbuf", "env"):
-                # their own options, with the one argument some take
-                while words and words[0].startswith("-"):
-                    takes_arg = words[0] in ("-u", "-g", "-h", "-p", "-C", "-n", "-i", "-e", "-o", "-s")
-                    words = words[2:] if takes_arg else words[1:]
-                if w == "timeout" and words and re.fullmatch(r"[0-9.]+[smhd]?", words[0]):
-                    words = words[1:]
+            if w == "case":
+                # `case WORD in`: the word is matched, not run
+                words = words[words.index("in") + 1:] if "in" in words else []
+                continue
+            if w in SHELL_KEYWORDS or _ASSIGN_RE.match(w):
+                continue
+            takes = WRAPPER_ARG_OPTIONS.get(w, ())
+            while words and words[0].startswith("-") and words[0] != "-":
+                opt = words[0]
+                words = words[2:] if opt in takes else words[1:]
+            if w == "timeout" and words and re.fullmatch(r"[0-9.]+[smhd]?", words[0]):
+                words = words[1:]
         seg["words"] = words
         seg["cmd"] = os.path.basename(words[0]) if words else ""
     return segs
@@ -716,9 +767,19 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
     plain = "".join(ch if ctx in ("", "dq", "hd") else " " for ch, ctx in zip(command, ctxs))
     for seg in _segments(command, ctxs):
         words, cmd = seg["words"], seg["cmd"]
+        if _ENV_SPLIT_RE.search(seg["text"]):
+            # env -S builds its command from a string: the command word is hidden (final review, 2026-09-28)
+            return "env -S builds the command from a string, so its command word cannot be checked"
         if not words:
             continue
         flags = [w for w in words[1:] if w.startswith("-")]
+        if cmd in ("watch", "parallel") and not (cmd == "watch" and any(f in ("-x", "--exec") for f in flags)):
+            return f"{cmd} runs its command through sh -c, which would parse the value a second time"
+        if cmd in ARG_RUNNERS or (cmd == "find" and any(w in ("-exec", "-execdir", "-ok", "-okdir") for w in words)):
+            inner = next((os.path.basename(w) for w in words[1:] if os.path.basename(w) in
+                          SHELLS | REMOTE_OR_EVAL | INLINE_INTERPRETERS | {"scp", "sftp", "autossh", "rsync"}), None)
+            if inner:
+                return f"{cmd} would hand the value to {inner} as an argument"
         if cmd in SHELLS:
             if any(INLINE_CODE_FLAGS.match(f) and "c" in f for f in flags) or seg["heredoc"] or seg["piped"]:
                 return f"{cmd} would parse the value a second time as shell code"
@@ -746,10 +807,240 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
                     return f"{os.path.basename(w)} -c would parse the value a second time as shell code"
     if re.search(r"(?<![\w-])PS4=", plain):
         return "a custom PS4 would trace the value"
+    # ssh in another form, in the parts of the command that carry a value or are piped with one: scp, sftp,
+    # autossh or mosh as the command; rsync with a remote shell and the value in its own arguments; a
+    # variable that names an ssh command (GIT_SSH_COMMAND, RSYNC_RSH, …) or git -c core.sshCommand anywhere.
+    # A word that only mentions ssh (ansible -c ssh, a path ending in /rsync) does not count (final
+    # review and differential test against 0.5.2, 2026-09-28)
+    segs = _segments(command, ctxs)
+    offsets = [a for _k, a, _b in find_refs(command) if ctxs[a] != "comment"]
+    if offsets and _SSH_VAR_RE.search(plain):
+        return "a variable that names an ssh command would hand the value to ssh in a form that cannot be checked"
+    with_value = {n for n, sg in enumerate(segs) if any(sg["start"] <= a < sg["end"] for a in offsets)}
+    related = set(with_value)
+    for n in sorted(with_value):
+        k = n
+        while k > 0 and segs[k]["piped"]:
+            k -= 1
+            related.add(k)
+        k = n + 1
+        while k < len(segs) and segs[k]["piped"]:
+            related.add(k)
+            k += 1
+    for n in sorted(related):
+        sg = segs[n]
+        words = sg["words"]
+        if sg["cmd"] in ("scp", "sftp", "autossh", "mosh"):
+            return (f"{sg['cmd']} hands its arguments to a remote shell; "
+                    "a value reaches ssh only as printf '%s' ⟦KEY⟧ | ssh host '…'")
+        if sg["cmd"] == "git" and any(w.lower().startswith("core.sshcommand=") for w in words):
+            return "git -c core.sshCommand would hand the value to ssh in a form that cannot be checked"
+        if sg["cmd"] == "rsync" and n in with_value:
+            remote_spec = any(re.match(r"^(?:[^\s/@:]+@)?[\w.-]+:(?!//)", w) for w in words[1:])
+            rsh = any(w in ("-e", "--rsh") or w.startswith(("--rsh=", "-e")) for w in words[1:])
+            if remote_spec or rsh:
+                return "rsync over ssh hands its arguments to a remote shell; pass the value another way"
     m = _SLICE_RE.search(plain)
     if m:
         return f"the parameter expansion {m.group(0)}… would slice or rewrite the value"
     return None
+
+
+# ssh options that take an argument (OpenSSH 9)
+_SSH_ARG_FLAGS = set("BbcDEeFIiJLlmOoPpQRSWw")
+# flags and -o options that pick another route, share a connection, change the destination or run a
+# local command: the route sets its own, and the user must read the real destination
+_SSH_REFUSED_FLAGS = set("JWSMOF")
+_SSH_REFUSED_OPTIONS = ("proxycommand", "proxyjump", "proxyusefdpass", "controlmaster", "controlpath",
+                        "controlpersist", "hostname", "localcommand", "permitlocalcommand", "knownhostscommand",
+                        "remotecommand", "include", "tunnel")
+
+
+def _ssh_options(toks: list[str], i: int, opts: list) -> int:
+    """Read ssh options from toks[i:] into opts as (flag, value); return the index after them."""
+    while i < len(toks) and toks[i].startswith("-") and toks[i] != "--" and toks[i] != "-":
+        letters, i, took_next = toks[i][1:], i + 1, False
+        for n, c in enumerate(letters):
+            if c in _SSH_ARG_FLAGS:
+                val = letters[n + 1:]
+                if not val and i < len(toks):
+                    val, took_next = toks[i], True
+                opts.append((c, val))
+                break
+            opts.append((c, None))
+        if took_next:
+            i += 1
+    return i
+
+
+def _remote_refusal(remote: str) -> str | None:
+    """Why the remote command would run the value as code, pass it on, or show it encoded. The
+    value arrives on its stdin, so a command that reads data there is fine (grep -F -f -, cat > f,
+    sh -c 'grep …'); one that reads its program there, or hands the value to another shell or
+    host, is not (edge-case review, 2026-09-27: only the first word was checked)."""
+    if not remote.strip():
+        return "the remote login shell would run the value as shell code; name the command that reads it"
+    rctx = _shell_contexts(remote)
+    for seg in _segments(remote, rctx):
+        words, cmd = seg["words"], seg["cmd"]
+        if not words:
+            if seg["text"].strip():
+                # only a wrapper and its options: sudo -s, sudo -i, env starts a login shell on stdin
+                return "the remote wrapper would start a shell that reads the value as shell code"
+            continue
+        # a redirection glued to the command word: bash</dev/stdin
+        cmd = os.path.basename(re.split(r"[<>]", words[0])[0]) or cmd
+        if re.search(r"<\s*/dev/(?:stdin|fd/0)", seg["text"]) and cmd in SHELLS | INLINE_INTERPRETERS:
+            return f"the remote {cmd} would read the value as its program"
+        flags = [w for w in words[1:] if w.startswith("-")]
+        args = [w for w in words[1:] if not w.startswith("-") or w == "-"]
+        if cmd in ("source", ".") and (not args or args[0] in _STDIN_FILES):
+            return "the remote shell would run the value as shell code"
+        if cmd in ("crontab", "at", "batch"):
+            return f"the remote {cmd} would store the value as code that runs later"
+        query_flags = ("-e", "-c", "--execute", "--command", "--eval", "-f", "--file")
+        if cmd in _SQL_CLIENTS and not any(f.split("=", 1)[0] in query_flags for f in flags):
+            return f"the remote {cmd} would read the value as statements; give the query with -e or -c"
+        if cmd == "openssl" and args and args[0] in ("enc", "base64", "dgst"):
+            return f"the remote openssl {args[0]} would send the value back encoded"
+        if cmd in SHELLS | INLINE_INTERPRETERS and args and args[0] in _STDIN_FILES:
+            return f"the remote {cmd} would read the value as its program"
+        if "$" in words[0] or "`" in words[0]:
+            return "the remote command word is built from a variable and is only known when it runs"
+        if cmd in REMOTE_OR_EVAL:
+            return f"the remote {cmd} would hand the value to another shell or host"
+        if cmd in ENCODERS:
+            return f"the remote {cmd} would send the value back encoded, where the output redaction cannot see it"
+        if cmd in SHELLS and ("-s" in flags or not any(INLINE_CODE_FLAGS.match(f) and "c" in f for f in flags)):
+            return f"the remote {cmd} would read the value as shell code"
+        if cmd in SHELLS:
+            code = next((words[n + 1] for n, w in enumerate(words[:-1]) if INLINE_CODE_FLAGS.match(w) and "c" in w), "")
+            inner = _remote_refusal(code) if code else None
+            if inner:
+                return inner
+        if cmd in INLINE_INTERPRETERS and not [w for w in words[1:] if w != "-" and not w.startswith("-")] \
+                and not any(INLINE_CODE_FLAGS.match(f) for f in flags):
+            return f"the remote {cmd} would read the value as its program"
+        if cmd in ARG_RUNNERS or (cmd == "find" and any(w in ("-exec", "-execdir", "-ok", "-okdir") for w in words)):
+            inner = next((os.path.basename(w) for w in words[1:] if os.path.basename(w) in
+                          SHELLS | REMOTE_OR_EVAL | INLINE_INTERPRETERS), None)
+            if inner:
+                return f"the remote {cmd} would hand the value to {inner}"
+    return None
+
+
+def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) -> dict | str:
+    """The one way a value may reach ssh: on stdin, through the Claude Code sandbox, after the
+    user confirms. Returns the plan, or the reason the command is refused.
+
+    Two review rounds broke a host allowlist that read the destination from the command text (a
+    quoted -oProxyCommand after the host reached another host). The sandbox needs no such proof:
+    no command reaches the network directly, and its proxy admits only the allowed hosts
+    (measured 2026-09-27 on macOS and Debian 13: 200 for an allowed host, 403 for another). What
+    the sandbox cannot see is the remote side, which may pass the value on; so the user reads the
+    remote command and confirms. The value never sits in ssh's arguments, where the remote
+    shell would parse it as code."""
+    import shlex
+    segs = _segments(command, ctxs)
+    ssh_idx = [n for n, seg in enumerate(segs) if seg["cmd"] == "ssh"]
+    if len(ssh_idx) != 1:
+        return "only one ssh per command can take a value; run each ssh as its own command"
+    j = ssh_idx[0]
+    seg = segs[j]
+    if any(seg["start"] <= a < seg["end"] for _k, a, _b in refs):
+        if "<<" in command[seg["start"]:seg["end"]]:
+            return "a heredoc or here-string into ssh is not supported; pipe it in: printf '%s' ⟦KEY⟧ | ssh host '…'"
+        return ("ssh would put the value into the remote command line, where the remote shell parses it; "
+                "pipe it in instead: printf '%s' ⟦KEY⟧ | ssh host 'grep -F -f - …'")
+    k = j
+    while k > 0 and segs[k]["piped"]:
+        k -= 1
+    if k == j:
+        return "the value reaches ssh only on stdin: printf '%s' ⟦KEY⟧ | ssh host '…'"
+    lo, hi = segs[k]["start"], segs[j - 1]["end"]
+    if any(not lo <= a < hi for _k, a, _b in refs):
+        return "every placeholder must sit in the commands that feed ssh on stdin"
+    blanked = command[:seg["start"]] + " " * (seg["end"] - seg["start"]) + command[seg["end"]:]
+    other = _refusal_for(blanked, _shell_contexts(blanked))
+    if other:
+        return other
+    text = command[seg["start"]:seg["end"]]
+    try:
+        toks = shlex.split(text)
+    except ValueError:
+        return "the ssh command line cannot be read"
+    at = next((n for n, t in enumerate(toks) if os.path.basename(t) == "ssh" and not _ASSIGN_RE.match(t)), None)
+    if at is None:
+        return "the ssh command line cannot be read"
+    opts: list = []
+    i = _ssh_options(toks, at + 1, opts)
+    if i < len(toks) and toks[i] == "--":
+        i += 1
+    if i >= len(toks):
+        return "the ssh command names no host"
+    dest = toks[i]
+    # OpenSSH reads options after the host too (edge-case review, 2026-09-27: -S after the host won)
+    i = _ssh_options(toks, i + 1, opts)
+    if i < len(toks) and toks[i] == "--":
+        i += 1
+    remote = toks[i:]
+    for c, val in opts:
+        if c == "o" and val and ("$" in val or "`" in val):
+            return "an ssh option holds an expansion whose result is only known when it runs"
+        key = re.split(r"[=\s]+", val.strip(" \t=\"'"), maxsplit=1)[0].strip("\"'").lower() if c == "o" and val else ""
+        if c in _SSH_REFUSED_FLAGS or key in _SSH_REFUSED_OPTIONS or key.startswith("canonical"):
+            return ("ssh with its own proxy, jump host, shared connection, config file, host name or local "
+                    "command is refused; the sandbox route sets the connection itself")
+    # ssh joins the remote words with spaces and the remote shell parses the result again, so the check
+    # reads exactly that string (final review, 2026-09-28: quoting each word hid a `;` or a `|`)
+    if any("$" in t or "`" in t for t in remote):
+        return "the remote command holds an expansion ($ or a backtick) whose result is only known when it runs"
+    why = _remote_refusal(" ".join(remote))
+    if why:
+        return why
+    # the insertion point: the end of the ssh command word, found among the plain words of the masked
+    # text, so it can never land inside a quoted word or an assignment (edge-case review, 2026-09-27)
+    masked = "".join(ch if ctx == "" else "Q" for ch, ctx in zip(command[seg["start"]:seg["end"]],
+                                                                  ctxs[seg["start"]:seg["end"]]))
+    spans = [(m.start(), m.end(), m.group(0)) for m in re.finditer(r"\S+", masked)]
+    # skip what _segments skips: assignments, keywords, wrappers with their options and option arguments
+    w = 0
+    while w < len(spans) and (_ASSIGN_RE.match(spans[w][2]) or spans[w][2] in SHELL_KEYWORDS
+                              or os.path.basename(spans[w][2]) in WRAPPERS):
+        wrapper = os.path.basename(spans[w][2])
+        w += 1
+        if wrapper in WRAPPERS:
+            while w < len(spans) and spans[w][2].startswith("-") and spans[w][2] != "-":
+                w += 2 if spans[w][2] in WRAPPER_ARG_OPTIONS.get(wrapper, ()) else 1
+            if wrapper == "timeout" and w < len(spans) and re.fullmatch(r"[0-9.]+[smhd]?", spans[w][2]):
+                w += 1
+    ssh_span = spans[w] if w < len(spans) and os.path.basename(spans[w][2]) == "ssh" else None
+    if ssh_span is None or "Q" in ssh_span[2]:
+        return "write ssh as a plain word, not quoted or escaped: printf '%s' ⟦KEY⟧ | ssh host '…'"
+    # the line as written, from the ssh word on: redirections such as 2>&1 stay whole
+    line = command[seg["start"] + ssh_span[0]:seg["end"]].strip()
+    return {"insert_at": seg["start"] + ssh_span[1], "dest": dest, "line": line}
+
+
+def _sandbox_guard(py: str | None = None) -> str:
+    """The first step of a command that sends a value over ssh: hooks/sandbox_probe.py exits 0 only
+    inside the Claude Code sandbox; otherwise the command stops with exit 97 before the value is read."""
+    from pathlib import Path as _P
+    probe = _P(__file__).resolve().parent.parent / "hooks" / "sandbox_probe.py"
+    return (f'{shlex_quote(py or sys.executable)} {shlex_quote(str(probe))} || '
+            '{ echo "maisecrets: this command sends a value over ssh and runs only inside the Claude Code '
+            'sandbox (sandbox.enabled with network.allowedDomains). The value was not read; the command '
+            'did not run." >&2; exit 97; }')
+
+
+def _proxy_option() -> str:
+    from pathlib import Path as _P
+    helper = _P(__file__).resolve().parent.parent / "hooks" / "proxy_connect.py"
+    # no shared connection either: a master socket opened outside the sandbox would carry the session
+    # past the proxy to whatever host it was opened for (Claude Code's own GIT_SSH_COMMAND sets the same).
+    # ssh expands % in a ProxyCommand, so a % in a path is doubled
+    cmd = f"{shlex_quote(sys.executable)} {shlex_quote(str(helper))}".replace("%", "%%") + " %h %p"
+    return " -o ControlMaster=no -o ControlPath=none -o " + shlex_quote(f"ProxyCommand={cmd}")
 
 
 def _resolver_call(key: str, nonce: str) -> str:
@@ -922,6 +1213,17 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                          "The command did not run. Pass the placeholder as a plain argument of the "
                          "command that needs it.")
     why = _refusal_for(command, ctxs)
+    ssh_plan, ssh_refused = None, False
+    if why == "ssh hands the command line to another shell" and not windows and client_of(payload) == "claude" \
+            and cfg.get("ssh_via_sandbox", True):
+        route = _ssh_route(command, ctxs, refs)
+        if isinstance(route, dict):
+            ssh_plan, why = route, None
+        else:
+            why, ssh_refused = route, True
+    if why and ssh_refused:
+        return _deny(f"maisecrets: {keys} is refused in this command: {why}. The command did not run. "
+                     "A value reaches ssh only on stdin, inside the Claude Code sandbox, after the user confirms.")
     if why:
         return _deny(f"maisecrets: {keys} is refused in this command: {why}. The command did not run. "
                      "Use the placeholder only as a plain argument of the tool that needs the value; "
@@ -994,8 +1296,20 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         else:
             piece = '"${' + var + '}"'
         rewritten = rewritten[:start] + piece + rewritten[end:]
+    if ssh_plan:
+        # the offset is before every placeholder (they all sit left of ssh), so it still holds
+        at = ssh_plan["insert_at"]
+        shift = len(rewritten) - len(command)
+        rewritten = rewritten[:at + shift] + _proxy_option() + rewritten[at + shift:]
+        prelude.insert(0, _sandbox_guard())
     new_input = dict(tool_input)
     new_input["command"] = "; ".join(prelude) + "; " + rewritten
+    if ssh_plan:
+        return _ask(new_input, f"maisecrets: this command sends the value of {keys} on stdin to ssh "
+                               f"{ssh_plan['dest']}: {ssh_plan['line'][:400]}. It runs only inside the Claude "
+                               "Code sandbox, so the connection reaches only a host your sandbox allows. The "
+                               "remote command can still pass the value on: allow it only if you trust that "
+                               "host and that command.")
     return _updated(payload, new_input)
 
 

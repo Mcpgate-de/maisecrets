@@ -166,9 +166,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 7 scenarios against a fake upstream
+python3 harness/run.py                                 # 8 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
-python3 scripts/replay_can_fail.py                     # 27 proofs: each control's test goes red without it
+python3 scripts/replay_can_fail.py                     # 34 proofs: each control's test goes red without it
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 scripts/install-hooks.sh                               # git pre-commit / pre-push
 ```
@@ -444,6 +444,53 @@ A placeholder turns back into its value only here:
   `python3 script.py ⟦KEY⟧`, `docker run -e T=⟦KEY⟧ img` and a word inside
   quotes or a comment pass. A refused command is refused as a whole: split off
   the step that needs the value and run it on its own.
+- **ssh through the Claude Code sandbox.** A value may go to your own servers
+  over ssh on one condition: the command runs in Claude Code's Bash sandbox,
+  where the operating system forces every connection through Claude Code's
+  proxy and the proxy admits only the hosts you allow. Then the value goes
+  on stdin, and Claude Code asks you first, showing the host and the remote
+  command:
+
+  ```
+  printf '%s' ⟦EMAIL_c3⟧ | ssh aux01 'grep -F -f - /var/log/mail.log'
+  ```
+
+  Enable the sandbox in `~/.claude/settings.json`:
+
+  ```json
+  {"sandbox": {"enabled": true, "allowUnsandboxedCommands": false,
+               "network": {"allowedDomains": ["aux01.example.com"], "strictAllowlist": true}}}
+  ```
+
+  maisecrets puts its own options first on the ssh line: a `ProxyCommand`
+  (`hooks/proxy_connect.py`, because plain ssh has no network in the
+  sandbox) and `ControlMaster=no`, `ControlPath=none`. Outside the sandbox the
+  command stops before the value is read. Refused, with the reason:
+
+  - a value inside ssh's arguments, a here-string or a heredoc into ssh;
+  - a remote side that reads its program from stdin or passes the value on:
+    no remote command, `bash`, `sh -s`, `python3` alone, `| sh`, `$SHELL`,
+    `eval`, another `ssh`, `xargs sh -c`, and encoders such as `base64`;
+  - an own proxy, jump host, shared connection, config file, host name or
+    local command (`-J`, `-W`, `-S`, `-M`, `-F`, `-o ProxyCommand`,
+    `-o HostName`, `-o LocalCommand`, …);
+  - ssh on Codex, which has no host allowlist.
+
+  What to know before you set it up:
+
+  - The allowlist needs the host name ssh connects to, not the alias:
+    `ssh -G aux01 | grep ^hostname` shows it.
+  - Jump hosts (`ProxyJump` in `~/.ssh/config`) and connection sharing are
+    off on this route: the sandbox proxy is the only way out.
+  - The sandbox has no terminal and limits writes. Use a key without a
+    passphrase prompt or an agent, and connect once outside the sandbox so
+    the host key is in `~/.ssh/known_hosts`. `sudo ssh` drops the proxy
+    variables and fails.
+  - The remote command itself can pass the value on: read it before you
+    allow.
+
+  `"ssh_via_sandbox": false` switches the route off. Measured on macOS and
+  Debian 13 with Claude Code 2.1.283.
 - **Inline for Write and Edit.** A placeholder in the content of Write, Edit,
   MultiEdit or NotebookEdit is resolved like an MCP argument, under the same
   session rule, cap and audit line (the line names the file). The client's

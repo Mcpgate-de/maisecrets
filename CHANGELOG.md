@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## [0.5.3] - 2026-09-28
+
+### Features
+
+- ssh gets a value on stdin inside the Claude Code sandbox, after a confirm (8eb8e5a)
+
+### Fixes
+
+- the final review follow-ups for the ssh route (2d434e2)
+- the final review of the ssh route and the command-word rules (54889dd)
+- the ssh safety net no longer refuses a sentence or a part without a value (7e1004d)
+- the ssh options follow the command word, past wrapper option arguments (9015378)
+- ssh in any other form is refused, and the guard checks the proxy (4b11421)
+- the second review round of the ssh route (341f7d2)
+- a command word hidden by quotes, a variable or a runner is still checked (985ff2a)
+- the ssh route reads options after the host and the whole remote command (dee6b85)
+- the ssh route also switches off shared ssh connections (a814d85)
+- a short value glued to its label is a value (65bd51e)
+
+### Other
+
+- Merge branch 'feat/ssh-through-the-sandbox' into 'main' (dc08fbd)
+
 ## [0.5.2] - 2026-09-27
 
 ### Features
