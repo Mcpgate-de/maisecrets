@@ -26,6 +26,11 @@ for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.
   python3 -c "import json,sys; json.load(open('$f'))" || { echo "pre-commit: $f is not valid JSON"; exit 1; }
 done
 
+# 2b. the plugin files as a directory check reads them: frontmatter YAML, manifests, hook paths,
+# command names. `claude plugin validate --strict` passed a frontmatter that the directory check
+# refused (2026-09-28), so this runs on every commit
+python3 scripts/lint_plugin.py || { echo "pre-commit: scripts/lint_plugin.py failed"; exit 1; }
+
 # 3. unit tests
 python3 -m unittest discover -s tests -q || { echo "pre-commit: unit tests failed"; exit 1; }
 exit 0
