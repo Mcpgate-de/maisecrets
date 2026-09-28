@@ -39,9 +39,11 @@ class _Recorder(unittest.TextTestResult):
     def addError(self, test, err):
         super().addError(test, err)
         if not isinstance(test, unittest.TestCase):
-            # an error in setUpClass or setUpModule arrives as a _ErrorHolder: no test of that
-            # class ran, so none of them was red on its own evidence
-            self.outcomes[test.id()] = "broken"
+            # a class or module fixture failed; it arrives as a _ErrorHolder named after the fixture.
+            # In setUpClass or setUpModule no test of it ran, so none was red on its own evidence. In
+            # tearDownClass the tests ran and the fixture's check is evidence too: c5's class finds a
+            # value-serving child still alive there under its mutation.
+            self.outcomes[test.id()] = "broken" if str(test).startswith(("setUpClass", "setUpModule")) else "fail"
             return
         self._set(test, "fail")
 

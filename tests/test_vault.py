@@ -177,7 +177,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg["keep_purged_days"], 3)
         self.assertNotIn("renew_on_uses", cfg)
         self.assertEqual(cfg["policy_keys"], [], "the user file cannot claim a key came from the policy")
-        self.assertIn("unknown key(s) policy_keys, renew_on_uses ignored", cfg["config_warning"])
+        # a typo of a real key is named, any other key only counted: it may be a pasted value
+        self.assertIn("unknown key(s) renew_on_uses, 1 more that are not near a known key ignored",
+                      cfg["config_warning"])
 
     def test_a_user_file_that_is_not_json_or_not_an_object_falls_back_to_the_defaults(self):
         for text, want in [("{nope", "not valid JSON"), ("[1, 2]", "must hold one JSON object")]:
