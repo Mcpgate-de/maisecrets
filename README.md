@@ -2,8 +2,19 @@
 
 [maisecrets.dev](https://maisecrets.dev) · by [mcpgate](https://mcpgate.de) · Apache-2.0 · free
 
-Keeps secrets and PII out of the cloud model. Works as a plugin for Claude Code
-(and Cowork) and for Codex, from the same `hooks/hooks.json`.
+An AI agent sees what you type and what its tools print: passwords, tokens, a
+customer's e-mail address. maisecrets intercepts detected secrets and personal
+data before they reach the cloud model. The real value goes back in only where
+the call happens, and only after you allow it. maisecrets itself sends no
+prompt, value or telemetry to a server.
+
+```bash
+claude plugin marketplace add Mcpgate-de/maisecrets
+claude plugin install maisecrets@maisecrets     # then start a new session
+```
+
+It works as a plugin for Claude Code (and Cowork) and for Codex, from the same
+`hooks/hooks.json`. Codex and the other install paths: see [Install](#install).
 
 **What it does, deterministically and locally:**
 
@@ -256,8 +267,8 @@ is delivered through live in `$XDG_RUNTIME_DIR/maisecrets` or
 `maisecrets-<uid>` in the temp directory, for up to 120 s. The values live in
 the store of the platform; on macOS a value longer than about 2.8 KB (a private
 key) is passed to `security` on its command line, visible to `ps` for the
-milliseconds of the call, because the stdin form has a line limit. Nothing leaves the machine: no hook
-opens a network connection. Two exceptions to state to a data-protection
+milliseconds of the call, because the stdin form has a line limit. maisecrets itself sends nothing to a
+server: no hook opens a network connection. Two exceptions to state to a data-protection
 officer: the Windows Credential Locker can roam through a Microsoft account on
 a machine that is not domain-joined (set `backend` to `encrypted-file` by
 policy if that matters), and `/maisecrets:report` prints an issue text and a
