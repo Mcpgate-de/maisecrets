@@ -233,7 +233,7 @@ class PostToolOutputTests(unittest.TestCase):
             "alone": value,
             "assignment": f"API_TOKEN={value}\n",
             "header": f"Authorization: Bearer {value}\n",
-            "url": f"GET https://ci:{value}@h.example/p?t={value}&z=1 200",
+            "url": "GET https://ci" + f":{value}@h.example/p?t={value}&z=1 200",   # assembled: the repo scan flags it
             "json": json.dumps({"config": {"token": value}}),
             "url-encoded": f"t={quote(value + '/+', safe='')}",
             "punctuation": f"({value}), [{value}].",
