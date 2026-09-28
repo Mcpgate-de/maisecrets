@@ -131,6 +131,11 @@ class LauncherFailsClosedTests(unittest.TestCase):
         self.check_all_events("python3 is 3.8")
 
 
+_NO_POSIX_SH = shutil.which("sh") is None or os.name == "nt"
+_POSIX_ONLY = "the POSIX hook command runs through sh; the Windows command is commandWindows"
+
+
+@unittest.skipIf(_NO_POSIX_SH, _POSIX_ONLY)
 class MovedPluginFolderFailsClosedTests(unittest.TestCase):
     """A plugin update moves the folder of an open session (anthropics/claude-code#97847). The client
     still runs the command of hooks/hooks.json with the old ${CLAUDE_PLUGIN_ROOT}; `bash <missing
@@ -500,6 +505,7 @@ class CodexShapedRefusalTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("withheld", out["reason"])
 
+    @unittest.skipIf(_NO_POSIX_SH, _POSIX_ONLY)
     def test_a_missing_launcher_answers_codex_in_its_shape(self):
         data = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         command = next(h["command"] for g in data["hooks"]["PostToolUse"] for h in g["hooks"])
