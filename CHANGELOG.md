@@ -29,6 +29,15 @@
   subagent, the subagent's own transcript, and its last answer. A value that anyone added outside the
   answer still blocks. `"pass_agent_reports": false` in `~/.maisecrets/config.json` turns this off.
 
+- **Fewer false alarms in source code.** A run over the Python standard library (36.6 MB, no real
+  secret in it) found 38 "secrets", 666 "IP addresses of a person" and 26 "phone numbers". These are
+  no longer hits: a name on the right side of an assignment (`authkey=authkey`, `self.token = nextchar`,
+  `TOKEN_ENDS = TSPECIALS | WSP`), a word of an error message (`pwd: expected bytes`), a format string,
+  a time zone (`key = "Europe/Dublin"`), a mask (`*******`), a signed number in code (`a = +4294967296`),
+  a number with more than 15 digits, and the documentation, shared, reserved and multicast address
+  ranges and the public DNS resolvers. A quoted value, a value in a properties file and a phone
+  number in prose are still found.
+
 ## [0.5.14] - 2026-09-29
 
 - **The restart command stands on a line of its own** in the refusal of the guard, so it is easy to

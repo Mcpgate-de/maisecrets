@@ -28,6 +28,7 @@ slightly different rules is how a redaction leaks.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
 import re
@@ -127,20 +128,26 @@ def _iban_ok(raw: str) -> bool:
     return int("".join(str(ord(c) - 55) if c.isalpha() else c for c in rearranged)) % 97 == 1
 
 
+# public resolvers: a server every network uses, never a person's address
+_RESOLVER_IPS = frozenset({"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9", "149.112.112.112",
+                           "208.67.222.222", "208.67.220.220", "2001:4860:4860::8888", "2001:4860:4860::8844",
+                           "2606:4700:4700::1111", "2606:4700:4700::1001"})
+
+
 def _public_ip(ip: str) -> bool:
+    """An address that can name a person: global unicast. Private, loopback, link-local, shared (100.64/10), the
+    documentation ranges (192.0.2.0/24, 2001:db8::/32 …), reserved, broadcast and multicast are not; the
+    Python standard library's own docs and tests held 666 of them (measured 2026-09-29)."""
     if ":" in ip:
-        # IPv6: no private-range rule here, but "::", "::1" and "fe80:…" are not worth a placeholder
-        return bool(re.fullmatch(r"[0-9A-Fa-f:.]{7,45}", ip)) and ip.count(":") >= 2 \
-            and any(c in "123456789abcdefABCDEF" for c in ip) and not ip.lower().startswith(("::1", "fe80", "fc", "fd"))
-    if not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", ip):
+        if not (re.fullmatch(r"[0-9A-Fa-f:.]{7,45}", ip) and ip.count(":") >= 2):
+            return False
+    elif not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", ip):
         return False   # e.g. a CIDR tail the upstream regex swallowed
-    parts = [int(p) for p in ip.split(".")]
-    if any(p > 255 for p in parts):
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
         return False
-    a, b = parts[0], parts[1]
-    private = (a in (10, 127, 0) or (a == 192 and b == 168) or (a == 172 and 16 <= b <= 31)
-               or (a == 169 and b == 254))
-    return not private
+    return addr.is_global and not addr.is_multicast and str(addr) not in _RESOLVER_IPS
 
 
 def _de_tax_id_ok(v: str) -> bool:
@@ -233,6 +240,7 @@ _DS_INDIRECT = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*\s*(\(.*\)|\[.*\])$")
 # condition, `;` of a statement, `[` before a quoted key): `settings.API_KEY`, `self._password`,
 # `os.environ[`, `confirm_password:` were taken for values (false-positive corpus, 2026-09-27)
 _DS_REFERENCE = re.compile(r"_*[A-Za-z]+(?:[._-]+[A-Za-z]+)+_*[:;\[]?")
+_FORMAT_ONLY_RE = re.compile(r"(?:%[-+ #0]*\d*(?:\.\d+)?[sdifxXeEgGrcoba%]|\{[^{}]*\}|[^A-Za-z0-9])+")
 
 
 # a short glued value that is a type or a keyword of code or config, or a camelCase identifier:
@@ -264,6 +272,10 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False   # a call, an expression or markdown (`re.compile(r"…`, "`/maisecrets:report` |"), not a value
     if not any(c.isalnum() for c in v):
         return False
+    if "***" in v or "\u2022\u2022" in v:
+        return False   # a mask as a prompt echoes it: "Password: *******" (Python standard library, 2026-09-29)
+    if _FORMAT_ONLY_RE.fullmatch(v):
+        return False   # a format string: token_range = "%d,%d-%d,%d:" (Python standard library, 2026-09-29)
     if v.count(" ") >= 2:
         return False   # a sentence or an i18n label ("Add API key"), not a value
     if " " in v and not any(c.isdigit() for c in v):
@@ -317,7 +329,7 @@ OWN_RULES: list[dict] = [
      "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})"
               r"@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "phone", "type": "PHONE",
-     "regex": r"(?<![\w+])\+\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?!\w)"},
+     "regex": r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?![\w.,]\d|\w)"},
     # bare token prefixes newer than the vendored rulesets live in rules/prefixes.txt (see _load_prefixes)
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
@@ -557,16 +569,68 @@ _CODE_CONDITION_RE = re.compile(r"(?:==|!=|<=|>=|\bis not\b|^\s*(?:def|class)\s+
 _CODE_WORDS = frozenset({"break", "continue", "return", "pass", "raise", "throw", "yield", "await", "elif",
                          "else"})
 
+# the word after a label in an error message or a log line: "pwd: expected bytes, got str" (Python standard library,
+# 2026-09-29), "token: invalid", "password: required". None is a password anyone chooses
+_MESSAGE_WORDS = frozenset({"expected", "invalid", "missing", "required", "incorrect", "wrong", "failed", "denied",
+                            "unsupported", "mismatch", "rejected", "expired", "revoked", "unset", "empty", "unknown",
+                            "must", "cannot", "should", "not", "no"})
+
 
 def is_code_word(value: str) -> bool:
-    """A statement keyword: a keyword rule never takes it as a value."""
-    return value.strip().rstrip(";").lower() in _CODE_WORDS
+    """A statement keyword or a word of an error message: a keyword rule never takes it as a value."""
+    w = value.strip().rstrip(";").lower()
+    return w in _CODE_WORDS or w in _MESSAGE_WORDS
 
 
 def code_word_spellings() -> list[str]:
-    """The spellings of a statement keyword that a keyword rule stored before 0.5.15. The vault finds a stored
-    one by its fingerprint and reads no value (Vault.drop_code_words)."""
-    return [s for w in sorted(_CODE_WORDS) for b in (w, w.capitalize(), w.upper()) for s in (b, b + ";")]
+    """The spellings of such a word that a keyword rule stored before 0.5.15. The vault finds a stored one by its
+    fingerprint and reads no value (Vault.drop_code_words)."""
+    return [s for w in sorted(_CODE_WORDS | _MESSAGE_WORDS) for b in (w, w.capitalize(), w.upper())
+            for s in (b, b + ";")]
+
+
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_LABEL_TAIL_RE = re.compile(r"([A-Za-z_][\w.]*)[\"']?\s*(?::=|=|:)\s*[\"'`]?$")
+_OPERATOR_AFTER_RE = re.compile(r"[ \t]+[|&^*+][ \t]+[A-Za-z_(]")
+_SELF_ATTR_RE = re.compile(r"(?:^|[\s,(])(?:self|this|cls)\.\w+$")
+
+
+def value_is_code(text: str, start: int, end: int, secret: str) -> bool:
+    """A keyword rule read `name = <expression>` in source code as label and value. Three forms, all measured in the
+    Python standard library (2026-09-29): the same name on both sides (`authkey=authkey`), an unquoted name that an
+    operator continues (`TOKEN_ENDS = TSPECIALS | WSP`), and an unquoted name given to an attribute of the object
+    (`self.token = nextchar`). A quoted value, and `spring.datasource.password=<value>`, stay values."""
+    v = secret.strip().strip("'\"`;,")
+    line_start = text.rfind("\n", 0, start) + 1
+    before = text[line_start:start]
+    m = _LABEL_TAIL_RE.search(before)
+    if not m:
+        return False
+    label = m.group(1)
+    name = label.rsplit(".", 1)[-1].lower()
+    if v.lower() == name or v.lower().startswith(name + "#"):
+        return True   # also a documentation anchor: 'token': 'token#module-token'
+    if before[-1:] in "'\"`" or not _IDENT_RE.fullmatch(v):
+        return False
+    if "=" in m.group(0) and _OPERATOR_AFTER_RE.match(text, end):
+        return True   # an assignment only: `password: <value> | then log in` is prose
+    return bool(_SELF_ATTR_RE.search(before[:m.start(1) + len(label)]))
+
+
+# gitleaks' generic-api-key takes `key = "Europe/Dublin"`: words joined by `/` without a digit are a time zone or a
+# path, never a key (Python standard library, 2026-09-29)
+_WORD_PATH_RE = re.compile(r"[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*(?:/[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*)+")
+# a signed number in code: `a = +4294967296`, `f(+12345678)`
+_NUMBER_BEFORE_RE = re.compile(r"(?:[=(,\[]|return)\s*$")
+
+
+def _phone_ok(text: str, start: int, secret: str) -> bool:
+    """E.164 has at most 15 digits; a run of 0 and 1 is a binary number; a signed number without separators after
+    `=`, `(` or `,` is a number in code (Python standard library, 2026-09-29)."""
+    digits = re.sub(r"\D", "", secret)
+    if len(digits) > 15 or set(digits) <= {"0", "1"}:
+        return False
+    return bool(re.search(r"[ \-()]", secret)) or not _NUMBER_BEFORE_RE.search(text, max(0, start - 8), start)
 
 
 # gitleaks' generic-api-key starts with a lazy `[\w.-]{0,50}?` before its keyword, so the regex
@@ -728,7 +792,11 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     end = start + len(secret)
                     if _CAPITALISED_WORD_RE.fullmatch(secret):
                         continue
-            if rule.id.startswith("ds-keyword") and is_code_word(secret):
+            if rule.id.startswith("ds-keyword") and (is_code_word(secret) or value_is_code(text, start, end, secret)):
+                continue
+            if rule.id == "generic-api-key" and _WORD_PATH_RE.fullmatch(secret.strip("'\"")):
+                continue
+            if rule.id == "phone" and not _phone_ok(text, start, secret):
                 continue
             if any(s < end and start < e for s, e in taken):
                 continue
