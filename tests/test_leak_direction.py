@@ -172,6 +172,43 @@ class CodexReviewTests(unittest.TestCase):
                 self.assertEqual(secrets("pass§word = Qx7vR2mK9pLw\n", path), ["Qx7vR2mK9pLw"])
 
 
+class CodexSecondReviewTests(unittest.TestCase):
+    """The findings of the second Codex review (gpt-5.6-sol, on 05052fe)."""
+
+    def test_a_base64_value_on_the_next_line_is_a_value(self):
+        for label in ("PASS§WORD=\n", "PASS§WORD:\n"):
+            with self.subTest(label=label):
+                self.assertEqual(secrets(label + "SkTcFTZCBKg="), ["SkTcFTZCBKg="])
+        self.assertEqual(found("Zugangsdaten:\nBenutzer: max\n"), [])
+
+    def test_a_spaced_phone_assignment_is_a_phone(self):
+        self.assertIn(("PHONE", "+4915112345678"), found("CONTACT_PHONE = +4915112345678"))
+        self.assertEqual(found("a = +4294967296"), [])
+
+    def test_an_upper_case_env_file_under_tests_is_no_test_code(self):
+        self.assertEqual(secrets("PASS§WORD=Qx7vR2mK9pLw!\n", "/repo/Tests/.ENV"), ["Qx7vR2mK9pLw!"])
+        self.assertEqual(secrets("PASS§WORD=Qx7vR2mK9pLw!\n", "/repo/Tests/Cassettes/login.yaml"), ["Qx7vR2mK9pLw!"])
+
+    def test_a_random_value_that_starts_with_its_label_is_a_value(self):
+        self.assertEqual(secrets("TOK§EN=tokenQx7vR2mK9pLw"), ["tokenQx7vR2mK9pLw"])
+        self.assertEqual(found("tok§en = tokenizer"), [])
+
+    def test_a_template_inside_a_password_does_not_hide_it(self):
+        self.assertEqual(secrets("PASS§WORD=Qx7v{user}R2mK9pLw"), ["Qx7v{user}R2mK9pLw"])
+        self.assertEqual(found("    - MCP tok§ens: `mcp_{user}`"), [])
+
+    def test_a_windows_grep_line_names_its_test_file(self):
+        self.assertEqual(secrets("C:\\repo\\Tests\\AuthTests.cs:12:pass§word = Qx7vR2mK9pLw\n"), [])
+        self.assertEqual(secrets("C:\\repo\\src\\Auth.cs:12:pass§word = Qx7vR2mK9pLw\n"), ["Qx7vR2mK9pLw"])
+
+    def test_a_megabyte_of_opening_tags_is_refused_at_once(self):
+        import time
+        started = time.monotonic()
+        text = ("<task-notification>\n" * 60000)[:1_000_000]
+        self.assertFalse(hooks.agent_report({"transcript_path": "/tmp/x.jsonl", **CLAUDE}, text))
+        self.assertLess(time.monotonic() - started, 1.0)
+
+
 class WeakWordTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):  # noqa: N802 - unittest hook

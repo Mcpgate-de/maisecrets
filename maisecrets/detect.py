@@ -256,6 +256,7 @@ _CAMEL_RE = re.compile(r"^[a-z]+(?:[A-Z][a-z0-9]*)+$")
 # `API_KEY=`), a generic type (`Option<String>`), a UUID, and a fixture that names itself (`testpass`, `secret123`,
 # `Passw0rd!`: letters after undoing the digits and symbols people use for them)
 _LABEL_SHAPE = re.compile(r"[A-Za-z_][\w.-]*[:=]")
+_NAME_LABEL_RE = re.compile(r"(?:[A-Z][A-Z0-9_]*|[a-z][a-z0-9_]*|[A-Z][a-z]+(?:[ _-][A-Za-z][a-z]+)*)[.-]?[:=]")
 _GENERIC_TYPE = re.compile(r"<[A-Za-z_][\w, ]*>")
 _VERSION_RE = re.compile(r"v?\d+(?:\.\d+){1,3}(?:[-+.]?[A-Za-z0-9]+)?")
 _PART_TEMPLATE_RE = re.compile(r"\{[A-Za-z_][\w.]*(?:\[[^\]]*\]?)?\}?$|\{[A-Za-z_][\w.]*\}")
@@ -319,7 +320,7 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False   # a generic type: Option<String>, Secret<String>
     if _VERSION_RE.fullmatch(v):
         return False   # a version pin: tokenizers==0.20.3 (requirements.txt, renovate.json)
-    if _PART_TEMPLATE_RE.search(v):
+    if _PART_TEMPLATE_RE.search(v) and not any(c.isdigit() for c in _PART_TEMPLATE_RE.sub("", v)):
         return False   # a template with a name in it: mcp_{user}, {body['transfer_id']}
     if _SHELL_EXPANSION_RE.fullmatch(v) or _YAML_REF_RE.fullmatch(v) or _PATH_IN_VALUE_RE.search(v):
         return False   # ${REDIS_PASSWORD:?…} cut after its name, a YAML anchor, a command with a path
@@ -641,13 +642,13 @@ _TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?i:tests?|__tests__|spec|testdata|test_
                            r"|(?:^|[/\\])[^/\\]*[._-]e2e[._-][^/\\]*$"
                            r"|(?:^|[/\\])(?:test_[^/\\]*|[^/\\]*_test\.\w+|[^/\\]*\.(?:test|spec)\.\w+|conftest\.py)$")
 # a file of real values even under tests/: an .env, a recorded HTTP cassette (review, 2026-09-29)
-_REAL_VALUE_FILE_RE = re.compile(r"(?:^|[/\\])(?:\.env[^/\\]*|[^/\\]*\.env|cassettes?[/\\].*)$")
+_REAL_VALUE_FILE_RE = re.compile(r"(?i)(?:^|[/\\])(?:\.env[^/\\]*|[^/\\]*\.env|cassettes?[/\\].*)$")
 _TEST_MARKER_RE = re.compile(
     r"(?m)^[ \t]*(?:(?:async[ \t]+)?def[ \t]+test_?\w*[ \t]*\(|class[ \t]+Test\w*|@pytest\.|@Test\b|#\[test\]"
     r"|(?:import|from)[ \t]+(?:pytest|unittest)\b|func[ \t]+Test\w*\(|(?:describe|it|test|beforeEach)[ \t]*\()")
 # `assert` alone is no marker: production code asserts too (review, 2026-09-29). A diff starts a new file here
 _DIFF_FILE_RE = re.compile(r"(?m)^(?:diff --git |\+\+\+ |--- a/)")
-_GREP_PATH_RE = re.compile(r"([^\s:]+):\d+[:-]")
+_GREP_PATH_RE = re.compile(r"((?:[A-Za-z]:)?[^\s:]+):\d+[:-]")
 _TEST_LOOKBACK_LINES = 40
 
 
@@ -767,7 +768,7 @@ def value_is_code(text: str, start: int, end: int, secret: str) -> bool:
         return True   # also a documentation anchor: 'token': 'token#module-token'
     if before[-1:] in "'\"`" or not _IDENT_RE.fullmatch(v):
         return False
-    if len(name) >= 3 and (v.lower().startswith(name) or v.lower().endswith(name)):
+    if len(name) >= 3 and not any(c.isdigit() for c in v) and (v.lower().startswith(name) or v.lower().endswith(name)):
         return True   # a name made from the label: token = tokenizer, token = nexttoken
     if "=" in m.group(0) and _OPERATOR_AFTER_RE.match(text, end):
         return True   # an assignment only: `password: <value> | then log in` is prose
@@ -780,6 +781,7 @@ _WORD_PATH_RE = re.compile(r"[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*(?:/[A-Z]?[a-z]+(?:_[
 # a signed number in code: `a = +4294967296`, `f(+12345678)`
 _SECTION_BEFORE_RE = re.compile(r"(?i)(?:\bRFC[ -]?\d{3,5}|\bCore|\bsection|\bsec\.|\bchapter|\bKapitel|\bAbschnitt"
                                 r"|\u00a7)[ ,:(]*\u00a7?[ ]*$")
+_PHONE_LABEL_RE = re.compile(r"(?i)phone|tel|mobil|handy|fax|contact|kontakt|rufnummer|whatsapp|sms")
 _NUMBER_BEFORE_RE = re.compile(r"(?:=\s+|[(\[]\s*|return\s+)$")   # not KEY=+49…, not a CSV column
 
 
@@ -789,7 +791,9 @@ def _phone_ok(text: str, start: int, secret: str) -> bool:
     digits = re.sub(r"\D", "", secret)
     if len(digits) > 15 or set(digits) <= {"0", "1"}:
         return False
-    return bool(re.search(r"[ \-()]", secret)) or not _NUMBER_BEFORE_RE.search(text, max(0, start - 8), start)
+    if re.search(r"[ \-()]", secret) or not _NUMBER_BEFORE_RE.search(text, max(0, start - 8), start):
+        return True
+    return bool(_PHONE_LABEL_RE.search(_label_before(text, start)))   # CONTACT_PHONE = +49… (Codex review)
 
 
 # gitleaks' generic-api-key starts with a lazy `[\w.-]{0,50}?` before its keyword, so the regex
@@ -1008,7 +1012,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if rule.id.startswith("ds-keyword") and _names_its_label(text, start, secret):
                 continue
             if (rule.id.startswith("ds-keyword") and _LABEL_SHAPE.fullmatch(secret.strip())
-                    and "\n" in text[m.start():start]):
+                    and _NAME_LABEL_RE.fullmatch(secret.strip()) and "\n" in text[m.start():start]):
                 continue   # the next line is a label of its own: `DB_PASSWORD=\nAPI_KEY=`, `Zugangsdaten:\nBenutzer:`
             if (rule.id.startswith("ds-keyword") and secret.strip("\"' ").isdigit()
                     and _MEASURE_LABEL_RE.search(_label_before(text, start))):

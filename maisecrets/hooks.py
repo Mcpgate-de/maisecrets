@@ -538,24 +538,42 @@ def _one_report_proves_itself(body: str, transcript: str) -> bool:
 
 
 def agent_report(payload: dict, prompt: str) -> bool:
-    """True when the prompt is nothing but reports of subagents of this session, each proven as described above.
-    Two agents that finish in the same turn may arrive in one prompt; each block proves itself."""
+    """True when the prompt is nothing but proven reports of this session's subagents, and no value is outside their
+    results: no shape, and no value the store holds (a stored value without a shape in a summary passed, Codex
+    review, 2026-09-29)."""
+    rest = _report_rest(payload, prompt)
+    if rest is None:
+        return False
+    if _has_live(load_config()) and _inserted_values(rest, Vault(load_config())):
+        return False
+    return True
+
+
+def _report_rest(payload: dict, prompt: str) -> str | None:
+    """The text outside the results when the prompt is nothing but reports of subagents of this session, each
+    proven as described above; None otherwise. Two agents that finish in the same turn may arrive in one prompt;
+    each block proves itself."""
     transcript = str(payload.get("transcript_path") or "")
     if not transcript.endswith(".jsonl"):
-        return False
+        return None
+    # one opening tag per closing tag, counted before any regex: a megabyte of opening tags kept the lazy match
+    # scanning past the watchdog (Codex review, 2026-09-29)
+    opened = prompt.count("<task-notification>")
+    if not opened or opened != prompt.count("</task-notification>") or opened > 16:
+        return None
     blocks = list(_NOTIFICATION_RE.finditer(prompt))
     if not blocks:
-        return False
+        return None
     # nothing but the blocks: a text typed before, between or after them is a person's
     pos = 0
     for m in blocks:
         if prompt[pos:m.start()].strip():
-            return False
+            return None
         pos = m.end()
-    if prompt[pos:].strip() or prompt.count("<task-notification>") != len(blocks):
-        return False
+    if prompt[pos:].strip() or opened != len(blocks):
+        return None
     if not all(_one_report_proves_itself(m.group("body"), transcript) for m in blocks):
-        return False
+        return None
     # only a result is the subagent's text: a value in another field (a real report pasted again, with a value
     # added to its summary) was typed by a person and must be blocked (review, 2026-09-29)
     rest, pos = [], 0
@@ -565,7 +583,8 @@ def agent_report(payload: dict, prompt: str) -> bool:
         rest.append(prompt[pos:m.start("body") + a])
         pos = m.start("body") + b
     rest.append(prompt[pos:])
-    return not detect.scan("".join(rest))
+    text = "".join(rest)
+    return None if detect.scan(text) else text
 
 
 def user_prompt(payload: dict) -> dict:

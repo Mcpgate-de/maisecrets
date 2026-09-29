@@ -183,6 +183,15 @@ class AgentReportTests(unittest.TestCase):
                 self.assertEqual(out.get("decision"), "block", out)
                 self.assertNotIn(stored, json.dumps(out))
 
+    def test_a_stored_value_in_a_field_outside_the_result_is_blocked(self):
+        # a value without a shape is found by its fingerprint only (second Codex review, 2026-09-29)
+        stored = "CedarMeadow" + "Blue77"
+        Vault().put(stored, "SECRET", "manual", session="s1")
+        hooks._live_cache.clear()
+        self.assertBlocked(self.prompt(self.s.notification(self.answer, summary=f"finished {stored}")))
+        hooks._live_cache.clear()
+        self.assertEqual(self.prompt(self.s.notification(self.answer)), {}, "the plain report still passes")
+
     def test_a_final_answer_in_two_records_passes(self):
         # Claude Code writes one record per content block; a text, a thinking and a text are three records
         rec = lambda content: json.dumps({"type": "assistant", "message": {"id": "msg_2", "content": content}})  # noqa: E731
