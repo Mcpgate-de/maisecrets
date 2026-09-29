@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.5.13] - 2026-09-29
+
 - **Synced installs: the guard now gives the restart command.** After a synced update,
   `/reload-plugins` can keep the path of the gone plugin folder (anthropics/claude-code#97847), and
   then it cannot load maisecrets again. The refusal of the guard now says so and names the command
@@ -10,6 +12,18 @@
 - **The guard puts that command on your clipboard**, once per session (`pbcopy` on macOS, `clip` on
   Windows, `wl-copy`, `xclip` or `xsel` on Linux). Exit, paste, press Enter. The refusal says so only
   when the copy worked. `MAISECRETS_GUARD_CLIPBOARD=off` turns it off.
+
+### Features
+
+- the resume command goes to the clipboard, once per session (857be68)
+
+### Fixes
+
+- the refusal gives the restart command when /reload-plugins cannot help (7f1292e)
+
+### Other
+
+- Merge branch 'fix/guard-restart-hint' into 'main' (8f58a86)
 
 ## [0.5.12] - 2026-09-29
 
