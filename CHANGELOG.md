@@ -44,6 +44,19 @@
   passes, and a Read of a test file keeps its fixtures. A token shape (`glpat-`, `AKIA`, a private
   key) and personal data are still found in test code.
 
+- **Fewer false alarms in config, docs and code.** A review of 679 snippets of normal work and a run
+  over a real repository found more values that are no secret, and these are no hits now:
+  - fixtures that name themselves (`testpass`, `secret123`, `Passw0rd!`) and a default that equals
+    its label or user (`POSTGRES_PASSWORD: postgres`, `curl -u admin:admin`)
+  - the next label of an `.env.example` (`DB_PASSWORD=` followed by `API_KEY=`)
+  - types (`Option<String>`, `list[str]`), templates (`mcp_{user}`, `?token={id}`), version pins
+    (`tokenizers==0.20.3`), durations (`TTL_REFRESH_TOKEN = 15552000`), UUIDs, elided values
+    (`sk-...`) and labels of a derived thing (`secret_name`, `password_hash`)
+  - e-mail addresses at `example.com`, `.test`, `.invalid`, `.localhost`, `.local` and `.internal`,
+    and section numbers such as `RFC 6749 4.1.2.1`
+  In the tests of that repository, the label-rule hits that a Read acted on went from 379 to none.
+  The example on the first start is now an address that maisecrets stops.
+
 ## [0.5.14] - 2026-09-29
 
 - **The restart command stands on a line of its own** in the refusal of the guard, so it is easy to

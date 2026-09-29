@@ -143,6 +143,8 @@ def _public_ip(ip: str) -> bool:
             return False
     elif not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", ip):
         return False   # e.g. a CIDR tail the upstream regex swallowed
+    if ":" not in ip and all(len(o) == 1 for o in ip.split(".")):
+        return False   # four one-digit parts: a section or a version number (RFC 6749 4.1.2.1), rarely a person
     try:
         addr = ipaddress.ip_address(ip)
     except ValueError:
@@ -252,6 +254,26 @@ _SHORT_WORDS = frozenset({
     "binary", "buffer", "array", "values", "string[]", "never", "nullable", "boolean[]", "option", "settings",
     "private", "public", "enabled", "disabled"})
 _CAMEL_RE = re.compile(r"^[a-z]+(?:[A-Z][a-z0-9]*)+$")
+# the review of 2026-09-29 (679 snippets of normal work): the next label taken for the value (`DB_PASSWORD=` then
+# `API_KEY=`), a generic type (`Option<String>`), a UUID, and a fixture that names itself (`testpass`, `secret123`,
+# `Passw0rd!`: letters after undoing the digits and symbols people use for them)
+_LABEL_SHAPE = re.compile(r"[A-Za-z_][\w.-]*[:=]")
+_GENERIC_TYPE = re.compile(r"<[A-Za-z_][\w, ]*>")
+_VERSION_RE = re.compile(r"v?\d+(?:\.\d+){1,3}(?:[-+.]?[A-Za-z0-9]+)?")
+_PART_TEMPLATE_RE = re.compile(r"\{[A-Za-z_][\w.]*(?:\[[^\]]*\]?)?\}?$|\{[A-Za-z_][\w.]*\}")
+_SUBSCRIPT_RE = re.compile(r"[A-Za-z_][\w.]*\[[\w.,\s]*\]?")
+_GLOB_RE = re.compile(r"[:/._-]\*$|^\*\.\w+$|/\*[/.]")   # token:*, *.py, logs/*.txt; a star inside a value stays
+_NUMBER_RE = re.compile(r"\d{1,3}(?:_\d{3})+|\d+(?:_\d+)+")
+_PRIVATE_NAME_RE = re.compile(r"_[A-Za-z][A-Za-z_]*")
+_EMAIL_VALUE_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_FIXTURE_WORD = re.compile(r"passw|pass(?![a-z])|(?<![a-z])pass|secret|token|test|geheim|kennwort")
+_LEET = str.maketrans({"0": "o", "3": "e", "4": "a", "5": "s", "$": "s", "@": "a", "1": "i", "!": "i", "|": "l",
+                       "7": "t"})
+
+
+def _deleet(v: str) -> str:
+    return v.lower().translate(_LEET)
 
 
 def _short_word(v: str) -> bool:
@@ -266,6 +288,24 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False
     if _DS_TEMPLATED.match(v) or _DS_INDIRECT.match(v):
         return False
+    if _LABEL_SHAPE.fullmatch(v):
+        return False   # the next line is a label of its own: `DB_PASSWORD=\nAPI_KEY=`, `Zugangsdaten:\nBenutzer:`
+    if _GENERIC_TYPE.search(v):
+        return False   # a generic type: Option<String>, Secret<String>
+    if _VERSION_RE.fullmatch(v):
+        return False   # a version pin: tokenizers==0.20.3 (requirements.txt, renovate.json)
+    if _PART_TEMPLATE_RE.search(v):
+        return False   # a template with a name in it: mcp_{user}, {body['transfer_id']}
+    if _SUBSCRIPT_RE.fullmatch(v) or _NUMBER_RE.fullmatch(v) or _GLOB_RE.search(v):
+        return False   # list[str], 1_234_567, chatgpt_access_token:* (the ai-gateway repository, 2026-09-29)
+    if not any(c.isdigit() for c in v) and _DS_REFERENCE.fullmatch(v.rstrip("})],;")):
+        return False   # a reference before a closing bracket: no-check}
+    if _PRIVATE_NAME_RE.fullmatch(v):
+        return False   # a private name: security_token_cleanup = _cleanup_tokens
+    if _EMAIL_VALUE_RE.fullmatch(v):
+        return False   # an address after a label (user_tokens:<address>): the e-mail rule decides, not a secret
+    if _FIXTURE_WORD.search(_deleet(v)):
+        return False   # a value that names itself a password, a secret, a token or a test is a fixture
     if re.match(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?![\w])", v):
         return False   # a shell variable: $PASSWORD, ${DB_PASSWORD}
     if "(" in v or ")" in v or "`" in v or "|" in v:
@@ -282,7 +322,9 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False   # two words of prose ("bad payload"), not a value
     if not any(c.isdigit() for c in v) and _DS_REFERENCE.fullmatch(v):
         return False   # an identifier or a reference to one: NAME_OF_SECRET, self._password, os.environ[
-    low = v.lower()
+    if not any(c.isdigit() for c in v) and _short_word(v):
+        return False   # a type, a keyword of code or a camelCase identifier, at any length (settings, tokenValue)
+    low = v.lower().rstrip(";")
     if low in {"password", "changeme", "placeholder", "example", "none", "null", "true", "false", "redacted"}:
         return False
     # sequential strings (abcdef…, 123456…) and one repeated character (********, xxxxxxxx);
@@ -312,8 +354,23 @@ VALIDATORS = {
     "public_ip": _public_ip,
     "not_placeholder": lambda v: v.lower() not in {"placeholder", "changeme", "redacted", "example"}
     and not v.startswith("<"),
-    "person_email": lambda v: v.split("@", 1)[0].lower() not in _SYSTEM_USERS,
+    "person_email": lambda v: v.split("@", 1)[0].lower() not in _SYSTEM_USERS and not _reserved_domain(v),
 }
+
+
+_RESERVED_MAIL_DOMAINS = ("example.com", "example.net", "example.org")
+_RESERVED_MAIL_TLDS = ("test", "example", "invalid", "localhost", "local", "internal")
+
+
+def _reserved_domain(v: str) -> bool:
+    """example.com/.net/.org, the TLDs .test .example .invalid .localhost (RFC 2606, RFC 6761), .local (RFC 6762)
+    and .internal (ICANN, 2024): no mailbox of a person on the internet is there. Every README, git fixture and
+    test used them (review, 2026-09-29)."""
+    d = v.rsplit("@", 1)[-1].lower()
+    return (d in _RESERVED_MAIL_DOMAINS or d.endswith(tuple("." + x for x in _RESERVED_MAIL_DOMAINS))
+            or d.rsplit(".", 1)[-1] in _RESERVED_MAIL_TLDS)
+
+
 _SYSTEM_USERS = frozenset({"git", "root", "ubuntu", "ec2-user", "admin", "noreply", "no-reply", "postmaster",
                            "hostmaster", "webmaster", "mailer-daemon", "bounce", "bounces"})
 
@@ -529,7 +586,7 @@ _TEMPLATE_NAME = re.compile(r"^[A-Z]+(?:_[A-Z]+)+$")   # YOUR_PORTKEY_API_KEY: w
 # "DuMmy" about once in 20,000, and it was then let through as a placeholder (found by a random
 # test token on windows-latest, 2026-09-27)
 _PARTS = "|".join(re.escape(p) for p in PLACEHOLDER_PARTS)
-_PLACEHOLDER_PART_RE = re.compile(f"(?<![a-z0-9])(?:{_PARTS})|(?:{_PARTS})$")
+_PLACEHOLDER_PART_RE = re.compile(f"(?<![a-z0-9])(?:{_PARTS})|(?:{_PARTS})(?:key)?$")
 
 
 def looks_like_placeholder(value: str) -> bool:
@@ -543,7 +600,7 @@ def looks_like_placeholder(value: str) -> bool:
 # tests of the Python standard library (2026-09-29). In test code the value is a fixture, and a
 # block or a placeholder there only stops the work. A token shape (glpat-, AKIA, a PEM key) and personal data stay
 # hits in test code too: a real token or a copy of customer data in a test is a leak.
-LABEL_RULES = ("ds-keyword", "generic-api-key", "url-query-secret")
+LABEL_RULES = ("ds-keyword", "generic-api-key", "url-query-secret", "auth-scheme")
 _TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?:tests?|__tests__|specs?|testdata|test_data|fixtures?)[/\\]"
                            r"|(?:^|[/\\])(?:test_[^/\\]*|[^/\\]*_test\.\w+|[^/\\]*\.(?:test|spec)\.\w+|conftest\.py)$")
 _TEST_MARKER_RE = re.compile(
@@ -768,6 +825,36 @@ class _Shifted:
         return self._m.end(i) + self._off
 
 
+def _names_its_label(text: str, start: int, secret: str) -> bool:
+    """`POSTGRES_PASSWORD: postgres`, `password: password`: the value is a word of its own label line, a default."""
+    words = set(re.findall(r"[a-z]+", text[text.rfind("\n", 0, start) + 1:start].lower()))
+    return secret.strip("\"'` ").lower() in words
+
+
+# lookarounds, not ^: search(text, pos) anchors ^ at the start of the text, never at pos (a file's line 19 passed)
+_MEASURE_LABEL_RE = re.compile(r"(?i)(?<![a-z])(?:ttl|timeout|expir\w*|lifetime|max|min|len|length|size|count|limit"
+                               r"|port|age|seconds|minutes|hours|days|retries|interval)(?![a-z])")
+_ELISION_RE = re.compile(r"(?:\.\.\.|\u2026)$")
+# a label that names a derived thing: secret_id, password_hash, token_type, hashed_secret. Anchored at the value: in
+# `secret_name: x, password: <value>` the password stays a hit
+_DERIVED_LABEL_RE = re.compile(
+    r"(?i)(?:(?:secret|password|passwd|pwd|token|key)[_-]?(?:id|name|hash|hashed|len|length|path|file|arn|ref|url|uri"
+    r"|version|type|field|label|prompt|policy|rules?)|hashed_(?:secret|password)|(?:secret|password|token|key)Id"
+    r"|(?:secret|password|token)Name)[\"']?\s*(?::=|=>|[:=])\s*[\"'`]?$")
+
+
+def _pass_equals_user(whole: str, secret: str) -> bool:
+    """`postgres:postgres@`, `curl -u admin:admin`: a password equal to the user name is a default."""
+    sec = secret.strip("\"' ")
+    if ":" in sec:    # curl-auth-user: the secret group is user:pass
+        u, _, pw = sec.partition(":")
+        return u != "" and u.strip("\"' ").lower() == pw.strip("\"' ").lower()
+    w = whole.strip("\"' ")
+    head = w.split("://", 1)[1] if "://" in w else w
+    user = head.split(":", 1)[0].strip("\"' ").rsplit(" ", 1)[-1]
+    return user != "" and user.lower() == sec.lower()
+
+
 def _line_of(text: str, start: int, end: int) -> str:
     a = text.rfind("\n", 0, start) + 1
     b = text.find("\n", end)
@@ -839,6 +926,24 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue
             if rule.id == "generic-api-key" and _WORD_PATH_RE.fullmatch(secret.strip("'\"")):
                 continue
+            if rule.id.startswith("ds-keyword") and _names_its_label(text, start, secret):
+                continue
+            if (rule.id.startswith("ds-keyword") and secret.strip("\"' ").isdigit()
+                    and _MEASURE_LABEL_RE.search(text, max(0, text.rfind("\n", 0, start) + 1, start - 60), start)):
+                continue   # a limit or a duration: TTL_REFRESH_TOKEN = 2592000
+            if rule.id == "url-query-secret" and secret.startswith("{"):
+                continue   # a template: ?token={body['transfer_id']}, ?token={SLACK_AUTO_TOKEN}
+            if (rule.id == "auth-scheme" and not any(c.isdigit() for c in secret)
+                    and re.fullmatch(r"[A-Za-z]+(?:[_-][A-Za-z]+)+", secret)):
+                continue   # words, not a token: Bearer test_access_token
+            if (rule.id.startswith("ds-keyword") or rule.id == "generic-api-key") and (
+                    _UUID_RE.fullmatch(secret.strip("\"'` ")) or _ELISION_RE.search(secret)
+                    or _DERIVED_LABEL_RE.search(text, max(0, text.rfind("\n", 0, start) + 1, start - 60), start)):
+                continue   # a UUID, an elided value (sk-...), or a label that names a derived thing (secret_id)
+            if rule.id in ("ds-basic-auth", "curl-auth-user") and _pass_equals_user(m.group(0), secret):
+                continue
+            if rule.id == "hashicorp-tf-password" and not _ds_value_ok(secret.strip("\"'")):
+                continue
             if rule.id == "phone" and not _phone_ok(text, start, secret):
                 continue
             if any(s < end and start < e for s, e in taken):
@@ -861,6 +966,8 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     continue
             if rule.type == "SECRET" and looks_like_placeholder(secret):
                 continue
+            if rule.type == "SECRET" and len(secret) >= 16 and len(set(secret[-12:])) <= 1:
+                continue   # a prefix and one repeated character: glpat-AAAAAAAAAAAAAAAAAAAA is a placeholder
             if rule.score < 1.0 or rule.require_context:
                 # presidio semantics: a weak shape passes only with a context WORD nearby
                 # cut from the original text, then lowered: a lowered text is not the same length (the

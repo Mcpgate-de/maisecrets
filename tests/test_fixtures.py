@@ -72,6 +72,13 @@ class InTestCodeTests(unittest.TestCase):
         # a marker after the value does not count
         self.assertEqual(scan(f"pass§word = '{PW}'\n\ndef test_login():\n    pass\n"), [("SECRET", PW)])
 
+    def test_a_bearer_value_in_test_code_is_a_fixture(self):
+        tail = "abc123" + "def456" + "ghi789"
+        bearer = "Bearer " + tail
+        self.assertEqual(scan(f"def test_call(client):\n    h = {{'Authorization': '{bearer}'}}\n"), [])
+        self.assertEqual(scan(f"h = {{'Authorization': '{bearer}'}}\n", "src/client.py"),
+                         [("SECRET", tail)])
+
     def test_a_token_shape_and_personal_data_stay_hits_in_test_code(self):
         text = f"def test_login():\n    tok = '{TOKEN}'\n    mail = 'anna.berg@acme.de'\n"
         self.assertEqual(scan(text, "tests/test_login.py"), [("SECRET", TOKEN), ("EMAIL", "anna.berg@acme.de")])

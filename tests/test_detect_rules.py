@@ -830,6 +830,31 @@ class FalsePositiveCorpusTests(unittest.TestCase):
         "    width = \"+0123 4567 89\"\n",                                       # no country code starts with 0
     ]
 
+    def test_each_value_shape_of_normal_work_is_refused_on_its_own(self):
+        # one shape per check of _ds_value_ok, so that no check hides behind another (mutation probes, 2026-09-29)
+        for v in ("API_KEY=", "Option<String>", "testpass1", "Passw0rd!", "0.20.3", "mcp_{user}",
+                  "{body['transfer_id']}", "_cleanup", "max.muster@firma-xyz.de", "list[str]", "1_234_567",
+                  "session_key:*", "logs/*.txt", "no-check}", "settings", "tokenValue", "redacted;",
+                  "Configuration["):
+            with self.subTest(v=v):
+                self.assertFalse(detect._ds_value_ok(v), v)
+        for v in ("Kx7Qp2Zr9Lm4Wn", "4CX!DkQ1ya*UT-Ci$", "*-n65R!DzNSnrLY%T$", "Sommerwiese", "Sommer2026!"):
+            with self.subTest(v=v):
+                self.assertTrue(detect._ds_value_ok(v), v)
+
+    def test_the_label_decides_only_right_before_the_value(self):
+        tok = "Kx7Qp2" + "Zr9Lm4Wn"
+        # a derived label earlier on the line does not hide the password after it
+        self.assertEqual([m.value for m in scan(f"secret_name: prod, pass§word: {tok}")], [tok])
+        self.assertEqual(kinds("secret_name: \"prod/db/password\""), [])
+        # an address after a label is personal data, not a secret
+        self.assertEqual([m.type for m in scan("GET user_tok§ens:max.muster@firma-xyz.de")], ["EMAIL"])
+        # a prefix and one repeated character is a placeholder, a random tail is not
+        self.assertEqual(kinds("tok§en: glpat-" + "A" * 20), [])
+        self.assertEqual(kinds("glrt-" + "A" * 40), [])          # a prefix rule without an entropy floor
+        self.assertEqual(kinds("cfut_" + "x" * 40), [])
+        self.assertEqual([m.type for m in scan("glpat-" + "Q7w8E9r0T1y2U3i4O5p6")], ["SECRET"])
+
     def test_lines_of_the_standard_library_are_not_a_hit(self):
         self._check(self.STANDARD_LIBRARY)
 

@@ -48,7 +48,7 @@ def tip_of_the_day(codex: bool = False) -> str | None:
 
 # the first session start says how to see maisecrets work. The example must be one the detector
 # finds (a@b.c is not: its top-level domain is one letter); a test holds it to that
-TRY_IT_EXAMPLE = "test@example.com"
+TRY_IT_EXAMPLE = "max.muster@firma-xyz.de"   # not example.com: a reserved domain is no hit
 
 
 def try_it_line() -> str:

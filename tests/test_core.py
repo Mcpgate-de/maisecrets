@@ -189,16 +189,16 @@ class DetectTests(unittest.TestCase):
         self.assertEqual([m.value for m in detect.scan("my_secret: " + value)], [value])
 
     def test_named_credential_keeps_the_name_and_takes_the_value(self):
-        ms = detect.scan("DB_PASSWORD=" + "Sup3rSecret" + "Value1234")
+        ms = detect.scan("DB_PASSWORD=" + "Qx7vR2mK" + "9pLwT4")
         self.assertEqual(len(ms), 1)
-        self.assertEqual(ms[0].value, "Sup3rSecret" + "Value1234")
+        self.assertEqual(ms[0].value, "Qx7vR2mK" + "9pLwT4")
         self.assertEqual(ms[0].type, "SECRET")
         self.assertTrue(ms[0].kind.startswith("ds-keyword"))
         self.assertEqual(detect.scan('password = "${DB_PASSWORD}"'), [])     # templated, not a value
         self.assertEqual(detect.scan('password: "changeme"'), [])            # placeholder
 
     def test_email_iban_card_are_pii_and_validated(self):
-        text = "mail max.mustermann@example.org iban " + IBAN_OK + " credit card " + CARD_OK
+        text = "mail max.mustermann@beispiel-gmbh.de iban " + IBAN_OK + " credit card " + CARD_OK
         types = [m.type for m in detect.scan(text)]
         self.assertEqual(types, ["EMAIL", "IBAN", "CARD"])
 
@@ -228,8 +228,11 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(detect.scan("legacy <EMAIL_c1:ma***@example.org> form"), [])
 
     def test_url_userinfo_is_a_secret_not_an_email(self):
-        ms = detect.scan("postgres://etl:" + "s3cretPassw0rd" + "@db.internal:5432/x")
-        self.assertEqual([(m.kind, m.value) for m in ms], [("ds-basic-auth", "s3cretPassw0rd")])
+        pw = "Kx7Qp2" + "Zr9Lm4"
+        ms = detect.scan("postgres://etl:" + pw + "@db.internal:5432/x")
+        self.assertEqual([(m.kind, m.value) for m in ms], [("ds-basic-auth", pw)])
+        # a fixture password there is no hit, and the rest is no e-mail address: .internal is a private TLD
+        self.assertEqual(detect.scan("postgres://etl:" + "s3cretPassw0rd" + "@db.internal:5432/x"), [])
 
     def test_query_parameter_secret(self):
         ms = detect.scan("GET https://x/api?api_key=" + "0123456789abcdef0123")
