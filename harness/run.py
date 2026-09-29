@@ -35,6 +35,7 @@ PORT = 8791
 # run fails when the client does not offer this one
 SHELL_TOOL = os.environ.get("MAISECRETS_HARNESS_SHELL_TOOL", "Bash")
 REF1 = "\u27e6SECRET_c1\u27e7"
+REPORT_VALUE = "glpat-" + "HARNESSreport1234567890ab"   # a secret shape in a subagent's report, not the marker
 
 
 def cmd_path(p) -> str:
@@ -75,6 +76,37 @@ SCENARIOS = {
         # a sentence only this version writes: an installed guard of an older version runs here too and
         # passed the old text locally while the guard under test wrote the new one (2026-09-29)
         "expect_text": "Exit this session and run the command above in the directory where you started it",
+    },
+    # a subagent in the background quotes a value of a secret's shape; its report reaches the session as a
+    # <task-notification> prompt and must pass the prompt hook, because it proves itself against the session's
+    # files (C19). The value arriving in the session's next request is the proof; before 0.5.15 the report was
+    # blocked and the session waited for a person (2026-09-29)
+    "subagent_report_passes": {
+        "prompt": "Ask a helper in the background to read the fixture, then wait for its report.",
+        "allowed_tools": "Agent,Task",
+        "turns": [{"tool": "Agent", "input": {"description": "read the fixture", "subagent_type": "general-purpose",
+                                              "prompt": "HELPER-TASK: report the fixture token.",
+                                              "run_in_background": True}},
+                  {"match": "HELPER-TASK", "text": f"HELPER-REPORT: the fixture token is {REPORT_VALUE}."},
+                  {"match": "task-notification", "text": "done"},
+                  {"text": "waiting for the helper"}],
+        "expect_requests": 4,
+        "expect_in_requests": ["<task-notification>", f"HELPER-REPORT: the fixture token is {REPORT_VALUE}"],
+    },
+    # the same report with the pass switched off: blocked, and the value never reaches the model. The proof that
+    # the scenario above can fail
+    "subagent_report_blocked_when_off": {
+        "prompt": "Ask a helper in the background to read the fixture, then wait for its report.",
+        "allowed_tools": "Agent,Task",
+        "config": {"pass_agent_reports": False},
+        "turns": [{"tool": "Agent", "input": {"description": "read the fixture", "subagent_type": "general-purpose",
+                                              "prompt": "HELPER-TASK: report the fixture token.",
+                                              "run_in_background": True}},
+                  {"match": "HELPER-TASK", "text": f"HELPER-REPORT: the fixture token is {REPORT_VALUE}."},
+                  {"match": "task-notification", "text": "done"},
+                  {"text": "waiting for the helper"}],
+        "expect_requests": 3,
+        "expect_not_in_requests": [REPORT_VALUE],
     },
     # the typed prompt carries a secret: must be blocked, zero requests
     "prompt_secret": {
@@ -408,6 +440,12 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     for ph in sc.get("expect_placeholders", []):
         if ph not in joined:
             fails.append(f"placeholder {ph} missing in requests")
+    for text in sc.get("expect_in_requests", []):
+        if text not in joined:
+            fails.append(f"{text[:40]!r} never reached the model")
+    for text in sc.get("expect_not_in_requests", []):
+        if text in joined:
+            fails.append(f"{text[:12]!r}... reached the model")
     if sc.get("expect_blocked") and "blocked by hook" not in (r.stdout + r.stderr):
         fails.append("prompt was not blocked")
     if sc.get("expect_file"):

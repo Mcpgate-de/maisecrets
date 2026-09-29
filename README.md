@@ -255,7 +255,7 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 17 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 19 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
 python3 scripts/replay_can_fail.py                     # 73 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again

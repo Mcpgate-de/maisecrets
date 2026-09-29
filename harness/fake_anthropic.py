@@ -20,7 +20,36 @@ OUT_DIR = sys.argv[2] if len(sys.argv) > 2 else "harness/out"
 PORT = int(sys.argv[3]) if len(sys.argv) > 3 else 8791
 os.makedirs(OUT_DIR, exist_ok=True)
 _lock = threading.Lock()
-_state = {"n": 0}
+_state = {"n": 0, "used": set()}
+
+
+def _last_text(body: bytes) -> str:
+    try:
+        msgs = json.loads(body).get("messages") or []
+    except ValueError:
+        return ""
+    # the last message of the user: Claude Code 2.1.285 ends a request with system messages of its own
+    users = [m for m in msgs if isinstance(m, dict) and m.get("role") == "user"]
+    return json.dumps(users[-1]) if users else ""
+
+
+def _pick(i: int, body: bytes) -> dict:
+    """The turn for request i. A scenario whose turns carry `match` is served by content, not by order: a subagent
+    in the background sends its requests between those of the session, in no fixed order. A turn with `match` goes
+    to the first request whose last message holds that text; a request that matches none takes the next turn
+    without `match`."""
+    turns = SCENARIO["turns"]
+    if not any("match" in t for t in turns):
+        return turns[i] if i < len(turns) else {"text": "done"}
+    last = _last_text(body)
+    with _lock:
+        for pick in ([j for j, t in enumerate(turns) if "match" in t and t["match"] in last],
+                     [j for j, t in enumerate(turns) if "match" not in t]):
+            for j in pick:
+                if j not in _state["used"]:
+                    _state["used"].add(j)
+                    return turns[j]
+    return {"text": "done"}
 
 
 def _sse(events: list[tuple[str, dict]]) -> bytes:
@@ -89,8 +118,7 @@ class H(BaseHTTPRequestHandler):
             model = json.loads(body).get("model", "claude")
         except ValueError:
             model = "claude"
-        turns = SCENARIO["turns"]
-        turn = turns[i] if i < len(turns) else {"text": "done"}
+        turn = _pick(i, body)
         # a step before the answer: `{"rename": [src, dst]}` moves the plugin folder while the
         # session runs, as a synced plugin update does (anthropics/claude-code#97847)
         for src, dst in [turn["before"]["rename"]] if "rename" in turn.get("before", {}) else []:
