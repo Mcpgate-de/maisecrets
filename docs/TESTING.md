@@ -16,7 +16,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | Codex with a real model | `python3 harness/codex.py --real` | by hand: `mcp_text_field_rehydrate`, `allow_keeps_the_codex_sandbox`, `apply_patch_rehydrate` and `apply_patch_store_refused` need a real model (an MCP call, a sandbox and a patch the fake upstream cannot script) |
 | ssh through the sandbox | `MAISECRETS_E2E_HOST=<ssh alias> MAISECRETS_E2E_IP=<address> python3 harness/sandbox/ssh_e2e.py` | by hand before a release that touches the ssh route, on macOS and on Linux: the real Claude Code sandbox against a real host, under `rehydration: automatic` (cases 0a to 0f) and `confirm` |
 
-611 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
+627 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
 the tested commit of a release (branch `ci`) and on a push to main without a release.
 
 ## What makes a test count
@@ -59,6 +59,11 @@ the tested commit of a release (branch `ci`) and on a push to main without a rel
   `mcp_rehydrate_confirm`, `bash_ssh_automatic`, `bash_ssh_asks` (Claude Code) and
   `bash_rehydrate_confirm`, `mcp_text_field_rehydrate`, `allow_keeps_the_codex_sandbox`,
   `apply_patch_rehydrate`, `apply_patch_store_refused` (Codex).
+- **The guard.** `tests/test_guard.py` runs the guard and the maisecrets hook as two processes of
+  one event: with maisecrets every event passes, without it every event is stopped. It also holds
+  the name both sides compute, the account check, and the synced install that places the script.
+  The harness proves it with the real client: `plugin_folder_moved_guarded` (the folder goes away
+  mid-session and the command does not run) and `bash_rehydrate_guarded` (a healthy session passes).
 - **Payloads from the real client.** A client-specific row of a matrix uses a payload captured from
   that client (`tests/client_payloads/`, recorded with `harness/codex.py` and the `dump` option,
   ids replaced). The Codex file row first used Claude Code's `Write`; Codex sends `apply_patch`, and

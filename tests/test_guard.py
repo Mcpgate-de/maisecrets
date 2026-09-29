@@ -1,0 +1,290 @@
+"""The guard outside the plugin folder (hooks/guard.py) and the heartbeat maisecrets writes for it.
+
+The guard and maisecrets run as two hooks of the same event, in parallel, as Claude Code runs them.
+The guard lets a call pass only when maisecrets wrote the heartbeat for exactly that call; it stays
+silent where maisecrets is not meant to run. The real client is in the harness (plugin_folder_moved
+with the guard); these tests hold the parts: the name both sides compute, the account check, the
+answers per event, and that the heartbeat exists only when the guard is installed.
+
+Run: python3 -m unittest tests.test_guard -v
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
+Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
+
+from maisecrets import hooks  # noqa: E402
+from maisecrets.vault import HOME  # noqa: E402
+import _hygiene  # noqa: E402
+
+sys.path.insert(0, str(ROOT / "hooks"))
+import guard  # noqa: E402
+
+GUARD = ROOT / "hooks" / "guard.py"
+DISPATCH = ROOT / "hooks" / "dispatch.py"
+PAYLOADS = {
+    "UserPromptSubmit": {"hook_event_name": "UserPromptSubmit", "prompt": "hello", "prompt_id": "p1",
+                         "session_id": "S1", "transcript_path": "", "cwd": "/tmp"},
+    "PreToolUse": {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"},
+                   "tool_use_id": "call_1", "prompt_id": "p1", "session_id": "S1", "transcript_path": "",
+                   "cwd": "/tmp"},
+    "PostToolUse": {"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"},
+                    "tool_response": {"stdout": "a", "stderr": ""}, "tool_use_id": "call_1", "prompt_id": "p1",
+                    "session_id": "S1", "transcript_path": "", "cwd": "/tmp"},
+}
+EVENT = {"UserPromptSubmit": "user-prompt", "PreToolUse": "pre-tool", "PostToolUse": "post-tool"}
+
+
+def tearDownModule():  # noqa: N802 - unittest hook
+    for f in ("guard.json",):
+        try:
+            os.unlink(Path(HOME, f))
+        except FileNotFoundError:
+            pass
+    _hygiene.assert_pristine()
+
+
+class _Env(unittest.TestCase):
+    def setUp(self):
+        self.claude = Path(tempfile.mkdtemp(prefix="maisecrets-guard-claude-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.claude, ignore_errors=True))
+        patcher = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.claude)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        __import__("shutil").rmtree(Path(HOME, "alive"), ignore_errors=True)
+        self.addCleanup(lambda: Path(HOME, "guard.json").unlink(missing_ok=True))
+
+    def installed(self, expect: str) -> None:
+        Path(HOME, "guard.json").write_text(json.dumps({"expect": expect}))
+
+    def account(self, org: str = "org-1", acc: str = "acc-1", synced: bool = True) -> None:
+        (self.claude / ".claude.json").write_text(json.dumps({"oauthAccount": {"organizationUuid": org,
+                                                                               "accountUuid": acc}}))
+        if synced:
+            d = self.claude / "plugins" / "synced" / f"{org}_{acc}" / "maisecrets" / ".claude-plugin"
+            d.mkdir(parents=True)
+            (d / "plugin.json").write_text("{}")
+
+
+class ExpectedTests(_Env):
+    def test_the_account_decides_whether_maisecrets_is_meant_to_run(self):
+        self.installed("synced")
+        self.account(synced=True)
+        self.assertTrue(guard.expected())
+        # another account of the same machine, with no maisecrets synced for it
+        self.account(org="org-1", acc="acc-2", synced=False)
+        self.assertFalse(guard.expected())
+        # installed from a marketplace instead
+        (self.claude / "plugins" / "installed_plugins.json").write_text(
+            json.dumps({"plugins": {"maisecrets@maisecrets": [{}]}}))
+        self.assertTrue(guard.expected())
+        # switched off by the user
+        (self.claude / "settings.json").write_text(json.dumps({"enabledPlugins": {"maisecrets@maisecrets": False}}))
+        self.assertFalse(guard.expected())
+
+    def test_the_mode_in_guard_json(self):
+        self.installed("always")
+        self.assertTrue(guard.expected(), "always: the harness and a machine that must have it")
+        self.installed("off")
+        self.assertFalse(guard.expected())
+        Path(HOME, "guard.json").unlink()
+        self.assertFalse(guard.expected(), "not installed: synced by default, and no account here")
+
+
+class DecisionTests(_Env):
+    def test_no_heartbeat_blocks_each_event_and_names_the_way_out(self):
+        self.installed("always")
+        want = {"UserPromptSubmit": lambda o: o["decision"] == "block",
+                "PreToolUse": lambda o: o["hookSpecificOutput"]["permissionDecision"] == "deny",
+                "PostToolUse": lambda o: "withheld" in o["hookSpecificOutput"]["updatedToolOutput"]}
+        for name, payload in PAYLOADS.items():
+            with self.subTest(name):
+                started = time.monotonic()
+                out = guard.decide(payload, wait=0.3)
+                self.assertTrue(want[name](out), out)
+                self.assertIn("/reload-plugins", json.dumps(out))
+                self.assertGreaterEqual(time.monotonic() - started, 0.3, "it waits before it refuses")
+
+    def test_the_heartbeat_of_this_call_lets_it_pass_and_is_taken_away(self):
+        self.installed("always")
+        for name, payload in PAYLOADS.items():
+            with self.subTest(name):
+                hooks._heartbeat(EVENT[name], payload)
+                path = Path(HOME, "alive", guard.heartbeat_name("S1", EVENT[name],
+                                                               payload.get("tool_use_id") or payload["prompt_id"]))
+                self.assertTrue(path.exists(), "maisecrets and the guard compute the same name")
+                self.assertEqual(guard.decide(payload, wait=0.3), {})
+                self.assertFalse(path.exists(), "one heartbeat lets one call pass")
+
+    def test_the_heartbeat_of_another_call_does_not_count(self):
+        self.installed("always")
+        other = dict(PAYLOADS["PreToolUse"], tool_use_id="call_2")
+        hooks._heartbeat("pre-tool", other)
+        self.assertIn("hookSpecificOutput", guard.decide(PAYLOADS["PreToolUse"], wait=0.2))
+        other_session = dict(PAYLOADS["PreToolUse"], session_id="S2")
+        hooks._heartbeat("pre-tool", other_session)
+        self.assertIn("hookSpecificOutput", guard.decide(PAYLOADS["PreToolUse"], wait=0.2))
+
+    def test_silent_for_codex_an_unguarded_event_and_an_account_without_maisecrets(self):
+        self.installed("always")
+        codex = dict(PAYLOADS["PreToolUse"], turn_id="t1")
+        codex.pop("prompt_id")
+        self.assertEqual(guard.decide(codex, wait=0.2), {})
+        self.assertEqual(guard.decide({"hook_event_name": "SessionStart", "session_id": "S1"}, wait=0.2), {})
+        self.installed("synced")
+        self.account(synced=False)
+        started = time.monotonic()
+        self.assertEqual(guard.decide(PAYLOADS["PreToolUse"], wait=2), {})
+        self.assertLess(time.monotonic() - started, 1, "it does not wait where maisecrets is not meant to run")
+
+
+class HeartbeatTests(_Env):
+    def test_the_heartbeat_exists_only_when_the_guard_is_installed(self):
+        hooks._heartbeat("pre-tool", PAYLOADS["PreToolUse"])
+        self.assertFalse(Path(HOME, "alive").exists(), "no guard, no file")
+        self.installed("synced")
+        codex = dict(PAYLOADS["PreToolUse"], turn_id="t")
+        codex.pop("prompt_id")                  # Codex sends turn_id, never prompt_id
+        hooks._heartbeat("pre-tool", codex)
+        self.assertFalse(Path(HOME, "alive").exists() and any(Path(HOME, "alive").iterdir()),
+                         "Codex: no heartbeat")
+
+    def test_an_old_heartbeat_is_swept(self):
+        self.installed("synced")
+        hooks._heartbeat("pre-tool", PAYLOADS["PreToolUse"])
+        old = next(Path(HOME, "alive").iterdir())
+        os.utime(old, (time.time() - 3600, time.time() - 3600))
+        hooks._heartbeat("pre-tool", dict(PAYLOADS["PreToolUse"], tool_use_id="call_9"))
+        self.assertFalse(old.exists())
+
+
+class SyncedInstallTests(_Env):
+    """A synced install gets the guard without a step by its user: the session start places the script,
+    the heartbeat is on, and the admin registers the hooks once in the organisation's managed settings."""
+
+    def test_a_synced_install_writes_the_heartbeat_without_guard_json(self):
+        with mock.patch.object(hooks, "_from_a_synced_folder", return_value=True):
+            hooks._heartbeat("pre-tool", PAYLOADS["PreToolUse"])
+        self.assertTrue(any(Path(HOME, "alive").iterdir()))
+
+    def test_the_folder_check_reads_the_synced_path(self):
+        synced = os.path.join(os.sep, "u", ".claude", "plugins", "synced", "o_a", "maisecrets")
+        with mock.patch.object(hooks.os.path, "realpath", return_value=synced):
+            self.assertTrue(hooks._from_a_synced_folder())
+        self.assertFalse(hooks._from_a_synced_folder(), "the checkout is no synced folder")
+
+    def synced_copy(self) -> Path:
+        import shutil
+        base = Path(tempfile.mkdtemp(prefix="maisecrets-synced-"))
+        self.addCleanup(lambda: shutil.rmtree(base, ignore_errors=True))
+        copy = base / "plugins" / "synced" / "org_acc" / "maisecrets"
+        for part in ("hooks", "maisecrets", ".claude-plugin"):
+            shutil.copytree(ROOT / part, copy / part, ignore=shutil.ignore_patterns("__pycache__"))
+        for f in (".guard-removed", "guard.json"):
+            Path(HOME, f).unlink(missing_ok=True)
+        self.addCleanup(lambda: Path(HOME, ".guard-removed").unlink(missing_ok=True))
+        return copy
+
+    def start(self, copy: Path) -> str:
+        r = subprocess.run([sys.executable, str(copy / "hooks" / "dispatch.py"), "session-start"],
+                           input=json.dumps({"session_id": "S1", "hook_event_name": "SessionStart"}),
+                           capture_output=True, text=True, env=dict(os.environ, CLAUDECODE="1"), timeout=60)
+        return json.loads(r.stdout)["systemMessage"]
+
+    def guard_entries(self) -> int:
+        settings = self.claude / "settings.json"
+        if not settings.exists():
+            return 0
+        hooks_cfg = json.loads(settings.read_text()).get("hooks") or {}
+        return sum("maisecrets-guard.py" in e["hooks"][0]["command"] for es in hooks_cfg.values() for e in es)
+
+    def test_the_session_start_of_a_synced_copy_places_and_registers_the_guard_once(self):
+        copy = self.synced_copy()
+        script = self.claude / "maisecrets-guard.py"
+        script.write_text("an older guard")
+        (self.claude / "settings.json").write_text(json.dumps({"model": "x"}))
+        msg = self.start(copy)
+        self.assertIn("is on", msg)
+        self.assertIn("registered its guard", msg)
+        self.assertEqual(script.read_bytes(), GUARD.read_bytes(), "the stale script was replaced")
+        self.assertEqual(self.guard_entries(), 3, "UserPromptSubmit, PreToolUse, PostToolUse")
+        self.assertEqual(json.loads((self.claude / "settings.json").read_text())["model"], "x")
+        self.assertNotIn("registered its guard", self.start(copy), "said once")
+        self.assertEqual(self.guard_entries(), 3, "registered once")
+
+    def test_a_guard_removed_by_hand_or_switched_off_stays_off(self):
+        from maisecrets import cli
+        copy = self.synced_copy()
+        self.start(copy)
+        cli.remove_guard()
+        self.assertEqual(self.guard_entries(), 0)
+        self.assertNotIn("registered its guard", self.start(copy))
+        self.assertEqual(self.guard_entries(), 0, "removed by hand: the next session start does not undo it")
+        Path(HOME, ".guard-removed").unlink()
+        cfg = json.loads(Path(HOME, "config.json").read_text())
+        Path(HOME, "config.json").write_text(json.dumps({**cfg, "guard": False}))
+        try:
+            self.start(copy)
+            self.assertEqual(self.guard_entries(), 0, '"guard": false keeps it off')
+        finally:
+            Path(HOME, "config.json").write_text(json.dumps(cfg))
+
+    def test_settings_that_are_not_json_are_left_alone(self):
+        copy = self.synced_copy()
+        (self.claude / "settings.json").write_text("{not json")
+        msg = self.start(copy)
+        self.assertIn("is on", msg)
+        self.assertEqual((self.claude / "settings.json").read_text(), "{not json")
+
+    def test_the_managed_settings_use_the_plugins_matchers_and_answer_without_the_script(self):
+        from maisecrets import cli
+        managed = cli.managed_guard_settings()["hooks"]
+        plugin = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+        for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
+            self.assertEqual([e.get("matcher") for e in managed[event]], [e.get("matcher") for e in plugin[event]])
+        home = Path(tempfile.mkdtemp(prefix="maisecrets-nohome-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        r = subprocess.run(["sh", "-c", cli.MANAGED_GUARD_COMMAND], input="{}", capture_output=True, text=True,
+                           env=dict(os.environ, HOME=str(home)))
+        self.assertEqual(r.stdout, "{}", "a machine where maisecrets never ran: nothing happens")
+
+
+class ParallelProcessTests(_Env):
+    """Both hooks as processes, started together, as Claude Code starts the hooks of one event."""
+
+    def run_both(self, payload: dict, with_maisecrets: bool) -> dict:
+        env = dict(os.environ, MAISECRETS_GUARD_WAIT="5" if with_maisecrets else "1")
+        g = subprocess.Popen([sys.executable, str(GUARD)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env,
+                             text=True)
+        m = None
+        if with_maisecrets:
+            m = subprocess.Popen([sys.executable, str(DISPATCH), EVENT[payload["hook_event_name"]]],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env, text=True)
+            m.communicate(json.dumps(payload), timeout=30)
+        out, _ = g.communicate(json.dumps(payload), timeout=30)
+        return json.loads(out)
+
+    def test_with_maisecrets_running_every_event_passes_and_without_it_every_event_is_stopped(self):
+        self.installed("always")
+        for name, payload in PAYLOADS.items():
+            with self.subTest(name):
+                self.assertEqual(self.run_both(payload, with_maisecrets=True), {})
+                self.assertNotEqual(self.run_both(payload, with_maisecrets=False), {})
+
+
+if __name__ == "__main__":
+    unittest.main()

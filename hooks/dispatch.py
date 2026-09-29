@@ -55,7 +55,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "pending":
     sys.exit(0)
 
 if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put", "status", "list", "audit", "expire", "config",
-                                          "wipe", "repair", "scan", "get", "shortcut", "forget"):
+                                          "wipe", "repair", "scan", "get", "shortcut", "forget", "guard"):
     from maisecrets.cli import main as cli_main  # noqa: E402
     sys.exit(cli_main(sys.argv[1:]))
 
@@ -145,6 +145,17 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
             (HOME / ".shortcut").write_text("offered\n", encoding="utf-8")
         except OSError:
             pass
+    # a synced install: keep the guard script outside the plugin folder current and register it once
+    # (the guard of README "Updates and open sessions"); "guard": false or a removal by hand keep it off
+    if not codex:
+        from maisecrets.hooks import _from_a_synced_folder  # noqa: E402
+        if _from_a_synced_folder():
+            from maisecrets.cli import place_guard_script, register_guard_for_a_synced_install  # noqa: E402
+            place_guard_script()
+            if cfg.get("guard", True):
+                note = register_guard_for_a_synced_install()
+                if note:
+                    out["systemMessage"] = out.get("systemMessage", "") + " " + note
     # the model reads what a placeholder is once per session, before it meets one
     out["hookSpecificOutput"] = {"hookEventName": "SessionStart", "additionalContext": PRIMER}
     print(json.dumps(out))

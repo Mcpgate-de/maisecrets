@@ -1,0 +1,10 @@
+# c13-a-synced-install-registers-its-guard: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-a-synced-install-registers-its-guard"
+control = "C13"
+statement = "The session start of a synced install places the guard script and registers the guard once in the Claude Code settings, unless the person removed it or guard is false."
+runner = ["tests/test_guard.py::SyncedInstallTests::test_the_session_start_of_a_synced_copy_places_and_registers_the_guard_once"]
+
+[proof]
+file = "hooks/dispatch.py"
+find = "            if cfg.get(\"guard\", True):\n"
+replace = "            if False:\n"

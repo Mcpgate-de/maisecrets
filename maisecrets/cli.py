@@ -374,6 +374,192 @@ def cmd_shortcut(args: list[str]) -> int:
     return 0
 
 
+GUARD_MARK = "maisecrets-guard.py"
+
+
+def _guard_paths() -> tuple:
+    """The guard script and the settings file it is registered in, both under ~/.claude
+    (CLAUDE_CONFIG_DIR when set): outside the plugin folder, which is what the guard watches."""
+    from pathlib import Path as _P
+    claude = _P(os.environ.get("CLAUDE_CONFIG_DIR", _P.home() / ".claude"))
+    return claude / GUARD_MARK, claude / "settings.json"
+
+
+def _without_guard(hooks: dict) -> dict:
+    """The hooks block with every entry of ours taken out, and events left empty removed."""
+    out = {}
+    for event, entries in hooks.items():
+        kept = [e for e in entries if not any(GUARD_MARK in str(h.get("command", "")) for h in e.get("hooks", []))]
+        if kept:
+            out[event] = kept
+    return out
+
+
+def place_guard_script() -> bool:
+    """Copy hooks/guard.py beside the Claude Code settings when it is missing or differs. Never raises:
+    the session start must not fail on it. True when the file was written."""
+    import shutil
+    from pathlib import Path as _P
+    try:
+        src = _P(__file__).resolve().parent.parent / "hooks" / "guard.py"
+        script, _settings = _guard_paths()
+        if script.exists() and script.read_bytes() == src.read_bytes():
+            return False
+        script.parent.mkdir(parents=True, exist_ok=True)
+        tmp = script.with_name(script.name + ".tmp")
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, script)
+        return True
+    except OSError:
+        return False
+
+
+# what an organisation admin puts into the managed settings (claude.ai admin settings, Claude Code):
+# the guard runs for every member; without the script (a machine where maisecrets never ran) it answers {}
+MANAGED_GUARD_COMMAND = ('if [ -f "$HOME/.claude/maisecrets-guard.py" ]; '
+                         'then python3 "$HOME/.claude/maisecrets-guard.py" '
+                         "|| printf '{}'; else printf '{}'; fi")
+
+
+def managed_guard_settings() -> dict:
+    from pathlib import Path as _P
+    plugin_hooks = json.loads((_P(__file__).resolve().parent.parent / "hooks" / "hooks.json")
+                              .read_text(encoding="utf-8"))["hooks"]
+    hooks: dict = {}
+    for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
+        for entry in plugin_hooks.get(event, []):
+            new = {"hooks": [{"type": "command", "command": MANAGED_GUARD_COMMAND, "timeout": 15}]}
+            hooks.setdefault(event, []).append({"matcher": entry["matcher"], **new} if entry.get("matcher") else new)
+    return {"hooks": hooks}
+
+
+def install_guard(expect: str = "synced") -> list[str]:
+    """Copy the guard next to the Claude Code settings and register it for the events and matchers
+    maisecrets itself uses. The settings file is backed up first and changed only in its hooks."""
+    import shutil
+    import time as _t
+    from pathlib import Path as _P
+    from .vault import HOME, atomic_write
+    root = _P(__file__).resolve().parent.parent
+    plugin_hooks = json.loads((root / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+    script, settings = _guard_paths()
+    script.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(root / "hooks" / "guard.py", script)
+    done = [f"copied the guard to {script}"]
+    try:
+        current = json.loads(settings.read_text(encoding="utf-8")) if settings.exists() else {}
+    except ValueError as exc:
+        raise SystemExit(f"{settings} is not valid JSON; fix it first, nothing was changed") from exc
+    if settings.exists():
+        backup = settings.with_name(f"settings.json.bak-maisecrets-{_t.strftime('%Y%m%d-%H%M%S')}")
+        shutil.copyfile(settings, backup)
+        done.append(f"backed up {settings.name} to {backup.name}")
+    hooks = _without_guard(current.get("hooks") or {})
+    command = f'"{sys.executable}" "{script}"'
+    for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
+        for entry in plugin_hooks.get(event, []):
+            new = {"hooks": [{"type": "command", "command": command, "timeout": 15}]}
+            if entry.get("matcher"):
+                new = {"matcher": entry["matcher"], **new}
+            hooks.setdefault(event, []).append(new)
+    current["hooks"] = hooks
+    atomic_write(settings, json.dumps(current, indent=2) + "\n", mode=0o644)
+    done.append(f"registered it in {settings} for UserPromptSubmit, PreToolUse and PostToolUse")
+    HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+    (HOME / "guard.json").write_text(json.dumps({"expect": expect}) + "\n", encoding="utf-8")
+    (HOME / ".guard-removed").unlink(missing_ok=True)
+    done.append(f"maisecrets now writes the heartbeat the guard waits for ({HOME / 'alive'})")
+    return done
+
+
+def guard_registered() -> bool:
+    _script, settings = _guard_paths()
+    try:
+        return GUARD_MARK in settings.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def register_guard_for_a_synced_install() -> "str | None":
+    """The session start of a synced install registers the guard itself (maintainer decision,
+    2026-09-29: a step nobody takes protects nobody). Not when the person removed it, not when
+    `guard` is false in the config or the policy, not when settings.json cannot be read as JSON.
+    Returns the one line for the session-start message, or None. Never raises."""
+    from .vault import HOME
+    try:
+        if (HOME / ".guard-removed").exists() or guard_registered():
+            return None
+        _script, settings = _guard_paths()
+        if settings.exists():
+            json.loads(settings.read_text(encoding="utf-8"))
+        install_guard("synced")
+    except (OSError, ValueError, SystemExit):
+        return None
+    return (f"maisecrets registered its guard in {settings}: it blocks a session in which a plugin update left "
+            "maisecrets not running. /maisecrets:guard remove takes it away.")
+
+
+def remove_guard() -> list[str]:
+    from .vault import HOME
+    script, settings = _guard_paths()
+    done = []
+    if settings.exists():
+        try:
+            current = json.loads(settings.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise SystemExit(f"{settings} is not valid JSON; remove the guard entries by hand") from exc
+        hooks = _without_guard(current.get("hooks") or {})
+        if hooks != (current.get("hooks") or {}):
+            from .vault import atomic_write
+            if hooks:
+                current["hooks"] = hooks
+            else:
+                current.pop("hooks", None)
+            atomic_write(settings, json.dumps(current, indent=2) + "\n", mode=0o644)
+            done.append(f"removed the guard entries from {settings}")
+    for path in (script, HOME / "guard.json"):
+        if path.exists():
+            path.unlink()
+            done.append(f"deleted {path}")
+    # a synced install registers the guard at its session start; removed by hand, it stays removed
+    HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+    (HOME / ".guard-removed").write_text("removed\n", encoding="utf-8")
+    return done
+
+
+def cmd_guard(args: list[str]) -> int:
+    """`guard install [--always]`, `guard remove`, `guard status`."""
+    what = args[0] if args else "status"
+    if what == "install":
+        if os.name == "nt":
+            print("The guard is not built for Windows yet.", file=sys.stderr)
+            return 1
+        for line in install_guard("always" if "--always" in args else "synced"):
+            print(line)
+        print("Start a new session (or /reload-plugins) to use it. `guard remove` takes it away again.")
+        return 0
+    if what == "managed":
+        print("For an organisation admin: add this to the Claude Code managed settings (claude.ai admin settings,")
+        print("Claude Code). A synced maisecrets places the guard script itself; members do nothing.")
+        print(json.dumps(managed_guard_settings(), indent=2))
+        return 0
+    if what == "remove":
+        done = remove_guard()
+        print("\n".join(done) if done else "nothing to remove (no maisecrets guard found)")
+        return 0
+    script, settings = _guard_paths()
+    from .vault import HOME
+    registered = False
+    try:
+        registered = GUARD_MARK in settings.read_text(encoding="utf-8")
+    except OSError:
+        pass
+    print(f"guard script: {script} ({'present' if script.exists() else 'missing'})")
+    print(f"registered in {settings}: {'yes' if registered else 'no'}")
+    print(f"heartbeat: {'on' if (HOME / 'guard.json').exists() else 'off'}")
+    return 0
+
+
 def cmd_repair(_: list[str]) -> int:
     """Rebuild a damaged index from the store; every stored value is deleted, the counters
     continue past the highest key seen, so no new value overwrites an old one."""
@@ -395,7 +581,7 @@ def cmd_repair(_: list[str]) -> int:
 COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_resolve, "audit": cmd_audit,
             "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
             "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut,
-            "forget": cmd_forget}
+            "forget": cmd_forget, "guard": cmd_guard}
 
 
 def _stdin_words() -> list[str]:

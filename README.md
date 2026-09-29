@@ -178,7 +178,30 @@ blocks without it. The Windows command (`commandWindows`) has no such test yet.
 - Synced from claude.ai, the previous folder moved to `~/.claude/plugins/.trash`
   when another Claude Code session started and synced (observed with Claude Code
   2.1.283 on 2026-09-28; not documented). A session that was open then lost its
-  hooks. After an update, run `/reload-plugins` in every open session.
+  hooks. After an update, run `/reload-plugins` in every open session. The
+  session that started the sync can lose them too: on 2026-09-29 (Claude Code
+  2.1.284) the folder was rewritten one second after a session started, and that
+  session ran no maisecrets hook while `/plugin` showed the new version.
+- **The guard closes this for a synced install.** It is a small hook outside the
+  plugin folder (`~/.claude/maisecrets-guard.py`). Every maisecrets hook writes a
+  heartbeat for its call; when none comes, the guard blocks the prompt, denies
+  the tool call or withholds the result, and names `/reload-plugins`. It stays
+  silent for an account without maisecrets, for a plugin you switched off, and
+  for Codex. Measured with the real client: `plugin_folder_moved_guarded` (the
+  command does not run) and `bash_rehydrate_guarded` (a healthy session passes).
+  - A synced maisecrets sets it up by itself: its session start places the script
+    and, once, registers it in `~/.claude/settings.json` (a backup first, only the
+    hooks change, one line in the session-start message says so). It protects the
+    sessions after that one. `/maisecrets:guard remove` takes it away and it stays
+    away; `"guard": false` in `~/.maisecrets/config.json` or in the machine policy
+    keeps it off. A `settings.json` that is not valid JSON is left alone.
+  - An admin who prefers central settings can register it in the Claude Code
+    managed settings instead (`python3 -m maisecrets.cli guard managed` prints the
+    entries); on a machine where maisecrets never ran that command answers `{}`.
+  - Installed another way: `/maisecrets:guard install` does the same by hand.
+  - Its cost: each prompt and tool call waits for the heartbeat, which the
+    maisecrets hook of the same call writes as it starts (both run in parallel);
+    without maisecrets it waits 5 s and then refuses.
 - For a team, an admin can roll out this marketplace with managed settings
   (`extraKnownMarketplaces` with `autoUpdate: true`, and `enabledPlugins`), so
   nobody has to type a command ([Claude Code docs](https://code.claude.com/docs/en/plugins/org)).
@@ -205,9 +228,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 12 scenarios against a fake upstream
+python3 harness/run.py                                 # 14 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 57 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 60 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -253,6 +276,11 @@ org-synced plugin, with `claude plugin update` otherwise. Every session starts
 with one line `maisecrets X.Y.Z active`; its absence means the plugin did not
 load. A rollback is a `git revert` on `main`: the pipeline releases it as the
 next patch version.
+
+**The guard for synced installs.** An update of an org-synced plugin can leave a
+session without its hooks. maisecrets registers a guard against that by itself
+(`"guard": false` in the policy turns it off); the managed settings can carry it
+instead (`python3 -m maisecrets.cli guard managed`). See "Updates and open sessions".
 
 **Settings you can enforce.** A machine policy file wins over the user's
 `~/.maisecrets/config.json` and cannot be changed from there:

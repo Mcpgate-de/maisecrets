@@ -1527,7 +1527,8 @@ def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: st
 
 
 _ARGS_END = "MAISECRETS_ARGS_END"
-_ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" (?:audit|forget|put --clipboard|report|shortcut) "
+_ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" "
+                           r"(?:audit|forget|guard|put --clipboard|report|shortcut) "
                            r"--args-stdin <<'" + _ARGS_END + r"'\n(.*)\n" + _ARGS_END + r"\n?\Z", re.S)
 
 
@@ -2537,6 +2538,45 @@ def _run_log(event: str, payload: dict, how: str, decision: str, ms: int) -> Non
         pass
 
 
+def _from_a_synced_folder() -> bool:
+    """maisecrets runs from a folder the claude.ai organisation sync writes (plugins/synced/…), the one
+    install whose update can leave a session without hooks. There the guard may come from the
+    organisation's managed settings, which no local file announces, so the heartbeat is always on."""
+    root = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
+    return f"{os.sep}plugins{os.sep}synced{os.sep}" in root
+
+
+def _heartbeat(event: str, payload: dict) -> None:
+    """Tell the guard (hooks/guard.py, installed outside the plugin folder) that maisecrets runs for
+    this call: an empty file named by session, event and the call's id. Only when the guard is
+    installed, and only for Claude Code, whose folder swap it watches. Never raises: a heartbeat
+    that cannot be written makes the guard refuse, which is the safe side."""
+    import hashlib
+    from .vault import HOME
+    if event not in ("user-prompt", "pre-tool", "post-tool") or client_of(payload) != "claude":
+        return
+    if not ((HOME / "guard.json").exists() or _from_a_synced_folder()):
+        return
+    ident = payload.get("prompt_id") if event == "user-prompt" else payload.get("tool_use_id")
+    session = payload.get("session_id")
+    if not ident or not session:
+        return
+    try:
+        d = HOME / "alive"
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        name = hashlib.sha256(f"{session}\0{event}\0{ident}".encode()).hexdigest()[:32]
+        with open(d / name, "w", encoding="utf-8"):
+            pass
+        now = time.time()
+        for n in os.listdir(d):
+            # a heartbeat whose guard never came for it (the guard removed, a matcher that differs)
+            p = d / n
+            if now - p.stat().st_mtime > 600:
+                p.unlink()
+    except OSError:
+        pass
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[1] not in HANDLERS:
         sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|session-start\n")
@@ -2554,6 +2594,7 @@ def main(argv: list[str]) -> int:
         # exit 2 before one (Codex review, 2026-09-28)
         _out(_fail_closed(event, {}, "got a payload that is not JSON."))
         return 0
+    _heartbeat(event, payload)
     import threading
     started = time.time()
     lock = threading.Lock()
