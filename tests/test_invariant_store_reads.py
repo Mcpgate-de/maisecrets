@@ -314,6 +314,10 @@ class PopulationTests(unittest.TestCase):
         for cmd in ("python3 ~/.claude/maisecrets-guard.py --off", "cat ~/.maisecrets/guard.json"):
             with self.subTest(cmd=cmd):
                 self.assertTrue(deny(pre("Bash", {"command": cmd}, "/tmp")), cmd)
+        guard_cmd = "python3 ~/.claude/" + "maisecrets-guard.py --off"
+        reason = pre("Bash", {"command": guard_cmd}, "/tmp")["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("the maisecrets guard", reason)
+        self.assertNotIn("own store", reason, "the guard is not the store (seen in a live session, 2026-09-29)")
         # no patch text: nothing names the paths, so nothing is resolved or allowed
         for ti in ({}, {"patch": f"*** Begin Patch\n*** Add File: {home}/x\n+x\n*** End Patch"}, {"command": 5}):
             with self.subTest(tool_input=str(ti)[:40]):

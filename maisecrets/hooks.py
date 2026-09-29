@@ -1574,6 +1574,11 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         return _deny("maisecrets: this command sets or clears the session id, which selects the blocked prompt "
                      "of another session. The command did not run. /ms sends the blocked prompt of this session.")
     matched = _store_read_match(command)
+    if matched == "the maisecrets guard":
+        # not the store: the person switches the guard off, and says so to the agent (live session, 2026-09-29)
+        return _deny("maisecrets: this command touches the maisecrets guard, which only the person switches off "
+                     "(/maisecrets:guard remove, or --off in a terminal). The command did not run. If the task needs "
+                     "something about the guard, tell the user what; /maisecrets:guard status shows its state.")
     if matched:
         # said as what the user does next, not as a check to stay inside: "do not rephrase … to get around
         # the check" next to an ops request read like an attempt to get around a control (ops review, 2026-09-28)

@@ -20,6 +20,7 @@ import from the plugin: the plugin folder is exactly what may be missing.
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 
@@ -78,6 +79,20 @@ def _account() -> str:
 
 
 TRASH_WINDOW = 15 * 60
+# the folder names of a synced copy: an update writes the next generation beside the last one
+# (maisecrets, then maisecrets~g2, ...; measured 2026-09-29) and moves the old one to the trash
+_SYNCED_NAME = re.compile(r"maisecrets(~g\d+)?")
+
+
+def _synced_copies(claude: str, account: str) -> list:
+    """Every maisecrets copy the sync holds for this account, whichever generation it is."""
+    base = os.path.join(claude, "plugins", "synced", account)
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return []
+    return [os.path.join(base, n) for n in names if _SYNCED_NAME.fullmatch(n)
+            and os.path.isfile(os.path.join(base, n, ".claude-plugin", "plugin.json"))]
 # after the start, how long an answer may take: maisecrets answers within its own watchdog (7 s for a
 # prompt and a tool call, 16 s for a tool result; maisecrets/hooks.py WATCHDOG_SECONDS) plus a margin. The
 # guard's hook timeout (GUARD_TIMEOUTS in maisecrets/cli.py) covers the start wait and this
@@ -128,12 +143,11 @@ def expected(cwd: str = "") -> bool:
     if account and account in registered:
         roots = cfg.get("roots") if isinstance(cfg.get("roots"), dict) else {}
         folders = [roots[account]] if isinstance(roots.get(account), str) else []
-        # the folder this account's copy ran from (measured), then the layout Claude Code uses today
-        folders.append(os.path.join(claude, "plugins", "synced", account, "maisecrets"))
+        # the folder this account's copy ran from (measured), then every copy the sync holds for it now
+        folders += _synced_copies(claude, account)
         return (any(os.path.isfile(os.path.join(f, ".claude-plugin", "plugin.json")) for f in folders)
                 or _recently_trashed(claude))
-    if account and os.path.isfile(os.path.join(claude, "plugins", "synced", account, "maisecrets",
-                                               ".claude-plugin", "plugin.json")):
+    if account and _synced_copies(claude, account):
         return True
     if mode is None:
         return False            # no guard.json and no synced copy: maisecrets writes no heartbeat here
