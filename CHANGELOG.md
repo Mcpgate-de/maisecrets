@@ -57,6 +57,13 @@
   In the tests of that repository, the label-rule hits that a Read acted on went from 379 to none.
   The example on the first start is now an address that maisecrets stops.
 
+- **A word no longer follows you around for a day.** When maisecrets found a word such as
+  `postgres` only by its label (`DB_PASSWORD=postgres`), it stored it and then redacted the word in
+  every later text of every session: `docker ps` showed a placeholder for the image, and the prompt
+  "add a postgres service" was blocked. Such a word is now replaced where it was found and nowhere
+  else; its placeholder still works. A value with a digit or a symbol is still found everywhere.
+  Words that an older version stored are marked at the next session start.
+
 ## [0.5.14] - 2026-09-29
 
 - **The restart command stands on a line of its own** in the refusal of the guard, so it is easy to

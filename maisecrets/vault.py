@@ -432,6 +432,8 @@ class Entry:
     purged: bool = False
     counters: dict = field(default_factory=dict)  # unused on entries; kept for schema stability
     sessions: list = field(default_factory=list)  # sessions allowed to resolve the entry (see Vault.get)
+    # a word that only a label rule found (letters only): replaced where it was found, never hunted in other texts
+    weak: bool = False
     # no purged_at field: from_meta drops it, so the proof below can remove the filter and
     # the owning test sees the TypeError of the field report again
 
@@ -449,6 +451,12 @@ class Entry:
     def ref(self) -> str:
         from .placeholder import CLOSE, OPEN
         return f"{OPEN}{self.key}:{self.display}{CLOSE}" if self.display else f"{OPEN}{self.key}{CLOSE}"
+
+
+def is_weak(kind: str, value: str) -> bool:
+    """A value that only a label rule found and that is a word: letters only, no digit, no symbol."""
+    from .detect import LABEL_RULES
+    return str(kind).startswith(LABEL_RULES) and value.strip().isalpha()
 
 
 # ---------------------------------------------------------------- backends --
@@ -893,8 +901,32 @@ class Vault:
         return fingerprint(value, self.fp_key())
 
     def live_fingerprints(self) -> dict[str, str]:
-        """fingerprint -> key for every entry whose value is still stored."""
-        return {m["fingerprint"]: k for k, m in self._index["entries"].items() if not m.get("purged")}
+        """fingerprint -> key for every entry whose value is still stored and may be hunted in any text. A weak entry
+        is not: `DB_PASSWORD=postgres` stored `postgres`, and every later text with the word was redacted and every
+        prompt with it blocked, in every session, for a day (review, 2026-09-29)."""
+        return {m["fingerprint"]: k for k, m in self._index["entries"].items()
+                if not m.get("purged") and not m.get("weak")}
+
+    @_mutating
+    def mark_weak_entries(self) -> int:
+        """Mark the weak entries a version before 0.5.15 stored without the mark (see Entry.weak). Reads the value of
+        each unmarked label-rule entry once; a store that refuses the read leaves the entry unmarked for the next
+        start. Returns the count marked weak."""
+        from .detect import LABEL_RULES
+        todo = [k for k, m in self._index["entries"].items()
+                if "weak" not in m and not m.get("purged") and str(m.get("kind", "")).startswith(LABEL_RULES)]
+        n = 0
+        for key in todo:
+            try:
+                value = self.backend.get(key)
+            except RuntimeError:
+                continue
+            if value is None:
+                continue
+            weak = is_weak(self._index["entries"][key]["kind"], value)
+            self._index["entries"][key]["weak"] = weak
+            n += weak
+        return n
 
     # api -------------------------------------------------------------------
     @_mutating
@@ -924,7 +956,7 @@ class Vault:
         e = Entry(key=key, type=type_, kind=kind, fingerprint=fp,
                   display=display_for(type_, value), created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
-                  session=session, uses=0, sessions=[session] if session else [])
+                  session=session, uses=0, sessions=[session] if session else [], weak=is_weak(kind, value))
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
         self.backend.put(
             key, value,

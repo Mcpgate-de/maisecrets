@@ -97,6 +97,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         v = Vault(cfg)
         v.expire(limit=None)
         dropped = v.drop_code_words()
+        v.mark_weak_entries()
     except RuntimeError as exc:
         # a damaged index: the message names `maisecrets repair`; a traceback here gave the
         # client no JSON and the person no hint

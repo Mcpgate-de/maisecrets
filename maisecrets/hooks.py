@@ -2484,8 +2484,9 @@ def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]
     keys = [r["key"] for r in vault._index.get("resolves", []) if r.get("session") == session and r["ts"] > now - 3600]
     out: list[tuple[str, str]] = []
     from .vault import Entry
-    live = [k for k in dict.fromkeys(keys)
-            if vault._index["entries"].get(k) and not vault._index["entries"][k].get("purged")]
+    # a weak entry is not hunted as a substring either (Vault.live_fingerprints)
+    live = [k for k in dict.fromkeys(keys) if vault._index["entries"].get(k)
+            and not vault._index["entries"][k].get("purged") and not vault._index["entries"][k].get("weak")]
     if hasattr(vault.backend, "get_many"):
         found = vault.backend.get_many(live)
     else:

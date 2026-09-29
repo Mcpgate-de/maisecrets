@@ -1006,6 +1006,20 @@ class SessionStartTests(unittest.TestCase):
         self.assertEqual(sorted(sb.index()["entries"]), [real])
         self.assertNotIn("Deleted", _start(self, sb, CLAUDECODE="1")["systemMessage"], "said once")
 
+    def test_the_start_marks_a_word_an_older_version_stored_so_it_is_not_hunted(self):
+        sb = self.sandbox()
+        seed = ("import json\nfrom maisecrets.vault import INDEX, Vault\n"
+                "k = Vault().put('postgres', 'SECRET', 'ds-keyword-equal-signs', session='S0').key\n"
+                "idx = json.loads(INDEX.read_text()); del idx['entries'][k]['weak']\n"
+                "INDEX.write_text(json.dumps(idx))\n"
+                "print(k)\n")
+        r = subprocess.run([sys.executable, "-c", seed], capture_output=True, encoding="utf-8", env=sb.env(),
+                           cwd=str(ROOT), timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        key = r.stdout.strip()
+        _start(self, sb, CLAUDECODE="1")
+        self.assertIs(sb.index()["entries"][key].get("weak"), True)
+
     def test_the_test_store_introduces_itself_at_every_start(self):
         sb = self.sandbox(JSONFILE, backend="jsonfile")
         for _ in range(2):
