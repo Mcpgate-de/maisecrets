@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN = ROOT / "harness" / "golden"
 MARK = "glpat-" + "HARNESSxxx1234567890abcd"   # matches gitlab_pat; split so the repo scan stays clean
-MAIL = "harness.person@example.org"
+MAIL = "harness.person@beispiel-gmbh.de"   # not example.org: a reserved domain is no hit (0.5.15)
 MARK2 = "pa$s'w\"ord`x $(echo no) y\\z"     # no known shape; quotes, $( and spaces
 PORT = 8791
 # the shell tool the client offers: Bash, or PowerShell on Windows without Git Bash (the CI of the
@@ -373,6 +373,9 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             [shutil.which("claude") or "claude", "-p", sc["prompt"].replace("{cwd}", str(cwd)),
              "--plugin-dir", str(plugin),
              "--settings", str(settings),
+             # a fixed mode: in the developer's auto mode the client sent every Bash command to a classifier on the
+             # same upstream, which took the scripted turns (2.1.285, 2026-09-29: four requests instead of two)
+             "--permission-mode", "default",
              "--allowedTools", sc.get("allowed_tools", "Bash,Read"), "--max-turns", "3",
              "--debug-file", str(debug_log), *extra, *sc.get("extra_args", [])],
             cwd=cwd, env=env, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
