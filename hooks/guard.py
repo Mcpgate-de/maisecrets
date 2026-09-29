@@ -21,6 +21,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 
@@ -163,9 +165,46 @@ def heartbeat_name(session: str, event: str, ident: str) -> str:
     return hashlib.sha256(f"{session}\0{event}\0{ident}".encode()).hexdigest()[:32]
 
 
+def _clipboard_commands() -> list:
+    """The clipboard writers of this platform that are on the PATH, first choice first."""
+    if sys.platform == "darwin":
+        names = [["pbcopy"]]
+    elif os.name == "nt":
+        names = [["clip"]]
+    else:
+        names = [["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]
+    return [n for n in names if shutil.which(n[0])]
+
+
+def _copy_resume(session: str) -> bool:
+    """Put the restart command on the clipboard, once per session: a refusal comes for every call, and the
+    person may copy something else in between. MAISECRETS_GUARD_CLIPBOARD=off turns it off (tests, harness)."""
+    if os.environ.get("MAISECRETS_GUARD_CLIPBOARD", "").lower() in ("off", "0", "false"):
+        return False
+    marker = os.path.join(_home(), "alive", heartbeat_name(session, "clipboard", "") + ".clip")
+    if os.path.exists(marker):
+        return True
+    for cmd in _clipboard_commands():
+        try:
+            r = subprocess.run(cmd, input=f"claude --resume {session}".encode(), timeout=2,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode == 0:
+            try:
+                os.makedirs(os.path.dirname(marker), mode=0o700, exist_ok=True)
+                open(marker, "w").close()
+            except OSError:
+                pass            # no marker: the next refusal copies again, which is harmless
+            return True
+    return False
+
+
 def _refusal(hook_event: str, session: str) -> dict:
     # a synced update: /reload-plugins keeps the gone generation path (measured 2026-09-29); a new process does not
     message = MESSAGE.format(script=os.path.join(_claude_dir(), "maisecrets-guard.py"), session=session)
+    if _copy_resume(session):
+        message += " The resume command is in your clipboard."
     if hook_event == "UserPromptSubmit":
         return {"decision": "block", "reason": message}
     if hook_event == "PreToolUse":

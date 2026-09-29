@@ -7,6 +7,9 @@
   then it cannot load maisecrets again. The refusal of the guard now says so and names the command
   that works: exit, then `claude --resume <id of this session>` in the directory where the session
   started. Run `/maisecrets:guard install` once more if you installed the guard yourself.
+- **The guard puts that command on your clipboard**, once per session (`pbcopy` on macOS, `clip` on
+  Windows, `wl-copy`, `xclip` or `xsel` on Linux). Exit, paste, press Enter. The refusal says so only
+  when the copy worked. `MAISECRETS_GUARD_CLIPBOARD=off` turns it off.
 
 ## [0.5.12] - 2026-09-29
 

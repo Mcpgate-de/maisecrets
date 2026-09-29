@@ -37,6 +37,8 @@ def client_variables(environ=os.environ) -> list[str]:
 REMOVED = client_variables()
 for _name in REMOVED:
     del os.environ[_name]
+# the guard puts the resume command on the clipboard: never the real one of the person running the tests
+os.environ["MAISECRETS_GUARD_CLIPBOARD"] = "off"
 
 # the system setting decides the label languages and the "auto" region; the tests pin it, so a run
 # on a German Mac and one in a C-locale container expect the same rules. A test of the lookup

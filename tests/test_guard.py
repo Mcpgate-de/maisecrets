@@ -207,6 +207,30 @@ class DecisionTests(_Env):
                 self.assertIn("anthropics/claude-code#97847", json.dumps(out))
                 self.assertGreaterEqual(time.monotonic() - started, 0.3, "it waits before it refuses")
 
+    def test_the_resume_command_goes_to_the_clipboard_once_per_session(self):
+        self.installed("always")
+        clip = Path(tempfile.mkdtemp()) / "clip.txt"
+        self.addCleanup(lambda: __import__("shutil").rmtree(clip.parent, ignore_errors=True))
+        # a stand-in for pbcopy: appends what it reads, so a second copy would show
+        writer = [sys.executable, "-c", f"import sys; open({str(clip)!r}, 'a').write(sys.stdin.read() + '\\n')"]
+        with mock.patch.dict(os.environ, {"MAISECRETS_GUARD_CLIPBOARD": "on"}), \
+                mock.patch.object(guard, "_clipboard_commands", return_value=[writer]):
+            first = json.dumps(guard.decide(PAYLOADS["UserPromptSubmit"], wait=0.1))
+            second = json.dumps(guard.decide(PAYLOADS["PreToolUse"], wait=0.1))
+        self.assertEqual(clip.read_text(), "claude --resume S1\n", "copied once, for this session")
+        self.assertIn("The resume command is in your clipboard.", first)
+        self.assertIn("The resume command is in your clipboard.", second)
+
+    def test_no_clipboard_writer_means_no_clipboard_claim(self):
+        self.installed("always")
+        failing = [sys.executable, "-c", "import sys; sys.exit(1)"]
+        for cmds in ([], [failing]):
+            with self.subTest(cmds=bool(cmds)), mock.patch.dict(os.environ, {"MAISECRETS_GUARD_CLIPBOARD": "on"}), \
+                    mock.patch.object(guard, "_clipboard_commands", return_value=cmds):
+                out = json.dumps(guard.decide(PAYLOADS["UserPromptSubmit"], wait=0.1))
+                self.assertNotIn("clipboard", out)
+                self.assertIn("claude --resume S1", out)
+
     def test_the_heartbeat_of_this_call_lets_it_pass_and_stays_for_a_second_guard(self):
         self.installed("always")
         for name, payload in PAYLOADS.items():

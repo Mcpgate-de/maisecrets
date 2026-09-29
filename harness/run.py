@@ -300,7 +300,8 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True,
                                                   **sc.get("config", {})}))
     env = dict(os.environ, ANTHROPIC_BASE_URL=f"http://127.0.0.1:{PORT}", CLAUDE_CODE_MAX_RETRIES="0",
-               MAISECRETS_HOME=str(home), MAISECRETS_DUMP=str(dump), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
+               MAISECRETS_HOME=str(home), MAISECRETS_DUMP=str(dump), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
+               MAISECRETS_GUARD_CLIPBOARD="off")   # a guarded scenario must not write the real clipboard
     for fname, content in sc.get("files", {}).items():
         (cwd / fname).write_text(content)
     if sc.get("preload"):

@@ -187,7 +187,8 @@ blocks without it, in bash and in PowerShell. The Codex command for Windows
   not always enough: on 2026-09-29 (Claude Code 2.1.284) `/reload-plugins` kept
   the path of the gone folder (`/plugin` showed `commands path not found …
   maisecrets~g2`), and only a new process loaded maisecrets again: exit, then
-  `claude --resume <session id>` in the directory where the session started. The
+  `claude --resume <session id>` in the directory where the session started (the
+  guard puts this command on your clipboard, once per session). The
   session that started the sync can lose them too: on 2026-09-29 (Claude Code
   2.1.284) the folder was rewritten one second after a session started, and that
   session ran no maisecrets hook while `/plugin` showed the new version.
