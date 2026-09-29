@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.5.11] - 2026-09-29
+
 - **Synced installs: a guard against the update gap, set up by maisecrets itself.** An update of a
   plugin that the organisation syncs from claude.ai can leave a session without maisecrets, silently.
   At its next session start a synced maisecrets places `~/.claude/maisecrets-guard.py` and registers
@@ -11,6 +13,25 @@
   keeps it off. Installs from the marketplace and Codex are not touched.
 - **Codex:** a placeholder in a file edit (`apply_patch`) is now resolved, and a patch against the
   maisecrets store is refused.
+
+### Features
+
+- a guard outside the plugin folder stops a session in which an update left maisecrets not running (4cdbdcd)
+
+### Fixes
+
+- "guard": false works without a guard.json; a person's --off stays their own (72eef2d)
+- a multi-line value stays file content in a Codex patch; the guard waits for the answer (8d28b90)
+- the update window reads the change time; the measured folder counts per account (8e7b4cc)
+- no lasting block after an organisation removes maisecrets; the script is guarded too (c02e964)
+- a patch header behind any whitespace is a header; the guard expects by account (3a158d4)
+- two registrations pass a healthy call; an indented Codex patch header is a header (5af2899)
+- Codex apply_patch resolves a placeholder and never writes the maisecrets store (5f3a399)
+
+### Other
+
+- Merge branch 'fix/guard-windows-tests' into 'main' (3c998cd)
+- Merge branch 'feat/codex-apply-patch' into 'main' (746374c)
 
 ## [0.5.10] - 2026-09-29
 
