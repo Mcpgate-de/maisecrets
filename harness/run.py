@@ -349,6 +349,11 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                                                     else {"expect": "always"}))
         if not account:
             print(f"     ~ {name}: no account file, the guard runs with expect=always")
+    else:
+        # a guard the developer installed (~/.claude settings) also runs here. It expects maisecrets for an
+        # account with a synced copy, and it cannot see the --settings flag that turns that copy off, so it
+        # blocked every scenario on a machine with the synced plugin (2026-09-29). Off for this home only
+        (home / "guard.json").write_text(json.dumps({"expect": "off"}))
     settings.write_text(json.dumps({"enabledPlugins": {"maisecrets@synced": False}, "hooks": hooks_cfg}))
     srv = start_server(turns, out)
     try:
