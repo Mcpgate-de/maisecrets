@@ -60,5 +60,7 @@ root.
 - `claude plugin validate --strict` does not parse the frontmatter strictly; the directory check
   does. `scripts/lint_plugin.py` covers that gap.
 - A plugin update removes the plugin folder of an open session (synced plugins) and its hooks then
-  fail open until `/reload-plugins`. Nothing in the plugin can prevent it (README, "Updates and
-  open sessions").
+  fail open until the session restarts. `/reload-plugins` does not help there: it keeps the old
+  `~gN` path (anthropics/claude-code#97847, measured on 2.1.284). A marketplace install keeps the old
+  version folder for 14 days, so its open sessions keep working. Nothing in the plugin can prevent
+  it (README, "Updates and open sessions").

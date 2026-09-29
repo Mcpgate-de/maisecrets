@@ -61,7 +61,8 @@ SCENARIOS = {
     },
     # the same folder swap with the guard installed outside the plugin folder (hooks/guard.py, run from the
     # checkout, not from the copy that moves): maisecrets runs no hook, so no heartbeat comes, and the
-    # guard denies the tool call and names /reload-plugins. The command must not run
+    # guard denies the tool call and names /reload-plugins, then `claude --resume <this session>` for when the reload
+    # keeps the gone folder (measured with a synced update, 2026-09-29). The command must not run
     "plugin_folder_moved_guarded": {
         "prompt": "Run the check script.",
         "plugin_copy": True,
@@ -71,7 +72,8 @@ SCENARIOS = {
                   {"text": "done"}],
         "expect_requests": 2,
         "expect_no_file": "ran.txt",
-        "expect_text": "maisecrets did not run for this call",
+        "expect_text": "load maisecrets again. Then exit this session and resume it in the directory where you started "
+                       "it: claude --resume ",
     },
     # the typed prompt carries a secret: must be blocked, zero requests
     "prompt_secret": {
@@ -298,7 +300,8 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True,
                                                   **sc.get("config", {})}))
     env = dict(os.environ, ANTHROPIC_BASE_URL=f"http://127.0.0.1:{PORT}", CLAUDE_CODE_MAX_RETRIES="0",
-               MAISECRETS_HOME=str(home), MAISECRETS_DUMP=str(dump), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
+               MAISECRETS_HOME=str(home), MAISECRETS_DUMP=str(dump), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
+               MAISECRETS_GUARD_CLIPBOARD="off")   # a guarded scenario must not write the real clipboard
     for fname, content in sc.get("files", {}).items():
         (cwd / fname).write_text(content)
     if sc.get("preload"):
@@ -347,6 +350,11 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                                                     else {"expect": "always"}))
         if not account:
             print(f"     ~ {name}: no account file, the guard runs with expect=always")
+    else:
+        # a guard the developer installed (~/.claude settings) also runs here. It expects maisecrets for an
+        # account with a synced copy, and it cannot see the --settings flag that turns that copy off, so it
+        # blocked every scenario on a machine with the synced plugin (2026-09-29). Off for this home only
+        (home / "guard.json").write_text(json.dumps({"expect": "off"}))
     settings.write_text(json.dumps({"enabledPlugins": {"maisecrets@synced": False}, "hooks": hooks_cfg}))
     srv = start_server(turns, out)
     try:
