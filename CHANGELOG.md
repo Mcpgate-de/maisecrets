@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Synced installs: a guard against the update gap, set up by maisecrets itself.** An update of a
+  plugin that the organisation syncs from claude.ai can leave a session without maisecrets, silently.
+  At its next session start a synced maisecrets places `~/.claude/maisecrets-guard.py` and registers
+  it once in `~/.claude/settings.json` (a backup first, only the hooks change, one line says so). The
+  guard blocks a prompt or tool call that maisecrets did not answer and names `/reload-plugins`.
+  `/maisecrets:guard remove` takes it away; `"guard": false` in the config or the machine policy
+  keeps it off. Installs from the marketplace and Codex are not touched.
+- **Codex:** a placeholder in a file edit (`apply_patch`) is now resolved, and a patch against the
+  maisecrets store is refused.
+
 ## [0.5.10] - 2026-09-29
 
 - **Behaviour change: maisecrets adds no approval of its own by default.** A value still never
