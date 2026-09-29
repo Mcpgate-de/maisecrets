@@ -53,6 +53,7 @@ powershell_7:
     - |
       python -m unittest tests.test_guard tests.test_rehydration_matrix tests.test_invariant_store_reads
       if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      $env:MAISECRETS_EXPECT_HOOK_SHELL = "Core 7"
       python harness/windows/shell_probe.py
       $probe = $LASTEXITCODE
       $env:MAISECRETS_HARNESS_SHELL_TOOL = "PowerShell"
@@ -64,20 +65,17 @@ powershell_7:
 # no Git Bash and no PowerShell 7: what a stock Windows 11 has. Claude Code looks for pwsh on PATH and
 # then at %ProgramFiles%\PowerShell\7\pwsh.exe (2.1.284), so both are hidden from the processes below;
 # only then does it fall back to Windows PowerShell 5.1 (measured: a PATH change alone left it on 7)
+# The probe must print "Desktop 5.1" for the settings hook; otherwise this job did not test 5.1
 powershell_5:
   extends: .windows
   script:
     - |
-      $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'PowerShell\\7' }) -join ';'
-      # $env:ProgramFiles alone did not reach the children (measured: python still saw C:\Program Files)
-      [Environment]::SetEnvironmentVariable("ProgramFiles", "C:\no-program-files", "Process")
-      $env:ProgramFiles = "C:\no-program-files"
-      Write-Output "pwsh on PATH: $([bool](Get-Command pwsh -ErrorAction Ignore))"
-      python -c "import os; print('ProgramFiles seen by a child:', os.environ.get('ProgramFiles'))"
-      python harness/windows/shell_probe.py
+      # a PATH or ProgramFiles change in this pwsh 7 does not reach the children: harness/windows/without_pwsh7.py
+      $env:MAISECRETS_EXPECT_HOOK_SHELL = "Desktop 5.1"
+      python harness/windows/without_pwsh7.py python harness/windows/shell_probe.py
       $probe = $LASTEXITCODE
       $env:MAISECRETS_HARNESS_SHELL_TOOL = "PowerShell"
-      python harness/run.py
+      python harness/windows/without_pwsh7.py python harness/run.py
       $rc = [Math]::Max($LASTEXITCODE, $probe)
     - *collect
     - exit $rc
@@ -90,6 +88,7 @@ git_bash:
       choco install git -y --no-progress --limit-output | Out-Null
       $env:CLAUDE_CODE_GIT_BASH_PATH = "C:\Program Files\Git\bin\bash.exe"
       Write-Output "git bash: $(Test-Path $env:CLAUDE_CODE_GIT_BASH_PATH)"
+      $env:MAISECRETS_EXPECT_HOOK_SHELL = "bash"
       python harness/windows/shell_probe.py
       $probe = $LASTEXITCODE
       python harness/run.py

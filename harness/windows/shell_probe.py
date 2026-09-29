@@ -9,7 +9,8 @@ Claude Code 2.1.284 starts it (bash -c; pwsh or powershell with -NoProfile -NonI
 with a prompt that carries a synthetic token and umlauts on stdin. The command must answer with a
 block, and without the plugin folder it must still block.
 
-Usage: python harness/windows/shell_probe.py      exit 1 when a shell does not block
+Usage: python harness/windows/shell_probe.py      exit 1 when a shell does not block, or when the hook ran in
+       another shell than MAISECRETS_EXPECT_HOOK_SHELL names ("Core 7", "Desktop 5.1", "bash")
 """
 from __future__ import annotations
 
@@ -90,7 +91,13 @@ def run_in(shell: list[str], root: Path) -> subprocess.CompletedProcess:
 
 def main() -> int:
     bad = 0
-    print("shell of a settings hook:", which_shell_runs_hooks())
+    seen = which_shell_runs_hooks()
+    print("shell of a settings hook:", seen)
+    # the CI job names the shell it set up; a job that did not reach it tested something else
+    expect = os.environ.get("MAISECRETS_EXPECT_HOOK_SHELL", "")
+    if expect and not seen.startswith(expect):
+        print(f"[FAIL] the hook ran in {seen!r}, the job expects {expect!r}")
+        bad += 1
     for name, shell in shells():
         for label, root in (("plugin", ROOT), ("folder gone", ROOT / "gone")):
             r = run_in(shell, root)
