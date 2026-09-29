@@ -11,6 +11,7 @@ Events:
 """
 from __future__ import annotations
 
+import html
 import json
 import os
 import platform
@@ -435,6 +436,96 @@ def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: 
     return lines
 
 
+# A subagent's report reaches the session as a prompt (<task-notification>), and a prompt hook can only
+# block or pass it: a report that quoted a value of the right shape stopped the session until the person
+# pasted it again (2026-09-29, twice in one review). The text was written by a model of this session, so
+# every value in it was in a model's context already, and blocking it protects nothing. The hook payload
+# has no origin field (Claude Code 2.1.284), so the report proves itself: one notification block, a tool
+# use id that this session's transcript gives to an Agent or SendMessage call, an output file in this
+# session's subagents folder, and a result equal to that subagent's last answer. A typed or pasted text,
+# a background command, a monitor event: none of them passes, and no value outside the result passes
+# (docs/THREAT-MODEL.md C19).
+_NOTIFICATION_RE = re.compile(r"\A\s*<task-notification>\n(?P<body>[^\x00]*)\n</task-notification>\s*\Z")
+_AGENT_TOOLS = ("Agent", "Task", "SendMessage")
+
+
+def _notification_tag(body: str, name: str) -> str | None:
+    # Claude Code escapes <, > and & inside the fields, so no field holds a tag of its own
+    m = re.search(rf"<{name}>([^<]*)</{name}>", body)
+    return m.group(1) if m else None
+
+
+def _last_answer(path: str) -> str | None:
+    text = None
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if '"assistant"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("type") != "assistant":
+                    continue
+                parts = [b.get("text", "") for b in (rec.get("message") or {}).get("content") or []
+                         if isinstance(b, dict) and b.get("type") == "text"]
+                if parts:
+                    text = "\n".join(parts)
+    except OSError:
+        return None
+    return text
+
+
+def _called_an_agent(transcript: str, tool_use_id: str) -> bool:
+    try:
+        with open(transcript, encoding="utf-8") as f:
+            for line in f:
+                if tool_use_id not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("type") != "assistant":
+                    continue
+                for b in (rec.get("message") or {}).get("content") or []:
+                    if (isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id") == tool_use_id
+                            and b.get("name") in _AGENT_TOOLS):
+                        return True
+    except OSError:
+        return False
+    return False
+
+
+def agent_report(payload: dict, prompt: str) -> bool:
+    """True when the prompt is the report of a subagent of this session, proven as described above."""
+    m = _NOTIFICATION_RE.match(prompt)
+    if not m or prompt.count("<task-notification>") != 1:
+        return False
+    body = m.group("body")
+    tool_use_id = _notification_tag(body, "tool-use-id")
+    out = _notification_tag(body, "output-file")
+    result = _notification_tag(body, "result")
+    transcript = str(payload.get("transcript_path") or "")
+    if (not tool_use_id or not out or result is None or _notification_tag(body, "status") != "completed"
+            or not transcript.endswith(".jsonl")):
+        return False
+    subagents = os.path.realpath(transcript[: -len(".jsonl")]) + os.sep + "subagents" + os.sep
+    real = os.path.realpath(out)
+    if not real.startswith(subagents) or not real.endswith(".jsonl"):
+        return False
+    answer = _last_answer(real)
+    if answer is None or answer.strip() != html.unescape(result).strip():
+        return False
+    # only the result is the subagent's text: a value in another field (a real report pasted again, with a
+    # value added to its summary) was typed by a person and must be blocked (review, 2026-09-29)
+    rest = re.sub(r"<result>[^<]*</result>", "<result></result>", prompt, count=1)
+    if detect.scan(rest):
+        return False
+    return _called_an_agent(transcript, tool_use_id)
+
+
 def user_prompt(payload: dict) -> dict:
     cfg = load_config()
     prompt = payload.get("prompt", "")
@@ -453,6 +544,18 @@ def user_prompt(payload: dict) -> dict:
                     ),
                     "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True},
                 }
+
+    # a subagent's report: before the references are admitted (a model wrote them, not the human) and
+    # before anything is stored; the audit line counts it
+    if cfg.get("pass_agent_reports", True) and client_of(payload) == "claude" and agent_report(payload, prompt):
+        found = detect.scan(prompt)
+        if found:
+            from types import SimpleNamespace
+            from . import events
+            # nothing is stored: kinds and types only, no key
+            events.record("UserPromptSubmit", "claude", [SimpleNamespace(key="-", type=m.type, kind=m.kind)
+                                                         for m in found], outcome="passed: a subagent report")
+        return {}
 
     # 2. references the human typed or pasted: this session may resolve them from now on
     typed = find_refs(prompt)

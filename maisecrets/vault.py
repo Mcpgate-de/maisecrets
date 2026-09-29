@@ -54,6 +54,7 @@ DEFAULT_CONFIG = {
     "ssh_approval": "per-command",   # under rehydration "confirm": "per-session" is one confirm per value and session
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
+    "pass_agent_reports": True,      # the report of a subagent of this session is model text: not blocked (hooks.py)
     "keep_purged_days": 30,          # metadata of an expired entry is deleted after this many days
     "audit_max_lines": 2000,
 }
@@ -71,7 +72,7 @@ _CONFIG_TYPES = {
     "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
-    "ssh_approval": str, "rehydration": str, "guard": bool,
+    "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool,
 }
 
 

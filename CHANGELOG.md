@@ -22,6 +22,13 @@
   entries and names their keys once. It finds them by fingerprint and reads no stored value. The
   same word stored by `/maisecrets:put` or another rule stays.
 
+- **A subagent's report no longer stops the session.** When a subagent quoted a value in the shape of
+  a secret, its report reached the session as a prompt, and maisecrets blocked it until you pressed
+  Cmd+V or `/ms`. A model of this session wrote that text, so the block protected nothing. The report
+  now passes when it proves itself against the files of this session: the call that started the
+  subagent, the subagent's own transcript, and its last answer. A value that anyone added outside the
+  answer still blocks. `"pass_agent_reports": false` in `~/.maisecrets/config.json` turns this off.
+
 ## [0.5.14] - 2026-09-29
 
 - **The restart command stands on a line of its own** in the refusal of the guard, so it is easy to

@@ -1,0 +1,10 @@
+# c19-a-report-passes-only-from-this-sessions-subagents-folder: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c19-a-report-passes-only-from-this-sessions-subagents-folder"
+control = "C19"
+statement = "The output file of a report that passes resolves, links and '..' included, into the subagents folder of this session's transcript."
+runner = ["tests/test_agent_reports.py::AgentReportTests::test_an_output_file_outside_the_subagents_folder_of_this_session_is_blocked"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if not real.startswith(subagents) or not real.endswith(\".jsonl\"):\n"
+replace = "    if not real.endswith(\".jsonl\"):\n"
