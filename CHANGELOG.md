@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.5.12] - 2026-09-29
+
 - **Windows without Git Bash: maisecrets now protects Claude Code there.** Claude Code runs a hook
   command in PowerShell when Git for Windows is not installed. The hook commands of 0.5.11 were bash
   only: PowerShell refused to parse them, the hook failed without a block, and a prompt with a secret
@@ -13,6 +15,17 @@
   covers the `PowerShell` tool.
 - **Codex users: re-trust the hooks once in `/hooks` after this update.** `hooks/hooks.json` changed.
   Until the hooks are trusted again, Codex runs no maisecrets hook and says nothing.
+
+### Fixes
+
+- refusals name what works without Git Bash; the PowerShell part has a test (2920339)
+- the store guard knows the Credential Locker listing, the launchers' get and two Windows spellings (a2023ac)
+- maisecrets protects Claude Code on Windows without Git Bash (8ad4795)
+- every generation of the synced folder counts; the guard's own refusal names it (f979433)
+
+### Other
+
+- Merge branch 'feat/windows-powershell' into 'main' (83ba31b)
 
 ## [0.5.11] - 2026-09-29
 
