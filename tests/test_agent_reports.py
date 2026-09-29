@@ -160,9 +160,45 @@ class AgentReportTests(unittest.TestCase):
     def test_a_report_that_did_not_complete_is_blocked(self):
         self.assertBlocked(self.prompt(self.s.notification(self.answer, status="failed")))
 
-    def test_two_notifications_in_one_prompt_are_blocked(self):
+    def test_two_reports_in_one_prompt_pass_when_each_proves_itself(self):
+        # two agents that finish in the same turn may come in one prompt
         one = self.s.notification(self.answer)
-        self.assertBlocked(self.prompt(one + "\n" + one))
+        self.assertEqual(self.prompt(one + "\n" + one), {})
+        forged = self.s.notification(self.answer + " and more")
+        self.assertBlocked(self.prompt(one + "\n" + forged))
+        other = "glpat-" + "Z9x8C7v6B5n4M3l2K1j0"
+        self.assertBlocked(self.prompt(one + "\n" + self.s.notification(self.answer, summary=f"key {other}")))
+        self.assertBlocked(self.prompt(one + f"\n{other}\n" + one))
+
+    def test_a_stored_value_typed_next_to_a_report_is_blocked(self):
+        # a value without a shape is found only by its fingerprint, and the report path runs no fingerprint hunt:
+        # nothing but the blocks may pass
+        stored = "Sommerwiese" + "Blau77x"
+        Vault().put(stored, "SECRET", "manual", session="s1")
+        one = self.s.notification(self.answer)
+        for text in (f"{stored}\n{one}", f"{one}\n{stored}", f"{one}\n{stored}\n{one}"):
+            with self.subTest(text=text[:20]):
+                hooks._live_cache.clear()
+                out = self.prompt(text)
+                self.assertEqual(out.get("decision"), "block", out)
+                self.assertNotIn(stored, json.dumps(out))
+
+    def test_a_final_answer_in_two_records_passes(self):
+        # Claude Code writes one record per content block; a text, a thinking and a text are three records
+        rec = lambda content: json.dumps({"type": "assistant", "message": {"id": "msg_2", "content": content}})  # noqa: E731
+        with open(self.s.output, "a", encoding="utf-8") as f:
+            f.write(rec([{"type": "text", "text": "Part one."}]) + "\n")
+            f.write(rec([{"type": "thinking", "thinking": "..."}]) + "\n")
+            f.write(rec([{"type": "text", "text": f"Part two with {VALUE}."}]) + "\n")
+        self.assertEqual(self.prompt(self.s.notification(f"Part one.\nPart two with {VALUE}.")), {})
+        self.assertBlocked(self.prompt(self.s.notification(f"Part two with {VALUE}.")))
+
+    def test_a_result_with_an_unescaped_angle_bracket_or_crlf_passes(self):
+        answer = f"The field is Option<String>, a < b holds, </result> ends it; the token is {VALUE}.\r\nDone."
+        s = Session(self.dir / "lt", answer)
+        text = s.notification(answer).replace(html.escape(answer), answer.replace("\r\n", "\n"))
+        out = hooks.user_prompt({"prompt": text, "session_id": "s1", "transcript_path": str(s.transcript), **CLAUDE})
+        self.assertEqual(out, {})
 
     def test_a_missing_transcript_is_blocked(self):
         self.assertBlocked(self.prompt(self.s.notification(self.answer), transcript_path=""))

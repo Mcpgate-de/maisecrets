@@ -445,18 +445,34 @@ def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: 
 # session's subagents folder, and a result equal to that subagent's last answer. A typed or pasted text,
 # a background command, a monitor event: none of them passes, and no value outside the result passes
 # (docs/THREAT-MODEL.md C19).
-_NOTIFICATION_RE = re.compile(r"\A\s*<task-notification>\n(?P<body>[^\x00]*)\n</task-notification>\s*\Z")
+_NOTIFICATION_RE = re.compile(r"<task-notification>\n(?P<body>.*?)\n</task-notification>", re.S)
 _AGENT_TOOLS = ("Agent", "Task", "SendMessage")
 
 
 def _notification_tag(body: str, name: str) -> str | None:
-    # Claude Code escapes <, > and & inside the fields, so no field holds a tag of its own
+    # the short fields (id, path, status) never hold a tag of their own
     m = re.search(rf"<{name}>([^<]*)</{name}>", body)
     return m.group(1) if m else None
 
 
+def _result_span(body: str) -> tuple[int, int] | None:
+    """The span of the result text in a notification body: from the first <result> to the last </result>. The
+    result is the subagent's own text, and a `<` in it (`Option<String>`, `a < b`) ended a match on `[^<]*` early,
+    so a real report was blocked (review, 2026-09-29)."""
+    a = body.find("<result>")
+    b = body.rfind("</result>")
+    return (a + len("<result>"), b) if 0 <= a and a + len("<result>") <= b else None
+
+
+def _plain(text: str) -> str:
+    return text.replace("\r\n", "\n").strip()
+
+
 def _last_answer(path: str) -> str | None:
-    text = None
+    """The text of the subagent's last message. Claude Code writes one record per content block of a message, all
+    with the same message id: a final answer of two text blocks (text, thinking, text) is two records, and taking
+    the last one alone blocked the report (review, 2026-09-29)."""
+    text_id, parts = None, []
     try:
         with open(path, encoding="utf-8") as f:
             for line in f:
@@ -468,13 +484,18 @@ def _last_answer(path: str) -> str | None:
                     continue
                 if rec.get("type") != "assistant":
                     continue
-                parts = [b.get("text", "") for b in (rec.get("message") or {}).get("content") or []
+                msg = rec.get("message") or {}
+                texts = [b.get("text", "") for b in msg.get("content") or []
                          if isinstance(b, dict) and b.get("type") == "text"]
-                if parts:
-                    text = "\n".join(parts)
+                if not texts:
+                    continue
+                mid = msg.get("id")
+                if mid is None or mid != text_id:
+                    text_id, parts = mid, []
+                parts.extend(texts)
     except OSError:
         return None
-    return text
+    return "\n".join(parts) if parts else None
 
 
 def _called_an_agent(transcript: str, tool_use_id: str) -> bool:
@@ -498,32 +519,51 @@ def _called_an_agent(transcript: str, tool_use_id: str) -> bool:
     return False
 
 
-def agent_report(payload: dict, prompt: str) -> bool:
-    """True when the prompt is the report of a subagent of this session, proven as described above."""
-    m = _NOTIFICATION_RE.match(prompt)
-    if not m or prompt.count("<task-notification>") != 1:
-        return False
-    body = m.group("body")
+def _one_report_proves_itself(body: str, transcript: str) -> bool:
+    span = _result_span(body)
     tool_use_id = _notification_tag(body, "tool-use-id")
     out = _notification_tag(body, "output-file")
-    result = _notification_tag(body, "result")
-    transcript = str(payload.get("transcript_path") or "")
-    if (not tool_use_id or not out or result is None or _notification_tag(body, "status") != "completed"
-            or not transcript.endswith(".jsonl")):
+    if span is None or not tool_use_id or not out or _notification_tag(body, "status") != "completed":
         return False
     subagents = os.path.realpath(transcript[: -len(".jsonl")]) + os.sep + "subagents" + os.sep
     real = os.path.realpath(out)
     if not real.startswith(subagents) or not real.endswith(".jsonl"):
         return False
     answer = _last_answer(real)
-    if answer is None or answer.strip() != html.unescape(result).strip():
-        return False
-    # only the result is the subagent's text: a value in another field (a real report pasted again, with a
-    # value added to its summary) was typed by a person and must be blocked (review, 2026-09-29)
-    rest = re.sub(r"<result>[^<]*</result>", "<result></result>", prompt, count=1)
-    if detect.scan(rest):
+    if answer is None or _plain(answer) != _plain(html.unescape(body[span[0]:span[1]])):
         return False
     return _called_an_agent(transcript, tool_use_id)
+
+
+def agent_report(payload: dict, prompt: str) -> bool:
+    """True when the prompt is nothing but reports of subagents of this session, each proven as described above.
+    Two agents that finish in the same turn may arrive in one prompt; each block proves itself."""
+    transcript = str(payload.get("transcript_path") or "")
+    if not transcript.endswith(".jsonl"):
+        return False
+    blocks = list(_NOTIFICATION_RE.finditer(prompt))
+    if not blocks:
+        return False
+    # nothing but the blocks: a text typed before, between or after them is a person's
+    pos = 0
+    for m in blocks:
+        if prompt[pos:m.start()].strip():
+            return False
+        pos = m.end()
+    if prompt[pos:].strip() or prompt.count("<task-notification>") != len(blocks):
+        return False
+    if not all(_one_report_proves_itself(m.group("body"), transcript) for m in blocks):
+        return False
+    # only a result is the subagent's text: a value in another field (a real report pasted again, with a value
+    # added to its summary) was typed by a person and must be blocked (review, 2026-09-29)
+    rest, pos = [], 0
+    for m in blocks:
+        body = m.group("body")
+        a, b = _result_span(body)
+        rest.append(prompt[pos:m.start("body") + a])
+        pos = m.start("body") + b
+    rest.append(prompt[pos:])
+    return not detect.scan("".join(rest))
 
 
 def user_prompt(payload: dict) -> dict:

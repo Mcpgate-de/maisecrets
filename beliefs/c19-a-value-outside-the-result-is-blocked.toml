@@ -6,5 +6,5 @@ runner = ["tests/test_agent_reports.py::AgentReportTests::test_a_value_added_out
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "    if detect.scan(rest):\n        return False\n"
-replace = "    pass\n"
+find = "    return not detect.scan(\"\".join(rest))\n"
+replace = "    return True\n"
