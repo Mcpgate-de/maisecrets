@@ -1,0 +1,80 @@
+# The CI of gitlab.com/Sprinterli/maisecrets-e2e: maisecrets end to end on GitLab-hosted Windows runners.
+# scripts/windows_e2e.py pushes a commit of this repository there with this file as its .gitlab-ci.yml;
+# nothing runs on a push to this repository. macOS and Linux run on our own machines.
+# Three shapes of a Windows machine, because Claude Code runs hook commands in Git Bash when it finds
+# one and in PowerShell otherwise (Windows 11 ships Windows PowerShell 5.1; PowerShell 7 is extra).
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+.windows:
+  tags: [saas-windows-medium-amd64]
+  timeout: 60m
+  variables:
+    ANTHROPIC_API_KEY: "sk-ant-dummy-for-the-fake-upstream-000000000000"
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+    CLAUDE_CODE_VERSION: "2.1.284"
+    PYTHONUTF8: "1"
+  before_script:
+    - |
+      choco install nodejs-lts -y --no-progress --limit-output | Out-Null
+      Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"; refreshenv
+      npm install --global --no-fund --no-audit "@anthropic-ai/claude-code@$env:CLAUDE_CODE_VERSION" | Out-Null
+      $env:PATH = "$(npm prefix -g);$env:PATH"
+      Write-Output "node $(node --version), $(python --version), claude $(claude --version)"
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - harness-out/
+
+.collect: &collect |
+  $dirs = Get-ChildItem $env:TEMP -Directory -Filter "maisecrets-h-*" -ErrorAction Ignore
+  foreach ($d in $dirs) {
+    $log = Join-Path $d.FullName "claude-debug.log"
+    if (Test-Path $log) {
+      Write-Output "===== $($d.Name)"
+      Select-String -Path $log -Pattern "Git Bash|Registered|Hook (SessionStart|UserPromptSubmit|PreToolUse|PostToolUse)[^:]*:[^ ]* \(.*\) (error|success)|shell" |
+        Select-Object -First 12 | ForEach-Object { $_.Line.Substring(0, [Math]::Min(240, $_.Line.Length)) }
+    }
+    New-Item -ItemType Directory -Force -Path "harness-out\$($d.Name)" | Out-Null
+    Copy-Item -Recurse -Force (Join-Path $d.FullName "*") "harness-out\$($d.Name)" -ErrorAction Ignore
+  }
+
+# no Git Bash, PowerShell 7 on the runner (the runner image has it)
+powershell_7:
+  extends: .windows
+  script:
+    - |
+      python -m unittest tests.test_guard tests.test_rehydration_matrix tests.test_invariant_store_reads
+      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      python harness/run.py
+      $rc = $LASTEXITCODE
+    - *collect
+    - exit $rc
+
+# no Git Bash and no PowerShell 7 on PATH: what a stock Windows 11 has
+powershell_5:
+  extends: .windows
+  script:
+    - |
+      $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'PowerShell\\7' }) -join ';'
+      Write-Output "pwsh on PATH: $([bool](Get-Command pwsh -ErrorAction Ignore))"
+      python harness/run.py
+      $rc = $LASTEXITCODE
+    - *collect
+    - exit $rc
+
+# with Git for Windows: Claude Code runs hooks in Git Bash
+git_bash:
+  extends: .windows
+  script:
+    - |
+      choco install git -y --no-progress --limit-output | Out-Null
+      $env:CLAUDE_CODE_GIT_BASH_PATH = "C:\Program Files\Git\bin\bash.exe"
+      Write-Output "git bash: $(Test-Path $env:CLAUDE_CODE_GIT_BASH_PATH)"
+      python harness/run.py
+      $rc = $LASTEXITCODE
+    - *collect
+    - exit $rc
