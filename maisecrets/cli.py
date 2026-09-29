@@ -167,12 +167,17 @@ def cmd_report(args: list[str]) -> int:
     return rc
 
 
+TEST_DATA_URL = "https://github.com/Mcpgate-de/maisecrets#test-data-that-maisecrets-leaves-alone"
+
+
 def _forget_the_false_positive(ev: dict) -> None:
     """A false positive stays in the store after the report: its fingerprint redacts the same text in
     every later tool result and, since 0.5.8, blocks every prompt that holds it; a detector fix does
     not clean it up (field report, 2026-09-28). The report names the stored value and the command
     that deletes it, and deletes nothing itself: the events are shared by all sessions, so "last" can
     be another session's real value, and a model can run this command too (Codex review, 2026-09-28)."""
+    # most false alarms are test data: the forms that are never a hit, for the next fixture (README)
+    print(f"Test data that maisecrets leaves alone: {TEST_DATA_URL}")
     keys = list(dict.fromkeys(h.get("key") for h in ev.get("hits", []) if h.get("key")))
     if keys:
         print("If this is not a secret, delete its stored value so it is not redacted or blocked again: "

@@ -110,6 +110,21 @@ class AdviceTests(unittest.TestCase):
                 self.assertEqual(scan(f"pass§word = {form}" if "." not in form else f"mail max@{form}"), [])
 
 
+    def test_the_report_of_a_false_alarm_links_the_section_that_exists(self):
+        import re as _re
+        from maisecrets import cli
+        heading = "Test data that maisecrets leaves alone"
+        self.assertIn(f"\n## {heading}\n", (ROOT / "README.md").read_text(encoding="utf-8"))
+        anchor = _re.sub(r"[^a-z0-9 -]", "", heading.lower()).replace(" ", "-")     # GitHub's heading anchor
+        self.assertTrue(cli.TEST_DATA_URL.endswith("#" + anchor), cli.TEST_DATA_URL)
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cli._forget_the_false_positive({"hits": [{"key": "SECRET_c1"}]})
+        self.assertIn(cli.TEST_DATA_URL, buf.getvalue())
+
+
 class HookTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):  # noqa: N802 - unittest hook
