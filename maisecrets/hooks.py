@@ -508,12 +508,18 @@ def user_prompt(payload: dict) -> dict:
 # text matching is a backstop, never the boundary (docs/THREAT-MODEL.md C8); each pattern is
 # named so a deny can say what it matched and the user can report a false positive
 _STORE_READ_PATTERNS: list[tuple[str, str]] = [
-    ("maisecrets get", r"(?<![\w.-])maisecrets(?:\.cli)?(?:\.py)?\s+get\b|(?<![\w-])cli\.py\s+get\b"),
+    # the launchers route `get` to the CLI too (review, 2026-09-29: `run.sh get` and `run.cmd get` passed)
+    ("maisecrets get", r"(?<![\w.-])maisecrets(?:\.cli)?(?:\.py)?\s+get\b|(?<![\w-])cli\.py\s+get\b"
+                       r"|(?<![\w-])(?:dispatch\.py|run\.sh|run\.cmd)[\"']?\s+get\b"),
     ("keychain read of the maisecrets service",
      r"security\s+find-generic-password[^\n]*maisecrets|security\s+dump-keychain"),
-    ("Credential Locker read", r"PasswordVault[^\n]*maisecrets|maisecrets[^\n]*PasswordVault"),
+    # listing every credential names no resource (review, 2026-09-29): the type itself is the read
+    ("Credential Locker read", r"PasswordVault[^\n]*maisecrets|maisecrets[^\n]*PasswordVault"
+                               r"|Windows\.Security\.Credentials\.PasswordVault"
+                               r"|PasswordVault[^\n]*Retrieve(?:All|Password)"),
     ("the vault files", r"vault\.enc\.json|vault\.json[^\n]*maisecrets|maisecrets[^\n]*vault\.json"),
-    ("the maisecrets home directory", r"(?i:\.maisecrets)(?![\w-])|MAISECRETS_HOME"),
+    # MAISEC~1: the 8.3 name Windows gives the default home (review, 2026-09-29)
+    ("the maisecrets home directory", r"(?i:\.maisecrets|maisec~\d)(?![\w-])|MAISECRETS_HOME"),
     ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"
                            r"|(?<![\w-])resolve\s+\S+\s+--grant\b|cmd_resolve|\.redeem\("),
     ("the ssh approval store", r"ssh-approvals|ssh_approval"),
@@ -533,7 +539,8 @@ def _store_read_match(command: str, windows_paths: bool = False) -> str | None:
     for d in _store_dir_spellings():
         # a home set by environment variable has no `.maisecrets` in its name (invariant I3, 2026-09-28)
         if windows_paths:
-            rx = r"[/\\]+".join(re.escape(p) for p in re.split(r"[/\\]+", d)) + r"(?![\w.-])"
+            # Win32 drops trailing dots of a path part: `<home>.\index.json` opens the home (review, 2026-09-29)
+            rx = r"\.*[/\\]+".join(re.escape(p) for p in re.split(r"[/\\]+", d)) + r"\.*(?![\w.-])"
             if re.search(rx, command, re.IGNORECASE):
                 return "the maisecrets home directory"
         elif re.search(re.escape(d) + r"(?![\w.-])", command):

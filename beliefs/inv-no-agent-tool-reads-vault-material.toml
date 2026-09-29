@@ -124,5 +124,5 @@ replace = "            if re.search(rx, command):"
 [[proof]]
 path = "a path next to the configured home in PowerShell"
 file = "maisecrets/hooks.py"
-find = 're.split(r"[/\\]+", d)) + r"(?![\w.-])"'
-replace = 're.split(r"[/\\]+", d))'
+find = 're.split(r"[/\\]+", d)) + r"\.*(?![\w.-])"'
+replace = 're.split(r"[/\\]+", d)) + r"\.*"'

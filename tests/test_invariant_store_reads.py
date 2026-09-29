@@ -254,6 +254,8 @@ class BashTests(unittest.TestCase):
             "keychain": "security find-generic-password -s maisecrets -w",
             "the delivery path": "cat /tmp/maisecrets-501/v-abc",
             "the environment variable": "cat $MAISECRETS_HOME/index.json",
+            "get through the launcher": 'bash "$CLAUDE_PLUGIN_ROOT/hooks/run.sh" ' + "get" + " SECRET_c1",
+            "get through dispatch": "python3 $CLAUDE_PLUGIN_ROOT/hooks/dispatch.py " + "get" + " SECRET_c1",
         }
         bad = [label for label, c in commands.items() if not deny(self.run_pre(c))]
         self.assertEqual(bad, [], "\n".join(bad))
@@ -292,6 +294,11 @@ class PowerShellTests(BashTests):
             "the environment variable": r"Get-ChildItem $env:MAISECRETS_HOME",
             "the guard script": r"python $env:USERPROFILE\.claude\maisecrets-guard.py --off",
             "the session id": "$env:CLAUDE_CODE_SESSION_ID = 'other'",
+            "a trailing dot on the home": "Get-Content " + h.replace("/", "\\") + ".\\index.json",
+            "the 8.3 name of the default home": r"type C:\Users\x\MAISEC~1\vault.json",
+            "every credential of the Locker": "$v = New-Object Windows.Security.Credentials.PasswordVault; "
+                                              "$v.RetrieveAll()",
+            "get through the Windows launcher": "& $env:CLAUDE_PLUGIN_ROOT\\hooks\\run.cmd " + "get" + " SECRET_c1",
         }
         bad = [label for label, c in commands.items() if not deny(self.run_pre(c))]
         self.assertEqual(bad, [], "\n".join(bad))

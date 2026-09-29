@@ -15,6 +15,8 @@ workflow:
     ANTHROPIC_API_KEY: "sk-ant-dummy-for-the-fake-upstream-000000000000"
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
     CLAUDE_CODE_VERSION: "2.1.284"
+    # npx fetches the MCP server of mcp_rehydrate on a cold runner: more than the 30 s default (measured)
+    MCP_TIMEOUT: "120000"
     PYTHONUTF8: "1"
   before_script:
     - |
@@ -22,6 +24,7 @@ workflow:
       Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"; refreshenv
       npm install --global --no-fund --no-audit "@anthropic-ai/claude-code@$env:CLAUDE_CODE_VERSION" | Out-Null
       $env:PATH = "$(npm prefix -g);$env:PATH"
+      npm cache add "@modelcontextprotocol/server-everything@2025.9.25" | Out-Null
       Write-Output "node $(node --version), $(python --version), claude $(claude --version)"
   artifacts:
     when: always
@@ -66,8 +69,11 @@ powershell_5:
   script:
     - |
       $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'PowerShell\\7' }) -join ';'
+      # $env:ProgramFiles alone did not reach the children (measured: python still saw C:\Program Files)
+      [Environment]::SetEnvironmentVariable("ProgramFiles", "C:\no-program-files", "Process")
       $env:ProgramFiles = "C:\no-program-files"
       Write-Output "pwsh on PATH: $([bool](Get-Command pwsh -ErrorAction Ignore))"
+      python -c "import os; print('ProgramFiles seen by a child:', os.environ.get('ProgramFiles'))"
       python harness/windows/shell_probe.py
       $probe = $LASTEXITCODE
       $env:MAISECRETS_HARNESS_SHELL_TOOL = "PowerShell"
