@@ -85,13 +85,20 @@ def _recently_trashed(claude: str) -> bool:
     trash = os.path.join(claude, "plugins", ".trash")
     now = time.time()
     try:
-        for entry in os.listdir(trash):
-            for name in os.listdir(os.path.join(trash, entry)):
-                p = os.path.join(trash, entry, name)
-                if name.startswith("maisecrets") and now - os.path.getmtime(p) < TRASH_WINDOW:
-                    return True
+        entries = os.listdir(trash)
     except OSError:
-        pass
+        return False
+    for entry in entries:
+        d = os.path.join(trash, entry)
+        try:
+            names = os.listdir(d)
+            # a move keeps a folder's mtime on APFS; the change time, and the new trash entry, say when
+            st = os.stat(d)
+            moved = max(st.st_mtime, st.st_ctime)
+        except OSError:
+            continue            # a plain file or a folder we cannot read: the next entry
+        if any(n.startswith("maisecrets") for n in names) and now - moved < TRASH_WINDOW:
+            return True
     return False
 
 
@@ -115,8 +122,12 @@ def expected(cwd: str = "") -> bool:
     # session for good (reviews, 2026-09-29). Another account falls through to its own synced folder.
     registered = cfg.get("accounts") if isinstance(cfg.get("accounts"), list) else [cfg.get("account")]
     if account and account in registered:
-        return (os.path.isfile(os.path.join(claude, "plugins", "synced", account, "maisecrets",
-                                            ".claude-plugin", "plugin.json")) or _recently_trashed(claude))
+        roots = cfg.get("roots") if isinstance(cfg.get("roots"), dict) else {}
+        folders = [roots[account]] if isinstance(roots.get(account), str) else []
+        # the folder this account's copy ran from (measured), then the layout Claude Code uses today
+        folders.append(os.path.join(claude, "plugins", "synced", account, "maisecrets"))
+        return (any(os.path.isfile(os.path.join(f, ".claude-plugin", "plugin.json")) for f in folders)
+                or _recently_trashed(claude))
     if account and os.path.isfile(os.path.join(claude, "plugins", "synced", account, "maisecrets",
                                                ".claude-plugin", "plugin.json")):
         return True

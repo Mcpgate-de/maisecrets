@@ -109,13 +109,20 @@ class ExpectedTests(_Env):
         Path(HOME, "guard.json").write_text(json.dumps({"expect": "synced", "accounts": ["org-1_acc-1"]}))
         self.account("org-1", "acc-1", synced=False)
         self.assertFalse(guard.expected(), "no synced folder and nothing in the trash: removed from the sync")
-        # an update moved the folder to the trash a moment ago: the guard expects maisecrets
-        trashed = self.claude / "plugins" / ".trash" / "1790000000000-1-abc" / "maisecrets"
-        trashed.mkdir(parents=True)
+        # an update moved the folder to the trash a moment ago: the guard expects maisecrets. A move keeps the
+        # folder's old mtime (APFS), so the folder is made old first and then moved, as Claude Code moves it
+        trash = self.claude / "plugins" / ".trash"
+        trash.mkdir(parents=True)
+        (trash / "a-plain-file").write_text("x")              # one file in the trash must not stop the scan
+        src = self.claude / "plugins" / "maisecrets-old"
+        src.mkdir()
+        old = time.time() - guard.TRASH_WINDOW - 3600
+        os.utime(src, (old, old))
+        (trash / "1790000000000-1-abc").mkdir()
+        os.rename(src, trash / "1790000000000-1-abc" / "maisecrets")
         self.assertTrue(guard.expected())
-        old = time.time() - guard.TRASH_WINDOW - 60
-        os.utime(trashed, (old, old))
-        self.assertFalse(guard.expected(), "long gone: the organisation removed it")
+        with mock.patch.object(guard.time, "time", return_value=time.time() + guard.TRASH_WINDOW + 60):
+            self.assertFalse(guard.expected(), "long gone: the organisation removed it")
         # the synced folder is there (an update rewrote it in place): expected
         self.account("org-1", "acc-1", synced=True)
         self.assertTrue(guard.expected())
@@ -286,10 +293,14 @@ class SyncedInstallTests(_Env):
         self.assertIn("registered its guard", msg)
         written = json.loads(Path(HOME, "guard.json").read_text())
         self.assertEqual((written["accounts"], written["root"]), (["org-1_acc-1"], str(copy.resolve())))
+        self.assertEqual(written["roots"], {"org-1_acc-1": str(copy.resolve())}, "the measured folder per account")
+        self.assertTrue(guard.expected(), "the measured folder counts, wherever Claude Code put it")
         # a second profile on the same maisecrets home adds its account and keeps the first one
         self.account("org-1", "acc-2", synced=False)
         self.start(copy)
         self.assertEqual(json.loads(Path(HOME, "guard.json").read_text())["accounts"], ["org-1_acc-1", "org-1_acc-2"])
+        roots = json.loads(Path(HOME, "guard.json").read_text())["roots"]
+        self.assertEqual(sorted(roots), ["org-1_acc-1", "org-1_acc-2"])
         self.assertEqual(script.read_bytes(), GUARD.read_bytes(), "the stale script was replaced")
         self.assertEqual(self.guard_entries(), 3, "UserPromptSubmit, PreToolUse, PostToolUse")
         self.assertEqual(json.loads((self.claude / "settings.json").read_text())["model"], "x")

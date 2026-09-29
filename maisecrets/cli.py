@@ -518,13 +518,19 @@ def install_guard(expect: str = "synced", root: str = "", keep_mode: bool = Fals
     # keep theirs (review, 2026-09-29: the last session start overwrote the other one)
     try:
         before = json.loads((HOME / "guard.json").read_text(encoding="utf-8"))
-        accounts = [a for a in before.get("accounts", []) if isinstance(a, str)] if isinstance(before, dict) else []
     except (OSError, ValueError):
-        accounts = []
+        before = {}
+    before = before if isinstance(before, dict) else {}
+    accounts = [a for a in before.get("accounts") or [] if isinstance(a, str)]
+    roots = {k: v for k, v in (before.get("roots") or {}).items() if isinstance(v, str)} \
+        if isinstance(before.get("roots"), dict) else {}
     account = _active_account() if root else ""
     if account and account not in accounts:
         accounts.append(account)
-    data = {"expect": expect, **({"root": root} if root else {}), **({"accounts": accounts} if accounts else {})}
+    if account:
+        roots[account] = root               # the measured folder of this account's synced copy
+    data = {"expect": expect, **({"root": root} if root else {}), **({"accounts": accounts} if accounts else {}),
+            **({"roots": roots} if roots else {})}
     (HOME / "guard.json").write_text(json.dumps(data) + "\n", encoding="utf-8")
     (HOME / ".guard-removed").unlink(missing_ok=True)
     done.append(f"maisecrets now writes the heartbeat the guard waits for ({HOME / 'alive'})")
