@@ -44,8 +44,8 @@ CLIENTS = {"claude": CLAUDE, "codex": {**CODEX, "model": "m"}}
 
 # The tool population comes from tests/client_tools.json, which the harness checks against the tool
 # list of the real client on every run: a tool the client adds and nobody classified fails there, so
-# this module no longer depends on a list written by hand. Codex: its shell arrives as Bash;
-# `apply_patch` is "unmeasured" (the Codex design is open, docs/THREAT-MODEL.md C5).
+# this module no longer depends on a list written by hand. Codex: its shell arrives as Bash; its file
+# edits arrive as apply_patch, whose headers name the paths (tests/client_payloads/codex-apply-patch.json).
 INVENTORY = json.loads((ROOT / "tests" / "client_tools.json").read_text(encoding="utf-8"))
 _CLAUDE_TOOLS = INVENTORY["claude-code"]["tools"]
 READERS = {name: t["field"] for name, t in _CLAUDE_TOOLS.items() if t["class"] in ("reads-path", "edits-path")}
@@ -276,6 +276,54 @@ class PopulationTests(unittest.TestCase):
         self.assertEqual(classes - {"reads-path", "edits-path", "shell", "mcp-resource", "no-path"}, set())
         self.assertTrue(all(t.get("why") for t in _CLAUDE_TOOLS.values() if t["class"] == "no-path"),
                         "a tool without a guard must say why it needs none")
+
+    def test_a_codex_patch_never_touches_the_store(self):
+        codex_tools = INVENTORY["codex"]["tools"]
+        edits = sorted(n for n, t in codex_tools.items() if t["class"] == "edits-path")
+        self.assertEqual(edits, ["apply_patch"], "a Codex tool that edits a path needs its own case here")
+        home = str(HOME)
+        for header in ("Add File", "Update File", "Delete File"):
+            spellings = [home + "/config.json", home + "/../" + Path(home).name + "/x", "~/.maisecrets/config.json"]
+            if __import__("platform").system() in ("Darwin", "Windows"):   # case-insensitive file systems
+                spellings.append(home.upper() + "/config.json")
+            for path in spellings:
+                patch = f"*** Begin Patch\n*** {header}: {path}\n+x\n*** End Patch"
+                with self.subTest(header=header, path=path):
+                    self.assertTrue(deny(pre("apply_patch", {"command": patch}, "/tmp", "codex")), patch)
+        # indented headers: codex-cli 0.158.0 trims them and applies the patch (review, 2026-09-29)
+        # and every other whitespace Codex trims (NBSP, \f, \v, \r, U+2003, U+3000: measured by review round 2)
+        for indent in (" ", "\t", "   ", "\u00a0", "\x0c", "\x0b", "\r", "\u2003", "\u3000", "\x85", "\u2028"):
+            patch = f"*** Begin Patch\n{indent}*** Add File: {home}/config.json\n+x\n*** End Patch"
+            with self.subTest(indent=repr(indent)):
+                self.assertTrue(deny(pre("apply_patch", {"command": patch}, "/tmp", "codex")), patch)
+        # the heredoc form Codex also applies is a patch like any other
+        heredoc = f"<<'EOF'\n*** Begin Patch\n*** Add File: {home}/config.json\n+x\n*** End Patch\nEOF"
+        self.assertTrue(deny(pre("apply_patch", {"command": heredoc}, "/tmp", "codex")))
+        beside_heredoc = "<<'EOF'\n*** Begin Patch\n*** Add File: notes.txt\n+x\n*** End Patch\nEOF"
+        self.assertFalse(deny(pre("apply_patch", {"command": beside_heredoc}, "/tmp", "codex")),
+                         "a heredoc patch next to the store is a normal edit")
+        # nor rewrite the guard script with a file tool
+        guard_script = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "maisecrets-guard.py")
+        for tool, ti in (("Write", {"file_path": guard_script, "content": "print('{}')"}),
+                         ("Edit", {"file_path": guard_script, "old_string": "a", "new_string": "b"})):
+            with self.subTest(tool=tool):
+                self.assertTrue(deny(pre(tool, ti, "/tmp")), tool)
+        patch = f"*** Begin Patch\n*** Update File: {guard_script}\n@@\n-a\n+b\n*** End Patch"
+        self.assertTrue(deny(pre("apply_patch", {"command": patch}, "/tmp", "codex")))
+        # the agent cannot switch the guard off: its --off is for the person at a terminal
+        for cmd in ("python3 ~/.claude/maisecrets-guard.py --off", "cat ~/.maisecrets/guard.json"):
+            with self.subTest(cmd=cmd):
+                self.assertTrue(deny(pre("Bash", {"command": cmd}, "/tmp")), cmd)
+        # no patch text: nothing names the paths, so nothing is resolved or allowed
+        for ti in ({}, {"patch": f"*** Begin Patch\n*** Add File: {home}/x\n+x\n*** End Patch"}, {"command": 5}):
+            with self.subTest(tool_input=str(ti)[:40]):
+                self.assertTrue(deny(pre("apply_patch", ti, "/tmp", "codex")))
+        # a move into the store is a write into it
+        moved = f"*** Begin Patch\n*** Update File: a.txt\n*** Move to: {home}/a.txt\n@@\n-x\n+y\n*** End Patch"
+        self.assertTrue(deny(pre("apply_patch", {"command": moved}, "/tmp", "codex")))
+        # the other side: a patch next to the store passes
+        beside = "*** Begin Patch\n*** Add File: " + home + "-other/notes.txt\n+x\n*** End Patch"
+        self.assertFalse(deny(pre("apply_patch", {"command": beside}, "/tmp", "codex")))
 
     def test_the_hook_code_knows_no_reading_tool_this_module_does_not(self):
         # a tool name the hook code handles by name is a tool that reads or writes: it must be here

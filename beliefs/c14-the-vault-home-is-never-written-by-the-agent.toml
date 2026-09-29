@@ -6,5 +6,5 @@ runner = ["tests/test_gates.py::ContextTests::test_file_tools_resolve_like_mcp_a
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "    if inside or \".maisecrets\" in path.lower():\n"
-replace = "    if False:\n"
+find = "        if _in_the_home(path, cwd):\n"
+replace = "        if False:\n"

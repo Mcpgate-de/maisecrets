@@ -323,6 +323,7 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
             ([], "", _ALL2)],
     "put": [(["--type=SECRET"], "PUTVALUE", _STORE), (["--clipboard"], "", _STORE), ([], "", _ALL2)],
     "shortcut": [([], "", _ALL0), (["--remove"], "", _ALL0)],
+    "guard": [([], "", _ALL0), (["install"], "", _ALL0), (["status"], "", _ALL0), (["remove"], "", _ALL0)],
     "pending": [([], "", _ALL0)],
 }
 
@@ -818,6 +819,34 @@ class StateMatrixTests(unittest.TestCase):
         self.assertIn("ms.md", r.stdout)
         self.assertFalse((commands / "ms.md").exists())
         self.assertEqual((sb.home / ".shortcut").read_text().strip(), "removed")
+
+    def test_the_guard_installs_beside_the_settings_and_keeps_the_users_own_hooks(self):
+        sb = base_state("empty").copy()
+        self.addCleanup(sb.remove)
+        claude = sb.user_home / ".claude"
+        claude.mkdir(parents=True, exist_ok=True)
+        own = {"matcher": "Bash", "hooks": [{"type": "command", "command": "/usr/local/bin/my-own-hook"}]}
+        (claude / "settings.json").write_text(json.dumps({"model": "x", "hooks": {"PreToolUse": [own]}}))
+        for _ in range(2):                                   # installing twice leaves one entry per event
+            r = sb.run("guard", "install")
+            self.assertEqual(r.returncode, 0, r.stderr)
+        settings = json.loads((claude / "settings.json").read_text())
+        self.assertEqual(settings["model"], "x", "only the hooks change")
+        plugin = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+        for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
+            ours = [e for e in settings["hooks"][event] if "maisecrets-guard.py" in e["hooks"][0]["command"]]
+            self.assertEqual(len(ours), 1, event)
+            self.assertEqual(ours[0].get("matcher"), plugin[event][0].get("matcher"), f"{event}: the plugin's matcher")
+        self.assertIn(own, settings["hooks"]["PreToolUse"], "the user's own hook stays")
+        self.assertTrue((claude / "maisecrets-guard.py").exists())
+        self.assertEqual(json.loads((sb.home / "guard.json").read_text()), {"expect": "synced"})
+        self.assertTrue(list(claude.glob("settings.json.bak-maisecrets-*")), "a backup before the change")
+        self.assertIn("registered in", sb.run("guard", "status").stdout)
+        r = sb.run("guard", "remove")
+        settings = json.loads((claude / "settings.json").read_text())
+        self.assertEqual(settings["hooks"], {"PreToolUse": [own]}, "remove takes out ours and only ours")
+        self.assertFalse((claude / "maisecrets-guard.py").exists())
+        self.assertFalse((sb.home / "guard.json").exists(), "no guard, no heartbeat")
 
     def test_pending_hands_out_the_blocked_prompt_once(self):
         sb, r = self._run("live", "pending")

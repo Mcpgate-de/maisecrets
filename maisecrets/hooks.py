@@ -517,6 +517,8 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
     ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"
                            r"|(?<![\w-])resolve\s+\S+\s+--grant\b|cmd_resolve|\.redeem\("),
     ("the ssh approval store", r"ssh-approvals|ssh_approval"),
+    # the guard outside the plugin folder: `--off` in its refusal is for the person, not the agent
+    ("the maisecrets guard", r"maisecrets-guard\.py"),     # guard.json sits in the home, covered above
     ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\](?:v-|sealed)|__ms_\d+\b"
                               r"|XDG_RUNTIME_DIR[^\n]*maisecrets"),
 ]
@@ -1527,7 +1529,8 @@ def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: st
 
 
 _ARGS_END = "MAISECRETS_ARGS_END"
-_ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" (?:audit|forget|put --clipboard|report|shortcut) "
+_ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" "
+                           r"(?:audit|forget|guard|put --clipboard|report|shortcut) "
                            r"--args-stdin <<'" + _ARGS_END + r"'\n(.*)\n" + _ARGS_END + r"\n?\Z", re.S)
 
 
@@ -2027,16 +2030,38 @@ def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
                  "a false positive, /maisecrets:report records it.")
 
 
-def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:
-    """Write/Edit/MultiEdit/NotebookEdit: a placeholder in the content is resolved like an MCP
-    argument (the value must be inline; the client's permission prompt shows the diff with it),
-    under the session rule, the limiter and an audit line that names the file. Writing a value
-    into a file on purpose is what the plugin exists for (user decision, 2026-09-26); the first
-    version refused it and sent the model to a Bash redirect. The maisecrets home is off limits
-    for the agent: a config written by an injected instruction could lift every cap or switch
-    the store to plaintext (review, 2026-09-26)."""
+# the file headers of a Codex patch: Add, Update and Delete name a file, Move to its new name
+_PATCH_MARKERS = ("Add File", "Update File", "Delete File", "Move to")
+
+
+def _patch_headers(patch: str) -> list[tuple[str, str]]:
+    """(the header line, the path it names) of a Codex patch. A line is a header by its stripped form:
+    codex-cli 0.158.0 trims all whitespace, Unicode included (NBSP, \\f, U+3000), before it reads a
+    marker; a regex for spaces and tabs missed the rest (reviews, 2026-09-29)."""
+    out = []
+    for line in patch.split("\n"):
+        t = line.strip()
+        for marker in _PATCH_MARKERS:
+            if t.startswith(f"*** {marker}:"):
+                out.append((line, t[len(marker) + 5:].strip()))
+    return out
+
+
+def _patch_text_ok(patch: object) -> bool:
+    """A Codex patch: `*** Begin Patch` first, also inside the heredoc form Codex accepts."""
+    if not isinstance(patch, str):
+        return False
+    lines = [ln.strip() for ln in patch.strip().split("\n")]
+    if lines and re.fullmatch(r"<<\s*['\"]?\w+['\"]?", lines[0]):
+        lines = lines[1:]
+    return bool(lines) and lines[0] == "*** Begin Patch"
+
+
+def _in_the_home(path: str, cwd: str) -> bool:
+    """A path under the maisecrets home or the value run directory, by any spelling or link."""
     from .vault import HOME
-    path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
+    if not path:
+        return False
     try:
         expanded = os.path.expanduser(path)
         if expanded and not os.path.isabs(expanded) and cwd:
@@ -2045,20 +2070,56 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         home = os.path.realpath(str(HOME))
         if platform.system() in ("Darwin", "Windows"):   # case-insensitive file systems (APFS, NTFS)
             real, home = real.lower(), home.lower()
-        inside = bool(path) and (real == home or real.startswith(home + os.sep))
+        inside = real == home or real.startswith(home + os.sep)
         # the run directory and a hard link are known by identity only (invariant I3, 2026-09-28)
         inside = inside or _touches_store(path, cwd)
+        # the guard script outside the plugin folder: an agent that rewrites it switches the guard off
+        guard = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(os.path.expanduser("~"), ".claude")),
+                             "maisecrets-guard.py")
+        inside = inside or os.path.realpath(expanded) == os.path.realpath(guard)
     except (OSError, ValueError):
         inside = False
-    if inside or ".maisecrets" in path.lower():
-        return _deny(f"maisecrets: {tool} on {path} is refused; the maisecrets home is changed by the human "
-                     "only. Nothing was written. Tell the user what you wanted to change there.")
+    return inside or ".maisecrets" in path.lower() or "maisecrets-guard.py" in path.lower()
+
+
+def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:
+    """Write/Edit/MultiEdit/NotebookEdit: a placeholder in the content is resolved like an MCP
+    argument (the value must be inline; the client's permission prompt shows the diff with it),
+    under the session rule, the limiter and an audit line that names the file. Writing a value
+    into a file on purpose is what the plugin exists for (user decision, 2026-09-26); the first
+    version refused it and sent the model to a Bash redirect. The maisecrets home is off limits
+    for the agent: a config written by an injected instruction could lift every cap or switch
+    the store to plaintext (review, 2026-09-26)."""
+    if tool == "apply_patch":
+        # Codex sends every file edit as one patch in `command` (measured on codex-cli 0.158.0: the
+        # matcher aliases Write and Edit, the payload says apply_patch). Each header names a path;
+        # the value goes into the content lines only, never into a file name
+        patch = tool_input.get("command")
+        if not _patch_text_ok(patch):
+            # without the patch text nothing names the paths: a placeholder elsewhere would resolve
+            # unchecked (review, 2026-09-29)
+            return _deny("maisecrets: this apply_patch call carries no patch in `command`. Nothing was written.")
+        headers = _patch_headers(patch)
+        paths = [path for _line, path in headers]
+        in_header = [k for line, _path in headers for k, _a, _b in find_refs(line)]
+        if in_header:
+            return _deny(f"maisecrets: ⟦{in_header[0]}⟧ is in a file name of the patch, where it is not resolved. "
+                         "Nothing was written. Put the placeholder into the content, not into a path.")
+    else:
+        paths = [str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")]
+    for path in paths:
+        if _in_the_home(path, cwd):
+            return _deny(f"maisecrets: {tool} on {path} is refused; the maisecrets home is changed by the human "
+                         "only. Nothing was written. Tell the user what you wanted to change there.")
+    path = ", ".join(paths)
     found: list[str] = []
 
     def collect(v: str) -> str:
         found.extend(k for k, _a, _b in find_refs(v))
         return v
-    _walk_strings(tool_input, collect)
+    # a Codex patch resolves in its text only; another field keeps a placeholder as text
+    target = {"command": tool_input["command"]} if tool == "apply_patch" else tool_input
+    _walk_strings(target, collect)
     if not found:
         return {}
     names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found))
@@ -2091,9 +2152,48 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         # the client records this hook's updatedInput, values included, in the transcript
         _scrub_transcript_later(payload.get("transcript_path", ""), list(values.values()),
                                 [f"⟦{k}⟧" for k in values])
-    return _rehydrated(payload, cfg, "file", _walk_strings(tool_input, substitute),
+    if tool == "apply_patch":
+        rewritten, why = _resolve_patch(tool_input["command"], values)
+        if rewritten is None:
+            return _deny(f"maisecrets: {names} cannot go into this patch: {why}. Nothing was written. "
+                         "Put the placeholder into a + line of the file content, or write the file with Bash "
+                         "(printf '%s' ⟦KEY⟧ > file).")
+        new_input = {**tool_input, "command": rewritten}
+    else:
+        new_input = {**tool_input, **_walk_strings(target, substitute)}
+    return _rehydrated(payload, cfg, "file", new_input,
                        f"maisecrets: {tool} writes the real value of {names} into {path}. "
                        "Check the file and the value before you allow it.")
+
+
+def _resolve_patch(patch: str, values: dict) -> tuple:
+    """The patch with each placeholder replaced by its value, line by line. A value with a line break
+    would otherwise start new patch lines: `\n*** Add File: …` in a value became an operation the path
+    check never saw (Codex review, 2026-09-29). Each further line of a value gets the prefix of the line
+    it sits in (+, - or a space), so a multi-line key lands in the file as it is; a placeholder outside
+    such a line, and a value with a carriage return (the patch format cannot carry it), are refused.
+    The rewritten patch must name exactly the files the checked one named. Returns (patch, None) or
+    (None, why)."""
+    out = []
+    for line in patch.split("\n"):
+        refs = find_refs(line)
+        if not refs:
+            out.append(line)
+            continue
+        prefix = line[:1]
+        if prefix not in ("+", "-", " "):
+            return None, "the placeholder is not in a content line of the patch"
+        new = line
+        for key, start, end in sorted(refs, key=lambda r: r[1], reverse=True):
+            value = values[key]
+            if "\r" in value:
+                return None, "the value holds a carriage return, which a patch cannot carry"
+            new = new[:start] + ("\n" + prefix).join(value.split("\n")) + new[end:]
+        out.append(new)
+    rewritten = "\n".join(out)
+    if _patch_headers(rewritten) != _patch_headers(patch):
+        return None, "the value would change which files the patch names"
+    return rewritten, None
 
 
 def pre_tool(payload: dict) -> dict:
@@ -2108,7 +2208,7 @@ def pre_tool(payload: dict) -> dict:
             return refused
         if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS:
             return {}
-    if tool in _FILE_TOOLS:
+    if tool in _FILE_TOOLS or tool == "apply_patch":
         return _pre_file_tool(payload, cfg, tool, tool_input, str(payload.get("cwd") or ""))
     if tool.startswith("mcp__"):
         # Gateway servers too: the deposit path (gateway resolves ⟦REF⟧ itself, PROTOCOL §4) is not
@@ -2513,6 +2613,47 @@ def _run_log(event: str, payload: dict, how: str, decision: str, ms: int) -> Non
         pass
 
 
+def _from_a_synced_folder() -> bool:
+    """maisecrets runs from a folder the claude.ai organisation sync writes (plugins/synced/…), the one
+    install whose update can leave a session without hooks. There the guard may come from the
+    organisation's managed settings, which no local file announces, so the heartbeat is always on."""
+    root = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
+    return f"{os.sep}plugins{os.sep}synced{os.sep}" in root
+
+
+def _heartbeat(event: str, payload: dict, done: bool = False) -> None:
+    """Tell the guard (hooks/guard.py, installed outside the plugin folder) that maisecrets runs for
+    this call: an empty file named by session, event and the call's id. Only when the guard is
+    installed, and only for Claude Code, whose folder swap it watches. Never raises: a heartbeat
+    that cannot be written makes the guard refuse, which is the safe side."""
+    import hashlib
+    from .vault import HOME
+    if event not in ("user-prompt", "pre-tool", "post-tool") or client_of(payload) != "claude":
+        return
+    if not ((HOME / "guard.json").exists() or _from_a_synced_folder()):
+        return
+    ident = payload.get("prompt_id") if event == "user-prompt" else payload.get("tool_use_id")
+    session = payload.get("session_id")
+    if not ident or not session:
+        return
+    try:
+        d = HOME / "alive"
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        name = hashlib.sha256(f"{session}\0{event}\0{ident}".encode()).hexdigest()[:32]
+        # ".s" when the hook starts, the bare name once it has answered: the guard lets a call pass only on
+        # the answer, so a hook that dies after it started is refused (Codex review, 2026-09-29)
+        with open(d / (name if done else name + ".s"), "w", encoding="utf-8"):
+            pass
+        now = time.time()
+        for n in os.listdir(d):
+            # a heartbeat whose guard never came for it (the guard removed, a matcher that differs)
+            p = d / n
+            if now - p.stat().st_mtime > 600:
+                p.unlink()
+    except OSError:
+        pass
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[1] not in HANDLERS:
         sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|session-start\n")
@@ -2530,6 +2671,7 @@ def main(argv: list[str]) -> int:
         # exit 2 before one (Codex review, 2026-09-28)
         _out(_fail_closed(event, {}, "got a payload that is not JSON."))
         return 0
+    _heartbeat(event, payload)
     import threading
     started = time.time()
     lock = threading.Lock()
@@ -2543,6 +2685,7 @@ def main(argv: list[str]) -> int:
                 return
             answered["v"] = True
             _out(obj)
+            _heartbeat(event, payload, done=True)
         ms = int((time.time() - started) * 1000)
         decision = _decision_of(event, obj)
         _debug(f"{event}: {how} {client_of(payload)} {ms}ms {decision}")

@@ -1,0 +1,10 @@
+# c13-a-hook-that-never-answered-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-a-hook-that-never-answered-is-refused"
+control = "C13"
+statement = "A maisecrets hook that started but never answered (a fatal error, a killed process) leaves only its start mark, and the guard refuses the call once the answer wait is over."
+runner = ["tests/test_guard.py::DecisionTests::test_a_hook_that_started_and_never_answered_is_refused"]
+
+[proof]
+file = "hooks/guard.py"
+find = "        if os.path.exists(done):\n"
+replace = "        if os.path.exists(done) or os.path.exists(started):\n"

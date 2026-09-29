@@ -46,6 +46,20 @@ SCENARIOS = {
         "expect_text": "reload-plugins",
         "known_gap": "anthropics/claude-code#97847",
     },
+    # the same folder swap with the guard installed outside the plugin folder (hooks/guard.py, run from the
+    # checkout, not from the copy that moves): maisecrets runs no hook, so no heartbeat comes, and the
+    # guard denies the tool call and names /reload-plugins. The command must not run
+    "plugin_folder_moved_guarded": {
+        "prompt": "Run the check script.",
+        "plugin_copy": True,
+        "guard": True,
+        "turns": [{"tool": "Bash", "input": {"command": "echo ran > {cwd}/ran.txt"},
+                   "before": {"rename": ["{plugin}", "{plugin}.moved"]}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_no_file": "ran.txt",
+        "expect_text": "maisecrets did not run for this call",
+    },
     # the typed prompt carries a secret: must be blocked, zero requests
     "prompt_secret": {
         "prompt": f"Please check the token {MARK} in CI",
@@ -113,6 +127,21 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_file": ("used.txt", f"got:{MARK}"),
+    },
+    # a healthy session with the guard: maisecrets writes a heartbeat for every call, so the guard lets the
+    # prompt, the rewrite and the result through, and the value arrives as without it
+    "bash_rehydrate_guarded": {
+        "prompt": "use the stored token ⟦SECRET_c1⟧",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "guard": True,
+        "turns": [
+            {"tool": "Bash", "input": {"command": "printf 'got:%s' '⟦SECRET_c1⟧' > used.txt; cat used.txt"}},
+            {"text": "done"},
+        ],
+        "expect_requests": 2,
+        "expect_placeholders": ["⟦SECRET_c1⟧"],
+        "expect_file": ("used.txt", f"got:{MARK}"),
+        "expect_no_text": "maisecrets did not run for this call",
     },
     # a value with quotes, $( and spaces, inside single quotes: it must arrive byte for byte
     # (no splice into shell syntax) and come back redacted although it has no known shape
@@ -244,10 +273,28 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     # the checkout under test must be the only maisecrets: a copy synced from the developer's
     # claude.ai account has the same name and wins over --plugin-dir (the harness ran the synced
     # release instead of the working tree for an afternoon, 2026-09-26)
-    settings.write_text(json.dumps({
-        "enabledPlugins": {"maisecrets@synced": False},
-        "hooks": {ev: [{"hooks": [{"type": "command", "command": dump_cmd}]}]
-                  for ev in ("UserPromptSubmit", "PreToolUse", "PostToolUse")}}))
+    hooks_cfg = {ev: [{"hooks": [{"type": "command", "command": dump_cmd}]}]
+                 for ev in ("UserPromptSubmit", "PreToolUse", "PostToolUse")}
+    if sc.get("guard"):
+        # registered as `maisecrets guard install` registers it: the plugin's own matchers
+        plugin_hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+        guard_cmd = f"{sys.executable} \"{ROOT / 'hooks' / 'guard.py'}\""
+        for ev in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
+            for entry in plugin_hooks[ev]:
+                g = {"hooks": [{"type": "command", "command": guard_cmd, "timeout": 15}]}
+                hooks_cfg[ev].append({"matcher": entry["matcher"], **g} if entry.get("matcher") else g)
+        # the production rule: the account the synced copy registered under must be the one Claude Code runs
+        # as. Its ids come from the account file the real client uses; without one (CI) the rule is "always"
+        try:
+            acc = json.loads((Path.home() / ".claude.json").read_text()).get("oauthAccount") or {}
+            account = f"{acc['organizationUuid']}_{acc['accountUuid']}"
+        except (OSError, ValueError, KeyError, TypeError):
+            account = ""
+        (home / "guard.json").write_text(json.dumps({"expect": "synced", "accounts": [account]} if account
+                                                    else {"expect": "always"}))
+        if not account:
+            print(f"     ~ {name}: no account file, the guard runs with expect=always")
+    settings.write_text(json.dumps({"enabledPlugins": {"maisecrets@synced": False}, "hooks": hooks_cfg}))
     srv = start_server(turns, out)
     try:
         debug_log = work / "claude-debug.log"
