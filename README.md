@@ -199,7 +199,9 @@ session and run `codex resume`.
   plugin folder (`~/.claude/maisecrets-guard.py`). Every maisecrets hook writes a
   heartbeat for its call once it has answered; when none comes (maisecrets did not
   run, or started and died), the guard blocks the prompt, denies
-  the tool call or withholds the result, and names `/reload-plugins`. It stays
+  the tool call or withholds the result. Without a sign of an update it asks to
+  run the call again first, so an agent that works alone goes on; after an update
+  it names `/reload-plugins` and the restart command. It stays
   silent for an account without maisecrets, for a plugin you switched off, and
   for Codex. Measured with the real client: `plugin_folder_moved_guarded` (the
   command does not run) and `bash_rehydrate_guarded` (a healthy session passes).

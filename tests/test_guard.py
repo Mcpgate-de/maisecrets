@@ -261,6 +261,31 @@ class DecisionTests(_Env):
             out = guard.decide(PAYLOADS["PreToolUse"], wait=0.2)
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
+    def test_the_refusal_asks_for_a_retry_first_unless_an_update_is_seen(self):
+        # a busy computer delayed maisecrets once and the next call went through; "exit this session" stopped an
+        # autonomous run for a person (2026-09-29). Only a folder in the trash is a sign of an update
+        self.installed("always")
+        for trashed, first in ((False, "Run it again. If every call fails this way"),
+                               (True, "a plugin update replaced its folder")):
+            with self.subTest(trashed=trashed), mock.patch.object(guard, "_recently_trashed", return_value=trashed):
+                reason = _reason(guard.decide(PAYLOADS["PreToolUse"], wait=0.2))
+                self.assertIn(first, reason)
+                self.assertIn(f"claude --resume {PAYLOADS['PreToolUse']['session_id']}", reason)
+                self.assertEqual("Run it again" in reason, not trashed)
+
+    def test_a_hook_that_started_is_no_update_and_asks_for_a_retry_only(self):
+        self.installed("always")
+        for name in ("PreToolUse", "PostToolUse"):
+            with self.subTest(name):
+                hooks._heartbeat(EVENT[name], PAYLOADS[name])
+                with mock.patch.dict(guard.ANSWER_WAIT, {name: 0.2}), \
+                        mock.patch.object(guard, "_recently_trashed", return_value=True):
+                    reason = _reason(guard.decide(PAYLOADS[name], wait=0.1))
+                self.assertIn("started for this call but did not answer in time", reason)
+                self.assertNotIn("claude --resume", reason, "maisecrets is there: no restart helps")
+                # after a tool the call ran: running it again would repeat it
+                self.assertEqual("Run it again" in reason, name == "PreToolUse")
+
     def test_the_guard_waits_as_long_as_maisecrets_may_take(self):
         from maisecrets import cli
         for event, timeout in cli.GUARD_TIMEOUTS.items():

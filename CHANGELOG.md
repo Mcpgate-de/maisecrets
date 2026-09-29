@@ -64,6 +64,12 @@
   else; its placeholder still works. A value with a digit or a symbol is still found everywhere.
   Words that an older version stored are marked at the next session start.
 
+- **A busy computer no longer ends a session.** When maisecrets answered a call too late, the guard
+  said to exit the session and resume it, and an agent that worked on its own stopped there for a
+  person. The next call would have worked. The guard now says to run the call again, and names the
+  restart only as the second step; when maisecrets started and was only slow, it names no restart.
+  After a plugin update, which the guard sees in the trash, it asks for the restart as before.
+
 ## [0.5.14] - 2026-09-29
 
 - **The restart command stands on a line of its own** in the refusal of the guard, so it is easy to
