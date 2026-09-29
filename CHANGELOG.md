@@ -2,10 +2,20 @@
 
 ## Unreleased
 
+## [0.5.14] - 2026-09-29
+
 - **The restart command stands on a line of its own** in the refusal of the guard, so it is easy to
   see, and a triple click copies just that line. The refusal now says the command *was* copied to
   your clipboard: a terminal with copy-on-select (the default in Ghostty) replaces the clipboard as
   soon as you select text, also text in the refusal itself.
+
+### Fixes
+
+- the restart command stands on its own line; the refusal says it was copied (3fef4b4)
+
+### Other
+
+- Merge branch 'fix/guard-message-layout' into 'main' (0d17b8b)
 
 ## [0.5.13] - 2026-09-29
 
