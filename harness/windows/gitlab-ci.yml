@@ -63,14 +63,17 @@ powershell_7:
     - exit $rc
 
 # no Git Bash and no PowerShell 7: what a stock Windows 11 has. Claude Code looks for pwsh on PATH and
-# then at %ProgramFiles%\PowerShell\7\pwsh.exe (2.1.284), so both are hidden from the processes below;
-# only then does it fall back to Windows PowerShell 5.1 (measured: a PATH change alone left it on 7)
+# then at %ProgramFiles%\PowerShell\7\pwsh.exe (2.1.284), so both must be gone; only then does it fall
+# back to Windows PowerShell 5.1 (measured: a PATH change alone, and a ProgramFiles change, left it on 7)
 # The probe must print "Desktop 5.1" for the settings hook; otherwise this job did not test 5.1
 powershell_5:
   extends: .windows
   script:
     - |
-      # a PATH or ProgramFiles change in this pwsh 7 does not reach the children: harness/windows/without_pwsh7.py
+      # Windows sets ProgramFiles in every new process, so only a folder that is gone hides pwsh 7
+      Write-Output "the job runs in: $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)"
+      Rename-Item "C:\Program Files\PowerShell\7" "7-hidden-by-the-job" -ErrorAction Continue
+      Write-Output "pwsh 7 folder present: $(Test-Path 'C:\Program Files\PowerShell\7\pwsh.exe')"
       $env:MAISECRETS_EXPECT_HOOK_SHELL = "Desktop 5.1"
       python harness/windows/without_pwsh7.py python harness/windows/shell_probe.py
       $probe = $LASTEXITCODE
