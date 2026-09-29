@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Synced installs: the guard now gives the restart command.** After a synced update,
+  `/reload-plugins` can keep the path of the gone plugin folder (anthropics/claude-code#97847), and
+  then it cannot load maisecrets again. The refusal of the guard now says so and names the command
+  that works: exit, then `claude --resume <id of this session>` in the directory where the session
+  started. Run `/maisecrets:guard install` once more if you installed the guard yourself.
+
 ## [0.5.12] - 2026-09-29
 
 - **Windows without Git Bash: maisecrets now protects Claude Code there.** Claude Code runs a hook

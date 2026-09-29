@@ -183,7 +183,11 @@ blocks without it, in bash and in PowerShell. The Codex command for Windows
 - Synced from claude.ai, the previous folder moved to `~/.claude/plugins/.trash`
   when another Claude Code session started and synced (observed with Claude Code
   2.1.283 on 2026-09-28; not documented). A session that was open then lost its
-  hooks. After an update, run `/reload-plugins` in every open session. The
+  hooks. After an update, run `/reload-plugins` in every open session. That is
+  not always enough: on 2026-09-29 (Claude Code 2.1.284) `/reload-plugins` kept
+  the path of the gone folder (`/plugin` showed `commands path not found …
+  maisecrets~g2`), and only a new process loaded maisecrets again: exit, then
+  `claude --resume <session id>` in the directory where the session started. The
   session that started the sync can lose them too: on 2026-09-29 (Claude Code
   2.1.284) the folder was rewritten one second after a session started, and that
   session ran no maisecrets hook while `/plugin` showed the new version.
@@ -208,7 +212,8 @@ blocks without it, in bash and in PowerShell. The Codex command for Windows
   - Its cost: each prompt and tool call waits for the heartbeat, which the
     maisecrets hook of the same call writes as it starts (both run in parallel);
     without maisecrets it waits 5 s and then refuses. The refusal names
-    `/reload-plugins` and, for a maisecrets that is off on purpose, the way out
+    `/reload-plugins`, then `claude --resume` with the id of this session for the
+    case that the reload does not help, and, for a maisecrets that is off on purpose, the way out
     from a terminal: `python3 ~/.claude/maisecrets-guard.py --off` (it stays off;
     the agent cannot run it). A plugin switched off in the user, project, local or
     managed settings is left alone. The guard expects maisecrets for the account

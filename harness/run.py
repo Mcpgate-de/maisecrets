@@ -61,7 +61,8 @@ SCENARIOS = {
     },
     # the same folder swap with the guard installed outside the plugin folder (hooks/guard.py, run from the
     # checkout, not from the copy that moves): maisecrets runs no hook, so no heartbeat comes, and the
-    # guard denies the tool call and names /reload-plugins. The command must not run
+    # guard denies the tool call and names /reload-plugins, then `claude --resume <this session>` for when the reload
+    # keeps the gone folder (measured with a synced update, 2026-09-29). The command must not run
     "plugin_folder_moved_guarded": {
         "prompt": "Run the check script.",
         "plugin_copy": True,
@@ -71,7 +72,8 @@ SCENARIOS = {
                   {"text": "done"}],
         "expect_requests": 2,
         "expect_no_file": "ran.txt",
-        "expect_text": "maisecrets did not run for this call",
+        "expect_text": "load maisecrets again. Then exit this session and resume it in the directory where you started "
+                       "it: claude --resume ",
     },
     # the typed prompt carries a secret: must be blocked, zero requests
     "prompt_secret": {

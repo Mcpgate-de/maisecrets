@@ -18,5 +18,5 @@ For a plugin that the organisation syncs from claude.ai, an update rewrites the 
 session loaded from it then runs no maisecrets hook, silently. `install` copies a small guard to
 `~/.claude/maisecrets-guard.py` and registers it in `~/.claude/settings.json` (a backup is made
 first). When maisecrets did not run for a prompt or a tool call, the guard blocks it and names
-`/reload-plugins`. It stays silent for an account without maisecrets and for Codex. `remove` takes it
+`/reload-plugins`, and `claude --resume` with the session id for when the reload does not help. It stays silent for an account without maisecrets and for Codex. `remove` takes it
 away again.

@@ -201,6 +201,10 @@ class DecisionTests(_Env):
                 out = guard.decide(payload, wait=0.3)
                 self.assertTrue(want[name](out), out)
                 self.assertIn("/reload-plugins", json.dumps(out))
+                # after a synced update /reload-plugins keeps the gone folder: the refusal gives the restart
+                # command of this very session and the bug behind it
+                self.assertIn(f"claude --resume {payload['session_id']}", json.dumps(out))
+                self.assertIn("anthropics/claude-code#97847", json.dumps(out))
                 self.assertGreaterEqual(time.monotonic() - started, 0.3, "it waits before it refuses")
 
     def test_the_heartbeat_of_this_call_lets_it_pass_and_stays_for_a_second_guard(self):

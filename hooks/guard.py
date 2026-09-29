@@ -26,7 +26,10 @@ import time
 
 EVENTS = {"UserPromptSubmit": "user-prompt", "PreToolUse": "pre-tool", "PostToolUse": "post-tool"}
 MESSAGE = ("maisecrets did not run for this call: a plugin update replaced its folder, or it started too slowly. "
-           "Run /reload-plugins, then try again. If maisecrets is off on purpose, switch the guard off in a terminal: "
+           "Run /reload-plugins, then try again. If this block comes again, a Claude Code bug "
+           "(anthropics/claude-code#97847) keeps the old plugin folder in this session, and /reload-plugins cannot "
+           "load maisecrets again. Then exit this session and resume it in the directory where you started it: "
+           "claude --resume {session}. If maisecrets is off on purpose, switch the guard off in a terminal: "
            "python3 {script} --off")
 MANAGED = {"darwin": "/Library/Application Support/ClaudeCode/managed-settings.json",
            "linux": "/etc/claude-code/managed-settings.json"}
@@ -160,8 +163,9 @@ def heartbeat_name(session: str, event: str, ident: str) -> str:
     return hashlib.sha256(f"{session}\0{event}\0{ident}".encode()).hexdigest()[:32]
 
 
-def _refusal(hook_event: str) -> dict:
-    message = MESSAGE.format(script=os.path.join(_claude_dir(), "maisecrets-guard.py"))
+def _refusal(hook_event: str, session: str) -> dict:
+    # a synced update: /reload-plugins keeps the gone generation path (measured 2026-09-29); a new process does not
+    message = MESSAGE.format(script=os.path.join(_claude_dir(), "maisecrets-guard.py"), session=session)
     if hook_event == "UserPromptSubmit":
         return {"decision": "block", "reason": message}
     if hook_event == "PreToolUse":
@@ -189,7 +193,7 @@ def decide(payload: dict, wait: float) -> dict:
         now = time.monotonic()
         # no start within `wait`: maisecrets does not run; started but no answer by its own watchdog: it died
         if (now - begin >= wait and not os.path.exists(started)) or now - begin >= wait + ANSWER_WAIT[hook_event]:
-            return _refusal(hook_event)
+            return _refusal(hook_event, session)
         time.sleep(0.05)
 
 
