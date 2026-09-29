@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.5.10] - 2026-09-29
+
 - **Behaviour change: maisecrets adds no approval of its own by default.** A value still never
   reaches the model, and a form where it could turn into code is still refused. What changed: an
   MCP call and an ssh command that get a real value no longer ask first, and on Codex a value in a
@@ -15,6 +17,22 @@
   fail closed (before, it counted as no policy). Keep it and its folder readable by every user. A
   key in it that looks like a misspelled `rehydration`, `resolve_in_files` or `ssh_via_sandbox`
   blocks rehydration until it is fixed; other unknown keys are ignored with a warning.
+
+### Features
+
+- maisecrets adds no approval of its own by default; rehydration confirm and block are optional (9eead0c)
+
+### Fixes
+
+- the limiter answers an empty key list without an index error (82264ef)
+- a lowered key cap no longer breaks a call with known keys (9725364)
+- a misspelled safety key blocks even next to a valid setting; caps count per call (650167c)
+- a setting that cannot be read as written blocks rehydration; no partial resolve (cdb57a8)
+- an ignored config file never loosens the rehydration policy (a043a33)
+
+### Other
+
+- Merge branch 'feat/rehydration-policy' into 'main' (b945f23)
 
 ## [0.5.9] - 2026-09-28
 
