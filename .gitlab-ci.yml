@@ -35,6 +35,14 @@ workflow:
     - if: $CI_COMMIT_TAG
     - if: $CI_COMMIT_BRANCH == "main"
 
+# The Anthropic directory tracks the GitHub branch `release` and reviews every commit on it. While a
+# version is in its review, a new commit there starts a new one. With the hold on, a release still
+# reaches the organisation marketplace (GitLab main + notify_marketplace), GitHub main and the tag;
+# only `release` stays where it is. Set "0" in a commit, or as a project CI variable, to publish
+# again: the next release then carries every change since (maintainer decision, 2026-09-29).
+variables:
+  MAISECRETS_DIRECTORY_HOLD: "1"
+
 default:
   image: python:3.12-slim
   tags:
@@ -337,6 +345,11 @@ mirror_tag:
     - git push ssh://git@github.com/Mcpgate-de/maisecrets.git "$CI_COMMIT_SHA:refs/heads/main"
     - git push ssh://git@github.com/Mcpgate-de/maisecrets.git "refs/tags/$CI_COMMIT_TAG"
     - echo "mirrored release $CI_COMMIT_TAG ($CI_COMMIT_SHA) to github.com/Mcpgate-de/maisecrets"
+    - |
+      if [ "${MAISECRETS_DIRECTORY_HOLD:-0}" = "1" ]; then
+        echo "directory hold: the branch release is not moved; the directory keeps reviewing its last version"
+        exit 0
+      fi
     # the branch release holds only the runtime files (scripts/build_release_tree.py): the directory
     # checks every file it gets and blocked two versions on literals in the test files (2026-09-27).
     # Each release is one commit on top of the last one; the directory tracks this branch.
