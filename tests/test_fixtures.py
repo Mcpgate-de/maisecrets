@@ -43,8 +43,7 @@ class InTestCodeTests(unittest.TestCase):
         self.assertEqual(scan(TEST), [])
         for marker in ("def test_login():", "    async def test_login(self):", "class TestLogin:", "@pytest.fixture",
                        "import unittest", "describe('login', () => {", "  it('logs in', async () => {",
-                       "func TestLogin(t *testing.T) {", "#[test]", "@Test", "    self.assertTrue(ok)",
-                       "    expect(res.status).toBe(200)"):
+                       "func TestLogin(t *testing.T) {", "#[test]", "@Test"):
             with self.subTest(marker=marker):
                 self.assertEqual(scan(f"{marker}\n    pass§word = '{PW}'\n"), [])
 

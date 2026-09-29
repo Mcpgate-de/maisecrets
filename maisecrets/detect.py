@@ -241,7 +241,7 @@ _DS_INDIRECT = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*\s*(\(.*\)|\[.*\])$")
 # words joined by `.`, `_` or `-`, optionally ending where the regex cut the line (`:` of a
 # condition, `;` of a statement, `[` before a quoted key): `settings.API_KEY`, `self._password`,
 # `os.environ[`, `confirm_password:` were taken for values (false-positive corpus, 2026-09-27)
-_DS_REFERENCE = re.compile(r"_*[A-Za-z]+(?:[._-]+[A-Za-z]+)+_*[:;\[]?")
+_DS_REFERENCE = re.compile(r"_*[A-Za-z]+(?:[._/:-]+[A-Za-z]+)+_*[:;\[]?")
 _FORMAT_ONLY_RE = re.compile(r"(?:%[-+ #0]*\d*(?:\.\d+)?[sdifxXeEgGrcoba%]|\{[^{}]*\}|[^A-Za-z0-9])+")
 
 
@@ -252,7 +252,7 @@ _SHORT_WORDS = frozenset({
     "string", "number", "boolean", "object", "integer", "bigint", "symbol", "unknown", "config", "bearer", "secret",
     "tokens", "hidden", "masked", "optional", "default", "require", "undefined", "double", "decimal", "varchar",
     "binary", "buffer", "array", "values", "string[]", "never", "nullable", "boolean[]", "option", "settings",
-    "private", "public", "enabled", "disabled"})
+    "private", "public", "enabled", "disabled", "secretstr", "secretbytes", "securestring"})
 _CAMEL_RE = re.compile(r"^[a-z]+(?:[A-Z][a-z0-9]*)+$")
 # the review of 2026-09-29 (679 snippets of normal work): the next label taken for the value (`DB_PASSWORD=` then
 # `API_KEY=`), a generic type (`Option<String>`), a UUID, and a fixture that names itself (`testpass`, `secret123`,
@@ -261,19 +261,48 @@ _LABEL_SHAPE = re.compile(r"[A-Za-z_][\w.-]*[:=]")
 _GENERIC_TYPE = re.compile(r"<[A-Za-z_][\w, ]*>")
 _VERSION_RE = re.compile(r"v?\d+(?:\.\d+){1,3}(?:[-+.]?[A-Za-z0-9]+)?")
 _PART_TEMPLATE_RE = re.compile(r"\{[A-Za-z_][\w.]*(?:\[[^\]]*\]?)?\}?$|\{[A-Za-z_][\w.]*\}")
+_SHELL_EXPANSION_RE = re.compile(r"[?:+=-]{1,2}[A-Z_][A-Z0-9_]*")
+_YAML_REF_RE = re.compile(r"[&*][A-Za-z_][\w-]*")
+_PATH_IN_VALUE_RE = re.compile(r"(?:^|\s)(?:~|\.{1,2})?/[\w.-]+/[\w.-]+")
+_ESCAPED_TAIL_RE = re.compile(r"(?:\\[nrt])+$")
 _SUBSCRIPT_RE = re.compile(r"[A-Za-z_][\w.]*\[[\w.,\s]*\]?")
 _GLOB_RE = re.compile(r"[:/._-]\*$|^\*\.\w+$|/\*[/.]")   # token:*, *.py, logs/*.txt; a star inside a value stays
 _NUMBER_RE = re.compile(r"\d{1,3}(?:_\d{3})+|\d+(?:_\d+)+")
 _PRIVATE_NAME_RE = re.compile(r"_[A-Za-z][A-Za-z_]*")
 _EMAIL_VALUE_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-_FIXTURE_WORD = re.compile(r"passw|pass(?![a-z])|(?<![a-z])pass|secret|token|test|geheim|kennwort")
+_FIXTURE_WORD = re.compile(r"passwor[dt]|passw|pass(?![a-z])|(?<![a-z])pass|secret|token|test|geheim|kennwort")
 _LEET = str.maketrans({"0": "o", "3": "e", "4": "a", "5": "s", "$": "s", "@": "a", "1": "i", "!": "i", "|": "l",
                        "7": "t"})
 
 
 def _deleet(v: str) -> str:
     return v.lower().translate(_LEET)
+
+
+# the words a fixture is made of around its fixture word: mypassword, wrongpassword, SuperSecret1, rootpass,
+# sk_test_123. Longest first, so that `password` is taken before `pass`
+_FIXTURE_PARTS = re.compile("|".join(sorted((
+    "password", "passwort", "passwd", "passw", "pass", "secret", "token", "testing", "test", "geheim", "kennwort",
+    "key", "my", "new", "old", "wrong", "bad", "top", "super", "very", "not", "so", "dummy", "fake", "default",
+    "admin", "user", "root", "db", "dev", "local", "sample", "example", "secure", "strong", "weak", "correct",
+    "valid", "invalid", "other", "some", "your", "the", "sk", "pk", "cs", "rk", "tok", "api", "app", "mock",
+    "demo"), key=len, reverse=True)))
+
+
+def _names_itself(v: str) -> bool:
+    """testpass, secret123, Passw0rd!, wrongpassword, SuperSecret1: a fixture word, the words a fixture is made of,
+    and at most one other letter. A real password that holds a fixture word keeps a word of its own: Contest-Winter,
+    Passion, Latest, Geheimnis, Passatwagen (review, 2026-09-29). Only letters of the value count, not the letters
+    that undoing 0, 1, 3 gave."""
+    d = _deleet(v)
+    if not _FIXTURE_WORD.search(d):
+        return False
+    covered = [False] * len(d)
+    for m in _FIXTURE_PARTS.finditer(d):
+        for i in range(m.start(), m.end()):
+            covered[i] = True
+    return sum(1 for i, c in enumerate(v) if c.isalpha() and not covered[i]) <= 1
 
 
 def _short_word(v: str) -> bool:
@@ -288,7 +317,7 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False
     if _DS_TEMPLATED.match(v) or _DS_INDIRECT.match(v):
         return False
-    if _LABEL_SHAPE.fullmatch(v):
+    if _LABEL_SHAPE.fullmatch(v) and not any(c.isdigit() for c in v):
         return False   # the next line is a label of its own: `DB_PASSWORD=\nAPI_KEY=`, `Zugangsdaten:\nBenutzer:`
     if _GENERIC_TYPE.search(v):
         return False   # a generic type: Option<String>, Secret<String>
@@ -296,6 +325,10 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False   # a version pin: tokenizers==0.20.3 (requirements.txt, renovate.json)
     if _PART_TEMPLATE_RE.search(v):
         return False   # a template with a name in it: mcp_{user}, {body['transfer_id']}
+    if _SHELL_EXPANSION_RE.fullmatch(v) or _YAML_REF_RE.fullmatch(v) or _PATH_IN_VALUE_RE.search(v):
+        return False   # ${REDIS_PASSWORD:?…} cut after its name, a YAML anchor, a command with a path
+    if not any(c.isdigit() for c in v) and _DS_REFERENCE.fullmatch(_ESCAPED_TAIL_RE.sub("", v).rstrip("})],;")):
+        return False   # process.env.NOTION_CLIENT_SECRET,\n in a JSON string
     if _SUBSCRIPT_RE.fullmatch(v) or _NUMBER_RE.fullmatch(v) or _GLOB_RE.search(v):
         return False   # list[str], 1_234_567, chatgpt_access_token:* (the ai-gateway repository, 2026-09-29)
     if not any(c.isdigit() for c in v) and _DS_REFERENCE.fullmatch(v.rstrip("})],;")):
@@ -304,7 +337,7 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False   # a private name: security_token_cleanup = _cleanup_tokens
     if _EMAIL_VALUE_RE.fullmatch(v):
         return False   # an address after a label (user_tokens:<address>): the e-mail rule decides, not a secret
-    if _FIXTURE_WORD.search(_deleet(v)):
+    if _names_itself(v):
         return False   # a value that names itself a password, a secret, a token or a test is a fixture
     if re.match(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?![\w])", v):
         return False   # a shell variable: $PASSWORD, ${DB_PASSWORD}
@@ -366,9 +399,13 @@ def _reserved_domain(v: str) -> bool:
     """example.com/.net/.org, the TLDs .test .example .invalid .localhost (RFC 2606, RFC 6761), .local (RFC 6762)
     and .internal (ICANN, 2024): no mailbox of a person on the internet is there. Every README, git fixture and
     test used them (review, 2026-09-29)."""
-    d = v.rsplit("@", 1)[-1].lower()
+    local, _, d = v.rpartition("@")
+    d = d.lower()
+    tld = d.rsplit(".", 1)[-1]
+    if tld in ("local", "internal") and re.search(r"[._]", local):
+        return False   # hans.mueller@firma.local: an Active Directory mailbox names a person (review, 2026-09-29)
     return (d in _RESERVED_MAIL_DOMAINS or d.endswith(tuple("." + x for x in _RESERVED_MAIL_DOMAINS))
-            or d.rsplit(".", 1)[-1] in _RESERVED_MAIL_TLDS)
+            or tld in _RESERVED_MAIL_TLDS)
 
 
 _SYSTEM_USERS = frozenset({"git", "root", "ubuntu", "ec2-user", "admin", "noreply", "no-reply", "postmaster",
@@ -601,18 +638,22 @@ def looks_like_placeholder(value: str) -> bool:
 # block or a placeholder there only stops the work. A token shape (glpat-, AKIA, a PEM key) and personal data stay
 # hits in test code too: a real token or a copy of customer data in a test is a leak.
 LABEL_RULES = ("ds-keyword", "generic-api-key", "url-query-secret", "auth-scheme")
-_TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?:tests?|__tests__|specs?|testdata|test_data|fixtures?)[/\\]"
+_TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?:tests?|__tests__|spec|testdata|test_data|e2e)[/\\]"
+                           r"|(?:^|[/\\])[^/\\]*[._-]e2e[._-][^/\\]*$"
                            r"|(?:^|[/\\])(?:test_[^/\\]*|[^/\\]*_test\.\w+|[^/\\]*\.(?:test|spec)\.\w+|conftest\.py)$")
+# a file of real values even under tests/: an .env, a recorded HTTP cassette (review, 2026-09-29)
+_REAL_VALUE_FILE_RE = re.compile(r"(?:^|[/\\])(?:\.env[^/\\]*|[^/\\]*\.env|cassettes?[/\\].*)$")
 _TEST_MARKER_RE = re.compile(
     r"(?m)^[ \t]*(?:(?:async[ \t]+)?def[ \t]+test_?\w*[ \t]*\(|class[ \t]+Test\w*|@pytest\.|@Test\b|#\[test\]"
-    r"|(?:import|from)[ \t]+(?:pytest|unittest)\b|func[ \t]+Test\w*\(|(?:describe|it|test|beforeEach)[ \t]*\("
-    r"|assert\b|self\.assert\w+\(|expect[ \t]*\()")
+    r"|(?:import|from)[ \t]+(?:pytest|unittest)\b|func[ \t]+Test\w*\(|(?:describe|it|test|beforeEach)[ \t]*\()")
+# `assert` alone is no marker: production code asserts too (review, 2026-09-29). A diff starts a new file here
+_DIFF_FILE_RE = re.compile(r"(?m)^(?:diff --git |\+\+\+ |--- a/)")
 _GREP_PATH_RE = re.compile(r"([^\s:]+):\d+[:-]")
 _TEST_LOOKBACK_LINES = 40
 
 
 def is_test_path(path: str) -> bool:
-    return bool(path) and bool(_TEST_PATH_RE.search(path))
+    return bool(path) and bool(_TEST_PATH_RE.search(path)) and not _REAL_VALUE_FILE_RE.search(path)
 
 
 def in_test_code(text: str, start: int, path: str = "") -> bool:
@@ -629,13 +670,28 @@ def in_test_code(text: str, start: int, path: str = "") -> bool:
         if begin == 0:
             break
         begin = text.rfind("\n", 0, begin - 1) + 1
+    for d in _DIFF_FILE_RE.finditer(text, begin, line_start):
+        begin = d.start()          # a marker of another file in the same diff does not count
     end = text.find("\n", start)
     return bool(_TEST_MARKER_RE.search(text, begin, end if end >= 0 else len(text)))
 
 
 def is_fixture(m: "Match", text: str, path: str = "") -> bool:
-    """A label-rule hit in test code: not a secret the person typed (see LABEL_RULES)."""
-    return m.type == "SECRET" and m.kind.startswith(LABEL_RULES) and in_test_code(text, m.start, path)
+    """A label-rule hit in test code: not a secret the person typed (see LABEL_RULES). The first rule to claim a
+    span wins, and the label rules run before the shape rules: `token = "<a JWT>"` got the kind of a label rule and
+    was dropped with the fixtures (review, 2026-09-29). A value that a shape rule finds on its own stays a hit."""
+    if not (m.type == "SECRET" and m.kind.startswith(LABEL_RULES) and in_test_code(text, m.start, path)):
+        return False
+    return not scan(m.value, enabled=_shape_rule_ids())
+
+
+_SHAPE_IDS: list = []
+
+
+def _shape_rule_ids() -> set:
+    if not _SHAPE_IDS:
+        _SHAPE_IDS.append({r.id for r in rules() if not r.id.startswith(LABEL_RULES)})
+    return _SHAPE_IDS[0]
 
 
 # ------------------------------------------------------------------ scanner --
@@ -712,6 +768,8 @@ def value_is_code(text: str, start: int, end: int, secret: str) -> bool:
         return True   # also a documentation anchor: 'token': 'token#module-token'
     if before[-1:] in "'\"`" or not _IDENT_RE.fullmatch(v):
         return False
+    if len(name) >= 3 and (v.lower().startswith(name) or v.lower().endswith(name)):
+        return True   # a name made from the label: token = tokenizer, token = nexttoken
     if "=" in m.group(0) and _OPERATOR_AFTER_RE.match(text, end):
         return True   # an assignment only: `password: <value> | then log in` is prose
     return bool(_SELF_ATTR_RE.search(before[:m.start(1) + len(label)]))
@@ -721,7 +779,7 @@ def value_is_code(text: str, start: int, end: int, secret: str) -> bool:
 # path, never a key (Python standard library, 2026-09-29)
 _WORD_PATH_RE = re.compile(r"[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*(?:/[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*)+")
 # a signed number in code: `a = +4294967296`, `f(+12345678)`
-_NUMBER_BEFORE_RE = re.compile(r"(?:[=(,\[]|return)\s*$")
+_NUMBER_BEFORE_RE = re.compile(r"(?:=\s+|[(\[]\s*|return\s+)$")   # not KEY=+49…, not a CSV column
 
 
 def _phone_ok(text: str, start: int, secret: str) -> bool:
@@ -826,21 +884,41 @@ class _Shifted:
 
 
 def _names_its_label(text: str, start: int, secret: str) -> bool:
-    """`POSTGRES_PASSWORD: postgres`, `password: password`: the value is a word of its own label line, a default."""
-    words = set(re.findall(r"[a-z]+", text[text.rfind("\n", 0, start) + 1:start].lower()))
-    return secret.strip("\"'` ").rstrip(".,;:!?").lower() in words   # also at the end of a sentence
+    """`POSTGRES_PASSWORD: postgres`, `password: password`: the value is a word of its own label, a default. With
+    one label on the line the whole line counts (`ALTER USER postgres WITH PASSWORD 'postgres'`); with more, only
+    the label of the value: in `smtp.host=mail.contoso.de smtp.password=contoso` the word is another value
+    (review, 2026-09-29)."""
+    before = text[text.rfind("\n", 0, start) + 1:start]
+    m = _LABEL_TAIL_RE.search(before)
+    if m and len(re.findall(r"[:=]", before[:m.start()])) > 0:
+        before = m.group(1)
+    words = set(re.findall(r"[a-z]+", before.lower()))
+    v = secret.strip("\"'` ").rstrip(".,;:!?")
+    if v.lower() in words:
+        return True   # also at the end of a sentence
+    parts = [p.lower() for p in re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])", v)]
+    return len(parts) >= 2 and "".join(parts) == v.lower() and set(parts) <= words   # token_data: TokenData
 
 
 # lookarounds, not ^: search(text, pos) anchors ^ at the start of the text, never at pos (a file's line 19 passed)
 _MEASURE_LABEL_RE = re.compile(r"(?i)(?<![a-z])(?:ttl|timeout|expir\w*|lifetime|max|min|len|length|size|count|limit"
                                r"|port|age|seconds|minutes|hours|days|retries|interval)(?![a-z])")
+# a label that names a secret: a UUID after it is one (Postmark server token, Scaleway secret key, a uuid4 API key)
+_SECRET_LABEL_RE = re.compile(r"(?i)(?:token|secret[_-]?key|api[_-]?key|apikey|access[_-]?key|auth[_-]?key|password"
+                              r"|passwd|pwd)[\"']?\s*(?::=|=>|[:=])\s*[\"'`]?$")
 _ELISION_RE = re.compile(r"(?:\.\.\.|\u2026)$")
 # a label that names a derived thing: secret_id, password_hash, token_type, hashed_secret. Anchored at the value: in
 # `secret_name: x, password: <value>` the password stays a hit
 _DERIVED_LABEL_RE = re.compile(
     r"(?i)(?:(?:secret|password|passwd|pwd|token|key)[_-]?(?:id|name|hash|hashed|len|length|path|file|arn|ref|url|uri"
-    r"|version|type|field|label|prompt|policy|rules?)|hashed_(?:secret|password)|(?:secret|password|token|key)Id"
+    r"|version|type|policy|rules?)|hashed_(?:secret|password)|(?:secret|password|token|key)Id"
     r"|(?:secret|password|token)Name)[\"']?\s*(?::=|=>|[:=])\s*[\"'`]?$")
+
+
+def _label_before(text: str, start: int) -> str:
+    """The label of the value at `start`: `TTL_REFRESH_TOKEN` in `TTL_REFRESH_TOKEN = 15552000`."""
+    m = _LABEL_TAIL_RE.search(text, max(0, text.rfind("\n", 0, start) + 1), start)
+    return m.group(1) if m else ""
 
 
 def _pass_equals_user(whole: str, secret: str) -> bool:
@@ -929,7 +1007,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if rule.id.startswith("ds-keyword") and _names_its_label(text, start, secret):
                 continue
             if (rule.id.startswith("ds-keyword") and secret.strip("\"' ").isdigit()
-                    and _MEASURE_LABEL_RE.search(text, max(0, text.rfind("\n", 0, start) + 1, start - 60), start)):
+                    and _MEASURE_LABEL_RE.search(_label_before(text, start))):
                 continue   # a limit or a duration: TTL_REFRESH_TOKEN = 2592000
             if rule.id == "url-query-secret" and secret.startswith("{"):
                 continue   # a template: ?token={body['transfer_id']}, ?token={SLACK_AUTO_TOKEN}
@@ -937,7 +1015,9 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     and re.fullmatch(r"[A-Za-z]+(?:[_-][A-Za-z]+)+", secret)):
                 continue   # words, not a token: Bearer test_access_token
             if (rule.id.startswith("ds-keyword") or rule.id == "generic-api-key") and (
-                    _UUID_RE.fullmatch(secret.strip("\"'` ")) or _ELISION_RE.search(secret)
+                    (_UUID_RE.fullmatch(secret.strip("\"'` ")) and not _SECRET_LABEL_RE.search(
+                        text, max(0, text.rfind("\n", 0, start) + 1, start - 60), start))
+                    or _ELISION_RE.search(secret)
                     or _DERIVED_LABEL_RE.search(text, max(0, text.rfind("\n", 0, start) + 1, start - 60), start)):
                 continue   # a UUID, an elided value (sk-...), or a label that names a derived thing (secret_id)
             if rule.id in ("ds-basic-auth", "curl-auth-user") and _pass_equals_user(m.group(0), secret):

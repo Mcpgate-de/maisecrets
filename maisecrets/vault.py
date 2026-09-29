@@ -454,9 +454,11 @@ class Entry:
 
 
 def is_weak(kind: str, value: str) -> bool:
-    """A value that only a label rule found and that is a word: letters only, no digit, no symbol."""
+    """A value that only a label rule found and that is a common word: lower case letters only, at most 10. A
+    capitalised or longer word (Sommerwiese) is a password someone chose and stays hunted (review, 2026-09-29)."""
     from .detect import LABEL_RULES
-    return str(kind).startswith(LABEL_RULES) and value.strip().isalpha()
+    v = value.strip()
+    return str(kind).startswith(LABEL_RULES) and v.isalpha() and v.islower() and len(v) <= 10
 
 
 # ---------------------------------------------------------------- backends --

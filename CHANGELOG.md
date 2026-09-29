@@ -41,19 +41,25 @@
 - **Test passwords no longer stop the work.** A password that maisecrets finds only by its label
   (`password = '…'`) is a fixture in test code: in a file on a test path, in a grep line of a test
   file, or after a test marker such as `def test_`, `assert` or `describe(`. A pasted unit test now
-  passes, and a Read of a test file keeps its fixtures. A token shape (`glpat-`, `AKIA`, a private
-  key) and personal data are still found in test code.
+  passes, and a Read of a test file keeps its fixtures. A token shape (`glpat-`, `AKIA`, a JWT, a
+  private key) and personal data are still found in test code, also after a label such as
+  `token = "…"`. An `.env` file and a recorded HTTP cassette are no test code, even under `tests/`,
+  and `assert` alone does not make production code a test.
 
 - **Fewer false alarms in config, docs and code.** A review of 679 snippets of normal work and a run
   over a real repository found more values that are no secret, and these are no hits now:
   - fixtures that name themselves (`testpass`, `secret123`, `Passw0rd!`) and a default that equals
-    its label or user (`POSTGRES_PASSWORD: postgres`, `curl -u admin:admin`)
+    its label or user (`POSTGRES_PASSWORD: postgres`, `curl -u admin:admin`). A real password that
+    holds such a word and a word of its own (`Contest-Winter2026!`, `Passion2026!`) is still found
   - the next label of an `.env.example` (`DB_PASSWORD=` followed by `API_KEY=`)
   - types (`Option<String>`, `list[str]`), templates (`mcp_{user}`, `?token={id}`), version pins
     (`tokenizers==0.20.3`), durations (`TTL_REFRESH_TOKEN = 15552000`), UUIDs, elided values
     (`sk-...`) and labels of a derived thing (`secret_name`, `password_hash`)
-  - e-mail addresses at `example.com`, `.test`, `.invalid`, `.localhost`, `.local` and `.internal`,
-    and section numbers such as `RFC 6749 4.1.2.1`
+  - e-mail addresses at `example.com`, `.test`, `.invalid` and `.localhost`, and a system mailbox at
+    `.local` or `.internal` (a person's name there, such as `hans.mueller@firma.local`, is still
+    found), and section numbers such as `RFC 6749 4.1.2.1`
+  - YAML anchors, shell expansions such as `${REDIS_PASSWORD:?…}`, a type made of the words of its
+    label (`token_data: TokenData`) and a command with a path
   In the tests of that repository, the label-rule hits that a Read acted on went from 379 to none.
   The example on the first start is now an address that maisecrets stops.
 
@@ -61,7 +67,8 @@
   `postgres` only by its label (`DB_PASSWORD=postgres`), it stored it and then redacted the word in
   every later text of every session: `docker ps` showed a placeholder for the image, and the prompt
   "add a postgres service" was blocked. Such a word is now replaced where it was found and nowhere
-  else; its placeholder still works. A value with a digit or a symbol is still found everywhere.
+  else; its placeholder still works. A value with a digit, a symbol or a capital letter, or a word
+  longer than ten letters, is still found everywhere.
   Words that an older version stored are marked at the next session start.
 
 - **A busy computer no longer ends a session.** When maisecrets answered a call too late, the guard
