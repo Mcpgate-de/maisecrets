@@ -234,7 +234,7 @@ class CmdExeFailsClosedTests(MovedPluginFolderFailsClosedTests):
     """The commandWindows of each hook, which Codex on Windows runs as `cmd.exe /C "<command>"` with the plugin
     root written in. Codex removes the folder of the old version when it installs a new one (codex-cli
     0.159.0, measured 2026-09-29), and a command that cannot start lets Codex run the tool unguarded."""
-    __unittest_skip__ = False                     # the POSIX parent is skipped on Windows; this class is the Windows one
+    __unittest_skip__ = False   # the POSIX parent is skipped on Windows; this class is the Windows one
     __unittest_skip_why__ = ""
     HINT = "codex resume"
 
