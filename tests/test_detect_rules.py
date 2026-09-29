@@ -847,6 +847,8 @@ class FalsePositiveCorpusTests(unittest.TestCase):
         # a derived label earlier on the line does not hide the password after it
         self.assertEqual([m.value for m in scan(f"secret_name: prod, pass§word: {tok}")], [tok])
         self.assertEqual(kinds("secret_name: \"prod/db/password\""), [])
+        # a default equal to its label, also at the end of a sentence
+        self.assertEqual(kinds("the compose file sets POSTGRES_PASS§WORD: postgres."), [])
         # an address after a label is personal data, not a secret
         self.assertEqual([m.type for m in scan("GET user_tok§ens:max.muster@firma-xyz.de")], ["EMAIL"])
         # a prefix and one repeated character is a placeholder, a random tail is not

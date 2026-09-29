@@ -828,7 +828,7 @@ class _Shifted:
 def _names_its_label(text: str, start: int, secret: str) -> bool:
     """`POSTGRES_PASSWORD: postgres`, `password: password`: the value is a word of its own label line, a default."""
     words = set(re.findall(r"[a-z]+", text[text.rfind("\n", 0, start) + 1:start].lower()))
-    return secret.strip("\"'` ").lower() in words
+    return secret.strip("\"'` ").rstrip(".,;:!?").lower() in words   # also at the end of a sentence
 
 
 # lookarounds, not ^: search(text, pos) anchors ^ at the start of the text, never at pos (a file's line 19 passed)
