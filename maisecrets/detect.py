@@ -781,7 +781,9 @@ _WORD_PATH_RE = re.compile(r"[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*(?:/[A-Z]?[a-z]+(?:_[
 # a signed number in code: `a = +4294967296`, `f(+12345678)`
 _SECTION_BEFORE_RE = re.compile(r"(?i)(?:\bRFC[ -]?\d{3,5}|\bCore|\bsection|\bsec\.|\bchapter|\bKapitel|\bAbschnitt"
                                 r"|\u00a7)[ ,:(]*\u00a7?[ ]*$")
-_PHONE_LABEL_RE = re.compile(r"(?i)phone|tel|mobil|handy|fax|contact|kontakt|rufnummer|whatsapp|sms")
+# whole words of the label: TELEMETRY_OFFSET is no telephone (Codex review, 2026-09-30)
+_PHONE_LABEL_RE = re.compile(r"(?i)(?<![a-z])(?:phone|telephone|tel|telefon|mobile?|mobil|handy|cell|fax"
+                             r"|contact|kontakt|rufnummer|whatsapp|sms)(?![a-z])")
 _NUMBER_BEFORE_RE = re.compile(r"(?:=\s+|[(\[]\s*|return\s+)$")   # not KEY=+49…, not a CSV column
 
 

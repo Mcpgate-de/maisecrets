@@ -183,7 +183,9 @@ class CodexSecondReviewTests(unittest.TestCase):
 
     def test_a_spaced_phone_assignment_is_a_phone(self):
         self.assertIn(("PHONE", "+4915112345678"), found("CONTACT_PHONE = +4915112345678"))
+        self.assertIn(("PHONE", "+4915112345678"), found("mobile = +4915112345678"))
         self.assertEqual(found("a = +4294967296"), [])
+        self.assertEqual(found("TELEMETRY_OFFSET = +4294967296"), [], "tel inside a word is no telephone")
 
     def test_an_upper_case_env_file_under_tests_is_no_test_code(self):
         self.assertEqual(secrets("PASS§WORD=Qx7vR2mK9pLw!\n", "/repo/Tests/.ENV"), ["Qx7vR2mK9pLw!"])
