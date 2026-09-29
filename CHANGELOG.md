@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Behaviour change: maisecrets adds no approval of its own by default.** A value still never
+  reaches the model, and a form where it could turn into code is still refused. What changed: an
+  MCP call and an ssh command that get a real value no longer ask first, and on Codex a value in a
+  published-text field (`text`, `message`, `body` …) now goes in. In Claude Code your permission
+  rules decide, as for any other call; in Codex maisecrets answers `allow`, as it did for Bash and
+  for other MCP fields, and Codex's sandbox and MCP tool approval still apply. To keep the ask of
+  0.5.9 for MCP and ssh, set `"rehydration": "confirm"` in `~/.maisecrets/config.json` or in the
+  machine policy. `confirm` is stricter than 0.5.9 on the other paths: Bash and Write/Edit ask too,
+  and Codex refuses every rehydration, because it cannot ask. `"block"` turns rehydration off.
+- **For administrators:** a machine policy file that exists but cannot be read now makes the hooks
+  fail closed (before, it counted as no policy). Keep it and its folder readable by every user. A
+  key in it that looks like a misspelled `rehydration`, `resolve_in_files` or `ssh_via_sandbox`
+  blocks rehydration until it is fixed; other unknown keys are ignored with a warning.
+
 ## [0.5.9] - 2026-09-28
 
 - **Codex:** `hooks/hooks.json` changed in this release, so Codex asks once in `/hooks` to trust

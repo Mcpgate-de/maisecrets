@@ -253,6 +253,14 @@ def cmd_status(_: list[str]) -> int:
     print(f"entries: {len(live)} live, {len(v.list()) - len(live)} expired (metadata kept {kept} days)")
     policy = v.cfg.get("policy_keys") or []
     print("settings from a machine policy: " + (", ".join(policy) if policy else "none"))
+    from . import rehydration
+    pol = {path: rehydration.policy(v.cfg, path) for path in rehydration.PATHS}
+    what = {"automatic": "no ask of maisecrets; the client's permission rules decide",
+            "confirm": "every call that gets a value asks first (Claude Code); Codex refuses it",
+            "block": "no value goes into a tool call"}
+    main = pol["bash"]
+    other = [f"{path} {p}" for path, p in pol.items() if p != main]
+    print(f"rehydration: {main} ({what[main]})" + (f"; except {', '.join(other)}" if other else ""))
     from . import detect
     def version(name: str) -> str:
         return (detect.RULES_DIR / f"{name}_VERSION").read_text(encoding="utf-8").strip()

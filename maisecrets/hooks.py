@@ -20,7 +20,7 @@ import time
 import sys
 from typing import Any
 
-from . import detect
+from . import detect, rehydration
 from .placeholder import find_refs
 from .vault import ConfigError, Vault, load_config
 
@@ -377,7 +377,7 @@ PRIMER = (
     "when the command runs. For awk, pass it as V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. To give a value to a "
     "remote host, pipe it on stdin to the command that reads it, for example "
     "printf '%s' ⟦KEY⟧ | ssh host 'sudo zgrep -F -f - /var/log/app.log' (inside the Claude Code sandbox, "
-    "one host per command; the user confirms it). A form that would run the value as code or change it "
+    "one host per command). A form that would run the value as code or change it "
     "(a nested shell, eval, backticks, $'…', a quoted heredoc, an encoder, a slice, set -x) gets an answer "
     "that names a form that works. The value stays with the user: to use it, use the placeholder; the user "
     "manages the stored values and the settings. When the user asks for the value in a file or a command, "
@@ -1099,8 +1099,7 @@ def _ssh_way(why: str) -> str:
     not only the rule: an ops user needs root-only logs, and "the remote su would hand the value to
     another shell" left no way forward (field report on 0.5.8, 2026-09-28)."""
     base = ("To give a value to a remote host, pipe it on stdin to the command that reads it, inside the "
-            "Claude Code sandbox, one host per command: printf '%s' ⟦KEY⟧ | ssh HOST 'zgrep -F -f - FILE'. "
-            "The user confirms it.")
+            "Claude Code sandbox, one host per command: printf '%s' ⟦KEY⟧ | ssh HOST 'zgrep -F -f - FILE'.")
     # the second hop first: its reason names "another shell or host" too
     if re.search(r"\bremote (?:ssh|sshpass|plink|mosh|autossh|scp|sftp|rsync)\b|\bjump\b|\bproxy\b", why):
         return "For a host behind another host, run one ssh command per host. " + base
@@ -1235,15 +1234,16 @@ def _remote_is_read_only(remote: str) -> bool:
 
 
 def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) -> dict | str:
-    """The one way a value may reach ssh: on stdin, through the Claude Code sandbox, after the
-    user confirms. Returns the plan, or the reason the command is refused.
+    """The one way a value may reach ssh: on stdin, through the Claude Code sandbox. Returns the
+    plan, or the reason the command is refused. Whether the user confirms is the rehydration
+    policy's decision (rehydration.py), not the route's.
 
     Two review rounds broke a host allowlist that read the destination from the command text (a
     quoted -oProxyCommand after the host reached another host). The sandbox needs no such proof:
     no command reaches the network directly, and its proxy admits only the allowed hosts
     (measured 2026-09-27 on macOS and Debian 13: 200 for an allowed host, 403 for another). What
-    the sandbox cannot see is the remote side, which may pass the value on; so the user reads the
-    remote command and confirms. The value never sits in ssh's arguments, where the remote
+    the sandbox cannot see is the remote side, which may pass the value on; under "confirm" the
+    user reads the remote command first. The value never sits in ssh's arguments, where the remote
     shell would parse it as code."""
     import shlex
     segs = _segments(command, ctxs)
@@ -1507,12 +1507,23 @@ def _ask(new_input: dict, reason: str) -> dict:
 
 def _updated(payload: dict, new_input: dict) -> dict:
     if client_of(payload) == "codex":
-        # Codex accepts updatedInput only together with "allow", and "allow" skips its approval prompt
-        # for this call (codex-cli 0.155.1; README "Codex approves nothing here").
+        # Codex accepts updatedInput only together with "allow". It does not skip Codex's own approval
+        # of an MCP tool (codex-cli 0.158.0, 2026-09-28); for a shell command see README "Codex gets allow".
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
                                        "updatedInput": new_input}}
     # Claude Code: no permissionDecision, the normal permission rules apply to the rewritten input.
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": new_input}}
+
+
+def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: str) -> dict:
+    """The decision for a call that got its values, by the rehydration policy of the path. A deny here
+    means the early refusal was skipped: fail closed, the rewritten input stays in the hook."""
+    decision = rehydration.outcome(client_of(payload), rehydration.policy(cfg, path))
+    if decision == "ask":
+        return _ask(new_input, reason)
+    if decision in ("defer", "allow"):
+        return _updated(payload, new_input)
+    return _deny("maisecrets: the rehydration policy refuses this call. Nothing ran.")
 
 
 _ARGS_END = "MAISECRETS_ARGS_END"
@@ -1592,16 +1603,6 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
             ssh_plan, why = route, None
         else:
             why, ssh_refused = route, True
-    # ssh_approval "per-session": an approved value runs without an ask; a first use asks once and gives
-    # its token to the serving child, which confirms it when the approved command reads the value
-    ssh_auto, ssh_token = False, None
-    if ssh_plan and cfg.get("ssh_approval") == "per-session" and _remote_is_read_only(ssh_plan["remote"]):
-        from . import ssh_approval
-        names = sorted({k for k, _a, _b in refs})
-        if ssh_approval.approved(payload.get("session_id"), names):
-            ssh_auto = True
-        else:
-            ssh_token = ssh_approval.remember_pending(payload.get("session_id"), names)
     if why and ssh_refused:
         return _deny(f"maisecrets: {keys} cannot go to the remote host in this form: {why}. The command did "
                      "not run. " + _ssh_way(why))
@@ -1609,16 +1610,30 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         return _deny(f"maisecrets: {keys} cannot be placed in this command: {why}. The command did not run. "
                      "Give the placeholder as a plain argument of the tool that needs the value; for a "
                      "wrapper such as bash -c or eval, run its inner command directly.")
+    # the value can go in; from here the rehydration policy decides (maisecrets/rehydration.py)
+    path = "ssh" if ssh_plan else "bash"
+    stop = rehydration.refusal(cfg, path, client_of(payload), keys, "The command did not run.")
+    if stop:
+        return _deny(stop)
     vault = Vault(cfg)
     session = payload.get("session_id")
     uniq = list(dict.fromkeys(k for k, _a, _b in refs))
-    # phase 1: session rule and limiter for every key, before anything is recorded
-    failed = [f"{k} ({st})" for k in uniq for st in [vault.status(k, session)] if st != "ok"]
+    failed = _precheck(vault, uniq, session)
     if failed:
         return _deny(_deny_reason(failed))
-    failed = [f"{k} ({st})" for k in uniq for st in [vault._limit(k, session)] if st != "ok"]
-    if failed:
-        return _deny(_deny_reason(failed))
+    # automatic: no ask of our own. confirm: an ask per command, or with ssh_approval "per-session" an
+    # approved value runs without an ask and a first use asks once and gives its token to the serving
+    # child, which confirms it when the approved command reads the value. After phase 1: a key
+    # this session may not resolve leaves no pending token (review, 2026-09-29)
+    ssh_auto, ssh_token = rehydration.policy(cfg, "ssh") == "automatic", None
+    if ssh_plan and not ssh_auto and cfg.get("ssh_approval") == "per-session" \
+            and _remote_is_read_only(ssh_plan["remote"]):
+        from . import ssh_approval
+        names = sorted({k for k, _a, _b in refs})
+        if ssh_approval.approved(payload.get("session_id"), names):
+            ssh_auto = True
+        else:
+            ssh_token = ssh_approval.remember_pending(payload.get("session_id"), names)
     # phase 2: record (audit line, limiter) and fetch; a failure here has recorded nothing served
     plan: dict[str, tuple[str | None, str | None]] = {}    # key -> (nonce, value)
     for key in uniq:
@@ -1694,7 +1709,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                 f"{ssh_plan['dest']}: {ssh_plan['line'][:400]}. It runs only inside the Claude "
                 "Code sandbox, so the connection reaches only a host your sandbox allows. ")
         if ssh_auto:
-            # approved once in this session: the normal permission rules of the client decide
+            # automatic, or approved once in this session: the normal permission rules of the client decide
             return _updated(payload, new_input)
         if ssh_token:
             from . import ssh_approval
@@ -1704,7 +1719,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                                    "tail, journalctl and the like). Allow it only if you trust those hosts.")
         return _ask(new_input, base + "The remote command can still pass the value on: allow it only if you trust "
                                       "that host and that command.")
-    return _updated(payload, new_input)
+    return _rehydrated(payload, cfg, "bash", new_input,
+                       f"maisecrets: this command gets the real value of {keys} through a shell variable; the "
+                       "command shown here carries no value. Check the command before you allow it.")
 
 
 def key_nonce() -> str:
@@ -1725,6 +1742,14 @@ def _unserve(fifos: list[str]) -> None:
 def shlex_quote(s: str) -> str:
     import shlex
     return shlex.quote(s)
+
+
+def _precheck(vault: Vault, keys: list[str], session: str | None) -> list[str]:
+    """Phase 1 of every resolve: the session rule, then the limiter, for every key, before anything is
+    recorded or served. A call with a good key and a bad one wrote the good key's audit line before
+    the refusal on MCP and file tools (review, 2026-09-29); Bash had this order already."""
+    failed = [f"{k} ({st})" for k in keys for st in [vault.status(k, session)] if st != "ok"]
+    return failed or vault._limit_all(keys, session)
 
 
 def _deny_reason(failed: list[str]) -> str:
@@ -1753,8 +1778,9 @@ def _deny_reason(failed: list[str]) -> str:
 
 def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
     """MCP tools: the value must be in the argument (there is no shell to read it later), so it
-    is inserted after the session rule and the limiter. The permission prompt of the client then
-    shows the value; this is the user's own value at the point where the real call happens."""
+    is inserted after the session rule and the limiter, into every field that holds it, a published
+    text field included. The rehydration policy decides whether we ask; a permission prompt of the
+    client shows the value, the user's own, at the point where the real call happens."""
     found: list[str] = []
 
     def collect(s: str) -> str:
@@ -1769,17 +1795,17 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
                      "The call did not run. Put the placeholder into a value, not into a key.")
     fields = _ref_fields(tool_input)
     text_fields = [f for f in fields if is_text_field(f)]
-    if text_fields and client_of(payload) == "codex":
-        return _deny(f"maisecrets: {', '.join('⟦' + k + '⟧' for k in dict.fromkeys(found))} is in "
-                     f"{', '.join(text_fields)} of {tool}, text the tool publishes or stores. maisecrets does "
-                     "not put a real value there on Codex, because Codex cannot ask the user first. The call "
-                     "did not run. Put the placeholder only in the field that needs the value (a recipient, "
-                     "an id, a token), or ask the user to add the value themselves.")
+    stop = rehydration.refusal(cfg, "mcp", client_of(payload),
+                               ", ".join("⟦" + k + "⟧" for k in dict.fromkeys(found)), "The call did not run.")
+    if stop:
+        return _deny(stop)
     vault = Vault(cfg)
     session = payload.get("session_id")
     context = json.dumps(tool_input, ensure_ascii=False)
     values: dict[str, str] = {}
-    failed: list[str] = []
+    failed = _precheck(vault, list(dict.fromkeys(found)), session)
+    if failed:
+        return _deny(_deny_reason(failed))
     for key in dict.fromkeys(found):
         status = vault.record_resolve(key, session, tool, context)
         if status == "ok":
@@ -1804,13 +1830,12 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
         refs = [f"⟦{k}⟧" for k in values]
         _scrub_transcript_later(payload.get("transcript_path", ""), list(values.values()), refs)
     new_input = _walk_strings(tool_input, substitute)
-    if client_of(payload) == "codex":
-        return _updated(payload, new_input)
     names = ", ".join(f"⟦{k}⟧" for k in values)
     warn = (f" WARNING: {', '.join(text_fields)} is text that the tool publishes or stores; the real value "
             "goes out with it." if text_fields else "")
-    return _ask(new_input, f"maisecrets: this call gets the real value of {names} in {', '.join(fields)} "
-                           f"of {tool}.{warn} Check the target and the value before you allow it.")
+    return _rehydrated(payload, cfg, "mcp", new_input,
+                       f"maisecrets: this call gets the real value of {names} in {', '.join(fields)} "
+                       f"of {tool}.{warn} Check the target and the value before you allow it.")
 
 
 def _ref_fields(node: Any, path: str = "") -> list[str]:
@@ -2036,15 +2061,16 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     _walk_strings(tool_input, collect)
     if not found:
         return {}
-    if not cfg.get("resolve_in_files", True):
-        names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found))
-        return _deny(f"maisecrets: {names} is not resolved in {tool} on this machine (resolve_in_files is off). "
-                     "Nothing was written. To put the value into a file, use a Bash command the user approves, "
-                     "for example printf '%s' ⟦KEY⟧ > file.")
+    names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found))
+    stop = rehydration.refusal(cfg, "file", client_of(payload), names, "Nothing was written.")
+    if stop:
+        return _deny(stop)
     vault = Vault(cfg)
     session = payload.get("session_id")
     values: dict[str, str] = {}
-    failed: list[str] = []
+    failed = _precheck(vault, list(dict.fromkeys(found)), session)
+    if failed:
+        return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
     for key in dict.fromkeys(found):
         status = vault.record_resolve(key, session, tool, f"{tool} {path}")
         if status == "ok":
@@ -2065,7 +2091,9 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         # the client records this hook's updatedInput, values included, in the transcript
         _scrub_transcript_later(payload.get("transcript_path", ""), list(values.values()),
                                 [f"⟦{k}⟧" for k in values])
-    return _updated(payload, _walk_strings(tool_input, substitute))
+    return _rehydrated(payload, cfg, "file", _walk_strings(tool_input, substitute),
+                       f"maisecrets: {tool} writes the real value of {names} into {path}. "
+                       "Check the file and the value before you allow it.")
 
 
 def pre_tool(payload: dict) -> dict:

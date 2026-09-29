@@ -142,6 +142,26 @@ class ListingManifestTests(unittest.TestCase):
         expected = " ".join(sorted(list(self.r.MANIFESTS) + ["CHANGELOG.md"])) + " "
         self.assertIn(f'"{expected}")', ci, "verify_release must list exactly the files the release commits")
 
+    def test_the_directory_hold_stops_only_the_release_branch(self):
+        """With MAISECRETS_DIRECTORY_HOLD "1", mirror_tag ends before it moves the GitHub branch
+        release, which the Anthropic directory tracks, and after it pushed main and the tag, which the
+        organisation marketplace and the Codex install read. notify_marketplace still runs."""
+        ci = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
+        self.assertIn('\nvariables:\n  MAISECRETS_DIRECTORY_HOLD: "1"\n', ci)
+        job = ci[ci.index("\nmirror_tag:"):]
+        end = job.find("\n\n", job.index("script:"))
+        job = job if end < 0 else job[:end]            # the last job of the file ends with it
+        main = job.index('"$CI_COMMIT_SHA:refs/heads/main"')
+        tag = job.index('"refs/tags/$CI_COMMIT_TAG"')
+        hold = job.index('if [ "${MAISECRETS_DIRECTORY_HOLD:-0}" = "1" ]; then')
+        release = job.index(':refs/heads/release"')
+        self.assertLess(main, hold)
+        self.assertLess(tag, hold)
+        self.assertLess(hold, release)
+        self.assertIn("exit 0", job[hold:release])
+        notify = ci[ci.index("\nnotify_marketplace:"):]
+        self.assertNotIn("MAISECRETS_DIRECTORY_HOLD", notify[:notify.index("\n\n")])
+
     def test_the_tag_pipeline_trusts_verify_release_instead_of_testing_twice(self):
         """Every test job extends the one rule that keeps it off a tag, and nothing on the tag path
         waits for a job that does not run there. verify_release must keep every check the skip

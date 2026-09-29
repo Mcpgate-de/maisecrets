@@ -1,0 +1,10 @@
+# c16-codex-refuses-what-it-cannot-confirm: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c16-codex-refuses-what-it-cannot-confirm"
+control = "C16"
+statement = "On Codex, which cannot ask with a rewritten input, confirm and block refuse the call before anything is resolved: no audit line, no value served."
+runner = ["tests/test_rehydration_matrix.py::RehydrationMatrixTests::test_every_cell_of_the_matrix"]
+
+[proof]
+file = "maisecrets/rehydration.py"
+find = "    if outcome(client, pol) != \"deny\":\n        return None\n"
+replace = "    if True:\n        return None\n"

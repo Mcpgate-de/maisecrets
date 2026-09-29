@@ -67,6 +67,13 @@ def _run(command: str) -> subprocess.CompletedProcess:
     return subprocess.run([BASH, "-c", command], capture_output=True, text=True)
 
 
+def _config(**keys):
+    """The config the hooks read, with these keys on top (the policy file wins over the user file,
+    so a patched load_config is the one place a test sets a key for one call)."""
+    from unittest import mock
+    return mock.patch.object(hooks, "load_config", return_value={**hooks.load_config(), **keys})
+
+
 class GrantTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):  # noqa: N802 - unittest hook
@@ -727,40 +734,54 @@ class McpTests(unittest.TestCase):
                    "tool_input": {"to": "a " + self.e.ref, "n": 1, "list": [self.e.ref, 2]}}
         out = hooks.pre_tool(payload)["hookSpecificOutput"]
         self.assertEqual(out["updatedInput"], {"to": "a " + PLAIN, "n": 1, "list": [PLAIN, 2]})
-        # the user confirms every call that gets a real value (review by an ops user, 2026-09-27)
+        # rehydration "automatic" (the default): no ask of ours, the client's own permission rules decide
+        self.assertNotIn("permissionDecision", out)
+        _reset()
+        self.e = Vault().put(PLAIN, "SECRET", "manual", session="S1")
+        payload["tool_input"] = {"to": "a " + self.e.ref, "n": 1, "list": [self.e.ref, 2]}
+        with _config(rehydration="confirm"):
+            out = hooks.pre_tool(payload)["hookSpecificOutput"]
+        self.assertEqual(out["updatedInput"], {"to": "a " + PLAIN, "n": 1, "list": [PLAIN, 2]})
         self.assertEqual(out["permissionDecision"], "ask")
         self.assertIn("to, list", out["permissionDecisionReason"])
         self.assertNotIn(PLAIN, out["permissionDecisionReason"])
 
-    def test_a_value_in_a_message_body_is_confirmed_with_a_warning_or_refused_on_codex(self):
+    def test_a_value_in_a_message_body_goes_out_by_default_and_is_confirmed_with_a_warning_on_confirm(self):
+        # the user asked the agent to send the value: maisecrets keeps it out of the model, not out of the post
         tool_input = {"channel": "C1", "text": "the key is " + self.e.ref}
         out = hooks.pre_tool({"tool_name": "mcp__slack__post", "session_id": "S1", "prompt_id": "p",
                               "tool_input": tool_input})["hookSpecificOutput"]
-        self.assertEqual(out["permissionDecision"], "ask")
-        self.assertIn("WARNING: text is text that the tool publishes", out["permissionDecisionReason"])
+        self.assertNotIn("permissionDecision", out)
+        self.assertEqual(out["updatedInput"]["text"], "the key is " + PLAIN)
         codex = hooks.pre_tool({"tool_name": "mcp__slack__post", "session_id": "S1", "turn_id": "t",
                                 "tool_input": tool_input})["hookSpecificOutput"]
-        self.assertEqual(codex["permissionDecision"], "deny")
-        self.assertNotIn("updatedInput", codex)
-        self.assertIn("in text of mcp__slack__post", codex["permissionDecisionReason"])
-        # nested, listed, camel-case, suffixed and JSON-string text fields (review, 2026-09-27)
-        for ti in ({"messages": [{"text": self.e.ref}]}, {"items": [{"Text": self.e.ref}]},
-                   {"children": [{"paragraph": {"rich_text": [{"text": {"content": self.e.ref}}]}}]},
-                   {"messageText": self.e.ref}, {"text_body": self.e.ref}, {"msg": self.e.ref},
-                   {"params": json.dumps({"text": self.e.ref}, ensure_ascii=False)}):
-            got = hooks.pre_tool({"tool_name": "mcp__x__post", "session_id": "S1", "turn_id": "t",
-                                  "tool_input": ti})["hookSpecificOutput"]
-            self.assertEqual(got["permissionDecision"], "deny", ti)
+        self.assertEqual(codex["permissionDecision"], "allow")
+        self.assertEqual(codex["updatedInput"]["text"], "the key is " + PLAIN)
+        with _config(rehydration="confirm"):
+            out = hooks.pre_tool({"tool_name": "mcp__slack__post", "session_id": "S1", "prompt_id": "p",
+                                  "tool_input": tool_input})["hookSpecificOutput"]
+            self.assertEqual(out["permissionDecision"], "ask")
+            self.assertIn("WARNING: text is text that the tool publishes", out["permissionDecisionReason"])
+            # nested, listed, camel-case, suffixed and JSON-string text fields (review, 2026-09-27)
+            for ti in ({"messages": [{"text": self.e.ref}]}, {"items": [{"Text": self.e.ref}]},
+                       {"children": [{"paragraph": {"rich_text": [{"text": {"content": self.e.ref}}]}}]},
+                       {"messageText": self.e.ref}, {"text_body": self.e.ref}, {"msg": self.e.ref},
+                       {"params": json.dumps({"text": self.e.ref}, ensure_ascii=False)}):
+                got = hooks.pre_tool({"tool_name": "mcp__x__post", "session_id": "S1", "prompt_id": "p",
+                                      "tool_input": ti})["hookSpecificOutput"]
+                self.assertIn("WARNING", got["permissionDecisionReason"], ti)
+            # whole words: these fields carry values a tool needs, not published text
+            for ti in ({"context": self.e.ref}, {"plaintext": self.e.ref}, {"httpStatus": self.e.ref}):
+                got = hooks.pre_tool({"tool_name": "mcp__x__post", "session_id": "S1", "prompt_id": "p",
+                                      "tool_input": ti})["hookSpecificOutput"]
+                self.assertNotIn("WARNING", got["permissionDecisionReason"], ti)
+            # Codex cannot ask with a rewritten input: confirm refuses there, before anything is resolved
+            got = hooks.pre_tool({"tool_name": "mcp__mail__send", "session_id": "S1", "turn_id": "t",
+                                  "tool_input": {"to": self.e.ref}})["hookSpecificOutput"]
+            self.assertEqual(got["permissionDecision"], "deny")
+            self.assertNotIn("updatedInput", got)
+            self.assertIn("Codex cannot ask", got["permissionDecisionReason"])
         self.assertEqual(hooks._ref_fields({"messages": [{"text": self.e.ref}]}), ["messages[0].text"])
-        # whole words: these fields carry values a tool needs, not published text
-        for ti in ({"context": self.e.ref}, {"plaintext": self.e.ref}, {"httpStatus": self.e.ref}):
-            got = hooks.pre_tool({"tool_name": "mcp__x__post", "session_id": "S1", "turn_id": "t",
-                                  "tool_input": ti})["hookSpecificOutput"]
-            self.assertNotEqual(got.get("permissionDecision"), "deny", ti)
-        # a recipient field still resolves on Codex, without a prompt Codex cannot show
-        ok = hooks.pre_tool({"tool_name": "mcp__mail__send", "session_id": "S1", "turn_id": "t",
-                             "tool_input": {"to": self.e.ref}})["hookSpecificOutput"]
-        self.assertEqual(ok["updatedInput"], {"to": PLAIN})
 
     def test_mcp_foreign_session_is_denied_and_nothing_is_partially_resolved(self):
         out = hooks.pre_tool({"tool_name": "mcp__x__y", "session_id": "S9", **CLAUDE,

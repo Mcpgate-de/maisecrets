@@ -1,0 +1,10 @@
+# c16-a-setting-that-is-no-policy-blocks: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c16-a-setting-that-is-no-policy-blocks"
+control = "C16"
+statement = "A rehydration setting that is not automatic, confirm or block refuses every rehydration: a typo never grants."
+runner = ["tests/test_rehydration_matrix.py::RehydrationMatrixTests::test_a_setting_that_is_not_a_policy_blocks"]
+
+[proof]
+file = "maisecrets/rehydration.py"
+find = "    if raw not in POLICIES or path not in PATHS:\n        return \"block\"\n"
+replace = "    if raw not in POLICIES or path not in PATHS:\n        return \"automatic\"\n"

@@ -70,6 +70,11 @@ and OpenAI plugin directories.
   them, and the Anthropic directory blocked two versions on literals in the tests.
   `tests/test_release_tree.py` names the developer-only files; every other tracked file
   ships.
+- The directory hold: with `MAISECRETS_DIRECTORY_HOLD: "1"` in `.gitlab-ci.yml`, `mirror_tag`
+  pushes GitHub `main` and the tag but not `release`, so the Anthropic directory sees no new
+  version while one is in its review. The organisation marketplace (GitLab `main`,
+  `notify_marketplace`) and a Codex install from GitHub `main` get every release. Set it to `"0"`
+  to publish again; the next release carries every change since.
 - The `release` job runs on every push to `main` after the tests, commits
   `chore(release): vX.Y.Z` with `ci.skip`, and pushes the tag `vX.Y.Z`. The tag
   pipeline validates again and mirrors. Nobody pushes a tag by hand: the

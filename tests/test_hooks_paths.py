@@ -591,7 +591,8 @@ class McpAskTests(unittest.TestCase):
 
     def test_the_ask_names_the_fields_the_tool_and_never_the_value(self):
         params = json.dumps({"body": "hi " + self.e.ref}, ensure_ascii=False)
-        out = _hso(self._pre({"to": self.e.ref, "params": params}, prompt_id="p"))
+        with mock.patch.object(hooks, "load_config", return_value={**hooks.load_config(), "rehydration": "confirm"}):
+            out = _hso(self._pre({"to": self.e.ref, "params": params}, prompt_id="p"))
         self.assertEqual(out["permissionDecision"], "ask")
         reason = out["permissionDecisionReason"]
         self.assertIn(f"the real value of {self.e.ref} in to, params.body of mcp__svc__act", reason)

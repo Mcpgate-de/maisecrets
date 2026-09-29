@@ -715,6 +715,11 @@ class StateMatrixTests(unittest.TestCase):
         self.assertIn("WARNING: config.json: tips has the wrong type; the file was ignored", r.stdout)
         _sb, r = self._run("empty", "status")
         self.assertIn("settings from a machine policy: none", r.stdout)
+        self.assertIn("rehydration: automatic (no ask of maisecrets; the client's permission rules decide)\n",
+                      r.stdout)
+        # a file ignored for a wrong type that set no rehydration: the default stays
+        _sb, r = self._run("config-wrong-type", "status")
+        self.assertIn("rehydration: automatic (", r.stdout)
         self.assertIn("encrypted file", r.stdout)
 
     def test_the_test_store_says_so(self):

@@ -1,0 +1,10 @@
+# c16-confirm-asks-before-a-value-goes-out: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c16-confirm-asks-before-a-value-goes-out"
+control = "C16"
+statement = "With rehydration confirm, every call that gets a real value stops at a permission prompt in Claude Code, on Bash, ssh, MCP and file tools; the reason never names the value."
+runner = ["tests/test_rehydration_matrix.py::RehydrationMatrixTests::test_every_cell_of_the_matrix"]
+
+[proof]
+file = "maisecrets/rehydration.py"
+find = "        return \"deny\" if client == \"codex\" else \"ask\"\n"
+replace = "        return \"deny\" if client == \"codex\" else \"defer\"\n"
