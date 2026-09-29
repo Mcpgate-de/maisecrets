@@ -14,6 +14,7 @@ Run: python3 -m unittest tests.test_rehydration_matrix -v
 from __future__ import annotations
 
 import ast
+import json
 import os
 import shutil
 import subprocess
@@ -68,6 +69,20 @@ def expected(path: str, client: str, pol: str) -> str:
     return EXPECTED[path][client][pol]
 
 
+# payloads captured from the real client (tests/client_payloads): a client-specific row uses the shape the
+# client sends, not the shape another client sends. The file row simulated Codex with Claude's Write, and
+# Codex sends apply_patch (ChatGPT review, 2026-09-29): every cell was green while real edits went through
+PAYLOADS = {p.stem: json.loads(p.read_text(encoding="utf-8"))
+            for p in (ROOT / "tests" / "client_payloads").glob("*.json")}
+CODEX_PATCH = PAYLOADS["codex-apply-patch"]
+
+
+def _patch(ref: str, path: str = "notes.txt") -> dict:
+    """The captured Codex patch with this test's placeholder and path."""
+    command = CODEX_PATCH["tool_input"]["command"].replace("⟦SECRET_c1⟧", ref).replace("notes.txt", path)
+    return {"command": command}
+
+
 # shapes the rewrite cannot keep as data, or a client cannot take: refused under every policy
 UNSUPPORTED = {
     "bash_nested_shell": ("Bash", lambda r: {"command": f"bash -c 'echo {r}'"}),
@@ -77,10 +92,12 @@ UNSUPPORTED = {
     "ssh_value_in_arguments": ("Bash", lambda r: {"command": f"ssh aux01 echo {r}"}),
     "mcp_placeholder_as_key": ("mcp__x__y", lambda r: {r: "x", "y": r}),
     "file_into_the_store": ("Write", lambda r: {"file_path": str(Path(HOME, "config.json")), "content": r}),
+    "patch_into_the_store": ("apply_patch", lambda r: _patch(r, str(Path(HOME, "config.json")))),
+    "patch_placeholder_in_a_path": ("apply_patch", lambda r: _patch("x", r + ".txt")),
 }
 
 
-def _input(path: str, ref: str) -> tuple[str, dict]:
+def _input(path: str, ref: str, client: str = "claude") -> tuple[str, dict]:
     if path == "bash":
         return "Bash", {"command": f"printf 'got:%s' {ref}"}
     if path == "ssh":
@@ -89,6 +106,8 @@ def _input(path: str, ref: str) -> tuple[str, dict]:
         return "mcp__svc__lookup", {"id": ref}
     if path == "mcp_text":
         return "mcp__slack__post", {"channel": "C1", "text": "the password is " + ref}
+    if client == "codex":
+        return CODEX_PATCH["tool_name"], _patch(ref)
     return "Write", {"file_path": "/tmp/maisecrets-matrix.env", "content": "K=" + ref}
 
 
@@ -160,7 +179,7 @@ class RehydrationMatrixTests(unittest.TestCase):
     def check_cell(self, path: str, client: str, pol: str, want: str, **cfg) -> None:
         _reset()
         ref = Vault().put(VALUE, "SECRET", "manual", session="S1").ref
-        tool, tool_input = _input(path, ref)
+        tool, tool_input = _input(path, ref, client)
         before = _side_effects()
         hso = self.pre(tool, tool_input, client, rehydration=pol, **cfg)
         got = _decision(hso)
@@ -195,6 +214,12 @@ class RehydrationMatrixTests(unittest.TestCase):
                     with self.subTest(path=path, client=client, policy=pol):
                         self.check_cell(path, client, pol, expected(path, client, pol))
 
+    def test_a_codex_row_uses_the_payload_codex_sends(self):
+        self.assertEqual(CODEX_PATCH["tool_name"], "apply_patch")
+        self.assertEqual(_input("file", "⟦SECRET_c1⟧", "codex")[0], "apply_patch")
+        # the corpus file has every key the real client sent, so a key the hooks start to read is there
+        self.assertLessEqual({"session_id", "tool_name", "tool_input", "turn_id", "model", "cwd"}, set(CODEX_PATCH))
+
     def test_the_matrix_covers_every_path_client_and_policy_the_code_knows(self):
         from maisecrets import rehydration
         self.assertEqual(rehydration.POLICIES, ("automatic", "confirm", "block"))
@@ -213,7 +238,7 @@ class RehydrationMatrixTests(unittest.TestCase):
                 with self.subTest(path=path, client=client):
                     _reset()
                     ref = Vault().put(VALUE, "SECRET", "manual", session="S1").ref
-                    tool, tool_input = _input(path, ref)
+                    tool, tool_input = _input(path, ref, client)
                     payload = {"tool_name": tool, "tool_input": tool_input, "session_id": "S1",
                                "transcript_path": "", **CLIENTS[client]}
                     hso = hooks.pre_tool(payload).get("hookSpecificOutput", {})

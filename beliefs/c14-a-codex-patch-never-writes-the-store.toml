@@ -1,0 +1,10 @@
+# c14-a-codex-patch-never-writes-the-store: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-a-codex-patch-never-writes-the-store"
+control = "C14"
+statement = "A Codex apply_patch whose header names a path in the maisecrets home (Add, Update, Delete or Move to) is refused before Codex applies it; a patch next to the home passes."
+runner = ["tests/test_invariant_store_reads.py::PopulationTests::test_a_codex_patch_never_touches_the_store"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if tool in _FILE_TOOLS or tool == \"apply_patch\":\n"
+replace = "    if tool in _FILE_TOOLS:\n"

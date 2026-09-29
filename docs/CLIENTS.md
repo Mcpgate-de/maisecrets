@@ -36,6 +36,26 @@ Two of the three guards (block a prompt, redact a result) have no hook to live
 in, so an adapter would only rehydrate and deny. Not built; `agy plugin
 validate` accepts the plugin layout but finds no hooks in it.
 
+## Codex file edits: `apply_patch`
+
+Measured on codex-cli 0.158.0 with a real model (2026-09-29): Codex edits files with one tool,
+`apply_patch`. A PreToolUse matcher of `Write` or `Edit` reaches it (aliases), but the payload says
+`tool_name: "apply_patch"` and holds the whole patch in `tool_input.command`:
+
+```
+*** Begin Patch
+*** Add File: notes.txt
++key=⟦SECRET_c1⟧
+*** End Patch
+```
+
+The headers `Add File`, `Update File`, `Delete File` and `Move to` name the paths. maisecrets
+refuses a patch that names the maisecrets home, refuses a placeholder in a header, and resolves one
+in the content lines, context and removed lines included (the model read the file redacted, so the
+patch must match the real text). Codex applies the rewritten patch when the hook answers `allow`.
+The captured payload is `tests/client_payloads/codex-apply-patch.json`; the rehydration matrix
+builds its Codex file row from it.
+
 ## Sessions, subagents and headless runs
 
 A reference resolves in the session that created it or admitted it. A Claude

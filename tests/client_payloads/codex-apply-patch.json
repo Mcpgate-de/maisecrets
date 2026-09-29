@@ -1,0 +1,15 @@
+{
+ "_captured": "codex-cli 0.158.0, codex exec with a real model, 2026-09-29 (harness/codex.py dump); ids, paths and the model name replaced, the patch text kept as the client sent it",
+ "cwd": "/tmp/maisecrets-payload-cwd",
+ "hook_event_name": "PreToolUse",
+ "model": "codex-model",
+ "permission_mode": "bypassPermissions",
+ "session_id": "S1",
+ "tool_input": {
+  "command": "*** Begin Patch\n*** Add File: notes.txt\n+key=⟦SECRET_c1⟧\n*** End Patch"
+ },
+ "tool_name": "apply_patch",
+ "tool_use_id": "call_1",
+ "transcript_path": "",
+ "turn_id": "t1"
+}

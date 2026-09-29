@@ -2027,16 +2027,15 @@ def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
                  "a false positive, /maisecrets:report records it.")
 
 
-def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:
-    """Write/Edit/MultiEdit/NotebookEdit: a placeholder in the content is resolved like an MCP
-    argument (the value must be inline; the client's permission prompt shows the diff with it),
-    under the session rule, the limiter and an audit line that names the file. Writing a value
-    into a file on purpose is what the plugin exists for (user decision, 2026-09-26); the first
-    version refused it and sent the model to a Bash redirect. The maisecrets home is off limits
-    for the agent: a config written by an injected instruction could lift every cap or switch
-    the store to plaintext (review, 2026-09-26)."""
+# the file headers of a Codex patch: Add, Update and Delete name a file, Move to its new name
+_PATCH_HEADER_RE = re.compile(r"^\*\*\* (Add File|Update File|Delete File|Move to): ?(.*)$", re.M)
+
+
+def _in_the_home(path: str, cwd: str) -> bool:
+    """A path under the maisecrets home or the value run directory, by any spelling or link."""
     from .vault import HOME
-    path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
+    if not path:
+        return False
     try:
         expanded = os.path.expanduser(path)
         if expanded and not os.path.isabs(expanded) and cwd:
@@ -2045,14 +2044,39 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         home = os.path.realpath(str(HOME))
         if platform.system() in ("Darwin", "Windows"):   # case-insensitive file systems (APFS, NTFS)
             real, home = real.lower(), home.lower()
-        inside = bool(path) and (real == home or real.startswith(home + os.sep))
+        inside = real == home or real.startswith(home + os.sep)
         # the run directory and a hard link are known by identity only (invariant I3, 2026-09-28)
         inside = inside or _touches_store(path, cwd)
     except (OSError, ValueError):
         inside = False
-    if inside or ".maisecrets" in path.lower():
-        return _deny(f"maisecrets: {tool} on {path} is refused; the maisecrets home is changed by the human "
-                     "only. Nothing was written. Tell the user what you wanted to change there.")
+    return inside or ".maisecrets" in path.lower()
+
+
+def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:
+    """Write/Edit/MultiEdit/NotebookEdit: a placeholder in the content is resolved like an MCP
+    argument (the value must be inline; the client's permission prompt shows the diff with it),
+    under the session rule, the limiter and an audit line that names the file. Writing a value
+    into a file on purpose is what the plugin exists for (user decision, 2026-09-26); the first
+    version refused it and sent the model to a Bash redirect. The maisecrets home is off limits
+    for the agent: a config written by an injected instruction could lift every cap or switch
+    the store to plaintext (review, 2026-09-26)."""
+    if tool == "apply_patch":
+        # Codex sends every file edit as one patch in `command` (measured on codex-cli 0.158.0: the
+        # matcher aliases Write and Edit, the payload says apply_patch). Each header names a path;
+        # the value goes into the content lines only, never into a file name
+        patch = str(tool_input.get("command") or "")
+        paths = [m.group(2).strip() for m in _PATCH_HEADER_RE.finditer(patch)]
+        in_header = [k for m in _PATCH_HEADER_RE.finditer(patch) for k, _a, _b in find_refs(m.group(0))]
+        if in_header:
+            return _deny(f"maisecrets: ⟦{in_header[0]}⟧ is in a file name of the patch, where it is not resolved. "
+                         "Nothing was written. Put the placeholder into the content, not into a path.")
+    else:
+        paths = [str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")]
+    for path in paths:
+        if _in_the_home(path, cwd):
+            return _deny(f"maisecrets: {tool} on {path} is refused; the maisecrets home is changed by the human "
+                         "only. Nothing was written. Tell the user what you wanted to change there.")
+    path = ", ".join(paths)
     found: list[str] = []
 
     def collect(v: str) -> str:
@@ -2108,7 +2132,7 @@ def pre_tool(payload: dict) -> dict:
             return refused
         if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS:
             return {}
-    if tool in _FILE_TOOLS:
+    if tool in _FILE_TOOLS or tool == "apply_patch":
         return _pre_file_tool(payload, cfg, tool, tool_input, str(payload.get("cwd") or ""))
     if tool.startswith("mcp__"):
         # Gateway servers too: the deposit path (gateway resolves ⟦REF⟧ itself, PROTOCOL §4) is not

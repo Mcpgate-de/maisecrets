@@ -206,8 +206,8 @@ For development:
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 12 scenarios against a fake upstream
-python3 harness/codex.py [--real]                      # 6 scenarios through codex exec (two need --real)
-python3 scripts/replay_can_fail.py                     # 56 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
+python3 scripts/replay_can_fail.py                     # 57 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -565,7 +565,9 @@ A placeholder turns back into its value only here:
   declined prompt approves nothing. Measured in the macOS and the Linux
   (bubblewrap) sandbox against a real host with Claude Code 2.1.283
   (`harness/sandbox/ssh_e2e.py`). The default is `"per-command"`.
-- **Inline for Write and Edit.** A placeholder in the content of Write, Edit,
+- **Inline for Write and Edit, and for a Codex patch.** In Codex a placeholder in the content
+  lines of `apply_patch` resolves the same way, and a patch against the maisecrets home is
+  refused (measured on codex-cli 0.158.0). A placeholder in the content of Write, Edit,
   MultiEdit or NotebookEdit is resolved like an MCP argument, under the same
   session rule, cap and audit line (the line names the file). When your
   permission rules ask (or with `rehydration: confirm`), the prompt shows the

@@ -13,10 +13,10 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | Claude Code harness | `python3 harness/run.py` | pre-push hook (needs `claude`), GitLab `harness_claude` |
 | Codex harness | `python3 harness/codex.py` | GitLab `harness_codex` |
 | native store and clipboard | `MAISECRETS_NATIVE_BACKEND_TEST=1`, `MAISECRETS_NATIVE_CLIPBOARD_TEST=1` | GitHub runners only: they use the real keychain and clipboard |
-| Codex with a real model | `python3 harness/codex.py --real` | by hand: `mcp_text_field_rehydrate` and `allow_keeps_the_codex_sandbox` need a real model (an MCP call and a sandbox the fake upstream cannot script) |
+| Codex with a real model | `python3 harness/codex.py --real` | by hand: `mcp_text_field_rehydrate`, `allow_keeps_the_codex_sandbox`, `apply_patch_rehydrate` and `apply_patch_store_refused` need a real model (an MCP call, a sandbox and a patch the fake upstream cannot script) |
 | ssh through the sandbox | `MAISECRETS_E2E_HOST=<ssh alias> MAISECRETS_E2E_IP=<address> python3 harness/sandbox/ssh_e2e.py` | by hand before a release that touches the ssh route, on macOS and on Linux: the real Claude Code sandbox against a real host, under `rehydration: automatic` (cases 0a to 0f) and `confirm` |
 
-609 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
+611 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
 the tested commit of a release (branch `ci`) and on a push to main without a release.
 
 ## What makes a test count
@@ -57,7 +57,12 @@ the tested commit of a release (branch `ci`) and on a push to main without a rel
   `hooks.py`, every call site that returns a rewrite and every function that builds one. The code's own table (`rehydration.outcome`) is never read by the test. Five C16 beliefs
   mutate the policy and its call sites. The harness proves the same on the real clients: `mcp_rehydrate`,
   `mcp_rehydrate_confirm`, `bash_ssh_automatic`, `bash_ssh_asks` (Claude Code) and
-  `bash_rehydrate_confirm`, `mcp_text_field_rehydrate`, `allow_keeps_the_codex_sandbox` (Codex).
+  `bash_rehydrate_confirm`, `mcp_text_field_rehydrate`, `allow_keeps_the_codex_sandbox`,
+  `apply_patch_rehydrate`, `apply_patch_store_refused` (Codex).
+- **Payloads from the real client.** A client-specific row of a matrix uses a payload captured from
+  that client (`tests/client_payloads/`, recorded with `harness/codex.py` and the `dump` option,
+  ids replaced). The Codex file row first used Claude Code's `Write`; Codex sends `apply_patch`, and
+  every cell was green while real Codex edits resolved nothing.
 - **Generated inputs with known answers.** `tests/detection_matrix.py` builds 2,500 cases from
   labels (the denylist and `maisecrets/rules/labels/*.txt`), separators, value shapes and
   context; the gate compares the full result per case. The matrix takes the label files of the

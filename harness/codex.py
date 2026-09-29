@@ -86,6 +86,25 @@ SCENARIOS = {
         "expect_ran_and_refused": ("used.txt: Operation not permitted", "used.txt: Read-only file system",
                                    "used.txt: Permission denied"),
     },
+    # Codex edits files with apply_patch (the matcher aliases Write and Edit; the payload says apply_patch,
+    # measured on 0.158.0). A placeholder in the patch content becomes the value in the file
+    "apply_patch_rehydrate": {
+        "prompt": "Use the apply_patch tool (not a shell command) to create the file notes.txt with the single "
+                  "line: key=⟦SECRET_c1⟧",
+        "preload": True,
+        "real_only": True,
+        "expect_placeholder": "⟦SECRET_c1⟧",
+        "expect_file": ("notes.txt", f"key={MARK}\n"),
+        "expect_hook": ("pre-tool", "apply_patch", "rewrite"),
+    },
+    # a patch against the maisecrets home is refused before Codex applies it (invariant I3, C14)
+    "apply_patch_store_refused": {
+        "prompt": "Use the apply_patch tool (not a shell command) to create the file {home}/notes.txt with the "
+                  "single line: hello",
+        "real_only": True,
+        "expect_home_file_missing": "notes.txt",
+        "expect_hook": ("pre-tool", "apply_patch", "deny"),
+    },
     # rehydration "confirm": Codex cannot ask with a rewritten input, so the hook refuses the command
     # and it does not run; the model reads the reason, which names the key, not the value
     "bash_rehydrate_confirm": {
@@ -136,6 +155,15 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         cfg += (f'[mcp_servers.{server}]\ncommand = {json.dumps(spec["command"])}\nargs = {json.dumps(spec["args"])}\n'
                 'default_tools_approval_mode = "approve"\n')
     (codex_home / "config.toml").write_text(cfg)
+    if sc.get("dump"):
+        # record every tool payload the real client sends (values masked by the shared detector): the
+        # contract corpus under tests/client_payloads comes from these files, not from a guess
+        dump_cmd = f"{sys.executable} \"{ROOT / 'harness' / 'dump_hook.py'}\""
+        (codex_home / "hooks.json").write_text(json.dumps({"hooks": {
+            ev: [{"matcher": ".*", "hooks": [{"type": "command", "command": dump_cmd}]}] if ev.endswith("ToolUse")
+            else [{"hooks": [{"type": "command", "command": dump_cmd}]}]
+            for ev in ("PreToolUse", "PostToolUse")}}))
+        env["MAISECRETS_DUMP"] = str(out)
     # The plugin is installed the way a user gets it, from this checkout as a local marketplace,
     # so Codex's own plugin and hook discovery is under test. Writing hooks.json into CODEX_HOME
     # (the first version of this harness) hid a discovery failure: with a root plugin.json in the
@@ -171,7 +199,7 @@ def run_scenario(name: str, sc: dict) -> list[str]:
     try:
         r = subprocess.run(
             ["codex", "exec", "--dangerously-bypass-hook-trust", "--skip-git-repo-check",
-             "-C", str(cwd), "-o", str(last), sc["prompt"]],
+             "-C", str(cwd), "-o", str(last), sc["prompt"].replace("{home}", str(home))],
             env=env, capture_output=True, text=True, timeout=180, stdin=subprocess.DEVNULL,
         )
     finally:
@@ -220,6 +248,8 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         got = (cwd / fname).read_text() if (cwd / fname).exists() else "<missing>"
         if got != content:
             fails.append(f"rehydration: {fname} holds {got!r}")
+    if sc.get("expect_home_file_missing") and (home / sc["expect_home_file_missing"]).exists():
+        fails.append(f"{sc['expect_home_file_missing']} was written into the maisecrets home")
     if sc.get("expect_hook"):
         log = (home / "hooks.log").read_text(errors="ignore") if (home / "hooks.log").exists() else ""
         event, tool, outcome = sc["expect_hook"]
