@@ -195,6 +195,9 @@ class PowerShellPartFailsClosedTests(MovedPluginFolderFailsClosedTests):
     `${env:CLAUDE_PLUGIN_ROOT}`, `pwsh -NoProfile -NonInteractive -Command`. pwsh runs on the GitHub
     Windows and macOS runners; the Windows e2e project runs it with the real client in pwsh 7 and 5.1."""
 
+    __unittest_skip__ = False                     # the POSIX parent is skipped on Windows; pwsh runs there too
+    __unittest_skip_why__ = ""
+
     def setUp(self):
         self.pwsh = shutil.which("pwsh")
         if not self.pwsh:
@@ -264,6 +267,44 @@ class CmdExeFailsClosedTests(MovedPluginFolderFailsClosedTests):
                               env=env, timeout=60)
 
     SLASH = "\\"
+
+    def stub_root(self, parent: str) -> Path:
+        """A plugin folder whose launcher exits 7: its exit code must come through the if/else of the command."""
+        root = Path(tempfile.mkdtemp(prefix="maisecrets-stub-")) / parent / "maisecrets"
+        (root / "hooks").mkdir(parents=True)
+        (root / "hooks" / "dispatch.py").write_text("", encoding="utf-8")
+        (root / "hooks" / "run.cmd").write_text("@exit /b 7\r\n", encoding="utf-8")
+        self.addCleanup(shutil.rmtree, root.parents[1], True)
+        return root
+
+    def test_the_exit_code_of_the_launcher_comes_through(self):
+        for parent in ("plain", "Program Files (x86)"):
+            root = self.stub_root(parent)
+            for event, command in self.commands().items():
+                with self.subTest(parent=parent, event=event):
+                    self.assertEqual(self.run_command(command, root).returncode, 7)
+
+    def test_a_missing_folder_under_a_path_with_spaces_and_parentheses_blocks(self):
+        gone = Path(tempfile.mkdtemp(prefix="maisecrets-moved-")) / "Program Files (x86)" / "maisecrets"
+        for event, command in self.commands().items():
+            with self.subTest(event):
+                r = self.run_command(command, gone)
+                if event == "session-start":
+                    self.assertIn("folder is gone", json.loads(r.stdout)["systemMessage"])
+                else:
+                    self.assert_refused(event, r)
+
+    def test_a_folder_that_lost_its_dispatcher_blocks(self):
+        # Codex deletes the old version folder while the session runs: run.cmd may still be there
+        root = self.stub_root("half-deleted")
+        (root / "hooks" / "dispatch.py").unlink()
+        for event, command in self.commands().items():
+            with self.subTest(event):
+                r = self.run_command(command, root)
+                if event == "session-start":
+                    self.assertIn("folder is gone", json.loads(r.stdout)["systemMessage"])
+                else:
+                    self.assert_refused(event, r)
 
 
 class CmdExeForwardSlashRootTests(CmdExeFailsClosedTests):

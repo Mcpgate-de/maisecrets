@@ -11,8 +11,8 @@
 
 - **Code after a colon is no longer stored as a secret.** A line such as `if not token: <statement>`
   put the statement word into the vault, and maisecrets then redacted that word in every later text,
-  in source code too. A line that opens a block (`if`, `elif`, `while`, `for`, `with`, `except`, …)
-  and a statement keyword after a label are not values now. One lowercase word after a label, with
+  in source code too. A statement keyword after a label (`break`, `return`, `pass`, `raise`, …) is not
+  a value now; so a password that is exactly such a word is not stored either. One lowercase word after a label, with
   the sentence going on, is still stored: without a dictionary it looks like a password of letters,
   and a missed password costs more than a false positive.
 

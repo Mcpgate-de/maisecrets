@@ -625,11 +625,18 @@ class LabelValueTests(unittest.TestCase):
         # this repository's own code included (field report, 2026-09-29)
         for text in ("        if not tok§en: continue", "            if not sec§ret: continue",
                      "    if tok§en is None: return", "while not pass§word: break", "if not api§_key: raise",
-                     "except Error as sec§ret: pass", "pass§word: continue",
-                     # no statement word: only the line, which opens a block, says it is code
-                     "        if not pass§word: getpass9x"):
+                     "except Error as sec§ret: pass", "pass§word: continue"):
             with self.subTest(text=text):
                 self.assertEqual(kinds(text), [])
+
+    def test_a_line_that_starts_like_code_still_carries_its_value(self):
+        # a check of the whole line ("it opens a block") skipped every one of these (review, 2026-09-29)
+        v = "Xk9" + "mQ2vLp8r"
+        for text in ("with pass§word: {v}", "for staging use pass§word: {v}", "if you need it, pass§word: {v}",
+                     "try pass§word: {v}", "else pass§word: {v}", "while testing, api§_key: {v}",
+                     "if env == 'prod': pass§word = '{v}'", "        if not tok§en: {v}"):
+            with self.subTest(text=text):
+                self.assertIn(v, [m.value for m in scan(text.format(v=v))])
 
     def test_one_lowercase_word_before_more_prose_stays_a_value(self):
         # "Sec§rets: connectors and plugins" is prose, but a lowercase value can be a random password

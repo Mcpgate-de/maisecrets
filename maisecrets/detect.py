@@ -551,9 +551,9 @@ _LABEL_ONLY_RE = re.compile(r"[:=]\s*$")
 # 2026-09-27: matching the bare words hid them).
 _CODE_CONDITION_RE = re.compile(r"(?:==|!=|<=|>=|\bis not\b|^\s*(?:def|class)\s+\w+\s*[(:])")
 # a keyword rule reads `if not token: <statement>` as label and value: the statement word went into the vault
-# and every later text with that word was redacted, code included (field report, 2026-09-29). A line that
-# opens a block with a keyword is code, and a statement keyword is never a value
-_CODE_STATEMENT_RE = re.compile(r"^\s*(?:if|elif|while|for|with|except|else|try|finally)\b[^\n]*:")
+# and every later text with that word was redacted, code included (field report, 2026-09-29). A statement
+# keyword is never a value. A check of the whole line ("it opens a block") was tried and dropped: the colon
+# of the label itself satisfied it, and `with password: <value>` went through (review, 2026-09-29)
 _CODE_WORDS = frozenset({"break", "continue", "return", "pass", "raise", "throw", "yield", "await", "elif",
                          "else"})
 
@@ -717,8 +717,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     end = start + len(secret)
                     if _CAPITALISED_WORD_RE.fullmatch(secret):
                         continue
-            if rule.id.startswith("ds-keyword") and (secret.strip().rstrip(";").lower() in _CODE_WORDS
-                                                     or _CODE_STATEMENT_RE.match(_line_of(text, start, end))):
+            if rule.id.startswith("ds-keyword") and secret.strip().rstrip(";").lower() in _CODE_WORDS:
                 continue
             if any(s < end and start < e for s, e in taken):
                 continue
