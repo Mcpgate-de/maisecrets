@@ -291,10 +291,21 @@ class PopulationTests(unittest.TestCase):
                 with self.subTest(header=header, path=path):
                     self.assertTrue(deny(pre("apply_patch", {"command": patch}, "/tmp", "codex")), patch)
         # indented headers: codex-cli 0.158.0 trims them and applies the patch (review, 2026-09-29)
-        for indent in (" ", "\t", "   "):
+        # and every other whitespace Codex trims (NBSP, \f, \v, \r, U+2003, U+3000: measured by review round 2)
+        for indent in (" ", "\t", "   ", "\u00a0", "\x0c", "\x0b", "\r", "\u2003", "\u3000", "\x85", "\u2028"):
             patch = f"*** Begin Patch\n{indent}*** Add File: {home}/config.json\n+x\n*** End Patch"
             with self.subTest(indent=repr(indent)):
                 self.assertTrue(deny(pre("apply_patch", {"command": patch}, "/tmp", "codex")), patch)
+        # the heredoc form Codex also applies is a patch like any other
+        heredoc = f"<<'EOF'\n*** Begin Patch\n*** Add File: {home}/config.json\n+x\n*** End Patch\nEOF"
+        self.assertTrue(deny(pre("apply_patch", {"command": heredoc}, "/tmp", "codex")))
+        beside_heredoc = "<<'EOF'\n*** Begin Patch\n*** Add File: notes.txt\n+x\n*** End Patch\nEOF"
+        self.assertFalse(deny(pre("apply_patch", {"command": beside_heredoc}, "/tmp", "codex")),
+                         "a heredoc patch next to the store is a normal edit")
+        # the agent cannot switch the guard off: its --off is for the person at a terminal
+        for cmd in ("python3 ~/.claude/maisecrets-guard.py --off", "cat ~/.maisecrets/guard.json"):
+            with self.subTest(cmd=cmd):
+                self.assertTrue(deny(pre("Bash", {"command": cmd}, "/tmp")), cmd)
         # no patch text: nothing names the paths, so nothing is resolved or allowed
         for ti in ({}, {"patch": f"*** Begin Patch\n*** Add File: {home}/x\n+x\n*** End Patch"}, {"command": 5}):
             with self.subTest(tool_input=str(ti)[:40]):

@@ -96,15 +96,24 @@ class ExpectedTests(_Env):
         (self.claude / "settings.json").write_text(json.dumps({"enabledPlugins": {"maisecrets@maisecrets": False}}))
         self.assertFalse(guard.expected())
 
-    def test_the_root_a_synced_copy_wrote_counts_for_its_own_account_only(self):
-        root = self.claude / "plugins" / "synced" / "org-1_acc-1" / "maisecrets"
-        (root / ".claude-plugin").mkdir(parents=True)
-        (root / ".claude-plugin" / "plugin.json").write_text("{}")
-        Path(HOME, "guard.json").write_text(json.dumps({"expect": "synced", "root": str(root)}))
+    def test_the_account_a_synced_copy_wrote_counts_even_when_its_folder_is_gone(self):
+        # the folder that is gone is the case the guard is for (review, 2026-09-29: a check that the
+        # folder exists made the guard silent exactly then)
+        Path(HOME, "guard.json").write_text(json.dumps({"expect": "synced", "root": "/gone/maisecrets",
+                                                        "account": "org-1_acc-1"}))
         self.account("org-1", "acc-1", synced=False)
         self.assertTrue(guard.expected())
         self.account("org-1", "acc-2", synced=False)
         self.assertFalse(guard.expected(), "another account of the machine")
+
+    def test_a_second_profile_on_the_same_home_keeps_its_own_synced_folder(self):
+        root_a = self.claude / "plugins" / "synced" / "org-1_acc-1" / "maisecrets"
+        (root_a / ".claude-plugin").mkdir(parents=True)
+        (root_a / ".claude-plugin" / "plugin.json").write_text("{}")
+        Path(HOME, "guard.json").write_text(json.dumps({"expect": "synced", "root": str(root_a),
+                                                        "account": "org-1_acc-1"}))
+        self.account("org-1", "acc-2", synced=True)            # profile B, with its own synced copy
+        self.assertTrue(guard.expected(), "profile A's root must not silence profile B")
 
     def test_no_guard_json_and_no_synced_copy_expects_nothing(self):
         # a manual install whose home went away: maisecrets writes no heartbeat, so the guard must not wait
@@ -257,9 +266,12 @@ class SyncedInstallTests(_Env):
         script = self.claude / "maisecrets-guard.py"
         script.write_text("an older guard")
         (self.claude / "settings.json").write_text(json.dumps({"model": "x"}))
+        self.account("org-1", "acc-1", synced=False)
         msg = self.start(copy)
         self.assertIn("is on", msg)
         self.assertIn("registered its guard", msg)
+        written = json.loads(Path(HOME, "guard.json").read_text())
+        self.assertEqual((written["account"], written["root"]), ("org-1_acc-1", str(copy.resolve())))
         self.assertEqual(script.read_bytes(), GUARD.read_bytes(), "the stale script was replaced")
         self.assertEqual(self.guard_entries(), 3, "UserPromptSubmit, PreToolUse, PostToolUse")
         self.assertEqual(json.loads((self.claude / "settings.json").read_text())["model"], "x")
@@ -318,6 +330,13 @@ class SyncedInstallTests(_Env):
                 (self.claude / "settings.json").write_text(text)
                 self.assertIn("is on", self.start(copy))
                 self.assertEqual((self.claude / "settings.json").read_text(), text)
+
+    def test_off_from_a_terminal_survives_the_next_session_start(self):
+        copy = self.synced_copy()
+        self.start(copy)
+        subprocess.run([sys.executable, str(GUARD), "--off"], capture_output=True, text=True, env=dict(os.environ))
+        self.start(copy)
+        self.assertEqual(json.loads(Path(HOME, "guard.json").read_text())["expect"], "off")
 
     def test_after_guard_remove_the_script_is_not_placed_again(self):
         from maisecrets import cli

@@ -203,8 +203,12 @@ blocks without it. The Windows command (`commandWindows`) has no such test yet.
     maisecrets hook of the same call writes as it starts (both run in parallel);
     without maisecrets it waits 5 s and then refuses. The refusal names
     `/reload-plugins` and, for a maisecrets that is off on purpose, the way out
-    from a terminal: `python3 ~/.claude/maisecrets-guard.py --off`. A plugin
-    switched off in the user, project, local or managed settings is left alone.
+    from a terminal: `python3 ~/.claude/maisecrets-guard.py --off` (it stays off;
+    the agent cannot run it). A plugin switched off in the user, project, local or
+    managed settings is left alone. The guard expects maisecrets for the account
+    the synced copy registered under, so a second Claude profile is not blocked.
+    On a Mac without the Command Line Tools there is no `python3`, and the guard
+    answers nothing.
 - For a team, an admin can roll out this marketplace with managed settings
   (`extraKnownMarketplaces` with `autoUpdate: true`, and `enabledPlugins`), so
   nobody has to type a command ([Claude Code docs](https://code.claude.com/docs/en/plugins/org)).

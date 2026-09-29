@@ -517,6 +517,8 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
     ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"
                            r"|(?<![\w-])resolve\s+\S+\s+--grant\b|cmd_resolve|\.redeem\("),
     ("the ssh approval store", r"ssh-approvals|ssh_approval"),
+    # the guard outside the plugin folder: `--off` in its refusal is for the person, not the agent
+    ("the maisecrets guard", r"maisecrets-guard\.py"),     # guard.json sits in the home, covered above
     ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\](?:v-|sealed)|__ms_\d+\b"
                               r"|XDG_RUNTIME_DIR[^\n]*maisecrets"),
 ]
@@ -2029,8 +2031,30 @@ def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
 
 
 # the file headers of a Codex patch: Add, Update and Delete name a file, Move to its new name
-# (indented too: codex-cli 0.158.0 applies "  *** Add File: x"; review, 2026-09-29)
-_PATCH_HEADER_RE = re.compile(r"^[ \t]*\*\*\* (Add File|Update File|Delete File|Move to): ?(.*)$", re.M)
+_PATCH_MARKERS = ("Add File", "Update File", "Delete File", "Move to")
+
+
+def _patch_headers(patch: str) -> list[tuple[str, str]]:
+    """(the header line, the path it names) of a Codex patch. A line is a header by its stripped form:
+    codex-cli 0.158.0 trims all whitespace, Unicode included (NBSP, \\f, U+3000), before it reads a
+    marker; a regex for spaces and tabs missed the rest (reviews, 2026-09-29)."""
+    out = []
+    for line in patch.split("\n"):
+        t = line.strip()
+        for marker in _PATCH_MARKERS:
+            if t.startswith(f"*** {marker}:"):
+                out.append((line, t[len(marker) + 5:].strip()))
+    return out
+
+
+def _patch_text_ok(patch: object) -> bool:
+    """A Codex patch: `*** Begin Patch` first, also inside the heredoc form Codex accepts."""
+    if not isinstance(patch, str):
+        return False
+    lines = [ln.strip() for ln in patch.strip().split("\n")]
+    if lines and re.fullmatch(r"<<\s*['\"]?\w+['\"]?", lines[0]):
+        lines = lines[1:]
+    return bool(lines) and lines[0] == "*** Begin Patch"
 
 
 def _in_the_home(path: str, cwd: str) -> bool:
@@ -2067,12 +2091,13 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         # matcher aliases Write and Edit, the payload says apply_patch). Each header names a path;
         # the value goes into the content lines only, never into a file name
         patch = tool_input.get("command")
-        if not isinstance(patch, str) or not patch.lstrip().startswith("*** Begin Patch"):
+        if not _patch_text_ok(patch):
             # without the patch text nothing names the paths: a placeholder elsewhere would resolve
             # unchecked (review, 2026-09-29)
             return _deny("maisecrets: this apply_patch call carries no patch in `command`. Nothing was written.")
-        paths = [m.group(2).strip() for m in _PATCH_HEADER_RE.finditer(patch)]
-        in_header = [k for m in _PATCH_HEADER_RE.finditer(patch) for k, _a, _b in find_refs(m.group(0))]
+        headers = _patch_headers(patch)
+        paths = [path for _line, path in headers]
+        in_header = [k for line, _path in headers for k, _a, _b in find_refs(line)]
         if in_header:
             return _deny(f"maisecrets: ⟦{in_header[0]}⟧ is in a file name of the patch, where it is not resolved. "
                          "Nothing was written. Put the placeholder into the content, not into a path.")

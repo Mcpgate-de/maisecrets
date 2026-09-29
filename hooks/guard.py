@@ -26,7 +26,7 @@ import time
 EVENTS = {"UserPromptSubmit": "user-prompt", "PreToolUse": "pre-tool", "PostToolUse": "post-tool"}
 MESSAGE = ("maisecrets did not run for this call: a plugin update replaced its folder, or it started too slowly. "
            "Run /reload-plugins, then try again. If maisecrets is off on purpose, switch the guard off in a terminal: "
-           "python3 ~/.claude/maisecrets-guard.py --off")
+           "python3 {script} --off")
 MANAGED = {"darwin": "/Library/Application Support/ClaudeCode/managed-settings.json",
            "linux": "/etc/claude-code/managed-settings.json"}
 
@@ -51,11 +51,15 @@ def _load(path: str) -> dict:
 def _switched_off(cwd: str) -> bool:
     """maisecrets disabled in any settings Claude Code reads: user, managed, or a project's own."""
     files = [os.path.join(_claude_dir(), "settings.json"), MANAGED.get(sys.platform, "")]
+    # the project's own settings: from cwd up to the project root (a .git) or the home directory
     d = os.path.abspath(cwd) if cwd else ""
+    stop = os.path.expanduser("~")
     while d:
         files += [os.path.join(d, ".claude", "settings.json"), os.path.join(d, ".claude", "settings.local.json")]
         parent = os.path.dirname(d)
-        d = "" if parent == d else parent
+        if parent == d or d == stop or os.path.exists(os.path.join(d, ".git")):
+            break
+        d = parent
     for f in files:
         plugins = _load(f).get("enabledPlugins") if f else None
         if isinstance(plugins, dict) and any("maisecrets" in k and v is False for k, v in plugins.items()):
@@ -84,12 +88,12 @@ def expected(cwd: str = "") -> bool:
     if mode == "always":
         return True
     claude = _claude_dir()
-    root = cfg.get("root")
-    if root:
-        # the synced copy that registered the guard wrote its real folder: it counts for its own account only
-        return (os.path.isfile(os.path.join(root, ".claude-plugin", "plugin.json"))
-                and os.path.basename(os.path.dirname(root)) == _account())
     account = _account()
+    # the synced copy that registered the guard wrote the account it ran as: for that account maisecrets is
+    # meant to run, whether or not its folder is there now (a folder that is gone is the case the guard is
+    # for; review, 2026-09-29). Another account (a second profile on the same home) falls through.
+    if account and cfg.get("account") == account:
+        return True
     if account and os.path.isfile(os.path.join(claude, "plugins", "synced", account, "maisecrets",
                                                ".claude-plugin", "plugin.json")):
         return True
@@ -105,13 +109,14 @@ def heartbeat_name(session: str, event: str, ident: str) -> str:
 
 
 def _refusal(hook_event: str) -> dict:
+    message = MESSAGE.format(script=os.path.join(_claude_dir(), "maisecrets-guard.py"))
     if hook_event == "UserPromptSubmit":
-        return {"decision": "block", "reason": MESSAGE}
+        return {"decision": "block", "reason": message}
     if hook_event == "PreToolUse":
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                       "permissionDecisionReason": MESSAGE}}
+                                       "permissionDecisionReason": message}}
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
-                                   "updatedToolOutput": f"[{MESSAGE} The tool ran; its output is withheld.]"}}
+                                   "updatedToolOutput": f"[{message} The tool ran; its output is withheld.]"}}
 
 
 def decide(payload: dict, wait: float) -> dict:

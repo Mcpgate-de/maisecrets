@@ -442,7 +442,7 @@ def _write_settings(settings, current: dict) -> None:
     import stat as _stat
     from pathlib import Path as _P
     from .vault import atomic_write
-    target = _P(os.path.realpath(settings)) if settings.exists() else settings
+    target = _P(os.path.realpath(settings)) if settings.exists() or settings.is_symlink() else settings
     mode = _stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o600
     atomic_write(target, json.dumps(current, indent=2) + "\n", mode=mode)
 
@@ -466,7 +466,20 @@ def place_guard_script() -> bool:
         return False
 
 
-def install_guard(expect: str = "synced", root: str = "") -> list[str]:
+def _active_account() -> str:
+    """<organizationUuid>_<accountUuid> of the account this Claude Code runs as (the guard compares it)."""
+    from pathlib import Path as _P
+    cfg_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    path = _P(cfg_dir) / ".claude.json" if cfg_dir else _P.home() / ".claude.json"
+    try:
+        acc = json.loads(path.read_text(encoding="utf-8")).get("oauthAccount") or {}
+    except (OSError, ValueError, AttributeError):
+        return ""
+    org, user = acc.get("organizationUuid"), acc.get("accountUuid")
+    return f"{org}_{user}" if org and user else ""
+
+
+def install_guard(expect: str = "synced", root: str = "", keep_mode: bool = False) -> list[str]:
     """Copy the guard next to the Claude Code settings and register it for the events and matchers
     maisecrets itself uses. The settings file is backed up first and changed only in its hooks."""
     import shutil
@@ -493,8 +506,16 @@ def install_guard(expect: str = "synced", root: str = "") -> list[str]:
         _write_settings(settings, current)
         done.append(f"registered it in {settings} for UserPromptSubmit, PreToolUse and PostToolUse")
     HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
-    # a synced copy names its real folder: the guard then expects maisecrets for that account only
-    (HOME / "guard.json").write_text(json.dumps({"expect": expect, **({"root": root} if root else {})}) + "\n",
+    # a synced copy names its real folder: the guard then expects maisecrets for that account only. The
+    # session start keeps a mode the person chose (`--off`, `--always`; review: it silently undid `--off`)
+    if keep_mode:
+        try:
+            chosen = json.loads((HOME / "guard.json").read_text(encoding="utf-8")).get("expect")
+        except (OSError, ValueError, AttributeError):
+            chosen = None
+        expect = chosen if chosen in ("off", "always") else expect
+    extra = {"root": root, "account": _active_account()} if root else {}
+    (HOME / "guard.json").write_text(json.dumps({"expect": expect, **{k: v for k, v in extra.items() if v}}) + "\n",
                                      encoding="utf-8")
     (HOME / ".guard-removed").unlink(missing_ok=True)
     done.append(f"maisecrets now writes the heartbeat the guard waits for ({HOME / 'alive'})")
@@ -522,7 +543,7 @@ def register_guard_for_a_synced_install() -> "str | None":
         _script, settings = _guard_paths()
         first = not guard_registered()
         from pathlib import Path as _P
-        done = install_guard("synced", str(_P(__file__).resolve().parent.parent))
+        done = install_guard("synced", str(_P(__file__).resolve().parent.parent), keep_mode=True)
     except (Exception, SystemExit):  # noqa: BLE001 - a settings file of any shape must not break the start
         return None
     if first and any(d.startswith("registered it") for d in done):
@@ -583,6 +604,16 @@ def cmd_guard(args: list[str]) -> int:
     print(f"guard script: {script} ({'present' if script.exists() else 'missing'})")
     print(f"registered in {settings}: {'yes' if guard_registered() else 'no'}")
     print(f"heartbeat: {'on' if (HOME / 'guard.json').exists() else 'off'}")
+    try:
+        import importlib.util
+        from pathlib import Path as _P
+        spec = importlib.util.spec_from_file_location("maisecrets_guard", _P(__file__).resolve().parent.parent
+                                                      / "hooks" / "guard.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        print(f"maisecrets expected for this account: {'yes' if mod.expected(os.getcwd()) else 'no'}")
+    except Exception as exc:  # noqa: BLE001 - status must print what it can
+        print(f"maisecrets expected for this account: unknown ({type(exc).__name__})")
     return 0
 
 

@@ -283,7 +283,17 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             for entry in plugin_hooks[ev]:
                 g = {"hooks": [{"type": "command", "command": guard_cmd, "timeout": 15}]}
                 hooks_cfg[ev].append({"matcher": entry["matcher"], **g} if entry.get("matcher") else g)
-        (home / "guard.json").write_text(json.dumps({"expect": "always"}))
+        # the production rule: the account the synced copy registered under must be the one Claude Code runs
+        # as. Its ids come from the account file the real client uses; without one (CI) the rule is "always"
+        try:
+            acc = json.loads((Path.home() / ".claude.json").read_text()).get("oauthAccount") or {}
+            account = f"{acc['organizationUuid']}_{acc['accountUuid']}"
+        except (OSError, ValueError, KeyError, TypeError):
+            account = ""
+        (home / "guard.json").write_text(json.dumps({"expect": "synced", "account": account} if account
+                                                    else {"expect": "always"}))
+        if not account:
+            print(f"     ~ {name}: no account file, the guard runs with expect=always")
     settings.write_text(json.dumps({"enabledPlugins": {"maisecrets@synced": False}, "hooks": hooks_cfg}))
     srv = start_server(turns, out)
     try:
