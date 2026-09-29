@@ -27,12 +27,14 @@ import sys
 import time
 
 EVENTS = {"UserPromptSubmit": "user-prompt", "PreToolUse": "pre-tool", "PostToolUse": "post-tool"}
-MESSAGE = ("maisecrets did not run for this call: a plugin update replaced its folder, or it started too slowly. "
-           "Run /reload-plugins, then try again. If this block comes again, a Claude Code bug "
-           "(anthropics/claude-code#97847) keeps the old plugin folder in this session, and /reload-plugins cannot "
-           "load maisecrets again. Then exit this session and resume it in the directory where you started it: "
-           "claude --resume {session}. If maisecrets is off on purpose, switch the guard off in a terminal: "
-           "python3 {script} --off")
+MESSAGE = ("maisecrets did not run for this call: a plugin update replaced its folder, or it started too slowly.\n\n"
+           "    claude --resume {session}\n\n"
+           "Exit this session and run the command above in the directory where you started it.{clip} "
+           "/reload-plugins may help first; after a synced update it cannot (anthropics/claude-code#97847). "
+           "If maisecrets is off on purpose, switch the guard off in a terminal: python3 {script} --off")
+# a terminal with copy-on-select (Ghostty's default) replaces the clipboard as soon as text is selected
+# (measured 2026-09-29: the command stayed 25 s until one word was selected), so the refusal says it was copied
+CLIP = " It was copied to your clipboard; selecting text in the terminal can replace it."
 MANAGED = {"darwin": "/Library/Application Support/ClaudeCode/managed-settings.json",
            "linux": "/etc/claude-code/managed-settings.json"}
 
@@ -202,9 +204,8 @@ def _copy_resume(session: str) -> bool:
 
 def _refusal(hook_event: str, session: str) -> dict:
     # a synced update: /reload-plugins keeps the gone generation path (measured 2026-09-29); a new process does not
-    message = MESSAGE.format(script=os.path.join(_claude_dir(), "maisecrets-guard.py"), session=session)
-    if _copy_resume(session):
-        message += " The resume command is in your clipboard."
+    message = MESSAGE.format(script=os.path.join(_claude_dir(), "maisecrets-guard.py"), session=session,
+                             clip=CLIP if _copy_resume(session) else "")
     if hook_event == "UserPromptSubmit":
         return {"decision": "block", "reason": message}
     if hook_event == "PreToolUse":

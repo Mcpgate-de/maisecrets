@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The restart command stands on a line of its own** in the refusal of the guard, so it is easy to
+  see, and a triple click copies just that line. The refusal now says the command *was* copied to
+  your clipboard: a terminal with copy-on-select (the default in Ghostty) replaces the clipboard as
+  soon as you select text, also text in the refusal itself.
+
 ## [0.5.13] - 2026-09-29
 
 - **Synced installs: the guard now gives the restart command.** After a synced update,
