@@ -382,7 +382,9 @@ PRIMER = (
     "(a nested shell, eval, backticks, $'…', a quoted heredoc, an encoder, a slice, set -x) gets an answer "
     "that names a form that works. The value stays with the user: to use it, use the placeholder; the user "
     "manages the stored values and the settings. When the user asks for the value in a file or a command, "
-    "put the placeholder there as they asked."
+    "put the placeholder there as they asked. In test data, write values that name themselves (testpass, "
+    "my-test-token), addresses at example.com and placeholders such as <your-token>: maisecrets leaves them "
+    "alone, and a password in a test file is taken for a fixture."
 )
 
 

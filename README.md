@@ -688,6 +688,28 @@ Recommended in your Claude Code settings, outside the plugin: the sandbox with
 sees: a command that sends `.env` or `printenv` somewhere without printing it
 (a command that pipes `.env` into an upload). The hook redacts only what comes back.
 
+## Test data that maisecrets leaves alone
+
+maisecrets steps in only when a value that it can detect goes to the AI. Test data
+does not need to look like a real secret, and these forms are never a hit:
+
+- **In test code** (a file under `tests/`, `test_*.py`, `*_test.go`, `*.spec.ts`,
+  `conftest.py`, or code after `def test_`, `assert`, `describe(`), a password that
+  maisecrets finds only by its label (`password = "<value>"`) is a fixture.
+  A token shape (`glpat-…`, `AKIA…`, a private key) and personal data are still found
+  there: a real token in a test is a leak.
+- **Anywhere:** a value that names itself (`testpass`, `secret123`, `Passw0rd!`,
+  `my-test-token`), a placeholder (`<your-token>`, `${API_KEY}`, `{password}`,
+  `changeme`, `xxxxxxxx`, `***`), and a default equal to its label or user
+  (`POSTGRES_PASSWORD: postgres`, `admin:admin`).
+- **Addresses:** e-mail at `example.com`, `example.org`, `example.net` and the domains
+  `.test`, `.example`, `.invalid`, `.localhost`, `.local`, `.internal`; IP addresses in
+  the documentation ranges `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and
+  `2001:db8::/32`, private and loopback addresses.
+
+If maisecrets stops something that is not a secret, `/maisecrets:report last <why>`
+sends the rule name, never the value.
+
 ## Detection rules
 
 Four sources, one scanner (`maisecrets/detect.py`):

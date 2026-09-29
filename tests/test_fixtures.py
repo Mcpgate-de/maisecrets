@@ -84,6 +84,32 @@ class InTestCodeTests(unittest.TestCase):
         self.assertEqual(scan(text, "tests/test_login.py"), [("SECRET", TOKEN), ("EMAIL", "anna.berg@acme.de")])
 
 
+class AdviceTests(unittest.TestCase):
+    """The test data the README and the primer recommend is no hit. Advice that the detector does not keep would
+    send an agent that follows it into the block it wanted to avoid."""
+
+    def test_every_form_the_readme_and_the_primer_name_is_no_hit(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        section = readme.split("## Test data that maisecrets leaves alone", 1)[1].split("\n## ", 1)[0]
+        for text in ("pass§word = testpass", "pass§word = secret123", "pass§word = Passw0rd!",
+                     "tok§en = my-test-token", "tok§en: <your-token>", "api§_key = ${API_KEY}",
+                     "pass§word = {password}", "pass§word = changeme", "pass§word = xxxxxxxx", "pass§word: ***",
+                     "POSTGRES_PASS§WORD: postgres", "curl -u admin:admin https://host", "mail max@example.com",
+                     "mail max@example.org", "mail max@example.net", "mail a@build.test", "mail a@x.example",
+                     "mail a@x.invalid", "mail a@app.localhost", "mail a@nas.local", "mail a@db.internal",
+                     "from 192.0.2.1", "from 198.51.100.7", "from 203.0.113.9", "from 2001:db8::1", "from 10.1.2.3"):
+            with self.subTest(text=text):
+                self.assertEqual(scan(text), [])
+        for form in ("testpass", "secret123", "Passw0rd!", "my-test-token", "<your-token>", "${API_KEY}",
+                     "{password}", "changeme", "example.com", ".internal", "192.0.2.0/24", "2001:db8::/32"):
+            with self.subTest(form=form):
+                self.assertIn(form, section, "the README names what the test checks")
+        for form in ("testpass", "my-test-token", "example.com", "<your-token>"):
+            with self.subTest(primer=form):
+                self.assertIn(form, hooks.PRIMER)
+                self.assertEqual(scan(f"pass§word = {form}" if "." not in form else f"mail max@{form}"), [])
+
+
 class HookTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):  # noqa: N802 - unittest hook
