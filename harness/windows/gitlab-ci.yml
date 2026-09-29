@@ -42,27 +42,37 @@ workflow:
     Copy-Item -Recurse -Force (Join-Path $d.FullName "*") "harness-out\$($d.Name)" -ErrorAction Ignore
   }
 
-# no Git Bash, PowerShell 7 on the runner (the runner image has it)
+# no Git Bash, PowerShell 7 on the runner (the runner image has it). Claude Code offers the PowerShell
+# tool instead of Bash, and runs hook commands in pwsh
 powershell_7:
   extends: .windows
   script:
     - |
       python -m unittest tests.test_guard tests.test_rehydration_matrix tests.test_invariant_store_reads
       if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      python harness/windows/shell_probe.py
+      $probe = $LASTEXITCODE
+      $env:MAISECRETS_HARNESS_SHELL_TOOL = "PowerShell"
       python harness/run.py
-      $rc = $LASTEXITCODE
+      $rc = [Math]::Max($LASTEXITCODE, $probe)
     - *collect
     - exit $rc
 
-# no Git Bash and no PowerShell 7 on PATH: what a stock Windows 11 has
+# no Git Bash and no PowerShell 7: what a stock Windows 11 has. Claude Code looks for pwsh on PATH and
+# then at %ProgramFiles%\PowerShell\7\pwsh.exe (2.1.284), so both are hidden from the processes below;
+# only then does it fall back to Windows PowerShell 5.1 (measured: a PATH change alone left it on 7)
 powershell_5:
   extends: .windows
   script:
     - |
       $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'PowerShell\\7' }) -join ';'
+      $env:ProgramFiles = "C:\no-program-files"
       Write-Output "pwsh on PATH: $([bool](Get-Command pwsh -ErrorAction Ignore))"
+      python harness/windows/shell_probe.py
+      $probe = $LASTEXITCODE
+      $env:MAISECRETS_HARNESS_SHELL_TOOL = "PowerShell"
       python harness/run.py
-      $rc = $LASTEXITCODE
+      $rc = [Math]::Max($LASTEXITCODE, $probe)
     - *collect
     - exit $rc
 
@@ -74,7 +84,9 @@ git_bash:
       choco install git -y --no-progress --limit-output | Out-Null
       $env:CLAUDE_CODE_GIT_BASH_PATH = "C:\Program Files\Git\bin\bash.exe"
       Write-Output "git bash: $(Test-Path $env:CLAUDE_CODE_GIT_BASH_PATH)"
+      python harness/windows/shell_probe.py
+      $probe = $LASTEXITCODE
       python harness/run.py
-      $rc = $LASTEXITCODE
+      $rc = [Math]::Max($LASTEXITCODE, $probe)
     - *collect
     - exit $rc

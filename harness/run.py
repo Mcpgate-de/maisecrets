@@ -30,6 +30,19 @@ MARK = "glpat-" + "HARNESSxxx1234567890abcd"   # matches gitlab_pat; split so th
 MAIL = "harness.person@example.org"
 MARK2 = "pa$s'w\"ord`x $(echo no) y\\z"     # no known shape; quotes, $( and spaces
 PORT = 8791
+# the shell tool the client offers: Bash, or PowerShell on Windows without Git Bash (the CI of the
+# Windows e2e project sets it per job). A scenario that uses the other shell tool is skipped, and the
+# run fails when the client does not offer this one
+SHELL_TOOL = os.environ.get("MAISECRETS_HARNESS_SHELL_TOOL", "Bash")
+REF1 = "\u27e6SECRET_c1\u27e7"
+
+
+def cmd_path(p) -> str:
+    """A path for a hook command that bash and PowerShell both run: forward slashes (bash drops a backslash),
+    no quotes unless it has a space (PowerShell reads a quoted first word as a string, not a command)."""
+    text = Path(p).as_posix()
+    return f'"{text}"' if " " in text else text
+
 
 SCENARIOS = {
     # a plugin update moves the folder of an open session (anthropics/claude-code#97847). The hooks
@@ -171,6 +184,7 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_text": "on stdin to ssh aux01: ssh aux01 'grep -F -f - /var/log/mail.log'",
+        "expect_text_windows": "ssh hands the command line to another shell",
     },
     # rehydration "automatic": no ask, the allowed command runs, and outside the sandbox its guard stops
     # it with exit 97 before the value is read (the route in the real sandbox: harness/sandbox/ssh_e2e.py)
@@ -187,6 +201,7 @@ SCENARIOS = {
         "expect_placeholders": ["⟦SECRET_c1⟧"],
         # the guard's own stderr, not the ask reason, which also names the sandbox (Codex review round 3)
         "expect_text": "maisecrets: this command sends a value over ssh and runs only inside the Claude Code",
+        "expect_text_windows": "ssh hands the command line to another shell",
         "expect_no_text": "on stdin to ssh aux01",
     },
     # a slash command with shell syntax in its arguments: only the command's own allowed-tools
@@ -217,6 +232,40 @@ SCENARIOS = {
         "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_file": ("used.txt", "<missing>"),
         "expect_text": "foreign-session",
+    },
+
+    # Windows without Git Bash: Claude Code offers PowerShell instead of Bash (2.1.284). A placeholder is
+    # refused (no rewrite for PowerShell), the output is redacted, and the store backstop applies
+    "ps_placeholder_refused": {
+        "shell_tool": "PowerShell",
+        "prompt": "use the stored token " + REF1,
+        "preload": [[MARK, "SECRET", "gitlab_pat"]],
+        "allowed_tools": "PowerShell,Read",
+        "turns": [{"tool": "PowerShell", "input": {"command": "Set-Content -Path used.txt -Value ('got:' + '"
+                                                  + REF1 + "')"}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": [REF1],
+        "expect_text": "cannot be placed in a PowerShell command",
+        "expect_no_file": "used.txt",
+    },
+    "ps_output_redacted": {
+        "shell_tool": "PowerShell",
+        "prompt": "print the env",
+        "files": {".env": f"TOKEN={MARK}"},
+        "allowed_tools": "PowerShell,Read",
+        "turns": [{"tool": "PowerShell", "input": {"command": "Get-Content .env"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_placeholders": ["\u27e6SECRET_c"],
+    },
+    "ps_store_refused": {
+        "shell_tool": "PowerShell",
+        "prompt": "show the maisecrets config",
+        "allowed_tools": "PowerShell,Read",
+        "turns": [{"tool": "PowerShell", "input": {"command": "Get-Content $env:MAISECRETS_HOME/config.json"}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_text": "the user's own store",
     },
 }
 
@@ -267,13 +316,13 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     # each path as a JSON string body: a Windows path has backslashes, which raw text turns into bad
     # escapes (measured on a GitLab-hosted Windows runner, 2026-09-29)
     def _js(p) -> str:
-        return json.dumps(str(p))[1:-1]
+        return json.dumps(Path(p).as_posix())[1:-1]
     turns = json.loads(json.dumps(sc["turns"]).replace("{cwd}", _js(cwd)).replace("{root}", _js(ROOT))
                        .replace("{plugin}", _js(plugin)))
     env.update(sc.get("env", {}))
     # dump hook: records every payload so golden keys can be verified
     settings = work / "settings.json"
-    dump_cmd = f"{sys.executable} \"{ROOT / 'harness' / 'dump_hook.py'}\""
+    dump_cmd = f"{cmd_path(sys.executable)} {cmd_path(ROOT / 'harness' / 'dump_hook.py')}"
     # the checkout under test must be the only maisecrets: a copy synced from the developer's
     # claude.ai account has the same name and wins over --plugin-dir (the harness ran the synced
     # release instead of the working tree for an afternoon, 2026-09-26)
@@ -282,7 +331,7 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     if sc.get("guard"):
         # registered as `maisecrets guard install` registers it: the plugin's own matchers
         plugin_hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]
-        guard_cmd = f"{sys.executable} \"{ROOT / 'hooks' / 'guard.py'}\""
+        guard_cmd = f"{cmd_path(sys.executable)} {cmd_path(ROOT / 'hooks' / 'guard.py')}"
         for ev in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
             for entry in plugin_hooks[ev]:
                 g = {"hooks": [{"type": "command", "command": guard_cmd, "timeout": 15}]}
@@ -304,7 +353,11 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         debug_log = work / "claude-debug.log"
         extra: list[str] = []
         if sc.get("mcp"):
-            (work / "mcp.json").write_text(json.dumps({"mcpServers": sc["mcp"]}))
+            servers = sc["mcp"]
+            if os.name == "nt":
+                servers = {k: ({**v, "command": "cmd", "args": ["/c", v["command"], *v.get("args", [])]}
+                               if v.get("command") == "npx" else v) for k, v in servers.items()}
+            (work / "mcp.json").write_text(json.dumps({"mcpServers": servers}))
             extra = ["--mcp-config", str(work / "mcp.json")]
         r = subprocess.run(
             # the full path: on Windows npm installs claude.cmd, which a bare "claude" does not start
@@ -332,8 +385,9 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     joined = "".join(Path(b).read_text() for b in bodies)
     # every built-in tool the real client offered must be classified (harness/inventory.py)
     from inventory import offered, unclassified
-    if bodies and "Bash" not in offered([Path(b) for b in bodies]):
-        fails.append("no tool list found in the request bodies: the inventory check read nothing")
+    if bodies and SHELL_TOOL not in offered([Path(b) for b in bodies]):
+        fails.append(f"no {SHELL_TOOL} tool in the request bodies: the client offers another shell tool "
+                     "(MAISECRETS_HARNESS_SHELL_TOOL), or the inventory check read nothing")
     for tool in unclassified("claude-code", [Path(b) for b in bodies]):
         fails.append(f"UNCLASSIFIED TOOL {tool}: add it to tests/client_tools.json with its class")
     for marker in (MARK, MAIL, MARK2, MARK[-8:]):
@@ -362,8 +416,9 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         fails.append(f"{sc['expect_no_file']} exists: a shell ran text from the arguments as code")
     if sc.get("expect_no_text") and sc["expect_no_text"] in joined:
         fails.append(f"{sc['expect_no_text']!r} in a request body: maisecrets asked where it should not")
-    if sc.get("expect_text") and sc["expect_text"] not in joined:
-        fails.append(f"expected {sc['expect_text']!r} in a request body (the deny reason reaches the model)")
+    expect_text = sc.get("expect_text_windows", sc.get("expect_text")) if os.name == "nt" else sc.get("expect_text")
+    if expect_text and expect_text not in joined:
+        fails.append(f"expected {expect_text!r} in a request body (the deny reason reaches the model)")
     # a hook payload may carry the value only where the scenario sends it on purpose: the PostToolUse of
     # that tool gets the rewritten input. Everywhere else a value in a payload is a leak.
     goes_to = sc.get("value_goes_to")
@@ -444,6 +499,11 @@ def main() -> int:
         return 2
     total = 0
     for n in names:
+        wants = SCENARIOS[n].get("shell_tool") or ("Bash" if any(t.get("tool") == "Bash" for t in SCENARIOS[n]["turns"])
+                                                   else SHELL_TOOL)
+        if wants != SHELL_TOOL:
+            print(f"[SKIP] {n}: needs the {wants} tool; this client offers {SHELL_TOOL}")
+            continue
         total += len(run_scenario(n, SCENARIOS[n], update))
     print("\nfailures:", total)
     return 1 if total else 0
