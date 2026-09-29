@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Codex on Windows: a removed plugin folder now blocks instead of letting the tool run.** Codex
+  removes the folder of the old version when it installs a new one, also under an open session
+  (codex-cli 0.159.0, measured). The Windows command of each hook (`commandWindows`, run by
+  `cmd.exe`) now checks for the launcher first and answers with a block when it is gone, as the
+  macOS and Linux command already did. The text tells Codex users to exit and run `codex resume`
+  instead of a Claude Code command.
+
 - **Code after a colon is no longer stored as a secret.** A line such as `if not token: <statement>`
   put the statement word into the vault, and maisecrets then redacted that word in every later text,
   in source code too. A line that opens a block (`if`, `elif`, `while`, `for`, `with`, `except`, …)

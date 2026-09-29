@@ -172,9 +172,12 @@ off until `/reload-plugins` or a new session. No code of the plugin runs then, s
 maisecrets cannot warn you itself. The harness measures this on every run
 (scenario `plugin_folder_moved`, Claude Code 2.1.283: no hook runs, the tool
 runs; anthropics/claude-code#97847). A client that runs the hook command anyway
-gets a refusal on macOS and Linux: the command tests for the launcher first and
-blocks without it, in bash and in PowerShell. The Codex command for Windows
-(`commandWindows`) has no such test yet.
+gets a refusal: the command tests for the launcher first and blocks without it,
+in bash, in PowerShell and, for Codex on Windows (`commandWindows`), in
+`cmd.exe`. Codex needs this most: it removes the folder of the old version as
+soon as it installs a new one, and an open Codex session then runs the command
+of a folder that is gone (codex-cli 0.159.0, measured 2026-09-29). Exit that
+session and run `codex resume`.
 
 - Installed from this GitHub marketplace (the commands above), a previous version
   stays for 14 days, "so a session that already loaded the old version keeps
