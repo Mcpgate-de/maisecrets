@@ -22,12 +22,13 @@ It works as a plugin for Claude Code (and Cowork) and for Codex, from the same
 **What it does, deterministically and locally:**
 
 1. **You type a secret or a personal value** (a token, a password after a
-   label, any e-mail address, a phone number with a country code, an IBAN, a
-   card number, a public IP, and German identifiers by default). A
+   label, an e-mail address, a phone number with a country code, an IBAN, a
+   card number, a public IP, and German identifiers by default; test data such
+   as `example.com` stays alone, see "Test data that maisecrets leaves alone"). A
    `UserPromptSubmit` hook
    detects it, stores it in a local vault, blocks the prompt, and keeps the
    rewritten prompt with a placeholder such as `⟦SECRET_c1⟧` or
-   `⟦EMAIL_c1:ma•••@example.org⟧`. Type `/maisecrets:send` to send it as is,
+   `⟦EMAIL_c1:ma•••@•••.de⟧`. Type `/maisecrets:send` to send it as is,
    or paste it from the clipboard where one exists. The value never reached
    the model. Measured: zero API requests for a blocked prompt.
 2. **The model reads a file or runs a command that outputs a secret.** A
