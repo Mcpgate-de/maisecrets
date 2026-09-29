@@ -302,6 +302,7 @@ STATES = {
 _K = "KEY"
 _ALL0 = {"ok": 0, "index": 0, "config": 0}
 _ALL2 = {"ok": 2, "index": 2, "config": 2}
+_ALL1 = {"ok": 1, "index": 1, "config": 1}
 _STORE = {"ok": 0, "index": 1, "config": 1}
 MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     "list": [([], "", _STORE)],
@@ -323,7 +324,9 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
             ([], "", _ALL2)],
     "put": [(["--type=SECRET"], "PUTVALUE", _STORE), (["--clipboard"], "", _STORE), ([], "", _ALL2)],
     "shortcut": [([], "", _ALL0), (["--remove"], "", _ALL0)],
-    "guard": [([], "", _ALL0), (["install"], "", _ALL0), (["status"], "", _ALL0), (["remove"], "", _ALL0)],
+    # the guard is POSIX only: `guard install` refuses on Windows with exit 1 and says why
+    "guard": [([], "", _ALL0), (["install"], "", _ALL1 if os.name == "nt" else _ALL0), (["status"], "", _ALL0),
+              (["remove"], "", _ALL0)],
     "pending": [([], "", _ALL0)],
 }
 
@@ -820,6 +823,7 @@ class StateMatrixTests(unittest.TestCase):
         self.assertFalse((commands / "ms.md").exists())
         self.assertEqual((sb.home / ".shortcut").read_text().strip(), "removed")
 
+    @unittest.skipIf(os.name == "nt", "the guard is POSIX only; `guard install` refuses on Windows")
     def test_the_guard_installs_beside_the_settings_and_keeps_the_users_own_hooks(self):
         sb = base_state("empty").copy()
         self.addCleanup(sb.remove)

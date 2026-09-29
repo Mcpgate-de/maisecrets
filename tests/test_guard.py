@@ -258,6 +258,7 @@ class HeartbeatTests(_Env):
         self.assertFalse(old.exists())
 
 
+@unittest.skipIf(os.name == "nt", "a synced install registers the guard on POSIX only (hooks/dispatch.py)")
 class SyncedInstallTests(_Env):
     """A synced install gets the guard without a step by its user: the session start places the script,
     the heartbeat is on, and the admin registers the hooks once in the organisation's managed settings."""
