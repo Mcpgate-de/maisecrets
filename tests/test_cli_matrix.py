@@ -987,7 +987,7 @@ class SessionStartTests(unittest.TestCase):
                 self.assertEqual("/maisecrets:" not in msg, codex, msg)
                 self.assertEqual((sb.home / ".shortcut").exists(), not codex)
 
-    def test_the_start_deletes_a_statement_keyword_an_old_detector_stored(self):
+    def test_the_start_quiets_a_statement_keyword_an_old_detector_stored(self):
         # an entry of a version before 0.5.15: the current detector stores no such value, so it is seeded directly
         sb = self.sandbox()
         seed = ("from maisecrets.vault import Vault\n"
@@ -1002,9 +1002,12 @@ class SessionStartTests(unittest.TestCase):
         (sb.home / ".shortcut").write_text("offered\n")
         (sb.home / ".tip").write_text("2000-01-01 1\n")
         msg = _start(self, sb, CLAUDECODE="1")["systemMessage"]
-        self.assertIn(f"Deleted 1 stored word(s) that are program code, not secrets ({old})", msg)
-        self.assertEqual(sorted(sb.index()["entries"]), [real])
-        self.assertNotIn("Deleted", _start(self, sb, CLAUDECODE="1")["systemMessage"], "said once")
+        self.assertIn(f"1 stored word(s) are program code, not secrets ({old})", msg)
+        self.assertIn("/maisecrets:forget deletes them", msg)
+        entries = sb.index()["entries"]
+        self.assertEqual(sorted(entries), sorted([old, real]), "nothing is deleted")
+        self.assertIs(entries[old].get("weak"), True)
+        self.assertNotIn("program code", _start(self, sb, CLAUDECODE="1")["systemMessage"], "said once")
 
     def test_the_start_marks_a_word_an_older_version_stored_so_it_is_not_hunted(self):
         sb = self.sandbox()

@@ -141,6 +141,37 @@ class HiddenFalseAlarmTests(unittest.TestCase):
         self.assertEqual(secrets("tok§en_data: Qx7vR2mK9pLwT4"), ["Qx7vR2mK9pLwT4"])
 
 
+class CodexReviewTests(unittest.TestCase):
+    """The findings of the Codex review of 2026-09-29 (gpt-5.6-sol, on 31fdfd1): each input was a hit on d805b1e
+    and passed on 31fdfd1."""
+
+    def test_a_letter_only_base64_value_on_the_label_line_is_a_value(self):
+        self.assertEqual(secrets("PASS§WORD=SkTcFTZCBKg="), ["SkTcFTZCBKg="])
+        self.assertEqual(found("DB_PASS§WORD=\nAPI_K§EY=\n"), [], "the label on the next line stays none")
+
+    def test_a_mailbox_at_local_or_internal_without_a_dot_is_a_person(self):
+        self.assertEqual(found("mail jdoe@corp.internal"), [("EMAIL", "jdoe@corp.internal")])
+        self.assertEqual(found("mail noreply@corp.internal"), [])
+
+    def test_four_one_digit_octets_are_an_address_unless_a_section_is_named(self):
+        self.assertEqual(found("from 5.6.7.8"), [("IP", "5.6.7.8")])
+        for text in ("RFC 6749 4.1.2.1 says", "OIDC Core 3.1.2.1 says", "see section 7.1.2.3"):
+            with self.subTest(text=text):
+                self.assertEqual(found(text), [])
+        self.assertEqual(detect.scan("see \u00a7 5.1.2.4"), [])     # found() removes the section sign
+
+    def test_a_comma_ends_a_phone_number(self):
+        self.assertIn(("PHONE", "+4915112345678"), found("row,+4915112345678,123"))
+
+    def test_a_capitalised_test_folder_and_a_tests_file_are_test_code(self):
+        for path in ("/repo/Tests/AuthTests.cs", "src/Auth/LoginTest.java", "Tests/Login.swift"):
+            with self.subTest(path=path):
+                self.assertEqual(secrets("pass§word = Qx7vR2mK9pLw\n", path), [])
+        for path in ("src/latest.py", "src/Contest.cs"):
+            with self.subTest(prod=path):
+                self.assertEqual(secrets("pass§word = Qx7vR2mK9pLw\n", path), ["Qx7vR2mK9pLw"])
+
+
 class WeakWordTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):  # noqa: N802 - unittest hook

@@ -143,8 +143,6 @@ def _public_ip(ip: str) -> bool:
             return False
     elif not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", ip):
         return False   # e.g. a CIDR tail the upstream regex swallowed
-    if ":" not in ip and all(len(o) == 1 for o in ip.split(".")):
-        return False   # four one-digit parts: a section or a version number (RFC 6749 4.1.2.1), rarely a person
     try:
         addr = ipaddress.ip_address(ip)
     except ValueError:
@@ -317,8 +315,6 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False
     if _DS_TEMPLATED.match(v) or _DS_INDIRECT.match(v):
         return False
-    if _LABEL_SHAPE.fullmatch(v) and not any(c.isdigit() for c in v):
-        return False   # the next line is a label of its own: `DB_PASSWORD=\nAPI_KEY=`, `Zugangsdaten:\nBenutzer:`
     if _GENERIC_TYPE.search(v):
         return False   # a generic type: Option<String>, Secret<String>
     if _VERSION_RE.fullmatch(v):
@@ -402,8 +398,10 @@ def _reserved_domain(v: str) -> bool:
     local, _, d = v.rpartition("@")
     d = d.lower()
     tld = d.rsplit(".", 1)[-1]
-    if tld in ("local", "internal") and re.search(r"[._]", local):
-        return False   # hans.mueller@firma.local: an Active Directory mailbox names a person (review, 2026-09-29)
+    if tld in ("local", "internal"):
+        # hans.mueller@firma.local, jdoe@corp.internal: an Active Directory mailbox names a person (reviews,
+        # 2026-09-29); only a system account there is no person
+        return local.lower() in _SYSTEM_USERS or local.lower() in ("alerts", "alert", "monitoring", "backup", "ci")
     return (d in _RESERVED_MAIL_DOMAINS or d.endswith(tuple("." + x for x in _RESERVED_MAIL_DOMAINS))
             or tld in _RESERVED_MAIL_TLDS)
 
@@ -423,7 +421,7 @@ OWN_RULES: list[dict] = [
      "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})"
               r"@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "phone", "type": "PHONE",
-     "regex": r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?![\w.,]\d|\w)"},
+     "regex": r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?![\w.]\d|\w)"},
     # bare token prefixes newer than the vendored rulesets live in rules/prefixes.txt (see _load_prefixes)
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
@@ -638,7 +636,8 @@ def looks_like_placeholder(value: str) -> bool:
 # block or a placeholder there only stops the work. A token shape (glpat-, AKIA, a PEM key) and personal data stay
 # hits in test code too: a real token or a copy of customer data in a test is a leak.
 LABEL_RULES = ("ds-keyword", "generic-api-key", "url-query-secret", "auth-scheme")
-_TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?:tests?|__tests__|spec|testdata|test_data|e2e)[/\\]"
+_TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?i:tests?|__tests__|spec|testdata|test_data|e2e)[/\\]"
+                           r"|(?:^|[/\\]|[a-z])Tests?\.\w+$"
                            r"|(?:^|[/\\])[^/\\]*[._-]e2e[._-][^/\\]*$"
                            r"|(?:^|[/\\])(?:test_[^/\\]*|[^/\\]*_test\.\w+|[^/\\]*\.(?:test|spec)\.\w+|conftest\.py)$")
 # a file of real values even under tests/: an .env, a recorded HTTP cassette (review, 2026-09-29)
@@ -779,6 +778,8 @@ def value_is_code(text: str, start: int, end: int, secret: str) -> bool:
 # path, never a key (Python standard library, 2026-09-29)
 _WORD_PATH_RE = re.compile(r"[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*(?:/[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*)+")
 # a signed number in code: `a = +4294967296`, `f(+12345678)`
+_SECTION_BEFORE_RE = re.compile(r"(?i)(?:\bRFC[ -]?\d{3,5}|\bCore|\bsection|\bsec\.|\bchapter|\bKapitel|\bAbschnitt"
+                                r"|\u00a7)[ ,:(]*\u00a7?[ ]*$")
 _NUMBER_BEFORE_RE = re.compile(r"(?:=\s+|[(\[]\s*|return\s+)$")   # not KEY=+49…, not a CSV column
 
 
@@ -1006,6 +1007,9 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue
             if rule.id.startswith("ds-keyword") and _names_its_label(text, start, secret):
                 continue
+            if (rule.id.startswith("ds-keyword") and _LABEL_SHAPE.fullmatch(secret.strip())
+                    and "\n" in text[m.start():start]):
+                continue   # the next line is a label of its own: `DB_PASSWORD=\nAPI_KEY=`, `Zugangsdaten:\nBenutzer:`
             if (rule.id.startswith("ds-keyword") and secret.strip("\"' ").isdigit()
                     and _MEASURE_LABEL_RE.search(_label_before(text, start))):
                 continue   # a limit or a duration: TTL_REFRESH_TOKEN = 2592000
@@ -1026,6 +1030,8 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue
             if rule.id == "phone" and not _phone_ok(text, start, secret):
                 continue
+            if rule.type == "IP" and _SECTION_BEFORE_RE.search(text, max(0, start - 24), start):
+                continue   # a section number: RFC 6749 4.1.2.1, OIDC Core 3.1.2.1, section 7.1.2.3
             if any(s < end and start < e for s, e in taken):
                 continue
             if rule.entropy and shannon_entropy(secret) < rule.entropy:

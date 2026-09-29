@@ -231,8 +231,6 @@ class DetectTests(unittest.TestCase):
         pw = "Kx7Qp2" + "Zr9Lm4"
         ms = detect.scan("postgres://etl:" + pw + "@db.internal:5432/x")
         self.assertEqual([(m.kind, m.value) for m in ms], [("ds-basic-auth", pw)])
-        # a fixture password there is no hit, and the rest is no e-mail address: .internal is a private TLD
-        self.assertEqual(detect.scan("postgres://etl:" + "s3cretPassw0rd" + "@db.internal:5432/x"), [])
 
     def test_query_parameter_secret(self):
         ms = detect.scan("GET https://x/api?api_key=" + "0123456789abcdef0123")

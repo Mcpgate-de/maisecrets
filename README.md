@@ -704,7 +704,8 @@ does not need to look like a real secret, and these forms are never a hit:
   `changeme`, `xxxxxxxx`, `***`), and a default equal to its label or user
   (`POSTGRES_PASSWORD: postgres`, `admin:admin`).
 - **Addresses:** e-mail at `example.com`, `example.org`, `example.net` and the domains
-  `.test`, `.example`, `.invalid`, `.localhost`, `.local`, `.internal`; IP addresses in
+  `.test`, `.example`, `.invalid`, `.localhost`, a system mailbox such as `alerts@` or `noreply@`
+  at `.local` or `.internal` (a person's mailbox there is found); IP addresses in
   the documentation ranges `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and
   `2001:db8::/32`, private and loopback addresses.
 

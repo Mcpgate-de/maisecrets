@@ -453,12 +453,26 @@ class Entry:
         return f"{OPEN}{self.key}:{self.display}{CLOSE}" if self.display else f"{OPEN}{self.key}{CLOSE}"
 
 
+# the default passwords of services and the words that follow a label in code and docs: hunting one of them in
+# every later text redacted `docker ps` and blocked "add a postgres service" (review, 2026-09-29). Only these are
+# weak: a random lower-case value such as xqzvbnmq is a secret wherever it shows up (Codex review, 2026-09-29)
+DEFAULT_WORDS = frozenset({
+    "postgres", "postgresql", "mysql", "mariadb", "redis", "mongo", "mongodb", "rabbitmq", "guest", "elastic",
+    "kibana", "grafana", "minio", "minioadmin", "keycloak", "oracle", "admin", "administrator", "root", "user",
+    "users", "test", "tester", "testing", "demo", "default", "secret", "password", "passwort", "changeme",
+    "example", "sample", "docker", "ubuntu", "raspberry", "letmein", "welcome", "qwerty", "plaintext", "candidate",
+    "unchanged", "sentinel", "credentials", "identifier", "whitespace", "previous", "lookahead", "encrypted",
+    "forbidden", "refreshed", "temporary", "operator", "punctuation", "tokenizer", "nexttoken", "token", "tokens",
+    "required", "optional", "database", "service", "server", "client", "local", "localhost", "development",
+    "production", "staging", "mindestens", "unbedingt", "vergessen", "unbekannt", "abgelaufen", "erforderlich",
+    "geheim", "kennwort"})
+
+
 def is_weak(kind: str, value: str) -> bool:
-    """A value that only a label rule found and that is a common word: lower case letters only, at most 10. A
-    capitalised or longer word (Sommerwiese) is a password someone chose and stays hunted (review, 2026-09-29)."""
+    """A value that only a label rule found and that is a known default word (DEFAULT_WORDS): replaced where it was
+    found, never hunted in other texts."""
     from .detect import LABEL_RULES
-    v = value.strip()
-    return str(kind).startswith(LABEL_RULES) and v.isalpha() and v.islower() and len(v) <= 10
+    return str(kind).startswith(LABEL_RULES) and value.strip().lower() in DEFAULT_WORDS
 
 
 # ---------------------------------------------------------------- backends --
@@ -1269,32 +1283,28 @@ class Vault:
         return n
 
     @_mutating
-    def drop_code_words(self) -> list[str]:
-        """Delete the statement keywords a keyword rule stored before 0.5.15. `if not token: <keyword>`
-        stored the keyword, and maisecrets redacted it in every later text until the entry expired; the
-        detector stores none now, but the old entries stayed (field report, 2026-09-29). The entries are
-        found by fingerprint: no value is read. An entry the store refuses to delete stays. Returns the
-        deleted keys."""
+    @_mutating
+    def quiet_code_words(self) -> list[str]:
+        """Mark weak the statement keywords a keyword rule stored before 0.5.15. `if not token: <keyword>` stored the
+        keyword, and maisecrets redacted it in every later text until the entry expired; the detector stores none
+        now, but the old entries stayed (field report, 2026-09-29). A weak entry is not hunted in other texts, and
+        its placeholder still resolves: nothing is deleted without the person (Codex review, 2026-09-29, of a
+        version that deleted). The entries are found by fingerprint: no value is read. Returns the keys marked."""
         entries = self._index["entries"]
-        if not any(str(m.get("kind", "")).startswith("ds-keyword") and not m.get("purged")
+        if not any(str(m.get("kind", "")).startswith("ds-keyword") and not m.get("purged") and not m.get("weak")
                    for m in entries.values()):
             return []   # no fingerprint key is made for a store that has no such entry
         from .detect import code_word_spellings
-        dropped = []
+        quieted = []
         for word in code_word_spellings():
-            fp = self.fingerprint(word)
-            key = self._index["by_fingerprint"].get(fp)
+            key = self._index["by_fingerprint"].get(self.fingerprint(word))
             meta = entries.get(key) if key else None
-            if not meta or meta.get("purged") or not str(meta.get("kind", "")).startswith("ds-keyword"):
+            if (not meta or meta.get("purged") or meta.get("weak")
+                    or not str(meta.get("kind", "")).startswith("ds-keyword")):
                 continue
-            try:
-                self.backend.delete(key)
-            except RuntimeError:
-                continue
-            del entries[key]
-            del self._index["by_fingerprint"][fp]
-            dropped.append(key)
-        return dropped
+            meta["weak"] = True
+            quieted.append(key)
+        return quieted
 
     def repair(self) -> dict:
         """Rebuild a damaged index from the store: every stored value is deleted (nothing

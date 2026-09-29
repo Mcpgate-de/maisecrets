@@ -832,7 +832,7 @@ class FalsePositiveCorpusTests(unittest.TestCase):
 
     def test_each_value_shape_of_normal_work_is_refused_on_its_own(self):
         # one shape per check of _ds_value_ok, so that no check hides behind another (mutation probes, 2026-09-29)
-        for v in ("API_KEY=", "Option<String>", "testpass1", "Passw0rd!", "0.20.3", "mcp_{user}",
+        for v in ("Option<String>", "testpass1", "Passw0rd!", "0.20.3", "mcp_{user}",
                   "{body['transfer_id']}", "_cleanup", "max.muster@firma-xyz.de", "list[str]", "1_234_567",
                   "session_key:*", "logs/*.txt", "no-check}", "settings", "tokenValue", "redacted;",
                   "Configuration["):

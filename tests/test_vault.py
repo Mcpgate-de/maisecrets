@@ -946,13 +946,14 @@ class LifeCycleTests(unittest.TestCase):
         self.assertEqual(self.v().forget(third.key), "ok")
         self.assertEqual(self.v().put(value, "SECRET", "manual", session="C").key, "SECRET_c4")
 
-    def test_a_statement_keyword_stored_by_an_old_detector_is_deleted(self):
+    def test_a_statement_keyword_stored_by_an_old_detector_is_quieted_not_deleted(self):
         # before 0.5.15 `if not token: continue` stored `continue`, and maisecrets redacted the word in every
-        # later text until the entry expired (field report, 2026-09-29)
+        # later text until the entry expired (field report, 2026-09-29). The start marks it weak: it is no longer
+        # hunted, and nothing is deleted without the person (Codex review, 2026-09-29)
         old = self.v().put("continue", "SECRET", "ds-keyword-colon", session="A")
         semi = self.v().put("Return;", "SECRET", "ds-keyword-equal-signs", session="A")
         real = self.v().put("Sommerwiese", "SECRET", "ds-keyword-colon", session="A")
-        # the same word from another rule is not the detector's error and stays
+        # the same word from another rule is not the detector's error and stays hunted
         other = self.v().put("break", "SECRET", "manual", session="A")
         real_get = JsonFileBackend.get
 
@@ -960,27 +961,21 @@ class LifeCycleTests(unittest.TestCase):
             if key != FP_KEY_ENTRY:
                 raise AssertionError(f"the value of {key} was read")
             return real_get(backend, key)
-        with mock.patch.object(JsonFileBackend, "get", only_the_fingerprint_key):
-            dropped = self.v().drop_code_words()
-        self.assertEqual(sorted(dropped), sorted([old.key, semi.key]))
+        with mock.patch.object(JsonFileBackend, "get", only_the_fingerprint_key), \
+                mock.patch.object(JsonFileBackend, "delete", side_effect=AssertionError("a value was deleted")):
+            quieted = self.v().quiet_code_words()
+        self.assertEqual(sorted(quieted), sorted([old.key, semi.key]))
         idx = self.v()._index
-        self.assertEqual(sorted(idx["entries"]), sorted([real.key, other.key]))
-        self.assertNotIn(old.fingerprint, idx["by_fingerprint"])
-        self.assertIsNone(self.v().backend.get(old.key))
-        self.assertEqual(self.v().get(real.key, "A"), ("Sommerwiese", "ok"))
-        self.assertEqual(self.v().get(other.key, "A"), ("break", "ok"))
-        self.assertEqual(self.v().drop_code_words(), [], "a second run finds nothing")
+        self.assertEqual(sorted(idx["entries"]), sorted([old.key, semi.key, real.key, other.key]))
+        self.assertEqual({k for k in (old.key, semi.key, real.key, other.key) if idx["entries"][k].get("weak")},
+                         {old.key, semi.key})
+        self.assertEqual(self.v().get(old.key, "A"), ("continue", "ok"), "its placeholder still resolves")
+        self.assertEqual(sorted(self.v().live_fingerprints().values()), sorted([real.key, other.key]))
+        self.assertEqual(self.v().quiet_code_words(), [], "a second run finds nothing")
 
     def test_the_code_word_cleanup_makes_no_fingerprint_key_in_an_empty_store(self):
-        self.assertEqual(self.v().drop_code_words(), [])
+        self.assertEqual(self.v().quiet_code_words(), [])
         self.assertIsNone(self.v().backend.get(FP_KEY_ENTRY))
-
-    def test_a_code_word_the_store_refuses_to_delete_stays(self):
-        e = self.v().put("continue", "SECRET", "ds-keyword-colon", session="A")
-        with mock.patch.object(JsonFileBackend, "delete", side_effect=RuntimeError("locked")):
-            self.assertEqual(self.v().drop_code_words(), [])
-        self.assertIn(e.key, self.v()._index["entries"])
-        self.assertEqual(self.v().drop_code_words(), [e.key])
 
     def test_repair_never_hands_out_a_key_an_old_placeholder_still_names(self):
         # the store keeps only live values; after a purge the key lives on in the index and in old

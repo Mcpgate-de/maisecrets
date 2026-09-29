@@ -95,7 +95,7 @@ class AdviceTests(unittest.TestCase):
                      "pass§word = {password}", "pass§word = changeme", "pass§word = xxxxxxxx", "pass§word: ***",
                      "POSTGRES_PASS§WORD: postgres", "curl -u admin:admin https://host", "mail max@example.com",
                      "mail max@example.org", "mail max@example.net", "mail a@build.test", "mail a@x.example",
-                     "mail a@x.invalid", "mail a@app.localhost", "mail a@nas.local", "mail a@db.internal",
+                     "mail a@x.invalid", "mail a@app.localhost", "mail alerts@nas.local", "mail noreply@db.internal",
                      "from 192.0.2.1", "from 198.51.100.7", "from 203.0.113.9", "from 2001:db8::1", "from 10.1.2.3"):
             with self.subTest(text=text):
                 self.assertEqual(scan(text), [])

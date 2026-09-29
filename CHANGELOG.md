@@ -16,11 +16,13 @@
   the sentence going on, is still stored: without a dictionary it looks like a password of letters,
   and a missed password costs more than a false positive.
 
-- **The false positives of the old detector are deleted at the next session start.** A statement
-  word such as `return` that an earlier version stored after a label stayed in the vault until it
-  expired, and maisecrets redacted it in every text until then. The session start now deletes these
-  entries and names their keys once. It finds them by fingerprint and reads no stored value. The
-  same word stored by `/maisecrets:put` or another rule stays.
+- **The false positives of the old detector stop at the next session start.** A statement word
+  such as `return` that an earlier version stored after a label stayed in the vault until it
+  expired, and maisecrets redacted it in every text until then. The session start now marks these
+  entries so that maisecrets no longer redacts the word in other texts, and names their keys once.
+  Nothing is deleted: the placeholder still works, and `/maisecrets:forget` deletes the entry. The
+  start finds them by fingerprint and reads no stored value. The same word stored by
+  `/maisecrets:put` or another rule stays as it is.
 
 - **A subagent's report no longer stops the session.** When a subagent quoted a value in the shape of
   a secret, its report reached the session as a prompt, and maisecrets blocked it until you pressed
@@ -67,8 +69,9 @@
   `postgres` only by its label (`DB_PASSWORD=postgres`), it stored it and then redacted the word in
   every later text of every session: `docker ps` showed a placeholder for the image, and the prompt
   "add a postgres service" was blocked. Such a word is now replaced where it was found and nowhere
-  else; its placeholder still works. A value with a digit, a symbol or a capital letter, or a word
-  longer than ten letters, is still found everywhere.
+  else; its placeholder still works. This holds for the default words of services and of code
+  (`postgres`, `admin`, `redis`, `changeme`, `plaintext` …); any other value, also a random
+  lower-case one, is still found everywhere.
   Words that an older version stored are marked at the next session start.
 
 - **A busy computer no longer ends a session.** When maisecrets answered a call too late, the guard

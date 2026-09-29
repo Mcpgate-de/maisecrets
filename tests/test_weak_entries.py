@@ -86,6 +86,8 @@ class WeakEntryTests(unittest.TestCase):
 
     def test_a_word_from_put_or_a_shape_rule_is_not_weak(self):
         self.assertFalse(Vault().put("Sommerwiese", "SECRET", "manual", session="s1").weak)
+        # a random lower-case value is no default word (Codex review, 2026-09-29)
+        self.assertFalse(Vault().put("xqzvbnmq", "SECRET", "ds-keyword-equal-signs", session="s1").weak)
         self.assertFalse(Vault().put("glpat-" + "Q7w8E9r0T1y2U3i4O5p6", "SECRET", "gitlab-pat", session="s1").weak)
         self.assertFalse(Vault().put("Sommer2026!", "SECRET", "ds-keyword-colon", session="s1").weak)
 
