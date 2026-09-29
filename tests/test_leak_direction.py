@@ -74,10 +74,11 @@ class LeakDirectionTests(unittest.TestCase):
         self.assertEqual(secrets("pass§word: P@55w0rt2026!"), [])
 
     def test_a_uuid_is_a_secret_under_a_label_that_names_one(self):
-        for label in ("POSTMARK_SERVER_TOK§EN=", "SCW_SECRET_K§EY=", "api_k§ey: ", "pass§word: "):
+        for label in ("POSTMARK_SERVER_TOK§EN=", "SCW_SECRET_K§EY=", "api_k§ey: ", "pass§word: ", "client_secr§et: ",
+                      "KEYCLOAK_CLIENT_SECR§ET=", "webhook_secr§et: "):
             with self.subTest(label=label):
                 self.assertEqual(secrets(label + UUID), [UUID])
-        for label in ("k§ey: ", "client_secr§et: ", "secret_i§d: "):
+        for label in ("k§ey: ", "secret_i§d: ", "request_i§d: "):
             with self.subTest(identifier=label):
                 self.assertEqual(secrets(label + UUID), [])
 
@@ -209,6 +210,86 @@ class CodexSecondReviewTests(unittest.TestCase):
         text = ("<task-notification>\n" * 60000)[:1_000_000]
         self.assertFalse(hooks.agent_report({"transcript_path": "/tmp/x.jsonl", **CLAUDE}, text))
         self.assertLess(time.monotonic() - started, 1.0)
+
+
+class FinalReviewTests(unittest.TestCase):
+    """The findings of the final Fable review (on 0147e81, 2026-09-30)."""
+
+    def test_a_long_line_of_labels_is_scanned_in_time(self):
+        import time
+        pw = "pass" + "word"
+        cases = {
+            "minified bundle": "var a=1;" * 8000 + "".join(f"x{i}({{{pw}:e.{pw},token:t.token}});" for i in range(300)),
+            "one-line API response": "{" + ",".join(f'"a{i}":"yy","token":"t{i}"' for i in range(1500)) + "}",
+            "a long word run": "a" * 100_000 + f" {pw}=Qx7vR2mK9pLw",
+        }
+        for name, text in cases.items():
+            with self.subTest(name=name):
+                started = time.monotonic()
+                ms = detect.scan(text)
+                [detect.is_fixture(m, text, "") for m in ms]
+                self.assertLess(time.monotonic() - started, 3.0, "far below the 7 s watchdog")
+        self.assertEqual(secrets(cases["a long word run"]), ["Qx7vR2mK9pLw"])
+        started = time.monotonic()
+        detect._FORMAT_ONLY_RE.fullmatch("%" * 200 + "Z")
+        self.assertLess(time.monotonic() - started, 0.05)
+
+    def test_a_camel_case_key_on_the_next_line_is_a_label(self):
+        self.assertEqual(found("pass§word:\n    driverClassName: org.h2.Driver\n"), [])
+        self.assertEqual(found("pass§word:\n  secretKeyRef:\n    name: db\n"), [])
+        self.assertEqual(secrets("PASS§WORD=\nsKTcFTZCBKg="), ["sKTcFTZCBKg="])
+
+    def test_phone_labels_as_words_of_a_label(self):
+        for text in ("phoneNumber = +4915112345678", "Telefonnummer = +4915112345678", "Handynummer = +4915112345678",
+                     "Mobiltelefon = +4915112345678", "MSISDN = +4915112345678", "phone(+4915112345678)",
+                     "phone: [+4915112345678]"):
+            with self.subTest(text=text):
+                self.assertIn(("PHONE", "+4915112345678"), found(text))
+        for text in ("TELEMETRY_OFFSET = +4294967296", "f(+12345678)", "x = [+4294967296]"):
+            with self.subTest(number=text):
+                self.assertEqual(found(text), [])
+
+    def test_recorded_traffic_and_every_env_file_hold_real_values(self):
+        bearer = "Bearer " + "8f3kd9sLq2pX7mN4vB6cZ1aW5eR9tY0u"
+        for path in ("tests/recordings/login.yaml", "tests/__recordings__/login.json", "spec/vcr/login.yml",
+                     "tests/login.har"):
+            with self.subTest(path=path):
+                self.assertTrue(secrets(f"authorization: {bearer}\n", path))
+        for path in ("tests/secrets.env.local", "tests/integration/staging.env.enc"):
+            with self.subTest(path=path):
+                self.assertEqual(secrets("DB_PASS§WORD=Qx7vR2mK9pLw!\n", path), ["Qx7vR2mK9pLw!"])
+
+    def test_a_production_method_named_test_is_no_test_code(self):
+        pw = "Qx7vR2mK" + "9pLw!"
+        for text in (f"class Db:\n    def test_connection(self):\n        return self.ping()\n\nPASS§WORD = \"{pw}\"\n",
+                     f"class Testimonial(models.Model):\n    pass\nSMTP_PASS§WORD = \"{pw}\"\n"):
+            with self.subTest(text=text[:30]):
+                self.assertEqual(secrets(text, "src/db.py"), [pw])
+        self.assertEqual(secrets(f"class TestDb:\n    def test_connection(self):\n        pass§word = \"{pw}\"\n"), [])
+
+    def test_small_value_shapes_that_hid_a_real_value(self):
+        self.assertEqual(secrets("PASS§WORD=*Qx7vR2mK9pLw"), ["*Qx7vR2mK9pLw"])
+        self.assertEqual(found("  fields: &tok§en_fields\n"), [])
+        for text in ('pass§word = "correctHorseBatteryStaple"', "pass§word: correctHorseBatteryStaple"):
+            with self.subTest(text=text):
+                self.assertEqual(secrets(text), ["correctHorseBatteryStaple"])
+        for text in ("tok§en = tokenValue", "pass§word = defaultAdminPassword", "Schlüss§el: apiKey"):
+            with self.subTest(identifier=text):
+                self.assertEqual(secrets(text), [])
+        self.assertEqual(secrets("PASS§WORD=Qx7vR2mK9pLw!..."), ["Qx7vR2mK9pLw!..."])
+        self.assertEqual(found("export API_K§EY=sk-..."), [])
+        for text in ("tok§en_budget = 12000000", "TOK§EN_REFRESH_MS = 86400000"):
+            with self.subTest(measure=text):
+                self.assertEqual(found(text), [])
+        self.assertEqual(secrets("user: max, pass§word: 48392011"), ["48392011"])
+        self.assertEqual(found("const pass§word = credentials?.pass§word ?? '';"), [])
+        for text in ("Kennw§ort: unverändert", "Tok§en: abgelaufen"):
+            with self.subTest(status=text):
+                self.assertEqual(found(text), [])
+
+    def test_an_address_with_leading_zeros_or_inside_6to4_is_an_address(self):
+        self.assertEqual([t for t, _ in found("from 085.214.132.005 port 22")], ["IP"])
+        self.assertEqual([t for t, _ in found("from 2002:55d6:8405::1")], ["IP"])
 
 
 class WeakWordTests(unittest.TestCase):

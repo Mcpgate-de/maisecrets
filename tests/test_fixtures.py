@@ -41,7 +41,7 @@ def scan(text: str, path: str = "") -> list[tuple[str, str]]:
 class InTestCodeTests(unittest.TestCase):
     def test_a_label_value_in_test_code_is_a_fixture(self):
         self.assertEqual(scan(TEST), [])
-        for marker in ("def test_login():", "    async def test_login(self):", "class TestLogin:", "@pytest.fixture",
+        for marker in ("def test_login():", "async def test_login():", "class TestLogin:", "@pytest.fixture",
                        "import unittest", "describe('login', () => {", "  it('logs in', async () => {",
                        "func TestLogin(t *testing.T) {", "#[test]", "@Test"):
             with self.subTest(marker=marker):
