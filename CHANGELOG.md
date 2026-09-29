@@ -38,6 +38,12 @@
   ranges and the public DNS resolvers. A quoted value, a value in a properties file and a phone
   number in prose are still found.
 
+- **Test passwords no longer stop the work.** A password that maisecrets finds only by its label
+  (`password = '…'`) is a fixture in test code: in a file on a test path, in a grep line of a test
+  file, or after a test marker such as `def test_`, `assert` or `describe(`. A pasted unit test now
+  passes, and a Read of a test file keeps its fixtures. A token shape (`glpat-`, `AKIA`, a private
+  key) and personal data are still found in test code.
+
 ## [0.5.14] - 2026-09-29
 
 - **The restart command stands on a line of its own** in the refusal of the guard, so it is easy to

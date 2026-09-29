@@ -1,0 +1,10 @@
+# c1-a-token-shape-in-test-code-stays-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-token-shape-in-test-code-stays-a-hit"
+control = "C1"
+statement = "In test code only a label-rule value counts as a fixture: a token shape and personal data in a test are still found."
+runner = ["tests/test_fixtures.py::InTestCodeTests::test_a_token_shape_and_personal_data_stay_hits_in_test_code"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "    return m.type == \"SECRET\" and m.kind.startswith(LABEL_RULES) and in_test_code(text, m.start, path)\n"
+replace = "    return in_test_code(text, m.start, path)\n"

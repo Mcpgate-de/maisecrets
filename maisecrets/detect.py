@@ -538,6 +538,49 @@ def looks_like_placeholder(value: str) -> bool:
     return low in PLACEHOLDER_VALUES or bool(_PLACEHOLDER_PART_RE.search(low)) or bool(_TEMPLATE_NAME.match(v))
 
 
+# ------------------------------------------------------------- test fixtures --
+# A label rule finds a value by its label alone, so a test password looks like a real one: `PASSWD = '<word>'` in the
+# tests of the Python standard library (2026-09-29). In test code the value is a fixture, and a
+# block or a placeholder there only stops the work. A token shape (glpat-, AKIA, a PEM key) and personal data stay
+# hits in test code too: a real token or a copy of customer data in a test is a leak.
+LABEL_RULES = ("ds-keyword", "generic-api-key", "url-query-secret")
+_TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?:tests?|__tests__|specs?|testdata|test_data|fixtures?)[/\\]"
+                           r"|(?:^|[/\\])(?:test_[^/\\]*|[^/\\]*_test\.\w+|[^/\\]*\.(?:test|spec)\.\w+|conftest\.py)$")
+_TEST_MARKER_RE = re.compile(
+    r"(?m)^[ \t]*(?:(?:async[ \t]+)?def[ \t]+test_?\w*[ \t]*\(|class[ \t]+Test\w*|@pytest\.|@Test\b|#\[test\]"
+    r"|(?:import|from)[ \t]+(?:pytest|unittest)\b|func[ \t]+Test\w*\(|(?:describe|it|test|beforeEach)[ \t]*\("
+    r"|assert\b|self\.assert\w+\(|expect[ \t]*\()")
+_GREP_PATH_RE = re.compile(r"([^\s:]+):\d+[:-]")
+_TEST_LOOKBACK_LINES = 40
+
+
+def is_test_path(path: str) -> bool:
+    return bool(path) and bool(_TEST_PATH_RE.search(path))
+
+
+def in_test_code(text: str, start: int, path: str = "") -> bool:
+    """Whether the hit at `start` sits in test code: the file is a test file, a grep line names one, or a test
+    marker (`def test_`, `assert`, `describe(` …) stands in its line or in the 40 lines before it."""
+    if is_test_path(path):
+        return True
+    line_start = text.rfind("\n", 0, start) + 1
+    m = _GREP_PATH_RE.match(text, line_start)
+    if m and is_test_path(m.group(1)):
+        return True
+    begin = line_start
+    for _ in range(_TEST_LOOKBACK_LINES):
+        if begin == 0:
+            break
+        begin = text.rfind("\n", 0, begin - 1) + 1
+    end = text.find("\n", start)
+    return bool(_TEST_MARKER_RE.search(text, begin, end if end >= 0 else len(text)))
+
+
+def is_fixture(m: "Match", text: str, path: str = "") -> bool:
+    """A label-rule hit in test code: not a secret the person typed (see LABEL_RULES)."""
+    return m.type == "SECRET" and m.kind.startswith(LABEL_RULES) and in_test_code(text, m.start, path)
+
+
 # ------------------------------------------------------------------ scanner --
 _CTX_CACHE: dict[tuple[str, ...], re.Pattern[str]] = {}
 

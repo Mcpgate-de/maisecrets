@@ -559,7 +559,7 @@ def user_prompt(payload: dict) -> dict:
 
     # 2. references the human typed or pasted: this session may resolve them from now on
     typed = find_refs(prompt)
-    matches = detect.scan(prompt)
+    matches = [m for m in detect.scan(prompt) if not detect.is_fixture(m, prompt)]
     vault = None
     if typed or matches or _has_live(cfg):
         vault = Vault(cfg)
@@ -2613,9 +2613,12 @@ def post_tool(payload: dict) -> dict:
     entries: list = []
     resolved: list[tuple[str, str]] | None = None
 
+    tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")   # a test file keeps its fixtures
+
     def redact(s: str) -> str:
         nonlocal vault, resolved
-        matches = detect.scan(s)
+        matches = [m for m in detect.scan(s) if not detect.is_fixture(m, s, path)]
         if not matches and not _has_live(cfg):
             return s
         if vault is None:
