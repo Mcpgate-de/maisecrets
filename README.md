@@ -184,7 +184,8 @@ blocks without it. The Windows command (`commandWindows`) has no such test yet.
   session ran no maisecrets hook while `/plugin` showed the new version.
 - **The guard closes this for a synced install.** It is a small hook outside the
   plugin folder (`~/.claude/maisecrets-guard.py`). Every maisecrets hook writes a
-  heartbeat for its call; when none comes, the guard blocks the prompt, denies
+  heartbeat for its call once it has answered; when none comes (maisecrets did not
+  run, or started and died), the guard blocks the prompt, denies
   the tool call or withholds the result, and names `/reload-plugins`. It stays
   silent for an account without maisecrets, for a plugin you switched off, and
   for Codex. Measured with the real client: `plugin_folder_moved_guarded` (the
@@ -240,7 +241,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 14 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 62 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 63 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push

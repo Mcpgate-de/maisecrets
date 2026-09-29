@@ -6,5 +6,5 @@ runner = ["tests/test_guard.py::ParallelProcessTests::test_with_maisecrets_runni
 
 [proof]
 file = "hooks/guard.py"
-find = "        if os.path.exists(path):\n            return {}\n"
-replace = "        if os.path.exists(path):\n            os.unlink(path)\n            return {}\n"
+find = "        if os.path.exists(done):\n            return {}           # maisecrets answered this call\n"
+replace = "        if os.path.exists(done):\n            os.unlink(done)\n            return {}\n"

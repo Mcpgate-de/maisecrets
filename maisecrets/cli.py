@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import sys
 import time
@@ -382,6 +383,8 @@ GUARD_COMMAND = ('G="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/maisecrets-guard.py"; '
                  'if [ -f "$G" ] && command -v python3 >/dev/null 2>&1; then python3 "$G" || printf \'{}\'; '
                  "else printf '{}'; fi")
 MANAGED_GUARD_COMMAND = GUARD_COMMAND
+# the start wait (5 s), the answer wait of hooks/guard.py ANSWER_WAIT, and a margin
+GUARD_TIMEOUTS = {"UserPromptSubmit": 15, "PreToolUse": 15, "PostToolUse": 25}
 
 
 def _guard_paths() -> tuple:
@@ -392,16 +395,35 @@ def _guard_paths() -> tuple:
     return claude / GUARD_MARK, claude / "settings.json"
 
 
+# the command an older registration wrote: "<python>" "<dir>/maisecrets-guard.py"
+_OLD_GUARD_COMMAND = re.compile(r'"[^"]+" "[^"]*[/\\]maisecrets-guard\.py"')
+
+
+def _is_our_hook(h) -> bool:
+    """Our hook object and only ours: the exact command we register (or an older one of ours), not any
+    command that happens to name the file (Codex review, 2026-09-29: a user's wrapper went with it)."""
+    command = str(h.get("command", "")) if isinstance(h, dict) else ""
+    return command == GUARD_COMMAND or bool(_OLD_GUARD_COMMAND.fullmatch(command))
+
+
 def _is_guard(entry) -> bool:
-    return isinstance(entry, dict) and any(isinstance(h, dict) and GUARD_MARK in str(h.get("command", ""))
-                                           for h in entry.get("hooks") or [])
+    """An entry that holds our hook and nothing else."""
+    hooks = entry.get("hooks") if isinstance(entry, dict) else None
+    return bool(hooks) and all(_is_our_hook(h) for h in hooks)
 
 
 def _without_guard(hooks: dict) -> dict:
-    """The hooks block with every entry of ours taken out, and events left empty removed."""
+    """The hooks block with our hook objects taken out; an entry keeps the user's own hooks beside ours,
+    and an entry or event left empty is removed."""
     out = {}
     for event, entries in hooks.items():
-        kept = [e for e in entries if not _is_guard(e)] if isinstance(entries, list) else entries
+        kept = []
+        for e in entries if isinstance(entries, list) else []:
+            inner = [h for h in (e.get("hooks") or []) if not _is_our_hook(h)] if isinstance(e, dict) else None
+            if inner is None:
+                kept.append(e)
+            elif inner:
+                kept.append({**e, "hooks": inner})
         if kept:
             out[event] = kept
     return out
@@ -415,7 +437,7 @@ def _guard_entries() -> dict:
     hooks: dict = {}
     for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
         for entry in plugin_hooks.get(event, []):
-            new = {"hooks": [{"type": "command", "command": GUARD_COMMAND, "timeout": 15}]}
+            new = {"hooks": [{"type": "command", "command": GUARD_COMMAND, "timeout": GUARD_TIMEOUTS[event]}]}
             hooks.setdefault(event, []).append({"matcher": entry["matcher"], **new} if entry.get("matcher") else new)
     return hooks
 
@@ -482,7 +504,6 @@ def _active_account() -> str:
 def install_guard(expect: str = "synced", root: str = "", keep_mode: bool = False) -> list[str]:
     """Copy the guard next to the Claude Code settings and register it for the events and matchers
     maisecrets itself uses. The settings file is backed up first and changed only in its hooks."""
-    import shutil
     import time as _t
     from .vault import HOME
     script, settings = _guard_paths()
@@ -498,7 +519,10 @@ def install_guard(expect: str = "synced", root: str = "", keep_mode: bool = Fals
     if {e: v for e, v in ours.items() if v} != wanted:
         if settings.exists():
             backup = settings.with_name(f"settings.json.bak-maisecrets-{_t.strftime('%Y%m%d-%H%M%S')}")
-            shutil.copyfile(settings, backup)
+            # 0600 from the start: the settings may hold tokens, and a copy under the umask was 0644
+            fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(settings.read_bytes())
             done.append(f"backed up {settings.name} to {backup.name}")
         for event, entries in wanted.items():
             hooks.setdefault(event, []).extend(entries)
@@ -510,10 +534,13 @@ def install_guard(expect: str = "synced", root: str = "", keep_mode: bool = Fals
     # session start keeps a mode the person chose (`--off`, `--always`; review: it silently undid `--off`)
     if keep_mode:
         try:
-            chosen = json.loads((HOME / "guard.json").read_text(encoding="utf-8")).get("expect")
-        except (OSError, ValueError, AttributeError):
-            chosen = None
-        expect = chosen if chosen in ("off", "always") else expect
+            prev = json.loads((HOME / "guard.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            prev = {}
+        prev = prev if isinstance(prev, dict) else {}
+        # a mode the person chose stays; an "off" that the policy set ends when the policy allows the guard
+        if prev.get("expect") in ("off", "always") and prev.get("by") != "policy":
+            expect = prev["expect"]
     # every account that registered from a synced copy: two claude.ai profiles on one maisecrets home each
     # keep theirs (review, 2026-09-29: the last session start overwrote the other one)
     try:
@@ -565,6 +592,22 @@ def register_guard_for_a_synced_install() -> "str | None":
         return (f"maisecrets registered its guard in {settings}: it blocks a session in which a plugin update left "
                 "maisecrets not running. /maisecrets:guard remove takes it away.")
     return None
+
+
+def guard_off_by_policy() -> None:
+    """`"guard": false` in the config or the machine policy: a guard registered earlier stops expecting
+    maisecrets (Codex review, 2026-09-29: it kept refusing). Never raises."""
+    from .vault import HOME
+    try:
+        path = HOME / "guard.json"
+        if not path.exists():
+            return
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        cfg = cfg if isinstance(cfg, dict) else {}
+        if cfg.get("expect") != "off":
+            path.write_text(json.dumps({**cfg, "expect": "off", "by": "policy"}) + "\n", encoding="utf-8")
+    except (OSError, ValueError):
+        pass
 
 
 def remove_guard() -> list[str]:

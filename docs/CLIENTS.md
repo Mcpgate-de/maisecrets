@@ -54,7 +54,10 @@ a header indented by spaces or tabs, so the hook reads it as a header too. A cal
 text in `command` is refused. maisecrets
 refuses a patch that names the maisecrets home, refuses a placeholder in a header, and resolves one
 in the content lines, context and removed lines included (the model read the file redacted, so the
-patch must match the real text). Codex applies the rewritten patch when the hook answers `allow`.
+patch must match the real text). Each further line of a multi-line value gets the prefix of its line,
+so a PEM key lands in the file as it is and never starts a patch operation; the rewritten patch must
+name exactly the files the checked one named. A context line that reads like a header is refused
+(the safe side), and a value with a carriage return is refused (the format cannot carry it). Codex applies the rewritten patch when the hook answers `allow`.
 The captured payload is `tests/client_payloads/codex-apply-patch.json`; the rehydration matrix
 builds its Codex file row from it.
 

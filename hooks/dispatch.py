@@ -151,12 +151,15 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     if not codex and os.name != "nt" and not (HOME / ".guard-removed").exists():
         from maisecrets.hooks import _from_a_synced_folder  # noqa: E402
         if _from_a_synced_folder():
-            from maisecrets.cli import place_guard_script, register_guard_for_a_synced_install  # noqa: E402
+            from maisecrets.cli import (guard_off_by_policy, place_guard_script,  # noqa: E402
+                                        register_guard_for_a_synced_install)
             place_guard_script()
             if cfg.get("guard", True):
                 note = register_guard_for_a_synced_install()
                 if note:
                     out["systemMessage"] = out.get("systemMessage", "") + " " + note
+            else:
+                guard_off_by_policy()
     # the model reads what a placeholder is once per session, before it meets one
     out["hookSpecificOutput"] = {"hookEventName": "SessionStart", "additionalContext": PRIMER}
     print(json.dumps(out))

@@ -190,7 +190,7 @@ class DecisionTests(_Env):
         self.installed("always")
         for name, payload in PAYLOADS.items():
             with self.subTest(name):
-                hooks._heartbeat(EVENT[name], payload)
+                hooks._heartbeat(EVENT[name], payload, done=True)
                 path = Path(HOME, "alive", guard.heartbeat_name("S1", EVENT[name],
                                                                payload.get("tool_use_id") or payload["prompt_id"]))
                 self.assertTrue(path.exists(), "maisecrets and the guard compute the same name")
@@ -200,13 +200,29 @@ class DecisionTests(_Env):
                 self.assertTrue(path.exists())
                 self.assertEqual(guard.decide(payload, wait=0.3), {})
 
+    def test_a_hook_that_started_and_never_answered_is_refused(self):
+        # a fatal error after the start leaves the start mark only (Codex review, 2026-09-29)
+        self.installed("always")
+        hooks._heartbeat("pre-tool", PAYLOADS["PreToolUse"])
+        with mock.patch.dict(guard.ANSWER_WAIT, {"PreToolUse": 0.3}):
+            out = guard.decide(PAYLOADS["PreToolUse"], wait=0.2)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_the_guard_waits_as_long_as_maisecrets_may_take(self):
+        from maisecrets import cli
+        for event, timeout in cli.GUARD_TIMEOUTS.items():
+            with self.subTest(event):
+                watchdog = hooks.WATCHDOG_SECONDS[EVENT[event]]
+                self.assertGreater(guard.ANSWER_WAIT[event], watchdog, "an answer at the watchdog still counts")
+                self.assertGreater(timeout, 5 + guard.ANSWER_WAIT[event], "the hook timeout covers both waits")
+
     def test_the_heartbeat_of_another_call_does_not_count(self):
         self.installed("always")
         other = dict(PAYLOADS["PreToolUse"], tool_use_id="call_2")
-        hooks._heartbeat("pre-tool", other)
+        hooks._heartbeat("pre-tool", other, done=True)
         self.assertIn("hookSpecificOutput", guard.decide(PAYLOADS["PreToolUse"], wait=0.2))
         other_session = dict(PAYLOADS["PreToolUse"], session_id="S2")
-        hooks._heartbeat("pre-tool", other_session)
+        hooks._heartbeat("pre-tool", other_session, done=True)
         self.assertIn("hookSpecificOutput", guard.decide(PAYLOADS["PreToolUse"], wait=0.2))
 
     def test_silent_for_codex_an_unguarded_event_and_an_account_without_maisecrets(self):
@@ -374,6 +390,42 @@ class SyncedInstallTests(_Env):
         cli.remove_guard()
         self.start(copy)
         self.assertFalse((self.claude / "maisecrets-guard.py").exists())
+
+    def test_the_backup_is_as_private_as_the_settings(self):
+        copy = self.synced_copy()
+        settings = self.claude / "settings.json"
+        settings.write_text(json.dumps({"env": {"A_TOKEN": "x"}}))
+        os.chmod(settings, 0o600)
+        self.start(copy)
+        backups = list(self.claude.glob("settings.json.bak-maisecrets-*"))
+        self.assertTrue(backups)
+        self.assertEqual(os.stat(backups[0]).st_mode & 0o777, 0o600)
+
+    def test_only_our_hook_object_is_ours(self):
+        from maisecrets import cli
+        wrapper = {"type": "command", "command": "/opt/tools/run-maisecrets-guard.py-audit"}
+        mixed = {"matcher": "Bash", "hooks": [wrapper, {"type": "command", "command": cli.GUARD_COMMAND}]}
+        out = cli._without_guard({"PreToolUse": [mixed]})
+        self.assertEqual(out, {"PreToolUse": [{"matcher": "Bash", "hooks": [wrapper]}]},
+                         "the user's hook beside ours, and a command that merely names the file, stay")
+        old = {"hooks": [{"type": "command", "command": '"/usr/bin/python3" "/u/.claude/maisecrets-guard.py"'}]}
+        self.assertEqual(cli._without_guard({"PostToolUse": [old]}), {}, "an older registration of ours goes")
+
+    def test_guard_false_in_the_policy_switches_a_registered_guard_off_and_back(self):
+        copy = self.synced_copy()
+        self.start(copy)
+        cfg = json.loads(Path(HOME, "config.json").read_text())
+        Path(HOME, "config.json").write_text(json.dumps({**cfg, "guard": False}))
+        try:
+            self.start(copy)
+            written = json.loads(Path(HOME, "guard.json").read_text())
+            self.assertEqual((written["expect"], written.get("by")), ("off", "policy"))
+            self.assertFalse(guard.expected())
+        finally:
+            Path(HOME, "config.json").write_text(json.dumps(cfg))
+        self.start(copy)
+        self.assertEqual(json.loads(Path(HOME, "guard.json").read_text())["expect"], "synced",
+                         "the policy allows it again: the policy's off ends, a person's --off would not")
 
     def test_settings_that_are_not_json_are_left_alone(self):
         copy = self.synced_copy()

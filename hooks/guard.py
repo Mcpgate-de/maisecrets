@@ -78,6 +78,10 @@ def _account() -> str:
 
 
 TRASH_WINDOW = 15 * 60
+# after the start, how long an answer may take: maisecrets answers within its own watchdog (7 s for a
+# prompt and a tool call, 16 s for a tool result; maisecrets/hooks.py WATCHDOG_SECONDS) plus a margin. The
+# guard's hook timeout (GUARD_TIMEOUTS in maisecrets/cli.py) covers the start wait and this
+ANSWER_WAIT = {"UserPromptSubmit": 8.0, "PreToolUse": 8.0, "PostToolUse": 17.0}
 
 
 def _recently_trashed(claude: str) -> bool:
@@ -162,12 +166,15 @@ def decide(payload: dict, wait: float) -> dict:
     session = payload.get("session_id")
     if not ident or not session or not expected(str(payload.get("cwd") or "")):
         return {}
-    path = os.path.join(_home(), "alive", heartbeat_name(session, event, ident))
-    end = time.monotonic() + wait
+    done = os.path.join(_home(), "alive", heartbeat_name(session, event, ident))
+    started = done + ".s"
+    begin = time.monotonic()
     while True:
-        if os.path.exists(path):
-            return {}
-        if time.monotonic() >= end:
+        if os.path.exists(done):
+            return {}           # maisecrets answered this call
+        now = time.monotonic()
+        # no start within `wait`: maisecrets does not run; started but no answer by its own watchdog: it died
+        if (now - begin >= wait and not os.path.exists(started)) or now - begin >= wait + ANSWER_WAIT[hook_event]:
             return _refusal(hook_event)
         time.sleep(0.05)
 

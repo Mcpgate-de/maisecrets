@@ -2152,9 +2152,48 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         # the client records this hook's updatedInput, values included, in the transcript
         _scrub_transcript_later(payload.get("transcript_path", ""), list(values.values()),
                                 [f"⟦{k}⟧" for k in values])
-    return _rehydrated(payload, cfg, "file", {**tool_input, **_walk_strings(target, substitute)},
+    if tool == "apply_patch":
+        rewritten, why = _resolve_patch(tool_input["command"], values)
+        if rewritten is None:
+            return _deny(f"maisecrets: {names} cannot go into this patch: {why}. Nothing was written. "
+                         "Put the placeholder into a + line of the file content, or write the file with Bash "
+                         "(printf '%s' ⟦KEY⟧ > file).")
+        new_input = {**tool_input, "command": rewritten}
+    else:
+        new_input = {**tool_input, **_walk_strings(target, substitute)}
+    return _rehydrated(payload, cfg, "file", new_input,
                        f"maisecrets: {tool} writes the real value of {names} into {path}. "
                        "Check the file and the value before you allow it.")
+
+
+def _resolve_patch(patch: str, values: dict) -> tuple:
+    """The patch with each placeholder replaced by its value, line by line. A value with a line break
+    would otherwise start new patch lines: `\n*** Add File: …` in a value became an operation the path
+    check never saw (Codex review, 2026-09-29). Each further line of a value gets the prefix of the line
+    it sits in (+, - or a space), so a multi-line key lands in the file as it is; a placeholder outside
+    such a line, and a value with a carriage return (the patch format cannot carry it), are refused.
+    The rewritten patch must name exactly the files the checked one named. Returns (patch, None) or
+    (None, why)."""
+    out = []
+    for line in patch.split("\n"):
+        refs = find_refs(line)
+        if not refs:
+            out.append(line)
+            continue
+        prefix = line[:1]
+        if prefix not in ("+", "-", " "):
+            return None, "the placeholder is not in a content line of the patch"
+        new = line
+        for key, start, end in sorted(refs, key=lambda r: r[1], reverse=True):
+            value = values[key]
+            if "\r" in value:
+                return None, "the value holds a carriage return, which a patch cannot carry"
+            new = new[:start] + ("\n" + prefix).join(value.split("\n")) + new[end:]
+        out.append(new)
+    rewritten = "\n".join(out)
+    if _patch_headers(rewritten) != _patch_headers(patch):
+        return None, "the value would change which files the patch names"
+    return rewritten, None
 
 
 def pre_tool(payload: dict) -> dict:
@@ -2582,7 +2621,7 @@ def _from_a_synced_folder() -> bool:
     return f"{os.sep}plugins{os.sep}synced{os.sep}" in root
 
 
-def _heartbeat(event: str, payload: dict) -> None:
+def _heartbeat(event: str, payload: dict, done: bool = False) -> None:
     """Tell the guard (hooks/guard.py, installed outside the plugin folder) that maisecrets runs for
     this call: an empty file named by session, event and the call's id. Only when the guard is
     installed, and only for Claude Code, whose folder swap it watches. Never raises: a heartbeat
@@ -2601,7 +2640,9 @@ def _heartbeat(event: str, payload: dict) -> None:
         d = HOME / "alive"
         d.mkdir(mode=0o700, parents=True, exist_ok=True)
         name = hashlib.sha256(f"{session}\0{event}\0{ident}".encode()).hexdigest()[:32]
-        with open(d / name, "w", encoding="utf-8"):
+        # ".s" when the hook starts, the bare name once it has answered: the guard lets a call pass only on
+        # the answer, so a hook that dies after it started is refused (Codex review, 2026-09-29)
+        with open(d / (name if done else name + ".s"), "w", encoding="utf-8"):
             pass
         now = time.time()
         for n in os.listdir(d):
@@ -2644,6 +2685,7 @@ def main(argv: list[str]) -> int:
                 return
             answered["v"] = True
             _out(obj)
+            _heartbeat(event, payload, done=True)
         ms = int((time.time() - started) * 1000)
         decision = _decision_of(event, obj)
         _debug(f"{event}: {how} {client_of(payload)} {ms}ms {decision}")
