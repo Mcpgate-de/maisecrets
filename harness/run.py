@@ -72,8 +72,9 @@ SCENARIOS = {
                   {"text": "done"}],
         "expect_requests": 2,
         "expect_no_file": "ran.txt",
-        "expect_text": "load maisecrets again. Then exit this session and resume it in the directory where you started "
-                       "it: claude --resume ",
+        # a sentence only this version writes: an installed guard of an older version runs here too and
+        # passed the old text locally while the guard under test wrote the new one (2026-09-29)
+        "expect_text": "Exit this session and run the command above in the directory where you started it",
     },
     # the typed prompt carries a secret: must be blocked, zero requests
     "prompt_secret": {
