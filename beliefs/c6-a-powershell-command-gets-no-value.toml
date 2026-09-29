@@ -1,0 +1,10 @@
+# c6-a-powershell-command-gets-no-value: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c6-a-powershell-command-gets-no-value"
+control = "C6"
+statement = "A placeholder in a command of the PowerShell tool (Claude Code on Windows without Git Bash) is refused with the reason: the rewrite knows POSIX quoting only, so no value goes into a PowerShell command."
+runner = ["tests/test_invariant_store_reads.py::PowerShellTests::test_a_placeholder_gets_no_value"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if keys:\n        return _deny(f\"maisecrets: {keys} cannot be placed in a PowerShell command"
+replace = "    if False:\n        return _deny(f\"maisecrets: {keys} cannot be placed in a PowerShell command"

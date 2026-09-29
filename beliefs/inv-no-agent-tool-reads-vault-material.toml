@@ -2,7 +2,7 @@
 belief = "inv-no-agent-tool-reads-vault-material"
 kind = "invariant"
 control = "I3"
-statement = "No tool of the agent reads a file of the vault home or the value run directory: every reading and editing tool refuses every spelling of such a path (absolute, relative, tilde, dot-dot, doubled slash, symlink, hard link, another case), a search that covers the store, an MCP argument or an MCP resource read with the path or a file URI, and a Bash command that names the default or the configured home. A path outside the store still passes."
+statement = "No tool of the agent reads a file of the vault home or the value run directory: every reading and editing tool refuses every spelling of such a path (absolute, relative, tilde, dot-dot, doubled slash, symlink, hard link, another case), a search that covers the store, an MCP argument or an MCP resource read with the path or a file URI, and a Bash or PowerShell command that names the default or the configured home (in PowerShell also in another case or with the other slash). A path outside the store still passes."
 runner = [
   "tests/test_invariant_store_reads.py::FileToolTests::test_every_reading_tool_refuses_every_spelling_of_a_store_path",
   "tests/test_invariant_store_reads.py::FileToolTests::test_a_search_that_covers_the_store_is_refused",
@@ -11,6 +11,10 @@ runner = [
   "tests/test_invariant_store_reads.py::FileToolTests::test_a_path_outside_the_store_still_passes",
   "tests/test_invariant_store_reads.py::BashTests::test_a_command_that_names_the_store_is_refused",
   "tests/test_invariant_store_reads.py::BashTests::test_a_command_near_the_store_still_runs",
+  "tests/test_invariant_store_reads.py::PowerShellTests::test_a_command_that_names_the_store_is_refused",
+  "tests/test_invariant_store_reads.py::PowerShellTests::test_a_windows_spelling_of_the_store_is_refused",
+  "tests/test_invariant_store_reads.py::PowerShellTests::test_a_command_near_the_store_still_runs",
+  "tests/test_invariant_store_reads.py::PopulationTests::test_every_shell_tool_meets_the_store_backstop",
   "tests/test_invariant_store_reads.py::PopulationTests::test_every_tool_that_reads_a_path_is_in_the_matcher",
   "tests/test_invariant_store_reads.py::PopulationTests::test_the_hook_code_knows_no_reading_tool_this_module_does_not",
 ]
@@ -66,14 +70,14 @@ replace = "    for d in []:\n"
 [[proof]]
 path = "Bash names the default home, the keychain or a delivery path"
 file = "maisecrets/hooks.py"
-find = "    m = _STORE_READ_RE.search(command)"
+find = "    m = (_STORE_READ_RE_I if windows_paths else _STORE_READ_RE).search(command)"
 replace = "    m = None"
 
 [[proof]]
 path = "a reading tool the matcher does not reach (ReadMcpResourceTool out of the matcher)"
 file = "hooks/hooks.json"
-find = "\"Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceTool|ReadMcpResourceDirTool|mcp__.*\""
-replace = "\"Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceDirTool|mcp__.*\""
+find = "\"Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceTool|ReadMcpResourceDirTool|mcp__.*\""
+replace = "\"Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceDirTool|mcp__.*\""
 
 [[proof]]
 path = "a tool the hooks handle that this invariant does not list"
@@ -98,3 +102,27 @@ path = "a resource read by URI (ReadMcpResourceTool, ReadMcpResourceDirTool)"
 file = "maisecrets/hooks.py"
 find = "    if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS or tool.startswith(\"mcp__\"):"
 replace = "    if tool in _READ_TOOLS or tool.startswith(\"mcp__\"):"
+
+[[proof]]
+path = "the PowerShell tool reaches no guard (the hole of 0.5.11 on Windows without Git Bash)"
+file = "maisecrets/hooks.py"
+find = "    if tool == \"PowerShell\":\n        return _pre_powershell(payload, tool_input)"
+replace = "    if False:\n        return _pre_powershell(payload, tool_input)"
+
+[[proof]]
+path = "the PowerShell tool out of the matcher"
+file = "hooks/hooks.json"
+find = "\"matcher\": \"Bash|PowerShell|Write|"
+replace = "\"matcher\": \"Bash|Write|"
+
+[[proof]]
+path = "a Windows path to the configured home in another case"
+file = "maisecrets/hooks.py"
+find = "            if re.search(rx, command, re.IGNORECASE):"
+replace = "            if re.search(rx, command):"
+
+[[proof]]
+path = "a path next to the configured home in PowerShell"
+file = "maisecrets/hooks.py"
+find = 're.split(r"[/\\]+", d)) + r"(?![\w.-])"'
+replace = 're.split(r"[/\\]+", d))'

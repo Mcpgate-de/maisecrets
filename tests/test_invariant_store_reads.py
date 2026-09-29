@@ -265,7 +265,58 @@ class BashTests(unittest.TestCase):
                 self.assertFalse(deny(self.run_pre(c)), c)
 
 
+REF = "\u27e6SECRET_c1\u27e7"      # a placeholder, escaped: the live plugin of a session resolves the literal
+
+
+class PowerShellTests(BashTests):
+    """PowerShell, the shell tool of Claude Code on Windows without Git Bash: the Bash backstop, and a
+    Windows path matches in any case and with either slash."""
+
+    def run_pre(self, command: str) -> dict:
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX"))}
+        env.update({"MAISECRETS_HOME": str(self.home), "PYTHONUTF8": "1"})
+        payload = {"tool_name": "PowerShell", "tool_input": {"command": command}, "session_id": "S1", "cwd": "/",
+                   "transcript_path": "", **CLAUDE}
+        r = subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "pre-tool"], env=env,
+                           input=json.dumps(payload), capture_output=True, encoding="utf-8", timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout) if r.stdout.strip() else {}
+
+    def test_a_windows_spelling_of_the_store_is_refused(self):
+        h = str(self.home)
+        commands = {
+            "Get-Content the default home": r"Get-Content $env:USERPROFILE\.maisecrets\vault.enc.json",
+            "the configured home with backslashes": "Get-Content " + h.replace("/", "\\") + "\\index.json",
+            "the configured home in upper case": "type " + h.upper() + "/index.json",
+            "the file name in upper case": r"gc C:\Users\x\.MAISECRETS\VAULT.ENC.JSON",
+            "the environment variable": r"Get-ChildItem $env:MAISECRETS_HOME",
+            "the guard script": r"python $env:USERPROFILE\.claude\maisecrets-guard.py --off",
+            "the session id": "$env:CLAUDE_CODE_SESSION_ID = 'other'",
+        }
+        bad = [label for label, c in commands.items() if not deny(self.run_pre(c))]
+        self.assertEqual(bad, [], "\n".join(bad))
+
+    def test_a_placeholder_gets_no_value(self):
+        out = self.run_pre("Write-Output " + REF)
+        self.assertTrue(deny(out), out)
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn(REF, reason)
+        self.assertIn("PowerShell", reason)
+        self.assertNotIn("updatedInput", out["hookSpecificOutput"])
+        self.assertEqual(self.run_pre("Get-ChildItem C:\\work"), {}, "a command without a placeholder runs as it is")
+
+
 class PopulationTests(unittest.TestCase):
+    def test_every_shell_tool_meets_the_store_backstop(self):
+        # a shell tool the hook code does not handle by name passes every command (PowerShell on Windows
+        # without Git Bash reached no guard in 0.5.11: measured on a hosted Windows runner, 2026-09-29)
+        shells = [name for name, t in _CLAUDE_TOOLS.items() if t["class"] == "shell"]
+        self.assertIn("PowerShell", shells)
+        for tool in shells:
+            for cmd in ("cat ~/.maisecrets/vault.enc.json", "cat $MAISECRETS_HOME/index.json"):
+                with self.subTest(tool=tool, cmd=cmd):
+                    self.assertTrue(deny(pre(tool, {"command": cmd}, "/tmp")), f"{tool}: {cmd}")
+
     def test_every_tool_that_reads_a_path_is_in_the_matcher(self):
         hooks_json = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         matchers = [m.get("matcher", "") for m in hooks_json["hooks"]["PreToolUse"]]

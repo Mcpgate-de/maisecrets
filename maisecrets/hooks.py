@@ -523,15 +523,22 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
                               r"|XDG_RUNTIME_DIR[^\n]*maisecrets"),
 ]
 _STORE_READ_RE = re.compile("|".join(f"(?P<p{i}>{rx})" for i, (_n, rx) in enumerate(_STORE_READ_PATTERNS)))
+# PowerShell on Windows: command names and file names in any case (Get-Content VAULT.ENC.JSON reads the file)
+_STORE_READ_RE_I = re.compile(_STORE_READ_RE.pattern, re.IGNORECASE)
 
 
-def _store_read_match(command: str) -> str | None:
-    """The name of the backstop pattern a command matches, or None."""
+def _store_read_match(command: str, windows_paths: bool = False) -> str | None:
+    """The name of the backstop pattern a command matches, or None. With windows_paths, a directory
+    matches in any case and with / or \\ between its parts, as a Windows path does."""
     for d in _store_dir_spellings():
         # a home set by environment variable has no `.maisecrets` in its name (invariant I3, 2026-09-28)
-        if re.search(re.escape(d) + r"(?![\w.-])", command):
+        if windows_paths:
+            rx = r"[/\\]+".join(re.escape(p) for p in re.split(r"[/\\]+", d)) + r"(?![\w.-])"
+            if re.search(rx, command, re.IGNORECASE):
+                return "the maisecrets home directory"
+        elif re.search(re.escape(d) + r"(?![\w.-])", command):
             return "the maisecrets home directory"
-    m = _STORE_READ_RE.search(command)
+    m = (_STORE_READ_RE_I if windows_paths else _STORE_READ_RE).search(command)
     if not m:
         return None
     for i, (name, _rx) in enumerate(_STORE_READ_PATTERNS):
@@ -1549,6 +1556,24 @@ def _args_call_refusal(command: str) -> str | None:
     return None
 
 
+def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
+    """The refusal for a shell command (Bash, PowerShell) that names the store, or None."""
+    matched = _store_read_match(command, windows_paths)
+    if matched == "the maisecrets guard":
+        # not the store: the person switches the guard off, and says so to the agent (live session, 2026-09-29)
+        return _deny("maisecrets: this command touches the maisecrets guard, which only the person switches off "
+                     "(/maisecrets:guard remove, or --off in a terminal). The command did not run. If the task needs "
+                     "something about the guard, tell the user what; /maisecrets:guard status shows its state.")
+    if matched:
+        # said as what the user does next, not as a check to stay inside: "do not rephrase … to get around
+        # the check" next to an ops request read like an attempt to get around a control (ops review, 2026-09-28)
+        return _deny(f"maisecrets: this command touches {matched}, the user's own store. The user manages it "
+                     "with /maisecrets:list and /maisecrets:forget. The command did not run. If the task needs "
+                     "something from there, tell the user what; if this is a false positive, "
+                     "/maisecrets:report records it.")
+    return None
+
+
 def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     """Bash: every value is read into a shell variable in the MAIN shell before the command
     runs, and the placeholder becomes that variable in its quoting context. The read fails
@@ -1573,19 +1598,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         # would take that session's text (Codex review, 2026-09-28)
         return _deny("maisecrets: this command sets or clears the session id, which selects the blocked prompt "
                      "of another session. The command did not run. /ms sends the blocked prompt of this session.")
-    matched = _store_read_match(command)
-    if matched == "the maisecrets guard":
-        # not the store: the person switches the guard off, and says so to the agent (live session, 2026-09-29)
-        return _deny("maisecrets: this command touches the maisecrets guard, which only the person switches off "
-                     "(/maisecrets:guard remove, or --off in a terminal). The command did not run. If the task needs "
-                     "something about the guard, tell the user what; /maisecrets:guard status shows its state.")
-    if matched:
-        # said as what the user does next, not as a check to stay inside: "do not rephrase … to get around
-        # the check" next to an ops request read like an attempt to get around a control (ops review, 2026-09-28)
-        return _deny(f"maisecrets: this command touches {matched}, the user's own store. The user manages it "
-                     "with /maisecrets:list and /maisecrets:forget. The command did not run. If the task needs "
-                     "something from there, tell the user what; if this is a false positive, "
-                     "/maisecrets:report records it.")
+    refused = _store_refusal(command)
+    if refused:
+        return refused
     ctxs = _shell_contexts(command)
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
     if not refs:
@@ -2201,12 +2216,37 @@ def _resolve_patch(patch: str, values: dict) -> tuple:
     return rewritten, None
 
 
+def _pre_powershell(payload: dict, tool_input: dict) -> dict:
+    """PowerShell: the shell tool of Claude Code on Windows without Git Bash (measured with 2.1.284 on
+    a hosted Windows runner, 2026-09-29). The rewrite knows POSIX quoting only, so a placeholder is
+    refused and no value goes in; the store backstop is the text match of Bash, with Windows paths in
+    any case and either slash."""
+    command = tool_input.get("command", "")
+    if not isinstance(command, str):
+        return _deny("maisecrets: this PowerShell call has no command text to check. The command did not run.")
+    if re.search(r"CLAUDE_CODE_SESSION_ID", command, re.IGNORECASE):
+        return _deny("maisecrets: this command names the session id, which selects the blocked prompt of a "
+                     "session. The command did not run. /ms sends the blocked prompt of this session.")
+    refused = _store_refusal(command, windows_paths=True)
+    if refused:
+        return refused
+    keys = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(k for k, _a, _b in find_refs(command)))
+    if keys:
+        return _deny(f"maisecrets: {keys} cannot be placed in a PowerShell command (maisecrets places values "
+                     "in Bash commands only; PowerShell quoting is not supported). The command did not run. Use "
+                     "the value through an MCP tool or a file tool, or ask the user to run the command "
+                     "themselves. With Git for Windows installed, Claude Code offers Bash instead.")
+    return {}
+
+
 def pre_tool(payload: dict) -> dict:
     cfg = load_config()
     tool = payload.get("tool_name", "")
     tool_input = payload.get("tool_input") or {}
     if tool == "Bash":
         return _pre_bash(payload, cfg, tool_input)
+    if tool == "PowerShell":
+        return _pre_powershell(payload, tool_input)
     if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS or tool.startswith("mcp__"):
         refused = _store_path_refusal(tool, tool_input, str(payload.get("cwd") or ""))
         if refused:

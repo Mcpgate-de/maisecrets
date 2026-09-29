@@ -13,6 +13,7 @@
       "NotebookEdit": {"class": "edits-path", "field": "notebook_path"},
       "Write": {"class": "edits-path", "field": "file_path"},
       "Bash": {"class": "shell"},
+      "PowerShell": {"class": "shell", "why": "the shell tool on Windows without Git Bash (2.1.284): placeholders are refused, the store backstop applies"},
       "ReadMcpResourceTool": {"class": "mcp-resource", "field": "uri", "why": "a filesystem server serves file: URIs"},
       "ReadMcpResourceDirTool": {"class": "mcp-resource", "field": "uri", "why": "lists and reads resources under a URI"},
       "ListMcpResourcesTool": {"class": "no-path", "why": "lists the resource names a server offers, no content"},
