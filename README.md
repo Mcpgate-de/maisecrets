@@ -103,10 +103,14 @@ moves only the last number; a higher one needs the owner's approval. Vault backe
 
 Hooks run through `hooks/run.sh` (bash), which looks for a Python 3.9+ as
 `python3`, `python`, `py -3`, a versioned name, or the Homebrew, `/usr/local`
-and python.org paths. Claude Code on Windows requires Git Bash, so the
-launcher runs there too. Codex on Windows has no Git Bash, so every hook also
-names a `commandWindows` entry: `hooks/run.cmd` runs the same `dispatch.py`
-from `cmd.exe`, the shell Codex uses for a Windows hook. Without a Python
+and python.org paths. Claude Code on Windows runs a hook command in Git Bash
+when Git for Windows is installed, and in PowerShell when it is not (pwsh 7,
+else Windows PowerShell 5.1; read from Claude Code 2.1.284). So each command
+in `hooks/hooks.json` is one text that both shells read: bash runs
+`hooks/run.sh` and stops there, and PowerShell, which sees that part as a
+comment, runs `hooks/run.cmd`. Codex on Windows runs the `commandWindows`
+entry of each hook through `cmd.exe`, which starts `hooks/run.cmd` too. Both
+launchers run the same `dispatch.py`. Without a Python
 3.9+ the launcher blocks every prompt and every tool call and withholds every
 tool result, and its message names what to install: fail closed, with a cause.
 
@@ -127,7 +131,7 @@ vendor's hook docs, not measured · ⚠️ partly · ❌ no hook
 
 | client | prompt | rehydrate | redact | adapter |
 |---|:---:|:---:|:---:|---|
-| Claude Code CLI | ✅ | ✅ | ✅ | built |
+| Claude Code CLI | ✅ | ✅ | ✅ | built; on Windows without Git Bash the shell tool is PowerShell, and a placeholder in a PowerShell command is refused (no PowerShell rewrite) |
 | Cowork, Claude desktop app | ✅ | ✅ | ✅ | same hooks and manifest; a blocked prompt, an MCP call that resolves (with the ask and warning of 0.5.9, now `rehydration: confirm`), and a redacted Bash output seen live in the desktop app (2026-09-28); not in the harness |
 | Codex CLI | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks; on Windows a shell placeholder is denied (PowerShell rewrite not built) |
 | Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | same plugin runtime; block, rewrite and redaction seen live (2026-09-27), not in the harness |
@@ -169,7 +173,8 @@ maisecrets cannot warn you itself. The harness measures this on every run
 (scenario `plugin_folder_moved`, Claude Code 2.1.283: no hook runs, the tool
 runs; anthropics/claude-code#97847). A client that runs the hook command anyway
 gets a refusal on macOS and Linux: the command tests for the launcher first and
-blocks without it. The Windows command (`commandWindows`) has no such test yet.
+blocks without it, in bash and in PowerShell. The Codex command for Windows
+(`commandWindows`) has no such test yet.
 
 - Installed from this GitHub marketplace (the commands above), a previous version
   stays for 14 days, "so a session that already loaded the old version keeps
@@ -239,9 +244,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 14 scenarios against a fake upstream
+python3 harness/run.py                                 # 17 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 63 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 64 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -761,6 +766,12 @@ a to-do.
   reference from an earlier run is foreign there.
 - **A reference in a prompt is admitted as typed by a human**, also when the
   prompt was built from an issue body or a log in a headless run.
+- **Claude Code on Windows without Git Bash** offers a `PowerShell` tool in
+  place of Bash. maisecrets checks it like Bash for the store, in any case
+  and with either slash, and refuses a placeholder in it with the reason:
+  the rewrite knows POSIX quoting only. A placeholder in a file tool or an
+  MCP argument works as on the other systems. The `/maisecrets:*` commands
+  run through Bash and need Git Bash.
 - **Codex on Windows** runs commands in PowerShell, where the bash quoting
   contexts of the grant rewrite do not apply. The prompt block, the output
   redaction and the inline MCP resolve run through `hooks/run.cmd`; a

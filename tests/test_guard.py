@@ -127,6 +127,23 @@ class ExpectedTests(_Env):
         self.account("org-1", "acc-1", synced=True)
         self.assertTrue(guard.expected())
 
+    def test_every_generation_of_the_synced_folder_counts(self):
+        # an update writes maisecrets~g2 beside maisecrets, then moves the old one away (measured 2026-09-29);
+        # the next update writes ~g3. A guard that knew one name went silent after the next update
+        Path(HOME, "guard.json").write_text(json.dumps({"expect": "synced", "accounts": ["org-1_acc-1"],
+                                                        "roots": {"org-1_acc-1": "/gone/maisecrets~g2"}}))
+        self.account("org-1", "acc-1", synced=False)
+        base = self.claude / "plugins" / "synced" / "org-1_acc-1"
+        for name, want in (("maisecrets-other", False), ("maisecrets~gx", False), ("maisecrets~g3", True)):
+            with self.subTest(name):
+                (base / name / ".claude-plugin").mkdir(parents=True)
+                (base / name / ".claude-plugin" / "plugin.json").write_text("{}")
+                with mock.patch.object(guard, "_recently_trashed", return_value=False):
+                    self.assertEqual(guard.expected(), want)
+        # and without a guard.json the account's own copy of any generation counts too
+        Path(HOME, "guard.json").unlink()
+        self.assertTrue(guard.expected())
+
     def test_a_second_profile_on_the_same_home_keeps_its_own_synced_folder(self):
         root_a = self.claude / "plugins" / "synced" / "org-1_acc-1" / "maisecrets"
         (root_a / ".claude-plugin").mkdir(parents=True)

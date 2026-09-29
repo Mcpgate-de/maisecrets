@@ -185,6 +185,44 @@ class MovedPluginFolderFailsClosedTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
 
 
+class PowerShellPartFailsClosedTests(MovedPluginFolderFailsClosedTests):
+    """The PowerShell half of each hooks.json command (Claude Code on Windows without Git Bash runs it,
+    2.1.284), run here the way that client starts it: `${CLAUDE_PLUGIN_ROOT}` rewritten to
+    `${env:CLAUDE_PLUGIN_ROOT}`, `pwsh -NoProfile -NonInteractive -Command`. pwsh runs on the GitHub
+    Windows and macOS runners; the Windows e2e project runs it with the real client in pwsh 7 and 5.1."""
+
+    def setUp(self):
+        self.pwsh = shutil.which("pwsh")
+        if not self.pwsh:
+            self.skipTest("pwsh is not installed")
+
+    def run_command(self, command: str, root: Path) -> subprocess.CompletedProcess:
+        for n in ("CLAUDE_PROJECT_DIR", "CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA"):
+            command = command.replace("${" + n + "}", "${env:" + n + "}")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+        env["CLAUDE_PLUGIN_ROOT"] = str(root)
+        return subprocess.run([self.pwsh, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
+                               command], input='{"prompt": "x"}', capture_output=True, text=True, env=env,
+                              timeout=60)
+
+    def test_a_present_plugin_folder_runs_the_launcher(self):
+        pass                                     # the launcher is a .cmd file: the Windows e2e runs it
+
+    def test_a_launcher_that_does_not_start_blocks_every_event(self):
+        # run.cmd is a directory here: PowerShell cannot start it on any system, as when cmd.exe is blocked
+        root = Path(tempfile.mkdtemp(prefix="maisecrets-nostart-")) / "maisecrets"
+        (root / "hooks" / "run.cmd").mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, root.parent, True)
+        for event, command in self.commands().items():
+            with self.subTest(event):
+                r = self.run_command(command, root)
+                self.assertIn("could not start hooks/run.cmd", r.stdout)
+                if event == "session-start":
+                    self.assertEqual(r.returncode, 0)
+                else:
+                    assert_refuses(self, event, r)
+
+
 class BrokenImportFailsClosedTests(unittest.TestCase):
     """The entry point cannot import the plugin's code (a half-synced folder, a missing module): every
     hook event must refuse as the launcher does without Python. Exit 1 lets the prompt or the tool
