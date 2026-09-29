@@ -184,7 +184,8 @@ def switch_off() -> str:
     os.makedirs(home, mode=0o700, exist_ok=True)
     cfg = _load(os.path.join(home, "guard.json"))
     with open(os.path.join(home, "guard.json"), "w", encoding="utf-8") as f:
-        json.dump({**cfg, "expect": "off"}, f)
+        # the person's own off: without "by", so a policy that allows the guard again does not undo it
+        json.dump({**{k: v for k, v in cfg.items() if k != "by"}, "expect": "off"}, f)
     return f"the maisecrets guard is off ({os.path.join(home, 'guard.json')}); /maisecrets:guard install turns it on"
 
 

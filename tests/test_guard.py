@@ -408,6 +408,9 @@ class SyncedInstallTests(_Env):
         out = cli._without_guard({"PreToolUse": [mixed]})
         self.assertEqual(out, {"PreToolUse": [{"matcher": "Bash", "hooks": [wrapper]}]},
                          "the user's hook beside ours, and a command that merely names the file, stay")
+        shaped = {"type": "command", "command": '"/opt/bin/audit" "/u/.claude/maisecrets-guard.py"'}
+        self.assertEqual(cli._without_guard({"PreToolUse": [{"hooks": [shaped]}]}),
+                         {"PreToolUse": [{"hooks": [shaped]}]}, "a wrapper of the same shape is not ours")
         old = {"hooks": [{"type": "command", "command": '"/usr/bin/python3" "/u/.claude/maisecrets-guard.py"'}]}
         self.assertEqual(cli._without_guard({"PostToolUse": [old]}), {}, "an older registration of ours goes")
 
@@ -426,6 +429,15 @@ class SyncedInstallTests(_Env):
         self.start(copy)
         self.assertEqual(json.loads(Path(HOME, "guard.json").read_text())["expect"], "synced",
                          "the policy allows it again: the policy's off ends, a person's --off would not")
+
+    def test_guard_false_without_a_guard_json_and_a_persons_off_under_the_policy(self):
+        from maisecrets import cli
+        Path(HOME, "guard.json").unlink(missing_ok=True)
+        cli.guard_off_by_policy()
+        self.assertEqual(json.loads(Path(HOME, "guard.json").read_text()),
+                         {"expect": "off", "by": "policy"}, "a managed guard reads it too")
+        subprocess.run([sys.executable, str(GUARD), "--off"], capture_output=True, text=True, env=dict(os.environ))
+        self.assertNotIn("by", json.loads(Path(HOME, "guard.json").read_text()), "now the person's own off")
 
     def test_settings_that_are_not_json_are_left_alone(self):
         copy = self.synced_copy()

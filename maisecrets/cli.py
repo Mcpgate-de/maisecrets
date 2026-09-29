@@ -396,7 +396,7 @@ def _guard_paths() -> tuple:
 
 
 # the command an older registration wrote: "<python>" "<dir>/maisecrets-guard.py"
-_OLD_GUARD_COMMAND = re.compile(r'"[^"]+" "[^"]*[/\\]maisecrets-guard\.py"')
+_OLD_GUARD_COMMAND = re.compile(r'"[^"]*[/\\]python[0-9.]*" "[^"]*[/\\]maisecrets-guard\.py"')
 
 
 def _is_our_hook(h) -> bool:
@@ -600,10 +600,13 @@ def guard_off_by_policy() -> None:
     from .vault import HOME
     try:
         path = HOME / "guard.json"
-        if not path.exists():
-            return
-        cfg = json.loads(path.read_text(encoding="utf-8"))
+        # also without a guard.json: a guard in the managed settings, or one registered earlier, reads it
+        try:
+            cfg = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cfg = {}
         cfg = cfg if isinstance(cfg, dict) else {}
+        HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
         if cfg.get("expect") != "off":
             path.write_text(json.dumps({**cfg, "expect": "off", "by": "policy"}) + "\n", encoding="utf-8")
     except (OSError, ValueError):
