@@ -264,8 +264,12 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         # a copy the scenario may move; the checkout itself is never moved
         plugin = work / "plugin" / "maisecrets"
         shutil.copytree(ROOT, plugin, ignore=shutil.ignore_patterns(".git", "__pycache__", ".ruff_cache", "harness"))
-    turns = json.loads(json.dumps(sc["turns"]).replace("{cwd}", str(cwd)).replace("{root}", str(ROOT))
-                       .replace("{plugin}", str(plugin)))
+    # each path as a JSON string body: a Windows path has backslashes, which raw text turns into bad
+    # escapes (measured on a GitLab-hosted Windows runner, 2026-09-29)
+    def _js(p) -> str:
+        return json.dumps(str(p))[1:-1]
+    turns = json.loads(json.dumps(sc["turns"]).replace("{cwd}", _js(cwd)).replace("{root}", _js(ROOT))
+                       .replace("{plugin}", _js(plugin)))
     env.update(sc.get("env", {}))
     # dump hook: records every payload so golden keys can be verified
     settings = work / "settings.json"
@@ -303,7 +307,9 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             (work / "mcp.json").write_text(json.dumps({"mcpServers": sc["mcp"]}))
             extra = ["--mcp-config", str(work / "mcp.json")]
         r = subprocess.run(
-            ["claude", "-p", sc["prompt"].replace("{cwd}", str(cwd)), "--plugin-dir", str(plugin),
+            # the full path: on Windows npm installs claude.cmd, which a bare "claude" does not start
+            [shutil.which("claude") or "claude", "-p", sc["prompt"].replace("{cwd}", str(cwd)),
+             "--plugin-dir", str(plugin),
              "--settings", str(settings),
              "--allowedTools", sc.get("allowed_tools", "Bash,Read"), "--max-turns", "3",
              "--debug-file", str(debug_log), *extra, *sc.get("extra_args", [])],
