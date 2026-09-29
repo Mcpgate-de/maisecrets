@@ -96,6 +96,43 @@ class ExpectedTests(_Env):
         (self.claude / "settings.json").write_text(json.dumps({"enabledPlugins": {"maisecrets@maisecrets": False}}))
         self.assertFalse(guard.expected())
 
+    def test_the_root_a_synced_copy_wrote_counts_for_its_own_account_only(self):
+        root = self.claude / "plugins" / "synced" / "org-1_acc-1" / "maisecrets"
+        (root / ".claude-plugin").mkdir(parents=True)
+        (root / ".claude-plugin" / "plugin.json").write_text("{}")
+        Path(HOME, "guard.json").write_text(json.dumps({"expect": "synced", "root": str(root)}))
+        self.account("org-1", "acc-1", synced=False)
+        self.assertTrue(guard.expected())
+        self.account("org-1", "acc-2", synced=False)
+        self.assertFalse(guard.expected(), "another account of the machine")
+
+    def test_no_guard_json_and_no_synced_copy_expects_nothing(self):
+        # a manual install whose home went away: maisecrets writes no heartbeat, so the guard must not wait
+        # for one (review, 2026-09-29: the healthy session was blocked)
+        (self.claude / "plugins").mkdir(parents=True)
+        (self.claude / "plugins" / "installed_plugins.json").write_text(
+            json.dumps({"plugins": {"maisecrets@maisecrets": [{}]}}))
+        self.assertFalse(guard.expected())
+
+    def test_a_project_that_switches_maisecrets_off_is_left_alone(self):
+        self.installed("always")
+        project = Path(tempfile.mkdtemp(prefix="maisecrets-project-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(project, ignore_errors=True))
+        (project / ".claude").mkdir()
+        (project / ".claude" / "settings.local.json").write_text(
+            json.dumps({"enabledPlugins": {"maisecrets@synced": False}}))
+        (project / "sub").mkdir()
+        self.assertFalse(guard.expected(str(project / "sub")))
+        self.assertTrue(guard.expected(str(Path(tempfile.gettempdir()))))
+
+    def test_off_from_a_terminal(self):
+        self.installed("always")
+        r = subprocess.run([sys.executable, str(GUARD), "--off"], capture_output=True, text=True,
+                           env=dict(os.environ))
+        self.assertIn("is off", r.stdout)
+        self.assertFalse(guard.expected())
+        self.assertIn("--off", guard.MESSAGE, "the refusal names the way out")
+
     def test_the_mode_in_guard_json(self):
         self.installed("always")
         self.assertTrue(guard.expected(), "always: the harness and a machine that must have it")
@@ -119,7 +156,7 @@ class DecisionTests(_Env):
                 self.assertIn("/reload-plugins", json.dumps(out))
                 self.assertGreaterEqual(time.monotonic() - started, 0.3, "it waits before it refuses")
 
-    def test_the_heartbeat_of_this_call_lets_it_pass_and_is_taken_away(self):
+    def test_the_heartbeat_of_this_call_lets_it_pass_and_stays_for_a_second_guard(self):
         self.installed("always")
         for name, payload in PAYLOADS.items():
             with self.subTest(name):
@@ -128,7 +165,10 @@ class DecisionTests(_Env):
                                                                payload.get("tool_use_id") or payload["prompt_id"]))
                 self.assertTrue(path.exists(), "maisecrets and the guard compute the same name")
                 self.assertEqual(guard.decide(payload, wait=0.3), {})
-                self.assertFalse(path.exists(), "one heartbeat lets one call pass")
+                # a second registration (user and managed settings) waits for the same heartbeat (review:
+                # the first guard took it away, and the second one refused a healthy call)
+                self.assertTrue(path.exists())
+                self.assertEqual(guard.decide(payload, wait=0.3), {})
 
     def test_the_heartbeat_of_another_call_does_not_count(self):
         self.installed("always")
@@ -243,6 +283,50 @@ class SyncedInstallTests(_Env):
         finally:
             Path(HOME, "config.json").write_text(json.dumps(cfg))
 
+    def test_the_registration_follows_the_plugins_matchers_after_an_update(self):
+        from maisecrets import cli
+        copy = self.synced_copy()
+        self.start(copy)
+        settings = self.claude / "settings.json"
+        data = json.loads(settings.read_text())
+        for e in data["hooks"]["PreToolUse"]:
+            if "maisecrets-guard.py" in e["hooks"][0]["command"]:
+                e["matcher"] = "Bash|OldTool"               # what an older release registered
+        settings.write_text(json.dumps(data))
+        self.start(copy)
+        now = [e["matcher"] for e in json.loads(settings.read_text())["hooks"]["PreToolUse"]
+               if "maisecrets-guard.py" in e["hooks"][0]["command"]]
+        plugin = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]["PreToolUse"][0]["matcher"]
+        self.assertEqual(now, [plugin])
+        self.assertEqual(cli._guard_entries()["PreToolUse"][0]["matcher"], plugin)
+
+    def test_the_settings_keep_their_mode_and_their_symlink(self):
+        copy = self.synced_copy()
+        real = self.claude / "dotfiles-settings.json"
+        real.write_text(json.dumps({"model": "x"}))
+        os.chmod(real, 0o600)
+        (self.claude / "settings.json").symlink_to(real)
+        self.start(copy)
+        self.assertTrue((self.claude / "settings.json").is_symlink(), "the dotfiles link stays a link")
+        self.assertEqual(os.stat(real).st_mode & 0o777, 0o600)
+        self.assertIn("maisecrets-guard.py", real.read_text())
+
+    def test_settings_of_another_shape_do_not_break_the_session_start(self):
+        copy = self.synced_copy()
+        for text in ("[]", json.dumps({"hooks": "x"}), json.dumps({"hooks": {"PreToolUse": ["x", 3]}})):
+            with self.subTest(text):
+                (self.claude / "settings.json").write_text(text)
+                self.assertIn("is on", self.start(copy))
+                self.assertEqual((self.claude / "settings.json").read_text(), text)
+
+    def test_after_guard_remove_the_script_is_not_placed_again(self):
+        from maisecrets import cli
+        copy = self.synced_copy()
+        self.start(copy)
+        cli.remove_guard()
+        self.start(copy)
+        self.assertFalse((self.claude / "maisecrets-guard.py").exists())
+
     def test_settings_that_are_not_json_are_left_alone(self):
         copy = self.synced_copy()
         (self.claude / "settings.json").write_text("{not json")
@@ -266,24 +350,25 @@ class SyncedInstallTests(_Env):
 class ParallelProcessTests(_Env):
     """Both hooks as processes, started together, as Claude Code starts the hooks of one event."""
 
-    def run_both(self, payload: dict, with_maisecrets: bool) -> dict:
+    def run_both(self, payload: dict, with_maisecrets: bool, guards: int = 1) -> list:
         env = dict(os.environ, MAISECRETS_GUARD_WAIT="5" if with_maisecrets else "1")
-        g = subprocess.Popen([sys.executable, str(GUARD)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env,
-                             text=True)
-        m = None
+        # every process started before any gets its input: Claude Code starts the hooks of one event together
+        procs = [subprocess.Popen([sys.executable, str(GUARD)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  env=env, text=True) for _ in range(guards)]
         if with_maisecrets:
             m = subprocess.Popen([sys.executable, str(DISPATCH), EVENT[payload["hook_event_name"]]],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env, text=True)
             m.communicate(json.dumps(payload), timeout=30)
-        out, _ = g.communicate(json.dumps(payload), timeout=30)
-        return json.loads(out)
+        return [json.loads(p.communicate(json.dumps(payload), timeout=30)[0]) for p in procs]
 
     def test_with_maisecrets_running_every_event_passes_and_without_it_every_event_is_stopped(self):
         self.installed("always")
         for name, payload in PAYLOADS.items():
             with self.subTest(name):
-                self.assertEqual(self.run_both(payload, with_maisecrets=True), {})
-                self.assertNotEqual(self.run_both(payload, with_maisecrets=False), {})
+                self.assertEqual(self.run_both(payload, with_maisecrets=True, guards=2), [{}, {}],
+                                 "two registrations of the guard both let a healthy call pass")
+                other = dict(payload, prompt_id="p-other", tool_use_id="call-other")
+                self.assertNotEqual(self.run_both(other, with_maisecrets=False), [{}])
 
 
 if __name__ == "__main__":

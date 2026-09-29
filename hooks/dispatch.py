@@ -146,8 +146,9 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         except OSError:
             pass
     # a synced install: keep the guard script outside the plugin folder current and register it once
-    # (the guard of README "Updates and open sessions"); "guard": false or a removal by hand keep it off
-    if not codex:
+    # (the guard of README "Updates and open sessions"); "guard": false or `guard remove` keep it off,
+    # an entry deleted from settings.json by hand comes back
+    if not codex and os.name != "nt" and not (HOME / ".guard-removed").exists():
         from maisecrets.hooks import _from_a_synced_folder  # noqa: E402
         if _from_a_synced_folder():
             from maisecrets.cli import place_guard_script, register_guard_for_a_synced_install  # noqa: E402

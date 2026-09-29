@@ -2029,7 +2029,8 @@ def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
 
 
 # the file headers of a Codex patch: Add, Update and Delete name a file, Move to its new name
-_PATCH_HEADER_RE = re.compile(r"^\*\*\* (Add File|Update File|Delete File|Move to): ?(.*)$", re.M)
+# (indented too: codex-cli 0.158.0 applies "  *** Add File: x"; review, 2026-09-29)
+_PATCH_HEADER_RE = re.compile(r"^[ \t]*\*\*\* (Add File|Update File|Delete File|Move to): ?(.*)$", re.M)
 
 
 def _in_the_home(path: str, cwd: str) -> bool:
@@ -2065,7 +2066,11 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         # Codex sends every file edit as one patch in `command` (measured on codex-cli 0.158.0: the
         # matcher aliases Write and Edit, the payload says apply_patch). Each header names a path;
         # the value goes into the content lines only, never into a file name
-        patch = str(tool_input.get("command") or "")
+        patch = tool_input.get("command")
+        if not isinstance(patch, str) or not patch.lstrip().startswith("*** Begin Patch"):
+            # without the patch text nothing names the paths: a placeholder elsewhere would resolve
+            # unchecked (review, 2026-09-29)
+            return _deny("maisecrets: this apply_patch call carries no patch in `command`. Nothing was written.")
         paths = [m.group(2).strip() for m in _PATCH_HEADER_RE.finditer(patch)]
         in_header = [k for m in _PATCH_HEADER_RE.finditer(patch) for k, _a, _b in find_refs(m.group(0))]
         if in_header:
@@ -2083,7 +2088,9 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     def collect(v: str) -> str:
         found.extend(k for k, _a, _b in find_refs(v))
         return v
-    _walk_strings(tool_input, collect)
+    # a Codex patch resolves in its text only; another field keeps a placeholder as text
+    target = {"command": tool_input["command"]} if tool == "apply_patch" else tool_input
+    _walk_strings(target, collect)
     if not found:
         return {}
     names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found))
@@ -2116,7 +2123,7 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         # the client records this hook's updatedInput, values included, in the transcript
         _scrub_transcript_later(payload.get("transcript_path", ""), list(values.values()),
                                 [f"⟦{k}⟧" for k in values])
-    return _rehydrated(payload, cfg, "file", _walk_strings(tool_input, substitute),
+    return _rehydrated(payload, cfg, "file", {**tool_input, **_walk_strings(target, substitute)},
                        f"maisecrets: {tool} writes the real value of {names} into {path}. "
                        "Check the file and the value before you allow it.")
 

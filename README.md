@@ -201,7 +201,10 @@ blocks without it. The Windows command (`commandWindows`) has no such test yet.
   - Installed another way: `/maisecrets:guard install` does the same by hand.
   - Its cost: each prompt and tool call waits for the heartbeat, which the
     maisecrets hook of the same call writes as it starts (both run in parallel);
-    without maisecrets it waits 5 s and then refuses.
+    without maisecrets it waits 5 s and then refuses. The refusal names
+    `/reload-plugins` and, for a maisecrets that is off on purpose, the way out
+    from a terminal: `python3 ~/.claude/maisecrets-guard.py --off`. A plugin
+    switched off in the user, project, local or managed settings is left alone.
 - For a team, an admin can roll out this marketplace with managed settings
   (`extraKnownMarketplaces` with `autoUpdate: true`, and `enabledPlugins`), so
   nobody has to type a command ([Claude Code docs](https://code.claude.com/docs/en/plugins/org)).
@@ -230,7 +233,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 14 scenarios against a fake upstream
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 60 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 62 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push

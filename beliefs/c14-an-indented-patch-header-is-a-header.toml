@@ -1,0 +1,10 @@
+# c14-an-indented-patch-header-is-a-header: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c14-an-indented-patch-header-is-a-header"
+control = "C14"
+statement = "A Codex patch header indented by spaces or tabs, which codex-cli applies, is read as a header: it cannot write the maisecrets store, and a placeholder in it is not put into a file name."
+runner = ["tests/test_invariant_store_reads.py::PopulationTests::test_a_codex_patch_never_touches_the_store", "tests/test_rehydration_matrix.py::RehydrationMatrixTests::test_an_unsupported_shape_is_refused_under_every_policy"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "_PATCH_HEADER_RE = re.compile(r\"^[ \\t]*\\*\\*\\* (Add File"
+replace = "_PATCH_HEADER_RE = re.compile(r\"^\\*\\*\\* (Add File"

@@ -58,7 +58,7 @@ SCENARIOS = {
                   {"text": "done"}],
         "expect_requests": 2,
         "expect_no_file": "ran.txt",
-        "expect_text": "maisecrets did not run in this session",
+        "expect_text": "maisecrets did not run for this call",
     },
     # the typed prompt carries a secret: must be blocked, zero requests
     "prompt_secret": {
@@ -141,7 +141,7 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_file": ("used.txt", f"got:{MARK}"),
-        "expect_no_text": "maisecrets did not run in this session",
+        "expect_no_text": "maisecrets did not run for this call",
     },
     # a value with quotes, $( and spaces, inside single quotes: it must arrive byte for byte
     # (no splice into shell syntax) and come back redacted although it has no known shape

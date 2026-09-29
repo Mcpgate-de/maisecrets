@@ -49,7 +49,9 @@ Measured on codex-cli 0.158.0 with a real model (2026-09-29): Codex edits files 
 *** End Patch
 ```
 
-The headers `Add File`, `Update File`, `Delete File` and `Move to` name the paths. maisecrets
+The headers `Add File`, `Update File`, `Delete File` and `Move to` name the paths; Codex also applies
+a header indented by spaces or tabs, so the hook reads it as a header too. A call without the patch
+text in `command` is refused. maisecrets
 refuses a patch that names the maisecrets home, refuses a placeholder in a header, and resolves one
 in the content lines, context and removed lines included (the model read the file redacted, so the
 patch must match the real text). Codex applies the rewritten patch when the hook answers `allow`.

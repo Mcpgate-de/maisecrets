@@ -290,6 +290,15 @@ class PopulationTests(unittest.TestCase):
                 patch = f"*** Begin Patch\n*** {header}: {path}\n+x\n*** End Patch"
                 with self.subTest(header=header, path=path):
                     self.assertTrue(deny(pre("apply_patch", {"command": patch}, "/tmp", "codex")), patch)
+        # indented headers: codex-cli 0.158.0 trims them and applies the patch (review, 2026-09-29)
+        for indent in (" ", "\t", "   "):
+            patch = f"*** Begin Patch\n{indent}*** Add File: {home}/config.json\n+x\n*** End Patch"
+            with self.subTest(indent=repr(indent)):
+                self.assertTrue(deny(pre("apply_patch", {"command": patch}, "/tmp", "codex")), patch)
+        # no patch text: nothing names the paths, so nothing is resolved or allowed
+        for ti in ({}, {"patch": f"*** Begin Patch\n*** Add File: {home}/x\n+x\n*** End Patch"}, {"command": 5}):
+            with self.subTest(tool_input=str(ti)[:40]):
+                self.assertTrue(deny(pre("apply_patch", ti, "/tmp", "codex")))
         # a move into the store is a write into it
         moved = f"*** Begin Patch\n*** Update File: a.txt\n*** Move to: {home}/a.txt\n@@\n-x\n+y\n*** End Patch"
         self.assertTrue(deny(pre("apply_patch", {"command": moved}, "/tmp", "codex")))

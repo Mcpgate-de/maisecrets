@@ -94,6 +94,8 @@ UNSUPPORTED = {
     "file_into_the_store": ("Write", lambda r: {"file_path": str(Path(HOME, "config.json")), "content": r}),
     "patch_into_the_store": ("apply_patch", lambda r: _patch(r, str(Path(HOME, "config.json")))),
     "patch_placeholder_in_a_path": ("apply_patch", lambda r: _patch("x", r + ".txt")),
+    "patch_placeholder_in_an_indented_path": ("apply_patch", lambda r: {
+        "command": _patch("x", r + ".txt")["command"].replace("\n*** Add File:", "\n  *** Add File:")}),
 }
 
 

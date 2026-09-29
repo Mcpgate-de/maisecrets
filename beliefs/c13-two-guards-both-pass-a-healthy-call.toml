@@ -1,0 +1,10 @@
+# c13-two-guards-both-pass-a-healthy-call: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-two-guards-both-pass-a-healthy-call"
+control = "C13"
+statement = "The guard leaves the heartbeat in place, so two registrations of it (user and managed settings) both let a call pass that maisecrets saw."
+runner = ["tests/test_guard.py::ParallelProcessTests::test_with_maisecrets_running_every_event_passes_and_without_it_every_event_is_stopped", "tests/test_guard.py::DecisionTests::test_the_heartbeat_of_this_call_lets_it_pass_and_stays_for_a_second_guard"]
+
+[proof]
+file = "hooks/guard.py"
+find = "        if os.path.exists(path):\n            return {}\n"
+replace = "        if os.path.exists(path):\n            os.unlink(path)\n            return {}\n"
