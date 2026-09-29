@@ -946,6 +946,42 @@ class LifeCycleTests(unittest.TestCase):
         self.assertEqual(self.v().forget(third.key), "ok")
         self.assertEqual(self.v().put(value, "SECRET", "manual", session="C").key, "SECRET_c4")
 
+    def test_a_statement_keyword_stored_by_an_old_detector_is_deleted(self):
+        # before 0.5.15 `if not token: continue` stored `continue`, and maisecrets redacted the word in every
+        # later text until the entry expired (field report, 2026-09-29)
+        old = self.v().put("continue", "SECRET", "ds-keyword-colon", session="A")
+        semi = self.v().put("Return;", "SECRET", "ds-keyword-equal-signs", session="A")
+        real = self.v().put("Sommerwiese", "SECRET", "ds-keyword-colon", session="A")
+        # the same word from another rule is not the detector's error and stays
+        other = self.v().put("break", "SECRET", "manual", session="A")
+        real_get = JsonFileBackend.get
+
+        def only_the_fingerprint_key(backend, key):
+            if key != FP_KEY_ENTRY:
+                raise AssertionError(f"the value of {key} was read")
+            return real_get(backend, key)
+        with mock.patch.object(JsonFileBackend, "get", only_the_fingerprint_key):
+            dropped = self.v().drop_code_words()
+        self.assertEqual(sorted(dropped), sorted([old.key, semi.key]))
+        idx = self.v()._index
+        self.assertEqual(sorted(idx["entries"]), sorted([real.key, other.key]))
+        self.assertNotIn(old.fingerprint, idx["by_fingerprint"])
+        self.assertIsNone(self.v().backend.get(old.key))
+        self.assertEqual(self.v().get(real.key, "A"), ("Sommerwiese", "ok"))
+        self.assertEqual(self.v().get(other.key, "A"), ("break", "ok"))
+        self.assertEqual(self.v().drop_code_words(), [], "a second run finds nothing")
+
+    def test_the_code_word_cleanup_makes_no_fingerprint_key_in_an_empty_store(self):
+        self.assertEqual(self.v().drop_code_words(), [])
+        self.assertIsNone(self.v().backend.get(FP_KEY_ENTRY))
+
+    def test_a_code_word_the_store_refuses_to_delete_stays(self):
+        e = self.v().put("continue", "SECRET", "ds-keyword-colon", session="A")
+        with mock.patch.object(JsonFileBackend, "delete", side_effect=RuntimeError("locked")):
+            self.assertEqual(self.v().drop_code_words(), [])
+        self.assertIn(e.key, self.v()._index["entries"])
+        self.assertEqual(self.v().drop_code_words(), [e.key])
+
     def test_repair_never_hands_out_a_key_an_old_placeholder_still_names(self):
         # the store keeps only live values; after a purge the key lives on in the index and in old
         # transcripts. A repair that counted the store alone went back to 0 and gave the old key

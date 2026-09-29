@@ -987,6 +987,25 @@ class SessionStartTests(unittest.TestCase):
                 self.assertEqual("/maisecrets:" not in msg, codex, msg)
                 self.assertEqual((sb.home / ".shortcut").exists(), not codex)
 
+    def test_the_start_deletes_a_statement_keyword_an_old_detector_stored(self):
+        # an entry of a version before 0.5.15: the current detector stores no such value, so it is seeded directly
+        sb = self.sandbox()
+        seed = ("from maisecrets.vault import Vault\n"
+                "v = Vault()\n"
+                "print(v.put('continue', 'SECRET', 'ds-keyword-colon', session='S0').key)\n"
+                "print(v.put('Sommerwiese', 'SECRET', 'ds-keyword-colon', session='S0').key)\n")
+        r = subprocess.run([sys.executable, "-c", seed], capture_output=True, encoding="utf-8", env=sb.env(),
+                           cwd=str(ROOT), timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        old, real = r.stdout.split()
+        (sb.home / ".announced").write_text("EncryptedFileBackend\n")
+        (sb.home / ".shortcut").write_text("offered\n")
+        (sb.home / ".tip").write_text("2000-01-01 1\n")
+        msg = _start(self, sb, CLAUDECODE="1")["systemMessage"]
+        self.assertIn(f"Deleted 1 stored word(s) that are program code, not secrets ({old})", msg)
+        self.assertEqual(sorted(sb.index()["entries"]), [real])
+        self.assertNotIn("Deleted", _start(self, sb, CLAUDECODE="1")["systemMessage"], "said once")
+
     def test_the_test_store_introduces_itself_at_every_start(self):
         sb = self.sandbox(JSONFILE, backend="jsonfile")
         for _ in range(2):

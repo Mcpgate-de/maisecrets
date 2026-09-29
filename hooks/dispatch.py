@@ -96,6 +96,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     try:
         v = Vault(cfg)
         v.expire(limit=None)
+        dropped = v.drop_code_words()
     except RuntimeError as exc:
         # a damaged index: the message names `maisecrets repair`; a traceback here gave the
         # client no JSON and the person no hint
@@ -134,6 +135,10 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         # one short line every session, so a lost hook registration is visible by its absence
         # (operator review, 2026-09-26); the tip rotates, the version does not
         out["systemMessage"] = f"maisecrets {version} is on." + (f" {tip}" if tip else "")
+    if dropped:
+        out["systemMessage"] = (out.get("systemMessage", "") +
+                                f" Deleted {len(dropped)} stored word(s) that are program code, not secrets "
+                                f"({', '.join(dropped)}); maisecrets no longer redacts them.")
     if cfg.get("config_warning"):
         out["systemMessage"] = out.get("systemMessage", "") + f" Warning: {cfg['config_warning']}."
     # /ms is offered once, not installed: writing ~/.claude/commands without a question was a

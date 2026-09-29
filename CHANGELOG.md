@@ -16,6 +16,12 @@
   the sentence going on, is still stored: without a dictionary it looks like a password of letters,
   and a missed password costs more than a false positive.
 
+- **The false positives of the old detector are deleted at the next session start.** A statement
+  word such as `return` that an earlier version stored after a label stayed in the vault until it
+  expired, and maisecrets redacted it in every text until then. The session start now deletes these
+  entries and names their keys once. It finds them by fingerprint and reads no stored value. The
+  same word stored by `/maisecrets:put` or another rule stays.
+
 ## [0.5.14] - 2026-09-29
 
 - **The restart command stands on a line of its own** in the refusal of the guard, so it is easy to

@@ -1233,6 +1233,34 @@ class Vault:
             self._save_index()
         return n
 
+    @_mutating
+    def drop_code_words(self) -> list[str]:
+        """Delete the statement keywords a keyword rule stored before 0.5.15. `if not token: <keyword>`
+        stored the keyword, and maisecrets redacted it in every later text until the entry expired; the
+        detector stores none now, but the old entries stayed (field report, 2026-09-29). The entries are
+        found by fingerprint: no value is read. An entry the store refuses to delete stays. Returns the
+        deleted keys."""
+        entries = self._index["entries"]
+        if not any(str(m.get("kind", "")).startswith("ds-keyword") and not m.get("purged")
+                   for m in entries.values()):
+            return []   # no fingerprint key is made for a store that has no such entry
+        from .detect import code_word_spellings
+        dropped = []
+        for word in code_word_spellings():
+            fp = self.fingerprint(word)
+            key = self._index["by_fingerprint"].get(fp)
+            meta = entries.get(key) if key else None
+            if not meta or meta.get("purged") or not str(meta.get("kind", "")).startswith("ds-keyword"):
+                continue
+            try:
+                self.backend.delete(key)
+            except RuntimeError:
+                continue
+            del entries[key]
+            del self._index["by_fingerprint"][fp]
+            dropped.append(key)
+        return dropped
+
     def repair(self) -> dict:
         """Rebuild a damaged index from the store: every stored value is deleted (nothing
         resolves), and the counters are set past every key seen so no new entry can overwrite

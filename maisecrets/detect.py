@@ -558,6 +558,17 @@ _CODE_WORDS = frozenset({"break", "continue", "return", "pass", "raise", "throw"
                          "else"})
 
 
+def is_code_word(value: str) -> bool:
+    """A statement keyword: a keyword rule never takes it as a value."""
+    return value.strip().rstrip(";").lower() in _CODE_WORDS
+
+
+def code_word_spellings() -> list[str]:
+    """The spellings of a statement keyword that a keyword rule stored before 0.5.15. The vault finds a stored
+    one by its fingerprint and reads no value (Vault.drop_code_words)."""
+    return [s for w in sorted(_CODE_WORDS) for b in (w, w.capitalize(), w.upper()) for s in (b, b + ";")]
+
+
 # gitleaks' generic-api-key starts with a lazy `[\w.-]{0,50}?` before its keyword, so the regex
 # engine tries up to 50 prefixes at every position of the text: 80 % of a log scan's time
 # (2026-09-27). Its keywords are found by a plain search first, and the rule runs only in a
@@ -717,7 +728,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     end = start + len(secret)
                     if _CAPITALISED_WORD_RE.fullmatch(secret):
                         continue
-            if rule.id.startswith("ds-keyword") and secret.strip().rstrip(";").lower() in _CODE_WORDS:
+            if rule.id.startswith("ds-keyword") and is_code_word(secret):
                 continue
             if any(s < end and start < e for s, e in taken):
                 continue
