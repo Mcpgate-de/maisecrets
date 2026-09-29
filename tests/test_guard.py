@@ -96,22 +96,36 @@ class ExpectedTests(_Env):
         (self.claude / "settings.json").write_text(json.dumps({"enabledPlugins": {"maisecrets@maisecrets": False}}))
         self.assertFalse(guard.expected())
 
-    def test_the_account_a_synced_copy_wrote_counts_even_when_its_folder_is_gone(self):
-        # the folder that is gone is the case the guard is for (review, 2026-09-29: a check that the
-        # folder exists made the guard silent exactly then)
+    def test_the_account_a_synced_copy_wrote_counts_for_that_account_only(self):
+        # the root of the copy that registered may be gone; its account's synced folder decides
         Path(HOME, "guard.json").write_text(json.dumps({"expect": "synced", "root": "/gone/maisecrets",
-                                                        "account": "org-1_acc-1"}))
-        self.account("org-1", "acc-1", synced=False)
+                                                        "accounts": ["org-1_acc-1"]}))
+        self.account("org-1", "acc-1", synced=True)
         self.assertTrue(guard.expected())
         self.account("org-1", "acc-2", synced=False)
         self.assertFalse(guard.expected(), "another account of the machine")
+
+    def test_an_organisation_that_takes_maisecrets_out_of_the_sync_is_not_blocked_for_good(self):
+        Path(HOME, "guard.json").write_text(json.dumps({"expect": "synced", "accounts": ["org-1_acc-1"]}))
+        self.account("org-1", "acc-1", synced=False)
+        self.assertFalse(guard.expected(), "no synced folder and nothing in the trash: removed from the sync")
+        # an update moved the folder to the trash a moment ago: the guard expects maisecrets
+        trashed = self.claude / "plugins" / ".trash" / "1790000000000-1-abc" / "maisecrets"
+        trashed.mkdir(parents=True)
+        self.assertTrue(guard.expected())
+        old = time.time() - guard.TRASH_WINDOW - 60
+        os.utime(trashed, (old, old))
+        self.assertFalse(guard.expected(), "long gone: the organisation removed it")
+        # the synced folder is there (an update rewrote it in place): expected
+        self.account("org-1", "acc-1", synced=True)
+        self.assertTrue(guard.expected())
 
     def test_a_second_profile_on_the_same_home_keeps_its_own_synced_folder(self):
         root_a = self.claude / "plugins" / "synced" / "org-1_acc-1" / "maisecrets"
         (root_a / ".claude-plugin").mkdir(parents=True)
         (root_a / ".claude-plugin" / "plugin.json").write_text("{}")
         Path(HOME, "guard.json").write_text(json.dumps({"expect": "synced", "root": str(root_a),
-                                                        "account": "org-1_acc-1"}))
+                                                        "accounts": ["org-1_acc-1"]}))
         self.account("org-1", "acc-2", synced=True)            # profile B, with its own synced copy
         self.assertTrue(guard.expected(), "profile A's root must not silence profile B")
 
@@ -271,7 +285,11 @@ class SyncedInstallTests(_Env):
         self.assertIn("is on", msg)
         self.assertIn("registered its guard", msg)
         written = json.loads(Path(HOME, "guard.json").read_text())
-        self.assertEqual((written["account"], written["root"]), ("org-1_acc-1", str(copy.resolve())))
+        self.assertEqual((written["accounts"], written["root"]), (["org-1_acc-1"], str(copy.resolve())))
+        # a second profile on the same maisecrets home adds its account and keeps the first one
+        self.account("org-1", "acc-2", synced=False)
+        self.start(copy)
+        self.assertEqual(json.loads(Path(HOME, "guard.json").read_text())["accounts"], ["org-1_acc-1", "org-1_acc-2"])
         self.assertEqual(script.read_bytes(), GUARD.read_bytes(), "the stale script was replaced")
         self.assertEqual(self.guard_entries(), 3, "UserPromptSubmit, PreToolUse, PostToolUse")
         self.assertEqual(json.loads((self.claude / "settings.json").read_text())["model"], "x")

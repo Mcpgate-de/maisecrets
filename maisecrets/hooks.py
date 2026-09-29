@@ -2073,9 +2073,13 @@ def _in_the_home(path: str, cwd: str) -> bool:
         inside = real == home or real.startswith(home + os.sep)
         # the run directory and a hard link are known by identity only (invariant I3, 2026-09-28)
         inside = inside or _touches_store(path, cwd)
+        # the guard script outside the plugin folder: an agent that rewrites it switches the guard off
+        guard = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(os.path.expanduser("~"), ".claude")),
+                             "maisecrets-guard.py")
+        inside = inside or os.path.realpath(expanded) == os.path.realpath(guard)
     except (OSError, ValueError):
         inside = False
-    return inside or ".maisecrets" in path.lower()
+    return inside or ".maisecrets" in path.lower() or "maisecrets-guard.py" in path.lower()
 
 
 def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:

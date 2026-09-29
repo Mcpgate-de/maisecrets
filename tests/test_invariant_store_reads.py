@@ -302,6 +302,14 @@ class PopulationTests(unittest.TestCase):
         beside_heredoc = "<<'EOF'\n*** Begin Patch\n*** Add File: notes.txt\n+x\n*** End Patch\nEOF"
         self.assertFalse(deny(pre("apply_patch", {"command": beside_heredoc}, "/tmp", "codex")),
                          "a heredoc patch next to the store is a normal edit")
+        # nor rewrite the guard script with a file tool
+        guard_script = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "maisecrets-guard.py")
+        for tool, ti in (("Write", {"file_path": guard_script, "content": "print('{}')"}),
+                         ("Edit", {"file_path": guard_script, "old_string": "a", "new_string": "b"})):
+            with self.subTest(tool=tool):
+                self.assertTrue(deny(pre(tool, ti, "/tmp")), tool)
+        patch = f"*** Begin Patch\n*** Update File: {guard_script}\n@@\n-a\n+b\n*** End Patch"
+        self.assertTrue(deny(pre("apply_patch", {"command": patch}, "/tmp", "codex")))
         # the agent cannot switch the guard off: its --off is for the person at a terminal
         for cmd in ("python3 ~/.claude/maisecrets-guard.py --off", "cat ~/.maisecrets/guard.json"):
             with self.subTest(cmd=cmd):

@@ -290,7 +290,7 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             account = f"{acc['organizationUuid']}_{acc['accountUuid']}"
         except (OSError, ValueError, KeyError, TypeError):
             account = ""
-        (home / "guard.json").write_text(json.dumps({"expect": "synced", "account": account} if account
+        (home / "guard.json").write_text(json.dumps({"expect": "synced", "accounts": [account]} if account
                                                     else {"expect": "always"}))
         if not account:
             print(f"     ~ {name}: no account file, the guard runs with expect=always")

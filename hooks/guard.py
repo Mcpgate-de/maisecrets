@@ -57,7 +57,8 @@ def _switched_off(cwd: str) -> bool:
     while d:
         files += [os.path.join(d, ".claude", "settings.json"), os.path.join(d, ".claude", "settings.local.json")]
         parent = os.path.dirname(d)
-        if parent == d or d == stop or os.path.exists(os.path.join(d, ".git")):
+        # a submodule has a .git file, not a folder: its superproject's settings count too
+        if parent == d or d == stop or os.path.isdir(os.path.join(d, ".git")):
             break
         d = parent
     for f in files:
@@ -76,6 +77,24 @@ def _account() -> str:
     return f"{org}_{user}" if org and user else ""
 
 
+TRASH_WINDOW = 15 * 60
+
+
+def _recently_trashed(claude: str) -> bool:
+    """A maisecrets folder that Claude Code moved to plugins/.trash in the last minutes (an update)."""
+    trash = os.path.join(claude, "plugins", ".trash")
+    now = time.time()
+    try:
+        for entry in os.listdir(trash):
+            for name in os.listdir(os.path.join(trash, entry)):
+                p = os.path.join(trash, entry, name)
+                if name.startswith("maisecrets") and now - os.path.getmtime(p) < TRASH_WINDOW:
+                    return True
+    except OSError:
+        pass
+    return False
+
+
 def expected(cwd: str = "") -> bool:
     """Whether maisecrets is meant to run here, by the same rule under which it writes its heartbeat
     (guard.json present, or a synced copy)."""
@@ -89,11 +108,15 @@ def expected(cwd: str = "") -> bool:
         return True
     claude = _claude_dir()
     account = _account()
-    # the synced copy that registered the guard wrote the account it ran as: for that account maisecrets is
-    # meant to run, whether or not its folder is there now (a folder that is gone is the case the guard is
-    # for; review, 2026-09-29). Another account (a second profile on the same home) falls through.
-    if account and cfg.get("account") == account:
-        return True
+    # the synced copy that registered the guard wrote the account it ran as. For that account maisecrets is
+    # meant to run while its synced folder is there, and in the minutes after an update moved it to the
+    # trash (a folder that is gone is the case the guard is for). A folder gone for longer means the
+    # organisation took maisecrets out of the sync: the guard stops expecting it, or it would block every
+    # session for good (reviews, 2026-09-29). Another account falls through to its own synced folder.
+    registered = cfg.get("accounts") if isinstance(cfg.get("accounts"), list) else [cfg.get("account")]
+    if account and account in registered:
+        return (os.path.isfile(os.path.join(claude, "plugins", "synced", account, "maisecrets",
+                                            ".claude-plugin", "plugin.json")) or _recently_trashed(claude))
     if account and os.path.isfile(os.path.join(claude, "plugins", "synced", account, "maisecrets",
                                                ".claude-plugin", "plugin.json")):
         return True

@@ -208,7 +208,10 @@ blocks without it. The Windows command (`commandWindows`) has no such test yet.
     managed settings is left alone. The guard expects maisecrets for the account
     the synced copy registered under, so a second Claude profile is not blocked.
     On a Mac without the Command Line Tools there is no `python3`, and the guard
-    answers nothing.
+    answers nothing. It needs a claude.ai login: with an API key there is no
+    account to compare, and `/maisecrets:guard status` says "expected: no".
+    After an organisation takes maisecrets out of its sync the guard stops
+    expecting it within 15 minutes; until then `--off` lets you work.
 - For a team, an admin can roll out this marketplace with managed settings
   (`extraKnownMarketplaces` with `autoUpdate: true`, and `enabledPlugins`), so
   nobody has to type a command ([Claude Code docs](https://code.claude.com/docs/en/plugins/org)).
