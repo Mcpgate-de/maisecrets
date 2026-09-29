@@ -49,6 +49,12 @@ PAYLOADS = {
 EVENT = {"UserPromptSubmit": "user-prompt", "PreToolUse": "pre-tool", "PostToolUse": "post-tool"}
 
 
+def _reason(out: dict) -> str:
+    """The text a refusal shows, for each of the three event shapes."""
+    spec = out.get("hookSpecificOutput") or {}
+    return out.get("reason") or spec.get("permissionDecisionReason") or spec.get("updatedToolOutput") or ""
+
+
 def tearDownModule():  # noqa: N802 - unittest hook
     for f in ("guard.json",):
         try:
@@ -205,6 +211,8 @@ class DecisionTests(_Env):
                 # command of this very session and the bug behind it
                 self.assertIn(f"claude --resume {payload['session_id']}", json.dumps(out))
                 self.assertIn("anthropics/claude-code#97847", json.dumps(out))
+                # the command stands on a line of its own, so it is seen, and a triple click copies just it
+                self.assertIn(f"\n\n    claude --resume {payload['session_id']}\n\n", _reason(out))
                 self.assertGreaterEqual(time.monotonic() - started, 0.3, "it waits before it refuses")
 
     def test_the_resume_command_goes_to_the_clipboard_once_per_session(self):
@@ -218,8 +226,8 @@ class DecisionTests(_Env):
             first = json.dumps(guard.decide(PAYLOADS["UserPromptSubmit"], wait=0.1))
             second = json.dumps(guard.decide(PAYLOADS["PreToolUse"], wait=0.1))
         self.assertEqual(clip.read_text(), "claude --resume S1\n", "copied once, for this session")
-        self.assertIn("The resume command is in your clipboard.", first)
-        self.assertIn("The resume command is in your clipboard.", second)
+        self.assertIn("It was copied to your clipboard", first)
+        self.assertIn("It was copied to your clipboard", second)
 
     def test_no_clipboard_writer_means_no_clipboard_claim(self):
         self.installed("always")

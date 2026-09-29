@@ -72,8 +72,9 @@ SCENARIOS = {
                   {"text": "done"}],
         "expect_requests": 2,
         "expect_no_file": "ran.txt",
-        "expect_text": "load maisecrets again. Then exit this session and resume it in the directory where you started "
-                       "it: claude --resume ",
+        # a sentence only this version writes: an installed guard of an older version runs here too and
+        # passed the old text locally while the guard under test wrote the new one (2026-09-29)
+        "expect_text": "Exit this session and run the command above in the directory where you started it",
     },
     # the typed prompt carries a secret: must be blocked, zero requests
     "prompt_secret": {
@@ -499,6 +500,16 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     return fails
 
 
+def _installed_guard() -> bool:
+    """A guard registered in the user settings of this machine (`maisecrets guard install` or a synced copy)."""
+    claude = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    try:
+        text = (claude / "settings.json").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return "maisecrets-guard.py" in text and (claude / "maisecrets-guard.py").is_file()
+
+
 def main() -> int:
     update = "--update-golden" in sys.argv
     names = [a for a in sys.argv[1:] if not a.startswith("--")] or list(SCENARIOS)
@@ -511,6 +522,11 @@ def main() -> int:
                                                    else SHELL_TOOL)
         if wants != SHELL_TOOL:
             print(f"[SKIP] {n}: needs the {wants} tool; this client offers {SHELL_TOOL}")
+            continue
+        if SCENARIOS[n].get("guard") and _installed_guard():
+            # the installed guard runs next to the guard under test, reads the same switches and can answer
+            # first: its text reached the model and the new guard was never seen (2026-09-29). CI has none
+            print(f"[SKIP] {n}: a guard is installed on this machine and masks the guard under test; CI runs it")
             continue
         total += len(run_scenario(n, SCENARIOS[n], update))
     print("\nfailures:", total)
