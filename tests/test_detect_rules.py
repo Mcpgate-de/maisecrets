@@ -620,6 +620,25 @@ class LabelValueTests(unittest.TestCase):
         # at the end of the line nothing was cut: one word is still the value
         self.assertEqual(kinds("pass§wort: Sommerwiese"), [("ds-keyword-colon", "Sommerwiese")])
 
+    def test_code_after_a_colon_is_not_a_value(self):
+        # `if not token: continue` stored the statement word, and every later text with it was redacted,
+        # this repository's own code included (field report, 2026-09-29)
+        for text in ("        if not tok§en: continue", "            if not sec§ret: continue",
+                     "    if tok§en is None: return", "while not pass§word: break", "if not api§_key: raise",
+                     "except Error as sec§ret: pass", "pass§word: continue",
+                     # no statement word: only the line, which opens a block, says it is code
+                     "        if not pass§word: getpass9x"):
+            with self.subTest(text=text):
+                self.assertEqual(kinds(text), [])
+
+    def test_one_lowercase_word_before_more_prose_stays_a_value(self):
+        # "Sec§rets: connectors and plugins" is prose, but a lowercase value can be a random password
+        # ("To§ken: abbabaabab, thanks", tests/detection_matrix.py) and a real word ("password:<word> and
+        # <address>" leaked once as prose, 2026-09-27). Without a dictionary the two cannot be told apart:
+        # the false positive is the cheaper error (decision, 2026-09-29)
+        self.assertEqual(kinds("Sec§rets: connectors and plugins"), [("ds-keyword-colon", "connectors")])
+        self.assertEqual(kinds("pass§word: hunter2hunter2 please"), [("ds-keyword-colon", "hunter2hunter2")])
+
     def test_two_distinct_characters_are_a_value(self):
         for text, value in [("pass§word:asasasasasasaasasasa", "asasasasasasaasasasa"),
                             ("pass§wort: abababab12", "abababab12")]:

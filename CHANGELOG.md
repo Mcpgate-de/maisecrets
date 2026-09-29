@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Code after a colon is no longer stored as a secret.** A line such as `if not token: <statement>`
+  put the statement word into the vault, and maisecrets then redacted that word in every later text,
+  in source code too. A line that opens a block (`if`, `elif`, `while`, `for`, `with`, `except`, …)
+  and a statement keyword after a label are not values now. One lowercase word after a label, with
+  the sentence going on, is still stored: without a dictionary it looks like a password of letters,
+  and a missed password costs more than a false positive.
+
 ## [0.5.14] - 2026-09-29
 
 - **The restart command stands on a line of its own** in the refusal of the guard, so it is easy to
