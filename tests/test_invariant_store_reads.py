@@ -254,6 +254,7 @@ class BashTests(unittest.TestCase):
             "keychain": "security find-generic-password -s maisecrets -w",
             "the delivery path": "cat /tmp/maisecrets-501/v-abc",
             "the environment variable": "cat $MAISECRETS_HOME/index.json",
+            "a wildcard for the default home": "cat ~/.maisec*/index.json",
             "get through the launcher": 'bash "$CLAUDE_PLUGIN_ROOT/hooks/run.sh" ' + "get" + " SECRET_c1",
             "get through dispatch": "python3 $CLAUDE_PLUGIN_ROOT/hooks/dispatch.py " + "get" + " SECRET_c1",
         }
@@ -262,7 +263,8 @@ class BashTests(unittest.TestCase):
 
     def test_a_command_near_the_store_still_runs(self):
         h = str(self.home)
-        for c in (f"ls {self.root}", f"cat {h}-other/notes.txt", "echo maisecrets is installed"):
+        for c in (f"ls {self.root}", f"cat {h}-other/notes.txt", "echo maisecrets is installed", "ls ~/.m*.txt",
+                  "ls ~/.config/*.json"):
             with self.subTest(c):
                 self.assertFalse(deny(self.run_pre(c)), c)
 
@@ -296,6 +298,7 @@ class PowerShellTests(BashTests):
             "the session id": "$env:CLAUDE_CODE_SESSION_ID = 'other'",
             "a trailing dot on the home": "Get-Content " + h.replace("/", "\\") + ".\\index.json",
             "the 8.3 name of the default home": r"type C:\Users\x\MAISEC~1\vault.json",
+            "a wildcard for the default home": r"Get-Content $HOME\.maisec*\index.json",
             "every credential of the Locker": "$v = New-Object Windows.Security.Credentials.PasswordVault; "
                                               "$v.RetrieveAll()",
             "get through the Windows launcher": "& $env:CLAUDE_PLUGIN_ROOT\\hooks\\run.cmd " + "get" + " SECRET_c1",

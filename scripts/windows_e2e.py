@@ -38,8 +38,9 @@ PROJECT = "Sprinterli/maisecrets-e2e"
 API = "https://gitlab.com/api/v4"
 CI_FILE = "harness/windows/gitlab-ci.yml"
 # the lines of a job log that carry a result: harness scenarios, unittest summary, the collect step
-RESULT = re.compile(r"^(\[(OK |FAIL|GAP|SKIP)\]|shell of a settings hook|     -|failures:|Ran \d+ tests|OK( \(|$)|FAILED|=====|node v|"
-                    r"pwsh on PATH|git bash:|shell|.*Hook (SessionStart|UserPromptSubmit|PreToolUse|PostToolUse))")
+RESULT = re.compile(r"^(\[(OK |FAIL|GAP|SKIP)\]|shell of a settings hook|     -|failures:|Ran \d+ tests|OK( \(|$)|"
+                    r"FAILED|=====|node v|pwsh on PATH|pwsh on the PATH|the job runs in|pwsh 7 folder|git bash:|shell|"
+                    r".*Hook (SessionStart|UserPromptSubmit|PreToolUse|PostToolUse))")
 
 
 def _git(*args: str, env: dict | None = None, cwd: Path = ROOT) -> str:
@@ -61,16 +62,23 @@ def build_commit(rev: str) -> str:
 
 
 def push_url() -> str:
+    """The e2e project on the host of `origin`, with the user part of `origin` and never its password:
+    the git credential helper answers for that user."""
     origin = urllib.parse.urlsplit(_git("remote", "get-url", "origin"))
-    return urllib.parse.urlunsplit((origin.scheme, origin.netloc, f"/{PROJECT}.git", "", ""))
+    if origin.scheme != "https" or not origin.hostname:
+        raise SystemExit("origin is not an https URL; this script pushes over https with the credential helper")
+    netloc = (f"{origin.username}@" if origin.username else "") + origin.hostname
+    return urllib.parse.urlunsplit(("https", netloc, f"/{PROJECT}.git", "", ""))
 
 
 def push(sha: str, branch: str) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         _git("init", "--quiet", "--bare", tmp)
         _git("fetch", "--quiet", str(ROOT), sha, cwd=Path(tmp))
-        subprocess.run(["git", "push", "--quiet", "--force", push_url(), f"{sha}:refs/heads/{branch}"],
-                       cwd=tmp, check=True)
+        r = subprocess.run(["git", "push", "--quiet", "--force", push_url(), f"{sha}:refs/heads/{branch}"], cwd=tmp)
+        if r.returncode:
+            # not CalledProcessError: its message prints the command, and with it the URL
+            raise SystemExit(f"git push to {PROJECT} failed (exit {r.returncode})")
 
 
 def _api(path: str) -> object:

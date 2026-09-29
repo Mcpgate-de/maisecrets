@@ -14,7 +14,10 @@ tomllib and run on the other Pythons.
 import re
 import sys
 
-ALLOWED = ("MAISECRETS_NATIVE_BACKEND_TEST", "MAISECRETS_NATIVE_CLIPBOARD_TEST")
+ALLOWED = ("MAISECRETS_NATIVE_BACKEND_TEST", "MAISECRETS_NATIVE_CLIPBOARD_TEST",
+           # the PowerShell part of hooks.json: the GitHub Windows and macOS runners have pwsh, the Linux
+           # images of GitLab do not
+           "pwsh is not installed")
 
 
 def main(path: str, *extra: str) -> int:

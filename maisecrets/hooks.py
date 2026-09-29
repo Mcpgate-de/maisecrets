@@ -519,7 +519,9 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
                                r"|PasswordVault[^\n]*Retrieve(?:All|Password)"),
     ("the vault files", r"vault\.enc\.json|vault\.json[^\n]*maisecrets|maisecrets[^\n]*vault\.json"),
     # MAISEC~1: the 8.3 name Windows gives the default home (review, 2026-09-29)
-    ("the maisecrets home directory", r"(?i:\.maisecrets|maisec~\d)(?![\w-])|MAISECRETS_HOME"),
+    # a wildcard that opens it: ~/.maisec*/index.json (review, 2026-09-29)
+    ("the maisecrets home directory", r"(?i:\.maisecrets|maisec~\d)(?![\w-])|(?i:\.mais\w*[*?])"
+                                      r"|MAISECRETS_HOME"),
     ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"
                            r"|(?<![\w-])resolve\s+\S+\s+--grant\b|cmd_resolve|\.redeem\("),
     ("the ssh approval store", r"ssh-approvals|ssh_approval"),
@@ -1563,19 +1565,24 @@ def _args_call_refusal(command: str) -> str | None:
     return None
 
 
+_NEEDS_GIT_BASH = " (on Windows these commands need Git for Windows)"
+
+
 def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
-    """The refusal for a shell command (Bash, PowerShell) that names the store, or None."""
+    """The refusal for a shell command (Bash, PowerShell) that names the store, or None. The PowerShell tool
+    runs where Git Bash is missing, and the /maisecrets commands run through Bash: its reason says so."""
     matched = _store_read_match(command, windows_paths)
+    also = _NEEDS_GIT_BASH if windows_paths else ""
     if matched == "the maisecrets guard":
         # not the store: the person switches the guard off, and says so to the agent (live session, 2026-09-29)
         return _deny("maisecrets: this command touches the maisecrets guard, which only the person switches off "
-                     "(/maisecrets:guard remove, or --off in a terminal). The command did not run. If the task needs "
-                     "something about the guard, tell the user what; /maisecrets:guard status shows its state.")
+                     f"(/maisecrets:guard remove, or --off in a terminal){also}. The command did not run. If the task "
+                     "needs something about the guard, tell the user what; /maisecrets:guard status shows its state.")
     if matched:
         # said as what the user does next, not as a check to stay inside: "do not rephrase … to get around
         # the check" next to an ops request read like an attempt to get around a control (ops review, 2026-09-28)
         return _deny(f"maisecrets: this command touches {matched}, the user's own store. The user manages it "
-                     "with /maisecrets:list and /maisecrets:forget. The command did not run. If the task needs "
+                     f"with /maisecrets:list and /maisecrets:forget{also}. The command did not run. If the task needs "
                      "something from there, tell the user what; if this is a false positive, "
                      "/maisecrets:report records it.")
     return None
@@ -2233,7 +2240,8 @@ def _pre_powershell(payload: dict, tool_input: dict) -> dict:
         return _deny("maisecrets: this PowerShell call has no command text to check. The command did not run.")
     if re.search(r"CLAUDE_CODE_SESSION_ID", command, re.IGNORECASE):
         return _deny("maisecrets: this command names the session id, which selects the blocked prompt of a "
-                     "session. The command did not run. /ms sends the blocked prompt of this session.")
+                     "session. The command did not run. /ms sends the blocked prompt of this session"
+                     + _NEEDS_GIT_BASH + ".")
     refused = _store_refusal(command, windows_paths=True)
     if refused:
         return refused

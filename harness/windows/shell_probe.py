@@ -75,7 +75,7 @@ def hook_command(event: str) -> str:
     raise KeyError(event)
 
 
-def run_in(shell: list[str], root: Path) -> subprocess.CompletedProcess:
+def run_in(shell: list[str], root: Path, prompt: str) -> subprocess.CompletedProcess:
     cmd = hook_command("UserPromptSubmit")
     if shell[-1] == "-Command":
         for n in ("CLAUDE_PROJECT_DIR", "CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA"):
@@ -83,7 +83,7 @@ def run_in(shell: list[str], root: Path) -> subprocess.CompletedProcess:
     home = Path(tempfile.mkdtemp(prefix="maisecrets-probe-home-"))
     (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True}))
     payload = {"session_id": "probe", "transcript_path": "", "cwd": str(ROOT), "hook_event_name": "UserPromptSubmit",
-               "prompt": f"Grüße, mein Token ist {MARK} – bitte prüfen"}
+               "prompt": prompt}
     env = dict(os.environ, CLAUDE_PLUGIN_ROOT=str(root), MAISECRETS_HOME=str(home))
     return subprocess.run([*shell, cmd], input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                           capture_output=True, env=env, timeout=60)
@@ -98,19 +98,27 @@ def main() -> int:
     if expect and not seen.startswith(expect):
         print(f"[FAIL] the hook ran in {seen!r}, the job expects {expect!r}")
         bad += 1
+    secret, harmless = f"Grüße, mein Token ist {MARK} – bitte prüfen", "Grüße – bitte prüfen"
+    # the prompt must arrive: dispatch.py blocks an empty or broken payload too, so a block alone does not
+    # prove stdin reached it. With the plugin the reason names the finding, and a harmless prompt passes
     for name, shell in shells():
-        for label, root in (("plugin", ROOT), ("folder gone", ROOT / "gone")):
-            r = run_in(shell, root)
+        for label, root, prompt, want in (("plugin", ROOT, secret, "a secret was found"),
+                                          ("plugin harmless", ROOT, harmless, None),
+                                          ("folder gone", ROOT / "gone", secret, "folder is gone")):
+            r = run_in(shell, root, prompt)
             out, err = r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
             try:
-                blocked = json.loads(out.strip() or "{}").get("decision") == "block"
+                answer = json.loads(out.strip() or "{}")
             except ValueError:
-                blocked = False
-            blocked = blocked or r.returncode == 2
+                answer = None
             leaked = MARK in out
-            ok = blocked and not leaked
+            if want is None:
+                ok = r.returncode == 0 and isinstance(answer, dict) and answer.get("decision") != "block"
+            else:
+                ok = isinstance(answer, dict) and answer.get("decision") == "block" and want in answer.get("reason", "")
+            ok = ok and not leaked
             bad += not ok
-            print(f"[{'OK ' if ok else 'FAIL'}] {name:18} {label:12} exit={r.returncode} stdout={out.strip()[:160]!r}"
+            print(f"[{'OK ' if ok else 'FAIL'}] {name:18} {label:15} exit={r.returncode} stdout={out.strip()[:160]!r}"
                   f" stderr={err.strip()[:200]!r}")
     return 1 if bad else 0
 
