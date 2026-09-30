@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.5.20] - 2026-09-30
+
+### Fixes
+
+- name the Python install for all users in every hint (e895d25)
+
+### Other
+
+- Merge branch 'docs/windows-codex-learnings' into 'main' (33f3e59)
+
 ## [0.5.19] - 2026-09-30
 
 ### Fixes
