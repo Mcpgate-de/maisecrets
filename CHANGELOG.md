@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.5.23] - 2026-09-30
+
+### Fixes
+
+- hooks work when the client clears their environment (f43af3e)
+
+### Other
+
+- Merge branch 'fix/run-cmd-cleared-env' into 'main' (31ac4ac)
+
 ## [0.5.22] - 2026-09-30
 
 ### Fixes
