@@ -66,7 +66,7 @@ def _value(rnd: random.Random, shape: str) -> str:
 
 
 def _mail(rnd: random.Random) -> str:
-    return rnd.choice(["anna", "a.kruse", "max.m"]) + "@" + rnd.choice(["firma-xyz.de", "example.org"])
+    return rnd.choice(["anna", "a.kruse", "max.m"]) + "@" + rnd.choice(["firma-xyz.de", "beispiel-gmbh.de"])
 
 
 def cases(n: int = 2500, seed: int = 27) -> list[Case]:

@@ -1,0 +1,10 @@
+# c1-a-word-a-label-rule-found-is-not-hunted: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-word-a-label-rule-found-is-not-hunted"
+control = "C1"
+statement = "A letters-only value that only a label rule found is not hunted in later texts: it neither blocks a later prompt nor redacts a later tool result that holds the word."
+runner = ["tests/test_weak_entries.py::WeakEntryTests::test_a_word_is_replaced_where_it_was_found_and_nowhere_else"]
+
+[proof]
+file = "maisecrets/vault.py"
+find = "                if not m.get(\"purged\") and not m.get(\"weak\")}\n"
+replace = "                if not m.get(\"purged\")}\n"

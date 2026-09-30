@@ -1,0 +1,10 @@
+# c19-a-value-outside-the-result-is-blocked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c19-a-value-outside-the-result-is-blocked"
+control = "C19"
+statement = "A value that the detector finds outside the result of a notification blocks the prompt, also when the rest of the report proves itself."
+runner = ["tests/test_agent_reports.py::AgentReportTests::test_a_value_added_outside_the_result_is_blocked"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    return None if detect.scan(text) else text\n"
+replace = "    return text\n"

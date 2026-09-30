@@ -1,0 +1,10 @@
+# c19-a-report-passes-only-with-the-subagents-last-answer: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c19-a-report-passes-only-with-the-subagents-last-answer"
+control = "C19"
+statement = "The result of a report that passes is the last answer of the subagent, word for word; a changed or extended result is blocked."
+runner = ["tests/test_agent_reports.py::AgentReportTests::test_a_result_that_is_not_the_last_answer_is_blocked"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if answer is None or _plain(answer) != _plain(html.unescape(body[span[0]:span[1]])):\n"
+replace = "    if answer is None:\n"

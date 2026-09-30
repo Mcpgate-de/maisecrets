@@ -26,7 +26,7 @@ def plugin_version() -> str:
         return "?"
 
 
-def record(hook: str, client: str, entries: list) -> None:
+def record(hook: str, client: str, entries: list, outcome: str = "") -> None:
     """One line per detection event; the last KEEP lines are kept."""
     if not entries:
         return
@@ -36,6 +36,7 @@ def record(hook: str, client: str, entries: list) -> None:
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
             "hook": hook, "client": client, "version": plugin_version(),
             "hits": [{"key": e.key, "type": e.type, "kind": e.kind} for e in entries],
+            **({"outcome": outcome} if outcome else {}),
         })
         old: list[str] = []
         if EVENTS.exists():

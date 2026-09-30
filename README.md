@@ -22,12 +22,13 @@ It works as a plugin for Claude Code (and Cowork) and for Codex, from the same
 **What it does, deterministically and locally:**
 
 1. **You type a secret or a personal value** (a token, a password after a
-   label, any e-mail address, a phone number with a country code, an IBAN, a
-   card number, a public IP, and German identifiers by default). A
+   label, an e-mail address, a phone number with a country code, an IBAN, a
+   card number, a public IP, and German identifiers by default; test data such
+   as `example.com` stays alone, see "Test data that maisecrets leaves alone"). A
    `UserPromptSubmit` hook
    detects it, stores it in a local vault, blocks the prompt, and keeps the
    rewritten prompt with a placeholder such as `⟦SECRET_c1⟧` or
-   `⟦EMAIL_c1:ma•••@example.org⟧`. Type `/maisecrets:send` to send it as is,
+   `⟦EMAIL_c1:ma•••@•••.de⟧`. Type `/maisecrets:send` to send it as is,
    or paste it from the clipboard where one exists. The value never reached
    the model. Measured: zero API requests for a blocked prompt.
 2. **The model reads a file or runs a command that outputs a secret.** A
@@ -172,9 +173,12 @@ off until `/reload-plugins` or a new session. No code of the plugin runs then, s
 maisecrets cannot warn you itself. The harness measures this on every run
 (scenario `plugin_folder_moved`, Claude Code 2.1.283: no hook runs, the tool
 runs; anthropics/claude-code#97847). A client that runs the hook command anyway
-gets a refusal on macOS and Linux: the command tests for the launcher first and
-blocks without it, in bash and in PowerShell. The Codex command for Windows
-(`commandWindows`) has no such test yet.
+gets a refusal: the command tests for the launcher first and blocks without it,
+in bash, in PowerShell and, for Codex on Windows (`commandWindows`), in
+`cmd.exe`. Codex needs this most: it removes the folder of the old version as
+soon as it installs a new one, and an open Codex session then runs the command
+of a folder that is gone (codex-cli 0.159.0, measured 2026-09-29). Exit that
+session and run `codex resume`.
 
 - Installed from this GitHub marketplace (the commands above), a previous version
   stays for 14 days, "so a session that already loaded the old version keeps
@@ -196,7 +200,9 @@ blocks without it, in bash and in PowerShell. The Codex command for Windows
   plugin folder (`~/.claude/maisecrets-guard.py`). Every maisecrets hook writes a
   heartbeat for its call once it has answered; when none comes (maisecrets did not
   run, or started and died), the guard blocks the prompt, denies
-  the tool call or withholds the result, and names `/reload-plugins`. It stays
+  the tool call or withholds the result. Without a sign of an update it asks to
+  run the call again first, so an agent that works alone goes on; after an update
+  it names `/reload-plugins` and the restart command. It stays
   silent for an account without maisecrets, for a plugin you switched off, and
   for Codex. Measured with the real client: `plugin_folder_moved_guarded` (the
   command does not run) and `bash_rehydrate_guarded` (a healthy session passes).
@@ -250,9 +256,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 17 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 19 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 64 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 73 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -682,6 +688,29 @@ Recommended in your Claude Code settings, outside the plugin: the sandbox with
 `injectHosts` for the hosts a value may go to. That closes the paths no hook
 sees: a command that sends `.env` or `printenv` somewhere without printing it
 (a command that pipes `.env` into an upload). The hook redacts only what comes back.
+
+## Test data that maisecrets leaves alone
+
+maisecrets steps in only when a value that it can detect goes to the AI. Test data
+does not need to look like a real secret, and these forms are never a hit:
+
+- **In test code** (a file under `tests/`, `test_*.py`, `*_test.go`, `*.spec.ts`,
+  `conftest.py`, or code after `def test_`, `assert`, `describe(`), a password that
+  maisecrets finds only by its label (`password = "<value>"`) is a fixture.
+  A token shape (`glpat-…`, `AKIA…`, a private key) and personal data are still found
+  there: a real token in a test is a leak.
+- **Anywhere:** a value that names itself (`testpass`, `secret123`, `Passw0rd!`,
+  `my-test-token`), a placeholder (`<your-token>`, `${API_KEY}`, `{password}`,
+  `changeme`, `xxxxxxxx`, `***`), and a default equal to its label or user
+  (`POSTGRES_PASSWORD: postgres`, `admin:admin`).
+- **Addresses:** e-mail at `example.com`, `example.org`, `example.net` and the domains
+  `.test`, `.example`, `.invalid`, `.localhost`, a system mailbox such as `alerts@` or `noreply@`
+  at `.local` or `.internal` (a person's mailbox there is found); IP addresses in
+  the documentation ranges `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and
+  `2001:db8::/32`, private and loopback addresses.
+
+If maisecrets stops something that is not a secret, `/maisecrets:report last <why>`
+sends the rule name, never the value.
 
 ## Detection rules
 

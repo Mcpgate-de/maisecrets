@@ -51,7 +51,7 @@ powershell_7:
   extends: .windows
   script:
     - |
-      python -m unittest tests.test_guard tests.test_rehydration_matrix tests.test_invariant_store_reads
+      python -m unittest tests.test_guard tests.test_rehydration_matrix tests.test_invariant_store_reads tests.test_promises
       if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       $env:MAISECRETS_EXPECT_HOOK_SHELL = "Core 7"
       python harness/windows/shell_probe.py

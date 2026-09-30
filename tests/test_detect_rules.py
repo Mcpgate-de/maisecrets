@@ -224,13 +224,18 @@ class ValidatorTests(unittest.TestCase):
         self.assertFalse(detect._iban_ok(iban_complete("DE", "1" * 31)))         # 35 characters
 
     def test_public_ip(self):
-        for ip, ok in [("8.8.8.8", True), ("172.15.0.1", True), ("172.32.0.1", True), ("193.168.1.1", True),
+        for ip, ok in [("93.184.216.34", True), ("172.15.0.1", True), ("172.32.0.1", True), ("193.168.1.1", True),
                        ("10.1.2.3", False), ("127.0.0.1", False), ("0.0.0.0", False), ("192.168.0.1", False),
                        ("172.16.0.1", False), ("172.31.255.255", False), ("169.254.1.1", False),
                        ("256.1.1.1", False), ("1.2.3.4/24", False), ("1.2.3", False),
-                       ("2a00:1450:4001::200e", True), ("2001:db8::1", True), ("::1", False), ("::", False),
+                       ("2a00:1450:4001::200e", True), ("::1", False), ("::", False),
                        ("fe80::1", False), ("fc00::1", False), ("fd12:3456::1", False), ("0:0:0:0::0", False),
-                       ("2a00:1450", False), ("zz::zz:zz", False)]:
+                       ("2a00:1450", False), ("zz::zz:zz", False),
+                       # no address of a person: documentation ranges, shared, reserved, broadcast, multicast and
+                       # the public resolvers (the standard library's docs and tests held 666, 2026-09-29)
+                       ("192.0.2.1", False), ("198.51.100.7", False), ("203.0.113.9", False), ("2001:db8::1", False),
+                       ("100.64.1.1", False), ("240.0.0.1", False), ("255.255.255.255", False), ("224.0.0.251", False),
+                       ("ff02::1", False), ("8.8.8.8", False), ("1.1.1.1", False), ("2606:4700:4700::1111", False)]:
             with self.subTest(ip=ip):
                 self.assertEqual(detect._public_ip(ip), ok)
 
@@ -441,7 +446,7 @@ class ScanRuleTests(unittest.TestCase):
     def test_results_are_leftmost_first_and_never_overlap(self):
         r = random.Random(4)
         pieces = [lambda: "glpat-" + rnd(20, AN, r), lambda: "ghp_" + rnd(36, AN, r),
-                  lambda: f"password = {rnd(14, AN, r)}", lambda: "anna.berg@acme.de", lambda: "8.8.4.4",
+                  lambda: f"password = {rnd(14, AN, r)}", lambda: "anna.berg@acme.de", lambda: "93.184.216.34",
                   lambda: "IBAN " + iban_complete("DE", rnd(18, string.digits, r)), lambda: "+49 170 1234567",
                   lambda: "Bearer " + rnd(24, AN, r), lambda: "https://x.org/?token=" + rnd(16, AN, r),
                   lambda: "plain words", lambda: "\n"]
@@ -620,6 +625,32 @@ class LabelValueTests(unittest.TestCase):
         # at the end of the line nothing was cut: one word is still the value
         self.assertEqual(kinds("pass§wort: Sommerwiese"), [("ds-keyword-colon", "Sommerwiese")])
 
+    def test_code_after_a_colon_is_not_a_value(self):
+        # `if not token: continue` stored the statement word, and every later text with it was redacted,
+        # this repository's own code included (field report, 2026-09-29)
+        for text in ("        if not tok§en: continue", "            if not sec§ret: continue",
+                     "    if tok§en is None: return", "while not pass§word: break", "if not api§_key: raise",
+                     "except Error as sec§ret: pass", "pass§word: continue"):
+            with self.subTest(text=text):
+                self.assertEqual(kinds(text), [])
+
+    def test_a_line_that_starts_like_code_still_carries_its_value(self):
+        # a check of the whole line ("it opens a block") skipped every one of these (review, 2026-09-29)
+        v = "Xk9" + "mQ2vLp8r"
+        for text in ("with pass§word: {v}", "for staging use pass§word: {v}", "if you need it, pass§word: {v}",
+                     "try pass§word: {v}", "else pass§word: {v}", "while testing, api§_key: {v}",
+                     "if env == 'prod': pass§word = '{v}'", "        if not tok§en: {v}"):
+            with self.subTest(text=text):
+                self.assertIn(v, [m.value for m in scan(text.format(v=v))])
+
+    def test_one_lowercase_word_before_more_prose_stays_a_value(self):
+        # "Sec§rets: connectors and plugins" is prose, but a lowercase value can be a random password
+        # ("To§ken: abbabaabab, thanks", tests/detection_matrix.py) and a real word ("password:<word> and
+        # <address>" leaked once as prose, 2026-09-27). Without a dictionary the two cannot be told apart:
+        # the false positive is the cheaper error (decision, 2026-09-29)
+        self.assertEqual(kinds("Sec§rets: connectors and plugins"), [("ds-keyword-colon", "connectors")])
+        self.assertEqual(kinds("pass§word: hunter2hunter2 please"), [("ds-keyword-colon", "hunter2hunter2")])
+
     def test_two_distinct_characters_are_a_value(self):
         for text, value in [("pass§word:asasasasasasaasasasa", "asasasasasasaasasasa"),
                             ("pass§wort: abababab12", "abababab12")]:
@@ -711,7 +742,7 @@ class TruePositiveCorpusTests(unittest.TestCase):
         for text, expected in [("mail anna.berg@acme.de now", [("email", "anna.berg@acme.de")]),
                                ("call +49 170 1234567", [("phone", "+49 170 1234567")]),
                                (f"card {card}", [("credit-card", card)]), (f"IBAN {iban}", [("iban", iban)]),
-                               ("from 8.8.4.4", [("ip#2", "8.8.4.4")])]:
+                               ("from 93.184.216.34", [("ip#2", "93.184.216.34")])]:
             with self.subTest(text=text):
                 self.assertEqual(kinds(text), expected)
 
@@ -770,6 +801,85 @@ class FalsePositiveCorpusTests(unittest.TestCase):
         "Version lodash@4.17.21 and actions/checkout@v4.1.1 and python@3.14",
         "Mail git@github.com or noreply@example.org",
     ]
+
+    # lines of the Python standard library that the detector took for secrets, IP addresses of a person or phone
+    # numbers (measured over 36.6 MB, 2026-09-29): a name on the right side, a message word, a format string, a
+    # time zone, a mask, a documentation anchor, a number in code, documentation and multicast addresses
+    STANDARD_LIBRARY = [
+        "            proxy = ProxyType(to§ken, serializer, manager=manager, auth§key=auth§key,\n",
+        "                    self.to§ken = nextchar\n",
+        "        self.username, self.pass§word = credentials\n",
+        "TOK§EN_ENDS = TSPECIALS | WSP\n",
+        "            raise TypeError(\"pw§d: expected bytes, got %s\" % type(pw§d).__name__)\n",
+        "        expected_msg = \"pw§d: expected bytes, got str\"\n",
+        "log.error(\"to§ken: invalid signature for %s\", user)\n",
+        "        token_range = \"%d,%d-%d,%d:\" % (to§ken.start + to§ken.end)\n",
+        "        k§ey = \"Europe/Dublin\"\n",
+        "        self.assertEqual('Pass§word: *******\\x08 \\x08', mock_output.getvalue())\n",
+        "    'pw§d': 'pw§d#module-pw§d',\n",
+        "            a = +4294967296  # 1 << 32\n",
+        "        testcommon(\"%+34d\", big, \"  +123456789012345678901234567890\")\n",
+        "        self.assertEqual(format(1234, \"+b\"), \"+10011010010\")\n",
+        ">>> ExtendedContext.quantize(Decimal('+35236450.6'), Decimal('1e-2'))\n",
+        "        testcommon(\"%0+34d\", big, \"+000123456789012345678901234567890\")\n",
+        "    >>> ipaddress.ip_address('192.0.2.1')\n",
+        "    >>> ipaddress.ip_address('2001:db8::1')\n",
+        "    nameserver 8.8.8.8\n    nameserver 1.1.1.1\n",
+        "    mcast = ('224.0.0.251', 5353)\n",
+        "    BROADCAST = '255.255.255.255'\n",
+        "    width = \"+0123 4567 89\"\n",                                       # no country code starts with 0
+    ]
+
+    def test_each_value_shape_of_normal_work_is_refused_on_its_own(self):
+        # one shape per check of _ds_value_ok, so that no check hides behind another (mutation probes, 2026-09-29)
+        for v in ("Option<String>", "testpass1", "Passw0rd!", "0.20.3", "mcp_{user}",
+                  "{body['transfer_id']}", "_cleanup", "max.muster@firma-xyz.de", "list[str]", "1_234_567",
+                  "session_key:*", "logs/*.txt", "no-check}", "settings", "tokenValue", "redacted;",
+                  "Configuration["):
+            with self.subTest(v=v):
+                self.assertFalse(detect._ds_value_ok(v), v)
+        for v in ("Kx7Qp2Zr9Lm4Wn", "4CX!DkQ1ya*UT-Ci$", "*-n65R!DzNSnrLY%T$", "Sommerwiese", "Sommer2026!"):
+            with self.subTest(v=v):
+                self.assertTrue(detect._ds_value_ok(v), v)
+
+    def test_the_label_decides_only_right_before_the_value(self):
+        tok = "Kx7Qp2" + "Zr9Lm4Wn"
+        # a derived label earlier on the line does not hide the password after it
+        self.assertEqual([m.value for m in scan(f"secret_name: prod, pass§word: {tok}")], [tok])
+        self.assertEqual(kinds("secret_name: \"prod/db/password\""), [])
+        # a default equal to its label, also at the end of a sentence
+        self.assertEqual(kinds("the compose file sets POSTGRES_PASS§WORD: postgres."), [])
+        # an address after a label is personal data, not a secret
+        self.assertEqual([m.type for m in scan("GET user_tok§ens:max.muster@firma-xyz.de")], ["EMAIL"])
+        # a prefix and one repeated character is a placeholder, a random tail is not
+        self.assertEqual(kinds("tok§en: glpat-" + "A" * 20), [])
+        self.assertEqual(kinds("glrt-" + "A" * 40), [])          # a prefix rule without an entropy floor
+        self.assertEqual(kinds("cfut_" + "x" * 40), [])
+        self.assertEqual([m.type for m in scan("glpat-" + "Q7w8E9r0T1y2U3i4O5p6")], ["SECRET"])
+
+    def test_lines_of_the_standard_library_are_not_a_hit(self):
+        self._check(self.STANDARD_LIBRARY)
+
+    def test_the_code_rules_keep_every_value_a_person_types(self):
+        # each rule of the standard-library group has a neighbour that must stay a hit, whichever rule finds it
+        tok = "Q7w8E9r0T1y2U3i4"
+        for text, expected in [
+                (f"self.pass§word = \"{tok}\"", [("SECRET", tok)]),           # quoted: a value
+                (f"spring.datasource.pass§word={tok}", [("SECRET", tok)]),    # not an object attribute
+                (f"db.pass§word = {tok}", [("SECRET", tok)]),
+                (f"pass§word: {tok} | then log in", [("SECRET", tok)]),            # a pipe in prose
+                ("pass§word: Sommerwiese", [("SECRET", "Sommerwiese")]),           # a word, not a message word
+                ("call +49 170 1234567", [("PHONE", "+49 170 1234567")]),
+                ("my number is +4915112345678", [("PHONE", "+4915112345678")]),              # no separators, prose
+                ("from 93.184.216.34", [("IP", "93.184.216.34")])]:
+            with self.subTest(text=text):
+                self.assertEqual([(m.type, m.value) for m in scan(text)], expected)
+        # generic-api-key takes a random value after a label too and hid a broken keyword rule: the keyword rules alone
+        keyword = {r.id for r in detect.rules() if r.id.startswith("ds-keyword")}
+        for text in (f"self.pass§word = \"{tok}\"", f"spring.datasource.pass§word={tok}", f"db.pass§word = {tok}",
+                     f"pass§word: {tok} | then log in"):
+            with self.subTest(text=text, rules="keyword"):
+                self.assertEqual([m.value for m in scan(text, enabled=keyword)], [tok])
 
     def _generated(self) -> list[str]:
         r = random.Random(6)

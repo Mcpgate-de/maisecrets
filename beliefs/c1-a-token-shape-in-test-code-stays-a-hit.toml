@@ -1,0 +1,10 @@
+# c1-a-token-shape-in-test-code-stays-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-token-shape-in-test-code-stays-a-hit"
+control = "C1"
+statement = "In test code only a label-rule value counts as a fixture: a token shape and personal data in a test are still found."
+runner = ["tests/test_leak_direction.py::LeakDirectionTests::test_a_token_shape_after_a_label_stays_a_hit_in_test_code"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "    return not scan(m.value, enabled=_shape_rule_ids())\n"
+replace = "    return True\n"

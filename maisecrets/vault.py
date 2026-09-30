@@ -54,6 +54,7 @@ DEFAULT_CONFIG = {
     "ssh_approval": "per-command",   # under rehydration "confirm": "per-session" is one confirm per value and session
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
+    "pass_agent_reports": True,      # the report of a subagent of this session is model text: not blocked (hooks.py)
     "keep_purged_days": 30,          # metadata of an expired entry is deleted after this many days
     "audit_max_lines": 2000,
 }
@@ -71,7 +72,7 @@ _CONFIG_TYPES = {
     "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
-    "ssh_approval": str, "rehydration": str, "guard": bool,
+    "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool,
 }
 
 
@@ -431,6 +432,8 @@ class Entry:
     purged: bool = False
     counters: dict = field(default_factory=dict)  # unused on entries; kept for schema stability
     sessions: list = field(default_factory=list)  # sessions allowed to resolve the entry (see Vault.get)
+    # a word that only a label rule found (letters only): replaced where it was found, never hunted in other texts
+    weak: bool = False
     # no purged_at field: from_meta drops it, so the proof below can remove the filter and
     # the owning test sees the TypeError of the field report again
 
@@ -448,6 +451,28 @@ class Entry:
     def ref(self) -> str:
         from .placeholder import CLOSE, OPEN
         return f"{OPEN}{self.key}:{self.display}{CLOSE}" if self.display else f"{OPEN}{self.key}{CLOSE}"
+
+
+# the default passwords of services and the words that follow a label in code and docs: hunting one of them in
+# every later text redacted `docker ps` and blocked "add a postgres service" (review, 2026-09-29). Only these are
+# weak: a random lower-case value such as xqzvbnmq is a secret wherever it shows up (Codex review, 2026-09-29)
+DEFAULT_WORDS = frozenset({
+    "postgres", "postgresql", "mysql", "mariadb", "redis", "mongo", "mongodb", "rabbitmq", "guest", "elastic",
+    "kibana", "grafana", "minio", "minioadmin", "keycloak", "oracle", "admin", "administrator", "root", "user",
+    "users", "test", "tester", "testing", "demo", "default", "secret", "password", "passwort", "changeme",
+    "example", "sample", "docker", "ubuntu", "raspberry", "letmein", "welcome", "qwerty", "plaintext", "candidate",
+    "unchanged", "sentinel", "credentials", "identifier", "whitespace", "previous", "lookahead", "encrypted",
+    "forbidden", "refreshed", "temporary", "operator", "punctuation", "tokenizer", "nexttoken", "token", "tokens",
+    "required", "optional", "database", "service", "server", "client", "local", "localhost", "development",
+    "production", "staging", "mindestens", "unbedingt", "vergessen", "unbekannt", "abgelaufen", "erforderlich",
+    "geheim", "kennwort"})
+
+
+def is_weak(kind: str, value: str) -> bool:
+    """A value that only a label rule found and that is a known default word (DEFAULT_WORDS): replaced where it was
+    found, never hunted in other texts."""
+    from .detect import LABEL_RULES
+    return str(kind).startswith(LABEL_RULES) and value.strip().lower() in DEFAULT_WORDS
 
 
 # ---------------------------------------------------------------- backends --
@@ -892,8 +917,32 @@ class Vault:
         return fingerprint(value, self.fp_key())
 
     def live_fingerprints(self) -> dict[str, str]:
-        """fingerprint -> key for every entry whose value is still stored."""
-        return {m["fingerprint"]: k for k, m in self._index["entries"].items() if not m.get("purged")}
+        """fingerprint -> key for every entry whose value is still stored and may be hunted in any text. A weak entry
+        is not: `DB_PASSWORD=postgres` stored `postgres`, and every later text with the word was redacted and every
+        prompt with it blocked, in every session, for a day (review, 2026-09-29)."""
+        return {m["fingerprint"]: k for k, m in self._index["entries"].items()
+                if not m.get("purged") and not m.get("weak")}
+
+    @_mutating
+    def mark_weak_entries(self) -> int:
+        """Mark the weak entries a version before 0.5.15 stored without the mark (see Entry.weak). Reads the value of
+        each unmarked label-rule entry once; a store that refuses the read leaves the entry unmarked for the next
+        start. Returns the count marked weak."""
+        from .detect import LABEL_RULES
+        todo = [k for k, m in self._index["entries"].items()
+                if "weak" not in m and not m.get("purged") and str(m.get("kind", "")).startswith(LABEL_RULES)]
+        n = 0
+        for key in todo:
+            try:
+                value = self.backend.get(key)
+            except RuntimeError:
+                continue
+            if value is None:
+                continue
+            weak = is_weak(self._index["entries"][key]["kind"], value)
+            self._index["entries"][key]["weak"] = weak
+            n += weak
+        return n
 
     # api -------------------------------------------------------------------
     @_mutating
@@ -923,7 +972,7 @@ class Vault:
         e = Entry(key=key, type=type_, kind=kind, fingerprint=fp,
                   display=display_for(type_, value), created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
-                  session=session, uses=0, sessions=[session] if session else [])
+                  session=session, uses=0, sessions=[session] if session else [], weak=is_weak(kind, value))
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
         self.backend.put(
             key, value,
@@ -1232,6 +1281,30 @@ class Vault:
         if n or old:
             self._save_index()
         return n
+
+    @_mutating
+    @_mutating
+    def quiet_code_words(self) -> list[str]:
+        """Mark weak the statement keywords a keyword rule stored before 0.5.15. `if not token: <keyword>` stored the
+        keyword, and maisecrets redacted it in every later text until the entry expired; the detector stores none
+        now, but the old entries stayed (field report, 2026-09-29). A weak entry is not hunted in other texts, and
+        its placeholder still resolves: nothing is deleted without the person (Codex review, 2026-09-29, of a
+        version that deleted). The entries are found by fingerprint: no value is read. Returns the keys marked."""
+        entries = self._index["entries"]
+        if not any(str(m.get("kind", "")).startswith("ds-keyword") and not m.get("purged") and not m.get("weak")
+                   for m in entries.values()):
+            return []   # no fingerprint key is made for a store that has no such entry
+        from .detect import code_word_spellings
+        quieted = []
+        for word in code_word_spellings():
+            key = self._index["by_fingerprint"].get(self.fingerprint(word))
+            meta = entries.get(key) if key else None
+            if (not meta or meta.get("purged") or meta.get("weak")
+                    or not str(meta.get("kind", "")).startswith("ds-keyword")):
+                continue
+            meta["weak"] = True
+            quieted.append(key)
+        return quieted
 
     def repair(self) -> dict:
         """Rebuild a damaged index from the store: every stored value is deleted (nothing

@@ -17,7 +17,9 @@ import sys
 ALLOWED = ("MAISECRETS_NATIVE_BACKEND_TEST", "MAISECRETS_NATIVE_CLIPBOARD_TEST",
            # the PowerShell part of hooks.json: the GitHub Windows and macOS runners have pwsh, the Linux
            # images of GitLab do not
-           "pwsh is not installed")
+           "pwsh is not installed",
+           # the commandWindows part of hooks.json (28c64d0): cmd.exe exists on the Windows runners only
+           "cmd.exe runs on Windows only")
 
 
 def main(path: str, *extra: str) -> int:

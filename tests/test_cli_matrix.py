@@ -987,6 +987,42 @@ class SessionStartTests(unittest.TestCase):
                 self.assertEqual("/maisecrets:" not in msg, codex, msg)
                 self.assertEqual((sb.home / ".shortcut").exists(), not codex)
 
+    def test_the_start_quiets_a_statement_keyword_an_old_detector_stored(self):
+        # an entry of a version before 0.5.15: the current detector stores no such value, so it is seeded directly
+        sb = self.sandbox()
+        seed = ("from maisecrets.vault import Vault\n"
+                "v = Vault()\n"
+                "print(v.put('continue', 'SECRET', 'ds-keyword-colon', session='S0').key)\n"
+                "print(v.put('Sommerwiese', 'SECRET', 'ds-keyword-colon', session='S0').key)\n")
+        r = subprocess.run([sys.executable, "-c", seed], capture_output=True, encoding="utf-8", env=sb.env(),
+                           cwd=str(ROOT), timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        old, real = r.stdout.split()
+        (sb.home / ".announced").write_text("EncryptedFileBackend\n")
+        (sb.home / ".shortcut").write_text("offered\n")
+        (sb.home / ".tip").write_text("2000-01-01 1\n")
+        msg = _start(self, sb, CLAUDECODE="1")["systemMessage"]
+        self.assertIn(f"1 stored word(s) are program code, not secrets ({old})", msg)
+        self.assertIn("/maisecrets:forget deletes them", msg)
+        entries = sb.index()["entries"]
+        self.assertEqual(sorted(entries), sorted([old, real]), "nothing is deleted")
+        self.assertIs(entries[old].get("weak"), True)
+        self.assertNotIn("program code", _start(self, sb, CLAUDECODE="1")["systemMessage"], "said once")
+
+    def test_the_start_marks_a_word_an_older_version_stored_so_it_is_not_hunted(self):
+        sb = self.sandbox()
+        seed = ("import json\nfrom maisecrets.vault import INDEX, Vault\n"
+                "k = Vault().put('postgres', 'SECRET', 'ds-keyword-equal-signs', session='S0').key\n"
+                "idx = json.loads(INDEX.read_text()); del idx['entries'][k]['weak']\n"
+                "INDEX.write_text(json.dumps(idx))\n"
+                "print(k)\n")
+        r = subprocess.run([sys.executable, "-c", seed], capture_output=True, encoding="utf-8", env=sb.env(),
+                           cwd=str(ROOT), timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        key = r.stdout.strip()
+        _start(self, sb, CLAUDECODE="1")
+        self.assertIs(sb.index()["entries"][key].get("weak"), True)
+
     def test_the_test_store_introduces_itself_at_every_start(self):
         sb = self.sandbox(JSONFILE, backend="jsonfile")
         for _ in range(2):

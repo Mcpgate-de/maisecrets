@@ -147,7 +147,8 @@ class ListingManifestTests(unittest.TestCase):
         release, which the Anthropic directory tracks, and after it pushed main and the tag, which the
         organisation marketplace and the Codex install read. notify_marketplace still runs."""
         ci = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
-        self.assertIn('\nvariables:\n  MAISECRETS_DIRECTORY_HOLD: "1"\n', ci)
+        # the switch is set in one place; its value is the maintainer's (off since the approval of 0.5.9, 2026-09-30)
+        self.assertRegex(ci, r'\nvariables:\n  MAISECRETS_DIRECTORY_HOLD: "[01]"\n')
         job = ci[ci.index("\nmirror_tag:"):]
         end = job.find("\n\n", job.index("script:"))
         job = job if end < 0 else job[:end]            # the last job of the file ends with it

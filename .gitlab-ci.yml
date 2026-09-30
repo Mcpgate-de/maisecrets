@@ -40,8 +40,10 @@ workflow:
 # reaches the organisation marketplace (GitLab main + notify_marketplace), GitHub main and the tag;
 # only `release` stays where it is. Set "0" in a commit, or as a project CI variable, to publish
 # again: the next release then carries every change since (maintainer decision, 2026-09-29).
+# The directory review ended with the approval of 0.5.9 (2026-09-30): the hold is off, and the next release
+# carries every change since to the directory.
 variables:
-  MAISECRETS_DIRECTORY_HOLD: "1"
+  MAISECRETS_DIRECTORY_HOLD: "0"
 
 default:
   image: python:3.12-slim

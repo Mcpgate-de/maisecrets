@@ -2,6 +2,84 @@
 
 ## Unreleased
 
+- **Codex on Windows: a removed plugin folder now blocks instead of letting the tool run.** Codex
+  removes the folder of the old version when it installs a new one, also under an open session
+  (codex-cli 0.159.0, measured). The Windows command of each hook (`commandWindows`, run by
+  `cmd.exe`) now checks for the launcher first and answers with a block when it is gone, as the
+  macOS and Linux command already did. The text tells Codex users to exit and run `codex resume`
+  instead of a Claude Code command.
+
+- **Code after a colon is no longer stored as a secret.** A line such as `if not token: <statement>`
+  put the statement word into the vault, and maisecrets then redacted that word in every later text,
+  in source code too. A statement keyword after a label (`break`, `return`, `pass`, `raise`, …) is not
+  a value now; so a password that is exactly such a word is not stored either. One lowercase word after a label, with
+  the sentence going on, is still stored: without a dictionary it looks like a password of letters,
+  and a missed password costs more than a false positive.
+
+- **The false positives of the old detector stop at the next session start.** A statement word
+  such as `return` that an earlier version stored after a label stayed in the vault until it
+  expired, and maisecrets redacted it in every text until then. The session start now marks these
+  entries so that maisecrets no longer redacts the word in other texts, and names their keys once.
+  Nothing is deleted: the placeholder still works, and `/maisecrets:forget` deletes the entry. The
+  start finds them by fingerprint and reads no stored value. The same word stored by
+  `/maisecrets:put` or another rule stays as it is.
+
+- **A subagent's report no longer stops the session.** When a subagent quoted a value in the shape of
+  a secret, its report reached the session as a prompt, and maisecrets blocked it until you pressed
+  Cmd+V or `/ms`. A model of this session wrote that text, so the block protected nothing. The report
+  now passes when it proves itself against the files of this session: the call that started the
+  subagent, the subagent's own transcript, and its last answer. A value that anyone added outside the
+  answer still blocks. `"pass_agent_reports": false` in `~/.maisecrets/config.json` turns this off.
+
+- **Fewer false alarms in source code.** A run over the Python standard library (36.6 MB, no real
+  secret in it) found 38 "secrets", 666 "IP addresses of a person" and 26 "phone numbers". These are
+  no longer hits: a name on the right side of an assignment (`authkey=authkey`, `self.token = nextchar`,
+  `TOKEN_ENDS = TSPECIALS | WSP`), a word of an error message (`pwd: expected bytes`), a format string,
+  a time zone (`key = "Europe/Dublin"`), a mask (`*******`), a signed number in code (`a = +4294967296`),
+  a number with more than 15 digits, and the documentation, shared, reserved and multicast address
+  ranges and the public DNS resolvers. A quoted value, a value in a properties file and a phone
+  number in prose are still found.
+
+- **Test passwords no longer stop the work.** A password that maisecrets finds only by its label
+  (`password = '…'`) is a fixture in test code: in a file on a test path, in a grep line of a test
+  file, or after a test marker such as `def test_`, `assert` or `describe(`. A pasted unit test now
+  passes, and a Read of a test file keeps its fixtures. A token shape (`glpat-`, `AKIA`, a JWT, a
+  private key) and personal data are still found in test code, also after a label such as
+  `token = "…"`. An `.env` file and a recorded HTTP cassette are no test code, even under `tests/`,
+  and `assert` alone does not make production code a test.
+
+- **Fewer false alarms in config, docs and code.** A review of 679 snippets of normal work and a run
+  over a real repository found more values that are no secret, and these are no hits now:
+  - fixtures that name themselves (`testpass`, `secret123`, `Passw0rd!`) and a default that equals
+    its label or user (`POSTGRES_PASSWORD: postgres`, `curl -u admin:admin`). A real password that
+    holds such a word and a word of its own (`Contest-Winter2026!`, `Passion2026!`) is still found
+  - the next label of an `.env.example` (`DB_PASSWORD=` followed by `API_KEY=`)
+  - types (`Option<String>`, `list[str]`), templates (`mcp_{user}`, `?token={id}`), version pins
+    (`tokenizers==0.20.3`), durations (`TTL_REFRESH_TOKEN = 15552000`), UUIDs, elided values
+    (`sk-...`) and labels of a derived thing (`secret_name`, `password_hash`)
+  - e-mail addresses at `example.com`, `.test`, `.invalid` and `.localhost`, and a system mailbox at
+    `.local` or `.internal` (a person's name there, such as `hans.mueller@firma.local`, is still
+    found), and section numbers such as `RFC 6749 4.1.2.1`
+  - YAML anchors, shell expansions such as `${REDIS_PASSWORD:?…}`, a type made of the words of its
+    label (`token_data: TokenData`) and a command with a path
+  In the tests of that repository, the label-rule hits that a Read acted on went from 379 to none.
+  The example on the first start is now an address that maisecrets stops.
+
+- **A word no longer follows you around for a day.** When maisecrets found a word such as
+  `postgres` only by its label (`DB_PASSWORD=postgres`), it stored it and then redacted the word in
+  every later text of every session: `docker ps` showed a placeholder for the image, and the prompt
+  "add a postgres service" was blocked. Such a word is now replaced where it was found and nowhere
+  else; its placeholder still works. This holds for the default words of services and of code
+  (`postgres`, `admin`, `redis`, `changeme`, `plaintext` …); any other value, also a random
+  lower-case one, is still found everywhere.
+  Words that an older version stored are marked at the next session start.
+
+- **A busy computer no longer ends a session.** When maisecrets answered a call too late, the guard
+  said to exit the session and resume it, and an agent that worked on its own stopped there for a
+  person. The next call would have worked. The guard now says to run the call again, and names the
+  restart only as the second step; when maisecrets started and was only slow, it names no restart.
+  After a plugin update, which the guard sees in the trash, it asks for the restart as before.
+
 ## [0.5.14] - 2026-09-29
 
 - **The restart command stands on a line of its own** in the refusal of the guard, so it is easy to

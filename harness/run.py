@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN = ROOT / "harness" / "golden"
 MARK = "glpat-" + "HARNESSxxx1234567890abcd"   # matches gitlab_pat; split so the repo scan stays clean
-MAIL = "harness.person@example.org"
+MAIL = "harness.person@beispiel-gmbh.de"   # not example.org: a reserved domain is no hit (0.5.15)
 MARK2 = "pa$s'w\"ord`x $(echo no) y\\z"     # no known shape; quotes, $( and spaces
 PORT = 8791
 # the shell tool the client offers: Bash, or PowerShell on Windows without Git Bash (the CI of the
@@ -35,6 +35,7 @@ PORT = 8791
 # run fails when the client does not offer this one
 SHELL_TOOL = os.environ.get("MAISECRETS_HARNESS_SHELL_TOOL", "Bash")
 REF1 = "\u27e6SECRET_c1\u27e7"
+REPORT_VALUE = "glpat-" + "HARNESSreport1234567890ab"   # a secret shape in a subagent's report, not the marker
 
 
 def cmd_path(p) -> str:
@@ -75,6 +76,39 @@ SCENARIOS = {
         # a sentence only this version writes: an installed guard of an older version runs here too and
         # passed the old text locally while the guard under test wrote the new one (2026-09-29)
         "expect_text": "Exit this session and run the command above in the directory where you started it",
+    },
+    # a subagent in the background quotes a value of a secret's shape; its report reaches the session as a
+    # <task-notification> prompt and must pass the prompt hook, because it proves itself against the session's
+    # files (C19). The value arriving in the session's next request is the proof; before 0.5.15 the report was
+    # blocked and the session waited for a person (2026-09-29)
+    "subagent_report_passes": {
+        "needs_notification": True,
+        "prompt": "Ask a helper in the background to read the fixture, then wait for its report.",
+        "allowed_tools": "Agent,Task",
+        "turns": [{"tool": "Agent", "input": {"description": "read the fixture", "subagent_type": "general-purpose",
+                                              "prompt": "HELPER-TASK: report the fixture token.",
+                                              "run_in_background": True}},
+                  {"match": "HELPER-TASK", "text": f"HELPER-REPORT: the fixture token is {REPORT_VALUE}."},
+                  {"match": "task-notification", "text": "done"},
+                  {"text": "waiting for the helper"}],
+        "expect_requests": [3, 4],
+        "expect_in_requests": ["<task-notification>", f"HELPER-REPORT: the fixture token is {REPORT_VALUE}"],
+    },
+    # the same report with the pass switched off: blocked, and the value never reaches the model. The proof that
+    # the scenario above can fail
+    "subagent_report_blocked_when_off": {
+        "needs_notification": True,
+        "prompt": "Ask a helper in the background to read the fixture, then wait for its report.",
+        "allowed_tools": "Agent,Task",
+        "config": {"pass_agent_reports": False},
+        "turns": [{"tool": "Agent", "input": {"description": "read the fixture", "subagent_type": "general-purpose",
+                                              "prompt": "HELPER-TASK: report the fixture token.",
+                                              "run_in_background": True}},
+                  {"match": "HELPER-TASK", "text": f"HELPER-REPORT: the fixture token is {REPORT_VALUE}."},
+                  {"match": "task-notification", "text": "done"},
+                  {"text": "waiting for the helper"}],
+        "expect_requests": [2, 3],
+        "expect_not_in_requests": [REPORT_VALUE],
     },
     # the typed prompt carries a secret: must be blocked, zero requests
     "prompt_secret": {
@@ -373,6 +407,9 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             [shutil.which("claude") or "claude", "-p", sc["prompt"].replace("{cwd}", str(cwd)),
              "--plugin-dir", str(plugin),
              "--settings", str(settings),
+             # a fixed mode: in the developer's auto mode the client sent every Bash command to a classifier on the
+             # same upstream, which took the scripted turns (2.1.285, 2026-09-29: four requests instead of two)
+             "--permission-mode", "default",
              "--allowedTools", sc.get("allowed_tools", "Bash,Read"), "--max-turns", "3",
              "--debug-file", str(debug_log), *extra, *sc.get("extra_args", [])],
             cwd=cwd, env=env, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
@@ -388,9 +425,21 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                      "Claude Code version")
     if "maisecrets@synced" in dbg and "not loaded" not in dbg and "disabled" not in dbg.lower():
         fails.append("a synced maisecrets copy is loaded next to the checkout; the run is not testing the working tree")
+    if sc.get("needs_notification") and not any(
+            "<task-notification>" in str(json.loads(pf.read_text(errors="ignore")).get("prompt", ""))
+            for pf in dump.glob("*UserPromptSubmit*.json")):
+        # claude -p of 2.1.284 ended before the background agent's notification came (the Windows e2e,
+        # 2026-09-30); 2.1.285 waits for it. No notification means nothing to test, neither a pass nor a block
+        ver = subprocess.run([shutil.which("claude") or "claude", "--version"], capture_output=True, text=True,
+                             timeout=30).stdout.strip()
+        print(f"[SKIP] {name}: this client ({ver}) sent no task notification before -p ended  out={out}")
+        return []
     bodies = sorted(glob.glob(str(out / "request_*.json")))
-    if len(bodies) != sc["expect_requests"]:
-        fails.append(f"expected {sc['expect_requests']} requests, got {len(bodies)}")
+    # a list allows several counts: a background agent that finishes before the session's next request has its
+    # notification sent in that same request (Linux runner, 2026-09-30: 3 requests, the report passed)
+    allowed = sc["expect_requests"] if isinstance(sc["expect_requests"], list) else [sc["expect_requests"]]
+    if len(bodies) not in allowed:
+        fails.append(f"expected {' or '.join(map(str, allowed))} requests, got {len(bodies)}")
     joined = "".join(Path(b).read_text() for b in bodies)
     # every built-in tool the real client offered must be classified (harness/inventory.py)
     from inventory import offered, unclassified
@@ -405,6 +454,27 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     for ph in sc.get("expect_placeholders", []):
         if ph not in joined:
             fails.append(f"placeholder {ph} missing in requests")
+    for text in sc.get("expect_in_requests", []):
+        if text not in joined:
+            fails.append(f"{text[:40]!r} never reached the model")
+    if sc.get("needs_notification") and fails:
+        # what the client made of the output file: a link into the session, or a file of its own (the report proof
+        # depends on it; the Windows e2e of 2026-09-30 blocked the report)
+        for pf in dump.glob("*UserPromptSubmit*.json"):
+            pl = json.loads(pf.read_text(errors="ignore"))
+            m = re.search(r"<output-file>([^<]*)</output-file>", str(pl.get("prompt", "")))
+            if m:
+                f = Path(m.group(1))
+                sub = Path(str(pl.get("transcript_path", ""))[:-len(".jsonl")]) / "subagents"
+                fails.append(f"diag: output file {f.name} link={f.is_symlink()} exists={f.exists()} "
+                             f"real={os.path.realpath(f)[-80:]}; subagents={sorted(x.name for x in sub.glob('*'))[:5]}")
+                probe = [sys.executable, str(ROOT / "harness" / "report_probe.py"), str(ROOT), str(pf)]
+                r2 = subprocess.run(probe, capture_output=True, text=True, env={**env, "MAISECRETS_HOME": str(home)},
+                                    timeout=60)
+                fails.append("diag: " + (r2.stdout.strip() or r2.stderr.strip()[-300:]))
+    for text in sc.get("expect_not_in_requests", []):
+        if text in joined:
+            fails.append(f"{text[:12]!r}... reached the model")
     if sc.get("expect_blocked") and "blocked by hook" not in (r.stdout + r.stderr):
         fails.append("prompt was not blocked")
     if sc.get("expect_file"):
