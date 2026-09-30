@@ -91,7 +91,7 @@ SCENARIOS = {
                   {"match": "HELPER-TASK", "text": f"HELPER-REPORT: the fixture token is {REPORT_VALUE}."},
                   {"match": "task-notification", "text": "done"},
                   {"text": "waiting for the helper"}],
-        "expect_requests": 4,
+        "expect_requests": [3, 4],
         "expect_in_requests": ["<task-notification>", f"HELPER-REPORT: the fixture token is {REPORT_VALUE}"],
     },
     # the same report with the pass switched off: blocked, and the value never reaches the model. The proof that
@@ -107,7 +107,7 @@ SCENARIOS = {
                   {"match": "HELPER-TASK", "text": f"HELPER-REPORT: the fixture token is {REPORT_VALUE}."},
                   {"match": "task-notification", "text": "done"},
                   {"text": "waiting for the helper"}],
-        "expect_requests": 3,
+        "expect_requests": [2, 3],
         "expect_not_in_requests": [REPORT_VALUE],
     },
     # the typed prompt carries a secret: must be blocked, zero requests
@@ -435,8 +435,11 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         print(f"[SKIP] {name}: this client ({ver}) sent no task notification before -p ended  out={out}")
         return []
     bodies = sorted(glob.glob(str(out / "request_*.json")))
-    if len(bodies) != sc["expect_requests"]:
-        fails.append(f"expected {sc['expect_requests']} requests, got {len(bodies)}")
+    # a list allows several counts: a background agent that finishes before the session's next request has its
+    # notification sent in that same request (Linux runner, 2026-09-30: 3 requests, the report passed)
+    allowed = sc["expect_requests"] if isinstance(sc["expect_requests"], list) else [sc["expect_requests"]]
+    if len(bodies) not in allowed:
+        fails.append(f"expected {' or '.join(map(str, allowed))} requests, got {len(bodies)}")
     joined = "".join(Path(b).read_text() for b in bodies)
     # every built-in tool the real client offered must be classified (harness/inventory.py)
     from inventory import offered, unclassified
