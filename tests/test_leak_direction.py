@@ -276,7 +276,8 @@ class FinalReviewTests(unittest.TestCase):
         for text in ("tok§en = tokenValue", "pass§word = defaultAdminPassword", "Schlüss§el: apiKey"):
             with self.subTest(identifier=text):
                 self.assertEqual(secrets(text), [])
-        self.assertEqual(secrets("PASS§WORD=Qx7vR2mK9pLw!..."), ["Qx7vR2mK9pLw!..."])
+        self.assertEqual(secrets("PASS§WORD=Qx7vR2mK9pLwAb3dEf9!..."), ["Qx7vR2mK9pLwAb3dEf9!..."])
+        self.assertEqual(found("tok§en: ghp_" + "1234567890ab..."), [], "a truncated token in a log is public")
         self.assertEqual(found("export API_K§EY=sk-..."), [])
         for text in ("tok§en_budget = 12000000", "TOK§EN_REFRESH_MS = 86400000"):
             with self.subTest(measure=text):
@@ -290,6 +291,82 @@ class FinalReviewTests(unittest.TestCase):
     def test_an_address_with_leading_zeros_or_inside_6to4_is_an_address(self):
         self.assertEqual([t for t, _ in found("from 085.214.132.005 port 22")], ["IP"])
         self.assertEqual([t for t, _ in found("from 2002:55d6:8405::1")], ["IP"])
+
+
+class LastCommitReviewTests(unittest.TestCase):
+    """The findings of the review of 3e5d53e (Fable, 2026-09-30)."""
+
+    def test_a_two_megabyte_line_is_linear(self):
+        import time
+        text = "{" + ",".join(f'"id{i}":"{"x" * 1800}","tok§en":"t{i}"' for i in range(250)) + "}"
+        text = text.replace("§", "")
+        started = time.monotonic()
+        detect.scan(text)
+        small = time.monotonic() - started
+        big = text[:-1] + "," + text[1:]
+        started = time.monotonic()
+        detect.scan(big)
+        self.assertLess(time.monotonic() - started, 3.0 * small + 0.5, "twice the text, about twice the time")
+
+    def test_an_earlier_label_outside_the_window_still_counts(self):
+        prose = "the contoso mail relay of the contoso tenant " * 5
+        self.assertEqual(secrets(f"smtp.user=svc {prose} smtp.pass§word=contoso"), ["contoso"])
+
+    def test_a_test_method_in_a_diff_hunk_or_a_paste_is_test_code(self):
+        pw = "Qx7vR2mK" + "9pLw!"
+        hunk = ("diff --git a/tests/test_login.py b/tests/test_login.py\n--- a/tests/test_login.py\n"
+                "+++ b/tests/test_login.py\n@@ -40,6 +40,7 @@ class TestLogin(unittest.TestCase):\n"
+                f"     def test_login(self):\n-        pass§word = 'old'\n+        pass§word = '{pw}'\n")
+        self.assertEqual(secrets(hunk), [])
+        paste = f"    def test_login(self):\n        pass§word = '{pw}'\n        self.assertTrue(x)\n"
+        self.assertEqual(secrets(paste), [])
+        prod = f"class Db:\n    def test_connection(self):\n        pass\nPASS§WORD = '{pw}'\n"
+        self.assertEqual(secrets(prod), [pw])
+        # a marker far above in a long test class, lines of 900 characters
+        long = "class TestLogin:\n" + ("    x = '" + "a" * 890 + "'\n") * 10 + f"    pass§word = \"{pw}\"\n"
+        self.assertEqual(secrets(long), [])
+
+    def test_a_yaml_anchor_or_tag_before_the_value_does_not_hide_it(self):
+        pw = "Qx7vR2mK" + "9pLw!"
+        for text in (f"pass§word: &pw {pw}", f"x-db-pass§word: &dbpw {pw}", f"pass§word: !!str {pw}",
+                     f"pass§word: !vault {pw}"):
+            with self.subTest(text=text):
+                self.assertEqual(secrets(text), [pw])
+        self.assertEqual(found("pass§word: &creds_2024"), [])
+        self.assertEqual(found("  access_tok§en_fields: &gitlab_tok§en_fields"), [])
+
+    def test_near_variants(self):
+        uuid_ = UUID
+        for label in ("secret_val§ue: ", "SECRET_VAL§UE=", "signing_k§ey: ", "passphr§ase: ", "app_k§ey: "):
+            with self.subTest(label=label):
+                self.assertEqual(secrets(label + uuid_), [uuid_])
+        for key in ("DriverClassName:", "jdbcURL:", "s3Bucket:", "oauth2ClientId:"):
+            with self.subTest(key=key):
+                self.assertEqual(found(f"pass§word:\n    {key} x\n"), [])
+        for text in ("cellphone = +4915112345678", "smartphone = +4915112345678", "Festnetz = +4915112345678",
+                     "hotline = +4915112345678"):
+            with self.subTest(text=text):
+                self.assertIn(("PHONE", "+4915112345678"), found(text))
+        self.assertEqual(found("handyman_id = +4294967296"), [])
+        bearer = "Bearer " + "8f3kd9sLq2pX7mN4vB6cZ1aW5eR9tY0u"
+        for path in ("tests/fixtures/recorded/login.json", "tests/tapes/login.json5", "test/__nock-fixtures__/l.json",
+                     "tests/fixtures/login.har.json"):
+            with self.subTest(path=path):
+                self.assertTrue(secrets(f"authorization: {bearer}\n", path))
+        for text in ("secr§et: loadFromEnvironmentVariable,", "tok§en = extractFromRequestHeader",
+                     "pass§word = fetchFromVaultStore"):
+            with self.subTest(identifier=text):
+                self.assertEqual(found(text), [])
+        for text in ("tok§en_exp = 1790000000", "pass§word_changed_at = 1790000000", "tok§en_counter = 48392011"):
+            with self.subTest(measure=text):
+                self.assertEqual(found(text), [])
+        for text in ("Pass§wort: gesperrt", "Kenn§wort: geändert", "Tok§en: widerrufen", "Tok§en: ungueltig",
+                     "Pass§wort: zurückgesetzt"):
+            with self.subTest(status=text):
+                self.assertEqual(found(text), [])
+        for text in ("pass§word = opts.pass§word!;", "pass§word = this.#pass§word;"):
+            with self.subTest(ts=text):
+                self.assertEqual(found(text), [])
 
 
 class WeakWordTests(unittest.TestCase):

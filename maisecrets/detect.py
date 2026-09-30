@@ -28,6 +28,7 @@ slightly different rules is how a redaction leaks.
 """
 from __future__ import annotations
 
+import bisect
 import ipaddress
 import json
 import math
@@ -244,7 +245,7 @@ _DS_INDIRECT = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*\s*(\(.*\)|\[.*\])$")
 # words joined by `.`, `_` or `-`, optionally ending where the regex cut the line (`:` of a
 # condition, `;` of a statement, `[` before a quoted key): `settings.API_KEY`, `self._password`,
 # `os.environ[`, `confirm_password:` were taken for values (false-positive corpus, 2026-09-27)
-_DS_REFERENCE = re.compile(r"_*[A-Za-z]+(?:(?:\?\.|[._/:-]+)[A-Za-z]+)+_*\??[:;\[]?")
+_DS_REFERENCE = re.compile(r"_*[A-Za-z]+(?:(?:\?\.|[._/:-]+)#?[A-Za-z]+)+_*\??[:;\[]?")
 _FORMAT_ONLY_RE = re.compile(r"(?:%[-+ #0]*\d*(?:\.\d+)?[sdifxXeEgGrcoba%]|\{[^{}]*\}|[^A-Za-z0-9%{])+")
 
 
@@ -262,12 +263,12 @@ _CAMEL_RE = re.compile(r"^[a-z]+(?:[A-Z][a-z0-9]*)+$")
 # `Passw0rd!`: letters after undoing the digits and symbols people use for them)
 _LABEL_SHAPE = re.compile(r"[A-Za-z_][\w.-]*[:=]")
 _NAME_LABEL_RE = re.compile(r"(?:[A-Z][A-Z0-9_]*|[a-z][a-z0-9_]*|[A-Z][a-z]+(?:[ _-][A-Za-z][a-z]+)*"
-                            r"|[a-z]{2,}(?:[A-Z][a-z]{2,})+)[.-]?[:=]")
+                            r"|[a-z]{2,}(?:[A-Z][a-z]{2,})+|[A-Za-z][a-z0-9]+(?:[A-Z][a-z0-9]{2,})*(?:[A-Z][a-z0-9]{2,}|[A-Z]{2,}|[A-Z][a-z0-9]))[.-]?[:=]")
 _GENERIC_TYPE = re.compile(r"<[A-Za-z_][\w, ]*>")
 _VERSION_RE = re.compile(r"v?\d+(?:\.\d+){1,3}(?:[-+.]?[A-Za-z0-9]+)?")
 _PART_TEMPLATE_RE = re.compile(r"\{[A-Za-z_][\w.]*(?:\[[^\]]*\]?)?\}?$|\{[A-Za-z_][\w.]*\}")
 _SHELL_EXPANSION_RE = re.compile(r"[?:+=-]{1,2}[A-Z_][A-Z0-9_]*")
-_YAML_REF_RE = re.compile(r"[&*][A-Za-z_][\w-]*")
+_ANCHOR_OR_TAG_RE = re.compile(r"[&*][A-Za-z_][\w-]*|!!?[A-Za-z][\w/-]*")
 _PATH_IN_VALUE_RE = re.compile(r"(?:^|\s)(?:~|\.{1,2})?/[\w.-]+/[\w.-]+")
 _ESCAPED_TAIL_RE = re.compile(r"(?:\\[nrt])+$")
 _SUBSCRIPT_RE = re.compile(r"[A-Za-z_][\w.]*\[[\w.,\s]*\]?")
@@ -312,7 +313,9 @@ def _names_itself(v: str) -> bool:
 
 _IDENT_WORDS = frozenset({"password", "passwort", "token", "secret", "key", "value", "default", "config", "env",
                           "setting", "settings", "credential", "credentials", "auth", "api", "get", "set", "new", "old",
-                          "user", "admin", "current", "stored", "hashed", "encrypted"})
+                          "user", "admin", "current", "stored", "hashed", "encrypted", "load", "read", "fetch",
+                          "extract", "parse", "resolve", "build", "create", "from", "to", "with", "vault", "request",
+                          "header", "environment", "variable", "store"})
 
 
 def _short_word(v: str) -> bool:
@@ -339,8 +342,7 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False   # a version pin: tokenizers==0.20.3 (requirements.txt, renovate.json)
     if _PART_TEMPLATE_RE.search(v) and not any(c.isdigit() for c in _PART_TEMPLATE_RE.sub("", v)):
         return False   # a template with a name in it: mcp_{user}, {body['transfer_id']}
-    if (_SHELL_EXPANSION_RE.fullmatch(v) or (_YAML_REF_RE.fullmatch(v) and not any(c.isdigit() for c in v))
-            or _PATH_IN_VALUE_RE.search(v)):
+    if _SHELL_EXPANSION_RE.fullmatch(v) or _PATH_IN_VALUE_RE.search(v):
         return False   # ${REDIS_PASSWORD:?…} cut after its name, a YAML anchor, a command with a path
     if not any(c.isdigit() for c in v) and _DS_REFERENCE.fullmatch(_ESCAPED_TAIL_RE.sub("", v).rstrip("})],;")):
         return False   # process.env.NOTION_CLIENT_SECRET,\n in a JSON string
@@ -368,8 +370,9 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False   # a sentence or an i18n label ("Add API key"), not a value
     if " " in v and not any(c.isdigit() for c in v):
         return False   # two words of prose ("bad payload"), not a value
-    if not any(c.isdigit() for c in v) and _DS_REFERENCE.fullmatch(v):
-        return False   # an identifier or a reference to one: NAME_OF_SECRET, self._password, os.environ[
+    if not any(c.isdigit() for c in v) and (_DS_REFERENCE.fullmatch(v) or (
+            v.rstrip(";").endswith("!") and "." in v and _DS_REFERENCE.fullmatch(v.rstrip(";")[:-1]))):
+        return False   # a reference: NAME_OF_SECRET, self._password, os.environ[, opts.password! (TypeScript)
     if not any(c.isdigit() for c in v) and _short_word(v):
         return False   # a type, a keyword of code or a camelCase identifier, at any length (settings, tokenValue)
     low = v.lower().rstrip(";")
@@ -661,12 +664,16 @@ _TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?i:tests?|__tests__|spec|testdata|test_
                            r"|(?:^|[/\\])(?:test_[^/\\]*|[^/\\]*_test\.\w+|[^/\\]*\.(?:test|spec)\.\w+|conftest\.py)$")
 # a file of real values even under tests/: an .env, a recorded HTTP cassette (review, 2026-09-29)
 _REAL_VALUE_FILE_RE = re.compile(r"(?i)(?:^|[/\\])(?:\.env[^/\\]*|[^/\\]*\.env(?:\.[^/\\]*)?|[^/\\]*\.har"
-                                 r"|(?:cassettes?|(?:__)?recordings?(?:__)?|vcr)[/\\].*)$")
+                                 r"|[^/\\]*\.har\.\w+|(?:cassettes?|(?:__)?recordings?(?:__)?|recorded|tapes|vcr"
+                                 r"|__nock-fixtures__)[/\\].*)$")
 _TEST_MARKER_RE = re.compile(
     r"(?m)^(?:(?:async[ \t]+)?def[ \t]+test_?\w*[ \t]*\(|[ \t]*class[ \t]+Tests?(?:[A-Z_(:]|$)|[ \t]*@pytest\."
     r"|[ \t]*@Test\b|[ \t]*#\[test\]"
     r"|[ \t]*(?:import|from)[ \t]+(?:pytest|unittest)\b|[ \t]*func[ \t]+Test\w*\("
     r"|[ \t]*(?:describe|it|test|beforeEach)[ \t]*\()")
+_TEST_METHOD_RE = re.compile(r"(?m)^[ \t+-]+(?:async[ \t]+)?def[ \t]+test_?\w*[ \t]*\([ \t]*self\b")
+_CLASS_LINE_RE = re.compile(r"(?m)^[ \t+-]*class[ \t]+\w|^@@[^\n]*\bclass[ \t]+\w")
+_TEST_CLASS_LINE_RE = re.compile(r"[ \t+-]*class[ \t]+Tests?(?:[A-Z_(:]|$)|@@[^\n]*\bclass[ \t]+Tests?(?:[A-Z_(:]|\b)")
 # `assert` alone is no marker: production code asserts too (review, 2026-09-29). A diff starts a new file here
 _DIFF_FILE_RE = re.compile(r"(?m)^(?:diff --git |\+\+\+ |--- a/)")
 _GREP_PATH_RE = re.compile(r"((?:[A-Za-z]:)?[^\s:]+):\d+[:-]")
@@ -682,21 +689,33 @@ def in_test_code(text: str, start: int, path: str = "") -> bool:
     marker (`def test_`, `assert`, `describe(` …) stands in its line or in the 40 lines before it."""
     if is_test_path(path):
         return True
-    line_start = text.rfind("\n", 0, start) + 1
+    line_start = _line_start(text, start)
     m = _GREP_PATH_RE.match(text, line_start)
     if m and is_test_path(m.group(1)):
         return True
-    begin = line_start
-    for _ in range(_TEST_LOOKBACK_LINES):
-        if begin == 0:
-            break
-        begin = text.rfind("\n", 0, begin - 1) + 1
-    begin = max(begin, start - 8000)   # 40 lines of code, not 40 lines of a minified bundle
-    for d in _DIFF_FILE_RE.finditer(text, begin, line_start):
-        begin = d.start()          # a marker of another file in the same diff does not count
-    end = text.find("\n", start)
-    end = min(end if end >= 0 else len(text), start + 400)
-    return bool(_TEST_MARKER_RE.search(text, begin, end))
+    nl = _newlines(text)
+    i = bisect.bisect_left(nl, line_start)       # the line of the hit is line i
+    begin = nl[i - _TEST_LOOKBACK_LINES - 1] + 1 if i > _TEST_LOOKBACK_LINES else 0
+    diffs = _positions(text, "diff", _DIFF_FILE_RE)
+    j = bisect.bisect_left(diffs, line_start)
+    if j and diffs[j - 1] >= begin:
+        begin = diffs[j - 1]      # a marker of another file in the same diff does not count
+    end = _line_end(text, start)
+    markers = _positions(text, "marker", _TEST_MARKER_RE)
+    k = bisect.bisect_left(markers, begin)
+    if k < len(markers) and markers[k] < end:
+        return True
+    # an indented `def test_…(self` counts when no class other than a test class stands nearer above it: a test
+    # method in a diff hunk or a paste, but not `def test_connection(self)` in class Db (reviews, 2026-09-30)
+    defs = _positions(text, "defs", _TEST_METHOD_RE)
+    k = bisect.bisect_left(defs, end) - 1
+    if k < 0 or defs[k] < begin:
+        return False
+    classes = _positions(text, "classes", _CLASS_LINE_RE)
+    c = bisect.bisect_left(classes, defs[k]) - 1
+    if c < 0 or classes[c] < begin:
+        return True
+    return bool(_TEST_CLASS_LINE_RE.match(text, classes[c]))
 
 
 def is_fixture(m: "Match", text: str, path: str = "") -> bool:
@@ -753,7 +772,8 @@ _CODE_WORDS = frozenset({"break", "continue", "return", "pass", "raise", "throw"
 _MESSAGE_WORDS = frozenset({"expected", "invalid", "missing", "required", "incorrect", "wrong", "failed", "denied",
                             "unsupported", "mismatch", "rejected", "expired", "revoked", "unset", "empty", "unknown",
                             "must", "cannot", "should", "not", "no", "abgelaufen", "unbekannt", "erforderlich",
-                            "vergessen", "unver\u00e4ndert", "ung\u00fcltig"})
+                            "vergessen", "unver\u00e4ndert", "ung\u00fcltig", "ungueltig", "gesperrt",
+                            "ge\u00e4ndert", "widerrufen", "zur\u00fcckgesetzt"})
 
 
 def is_code_word(value: str) -> bool:
@@ -769,13 +789,57 @@ def code_word_spellings() -> list[str]:
             for s in (b, b + ";")]
 
 
+_NL_RE = re.compile("\n")
+_INDEX: list = [None, None]   # the last text and its line index: scan() and is_fixture() ask about one text
+
+
+def _newlines(text: str) -> list:
+    """The offsets of the line breaks of `text`, computed once per text. A search for the start or the end of a line
+    at each keyword hit was one pass over the line, and a one-line text of 2 MB took 14.5 s (review of 3e5d53e,
+    2026-09-30)."""
+    if _INDEX[0] is not text:
+        _INDEX[0], _INDEX[1] = text, {"nl": [m.start() for m in _NL_RE.finditer(text)]}
+    return _INDEX[1]["nl"]
+
+
+def _line_start(text: str, pos: int) -> int:
+    nl = _newlines(text)
+    i = bisect.bisect_left(nl, pos)
+    return nl[i - 1] + 1 if i else 0
+
+
+def _line_end(text: str, pos: int) -> int:
+    nl = _newlines(text)
+    i = bisect.bisect_left(nl, pos)
+    return nl[i] if i < len(nl) else len(text)
+
+
+def _split_lines(text: str) -> tuple:
+    """The lines of `text` and of its lower-case form, split once per text: the seven keyword rules each split a
+    megabyte again (review of 3e5d53e, 2026-09-30)."""
+    _newlines(text)
+    cache = _INDEX[1]
+    if "lines" not in cache:
+        cache["lines"] = (text.split("\n"), _lower(text).split("\n"))
+    return cache["lines"]
+
+
+def _positions(text: str, name: str, rx: re.Pattern) -> list:
+    """The start offsets of the matches of `rx` in `text`, computed once per text (see _newlines)."""
+    _newlines(text)
+    cache = _INDEX[1]
+    if name not in cache:
+        cache[name] = [m.start() for m in rx.finditer(text)]
+    return cache[name]
+
+
 _IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _LABEL_WINDOW = 200   # characters before a value in which its label is looked for
 
 
 def _before_value(text: str, start: int) -> str:
     """The text of the value's line before it, at most _LABEL_WINDOW characters."""
-    return text[max(text.rfind("\n", 0, start) + 1, start - _LABEL_WINDOW):start]
+    return text[max(_line_start(text, start), start - _LABEL_WINDOW):start]
 _LABEL_TAIL_RE = re.compile(r"([A-Za-z_][\w.]*)[\"']?\s*(?::=|=|:)\s*[\"'`]?$")
 _OPERATOR_AFTER_RE = re.compile(r"[ \t]+[|&^*+][ \t]+[A-Za-z_(]")
 _SELF_ATTR_RE = re.compile(r"(?:^|[\s,(])(?:self|this|cls)\.\w+$")
@@ -811,8 +875,8 @@ _WORD_PATH_RE = re.compile(r"[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*(?:/[A-Z]?[a-z]+(?:_[
 _SECTION_BEFORE_RE = re.compile(r"(?i)(?:\bRFC[ -]?\d{3,5}|\bCore|\bsection|\bsec\.|\bchapter|\bKapitel|\bAbschnitt"
                                 r"|\u00a7)[ ,:(]*\u00a7?[ ]*$")
 # whole words of the label: TELEMETRY_OFFSET is no telephone (Codex review, 2026-09-30)
-_PHONE_LABEL_RE = re.compile(r"(?i)(?<![a-z])(?:phone|telephone|telefon|mobil|handy|fax|contact|kontakt|rufnummer"
-                             r"|whatsapp|msisdn)|(?<![a-z])(?:tel|cell|sms)(?![a-z])")
+_PHONE_LABEL_RE = re.compile(r"(?i)phone|(?<![a-z])(?:telefon|mobil|handy(?!man)|fax|contact|kontakt|rufnummer|whatsapp"
+                             r"|msisdn|festnetz|hotline|durchwahl)|(?<![a-z])(?:tel|cell|sms)(?![a-z])")
 _NUMBER_BEFORE_RE = re.compile(r"(?:=\s+|[(\[]\s*|return\s+)$")   # not KEY=+49…, not a CSV column
 
 
@@ -840,20 +904,15 @@ _WINDOWED = {"generic-api-key": re.compile(r"(?i)access|auth|api|credential|cred
 
 def _windowed(rule: Rule, kw: re.Pattern, text: str):
     spans: list[list[int]] = []
+    nl = _newlines(text)
     for k in kw.finditer(text):
-        line_start = text.rfind("\n", 0, k.start()) + 1
-        a = max(line_start, k.start() - 50)
+        a = max(_line_start(text, k.start()), k.start() - 50)
         # the separators may hold several line breaks (`password for prod:` + blank line +
         # value, review 2026-09-27). The regex allows 3 whitespace characters before the separator
         # and 5 after it, so the value can start after 8 line breaks: the window runs to the end
         # of the 9th line (8 cut `password\n\n\n:\n\n\n\n\n<value>` off, differential test 2026-09-27)
-        b = k.end()
-        for _ in range(9):
-            nxt = text.find("\n", b)
-            if nxt < 0:
-                b = len(text)
-                break
-            b = nxt + 1
+        i = bisect.bisect_left(nl, k.end()) + 8
+        b = nl[i] + 1 if i < len(nl) else len(text)
         if spans and a <= spans[-1][1]:
             spans[-1][1] = max(spans[-1][1], b)
         else:
@@ -877,12 +936,12 @@ def _matches(rule: Rule, text: str):
     if kw is not None and len(text) > 4096:
         yield from _windowed(rule, kw, text)
         return
-    if not rule.id.startswith("ds-keyword") or "\n" not in text:
+    if not rule.id.startswith("ds-keyword") or not _newlines(text):
         yield from rule.regex.finditer(text)
         return
     pos = 0
-    lines = text.split("\n")
-    low = _lower(text).split("\n") if rule.keywords else None
+    lines, low = _split_lines(text)
+    low = low if rule.keywords else None
     for i, line in enumerate(lines):
         # the regex needs one of the rule's keywords in this line (every denylist word contains
         # one); skipping the other lines cut a history scan from 71 s to a fraction (2026-09-27)
@@ -928,7 +987,10 @@ def _names_its_label(text: str, start: int, secret: str) -> bool:
     (review, 2026-09-29)."""
     before = _before_value(text, start)
     m = _LABEL_TAIL_RE.search(before)
-    if m and len(re.findall(r"[:=]", before[:m.start()])) > 0:
+    # another label on the line, also one before the window: then only the value's own label counts (an earlier
+    # smtp.user= label, 225 characters of prose, then the password label and a word of the prose; review of 3e5d53e)
+    wide = text[max(_line_start(text, start), start - 1000):start]
+    if m and (len(re.findall(r"[:=]", before[:m.start()])) > 0 or len(re.findall(r"[:=]", wide)) > 1):
         before = m.group(1)
     words = set(re.findall(r"[a-z]+", before.lower()))
     v = secret.strip("\"'` ").rstrip(".,;:!?")
@@ -941,10 +1003,11 @@ def _names_its_label(text: str, start: int, secret: str) -> bool:
 # lookarounds, not ^: search(text, pos) anchors ^ at the start of the text, never at pos (a file's line 19 passed)
 _MEASURE_LABEL_RE = re.compile(r"(?i)(?<![a-z])(?:ttl|timeout|expir\w*|lifetime|max|min|len|length|size|count|limit"
                                r"|port|age|seconds|minutes|hours|days|retries|interval|ms|budget|refresh|rotation|cost"
-                               r"|price|quota|window|delay|offset|threshold|rate|bytes)(?![a-z])")
+                               r"|price|quota|window|delay|offset|threshold|rate|bytes|exp|iat|nbf|at|counter|index"
+                               r"|generation)(?![a-z])")
 # a label that names a secret: a UUID after it is one (Postmark server token, Scaleway secret key, a uuid4 API key)
-_SECRET_LABEL_RE = re.compile(r"(?i)(?:token|secret[_-]?key|secret|api[_-]?key|apikey|access[_-]?key|auth[_-]?key"
-                              r"|password|passwd|pwd)[\"']?\s*(?::=|=>|[:=])\s*[\"'`]?$")
+_SECRET_LABEL_RE = re.compile(r"(?i)(?:token|secret[_-]?key|secret|secret[_-]?value|api[_-]?key|apikey|access[_-]?key"
+                              r"|auth[_-]?key|\w+[_-]key|password|passwd|pwd|passphrase)[\"']?\s*(?::=|=>|[:=])\s*[\"'`]?$")
 _ELISION_RE = re.compile(r"(?:\.\.\.|\u2026)$")
 # a label that names a derived thing: secret_id, password_hash, token_type, hashed_secret. Anchored at the value: in
 # `secret_name: x, password: <value>` the password stays a hit
@@ -1039,6 +1102,15 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     end = start + len(secret)
                     if _CAPITALISED_WORD_RE.fullmatch(secret):
                         continue
+            if rule.id.startswith("ds-keyword") and _ANCHOR_OR_TAG_RE.fullmatch(secret.strip()):
+                nxt = re.match(r"[ \t]+([^\s#]+)", text[end:end + 300])
+                if nxt:
+                    # password: &pw <value>, password: !vault <value>: the value follows the anchor or the tag
+                    # (review of 3e5d53e: the value after it was never scanned)
+                    start, end = end + nxt.start(1), end + nxt.end(1)
+                    secret = text[start:end]
+                elif _before_value(text, start).rstrip(" \t\"'").endswith(":"):
+                    continue   # a YAML anchor or alias alone after a colon label: &gitlab_token_fields
             if rule.id.startswith("ds-keyword") and (is_code_word(secret) or value_is_code(text, start, end, secret)):
                 continue
             if rule.id == "generic-api-key" and _WORD_PATH_RE.fullmatch(secret.strip("'\"")):
@@ -1058,9 +1130,9 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue   # words, not a token: Bearer test_access_token
             if (rule.id.startswith("ds-keyword") or rule.id == "generic-api-key") and (
                     (_UUID_RE.fullmatch(secret.strip("\"'` ")) and not _SECRET_LABEL_RE.search(
-                        text, max(0, text.rfind("\n", 0, start) + 1, start - 60), start))
-                    or (_ELISION_RE.search(secret) and len(secret.rstrip(".\u2026")) < 12)
-                    or _DERIVED_LABEL_RE.search(text, max(0, text.rfind("\n", 0, start) + 1, start - 60), start)):
+                        text, max(_line_start(text, start), start - 60), start))
+                    or (_ELISION_RE.search(secret) and len(secret.rstrip(".\u2026")) < 20)
+                    or _DERIVED_LABEL_RE.search(text, max(_line_start(text, start), start - 60), start)):
                 continue   # a UUID, an elided value (sk-...), or a label that names a derived thing (secret_id)
             if rule.id in ("ds-basic-auth", "curl-auth-user") and _pass_equals_user(m.group(0), secret):
                 continue
