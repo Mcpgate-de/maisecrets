@@ -52,7 +52,7 @@ finding below broke `/maisecrets:status` on one machine, one after the other.
 - **No program from the profile.** The sandbox user may not start a program from the person's profile.
   `python.exe` under `%LOCALAPPDATA%\Programs\Python\Python312` fails with "Zugriff verweigert" (access
   denied). The python.org installer puts Python there by default, and so does
-  `winget install Python.Python.3.12`. A Python bundled in the plugin folder would fail the same way, because
+  `winget install Python.Python.3.12` (maisecrets 0.5.19 and older named that command). A Python bundled in the plugin folder would fail the same way, because
   that folder is in the profile too.
 - **PATH.** The python.org installer changes PATH only when it is asked to. Since 0.5.19 `run.cmd` also looks in
   the install folders: the `py` launcher, and `Python3*` under `%LOCALAPPDATA%\Programs\Python` and
