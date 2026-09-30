@@ -154,7 +154,10 @@ behind each mark are in `docs/CLIENTS.md`.
 
 Python 3.9 or newer on the PATH the client gives its hooks (`python3 --version`).
 The stock `python3` of macOS (3.9) is enough; nothing to install on a Mac.
-Windows: `winget install Python.Python.3.12`. Linux: your package manager, plus
+Windows: install Python for all users, as an administrator:
+`winget install --id Python.Python.3.12 --exact --scope machine`. Codex on Windows
+runs commands as a sandbox user, and that user cannot start a Python installed for one
+person only (`docs/CLIENTS.md`, "Codex on Windows: the sandbox user"). Linux: your package manager, plus
 `openssl` for the vault and `xclip` if you want the clipboard. Without it the
 plugin blocks every prompt and names the missing piece.
 

@@ -47,10 +47,10 @@ for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*" "%ProgramFiles%\Python3
 )
 if "%~1"=="post-tool" (
   rem both shapes: updatedToolOutput for Claude Code, decision/reason for Codex
-  echo {"decision":"block","reason":"[maisecrets needs Python 3.9 or newer. Install it with: winget install Python.Python.3.12 - then restart the client. Tool output withheld; the tool ran and finished, do not run it again.]","hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"[maisecrets needs Python 3.9 or newer. Install it with: winget install Python.Python.3.12 - then restart the client. Tool output withheld; the tool ran and finished, do not run it again.]"}}
+  echo {"decision":"block","reason":"[maisecrets needs Python 3.9 or newer. Install it for all users, as an administrator: winget install --id Python.Python.3.12 --exact --scope machine - a Python for one user only cannot run in the Codex sandbox. Then restart the client. Tool output withheld; the tool ran and finished, do not run it again.]","hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"[maisecrets needs Python 3.9 or newer. Install it for all users, as an administrator: winget install --id Python.Python.3.12 --exact --scope machine - a Python for one user only cannot run in the Codex sandbox. Then restart the client. Tool output withheld; the tool ran and finished, do not run it again.]"}}
   exit /b 0
 )
-echo maisecrets needs Python 3.9 or newer (tried py -3, python, python3 and the install folders of python.org). Install it with: winget install Python.Python.3.12 - then restart the client. Until then every prompt and command is blocked; the command did not run. 1>&2
+echo maisecrets needs Python 3.9 or newer (tried py -3, python, python3 and the install folders of python.org). Install it for all users, as an administrator: winget install --id Python.Python.3.12 --exact --scope machine - a Python for one user only cannot run in the Codex sandbox. Then restart the client. Until then every prompt and command is blocked; the command did not run. 1>&2
 exit /b 2
 :done
 exit /b %errorlevel%

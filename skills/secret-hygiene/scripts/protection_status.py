@@ -137,7 +137,8 @@ def main() -> int:
         print("maisecrets protection: CANNOT PROTECT YET. The hooks need Python 3.9 or newer "
               f"(found: {found}).")
         print("Install a newer Python first (macOS: brew install python, or python.org; Windows: "
-              "winget install Python.Python.3.12), then ask again. Do not install maisecrets before "
+              "as an administrator, winget install --id Python.Python.3.12 --exact --scope machine), then ask "
+              "again. Do not install maisecrets before "
               "that: with no suitable Python, its hooks block every prompt.")
         return 3
     print("maisecrets protection: NOT ACTIVE. A password or key typed into a prompt reaches the AI provider.")
