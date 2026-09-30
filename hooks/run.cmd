@@ -24,12 +24,33 @@ if not errorlevel 1 (
   python3 "%HERE%dispatch.py" %*
   goto :done
 )
+rem Not on PATH: the python.org installer (also through winget) leaves PATH alone unless asked, and an
+rem open client keeps the PATH it started with (reported 2026-09-30: Python 3.12 installed, not found).
+rem Look where that installer puts Python, for one user and for all users.
+for %%P in ("%LOCALAPPDATA%\Programs\Python\Launcher\py.exe" "%SystemRoot%\py.exe") do (
+  if exist %%P (
+    %%P -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" >nul 2>&1
+    if not errorlevel 1 (
+      %%P -3 "%HERE%dispatch.py" %*
+      goto :done
+    )
+  )
+)
+for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*" "%ProgramFiles%\Python3*") do (
+  if exist "%%~D\python.exe" (
+    "%%~D\python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" >nul 2>&1
+    if not errorlevel 1 (
+      "%%~D\python.exe" "%HERE%dispatch.py" %*
+      goto :done
+    )
+  )
+)
 if "%~1"=="post-tool" (
   rem both shapes: updatedToolOutput for Claude Code, decision/reason for Codex
   echo {"decision":"block","reason":"[maisecrets needs Python 3.9 or newer. Install it with: winget install Python.Python.3.12 - then restart the client. Tool output withheld; the tool ran and finished, do not run it again.]","hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"[maisecrets needs Python 3.9 or newer. Install it with: winget install Python.Python.3.12 - then restart the client. Tool output withheld; the tool ran and finished, do not run it again.]"}}
   exit /b 0
 )
-echo maisecrets needs Python 3.9 or newer (tried py -3, python, python3). Install it with: winget install Python.Python.3.12 - then restart the client. Until then every prompt and command is blocked; the command did not run. 1>&2
+echo maisecrets needs Python 3.9 or newer (tried py -3, python, python3 and the install folders of python.org). Install it with: winget install Python.Python.3.12 - then restart the client. Until then every prompt and command is blocked; the command did not run. 1>&2
 exit /b 2
 :done
 exit /b %errorlevel%
