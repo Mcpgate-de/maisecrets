@@ -36,6 +36,37 @@ Two of the three guards (block a prompt, redact a result) have no hook to live
 in, so an adapter would only rehydrate and deny. Not built; `agy plugin
 validate` accepts the plugin layout but finds no hooks in it.
 
+## Codex on Windows: the sandbox user
+
+Measured on 2026-09-30 in Codex in the ChatGPT desktop app, Windows 11, maisecrets 0.5.15 to 0.5.19. Each
+finding below broke `/maisecrets:status` on one machine, one after the other.
+
+- **PowerShell, no bash.** The model runs a command in PowerShell. A command that calls `bash` fails with
+  "The term 'bash' is not recognized". Each file in `commands/` names a PowerShell form (`run.cmd`) since 0.5.17.
+- **No plugin root.** Codex leaves `${CLAUDE_PLUGIN_ROOT}` in a command file as written, and
+  `$env:CLAUDE_PLUGIN_ROOT` is empty. Since 0.5.18 the command names the newest folder in
+  `%USERPROFILE%\.codex\plugins\cache\*\maisecrets\*` instead.
+- **A sandbox user.** Codex runs the command as a separate local user (`whoami`: `<host>\codexsandboxoffline`).
+  That user gets the environment of the person (`USERNAME`, `LOCALAPPDATA`, the profile paths), so `run.cmd`
+  finds the files, and `Test-Path` on the per-user Python is `True`.
+- **No program from the profile.** The sandbox user may not start a program from the person's profile.
+  `python.exe` under `%LOCALAPPDATA%\Programs\Python\Python312` fails with "Zugriff verweigert" (access
+  denied). The python.org installer puts Python there by default, and so does
+  `winget install Python.Python.3.12`. A Python bundled in the plugin folder would fail the same way, because
+  that folder is in the profile too.
+- **PATH.** The python.org installer changes PATH only when it is asked to. Since 0.5.19 `run.cmd` also looks in
+  the install folders: the `py` launcher, and `Python3*` under `%LOCALAPPDATA%\Programs\Python` and
+  `%ProgramFiles%`.
+
+What works: Python installed for all users, in `C:\Program Files`. This needs an administrator once:
+
+    winget install --id Python.Python.3.12 --exact --scope machine
+
+Remove a per-user install of the same package first (`winget uninstall --id Python.Python.3.12 --exact`), or
+winget reports it as installed and changes nothing. In an organisation, ship it through the software
+distribution (Intune, MDM). Not yet measured: whether the sandbox user may start Python from
+`C:\Program Files`, and whether Codex runs the hooks themselves as the person or as the sandbox user.
+
 ## Codex file edits: `apply_patch`
 
 Measured on codex-cli 0.158.0 with a real model (2026-09-29): Codex edits files with one tool,
