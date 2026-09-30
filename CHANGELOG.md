@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.5.18] - 2026-09-30
+
+### Fixes
+
+- find the plugin folder when Codex on Windows sets no CLAUDE_PLUGIN_ROOT (edf787a)
+
+### Other
+
+- Merge branch 'fix/codex-plugin-folder' into 'main' (5eec0fe)
+
 ## [0.5.17] - 2026-09-30
 
 ### Fixes
