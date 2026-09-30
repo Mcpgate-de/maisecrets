@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.5.15] - 2026-09-30
+
 - **Codex on Windows: a removed plugin folder now blocks instead of letting the tool run.** Codex
   removes the folder of the old version when it installs a new one, also under an open session
   (codex-cli 0.159.0, measured). The Windows command of each hook (`commandWindows`, run by
@@ -79,6 +81,36 @@
   person. The next call would have worked. The guard now says to run the call again, and names the
   restart only as the second step; when maisecrets started and was only slow, it names no restart.
   After a plugin update, which the guard sees in the trash, it asks for the restart as before.
+
+### Features
+
+- a reported false alarm links the test data that maisecrets leaves alone (f3f2ead)
+
+### Fixes
+
+- a subagent's report passes on Windows too (fbb2d34)
+- a password that starts with & or ! is no YAML anchor, and many hits stay linear (c674527)
+- the scan is linear in a long line, and the review of 3e5d53e is closed (b4a7c54)
+- a long line is scanned in time again, and the final review's findings are closed (3e5d53e)
+- tel inside a word is no telephone label (0147e81)
+- the second Codex review of 05052fe found eight more; each is closed (37a68a8)
+- the Codex review of 31fdfd1 found seven more ways through; each is closed (05052fe)
+- no relaxation of this release lets a real, detectable value through (31fdfd1)
+- a busy computer no longer ends a session (50468d0)
+- a real subagent report is no longer blocked by its own shape (ba63f17)
+- a word no longer follows you around for a day (6a9162f)
+- fewer false alarms in config, docs and code (c33271b)
+- test passwords no longer stop the work (edd6df0)
+- fewer false alarms in source code (86d56e8)
+- a subagent's report no longer stops the session (fbbe7c5)
+- the session start deletes the code words an older detector stored (5757d20)
+- the review of the detector and the Windows fallback (d805b1e)
+- Codex on Windows blocks when the plugin folder is gone (28c64d0)
+- code after a colon is not a secret value (aa79eab)
+
+### Other
+
+- Merge branch 'feat/agent-reports' into 'main' (aa639a4)
 
 ## [0.5.14] - 2026-09-29
 
