@@ -307,6 +307,42 @@ class CmdExeFailsClosedTests(MovedPluginFolderFailsClosedTests):
                     self.assert_refused(event, r)
 
 
+class RunCmdFindsAnInstallOffThePathTests(unittest.TestCase):
+    """The python.org installer (also through winget) leaves PATH alone unless asked: run.cmd looks in its install
+    folder (reported 2026-09-30: Python 3.12.10 installed, maisecrets said it needs Python)."""
+
+    def setUp(self):
+        if os.name != "nt":
+            self.skipTest("cmd.exe runs on Windows only; the GitHub Windows runner and the e2e project run it")
+
+    def test_a_python_only_in_the_install_folder_runs_the_hook(self):
+        local = Path(tempfile.mkdtemp(prefix="maisecrets-localappdata-"))
+        self.addCleanup(shutil.rmtree, local, True)
+        (local / "Programs" / "Python").mkdir(parents=True)
+        # a junction to this Python, where the per-user installer puts it; no admin right needed for one
+        target = local / "Programs" / "Python" / "Python312"
+        subprocess.run(f'mklink /J "{target}" "{sys.base_prefix}"', shell=True, check=True,
+                       capture_output=True)
+        self.addCleanup(lambda: os.rmdir(target))
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+        # a PATH with no Python and no py launcher; the real install folder of this Python, not a venv
+        env["PATH"] = os.path.join(os.environ["SystemRoot"], "System32")
+        env["LOCALAPPDATA"] = str(local)
+        if os.path.exists(os.path.join(os.environ["SystemRoot"], "py.exe")):
+            # the all-users py launcher would answer first; a wrong SystemRoot can hurt Python, so only then
+            env["SystemRoot"] = str(local)
+        env["ProgramFiles"] = str(local / "none")
+        home = Path(tempfile.mkdtemp(prefix="maisecrets-home-"))
+        self.addCleanup(shutil.rmtree, home, True)
+        (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True}))
+        env["MAISECRETS_HOME"] = str(home)
+        r = subprocess.run([os.path.join(os.environ["SystemRoot"], "System32", "cmd.exe"), "/C",
+                            str(RUN_CMD), "user-prompt"], input='{"prompt": "x", "session_id": "S", "prompt_id": "p"}',
+                           capture_output=True, text=True, env=env, timeout=60)
+        self.assertNotIn("needs Python", r.stdout + r.stderr)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
 class CmdExeForwardSlashRootTests(CmdExeFailsClosedTests):
     SLASH = "/"
 
@@ -341,7 +377,7 @@ class RunCmdFailsClosedTests(unittest.TestCase):
 
     def test_dispatch_runs_only_behind_a_passed_version_probe(self):
         runs = [i for i, ln in enumerate(self.lines) if "dispatch.py" in ln and not ln.startswith("rem")]
-        self.assertEqual(len(runs), 3, "py -3, python, python3")
+        self.assertEqual(len(runs), 5, "py -3, python, python3, the py launcher, a python.org install folder")
         for i in runs:
             interp = self.lines[i].split('"%HERE%dispatch.py"')[0].strip()
             self.assertEqual(self.lines[i - 1], "if not errorlevel 1 (", self.lines[i])
