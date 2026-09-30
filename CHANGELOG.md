@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.5.19] - 2026-09-30
+
+### Fixes
+
+- find Python in its install folder when it is not on PATH (21f0d65)
+
+### Other
+
+- Merge branch 'fix/find-installed-python' into 'main' (35e1b45)
+
 ## [0.5.18] - 2026-09-30
 
 ### Fixes
