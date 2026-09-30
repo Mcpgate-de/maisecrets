@@ -118,6 +118,55 @@ class ReleaseTreeTests(unittest.TestCase):
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
+    def test_each_directory_hook_names_one_program_and_nothing_computed(self):
+        # the directory refused 0.5.15 and 0.5.16 (UNPINNED_NPX): no variable but the plugin root, no command
+        # substitution, no wildcard, no inline program
+        tree = json.loads((self.tree / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        main = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        for event, entries in tree["hooks"].items():
+            for i, entry in enumerate(entries):
+                for j, h in enumerate(entry["hooks"]):
+                    for key in ("command", "commandWindows"):
+                        with self.subTest(event=event, key=key):
+                            cmd = h[key]
+                            rest = cmd.replace("${CLAUDE_PLUGIN_ROOT}", "")
+                            self.assertNotRegex(rest, r"[$`*?;&|<>(){}\n]", cmd)
+                            self.assertRegex(cmd, r'^(?:bash )?"\$\{CLAUDE_PLUGIN_ROOT\}/hooks/run\.(?:sh|cmd)" '
+                                                  r'[\w-]+$')
+                    # the same events, matchers and timeouts as main: only the commands differ
+                    m = main["hooks"][event][i]
+                    self.assertEqual(entry.get("matcher"), m.get("matcher"))
+                    self.assertEqual(h["timeout"], m["hooks"][j]["timeout"])
+                    self.assertEqual(h["command"].split()[-1], re.search(r'run\.sh" ([\w-]+)',
+                                                                          m["hooks"][j]["command"]).group(1))
+        self.assertEqual(tree["hooks"].keys(), main["hooks"].keys())
+
+    @unittest.skipIf(os.name == "nt", "the bash form; Windows runs commandWindows")
+    def test_the_directory_hook_command_blocks_a_secret(self):
+        tree = json.loads((self.tree / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        cmd = tree["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"].replace("${CLAUDE_PLUGIN_ROOT}",
+                                                                                   str(self.tree))
+        home = Path(tempfile.mkdtemp(prefix="maisecrets-release-home-"))
+        try:
+            (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True}))
+            env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX_"))}
+            sink = home / "bin"   # the clipboard copy of the cleaned prompt goes here, not to a real tool
+            sink.mkdir()
+            for tool in ("pbcopy", "xclip"):
+                (sink / tool).write_text("#!/bin/sh\ncat >/dev/null\n", encoding="utf-8")
+                (sink / tool).chmod(0o755)
+            env.update(MAISECRETS_HOME=str(home), MS_TEST_CLIP=str(home / "clip"),
+                       PATH=str(sink) + os.pathsep + env.get("PATH", ""))
+            token = "glpat-" + "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(20))
+            payload = json.dumps({"prompt": f"use {token}", "session_id": "S1", "transcript_path": "",
+                                  "prompt_id": "p1"})
+            r = subprocess.run(["bash", "-c", cmd], input=payload, capture_output=True, text=True, env=env,
+                               timeout=60, cwd=str(home))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(json.loads(r.stdout).get("decision"), "block", r.stdout)
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
     def test_a_commit_continues_the_history_of_its_parent(self):
         cwd = os.getcwd()
         os.chdir(ROOT)
