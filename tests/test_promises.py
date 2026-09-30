@@ -349,6 +349,45 @@ class RunCmdFindsAnInstallOffThePathTests(unittest.TestCase):
         self.assertNotIn('"prompt"', record)
 
 
+class RunCmdClearedEnvironmentTests(unittest.TestCase):
+    """Codex clears the environment of a hook and replays a snapshot (codex-rs command_runner.rs). With no
+    variables at all run.cmd found no Python (exit 2, a failed hook), and with SystemRoot and PATH only, Python
+    found no home directory (measured on windows-latest, 2026-09-30). The Codex form of the hook must block."""
+
+    def setUp(self):
+        if os.name != "nt":
+            self.skipTest("cmd.exe runs on Windows only; the GitHub Windows runner and the e2e project run it")
+
+    def test_the_codex_command_blocks_with_an_empty_environment_and_an_umlaut_profile(self):
+        base = Path(tempfile.mkdtemp(prefix="maisecrets-empty-env-"))
+        self.addCleanup(shutil.rmtree, base, True)
+        profile = base / "Users" / "Tëst Adämmer (x86)"
+        root = profile / ".codex" / "plugins" / "cache" / "workspace-directory" / "maisecrets" / "0.0.0"
+        for d in ("hooks", "maisecrets"):
+            shutil.copytree(ROOT / d, root / d)
+        # the profile run.cmd derives from its own path holds the store: a temp one, never the real one
+        (profile / ".maisecrets").mkdir()
+        (profile / ".maisecrets" / "config.json").write_text(
+            json.dumps({"backend": "jsonfile", "allow_plaintext_store": True}))
+        # the Python the installer puts in Program Files for all users; the runner's Python has no other name here
+        pf = Path(os.environ["ProgramFiles"]) / "Python312"
+        if not (pf / "python.exe").exists():
+            made = subprocess.run(f'mklink /J "{pf}" "{sys.base_prefix}"', shell=True, capture_output=True)
+            if made.returncode != 0:
+                self.skipTest("cmd.exe runs on Windows only; a junction in Program Files needs an administrator")
+            self.addCleanup(os.rmdir, pf)
+        data = json.loads((root / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        line = data["hooks"]["UserPromptSubmit"][0]["hooks"][0]["commandWindows"].replace("${CLAUDE_PLUGIN_ROOT}",
+                                                                                          str(root))
+        payload = json.dumps({"prompt": "reach me at x" + chr(64) + "beispiel-gmbh.de", "session_id": "S",
+                              "turn_id": "T", "hook_event_name": "UserPromptSubmit"})
+        comspec = os.path.join(os.environ["SystemRoot"], "System32", "cmd.exe")
+        r = subprocess.run(f'"{comspec}" /C "{line}"', input=payload, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", env={}, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(json.loads(r.stdout).get("decision"), "block", r.stdout + r.stderr)
+
+
 class CmdExeForwardSlashRootTests(CmdExeFailsClosedTests):
     SLASH = "/"
 
