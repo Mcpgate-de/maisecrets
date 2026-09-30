@@ -26,6 +26,8 @@ class CommandFormTests(unittest.TestCase):
                 sub = re.search(r'hooks/run\.sh" (\w+)', s).group(1)
                 self.assertIn(f'& "${{CLAUDE_PLUGIN_ROOT}}/hooks/run.cmd" {sub}', s)
                 self.assertIn(f'PowerShell(& "${{CLAUDE_PLUGIN_ROOT}}/hooks/run.cmd" {sub}', s)
+                # the Codex sandbox on Windows runs the command as another user (measured 2026-09-30)
+                self.assertIn("outside the sandbox, with escalated permissions", s)
                 if "--args-stdin" in s:
                     # a single-quoted here-string, so PowerShell expands nothing in the arguments
                     self.assertRegex(s, r"@'\n\$ARGUMENTS\n'@ \| & ")
