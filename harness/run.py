@@ -465,6 +465,10 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                 sub = Path(str(pl.get("transcript_path", ""))[:-len(".jsonl")]) / "subagents"
                 fails.append(f"diag: output file {f.name} link={f.is_symlink()} exists={f.exists()} "
                              f"real={os.path.realpath(f)[-80:]}; subagents={sorted(x.name for x in sub.glob('*'))[:5]}")
+                probe = [sys.executable, str(ROOT / "harness" / "report_probe.py"), str(ROOT), str(pf)]
+                r2 = subprocess.run(probe, capture_output=True, text=True, env={**env, "MAISECRETS_HOME": str(home)},
+                                    timeout=60)
+                fails.append("diag: " + (r2.stdout.strip() or r2.stderr.strip()[-300:]))
     for text in sc.get("expect_not_in_requests", []):
         if text in joined:
             fails.append(f"{text[:12]!r}... reached the model")
