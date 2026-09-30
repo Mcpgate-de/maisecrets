@@ -268,7 +268,9 @@ _GENERIC_TYPE = re.compile(r"<[A-Za-z_][\w, ]*>")
 _VERSION_RE = re.compile(r"v?\d+(?:\.\d+){1,3}(?:[-+.]?[A-Za-z0-9]+)?")
 _PART_TEMPLATE_RE = re.compile(r"\{[A-Za-z_][\w.]*(?:\[[^\]]*\]?)?\}?$|\{[A-Za-z_][\w.]*\}")
 _SHELL_EXPANSION_RE = re.compile(r"[?:+=-]{1,2}[A-Z_][A-Z0-9_]*")
-_ANCHOR_OR_TAG_RE = re.compile(r"[&*][A-Za-z_][\w-]*|!!?[A-Za-z][\w/-]*")
+# the names of anchors and tags are lower case (&creds_2024, &gitlab_token_fields, !vault, !!str); a value with
+# capitals after & or ! is a password (&Xk9v2Qm7…, !Passw0rd…; review of b4a7c54)
+_ANCHOR_OR_TAG_RE = re.compile(r"[&*][a-z_][a-z0-9_-]*|!!?[a-z][a-z0-9_/-]*")
 _PATH_IN_VALUE_RE = re.compile(r"(?:^|\s)(?:~|\.{1,2})?/[\w.-]+/[\w.-]+")
 _ESCAPED_TAIL_RE = re.compile(r"(?:\\[nrt])+$")
 _SUBSCRIPT_RE = re.compile(r"[A-Za-z_][\w.]*\[[\w.,\s]*\]?")
@@ -712,7 +714,7 @@ def in_test_code(text: str, start: int, path: str = "") -> bool:
     if k < 0 or defs[k] < begin:
         return False
     classes = _positions(text, "classes", _CLASS_LINE_RE)
-    c = bisect.bisect_left(classes, defs[k]) - 1
+    c = bisect.bisect_left(classes, end) - 1   # the class nearest above the hit, also one after the method
     if c < 0 or classes[c] < begin:
         return True
     return bool(_TEST_CLASS_LINE_RE.match(text, classes[c]))
@@ -1073,7 +1075,14 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
         return []
     low = _lower(text)
     found: list[Match] = []
-    taken: list[tuple[int, int]] = []
+    taken_starts: list[int] = []
+    taken_ends: list[int] = []
+
+    def overlaps(a: int, b: int) -> bool:
+        """Whether [a, b) overlaps a span already taken. The spans never overlap each other, so only the two
+        neighbours by start can; a scan over all of them was quadratic in the hits (review of b4a7c54)."""
+        i = bisect.bisect_left(taken_starts, a)
+        return (i > 0 and taken_ends[i - 1] > a) or (i < len(taken_starts) and taken_starts[i] < b)
     for rule in rules():
         if enabled is not None and rule.id not in enabled:
             continue
@@ -1103,13 +1112,17 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     if _CAPITALISED_WORD_RE.fullmatch(secret):
                         continue
             if rule.id.startswith("ds-keyword") and _ANCHOR_OR_TAG_RE.fullmatch(secret.strip()):
+                # a quoted scalar is never an anchor: the colon must stand right before it (review of b4a7c54)
                 nxt = re.match(r"[ \t]+([^\s#]+)", text[end:end + 300])
                 if nxt:
                     # password: &pw <value>, password: !vault <value>: the value follows the anchor or the tag
-                    # (review of 3e5d53e: the value after it was never scanned)
-                    start, end = end + nxt.start(1), end + nxt.end(1)
+                    # (review of 3e5d53e: the value after it was never scanned); its quotes are no part of it
+                    a, b = end + nxt.start(1), end + nxt.end(1)
+                    if b - a >= 2 and text[a] == text[b - 1] and text[a] in "'\"":
+                        a, b = a + 1, b - 1
+                    start, end = a, b
                     secret = text[start:end]
-                elif _before_value(text, start).rstrip(" \t\"'").endswith(":"):
+                elif _before_value(text, start).rstrip(" \t").endswith(":"):
                     continue   # a YAML anchor or alias alone after a colon label: &gitlab_token_fields
             if rule.id.startswith("ds-keyword") and (is_code_word(secret) or value_is_code(text, start, end, secret)):
                 continue
@@ -1142,7 +1155,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue
             if rule.type == "IP" and _SECTION_BEFORE_RE.search(text, max(0, start - 24), start):
                 continue   # a section number: RFC 6749 4.1.2.1, OIDC Core 3.1.2.1, section 7.1.2.3
-            if any(s < end and start < e for s, e in taken):
+            if overlaps(start, end):
                 continue
             if rule.entropy and shannon_entropy(secret) < rule.entropy:
                 continue
@@ -1189,11 +1202,13 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 end2 = end
                 while end2 < len(text) and end2 - end < 128 and _TOKEN_CHAR_RE.match(text[end2]):
                     end2 += 1
-                if end2 > end and _TOKEN_CHAR_RE.match(secret[-1]) and not any(s < end2 and end < e for s, e in taken):
+                if end2 > end and _TOKEN_CHAR_RE.match(secret[-1]) and not overlaps(end, end2):
                     end = end2
                     secret = text[start:end]
             found.append(Match(rule.id, rule.type, secret, start, end))
-            taken.append((start, end))
+            i = bisect.bisect_left(taken_starts, start)
+            taken_starts.insert(i, start)
+            taken_ends.insert(i, end)
     found.sort(key=lambda x: x.start)
     return found
 

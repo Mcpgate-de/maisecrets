@@ -322,6 +322,10 @@ class LastCommitReviewTests(unittest.TestCase):
         self.assertEqual(secrets(paste), [])
         prod = f"class Db:\n    def test_connection(self):\n        pass\nPASS§WORD = '{pw}'\n"
         self.assertEqual(secrets(prod), [pw])
+        # a production class between the test method and the value decides
+        between = (f"    def test_a(self):\n        pass\nclass Db:\n    def __init__(self):\n"
+                   f"        pass§word = '{pw}'\n")
+        self.assertEqual(secrets(between), [pw])
         # a marker far above in a long test class, lines of 900 characters
         long = "class TestLogin:\n" + ("    x = '" + "a" * 890 + "'\n") * 10 + f"    pass§word = \"{pw}\"\n"
         self.assertEqual(secrets(long), [])
@@ -333,6 +337,19 @@ class LastCommitReviewTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(secrets(text), [pw])
         self.assertEqual(found("pass§word: &creds_2024"), [])
+        # a quoted scalar or a name with capitals is no anchor or tag (review of b4a7c54)
+        for text in ('{"pass§word": "!Passw0rd2024xyz"}', '{"pass§word": "&Xk9v2Qm7Lp4Rt8Wz"}',
+                     "pass§word: '*Xk9v2Qm7Lp4Rt8Wz'", "the pass§word: !Xk9v2Qm7Lp4Rt8Wz"):
+            with self.subTest(text=text):
+                self.assertTrue(secrets(text), "a real value")
+        self.assertEqual(secrets('pass§word: &pw "Xk9v2Qm7Lp4Rt8Wz"'), ["Xk9v2Qm7Lp4Rt8Wz"], "without its quotes")
+        # a quoted value with a lower-case name is a value too: quotes make a scalar, never an anchor
+        self.assertEqual(secrets('{"pass§word": "&xk9v2qm7lp4rt8wz"}'), ["&xk9v2qm7lp4rt8wz"])
+
+    def test_a_hit_that_starts_inside_a_taken_span_is_no_second_hit(self):
+        # the keyword rule takes the whole value first; the token shape inside it starts within that span
+        text = "tok§en: abc12345glpat-" + "Q7w8E9r0T1y2U3i4O5p6"
+        self.assertEqual(len(detect.scan(text.replace("§", ""))), 1)
         self.assertEqual(found("  access_tok§en_fields: &gitlab_tok§en_fields"), [])
 
     def test_near_variants(self):

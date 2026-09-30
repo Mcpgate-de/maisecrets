@@ -82,6 +82,7 @@ SCENARIOS = {
     # files (C19). The value arriving in the session's next request is the proof; before 0.5.15 the report was
     # blocked and the session waited for a person (2026-09-29)
     "subagent_report_passes": {
+        "needs_notification": True,
         "prompt": "Ask a helper in the background to read the fixture, then wait for its report.",
         "allowed_tools": "Agent,Task",
         "turns": [{"tool": "Agent", "input": {"description": "read the fixture", "subagent_type": "general-purpose",
@@ -96,6 +97,7 @@ SCENARIOS = {
     # the same report with the pass switched off: blocked, and the value never reaches the model. The proof that
     # the scenario above can fail
     "subagent_report_blocked_when_off": {
+        "needs_notification": True,
         "prompt": "Ask a helper in the background to read the fixture, then wait for its report.",
         "allowed_tools": "Agent,Task",
         "config": {"pass_agent_reports": False},
@@ -423,6 +425,15 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                      "Claude Code version")
     if "maisecrets@synced" in dbg and "not loaded" not in dbg and "disabled" not in dbg.lower():
         fails.append("a synced maisecrets copy is loaded next to the checkout; the run is not testing the working tree")
+    if sc.get("needs_notification") and not any(
+            "<task-notification>" in str(json.loads(pf.read_text(errors="ignore")).get("prompt", ""))
+            for pf in dump.glob("*UserPromptSubmit*.json")):
+        # claude -p of 2.1.284 ended before the background agent's notification came (the Windows e2e,
+        # 2026-09-30); 2.1.285 waits for it. No notification means nothing to test, neither a pass nor a block
+        ver = subprocess.run([shutil.which("claude") or "claude", "--version"], capture_output=True, text=True,
+                             timeout=30).stdout.strip()
+        print(f"[SKIP] {name}: this client ({ver}) sent no task notification before -p ended  out={out}")
+        return []
     bodies = sorted(glob.glob(str(out / "request_*.json")))
     if len(bodies) != sc["expect_requests"]:
         fails.append(f"expected {sc['expect_requests']} requests, got {len(bodies)}")
