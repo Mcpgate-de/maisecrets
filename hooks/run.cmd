@@ -9,6 +9,12 @@ rem on a failed hook, so the message names the missing piece).
 rem Usage: run.cmd <user-prompt|pre-tool|post-tool|session-start>
 set PYTHONUTF8=1
 set "HERE=%~dp0"
+rem One line per start, overwritten: when a hook does not act, this says whether the client started it and with
+rem which environment. Codex clears the environment of a hook and replays a snapshot (codex-rs command_runner.rs);
+rem on one Windows machine no hook acted with Python installed (2026-09-30). Names and paths only, never a payload.
+set "MS_PATH=no"
+if defined PATH set "MS_PATH=yes"
+>"%HERE%last-start.txt" echo %DATE% %TIME% event=%~1 user=%USERNAME% localappdata=%LOCALAPPDATA% programfiles=%ProgramFiles% path=%MS_PATH%
 py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" >nul 2>&1
 if not errorlevel 1 (
   py -3 "%HERE%dispatch.py" %*
@@ -45,6 +51,7 @@ for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*" "%ProgramFiles%\Python3
     )
   )
 )
+>>"%HERE%last-start.txt" echo no Python 3.9 or newer found
 if "%~1"=="post-tool" (
   rem both shapes: updatedToolOutput for Claude Code, decision/reason for Codex
   echo {"decision":"block","reason":"[maisecrets needs Python 3.9 or newer. Install it for all users, as an administrator: winget install --id Python.Python.3.12 --exact --scope machine - a Python for one user only cannot run in the Codex sandbox. Then restart the client. Tool output withheld; the tool ran and finished, do not run it again.]","hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"[maisecrets needs Python 3.9 or newer. Install it for all users, as an administrator: winget install --id Python.Python.3.12 --exact --scope machine - a Python for one user only cannot run in the Codex sandbox. Then restart the client. Tool output withheld; the tool ran and finished, do not run it again.]"}}

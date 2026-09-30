@@ -341,6 +341,12 @@ class RunCmdFindsAnInstallOffThePathTests(unittest.TestCase):
                            capture_output=True, text=True, env=env, timeout=60)
         self.assertNotIn("needs Python", r.stdout + r.stderr)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # the start record says which event ran with which environment, and nothing of the payload
+        record = (RUN_CMD.parent / "last-start.txt").read_text(encoding="utf-8", errors="replace")
+        self.assertIn("event=user-prompt", record)
+        self.assertIn(f"localappdata={local}", record)
+        self.assertNotIn("no Python", record)
+        self.assertNotIn('"prompt"', record)
 
 
 class CmdExeForwardSlashRootTests(CmdExeFailsClosedTests):

@@ -13,3 +13,4 @@ dist/
 
 # agent worktrees (Claude Code)
 .claude/
+hooks/last-start.txt
