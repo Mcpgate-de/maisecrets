@@ -2,10 +2,20 @@
 
 ## Unreleased
 
+## [0.5.16] - 2026-09-30
+
 - **The Claude plugin directory accepts the hooks again.** It refused 0.5.15 because the PowerShell
   part of each hook started `hooks/run.cmd` from a variable; the directory wants every program named
   by its path. The hooks now name `${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd` directly. Nothing changes in
   what they do.
+
+### Fixes
+
+- the Claude plugin directory accepts the hooks again (70e73df)
+
+### Other
+
+- Merge branch 'fix/directory-spell-the-program' into 'main' (8d1a65e)
 
 ## [0.5.15] - 2026-09-30
 
