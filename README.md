@@ -180,6 +180,13 @@ soon as it installs a new one, and an open Codex session then runs the command
 of a folder that is gone (codex-cli 0.159.0, measured 2026-09-29). Exit that
 session and run `codex resume`.
 
+The install from the Claude plugin directory does not have this refusal. The
+directory accepts only a hook command that names one program, so its copy (the
+GitHub branch `release`) runs `run.sh` or `run.cmd` directly. If that folder is
+gone, the hook does not run. Claude Code on Windows then also needs Git Bash. A
+directory install keeps the old version folder for 14 days, so an open session
+keeps its hooks. The install from this repository (`main`) keeps the refusal.
+
 - Installed from this GitHub marketplace (the commands above), a previous version
   stays for 14 days, "so a session that already loaded the old version keeps
   running" ([Claude Code docs](https://code.claude.com/docs/en/plugins/loading#cleanup-of-previous-versions)).

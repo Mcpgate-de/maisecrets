@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [0.5.17] - 2026-09-30
+
+### Fixes
+
+- ship hooks that name one program on the release branch (d307228)
+- name a PowerShell form for Windows without bash (f02419a)
+
+### Other
+
+- Merge branch 'fix/commands-on-windows' into 'main' (efba65c)
+
 ## [0.5.16] - 2026-09-30
 
 - **The Claude plugin directory accepts the hooks again.** It refused 0.5.15 because the PowerShell

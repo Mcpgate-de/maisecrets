@@ -1,6 +1,6 @@
 ---
 description: Store the value in your clipboard in the maisecrets vault and get a placeholder back (for a password without a recognisable shape). The value never reaches the model.
-allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" put *)
+allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" put *), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" put *)
 ---
 
 The user has copied a secret to the clipboard. Run exactly this command and show the user its
@@ -11,6 +11,16 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" put --clipboard --args-stdin <<'MAISEC
 $ARGUMENTS
 MAISECRETS_ARGS_END
 ```
+
+On Windows without bash (PowerShell: the ChatGPT app, Codex on Windows, Claude Code without Git Bash), run this instead:
+
+```
+@'
+$ARGUMENTS
+'@ | & "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" put --clipboard --args-stdin
+```
+
+If `${CLAUDE_PLUGIN_ROOT}` is still written like that when the command runs, put `$env:CLAUDE_PLUGIN_ROOT` in its place. The single-quoted here-string keeps the arguments as they are, as the quoted heredoc does.
 
 The arguments go in the quoted heredoc as they are, so the shell never reads them as code. Do not move them onto the command line, and do not add quotes.
 
