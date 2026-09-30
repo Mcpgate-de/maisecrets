@@ -745,6 +745,14 @@ def main(argv: list[str] | None = None) -> int:
     except RuntimeError as exc:
         print(f"maisecrets {argv[0]}: {exc}", file=sys.stderr)
         return 1
+    except PermissionError as exc:
+        # Codex on Windows runs a slash command as a sandbox user that may read the person's profile but not
+        # write it (measured 2026-09-30); the traceback told the person nothing. The path is the store folder,
+        # never a value.
+        print(f"maisecrets {argv[0]}: no write access to {exc.filename or 'the store folder'}. The command runs as "
+              "a different user than the one maisecrets protects, as the Codex sandbox on Windows does. Run it "
+              "again outside the sandbox (Codex asks you to approve that).", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
