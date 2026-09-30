@@ -62,8 +62,10 @@ What works: Python installed for all users, in `C:\Program Files`. This needs an
 
     winget install --id Python.Python.3.12 --exact --scope machine
 
-Remove a per-user install of the same package first (`winget uninstall --id Python.Python.3.12 --exact`), or
-winget reports it as installed and changes nothing. In an organisation, ship it through the software
+Remove a per-user install of the same version first, in a terminal that is *not* elevated
+(`winget uninstall --id Python.Python.3.12 --exact`). An elevated winget refuses it ("The package installed for
+user scope cannot be uninstalled when running with administrator privileges"), and while it is there the
+installer for all users stops with exit code 1603 (measured 2026-09-30). In an organisation, ship it through the software
 distribution (Intune, MDM). Not yet measured: whether the sandbox user may start Python from
 `C:\Program Files`, and whether Codex runs the hooks themselves as the person or as the sandbox user.
 
