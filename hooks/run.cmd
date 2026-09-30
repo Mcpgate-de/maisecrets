@@ -14,7 +14,19 @@ rem which environment. Codex clears the environment of a hook and replays a snap
 rem on one Windows machine no hook acted with Python installed (2026-09-30). Names and paths only, never a payload.
 set "MS_PATH=no"
 if defined PATH set "MS_PATH=yes"
->"%HERE%last-start.txt" echo %DATE% %TIME% event=%~1 user=%USERNAME% localappdata=%LOCALAPPDATA% programfiles=%ProgramFiles% path=%MS_PATH%
+>"%HERE%last-start.txt" echo %DATE% %TIME% event=%~1 user=%USERNAME% profile=%USERPROFILE% localappdata=%LOCALAPPDATA% programfiles=%ProgramFiles% path=%MS_PATH%
+rem Codex clears the environment of a hook and replays a snapshot (codex-rs command_runner.rs). Without these
+rem variables Python finds no home directory and run.cmd no Python (measured on windows-latest, 2026-09-30).
+if not defined SystemRoot set "SystemRoot=C:\Windows"
+if not defined ProgramFiles set "ProgramFiles=C:\Program Files"
+if not defined PATH set "PATH=%SystemRoot%\System32;%SystemRoot%"
+if defined USERPROFILE goto :profile_set
+rem the plugin sits in <profile>\.codex\...: the part before \.codex\ is the profile
+set "MS_UP=%HERE:\.codex\=|%"
+if "%MS_UP%"=="%HERE%" goto :profile_set
+for /f "tokens=1 delims=|" %%A in ("%MS_UP%") do set "USERPROFILE=%%A"
+:profile_set
+if not defined LOCALAPPDATA if defined USERPROFILE set "LOCALAPPDATA=%USERPROFILE%\AppData\Local"
 py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" >nul 2>&1
 if not errorlevel 1 (
   py -3 "%HERE%dispatch.py" %*
