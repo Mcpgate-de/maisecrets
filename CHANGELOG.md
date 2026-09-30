@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.5.22] - 2026-09-30
+
+### Fixes
+
+- run.cmd records each start, so a hook that does not act can be traced (e87c522)
+
+### Other
+
+- Merge branch 'fix/run-cmd-last-start' into 'main' (19a19a8)
+
 ## [0.5.21] - 2026-09-30
 
 ### Fixes
