@@ -11,6 +11,7 @@ Events:
 """
 from __future__ import annotations
 
+import html
 import json
 import os
 import platform
@@ -20,7 +21,7 @@ import time
 import sys
 from typing import Any
 
-from . import detect
+from . import detect, rehydration
 from .placeholder import find_refs
 from .vault import ConfigError, Vault, load_config
 
@@ -377,11 +378,13 @@ PRIMER = (
     "when the command runs. For awk, pass it as V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. To give a value to a "
     "remote host, pipe it on stdin to the command that reads it, for example "
     "printf '%s' ⟦KEY⟧ | ssh host 'sudo zgrep -F -f - /var/log/app.log' (inside the Claude Code sandbox, "
-    "one host per command; the user confirms it). A form that would run the value as code or change it "
+    "one host per command). A form that would run the value as code or change it "
     "(a nested shell, eval, backticks, $'…', a quoted heredoc, an encoder, a slice, set -x) gets an answer "
     "that names a form that works. The value stays with the user: to use it, use the placeholder; the user "
     "manages the stored values and the settings. When the user asks for the value in a file or a command, "
-    "put the placeholder there as they asked."
+    "put the placeholder there as they asked. In test data, write values that name themselves (testpass, "
+    "my-test-token), addresses at example.com and placeholders such as <your-token>: maisecrets leaves them "
+    "alone, and a password in a test file is taken for a fixture."
 )
 
 
@@ -435,6 +438,163 @@ def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: 
     return lines
 
 
+# A subagent's report reaches the session as a prompt (<task-notification>), and a prompt hook can only
+# block or pass it: a report that quoted a value of the right shape stopped the session until the person
+# pasted it again (2026-09-29, twice in one review). The text was written by a model of this session, so
+# every value in it was in a model's context already, and blocking it protects nothing. The hook payload
+# has no origin field (Claude Code 2.1.284), so the report proves itself: one notification block, a tool
+# use id that this session's transcript gives to an Agent or SendMessage call, an output file in this
+# session's subagents folder, and a result equal to that subagent's last answer. A typed or pasted text,
+# a background command, a monitor event: none of them passes, and no value outside the result passes
+# (docs/THREAT-MODEL.md C19).
+_NOTIFICATION_RE = re.compile(r"<task-notification>\n(?P<body>.*?)\n</task-notification>", re.S)
+_AGENT_TOOLS = ("Agent", "Task", "SendMessage")
+
+
+def _notification_tag(body: str, name: str) -> str | None:
+    # the short fields (id, path, status) never hold a tag of their own
+    m = re.search(rf"<{name}>([^<]*)</{name}>", body)
+    return m.group(1) if m else None
+
+
+def _result_span(body: str) -> tuple[int, int] | None:
+    """The span of the result text in a notification body: from the first <result> to the last </result>. The
+    result is the subagent's own text, and a `<` in it (`Option<String>`, `a < b`) ended a match on `[^<]*` early,
+    so a real report was blocked (review, 2026-09-29)."""
+    a = body.find("<result>")
+    b = body.rfind("</result>")
+    return (a + len("<result>"), b) if 0 <= a and a + len("<result>") <= b else None
+
+
+def _plain(text: str) -> str:
+    return text.replace("\r\n", "\n").strip()
+
+
+def _last_answer(path: str) -> str | None:
+    """The text of the subagent's last message. Claude Code writes one record per content block of a message, all
+    with the same message id: a final answer of two text blocks (text, thinking, text) is two records, and taking
+    the last one alone blocked the report (review, 2026-09-29)."""
+    text_id, parts = None, []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if '"assistant"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("type") != "assistant":
+                    continue
+                msg = rec.get("message") or {}
+                texts = [b.get("text", "") for b in msg.get("content") or []
+                         if isinstance(b, dict) and b.get("type") == "text"]
+                if not texts:
+                    continue
+                mid = msg.get("id")
+                if mid is None or mid != text_id:
+                    text_id, parts = mid, []
+                parts.extend(texts)
+    except OSError:
+        return None
+    return "\n".join(parts) if parts else None
+
+
+def _called_an_agent(transcript: str, tool_use_id: str) -> bool:
+    try:
+        with open(transcript, encoding="utf-8") as f:
+            for line in f:
+                if tool_use_id not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("type") != "assistant":
+                    continue
+                for b in (rec.get("message") or {}).get("content") or []:
+                    if (isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id") == tool_use_id
+                            and b.get("name") in _AGENT_TOOLS):
+                        return True
+    except OSError:
+        return False
+    return False
+
+
+def _one_report_proves_itself(body: str, transcript: str) -> bool:
+    span = _result_span(body)
+    tool_use_id = _notification_tag(body, "tool-use-id")
+    out = _notification_tag(body, "output-file")
+    if span is None or not tool_use_id or not out or _notification_tag(body, "status") != "completed":
+        return False
+    subagents = os.path.realpath(transcript[: -len(".jsonl")]) + os.sep + "subagents" + os.sep
+    real = os.path.realpath(out)
+    if not real.startswith(subagents) or not real.endswith(".jsonl"):
+        # on Windows the output file under the temp folder is no link into the session (a link needs a right
+        # there), so the report named a file outside it and was blocked (Windows e2e, 2026-09-30). The subagent's
+        # own transcript is found by its task id, in this session's folder only
+        task_id = _notification_tag(body, "task-id") or ""
+        if not re.fullmatch(r"[A-Za-z0-9]{6,64}", task_id):
+            return False
+        real = subagents + f"agent-{task_id}.jsonl"
+        if not os.path.isfile(real):
+            return False
+    answer = _last_answer(real)
+    if answer is None or _plain(answer) != _plain(html.unescape(body[span[0]:span[1]])):
+        return False
+    return _called_an_agent(transcript, tool_use_id)
+
+
+def agent_report(payload: dict, prompt: str) -> bool:
+    """True when the prompt is nothing but proven reports of this session's subagents, and no value is outside their
+    results: no shape, and no value the store holds (a stored value without a shape in a summary passed, Codex
+    review, 2026-09-29)."""
+    rest = _report_rest(payload, prompt)
+    if rest is None:
+        return False
+    if _has_live(load_config()) and _inserted_values(rest, Vault(load_config())):
+        return False
+    return True
+
+
+def _report_rest(payload: dict, prompt: str) -> str | None:
+    """The text outside the results when the prompt is nothing but reports of subagents of this session, each
+    proven as described above; None otherwise. Two agents that finish in the same turn may arrive in one prompt;
+    each block proves itself."""
+    transcript = str(payload.get("transcript_path") or "")
+    if not transcript.endswith(".jsonl"):
+        return None
+    # one opening tag per closing tag, counted before any regex: a megabyte of opening tags kept the lazy match
+    # scanning past the watchdog (Codex review, 2026-09-29)
+    opened = prompt.count("<task-notification>")
+    if not opened or opened != prompt.count("</task-notification>") or opened > 16:
+        return None
+    blocks = list(_NOTIFICATION_RE.finditer(prompt))
+    if not blocks:
+        return None
+    # nothing but the blocks: a text typed before, between or after them is a person's
+    pos = 0
+    for m in blocks:
+        if prompt[pos:m.start()].strip():
+            return None
+        pos = m.end()
+    if prompt[pos:].strip() or opened != len(blocks):
+        return None
+    if not all(_one_report_proves_itself(m.group("body"), transcript) for m in blocks):
+        return None
+    # only a result is the subagent's text: a value in another field (a real report pasted again, with a value
+    # added to its summary) was typed by a person and must be blocked (review, 2026-09-29)
+    rest, pos = [], 0
+    for m in blocks:
+        body = m.group("body")
+        a, b = _result_span(body)
+        rest.append(prompt[pos:m.start("body") + a])
+        pos = m.start("body") + b
+    rest.append(prompt[pos:])
+    text = "".join(rest)
+    return None if detect.scan(text) else text
+
+
 def user_prompt(payload: dict) -> dict:
     cfg = load_config()
     prompt = payload.get("prompt", "")
@@ -454,9 +614,21 @@ def user_prompt(payload: dict) -> dict:
                     "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True},
                 }
 
+    # a subagent's report: before the references are admitted (a model wrote them, not the human) and
+    # before anything is stored; the audit line counts it
+    if cfg.get("pass_agent_reports", True) and client_of(payload) == "claude" and agent_report(payload, prompt):
+        found = detect.scan(prompt)
+        if found:
+            from types import SimpleNamespace
+            from . import events
+            # nothing is stored: kinds and types only, no key
+            events.record("UserPromptSubmit", "claude", [SimpleNamespace(key="-", type=m.type, kind=m.kind)
+                                                         for m in found], outcome="passed: a subagent report")
+        return {}
+
     # 2. references the human typed or pasted: this session may resolve them from now on
     typed = find_refs(prompt)
-    matches = detect.scan(prompt)
+    matches = [m for m in detect.scan(prompt) if not detect.is_fixture(m, prompt)]
     vault = None
     if typed or matches or _has_live(cfg):
         vault = Vault(cfg)
@@ -508,28 +680,46 @@ def user_prompt(payload: dict) -> dict:
 # text matching is a backstop, never the boundary (docs/THREAT-MODEL.md C8); each pattern is
 # named so a deny can say what it matched and the user can report a false positive
 _STORE_READ_PATTERNS: list[tuple[str, str]] = [
-    ("maisecrets get", r"(?<![\w.-])maisecrets(?:\.cli)?(?:\.py)?\s+get\b|(?<![\w-])cli\.py\s+get\b"),
+    # the launchers route `get` to the CLI too (review, 2026-09-29: `run.sh get` and `run.cmd get` passed)
+    ("maisecrets get", r"(?<![\w.-])maisecrets(?:\.cli)?(?:\.py)?\s+get\b|(?<![\w-])cli\.py\s+get\b"
+                       r"|(?<![\w-])(?:dispatch\.py|run\.sh|run\.cmd)[\"']?\s+get\b"),
     ("keychain read of the maisecrets service",
      r"security\s+find-generic-password[^\n]*maisecrets|security\s+dump-keychain"),
-    ("Credential Locker read", r"PasswordVault[^\n]*maisecrets|maisecrets[^\n]*PasswordVault"),
+    # listing every credential names no resource (review, 2026-09-29): the type itself is the read
+    ("Credential Locker read", r"PasswordVault[^\n]*maisecrets|maisecrets[^\n]*PasswordVault"
+                               r"|Windows\.Security\.Credentials\.PasswordVault"
+                               r"|PasswordVault[^\n]*Retrieve(?:All|Password)"),
     ("the vault files", r"vault\.enc\.json|vault\.json[^\n]*maisecrets|maisecrets[^\n]*vault\.json"),
-    ("the maisecrets home directory", r"(?i:\.maisecrets)(?![\w-])|MAISECRETS_HOME"),
+    # MAISEC~1: the 8.3 name Windows gives the default home (review, 2026-09-29)
+    # a wildcard that opens it: ~/.maisec*/index.json (review, 2026-09-29)
+    ("the maisecrets home directory", r"(?i:\.maisecrets|maisec~\d)(?![\w-])|(?i:\.mais\w*[*?])"
+                                      r"|MAISECRETS_HOME"),
     ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"
                            r"|(?<![\w-])resolve\s+\S+\s+--grant\b|cmd_resolve|\.redeem\("),
     ("the ssh approval store", r"ssh-approvals|ssh_approval"),
+    # the guard outside the plugin folder: `--off` in its refusal is for the person, not the agent
+    ("the maisecrets guard", r"maisecrets-guard\.py"),     # guard.json sits in the home, covered above
     ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\](?:v-|sealed)|__ms_\d+\b"
                               r"|XDG_RUNTIME_DIR[^\n]*maisecrets"),
 ]
 _STORE_READ_RE = re.compile("|".join(f"(?P<p{i}>{rx})" for i, (_n, rx) in enumerate(_STORE_READ_PATTERNS)))
+# PowerShell on Windows: command names and file names in any case (Get-Content VAULT.ENC.JSON reads the file)
+_STORE_READ_RE_I = re.compile(_STORE_READ_RE.pattern, re.IGNORECASE)
 
 
-def _store_read_match(command: str) -> str | None:
-    """The name of the backstop pattern a command matches, or None."""
+def _store_read_match(command: str, windows_paths: bool = False) -> str | None:
+    """The name of the backstop pattern a command matches, or None. With windows_paths, a directory
+    matches in any case and with / or \\ between its parts, as a Windows path does."""
     for d in _store_dir_spellings():
         # a home set by environment variable has no `.maisecrets` in its name (invariant I3, 2026-09-28)
-        if re.search(re.escape(d) + r"(?![\w.-])", command):
+        if windows_paths:
+            # Win32 drops trailing dots of a path part: `<home>.\index.json` opens the home (review, 2026-09-29)
+            rx = r"\.*[/\\]+".join(re.escape(p) for p in re.split(r"[/\\]+", d)) + r"\.*(?![\w.-])"
+            if re.search(rx, command, re.IGNORECASE):
+                return "the maisecrets home directory"
+        elif re.search(re.escape(d) + r"(?![\w.-])", command):
             return "the maisecrets home directory"
-    m = _STORE_READ_RE.search(command)
+    m = (_STORE_READ_RE_I if windows_paths else _STORE_READ_RE).search(command)
     if not m:
         return None
     for i, (name, _rx) in enumerate(_STORE_READ_PATTERNS):
@@ -1099,8 +1289,7 @@ def _ssh_way(why: str) -> str:
     not only the rule: an ops user needs root-only logs, and "the remote su would hand the value to
     another shell" left no way forward (field report on 0.5.8, 2026-09-28)."""
     base = ("To give a value to a remote host, pipe it on stdin to the command that reads it, inside the "
-            "Claude Code sandbox, one host per command: printf '%s' ⟦KEY⟧ | ssh HOST 'zgrep -F -f - FILE'. "
-            "The user confirms it.")
+            "Claude Code sandbox, one host per command: printf '%s' ⟦KEY⟧ | ssh HOST 'zgrep -F -f - FILE'.")
     # the second hop first: its reason names "another shell or host" too
     if re.search(r"\bremote (?:ssh|sshpass|plink|mosh|autossh|scp|sftp|rsync)\b|\bjump\b|\bproxy\b", why):
         return "For a host behind another host, run one ssh command per host. " + base
@@ -1235,15 +1424,16 @@ def _remote_is_read_only(remote: str) -> bool:
 
 
 def _ssh_route(command: str, ctxs: list[str], refs: list[tuple[str, int, int]]) -> dict | str:
-    """The one way a value may reach ssh: on stdin, through the Claude Code sandbox, after the
-    user confirms. Returns the plan, or the reason the command is refused.
+    """The one way a value may reach ssh: on stdin, through the Claude Code sandbox. Returns the
+    plan, or the reason the command is refused. Whether the user confirms is the rehydration
+    policy's decision (rehydration.py), not the route's.
 
     Two review rounds broke a host allowlist that read the destination from the command text (a
     quoted -oProxyCommand after the host reached another host). The sandbox needs no such proof:
     no command reaches the network directly, and its proxy admits only the allowed hosts
     (measured 2026-09-27 on macOS and Debian 13: 200 for an allowed host, 403 for another). What
-    the sandbox cannot see is the remote side, which may pass the value on; so the user reads the
-    remote command and confirms. The value never sits in ssh's arguments, where the remote
+    the sandbox cannot see is the remote side, which may pass the value on; under "confirm" the
+    user reads the remote command first. The value never sits in ssh's arguments, where the remote
     shell would parse it as code."""
     import shlex
     segs = _segments(command, ctxs)
@@ -1507,16 +1697,28 @@ def _ask(new_input: dict, reason: str) -> dict:
 
 def _updated(payload: dict, new_input: dict) -> dict:
     if client_of(payload) == "codex":
-        # Codex accepts updatedInput only together with "allow", and "allow" skips its approval prompt
-        # for this call (codex-cli 0.155.1; README "Codex approves nothing here").
+        # Codex accepts updatedInput only together with "allow". It does not skip Codex's own approval
+        # of an MCP tool (codex-cli 0.158.0, 2026-09-28); for a shell command see README "Codex gets allow".
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
                                        "updatedInput": new_input}}
     # Claude Code: no permissionDecision, the normal permission rules apply to the rewritten input.
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": new_input}}
 
 
+def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: str) -> dict:
+    """The decision for a call that got its values, by the rehydration policy of the path. A deny here
+    means the early refusal was skipped: fail closed, the rewritten input stays in the hook."""
+    decision = rehydration.outcome(client_of(payload), rehydration.policy(cfg, path))
+    if decision == "ask":
+        return _ask(new_input, reason)
+    if decision in ("defer", "allow"):
+        return _updated(payload, new_input)
+    return _deny("maisecrets: the rehydration policy refuses this call. Nothing ran.")
+
+
 _ARGS_END = "MAISECRETS_ARGS_END"
-_ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" (?:audit|forget|put --clipboard|report|shortcut) "
+_ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" "
+                           r"(?:audit|forget|guard|put --clipboard|report|shortcut) "
                            r"--args-stdin <<'" + _ARGS_END + r"'\n(.*)\n" + _ARGS_END + r"\n?\Z", re.S)
 
 
@@ -1532,6 +1734,29 @@ def _args_call_refusal(command: str) -> str | None:
         return ("maisecrets: a maisecrets command with --args-stdin must have exactly the form of its command "
                 f"file, and its arguments must not contain a line {_ARGS_END}. The command did not run. Tell the "
                 "user to write the arguments without that line.")
+    return None
+
+
+_NEEDS_GIT_BASH = " (on Windows these commands need Git for Windows)"
+
+
+def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
+    """The refusal for a shell command (Bash, PowerShell) that names the store, or None. The PowerShell tool
+    runs where Git Bash is missing, and the /maisecrets commands run through Bash: its reason says so."""
+    matched = _store_read_match(command, windows_paths)
+    also = _NEEDS_GIT_BASH if windows_paths else ""
+    if matched == "the maisecrets guard":
+        # not the store: the person switches the guard off, and says so to the agent (live session, 2026-09-29)
+        return _deny("maisecrets: this command touches the maisecrets guard, which only the person switches off "
+                     f"(/maisecrets:guard remove, or --off in a terminal){also}. The command did not run. If the task "
+                     "needs something about the guard, tell the user what; /maisecrets:guard status shows its state.")
+    if matched:
+        # said as what the user does next, not as a check to stay inside: "do not rephrase … to get around
+        # the check" next to an ops request read like an attempt to get around a control (ops review, 2026-09-28)
+        return _deny(f"maisecrets: this command touches {matched}, the user's own store. The user manages it "
+                     f"with /maisecrets:list and /maisecrets:forget{also}. The command did not run. If the task needs "
+                     "something from there, tell the user what; if this is a false positive, "
+                     "/maisecrets:report records it.")
     return None
 
 
@@ -1559,14 +1784,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         # would take that session's text (Codex review, 2026-09-28)
         return _deny("maisecrets: this command sets or clears the session id, which selects the blocked prompt "
                      "of another session. The command did not run. /ms sends the blocked prompt of this session.")
-    matched = _store_read_match(command)
-    if matched:
-        # said as what the user does next, not as a check to stay inside: "do not rephrase … to get around
-        # the check" next to an ops request read like an attempt to get around a control (ops review, 2026-09-28)
-        return _deny(f"maisecrets: this command touches {matched}, the user's own store. The user manages it "
-                     "with /maisecrets:list and /maisecrets:forget. The command did not run. If the task needs "
-                     "something from there, tell the user what; if this is a false positive, "
-                     "/maisecrets:report records it.")
+    refused = _store_refusal(command)
+    if refused:
+        return refused
     ctxs = _shell_contexts(command)
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
     if not refs:
@@ -1592,16 +1812,6 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
             ssh_plan, why = route, None
         else:
             why, ssh_refused = route, True
-    # ssh_approval "per-session": an approved value runs without an ask; a first use asks once and gives
-    # its token to the serving child, which confirms it when the approved command reads the value
-    ssh_auto, ssh_token = False, None
-    if ssh_plan and cfg.get("ssh_approval") == "per-session" and _remote_is_read_only(ssh_plan["remote"]):
-        from . import ssh_approval
-        names = sorted({k for k, _a, _b in refs})
-        if ssh_approval.approved(payload.get("session_id"), names):
-            ssh_auto = True
-        else:
-            ssh_token = ssh_approval.remember_pending(payload.get("session_id"), names)
     if why and ssh_refused:
         return _deny(f"maisecrets: {keys} cannot go to the remote host in this form: {why}. The command did "
                      "not run. " + _ssh_way(why))
@@ -1609,16 +1819,30 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         return _deny(f"maisecrets: {keys} cannot be placed in this command: {why}. The command did not run. "
                      "Give the placeholder as a plain argument of the tool that needs the value; for a "
                      "wrapper such as bash -c or eval, run its inner command directly.")
+    # the value can go in; from here the rehydration policy decides (maisecrets/rehydration.py)
+    path = "ssh" if ssh_plan else "bash"
+    stop = rehydration.refusal(cfg, path, client_of(payload), keys, "The command did not run.")
+    if stop:
+        return _deny(stop)
     vault = Vault(cfg)
     session = payload.get("session_id")
     uniq = list(dict.fromkeys(k for k, _a, _b in refs))
-    # phase 1: session rule and limiter for every key, before anything is recorded
-    failed = [f"{k} ({st})" for k in uniq for st in [vault.status(k, session)] if st != "ok"]
+    failed = _precheck(vault, uniq, session)
     if failed:
         return _deny(_deny_reason(failed))
-    failed = [f"{k} ({st})" for k in uniq for st in [vault._limit(k, session)] if st != "ok"]
-    if failed:
-        return _deny(_deny_reason(failed))
+    # automatic: no ask of our own. confirm: an ask per command, or with ssh_approval "per-session" an
+    # approved value runs without an ask and a first use asks once and gives its token to the serving
+    # child, which confirms it when the approved command reads the value. After phase 1: a key
+    # this session may not resolve leaves no pending token (review, 2026-09-29)
+    ssh_auto, ssh_token = rehydration.policy(cfg, "ssh") == "automatic", None
+    if ssh_plan and not ssh_auto and cfg.get("ssh_approval") == "per-session" \
+            and _remote_is_read_only(ssh_plan["remote"]):
+        from . import ssh_approval
+        names = sorted({k for k, _a, _b in refs})
+        if ssh_approval.approved(payload.get("session_id"), names):
+            ssh_auto = True
+        else:
+            ssh_token = ssh_approval.remember_pending(payload.get("session_id"), names)
     # phase 2: record (audit line, limiter) and fetch; a failure here has recorded nothing served
     plan: dict[str, tuple[str | None, str | None]] = {}    # key -> (nonce, value)
     for key in uniq:
@@ -1694,7 +1918,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                 f"{ssh_plan['dest']}: {ssh_plan['line'][:400]}. It runs only inside the Claude "
                 "Code sandbox, so the connection reaches only a host your sandbox allows. ")
         if ssh_auto:
-            # approved once in this session: the normal permission rules of the client decide
+            # automatic, or approved once in this session: the normal permission rules of the client decide
             return _updated(payload, new_input)
         if ssh_token:
             from . import ssh_approval
@@ -1704,7 +1928,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                                    "tail, journalctl and the like). Allow it only if you trust those hosts.")
         return _ask(new_input, base + "The remote command can still pass the value on: allow it only if you trust "
                                       "that host and that command.")
-    return _updated(payload, new_input)
+    return _rehydrated(payload, cfg, "bash", new_input,
+                       f"maisecrets: this command gets the real value of {keys} through a shell variable; the "
+                       "command shown here carries no value. Check the command before you allow it.")
 
 
 def key_nonce() -> str:
@@ -1725,6 +1951,14 @@ def _unserve(fifos: list[str]) -> None:
 def shlex_quote(s: str) -> str:
     import shlex
     return shlex.quote(s)
+
+
+def _precheck(vault: Vault, keys: list[str], session: str | None) -> list[str]:
+    """Phase 1 of every resolve: the session rule, then the limiter, for every key, before anything is
+    recorded or served. A call with a good key and a bad one wrote the good key's audit line before
+    the refusal on MCP and file tools (review, 2026-09-29); Bash had this order already."""
+    failed = [f"{k} ({st})" for k in keys for st in [vault.status(k, session)] if st != "ok"]
+    return failed or vault._limit_all(keys, session)
 
 
 def _deny_reason(failed: list[str]) -> str:
@@ -1753,8 +1987,9 @@ def _deny_reason(failed: list[str]) -> str:
 
 def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
     """MCP tools: the value must be in the argument (there is no shell to read it later), so it
-    is inserted after the session rule and the limiter. The permission prompt of the client then
-    shows the value; this is the user's own value at the point where the real call happens."""
+    is inserted after the session rule and the limiter, into every field that holds it, a published
+    text field included. The rehydration policy decides whether we ask; a permission prompt of the
+    client shows the value, the user's own, at the point where the real call happens."""
     found: list[str] = []
 
     def collect(s: str) -> str:
@@ -1769,17 +2004,17 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
                      "The call did not run. Put the placeholder into a value, not into a key.")
     fields = _ref_fields(tool_input)
     text_fields = [f for f in fields if is_text_field(f)]
-    if text_fields and client_of(payload) == "codex":
-        return _deny(f"maisecrets: {', '.join('⟦' + k + '⟧' for k in dict.fromkeys(found))} is in "
-                     f"{', '.join(text_fields)} of {tool}, text the tool publishes or stores. maisecrets does "
-                     "not put a real value there on Codex, because Codex cannot ask the user first. The call "
-                     "did not run. Put the placeholder only in the field that needs the value (a recipient, "
-                     "an id, a token), or ask the user to add the value themselves.")
+    stop = rehydration.refusal(cfg, "mcp", client_of(payload),
+                               ", ".join("⟦" + k + "⟧" for k in dict.fromkeys(found)), "The call did not run.")
+    if stop:
+        return _deny(stop)
     vault = Vault(cfg)
     session = payload.get("session_id")
     context = json.dumps(tool_input, ensure_ascii=False)
     values: dict[str, str] = {}
-    failed: list[str] = []
+    failed = _precheck(vault, list(dict.fromkeys(found)), session)
+    if failed:
+        return _deny(_deny_reason(failed))
     for key in dict.fromkeys(found):
         status = vault.record_resolve(key, session, tool, context)
         if status == "ok":
@@ -1804,13 +2039,12 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
         refs = [f"⟦{k}⟧" for k in values]
         _scrub_transcript_later(payload.get("transcript_path", ""), list(values.values()), refs)
     new_input = _walk_strings(tool_input, substitute)
-    if client_of(payload) == "codex":
-        return _updated(payload, new_input)
     names = ", ".join(f"⟦{k}⟧" for k in values)
     warn = (f" WARNING: {', '.join(text_fields)} is text that the tool publishes or stores; the real value "
             "goes out with it." if text_fields else "")
-    return _ask(new_input, f"maisecrets: this call gets the real value of {names} in {', '.join(fields)} "
-                           f"of {tool}.{warn} Check the target and the value before you allow it.")
+    return _rehydrated(payload, cfg, "mcp", new_input,
+                       f"maisecrets: this call gets the real value of {names} in {', '.join(fields)} "
+                       f"of {tool}.{warn} Check the target and the value before you allow it.")
 
 
 def _ref_fields(node: Any, path: str = "") -> list[str]:
@@ -2002,16 +2236,38 @@ def _store_path_refusal(tool: str, tool_input: dict, cwd: str) -> dict | None:
                  "a false positive, /maisecrets:report records it.")
 
 
-def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:
-    """Write/Edit/MultiEdit/NotebookEdit: a placeholder in the content is resolved like an MCP
-    argument (the value must be inline; the client's permission prompt shows the diff with it),
-    under the session rule, the limiter and an audit line that names the file. Writing a value
-    into a file on purpose is what the plugin exists for (user decision, 2026-09-26); the first
-    version refused it and sent the model to a Bash redirect. The maisecrets home is off limits
-    for the agent: a config written by an injected instruction could lift every cap or switch
-    the store to plaintext (review, 2026-09-26)."""
+# the file headers of a Codex patch: Add, Update and Delete name a file, Move to its new name
+_PATCH_MARKERS = ("Add File", "Update File", "Delete File", "Move to")
+
+
+def _patch_headers(patch: str) -> list[tuple[str, str]]:
+    """(the header line, the path it names) of a Codex patch. A line is a header by its stripped form:
+    codex-cli 0.158.0 trims all whitespace, Unicode included (NBSP, \\f, U+3000), before it reads a
+    marker; a regex for spaces and tabs missed the rest (reviews, 2026-09-29)."""
+    out = []
+    for line in patch.split("\n"):
+        t = line.strip()
+        for marker in _PATCH_MARKERS:
+            if t.startswith(f"*** {marker}:"):
+                out.append((line, t[len(marker) + 5:].strip()))
+    return out
+
+
+def _patch_text_ok(patch: object) -> bool:
+    """A Codex patch: `*** Begin Patch` first, also inside the heredoc form Codex accepts."""
+    if not isinstance(patch, str):
+        return False
+    lines = [ln.strip() for ln in patch.strip().split("\n")]
+    if lines and re.fullmatch(r"<<\s*['\"]?\w+['\"]?", lines[0]):
+        lines = lines[1:]
+    return bool(lines) and lines[0] == "*** Begin Patch"
+
+
+def _in_the_home(path: str, cwd: str) -> bool:
+    """A path under the maisecrets home or the value run directory, by any spelling or link."""
     from .vault import HOME
-    path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
+    if not path:
+        return False
     try:
         expanded = os.path.expanduser(path)
         if expanded and not os.path.isabs(expanded) and cwd:
@@ -2020,31 +2276,68 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         home = os.path.realpath(str(HOME))
         if platform.system() in ("Darwin", "Windows"):   # case-insensitive file systems (APFS, NTFS)
             real, home = real.lower(), home.lower()
-        inside = bool(path) and (real == home or real.startswith(home + os.sep))
+        inside = real == home or real.startswith(home + os.sep)
         # the run directory and a hard link are known by identity only (invariant I3, 2026-09-28)
         inside = inside or _touches_store(path, cwd)
+        # the guard script outside the plugin folder: an agent that rewrites it switches the guard off
+        guard = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(os.path.expanduser("~"), ".claude")),
+                             "maisecrets-guard.py")
+        inside = inside or os.path.realpath(expanded) == os.path.realpath(guard)
     except (OSError, ValueError):
         inside = False
-    if inside or ".maisecrets" in path.lower():
-        return _deny(f"maisecrets: {tool} on {path} is refused; the maisecrets home is changed by the human "
-                     "only. Nothing was written. Tell the user what you wanted to change there.")
+    return inside or ".maisecrets" in path.lower() or "maisecrets-guard.py" in path.lower()
+
+
+def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: str = "") -> dict:
+    """Write/Edit/MultiEdit/NotebookEdit: a placeholder in the content is resolved like an MCP
+    argument (the value must be inline; the client's permission prompt shows the diff with it),
+    under the session rule, the limiter and an audit line that names the file. Writing a value
+    into a file on purpose is what the plugin exists for (user decision, 2026-09-26); the first
+    version refused it and sent the model to a Bash redirect. The maisecrets home is off limits
+    for the agent: a config written by an injected instruction could lift every cap or switch
+    the store to plaintext (review, 2026-09-26)."""
+    if tool == "apply_patch":
+        # Codex sends every file edit as one patch in `command` (measured on codex-cli 0.158.0: the
+        # matcher aliases Write and Edit, the payload says apply_patch). Each header names a path;
+        # the value goes into the content lines only, never into a file name
+        patch = tool_input.get("command")
+        if not _patch_text_ok(patch):
+            # without the patch text nothing names the paths: a placeholder elsewhere would resolve
+            # unchecked (review, 2026-09-29)
+            return _deny("maisecrets: this apply_patch call carries no patch in `command`. Nothing was written.")
+        headers = _patch_headers(patch)
+        paths = [path for _line, path in headers]
+        in_header = [k for line, _path in headers for k, _a, _b in find_refs(line)]
+        if in_header:
+            return _deny(f"maisecrets: ⟦{in_header[0]}⟧ is in a file name of the patch, where it is not resolved. "
+                         "Nothing was written. Put the placeholder into the content, not into a path.")
+    else:
+        paths = [str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")]
+    for path in paths:
+        if _in_the_home(path, cwd):
+            return _deny(f"maisecrets: {tool} on {path} is refused; the maisecrets home is changed by the human "
+                         "only. Nothing was written. Tell the user what you wanted to change there.")
+    path = ", ".join(paths)
     found: list[str] = []
 
     def collect(v: str) -> str:
         found.extend(k for k, _a, _b in find_refs(v))
         return v
-    _walk_strings(tool_input, collect)
+    # a Codex patch resolves in its text only; another field keeps a placeholder as text
+    target = {"command": tool_input["command"]} if tool == "apply_patch" else tool_input
+    _walk_strings(target, collect)
     if not found:
         return {}
-    if not cfg.get("resolve_in_files", True):
-        names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found))
-        return _deny(f"maisecrets: {names} is not resolved in {tool} on this machine (resolve_in_files is off). "
-                     "Nothing was written. To put the value into a file, use a Bash command the user approves, "
-                     "for example printf '%s' ⟦KEY⟧ > file.")
+    names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found))
+    stop = rehydration.refusal(cfg, "file", client_of(payload), names, "Nothing was written.")
+    if stop:
+        return _deny(stop)
     vault = Vault(cfg)
     session = payload.get("session_id")
     values: dict[str, str] = {}
-    failed: list[str] = []
+    failed = _precheck(vault, list(dict.fromkeys(found)), session)
+    if failed:
+        return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
     for key in dict.fromkeys(found):
         status = vault.record_resolve(key, session, tool, f"{tool} {path}")
         if status == "ok":
@@ -2065,7 +2358,72 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         # the client records this hook's updatedInput, values included, in the transcript
         _scrub_transcript_later(payload.get("transcript_path", ""), list(values.values()),
                                 [f"⟦{k}⟧" for k in values])
-    return _updated(payload, _walk_strings(tool_input, substitute))
+    if tool == "apply_patch":
+        rewritten, why = _resolve_patch(tool_input["command"], values)
+        if rewritten is None:
+            return _deny(f"maisecrets: {names} cannot go into this patch: {why}. Nothing was written. "
+                         "Put the placeholder into a + line of the file content, or write the file with Bash "
+                         "(printf '%s' ⟦KEY⟧ > file).")
+        new_input = {**tool_input, "command": rewritten}
+    else:
+        new_input = {**tool_input, **_walk_strings(target, substitute)}
+    return _rehydrated(payload, cfg, "file", new_input,
+                       f"maisecrets: {tool} writes the real value of {names} into {path}. "
+                       "Check the file and the value before you allow it.")
+
+
+def _resolve_patch(patch: str, values: dict) -> tuple:
+    """The patch with each placeholder replaced by its value, line by line. A value with a line break
+    would otherwise start new patch lines: `\n*** Add File: …` in a value became an operation the path
+    check never saw (Codex review, 2026-09-29). Each further line of a value gets the prefix of the line
+    it sits in (+, - or a space), so a multi-line key lands in the file as it is; a placeholder outside
+    such a line, and a value with a carriage return (the patch format cannot carry it), are refused.
+    The rewritten patch must name exactly the files the checked one named. Returns (patch, None) or
+    (None, why)."""
+    out = []
+    for line in patch.split("\n"):
+        refs = find_refs(line)
+        if not refs:
+            out.append(line)
+            continue
+        prefix = line[:1]
+        if prefix not in ("+", "-", " "):
+            return None, "the placeholder is not in a content line of the patch"
+        new = line
+        for key, start, end in sorted(refs, key=lambda r: r[1], reverse=True):
+            value = values[key]
+            if "\r" in value:
+                return None, "the value holds a carriage return, which a patch cannot carry"
+            new = new[:start] + ("\n" + prefix).join(value.split("\n")) + new[end:]
+        out.append(new)
+    rewritten = "\n".join(out)
+    if _patch_headers(rewritten) != _patch_headers(patch):
+        return None, "the value would change which files the patch names"
+    return rewritten, None
+
+
+def _pre_powershell(payload: dict, tool_input: dict) -> dict:
+    """PowerShell: the shell tool of Claude Code on Windows without Git Bash (measured with 2.1.284 on
+    a hosted Windows runner, 2026-09-29). The rewrite knows POSIX quoting only, so a placeholder is
+    refused and no value goes in; the store backstop is the text match of Bash, with Windows paths in
+    any case and either slash."""
+    command = tool_input.get("command", "")
+    if not isinstance(command, str):
+        return _deny("maisecrets: this PowerShell call has no command text to check. The command did not run.")
+    if re.search(r"CLAUDE_CODE_SESSION_ID", command, re.IGNORECASE):
+        return _deny("maisecrets: this command names the session id, which selects the blocked prompt of a "
+                     "session. The command did not run. /ms sends the blocked prompt of this session"
+                     + _NEEDS_GIT_BASH + ".")
+    refused = _store_refusal(command, windows_paths=True)
+    if refused:
+        return refused
+    keys = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(k for k, _a, _b in find_refs(command)))
+    if keys:
+        return _deny(f"maisecrets: {keys} cannot be placed in a PowerShell command (maisecrets places values "
+                     "in Bash commands only; PowerShell quoting is not supported). The command did not run. Use "
+                     "the value through an MCP tool or a file tool, or ask the user to run the command "
+                     "themselves. With Git for Windows installed, Claude Code offers Bash instead.")
+    return {}
 
 
 def pre_tool(payload: dict) -> dict:
@@ -2074,13 +2432,15 @@ def pre_tool(payload: dict) -> dict:
     tool_input = payload.get("tool_input") or {}
     if tool == "Bash":
         return _pre_bash(payload, cfg, tool_input)
+    if tool == "PowerShell":
+        return _pre_powershell(payload, tool_input)
     if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS or tool.startswith("mcp__"):
         refused = _store_path_refusal(tool, tool_input, str(payload.get("cwd") or ""))
         if refused:
             return refused
         if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS:
             return {}
-    if tool in _FILE_TOOLS:
+    if tool in _FILE_TOOLS or tool == "apply_patch":
         return _pre_file_tool(payload, cfg, tool, tool_input, str(payload.get("cwd") or ""))
     if tool.startswith("mcp__"):
         # Gateway servers too: the deposit path (gateway resolves ⟦REF⟧ itself, PROTOCOL §4) is not
@@ -2193,8 +2553,9 @@ def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]
     keys = [r["key"] for r in vault._index.get("resolves", []) if r.get("session") == session and r["ts"] > now - 3600]
     out: list[tuple[str, str]] = []
     from .vault import Entry
-    live = [k for k in dict.fromkeys(keys)
-            if vault._index["entries"].get(k) and not vault._index["entries"][k].get("purged")]
+    # a weak entry is not hunted as a substring either (Vault.live_fingerprints)
+    live = [k for k in dict.fromkeys(keys) if vault._index["entries"].get(k)
+            and not vault._index["entries"][k].get("purged") and not vault._index["entries"][k].get("weak")]
     if hasattr(vault.backend, "get_many"):
         found = vault.backend.get_many(live)
     else:
@@ -2322,9 +2683,12 @@ def post_tool(payload: dict) -> dict:
     entries: list = []
     resolved: list[tuple[str, str]] | None = None
 
+    tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")   # a test file keeps its fixtures
+
     def redact(s: str) -> str:
         nonlocal vault, resolved
-        matches = detect.scan(s)
+        matches = [m for m in detect.scan(s) if not detect.is_fixture(m, s, path)]
         if not matches and not _has_live(cfg):
             return s
         if vault is None:
@@ -2485,6 +2849,47 @@ def _run_log(event: str, payload: dict, how: str, decision: str, ms: int) -> Non
         pass
 
 
+def _from_a_synced_folder() -> bool:
+    """maisecrets runs from a folder the claude.ai organisation sync writes (plugins/synced/…), the one
+    install whose update can leave a session without hooks. There the guard may come from the
+    organisation's managed settings, which no local file announces, so the heartbeat is always on."""
+    root = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
+    return f"{os.sep}plugins{os.sep}synced{os.sep}" in root
+
+
+def _heartbeat(event: str, payload: dict, done: bool = False) -> None:
+    """Tell the guard (hooks/guard.py, installed outside the plugin folder) that maisecrets runs for
+    this call: an empty file named by session, event and the call's id. Only when the guard is
+    installed, and only for Claude Code, whose folder swap it watches. Never raises: a heartbeat
+    that cannot be written makes the guard refuse, which is the safe side."""
+    import hashlib
+    from .vault import HOME
+    if event not in ("user-prompt", "pre-tool", "post-tool") or client_of(payload) != "claude":
+        return
+    if not ((HOME / "guard.json").exists() or _from_a_synced_folder()):
+        return
+    ident = payload.get("prompt_id") if event == "user-prompt" else payload.get("tool_use_id")
+    session = payload.get("session_id")
+    if not ident or not session:
+        return
+    try:
+        d = HOME / "alive"
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        name = hashlib.sha256(f"{session}\0{event}\0{ident}".encode()).hexdigest()[:32]
+        # ".s" when the hook starts, the bare name once it has answered: the guard lets a call pass only on
+        # the answer, so a hook that dies after it started is refused (Codex review, 2026-09-29)
+        with open(d / (name if done else name + ".s"), "w", encoding="utf-8"):
+            pass
+        now = time.time()
+        for n in os.listdir(d):
+            # a heartbeat whose guard never came for it (the guard removed, a matcher that differs)
+            p = d / n
+            if now - p.stat().st_mtime > 600:
+                p.unlink()
+    except OSError:
+        pass
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[1] not in HANDLERS:
         sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|session-start\n")
@@ -2502,6 +2907,7 @@ def main(argv: list[str]) -> int:
         # exit 2 before one (Codex review, 2026-09-28)
         _out(_fail_closed(event, {}, "got a payload that is not JSON."))
         return 0
+    _heartbeat(event, payload)
     import threading
     started = time.time()
     lock = threading.Lock()
@@ -2515,6 +2921,7 @@ def main(argv: list[str]) -> int:
                 return
             answered["v"] = True
             _out(obj)
+            _heartbeat(event, payload, done=True)
         ms = int((time.time() - started) * 1000)
         decision = _decision_of(event, obj)
         _debug(f"{event}: {how} {client_of(payload)} {ms}ms {decision}")

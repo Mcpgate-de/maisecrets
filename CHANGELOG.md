@@ -2,6 +2,242 @@
 
 ## Unreleased
 
+## [0.5.15] - 2026-09-30
+
+- **Codex on Windows: a removed plugin folder now blocks instead of letting the tool run.** Codex
+  removes the folder of the old version when it installs a new one, also under an open session
+  (codex-cli 0.159.0, measured). The Windows command of each hook (`commandWindows`, run by
+  `cmd.exe`) now checks for the launcher first and answers with a block when it is gone, as the
+  macOS and Linux command already did. The text tells Codex users to exit and run `codex resume`
+  instead of a Claude Code command.
+
+- **Code after a colon is no longer stored as a secret.** A line such as `if not token: <statement>`
+  put the statement word into the vault, and maisecrets then redacted that word in every later text,
+  in source code too. A statement keyword after a label (`break`, `return`, `pass`, `raise`, …) is not
+  a value now; so a password that is exactly such a word is not stored either. One lowercase word after a label, with
+  the sentence going on, is still stored: without a dictionary it looks like a password of letters,
+  and a missed password costs more than a false positive.
+
+- **The false positives of the old detector stop at the next session start.** A statement word
+  such as `return` that an earlier version stored after a label stayed in the vault until it
+  expired, and maisecrets redacted it in every text until then. The session start now marks these
+  entries so that maisecrets no longer redacts the word in other texts, and names their keys once.
+  Nothing is deleted: the placeholder still works, and `/maisecrets:forget` deletes the entry. The
+  start finds them by fingerprint and reads no stored value. The same word stored by
+  `/maisecrets:put` or another rule stays as it is.
+
+- **A subagent's report no longer stops the session.** When a subagent quoted a value in the shape of
+  a secret, its report reached the session as a prompt, and maisecrets blocked it until you pressed
+  Cmd+V or `/ms`. A model of this session wrote that text, so the block protected nothing. The report
+  now passes when it proves itself against the files of this session: the call that started the
+  subagent, the subagent's own transcript, and its last answer. A value that anyone added outside the
+  answer still blocks. `"pass_agent_reports": false` in `~/.maisecrets/config.json` turns this off.
+
+- **Fewer false alarms in source code.** A run over the Python standard library (36.6 MB, no real
+  secret in it) found 38 "secrets", 666 "IP addresses of a person" and 26 "phone numbers". These are
+  no longer hits: a name on the right side of an assignment (`authkey=authkey`, `self.token = nextchar`,
+  `TOKEN_ENDS = TSPECIALS | WSP`), a word of an error message (`pwd: expected bytes`), a format string,
+  a time zone (`key = "Europe/Dublin"`), a mask (`*******`), a signed number in code (`a = +4294967296`),
+  a number with more than 15 digits, and the documentation, shared, reserved and multicast address
+  ranges and the public DNS resolvers. A quoted value, a value in a properties file and a phone
+  number in prose are still found.
+
+- **Test passwords no longer stop the work.** A password that maisecrets finds only by its label
+  (`password = '…'`) is a fixture in test code: in a file on a test path, in a grep line of a test
+  file, or after a test marker such as `def test_`, `assert` or `describe(`. A pasted unit test now
+  passes, and a Read of a test file keeps its fixtures. A token shape (`glpat-`, `AKIA`, a JWT, a
+  private key) and personal data are still found in test code, also after a label such as
+  `token = "…"`. An `.env` file and a recorded HTTP cassette are no test code, even under `tests/`,
+  and `assert` alone does not make production code a test.
+
+- **Fewer false alarms in config, docs and code.** A review of 679 snippets of normal work and a run
+  over a real repository found more values that are no secret, and these are no hits now:
+  - fixtures that name themselves (`testpass`, `secret123`, `Passw0rd!`) and a default that equals
+    its label or user (`POSTGRES_PASSWORD: postgres`, `curl -u admin:admin`). A real password that
+    holds such a word and a word of its own (`Contest-Winter2026!`, `Passion2026!`) is still found
+  - the next label of an `.env.example` (`DB_PASSWORD=` followed by `API_KEY=`)
+  - types (`Option<String>`, `list[str]`), templates (`mcp_{user}`, `?token={id}`), version pins
+    (`tokenizers==0.20.3`), durations (`TTL_REFRESH_TOKEN = 15552000`), UUIDs, elided values
+    (`sk-...`) and labels of a derived thing (`secret_name`, `password_hash`)
+  - e-mail addresses at `example.com`, `.test`, `.invalid` and `.localhost`, and a system mailbox at
+    `.local` or `.internal` (a person's name there, such as `hans.mueller@firma.local`, is still
+    found), and section numbers such as `RFC 6749 4.1.2.1`
+  - YAML anchors, shell expansions such as `${REDIS_PASSWORD:?…}`, a type made of the words of its
+    label (`token_data: TokenData`) and a command with a path
+  In the tests of that repository, the label-rule hits that a Read acted on went from 379 to none.
+  The example on the first start is now an address that maisecrets stops.
+
+- **A word no longer follows you around for a day.** When maisecrets found a word such as
+  `postgres` only by its label (`DB_PASSWORD=postgres`), it stored it and then redacted the word in
+  every later text of every session: `docker ps` showed a placeholder for the image, and the prompt
+  "add a postgres service" was blocked. Such a word is now replaced where it was found and nowhere
+  else; its placeholder still works. This holds for the default words of services and of code
+  (`postgres`, `admin`, `redis`, `changeme`, `plaintext` …); any other value, also a random
+  lower-case one, is still found everywhere.
+  Words that an older version stored are marked at the next session start.
+
+- **A busy computer no longer ends a session.** When maisecrets answered a call too late, the guard
+  said to exit the session and resume it, and an agent that worked on its own stopped there for a
+  person. The next call would have worked. The guard now says to run the call again, and names the
+  restart only as the second step; when maisecrets started and was only slow, it names no restart.
+  After a plugin update, which the guard sees in the trash, it asks for the restart as before.
+
+### Features
+
+- a reported false alarm links the test data that maisecrets leaves alone (f3f2ead)
+
+### Fixes
+
+- a subagent's report passes on Windows too (fbb2d34)
+- a password that starts with & or ! is no YAML anchor, and many hits stay linear (c674527)
+- the scan is linear in a long line, and the review of 3e5d53e is closed (b4a7c54)
+- a long line is scanned in time again, and the final review's findings are closed (3e5d53e)
+- tel inside a word is no telephone label (0147e81)
+- the second Codex review of 05052fe found eight more; each is closed (37a68a8)
+- the Codex review of 31fdfd1 found seven more ways through; each is closed (05052fe)
+- no relaxation of this release lets a real, detectable value through (31fdfd1)
+- a busy computer no longer ends a session (50468d0)
+- a real subagent report is no longer blocked by its own shape (ba63f17)
+- a word no longer follows you around for a day (6a9162f)
+- fewer false alarms in config, docs and code (c33271b)
+- test passwords no longer stop the work (edd6df0)
+- fewer false alarms in source code (86d56e8)
+- a subagent's report no longer stops the session (fbbe7c5)
+- the session start deletes the code words an older detector stored (5757d20)
+- the review of the detector and the Windows fallback (d805b1e)
+- Codex on Windows blocks when the plugin folder is gone (28c64d0)
+- code after a colon is not a secret value (aa79eab)
+
+### Other
+
+- Merge branch 'feat/agent-reports' into 'main' (aa639a4)
+
+## [0.5.14] - 2026-09-29
+
+- **The restart command stands on a line of its own** in the refusal of the guard, so it is easy to
+  see, and a triple click copies just that line. The refusal now says the command *was* copied to
+  your clipboard: a terminal with copy-on-select (the default in Ghostty) replaces the clipboard as
+  soon as you select text, also text in the refusal itself.
+
+### Fixes
+
+- the restart command stands on its own line; the refusal says it was copied (3fef4b4)
+
+### Other
+
+- Merge branch 'fix/guard-message-layout' into 'main' (0d17b8b)
+
+## [0.5.13] - 2026-09-29
+
+- **Synced installs: the guard now gives the restart command.** After a synced update,
+  `/reload-plugins` can keep the path of the gone plugin folder (anthropics/claude-code#97847), and
+  then it cannot load maisecrets again. The refusal of the guard now says so and names the command
+  that works: exit, then `claude --resume <id of this session>` in the directory where the session
+  started. Run `/maisecrets:guard install` once more if you installed the guard yourself.
+- **The guard puts that command on your clipboard**, once per session (`pbcopy` on macOS, `clip` on
+  Windows, `wl-copy`, `xclip` or `xsel` on Linux). Exit, paste, press Enter. The refusal says so only
+  when the copy worked. `MAISECRETS_GUARD_CLIPBOARD=off` turns it off.
+
+### Features
+
+- the resume command goes to the clipboard, once per session (857be68)
+
+### Fixes
+
+- the refusal gives the restart command when /reload-plugins cannot help (7f1292e)
+
+### Other
+
+- Merge branch 'fix/guard-restart-hint' into 'main' (8f58a86)
+
+## [0.5.12] - 2026-09-29
+
+- **Windows without Git Bash: maisecrets now protects Claude Code there.** Claude Code runs a hook
+  command in PowerShell when Git for Windows is not installed. The hook commands of 0.5.11 were bash
+  only: PowerShell refused to parse them, the hook failed without a block, and a prompt with a secret
+  reached the model. Each hook command now works in bash and in PowerShell. The `PowerShell` tool of
+  Claude Code meets the store guard, and a placeholder in a PowerShell command is refused with the
+  reason.
+- **A guard you installed yourself** (`/maisecrets:guard install`, not a synced install) keeps the tool
+  list of its version. Run `/maisecrets:guard install` once more after this update, so that it also
+  covers the `PowerShell` tool.
+- **Codex users: re-trust the hooks once in `/hooks` after this update.** `hooks/hooks.json` changed.
+  Until the hooks are trusted again, Codex runs no maisecrets hook and says nothing.
+
+### Fixes
+
+- refusals name what works without Git Bash; the PowerShell part has a test (2920339)
+- the store guard knows the Credential Locker listing, the launchers' get and two Windows spellings (a2023ac)
+- maisecrets protects Claude Code on Windows without Git Bash (8ad4795)
+- every generation of the synced folder counts; the guard's own refusal names it (f979433)
+
+### Other
+
+- Merge branch 'feat/windows-powershell' into 'main' (83ba31b)
+
+## [0.5.11] - 2026-09-29
+
+- **Synced installs: a guard against the update gap, set up by maisecrets itself.** An update of a
+  plugin that the organisation syncs from claude.ai can leave a session without maisecrets, silently.
+  At its next session start a synced maisecrets places `~/.claude/maisecrets-guard.py` and registers
+  it once in `~/.claude/settings.json` (a backup first, only the hooks change, one line says so). The
+  guard blocks a prompt or tool call that maisecrets did not answer and names `/reload-plugins`.
+  `/maisecrets:guard remove` takes it away; `"guard": false` in the config or the machine policy
+  keeps it off. Installs from the marketplace and Codex are not touched.
+- **Codex:** a placeholder in a file edit (`apply_patch`) is now resolved, and a patch against the
+  maisecrets store is refused.
+
+### Features
+
+- a guard outside the plugin folder stops a session in which an update left maisecrets not running (4cdbdcd)
+
+### Fixes
+
+- "guard": false works without a guard.json; a person's --off stays their own (72eef2d)
+- a multi-line value stays file content in a Codex patch; the guard waits for the answer (8d28b90)
+- the update window reads the change time; the measured folder counts per account (8e7b4cc)
+- no lasting block after an organisation removes maisecrets; the script is guarded too (c02e964)
+- a patch header behind any whitespace is a header; the guard expects by account (3a158d4)
+- two registrations pass a healthy call; an indented Codex patch header is a header (5af2899)
+- Codex apply_patch resolves a placeholder and never writes the maisecrets store (5f3a399)
+
+### Other
+
+- Merge branch 'fix/guard-windows-tests' into 'main' (3c998cd)
+- Merge branch 'feat/codex-apply-patch' into 'main' (746374c)
+
+## [0.5.10] - 2026-09-29
+
+- **Behaviour change: maisecrets adds no approval of its own by default.** A value still never
+  reaches the model, and a form where it could turn into code is still refused. What changed: an
+  MCP call and an ssh command that get a real value no longer ask first, and on Codex a value in a
+  published-text field (`text`, `message`, `body` …) now goes in. In Claude Code your permission
+  rules decide, as for any other call; in Codex maisecrets answers `allow`, as it did for Bash and
+  for other MCP fields, and Codex's sandbox and MCP tool approval still apply. To keep the ask of
+  0.5.9 for MCP and ssh, set `"rehydration": "confirm"` in `~/.maisecrets/config.json` or in the
+  machine policy. `confirm` is stricter than 0.5.9 on the other paths: Bash and Write/Edit ask too,
+  and Codex refuses every rehydration, because it cannot ask. `"block"` turns rehydration off.
+- **For administrators:** a machine policy file that exists but cannot be read now makes the hooks
+  fail closed (before, it counted as no policy). Keep it and its folder readable by every user. A
+  key in it that looks like a misspelled `rehydration`, `resolve_in_files` or `ssh_via_sandbox`
+  blocks rehydration until it is fixed; other unknown keys are ignored with a warning.
+
+### Features
+
+- maisecrets adds no approval of its own by default; rehydration confirm and block are optional (9eead0c)
+
+### Fixes
+
+- the limiter answers an empty key list without an index error (82264ef)
+- a lowered key cap no longer breaks a call with known keys (9725364)
+- a misspelled safety key blocks even next to a valid setting; caps count per call (650167c)
+- a setting that cannot be read as written blocks rehydration; no partial resolve (cdb57a8)
+- an ignored config file never loosens the rehydration policy (a043a33)
+
+### Other
+
+- Merge branch 'feat/rehydration-policy' into 'main' (b945f23)
+
 ## [0.5.9] - 2026-09-28
 
 - **Codex:** `hooks/hooks.json` changed in this release, so Codex asks once in `/hooks` to trust

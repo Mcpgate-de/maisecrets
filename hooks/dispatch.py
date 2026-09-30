@@ -55,7 +55,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "pending":
     sys.exit(0)
 
 if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put", "status", "list", "audit", "expire", "config",
-                                          "wipe", "repair", "scan", "get", "shortcut", "forget"):
+                                          "wipe", "repair", "scan", "get", "shortcut", "forget", "guard"):
     from maisecrets.cli import main as cli_main  # noqa: E402
     sys.exit(cli_main(sys.argv[1:]))
 
@@ -96,6 +96,8 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     try:
         v = Vault(cfg)
         v.expire(limit=None)
+        quieted = v.quiet_code_words()
+        v.mark_weak_entries()
     except RuntimeError as exc:
         # a damaged index: the message names `maisecrets repair`; a traceback here gave the
         # client no JSON and the person no hint
@@ -134,6 +136,11 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         # one short line every session, so a lost hook registration is visible by its absence
         # (operator review, 2026-09-26); the tip rotates, the version does not
         out["systemMessage"] = f"maisecrets {version} is on." + (f" {tip}" if tip else "")
+    if quieted:
+        out["systemMessage"] = (out.get("systemMessage", "") +
+                                f" {len(quieted)} stored word(s) are program code, not secrets "
+                                f"({', '.join(quieted)}): maisecrets no longer redacts them in other texts. "
+                                "/maisecrets:forget deletes them.")
     if cfg.get("config_warning"):
         out["systemMessage"] = out.get("systemMessage", "") + f" Warning: {cfg['config_warning']}."
     # /ms is offered once, not installed: writing ~/.claude/commands without a question was a
@@ -145,6 +152,21 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
             (HOME / ".shortcut").write_text("offered\n", encoding="utf-8")
         except OSError:
             pass
+    # a synced install: keep the guard script outside the plugin folder current and register it once
+    # (the guard of README "Updates and open sessions"); "guard": false or `guard remove` keep it off,
+    # an entry deleted from settings.json by hand comes back
+    if not codex and os.name != "nt" and not (HOME / ".guard-removed").exists():
+        from maisecrets.hooks import _from_a_synced_folder  # noqa: E402
+        if _from_a_synced_folder():
+            from maisecrets.cli import (guard_off_by_policy, place_guard_script,  # noqa: E402
+                                        register_guard_for_a_synced_install)
+            place_guard_script()
+            if cfg.get("guard", True):
+                note = register_guard_for_a_synced_install()
+                if note:
+                    out["systemMessage"] = out.get("systemMessage", "") + " " + note
+            else:
+                guard_off_by_policy()
     # the model reads what a placeholder is once per session, before it meets one
     out["hookSpecificOutput"] = {"hookEventName": "SessionStart", "additionalContext": PRIMER}
     print(json.dumps(out))

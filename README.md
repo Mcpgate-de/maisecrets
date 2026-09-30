@@ -5,7 +5,10 @@
 An AI agent sees what you type and what its tools print: passwords, tokens, a
 customer's e-mail address. maisecrets intercepts detected secrets and personal
 data before they reach the cloud model. The real value goes back in only where
-the call happens, and only after you allow it. maisecrets itself sends no
+the call happens, and the model never sees it there either. By default
+maisecrets adds no approval of its own: in Claude Code your permission rules
+decide, as before; in Codex maisecrets answers `allow`, and Codex's sandbox and
+its approval of MCP tools still apply. maisecrets itself sends no
 prompt, value or telemetry to a server.
 
 ```bash
@@ -19,12 +22,13 @@ It works as a plugin for Claude Code (and Cowork) and for Codex, from the same
 **What it does, deterministically and locally:**
 
 1. **You type a secret or a personal value** (a token, a password after a
-   label, any e-mail address, a phone number with a country code, an IBAN, a
-   card number, a public IP, and German identifiers by default). A
+   label, an e-mail address, a phone number with a country code, an IBAN, a
+   card number, a public IP, and German identifiers by default; test data such
+   as `example.com` stays alone, see "Test data that maisecrets leaves alone"). A
    `UserPromptSubmit` hook
    detects it, stores it in a local vault, blocks the prompt, and keeps the
    rewritten prompt with a placeholder such as `⟦SECRET_c1⟧` or
-   `⟦EMAIL_c1:ma•••@example.org⟧`. Type `/maisecrets:send` to send it as is,
+   `⟦EMAIL_c1:ma•••@•••.de⟧`. Type `/maisecrets:send` to send it as is,
    or paste it from the clipboard where one exists. The value never reached
    the model. Measured: zero API requests for a blocked prompt.
 2. **The model reads a file or runs a command that outputs a secret.** A
@@ -33,6 +37,9 @@ It works as a plugin for Claude Code (and Cowork) and for Codex, from the same
    `PreToolUse` hook lets the command read the value once under a one-time
    grant, or inserts it into the tool argument, right before execution. The
    output is redacted again on the way back. See "Gates around a resolve".
+   A form where the value could turn into code is refused; every other form
+   runs without a maisecrets prompt, unless you set a stricter
+   [rehydration policy](#rehydration-policy-optional).
 
 Everything a hook runs is readable source in this folder. No download, no
 package install, no dependency outside the Python standard library and the
@@ -56,8 +63,8 @@ DB_PASSWORD=⟦SECRET_c1⟧
 STRIPE_KEY=⟦SECRET_c2⟧
 ```
 
-Claude writes the deploy command with the placeholder. You approve this,
-and only this:
+Claude writes the deploy command with the placeholder. Claude Code's permission
+prompt, if your rules ask for one, shows this, and only this:
 
 ```
 curl -u "app:⟦SECRET_c1⟧" https://db.example.internal/migrate
@@ -97,15 +104,19 @@ moves only the last number; a higher one needs the owner's approval. Vault backe
 
 Hooks run through `hooks/run.sh` (bash), which looks for a Python 3.9+ as
 `python3`, `python`, `py -3`, a versioned name, or the Homebrew, `/usr/local`
-and python.org paths. Claude Code on Windows requires Git Bash, so the
-launcher runs there too. Codex on Windows has no Git Bash, so every hook also
-names a `commandWindows` entry: `hooks/run.cmd` runs the same `dispatch.py`
-from `cmd.exe`, the shell Codex uses for a Windows hook. Without a Python
+and python.org paths. Claude Code on Windows runs a hook command in Git Bash
+when Git for Windows is installed, and in PowerShell when it is not (pwsh 7,
+else Windows PowerShell 5.1; read from Claude Code 2.1.284). So each command
+in `hooks/hooks.json` is one text that both shells read: bash runs
+`hooks/run.sh` and stops there, and PowerShell, which sees that part as a
+comment, runs `hooks/run.cmd`. Codex on Windows runs the `commandWindows`
+entry of each hook through `cmd.exe`, which starts `hooks/run.cmd` too. Both
+launchers run the same `dispatch.py`. Without a Python
 3.9+ the launcher blocks every prompt and every tool call and withholds every
 tool result, and its message names what to install: fail closed, with a cause.
 
 Proven with the harness on macOS (Claude Code 2.1.283) and on Debian 13
-(2.1.223), 7 scenarios each, on every push in CI; Windows through the GitHub
+(2.1.223), the scenarios of `harness/run.py`, on every push in CI; Windows through the GitHub
 Actions matrix (unit tests, both launchers, Credential Locker round trip), not
 yet with a live Claude Code session. Codex (codex-cli 0.155.1): the same
 `hooks/hooks.json`, Codex sets `CLAUDE_PLUGIN_ROOT` itself; `harness/codex.py`
@@ -121,8 +132,8 @@ vendor's hook docs, not measured · ⚠️ partly · ❌ no hook
 
 | client | prompt | rehydrate | redact | adapter |
 |---|:---:|:---:|:---:|---|
-| Claude Code CLI | ✅ | ✅ | ✅ | built |
-| Cowork, Claude desktop app | ✅ | ✅ | ✅ | same hooks and manifest; a blocked prompt, an MCP call that resolves with its ask and warning, and a redacted Bash output seen live in the desktop app (2026-09-28); not in the harness |
+| Claude Code CLI | ✅ | ✅ | ✅ | built; on Windows without Git Bash the shell tool is PowerShell, and a placeholder in a PowerShell command is refused (no PowerShell rewrite) |
+| Cowork, Claude desktop app | ✅ | ✅ | ✅ | same hooks and manifest; a blocked prompt, an MCP call that resolves (with the ask and warning of 0.5.9, now `rehydration: confirm`), and a redacted Bash output seen live in the desktop app (2026-09-28); not in the harness |
 | Codex CLI | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks; on Windows a shell placeholder is denied (PowerShell rewrite not built) |
 | Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | same plugin runtime; block, rewrite and redaction seen live (2026-09-27), not in the harness |
 | Codex IDE extension | ☑️ | ☑️ | ☑️ | same plugin runtime; not measured |
@@ -162,8 +173,12 @@ off until `/reload-plugins` or a new session. No code of the plugin runs then, s
 maisecrets cannot warn you itself. The harness measures this on every run
 (scenario `plugin_folder_moved`, Claude Code 2.1.283: no hook runs, the tool
 runs; anthropics/claude-code#97847). A client that runs the hook command anyway
-gets a refusal on macOS and Linux: the command tests for the launcher first and
-blocks without it. The Windows command (`commandWindows`) has no such test yet.
+gets a refusal: the command tests for the launcher first and blocks without it,
+in bash, in PowerShell and, for Codex on Windows (`commandWindows`), in
+`cmd.exe`. Codex needs this most: it removes the folder of the old version as
+soon as it installs a new one, and an open Codex session then runs the command
+of a folder that is gone (codex-cli 0.159.0, measured 2026-09-29). Exit that
+session and run `codex resume`.
 
 - Installed from this GitHub marketplace (the commands above), a previous version
   stays for 14 days, "so a session that already loaded the old version keeps
@@ -172,7 +187,49 @@ blocks without it. The Windows command (`commandWindows`) has no such test yet.
 - Synced from claude.ai, the previous folder moved to `~/.claude/plugins/.trash`
   when another Claude Code session started and synced (observed with Claude Code
   2.1.283 on 2026-09-28; not documented). A session that was open then lost its
-  hooks. After an update, run `/reload-plugins` in every open session.
+  hooks. After an update, run `/reload-plugins` in every open session. That is
+  not always enough: on 2026-09-29 (Claude Code 2.1.284) `/reload-plugins` kept
+  the path of the gone folder (`/plugin` showed `commands path not found …
+  maisecrets~g2`), and only a new process loaded maisecrets again: exit, then
+  `claude --resume <session id>` in the directory where the session started (the
+  guard puts this command on your clipboard, once per session). The
+  session that started the sync can lose them too: on 2026-09-29 (Claude Code
+  2.1.284) the folder was rewritten one second after a session started, and that
+  session ran no maisecrets hook while `/plugin` showed the new version.
+- **The guard closes this for a synced install.** It is a small hook outside the
+  plugin folder (`~/.claude/maisecrets-guard.py`). Every maisecrets hook writes a
+  heartbeat for its call once it has answered; when none comes (maisecrets did not
+  run, or started and died), the guard blocks the prompt, denies
+  the tool call or withholds the result. Without a sign of an update it asks to
+  run the call again first, so an agent that works alone goes on; after an update
+  it names `/reload-plugins` and the restart command. It stays
+  silent for an account without maisecrets, for a plugin you switched off, and
+  for Codex. Measured with the real client: `plugin_folder_moved_guarded` (the
+  command does not run) and `bash_rehydrate_guarded` (a healthy session passes).
+  - A synced maisecrets sets it up by itself: its session start places the script
+    and, once, registers it in `~/.claude/settings.json` (a backup first, only the
+    hooks change, one line in the session-start message says so). It protects the
+    sessions after that one. `/maisecrets:guard remove` takes it away and it stays
+    away; `"guard": false` in `~/.maisecrets/config.json` or in the machine policy
+    keeps it off. A `settings.json` that is not valid JSON is left alone.
+  - An admin who prefers central settings can register it in the Claude Code
+    managed settings instead (`python3 -m maisecrets.cli guard managed` prints the
+    entries); on a machine where maisecrets never ran that command answers `{}`.
+  - Installed another way: `/maisecrets:guard install` does the same by hand.
+  - Its cost: each prompt and tool call waits for the heartbeat, which the
+    maisecrets hook of the same call writes as it starts (both run in parallel);
+    without maisecrets it waits 5 s and then refuses. The refusal names
+    `/reload-plugins`, then `claude --resume` with the id of this session for the
+    case that the reload does not help, and, for a maisecrets that is off on purpose, the way out
+    from a terminal: `python3 ~/.claude/maisecrets-guard.py --off` (it stays off;
+    the agent cannot run it). A plugin switched off in the user, project, local or
+    managed settings is left alone. The guard expects maisecrets for the account
+    the synced copy registered under, so a second Claude profile is not blocked.
+    On a Mac without the Command Line Tools there is no `python3`, and the guard
+    answers nothing. It needs a claude.ai login: with an API key there is no
+    account to compare, and `/maisecrets:guard status` says "expected: no".
+    After an organisation takes maisecrets out of its sync the guard stops
+    expecting it within 15 minutes; until then `--off` lets you work.
 - For a team, an admin can roll out this marketplace with managed settings
   (`extraKnownMarketplaces` with `autoUpdate: true`, and `enabledPlugins`), so
   nobody has to type a command ([Claude Code docs](https://code.claude.com/docs/en/plugins/org)).
@@ -199,9 +256,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 10 scenarios against a fake upstream
-python3 harness/codex.py [--real]                      # 3 scenarios through codex exec
-python3 scripts/replay_can_fail.py                     # 53 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 harness/run.py                                 # 19 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
+python3 scripts/replay_can_fail.py                     # 73 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -248,13 +305,24 @@ with one line `maisecrets X.Y.Z active`; its absence means the plugin did not
 load. A rollback is a `git revert` on `main`: the pipeline releases it as the
 next patch version.
 
+**The guard for synced installs.** An update of an org-synced plugin can leave a
+session without its hooks. maisecrets registers a guard against that by itself
+(`"guard": false` in the policy turns it off); the managed settings can carry it
+instead (`python3 -m maisecrets.cli guard managed`). See "Updates and open sessions".
+
 **Settings you can enforce.** A machine policy file wins over the user's
 `~/.maisecrets/config.json` and cannot be changed from there:
 `/Library/Application Support/maisecrets/policy.json` (macOS),
 `%ProgramData%\maisecrets\policy.json` (Windows), `/etc/maisecrets/policy.json`
 (Linux). Any key from "Options" goes in it; typical: `backend`,
 `scrub_transcript`, `max_ttl_seconds`, `regions`, `report_url`,
-`resolve_in_files`.
+`resolve_in_files`, `rehydration`.
+Every user must be able to read the file and its folder (for example 0644 and
+0755): a policy maisecrets cannot read makes every hook fail closed, because it
+cannot tell what the policy says. A key it does not know is ignored with a
+warning; a key that starts with `_` or `$` is a comment or a schema link. A key
+that looks like a misspelled `rehydration`, `resolve_in_files` or
+`ssh_via_sandbox` blocks rehydration until it is fixed.
 `/maisecrets:status` names the keys that come from the policy. The plaintext
 `jsonfile` store is refused unless the policy or the user sets
 `allow_plaintext_store`.
@@ -493,8 +561,9 @@ A placeholder turns back into its value only here:
   over ssh on one condition: the command runs in Claude Code's Bash sandbox,
   where the operating system forces every connection through Claude Code's
   proxy and the proxy admits only the hosts you allow. Then the value goes
-  on stdin, and Claude Code asks you first, showing the host and the remote
-  command:
+  on stdin. maisecrets adds no ask of its own by default: Claude Code's permission
+  rules decide, as for any Bash command. With `"rehydration": "confirm"` Claude Code
+  asks you first, showing the host and the remote command:
 
   ```
   printf '%s' ⟦EMAIL_c3⟧ | ssh aux01 'grep -F -f - /var/log/mail.log'
@@ -531,14 +600,15 @@ A placeholder turns back into its value only here:
     passphrase prompt or an agent, and connect once outside the sandbox so
     the host key is in `~/.ssh/known_hosts`. `sudo ssh` drops the proxy
     variables and fails.
-  - The remote command itself can pass the value on: read it before you
-    allow.
+  - The remote command itself can pass the value on. The sandbox limits
+    where the connection goes, not what the remote side does with the value.
 
   `"ssh_via_sandbox": false` switches the route off. Measured on macOS and
   Debian 13 with Claude Code 2.1.283.
 
-  **One approval per session (opt-in).** A search over many hosts asks for
-  every command. Set `"ssh_approval": "per-session"` in
+  **One approval per session (opt-in, under `rehydration: confirm`).** With
+  confirm, a search over many hosts asks for every command. Set
+  `"ssh_approval": "per-session"` in
   `~/.maisecrets/config.json`: the first ssh use of a value asks once, and
   names this scope. After you allow it, the same value goes on stdin to ssh
   without a prompt for the rest of the session, at most 8 hours. The session
@@ -551,28 +621,57 @@ A placeholder turns back into its value only here:
   declined prompt approves nothing. Measured in the macOS and the Linux
   (bubblewrap) sandbox against a real host with Claude Code 2.1.283
   (`harness/sandbox/ssh_e2e.py`). The default is `"per-command"`.
-- **Inline for Write and Edit.** A placeholder in the content of Write, Edit,
+- **Inline for Write and Edit, and for a Codex patch.** In Codex a placeholder in the content
+  lines of `apply_patch` resolves the same way, and a patch against the maisecrets home is
+  refused (measured on codex-cli 0.158.0). A placeholder in the content of Write, Edit,
   MultiEdit or NotebookEdit is resolved like an MCP argument, under the same
-  session rule, cap and audit line (the line names the file). The client's
-  permission prompt then shows the diff with the value: that is the moment you
-  see what goes on disk. `"resolve_in_files": false` (a policy can set it)
+  session rule, cap and audit line (the line names the file). When your
+  permission rules ask (or with `rehydration: confirm`), the prompt shows the
+  diff with the value: that is the moment you see what goes on disk. `"resolve_in_files": false` (a policy can set it)
   turns this off; then the file tools refuse a placeholder and the way to a
   file is a Bash command you approve (`printf '%s' ⟦KEY⟧ > file`). The
   maisecrets home itself is never written by the agent.
-- **Codex approves nothing here.** Codex accepts a rewritten command only
-  together with `allow`, which skips its own approval prompt for that call.
-  On Codex the gates above are the whole control; on Claude Code the normal
-  permission rules still apply to the rewritten command.
-- **Inline for MCP tools, after you confirm.** An argument has no shell to read
-  from, so the value is inserted after the same session rule, and in Claude Code
-  every such call stops at a permission prompt, also in auto and bypass mode. The
-  prompt shows the call with the real value and names the fields; a field that
-  carries published text (`text`, `message`, `body`, `comment`, `description`,
-  `subject` …) gets a warning, because the value goes out with the message. In an
-  unattended run (`claude -p`) nobody can confirm, so the call is refused and the
-  model reads the reason, never the value. Codex cannot ask: there a placeholder
-  in such a text field is refused, and one in another field (a recipient, an id)
-  resolves without a prompt.
+- **Codex gets "allow".** Codex accepts a rewritten input only together with
+  `allow`. Measured with codex-cli 0.158.0 (`harness/codex.py --real`): the call
+  of an MCP tool still needs the tool's approval in Codex
+  (`mcp_text_field_rehydrate`), and a shell command still runs in Codex's
+  sandbox: in a read-only sandbox the write is refused although the hook
+  rewrote it (`allow_keeps_the_codex_sandbox`). Whether `allow` skips Codex's
+  approval of an escalated shell command is not measured: `codex exec` offers
+  no escalation. Codex 0.155.1 documented that it does, so on Codex treat the
+  rewrite of a shell command as approved by maisecrets. On Claude Code the hook
+  gives no decision, so the normal permission rules apply to the rewritten call.
+- **Inline for MCP tools.** An argument has no shell to read from, so the value
+  is inserted after the same session rule, cap and audit line, into every field
+  that holds the placeholder. A field that carries published text (`text`,
+  `message`, `body`, `comment`, `subject` …) is no exception: when you ask the
+  agent to send a password over Slack, it goes out, and the model still sees
+  only the placeholder. The client's permission rules decide whether the call
+  runs.
+
+## Rehydration policy (optional)
+
+The core does not change with this setting: a value stays out of the model on
+every path, and a form where the value could become code is refused on every
+path. The setting decides only whether maisecrets adds its own confirm where a
+value is put into a call. `~/.maisecrets/config.json`, or the machine policy:
+
+| `rehydration` | Claude Code | Codex |
+|---|---|---|
+| `"automatic"` (default) | no ask of ours; your permission rules decide | `allow` with the rewritten input |
+| `"confirm"` | every call that gets a value asks, also in auto and bypass mode; the prompt names the fields and warns for a published-text field | refused before anything is resolved: Codex cannot ask with a rewritten input |
+| `"block"` | refused before anything is resolved | refused |
+
+It covers Bash, ssh, MCP tools and Write/Edit alike. `"resolve_in_files": false`
+blocks the file tools alone; `"ssh_approval": "per-session"` works under
+`confirm`. A value that is none of the three blocks. A `config.json` that is not
+valid JSON, or holds no JSON object, blocks rehydration until it is fixed (it may
+have said `block`), and
+one ignored for a wrong type keeps what it made stricter (`rehydration`,
+`resolve_in_files: false`, `ssh_via_sandbox: false`), so a typo never loosens
+a setting. The refusal and `/maisecrets:status` name the file. In an unattended run (`claude -p`) nobody can answer a confirm, so the
+call is refused and the model reads the reason, never the value. The whole
+matrix, path by path: `tests/test_rehydration_matrix.py`.
 - **Under a cap.** `max_keys_per_session` (25) distinct keys per session and
   `max_resolves_per_hour` (60) in total; above that the call is denied and the
   reason names the cap. Every resolve writes one line to `~/.maisecrets/audit.log`
@@ -589,6 +688,29 @@ Recommended in your Claude Code settings, outside the plugin: the sandbox with
 `injectHosts` for the hosts a value may go to. That closes the paths no hook
 sees: a command that sends `.env` or `printenv` somewhere without printing it
 (a command that pipes `.env` into an upload). The hook redacts only what comes back.
+
+## Test data that maisecrets leaves alone
+
+maisecrets steps in only when a value that it can detect goes to the AI. Test data
+does not need to look like a real secret, and these forms are never a hit:
+
+- **In test code** (a file under `tests/`, `test_*.py`, `*_test.go`, `*.spec.ts`,
+  `conftest.py`, or code after `def test_`, `assert`, `describe(`), a password that
+  maisecrets finds only by its label (`password = "<value>"`) is a fixture.
+  A token shape (`glpat-…`, `AKIA…`, a private key) and personal data are still found
+  there: a real token in a test is a leak.
+- **Anywhere:** a value that names itself (`testpass`, `secret123`, `Passw0rd!`,
+  `my-test-token`), a placeholder (`<your-token>`, `${API_KEY}`, `{password}`,
+  `changeme`, `xxxxxxxx`, `***`), and a default equal to its label or user
+  (`POSTGRES_PASSWORD: postgres`, `admin:admin`).
+- **Addresses:** e-mail at `example.com`, `example.org`, `example.net` and the domains
+  `.test`, `.example`, `.invalid`, `.localhost`, a system mailbox such as `alerts@` or `noreply@`
+  at `.local` or `.internal` (a person's mailbox there is found); IP addresses in
+  the documentation ranges `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and
+  `2001:db8::/32`, private and loopback addresses.
+
+If maisecrets stops something that is not a secret, `/maisecrets:report last <why>`
+sends the rule name, never the value.
 
 ## Detection rules
 
@@ -679,6 +801,12 @@ a to-do.
   reference from an earlier run is foreign there.
 - **A reference in a prompt is admitted as typed by a human**, also when the
   prompt was built from an issue body or a log in a headless run.
+- **Claude Code on Windows without Git Bash** offers a `PowerShell` tool in
+  place of Bash. maisecrets checks it like Bash for the store, in any case
+  and with either slash, and refuses a placeholder in it with the reason:
+  the rewrite knows POSIX quoting only. A placeholder in a file tool or an
+  MCP argument works as on the other systems. The `/maisecrets:*` commands
+  run through Bash and need Git Bash.
 - **Codex on Windows** runs commands in PowerShell, where the bash quoting
   contexts of the grant rewrite do not apply. The prompt block, the output
   redaction and the inline MCP resolve run through `hooks/run.cmd`; a

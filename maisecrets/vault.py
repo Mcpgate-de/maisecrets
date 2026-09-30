@@ -50,8 +50,11 @@ DEFAULT_CONFIG = {
     "max_new_entries_per_result": 100,   # above this, a tool result is masked without storing more values
     "resolve_in_files": True,        # Write/Edit content resolves a placeholder like an MCP argument
     "shortcut": True,                # the first SessionStart names /maisecrets:shortcut once; it installs nothing
-    "ssh_via_sandbox": True,         # a value may go to ssh on stdin inside the Claude Code sandbox, after a confirm
-    "ssh_approval": "per-command",   # "per-session": one confirm per value and session, read-only remote commands
+    "ssh_via_sandbox": True,         # a value may go to ssh on stdin inside the Claude Code sandbox
+    "ssh_approval": "per-command",   # under rehydration "confirm": "per-session" is one confirm per value and session
+    "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
+    "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
+    "pass_agent_reports": True,      # the report of a subagent of this session is model text: not blocked (hooks.py)
     "keep_purged_days": 30,          # metadata of an expired entry is deleted after this many days
     "audit_max_lines": 2000,
 }
@@ -69,7 +72,7 @@ _CONFIG_TYPES = {
     "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
-    "ssh_approval": str,
+    "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool,
 }
 
 
@@ -218,6 +221,35 @@ def _old_region_key(layer: dict) -> dict:
     return layer
 
 
+_STRICTNESS = {"automatic": 0, "confirm": 1, "block": 2}
+_SAFETY_KEYS = ("rehydration", "resolve_in_files", "ssh_via_sandbox")
+
+
+def _looks_misspelled(key: str) -> bool:
+    """A near miss of a safety key ("rehydraton"), not a longer key of a newer version that starts with
+    one ("rehydration_mcp"): an older plugin reading a newer policy only warns about that (review round 4)."""
+    import difflib
+    if any(key.startswith(k + "_") for k in _SAFETY_KEYS):
+        return False
+    return bool(difflib.get_close_matches(key, list(_SAFETY_KEYS), n=1, cutoff=0.8))
+
+
+def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
+    """A user file ignored for a wrong type still said what it wanted: a stricter rehydration policy,
+    or a route switched off, stays; a looser one is the default anyway. A rehydration value that is
+    no policy is block (review, 2026-09-29: the fallback turned block into confirm); a list or an
+    object there raised TypeError and locked the client (review round 2)."""
+    want = parsed.get("rehydration", cfg["rehydration"])
+    if not isinstance(want, str) or want not in _STRICTNESS:
+        want = "block"
+        cfg["rehydration_fallback"] = True     # the setting is ours, not the file's: the refusal says so
+    if _STRICTNESS[want] > _STRICTNESS.get(cfg["rehydration"], 2):
+        cfg["rehydration"] = want
+    for key in ("resolve_in_files", "ssh_via_sandbox"):
+        if parsed.get(key) is False:
+            cfg[key] = False
+
+
 def load_config() -> dict:
     """Defaults, then ~/.maisecrets/config.json, then CLAUDE_PLUGIN_OPTION_<KEY> if a client passes
     plugin options that way, then the machine policy file, whose keys win. The manifest declares
@@ -235,17 +267,32 @@ def load_config() -> dict:
         if not isinstance(user, dict):
             raise ConfigError(f"{CONFIG.name} must hold one JSON object")
         _check_types(user, CONFIG.name)
-    except OSError:
+    except FileNotFoundError:
         user = {}
+    except OSError as exc:
+        # a file that exists and cannot be read may say block: it loosens nothing (review, 2026-09-29)
+        user = {}
+        cfg["config_warning"] = f"{CONFIG.name} cannot be read ({type(exc).__name__}) and was ignored"
+        cfg["rehydration"] = "block"
+        cfg["rehydration_fallback"] = True
     except ValueError:
         # the user file is advisory: a typo must not lock the user out of the client (review,
         # 2026-09-26). The defaults are the strict values, so the fallback loosens nothing; the
         # warning is shown at session start and in the block notice.
         user = {}
         cfg["config_warning"] = f"{CONFIG.name} is not valid JSON and was ignored"
+        # the file may have set block: an ignored file loosens nothing, so nothing is rehydrated until it is fixed
+        cfg["rehydration"] = "block"
+        cfg["rehydration_fallback"] = True
     except ConfigError as exc:
-        user = {}
         cfg["config_warning"] = f"{exc}; the file was ignored"
+        if isinstance(user, dict):
+            _keep_the_stricter(cfg, user)
+        else:
+            # JSON that is no object cannot be read either (it may wrap a block): the same as invalid JSON
+            cfg["rehydration"] = "block"
+            cfg["rehydration_fallback"] = True
+        user = {}
     unknown = sorted(k for k in user if k not in _CONFIG_TYPES)
     if unknown:
         # a key is named only when it is a typo of a real one: a value pasted into the file as a
@@ -258,6 +305,12 @@ def load_config() -> dict:
         cfg["config_warning"] = (cfg["config_warning"] + "; " if cfg["config_warning"] else "") + \
             f"{CONFIG.name}: unknown key(s) {what} ignored"
         user = {k: v for k, v in user.items() if k in _CONFIG_TYPES}
+        if any(_looks_misspelled(k) for k in named):
+            # "rehydraton": "block" is a stricter wish spelled wrong: dropping it would loosen. The file's
+            # own rehydration key must not undo it (review round 3: "resolve_in_file": false next to it)
+            user.pop("rehydration", None)
+            cfg["rehydration"] = "block"
+            cfg["rehydration_fallback"] = True
     user = _old_region_key(user)
     cfg.update(user)
     cfg["regions_from"] = "config.json" if "regions" in user else "default"
@@ -282,14 +335,34 @@ def load_config() -> dict:
     if policy_path is not None:
         try:
             policy = json.loads(policy_path.read_text(encoding="utf-8"))
-        except OSError:
+        except FileNotFoundError:
             policy = {}
+        except OSError as exc:
+            # an administrator's file that exists and cannot be read is not "no policy": it fails closed
+            # like a policy that is not valid JSON (review, 2026-09-29)
+            raise ConfigError(f"{policy_path} cannot be read ({type(exc).__name__})") from exc
         except ValueError as exc:
             raise ConfigError(f"{policy_path} is not valid JSON") from exc
         if not isinstance(policy, dict):
             # valid JSON of another shape was skipped silently: no policy applied at all
             raise ConfigError(f"{policy_path} must hold one JSON object")
         _check_types(policy, policy_path.name)
+        import difflib
+        unknown_policy = sorted(k for k in policy if k not in _CONFIG_TYPES and not k.startswith(("_", "$")))
+        policy = {k: v for k, v in policy.items() if k in _CONFIG_TYPES}
+        typo = [k for k in unknown_policy if _looks_misspelled(k)]
+        if unknown_policy:
+            # a key of a newer version or a management tool is ignored with a warning; "_" and "$" keys
+            # are comments and schema links
+            cfg["config_warning"] = (cfg["config_warning"] + "; " if cfg["config_warning"] else "") + \
+                f"{policy_path.name}: {len(unknown_policy)} unknown key(s) ignored" + \
+                ("; a safety key looks misspelled, rehydration is blocked until fixed" if typo else "")
+        if typo:
+            # an administrator's "rehydraton": "block" dropped silently would loosen; its intent is unknown
+            policy["rehydration"] = "block"
+            cfg["rehydration_fallback"] = True
+        elif "rehydration" in policy:
+            cfg["rehydration_fallback"] = False   # the administrator's setting, not our fallback
         policy_keys = sorted(policy)
         policy = _old_region_key(policy)
         cfg.update(policy)
@@ -359,6 +432,8 @@ class Entry:
     purged: bool = False
     counters: dict = field(default_factory=dict)  # unused on entries; kept for schema stability
     sessions: list = field(default_factory=list)  # sessions allowed to resolve the entry (see Vault.get)
+    # a word that only a label rule found (letters only): replaced where it was found, never hunted in other texts
+    weak: bool = False
     # no purged_at field: from_meta drops it, so the proof below can remove the filter and
     # the owning test sees the TypeError of the field report again
 
@@ -376,6 +451,28 @@ class Entry:
     def ref(self) -> str:
         from .placeholder import CLOSE, OPEN
         return f"{OPEN}{self.key}:{self.display}{CLOSE}" if self.display else f"{OPEN}{self.key}{CLOSE}"
+
+
+# the default passwords of services and the words that follow a label in code and docs: hunting one of them in
+# every later text redacted `docker ps` and blocked "add a postgres service" (review, 2026-09-29). Only these are
+# weak: a random lower-case value such as xqzvbnmq is a secret wherever it shows up (Codex review, 2026-09-29)
+DEFAULT_WORDS = frozenset({
+    "postgres", "postgresql", "mysql", "mariadb", "redis", "mongo", "mongodb", "rabbitmq", "guest", "elastic",
+    "kibana", "grafana", "minio", "minioadmin", "keycloak", "oracle", "admin", "administrator", "root", "user",
+    "users", "test", "tester", "testing", "demo", "default", "secret", "password", "passwort", "changeme",
+    "example", "sample", "docker", "ubuntu", "raspberry", "letmein", "welcome", "qwerty", "plaintext", "candidate",
+    "unchanged", "sentinel", "credentials", "identifier", "whitespace", "previous", "lookahead", "encrypted",
+    "forbidden", "refreshed", "temporary", "operator", "punctuation", "tokenizer", "nexttoken", "token", "tokens",
+    "required", "optional", "database", "service", "server", "client", "local", "localhost", "development",
+    "production", "staging", "mindestens", "unbedingt", "vergessen", "unbekannt", "abgelaufen", "erforderlich",
+    "geheim", "kennwort"})
+
+
+def is_weak(kind: str, value: str) -> bool:
+    """A value that only a label rule found and that is a known default word (DEFAULT_WORDS): replaced where it was
+    found, never hunted in other texts."""
+    from .detect import LABEL_RULES
+    return str(kind).startswith(LABEL_RULES) and value.strip().lower() in DEFAULT_WORDS
 
 
 # ---------------------------------------------------------------- backends --
@@ -820,8 +917,32 @@ class Vault:
         return fingerprint(value, self.fp_key())
 
     def live_fingerprints(self) -> dict[str, str]:
-        """fingerprint -> key for every entry whose value is still stored."""
-        return {m["fingerprint"]: k for k, m in self._index["entries"].items() if not m.get("purged")}
+        """fingerprint -> key for every entry whose value is still stored and may be hunted in any text. A weak entry
+        is not: `DB_PASSWORD=postgres` stored `postgres`, and every later text with the word was redacted and every
+        prompt with it blocked, in every session, for a day (review, 2026-09-29)."""
+        return {m["fingerprint"]: k for k, m in self._index["entries"].items()
+                if not m.get("purged") and not m.get("weak")}
+
+    @_mutating
+    def mark_weak_entries(self) -> int:
+        """Mark the weak entries a version before 0.5.15 stored without the mark (see Entry.weak). Reads the value of
+        each unmarked label-rule entry once; a store that refuses the read leaves the entry unmarked for the next
+        start. Returns the count marked weak."""
+        from .detect import LABEL_RULES
+        todo = [k for k, m in self._index["entries"].items()
+                if "weak" not in m and not m.get("purged") and str(m.get("kind", "")).startswith(LABEL_RULES)]
+        n = 0
+        for key in todo:
+            try:
+                value = self.backend.get(key)
+            except RuntimeError:
+                continue
+            if value is None:
+                continue
+            weak = is_weak(self._index["entries"][key]["kind"], value)
+            self._index["entries"][key]["weak"] = weak
+            n += weak
+        return n
 
     # api -------------------------------------------------------------------
     @_mutating
@@ -851,7 +972,7 @@ class Vault:
         e = Entry(key=key, type=type_, kind=kind, fingerprint=fp,
                   display=display_for(type_, value), created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
-                  session=session, uses=0, sessions=[session] if session else [])
+                  session=session, uses=0, sessions=[session] if session else [], weak=is_weak(kind, value))
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
         self.backend.put(
             key, value,
@@ -1014,6 +1135,31 @@ class Vault:
             return f"limit: {per_hour} resolves in the last hour (max_resolves_per_hour)"
         return "ok"
 
+    def _limit_all(self, keys: list[str], session: str | None) -> list[str]:
+        """The limiter for every key of one call together: two new keys at a cap of one passed one by
+        one, and the first was recorded before the second was refused (review, 2026-09-29)."""
+        keys = list(dict.fromkeys(keys))     # one resolve per key, whatever the caller passes
+        if not keys:
+            return []                         # nothing to resolve is under every cap, also a lowered one
+        failed = [f"{k} ({st})" for k in keys for st in [self._limit(k, session)] if st != "ok"]
+        if failed:
+            return failed
+        now = time.time()
+        rec = [r for r in self._index.get("resolves", []) if r["ts"] > now - 3600]
+        per_session = int(self.cfg.get("max_keys_per_session", 25))
+        per_hour = int(self.cfg.get("max_resolves_per_hour", 60))
+        known = {r["key"] for r in rec if r["session"] == session}
+        new = [k for k in dict.fromkeys(keys) if k not in known]
+        if new and len(known) + len(new) > per_session:
+            # a cap lowered below the keys already known: the first new key is over it (review round 4:
+            # IndexError when the call named only known keys)
+            return [f"{new[max(0, per_session - len(known))]} (limit: {per_session} distinct keys in this session this "
+                    "hour (max_keys_per_session))"]
+        if len(rec) + len(keys) > per_hour:
+            return [f"{keys[per_hour - len(rec)]} (limit: {per_hour} resolves in the last hour "
+                    "(max_resolves_per_hour))"]
+        return []
+
     def _record(self, key: str, session: str | None, tool: str, context: str) -> bool:
         """One audit line per resolve. False when the line could not be written: the README
         promises the line, so a resolve without it does not happen (review, 2026-09-26)."""
@@ -1135,6 +1281,30 @@ class Vault:
         if n or old:
             self._save_index()
         return n
+
+    @_mutating
+    @_mutating
+    def quiet_code_words(self) -> list[str]:
+        """Mark weak the statement keywords a keyword rule stored before 0.5.15. `if not token: <keyword>` stored the
+        keyword, and maisecrets redacted it in every later text until the entry expired; the detector stores none
+        now, but the old entries stayed (field report, 2026-09-29). A weak entry is not hunted in other texts, and
+        its placeholder still resolves: nothing is deleted without the person (Codex review, 2026-09-29, of a
+        version that deleted). The entries are found by fingerprint: no value is read. Returns the keys marked."""
+        entries = self._index["entries"]
+        if not any(str(m.get("kind", "")).startswith("ds-keyword") and not m.get("purged") and not m.get("weak")
+                   for m in entries.values()):
+            return []   # no fingerprint key is made for a store that has no such entry
+        from .detect import code_word_spellings
+        quieted = []
+        for word in code_word_spellings():
+            key = self._index["by_fingerprint"].get(self.fingerprint(word))
+            meta = entries.get(key) if key else None
+            if (not meta or meta.get("purged") or meta.get("weak")
+                    or not str(meta.get("kind", "")).startswith("ds-keyword")):
+                continue
+            meta["weak"] = True
+            quieted.append(key)
+        return quieted
 
     def repair(self) -> dict:
         """Rebuild a damaged index from the store: every stored value is deleted (nothing
