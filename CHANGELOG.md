@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.5.21] - 2026-09-30
+
+### Fixes
+
+- a command in the Windows sandbox names its cause and runs again outside it (9590ae4)
+
+### Other
+
+- Merge branch 'fix/commands-in-codex-sandbox' into 'main' (d638070)
+
 ## [0.5.20] - 2026-09-30
 
 ### Fixes
