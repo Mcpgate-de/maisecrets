@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The Claude plugin directory accepts the hooks again.** It refused 0.5.15 because the PowerShell
+  part of each hook started `hooks/run.cmd` from a variable; the directory wants every program named
+  by its path. The hooks now name `${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd` directly. Nothing changes in
+  what they do.
+
 ## [0.5.15] - 2026-09-30
 
 - **Codex on Windows: a removed plugin folder now blocks instead of letting the tool run.** Codex
