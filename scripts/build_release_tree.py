@@ -13,10 +13,19 @@ hooks and the commands name is in the tree.
 
 `commit` writes the tree into a temporary index, so the working copy and the real index stay as
 they are. With <parent> the new commit continues that history; without it, it starts one.
+
+The `release` branch also carries its own `hooks/hooks.json` (`directory_hooks`). The directory refused 0.5.15 and
+0.5.16 with UNPINNED_NPX: a hook command may hold no variable, command substitution, wildcard or inline program.
+The hooks on `main` are one program for bash and PowerShell, and they block when an update removed the plugin
+folder of an open session. The directory flavor names one program per hook, and gives up two things: a hook
+without Git Bash on Windows (Claude Code), and the block after a synced update removed the folder. A marketplace
+install, as the directory makes it, keeps the old version folder for 14 days.
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -41,6 +50,22 @@ def paths(ref: str = "HEAD") -> list[str]:
     return sorted(keep)
 
 
+HOOKS = "hooks/hooks.json"
+
+
+def directory_hooks(text: str) -> str:
+    """The hooks of `main` with each command reduced to one program by its full path from ${CLAUDE_PLUGIN_ROOT}."""
+    data = json.loads(text)
+    for entries in data["hooks"].values():
+        for entry in entries:
+            for h in entry.get("hooks", []):
+                sub = re.search(r'hooks/run\.sh" ([\w-]+)', h["command"]).group(1)
+                h["command"] = f'bash "${{CLAUDE_PLUGIN_ROOT}}/hooks/run.sh" {sub}'
+                if "commandWindows" in h:
+                    h["commandWindows"] = f'"${{CLAUDE_PLUGIN_ROOT}}/hooks/run.cmd" {sub}'
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
 def commit(ref: str, parent: str | None, message: str) -> str:
     with tempfile.TemporaryDirectory() as d:
         env = dict(os.environ, GIT_INDEX_FILE=os.path.join(d, "index"))
@@ -49,7 +74,12 @@ def commit(ref: str, parent: str | None, message: str) -> str:
         # then reads paths that end in a carriage return (the release tree test on windows-latest)
         rows = subprocess.run(["git", "ls-tree", "-r", "-z", ref], capture_output=True, check=True).stdout
         wanted = {p.encode() for p in paths(ref)}
-        info = b"".join(row + b"\0" for row in rows.split(b"\0") if row and row.split(b"\t", 1)[1] in wanted)
+        info = b"".join(row + b"\0" for row in rows.split(b"\0") if row and row.split(b"\t", 1)[1] in wanted
+                        and row.split(b"\t", 1)[1] != HOOKS.encode())
+        hooks = directory_hooks(_git("show", f"{ref}:{HOOKS}"))
+        blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], input=hooks.encode("utf-8"),
+                              capture_output=True, check=True).stdout.decode().strip()
+        info += f"100644 {blob}\t{HOOKS}".encode() + b"\0"
         r = subprocess.run(["git", "update-index", "-z", "--index-info"], input=info, env=env, capture_output=True)
         if r.returncode != 0:
             raise SystemExit(f"git update-index failed: {r.stderr.decode(errors='replace').strip()[:300]}")
