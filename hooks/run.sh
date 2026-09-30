@@ -19,7 +19,7 @@ for PY in python3 python "py -3" python3.14 python3.13 python3.12 python3.11 pyt
   fi
   V="$($PY -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>/dev/null)" && FOUND="${FOUND:+$FOUND, }$PY is $V"
 done
-MSG="maisecrets needs Python 3.9 or newer on the PATH of the client (found: ${FOUND:-none}). Install it: macOS 'brew install python' or python.org, Windows 'winget install Python.Python.3.12', Linux your package manager; then restart the client."
+MSG="maisecrets needs Python 3.9 or newer on the PATH of the client (found: ${FOUND:-none}). Install it: macOS 'brew install python' or python.org, Windows, as an administrator, 'winget install --id Python.Python.3.12 --exact --scope machine', Linux your package manager; then restart the client."
 case "${1:-}" in
   post-tool)
     # Claude Code ignores exit 2 here and would show the raw output to the model: answer
