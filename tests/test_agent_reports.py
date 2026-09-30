@@ -153,6 +153,19 @@ class AgentReportTests(unittest.TestCase):
         link.symlink_to(elsewhere)
         self.assertBlocked(self.prompt(self.s.notification(self.answer, output=link)))
 
+    def test_a_windows_output_file_outside_the_session_is_found_by_its_task_id(self):
+        # Windows keeps the output file under the temp folder, no link into the session (e2e, 2026-09-30)
+        tmp = self.dir / "Temp" / "claude" / "proj" / "s1" / "tasks"
+        tmp.mkdir(parents=True)
+        (tmp / "a1.output").write_text(self.s.output.read_text(encoding="utf-8"), encoding="utf-8")
+        self.s.output.rename(self.s.output.parent / "agent-a1b2c3d4.jsonl")
+        text = self.s.notification(self.answer, output=tmp / "a1.output").replace("<task-id>a1<", "<task-id>a1b2c3d4<")
+        self.assertEqual(self.prompt(text), {})
+        # the task id names the file: another id, a path in it, or no subagent file is no proof
+        for bad in ("<task-id>ffffffff<", "<task-id>..<", "<task-id>a1b2c3d4/../x<"):
+            with self.subTest(task_id=bad):
+                self.assertBlocked(self.prompt(text.replace("<task-id>a1b2c3d4<", bad)))
+
     def test_a_report_of_another_session_is_blocked(self):
         other = Session(self.dir / "o", self.answer)
         self.assertBlocked(self.prompt(other.notification(self.answer)))

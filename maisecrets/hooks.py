@@ -530,7 +530,15 @@ def _one_report_proves_itself(body: str, transcript: str) -> bool:
     subagents = os.path.realpath(transcript[: -len(".jsonl")]) + os.sep + "subagents" + os.sep
     real = os.path.realpath(out)
     if not real.startswith(subagents) or not real.endswith(".jsonl"):
-        return False
+        # on Windows the output file under the temp folder is no link into the session (a link needs a right
+        # there), so the report named a file outside it and was blocked (Windows e2e, 2026-09-30). The subagent's
+        # own transcript is found by its task id, in this session's folder only
+        task_id = _notification_tag(body, "task-id") or ""
+        if not re.fullmatch(r"[A-Za-z0-9]{6,64}", task_id):
+            return False
+        real = subagents + f"agent-{task_id}.jsonl"
+        if not os.path.isfile(real):
+            return False
     answer = _last_answer(real)
     if answer is None or _plain(answer) != _plain(html.unescape(body[span[0]:span[1]])):
         return False

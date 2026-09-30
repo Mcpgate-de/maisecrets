@@ -454,6 +454,17 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     for text in sc.get("expect_in_requests", []):
         if text not in joined:
             fails.append(f"{text[:40]!r} never reached the model")
+    if sc.get("needs_notification") and fails:
+        # what the client made of the output file: a link into the session, or a file of its own (the report proof
+        # depends on it; the Windows e2e of 2026-09-30 blocked the report)
+        for pf in dump.glob("*UserPromptSubmit*.json"):
+            pl = json.loads(pf.read_text(errors="ignore"))
+            m = re.search(r"<output-file>([^<]*)</output-file>", str(pl.get("prompt", "")))
+            if m:
+                f = Path(m.group(1))
+                sub = Path(str(pl.get("transcript_path", ""))[:-len(".jsonl")]) / "subagents"
+                fails.append(f"diag: output file {f.name} link={f.is_symlink()} exists={f.exists()} "
+                             f"real={os.path.realpath(f)[-80:]}; subagents={sorted(x.name for x in sub.glob('*'))[:5]}")
     for text in sc.get("expect_not_in_requests", []):
         if text in joined:
             fails.append(f"{text[:12]!r}... reached the model")
