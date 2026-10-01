@@ -147,6 +147,8 @@ class Sandbox:
             "CLAUDE_CONFIG_DIR": str(self.user_home / ".claude"),
             "PATH": str(self.bin) + os.pathsep + env.get("PATH", ""),
             "MS_TEST_CLIP": str(self.clip), "MS_TEST_OPENED": str(self.opened),
+            # the fake clipboard tools are shell scripts; with four cells at a time they took longer than 3 s
+            "MAISECRETS_CLIPBOARD_TIMEOUT": "30",
             "MS_TEST_TRIPWIRE": str(self.root / "tripwire"), "CLAUDE_PLUGIN_OPTION_BACKEND": self.backend,
             "CLAUDE_PLUGIN_ROOT": str(ROOT), "PYTHONUTF8": "1",
             # a local desktop for the fake opener in self.bin: without a display, or over ssh, the report opens
