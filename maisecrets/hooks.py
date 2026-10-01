@@ -61,6 +61,11 @@ def _out(obj: dict) -> None:
     sys.stdout.flush()
 
 
+# a clipboard tool that hangs must not eat the hook's watchdog; the tests raise it, because under a loaded test run
+# the fake pbcopy (a shell script) took longer than 3 s and a put saw no clipboard (2026-10-01)
+_CLIPBOARD_TIMEOUT = float(os.environ.get("MAISECRETS_CLIPBOARD_TIMEOUT") or 3)
+
+
 def _clipboard(text: str) -> bool:
     try:
         sysname = platform.system()
@@ -74,7 +79,7 @@ def _clipboard(text: str) -> bool:
             cmd, data = ["clip"], text.encode("utf-16-le")
         else:
             cmd = ["xclip", "-selection", "clipboard"]
-        subprocess.run(cmd, input=data, check=True, timeout=3)
+        subprocess.run(cmd, input=data, check=True, timeout=_CLIPBOARD_TIMEOUT)
         return True
     except (OSError, subprocess.SubprocessError):
         return False
@@ -93,7 +98,8 @@ def _clipboard_read() -> str:
                    "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; Get-Clipboard -Raw"]
         else:
             cmd = ["xclip", "-selection", "clipboard", "-o"]
-        return subprocess.run(cmd, capture_output=True, timeout=3, check=True).stdout.decode("utf-8", "replace")
+        return subprocess.run(cmd, capture_output=True, timeout=_CLIPBOARD_TIMEOUT, check=True).stdout.decode(
+            "utf-8", "replace")
     except (OSError, subprocess.SubprocessError):
         return ""
 
