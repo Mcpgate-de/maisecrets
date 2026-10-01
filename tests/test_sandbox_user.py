@@ -6,6 +6,7 @@ ended in a Python traceback on "PermissionError: [WinError 5]" for the store fol
 from __future__ import annotations
 
 import contextlib
+import json
 import io
 import os
 import sys
@@ -36,3 +37,36 @@ class PermissionErrorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HookPermissionErrorTests(unittest.TestCase):
+    """The same sandbox user ran the hooks: each blocked with "a locked store or a slow disk" (2026-10-01)."""
+
+    def run_hook(self, event: str, payload: dict) -> dict:
+        import json
+        from maisecrets import hooks
+        folder = os.path.join("C:\\Users", "someone", ".maisecrets")
+
+        def denied(_payload):
+            raise PermissionError(13, "Zugriff verweigert", os.path.join(folder, ".lock"))
+
+        out = io.StringIO()
+        handler = "post_tool" if event == "post-tool" else event.replace("-", "_")
+        with mock.patch.object(hooks, handler, denied), \
+                mock.patch.dict(hooks.HANDLERS, {e: (denied if e == event and e != "post-tool"
+                                                     else hooks.HANDLERS[e]) for e in hooks.HANDLERS}), \
+                mock.patch("sys.stdin", io.StringIO(json.dumps(payload))), contextlib.redirect_stdout(out):
+            rc = hooks.main(["dispatch.py", event])
+        self.assertEqual(rc, 0)
+        return json.loads(out.getvalue())
+
+    def test_every_event_blocks_and_names_the_write_access(self):
+        base = {"session_id": "S", "prompt_id": "p", "tool_use_id": "t", "tool_name": "Bash",
+                "tool_input": {"command": "ls"}, "tool_response": "x", "prompt": "hi"}
+        for event in ("user-prompt", "pre-tool", "post-tool"):
+            with self.subTest(event):
+                text = json.dumps(self.run_hook(event, dict(base)))
+                self.assertIn("no write access to", text)
+                self.assertIn("another user", text)
+                self.assertNotIn("slow disk", text)
+                self.assertTrue('"block"' in text or '"deny"' in text or "withheld" in text, text)

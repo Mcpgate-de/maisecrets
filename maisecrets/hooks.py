@@ -2760,6 +2760,21 @@ def _has_live(cfg: dict) -> bool:
     return _live_cache["v"]
 
 
+def _failure(event: str, payload: dict, exc: BaseException) -> dict:
+    """The fail-closed answer for an exception, with a cause the user can act on where one is known."""
+    if isinstance(exc, PermissionError):
+        # the Codex app on Windows runs the hooks as its sandbox user, which may read the person's profile but
+        # not write it (measured 2026-09-30); "a locked store or a slow disk" sent the person in a circle. The
+        # path is the store folder, never a value.
+        where = getattr(exc, "filename", None) or "its store folder"
+        return _fail_closed(event, payload, (
+            f"no write access to {where}. The client runs this hook as another user than the one the store "
+            "belongs to, as the Codex app on Windows does with its sandbox user. maisecrets blocks until that is "
+            "fixed; to work without its protection meanwhile, switch its hooks off in the client's hook "
+            "settings."), hint=False)
+    return _fail_closed(event, payload, f"failed ({type(exc).__name__}).")
+
+
 def _post_tool_guarded(payload: dict) -> dict:
     """Claude Code ignores exit 2 from PostToolUse: the raw output would reach the model. So a
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
@@ -2769,7 +2784,7 @@ def _post_tool_guarded(payload: dict) -> dict:
         return _fail_closed("post-tool", payload, f"configuration error: {exc}. Fix the file named there.", hint=False)
     except Exception as exc:  # noqa: BLE001
         _debug(f"post-tool: {type(exc).__name__}")
-        return _fail_closed("post-tool", payload, f"failed ({type(exc).__name__}).")
+        return _failure("post-tool", payload, exc)
 
 
 HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post_tool_guarded}
@@ -2944,7 +2959,7 @@ def main(argv: list[str]) -> int:
         return 0
     except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         # the type only: an exception message may carry a value (subprocess errors list the argv)
-        answer(_fail_closed(event, payload, f"failed ({type(exc).__name__})."), f"failed {type(exc).__name__}")
+        answer(_failure(event, payload, exc), f"failed {type(exc).__name__}")
         return 0
     finally:
         # cancel, then wait: a daemon timer thread that still runs while the interpreter shuts down

@@ -60,8 +60,8 @@ replace = "    if False:\n        # a value the store already holds"
 [[proof]]
 path = "the fail-closed answer names the type, not the message"
 file = "maisecrets/hooks.py"
-find = "        answer(_fail_closed(event, payload, f\"failed ({type(exc).__name__}).\"), f\"failed"
-replace = "        answer(_fail_closed(event, payload, f\"failed ({exc}).\"), f\"failed"
+find = "    return _fail_closed(event, payload, f\"failed ({type(exc).__name__}).\")"
+replace = "    return _fail_closed(event, payload, f\"failed ({exc}).\")"
 
 [[proof]]
 path = "the configuration warning names only a typo of a real key"
