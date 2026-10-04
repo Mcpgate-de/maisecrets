@@ -31,7 +31,9 @@ import sys
 import tempfile
 
 # folders and files of the plugin at run time, and the documents a user reads
-RUNTIME = (".claude-plugin/", ".codex-plugin/", "hooks/", "maisecrets/", "commands/", "skills/", "assets/",
+# no .codex-plugin/: Codex installs from main, and the directory held every version because that manifest names
+# image files (UNREAD_ASSET_REFERENCED, 2026-09-30: "the plugin stays held for review")
+RUNTIME = (".claude-plugin/", "hooks/", "maisecrets/", "commands/", "skills/", "assets/",
            "LICENSE", "NOTICE", "README.md", "PRIVACY.md", "SECURITY.md", "CHANGELOG.md",
            "docs/CLIENTS.md", "docs/PROTOCOL.md", "docs/THREAT-MODEL.md", "docs/label-sources.md")
 
