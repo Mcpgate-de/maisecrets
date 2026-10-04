@@ -174,8 +174,9 @@ class ReleaseTreeTests(unittest.TestCase):
         for p in self.files:
             if p.endswith((".json", ".yaml", ".yml")) and not p.startswith("hooks/"):
                 with self.subTest(p):
-                    self.assertNotRegex((self.tree / p).read_text(encoding="utf-8"),
-                                        r'"?(?:composerIcon|logo|screenshots|icon_small|icon_large)"?\s*:\s*"[^"]+\.(?:png|jpg|svg)"', p)
+                    image_ref = (r'"?(?:composerIcon|logo|screenshots|icon_small|icon_large)"?\s*:\s*'
+                                 r'"[^"]+\.(?:png|jpg|svg)"')
+                    self.assertNotRegex((self.tree / p).read_text(encoding="utf-8"), image_ref, p)
 
     def test_a_commit_continues_the_history_of_its_parent(self):
         cwd = os.getcwd()
