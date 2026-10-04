@@ -48,7 +48,9 @@ def _git(*args: str, env: dict | None = None, text: bool = True) -> str:
 def paths(ref: str = "HEAD") -> list[str]:
     tracked = _git("ls-tree", "-r", "--name-only", ref).splitlines()
     keep = [p for p in tracked
-            if any(p == r or (r.endswith("/") and p.startswith(r)) for r in RUNTIME) and "__pycache__" not in p]
+            if any(p == r or (r.endswith("/") and p.startswith(r)) for r in RUNTIME) and "__pycache__" not in p
+            # a skill's Codex metadata names its icon images, which the directory flags the same way
+            and not (p.startswith("skills/") and "/agents/" in p and p.endswith("openai.yaml"))]
     return sorted(keep)
 
 

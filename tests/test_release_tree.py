@@ -75,7 +75,7 @@ class ReleaseTreeTests(unittest.TestCase):
         tracked = subprocess.run(["git", "ls-tree", "-r", "--name-only", "HEAD"], capture_output=True, text=True,
                                  check=True, cwd=ROOT).stdout.split("\n")
         want = sorted(p for p in tracked if p and not p.startswith(self.DEV_ONLY_PREFIXES)
-                      and p not in self.DEV_ONLY_FILES)
+                      and p not in self.DEV_ONLY_FILES and not p.endswith("/agents/openai.yaml"))
         self.assertEqual(sorted(self.files), want)
 
     def test_every_path_the_hooks_commands_and_manifests_name_is_in_the_tree(self):
@@ -172,10 +172,10 @@ class ReleaseTreeTests(unittest.TestCase):
     def test_no_listing_file_of_the_tree_names_an_image(self):
         # UNREAD_ASSET_REFERENCED: a manifest that names an image file holds every version for a reviewer
         for p in self.files:
-            if p.endswith(".json") and not p.startswith("hooks/"):
+            if p.endswith((".json", ".yaml", ".yml")) and not p.startswith("hooks/"):
                 with self.subTest(p):
                     self.assertNotRegex((self.tree / p).read_text(encoding="utf-8"),
-                                        r'"(?:composerIcon|logo|screenshots)"\s*:\s*"[^"]+\.(?:png|jpg|svg)"', p)
+                                        r'"?(?:composerIcon|logo|screenshots|icon_small|icon_large)"?\s*:\s*"[^"]+\.(?:png|jpg|svg)"', p)
 
     def test_a_commit_continues_the_history_of_its_parent(self):
         cwd = os.getcwd()
