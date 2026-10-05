@@ -44,6 +44,8 @@ os.environ["MAISECRETS_GUARD_CLIPBOARD"] = "off"
 # on a German Mac and one in a C-locale container expect the same rules. A test of the lookup
 # itself sets or removes MAISECRETS_LOCALE with mock.patch.dict.
 os.environ["MAISECRETS_LOCALE"] = "de_DE"
+# the fake clipboard tools are shell scripts; under a loaded run they took longer than the 3 s of a real one
+os.environ["MAISECRETS_CLIPBOARD_TIMEOUT"] = "30"
 
 if not os.environ.get(_MINE) or os.environ.get(_MINE) != os.environ.get("MAISECRETS_HOME"):
     home = tempfile.mkdtemp(prefix="maisecrets-test-home-")
