@@ -122,6 +122,31 @@ def read_text_retry(path: Path, attempts: int = 40) -> str:
     raise AssertionError("unreachable")
 
 
+def windows_user_mismatch() -> tuple[str, str] | None:
+    """(account the process runs as, account the environment names) when they differ on Windows, else None.
+
+    The Codex app runs a slash command as its sandbox user with the person's environment, so the store path points
+    into the person's profile. There such a command left the store folder with rights for the sandbox users and an
+    index.json the person could no longer read, and every later hook of the person failed (2026-10-01..05). A run
+    with an explicit MAISECRETS_HOME chose its store on purpose and is not checked."""
+    if os.name != "nt" or os.environ.get("MAISECRETS_HOME"):
+        return None
+    named = os.environ.get("USERNAME") or ""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        size = wintypes.DWORD(257)
+        buf = ctypes.create_unicode_buffer(257)
+        if not ctypes.windll.advapi32.GetUserNameW(buf, ctypes.byref(size)):
+            return None
+        real = buf.value
+    except (OSError, AttributeError, ImportError):
+        return None
+    if named and real and real.lower() != named.lower():
+        return real, named
+    return None
+
+
 _LOCKS: dict = {}
 
 

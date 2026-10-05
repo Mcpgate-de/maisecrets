@@ -78,3 +78,28 @@ class HookPermissionErrorTests(unittest.TestCase):
         log = (vault.HOME / "hooks.log").read_text(encoding="utf-8").splitlines()[-1]
         self.assertIn("failed PermissionError (13, .lock)", log)
         self.assertNotIn("someone", log, "the last part of the path only")
+
+
+class ForeignAccountTests(unittest.TestCase):
+    """A command that runs as another Windows account than the environment names leaves the store alone."""
+
+    def test_a_command_as_the_sandbox_user_does_not_touch_the_store(self):
+        from maisecrets import vault
+        before = sorted(p.name for p in vault.HOME.iterdir()) if vault.HOME.exists() else []
+        err = io.StringIO()
+        with mock.patch.object(vault, "windows_user_mismatch", lambda: ("codexsandboxoffline", "someone")), \
+                contextlib.redirect_stderr(err):
+            rc = cli.main(["status"])
+        self.assertEqual(rc, 1)
+        self.assertIn("runs as the Windows account 'codexsandboxoffline', not as 'someone'", err.getvalue())
+        after = sorted(p.name for p in vault.HOME.iterdir()) if vault.HOME.exists() else []
+        self.assertEqual(after, before, "the command wrote into the store")
+
+    def test_the_check_is_off_with_an_explicit_store_and_off_the_platform(self):
+        from maisecrets import vault
+        with mock.patch.dict(os.environ, {"MAISECRETS_HOME": "x"}):
+            self.assertIsNone(vault.windows_user_mismatch())
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("MAISECRETS_HOME", None)
+            # off Windows there is nothing to compare; on the Windows runner the account and USERNAME agree
+            self.assertIsNone(vault.windows_user_mismatch())
