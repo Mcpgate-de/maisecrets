@@ -61,6 +61,11 @@ def _out(obj: dict) -> None:
     sys.stdout.flush()
 
 
+# a clipboard tool that hangs must not eat the hook's watchdog; the tests raise it, because under a loaded test run
+# the fake pbcopy (a shell script) took longer than 3 s and a put saw no clipboard (2026-10-01)
+_CLIPBOARD_TIMEOUT = float(os.environ.get("MAISECRETS_CLIPBOARD_TIMEOUT") or 3)
+
+
 def _clipboard(text: str) -> bool:
     try:
         sysname = platform.system()
@@ -74,7 +79,7 @@ def _clipboard(text: str) -> bool:
             cmd, data = ["clip"], text.encode("utf-16-le")
         else:
             cmd = ["xclip", "-selection", "clipboard"]
-        subprocess.run(cmd, input=data, check=True, timeout=3)
+        subprocess.run(cmd, input=data, check=True, timeout=_CLIPBOARD_TIMEOUT)
         return True
     except (OSError, subprocess.SubprocessError):
         return False
@@ -93,7 +98,8 @@ def _clipboard_read() -> str:
                    "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; Get-Clipboard -Raw"]
         else:
             cmd = ["xclip", "-selection", "clipboard", "-o"]
-        return subprocess.run(cmd, capture_output=True, timeout=3, check=True).stdout.decode("utf-8", "replace")
+        return subprocess.run(cmd, capture_output=True, timeout=_CLIPBOARD_TIMEOUT, check=True).stdout.decode(
+            "utf-8", "replace")
     except (OSError, subprocess.SubprocessError):
         return ""
 
@@ -2760,6 +2766,32 @@ def _has_live(cfg: dict) -> bool:
     return _live_cache["v"]
 
 
+def _failure(event: str, payload: dict, exc: BaseException) -> dict:
+    """The fail-closed answer for an exception, with a cause the user can act on where one is known."""
+    if isinstance(exc, PermissionError):
+        # "a locked store or a slow disk" sent the person in a circle (Windows, 2026-10-01). The hooks there ran as
+        # the person (whoami in a probe); a slash command runs as the Codex sandbox user, which may not write the
+        # profile. The path is the store folder, never a value.
+        where = getattr(exc, "filename", None) or "its store folder"
+        return _fail_closed(event, payload, (
+            f"no write access to {where}. Another program may hold it open (an antivirus scan, a second copy of "
+            "maisecrets), or it belongs to another user. maisecrets blocks until it can write; to work without its "
+            "protection meanwhile, switch its hooks off in the client's hook settings."), hint=False)
+    return _fail_closed(event, payload, f"failed ({type(exc).__name__}).")
+
+
+def _how_failed(exc: BaseException) -> str:
+    """The run-log word for a failure: the type, and for a file error its code and file name, so a failure on one
+    machine says which file (2026-10-01: "failed PermissionError" alone left the cause open). Never a value: the
+    name is the last part of a path the store or the plugin owns."""
+    how = f"failed {type(exc).__name__}"
+    if isinstance(exc, OSError):
+        code = getattr(exc, "winerror", None) or exc.errno
+        name = os.path.basename(str(exc.filename)) if exc.filename else ""
+        how += f" ({code or '?'}{', ' + name if name else ''})"
+    return how
+
+
 def _post_tool_guarded(payload: dict) -> dict:
     """Claude Code ignores exit 2 from PostToolUse: the raw output would reach the model. So a
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
@@ -2769,7 +2801,7 @@ def _post_tool_guarded(payload: dict) -> dict:
         return _fail_closed("post-tool", payload, f"configuration error: {exc}. Fix the file named there.", hint=False)
     except Exception as exc:  # noqa: BLE001
         _debug(f"post-tool: {type(exc).__name__}")
-        return _fail_closed("post-tool", payload, f"failed ({type(exc).__name__}).")
+        return _failure("post-tool", payload, exc)
 
 
 HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post_tool_guarded}
@@ -2944,7 +2976,7 @@ def main(argv: list[str]) -> int:
         return 0
     except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         # the type only: an exception message may carry a value (subprocess errors list the argv)
-        answer(_fail_closed(event, payload, f"failed ({type(exc).__name__})."), f"failed {type(exc).__name__}")
+        answer(_failure(event, payload, exc), _how_failed(exc))
         return 0
     finally:
         # cancel, then wait: a daemon timer thread that still runs while the interpreter shuts down

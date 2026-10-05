@@ -735,6 +735,17 @@ def main(argv: list[str] | None = None) -> int:
     if fn is None:
         print(f"unknown command {argv[0]}", file=sys.stderr)
         return 2
+    from .vault import windows_user_mismatch
+    mismatch = windows_user_mismatch()
+    if mismatch:
+        # a command that ran as the Codex sandbox user changed the rights of the person's store, and every hook of
+        # the person failed after it (2026-10-01..05); so it does not touch the store at all
+        real, named = mismatch
+        print(f"maisecrets {argv[0]}: this command runs as the Windows account {real!r}, not as {named!r} whose "
+              "maisecrets store this is (the Codex app runs commands in its sandbox like this). It does not touch the "
+              "store, so the store keeps its rights. Run it again outside the sandbox (Codex asks you to approve "
+              "that), or in a terminal of your own.", file=sys.stderr)
+        return 1
     # a damaged index or a wrong policy printed a Python traceback to the person who ran
     # /maisecrets:list; the message of these two errors names the file and the fix, never a value
     try:
