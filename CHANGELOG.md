@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## [0.5.24] - 2026-10-05
+
+### Fixes
+
+- a command that runs as the Codex sandbox user leaves the store alone (29285b8)
+- a permission failure names the likely causes, and the run log names the file (58e9bd9)
+- leave the skill's Codex metadata out of the release branch (d6dd769)
+- leave the Codex manifest out of the release branch (3734aca)
+- a hook that may not write its store names the cause and the way out (ee08ba6)
+
+### Other
+
+- Merge branch 'fix/windows-sandbox-user-home' into 'main' (2a89caa)
+
 ## [0.5.23] - 2026-09-30
 
 ### Fixes
