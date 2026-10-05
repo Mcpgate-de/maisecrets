@@ -2769,16 +2769,27 @@ def _has_live(cfg: dict) -> bool:
 def _failure(event: str, payload: dict, exc: BaseException) -> dict:
     """The fail-closed answer for an exception, with a cause the user can act on where one is known."""
     if isinstance(exc, PermissionError):
-        # the Codex app on Windows runs the hooks as its sandbox user, which may read the person's profile but
-        # not write it (measured 2026-09-30); "a locked store or a slow disk" sent the person in a circle. The
-        # path is the store folder, never a value.
+        # "a locked store or a slow disk" sent the person in a circle (Windows, 2026-10-01). The hooks there ran as
+        # the person (whoami in a probe); a slash command runs as the Codex sandbox user, which may not write the
+        # profile. The path is the store folder, never a value.
         where = getattr(exc, "filename", None) or "its store folder"
         return _fail_closed(event, payload, (
-            f"no write access to {where}. The client runs this hook as another user than the one the store "
-            "belongs to, as the Codex app on Windows does with its sandbox user. maisecrets blocks until that is "
-            "fixed; to work without its protection meanwhile, switch its hooks off in the client's hook "
-            "settings."), hint=False)
+            f"no write access to {where}. Another program may hold it open (an antivirus scan, a second copy of "
+            "maisecrets), or it belongs to another user. maisecrets blocks until it can write; to work without its "
+            "protection meanwhile, switch its hooks off in the client's hook settings."), hint=False)
     return _fail_closed(event, payload, f"failed ({type(exc).__name__}).")
+
+
+def _how_failed(exc: BaseException) -> str:
+    """The run-log word for a failure: the type, and for a file error its code and file name, so a failure on one
+    machine says which file (2026-10-01: "failed PermissionError" alone left the cause open). Never a value: the
+    name is the last part of a path the store or the plugin owns."""
+    how = f"failed {type(exc).__name__}"
+    if isinstance(exc, OSError):
+        code = getattr(exc, "winerror", None) or exc.errno
+        name = os.path.basename(str(exc.filename)) if exc.filename else ""
+        how += f" ({code or '?'}{', ' + name if name else ''})"
+    return how
 
 
 def _post_tool_guarded(payload: dict) -> dict:
@@ -2965,7 +2976,7 @@ def main(argv: list[str]) -> int:
         return 0
     except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         # the type only: an exception message may carry a value (subprocess errors list the argv)
-        answer(_failure(event, payload, exc), f"failed {type(exc).__name__}")
+        answer(_failure(event, payload, exc), _how_failed(exc))
         return 0
     finally:
         # cancel, then wait: a daemon timer thread that still runs while the interpreter shuts down

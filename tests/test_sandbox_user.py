@@ -68,5 +68,13 @@ class HookPermissionErrorTests(unittest.TestCase):
                 text = json.dumps(self.run_hook(event, dict(base)))
                 self.assertIn("no write access to", text)
                 self.assertIn("another user", text)
+                self.assertIn("hold it open", text)
                 self.assertNotIn("slow disk", text)
                 self.assertTrue('"block"' in text or '"deny"' in text or "withheld" in text, text)
+
+    def test_the_run_log_names_the_code_and_the_file(self):
+        from maisecrets import vault
+        self.run_hook("user-prompt", {"session_id": "S", "prompt_id": "p", "prompt": "hi"})
+        log = (vault.HOME / "hooks.log").read_text(encoding="utf-8").splitlines()[-1]
+        self.assertIn("failed PermissionError (13, .lock)", log)
+        self.assertNotIn("someone", log, "the last part of the path only")
