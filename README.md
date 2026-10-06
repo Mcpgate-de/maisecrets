@@ -32,7 +32,7 @@ It works as a plugin for Claude Code (and Cowork) and for Codex, from the same
    or paste it from the clipboard where one exists. The value never reached
    the model. Measured: zero API requests for a blocked prompt.
    **On Claude Code 2.1.287 and later, as a rule, there is no block and no
-   resend:** a mod (`hooks/mod.mjs`) replaces the values with placeholders and
+   resend:** a mod (`claude-mod/maisecrets-mod.mjs`) replaces the values with placeholders and
    the prompt goes on at once (the hook still blocks a prompt with an `@file`
    mention, a timeout of the mod, and a session where mods are off); your message on screen shows the placeholders, and the
    record of the prompt as typed in the transcript file is masked in place. The
@@ -515,19 +515,40 @@ A bare password in prose, such as "use Sommer2026 for the login", is not
 detected. That is a limit of pattern detection, not a setting.
 
 **The mod.** Claude Code 2.1.287 and later loads JavaScript middleware from a
-plugin ("mods"). maisecrets ships one, named by the manifest (`"hooks":
-"./hooks/mod.json"`). On each prompt you type, send through Remote Control or
-give to `claude -p`, it asks the plugin's own launcher (`run.sh mod-prompt`):
-the same detection and store as the hook, with the prompt on stdin. A prompt
-from anyone else (a subagent's report, another session, a channel) goes on
-unchanged to the hook. The record of the prompt as typed in the transcript is
-scrubbed, found by the session id. `hooks/hooks.json` is unchanged, so Codex
-and an older Claude Code keep the block. Measured on 2.1.291: the request
-holds the placeholder and not the value, also for a prompt typed while a tool
-runs; the settings hook runs after the mod and sees the placeholder; on
-2.1.274 the mod does not load and the hook blocks. Mods are a rollout switch of
-the client: where they are off (a saved switch, some third-party setups), the
-hook blocks.
+plugin ("mods"). maisecrets ships one in its own folder: `claude-mod/maisecrets-mod.mjs`,
+named by the manifest (`"hooks": "./claude-mod/maisecrets-mod.json"`). Nothing else in
+the plugin points into that folder.
+
+- **The one event it handles:** `prompt.submit`, which fires when a prompt is about
+  to be sent. The mod handles the event; it never calls `$.prompt.submit` itself,
+  so it submits no prompt and changes no prompt of other code. It acts on a
+  person's own prompt only (typed or queued at the terminal, sent through Remote
+  Control, or the turn of `claude -p`). A subagent's report, another session's or
+  a channel's message goes on unchanged to the settings hook.
+- **What it reads:** the text of that prompt, the session id, the session's
+  working directory, and one environment variable, `OS`, to tell Windows from the
+  others.
+- **What it runs:** one program, the plugin's own launcher, with a fixed command
+  line, in the plugin folder: `bash hooks/run.sh mod-prompt`, or on Windows
+  `cmd.exe /d /c hooks\run.cmd mod-prompt`. The launcher starts this computer's
+  Python with `hooks/dispatch.py`, the same code the settings hooks run. No shell
+  reads the command line.
+- **What it sends, and where:** the prompt, the session id and the working
+  directory go to that local process on stdin. The process detects the values,
+  stores them in the local store, and answers with the prompt with placeholders.
+  The mod passes that text on to Claude Code in place of the prompt. Nothing goes
+  to a network address: the mod makes no network call, and the launcher has none.
+  The process also starts the local transcript scrub, which masks the values in
+  this session's transcript file on disk.
+
+The settings hook in `hooks/hooks.json` runs after the mod and stays the gate.
+When the mod does not load, fails, times out or gets an answer of another shape,
+the prompt reaches the hook unchanged and the hook blocks it. `hooks/hooks.json`
+is unchanged, so Codex and an older Claude Code keep the block. Measured on
+2.1.291: the request holds the placeholder and not the value, also for a prompt
+typed while a tool runs; the settings hook sees the placeholder; on 2.1.274 the
+mod does not load and the hook blocks. Mods are a rollout switch of the client:
+where they are off (a saved switch, some third-party setups), the hook blocks.
 
 **Sending a blocked prompt.** `/maisecrets:send` sends the rewritten prompt as
 it is, without the clipboard. A plugin cannot register a command without its

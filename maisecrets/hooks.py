@@ -683,7 +683,7 @@ def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str 
 
 
 def rewrite_prompt(payload: dict) -> dict:
-    """The question of the mod (hooks/mod.mjs, Claude Code 2.1.287 and later): this prompt with a
+    """The question of the mod (claude-mod/maisecrets-mod.mjs, Claude Code 2.1.287 and later): this prompt with a
     placeholder in place of each value, so it goes through instead of being blocked. ``{}`` leaves
     the prompt as it is, and the settings hook, which runs after the mod on what the mod passes on,
     decides it as without the mod: a clean prompt, an @file mention, a subagent report, a setting

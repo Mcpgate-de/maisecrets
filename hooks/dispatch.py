@@ -48,7 +48,7 @@ except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
     raise
 
 if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt":
-    # the mod's question (hooks/mod.mjs). Any failure answers nothing: the mod then passes the prompt on
+    # the mod's question (claude-mod/maisecrets-mod.mjs). Any failure answers nothing: the mod then passes the prompt on
     # unchanged and the settings hook decides it, so a broken rewrite blocks and never lets a value through
     # unauthenticated like every hook entry (user-prompt takes any transcript_path too): a call by the agent
     # names any session id, so it can store values it already knows under that session and mask them in that
@@ -59,7 +59,11 @@ if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt":
             raise RuntimeError("fault injected for the harness")
         from maisecrets.hooks import rewrite_prompt  # noqa: E402
         payload = json.load(sys.stdin)
-        answer = rewrite_prompt(payload if isinstance(payload, dict) else {})
+        payload = payload if isinstance(payload, dict) else {}
+        # the mod starts this in the plugin folder (a fixed command line); an @mention is relative to the session
+        if isinstance(payload.get("cwd"), str) and os.path.isdir(payload["cwd"]):
+            os.chdir(payload["cwd"])
+        answer = rewrite_prompt(payload)
     except Exception:  # noqa: BLE001 - no traceback: what passes back goes through other mods
         sys.exit(1)
     # ASCII JSON: ⟦ as \u27e6. A Windows console code page cannot write ⟦, and the answer was a traceback

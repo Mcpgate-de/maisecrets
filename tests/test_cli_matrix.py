@@ -629,7 +629,7 @@ class PopulationTests(unittest.TestCase):
             self.assertEqual(sorted(cmds - known), [], f"commands/{name}")
 
     def test_every_cli_command_is_reachable_and_every_dispatched_one_exists(self):
-        # mod-prompt is the question of the mod (hooks/mod.mjs), not a command of the CLI
+        # mod-prompt is the question of the mod (claude-mod/maisecrets-mod.mjs), not a command of the CLI
         dispatched = commands_in_dispatch() - {"pending", "session-start", "mod-prompt"}
         self.assertEqual(sorted(dispatched - cli_commands()), [], "dispatch.py sends these to cli.main")
         # resolve is reached through hooks/resolve.py, which the Bash hook writes into a command

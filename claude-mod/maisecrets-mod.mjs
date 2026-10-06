@@ -14,13 +14,12 @@ const PERSON = new Set(['composer', 'bridge', 'sdk'])
 
 async function ask($, prompt, session, cwd) {
   const stdin = JSON.stringify({ prompt, session_id: session, cwd })
-  const root = $.plugin.root
-  const windows = (await $.env.get('OS')) === 'Windows_NT'
-  // no shell: the argument vector goes to the launcher as it is
-  const argv = windows
-    ? ['cmd.exe', '/d', '/c', root + '\\hooks\\run.cmd', MARK]
-    : ['bash', root + '/hooks/run.sh', MARK]
-  const r = await $.process.run(argv, { stdin, timeoutMs: 8000 })
+  // the plugin's own launcher, as fixed text, run in the plugin folder: no shell, and nothing but this
+  // computer's own Python gets the prompt (README, "The mod")
+  const init = { cwd: $.plugin.root, stdin, timeoutMs: 8000 }
+  const r = (await $.env.get('OS')) === 'Windows_NT'
+    ? await $.process.run(['cmd.exe', '/d', '/c', 'hooks\\run.cmd', 'mod-prompt'], init)
+    : await $.process.run(['bash', 'hooks/run.sh', 'mod-prompt'], init)
   if (r.exitCode !== 0) return null
   const answer = JSON.parse(r.stdout)
   if (!answer || answer.maisecrets !== MARK || typeof answer.text !== 'string') return null

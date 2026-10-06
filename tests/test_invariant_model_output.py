@@ -326,7 +326,7 @@ class RefusalTextTests(unittest.TestCase):
 
 
     def test_the_prompt_the_mod_passes_on_carries_no_value(self):
-        # hooks/mod.mjs sends this text to the model in place of the prompt (Claude Code with mods)
+        # claude-mod/maisecrets-mod.mjs sends this text to the model in place of the prompt (Claude Code with mods)
         typed = "ghp_" + secrets.token_hex(18)
         bad = []
         for name in ("live", "resolved", "nasty"):
