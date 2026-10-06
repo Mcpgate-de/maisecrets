@@ -6,5 +6,5 @@ runner = ["tests/test_gates.py::RedactionTests::test_shapeless_value_is_redacted
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "    new_response = _walk_strings(response, redact)\n"
+find = "    new_response = walk(response)\n"
 replace = "    new_response = response\n"

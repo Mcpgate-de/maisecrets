@@ -7,7 +7,7 @@ output. `README.md` says what it does for users; `docs/` holds the design.
 
 ## Read first
 
-- `docs/THREAT-MODEL.md`: the controls C1 to C18, what each one blocks and where it ends.
+- `docs/THREAT-MODEL.md`: the controls C1 to C20, what each one blocks and where it ends.
 - `docs/REPO-STANDARDS.md`: layout, git hooks, CI, versions and releases, remotes, directory rules.
 - `docs/TESTING.md`: the test layers and how to run them.
 - `docs/PROTOCOL.md` and `docs/CLIENTS.md`: the hook payloads of each client.

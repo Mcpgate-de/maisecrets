@@ -1,0 +1,10 @@
+# c20-invisible-characters-leave-tool-output: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c20-invisible-characters-leave-tool-output"
+control = "C20"
+statement = "Unicode tag characters and the variation selectors that no character needs leave every tool result, keys included, before the model reads it; a value spelled in tag characters goes with them."
+runner = ["tests/test_hidden_characters.py::HiddenCharacterTests::test_a_hidden_instruction_in_tag_characters_is_removed_and_named", "tests/test_hidden_characters.py::HiddenCharacterTests::test_a_value_spelled_in_tag_characters_goes_with_them", "tests/test_hidden_characters.py::HiddenCharacterTests::test_every_class_is_removed_at_its_edges", "tests/test_hidden_characters.py::HiddenCharacterTests::test_selectors_that_carry_bytes_go_also_with_gaps", "tests/test_hidden_characters.py::HiddenCharacterTests::test_a_key_of_the_result_is_cleaned_too"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "            s, gone, runs = strip_hidden(s)\n"
+replace = "            gone, runs = 0, []\n"
