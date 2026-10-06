@@ -425,11 +425,17 @@ def _reserved_domain(v: str) -> bool:
     if tld in ("local", "internal"):
         # hans.mueller@firma.local, jdoe@corp.internal: an Active Directory mailbox names a person (reviews,
         # 2026-09-29); only a system account there is no person
-        return local.lower() in _SYSTEM_USERS or local.lower() in ("alerts", "alert", "monitoring", "backup", "ci")
+        # a bot or a pipeline is no person either: a CI file that names renovate@repo.local was blocked in Codex,
+        # which cannot rewrite a prompt (2026-10-06)
+        local = local.lower()
+        return (local in _SYSTEM_USERS or local in _SERVICE_MAILBOXES
+                or local.endswith(("-bot", "_bot")))
     return (d in _RESERVED_MAIL_DOMAINS or d.endswith(tuple("." + x for x in _RESERVED_MAIL_DOMAINS))
             or tld in _RESERVED_MAIL_TLDS)
 
 
+_SERVICE_MAILBOXES = frozenset({"alerts", "alert", "monitoring", "backup", "ci", "bot", "renovate", "dependabot",
+                                "release", "deploy", "build", "jenkins", "gitlab-runner", "github-actions"})
 _SYSTEM_USERS = frozenset({"git", "root", "ubuntu", "ec2-user", "admin", "noreply", "no-reply", "postmaster",
                            "hostmaster", "webmaster", "mailer-daemon", "bounce", "bounces"})
 
