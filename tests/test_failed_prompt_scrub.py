@@ -146,6 +146,66 @@ class FailedPromptScrubTests(unittest.TestCase):
         self.assertEqual(len(started), 1)
         self.assertNotIn(GLPAT, json.dumps(started, default=str), "the prompt goes on stdin, not as an argument")
 
+    def test_the_hook_itself_never_scans_or_scrubs(self):
+        # Opus review, 2026-10-06: a scrub done in the hook process was not caught by any test
+        fake = mock.MagicMock()
+        with mock.patch.object(hooks, "_FAILED_SCRUB_STARTED", []), \
+                mock.patch.object(hooks.subprocess, "Popen", return_value=fake) as popen, \
+                mock.patch.object(hooks.detect, "scan", side_effect=AssertionError("scanned in the hook")), \
+                mock.patch.object(hooks, "_scrub_transcript", side_effect=AssertionError("scrubbed in the hook")):
+            hooks._scrub_failed_prompt("user-prompt", {"prompt": f"check {GLPAT}", "transcript_path": "/t.jsonl"})
+        popen.assert_called_once()
+        self.assertEqual(popen.call_args[0][0][:3], [sys.executable, "-I", "-c"])
+
+    def test_a_slow_child_holds_the_hook_one_second_at_most(self):
+        fake = mock.MagicMock()
+        fake.stdin.write.side_effect = lambda data: time.sleep(5)       # a pipe that the child does not read yet
+        with mock.patch.object(hooks, "_FAILED_SCRUB_STARTED", []), \
+                mock.patch.object(hooks.subprocess, "Popen", return_value=fake):
+            started = time.time()
+            hooks._scrub_failed_prompt("user-prompt", {"prompt": "x" * 300000, "transcript_path": "/t.jsonl"})
+        self.assertLess(time.time() - started, 2.0)
+
+    def test_the_watchdog_answers_before_it_starts_the_scrub(self):
+        import io
+        from contextlib import redirect_stdout
+        order = []
+
+        def slow(_payload):
+            time.sleep(1.0)
+            return {}
+        payload = {"prompt": f"check {GLPAT}", "session_id": "s1", "prompt_id": "p", "transcript_path": "/t.jsonl"}
+        with mock.patch.dict(hooks.HANDLERS, {"user-prompt": slow}), \
+                mock.patch.dict(hooks.WATCHDOG_SECONDS, {"user-prompt": 0.2}), \
+                mock.patch.object(hooks, "_out", lambda obj: order.append("answer")), \
+                mock.patch.object(hooks, "_scrub_failed_prompt", lambda e, p: order.append("scrub")), \
+                mock.patch.object(hooks.os, "_exit", lambda code: order.append("exit")), \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps(payload))), redirect_stdout(io.StringIO()):
+            hooks.main(["hook", "user-prompt"])
+        self.assertEqual(order[:3], ["answer", "scrub", "exit"])
+
+    def test_the_child_obeys_the_scrub_setting(self):
+        with mock.patch.object(hooks, "load_config", return_value={"scrub_transcript": False}), \
+                mock.patch.object(hooks, "_scrub_transcript") as now, \
+                mock.patch.object(hooks, "_scrub_transcript_later") as later:
+            hooks._scrub_failed_prompt_now(f"check {GLPAT}", "/t.jsonl")
+        now.assert_not_called()
+        later.assert_not_called()
+
+    def test_the_child_does_not_load_a_module_from_the_working_directory(self):
+        # Opus review, 2026-10-06: a json.py in the repository ran with the prompt on stdin
+        marker = Path(self.dir, "shadowed")
+        Path(self.dir, "json.py").write_text(f"open({str(marker)!r}, 'w').write('ran')\nfrom json import *\n")
+        here = os.getcwd()
+        os.chdir(self.dir)
+        try:
+            with mock.patch.object(hooks, "_FAILED_SCRUB_STARTED", []):
+                hooks._scrub_failed_prompt("user-prompt", {"prompt": "say hi", "transcript_path": str(self.transcript)})
+            time.sleep(1.5)
+        finally:
+            os.chdir(here)
+        self.assertFalse(marker.exists())
+
     def test_the_scrub_never_raises(self):
         with mock.patch.object(hooks.detect, "scan", side_effect=RuntimeError("boom")):
             hooks._scrub_failed_prompt_now("x", "/t.jsonl")

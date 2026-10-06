@@ -1060,7 +1060,10 @@ def _allowed(rule: Rule, text: str, m: re.Match, secret: str) -> bool:
 
 
 _TOKEN_CHAR_RE = re.compile(r"[A-Za-z0-9_\-]")
-_ROUTABLE_TAIL_RE = re.compile(r"\.[0-9a-z]{2}\.[0-9a-z]{4,16}(?![0-9A-Za-z_-])")
+# GitLab's routable token: payload, ".", version (2 base36), ".", length (2) and CRC32 (7) in base36: 9 characters;
+# the older form has one dot: payload, ".", 9 characters (lib/authn/token_field/generator/routable_token.rb)
+_ROUTABLE_TAIL_RE = re.compile(r"\.(?:[0-9a-z]{2}\.)?[0-9a-z]{9}(?![0-9A-Za-z_-])")
+_GITLAB_PREFIX_RE = re.compile(r"gl[a-z]+-")
 
 
 def _lower(text: str) -> str:
@@ -1208,7 +1211,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     secret = text[start:end]
                 # a routable GitLab token ends in ".<version>.<id>" (glpat-...CA.01.0y0znlm9w): the token
                 # characters stop at the dot, and the tail stayed in the clear (field report, 2026-10-06)
-                tail = _ROUTABLE_TAIL_RE.match(text, end) if secret.startswith("gl") else None
+                tail = _ROUTABLE_TAIL_RE.match(text, end) if _GITLAB_PREFIX_RE.match(secret) else None
                 if tail and not overlaps(end, tail.end()):
                     end = tail.end()
                     secret = text[start:end]

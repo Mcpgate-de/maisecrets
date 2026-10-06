@@ -214,7 +214,7 @@ def _scrub_transcript_later(path: str, values: list[str], refs: list[str], secon
     )
     try:
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        child = subprocess.Popen([sys.executable, "-c", code, root], stdin=subprocess.PIPE,
+        child = subprocess.Popen([sys.executable, "-I", "-c", code, root], stdin=subprocess.PIPE,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         child.stdin.write(json.dumps({"path": path, "values": values, "refs": refs, "seconds": seconds,
                                       "bases": bases, "session": session or "", "hidden": hidden}).encode())
@@ -756,7 +756,8 @@ def rewrite_prompt(payload: dict) -> dict:
 
 
 def user_prompt(payload: dict) -> dict:
-    if os.environ.get("MAISECRETS_TEST_FAULT") == "user-prompt-slow":     # tests: the watchdog answers
+    if os.environ.get("MAISECRETS_TEST_FAULT") == "user-prompt-slow" and os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
+        # tests only (tests/_isolate.py sets the second variable): the watchdog answers
         time.sleep(WATCHDOG_SECONDS["user-prompt"] + 3)
     cfg = load_config()
     prompt = payload.get("prompt", "")
@@ -1745,7 +1746,7 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: s
         "    pass\n"
     )
     try:
-        child = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE,
+        child = subprocess.Popen([sys.executable, "-I", "-c", code], stdin=subprocess.PIPE,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         child.stdin.write(json.dumps({"fifo": fifo, "value": value, "seconds": seconds, "approve": approve,
@@ -3296,6 +3297,7 @@ def _heartbeat(event: str, payload: dict, done: bool = False) -> None:
 
 
 _FAILED_SCRUB_STARTED: list[bool] = []
+_FAILED_SCRUB_LOCK = __import__("threading").Lock()
 
 
 def _scrub_failed_prompt_now(prompt: str, path: str) -> None:
@@ -3319,26 +3321,44 @@ def _scrub_failed_prompt(event: str, payload: dict) -> None:
     """The prompt hook could not finish (a damaged index, a broken config, an exception, the watchdog) and blocks.
     The client still writes the prompt as typed into its transcript, so the detected values are masked there:
     the detector needs no store and no index (Mcpgate-de/maisecrets#3). The work runs in a detached child, once
-    per hook process: the hook must end before the client's timeout, which lets the prompt through (codex review,
-    2026-10-06: a scan and a locked transcript inside the watchdog could hold the process past it). The prompt
-    reaches the child on stdin, never as an argument. Never raises."""
-    if event != "user-prompt" or _FAILED_SCRUB_STARTED:
+    per hook process (the watchdog and the main thread may both get here), and the hook does not wait for it:
+    the hook must end before the client's timeout, which lets the prompt through (codex review). The prompt goes
+    to the child on stdin from a thread that the hook waits for one second at most: a prompt larger than the pipe
+    buffer blocked the write until the child had started (Opus review, 2026-10-06). Never raises."""
+    if event != "user-prompt" or not isinstance(payload, dict):
         return
-    try:
-        prompt, path = payload.get("prompt"), payload.get("transcript_path")
-        if not isinstance(prompt, str) or not isinstance(path, str) or not path:
+    prompt, path = payload.get("prompt"), payload.get("transcript_path")
+    if not isinstance(prompt, str) or not isinstance(path, str) or not path:
+        return
+    with _FAILED_SCRUB_LOCK:
+        if _FAILED_SCRUB_STARTED:
             return
         _FAILED_SCRUB_STARTED.append(True)
+    try:
         code = ("import json,sys\n"
+                "try:\n"
+                "    import signal; signal.alarm(30)   # the detector is slow on a huge prompt: the child ends\n"
+                "except (ImportError, AttributeError):\n"
+                "    pass\n"
                 "sys.path.insert(0, sys.argv[1])\n"
                 "from maisecrets.hooks import _scrub_failed_prompt_now\n"
                 "spec = json.load(sys.stdin)\n"
                 "_scrub_failed_prompt_now(spec['prompt'], spec['path'])\n")
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        child = subprocess.Popen([sys.executable, "-c", code, root], stdin=subprocess.PIPE,
+        child = subprocess.Popen([sys.executable, "-I", "-c", code, root], stdin=subprocess.PIPE,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        child.stdin.write(json.dumps({"prompt": prompt, "path": path}).encode())
-        child.stdin.close()
+        data = json.dumps({"prompt": prompt, "path": path}).encode()
+
+        def feed() -> None:
+            try:
+                child.stdin.write(data)
+                child.stdin.close()
+            except (OSError, ValueError):
+                pass
+        import threading
+        writer = threading.Thread(target=feed, daemon=True)
+        writer.start()
+        writer.join(timeout=1.0)
     except Exception:  # noqa: BLE001 - the block stands either way
         _debug("scrub-failed-prompt: could not start")
 
