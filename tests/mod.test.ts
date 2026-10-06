@@ -1,4 +1,4 @@
-// The mod's own logic (hooks/mod.mjs), run by `claude plugin test` with no session and no
+// The mod's own logic (claude-mod/maisecrets-mod.mjs), run by `claude plugin test` with no session and no
 // Python: $.process.run is stubbed. The rule under test: only a well-formed answer from the
 // plugin's launcher changes the prompt; every other outcome passes it on unchanged, so the
 // settings hook decides it (harness: prompt_secret_rewrite_off shows that hook blocks it).
@@ -31,8 +31,8 @@ test('a well-formed answer replaces the prompt', async ($, on) => {
   const r = await submit($)
   expect(r.text).toBe(REWRITTEN)
   // the plugin's own launcher, with the prompt and the session on stdin
-  expect(seen.argv[seen.argv.length - 1]).toBe('mod-prompt')
-  expect(seen.argv[1].endsWith('/hooks/run.sh')).toBe(true)
+  expect(seen.argv).toEqual(['bash', 'hooks/run.sh', 'mod-prompt'])
+  expect(typeof seen.init.cwd).toBe('string')        // the plugin folder: the command line is fixed text
   expect(JSON.parse(seen.init.stdin)).toEqual({ prompt: TYPED, session_id: 'sess-1', cwd: '/work' })
 })
 

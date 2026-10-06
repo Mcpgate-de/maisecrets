@@ -111,7 +111,7 @@ SCENARIOS = {
         "expect_not_in_requests": [REPORT_VALUE],
     },
     # the typed prompt carries a secret. Without the mod (Codex, Claude Code before 2.1.287): blocked, zero
-    # requests. With the mod (hooks/mod.mjs): one request, with the placeholder and without the value
+    # requests. With the mod (claude-mod/maisecrets-mod.mjs): one request, with the placeholder and without the value
     "prompt_secret": {
         "prompt": f"Please check the token {MARK} in CI",
         "turns": [{"text": "checked"}],
@@ -453,16 +453,16 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     if "invalid manifest" in dbg or not re.search(r"Registered [1-9]\d* hooks from [1-9]\d* plugins", dbg):
         fails.append("PLUGIN NOT LOADED: no hooks registered (see claude-debug.log); the manifest is rejected by this "
                      "Claude Code version")
-    # a hooks file the client could not read: 2.1.223 logged this for hooks/mod.json while it held only `modules`
+    # a hooks file the client could not read: 2.1.223 logged this for the mod's hooks file while it held only `modules`
     # (2026-10-06); the other hooks still loaded, so nothing else here would notice
     if "Failed to load hooks" in dbg:
         fails.append("a hooks file of the plugin failed to load (see 'Failed to load hooks' in claude-debug.log)")
-    # the mod (hooks/mod.mjs) loads on Claude Code 2.1.287 and later; a scenario with `with_mod` expects its
+    # the mod (the mod) loads on Claude Code 2.1.287 and later; a scenario with `with_mod` expects its
     # outcome there and the hook's outcome elsewhere. A client that should load it and does not is a failure,
     # or a broken mod would pass as "an older client"
     mod_loaded = re.search(r"hooks module maisecrets@\S+ loaded", dbg) is not None
     if _client_version() >= (2, 1, 287) and not mod_loaded and "hooks modules not loaded" not in dbg:
-        fails.append("MOD NOT LOADED: this client loads mods, but hooks/mod.mjs did not load (see claude-debug.log)")
+        fails.append("MOD NOT LOADED: this client loads mods, but the mod did not load (see claude-debug.log)")
     if _client_version() >= (2, 1, 287) and "hooks modules not loaded" in dbg:
         # a saved rollout switch can keep mods off on a client that has them; the scenario then tests the hook
         print(f"     ~ {name}: this client has mods, but they are off in this process; the hook path ran")

@@ -1,4 +1,4 @@
-"""The prompt path of the mod (hooks/mod.mjs → dispatch.py mod-prompt → hooks.rewrite_prompt) and the
+"""The prompt path of the mod (claude-mod/maisecrets-mod.mjs → dispatch.py mod-prompt → hooks.rewrite_prompt) and the
 transcript scrub it starts by session id.
 
 The mod's own JavaScript is tested in tests/mod.test.ts (`claude plugin test`); the real client with
@@ -264,8 +264,10 @@ class DispatchTests(unittest.TestCase):
 
     def run_dispatch(self, payload) -> subprocess.CompletedProcess:
         env = {**os.environ, "MAISECRETS_HOME": _TMP}
+        # in the plugin folder, as the mod starts it
         return subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "mod-prompt"],
-                              input=json.dumps(payload), capture_output=True, text=True, env=env, timeout=60)
+                              input=json.dumps(payload), capture_output=True, text=True, env=env, timeout=60,
+                              cwd=str(ROOT))
 
     def setUp(self):
         for name in ("index.json", "vault.json", "events.log"):
@@ -284,6 +286,17 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(out["text"], "check ⟦SECRET_c1⟧")
         self.assertNotIn(GLPAT, r.stdout + r.stderr)
         r.stdout.encode("ascii")        # a console code page without ⟦ can write it (Windows, cp1252)
+
+    def test_a_mention_is_checked_in_the_session_folder_not_in_the_plugin_folder(self):
+        # the mod starts the launcher in the plugin folder (a fixed command line for the directory review)
+        import tempfile
+        with tempfile.TemporaryDirectory() as cwd:
+            Path(cwd, "notes.env").write_text("X=1")
+            r = self.run_dispatch({"prompt": f"see @notes.env and {GLPAT}", "session_id": "s9", "cwd": cwd})
+            self.assertEqual(json.loads(r.stdout), {"maisecrets": "mod-prompt"})        # left to the hook
+            # `hooks` is a folder of the plugin, not of the session: the prompt is rewritten
+            r = self.run_dispatch({"prompt": f"see @hooks and {GLPAT}", "session_id": "s9", "cwd": cwd})
+            self.assertIn("text", json.loads(r.stdout))
 
     def test_a_clean_prompt_answers_without_a_text(self):
         r = self.run_dispatch({"prompt": "say hi", "session_id": "s9"})
