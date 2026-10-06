@@ -106,7 +106,7 @@ replace = "    if tool in _READ_TOOLS or tool.startswith(\"mcp__\"):"
 [[proof]]
 path = "the PowerShell tool reaches no guard (the hole of 0.5.11 on Windows without Git Bash)"
 file = "maisecrets/hooks.py"
-find = "    if tool == \"PowerShell\":\n        return _pre_powershell(payload, tool_input)"
+find = "    if tool == \"PowerShell\":\n        return _pre_powershell(payload, tool_input, cfg)"
 replace = "    if False:\n        return _pre_powershell(payload, tool_input)"
 
 [[proof]]

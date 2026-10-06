@@ -400,8 +400,12 @@ class DecisionSitesTests(unittest.TestCase):
         self.assertEqual({k: sorted(v) for k, v in sites.items()}, {
             "_rehydrated": ["_ask", "_updated"],
             # the ssh route under the policy: automatic or a session approval, the ask of confirm per
-            # session, the ask of confirm per command
-            "_pre_bash": ["_ask", "_ask", "_updated"],
+            # session, the ask of confirm per command; and the ssh consent (#8): the ask for a command with no
+            # value (its input carries only the consent read), and one ask for consent and value together
+            # (a consent window never skips the value policy: the consent asks before the policy decides)
+            "_pre_bash": ["_ask", "_ask", "_ask", "_ask", "_updated"],
+            # ssh consent outside Bash (PowerShell text, a file under ~/.ssh): asks with the input unchanged
+            "_consent_gate": ["_ask"],
         })
         src = Path(ROOT, "maisecrets", "hooks.py").read_text(encoding="utf-8")
         self.assertEqual(src.count('"permissionDecision": "allow"'), 1, "allow is written in _updated only")

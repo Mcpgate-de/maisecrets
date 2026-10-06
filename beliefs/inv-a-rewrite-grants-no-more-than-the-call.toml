@@ -37,8 +37,8 @@ replace = "        pass"
 [[proof]]
 path = "a Bash call without a placeholder is answered with a grant"
 file = "maisecrets/hooks.py"
-find = "    refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != \"comment\"]\n    if not refs:\n        return {}"
-replace = "    refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != \"comment\"]\n    if not refs:\n        return _updated(payload, tool_input)"
+find = "    if not refs:\n        if not needs_yes:\n            return {}"
+replace = "    if not refs:\n        if not needs_yes:\n            return _updated(payload, tool_input)"
 
 [[proof]]
 path = "the Codex exception changes (the canary)"
