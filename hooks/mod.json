@@ -1,0 +1,7 @@
+{
+  "description": "maisecrets as a Claude Code mod (2.1.287 and later): a prompt with a secret goes through with placeholders. hooks/hooks.json stays the gate. The empty hooks object keeps a client without mods from logging an error for this file.",
+  "modules": [
+    "./mod.mjs"
+  ],
+  "hooks": {}
+}

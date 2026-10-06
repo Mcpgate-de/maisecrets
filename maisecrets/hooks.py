@@ -22,7 +22,7 @@ import sys
 from typing import Any
 
 from . import detect, rehydration
-from .placeholder import find_refs
+from .placeholder import KEY_RE, find_refs
 from .vault import ConfigError, Vault, load_config
 
 # a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
@@ -138,31 +138,59 @@ def _debug(msg: str) -> None:
             pass
 
 
-def _scrub_transcript_later(path: str, values: list[str], refs: list[str], seconds: float = 15.0) -> None:
+def _scrub_transcript_later(path: str, values: list[str], refs: list[str], seconds: float = 15.0,
+                            session: str | None = None) -> None:
     """Claude Code 2.1.283 writes the blocked prompt's transcript record AFTER the hook returned
     (measured 2026-09-26: at hook time the transcript file did not exist yet), so a scrub inside
     the hook finds nothing. A detached child polls the file for up to ``seconds`` and scrubs
-    it as soon as the raw value appears. Values reach the child on stdin, never as arguments."""
+    it as soon as the raw value appears. Values reach the child on stdin, never as arguments.
+    Without a path (the mod gets none), the child looks for ``projects/*/<session>.jsonl`` under
+    the client's config directory on each poll, as the harness finds a transcript."""
+    bases: list[str] = []
     if not path:
-        return
+        if not session or not _SESSION_ID_RE.fullmatch(session):
+            return
+        bases = [os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")]
     code = (
-        "import json,os,sys,time\n"
+        "import glob,json,os,sys,time\n"
         "sys.path.insert(0, sys.argv[1])\n"
         "from maisecrets.hooks import _scrub_transcript, _debug\n"
         "spec = json.load(sys.stdin)\n"
+        "def paths():\n"
+        "    if spec['path']: return [spec['path']]\n"
+        "    name = spec['session'] + '.jsonl'\n"
+        "    return [p for b in spec['bases'] for p in glob.glob(os.path.join(b, 'projects', '*', name))]\n"
         "deadline = time.time() + spec['seconds']\n"
-        "while time.time() < deadline:\n"
-        "    if _scrub_transcript(spec['path'], spec['values'], spec['refs']):\n"
-        "        _debug('scrub-later: done'); break\n"
-        "    time.sleep(0.2)\n"
+        "if spec['path']:\n"
+        "    while time.time() < deadline:\n"
+        "        if _scrub_transcript(spec['path'], spec['values'], spec['refs']):\n"
+        "            _debug('scrub-later: done'); break\n"
+        "        time.sleep(0.2)\n"
+        "    else:\n"
+        "        _debug('scrub-later: gave up')\n"
         "else:\n"
-        "    _debug('scrub-later: gave up')\n"
+        "    # by session id (the mod): an older record of the value may come first, and the client may write\n"
+        "    # the typed text more than once, so the child watches the whole window and reads a file again\n"
+        "    # only when it grew\n"
+        "    seen = {}\n"
+        "    while time.time() < deadline:\n"
+        "        for p in paths():\n"
+        "            try:\n"
+        "                size = os.path.getsize(p)\n"
+        "            except OSError:\n"
+        "                continue\n"
+        "            if seen.get(p) != size:\n"
+        "                _scrub_transcript(p, spec['values'], spec['refs'])\n"
+        "                seen[p] = size\n"
+        "        time.sleep(0.2)\n"
+        "    _debug('scrub-later: window closed')\n"
     )
     try:
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         child = subprocess.Popen([sys.executable, "-c", code, root], stdin=subprocess.PIPE,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        child.stdin.write(json.dumps({"path": path, "values": values, "refs": refs, "seconds": seconds}).encode())
+        child.stdin.write(json.dumps({"path": path, "values": values, "refs": refs, "seconds": seconds,
+                                      "bases": bases, "session": session or ""}).encode())
         child.stdin.close()
     except (OSError, ValueError):
         _debug("scrub-later: could not start")
@@ -321,6 +349,7 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
 
 
 _SESSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+_KEY_RE = re.compile(KEY_RE)
 
 
 def _pending_path(session: str | None):
@@ -601,24 +630,108 @@ def _report_rest(payload: dict, prompt: str) -> str | None:
     return None if detect.scan(text) else text
 
 
+def _blocking_mention(prompt: str, cwd: str, cfg: dict) -> str | None:
+    """The first @mention of a file that exists, which the hook blocks before it stores anything."""
+    if not cfg.get("block_at_mentions", True):
+        return None
+    for m in AT_MENTION_RE.finditer(prompt):
+        p = os.path.expanduser(m.group("path")).rstrip(".,;:)")
+        if os.path.exists(p) or os.path.exists(os.path.join(cwd or "", p)):
+            return m.group("path")
+    return None
+
+
+def _prompt_hits(prompt: str) -> list:
+    """The detected values of a prompt, without the fixtures of a pasted test (C1); the hook and the mod both
+    take these out."""
+    return [m for m in detect.scan(prompt) if not detect.is_fixture(m, prompt)]
+
+
+def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str | None) -> tuple:
+    """(rewritten, entries, values, stored): the prompt with a placeholder for each detected value and
+    for each value the store already holds; the hook and the mod share it, so both take out the same."""
+    rewritten, entries = _replace(prompt, matches, vault, session) if matches else (prompt, [])
+    values = [m.value for m in matches]
+    stored = {"n": 0}
+    if vault is not None and _has_live(cfg):
+        # a value the store already holds has a known shape: its fingerprint. Without this a stored
+        # password typed again, or a value without a detector shape next to a detected one, went to
+        # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
+        # from 8 characters; a shorter one would block ordinary words in a prompt.
+        resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]
+        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values)
+    return rewritten, entries, values, stored
+
+
+def rewrite_prompt(payload: dict) -> dict:
+    """The question of the mod (hooks/mod.mjs, Claude Code 2.1.287 and later): this prompt with a
+    placeholder in place of each value, so it goes through instead of being blocked. ``{}`` leaves
+    the prompt as it is, and the settings hook, which runs after the mod on what the mod passes on,
+    decides it as without the mod: a clean prompt, an @file mention, a subagent report, a setting
+    that turns the rewrite off. The answer carries placeholders, never a value."""
+    cfg = load_config()
+    if not cfg.get("rewrite_prompts", True):
+        return {}
+    prompt = payload.get("prompt", "")
+    session = payload.get("session_id")
+    # a minted key resolves only in its session (C4), and the scrub handoff is found by it
+    if not isinstance(prompt, str) or not session or not _SESSION_ID_RE.fullmatch(session):
+        return {}
+    # a subagent's report is the hook's to judge (C19); a model wrote it, so nothing of it is stored
+    if "<task-notification>" in prompt:
+        return {}
+    # the hook blocks an @file mention before it stores anything; without a working directory a relative
+    # mention cannot be checked, so any mention goes to the hook
+    cwd = payload.get("cwd")
+    if _blocking_mention(prompt, cwd if isinstance(cwd, str) else "", cfg) or (
+            not cwd and cfg.get("block_at_mentions", True) and AT_MENTION_RE.search(prompt)):
+        return {}
+    matches = _prompt_hits(prompt)
+    if not matches and not _has_live(cfg):
+        return {}
+    # the hook checks the text the mod passes on: a placeholder in place of a value can turn `@src/<value>` into
+    # a mention of the folder src/ (Gate B, 2026-10-06). A preview with a stop character in each value's place
+    # shows it before anything is stored
+    preview = prompt
+    for m in sorted(matches, key=lambda x: x.start, reverse=True):
+        preview = preview[:m.start] + "\u27e6" + preview[m.end:]
+    if _blocking_mention(preview, cwd if isinstance(cwd, str) else "", cfg):
+        return {}
+    vault = Vault(cfg)
+    rewritten, entries, values, stored = _take_values_out(prompt, matches, cfg, vault, session)
+    if not matches and not stored["n"]:
+        return {}
+    if _blocking_mention(rewritten, cwd if isinstance(cwd, str) else "", cfg):
+        return {}      # a stored value without a shape made the mention; the hook blocks it
+    if cfg.get("scrub_transcript", True):
+        # the prompt's own record in the transcript keeps the text as typed (queue-operation, measured on
+        # 2.1.291); the transcript is found by the session id, so the scrub needs no hook after this one. The
+        # child watches the whole window: an older record of the same value ended it at its first hit before
+        # the record of this prompt was written (codex review, 2026-10-06)
+        _scrub_transcript_later("", values, [], session=session)
+    from . import events
+    events.record("UserPromptSubmit", "claude", entries, outcome="rewritten by the mod")
+    # what the person reads: the placeholders this rewrite put in (a stored value counted once)
+    added = {k for k, _s, _e in find_refs(rewritten)} - {k for k, _s, _e in find_refs(prompt)}
+    return {"text": rewritten, "count": len(added)}
+
+
 def user_prompt(payload: dict) -> dict:
     cfg = load_config()
     prompt = payload.get("prompt", "")
     session = payload.get("session_id")
 
     # 1. @file mentions inline the file OUTSIDE the hook pipeline. Force a Read.
-    if cfg.get("block_at_mentions", True):
-        for m in AT_MENTION_RE.finditer(prompt):
-            p = os.path.expanduser(m.group("path")).rstrip(".,;:)")
-            if os.path.exists(p) or os.path.exists(os.path.join(payload.get("cwd", ""), p)):
-                return {
-                    "decision": "block",
-                    "reason": (
-                        f"maisecrets: @{m.group('path')} would inline the file without scanning. "
-                        "Ask the assistant to read it instead, so the Read result can be redacted."
-                    ),
-                    "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True},
-                }
+    mention = _blocking_mention(prompt, payload.get("cwd", ""), cfg)
+    if mention:
+        return {
+            "decision": "block",
+            "reason": (
+                f"maisecrets: @{mention} would inline the file without scanning. "
+                "Ask the assistant to read it instead, so the Read result can be redacted."
+            ),
+            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True},
+        }
 
     # a subagent's report: before the references are admitted (a model wrote them, not the human) and
     # before anything is stored; the audit line counts it
@@ -634,22 +747,13 @@ def user_prompt(payload: dict) -> dict:
 
     # 2. references the human typed or pasted: this session may resolve them from now on
     typed = find_refs(prompt)
-    matches = [m for m in detect.scan(prompt) if not detect.is_fixture(m, prompt)]
+    matches = _prompt_hits(prompt)
     vault = None
     if typed or matches or _has_live(cfg):
         vault = Vault(cfg)
         for key, _s, _e in typed:
             vault.admit(key, session)
-    rewritten, entries = _replace(prompt, matches, vault, session) if matches else (prompt, [])
-    values = [m.value for m in matches]
-    stored = {"n": 0}
-    if vault is not None and _has_live(cfg):
-        # a value the store already holds has a known shape: its fingerprint. Without this a stored
-        # password typed again, or a value without a detector shape next to a detected one, went to
-        # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
-        # from 8 characters; a shorter one would block ordinary words in a prompt.
-        resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]
-        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values)
+    rewritten, entries, values, stored = _take_values_out(prompt, matches, cfg, vault, session)
     if not matches and not stored["n"]:
         if typed:
             # the model has never seen the bracket syntax; without this it asks the user for the
@@ -703,6 +807,8 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
     ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"
                            r"|(?<![\w-])resolve\s+\S+\s+--grant\b|cmd_resolve|\.redeem\("),
     ("the ssh approval store", r"ssh-approvals|ssh_approval"),
+    # the mod's question stores values and scrubs a transcript by session id: for the mod, not the agent
+    ("the mod's question", r"(?<![\w-])(?:dispatch\.py|run\.sh|run\.cmd)[\"']?\s+[\"']?mod-prompt\b"),
     # the guard outside the plugin folder: `--off` in its refusal is for the person, not the agent
     ("the maisecrets guard", r"maisecrets-guard\.py"),     # guard.json sits in the home, covered above
     ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\](?:v-|sealed)|__ms_\d+\b"

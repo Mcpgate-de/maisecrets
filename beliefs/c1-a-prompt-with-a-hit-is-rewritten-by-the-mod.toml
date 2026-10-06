@@ -1,0 +1,10 @@
+# c1-a-prompt-with-a-hit-is-rewritten-by-the-mod: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-prompt-with-a-hit-is-rewritten-by-the-mod"
+control = "C1"
+statement = "With the mod (Claude Code 2.1.287 and later), a prompt that carries a detected value goes on with a placeholder in its place, and the value goes to the store; the value never reaches the model."
+runner = ["tests/test_mod_prompt.py::RewriteTests::test_a_secret_becomes_a_placeholder_and_the_value_goes_to_the_store"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    return {\"text\": rewritten, \"count\": len(added)}\n"
+replace = "    return {\"text\": prompt, \"count\": len(added)}\n"

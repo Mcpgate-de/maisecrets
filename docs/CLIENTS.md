@@ -5,7 +5,8 @@ documentation on 2026-09-26 unless marked measured.
 
 One core (detector, vault, placeholder), one adapter per provider (manifest,
 hook names, block/rewrite fields). Proven by the harness: Claude Code CLI
-(hooks: block prompt, rewrite tool I/O) and Codex CLI (same format; output via
+(hooks: block prompt, rewrite tool I/O; with mods, from 2.1.287, a prompt is rewritten instead of blocked, see the
+README "The mod") and Codex CLI (same format; output via
 block feedback). Same runtime, seen live but not in the harness: the Claude desktop app
 (Cowork; a blocked prompt, an MCP resolve with its ask and a redacted Bash output, 2026-09-28) and Codex in the
 ChatGPT app (2026-09-27). Same runtime, not measured: the Codex IDE extension. Docs, untested: ChatGPT

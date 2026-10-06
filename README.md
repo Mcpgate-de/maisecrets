@@ -31,6 +31,13 @@ It works as a plugin for Claude Code (and Cowork) and for Codex, from the same
    `⟦EMAIL_c1:ma•••@•••.de⟧`. Type `/maisecrets:send` to send it as is,
    or paste it from the clipboard where one exists. The value never reached
    the model. Measured: zero API requests for a blocked prompt.
+   **On Claude Code 2.1.287 and later, as a rule, there is no block and no
+   resend:** a mod (`hooks/mod.mjs`) replaces the values with placeholders and
+   the prompt goes on at once (the hook still blocks a prompt with an `@file`
+   mention, a timeout of the mod, and a session where mods are off); your message on screen shows the placeholders, and the
+   record of the prompt as typed in the transcript file is masked in place. The
+   hook stays the gate: when the mod does not run or fails, the hook blocks as
+   above. `"rewrite_prompts": false` keeps the block. See "The mod".
 2. **The model reads a file or runs a command that outputs a secret.** A
    `PostToolUse` hook redacts the result before the model sees it.
 3. **The model uses a placeholder in a Bash command or a tool argument.** A
@@ -266,9 +273,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 19 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 21 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 73 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 75 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -448,6 +455,7 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
   "renew_on_use": true,
   "scrub_transcript": true,
   "block_at_mentions": true,
+  "rewrite_prompts": true,
   "regions": ["auto"],
   "max_keys_per_session": 25,
   "max_resolves_per_hour": 60,
@@ -505,6 +513,21 @@ a shape needs a label or the vault command:
 
 A bare password in prose, such as "use Sommer2026 for the login", is not
 detected. That is a limit of pattern detection, not a setting.
+
+**The mod.** Claude Code 2.1.287 and later loads JavaScript middleware from a
+plugin ("mods"). maisecrets ships one, named by the manifest (`"hooks":
+"./hooks/mod.json"`). On each prompt you type, send through Remote Control or
+give to `claude -p`, it asks the plugin's own launcher (`run.sh mod-prompt`):
+the same detection and store as the hook, with the prompt on stdin. A prompt
+from anyone else (a subagent's report, another session, a channel) goes on
+unchanged to the hook. The record of the prompt as typed in the transcript is
+scrubbed, found by the session id. `hooks/hooks.json` is unchanged, so Codex
+and an older Claude Code keep the block. Measured on 2.1.291: the request
+holds the placeholder and not the value, also for a prompt typed while a tool
+runs; the settings hook runs after the mod and sees the placeholder; on
+2.1.274 the mod does not load and the hook blocks. Mods are a rollout switch of
+the client: where they are off (a saved switch, some third-party setups), the
+hook blocks.
 
 **Sending a blocked prompt.** `/maisecrets:send` sends the rewritten prompt as
 it is, without the clipboard. A plugin cannot register a command without its

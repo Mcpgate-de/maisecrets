@@ -43,7 +43,27 @@ try:
 except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
     if len(sys.argv) == 2 and sys.argv[1] in HOOK_EVENTS:
         _refuse_without_the_code(type(exc).__name__)
+    if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt":
+        sys.exit(1)       # no traceback: the mod passes the prompt on and the hook decides (above: it blocks)
     raise
+
+if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt":
+    # the mod's question (hooks/mod.mjs). Any failure answers nothing: the mod then passes the prompt on
+    # unchanged and the settings hook decides it, so a broken rewrite blocks and never lets a value through
+    # unauthenticated like every hook entry (user-prompt takes any transcript_path too): a call by the agent
+    # names any session id, so it can store values it already knows under that session and mask them in that
+    # session's transcript. It learns nothing it did not give. The PreToolUse backstop names the command
+    import json
+    try:
+        if os.environ.get("MAISECRETS_TEST_FAULT") == "mod-prompt":   # harness: prompt_secret_mod_fails
+            raise RuntimeError("fault injected for the harness")
+        from maisecrets.hooks import rewrite_prompt  # noqa: E402
+        payload = json.load(sys.stdin)
+        answer = rewrite_prompt(payload if isinstance(payload, dict) else {})
+    except Exception:  # noqa: BLE001 - no traceback: what passes back goes through other mods
+        sys.exit(1)
+    print(json.dumps({"maisecrets": "mod-prompt", **answer}, ensure_ascii=False))
+    sys.exit(0)
 
 if len(sys.argv) >= 2 and sys.argv[1] == "pending":
     from maisecrets.hooks import take_pending  # noqa: E402
