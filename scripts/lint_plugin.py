@@ -25,7 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 JSON_FILES = (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", ".codex-plugin/plugin.json",
-              "hooks/hooks.json")
+              "hooks/hooks.json", "hooks/mod.json")
 REQUIRED = {"commands": ("description",), "skills": ("name", "description"), "agents": ("name", "description")}
 # a plain (unquoted) YAML scalar must not start with one of these, and must not hold ": " or " #"
 _INDICATORS = tuple("[]{}&*!|>%@`\"'#,?-:")
@@ -159,9 +159,33 @@ def check_cli_commands(root: Path = ROOT) -> list[str]:
     return errors
 
 
+def check_mod(root: Path = ROOT) -> list[str]:
+    """The mod: the manifest names hooks/mod.json, its module exists, and the launcher command the module asks
+    (`const MARK`) is one dispatch.py handles. Otherwise the mod gets no answer and every prompt is blocked
+    again, which no test of the hook alone would notice."""
+    errors = []
+    try:
+        named = json.loads((root / ".claude-plugin/plugin.json").read_text(encoding="utf-8")).get("hooks")
+        modules = json.loads((root / "hooks/mod.json").read_text(encoding="utf-8")).get("modules") or []
+    except (OSError, ValueError):
+        return ["hooks/mod.json or .claude-plugin/plugin.json cannot be read"]
+    if named != "./hooks/mod.json":
+        errors.append(f'.claude-plugin/plugin.json: "hooks" is {named!r}, not "./hooks/mod.json"')
+    for module in modules:
+        path = root / "hooks" / module
+        if not path.is_file():
+            errors.append(f"hooks/mod.json names {module}, which does not exist")
+            continue
+        m = re.search(r"const MARK = '([a-z][a-z-]*)'", path.read_text(encoding="utf-8"))
+        if not m or m.group(1) not in dispatcher_names(root)[0]:
+            errors.append(f"hooks/{module}: its launcher command {m.group(1) if m else '(none)'} is not one "
+                          "hooks/dispatch.py handles")
+    return errors
+
+
 def main() -> int:
     fm, parsed = check_frontmatter()
-    errors = fm + check_json() + check_hook_paths() + check_cli_commands()
+    errors = fm + check_json() + check_hook_paths() + check_cli_commands() + check_mod()
     for e in errors:
         print(f"lint_plugin: {e}")
     n = len(component_files())

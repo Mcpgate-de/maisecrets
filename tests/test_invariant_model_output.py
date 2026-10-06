@@ -325,6 +325,21 @@ class RefusalTextTests(unittest.TestCase):
         self.assertEqual(bad, [], f"{len(bad)} leaks:\n" + "\n".join(bad[:15]))
 
 
+    def test_the_prompt_the_mod_passes_on_carries_no_value(self):
+        # hooks/mod.mjs sends this text to the model in place of the prompt (Claude Code with mods)
+        typed = "ghp_" + secrets.token_hex(18)
+        bad = []
+        for name in ("live", "resolved", "nasty"):
+            w = _World()
+            prompt = f"deploy with {typed}, then log in with {w.values[name]}"
+            with mock.patch.object(hooks, "_scrub_transcript_later", lambda *a, **k: None):
+                out = hooks.rewrite_prompt({"prompt": prompt, "session_id": "S1"})
+            if "text" not in out:
+                bad.append(f"{name}: no rewrite, so the hook decides; a rewrite was expected")
+            bad += [f"{name}: {x}" for x in leaks(w.all_values + [typed], out)]
+        self.assertEqual(bad, [], f"{len(bad)} leaks:\n" + "\n".join(bad[:15]))
+
+
 class FailClosedTextTests(unittest.TestCase):
     """The answer of a hook that cannot finish names the exception type, never its message:
     a store error can carry the value in its argument list."""

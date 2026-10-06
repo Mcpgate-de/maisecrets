@@ -1,0 +1,10 @@
+# c3-the-mod-scrubs-the-record-of-the-prompt-it-rewrote: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c3-the-mod-scrubs-the-record-of-the-prompt-it-rewrote"
+control = "C3"
+statement = "After the mod rewrote a prompt, the values it took out are scrubbed from that session's transcript, found by the session id; the record of the prompt as typed keeps no value."
+runner = ["tests/test_mod_prompt.py::RewriteTests::test_the_scrub_starts_with_the_values_and_the_session", "tests/test_mod_prompt.py::ScrubBySessionTests::test_the_child_finds_the_transcript_by_session_id_and_masks_the_value"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        _scrub_transcript_later(\"\", values, [], session=session)\n"
+replace = "        pass\n"

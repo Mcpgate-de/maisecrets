@@ -43,6 +43,8 @@ DEFAULT_CONFIG = {
     "renew_on_use": True,
     "scrub_transcript": True,
     "block_at_mentions": True,
+    # Claude Code with mods (hooks/mod.mjs): a prompt with a value goes through with placeholders; false blocks it
+    "rewrite_prompts": True,
     "gateway_servers": [],           # MCP servers that resolve placeholders themselves (PROTOCOL §4); none by default
     # country codes for the PII rules and the label languages; "auto" is the country of the system
     # setting (maisecrets/regions.py). pii_regions is the old name and still read.
@@ -68,7 +70,8 @@ POLICY_PATHS = {
 }
 _CONFIG_TYPES = {
     "backend": str, "report_url": (str, type(None)), "ttl_seconds": dict, "max_ttl_seconds": int,
-    "renew_on_use": bool, "scrub_transcript": bool, "block_at_mentions": bool, "gateway_servers": list,
+    "renew_on_use": bool, "scrub_transcript": bool, "block_at_mentions": bool, "rewrite_prompts": bool,
+    "gateway_servers": list,
     "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,

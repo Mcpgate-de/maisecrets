@@ -110,9 +110,29 @@ SCENARIOS = {
         "expect_requests": [2, 3],
         "expect_not_in_requests": [REPORT_VALUE],
     },
-    # the typed prompt carries a secret: must be blocked, zero requests
+    # the typed prompt carries a secret. Without the mod (Codex, Claude Code before 2.1.287): blocked, zero
+    # requests. With the mod (hooks/mod.mjs): one request, with the placeholder and without the value
     "prompt_secret": {
         "prompt": f"Please check the token {MARK} in CI",
+        "turns": [{"text": "checked"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+        "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"],
+                     "expect_hook_prompt": "\u27e6SECRET_c1\u27e7"},
+    },
+    # the mod's question fails on the real client (an injected fault: dispatch.py mod-prompt exits 1). The mod
+    # passes the prompt on unchanged and the settings hook blocks it: a broken rewrite never lets a value through
+    "prompt_secret_mod_fails": {
+        "prompt": f"Please check the token {MARK} in CI",
+        "env": {"MAISECRETS_TEST_FAULT": "mod-prompt"},
+        "turns": [{"text": "unreachable"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+    },
+    # the person turned the rewrite off: blocked as without the mod, on every client
+    "prompt_secret_rewrite_off": {
+        "prompt": f"Please check the token {MARK} in CI",
+        "config": {"rewrite_prompts": False},
         "turns": [{"text": "unreachable"}],
         "expect_requests": 0,
         "expect_blocked": True,
@@ -321,6 +341,13 @@ def start_server(turns: list, out: Path) -> subprocess.Popen:
     raise RuntimeError("fake upstream did not start")
 
 
+def _client_version() -> tuple:
+    out = subprocess.run([shutil.which("claude") or "claude", "--version"], capture_output=True, text=True,
+                         timeout=30).stdout
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", out)
+    return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
+
+
 def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     fails: list[str] = []
     work = Path(tempfile.mkdtemp(prefix=f"maisecrets-h-{name}-"))
@@ -390,7 +417,10 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         # account with a synced copy, and it cannot see the --settings flag that turns that copy off, so it
         # blocked every scenario on a machine with the synced plugin (2026-09-29). Off for this home only
         (home / "guard.json").write_text(json.dumps({"expect": "off"}))
-    settings.write_text(json.dumps({"enabledPlugins": {"maisecrets@synced": False}, "hooks": hooks_cfg}))
+    # the copy installed from the Anthropic plugin directory has the same name, like the synced one
+    settings.write_text(json.dumps({"enabledPlugins": {"maisecrets@synced": False,
+                                                       "maisecrets@anthropic-plugin-directory": False},
+                                    "hooks": hooks_cfg}))
     srv = start_server(turns, out)
     try:
         debug_log = work / "claude-debug.log"
@@ -423,6 +453,27 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     if "invalid manifest" in dbg or not re.search(r"Registered [1-9]\d* hooks from [1-9]\d* plugins", dbg):
         fails.append("PLUGIN NOT LOADED: no hooks registered (see claude-debug.log); the manifest is rejected by this "
                      "Claude Code version")
+    # a hooks file the client could not read: 2.1.223 logged this for hooks/mod.json while it held only `modules`
+    # (2026-10-06); the other hooks still loaded, so nothing else here would notice
+    if "Failed to load hooks" in dbg:
+        fails.append("a hooks file of the plugin failed to load (see 'Failed to load hooks' in claude-debug.log)")
+    # the mod (hooks/mod.mjs) loads on Claude Code 2.1.287 and later; a scenario with `with_mod` expects its
+    # outcome there and the hook's outcome elsewhere. A client that should load it and does not is a failure,
+    # or a broken mod would pass as "an older client"
+    mod_loaded = re.search(r"hooks module maisecrets@\S+ loaded", dbg) is not None
+    if _client_version() >= (2, 1, 287) and not mod_loaded and "hooks modules not loaded" not in dbg:
+        fails.append("MOD NOT LOADED: this client loads mods, but hooks/mod.mjs did not load (see claude-debug.log)")
+    if _client_version() >= (2, 1, 287) and "hooks modules not loaded" in dbg:
+        # a saved rollout switch can keep mods off on a client that has them; the scenario then tests the hook
+        print(f"     ~ {name}: this client has mods, but they are off in this process; the hook path ran")
+    if mod_loaded and sc.get("with_mod"):
+        sc = {**sc, **sc["with_mod"]}
+    if sc.get("expect_hook_prompt"):
+        # positive: the settings hook ran after the mod and got the rewritten prompt
+        prompts = [str(json.loads(pf.read_text(errors="ignore")).get("prompt", ""))
+                   for pf in dump.glob("*UserPromptSubmit*.json")]
+        if not any(sc["expect_hook_prompt"] in p for p in prompts):
+            fails.append(f"the settings hook never saw {sc['expect_hook_prompt']!r} (prompts: {len(prompts)})")
     if "maisecrets@synced" in dbg and "not loaded" not in dbg and "disabled" not in dbg.lower():
         fails.append("a synced maisecrets copy is loaded next to the checkout; the run is not testing the working tree")
     if sc.get("needs_notification") and not any(

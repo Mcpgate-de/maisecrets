@@ -629,7 +629,8 @@ class PopulationTests(unittest.TestCase):
             self.assertEqual(sorted(cmds - known), [], f"commands/{name}")
 
     def test_every_cli_command_is_reachable_and_every_dispatched_one_exists(self):
-        dispatched = commands_in_dispatch() - {"pending", "session-start"}
+        # mod-prompt is the question of the mod (hooks/mod.mjs), not a command of the CLI
+        dispatched = commands_in_dispatch() - {"pending", "session-start", "mod-prompt"}
         self.assertEqual(sorted(dispatched - cli_commands()), [], "dispatch.py sends these to cli.main")
         # resolve is reached through hooks/resolve.py, which the Bash hook writes into a command
         self.assertEqual(sorted(cli_commands() - dispatched), ["resolve"])
@@ -1090,6 +1091,14 @@ class HookEventTests(unittest.TestCase):
         self.assertNotIn(value, events)
         log = (self.sb.home / "hooks.log").read_text()
         self.assertRegex(log, r"\tuser-prompt\tclaude\tS1\t-\tblock\t\d+ms\tok\n")
+
+    def test_the_mod_prompt_answers_a_rewrite_without_the_value_through_the_dispatcher(self):
+        value = fake_value("Mp")
+        r = self.sb.run("mod-prompt", stdin=json.dumps({"prompt": f"password: {value}", "session_id": "S1"}))
+        out = json.loads(r.stdout)
+        self.assertEqual((r.returncode, out["maisecrets"], out["text"]), (0, "mod-prompt", "password: ⟦SECRET_c1⟧"))
+        self.assertNotIn(value, r.stdout + r.stderr)
+        self.assertNotIn(value, (self.sb.home / "events.log").read_text())
 
     def test_pre_tool_and_post_tool_answer_through_the_dispatcher(self):
         r = self.sb.run("pre-tool", stdin=json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"},
