@@ -240,7 +240,14 @@ class ScrubBySessionTests(unittest.TestCase):
             time.sleep(0.3)
             tmp = Path(cfg, "projects", "-p", "new.tmp")
             tmp.write_text(record)
-            os.replace(tmp, t)                           # another file, same name and size
+            for _ in range(50):                          # another file, same name and size
+                try:
+                    os.replace(tmp, t)
+                    break
+                except PermissionError:                  # Windows: the child has it open for a pass
+                    time.sleep(0.1)
+            else:
+                self.fail("the transcript stayed locked for five seconds")
             self.assertTrue(masked_soon(), "replaced file")
             child.wait(timeout=10)
 
