@@ -64,3 +64,15 @@ root.
   `~gN` path (anthropics/claude-code#97847, measured on 2.1.284). A marketplace install keeps the old
   version folder for 14 days, so its open sessions keep working. Nothing in the plugin can prevent
   it (README, "Updates and open sessions").
+
+## Watch list: changes upstream that change the design
+
+Check these at the start of a work session here, and at least once a week. A change in one of
+them is a reason for an issue. After each check, update the last column (date and result).
+
+| What to watch | Why it matters | How to check | Last checked |
+|---|---|---|---|
+| Codex can replace a prompt (a `UserPromptSubmit` answer that rewrites the text, or middleware like the Claude Code mods) | Codex still blocks a prompt with a value, and the person sends it again with `/maisecrets:send`. With a rewrite, `rewrite_prompt()` (the path of `hooks/mod.mjs`) can serve Codex too. | `codex-rs/hooks/src/events/user_prompt_submit.rs` on `openai/codex` main: does `UserPromptSubmitOutcome` get a prompt field? Read the notes of the newest release (`gh release list -R openai/codex`). | 2026-10-06, codex 0.160.1: no. The outcome has `should_stop`, `stop_reason`, `additional_contexts`. |
+| anthropics/claude-code#97847: a synced plugin update moves the plugin folder of an open session, and its hooks fail open | The guard (C13) and README "Updates and open sessions" exist because of it. | `gh issue view 97847 -R anthropics/claude-code`. The harness scenario `plugin_folder_moved` prints `[GAP]` while the gap is open and fails when a client closes it. | 2026-10-06: open. |
+| A ChatGPT workspace delivers a plugin's hooks | A workspace that imported the marketplace delivered the plugin with `hooks: []`, so a plugin with hooks and no MCP server protects nothing there. Each person needs the local marketplace install. | Sync the marketplace in a test workspace (Admin > Plugins), install it, and look for the maisecrets hooks in Settings > Hooks (with a project open), or run a probe hook. Read OpenAI's plugin docs on hooks. | 2026-10 (field report, ChatGPT app on Windows, OpenAI.Codex 26.928.2636.0): `hooks: []`. |
+| The Claude Code mods API (`prompt.submit`, `$.process.run`, the rollout switch) | `hooks/mod.mjs` depends on it. The settings hook catches every failure, but a silent change would bring back the block. | On each new Claude Code version: `claude plugin test .` and `python3 harness/run.py prompt_secret`. The harness fails when a client that has mods does not load the mod. The types of the running version are in `.claude-plugin/types/` after a run. | 2026-10-06, Claude Code 2.1.291: works. |
