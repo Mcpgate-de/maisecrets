@@ -43,7 +43,7 @@ DEFAULT_CONFIG = {
     "renew_on_use": True,
     "scrub_transcript": True,
     "block_at_mentions": True,
-    # Claude Code with mods (hooks/mod.mjs): a prompt with a value goes through with placeholders; false blocks it
+    # Claude Code with mods (the mod): a prompt with a value goes through with placeholders; false blocks it
     "rewrite_prompts": True,
     "gateway_servers": [],           # MCP servers that resolve placeholders themselves (PROTOCOL §4); none by default
     # country codes for the PII rules and the label languages; "auto" is the country of the system

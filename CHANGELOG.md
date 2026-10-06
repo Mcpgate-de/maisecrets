@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [0.6.1] - 2026-10-06
+
+### Fixes
+
+- the mod runs a fixed command line, lives in its own folder, and the README says what it sends (e458172)
+
+### Other
+
+- Merge branch 'fix/the-mod-says-what-it-runs-and-lives-apart' into 'main' (3985709)
+- Merge branch 'test/the-replaced-file-test-holds-on-windows' into 'main' (3e2e7d5)
+
 ## [0.6.0] - 2026-10-06
 
 ### Features
