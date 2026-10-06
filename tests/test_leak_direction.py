@@ -113,6 +113,17 @@ class LeakDirectionTests(unittest.TestCase):
                 self.assertEqual(found(f"mail {mail}"), [("EMAIL", mail)])
         self.assertEqual(found("mail alerts@nas.local"), [])
 
+    def test_a_bot_or_pipeline_mailbox_at_local_or_internal_is_no_person(self):
+        for mail in ("renovate@repo.local", "dependabot@corp.internal", "release-bot@build.local",
+                     "github-actions@corp.internal"):
+            with self.subTest(mail=mail):
+                self.assertEqual(found(f'RENOVATE_GIT_AUTHOR: "x <{mail}>"'), [])
+        # a person whose name only contains a bot word stays a person
+        for mail in ("bothe.anna@firma.local", "renovate.hans@firma.local", "abbot@corp.internal",
+                     "anna.bot@firma.local"):
+            with self.subTest(mail=mail):
+                self.assertEqual(found(f"mail {mail}"), [("EMAIL", mail)])
+
     def test_the_label_of_the_value_decides_not_the_line(self):
         self.assertEqual(secrets("smtp.host=mail.contoso.de smtp.pass§word=contoso"), ["contoso"])
         self.assertEqual(found("ALTER USER postgres WITH PASS§WORD 'postgres';"), [])

@@ -39,6 +39,42 @@ and OpenAI plugin directories.
   (Windows, macOS; Linux runs on GitLab) is green for the tested SHA on the public mirror
   (`scripts/wait_for_github_checks.py`, public API, no token). Windows was
   red across four releases on 2026-09-26 because nothing waited for it.
+- Vendored rulesets: Renovate keeps `maisecrets/rules/` current (`renovate.json`). The job `renovate`
+  runs self-hosted on a pipeline schedule with `RENOVATE_RUN=true`; on a schedule no other job runs.
+  It reads the three `*_VERSION` files. For an upstream release at least 7 days old it runs the sync
+  script of that ruleset (`postUpgradeTasks`), so the MR carries the version and the regenerated
+  JSON together. The MR pipeline tests the new rules, and a person merges; it becomes a
+  `deps(rules)` patch release. A version of detect-secrets or Presidio moved without its JSON is red
+  (`scripts/check_vendored_rules.py`, `tests/test_vendored_rules.py`).
+
+  The sync scripts execute no upstream code: gitleaks ships TOML, and the detect-secrets and Presidio
+  regexes are read from their Python source as data (`scripts/_static_python.py` knows literals,
+  f-strings, `+`, `.format`, `join`, `re.compile` and `Pattern(...)`, and refuses the rest; the
+  Presidio wheel is checked against the sha256 PyPI lists, which proves only that the download is the
+  file PyPI lists). A value built larger than 200,000 characters, a source file over 2 MB or a
+  download over 20 MB is refused. A Presidio class the reading cannot take whole (another base form,
+  two bases, a computed default, a duplicate name, patterns that are no literal list) stops the sync:
+  Renovate then shows an artifact error on the MR instead of a ruleset with a rule missing. For
+  detect-secrets v1.3.0 to v1.5.0 and Presidio 2.2.355 to 2.2.364 (five versions) this gives the same
+  JSON byte for byte as executing the upstream code did. Three designs before this one were refused
+  in review (2026-10-06): upstream code ran next to the Renovate token, next to the CI job token of
+  the schedule's owner, or handed an artifact to a job with a push token.
+
+  `RENOVATE_TOKEN` is the project access token `renovate-bot`, Developer, `api` and
+  `write_repository`: it can open an MR and push an unprotected branch, also a branch of another
+  open MR, and it cannot push to `main`, merge, create a `v*` tag or read a CI variable (with the
+  project's protection: `main` and `v*` tags for Maintainers only). It is protected (only protected
+  branches and tags get it) and scoped to the environment `renovate` (on gitlab.com Free that names which
+  job of this file gets it; it is no access control).
+
+  What review of the MR is for: a vendored ruleset is data the detector trusts. A new release can
+  weaken or drop a rule, or bring a regex
+  that backtracks; the tests catch only what they cover. Read the diff of the rule ids. The 7-day wait
+  is weaker for detect-secrets: a GitHub tag's date is set by its author, and a tag can move.
+  `LICENSE-presidio` comes from the main branch, not from the release.
+
+  Set in the GitLab project, not in this repository: the schedule and its variable, the token and its
+  expiry (2027-10-05).
 
 ## Versions and releases (now)
 
