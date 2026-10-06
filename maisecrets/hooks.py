@@ -139,7 +139,7 @@ def _debug(msg: str) -> None:
 
 
 def _scrub_transcript_later(path: str, values: list[str], refs: list[str], seconds: float = 15.0,
-                            session: str | None = None) -> None:
+                            session: str | None = None):
     """Claude Code 2.1.283 writes the blocked prompt's transcript record AFTER the hook returned
     (measured 2026-09-26: at hook time the transcript file did not exist yet), so a scrub inside
     the hook finds nothing. A detached child polls the file for up to ``seconds`` and scrubs
@@ -149,7 +149,7 @@ def _scrub_transcript_later(path: str, values: list[str], refs: list[str], secon
     bases: list[str] = []
     if not path:
         if not session or not _SESSION_ID_RE.fullmatch(session):
-            return
+            return None
         bases = [os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")]
     code = (
         "import glob,json,os,sys,time\n"
@@ -176,12 +176,15 @@ def _scrub_transcript_later(path: str, values: list[str], refs: list[str], secon
         "    while time.time() < deadline:\n"
         "        for p in paths():\n"
         "            try:\n"
-        "                size = os.path.getsize(p)\n"
+        "                st = os.stat(p)\n"
         "            except OSError:\n"
         "                continue\n"
-        "            if seen.get(p) != size:\n"
+        "            # inode, size and mtime before the pass: a write during the pass, a same-size overwrite or a\n"
+        "            # replaced file all differ next time; a pass that masked something changes mtime once more\n"
+        "            sig = (st.st_ino, st.st_size, st.st_mtime_ns)\n"
+        "            if seen.get(p) != sig:\n"
         "                _scrub_transcript(p, spec['values'], spec['refs'])\n"
-        "                seen[p] = size\n"
+        "                seen[p] = sig\n"
         "        time.sleep(0.2)\n"
         "    _debug('scrub-later: window closed')\n"
     )
@@ -192,8 +195,10 @@ def _scrub_transcript_later(path: str, values: list[str], refs: list[str], secon
         child.stdin.write(json.dumps({"path": path, "values": values, "refs": refs, "seconds": seconds,
                                       "bases": bases, "session": session or ""}).encode())
         child.stdin.close()
+        return child          # the tests wait for it; the hooks never do
     except (OSError, ValueError):
         _debug("scrub-later: could not start")
+    return None
 
 
 def _scrub_forms(values: list[str]) -> list[bytes]:
@@ -641,6 +646,20 @@ def _blocking_mention(prompt: str, cwd: str, cfg: dict) -> str | None:
     return None
 
 
+def _mention_prefix_exists(prompt: str, cwd: str, cfg: dict) -> bool:
+    """Whether some @mention, cut anywhere, names a file or folder: what the hook could see once a value in the
+    mention became a placeholder (the placeholder ends the path, see AT_MENTION_RE)."""
+    if not cfg.get("block_at_mentions", True):
+        return False
+    for m in AT_MENTION_RE.finditer(prompt):
+        path = m.group("path")
+        for k in range(1, min(len(path), 256) + 1):
+            p = os.path.expanduser(path[:k]).rstrip(".,;:)")
+            if p and (os.path.exists(p) or os.path.exists(os.path.join(cwd or "", p))):
+                return True
+    return False
+
+
 def _prompt_hits(prompt: str) -> list:
     """The detected values of a prompt, without the fixtures of a pasted test (C1); the hook and the mod both
     take these out."""
@@ -690,12 +709,9 @@ def rewrite_prompt(payload: dict) -> dict:
     if not matches and not _has_live(cfg):
         return {}
     # the hook checks the text the mod passes on: a placeholder in place of a value can turn `@src/<value>` into
-    # a mention of the folder src/ (Gate B, 2026-10-06). A preview with a stop character in each value's place
-    # shows it before anything is stored
-    preview = prompt
-    for m in sorted(matches, key=lambda x: x.start, reverse=True):
-        preview = preview[:m.start] + "\u27e6" + preview[m.end:]
-    if _blocking_mention(preview, cwd if isinstance(cwd, str) else "", cfg):
+    # a mention of the folder src/ (Gate B), and a stored value has no shape to preview (codex, round 2). So a
+    # mention any of whose prefixes exists goes to the hook, before anything is stored or admitted
+    if _mention_prefix_exists(prompt, cwd if isinstance(cwd, str) else "", cfg):
         return {}
     vault = Vault(cfg)
     rewritten, entries, values, stored = _take_values_out(prompt, matches, cfg, vault, session)
@@ -711,9 +727,8 @@ def rewrite_prompt(payload: dict) -> dict:
         _scrub_transcript_later("", values, [], session=session)
     from . import events
     events.record("UserPromptSubmit", "claude", entries, outcome="rewritten by the mod")
-    # what the person reads: the placeholders this rewrite put in (a stored value counted once)
-    added = {k for k, _s, _e in find_refs(rewritten)} - {k for k, _s, _e in find_refs(prompt)}
-    return {"text": rewritten, "count": len(added)}
+    # what the person reads: each value taken out, a detected one per place and a stored one per place
+    return {"text": rewritten, "count": len(matches) + stored["n"]}
 
 
 def user_prompt(payload: dict) -> dict:

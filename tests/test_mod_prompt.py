@@ -122,6 +122,22 @@ class RewriteTests(unittest.TestCase):
         self.assertEqual(out, {})
         self.assertFalse(Path(_TMP, "index.json").exists())
 
+    def test_a_stored_value_inside_a_mention_is_left_to_the_hook_and_admits_nothing(self):
+        import tempfile
+        e = Vault().put(PASSWORD, "SECRET", "manual", session="s0")
+        hooks._live_cache.clear()
+        with tempfile.TemporaryDirectory() as cwd:
+            Path(cwd, "src").mkdir()
+            out = hooks.rewrite_prompt({"prompt": f"see @src/{PASSWORD} now", "session_id": "s1", "cwd": cwd})
+        self.assertEqual(out, {})
+        self.assertEqual(Vault().status(e.key, "s1"), "foreign-session")      # not admitted to s1
+
+    def test_the_count_is_one_per_place(self):
+        out = hooks.rewrite_prompt({"prompt": f"{GLPAT} and again {GLPAT}", "session_id": "s1"})
+        self.assertEqual(out["count"], 2)
+        out = hooks.rewrite_prompt({"prompt": f"\u27e6SECRET_c1\u27e7 is {GLPAT}", "session_id": "s1"})
+        self.assertEqual(out["count"], 1)
+
     def test_a_stored_value_counts_once(self):
         Vault().put(PASSWORD, "SECRET", "manual", session="s1")
         hooks._live_cache.clear()
@@ -165,7 +181,7 @@ class ScrubBySessionTests(unittest.TestCase):
             record = json.dumps({"type": "queue-operation", "content": f"check {GLPAT} in CI"}) + "\n"
             other.write_text(record)
             with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
-                hooks._scrub_transcript_later("", [GLPAT], [], seconds=4, session="sess-42")
+                child = hooks._scrub_transcript_later("", [GLPAT], [], seconds=4, session="sess-42")
             time.sleep(0.5)
             t.write_text(record)                        # the record appears after the child started
             deadline = time.time() + 10
@@ -174,7 +190,7 @@ class ScrubBySessionTests(unittest.TestCase):
             self.assertNotIn(GLPAT, t.read_text())
             json.loads(t.read_text())                   # still one valid record
             self.assertIn(GLPAT, other.read_text())     # another session's transcript is not touched
-            time.sleep(3)                                # let the child's window close before the dir goes
+            child.wait(timeout=10)
 
     def test_an_older_record_of_the_value_does_not_end_the_scrub_before_the_new_one(self):
         # the child watches the whole window: the old record is masked at its first look, and the record of this
@@ -186,7 +202,7 @@ class ScrubBySessionTests(unittest.TestCase):
             t.parent.mkdir(parents=True)
             t.write_text(json.dumps({"type": "user", "content": f"old {GLPAT}"}) + "\n")
             with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
-                hooks._scrub_transcript_later("", [GLPAT], [], seconds=6, session="sess-7")
+                child = hooks._scrub_transcript_later("", [GLPAT], [], seconds=6, session="sess-7")
             deadline = time.time() + 5
             while GLPAT in t.read_text() and time.time() < deadline:
                 time.sleep(0.1)
@@ -198,7 +214,35 @@ class ScrubBySessionTests(unittest.TestCase):
             while GLPAT in t.read_text() and time.time() < deadline:
                 time.sleep(0.2)
             self.assertNotIn(GLPAT, t.read_text())
-            time.sleep(2.5)                              # let the child's window close before the dir goes
+            child.wait(timeout=10)
+
+    def test_a_same_size_overwrite_and_a_replaced_file_are_read_again(self):
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as cfg:
+            t = Path(cfg, "projects", "-p", "sess-8.jsonl")
+            t.parent.mkdir(parents=True)
+            record = json.dumps({"type": "queue-operation", "content": f"check {GLPAT}"}) + "\n"
+            t.write_text(record)
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+                child = hooks._scrub_transcript_later("", [GLPAT], [], seconds=6, session="sess-8")
+
+            def masked_soon() -> bool:
+                deadline = time.time() + 4
+                while GLPAT in t.read_text() and time.time() < deadline:
+                    time.sleep(0.1)
+                return GLPAT not in t.read_text()
+            self.assertTrue(masked_soon(), "first record")
+            time.sleep(0.3)
+            with open(t, "r+", encoding="utf-8") as f:   # the same bytes again, in place: same size
+                f.write(record)
+            self.assertTrue(masked_soon(), "same-size overwrite")
+            time.sleep(0.3)
+            tmp = Path(cfg, "projects", "-p", "new.tmp")
+            tmp.write_text(record)
+            os.replace(tmp, t)                           # another file, same name and size
+            self.assertTrue(masked_soon(), "replaced file")
+            child.wait(timeout=10)
 
     def test_a_session_id_that_is_a_pattern_starts_no_child(self):
         from unittest import mock

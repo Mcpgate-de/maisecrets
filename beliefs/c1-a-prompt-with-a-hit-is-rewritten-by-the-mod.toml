@@ -6,5 +6,5 @@ runner = ["tests/test_mod_prompt.py::RewriteTests::test_a_secret_becomes_a_place
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "    return {\"text\": rewritten, \"count\": len(added)}\n"
-replace = "    return {\"text\": prompt, \"count\": len(added)}\n"
+find = "    return {\"text\": rewritten, \"count\": len(matches) + stored[\"n\"]}\n"
+replace = "    return {\"text\": prompt, \"count\": len(matches) + stored[\"n\"]}\n"
