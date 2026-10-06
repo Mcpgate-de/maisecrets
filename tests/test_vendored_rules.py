@@ -39,11 +39,18 @@ class VendoredRulesTests(unittest.TestCase):
     def test_a_symlink_or_broken_json_from_the_artifact_is_refused(self):
         target = self.rules / "presidio.json"
         target.unlink()
-        os.symlink(ROOT / "scripts" / "check_vendored_rules.py", target)
-        self.assertIn("presidio.json: not a regular file", cvr.problems(self.root))
-        target.unlink()
+        try:
+            os.symlink(ROOT / "scripts" / "check_vendored_rules.py", target)
+        except OSError:                      # Windows without the symlink privilege
+            symlinked = False
+        else:
+            symlinked = True
+            self.assertIn("presidio.json: not a regular file", cvr.problems(self.root))
+            target.unlink()
         target.write_text("{broken", encoding="utf-8")
         self.assertTrue(any(p.startswith("presidio.json: no JSON") for p in cvr.problems(self.root)))
+        if not symlinked and os.name != "nt":
+            self.fail("a symlink could not be made outside Windows")
 
     def test_a_gitleaks_json_without_rules_is_refused(self):
         (self.rules / "gitleaks.json").write_text(json.dumps({"title": "x"}), encoding="utf-8")

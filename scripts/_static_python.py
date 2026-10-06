@@ -25,17 +25,34 @@ class Rx(NamedTuple):
     flags: int
 
 
-MAX_LEN = 200_000          # a regex source longer than this is no rule; doubling by `+` stops here
-_RE_FLAGS = {name: int(getattr(re, name)) for name in ("IGNORECASE", "I", "MULTILINE", "M", "DOTALL", "S",
-                                                       "VERBOSE", "X", "ASCII", "A", "UNICODE", "U")}
+MAX_LEN = 200_000          # a regex source longer than this is no rule; every value in total stays below it
+_RE_FLAGS = {"IGNORECASE": int(re.IGNORECASE), "I": int(re.I), "MULTILINE": int(re.MULTILINE), "M": int(re.M),
+             "DOTALL": int(re.DOTALL), "S": int(re.S), "VERBOSE": int(re.VERBOSE), "X": int(re.X),
+             "ASCII": int(re.ASCII), "A": int(re.A), "UNICODE": int(re.UNICODE), "U": int(re.U)}
+
+
+def weight(v: Any, budget: list[int] | None = None) -> int:
+    """Characters plus items of a value, counted through nested containers, shared references included
+    (`A = [A, A]` doubles without growing `len`). Stops as soon as the total passes MAX_LEN."""
+    budget = budget if budget is not None else [MAX_LEN]
+    budget[0] -= len(v) if isinstance(v, str) else 1
+    if budget[0] < 0:
+        raise Unknown("too large")
+    if isinstance(v, (tuple, list, set, frozenset)):
+        for x in v:
+            weight(x, budget)
+    elif isinstance(v, dict):
+        for k, x in v.items():
+            weight(k, budget)
+            weight(x, budget)
+    return MAX_LEN - budget[0]
 
 
 def evaluate(node: ast.AST, env: dict[str, Any], calls: dict[str, Callable[..., Any]] | None = None) -> Any:
     calls = calls or {}
 
     def sized(v: Any) -> Any:
-        if isinstance(v, (str, tuple, list)) and len(v) > MAX_LEN:
-            raise Unknown("too long")
+        weight(v)
         return v
 
     def ev(n: ast.AST) -> Any:
@@ -94,12 +111,29 @@ def evaluate(node: ast.AST, env: dict[str, Any], calls: dict[str, Callable[..., 
                 if f.attr == "join":
                     if kwargs or len(args) != 1 or not all(isinstance(a, str) for a in args[0]):
                         raise Unknown("join form")
+                    if sum(len(a) for a in args[0]) + len(base) * len(args[0]) > MAX_LEN:
+                        raise Unknown("join too long")
                     return base.join(args[0])
                 if not all(isinstance(v, (str, int)) for v in [*args, *kwargs.values()]):
                     raise Unknown("format argument")
                 # a field name with `.` or `[` reads attributes of its argument: `{0.__class__}`
-                if any(f and ("." in f or "[" in f) for _, f, _, _ in string.Formatter().parse(base)):
+                fields = list(string.Formatter().parse(base))
+                if any(f and ("." in f or "[" in f) for _, f, _, _ in fields):
                     raise Unknown("format field with an attribute")
+                # a spec or a conversion (`{0:>400000000}`, `{0!r}`) is no form the rules use, and a width
+                # builds a value of any size before its length could be checked
+                if any(spec or conv for _, f, spec, conv in fields if f is not None):
+                    raise Unknown("format spec")
+                values = {**{str(i): a for i, a in enumerate(args)}, **kwargs}
+                size, auto = len(base), 0
+                for _, f, _, _ in fields:
+                    if f is None:
+                        continue
+                    key = f if f else str(auto)
+                    auto += f == ""
+                    size += len(str(values.get(key, "")))
+                if size > MAX_LEN:
+                    raise Unknown("format too long")
                 return base.format(*args, **kwargs)
             if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == "re" \
                     and f.attr == "compile":

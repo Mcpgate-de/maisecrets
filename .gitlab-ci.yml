@@ -221,8 +221,9 @@ harness_codex:
 # rules as data and execute none of them (scripts/_static_python.py; reviews, 2026-10-06: running them
 # put upstream code next to this job's credentials, the Renovate token and the CI job token of the
 # schedule's owner). RENOVATE_TOKEN is the project access token renovate-bot, Developer: it can open an
-# MR and push an unprotected branch, and cannot push to main, merge or read a CI variable. It is
-# protected (only main and tags get it) and scoped to the environment renovate. Nothing merges by
+# MR and push an unprotected branch, and cannot push to main, merge, create a v* tag or read a CI
+# variable (main and v* tags are Maintainer-only). It is protected (only protected branches and tags
+# get it) and scoped to the environment renovate. Nothing merges by
 # itself: the MR pipeline tests the new rules and a person merges.
 renovate:
   stage: validate
