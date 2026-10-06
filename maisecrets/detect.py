@@ -1060,6 +1060,7 @@ def _allowed(rule: Rule, text: str, m: re.Match, secret: str) -> bool:
 
 
 _TOKEN_CHAR_RE = re.compile(r"[A-Za-z0-9_\-]")
+_ROUTABLE_TAIL_RE = re.compile(r"\.[0-9a-z]{2}\.[0-9a-z]{4,16}(?![0-9A-Za-z_-])")
 
 
 def _lower(text: str) -> str:
@@ -1204,6 +1205,12 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     end2 += 1
                 if end2 > end and _TOKEN_CHAR_RE.match(secret[-1]) and not overlaps(end, end2):
                     end = end2
+                    secret = text[start:end]
+                # a routable GitLab token ends in ".<version>.<id>" (glpat-...CA.01.0y0znlm9w): the token
+                # characters stop at the dot, and the tail stayed in the clear (field report, 2026-10-06)
+                tail = _ROUTABLE_TAIL_RE.match(text, end) if secret.startswith("gl") else None
+                if tail and not overlaps(end, tail.end()):
+                    end = tail.end()
                     secret = text[start:end]
             found.append(Match(rule.id, rule.type, secret, start, end))
             i = bisect.bisect_left(taken_starts, start)
