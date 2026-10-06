@@ -40,10 +40,24 @@ def record(hook: str, client: str, entries: list, outcome: str = "") -> None:
         })
         old: list[str] = []
         if EVENTS.exists():
-            old = EVENTS.read_text(encoding="utf-8").splitlines()[-(KEEP - 1):]
+            old = EVENTS.read_text(encoding="utf-8").splitlines()
+        lines = old + [line]
+
+        def removal_only(text: str) -> bool:
+            try:
+                obj = json.loads(text)
+            except ValueError:
+                return False
+            hits = obj.get("hits") if isinstance(obj, dict) else None
+            # a line of another shape is kept and never breaks the record (Opus review, 2026-10-06)
+            return (isinstance(hits, list) and bool(hits)
+                    and all(isinstance(h, dict) and h.get("type") == "HIDDEN" for h in hits))
+        # removals of invisible characters go first, the new one too, so they never push a detection out
+        while len(lines) > KEEP:
+            del lines[next((i for i, x in enumerate(lines) if removal_only(x)), 0)]
         fd = os.open(EVENTS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write("\n".join(old + [line]) + "\n")
+            f.write("\n".join(lines) + "\n")
     except OSError:
         pass
 

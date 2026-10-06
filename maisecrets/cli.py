@@ -161,7 +161,19 @@ def cmd_report(args: list[str]) -> int:
         print("\nmaisecrets report last [note] | report <n> [note] | report bug <text> | report feature <text>"
               "  (add --create to file it with the GitHub CLI)")
         return 0
-    ev = evs[-1] if args[0] == "last" else evs[int(args[0]) - 1]
+    if args[0] == "last":
+        # a removal of invisible characters is no detection to report as a false alarm; the list shows it. The
+        # whole log is searched: twenty removals pushed a detection out of the last twenty (codex review)
+        real = [e for e in events.load(events.KEEP) if any(h.get("type") != "HIDDEN" for h in e.get("hits", []))]
+        if not real:
+            print("(no detection recorded yet)")
+            return 0
+        ev = real[-1]
+    else:
+        ev = evs[int(args[0]) - 1]
+        if not any(h.get("type") != "HIDDEN" for h in ev.get("hits", [])):
+            print("that event only removed invisible characters; there is no detection to report as a false alarm")
+            return 0
     rc = _report_out(events, *events.issue_parts(ev, " ".join(args[1:])), create=create)
     _forget_the_false_positive(ev)
     return rc
