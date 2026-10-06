@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.6.3] - 2026-10-06
+
+### Fixes
+
+- a bot or pipeline mailbox at .local or .internal is no longer taken for a person (3e93c8e)
+
+### Other
+
+- Merge branch 'ci/renovate-keeps-the-vendored-rulesets-current' into 'main' (29e6a1a)
+
 ## [0.6.2] - 2026-10-06
 
 ### Features
