@@ -208,8 +208,8 @@ SCENARIOS = {
     "ssh_consent_write_asks": {
         "prompt": "restart the web service",
         "config": {"ssh_consent": True},
-        "turns": [{"tool": "Bash", "input": {"command": "printf ran > {cwd}/ran.txt; ssh -o BatchMode=yes "
-                                                        "-o ConnectTimeout=2 nohost.invalid 'systemctl restart nginx'"}},
+        "turns": [{"tool": "Bash", "input": {"command": "printf ran > {cwd}/ran.txt; ssh -o BatchMode=yes -o "
+                                                        "ConnectTimeout=2 nohost.invalid 'systemctl restart nginx'"}},
                   {"text": "done"}],
         "expect_requests": 2,
         "expect_no_file": "ran.txt",
