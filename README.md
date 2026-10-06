@@ -31,8 +31,8 @@ It works as a plugin for Claude Code (and Cowork) and for Codex, from the same
    `⟦EMAIL_c1:ma•••@•••.de⟧`. Type `/maisecrets:send` to send it as is,
    or paste it from the clipboard where one exists. The value never reached
    the model. Measured: zero API requests for a blocked prompt.
-   **On Claude Code 2.1.287 and later, as a rule, there is no block and no
-   resend:** a mod (`claude-mod/maisecrets-mod.mjs`) replaces the values with placeholders and
+   **On Claude Code 2.1.287 and later (in the desktop app's Code tab from
+   2.1.286), as a rule, there is no block and no resend:** a mod (`claude-mod/maisecrets-mod.mjs`) replaces the values with placeholders and
    the prompt goes on at once (the hook still blocks a prompt with an `@file`
    mention, a timeout of the mod, and a session where mods are off); your message on screen shows the placeholders, and the
    record of the prompt as typed in the transcript file is masked in place. The
@@ -139,8 +139,9 @@ vendor's hook docs, not measured · ⚠️ partly · ❌ no hook
 
 | client | prompt | rehydrate | redact | adapter |
 |---|:---:|:---:|:---:|---|
-| Claude Code CLI | ✅ | ✅ | ✅ | built; on Windows without Git Bash the shell tool is PowerShell, and a placeholder in a PowerShell command is refused (no PowerShell rewrite) |
-| Cowork, Claude desktop app | ✅ | ✅ | ✅ | same hooks and manifest; a blocked prompt, an MCP call that resolves (with the ask and warning of 0.5.9, now `rehydration: confirm`), and a redacted Bash output seen live in the desktop app (2026-09-28); not in the harness |
+| Claude Code CLI | ✅ | ✅ | ✅ | built; from 0.6.0 with mods (2.1.287+) a prompt with a value is rewritten with placeholders instead of blocked, measured live and in the harness; on Windows without Git Bash the shell tool is PowerShell, and a placeholder in a PowerShell command is refused (no PowerShell rewrite) |
+| Claude desktop app, Code tab | ✅ | ✅ | ✅ | same hooks and manifest; a blocked prompt, an MCP call that resolves (with the ask and warning of 0.5.9, now `rehydration: confirm`), and a redacted Bash output seen live (2026-09-28); the mod (mods from 2.1.286) rewrites the prompt, seen live with Claude Code 2.1.288 (2026-10-06): the model got the placeholder, and your own message bubble shows the text as typed (a local display); not in the harness |
+| Cowork | ✅ | ✅ | ✅ | same hooks as the desktop app; whether the mod loads there is not measured, so count on the block |
 | Codex CLI | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks; on Windows a shell placeholder is denied (PowerShell rewrite not built) |
 | Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | same plugin runtime; block, rewrite and redaction seen live (2026-09-27), not in the harness |
 | Codex IDE extension | ☑️ | ☑️ | ☑️ | same plugin runtime; not measured |
@@ -547,7 +548,10 @@ the prompt reaches the hook unchanged and the hook blocks it. `hooks/hooks.json`
 is unchanged, so Codex and an older Claude Code keep the block. Measured on
 2.1.291: the request holds the placeholder and not the value, also for a prompt
 typed while a tool runs; the settings hook sees the placeholder; on 2.1.274 the
-mod does not load and the hook blocks. Mods are a rollout switch of the client:
+mod does not load and the hook blocks. Seen live in the desktop app's Code tab
+with Claude Code 2.1.288: the prompt is rewritten and the model gets the
+placeholder; your own message bubble there shows the text as you typed it, which
+is the app's local display. Cowork is not measured. Mods are a rollout switch of the client:
 where they are off (a saved switch, some third-party setups), the hook blocks.
 
 **Sending a blocked prompt.** `/maisecrets:send` sends the rewritten prompt as
