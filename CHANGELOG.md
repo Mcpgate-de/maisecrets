@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## [0.6.2] - 2026-10-06
+
+### Features
+
+- invisible characters that can carry hidden instructions leave tool results (6f548b3)
+
+### Fixes
+
+- a routable GitLab token is detected whole, its tail no longer stays in the clear (a22e142)
+- a prompt the hook blocks because it cannot finish no longer stays in the transcript (1be2b04)
+
+### Other
+
+- Merge branch 'feat/invisible-characters-a-failed-hook-scrub-and-routable-tokens' into 'main' (25ab1cb)
+
 ## [0.6.1] - 2026-10-06
 
 ### Fixes
