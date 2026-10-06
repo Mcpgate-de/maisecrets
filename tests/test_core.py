@@ -56,6 +56,28 @@ class DetectTests(unittest.TestCase):
                 ms = detect.scan(f"token is {val} ok")
                 self.assertEqual([(m.kind, m.value) for m in ms], [(kind, val)])
 
+    def test_a_routable_gitlab_token_is_taken_whole(self):
+        # GitLab's routable tokens end in ".<version>.<id>": the token characters stopped at the dot, and the
+        # tail stayed in the clear (field report, 2026-10-06)
+        token = "glpat-" + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7" + ".01." + "0abcd12ef"
+        for text in (f'Wert="{token}"', f"{token}.", f"see {token}, then", f"{token}.x9", f"TOKEN={token}\n"):
+            with self.subTest(text[:12]):
+                self.assertEqual([m.value for m in detect.scan(text)], [token])
+        # every GitLab prefix, and the older form with one dot (version, length and CRC as 9 characters)
+        for prefix in ("glrt-", "gldt-"):
+            other_token = prefix + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7" + ".01." + "0abcd12ef"
+            with self.subTest(prefix):
+                self.assertIn(other_token, [m.value for m in detect.scan(f"token {other_token}")])
+        older = "glpat-" + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7" + ".0ab0znlm9"
+        self.assertEqual([m.value for m in detect.scan(f"token {older}")], [older])
+        # the tail belongs to a GitLab token only, and it is exactly 9 characters: a dotted word stays text
+        other = "ghp_" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"
+        self.assertEqual([m.value for m in detect.scan(f"{other}.01.release9x")], [other])
+        short = "glpat-" + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7"
+        for tail in (".01.backup", ".01.0abcd12efg", ".v1.release"):
+            with self.subTest(tail):
+                self.assertEqual([m.value for m in detect.scan(f"{short}{tail}")], [short])
+
     def test_a_token_longer_than_its_fixed_shape_is_taken_whole(self):
         long_pat = GLPAT + "6789"                       # 24 chars after the prefix, the rule says 20
         ms = detect.scan(f"TOKEN={long_pat}\n")

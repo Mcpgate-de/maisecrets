@@ -1,0 +1,10 @@
+# c1-a-routable-gitlab-token-is-taken-whole: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-routable-gitlab-token-is-taken-whole"
+control = "C1"
+statement = "A routable GitLab token (glpat-... with a tail .<version>.<id>) is detected whole, so no part of it stays in the clear."
+runner = ["tests/test_core.py::DetectTests::test_a_routable_gitlab_token_is_taken_whole"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "                tail = _ROUTABLE_TAIL_RE.match(text, end) if _GITLAB_PREFIX_RE.match(secret) else None\n"
+replace = "                tail = None\n"

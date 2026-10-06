@@ -31,8 +31,8 @@ It works as a plugin for Claude Code (and Cowork) and for Codex, from the same
    `⟦EMAIL_c1:ma•••@•••.de⟧`. Type `/maisecrets:send` to send it as is,
    or paste it from the clipboard where one exists. The value never reached
    the model. Measured: zero API requests for a blocked prompt.
-   **On Claude Code 2.1.287 and later, as a rule, there is no block and no
-   resend:** a mod (`claude-mod/maisecrets-mod.mjs`) replaces the values with placeholders and
+   **On Claude Code 2.1.287 and later (in the desktop app's Code tab from
+   2.1.286), as a rule, there is no block and no resend:** a mod (`claude-mod/maisecrets-mod.mjs`) replaces the values with placeholders and
    the prompt goes on at once (the hook still blocks a prompt with an `@file`
    mention, a timeout of the mod, and a session where mods are off); your message on screen shows the placeholders, and the
    record of the prompt as typed in the transcript file is masked in place. The
@@ -139,8 +139,9 @@ vendor's hook docs, not measured · ⚠️ partly · ❌ no hook
 
 | client | prompt | rehydrate | redact | adapter |
 |---|:---:|:---:|:---:|---|
-| Claude Code CLI | ✅ | ✅ | ✅ | built; on Windows without Git Bash the shell tool is PowerShell, and a placeholder in a PowerShell command is refused (no PowerShell rewrite) |
-| Cowork, Claude desktop app | ✅ | ✅ | ✅ | same hooks and manifest; a blocked prompt, an MCP call that resolves (with the ask and warning of 0.5.9, now `rehydration: confirm`), and a redacted Bash output seen live in the desktop app (2026-09-28); not in the harness |
+| Claude Code CLI | ✅ | ✅ | ✅ | built; from 0.6.0 with mods (2.1.287+) a prompt with a value is rewritten with placeholders instead of blocked, measured live and in the harness; on Windows without Git Bash the shell tool is PowerShell, and a placeholder in a PowerShell command is refused (no PowerShell rewrite) |
+| Claude desktop app, Code tab | ✅ | ✅ | ✅ | same hooks and manifest; a blocked prompt, an MCP call that resolves (with the ask and warning of 0.5.9, now `rehydration: confirm`), and a redacted Bash output seen live (2026-09-28); the mod (mods from 2.1.286) rewrites the prompt, seen live with Claude Code 2.1.288 (2026-10-06): the model got the placeholder, and your own message bubble shows the text as typed (a local display); not in the harness |
+| Cowork | ✅ | ✅ | ✅ | same hooks as the desktop app; whether the mod loads there is not measured, so count on the block |
 | Codex CLI | ✅ | ✅ | ✅ | built; hooks need one trust review per user (`/hooks`) unless an admin ships them as managed hooks; on Windows a shell placeholder is denied (PowerShell rewrite not built) |
 | Codex in the ChatGPT desktop app | ✅ | ✅ | ✅ | same plugin runtime; block, rewrite and redaction seen live (2026-09-27), not in the harness |
 | Codex IDE extension | ☑️ | ☑️ | ☑️ | same plugin runtime; not measured |
@@ -273,9 +274,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 21 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 23 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 75 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 78 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -456,6 +457,7 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
   "scrub_transcript": true,
   "block_at_mentions": true,
   "rewrite_prompts": true,
+  "strip_hidden_characters": true,
   "regions": ["auto"],
   "max_keys_per_session": 25,
   "max_resolves_per_hour": 60,
@@ -547,7 +549,10 @@ the prompt reaches the hook unchanged and the hook blocks it. `hooks/hooks.json`
 is unchanged, so Codex and an older Claude Code keep the block. Measured on
 2.1.291: the request holds the placeholder and not the value, also for a prompt
 typed while a tool runs; the settings hook sees the placeholder; on 2.1.274 the
-mod does not load and the hook blocks. Mods are a rollout switch of the client:
+mod does not load and the hook blocks. Seen live in the desktop app's Code tab
+with Claude Code 2.1.288: the prompt is rewritten and the model gets the
+placeholder; your own message bubble there shows the text as you typed it, which
+is the app's local display. Cowork is not measured. Mods are a rollout switch of the client:
 where they are off (a saved switch, some third-party setups), the hook blocks.
 
 **Sending a blocked prompt.** `/maisecrets:send` sends the rewritten prompt as
@@ -561,6 +566,37 @@ off. Codex gets no offer, because it has no plugin slash commands. The answer st
 text that went out, because Remote Control shows neither a blocked prompt nor
 a slash command's expansion; the block notice itself is not shown there
 either (reported to the vendor).
+
+## Invisible characters
+
+A tool result can carry text that the model reads and a person does not see. maisecrets removes two
+kinds of such characters from every tool result (a file read, a command's output, a web page, an MCP
+result, the keys of its JSON too) before the model reads it:
+
+- **Unicode tag characters** (U+E0000 to U+E007F). Each one is the twin of an ASCII character, so a
+  web page can hold a whole hidden instruction ("ASCII smuggling"). A value spelled in them goes
+  away with them. Only the flags of England, Scotland and Wales keep their tags.
+- **Variation selectors used as bytes** (U+FE00 to U+FE0F, U+E0100 to U+E01EF). By a rule of
+  thumb, not the Unicode registry of variation sequences, a selector stays after a letter, a digit,
+  punctuation or a symbol: VS15 or VS16 (text or emoji style) after any of them, VS1 to VS14 after
+  one that is not ASCII, an ideographic selector after an assigned CJK ideograph. A second selector
+  in a row, or one after a space, a control, a format, a combining, private or unassigned character,
+  goes. "Assigned" means known to the Unicode version of the Python that runs the hook.
+
+The zero-width joiner of emoji and the marks U+200E and U+200F stay. Bidi controls (U+202A to
+U+202E, U+2066 to U+2069) stay too: they reorder what a person sees, but the model reads the text in
+its logical order, and translation files need them. The file on disk does not change, only what
+the model reads. In Codex, the session's rollout file holds the raw output, and a resumed session
+reads it again: maisecrets overwrites each tag character, ideographic selector and VS1 to VS14 there
+with spaces, at once and again whenever the file changes in the next 15 seconds. That rule is
+blunter: in the rollout, the three flags and ideographic variants lose their selectors too. You get no question: one line says how many characters went, the model reads that they can
+carry an instruction, and the audit log records the count, never the text.
+`"strip_hidden_characters": false` turns it off.
+
+This is not a detector of prompt injection. It takes away one way to hide one. A selector that the
+rule keeps still holds something: one of three states (VS15, VS16, none) after any letter or
+symbol, up to four bits after a character that is not ASCII, and up to one byte after a CJK
+ideograph, where the rule keeps the ideographic selectors that Chinese and Japanese text use.
 
 ## Reporting a wrong detection
 

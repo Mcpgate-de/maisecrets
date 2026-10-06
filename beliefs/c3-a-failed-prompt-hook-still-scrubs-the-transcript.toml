@@ -1,0 +1,10 @@
+# c3-a-failed-prompt-hook-still-scrubs-the-transcript: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c3-a-failed-prompt-hook-still-scrubs-the-transcript"
+control = "C3"
+statement = "When the prompt hook fails closed after it read the payload (a damaged index, an exception, the watchdog), the values the detector finds without the store are still masked in the transcript, by a detached child, and the hook does not wait for it."
+runner = ["tests/test_failed_prompt_scrub.py::FailedPromptScrubTests::test_a_damaged_index_blocks_and_the_record_written_before_is_masked", "tests/test_failed_prompt_scrub.py::FailedPromptScrubTests::test_a_record_the_client_writes_after_the_hook_is_masked_too", "tests/test_failed_prompt_scrub.py::FailedPromptScrubTests::test_the_watchdog_answers_ends_the_hook_and_the_value_is_masked"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        values = [m.value for m in detect.scan(prompt) if not detect.is_fixture(m, prompt)]\n        if values:\n"
+replace = "        values = []\n        if values:\n"
