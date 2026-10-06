@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 23 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 78 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 81 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -738,6 +738,59 @@ A placeholder turns back into its value only here:
   agent to send a password over Slack, it goes out, and the model still sees
   only the placeholder. The client's permission rules decide whether the call
   runs.
+
+## SSH consent (optional)
+
+An agent with your SSH keys can run any command on any host it reaches, also
+when no secret is in the command. Claude Code's own `permissions.ask:
+["Bash(ssh:*)"]` matches only the start of a command, so `cd x && ssh …`,
+`bash -c "ssh …"` and `timeout 30 ssh …` pass it. With `"ssh_consent": true`
+in `~/.maisecrets/config.json` (a policy can set it; it is off by default),
+maisecrets reads every ssh-family call (`ssh`, `scp`, `sftp`, `rsync` to a
+host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
+`timeout`, `nohup`, `env`, `sudo` and `perl -e 'alarm N; exec @ARGV'`:
+
+- **A read runs.** A remote command from a short list with named options
+  (`uptime`, `df -h`, `free`, `ps aux`, `cat`/`head`/`tail -n` of a literal
+  absolute path, `grep` with named options, `systemctl status`, `journalctl
+  -u … -n …`), with no expansion, no redirect except `2>&1` and `>/dev/null`,
+  and no sensitive path (`/etc/shadow`, `.env`, `id_*`, `*.pem`, `/proc`,
+  `/root` …). Its output reaches the model, and the output redaction applies.
+- **A write asks once per host.** Any other remote command, a login shell,
+  `sudo`, `docker`, a copy, or local data on stdin. If you allow it, writes to
+  that host (and the hosts of its group in `"ssh_host_groups": {"web":
+  ["web1", "web2"]}`) run without a question for 8 hours, in that session and
+  for that agent only: a subagent asks for itself. The asked command first
+  reads a FIFO that nobody can list; that read records the consent, so a
+  declined prompt, a forged hook call or a PostToolUse records nothing.
+- **A form maisecrets cannot read asks every time.** An ssh word in a nested
+  shell (`bash -c`, `eval`, `xargs`, `find -exec`), a wrapper it does not
+  know (`sshpass`, `setsid`, `flock`), a word built at run time
+  (`$(which ssh)`, `S=ssh; $S`, `ssh $HOST`), an option that sends the
+  connection elsewhere (`-J`, `-W`, `-S`, `-F`, `-o ProxyCommand`, `-o
+  HostName`, `-o RemoteCommand`), `GIT_SSH_COMMAND`, `git -c core.sshCommand`,
+  `RSYNC_RSH`, `DOCKER_HOST=ssh://`, and a change to `~/.ssh/config` (also
+  through Write or Edit).
+- **A short deny list is always refused:** `mkfs`, `wipefs`, `dd` to a
+  device, `rm -rf /`, a fork bomb. It is an airbag, not the protection.
+- **Codex** cannot ask. It refuses and names a sentence with a code, for
+  example `maisecrets: allow ssh web1 123456`. Typed alone as your next
+  prompt within 10 minutes, it allows writes to that host for 8 hours; the
+  prompt does not reach the model.
+
+Measured on the maintainer's transcripts with `scripts/measure_ssh_consent.py`
+(2026-10-06): real ops commands use `sudo` or `docker` on the remote side
+almost always, so about 9 in 10 are writes, and the consent per host carries
+them. Without the sessions that work on maisecrets itself: 116 sessions with
+ssh, a median of 2 questions per session, 8 at the 90th percentile.
+
+Limits: maisecrets sees only the command text. A script file, an alias or a
+variable that holds `ssh` and was set in an earlier command is not seen. The
+`Monitor` tool of Claude Code runs a shell command outside the maisecrets
+matcher (adding it would change the hook hash that Codex trusts). A program
+that runs as you outside the sandbox can write the consent store. A hard
+boundary needs host-side controls (restricted keys, `ForceCommand`, sudo
+rules). Git over ssh (`git push`) is out of scope.
 
 ## Rehydration policy (optional)
 

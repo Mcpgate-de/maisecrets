@@ -1,0 +1,10 @@
+# c21-the-deny-list-holds-inside-a-consent-window: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c21-the-deny-list-holds-inside-a-consent-window"
+control = "C21"
+statement = "With ssh_consent on, a remote command on the deny list (mkfs, wipefs, dd to a device, rm -rf /, a fork bomb) is refused, also for a host with a consent."
+runner = ["tests/test_ssh_consent.py::ClassifierMatrixTests::test_each_command_has_its_kind"]
+
+[proof]
+file = "maisecrets/ssh_consent.py"
+find = "    hit = _deny_hit(remote)"
+replace = "    hit = None"

@@ -35,7 +35,7 @@ SSH_CMDS = {"ssh", "autossh", "mosh", "scp", "sftp", "sshfs", "ssh-copy-id", "rs
 # a mention of ssh that this module must have read as a call, or the command is not understood.
 # `.ssh/` paths are not a call (the lookbehind skips `~/.ssh`), except the config that retargets a host.
 _TOKEN_RE = re.compile(
-    r"(?<![\w.-])(?:ssh|autossh|mosh|scp|sftp|sshfs|ssh-copy-id|sshpass|pssh|parallel-ssh|pscp|"
+    r"(?<![\w./])(?:ssh|autossh|mosh|scp|sftp|sshfs|ssh-copy-id|sshpass|pssh|parallel-ssh|pscp|"
     r"pssh\.\w+|tsh|kitten)(?![\w-])"
     r"|ssh://|GIT_SSH|sshCommand|RSYNC_RSH|DOCKER_HOST|\.ssh/config\b")
 
@@ -297,15 +297,20 @@ def classify(command: str, parse: Parser) -> Verdict:
         masked = "".join(ch if ctx == "" else " " for ch, ctx in
                          zip(text, ctxs[sg["start"]:sg["end"]]))
         fed = bool(sg.get("piped") or sg.get("heredoc") or re.search(r"(?<![<>&\d])<(?!\()", masked))
-        if cmd in ("ssh", "autossh"):
+        if cmd == "ssh":
+            call = _ssh_call(words, fed, parse)
+        elif cmd == "autossh":
+            # a connection that restarts itself, for tunnels: always a write, its host as ssh reads it
             call = _ssh_call(words, fed, parse)
             call.tool = cmd
+            if call.kind == "read":
+                call.kind, call.why = "write", "autossh keeps a connection and its tunnels open"
         elif cmd == "mosh":
             dest = next((w for w in words[1:] if not w.startswith("-")), "")
             call = Call(cmd, dest, "write" if _HOST_RE.match(dest.split("@")[-1] or "-") else "unknown",
                         "an interactive login")
         elif cmd == "rsync":
-            if any(w in ("-e", "--rsh") or w.startswith("--rsh=") for w in words):
+            if any(w in ("-e", "--rsh") or w.startswith(("--rsh=", "-e")) for w in words) or "RSYNC_RSH" in text:
                 call = Call(cmd, "", "unknown", "rsync with its own remote shell")
             else:
                 hosts = _copy_hosts(words)
