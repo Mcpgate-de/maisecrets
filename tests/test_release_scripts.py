@@ -96,6 +96,9 @@ class ReleaseTests(unittest.TestCase):
         self.addCleanup(env.stop)
         for k in [k for k in os.environ if k.startswith("GIT_")]:
             del os.environ[k]
+        # the owner's approval for one pipeline (a CI variable) must not move the versions these tests expect: the
+        # main pipeline of 0.6.0 failed here with 0.5.0 for 0.4.2 (2026-10-06)
+        os.environ.pop("MAISECRETS_RELEASE_BUMP", None)
 
     def _main(self, *argv: str) -> tuple[int, str]:
         buf = io.StringIO()
