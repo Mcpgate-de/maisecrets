@@ -3,20 +3,23 @@
 
 Usage: scripts/sync_detect_secrets.py v1.5.0
 Fetches keyword.py and basic_auth.py from Yelp/detect-secrets at that tag,
-executes them with stubbed imports to harvest the compiled regexes and their
-secret group numbers, and writes maisecrets/rules/detect_secrets.json,
+reads the regexes and their secret group numbers from the source as data
+(scripts/_static_python.py; nothing upstream is executed), and writes maisecrets/rules/detect_secrets.json,
 LICENSE-detect-secrets and DETECT_SECRETS_VERSION. Only the "config" and
 "quotes required" regex sets are kept; the other sets are file-type specific.
 """
-import enum
+import ast
 import json
 import re
 import sys
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _static_python import Rx, bind  # noqa: E402
+
 tag = sys.argv[1] if len(sys.argv) > 1 else None
-if not tag or not tag.startswith("v"):
+if not tag or not re.fullmatch(r"v\d+\.\d+\.\d+", tag):   # it becomes part of a URL
     print("usage: sync_detect_secrets.py vX.Y.Z")
     sys.exit(2)
 base = f"https://raw.githubusercontent.com/Yelp/detect-secrets/{tag}/"
@@ -28,20 +31,10 @@ def fetch(path: str) -> str:
 
 
 src = fetch("detect_secrets/plugins/keyword.py")
-src = re.sub(r"^from .*$", "", src, flags=re.M).replace("class KeywordDetector(BasePlugin):", "class KeywordDetector:")
-
-
-class FileType(enum.Enum):
-    GO = 1; OBJECTIVE_C = 2; C_SHARP = 3; C = 4; C_PLUS_PLUS = 5; CLS = 6; JAVA = 7; JAVASCRIPT = 8  # noqa: E702
-    PYTHON = 9; SWIFT = 10; TERRAFORM = 11; YAML = 12; CONFIG = 13; INI = 14; PROPERTIES = 15; TOML = 16; PHP = 17  # noqa: E702
-
-
-ns = {"re": re, "FileType": FileType, "Optional": object, "Dict": dict, "Pattern": object, "Generator": object}
-try:
-    exec(src, ns)  # noqa: S102 - vendored upstream source, executed to harvest constants
-except Exception:  # noqa: BLE001 - the class body may reference stubs; the constants are defined by then
-    pass
-names = {v: k for k, v in ns.items() if isinstance(v, re.Pattern)}
+# read as data, never executed: the regexes are string constants, `.format`, `join` and `re.compile`
+ns: dict = {}
+bind(ast.parse(src).body, ns)
+names = {v: k for k, v in ns.items() if isinstance(v, Rx)}
 rules, seen = [], set()
 for setname in ("CONFIG_DENYLIST_REGEX_TO_GROUP", "QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP"):
     for rx, group in ns[setname].items():
