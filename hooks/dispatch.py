@@ -62,7 +62,9 @@ if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt":
         answer = rewrite_prompt(payload if isinstance(payload, dict) else {})
     except Exception:  # noqa: BLE001 - no traceback: what passes back goes through other mods
         sys.exit(1)
-    print(json.dumps({"maisecrets": "mod-prompt", **answer}, ensure_ascii=False))
+    # ASCII JSON: ⟦ as \u27e6. A Windows console code page cannot write ⟦, and the answer was a traceback
+    # (GitHub windows-latest, 2026-10-06); JSON.parse in the mod reads the escape as the same text
+    print(json.dumps({"maisecrets": "mod-prompt", **answer}))
     sys.exit(0)
 
 if len(sys.argv) >= 2 and sys.argv[1] == "pending":

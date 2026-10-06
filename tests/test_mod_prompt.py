@@ -276,6 +276,7 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(out["maisecrets"], "mod-prompt")
         self.assertEqual(out["text"], "check ⟦SECRET_c1⟧")
         self.assertNotIn(GLPAT, r.stdout + r.stderr)
+        r.stdout.encode("ascii")        # a console code page without ⟦ can write it (Windows, cp1252)
 
     def test_a_clean_prompt_answers_without_a_text(self):
         r = self.run_dispatch({"prompt": "say hi", "session_id": "s9"})
