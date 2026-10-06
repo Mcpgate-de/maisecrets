@@ -129,6 +129,15 @@ SCENARIOS = {
         "expect_requests": 0,
         "expect_blocked": True,
     },
+    # the index is damaged: the prompt hook fails closed and blocks, and the prompt as typed still leaves the
+    # transcript (Mcpgate-de/maisecrets#3; before, the hook failed before it started the scrub)
+    "prompt_damaged_index": {
+        "prompt": f"Please check the token {MARK} in CI",
+        "home_files": {"index.json": "{damaged"},
+        "turns": [{"text": "unreachable"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+    },
     # the person turned the rewrite off: blocked as without the mod, on every client
     "prompt_secret_rewrite_off": {
         "prompt": f"Please check the token {MARK} in CI",
@@ -371,6 +380,8 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     # preload and hooks must agree on the backend, on every OS: pin the test backend for this home
     (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True,
                                                   **sc.get("config", {})}))
+    for fname, content in sc.get("home_files", {}).items():
+        (home / fname).write_text(content, encoding="utf-8")
     env = dict(os.environ, ANTHROPIC_BASE_URL=f"http://127.0.0.1:{PORT}", CLAUDE_CODE_MAX_RETRIES="0",
                MAISECRETS_HOME=str(home), MAISECRETS_DUMP=str(dump), CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
                MAISECRETS_GUARD_CLIPBOARD="off")   # a guarded scenario must not write the real clipboard

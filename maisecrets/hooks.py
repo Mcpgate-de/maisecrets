@@ -756,6 +756,8 @@ def rewrite_prompt(payload: dict) -> dict:
 
 
 def user_prompt(payload: dict) -> dict:
+    if os.environ.get("MAISECRETS_TEST_FAULT") == "user-prompt-slow":     # tests: the watchdog answers
+        time.sleep(WATCHDOG_SECONDS["user-prompt"] + 3)
     cfg = load_config()
     prompt = payload.get("prompt", "")
     session = payload.get("session_id")
@@ -3293,6 +3295,54 @@ def _heartbeat(event: str, payload: dict, done: bool = False) -> None:
         pass
 
 
+_FAILED_SCRUB_STARTED: list[bool] = []
+
+
+def _scrub_failed_prompt_now(prompt: str, path: str) -> None:
+    """In the child that _scrub_failed_prompt starts: the values the detector finds without the store, masked in
+    the transcript at once and by the delayed child. Never raises."""
+    try:
+        try:
+            if not load_config().get("scrub_transcript", True):
+                return
+        except Exception:  # noqa: BLE001 - a config that cannot be read must not stop the scrub
+            pass
+        values = [m.value for m in detect.scan(prompt) if not detect.is_fixture(m, prompt)]
+        if values:
+            _scrub_transcript(path, values, [])
+            _scrub_transcript_later(path, values, [])
+    except Exception:  # noqa: BLE001 - the block stands either way
+        _debug("scrub-failed-prompt: could not finish")
+
+
+def _scrub_failed_prompt(event: str, payload: dict) -> None:
+    """The prompt hook could not finish (a damaged index, a broken config, an exception, the watchdog) and blocks.
+    The client still writes the prompt as typed into its transcript, so the detected values are masked there:
+    the detector needs no store and no index (Mcpgate-de/maisecrets#3). The work runs in a detached child, once
+    per hook process: the hook must end before the client's timeout, which lets the prompt through (codex review,
+    2026-10-06: a scan and a locked transcript inside the watchdog could hold the process past it). The prompt
+    reaches the child on stdin, never as an argument. Never raises."""
+    if event != "user-prompt" or _FAILED_SCRUB_STARTED:
+        return
+    try:
+        prompt, path = payload.get("prompt"), payload.get("transcript_path")
+        if not isinstance(prompt, str) or not isinstance(path, str) or not path:
+            return
+        _FAILED_SCRUB_STARTED.append(True)
+        code = ("import json,sys\n"
+                "sys.path.insert(0, sys.argv[1])\n"
+                "from maisecrets.hooks import _scrub_failed_prompt_now\n"
+                "spec = json.load(sys.stdin)\n"
+                "_scrub_failed_prompt_now(spec['prompt'], spec['path'])\n")
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        child = subprocess.Popen([sys.executable, "-c", code, root], stdin=subprocess.PIPE,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        child.stdin.write(json.dumps({"prompt": prompt, "path": path}).encode())
+        child.stdin.close()
+    except Exception:  # noqa: BLE001 - the block stands either way
+        _debug("scrub-failed-prompt: could not start")
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[1] not in HANDLERS:
         sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|session-start\n")
@@ -3332,6 +3382,7 @@ def main(argv: list[str]) -> int:
 
     def on_timeout() -> None:
         answer(_fail_closed(event, payload, f"took longer than {WATCHDOG_SECONDS[event]:.0f}s."), "watchdog")
+        _scrub_failed_prompt(event, payload)
         os._exit(0)
     watchdog = threading.Timer(WATCHDOG_SECONDS[event], on_timeout)
     watchdog.daemon = True
@@ -3344,10 +3395,12 @@ def main(argv: list[str]) -> int:
         # a value; a bare type name sent the user to "a locked store"; review, 2026-09-26)
         answer(_fail_closed(event, payload, f"configuration error: {exc}. Fix the file named there.", hint=False),
                "config-error")
+        _scrub_failed_prompt(event, payload)
         return 0
     except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         # the type only: an exception message may carry a value (subprocess errors list the argv)
         answer(_failure(event, payload, exc), _how_failed(exc))
+        _scrub_failed_prompt(event, payload)
         return 0
     finally:
         # cancel, then wait: a daemon timer thread that still runs while the interpreter shuts down
