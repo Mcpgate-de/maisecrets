@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## [0.6.0] - 2026-10-06
+
+### Features
+
+- a prompt with a secret goes through with placeholders on Claude Code with mods (7eef69d)
+
+### Other
+
+- Merge branch 'chore/the-mod-answer-is-ascii-json' into 'main' (d079c7d)
+- Merge branch 'docs/an-agent-checks-the-upstream-changes-that-change-the-design' into 'main' (bd17a6d)
+- Merge branch 'test/the-release-tests-ignore-an-approved-bump-in-the-ci' into 'main' (9a3c46e)
+- Merge branch 'feat/a-prompt-with-a-secret-is-rewritten-not-blocked' into 'main' (fade6ff)
+
 ## [0.5.24] - 2026-10-05
 
 ### Fixes
