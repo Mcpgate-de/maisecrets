@@ -42,10 +42,10 @@ _TOKEN_RE = re.compile(
 # ssh options that take an argument (ssh(1)); the first word that is no option is the host
 _SSH_ARG_OPTS = set("BbcDEeFIiJLlmOoPpQRSWw")
 # options that send the connection elsewhere than the host on the command line, or run a local command
-_RETARGET_FLAGS = set("JWSOFM")
+_RETARGET_FLAGS = set("JWSOFMP")       # -P: a tag that selects a Match block of the user's config
 _RETARGET_O = re.compile(r"^(?:proxyjump|proxycommand|hostname|remotecommand|controlpath|controlmaster|"
                          r"localcommand|permitlocalcommand|match|include|knownhostscommand|"
-                         r"canonicalizehostname|canonicaldomains)\b", re.I)
+                         r"canonicalizehostname|canonicaldomains|tag)\b", re.I)
 # commands whose quoted arguments are data, never run: a mention of ssh there is no call (`grep "ssh" log`)
 _DATA_CMDS = {"grep", "egrep", "fgrep", "rg", "ag", "echo", "printf", "cut", "tr", "wc", "sort", "uniq", "head",
               "tail", "diff", "test", "[", "pgrep", "pkill"}
@@ -59,11 +59,14 @@ _HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _USER_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 # destructive remote commands, refused even with consent; each spelled loosely on purpose
+# a command word (at the start, after a separator or a wrapper), never part of a file name or an option value
+_CMD_POS = r"(?:^|[\s;|&(`=])"
 _DENY = [
-    ("mkfs", re.compile(r"(?<![\w-])mkfs(?:\.\w+)?(?![\w-])")),
-    ("wipefs", re.compile(r"(?<![\w-])wipefs(?![\w-])")),
-    ("dd to a device", re.compile(r"(?<![\w-])dd\b[^\n;|&]*\bof=/dev/")),
-    ("rm -rf /", re.compile(r"(?<![\w-])rm\s+(?:-{1,2}[\w-]+\s+)*(?:/|/\*|--no-preserve-root)(?:\s|$|;)")),
+    ("mkfs", re.compile(_CMD_POS + r"mkfs(?:\.\w+)?\s+(?:-\S+\s+)*/dev/")),
+    ("wipefs", re.compile(_CMD_POS + r"wipefs\s+(?:-\S+\s+)*/dev/")),
+    # /dev/null and the like are no device: `dd if=/dev/vda of=/dev/null` is a read benchmark (corpus, 2026-10-07)
+    ("dd to a device", re.compile(_CMD_POS + r"dd\s[^\n;|&]*\bof=/dev/(?!(?:null|zero|stdout|stderr)\b)")),
+    ("rm -rf /", re.compile(_CMD_POS + r"rm\s+(?:-{1,2}[\w-]+\s+)*(?:/|/\*|--no-preserve-root)(?:\s|$|;)")),
     ("a fork bomb", re.compile(r":\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:")),
 ]
 
@@ -266,9 +269,13 @@ def _ssh_call(words: list[str], fed: bool, parse: Parser, unquoted: str = "") ->
     if i >= len(words):
         return Call("ssh", "", "unknown", "no host")
     dest = words[i]
-    i, why = _ssh_options(words, i + 1, opt)
-    if why:
-        return Call("ssh", "", "unknown", why)
+    if words[i - 1] != "--":
+        # OpenSSH reads options after the host too, unless -- ended them before the host (Gate B round 2)
+        i, why = _ssh_options(words, i + 1, opt)
+        if why:
+            return Call("ssh", "", "unknown", why)
+    else:
+        i += 1
     i -= 1                                   # words[i + 1:] is the remote command below
     users, ports = list(opt.get("users", [])), list(opt.get("ports", []))
     if dest.startswith("ssh://"):
@@ -304,12 +311,22 @@ def _ssh_call(words: list[str], fed: bool, parse: Parser, unquoted: str = "") ->
 
 
 # options that take an argument, per copy tool; the ones that send the connection elsewhere or run a program
-_COPY_ARG = {"scp": set("cDFiJloPSX"), "sftp": set("BbcDFiJloPRSs"), "sshfs": set("op"), "ssh-copy-id": set("iFJop"),
+_COPY_ARG = {"scp": set("cDFiJloPSX"), "sftp": set("BbcDFiJloPRSs"), "sshfs": set("opF"), "ssh-copy-id": set("iFJop"),
              "rsync": set()}
+_WRITES_RE = re.compile(r"(?<![<\d&-])>(?![&=])|>>|\btee\b|\bsort\b[^\n;|&]*\s-o|\buniq\b|\bcp\b|\bmv\b|"
+                        r"\binstall\b|\bln\b|\bdd\b|\bsed\b[^\n;|&]*\s-i|\bperl\b|\bpython\d*\b|\bnode\b|\bruby\b|"
+                        r"\bawk\b|\btruncate\b|\bchmod\b|\bchown\b|\brm\b|\bcd\b|\bpushd\b")
+def _mosh_program(word: str) -> bool:
+    """mosh --ssh/--server/--client, also abbreviated: mosh's Getopt::Long takes --se=… for --server (Gate B)."""
+    name = word.split("=")[0]
+    return word.startswith("--") and len(name) >= 4 and any(o.startswith(name)
+                                                           for o in ("--server", "--client", "--ssh"))
+
+
 _MOSH_ARG = {"-p", "--port", "--predict", "--family", "--bind-server", "--experimental-remote-ip"}
 # sshfs passes ssh options in a comma list and can run another ssh program
 _SSHFS_PROGRAM = re.compile(r"^(?:ssh_command|ssh_protocol|sftp_server|directport|passive|slave)\b", re.I)
-_COPY_RETARGET = {"scp": set("JFS"), "sftp": set("JFSDs"), "sshfs": set(), "ssh-copy-id": set("JF"), "rsync": set()}
+_COPY_RETARGET = {"scp": set("JFS"), "sftp": set("JFSDs"), "sshfs": set("F"), "ssh-copy-id": set("JF"), "rsync": set()}
 _COPY_PORT = {"scp": "P", "sftp": "P", "sshfs": "p", "ssh-copy-id": "p"}
 _URI_RE = re.compile(r"^(?:scp|sftp|rsync|ssh)://(?:([^@/:]+)@)?([^@/:]+)(?::(\d+))?(?:/.*)?$")
 _SPEC_RE = re.compile(r"^(?:([^@/:]+)@)?([A-Za-z0-9][A-Za-z0-9._-]*):{1,2}(?!//)")
@@ -365,6 +382,9 @@ def _copy_call(cmd: str, words: list[str]) -> "tuple[list[str], str]":
             return [], "a bracketed (IPv6) host this hook does not read"
         users, ports = list(opt.get("users", [])), list(opt.get("ports", []))
         m = _URI_RE.match(w)
+        daemon = bool(m and w.startswith("rsync://")) or (cmd == "rsync" and "::" in w)
+        if cmd == "rsync" and not daemon:
+            ports = []                       # --port is the daemon's; host:path goes over ssh, port 22 (Gate B)
         if m:
             users.append(m.group(1) or "")
             ports.append(m.group(3) or "")
@@ -421,10 +441,8 @@ def classify(command: str, parse: Parser) -> Verdict:
             call.tool = cmd
             if call.kind == "read":
                 call.kind, call.why = "write", "autossh keeps a connection and its tunnels open"
-        elif cmd == "mosh" and any(w.startswith("--ssh") for w in words):
-            call = Call(cmd, "", "unknown", "mosh with its own ssh command")
-        elif cmd == "mosh" and any(w.startswith(("--server", "--client")) for w in words):
-            call = Call(cmd, "", "unknown", "mosh with its own server or client program")
+        elif cmd == "mosh" and any(_mosh_program(w) for w in words):
+            call = Call(cmd, "", "unknown", "mosh with its own ssh, server or client program")
         elif cmd == "mosh":
             # -p/--port is mosh's UDP port, not part of the host; skip the arguments of options (codex review)
             dest, k = "", 1
@@ -466,25 +484,18 @@ def classify(command: str, parse: Parser) -> Verdict:
         k = segs.index(sg)
         return k + 1 < len(segs) and bool(segs[k + 1].get("piped"))
 
-    # the airbag on the fields that run on the remote side, also outside ssh: the command after mosh's host or --,
-    # rsync's --rsync-path; never a host, a local file or a filter (codex review of the repair)
-    for sg in segs:
-        ws = sg.get("words") or []
-        remote_parts = []
-        if sg.get("cmd") == "mosh" and "--" in ws:
-            remote_parts.append(" ".join(ws[ws.index("--") + 1:]))
-        if sg.get("cmd") == "rsync":
-            for k, w in enumerate(ws):
-                if w.startswith("--rsync-path="):
-                    remote_parts.append(w.split("=", 1)[1])
-                elif w == "--rsync-path" and k + 1 < len(ws):
-                    remote_parts.append(ws[k + 1])
-        for part in remote_parts:
-            hit = _deny_hit(part.replace('"', "").replace("'", ""))
-            if hit:
-                calls.append(Call(sg.get("cmd", ""), "", "deny", f"the remote command matches {hit}"))
-        if sg.get("cmd") in ("cd", "pushd") and any(".ssh" in w for w in (sg.get("words") or [])[1:]):
-            calls.append(Call("cd", "", "unknown", "a command inside ~/.ssh, which decides where ssh connects"))
+    # the airbag: when a command names an ssh-family call anywhere, the whole command, quotes removed, is checked.
+    # A narrower scan of the "remote fields" missed forms twice (Gate B rounds 1 and 2): ssh -A host 'mkfs …',
+    # mosh host mkfs …; the deny patterns match a command word only, not a file name or an option value
+    if _TOKEN_RE.search(command):
+        hit = _deny_hit(command.replace('"', "").replace("'", "").replace("\\", ""))
+        if hit:
+            calls.append(Call("ssh", "", "deny", f"the command matches {hit}"))
+    # a change that can reach ~/.ssh (its config retargets every alias): any spelling of .ss… next to a construct
+    # that writes asks; a read alone (cat, grep, ls) does not (Gate B round 2: $HOME, sort -o, conf"ig", ln -s)
+    flat = command.replace('"', "").replace("'", "").replace("\\", "")
+    if re.search(r"\.ss", flat) and _WRITES_RE.search(flat):
+        calls.append(Call("ssh", "", "unknown", "a command that can change ~/.ssh, which decides where ssh connects"))
     fed_by_heredoc = any(c.kind != "unknown" for c in calls) and any(
         sg.get("heredoc") and sg.get("cmd") in SSH_CMDS for sg in segs)
     # a path into ~/.ssh that resolves to its config only after normalising (`~/.ssh/sub/../config`): a change there

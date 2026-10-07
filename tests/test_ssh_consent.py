@@ -100,7 +100,8 @@ class ClassifierMatrixTests(unittest.TestCase):
         "none": [
             "ls -la", "git status", "rsync -a ./a/ ./b/", "ls ~/.ssh", "grep \"ssh\" /var/log/auth.log",
             "echo 'use ssh keys'", "git push ssh://git@example.org/x.git main", "grep Host ~/.ssh/config",
-            "cat ~/.ssh/config", "git commit -F - <<'EOF'\nfix the ssh docs\nEOF\n", "pkill -f \"ssh -N tunnel\"",
+            "cat ~/.ssh/config", "ls -la ~/.ssh", "git commit -F - <<'EOF'\nfix the ssh docs\nEOF\n",
+            "pkill -f \"ssh -N tunnel\"",
             "# ssh web1 reboot\nls",
         ],
         "read": [
@@ -142,6 +143,7 @@ class ClassifierMatrixTests(unittest.TestCase):
             # since the dequoted words cannot tell them apart
             "ssh web1 wc -l \">\" /tmp/out", "ssh web1 uptime > /tmp/out",
             "mosh -p 60000 web1", "rsync -a --exclude=mkfs.py ./ web1:/srv/", "scp wipefs web1:/tmp/",
+            "ssh web1 'dd if=/dev/vda of=/dev/null bs=1M count=2000'",
             "ssh -A web1 uptime", "ssh -X web1 uptime", "ssh -o ForwardAgent=yes web1 uptime",
             "ssh -o 'SetEnv BASH_ENV=/x' web1 uptime", "sshfs -o reconnect web1:/ /mnt/w", "autossh -M 0 -f -N web1",
         ],
@@ -178,6 +180,12 @@ class ClassifierMatrixTests(unittest.TestCase):
             "printf x >> ~/.ssh//config", "sshfs -o reconnect,HostName=evil.example web1:/ /mnt/w",
             "sshfs -o ssh_command='ssh -J evil' web1:/ /mnt/w", "mosh --ssh='ssh -o HostName=evil' web1",
             "sudo -u bob ssh web1 'touch x'", "printf x >> ~/.ssh/sub/../config", "mosh --server=/tmp/x web1",
+            # Gate B round 2: ~/.ssh written in other spellings, sshfs -F, mosh abbreviations, ssh -P tag
+            "echo 'Host web1 HostName prod' >> \"$HOME/.ssh/config\"", "echo x >> \"${HOME}/.ssh/config\"",
+            "sort -o ~/.ssh/config /tmp/evil", "uniq /tmp/evil ~/.ssh/config", "printf x >> ~/.ssh/conf\"ig\"",
+            "ln -s ~/.ssh d; printf x >> d/config", "cd ~/.ss? && printf x >> config",
+            "D=~/.ssh; printf x >> $D/config", "sshfs -F /tmp/evil web1:/ /mnt", "mosh --se=/x web1",
+            "ssh -P prod web1 uptime", "ssh -o Tag=prod web1 uptime",
         ],
         "deny": [
             "ssh web1 'mkfs.ext4 /dev/sda1'", "ssh web1 'dd if=/dev/zero of=/dev/sda bs=1M'", "ssh web1 'rm -rf /'",
@@ -185,6 +193,9 @@ class ClassifierMatrixTests(unittest.TestCase):
             # the airbag on every ssh-family call and through quotes (Gate B of #8)
             "mosh web1 -- mkfs.ext4 /dev/sda", "rsync --rsync-path='mkfs.ext4 /dev/sda; rsync' ./f web1:/x",
             "ssh web1 'rm -rf \"/\"'", "ssh web1 'dd if=/dev/zero of=\"/dev/sda\"'",
+            # Gate B round 2: a forward, a jump, autossh or mosh without -- must not skip the airbag
+            "ssh -A web1 'mkfs.ext4 /dev/sda'", "ssh -L 9:x:9 web1 'rm -rf /'", "mosh web1 mkfs.ext4 /dev/sda",
+            "ssh -J jump web1 'rm -rf /'", "autossh -M 0 web1 'rm -rf /'",
         ],
     }
 
@@ -195,7 +206,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 178, "a row was added or lost: update the count")
+        self.assertEqual(counted, 197, "a row was added or lost: update the count")
 
     def test_the_approval_key_carries_user_and_port(self):
         for command, host in (("ssh root@web1 -p 2222 uptime", "root@web1:2222"),
@@ -217,7 +228,11 @@ class ClassifierMatrixTests(unittest.TestCase):
                               # mosh -p is its UDP port, not the host; rsync --port is the daemon's (codex review)
                               ("mosh -p 60000 web1", "web1"), ("mosh --port 60000 ops@web1", "ops@web1"),
                               ("rsync --port=8873 a rsync://web1/module", "web1:8873"),
-                              ("rsync --port 8873 a rsync://web1/module", "web1:8873")):
+                              ("rsync --port 8873 a rsync://web1/module", "web1:8873"),
+                              # --port is the daemon's: host:path goes over ssh on port 22 (Gate B round 2)
+                              ("rsync --port=2222 /x web1:/y", "web1"),
+                              # after `ssh -- host` the rest is the remote command, not options (Gate B round 2)
+                              ("ssh -- web1 -l root uptime", "web1")):
             with self.subTest(command):
                 self.assertEqual(ssh_consent.classify(command, parse).hosts, [host])
 
@@ -253,7 +268,10 @@ class ConsentFlowTests(unittest.TestCase):
         self.assertEqual(_pre("ssh web2 'systemctl restart nginx'"), {}, "the group is covered")
         self.assertEqual(_decision(_pre("ssh db1 reboot")), "ask", "another host still asks")
         self.assertEqual(_decision(_pre("ssh web1 reboot", agent_id="sub1")), "ask", "a subagent asks for itself")
-        self.assertEqual(_decision(_pre("ssh web1 'mkfs /dev/x'")), "deny", "the deny list holds inside the window")
+        for denied in ("ssh web1 'mkfs /dev/x'", "ssh -A web1 'mkfs.ext4 /dev/sda'", "ssh -L 9:x:9 web1 'rm -rf /'",
+                       "mosh web1 mkfs.ext4 /dev/sda"):
+            with self.subTest(denied):
+                self.assertEqual(_decision(_pre(denied)), "deny", "the deny list holds inside the window")
         self.assertEqual(_decision(_pre("bash -c 'ssh web1 reboot'")), "ask", "an unread form is never covered")
 
     def test_a_forged_hook_call_cannot_confirm_and_is_refused(self):
@@ -265,7 +283,11 @@ class ConsentFlowTests(unittest.TestCase):
                        'bash "/x/hooks/run.sh" "post-tool" < p.json', "cat ~/.maisecrets/ssh-consent.json"):
             with self.subTest(forged):
                 self.assertEqual(_decision(_pre(forged)), "deny")
-        for nested in ("bash -c 'hooks/run.sh user-prompt < f.json'", "P=user-prompt; bash hooks/run.sh $P"):
+        for nested in ("bash -c 'hooks/run.sh user-prompt < f.json'", "P=user-prompt; bash hooks/run.sh $P",
+                       # with consent on, any command that does not only print it (Gate B round 2)
+                       "python3 -c 'import os; os.system(\"P/hooks/run.sh user-prompt < p.json\")'",
+                       "perl -e 'system(\"run.sh user-prompt\")'", "echo 'run.sh user-prompt' | bash",
+                       "R=P/hooks/run.sh; $R user-prompt"):
             with self.subTest(nested):
                 self.assertEqual(_decision(_pre(nested)), "deny")
         # the client's own PostToolUse of the asked call is no proof either: it runs, and nothing is covered

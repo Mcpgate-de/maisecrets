@@ -1950,7 +1950,7 @@ _GRANT_RE = re.compile(r"\A\s*maisecrets:\s*allow\s+ssh\s+(\S+)\s+(\d{6})\s*\Z")
 _HOOK_ENTRIES = {"session-start", "user-prompt", "pre-tool", "post-tool", "mod-prompt"}
 
 
-def _calls_a_hook_entry(command: str) -> bool:
+def _calls_a_hook_entry(command: str, broad: bool = False) -> bool:
     """A command word that runs a maisecrets hook entry with an event: the agent would hand the hook a payload it
     wrote, a forged PostToolUse or prompt (plan review of #8, 2026-10-06). Read from the parsed words, so a mention
     in quotes (`echo "… run.sh post-tool"`) is no call (Codex review)."""
@@ -1962,14 +1962,29 @@ def _calls_a_hook_entry(command: str) -> bool:
             if os.path.basename(w) in ("run.sh", "run.cmd", "dispatch.py") and (
                     words[k + 1] in _HOOK_ENTRIES or words[k + 1].startswith("$")):
                 return True
-    # inside a nested shell (`bash -c 'hooks/run.sh user-prompt …'`) the words are one string: the text decides,
-    # for a command that runs its argument as shell code only (Gate B of #8; `python3 -c 'print(…)'` is no call)
+    # inside a nested shell or an interpreter (`bash -c '…run.sh user-prompt …'`, `python3 -c 'os.system(…)'`,
+    # `find -exec sh -c`) the words are one string: the text decides. Always for a shell; with ssh consent on
+    # (`broad`), for any command that does not only print the text (Gate B of #8, two rounds): a Codex consent has
+    # no second proof, so a forged prompt must not reach the hook. With consent off, `python3 -c 'print(…)'` passes.
     shells = {"bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "su", "xargs", "parallel", "watch", "script"}
+    printers = {"echo", "printf", "grep", "egrep", "rg", "cat", "head", "tail", "less", "git"}
     for m in re.finditer(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
                          r"(?:session-start|user-prompt|pre-tool|post-tool|mod-prompt)\b", command):
         seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
         if seg and seg.get("cmd") in shells:
             return True
+        if broad:
+            k = segs.index(seg) if seg else -1
+            piped_on = seg is not None and k + 1 < len(segs) and bool(segs[k + 1].get("piped"))
+            if not seg or seg.get("cmd") not in printers or piped_on:
+                return True
+    if broad and re.search(r"\b(?:session-start|user-prompt|pre-tool|post-tool|mod-prompt)\b", command):
+        # the entry and the event in different words (R=…/run.sh; $R user-prompt): any mention of an entry outside
+        # a command that only prints it counts
+        for m in re.finditer(r"run\.sh|run\.cmd|dispatch\.py", command):
+            seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
+            if not seg or seg.get("cmd") not in printers:
+                return True
     return False
 
 
@@ -2094,7 +2109,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     refused = _store_refusal(command)
     if refused:
         return refused
-    if _calls_a_hook_entry(command):
+    if _calls_a_hook_entry(command, broad=bool(cfg.get("ssh_consent"))):
         return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "
                      "The command did not run.")
     ctxs = _shell_contexts(command)

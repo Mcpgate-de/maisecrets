@@ -779,14 +779,17 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   ports for one connection, `sudo -u` (another user's ssh config), an option that sends the
   connection elsewhere (`-J`, `-W`, `-S`, `-F`, `-o ProxyCommand`, `-o
   HostName`, `-o RemoteCommand`), `GIT_SSH_COMMAND`, `git -c core.sshCommand`,
-  `RSYNC_RSH`, `DOCKER_HOST=ssh://`, the own ssh options of `sshfs`, `mosh`
-  and `rsync -e`, and a change to `~/.ssh/config` (also through Write or
-  Edit, a command that works inside `~/.ssh`, and a path like
-  `~/.ssh/x/../config`).
-- **A short deny list is always refused:** `mkfs`, `wipefs`, `dd` to a
-  device, `rm -rf /`, a fork bomb, in the command that runs on the remote side
-  (ssh's remote command, the command after `mosh … --`, `rsync
-  --rsync-path`). It is an airbag, not the protection.
+  `RSYNC_RSH`, `DOCKER_HOST=ssh://`, the own ssh options of `sshfs` (also
+  `-F`), `mosh` (also abbreviated) and `rsync -e`, `ssh -P` (a tag that
+  selects a block of your ssh config), and any command that names `.ss…` and
+  also writes (a redirect, `tee`, `cp`, `mv`, `ln`, `sort -o`, `sed -i`, an
+  interpreter …): a change to `~/.ssh` can send an approved alias elsewhere.
+  Write and Edit on `~/.ssh` ask too. A read of it (`cat`, `grep`, `ls`) does
+  not.
+- **A short deny list is always refused:** `mkfs` or `wipefs` on a device,
+  `dd` to a device, `rm -rf /`, a fork bomb, anywhere in a command that names
+  an ssh-family call (quotes removed; as a command word, not as a file name).
+  It is an airbag, not the protection.
 - **Codex** cannot ask. It refuses and names a sentence with a code, for
   example `maisecrets: allow ssh web1 123456`. Typed alone as your very next
   prompt within 10 minutes, it allows writes to that host for 8 hours; the
@@ -796,7 +799,7 @@ Measured on the maintainer's transcripts with `scripts/measure_ssh_consent.py
 --skip-cwd maisecrets` (2026-10-07, the sessions that work on maisecrets itself
 left out): real ops commands use `sudo` or `docker` on the remote side almost
 always, so most are writes (88 %), and the consent per host carries them. 112
-sessions with ssh, a median of 1.5 questions per session, 7 at the 90th
+sessions with ssh, a median of 2 questions per session, 7 at the 90th
 percentile, 48 at most. The script ignores groups and the 8-hour expiry.
 
 Limits: maisecrets sees only the command text. A script file, an alias, a
