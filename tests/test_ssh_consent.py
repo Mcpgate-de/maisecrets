@@ -366,6 +366,7 @@ class ConsentFlowTests(unittest.TestCase):
             self.assertIn("not valid", hooks.user_prompt({"prompt": sentence, "session_id": "S1", **CODEX})["reason"],
                           "a prompt in between ended the code")
 
+    @unittest.skipIf(os.name == "nt", "the ssh value route (C18) is POSIX only; Windows refuses a value for ssh")
     def test_a_value_and_a_consent_make_one_ask(self):
         from maisecrets.vault import Vault
         cfg = {**hooks.load_config(), **ON}
