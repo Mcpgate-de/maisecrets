@@ -66,6 +66,14 @@ def main(argv: list[str]) -> int:
             print("no check runs yet for this commit; waiting")
             time.sleep(30)
             continue
+        # one commit can have two runs of a check: a second push of the same commit starts a new run, and the
+        # workflow's concurrency rule cancels the first. The newest run per name decides; a cancelled run that a
+        # newer one replaced is no failure (release of 0.6.6, 2026-10-07: red on a cancelled run, green beside it)
+        newest: dict = {}
+        for c in runs:
+            if c["name"] not in newest or c.get("id", 0) > newest[c["name"]].get("id", 0):
+                newest[c["name"]] = c
+        runs = list(newest.values())
         pending = [c["name"] for c in runs if c["status"] != "completed"]
         failed = [c["name"] for c in runs
                   if c["status"] == "completed" and c["conclusion"] not in ("success", "skipped")]
