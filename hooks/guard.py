@@ -30,7 +30,7 @@ EVENTS = {"UserPromptSubmit": "user-prompt", "PreToolUse": "pre-tool", "PostTool
 MESSAGE = ("maisecrets did not run for this call: a plugin update replaced its folder, or it started too slowly.\n\n"
            "    claude --resume {session}\n\n"
            "Exit this session and run the command above in the directory where you started it.{clip} "
-           "/reload-plugins may help first; after a synced update it cannot (anthropics/claude-code#97847). "
+           "/reload-plugins does not help after an update of a synced plugin (anthropics/claude-code#97847). "
            "If maisecrets is off on purpose, switch the guard off in a terminal: python3 {script} --off")
 # no sign of an update: a busy computer delayed maisecrets, and a second try works. The refusal said "exit this
 # session" and an autonomous run stopped for a person, while the next call went through (measured 2026-09-29,
@@ -39,7 +39,7 @@ RETRY = ("maisecrets did not answer in time for this call (the computer may be b
          "Run it again. If every call fails this way, a plugin update replaced the maisecrets folder:\n\n"
          "    claude --resume {session}\n\n"
          "Exit this session and run the command above in the directory where you started it.{clip} "
-         "/reload-plugins may help first; after a synced update it cannot (anthropics/claude-code#97847). "
+         "/reload-plugins does not help after an update of a synced plugin (anthropics/claude-code#97847). "
          "If maisecrets is off on purpose, switch the guard off in a terminal: python3 {script} --off")
 # maisecrets started for this call: its folder is there, so no restart helps
 SLOW = ("maisecrets started for this call but did not answer in time (the computer may be busy), so the call did "

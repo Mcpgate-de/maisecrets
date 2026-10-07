@@ -115,12 +115,23 @@ def check_json(root: Path = ROOT) -> list[str]:
     return errors
 
 
+# the events hooks/hooks.json may name: a client rejects or skips an event it does not know, and a rejected manifest
+# loads no hook at all (Claude Code 2.1.223 and userConfig). This check ran only in the CI job `manifests` before,
+# and a new event first failed there (2026-10-07)
+HOOK_EVENTS = {"UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SessionStart", "Setup"}
+
+
 def check_hook_paths(root: Path = ROOT) -> list[str]:
     errors = []
     try:
         hooks = json.loads((root / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
     except (OSError, ValueError, KeyError):
         return ["hooks/hooks.json: cannot read its hooks"]
+    unknown = sorted(set(hooks) - HOOK_EVENTS)
+    if unknown:
+        errors.append(f"hooks/hooks.json: events {unknown} are not in HOOK_EVENTS; add one there only after a client "
+                      "that does not know it was measured to still load the others (PostToolUseFailure: codex-cli "
+                      "0.159.2)")
     for event, groups in hooks.items():
         for group in groups:
             for h in group.get("hooks", []):

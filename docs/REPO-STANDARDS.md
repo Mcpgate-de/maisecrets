@@ -39,6 +39,9 @@ and OpenAI plugin directories.
   (Windows, macOS; Linux runs on GitLab) is green for the tested SHA on the public mirror
   (`scripts/wait_for_github_checks.py`, public API, no token). Windows was
   red across four releases on 2026-09-26 because nothing waited for it.
+- Matrix before a merge: push the commit to the GitHub branch `ci-check` (pushed over each time; the rulesets
+  protect only `main`, `release` and the tags `v*`). `.github/workflows/ci.yml` runs on it. No draft pull request
+  and no new branch name: GitHub keeps listing a deleted pull-request branch.
 - Vendored rulesets: Renovate keeps `maisecrets/rules/` current (`renovate.json`). The job `renovate`
   runs self-hosted on a pipeline schedule with `RENOVATE_RUN=true`; on a schedule no other job runs.
   It reads the three `*_VERSION` files. For an upstream release at least 7 days old it runs the sync

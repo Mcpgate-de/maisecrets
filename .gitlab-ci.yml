@@ -73,7 +73,7 @@ manifests:
   extends: .not_on_a_schedule
   script:
     - python -c "import json; [json.load(open(f)) for f in ('.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', '.codex-plugin/plugin.json', 'hooks/hooks.json')]"
-    - python -c "import json; h=json.load(open('hooks/hooks.json'))['hooks']; assert set(h) <= {'UserPromptSubmit','PreToolUse','PostToolUse','PostToolUseFailure','SessionStart','Setup'}, set(h)"
+    # the allowed hook events: scripts/lint_plugin.py (HOOK_EVENTS), which the commit hook runs too
     - python scripts/release.py check
     # the numbers the docs state, measured again (test count, scenario counts, proof count)
     - python scripts/derived_counts.py
