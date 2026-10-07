@@ -1954,11 +1954,22 @@ def _calls_a_hook_entry(command: str) -> bool:
     """A command word that runs a maisecrets hook entry with an event: the agent would hand the hook a payload it
     wrote, a forged PostToolUse or prompt (plan review of #8, 2026-10-06). Read from the parsed words, so a mention
     in quotes (`echo "… run.sh post-tool"`) is no call (Codex review)."""
-    for sg in _segments(command, _shell_contexts(command)):
+    ctxs = _shell_contexts(command)
+    segs = _segments(command, ctxs)
+    for sg in segs:
         words = sg.get("words") or []
         for k, w in enumerate(words[:-1]):
-            if os.path.basename(w) in ("run.sh", "run.cmd", "dispatch.py") and words[k + 1] in _HOOK_ENTRIES:
+            if os.path.basename(w) in ("run.sh", "run.cmd", "dispatch.py") and (
+                    words[k + 1] in _HOOK_ENTRIES or words[k + 1].startswith("$")):
                 return True
+    # inside a nested shell (`bash -c 'hooks/run.sh user-prompt …'`) the words are one string: the text decides,
+    # except as an argument of a command that only prints it (Gate B of #8)
+    data = {"echo", "printf", "grep", "egrep", "rg", "git", "cat", "head", "tail", "less"}
+    for m in re.finditer(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
+                         r"(?:session-start|user-prompt|pre-tool|post-tool|mod-prompt)\b", command):
+        seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
+        if not seg or seg.get("cmd") not in data:
+            return True
     return False
 
 
@@ -2089,6 +2100,11 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     ctxs = _shell_contexts(command)
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
     # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line
+    if cfg.get("ssh_consent") and re.search(r"allow\s+ssh\s+\S+\s+\d{6}", command):
+        # the model saw the code in the refusal; a nested prompt (`codex exec resume …`) would type the sentence
+        # for it (Gate B of #8). Text matching: a code built at run time is not seen (C21)
+        return _deny("maisecrets: this command carries the ssh consent sentence; only the person types it, as a "
+                     "prompt. The command did not run.")
     consent = _ssh_consent(payload, cfg, command)
     if consent and consent["kind"] == "deny":
         return _deny(f"maisecrets: the remote command matches the deny list ({consent['why']}); it never runs "
@@ -2148,7 +2164,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     # child, which confirms it when the approved command reads the value. After phase 1: a key
     # this session may not resolve leaves no pending token (review, 2026-09-29)
     ssh_auto, ssh_token = rehydration.policy(cfg, "ssh") == "automatic", None
-    if ssh_plan and not ssh_auto and cfg.get("ssh_approval") == "per-session" \
+    # with a consent question in the same ask, no hidden per-session value approval rides along (Gate B of #8)
+    if ssh_plan and not ssh_auto and not needs_yes and cfg.get("ssh_approval") == "per-session" \
             and _remote_is_read_only(ssh_plan["remote"]):
         from . import ssh_approval
         names = sorted({k for k, _a, _b in refs})

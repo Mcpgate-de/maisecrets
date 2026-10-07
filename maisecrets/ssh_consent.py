@@ -37,7 +37,7 @@ SSH_CMDS = {"ssh", "autossh", "mosh", "scp", "sftp", "sshfs", "ssh-copy-id", "rs
 _TOKEN_RE = re.compile(
     r"(?<![\w./])(?:ssh|autossh|mosh|scp|sftp|sshfs|ssh-copy-id|sshpass|pssh|parallel-ssh|pscp|"
     r"pssh\.\w+|tsh|kitten|rsync)(?![\w-])"
-    r"|ssh://|rsync://|GIT_SSH|sshCommand|RSYNC_RSH|DOCKER_HOST|\.ssh/config\b")
+    r"|ssh://|rsync://|GIT_SSH|sshCommand|RSYNC_RSH|DOCKER_HOST|\.ssh/+(?:\./+)*config\b")
 
 # ssh options that take an argument (ssh(1)); the first word that is no option is the host
 _SSH_ARG_OPTS = set("BbcDEeFIiJLlmOoPpQRSWw")
@@ -172,23 +172,37 @@ def _args_ok(cmd: str, args: list[str], opts: set[str], mode: str) -> bool:
     return False
 
 
-_FORWARD_FLAGS = set("LRDw")
-_FORWARD_O = re.compile(r"^(?:localforward|remoteforward|dynamicforward|tunnel|tunneldevice)$", re.I)
+# a port forward, a tunnel, the agent or X11 forwarded, an environment sent: state on the other side
+_FORWARD_FLAGS = set("LRDwAXY")
+_FORWARD_O = re.compile(r"^(?:localforward|remoteforward|dynamicforward|tunnel|tunneldevice|forwardagent|forwardx11|"
+                        r"forwardx11trusted|setenv|sendenv|streamlocalbindunlink)$", re.I)
+# ssh_config(5) reads "Name value" and "Name=value" with blanks around both; a leading blank hid HostName (Gate B)
+_O_RE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9]*)\s*(?:=\s*|\s+)(.*)$", re.S)
 
 
 def _o_option(val: str, opt: dict) -> str:
-    """One -o Name=value: a reason when it sends the connection elsewhere; the user, port or a forward into opt."""
-    name, _, value = val.replace(" ", "=", 1).partition("=")
+    """One -o Name=value: a reason when it sends the connection elsewhere or cannot be read; the user, port or a
+    forward into opt. Users and ports are lists: OpenSSH takes the first value, and two different ones are unknown."""
+    m = _O_RE.match(val)
+    if not m:
+        return f"the option -o {val!r} cannot be read"
+    name, value = m.group(1), m.group(2).strip()
     if _RETARGET_O.match(name):
-        return f"the option -o {val} changes the target or runs a command"
+        return f"the option -o {name} changes the target or runs a command"
     low = name.lower()
     if low == "user":
-        opt["l"] = value
+        opt.setdefault("users", []).append(value)
     elif low == "port":
-        opt["p"] = value
+        opt.setdefault("ports", []).append(value)
     elif _FORWARD_O.match(name):
         opt["fwd"] = f"-o {name}"
     return ""
+
+
+def _one(values: list[str]) -> "tuple[str, bool]":
+    """The single user or port that several sources name, and whether they disagree."""
+    vals = [v for v in values if v]
+    return (vals[0] if vals else ""), len(set(vals)) > 1
 
 
 def _ssh_options(words: list[str], i: int, opt: dict) -> "tuple[int, str]":
@@ -210,8 +224,10 @@ def _ssh_options(words: list[str], i: int, opt: dict) -> "tuple[int, str]":
                     why = _o_option(val, opt)
                     if why:
                         return i, why
-                if f in "lp":
-                    opt[f] = val
+                if f == "l":
+                    opt.setdefault("users", []).append(val)
+                if f == "p":
+                    opt.setdefault("ports", []).append(val)
                 i += 1 if flags[k + 1:] else 2
                 break
         else:
@@ -219,7 +235,30 @@ def _ssh_options(words: list[str], i: int, opt: dict) -> "tuple[int, str]":
     return i, ""
 
 
+_REDIR_WORD = re.compile(r"^\d*(?:<<<|<<|>>|<|>|&>>|&>)&?\d*$")
+_REDIR_GLUED = re.compile(r"^\d*(?:>>|<|>|&>)&?\S+$")
+
+
+def _drop_local_redirects(words: list[str]) -> list[str]:
+    """The words without the local shell's redirections (`< /dev/null`, `2>&1`, `> out`): they are not part of the
+    remote command. A quoted remote command is one word, so a lone `>` here was unquoted."""
+    out: list[str] = []
+    skip = False
+    for w in words:
+        if skip:
+            skip = False
+            continue
+        if _REDIR_WORD.match(w):
+            skip = not w.endswith(("&1", "&2")) and not re.search(r"&\d$", w)
+            continue
+        if _REDIR_GLUED.match(w):
+            continue
+        out.append(w)
+    return out
+
+
 def _ssh_call(words: list[str], fed: bool, parse: Parser) -> Call:
+    words = _drop_local_redirects(words)
     opt: dict = {}
     i, why = _ssh_options(words, 1, opt)
     if why:
@@ -231,23 +270,30 @@ def _ssh_call(words: list[str], fed: bool, parse: Parser) -> Call:
     if why:
         return Call("ssh", "", "unknown", why)
     i -= 1                                   # words[i + 1:] is the remote command below
-    user, port = opt.get("l", ""), opt.get("p", "")
+    users, ports = list(opt.get("users", [])), list(opt.get("ports", []))
     if dest.startswith("ssh://"):
         m = re.match(r"^ssh://(?:([^@/]+)@)?([^:/]+)(?::(\d+))?/?$", dest)
         if not m:
             return Call("ssh", "", "unknown", "an ssh:// target this hook cannot read")
-        user, dest, port = m.group(1) or user, m.group(2), m.group(3) or port
+        users.append(m.group(1) or "")
+        ports.append(m.group(3) or "")
+        dest = m.group(2)
     elif "@" in dest:
-        user, dest = dest.rsplit("@", 1)
+        u, dest = dest.rsplit("@", 1)
+        users.append(u)
+    (user, two_users), (port, two_ports) = _one(users), _one(ports)
+    if two_users or two_ports:
+        return Call("ssh", "", "unknown", "two users or two ports for one connection; ssh takes the first one")
     if not _HOST_RE.match(dest) or (user and not _USER_RE.match(user)) or (port and not port.isdigit()):
         return Call("ssh", "", "unknown", "a host or user built at run time or with odd characters")
     host = f"{user + '@' if user else ''}{dest}{':' + port if port else ''}"
     if opt.get("fwd"):
-        return Call("ssh", host, "write", f"the option {opt['fwd']} opens a port forward or a tunnel")
+        return Call("ssh", host, "write", f"the option {opt['fwd']} forwards a port, a tunnel, the agent or X11, or "
+                                          "sends the environment")
     remote = " ".join(words[i + 1:])
     if not remote.strip():
         return Call("ssh", host, "write", "an interactive login")
-    hit = _deny_hit(remote)
+    hit = _deny_hit(remote.replace('"', "").replace("'", ""))
     if hit:
         return Call("ssh", host, "deny", f"the remote command matches {hit}")
     if fed:
@@ -260,6 +306,8 @@ def _ssh_call(words: list[str], fed: bool, parse: Parser) -> Call:
 # options that take an argument, per copy tool; the ones that send the connection elsewhere or run a program
 _COPY_ARG = {"scp": set("cDFiJloPSX"), "sftp": set("BbcDFiJloPRSs"), "sshfs": set("op"), "ssh-copy-id": set("iFJop"),
              "rsync": set()}
+# sshfs passes ssh options in a comma list and can run another ssh program
+_SSHFS_PROGRAM = re.compile(r"^(?:ssh_command|ssh_protocol|sftp_server|directport|passive|slave)\b", re.I)
 _COPY_RETARGET = {"scp": set("JFS"), "sftp": set("JFSDs"), "sshfs": set(), "ssh-copy-id": set("JF"), "rsync": set()}
 _COPY_PORT = {"scp": "P", "sftp": "P", "sshfs": "p", "ssh-copy-id": "p"}
 _URI_RE = re.compile(r"^(?:scp|sftp|rsync|ssh)://(?:([^@/:]+)@)?([^@/:]+)(?::(\d+))?(?:/.*)?$")
@@ -287,13 +335,16 @@ def _copy_call(cmd: str, words: list[str]) -> "tuple[list[str], str]":
                 if f in _COPY_ARG.get(cmd, set()):
                     val = flags[k + 1:] or (words[i + 1] if i + 1 < len(words) else "")
                     if f == "o":
-                        why = _o_option(val, opt)
-                        if why:
-                            return [], why
+                        for item in (val.split(",") if cmd == "sshfs" else [val]):
+                            if cmd == "sshfs" and _SSHFS_PROGRAM.match(item.strip()):
+                                return [], f"the sshfs option {item.strip()} runs another ssh program"
+                            if cmd == "sshfs" and "=" not in item and " " not in item.strip():
+                                continue     # an sshfs flag such as reconnect
+                            why = _o_option(item, opt)
+                            if why:
+                                return [], why
                     if f == _COPY_PORT.get(cmd):
-                        opt["p"] = val
-                    if f == "l":
-                        opt["l"] = val
+                        opt.setdefault("ports", []).append(val)
                     i += 1 if flags[k + 1:] else 2
                     break
             else:
@@ -301,19 +352,30 @@ def _copy_call(cmd: str, words: list[str]) -> "tuple[list[str], str]":
             continue
         targets.append(w)
         i += 1
+    if opt.get("fwd"):
+        return [], f"the option {opt['fwd']} forwards or sends the environment"
     hosts = []
     for w in targets:
+        if "[" in w and "]:" in w:
+            return [], "a bracketed (IPv6) host this hook does not read"
+        users, ports = list(opt.get("users", [])), list(opt.get("ports", []))
         m = _URI_RE.match(w)
         if m:
-            user, host, port = m.group(1) or opt.get("l", ""), m.group(2), m.group(3) or opt.get("p", "")
+            users.append(m.group(1) or "")
+            ports.append(m.group(3) or "")
+            host = m.group(2)
         elif cmd in ("sftp", "ssh-copy-id") and w is targets[-1] and not _SPEC_RE.match(w) and "/" not in w:
-            user, _, host = w.rpartition("@")
-            user, port = user or opt.get("l", ""), opt.get("p", "")
+            u, _, host = w.rpartition("@")
+            users.append(u)
         else:
             m = _SPEC_RE.match(w)
             if not m:
                 continue                     # a local path
-            user, host, port = m.group(1) or opt.get("l", ""), m.group(2), opt.get("p", "")
+            users.append(m.group(1) or "")
+            host = m.group(2)
+        (user, two_users), (port, two_ports) = _one(users), _one(ports)
+        if two_users or two_ports:
+            return [], "two users or two ports for one connection"
         if not _HOST_RE.match(host) or (user and not _USER_RE.match(user)) or (port and not str(port).isdigit()):
             return [], "a host or user built at run time or with odd characters"
         hosts.append(f"{user + '@' if user else ''}{host}{':' + port if port else ''}")
@@ -336,7 +398,16 @@ def classify(command: str, parse: Parser) -> Verdict:
         # stdin from the local side: a pipe into ssh, a redirect, a here-string or a heredoc
         masked = "".join(ch if ctx == "" else " " for ch, ctx in
                          zip(text, ctxs[sg["start"]:sg["end"]]))
-        fed = bool(sg.get("piped") or sg.get("heredoc") or re.search(r"(?<![<>&\d])<(?!\()", masked))
+        fed = bool(sg.get("piped") or sg.get("heredoc")
+                   or re.search(r"(?<![<>&\d])<(?!\(|\s*/dev/null\b)", masked))
+        if re.match(r"\s*(?:\S+=\S*\s+)*(?:sudo|doas)\b[^;|&]*\s-(?:u|-user|i|s|-login|-shell)\b", masked):
+            # another user's ssh config and keys: its aliases are not this user's (Gate B of #8)
+            calls.append(Call(cmd, "", "unknown", "ssh as another local user, with that user's ssh config"))
+            spans.append((sg["start"], sg["end"]))
+            continue
+        if cmd == "autossh":
+            # -M is autossh's monitor port, not ssh's -M (Gate B: `autossh -M 0` asked every time)
+            words = [w for k, w in enumerate(words) if not (w.startswith("-M") or (k and words[k - 1] == "-M"))]
         if cmd == "ssh":
             call = _ssh_call(words, fed, parse)
         elif cmd == "autossh":
@@ -345,13 +416,15 @@ def classify(command: str, parse: Parser) -> Verdict:
             call.tool = cmd
             if call.kind == "read":
                 call.kind, call.why = "write", "autossh keeps a connection and its tunnels open"
+        elif cmd == "mosh" and any(w.startswith("--ssh") for w in words):
+            call = Call(cmd, "", "unknown", "mosh with its own ssh command")
         elif cmd == "mosh":
             dest = next((w for w in words[1:] if not w.startswith("-")), "")
             call = Call(cmd, dest, "write" if _HOST_RE.match(dest.split("@")[-1] or "-") else "unknown",
                         "an interactive login")
         else:
-            if cmd == "rsync" and (any(w in ("-e", "--rsh") or w.startswith(("--rsh=", "-e")) for w in words)
-                                   or "RSYNC_RSH" in text):
+            if cmd == "rsync" and (any(w in ("-e", "--rsh") or w.startswith("--rsh=") or re.match(r"^-[A-Za-z]*e", w)
+                                       for w in words) or "RSYNC_RSH" in text):
                 call = Call(cmd, "", "unknown", "rsync with its own remote shell")
             else:
                 hosts, why = _copy_call(cmd, words)
@@ -360,7 +433,7 @@ def classify(command: str, parse: Parser) -> Verdict:
                     calls.append(Call(cmd, "", "unknown", why))
                 elif hosts:
                     calls.extend(Call(cmd, h, "write", "a copy to or from the host") for h in hosts)
-                elif cmd != "rsync":
+                elif cmd != "rsync" or any("[" in w and "]:" in w for w in words):
                     calls.append(Call(cmd, "", "unknown", "a host this hook cannot read"))
                 continue                         # rsync with no host is a local copy
         calls.append(call)
@@ -371,6 +444,14 @@ def classify(command: str, parse: Parser) -> Verdict:
         k = segs.index(sg)
         return k + 1 < len(segs) and bool(segs[k + 1].get("piped"))
 
+    # the airbag on every ssh-family call, not only on ssh's remote command: mosh --, rsync --rsync-path, quotes
+    for sg in segs:
+        if sg.get("cmd") in SSH_CMDS or (sg.get("cmd") == "perl" and "exec @ARGV" in command[sg["start"]:sg["end"]]):
+            hit = _deny_hit(command[sg["start"]:sg["end"]].replace('"', "").replace("'", ""))
+            if hit:
+                calls.append(Call(sg.get("cmd", ""), "", "deny", f"the command matches {hit}"))
+        if sg.get("cmd") in ("cd", "pushd") and any(".ssh" in w for w in (sg.get("words") or [])[1:]):
+            calls.append(Call("cd", "", "unknown", "a command inside ~/.ssh, which decides where ssh connects"))
     fed_by_heredoc = any(c.kind != "unknown" for c in calls) and any(
         sg.get("heredoc") and sg.get("cmd") in SSH_CMDS for sg in segs)
     for m in _TOKEN_RE.finditer(command):

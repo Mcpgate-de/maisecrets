@@ -107,7 +107,8 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ssh web1 uptime", "ssh web1 'df -h'", "ssh web1 'systemctl is-active nginx'", "ssh web1 -- uptime",
             "ssh -p 2222 -l deploy web1 'free -m'", "ssh web1 'ls -la /var/log 2>&1'",
             "ssh web1 'du -sh /srv 2>/dev/null'", "ssh web1 'wc -l /var/log/syslog'", "cd /tmp && ssh web1 uptime",
-            "timeout 30 ssh web1 uptime", "perl -e 'alarm 45; exec @ARGV' ssh web1 uptime",
+            "timeout 30 ssh web1 uptime", "ssh web1 uptime < /dev/null", "ssh web1 uptime > /tmp/out",
+            "perl -e 'alarm 45; exec @ARGV' ssh web1 uptime",
             "ssh web1 'uname -a; df -h'",
         ],
         "write": [
@@ -137,6 +138,8 @@ class ClassifierMatrixTests(unittest.TestCase):
             # copies with a URI, a port, an option
             "scp f scp://web1/path", "sftp sftp://web1/path", "rsync -a f rsync://web1/module/",
             "rsync -a f web1::module/", "scp -P 2222 f web1:/tmp/",
+            "ssh -A web1 uptime", "ssh -X web1 uptime", "ssh -o ForwardAgent=yes web1 uptime",
+            "ssh -o 'SetEnv BASH_ENV=/x' web1 uptime", "sshfs -o reconnect web1:/ /mnt/w", "autossh -M 0 -f -N web1",
         ],
         "unknown": [
             "bash -c \"ssh web1 reboot\"", "sh -c 'ssh web1 reboot'", "eval ssh web1 reboot",
@@ -160,10 +163,24 @@ class ClassifierMatrixTests(unittest.TestCase):
             "bash -c \"rsync -a file web1:/tmp/\"", "R=rsync; $R -a . web1:/x", "scp -o HostName=web2 f web1:/tmp/",
             "scp -J jump f web1:/tmp/", "sftp -D /tmp/server web1", "sftp -s 'cmd' web1",
             "scp -o ProxyCommand='nc evil 22' f web1:/x",
+            # Gate B of #8: a blank before the option name, a second user or port (ssh takes the first), a bundled
+            # rsync -e, a bracketed host, ~/.ssh/config through cd or another spelling, sshfs and mosh own options
+            "ssh -o ' HostName=evil.example' web1 'rm -rf /srv/data'", "ssh -o '\tHostName=evil' web1 x",
+            "scp -o ' HostName=evil' f web1:/x", "ssh -l root deploy@web1 'touch /x'",
+            "ssh -o User=root -o User=deploy web1 x", "ssh -p 22 -p 2222 web1 x", "ssh -p 22 ssh://web1:2222 x",
+            "ssh -l deploy web1 -l root", "rsync -avze 'ssh -o HostName=evil.example' ./d web1:/srv/",
+            "rsync -a ./data 'root@[2001:db8::1]:/srv/'", "scp web1:/a 'root@[2001:db8::1]:/b'",
+            "cd ~/.ssh && printf 'Host web1\\n HostName evil\\n' >> config", "printf x >> ~/.ssh/./config",
+            "printf x >> ~/.ssh//config", "sshfs -o reconnect,HostName=evil.example web1:/ /mnt/w",
+            "sshfs -o ssh_command='ssh -J evil' web1:/ /mnt/w", "mosh --ssh='ssh -o HostName=evil' web1",
+            "sudo -u bob ssh web1 'touch x'",
         ],
         "deny": [
             "ssh web1 'mkfs.ext4 /dev/sda1'", "ssh web1 'dd if=/dev/zero of=/dev/sda bs=1M'", "ssh web1 'rm -rf /'",
             "ssh web1 'sudo rm -rf --no-preserve-root /'", "ssh web1 'wipefs -a /dev/sdb'",
+            # the airbag on every ssh-family call and through quotes (Gate B of #8)
+            "mosh web1 -- mkfs.ext4 /dev/sda", "rsync --rsync-path='mkfs.ext4 /dev/sda; rsync' ./f web1:/x",
+            "ssh web1 'rm -rf \"/\"'", "ssh web1 'dd if=/dev/zero of=\"/dev/sda\"'",
         ],
     }
 
@@ -174,7 +191,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertGreaterEqual(counted, 140)
+        self.assertGreaterEqual(counted, 170)
 
     def test_the_approval_key_carries_user_and_port(self):
         for command, host in (("ssh root@web1 -p 2222 uptime", "root@web1:2222"),
@@ -188,7 +205,11 @@ class ClassifierMatrixTests(unittest.TestCase):
                               ("scp f scp://ops@web1:2200/path", "ops@web1:2200"), ("scp -P 2222 f web1:/tmp/",
                               "web1:2222"),
                               ("sftp sftp://db1/x", "db1"), ("rsync -a f rsync://db1/m/", "db1"),
-                              ("rsync -a f web1::m/", "web1"), ("sftp -P 2201 ops@web1", "ops@web1:2201")):
+                              ("rsync -a f web1::m/", "web1"), ("sftp -P 2201 ops@web1", "ops@web1:2201"),
+                              # scp -l is a bandwidth limit, not a user (Gate B of #8)
+                              ("scp -l 1000 ./f web1:/x", "web1"),
+                              # one user from two sources that agree stays one host
+                              ("ssh -l deploy deploy@web1 x", "deploy@web1")):
             with self.subTest(command):
                 self.assertEqual(ssh_consent.classify(command, parse).hosts, [host])
 
@@ -236,8 +257,10 @@ class ConsentFlowTests(unittest.TestCase):
                        'bash "/x/hooks/run.sh" "post-tool" < p.json', "cat ~/.maisecrets/ssh-consent.json"):
             with self.subTest(forged):
                 self.assertEqual(_decision(_pre(forged)), "deny")
-        hooks.post_tool(json.loads(payload)) if hasattr(hooks, "post_tool") else None
-        self.assertFalse(consent_store.covered("S1", None, ["web1"]), "a PostToolUse is no proof")
+        for nested in ("bash -c 'hooks/run.sh user-prompt < f.json'", "P=user-prompt; bash hooks/run.sh $P"):
+            with self.subTest(nested):
+                self.assertEqual(_decision(_pre(nested)), "deny")
+        self.assertFalse(consent_store.covered("S1", None, ["web1"]))
 
     def test_codex_refuses_and_grants_only_by_the_sentence_alone_with_its_code(self):
         out = _pre("ssh db1 reboot", client=CODEX)
@@ -255,6 +278,9 @@ class ConsentFlowTests(unittest.TestCase):
             self.assertIn("not valid", hooks.user_prompt({"prompt": sentence, "session_id": "S2", **CODEX})["reason"],
                           "a code works in its own session only")
         self.assertEqual(_pre("ssh db1 reboot", client=CODEX), {})
+        # the model saw the code: a command that would type the sentence for it is refused (Gate B of #8)
+        self.assertEqual(_decision(_pre(f"codex exec resume --last '{sentence}'")), "deny",
+                         "refused, not only asked as an unread ssh mention")
         # the sentence counts only as the very next prompt: another prompt in between ends the code
         out = _pre("ssh db2 reboot", client=CODEX)
         sentence = re.search(r"maisecrets: allow ssh db2 \d{6}$", out["hookSpecificOutput"]["permissionDecisionReason"]
@@ -278,6 +304,14 @@ class ConsentFlowTests(unittest.TestCase):
         self.assertTrue(cmd.startswith("__ms_consent="), cmd[:80])
         self.assertIn("__ms_1=", cmd)
         self.assertNotIn("consent-flow-value-xyz", cmd)
+        # with ssh_approval per-session and a read command, the consent ask must not carry a hidden value approval
+        out = _pre(f"printf '%s' {ref} | ssh web1 uptime", cfg={**ON, "rehydration": "confirm",
+                                                                 "ssh_approval": "per-session"})
+        self.assertEqual(_decision(out), "ask")
+        self.assertNotIn("without asking again", out["hookSpecificOutput"]["permissionDecisionReason"])
+        approvals = Path(HOME, "ssh-approvals.json")
+        self.assertFalse(approvals.exists() and json.loads(approvals.read_text()).get("pending"),
+                         "no pending per-session value approval")
 
     def test_outside_bash_the_gate_asks_or_refuses(self):
         self.assertEqual(_decision(_pre("ssh web1 reboot", tool="PowerShell")), "ask")
@@ -291,12 +325,17 @@ class ConsentFlowTests(unittest.TestCase):
                     mock.patch.object(hooks, "load_config", return_value={**hooks.load_config(), **ON}):
                 self.assertEqual(_decision(hooks.pre_tool(payload)), want)
 
-    def test_the_setting_is_a_safety_key(self):
+    def test_a_user_file_ignored_for_a_wrong_type_keeps_consent_on(self):
         from maisecrets import vault
         self.assertIn("ssh_consent", vault._SAFETY_KEYS)
-        cfg = {**vault.DEFAULT_CONFIG}
-        vault._keep_the_stricter(cfg, {"ssh_consent": True, "rehydration": "automatic"})
-        self.assertTrue(cfg["ssh_consent"], "a user file ignored for a wrong type keeps consent on")
+        Path(HOME, "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True,
+                                                         "ssh_consent": True, "max_keys_per_session": "many"}))
+        try:
+            cfg = vault.load_config()
+            self.assertIn("was ignored", cfg["config_warning"], "the premise: the file was ignored")
+            self.assertTrue(cfg["ssh_consent"])
+        finally:
+            _reset()
 
 
 if __name__ == "__main__":

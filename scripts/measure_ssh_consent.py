@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Measure what ssh consent (#8) would do with the ssh commands an agent really ran: how often it would ask.
 
-    python3 scripts/measure_ssh_consent.py [transcript-dir]      # default: ~/.claude/projects
+    python3 scripts/measure_ssh_consent.py [transcript-dir] [--skip-cwd TEXT]   # default: ~/.claude/projects
 
 It reads the Bash calls in Claude Code transcripts, classifies each one that names ssh (maisecrets/ssh_consent.py)
 and replays the consents per session: a write asks once per host (or group of hosts), a form the hook cannot read
-asks every time. It prints counts and reasons only: no host, no command, no value. A reality check, not a gate.
+asks every time. It ignores host groups and the 8-hour expiry, so it counts at most the questions of one
+session. `--skip-cwd TEXT` leaves out every transcript that ran in a directory whose path contains TEXT. It prints
+counts and reasons only: no host, no command, no value. A reality check, not a gate.
 
-Measured on 2026-10-07 over the maintainer's transcripts (this script, default directory: 296 sessions with ssh,
-4155 calls): write 82.8 %, unknown 12.4 %, none 4.6 %, read 0.2 %; questions per session median 1, 90th percentile
-4, at most 150, 863 in all. The sessions that work on maisecrets itself are in that count; their commands name ssh
-in test cases. Without them (117 sessions, 3644 calls): questions per session median 2, 90th percentile 10, at most 48.
+Measured on 2026-10-07 over the maintainer's transcripts (this script, default directory: 297 sessions with ssh,
+4169 calls): write 82.5 %, unknown 12.7 %, none 4.6 %, read 0.2 %; questions per session median 1, 90th percentile
+4, at most 150, 876 in all. The sessions that work on maisecrets itself are in that count; their commands name ssh
+in test cases. With `--skip-cwd maisecrets` they are left out; the number is in the README.
 Real ops commands almost always use sudo or docker on the remote side, so they are writes by design: the consent
 per host carries them, not the read list.
 """
@@ -37,7 +39,7 @@ def parse(text: str):
     return hooks._segments(text, ctxs), ctxs
 
 
-def commands(path: str) -> list[str]:
+def commands(path: str, skip_cwd: str = "") -> list[str]:
     out = []
     try:
         for line in open(path, encoding="utf-8", errors="replace"):
@@ -47,6 +49,8 @@ def commands(path: str) -> list[str]:
                 rec = json.loads(line)
             except ValueError:
                 continue
+            if skip_cwd and skip_cwd in (rec.get("cwd") or ""):
+                return []
             for block in (rec.get("message") or {}).get("content") or []:
                 if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "Bash":
                     cmd = (block.get("input") or {}).get("command", "")
@@ -58,11 +62,16 @@ def commands(path: str) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    skip = ""
+    if "--skip-cwd" in argv:
+        k = argv.index("--skip-cwd")
+        skip = argv[k + 1] if k + 1 < len(argv) else ""
+        argv = argv[:k] + argv[k + 2:]
     base = Path(argv[0]).expanduser() if argv else Path.home() / ".claude" / "projects"
     kinds, why, asks = collections.Counter(), collections.Counter(), []
     total = 0
     for path in glob.glob(str(base / "*" / "*.jsonl")):
-        cmds = commands(path)
+        cmds = commands(path, skip)
         if not cmds:
             continue
         granted: set[str] = set()

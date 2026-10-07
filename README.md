@@ -767,15 +767,19 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   ["web1", "web2"]}`) run without a question for 8 hours, in that session and
   for that agent only: a subagent asks for itself. The asked command first
   reads a FIFO that nobody can list; that read records the consent, so a
-  declined prompt, a forged hook call or a PostToolUse records nothing.
+  declined prompt, a forged hook call or a PostToolUse records nothing. The
+  FIFO waits 120 seconds; a later yes runs nothing and the next call asks
+  again. On Windows there is no FIFO: every write asks every time.
 - **A form maisecrets cannot read asks every time.** An ssh word in a nested
   shell (`bash -c`, `eval`, `xargs`, `find -exec`), a wrapper it does not
-  know (`sshpass`, `setsid`, `flock`), a word built at run time
-  (`$(which ssh)`, `S=ssh; $S`, `ssh $HOST`), an option that sends the
+  know (`sshpass`, `setsid`, `flock`), a word built at run time when `ssh`
+  is in its text (`$(which ssh)`, `S=ssh; $S`, `ssh $HOST`), two users or
+  ports for one connection, `sudo -u` (another user's ssh config), an option that sends the
   connection elsewhere (`-J`, `-W`, `-S`, `-F`, `-o ProxyCommand`, `-o
   HostName`, `-o RemoteCommand`), `GIT_SSH_COMMAND`, `git -c core.sshCommand`,
-  `RSYNC_RSH`, `DOCKER_HOST=ssh://`, and a change to `~/.ssh/config` (also
-  through Write or Edit).
+  `RSYNC_RSH`, `DOCKER_HOST=ssh://`, the own ssh options of `sshfs`, `mosh`
+  and `rsync -e`, and a change to `~/.ssh/config` (also through Write or
+  Edit, and a command that works inside `~/.ssh`).
 - **A short deny list is always refused:** `mkfs`, `wipefs`, `dd` to a
   device, `rm -rf /`, a fork bomb. It is an airbag, not the protection.
 - **Codex** cannot ask. It refuses and names a sentence with a code, for
@@ -783,14 +787,20 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   prompt within 10 minutes, it allows writes to that host for 8 hours; the
   prompt does not reach the model. Any other prompt ends the code.
 
-Measured on the maintainer's transcripts with `scripts/measure_ssh_consent.py`
-(2026-10-06): real ops commands use `sudo` or `docker` on the remote side
-almost always, so most are writes, and the consent per host carries them.
-Without the sessions that work on maisecrets itself: 117 sessions with ssh, a
-median of 2 questions per session, 10 at the 90th percentile.
+Measured on the maintainer's transcripts with `scripts/measure_ssh_consent.py
+--skip-cwd maisecrets` (2026-10-07, the sessions that work on maisecrets itself
+left out): real ops commands use `sudo` or `docker` on the remote side almost
+always, so most are writes (88 %), and the consent per host carries them. 112
+sessions with ssh, a median of 1.5 questions per session, 7 at the 90th
+percentile, 48 at most. The script ignores groups and the 8-hour expiry.
 
-Limits: maisecrets sees only the command text. A script file, an alias or a
-variable that holds `ssh` and was set in an earlier command is not seen. The
+Limits: maisecrets sees only the command text. A script file, an alias, a
+variable that holds `ssh` and was set in an earlier command, or a word built
+without the letters `ssh` in the text is not seen. A mount (`sshfs`) or a tunnel
+(`ssh -f -N -L`) that one consent started stays after the 8 hours, and the
+local commands that use it ask nothing. On Codex the model sees the consent
+code; maisecrets refuses a command that carries the sentence, but not one that
+builds it at run time. The
 `Monitor` tool of Claude Code runs a shell command outside the maisecrets
 matcher (adding it would change the hook hash that Codex trusts). A program
 that runs as you outside the sandbox can write the consent store. A hard
