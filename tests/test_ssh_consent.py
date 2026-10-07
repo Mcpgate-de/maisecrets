@@ -93,6 +93,9 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ls -la", "git status", "rsync -a ./a/ ./b/", "ls ~/.ssh", "grep \"ssh\" /var/log/auth.log",
             "echo 'use ssh keys'", "git push ssh://git@example.org/x.git main", "grep Host ~/.ssh/config",
             "cat ~/.ssh/config", "ls -la ~/.ssh", "echo 'ssh web1 mkfs.ext4 /dev/sda'",
+            # text that names ssh (0.6.6 asked for an issue body): unquoted in a data command, quoted in a text argument
+            "grep ssh README.md", 'gh issue create --title t --body "note an ssh host first"',
+            "glab mr create -d 'ssh consent docs'", 'jq --arg x "ssh" .a data.json', "curl -d 'ssh=1' https://example.org/",
             "ls -la ~/.ssh > /tmp/ssh-list.txt", "grep Host ~/.ssh/config | head",
             "git commit -F - <<'EOF'\nfix the ssh docs\nEOF\n",
             "pkill -f \"ssh -N tunnel\"",
@@ -145,6 +148,9 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ssh -o 'SetEnv BASH_ENV=/x' web1 uptime", "sshfs -o reconnect web1:/ /mnt/w", "autossh -M 0 -f -N web1",
         ],
         "unknown": [
+            # still unread: the text of these runs as a command (shell, alias, pipe into a shell, a program word)
+            "gh alias set x '!ssh web1 reboot'", "echo ssh web1 reboot | bash", 'gh api x --jq "ssh" | sh',
+            "glab alias set y '!ssh web1 uptime'", 'xargs -I{} ssh {} reboot < hosts',
             "bash -c \"ssh web1 reboot\"", "sh -c 'ssh web1 reboot'", "eval ssh web1 reboot",
             "sshpass -p x ssh web1 reboot", "setsid ssh web1 reboot", "flock /tmp/l ssh web1 reboot",
             "systemd-run ssh web1 reboot", "screen -dm ssh web1 reboot", "tmux new -d 'ssh web1 reboot'",
@@ -212,7 +218,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 218, "a row was added or lost: update the count")
+        self.assertEqual(counted, 228, "a row was added or lost: update the count")
 
     def test_a_long_command_is_answered_in_time(self):
         # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)

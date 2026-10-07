@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 29 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 93 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 94 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -875,6 +875,11 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   (`rsync`, `tar -C`, `ln -s` …), so only reads are listed (`cat`, `ls`,
   `grep`, `head`, `diff` …), and a redirect into `.ss…` asks too. Write and
   Edit on `~/.ssh` ask as well.
+- **The word ssh in text runs freely:** an argument of a command that only
+  prints or searches (`grep ssh README.md`, `echo "use ssh"`), and a quoted
+  argument of a command that posts or stores text (`gh issue create --body
+  "… ssh …"`, `glab`, `jq`, `tee`, `cat`, `curl -d`), unless the text goes into
+  a pipe or the call holds a `!` (a shell alias).
 - **A short deny list is always refused:** `mkfs` or `wipefs` on a device,
   `dd` to a device, `rm -rf /`, a fork bomb, anywhere in a command that names
   an ssh-family call (quotes removed; as a command word, not as a file name;

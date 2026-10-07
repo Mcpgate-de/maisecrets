@@ -1,0 +1,10 @@
+# c21-ssh-in-a-quoted-text-argument-is-text: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c21-ssh-in-a-quoted-text-argument-is-text"
+control = "C21"
+statement = "With ssh_consent on, the word ssh in a quoted argument of a command that posts or stores text (gh, glab, jq, tee, cat, curl) is text and runs freely, unless a pipe follows or the call holds a ! alias."
+runner = ["tests/test_ssh_consent.py::ClassifierMatrixTests::test_each_command_has_its_kind"]
+
+[proof]
+file = "maisecrets/ssh_consent.py"
+find = "        if seg and ctx in (\"sq\", \"dq\") and seg.get(\"cmd\") in _TEXT_ARG_CMDS and not piped_on(seg) \\"
+replace = "        if seg and ctx in (\"sq\", \"dq\") and seg.get(\"cmd\") in set() and not piped_on(seg) \\"

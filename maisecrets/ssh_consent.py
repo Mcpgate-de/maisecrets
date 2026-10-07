@@ -54,6 +54,10 @@ _RETARGET_O = re.compile(r"^(?:proxyjump|proxycommand|hostname|remotecommand|con
 # commands whose quoted arguments are data, never run: a mention of ssh there is no call (`grep "ssh" log`)
 _DATA_CMDS = {"grep", "egrep", "fgrep", "rg", "ag", "echo", "printf", "cut", "tr", "wc", "sort", "uniq", "head",
               "tail", "diff", "test", "[", "pgrep", "pkill"}
+# a quoted argument of these is text they print, post or store, never a command they run: an issue body that names
+# ssh asked on 0.6.6 (`gh issue create --body "… an ssh host …"`). A `!` in the call is a shell alias (gh alias set,
+# glab alias), so it stays unread
+_TEXT_ARG_CMDS = {"gh", "glab", "jq", "tee", "cat", "curl"}
 # a heredoc to these is text, not a script: a commit message or a file that mentions ssh
 _HEREDOC_DATA = {"cat", "tee", "git", "gh", "glab", "grep", "echo", "printf", "wc", "head", "tail", "jq", "less"}
 # stderr or all output to /dev/null, or stderr to stdout: no file is written
@@ -535,8 +539,11 @@ def classify(command: str, parse: Parser) -> Verdict:
         if ctx == "comment":
             continue
         seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
-        if seg and ctx in ("sq", "dq") and seg.get("cmd") in _DATA_CMDS and not piped_on(seg):
-            continue                         # a mention in data: grep "ssh" log, echo "use ssh" (not | bash)
+        if seg and ctx in ("", "sq", "dq") and seg.get("cmd") in _DATA_CMDS and not piped_on(seg):
+            continue                         # a mention in data: grep ssh log, echo "use ssh" (not | bash)
+        if seg and ctx in ("sq", "dq") and seg.get("cmd") in _TEXT_ARG_CMDS and not piped_on(seg) \
+                and "!" not in command[seg["start"]:seg["end"]]:
+            continue                         # a quoted text argument: gh issue create --body "… ssh …"
         if seg and seg.get("cmd") == "git" and m.group(0) in ("ssh", "ssh://") \
                 and not re.search(r"(?:^|\s)-c(?:\s|$)|!", command[seg["start"]:seg["end"]]):
             continue                         # git over ssh is out of scope (C21); -c and a ! alias run commands
