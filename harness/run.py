@@ -215,13 +215,13 @@ SCENARIOS = {
         "expect_no_file": "ran.txt",
         "expect_text": "approve this ssh write to nohost.invalid",
     },
-    # a setting changes only from the person's own prompt (C22): the typed slash command is handled by the prompt
-    # hook, which writes the setting and stops the prompt, so nothing reaches the model
+    # a setting changes only from the person's own prompt (C22): the prompt hook writes the setting the typed slash
+    # command names, and the command runs on to show the new state (a success is no block)
     "settings_typed_prompt": {
         "prompt": "/maisecrets:settings ssh_consent on",
-        "turns": [{"text": "unreachable"}],
-        "expect_requests": 0,
-        "expect_blocked": True,
+        "turns": [{"text": "shown"}],
+        "expect_requests": 1,
+        "expect_in_requests": ["SSH consent is on (set by you)"],
         "expect_home_json": ("config.json", ["ssh_consent"]),
     },
     # the person has not decided ssh_consent: the first ssh write gives the model the hint, once. `|| true`: a

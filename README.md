@@ -446,11 +446,20 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
 
 ### Settings you decide
 
-`/maisecrets:settings` shows the settings that are yours to decide, each with
-its value, one line of meaning and its state: `default (not decided)`,
-`explicitly enabled`, `explicitly disabled` or `managed by policy`. A key that
-is missing from `config.json` is not decided; `false` written there is a
-decision, with the same effect. `--all` shows the advanced settings too.
+`/maisecrets:settings` shows the settings that are yours to decide, grouped
+(Protection, Using stored values), one card each: the value, its state (`not
+decided`, `set by you`, `set by a policy`), what it does, and the command for
+the next step:
+
+```
+Protection
+  SSH consent · off · not decided
+    Ask before each ssh command that changes something on a host.
+    Turn on: /maisecrets:settings ssh_consent on
+```
+
+A key that is missing from `config.json` is not decided; `false` written there
+is a decision, with the same effect. `--all` shows the advanced settings too.
 
 To change one, send the change as your own prompt, alone:
 
@@ -459,16 +468,18 @@ To change one, send the change as your own prompt, alone:
 maisecrets: set ssh_consent on          (the same, and the form for Codex)
 ```
 
-`on`, `off`, a choice the list names (`rehydration confirm`), or `default`,
+`on`, `off`, a choice the card names (`rehydration confirm`), or `default`,
 which removes your decision so that the setting reads the default again.
-The prompt hook writes `config.json` and stops the prompt; it does not reach
-the model. maisecrets changes a setting for nothing else: not for a prompt the
-client injected (a scheduled task, a loop wakeup), not for a subagent's report,
-and a Bash or PowerShell command that carries the change (a nested `codex exec`
-or `claude -p` that would type it) is refused. The AI can tell you about a
-setting and the prompt to send. A setting from a machine policy cannot be
-changed here. The limit: a program that runs as you can write the file itself,
-and maisecrets sees a command only as text (C22 in the threat model).
+The prompt hook writes `config.json`. After the slash command it lets the
+command run on, which shows the new card; the sentence form is stopped and
+does not reach the model. maisecrets changes a setting for nothing else: not
+for a prompt the client injected (a scheduled task, a loop wakeup, an SDK
+prompt), not for a subagent's report, and a Bash or PowerShell command that
+carries the change (a nested `codex exec` or `claude -p` that would type it)
+is refused. The AI can tell you about a setting and the prompt to send. A
+setting from a machine policy cannot be changed here. The limit: a program
+that runs as you can write the file itself, and maisecrets sees a command only
+as text (C22 in the threat model).
 
 **Hints.** maisecrets stays quiet until a case comes up that one of these
 settings is about. Then the AI gets one sentence about it, and mentions it
@@ -479,6 +490,9 @@ through another event). A hint comes once, also when hooks run at the same
 time; if maisecrets cannot record it, it does not come at all. It does not come again after you decided, and
 it does not come again because time passed: only a real change of the
 feature brings it back, once. `"tips": false` turns hints off with the tips.
+The settings list shows each hint as `not shown yet` or `shown` with its date;
+`/maisecrets:settings hints reset` (or `maisecrets: reset hints`) lets them
+come once more and changes no protection setting.
 
 ## Vault
 

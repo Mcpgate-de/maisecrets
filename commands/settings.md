@@ -1,6 +1,6 @@
 ---
 description: Show the maisecrets settings you decide - value, state (not decided, set by you, set by a policy) and meaning. To change one, send /maisecrets:settings KEY VALUE as your own prompt.
-argument-hint: "[--all | KEY on|off|default]"
+argument-hint: "[--all | KEY on|off|default | hints reset]"
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" settings *), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" settings *)
 ---
 
@@ -24,6 +24,6 @@ If `${CLAUDE_PLUGIN_ROOT}` is still written like that when the command runs, put
 
 The arguments go in the quoted heredoc as they are, so the shell never reads them as code. Do not move them onto the command line, and do not add quotes. With no argument it shows the settings you decide; with `--all` also the advanced ones.
 
-With `KEY VALUE` the maisecrets prompt hook already changed the setting and answered; this command then does not
-run. The command itself only shows the settings. Do not change a setting in another way, and do not write
-maisecrets files: if the user wants a change, tell them the prompt to send.
+With `KEY VALUE` the maisecrets prompt hook has already made the change the user typed; the command then shows
+the new state of that setting. The command itself never changes a setting. Do not change a setting in another
+way, and do not write maisecrets files: if the user wants a change, tell them the prompt to send.
