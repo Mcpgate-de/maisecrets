@@ -349,6 +349,8 @@ def load_config() -> dict:
             cfg["rehydration_fallback"] = True
     user = _old_region_key(user)
     cfg.update(user)
+    # a key the user wrote is a decision, a missing one is not (maisecrets/settings.py): both read the same value
+    cfg["user_keys"] = sorted(user)
     cfg["regions_from"] = "config.json" if "regions" in user else "default"
     env = os.environ
     backend = env.get("CLAUDE_PLUGIN_OPTION_BACKEND", "").strip()

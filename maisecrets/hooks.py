@@ -793,6 +793,16 @@ def user_prompt(payload: dict) -> dict:
     if cfg.get("ssh_consent") and not grant and session:
         from . import consent_store
         consent_store.drop_codes(session)    # the sentence counts only as the very next prompt (Codex review)
+    # a settings change the person typed (maisecrets/settings.py): the only way a setting changes. After the subagent
+    # report pass, so a report never changes one; blocked, so the prompt does not reach the model
+    from . import settings
+    change = settings.parse_prompt(prompt)
+    if change:
+        reason = settings.apply(*change)
+        if client_of(payload) == "codex":
+            return {"decision": "block", "reason": reason}
+        return {"decision": "block", "reason": reason,
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
     if grant:
         from . import consent_store
         hosts = consent_store.grant_by_code(session or "", grant.group(1), grant.group(2))
@@ -1898,7 +1908,7 @@ def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: st
 
 _ARGS_END = "MAISECRETS_ARGS_END"
 _ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" "
-                           r"(?:audit|forget|guard|put --clipboard|report|shortcut) "
+                           r"(?:audit|forget|guard|put --clipboard|report|settings|shortcut) "
                            r"--args-stdin <<'" + _ARGS_END + r"'\n(.*)\n" + _ARGS_END + r"\n?\Z", re.S)
 
 
@@ -3386,16 +3396,59 @@ def _how_failed(exc: BaseException) -> str:
     return how
 
 
+def _ssh_hint(payload: dict) -> str | None:
+    """The ssh_consent hint (maisecrets/settings.py), the first time an ssh call that changes something runs while
+    the person has not decided. A read (`ssh host uptime`) is no case for it, and neither is a form the hook cannot
+    read: that class also holds a plain mention (`grep ssh README.md`). Not in a subagent: it has no conversation
+    with the person."""
+    if payload.get("tool_name") not in ("Bash", "PowerShell") or payload.get("agent_id"):
+        return None
+    command = (payload.get("tool_input") or {}).get("command") if isinstance(payload.get("tool_input"), dict) else None
+    if not isinstance(command, str):
+        return None
+    from . import settings, ssh_consent
+    if not ssh_consent._TOKEN_RE.search(command):
+        return None          # most commands: no parse, no file read
+    cfg = load_config()
+    if not settings.hint_due("ssh_consent", cfg):
+        return None
+    if ssh_consent.classify(command, _parse_for_consent).kind != "write":
+        return None
+    settings.mark_given("ssh_consent")
+    return settings.HINTS["ssh_consent"]["codex" if client_of(payload) == "codex" else "claude"]
+
+
+def _with_hint(payload: dict, result: dict) -> dict:
+    """Add a hint to the answer of a PostToolUse without changing what the answer does."""
+    hint = _ssh_hint(payload)
+    if not hint:
+        return result
+    result = dict(result)
+    if result.get("decision") == "block":
+        # Codex: the reason replaces the output the model sees, so the hint goes after it
+        result["reason"] = f"{result.get('reason', '')}\n\n[{hint}]"
+        return result
+    hso = dict(result.get("hookSpecificOutput") or {"hookEventName": "PostToolUse"})
+    hso["additionalContext"] = f"{hso['additionalContext']}\n\n{hint}" if hso.get("additionalContext") else hint
+    result["hookSpecificOutput"] = hso
+    return result
+
+
 def _post_tool_guarded(payload: dict) -> dict:
     """Claude Code ignores exit 2 from PostToolUse: the raw output would reach the model. So a
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
     try:
-        return post_tool(payload)
+        result = post_tool(payload)
     except ConfigError as exc:
         return _fail_closed("post-tool", payload, f"configuration error: {exc}. Fix the file named there.", hint=False)
     except Exception as exc:  # noqa: BLE001
         _debug(f"post-tool: {type(exc).__name__}")
         return _failure("post-tool", payload, exc)
+    try:
+        return _with_hint(payload, result)
+    except Exception as exc:  # noqa: BLE001 - a hint that fails must not withhold the output
+        _debug(f"post-tool hint: {type(exc).__name__}")
+        return result
 
 
 HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post_tool_guarded}

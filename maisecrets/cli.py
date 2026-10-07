@@ -247,6 +247,18 @@ def cmd_config(_: list[str]) -> int:
     return 0
 
 
+def cmd_settings(args: list[str]) -> int:
+    """Show the settings a person decides, with their state. It changes nothing: a setting changes only from a
+    prompt the person typed (maisecrets/settings.py), never from a command the model runs."""
+    from . import settings
+    rest = [a for a in args if a != "--all"]
+    if rest:
+        print("maisecrets settings: this command only shows the settings. To change one, send it as your own "
+              "prompt: /maisecrets:settings KEY VALUE (in Codex: maisecrets: set KEY VALUE).\n")
+    print(settings.render(show_all="--all" in args))
+    return 1 if rest else 0
+
+
 def cmd_status(_: list[str]) -> int:
     """What support needs first: version, where the plugin runs from, which Python, which
     store, which settings come from a policy, and what the logs counted."""
@@ -716,7 +728,7 @@ def cmd_repair(_: list[str]) -> int:
 COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_resolve, "audit": cmd_audit,
             "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
             "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut,
-            "forget": cmd_forget, "guard": cmd_guard}
+            "forget": cmd_forget, "guard": cmd_guard, "settings": cmd_settings}
 
 
 def _stdin_words() -> list[str]:
@@ -734,7 +746,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] in {"-h", "--help"}:
         print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | audit [n]\n"
-              "           | report [last|n|bug|feature] [text] | expire | scan [text] | config\n"
+              "           | report [last|n|bug|feature] [text] | expire | scan [text] | config | settings [--all]\n"
               "           | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>")
         return 0
     if argv[0] == "hook":

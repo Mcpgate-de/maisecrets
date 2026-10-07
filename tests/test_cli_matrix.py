@@ -319,6 +319,9 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     "report": [([], "", _ALL0), (["last", "a build id"], "", _ALL0), (["1"], "", _ALL0),
                (["bug", "the notice is long"], "", _ALL0), (["feature", "ask first"], "", _ALL0)],
     "config": [([], "", {"ok": 0, "index": 0, "config": 1})],
+    # it only shows the settings: arguments that would change one exit 1 and change nothing
+    "settings": [([], "", {"ok": 0, "index": 0, "config": 1}), (["--all"], "", {"ok": 0, "index": 0, "config": 1}),
+                 (["ssh_consent", "on"], "", _ALL1)],
     # the labels are assembled so the repo's own pre-commit scan does not take the fixtures for secrets
     "scan": [(["pass" "word: SCANVALUE"], "", _ALL0), ([], "api" "_key=SCANVALUE", _ALL0)],
     "get": [([_K], "", {"ok": {"live": 0, "jsonfile": 0, "config-wrong-type": 0, "policy": 0, "*": 1},

@@ -81,7 +81,8 @@ if len(sys.argv) >= 2 and sys.argv[1] == "pending":
     sys.exit(0)
 
 if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put", "status", "list", "audit", "expire", "config",
-                                          "wipe", "repair", "scan", "get", "shortcut", "forget", "guard"):
+                                          "wipe", "repair", "scan", "get", "shortcut", "forget", "guard",
+                                          "settings"):
     from maisecrets.cli import main as cli_main  # noqa: E402
     sys.exit(cli_main(sys.argv[1:]))
 

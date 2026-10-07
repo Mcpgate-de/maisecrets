@@ -1,0 +1,10 @@
+# c22-only-a-typed-prompt-changes-a-setting: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-only-a-typed-prompt-changes-a-setting"
+control = "C22"
+statement = "A setting changes only when the whole prompt the person typed is a settings change; the same words inside a longer prompt, or a command the model runs, change nothing."
+runner = ["tests/test_settings.py::Change::test_only_the_whole_prompt_counts"]
+
+[proof]
+file = "maisecrets/settings.py"
+find = "_PROMPT_RE = re.compile(r\"\\A\\s*(?:/maisecrets:settings|maisecrets:\\s*set)\\s+([a-z_]+)\\s+([a-z-]+)\\s*\\Z\", re.I)"
+replace = "_PROMPT_RE = re.compile(r\"(?:/maisecrets:settings|maisecrets:\\s*set)\\s+([a-z_]+)\\s+([a-z-]+)\", re.I)"
