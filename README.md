@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 27 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 87 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 88 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -797,18 +797,18 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   `systemctl status`) is a write: it can carry a credential. Paths like
   `/etc/shadow`, `.env`, `id_*`, `*.pem`, `/proc` or `/root` are never a read;
   that check is a heuristic, not a guarantee.
-- **A write asks once per host.** Any other remote command, a login shell,
-  `sudo`, `docker`, a copy, a port forward or tunnel (`-L`, `-R`, `-D`, `-w`),
-  or local data on stdin. The consent is for the host as written, with its
-  user and port (`-l`, `-p`, `-o User`, `-o Port`, `user@`, `scp://…:port`):
-  `root@web1` and `web1:2222` are other hosts than `web1`. If you allow it, writes to
-  that host (and the hosts of its group in `"ssh_host_groups": {"web":
-  ["web1", "web2"]}`) run without a question for 8 hours, in that session and
-  for that agent only: a subagent asks for itself. The asked command first
-  reads a FIFO that nobody can list; that read records the consent, so a
-  declined prompt, a forged hook call or a PostToolUse records nothing. The
-  FIFO waits 120 seconds; a later yes runs nothing and the next call asks
-  again. On Windows there is no FIFO: every write asks every time.
+- **Every write asks.** Any other remote command, a login shell, `sudo`,
+  `docker`, a copy, a port forward or tunnel (`-L`, `-R`, `-D`, `-w`), or local
+  data on stdin. A yes allows that one command; the next write asks again.
+- **A host you trust for a while: type it.** Send `maisecrets: allow ssh web1`
+  as your own prompt (the question names the exact sentence). Writes to that
+  host, and to the hosts of its group in `"ssh_host_groups": {"web": ["web1",
+  "web2"]}`, then run without a question for 8 hours, in that session, for the
+  main thread only: a subagent asks for itself. The host is as written, with
+  its user and port (`-l`, `-p`, `-o User`, `-o Port`, `user@`, `scp://…:port`):
+  `root@web1` and `web1:2222` are other hosts than `web1`. Only a prompt you
+  type counts: not a scheduled or SDK prompt, not a tool call that carries the
+  sentence (it is refused).
 - **A form maisecrets cannot read asks every time.** An ssh word in a nested
   shell (`bash -c`, `eval`, `xargs`, `find -exec`), a wrapper it does not
   know (`sshpass`, `setsid`, `flock`), a word built at run time when `ssh`
@@ -832,7 +832,8 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
 - **Codex** cannot ask. It refuses and names a sentence with a code, for
   example `maisecrets: allow ssh web1 123456`. Typed alone as your very next
   prompt within 10 minutes, it allows writes to that host for 8 hours; the
-  prompt does not reach the model. Any other prompt ends the code.
+  prompt does not reach the model. Any other prompt ends the code. Codex sends
+  no sign of who wrote a prompt, so there the code is the proof.
 
 Measured on the maintainer's transcripts with `scripts/measure_ssh_consent.py
 --skip-cwd maisecrets` (2026-10-07, the sessions that work on maisecrets itself

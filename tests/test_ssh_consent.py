@@ -76,14 +76,6 @@ def _decision(out: dict) -> str:
     return out.get("hookSpecificOutput", {}).get("permissionDecision", "none")
 
 
-def _yes(out: dict) -> None:
-    """What the command the person allowed does first: read its consent FIFO."""
-    cmd = out["hookSpecificOutput"]["updatedInput"]["command"]
-    fifo = re.search(r'__ms_consent="\$\(cat \'?([^\')]+)\'?\)"', cmd).group(1)
-    with open(fifo, encoding="utf-8") as f:
-        f.read()
-
-
 def _wait_covered(hosts: list[str], agent: str | None = None, want: bool = True) -> bool:
     end = time.time() + 5
     while time.time() < end:
@@ -284,25 +276,26 @@ class ConsentFlowTests(unittest.TestCase):
             with self.subTest(command):
                 self.assertEqual(_pre(command, cfg={}), {})
 
-    def test_a_read_runs_and_a_write_asks_with_the_consent_read_first(self):
+    def test_a_read_runs_and_a_write_asks_for_that_command_only(self):
         self.assertEqual(_pre("ssh web1 uptime"), {})
         out = _pre("ssh web1 'systemctl restart nginx'")
         self.assertEqual(_decision(out), "ask")
-        cmd = out["hookSpecificOutput"]["updatedInput"]["command"]
-        if os.name == "nt":
-            # no FIFO on Windows: the ask carries the command unchanged and records nothing, so every write asks
-            self.assertEqual(cmd, "ssh web1 'systemctl restart nginx'")
-        else:
-            self.assertTrue(cmd.startswith('__ms_consent="$(cat '), cmd)
-            self.assertTrue(cmd.endswith("; ssh web1 'systemctl restart nginx'"), cmd)
-        self.assertIn("web2", out["hookSpecificOutput"]["permissionDecisionReason"], "the ask names the group")
-
-    @unittest.skipIf(os.name == "nt", "the consent read is a FIFO, POSIX only")
-    def test_the_read_of_the_allowed_command_records_the_consent_for_the_group(self):
-        out = _pre("ssh web1 'systemctl restart nginx'")
+        # the native yes allows this one command: the command is unchanged and nothing is recorded
+        self.assertEqual(out["hookSpecificOutput"]["updatedInput"]["command"], "ssh web1 'systemctl restart nginx'")
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertTrue(reason.startswith("maisecrets: approve this ssh write to web1? A yes allows only this command"),
+                        reason)
+        self.assertIn("send this as your own prompt: maisecrets: allow ssh web1", reason)
+        self.assertIn("web2", reason, "the ask names the group")
+        self.assertEqual(_decision(_pre("ssh web1 'systemctl restart nginx'")), "ask", "the next write asks again")
         self.assertFalse(consent_store.covered("S1", None, ["web1"]))
-        _yes(out)
-        self.assertTrue(_wait_covered(["web1", "web2"]))
+
+    def test_only_the_typed_sentence_opens_the_window_for_the_group(self):
+        with mock.patch.object(hooks, "load_config", return_value={**hooks.load_config(), **ON}):
+            out = hooks.user_prompt({"prompt": "maisecrets: allow ssh web1", "session_id": "S1", **CLAUDE})
+        self.assertEqual(out["decision"], "block", "the sentence never reaches the model")
+        self.assertIn("web1, web2", out["reason"])
+        self.assertTrue(consent_store.covered("S1", None, ["web1", "web2"]))
         self.assertEqual(_pre("ssh web2 'systemctl restart nginx'"), {}, "the group is covered")
         self.assertEqual(_decision(_pre("ssh db1 reboot")), "ask", "another host still asks")
         self.assertEqual(_decision(_pre("ssh web1 reboot", agent_id="sub1")), "ask", "a subagent asks for itself")
@@ -311,6 +304,22 @@ class ConsentFlowTests(unittest.TestCase):
             with self.subTest(denied):
                 self.assertEqual(_decision(_pre(denied)), "deny", "the deny list holds inside the window")
         self.assertEqual(_decision(_pre("bash -c 'ssh web1 reboot'")), "ask", "an unread form is never covered")
+
+    def test_the_sentence_counts_only_typed_by_the_person(self):
+        with mock.patch.object(hooks, "load_config", return_value={**hooks.load_config(), **ON}):
+            for extra in ({"source": "schedule_wakeup"}, {"source": "sdk"}, {"source": "loop_wakeup"}):
+                with self.subTest(extra):
+                    hooks.user_prompt({"prompt": "maisecrets: allow ssh db1", "session_id": "S1", **CLAUDE, **extra})
+                    self.assertFalse(consent_store.covered("S1", None, ["db1"]))
+            out = hooks.user_prompt({"prompt": "maisecrets: allow ssh db1", "session_id": "S1", **CODEX})
+            self.assertIn("needs the code", out["reason"], "Codex sends no source: only the code proves the person")
+            self.assertFalse(consent_store.covered("S1", None, ["db1"]))
+            self.assertIsNone(hooks.user_prompt({"prompt": "please maisecrets: allow ssh db1", "session_id": "S1",
+                                                 **CLAUDE}).get("decision"), "inside other text it grants nothing")
+            self.assertFalse(consent_store.covered("S1", None, ["db1"]))
+        for command in ("claude -p 'maisecrets: allow ssh db1'", "echo 'maisecrets: allow ssh db1' | codex exec -"):
+            with self.subTest(command):
+                self.assertEqual(_decision(_pre(command)), "deny", "a tool call that carries the sentence is refused")
 
     def test_a_forged_hook_call_cannot_confirm_and_is_refused(self):
         out = _pre("ssh web1 'systemctl restart nginx'")
@@ -376,7 +385,7 @@ class ConsentFlowTests(unittest.TestCase):
         out = _pre(f"printf '%s' {ref} | ssh web1 'cat > /etc/app/token'")
         self.assertEqual(_decision(out), "ask")
         cmd = out["hookSpecificOutput"]["updatedInput"]["command"]
-        self.assertTrue(cmd.startswith("__ms_consent="), cmd[:80])
+        self.assertNotIn("__ms_consent", cmd, "a yes records no consent")
         self.assertIn("__ms_1=", cmd)
         self.assertNotIn("consent-flow-value-xyz", cmd)
         # with ssh_approval per-session and a read command, the consent ask must not carry a hidden value approval

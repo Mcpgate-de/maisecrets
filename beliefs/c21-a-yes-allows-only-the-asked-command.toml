@@ -1,0 +1,10 @@
+# c21-a-yes-allows-only-the-asked-command: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c21-a-yes-allows-only-the-asked-command"
+control = "C21"
+statement = "With ssh_consent on, a write over ssh asks, and the client's yes allows that one command: it records no consent, so the next write asks again."
+runner = ["tests/test_ssh_consent.py::ConsentFlowTests::test_a_read_runs_and_a_write_asks_for_that_command_only"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        return _ask(dict(tool_input), _consent_text(consent))"
+replace = "        from . import consent_store as _cs\n        _cs.grant_typed(payload.get(\"session_id\") or \"\", consent[\"hosts\"])\n        return _ask(dict(tool_input), _consent_text(consent))"

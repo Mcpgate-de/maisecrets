@@ -213,7 +213,7 @@ SCENARIOS = {
                   {"text": "done"}],
         "expect_requests": 2,
         "expect_no_file": "ran.txt",
-        "expect_text": "writes over ssh to nohost.invalid",
+        "expect_text": "approve this ssh write to nohost.invalid",
     },
     # a setting changes only from the person's own prompt (C22): the typed slash command is handled by the prompt
     # hook, which writes the setting and stops the prompt, so nothing reaches the model
