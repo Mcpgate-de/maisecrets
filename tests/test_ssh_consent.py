@@ -289,8 +289,12 @@ class ConsentFlowTests(unittest.TestCase):
         out = _pre("ssh web1 'systemctl restart nginx'")
         self.assertEqual(_decision(out), "ask")
         cmd = out["hookSpecificOutput"]["updatedInput"]["command"]
-        self.assertTrue(cmd.startswith('__ms_consent="$(cat '), cmd)
-        self.assertTrue(cmd.endswith("; ssh web1 'systemctl restart nginx'"), cmd)
+        if os.name == "nt":
+            # no FIFO on Windows: the ask carries the command unchanged and records nothing, so every write asks
+            self.assertEqual(cmd, "ssh web1 'systemctl restart nginx'")
+        else:
+            self.assertTrue(cmd.startswith('__ms_consent="$(cat '), cmd)
+            self.assertTrue(cmd.endswith("; ssh web1 'systemctl restart nginx'"), cmd)
         self.assertIn("web2", out["hookSpecificOutput"]["permissionDecisionReason"], "the ask names the group")
 
     @unittest.skipIf(os.name == "nt", "the consent read is a FIFO, POSIX only")
