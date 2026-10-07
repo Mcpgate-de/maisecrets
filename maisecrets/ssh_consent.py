@@ -507,8 +507,9 @@ def classify(command: str, parse: Parser) -> Verdict:
 
     def text_only() -> bool:
         """The whole command only prints, searches or passes text on: every part is a command that runs nothing, so
-        no later part can run text an earlier one wrote, and no `!` alias. Then ssh in it is a word, not a call. Per part this was not enough: `echo "ssh web1 reboot" > /tmp/x; bash /tmp/x` ran
-        without a question on 0.6.6 (codex review of 0.6.7), because the echo part alone was data."""
+        no later part can run text an earlier one wrote, and no `!` alias. Then ssh in it is a word, not a call.
+        Per part this was not enough: `echo "ssh web1 reboot" > /tmp/x; bash /tmp/x` ran without a question on
+        0.6.6 (codex review of 0.6.7), because the echo part alone was data."""
         if not segs or any(sg.get("cmd") not in _TEXT_ONLY_CMDS for sg in segs):
             return False                 # a part that can run text (bash /tmp/x after an echo into it) decides
         return not any(sg.get("cmd") in _TEXT_ARG_CMDS and "!" in command[sg["start"]:sg["end"]] for sg in segs)
