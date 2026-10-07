@@ -319,9 +319,11 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     "report": [([], "", _ALL0), (["last", "a build id"], "", _ALL0), (["1"], "", _ALL0),
                (["bug", "the notice is long"], "", _ALL0), (["feature", "ask first"], "", _ALL0)],
     "config": [([], "", {"ok": 0, "index": 0, "config": 1})],
-    # it only shows the settings: arguments that would change one exit 1 and change nothing
+    # it only shows the settings: KEY VALUE shows that setting's card (the prompt hook made the change), and an
+    # unknown word exits 1; none of them writes a setting (tests/test_settings.py)
     "settings": [([], "", {"ok": 0, "index": 0, "config": 1}), (["--all"], "", {"ok": 0, "index": 0, "config": 1}),
-                 (["ssh_consent", "on"], "", _ALL1)],
+                 (["ssh_consent", "on"], "", {"ok": 0, "index": 0, "config": 1}),
+                 (["hints"], "", _ALL0), (["nosuchkey"], "", _ALL1)],
     # the labels are assembled so the repo's own pre-commit scan does not take the fixtures for secrets
     "scan": [(["pass" "word: SCANVALUE"], "", _ALL0), ([], "api" "_key=SCANVALUE", _ALL0)],
     "get": [([_K], "", {"ok": {"live": 0, "jsonfile": 0, "config-wrong-type": 0, "policy": 0, "*": 1},
@@ -1122,6 +1124,9 @@ class HookEventTests(unittest.TestCase):
             self.assertIn("usage: dispatch.py", r.stderr)
         r = self.sb.run("user-prompt", stdin="not json")
         self.assertEqual((r.returncode, json.loads(r.stdout)["decision"]), (0, "block"))
+        r = self.sb.run("post-tool-failure", stdin=json.dumps({"tool_name": "Bash", "session_id": "S1",
+                                                                "error": "Exit code 1\nnothing here"}))
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "{}"), r.stderr)
         r = self.sb.run("post-tool", stdin="not json")
         self.assertEqual(r.returncode, 0, "exit 2 is ignored after a tool; the answer must withhold instead")
         self.assertIn("its output is withheld", json.loads(r.stdout)["hookSpecificOutput"]["updatedToolOutput"])

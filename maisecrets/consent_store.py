@@ -7,9 +7,9 @@ text must not inherit the main thread's yes; plan review of #8, 2026-10-06), for
 How a yes is proven, since the hook cannot see the answer to its own `ask` and a hook entry point can be
 called by anyone (an agent can run `run.sh post-tool` with a payload it wrote):
 
-- Claude Code on POSIX: the asked command first reads a FIFO in the sealed directory (mode 0300, nobody
-  can list it), served by a detached child outside the sandbox. Only the command the user allowed holds
-  its name; the child confirms the pending consent when the FIFO is read (the proof of ssh_approval.py).
+- Claude Code: the native yes to the ask allows that one command and records nothing (a yes that silently
+  opened an 8-hour window surprised the person, 2026-10-07). A window opens only from the person's own prompt
+  `maisecrets: allow ssh HOST` (source user, the whole prompt; a tool call that carries it is refused).
 - Codex, which cannot ask: the refusal names a sentence with a code that the hook made at that moment
   (`maisecrets: allow ssh HOST CODE`); typed alone as the next prompt, it grants. Text written before the
   refusal (a pasted document, a headless prompt built from an issue) cannot know the code.
@@ -27,7 +27,6 @@ import time
 from .vault import HOME, _lock_for, atomic_write, read_text_retry
 
 APPROVAL_SECONDS = 8 * 3600
-PENDING_SECONDS = 15 * 60
 CODE_SECONDS = 10 * 60
 STORE = "ssh-consent.json"
 
@@ -51,11 +50,10 @@ def _load() -> dict:
         data = {}
     if not isinstance(data, dict):
         data = {}
-    for k in ("pending", "codes", "approved"):
+    for k in ("codes", "approved"):
         if not isinstance(data.get(k), dict):
             data[k] = {}
     now = time.time()
-    data["pending"] = {k: v for k, v in data["pending"].items() if isinstance(v, dict) and v.get("until", 0) > now}
     data["codes"] = {k: v for k, v in data["codes"].items() if isinstance(v, dict) and v.get("until", 0) > now}
     for who, hosts in list(data["approved"].items()):
         kept = {h: u for h, u in (hosts.items() if isinstance(hosts, dict) else []) if isinstance(u, (int, float))
@@ -79,29 +77,16 @@ def covered(session: str | None, agent: str | None, hosts: list[str]) -> bool:
     return all(h in approved for h in hosts)
 
 
-def remember_pending(session: str, agent: str | None, hosts: list[str]) -> str:
-    """A token for the ask; the raw token goes only to the serving child, the store keeps its hash."""
-    token = secrets.token_hex(16)
+def grant_typed(session: str, hosts: list[str]) -> list[str]:
+    """The person typed `maisecrets: allow ssh HOST` as their own prompt (Claude Code, source user): writes to these
+    hosts run without a question for APPROVAL_SECONDS, in this session, for the main thread. A subagent asks for
+    itself, as before."""
     with _lock_for(HOME / ".ssh-consent.lock"):
         data = _load()
-        data["pending"][_h(token)] = {"who": _who(session, agent), "hosts": sorted(set(hosts)),
-                                      "until": time.time() + PENDING_SECONDS}
-        _save(data)
-    return token
-
-
-def confirm(token: str) -> bool:
-    """The asked command read its FIFO: the person said yes. One use per token."""
-    with _lock_for(HOME / ".ssh-consent.lock"):
-        data = _load()
-        rec = data["pending"].pop(_h(token), None)
-        if not rec:
-            _save(data)
-            return False
         until = time.time() + APPROVAL_SECONDS
-        data["approved"].setdefault(rec["who"], {}).update({h: until for h in rec["hosts"]})
+        data["approved"].setdefault(_who(session, None), {}).update({h: until for h in hosts})
         _save(data)
-    return True
+    return sorted(hosts)
 
 
 def new_code(session: str, agent: str | None, hosts: list[str]) -> str:

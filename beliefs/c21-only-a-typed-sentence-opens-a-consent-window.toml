@@ -1,0 +1,10 @@
+# c21-only-a-typed-sentence-opens-a-consent-window: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c21-only-a-typed-sentence-opens-a-consent-window"
+control = "C21"
+statement = "The 8-hour window for a host opens only from the person's own prompt maisecrets: allow ssh HOST: a scheduled, loop or SDK prompt, a Codex prompt without the code from the refusal, and the sentence inside other text open nothing."
+runner = ["tests/test_ssh_consent.py::ConsentFlowTests::test_the_sentence_counts_only_typed_by_the_person"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    grant = _GRANT_RE.match(prompt) if cfg.get(\"ssh_consent\") and typed else None"
+replace = "    grant = _GRANT_RE.match(prompt) if cfg.get(\"ssh_consent\") else None"

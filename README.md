@@ -274,9 +274,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 27 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 28 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 87 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 90 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -446,11 +446,20 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
 
 ### Settings you decide
 
-`/maisecrets:settings` shows the settings that are yours to decide, each with
-its value, one line of meaning and its state: `default (not decided)`,
-`explicitly enabled`, `explicitly disabled` or `managed by policy`. A key that
-is missing from `config.json` is not decided; `false` written there is a
-decision, with the same effect. `--all` shows the advanced settings too.
+`/maisecrets:settings` shows the settings that are yours to decide, grouped
+(Protection, Using stored values), one card each: the value, its state (`not
+decided`, `set by you`, `set by a policy`), what it does, and the command for
+the next step:
+
+```
+Protection
+  SSH consent · off · not decided
+    Ask before each ssh command that changes something on a host.
+    Turn on: /maisecrets:settings ssh_consent on
+```
+
+A key that is missing from `config.json` is not decided; `false` written there
+is a decision, with the same effect. `--all` shows the advanced settings too.
 
 To change one, send the change as your own prompt, alone:
 
@@ -459,16 +468,18 @@ To change one, send the change as your own prompt, alone:
 maisecrets: set ssh_consent on          (the same, and the form for Codex)
 ```
 
-`on`, `off`, a choice the list names (`rehydration confirm`), or `default`,
+`on`, `off`, a choice the card names (`rehydration confirm`), or `default`,
 which removes your decision so that the setting reads the default again.
-The prompt hook writes `config.json` and stops the prompt; it does not reach
-the model. maisecrets changes a setting for nothing else: not for a prompt the
-client injected (a scheduled task, a loop wakeup), not for a subagent's report,
-and a Bash or PowerShell command that carries the change (a nested `codex exec`
-or `claude -p` that would type it) is refused. The AI can tell you about a
-setting and the prompt to send. A setting from a machine policy cannot be
-changed here. The limit: a program that runs as you can write the file itself,
-and maisecrets sees a command only as text (C22 in the threat model).
+The prompt hook writes `config.json`. After the slash command it lets the
+command run on, which shows the new card; the sentence form is stopped and
+does not reach the model. maisecrets changes a setting for nothing else: not
+for a prompt the client injected (a scheduled task, a loop wakeup, an SDK
+prompt), not for a subagent's report, and a Bash or PowerShell command that
+carries the change (a nested `codex exec` or `claude -p` that would type it)
+is refused. The AI can tell you about a setting and the prompt to send. A
+setting from a machine policy cannot be changed here. The limit: a program
+that runs as you can write the file itself, and maisecrets sees a command only
+as text (C22 in the threat model).
 
 **Hints.** maisecrets stays quiet until a case comes up that one of these
 settings is about. Then the AI gets one sentence about it, and mentions it
@@ -479,6 +490,9 @@ through another event). A hint comes once, also when hooks run at the same
 time; if maisecrets cannot record it, it does not come at all. It does not come again after you decided, and
 it does not come again because time passed: only a real change of the
 feature brings it back, once. `"tips": false` turns hints off with the tips.
+The settings list shows each hint as `not shown yet` or `shown` with its date;
+`/maisecrets:settings hints reset` (or `maisecrets: reset hints`) lets them
+come once more and changes no protection setting.
 
 ## Vault
 
@@ -797,18 +811,30 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   `systemctl status`) is a write: it can carry a credential. Paths like
   `/etc/shadow`, `.env`, `id_*`, `*.pem`, `/proc` or `/root` are never a read;
   that check is a heuristic, not a guarantee.
-- **A write asks once per host.** Any other remote command, a login shell,
-  `sudo`, `docker`, a copy, a port forward or tunnel (`-L`, `-R`, `-D`, `-w`),
-  or local data on stdin. The consent is for the host as written, with its
-  user and port (`-l`, `-p`, `-o User`, `-o Port`, `user@`, `scp://…:port`):
-  `root@web1` and `web1:2222` are other hosts than `web1`. If you allow it, writes to
-  that host (and the hosts of its group in `"ssh_host_groups": {"web":
-  ["web1", "web2"]}`) run without a question for 8 hours, in that session and
-  for that agent only: a subagent asks for itself. The asked command first
-  reads a FIFO that nobody can list; that read records the consent, so a
-  declined prompt, a forged hook call or a PostToolUse records nothing. The
-  FIFO waits 120 seconds; a later yes runs nothing and the next call asks
-  again. On Windows there is no FIFO: every write asks every time.
+- **Every write asks.** Any other remote command, a login shell, `sudo`,
+  `docker`, a copy, a port forward or tunnel (`-L`, `-R`, `-D`, `-w`), or local
+  data on stdin. A yes allows that one command; the next write asks again.
+- **A host you trust for a while: type it.** Send `maisecrets: allow ssh web1`
+  as your own prompt (the question names the exact sentence). Writes to that
+  host, and to the hosts of its group in `"ssh_host_groups": {"web": ["web1",
+  "web2"]}`, then run without a question for 8 hours, in that session, for the
+  main thread only: a subagent asks for itself. The host is as written, with
+  its user and port (`-l`, `-p`, `-o User`, `-o Port`, `user@`, `scp://…:port`):
+  `root@web1` and `web1:2222` are other hosts than `web1`. Only a prompt you
+  type counts: not a scheduled or SDK prompt, and a Bash or PowerShell command
+  that carries the sentence is refused.
+- **Hosts where the AI may work on its own.** Your own lab or ops servers can
+  be autonomous: writes there never ask, in any session, while every other
+  host asks for each write. Send `/maisecrets:settings ssh_autonomous_hosts add
+  ops1` (or `maisecrets: ssh autonomous ops1`), and `remove ops1` (or
+  `maisecrets: ssh ask ops1`) to take one off. The host is as the ssh call
+  writes it (`root@lab:2323` is not `lab`), or the name of a group in
+  `ssh_host_groups` (then its members, not a host of that name); every host
+  of a call must be on the list. The list changes from your own prompt, and
+  the deny list holds there too. Limit: maisecrets reads commands as text, so
+  a program that builds the sentence at run time and feeds it to a nested
+  client (Codex does not say who wrote a prompt) can add a host; check the
+  list in `/maisecrets:settings`.
 - **A form maisecrets cannot read asks every time.** An ssh word in a nested
   shell (`bash -c`, `eval`, `xargs`, `find -exec`), a wrapper it does not
   know (`sshpass`, `setsid`, `flock`), a word built at run time when `ssh`
@@ -832,7 +858,8 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
 - **Codex** cannot ask. It refuses and names a sentence with a code, for
   example `maisecrets: allow ssh web1 123456`. Typed alone as your very next
   prompt within 10 minutes, it allows writes to that host for 8 hours; the
-  prompt does not reach the model. Any other prompt ends the code.
+  prompt does not reach the model. Any other prompt ends the code. Codex sends
+  no sign of who wrote a prompt, so there the code is the proof.
 
 Measured on the maintainer's transcripts with `scripts/measure_ssh_consent.py
 --skip-cwd maisecrets` (2026-10-07, the sessions that work on maisecrets itself
@@ -971,6 +998,16 @@ printed: `scripts/replay_sessions.py --claude --codex`.
 What the plugin does not protect. Each item is a limit of the mechanism, not
 a to-do.
 
+- **The output of a command that fails reaches the model as it is (Claude
+  Code).** Claude Code reports a failed call through another hook event,
+  whose answer cannot replace the output. A value that a failing command
+  prints (`grep TOKEN .env` with exit 1, a script that prints its config and
+  stops) is not redacted, and it stays in the transcript. Measured over one
+  user's transcripts: 14 such outputs with a hit in 105,241 Bash calls over 90
+  days, 1 of them a secret. A command that ends in a pipe (`… | tail`) is
+  redacted as usual. maisecrets then stores the value (a repeat is redacted),
+  cleans the transcript on disk, tells the AI not to use it, and shows you a
+  line about it. See the threat model, "What is knowingly not defended".
 - **No hook, no protection.** Claude Chat, ChatGPT Chat, the web and the
   mobile apps run no plugin hooks. Cowork does, Claude Code does, Codex does.
 - **A client that rejects the manifest loads nothing and says nothing.**

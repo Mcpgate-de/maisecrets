@@ -252,9 +252,15 @@ def cmd_settings(args: list[str]) -> int:
     prompt the person typed (maisecrets/settings.py), never from a command the model runs."""
     from . import settings
     rest = [a for a in args if a != "--all"]
+    if rest and len(rest) <= 2 and rest[0].lower() in settings.TITLE:
+        # after a typed change the prompt hook already wrote it: show the card with the new state
+        print(settings.render(only=rest[0].lower()))
+        return 0
+    if rest and rest[0].lower() == "hints":
+        print("\n".join(settings._hint_lines()))
+        return 0
     if rest:
-        print("maisecrets settings: this command only shows the settings. To change one, send it as your own "
-              "prompt: /maisecrets:settings KEY VALUE (in Codex: maisecrets: set KEY VALUE).\n")
+        print(f"maisecrets settings: {rest[0]!r} is no setting this command shows.\n")
     print(settings.render(show_all="--all" in args))
     return 1 if rest else 0
 

@@ -4,7 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-HOOK_EVENTS = ("user-prompt", "pre-tool", "post-tool", "session-start")
+HOOK_EVENTS = ("user-prompt", "pre-tool", "post-tool", "post-tool-failure", "session-start")
 
 
 def _refuse_without_the_code(why: str) -> None:
@@ -15,6 +15,10 @@ def _refuse_without_the_code(why: str) -> None:
     event = sys.argv[1] if len(sys.argv) == 2 else ""
     msg = (f"maisecrets cannot load its own code ({why}); the plugin folder may be half updated. "
            "Run /reload-plugins or start a new session.")
+    if event == "post-tool-failure":
+        import json
+        print(json.dumps({"systemMessage": msg}))    # a failed output cannot be withheld: only the reason is named
+        sys.exit(0)
     if event == "post-tool":
         import json
         text = f"[{msg} The tool ran and finished; its output is withheld, do not run it again.]"

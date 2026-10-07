@@ -213,15 +213,15 @@ SCENARIOS = {
                   {"text": "done"}],
         "expect_requests": 2,
         "expect_no_file": "ran.txt",
-        "expect_text": "writes over ssh to nohost.invalid",
+        "expect_text": "approve this ssh write to nohost.invalid",
     },
-    # a setting changes only from the person's own prompt (C22): the typed slash command is handled by the prompt
-    # hook, which writes the setting and stops the prompt, so nothing reaches the model
+    # a setting changes only from the person's own prompt (C22): the prompt hook writes the setting the typed slash
+    # command names, and the command runs on to show the new state (a success is no block)
     "settings_typed_prompt": {
         "prompt": "/maisecrets:settings ssh_consent on",
-        "turns": [{"text": "unreachable"}],
-        "expect_requests": 0,
-        "expect_blocked": True,
+        "turns": [{"text": "shown"}],
+        "expect_requests": 1,
+        "expect_in_requests": ["SSH consent is on (set by you)"],
         "expect_home_json": ("config.json", ["ssh_consent"]),
     },
     # the person has not decided ssh_consent: the first ssh write gives the model the hint, once. `|| true`: a
@@ -234,6 +234,17 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_in_requests": ["/maisecrets:settings ssh_consent on"],
         "expect_home_json": ("hints.json", ["ssh_consent", "revision"]),
+    },
+    # a command that fails: Claude Code answers PostToolUseFailure, whose answer cannot replace the output, so the
+    # value reaches the model (a known gap). What maisecrets still does: the model is told not to use the value, it is
+    # stored so a repeat is redacted, and the transcript on disk is cleaned (checked for every scenario below)
+    "bash_failed_output": {
+        "prompt": "print the env",
+        "files": {".env": f"TOKEN={MARK}\n"},
+        "turns": [{"tool": "Bash", "input": {"command": "cat .env >&2; exit 3"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "upstream_leak_is_a_known_gap": "anthropics/claude-code#97278",
+        "expect_in_requests": ["the output of this failed call held"],
     },
     "ssh_consent_read_runs": {
         "prompt": "check the uptime",
@@ -563,7 +574,11 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         fails.append(f"UNCLASSIFIED TOOL {tool}: add it to tests/client_tools.json with its class")
     for marker in (MARK, MAIL, MARK2, MARK[-8:]):
         if marker in joined:
-            fails.append(f"LEAK: …{marker[-6:]} reached the upstream")
+            if sc.get("upstream_leak_is_a_known_gap"):
+                # the client gives the hook no way to replace this output; the scenario checks what is left to do
+                print(f"[GAP] {name}: …{marker[-6:]} reached the upstream ({sc['upstream_leak_is_a_known_gap']})")
+            else:
+                fails.append(f"LEAK: …{marker[-6:]} reached the upstream")
     for ph in sc.get("expect_placeholders", []):
         if ph not in joined:
             fails.append(f"placeholder {ph} missing in requests")

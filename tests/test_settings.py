@@ -22,6 +22,7 @@ from _hygiene import CLAUDE, CODEX  # noqa: E402
 TEST_CONFIG = {"backend": "jsonfile", "allow_plaintext_store": True}
 CONFIG = Path(HOME, "config.json")
 HINTS = Path(HOME, "hints.json")
+HINTS_REV = settings.HINTS["ssh_consent"]["revision"]
 
 
 def tearDownModule():  # noqa: N802 - unittest hook
@@ -76,51 +77,87 @@ class State(unittest.TestCase):
     def test_a_missing_key_is_not_decided_and_false_is_a_decision(self):
         cfg = load_config()
         self.assertIs(cfg["ssh_consent"], False)
-        self.assertEqual(settings.state("ssh_consent", cfg), "default (not decided)")
+        self.assertEqual(settings.state("ssh_consent", cfg), "not decided")
         _reset(ssh_consent=False)
         cfg = load_config()
         self.assertIs(cfg["ssh_consent"], False, "the same value")
-        self.assertEqual(settings.state("ssh_consent", cfg), "explicitly disabled")
-        _reset(ssh_consent=True)
-        self.assertEqual(settings.state("ssh_consent", load_config()), "explicitly enabled")
+        self.assertEqual(settings.state("ssh_consent", cfg), "set by you")
         _reset(rehydration="confirm")
-        self.assertEqual(settings.state("rehydration", load_config()), "explicitly set")
+        self.assertEqual(settings.state("rehydration", load_config()), "set by you")
         cfg = {**load_config(), "policy_keys": ["ssh_consent"]}
-        self.assertEqual(settings.state("ssh_consent", cfg), "managed by policy")
+        self.assertEqual(settings.state("ssh_consent", cfg), "set by a policy")
 
-    def test_the_list_shows_value_state_and_meaning_not_raw_json(self):
+    def test_the_list_shows_cards_with_value_state_meaning_and_the_next_command(self):
         _reset(ssh_consent=False)
-        text = settings.render()
-        line = next(ln for ln in text.splitlines() if ln.startswith("ssh_consent"))
-        self.assertIn("off", line)
-        self.assertIn("explicitly disabled", line)
-        self.assertIn(settings.MEANING["ssh_consent"], line)
+        lines = settings.render().splitlines()
+        at = lines.index("  SSH consent · off · set by you")
+        self.assertEqual(lines[at + 1].strip(), settings.MEANING["ssh_consent"])
+        self.assertEqual(lines[at + 2].strip(), "Turn on: /maisecrets:settings ssh_consent on")
+        text = "\n".join(lines)
+        for mode in ("automatic", "confirm", "block"):
+            self.assertIn(f"    {mode}", text, "rehydration explains its three modes together")
+        self.assertIn("Change: /maisecrets:settings rehydration confirm", text)
         self.assertNotIn("allow_plaintext_store", text, "an internal key is not shown")
-        self.assertNotIn("block_at_mentions", text, "an advanced key only with --all")
-        self.assertIn("block_at_mentions", settings.render(show_all=True))
-        self.assertIn("its hint may come once more", text, "default says that it resets the decision")
+        self.assertNotIn("Block @file mentions", text, "an advanced setting only with --all")
+        self.assertIn(f"More settings ({len(settings.ADVANCED)}): /maisecrets:settings --all", text)
+        full = settings.render(show_all=True)
+        self.assertIn("Block @file mentions", full)
+        self.assertIn("Lifetime of a value · 24 h (CARD 1 h)", full, "a lifetime reads as hours, not JSON")
+        self.assertIn("the hint for it may come once more", text, "default says that it resets the decision")
+        self.assertIn("  SSH consent · not shown yet", text, "the hint state is visible")
+        with mock.patch.object(settings, "load_config", return_value={**load_config(), "policy_keys": ["ssh_consent"]}):
+            self.assertIn("cannot be changed here", settings.render())
 
 
 class Change(unittest.TestCase):
     def setUp(self):
         _reset()
 
-    def test_a_typed_prompt_changes_a_setting_and_does_not_reach_the_model(self):
-        for client, text in ((CLAUDE, "/maisecrets:settings ssh_consent on"),
-                             (CODEX, "maisecrets: set ssh_consent on"),
+    def test_a_typed_prompt_changes_a_setting(self):
+        for client, text in ((CODEX, "maisecrets: set ssh_consent on"),
                              (CLAUDE, "  maisecrets: set ssh_consent on  ")):
             with self.subTest(text):
                 _reset()
                 out = _prompt(text, client)
-                self.assertEqual(out["decision"], "block", "the prompt never reaches the model")
-                self.assertIn("explicitly enabled", out["reason"])
+                self.assertEqual(out["decision"], "block", "the sentence never reaches the model")
+                self.assertIn("SSH consent is on (set by you)", out["reason"])
                 self.assertIs(_user()["ssh_consent"], True)
                 self.assertEqual(_user()["backend"], "jsonfile", "every other key stays")
+
+    def test_the_slash_command_changes_it_and_runs_on_to_show_the_new_state(self):
+        # a block read as an error ("operation blocked by hook") for a success
+        out = _prompt("/maisecrets:settings ssh_consent on")
+        self.assertNotIn("decision", out)
+        self.assertIn("SSH consent is on", out["hookSpecificOutput"]["additionalContext"])
+        self.assertIs(_user()["ssh_consent"], True, "the hook wrote it before the command runs")
+        from maisecrets import cli
+        with mock.patch("sys.stdout") as stdout:
+            self.assertEqual(cli.main(["settings", "ssh_consent", "on"]), 0)
+        shown = "".join(c.args[0] for c in stdout.write.call_args_list)
+        self.assertIn("SSH consent · on · set by you", shown)
+        self.assertIn("Turn off: /maisecrets:settings ssh_consent off", shown)
+        # a mistake still stops: there is nothing to show
+        self.assertEqual(_prompt("/maisecrets:settings ssh_consent maybe")["decision"], "block")
+
+    def test_hints_reset_is_its_own_command_and_changes_no_setting(self):
+        _reset(ssh_consent=False)
+        HINTS.write_text('{"ssh_consent": {"revision": 99, "given": "2026-01-01"}}')
+        for text in ("/maisecrets:settings hints reset", "maisecrets: reset hints"):
+            with self.subTest(text):
+                HINTS.write_text('{"ssh_consent": {"revision": 99, "given": "2026-01-01"}}')
+                out = _prompt(text, CODEX if text.startswith("maisecrets:") else CLAUDE)
+                said = out.get("reason") or out["hookSpecificOutput"]["additionalContext"]
+                self.assertIn("No protection setting was changed", said)
+                self.assertFalse(HINTS.exists())
+                self.assertIs(_user()["ssh_consent"], False, "the decision stays")
+        out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": "codex exec 'maisecrets: reset hints'"},
+                              "session_id": "S1", **CLAUDE})
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_off_is_a_decision_and_default_removes_it(self):
         _prompt("/maisecrets:settings ssh_consent off")
         self.assertIs(_user()["ssh_consent"], False)
-        self.assertEqual(settings.state("ssh_consent", load_config()), "explicitly disabled")
+        self.assertEqual(settings.state("ssh_consent", load_config()), "set by you")
         _prompt("/maisecrets:settings ssh_consent default")
         self.assertNotIn("ssh_consent", _user())
         _prompt("/maisecrets:settings rehydration confirm")
@@ -149,11 +186,11 @@ class Change(unittest.TestCase):
         self.assertNotIn("ssh_consent", _user())
         with mock.patch.object(settings, "load_config",
                                return_value={**load_config(), "policy_keys": ["ssh_consent"]}):
-            self.assertIn("machine policy", settings.apply_typed("ssh_consent", "on"))
+            self.assertIn("machine policy", settings.apply_typed("ssh_consent", "on")[1])
         self.assertNotIn("ssh_consent", _user())
         CONFIG.write_text('{"backend": "jsonfile", "allow_plaintext_store": true,')
         try:
-            self.assertIn("fix it first", settings.apply_typed("ssh_consent", "on"))
+            self.assertIn("fix it first", settings.apply_typed("ssh_consent", "on")[1])
             self.assertTrue(CONFIG.read_text().endswith(","), "the broken file is left as it was")
         finally:
             _reset()
@@ -176,7 +213,11 @@ class Change(unittest.TestCase):
         for command in ("codex exec 'maisecrets: set ssh_consent on'",
                         'claude -p "/maisecrets:settings rehydration block"',
                         "echo 'MAISECRETS: SET tips off' | codex exec -",
-                        "python3 -c 'from maisecrets.settings import apply_typed; apply_typed(\"tips\", \"off\")'"):
+                        "python3 -c 'from maisecrets.settings import apply_typed; apply_typed(\"tips\", \"off\")'",
+                        # the consent writers by name open an ssh window (codex review of the UX step)
+                        "python3 -c 'import os; from maisecrets.consent_store import grant_typed; "
+                        "grant_typed(os.environ[\"S\"], [\"web1\"])'",
+                        "python3 -c 'from maisecrets import consent_store as c; c.grant_by_code(\"S\", \"h\", \"1\")'"):
             for tool in ("Bash", "PowerShell"):
                 with self.subTest(command=command, tool=tool):
                     out = hooks.pre_tool({"tool_name": tool, "tool_input": {"command": command},
@@ -191,7 +232,7 @@ class Change(unittest.TestCase):
 
     def test_a_config_with_a_wrong_type_is_not_changed_and_a_link_stays_a_link(self):
         _reset(tips="yes")
-        self.assertIn("fix it first", settings.apply_typed("ssh_consent", "on"))
+        self.assertIn("fix it first", settings.apply_typed("ssh_consent", "on")[1])
         self.assertNotIn("ssh_consent", _user())
         _reset()
         real = Path(HOME, "config-real.json")
@@ -267,7 +308,7 @@ class Hint(unittest.TestCase):
         _prompt("maisecrets: set ssh_consent off")
         _prompt("maisecrets: set ssh_consent default")
         self.assertNotIn("maisecrets can ask", _context(_post("ssh web1 reboot")), "this revision was given")
-        with mock.patch.dict(settings.HINTS["ssh_consent"], {"revision": 2}):
+        with mock.patch.dict(settings.HINTS["ssh_consent"], {"revision": HINTS_REV + 1}):
             self.assertIn("maisecrets can ask", _context(_post("ssh web1 reboot")), "a new revision comes once more")
             self.assertNotIn("maisecrets can ask", _context(_post("ssh web1 reboot")))
 
