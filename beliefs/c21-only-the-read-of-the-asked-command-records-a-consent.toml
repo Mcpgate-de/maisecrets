@@ -1,0 +1,10 @@
+# c21-only-the-read-of-the-asked-command-records-a-consent: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c21-only-the-read-of-the-asked-command-records-a-consent"
+control = "C21"
+statement = "With ssh_consent on, a write over ssh asks once for its host, and only the read of the asked command's FIFO in the sealed directory records the consent: a forged hook call or a PostToolUse is no proof."
+runner = ["tests/test_ssh_consent.py::ConsentFlowTests::test_a_read_runs_and_a_write_asks_with_the_consent_read_first"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if c[\"kind\"] != \"write\" or not c[\"hosts\"] or platform.system() == \"Windows\":\n        return None"
+replace = "    return None"

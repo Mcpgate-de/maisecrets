@@ -56,6 +56,8 @@ DEFAULT_CONFIG = {
     "shortcut": True,                # the first SessionStart names /maisecrets:shortcut once; it installs nothing
     "ssh_via_sandbox": True,         # a value may go to ssh on stdin inside the Claude Code sandbox
     "ssh_approval": "per-command",   # under rehydration "confirm": "per-session" is one confirm per value and session
+    "ssh_consent": False,            # every ssh-family command: a read runs, a write asks once per host (#8)
+    "ssh_host_groups": {},           # {"group": ["host", …]}: one ssh consent covers the whole group
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
     "pass_agent_reports": True,      # the report of a subagent of this session is model text: not blocked (hooks.py)
@@ -78,6 +80,7 @@ _CONFIG_TYPES = {
     "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
+    "ssh_consent": bool, "ssh_host_groups": dict,
     "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool,
 }
 
@@ -253,7 +256,7 @@ def _old_region_key(layer: dict) -> dict:
 
 
 _STRICTNESS = {"automatic": 0, "confirm": 1, "block": 2}
-_SAFETY_KEYS = ("rehydration", "resolve_in_files", "ssh_via_sandbox")
+_SAFETY_KEYS = ("rehydration", "resolve_in_files", "ssh_via_sandbox", "ssh_consent")
 
 
 def _looks_misspelled(key: str) -> bool:
@@ -279,6 +282,8 @@ def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
     for key in ("resolve_in_files", "ssh_via_sandbox"):
         if parsed.get(key) is False:
             cfg[key] = False
+    if parsed.get("ssh_consent") is True:
+        cfg["ssh_consent"] = True
 
 
 def load_config() -> dict:

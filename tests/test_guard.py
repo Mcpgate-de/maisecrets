@@ -167,6 +167,72 @@ class ExpectedTests(_Env):
             json.dumps({"plugins": {"maisecrets@maisecrets": [{}]}}))
         self.assertFalse(guard.expected())
 
+    def test_a_second_copy_switched_off_is_not_maisecrets_switched_off(self):
+        # the directory copy off, the synced copy on: maisecrets is meant to run, so the guard watches it
+        # (field report, 2026-10-07: the guard stayed silent and a session without maisecrets let a@b.com through)
+        self.installed("synced")
+        self.account(synced=True)
+        # the field case: the directory copy installed and switched off, the synced copy on
+        (self.claude / "plugins" / "installed_plugins.json").write_text(json.dumps({"plugins": {
+            "maisecrets@anthropic-plugin-directory": [{}]}}))
+        (self.claude / "settings.json").write_text(json.dumps({"enabledPlugins": {
+            "maisecrets@anthropic-plugin-directory": False, "maisecrets@synced": True}}))
+        self.assertTrue(guard.expected())
+        (self.claude / "settings.json").write_text(json.dumps({"enabledPlugins": {
+            "maisecrets@anthropic-plugin-directory": False, "maisecrets@synced": False}}))
+        self.assertFalse(guard.expected(), "every copy off")
+
+    def test_only_the_ids_of_installed_copies_count(self):
+        # codex review of the guard fix, 2026-10-07: a stale key of a copy that is not installed decides nothing,
+        # an installed copy with no entry is on, a marketplace may list maisecrets under another name
+        self.installed("always")
+        plugins = self.claude / "plugins"
+        plugins.mkdir(parents=True, exist_ok=True)
+        copy = Path(tempfile.mkdtemp(prefix="maisecrets-copy-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(copy, ignore_errors=True))
+        (copy / ".claude-plugin").mkdir()
+        (copy / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "maisecrets"}))
+        (plugins / "installed_plugins.json").write_text(json.dumps({"plugins": {
+            "privacy-guard@corp": [{"installPath": str(copy)}], "notmaisecrets-tool@x": [{}]}}))
+        settings = self.claude / "settings.json"
+        cases = (({"privacy-guard@corp": False}, False, "the renamed copy is off"),
+                 ({"privacy-guard@corp": False, "maisecrets@old": True}, False, "a stale key on decides nothing"),
+                 ({"maisecrets@old": False}, True, "a stale key off decides nothing; the copy has no entry: on"),
+                 ({"notmaisecrets-tool@x": False}, True, "another plugin with the word in its name"),
+                 ({"privacy-guard@corp": False, "notmaisecrets-tool@x": True}, False,
+                  "another installed plugin with the word in its name is no copy of maisecrets"))
+        for plugins_set, want, why in cases:
+            with self.subTest(why):
+                settings.write_text(json.dumps({"enabledPlugins": plugins_set}))
+                self.assertEqual(guard.expected(), want, why)
+
+    def test_the_repository_root_local_file_wins_over_an_old_nested_one(self):
+        self.installed("synced")
+        self.account(synced=True)
+        repo = Path(tempfile.mkdtemp(prefix="maisecrets-repo-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(repo, ignore_errors=True))
+        (repo / ".git").mkdir()
+        (repo / ".claude").mkdir()
+        (repo / ".claude" / "settings.local.json").write_text(
+            json.dumps({"enabledPlugins": {"maisecrets@synced": False}}))
+        (repo / "sub" / ".claude").mkdir(parents=True)
+        (repo / "sub" / ".claude" / "settings.local.json").write_text(
+            json.dumps({"enabledPlugins": {"maisecrets@synced": True}}))
+        self.assertFalse(guard.expected(str(repo / "sub")))
+
+    def test_a_project_switch_wins_over_the_user_switch(self):
+        self.installed("synced")
+        self.account(synced=True)
+        (self.claude / "settings.json").write_text(json.dumps({"enabledPlugins": {"maisecrets@synced": True}}))
+        project = Path(tempfile.mkdtemp(prefix="maisecrets-project-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(project, ignore_errors=True))
+        (project / ".claude").mkdir()
+        (project / ".claude" / "settings.json").write_text(json.dumps({"enabledPlugins": {"maisecrets@synced": False}}))
+        self.assertFalse(guard.expected(str(project)))
+        (project / ".claude" / "settings.local.json").write_text(
+            json.dumps({"enabledPlugins": {"maisecrets@synced": True}}))
+        self.assertTrue(guard.expected(str(project)), "local wins over the project file")
+
     def test_a_project_that_switches_maisecrets_off_is_left_alone(self):
         self.installed("always")
         project = Path(tempfile.mkdtemp(prefix="maisecrets-project-"))

@@ -787,6 +787,23 @@ def user_prompt(payload: dict) -> dict:
                                                          for m in found], outcome="passed: a subagent report")
         return {}
 
+    # the ssh consent sentence (#8): alone, with the code the refusal made, after the subagent report pass so a
+    # report never grants. Blocked, so the sentence and its code never reach the model
+    grant = _GRANT_RE.match(prompt) if cfg.get("ssh_consent") else None
+    if cfg.get("ssh_consent") and not grant and session:
+        from . import consent_store
+        consent_store.drop_codes(session)    # the sentence counts only as the very next prompt (Codex review)
+    if grant:
+        from . import consent_store
+        hosts = consent_store.grant_by_code(session or "", grant.group(1), grant.group(2))
+        reason = (f"maisecrets: writes over ssh to {', '.join(hosts)} run without asking for "
+                  f"{consent_store.APPROVAL_SECONDS // 3600} hours in this session. This prompt was not sent to the "
+                  "model; send your next request." if hosts else
+                  "maisecrets: this consent code is not valid (wrong host, used, or older than "
+                  f"{consent_store.CODE_SECONDS // 60} minutes). Nothing was allowed; this prompt was not sent.")
+        return {"decision": "block", "reason": reason,
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+
     # 2. references the human typed or pasted: this session may resolve them from now on
     typed = find_refs(prompt)
     matches = _prompt_hits(prompt)
@@ -848,7 +865,7 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
                                       r"|MAISECRETS_HOME"),
     ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"
                            r"|(?<![\w-])resolve\s+\S+\s+--grant\b|cmd_resolve|\.redeem\("),
-    ("the ssh approval store", r"ssh-approvals|ssh_approval"),
+    ("the ssh approval store", r"ssh-approvals|ssh_approval|ssh-consent\.json"),
     # the mod's question stores values and scrubs a transcript by session id: for the mod, not the agent
     ("the mod's question", r"(?<![\w-])(?:dispatch\.py|run\.sh|run\.cmd)[\"']?\s+[\"']?mod-prompt\b"),
     # the guard outside the plugin folder: `--off` in its refusal is for the person, not the agent
@@ -1700,7 +1717,8 @@ def _resolver_call(key: str, nonce: str) -> str:
     return f'$("{py}" "{script}" {key} --grant {nonce})'
 
 
-def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: str | None = None) -> bool:
+def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: str | None = None,
+                       consent: str | None = None) -> bool:
     """Deliver one value once through a FIFO from a detached child. The command runs later, and
     on Codex inside a sandbox that may neither write the vault nor read the keychain (measured:
     resolve.py failed there and the command died); a FIFO in TMPDIR is readable from inside.
@@ -1710,7 +1728,8 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: s
     with the value in its memory (suite review, 2026-09-27). With ``approve``, the child confirms that
     ssh session-approval token once the value was read. That FIFO sits in the sealed directory, which
     nobody can list: only the command that holds its name can open it, and only the rewritten command
-    the user allowed holds that name (ssh_approval.py)."""
+    the user allowed holds that name (ssh_approval.py). With ``consent``, the same for an ssh consent
+    (consent_store.py)."""
     code = (
         "import json,os,sys,time\n"
         "spec = json.load(sys.stdin)\n"
@@ -1740,6 +1759,13 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: s
         "            ssh_approval.confirm(spec['approve'])\n"
         "        except Exception:\n"
         "            pass\n"
+        "    if spec.get('consent'):\n"
+        "        try:\n"
+        "            sys.path.insert(0, spec['root'])\n"
+        "            from maisecrets import consent_store\n"
+        "            consent_store.confirm(spec['consent'])\n"
+        "        except Exception:\n"
+        "            pass\n"
         "try:\n"
         "    os.unlink(spec['fifo'])\n"
         "except OSError:\n"
@@ -1750,7 +1776,7 @@ def _serve_value_later(fifo: str, value: str, seconds: float = 120.0, approve: s
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         child.stdin.write(json.dumps({"fifo": fifo, "value": value, "seconds": seconds, "approve": approve,
-                                      "root": root}).encode())
+                                      "consent": consent, "root": root}).encode())
         child.stdin.close()
         # the FIFO must exist before the command starts: wait for the child to create it
         for _ in range(100):
@@ -1914,6 +1940,158 @@ def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
     return None
 
 
+# ------------------------------------------------------------- ssh consent (#8) --
+# opt-in (`ssh_consent: true`): every ssh-family call is classified (maisecrets/ssh_consent.py); a read runs,
+# a write needs the person's consent for its host (consent_store.py), a form the hook cannot read asks
+# each time, a short deny list is refused. Codex cannot ask: it refuses and names the sentence that grants.
+_GRANT_RE = re.compile(r"\A\s*maisecrets:\s*allow\s+ssh\s+(\S+)\s+(\d{6})\s*\Z")
+
+
+_HOOK_ENTRIES = {"session-start", "user-prompt", "pre-tool", "post-tool", "mod-prompt"}
+
+
+def _calls_a_hook_entry(command: str, broad: bool = False) -> bool:
+    """A command word that runs a maisecrets hook entry with an event: the agent would hand the hook a payload it
+    wrote, a forged PostToolUse or prompt (plan review of #8, 2026-10-06). Read from the parsed words, so a mention
+    in quotes (`echo "… run.sh post-tool"`) is no call (Codex review)."""
+    ctxs = _shell_contexts(command)
+    segs = _segments(command, ctxs)
+    for sg in segs:
+        words = sg.get("words") or []
+        for k, w in enumerate(words[:-1]):
+            # an event in a variable counts only with consent on: `./run.sh $ENV` of another project (opus round 3)
+            if os.path.basename(w) in ("run.sh", "run.cmd", "dispatch.py") and (
+                    words[k + 1] in _HOOK_ENTRIES or (broad and words[k + 1].startswith("$"))):
+                return True
+    # inside a nested shell or an interpreter (`bash -c '…run.sh user-prompt …'`, `python3 -c 'os.system(…)'`,
+    # `find -exec sh -c`) the words are one string: the text decides. Always for a shell; with ssh consent on
+    # (`broad`), for any command that does not only print the text (Gate B of #8, two rounds): a Codex consent has
+    # no second proof, so a forged prompt must not reach the hook. With consent off, `python3 -c 'print(…)'` passes.
+    shells = {"bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "su", "xargs", "parallel", "watch", "script"}
+    printers = {"echo", "printf", "grep", "egrep", "rg", "cat", "head", "tail", "less", "git"}
+    for m in re.finditer(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
+                         r"(?:session-start|user-prompt|pre-tool|post-tool|mod-prompt)\b", command):
+        seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
+        if seg and seg.get("cmd") in shells:
+            return True
+        if broad and not _only_prints(command, ctxs, segs, seg, printers):
+            return True
+    if broad and re.search(r"\b(?:session-start|user-prompt|pre-tool|post-tool|mod-prompt)\b", command):
+        # the entry and the event in different words (R=…/run.sh; $R user-prompt): any mention of an entry outside
+        # a command that only prints it counts
+        for m in re.finditer(r"run\.sh|run\.cmd|dispatch\.py", command):
+            seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
+            if not _only_prints(command, ctxs, segs, seg, printers):
+                return True
+    return False
+
+
+def _only_prints(command: str, ctxs: list[str], segs: list[dict], seg: dict | None, printers: set) -> bool:
+    """The whole command is one printing command with no pipe and no redirect: its text reaches nobody's shell.
+    `printf … > /tmp/x; bash /tmp/x` wrote it to a file a later part runs (codex review of the repair)."""
+    if not seg or len(segs) != 1 or seg.get("cmd") not in printers:
+        return False
+    unquoted = "".join(ch if cx == "" else " " for ch, cx in zip(command, ctxs))
+    return not re.search(r"[<>|]", unquoted)
+
+
+def _parse_for_consent(text: str):
+    ctxs = _shell_contexts(text)
+    return _segments(text, ctxs), ctxs
+
+
+def _expand_groups(hosts: list[str], groups: dict) -> list[str]:
+    """A host and every member of a group in `ssh_host_groups` that names it."""
+    out = set(hosts)
+    for members in (groups or {}).values():
+        if isinstance(members, list) and any(h in members for h in hosts):
+            out.update(m for m in members if isinstance(m, str))
+    return sorted(out)
+
+
+def _ssh_consent(payload: dict, cfg: dict, command: str) -> dict | None:
+    """None when consent is off or the command reads only; else the call's kind, hosts and whether an
+    unexpired consent of this session and agent covers them (a form the hook cannot read never is)."""
+    if not cfg.get("ssh_consent"):
+        return None
+    from . import consent_store, ssh_consent
+    v = ssh_consent.classify(command, _parse_for_consent)
+    if v.kind in ("none", "read"):
+        return None
+    hosts = _expand_groups(v.hosts, cfg.get("ssh_host_groups") or {})
+    covered = v.kind == "write" and consent_store.covered(payload.get("session_id"), payload.get("agent_id"), hosts)
+    return {"kind": v.kind, "hosts": hosts, "named": v.hosts, "why": v.why, "covered": covered}
+
+
+def _consent_text(c: dict) -> str:
+    from . import consent_store
+    if c["kind"] == "unknown" or not c["hosts"]:
+        return (f"maisecrets: this command starts ssh in a form the hook cannot read ({c['why']}). Allow it only if "
+                "you know what it does on the remote side; no consent is recorded, the next one asks again.")
+    more = [h for h in c["hosts"] if h not in c["named"]]
+    group = f" and the hosts of its group ({', '.join(more)})" if more else ""
+    return (f"maisecrets: this command writes over ssh to {', '.join(c['named'])} ({c['why']}). If you allow it, "
+            f"writes to {', '.join(c['named'])}{group} run without asking for {consent_store.APPROVAL_SECONDS // 3600} "
+            "hours, in this session and for this agent only. The deny list (mkfs, dd to a device, rm -rf /) stays on.")
+
+
+def _consent_codex_refusal(payload: dict, c: dict) -> str:
+    from . import consent_store
+    if c["kind"] == "unknown" or not c["hosts"]:
+        return (f"maisecrets: this command starts ssh in a form the hook cannot read ({c['why']}). The command did "
+                "not run. Write the call directly, as ssh HOST 'remote command', so maisecrets can read its host.")
+    code = consent_store.new_code(payload.get("session_id") or "", payload.get("agent_id"), c["hosts"])
+    return (f"maisecrets: this command writes over ssh to {', '.join(c['named'])} ({c['why']}), and ssh consent is "
+            f"on. The command did not run. To allow writes to {', '.join(c['hosts'])} for "
+            f"{consent_store.APPROVAL_SECONDS // 3600} hours in this session, the user types exactly this, alone, as "
+            f"the next prompt (valid for {consent_store.CODE_SECONDS // 60} minutes): "
+            f"maisecrets: allow ssh {c['named'][0]} {code}")
+
+
+def _consent_read(payload: dict, c: dict) -> str | None:
+    """The first part of an asked command: a read of a FIFO in the sealed directory. The child that serves it
+    records the consent when it is read, so only the command the person allowed records one (a forged hook
+    call cannot). None for a form no consent covers, on Windows (no FIFO), or when no FIFO can be made."""
+    if c["kind"] != "write" or not c["hosts"] or platform.system() == "Windows":
+        return None
+    from . import consent_store
+    try:
+        fifo = os.path.join(_sealed_dir(), os.path.basename(_fifo_path(key_nonce())))
+        token = consent_store.remember_pending(payload.get("session_id") or "", payload.get("agent_id"),
+                                               c["hosts"])
+    except (OSError, RuntimeError):
+        return None
+    if not _serve_value_later(fifo, "1", consent=token):
+        return None
+    return (f'__ms_consent="$(cat {shlex_quote(fifo)})" || {{ echo "maisecrets: the consent read failed '
+            '(asked more than 120 s ago); the command did not run. Run it again" >&2; exit 97; }')
+
+
+def _consent_gate(payload: dict, tool_input: dict, why: str) -> dict:
+    """A call outside Bash that the consent rules stop: PowerShell text that names ssh, a file under ~/.ssh.
+    Claude Code asks with the input unchanged (no value is in it, nothing is recorded); Codex refuses."""
+    if client_of(payload) == "codex":
+        return _deny(f"maisecrets: {why}, and ssh consent is on. The call did not run.")
+    return _ask(dict(tool_input), f"maisecrets: {why}. Allow it only if you know what it does.")
+
+
+def _is_ssh_config_path(path: str, cwd: str) -> bool:
+    if not path:
+        return False
+    p = os.path.expanduser(path)
+    if not os.path.isabs(p):
+        p = os.path.join(cwd or os.getcwd(), p)
+    try:
+        real = os.path.realpath(p)
+    except OSError:
+        real = p
+    home_ssh = os.path.realpath(os.path.join(os.path.expanduser("~"), ".ssh"))
+    if platform.system() in ("Darwin", "Windows"):
+        # a case-insensitive file system: ~/.SSH/config is ~/.ssh/config (opus round 3)
+        real, home_ssh = os.path.normcase(real).casefold(), os.path.normcase(home_ssh).casefold()
+    return real == home_ssh or real.startswith(home_ssh + os.sep)
+
+
 def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     """Bash: every value is read into a shell variable in the MAIN shell before the command
     runs, and the placeholder becomes that variable in its quoting context. The read fails
@@ -1941,10 +2119,32 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     refused = _store_refusal(command)
     if refused:
         return refused
+    if _calls_a_hook_entry(command, broad=bool(cfg.get("ssh_consent"))):
+        return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "
+                     "The command did not run.")
     ctxs = _shell_contexts(command)
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
+    # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line
+    if cfg.get("ssh_consent") and re.search(r"allow\s+ssh\s+\S+\s+\d{6}", command):
+        # the model saw the code in the refusal; a nested prompt (`codex exec resume …`) would type the sentence
+        # for it (Gate B of #8). Text matching: a code built at run time is not seen (C21)
+        return _deny("maisecrets: this command carries the ssh consent sentence; only the person types it, as a "
+                     "prompt. The command did not run.")
+    consent = _ssh_consent(payload, cfg, command)
+    if consent and consent["kind"] == "deny":
+        return _deny(f"maisecrets: the remote command matches the deny list ({consent['why']}); it never runs "
+                     "through maisecrets, also with consent. The command did not run.")
+    needs_yes = bool(consent) and not consent["covered"]
+    if needs_yes and client_of(payload) == "codex":
+        return _deny(_consent_codex_refusal(payload, consent))
     if not refs:
-        return {}
+        if not needs_yes:
+            return {}
+        read = _consent_read(payload, consent)
+        asked = dict(tool_input)
+        if read:
+            asked["command"] = read + "; " + command
+        return _ask(asked, _consent_text(consent))
     keys = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(k for k, _a, _b in refs))
     windows = platform.system() == "Windows"
     if windows and client_of(payload) == "codex":
@@ -1989,7 +2189,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     # child, which confirms it when the approved command reads the value. After phase 1: a key
     # this session may not resolve leaves no pending token (review, 2026-09-29)
     ssh_auto, ssh_token = rehydration.policy(cfg, "ssh") == "automatic", None
-    if ssh_plan and not ssh_auto and cfg.get("ssh_approval") == "per-session" \
+    # with a consent question in the same ask, no hidden per-session value approval rides along (Gate B of #8)
+    if ssh_plan and not ssh_auto and not needs_yes and cfg.get("ssh_approval") == "per-session" \
             and _remote_is_read_only(ssh_plan["remote"]):
         from . import ssh_approval
         names = sorted({k for k, _a, _b in refs})
@@ -2065,8 +2266,16 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         shift = len(rewritten) - len(command)
         rewritten = rewritten[:at + shift] + _proxy_option() + rewritten[at + shift:]
         prelude.insert(0, _sandbox_guard())
+    if needs_yes:
+        read = _consent_read(payload, consent)
+        if read:
+            prelude.insert(0, read)
     new_input = dict(tool_input)
     new_input["command"] = "; ".join(prelude) + "; " + rewritten
+    if needs_yes:
+        # one question for both: the consent and the value; a consent window never skips C16 (plan review M4)
+        return _ask(new_input, _consent_text(consent) + f" The command also gets the value of {keys}; the command "
+                               "shown here carries no value.")
     if ssh_plan:
         base = (f"maisecrets: this command sends the value of {keys} on stdin to ssh "
                 f"{ssh_plan['dest']}: {ssh_plan['line'][:400]}. It runs only inside the Claude "
@@ -2471,6 +2680,11 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         if _in_the_home(path, cwd):
             return _deny(f"maisecrets: {tool} on {path} is refused; the maisecrets home is changed by the human "
                          "only. Nothing was written. Tell the user what you wanted to change there.")
+    if cfg.get("ssh_consent"):
+        # a changed ~/.ssh/config sends an approved alias to another host or runs a local command (plan review H3)
+        for path in paths:
+            if _is_ssh_config_path(path, cwd):
+                return _consent_gate(payload, tool_input, f"{tool} changes {path}, which decides where ssh connects")
     path = ", ".join(paths)
     found: list[str] = []
 
@@ -2556,7 +2770,7 @@ def _resolve_patch(patch: str, values: dict) -> tuple:
     return rewritten, None
 
 
-def _pre_powershell(payload: dict, tool_input: dict) -> dict:
+def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) -> dict:
     """PowerShell: the shell tool of Claude Code on Windows without Git Bash (measured with 2.1.284 on
     a hosted Windows runner, 2026-09-29). The rewrite knows POSIX quoting only, so a placeholder is
     refused and no value goes in; the store backstop is the text match of Bash, with Windows paths in
@@ -2577,6 +2791,12 @@ def _pre_powershell(payload: dict, tool_input: dict) -> dict:
                      "in Bash commands only; PowerShell quoting is not supported). The command did not run. Use "
                      "the value through an MCP tool or a file tool, or ask the user to run the command "
                      "themselves. With Git for Windows installed, Claude Code offers Bash instead.")
+    if (cfg or {}).get("ssh_consent"):
+        from . import ssh_consent
+        m = ssh_consent._TOKEN_RE.search(command)
+        if m:
+            return _consent_gate(payload, tool_input, f"this PowerShell command names '{m.group(0)}', and maisecrets "
+                                                      "reads ssh calls in Bash only")
     return {}
 
 
@@ -2587,7 +2807,7 @@ def pre_tool(payload: dict) -> dict:
     if tool == "Bash":
         return _pre_bash(payload, cfg, tool_input)
     if tool == "PowerShell":
-        return _pre_powershell(payload, tool_input)
+        return _pre_powershell(payload, tool_input, cfg)
     if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS or tool.startswith("mcp__"):
         refused = _store_path_refusal(tool, tool_input, str(payload.get("cwd") or ""))
         if refused:

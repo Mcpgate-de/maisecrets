@@ -203,6 +203,27 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c"],
     },
+    # ssh consent (#8) in the real client: a write over ssh asks, and a headless client refuses every ask, so
+    # nothing of the command runs and the reason reaches the model; a read runs as before
+    "ssh_consent_write_asks": {
+        "prompt": "restart the web service",
+        "config": {"ssh_consent": True},
+        "turns": [{"tool": "Bash", "input": {"command": "printf ran > {cwd}/ran.txt; ssh -o BatchMode=yes -o "
+                                                        "ConnectTimeout=2 nohost.invalid 'systemctl restart nginx'"}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_no_file": "ran.txt",
+        "expect_text": "writes over ssh to nohost.invalid",
+    },
+    "ssh_consent_read_runs": {
+        "prompt": "check the uptime",
+        "config": {"ssh_consent": True},
+        "turns": [{"tool": "Bash", "input": {"command": "printf ran > {cwd}/ran.txt; ssh -o BatchMode=yes "
+                                                        "-o ConnectTimeout=2 nohost.invalid uptime"}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_file": ("ran.txt", "ran"),
+    },
     # the model uses a placeholder in Bash: PreToolUse rehydrates, the command sees the value,
     # PostToolUse redacts the echo again
     "bash_rehydrate": {
