@@ -215,6 +215,26 @@ SCENARIOS = {
         "expect_no_file": "ran.txt",
         "expect_text": "writes over ssh to nohost.invalid",
     },
+    # a setting changes only from the person's own prompt (C22): the typed slash command is handled by the prompt
+    # hook, which writes the setting and stops the prompt, so nothing reaches the model
+    "settings_typed_prompt": {
+        "prompt": "/maisecrets:settings ssh_consent on",
+        "turns": [{"text": "unreachable"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+        "expect_home_json": ("config.json", ["ssh_consent"]),
+    },
+    # the person has not decided ssh_consent: the first ssh write gives the model the hint, once. `|| true`: a
+    # command that fails gets PostToolUseFailure from Claude Code (2.1.292), not PostToolUse, and so no hint
+    "ssh_consent_hint_once": {
+        "prompt": "restart the web service",
+        "turns": [{"tool": "Bash", "input": {"command": "ssh -o BatchMode=yes -o ConnectTimeout=2 nohost.invalid "
+                                                        "'sudo systemctl restart nginx' || true"}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_in_requests": ["/maisecrets:settings ssh_consent on"],
+        "expect_home_json": ("hints.json", ["ssh_consent", "revision"]),
+    },
     "ssh_consent_read_runs": {
         "prompt": "check the uptime",
         "config": {"ssh_consent": True},

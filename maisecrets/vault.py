@@ -61,6 +61,7 @@ DEFAULT_CONFIG = {
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
     "pass_agent_reports": True,      # the report of a subagent of this session is model text: not blocked (hooks.py)
+    "tips": True,                    # a tip at session start, and a hint when a case for a setting first comes up
     "keep_purged_days": 30,          # metadata of an expired entry is deleted after this many days
     "audit_max_lines": 2000,
 }
@@ -324,6 +325,8 @@ def load_config() -> dict:
         cfg["config_warning"] = f"{exc}; the file was ignored"
         if isinstance(user, dict):
             _keep_the_stricter(cfg, user)
+            # the file still says what the person decided: no hint asks about a key they wrote (settings.py)
+            cfg["user_keys_ignored"] = sorted(k for k in user if k in _CONFIG_TYPES)
         else:
             # JSON that is no object cannot be read either (it may wrap a block): the same as invalid JSON
             cfg["rehydration"] = "block"
@@ -349,6 +352,8 @@ def load_config() -> dict:
             cfg["rehydration_fallback"] = True
     user = _old_region_key(user)
     cfg.update(user)
+    # a key the user wrote is a decision, a missing one is not (maisecrets/settings.py): both read the same value
+    cfg["user_keys"] = sorted(set(user) | set(cfg.pop("user_keys_ignored", [])))
     cfg["regions_from"] = "config.json" if "regions" in user else "default"
     env = os.environ
     backend = env.get("CLAUDE_PLUGIN_OPTION_BACKEND", "").strip()

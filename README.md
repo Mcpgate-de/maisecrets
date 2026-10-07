@@ -274,9 +274,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 25 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 27 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 82 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 87 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -443,6 +443,42 @@ no hook at all, silently. A guard that vanishes on an older client is worse
 than one without a settings dialog. At the first session start, and at every
 start in test mode, a notice names the active store, its path and where to
 change it. `python3 -m maisecrets.cli status` prints the same at any time.
+
+### Settings you decide
+
+`/maisecrets:settings` shows the settings that are yours to decide, each with
+its value, one line of meaning and its state: `default (not decided)`,
+`explicitly enabled`, `explicitly disabled` or `managed by policy`. A key that
+is missing from `config.json` is not decided; `false` written there is a
+decision, with the same effect. `--all` shows the advanced settings too.
+
+To change one, send the change as your own prompt, alone:
+
+```
+/maisecrets:settings ssh_consent on
+maisecrets: set ssh_consent on          (the same, and the form for Codex)
+```
+
+`on`, `off`, a choice the list names (`rehydration confirm`), or `default`,
+which removes your decision so that the setting reads the default again.
+The prompt hook writes `config.json` and stops the prompt; it does not reach
+the model. maisecrets changes a setting for nothing else: not for a prompt the
+client injected (a scheduled task, a loop wakeup), not for a subagent's report,
+and a Bash or PowerShell command that carries the change (a nested `codex exec`
+or `claude -p` that would type it) is refused. The AI can tell you about a
+setting and the prompt to send. A setting from a machine policy cannot be
+changed here. The limit: a program that runs as you can write the file itself,
+and maisecrets sees a command only as text (C22 in the threat model).
+
+**Hints.** maisecrets stays quiet until a case comes up that one of these
+settings is about. Then the AI gets one sentence about it, and mentions it
+once. For `ssh_consent` that case is the first ssh command that changes
+something on a host (`ssh web1 'sudo systemctl restart nginx'`; not `ssh web1
+uptime`; and only when the command succeeds: Claude Code reports a failed one
+through another event). A hint comes once, also when hooks run at the same
+time; if maisecrets cannot record it, it does not come at all. It does not come again after you decided, and
+it does not come again because time passed: only a real change of the
+feature brings it back, once. `"tips": false` turns hints off with the tips.
 
 ## Vault
 
@@ -744,8 +780,9 @@ A placeholder turns back into its value only here:
 An agent with your SSH keys can run any command on any host it reaches, also
 when no secret is in the command. Claude Code's own `permissions.ask:
 ["Bash(ssh:*)"]` matches only the start of a command, so `cd x && ssh …`,
-`bash -c "ssh …"` and `timeout 30 ssh …` pass it. With `"ssh_consent": true`
-in `~/.maisecrets/config.json` (a policy can set it; it is off by default),
+`bash -c "ssh …"` and `timeout 30 ssh …` pass it. With `ssh_consent` on (send
+`/maisecrets:settings ssh_consent on` as your prompt, see "Settings you decide";
+a policy can set it; it is off by default),
 maisecrets reads every ssh-family call (`ssh`, `scp`, `sftp`, `rsync` to a
 host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
 `timeout`, `nohup`, `env`, `sudo` and `perl -e 'alarm N; exec @ARGV'`:

@@ -759,6 +759,7 @@ def user_prompt(payload: dict) -> dict:
     if os.environ.get("MAISECRETS_TEST_FAULT") == "user-prompt-slow" and os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
         # tests only (tests/_isolate.py sets the second variable): the watchdog answers
         time.sleep(WATCHDOG_SECONDS["user-prompt"] + 3)
+    from . import settings as settings_mod
     cfg = load_config()
     prompt = payload.get("prompt", "")
     session = payload.get("session_id")
@@ -789,10 +790,24 @@ def user_prompt(payload: dict) -> dict:
 
     # the ssh consent sentence (#8): alone, with the code the refusal made, after the subagent report pass so a
     # report never grants. Blocked, so the sentence and its code never reach the model
-    grant = _GRANT_RE.match(prompt) if cfg.get("ssh_consent") else None
+    # a prompt the client injected (a scheduled task, a loop wakeup) can carry text the model chose: it grants and
+    # sets nothing (C21, C22)
+    typed = payload.get("source") in settings_mod.TYPED_SOURCES
+    grant = _GRANT_RE.match(prompt) if cfg.get("ssh_consent") and typed else None
     if cfg.get("ssh_consent") and not grant and session:
         from . import consent_store
         consent_store.drop_codes(session)    # the sentence counts only as the very next prompt (Codex review)
+    # a settings change the person typed (maisecrets/settings.py): the only way a setting changes. After the subagent
+    # report pass, so a report never changes one; blocked, so the prompt does not reach the model
+    change = settings_mod.parse_prompt(prompt)
+    if change:
+        reason = settings_mod.apply_typed(*change) if typed else (
+            "maisecrets: a settings change counts only when you type it as your prompt; this one came from the "
+            f"client ({payload.get('source')}), so nothing was changed.")
+        if client_of(payload) == "codex":
+            return {"decision": "block", "reason": reason}
+        return {"decision": "block", "reason": reason,
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
     if grant:
         from . import consent_store
         hosts = consent_store.grant_by_code(session or "", grant.group(1), grant.group(2))
@@ -1898,7 +1913,7 @@ def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: st
 
 _ARGS_END = "MAISECRETS_ARGS_END"
 _ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" "
-                           r"(?:audit|forget|guard|put --clipboard|report|shortcut) "
+                           r"(?:audit|forget|guard|put --clipboard|report|settings|shortcut) "
                            r"--args-stdin <<'" + _ARGS_END + r"'\n(.*)\n" + _ARGS_END + r"\n?\Z", re.S)
 
 
@@ -1944,6 +1959,11 @@ def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
 # opt-in (`ssh_consent: true`): every ssh-family call is classified (maisecrets/ssh_consent.py); a read runs,
 # a write needs the person's consent for its host (consent_store.py), a form the hook cannot read asks
 # each time, a short deny list is refused. Codex cannot ask: it refuses and names the sentence that grants.
+_SETTINGS_IN_A_COMMAND = ("maisecrets: this command carries a maisecrets settings change; only the person makes one, "
+                          "as their own prompt (/maisecrets:settings KEY VALUE). The command did not run. Tell the "
+                          "user the prompt to send.")
+_HOOK_ENTRY_TEXT_RE = re.compile(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
+                                 r"(?:session-start|user-prompt|pre-tool|post-tool|mod-prompt)\b", re.I)
 _GRANT_RE = re.compile(r"\A\s*maisecrets:\s*allow\s+ssh\s+(\S+)\s+(\d{6})\s*\Z")
 
 
@@ -2124,6 +2144,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                      "The command did not run.")
     ctxs = _shell_contexts(command)
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
+    from . import settings as settings_mod
+    if settings_mod.IN_A_COMMAND_RE.search(command):
+        return _deny(_SETTINGS_IN_A_COMMAND)
     # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line
     if cfg.get("ssh_consent") and re.search(r"allow\s+ssh\s+\S+\s+\d{6}", command):
         # the model saw the code in the refusal; a nested prompt (`codex exec resume …`) would type the sentence
@@ -2785,6 +2808,13 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
     refused = _store_refusal(command, windows_paths=True)
     if refused:
         return refused
+    from . import settings as settings_mod
+    if settings_mod.IN_A_COMMAND_RE.search(command):
+        return _deny(_SETTINGS_IN_A_COMMAND)
+    if _HOOK_ENTRY_TEXT_RE.search(command):
+        # PowerShell has no word parser here: any mention of a hook entry with its event is refused
+        return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "
+                     "The command did not run.")
     keys = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(k for k, _a, _b in find_refs(command)))
     if keys:
         return _deny(f"maisecrets: {keys} cannot be placed in a PowerShell command (maisecrets places values "
@@ -3386,16 +3416,60 @@ def _how_failed(exc: BaseException) -> str:
     return how
 
 
+def _ssh_hint(payload: dict) -> str | None:
+    """The ssh_consent hint (maisecrets/settings.py), the first time an ssh call that changes something runs while
+    the person has not decided. A read (`ssh host uptime`) is no case for it, and neither is a form the hook cannot
+    read: that class also holds a plain mention (`grep ssh README.md`). Not in a subagent: it has no conversation
+    with the person."""
+    if payload.get("tool_name") not in ("Bash", "PowerShell") or payload.get("agent_id"):
+        return None
+    command = (payload.get("tool_input") or {}).get("command") if isinstance(payload.get("tool_input"), dict) else None
+    if not isinstance(command, str):
+        return None
+    from . import settings, ssh_consent
+    if not ssh_consent._TOKEN_RE.search(command):
+        return None          # most commands: no parse, no file read
+    cfg = load_config()
+    if not settings.hint_due("ssh_consent", cfg):
+        return None
+    if ssh_consent.classify(command, _parse_for_consent).kind != "write":
+        return None
+    if not settings.claim_hint("ssh_consent"):
+        return None       # another hook gave it first, or the record cannot be written: no hint rather than many
+    return settings.HINTS["ssh_consent"]["codex" if client_of(payload) == "codex" else "claude"]
+
+
+def _with_hint(payload: dict, result: dict) -> dict:
+    """Add a hint to the answer of a PostToolUse without changing what the answer does."""
+    hint = _ssh_hint(payload)
+    if not hint:
+        return result
+    result = dict(result)
+    if result.get("decision") == "block":
+        # Codex: the reason replaces the output the model sees, so the hint goes after it
+        result["reason"] = f"{result.get('reason', '')}\n\n[{hint}]"
+        return result
+    hso = dict(result.get("hookSpecificOutput") or {"hookEventName": "PostToolUse"})
+    hso["additionalContext"] = f"{hso['additionalContext']}\n\n{hint}" if hso.get("additionalContext") else hint
+    result["hookSpecificOutput"] = hso
+    return result
+
+
 def _post_tool_guarded(payload: dict) -> dict:
     """Claude Code ignores exit 2 from PostToolUse: the raw output would reach the model. So a
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
     try:
-        return post_tool(payload)
+        result = post_tool(payload)
     except ConfigError as exc:
         return _fail_closed("post-tool", payload, f"configuration error: {exc}. Fix the file named there.", hint=False)
     except Exception as exc:  # noqa: BLE001
         _debug(f"post-tool: {type(exc).__name__}")
         return _failure("post-tool", payload, exc)
+    try:
+        return _with_hint(payload, result)
+    except Exception as exc:  # noqa: BLE001 - a hint that fails must not withhold the output
+        _debug(f"post-tool hint: {type(exc).__name__}")
+        return result
 
 
 HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post_tool_guarded}
