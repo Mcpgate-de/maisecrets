@@ -823,6 +823,8 @@ def user_prompt(payload: dict) -> dict:
                                                                       cfg.get("ssh_host_groups") or {}))
         else:
             hosts = None
+        if not hosts and session:
+            consent_store.drop_codes(session)    # a wrong sentence is another prompt: the code ends (codex review)
         reason = (f"maisecrets: writes over ssh to {', '.join(hosts)} run without asking for "
                   f"{consent_store.APPROVAL_SECONDS // 3600} hours in this session. This prompt was not sent to the "
                   "model; send your next request." if hosts else

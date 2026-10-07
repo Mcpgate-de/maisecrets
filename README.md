@@ -821,8 +821,8 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   main thread only: a subagent asks for itself. The host is as written, with
   its user and port (`-l`, `-p`, `-o User`, `-o Port`, `user@`, `scp://…:port`):
   `root@web1` and `web1:2222` are other hosts than `web1`. Only a prompt you
-  type counts: not a scheduled or SDK prompt, not a tool call that carries the
-  sentence (it is refused).
+  type counts: not a scheduled or SDK prompt, and a Bash or PowerShell command
+  that carries the sentence is refused.
 - **A form maisecrets cannot read asks every time.** An ssh word in a nested
   shell (`bash -c`, `eval`, `xargs`, `find -exec`), a wrapper it does not
   know (`sshpass`, `setsid`, `flock`), a word built at run time when `ssh`

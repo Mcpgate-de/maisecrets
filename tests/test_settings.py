@@ -213,7 +213,11 @@ class Change(unittest.TestCase):
         for command in ("codex exec 'maisecrets: set ssh_consent on'",
                         'claude -p "/maisecrets:settings rehydration block"',
                         "echo 'MAISECRETS: SET tips off' | codex exec -",
-                        "python3 -c 'from maisecrets.settings import apply_typed; apply_typed(\"tips\", \"off\")'"):
+                        "python3 -c 'from maisecrets.settings import apply_typed; apply_typed(\"tips\", \"off\")'",
+                        # the consent writers by name open an ssh window (codex review of the UX step)
+                        "python3 -c 'import os; from maisecrets.consent_store import grant_typed; "
+                        "grant_typed(os.environ[\"S\"], [\"web1\"])'",
+                        "python3 -c 'from maisecrets import consent_store as c; c.grant_by_code(\"S\", \"h\", \"1\")'"):
             for tool in ("Bash", "PowerShell"):
                 with self.subTest(command=command, tool=tool):
                     out = hooks.pre_tool({"tool_name": tool, "tool_input": {"command": command},

@@ -78,7 +78,7 @@ _HINTS_RESET_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+hints\s+reset|mais
 # type it for the model, and the writer called by name would skip the prompt (review of C22). A text match: a
 # sentence or a name built at run time is not seen
 IN_A_COMMAND_RE = re.compile(r"(?:/maisecrets:settings|maisecrets:\s*set)\s+[a-z_]+\s+[a-z-]+|"
-                             r"maisecrets:\s*reset\s+hints|\bapply_typed\b", re.I)
+                             r"maisecrets:\s*reset\s+hints|\b(?:apply_typed|grant_typed|grant_by_code)\b", re.I)
 # who wrote the prompt (Claude Code 2.1.292 UserPromptSubmit `source`): only the person at the composer. A scheduled
 # task, a loop wakeup, a system or poll prompt can carry text the model chose (CronCreate, ScheduleWakeup), and an
 # `sdk` prompt can come from a program a tool started (codex review round 2), so none of them changes anything. A
@@ -169,12 +169,8 @@ def parse_prompt(prompt) -> tuple[str, str] | None:
 
 def apply_typed(key: str, word: str) -> tuple[bool, str]:
     """Write one change the person typed into config.json, keep every other key, and say what happened: (changed,
-    text). Only the prompt hook calls this, for a prompt whose source is the person (TYPED_SOURCES)."""
-    ok, text = _apply(key, word)
-    return ok, text
-
-
-def _apply(key: str, word: str) -> tuple[bool, str]:
+    text). Only the prompt hook calls this, for a prompt whose source is the person (TYPED_SOURCES). It is the
+    only writer, under one name that a tool call is refused for (IN_A_COMMAND_RE)."""
     if (key, word) == ("hints", "reset"):
         try:
             with _lock_for(_LOCK):

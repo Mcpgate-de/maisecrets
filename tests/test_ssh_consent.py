@@ -353,6 +353,13 @@ class ConsentFlowTests(unittest.TestCase):
         with mock.patch.object(hooks, "load_config", return_value={**hooks.load_config(), **ON}):
             wrong = sentence.replace("db1", "db2")
             self.assertIn("not valid", hooks.user_prompt({"prompt": wrong, "session_id": "S1", **CODEX})["reason"])
+            self.assertIn("not valid", hooks.user_prompt({"prompt": sentence, "session_id": "S1", **CODEX})["reason"],
+                          "a wrong sentence was the next prompt: it ended the code (codex review)")
+            self.assertFalse(consent_store.covered("S1", None, ["db1"]))
+        out = _pre("ssh db1 reboot", client=CODEX)
+        sentence = re.search(r"maisecrets: allow ssh db1 \d{6}$", out["hookSpecificOutput"]["permissionDecisionReason"]
+                             ).group(0)
+        with mock.patch.object(hooks, "load_config", return_value={**hooks.load_config(), **ON}):
             got = hooks.user_prompt({"prompt": sentence, "session_id": "S1", **CODEX})
             self.assertEqual(got["decision"], "block", "the sentence never reaches the model")
             self.assertTrue(consent_store.covered("S1", None, ["db1"]))
