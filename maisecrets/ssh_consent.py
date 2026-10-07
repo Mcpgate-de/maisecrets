@@ -54,13 +54,19 @@ _RETARGET_O = re.compile(r"^(?:proxyjump|proxycommand|hostname|remotecommand|con
 # commands whose quoted arguments are data, never run: a mention of ssh there is no call (`grep "ssh" log`)
 _DATA_CMDS = {"grep", "egrep", "fgrep", "rg", "ag", "echo", "printf", "cut", "tr", "wc", "sort", "uniq", "head",
               "tail", "diff", "test", "[", "pgrep", "pkill"}
-# options that make a data command start a program (rg --pre ssh . host ran ssh; sort --compress-program likewise):
-# with one of them a data command is no data (Opus review of 0.6.7)
-_EXEC_OPTION = re.compile(r"(?:^|\s)(?:--pre(?:-glob)?|--compress-program|--use-compress-program)(?:[=\s]|$)")
+# the data commands with no option that starts a program; only in these is a quoted mention text. Not rg (--pre), ag
+# (--pager) or sort (--compress-program): a list of such options was never complete (codex review of 0.6.7)
+_TEXT_SAFE_CMDS = _DATA_CMDS - {"rg", "ag", "sort"}
+# other parts a text line may hold: they start no program and write nothing (cd x && grep "ssh" log)
+_LINE_SAFE_CMDS = _TEXT_SAFE_CMDS | {"cd", "ls", "cat", "sleep", "true", "false", "pwd", "date"}
 # the text fields of gh and glab subcommands that only post text: a quoted value of one of these flags that names ssh
 # is the text of an issue, not a call (0.6.6 asked for `gh issue create --body "… an ssh host …"`)
 _TEXT_FLAG = re.compile(r"(?:^|\s)(?:--body|-b|--title|-t|--description|-d|--message|-m|--notes|-n)[=\s]*$")
 _TEXT_SUBCOMMANDS = {"issue", "pr", "mr", "release"}
+_GIT_MESSAGE_FLAG = re.compile(r"(?:^|\s)(?:-m|--message)[=\s]*$")     # git commit -m "…", git tag -m "…"
+# outside quotes these start, feed or define a program. A $( or ` inside double quotes is plain context to
+# hooks._shell_contexts, so it is caught here too; a $VAR in double quotes runs nothing
+_LIVE_PLAIN = re.compile(r"[$`<>(){}\\]")
 # a heredoc to these is text, not a script: a commit message or a file that mentions ssh
 _HEREDOC_DATA = {"cat", "tee", "git", "gh", "glab", "grep", "echo", "printf", "wc", "head", "tail", "jq", "less"}
 # stderr or all output to /dev/null, or stderr to stdout: no file is written
@@ -514,16 +520,43 @@ def classify(command: str, parse: Parser) -> Verdict:
         return k - 1 if k > 0 else 0
 
     def gh_text_field(sg: dict, pos: int) -> bool:
-        """pos is inside the quoted value of a text flag of `gh|glab issue|pr|mr|release …`: the text of an issue."""
+        """pos is inside the quoted value of a text flag of `gh|glab issue|pr|mr|release …` or the message of
+        `git commit|tag -m`: the text of an issue or a commit."""
         words = sg.get("words") or []
+        if sg.get("cmd") == "git" and len(words) >= 2 and words[1] in ("commit", "tag"):
+            return bool(_GIT_MESSAGE_FLAG.search(command[sg["start"]:quoted_start(pos)]))
         if sg.get("cmd") not in ("gh", "glab") or len(words) < 2 or words[1] not in _TEXT_SUBCOMMANDS:
             return False
         return bool(_TEXT_FLAG.search(command[sg["start"]:quoted_start(pos)]))
 
+    def text_line() -> bool:
+        """The whole line can run nothing but text commands, so a quoted mention in it is text. Per part this was
+        not enough (Opus round 3): `gh issue create -b "ssh web1 reboot" || $_`, `$(echo "…")`, a function named
+        gh, /tmp/gh and `bash <(echo …)` ran the text. Each part is a text command written as itself (no path, no
+        variable, no wrapper, no assignment before it), and nothing outside single quotes starts a program."""
+        if not segs or any(cx not in ("", "sq", "dq", "comment") for cx in ctxs):
+            return False
+        plain = "".join(ch for ch, cx in zip(command, ctxs) if cx == "")
+        if _LIVE_PLAIN.search(_HARMLESS_REDIRECT.sub(" ", plain)):
+            return False
+        for sg in segs:
+            first = command[sg["start"]:sg["end"]].split(None, 1)
+            words = sg.get("words") or []
+            if not first or first[0] != sg.get("cmd"):
+                return False
+            if sg["cmd"] in _LINE_SAFE_CMDS:
+                continue
+            if sg["cmd"] in ("gh", "glab") and len(words) >= 2 and words[1] in _TEXT_SUBCOMMANDS:
+                continue
+            if sg["cmd"] == "git" and len(words) >= 2 and words[1] in ("commit", "tag"):
+                continue
+            return False
+        return True
+
     def data_only(sg: dict) -> bool:
         text = command[sg["start"]:sg["end"]]
         unq = "".join(ch if cx == "" else " " for ch, cx in zip(text, ctxs[sg["start"]:sg["end"]]))
-        return sg.get("cmd") in _DATA_CMDS and not piped_on(sg) and ">" not in unq and not _EXEC_OPTION.search(text)
+        return sg.get("cmd") in _DATA_CMDS and not piped_on(sg) and ">" not in _HARMLESS_REDIRECT.sub(" ", unq)
 
     # the airbag: when a command names an ssh-family call, every part of it that is not plain data is checked,
     # quotes removed (`echo '… mkfs …'` alone is data; `echo … | bash` is not). A narrower scan of "remote fields"
@@ -556,13 +589,14 @@ def classify(command: str, parse: Parser) -> Verdict:
         if ctx == "comment":
             continue
         seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
-        if seg and ctx in ("sq", "dq") and data_only(seg):
+        if seg and ctx in ("sq", "dq") and data_only(seg) and seg.get("cmd") in _TEXT_SAFE_CMDS and text_line():
             continue                         # quoted text a data command prints: echo "use ssh" (no > file, no pipe)
-        if seg and ctx in ("sq", "dq") and gh_text_field(seg, m.start()):
+        if seg and ctx in ("sq", "dq") and gh_text_field(seg, m.start()) and text_line():
             continue                         # the quoted body of an issue: gh issue create --body "… ssh …"
-        if seg and seg.get("cmd") == "git" and m.group(0) in ("ssh", "ssh://") \
+        if seg and seg.get("cmd") == "git" and command[m.start():m.start() + 6].lower() == "ssh://" \
                 and not re.search(r"(?:^|\s)-c(?:\s|$)|!", command[seg["start"]:seg["end"]]):
-            continue                         # git over ssh is out of scope (C21); -c and a ! alias run commands
+            continue          # an ssh:// URL: git over ssh is out of scope (C21). A plain ssh word in git can be
+            #                   a command git runs (filter-branch, rebase --exec); -c and ! run commands too
         if m.group(0) == ".ssh/config" and seg and not re.search(r">\s*\S*$", command[seg["start"]:m.start()]) \
                 and seg.get("cmd") in _DATA_CMDS | {"cat", "less", "ls", "stat"}:
             continue                         # reading the config; a redirect into it is a change

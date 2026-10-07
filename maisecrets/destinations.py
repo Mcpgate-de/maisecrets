@@ -23,6 +23,7 @@ as the threshold (scripts/measure_binding.py over 90 days of one user's transcri
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import time
@@ -59,6 +60,7 @@ MAX_PER_SECRET = 50       # a call the model writes chooses a label; the record 
 
 def _well_formed(d) -> bool:
     return isinstance(d, dict) and all(isinstance(d.get(k), t) and not isinstance(d.get(k), bool)
+                                       and not (isinstance(d.get(k), float) and not math.isfinite(d[k]))
                                        for k, t in _FIELDS.items())
 
 
@@ -70,6 +72,8 @@ def _clean(data: dict) -> dict:
         if not (isinstance(key, str) and isinstance(rec, dict) and isinstance(rec.get("seen", {}), dict)):
             continue
         seen = {i: d for i, d in rec.get("seen", {}).items() if isinstance(i, str) and _well_formed(d)}
+        if len(seen) > MAX_PER_SECRET:
+            seen = dict(sorted(seen.items(), key=lambda kv: kv[1]["last"])[-MAX_PER_SECRET:])
         kept[key] = {"seen": seen, "allowed": rec.get("allowed") if isinstance(rec.get("allowed"), dict) else {}}
     data["secrets"] = kept
     return data
@@ -82,7 +86,7 @@ def _load(strict: bool = False) -> dict:
         data = json.loads(_path().read_text(encoding="utf-8"))
     except FileNotFoundError:
         data = {}
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         if strict:
             raise Corrupt(STORE)
         data = {}
@@ -108,12 +112,11 @@ def _load_for_write() -> dict:
         return _load(strict=True)
     except Corrupt:
         aside = _path().with_name(STORE + ".corrupt")
-        if aside.exists():
-            aside = _path().with_name(f"{STORE}.corrupt.{int(time.time())}")
-        try:
-            os.replace(_path(), aside)
-        except OSError:
-            pass
+        n = 0
+        while aside.exists():
+            n += 1
+            aside = _path().with_name(f"{STORE}.corrupt.{int(time.time())}.{n}")
+        os.replace(_path(), aside)   # an OSError ends this note: a file not moved aside is never written over
         return _load()
 
 
@@ -226,7 +229,7 @@ def mark_interactive(session: str) -> None:
                 return
             data["interactive"] = (data["interactive"] + [session])[-_MAX_SESSIONS:]
             _save(data)
-    except (OSError, LockTimeout, ValueError):
+    except (OSError, LockTimeout, ValueError, RecursionError):
         pass
 
 
@@ -292,7 +295,7 @@ def wipe() -> bool:
     """Delete the whole record under its lock (a writer that holds it would write it back after an unlink)."""
     try:
         with _LOCK:
-            for p in (_path(), _path().with_name(STORE + ".corrupt")):
+            for p in [_path(), *HOME.glob(STORE + ".corrupt*")]:
                 try:
                     p.unlink()
                 except FileNotFoundError:

@@ -250,6 +250,110 @@ class Bounds(unittest.TestCase):
         self.assertIn("MCP gw · y_write · <hidden>", {d["label"] for d in _seen(ref).values()})
 
 
+class RoundThree(unittest.TestCase):
+    """The repairs of review round 3 (codex, Opus), each against the code it names."""
+
+    def setUp(self):
+        _reset()
+
+    def _break(self, agent):
+        destinations.mark_interactive("S1")
+        for _ in range(destinations.ESTABLISHED_USES):
+            destinations.note(["K1"], "S1", None, [("network", "api.example.com")])
+        destinations.note(["K1"], "S1", agent, [("network", "other.example.net")])
+        return json.loads(STORE.read_text())["pending_hint"]
+
+    def test_note_alone_keeps_a_subagent_break_from_the_hint(self):
+        self.assertEqual(self._break("sub1"), {}, "a break in a subagent waits for no hint")
+        _reset()
+        self.assertIn("S1", self._break(None), "the premise: the same break in the main thread does")
+
+    def test_only_a_prompt_the_person_typed_marks_the_session(self):
+        hooks.user_prompt({"prompt": "go on", "session_id": "S7", **CLAUDE, "source": "sdk"})
+        self.assertFalse(STORE.exists() and "S7" in json.loads(STORE.read_text())["interactive"])
+        hooks.user_prompt({"prompt": "go on", "session_id": "S7", **CLAUDE, "source": "user"})
+        self.assertIn("S7", json.loads(STORE.read_text())["interactive"])
+
+    def test_with_the_setting_off_a_prompt_writes_no_record(self):
+        _reset(secret_destinations="off")
+        _typed("S6")
+        self.assertFalse(STORE.exists())
+
+    def test_a_deeply_nested_file_never_blocks_a_prompt_or_a_call(self):
+        STORE.write_text("[" * 100_000)
+        out = hooks.user_prompt({"prompt": "go on", "session_id": "S5", **CLAUDE})
+        self.assertNotEqual(out.get("decision"), "block", out)
+        from maisecrets import cli
+        with mock.patch("sys.stdout"):
+            self.assertEqual(cli.main(["list"]), 0, "the list reads past it")
+        ref = _secret()
+        self.assertIn("updatedInput", json.dumps(_pre("Bash", {"command": _curl(ref, "api.example.com")})))
+        copies = list(Path(HOME).glob("destinations.json.corrupt*"))
+        self.assertEqual(len(copies), 1, "the nested file is damage: it is moved aside, and the record goes on")
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com"})
+        for p in copies:
+            os.unlink(p)
+
+    def test_a_flag_or_a_number_that_is_no_number_is_no_record(self):
+        good = {"kind": "network", "label": "a", "uses": 1, "first": 1.0, "last": 1.0, "day": "2026-01-01",
+                "day_uses": 1, "max_day_uses": 1}
+        STORE.write_text(json.dumps({"secrets": {"K1": {"seen": {
+            "network:a": good, "network:b": {**good, "label": "b", "uses": True},
+            "network:c": {**good, "label": "c", "last": float("inf")},
+            "network:d": {**good, "label": "d", "first": float("nan")}}}}}))
+        self.assertEqual(set(destinations.of("K1")["seen"]), {"network:a"})
+
+    def test_a_record_read_from_disk_keeps_the_cap(self):
+        good = {"kind": "network", "label": "a", "uses": 1, "first": 1.0, "day": "2026-01-01", "day_uses": 1,
+                "max_day_uses": 1}
+        seen = {f"network:h{i}": {**good, "label": f"h{i}", "last": float(i)} for i in range(60)}
+        STORE.write_text(json.dumps({"secrets": {"K1": {"seen": seen}}}))
+        kept = destinations.of("K1")["seen"]
+        self.assertEqual(len(kept), destinations.MAX_PER_SECRET)
+        self.assertIn("network:h59", kept)
+        self.assertNotIn("network:h0", kept, "the oldest go")
+
+    def test_a_damaged_file_that_cannot_be_moved_aside_is_left_alone(self):
+        STORE.write_text("{damaged")
+        real = os.replace
+
+        def replace(src, dst):           # only the move aside fails; the atomic write of the store still works
+            if "corrupt" in str(dst):
+                raise OSError("busy")
+            return real(src, dst)
+        with mock.patch("maisecrets.destinations.os.replace", side_effect=replace):
+            self.assertFalse(destinations.note(["K1"], "S1", None, [("network", "api.example.com")]))
+        self.assertEqual(STORE.read_text(), "{damaged")
+        os.unlink(STORE)
+
+    def test_an_aside_copy_is_never_overwritten_and_wipe_takes_them_all(self):
+        for text in ("{one", "{two", "{three"):
+            STORE.write_text(text)
+            destinations.note(["K1"], "S1", None, [("network", "api.example.com")])
+        copies = sorted(p.read_text() for p in Path(HOME).glob("destinations.json.corrupt*"))
+        self.assertEqual(copies, ["{one", "{three", "{two"], "three damaged files in one second, three copies")
+        self.assertTrue(destinations.wipe())
+        self.assertEqual(list(Path(HOME).glob("destinations.json*")), [])
+
+    def test_wipe_everything_reports_a_record_it_could_not_delete(self):
+        with mock.patch.object(destinations, "wipe", return_value=False):
+            from maisecrets import vault as vault_mod
+            _, problems = vault_mod.wipe_everything(load_config())
+        self.assertIn("destinations.json not deleted", problems)
+
+    def test_forget_of_an_unknown_key_still_takes_an_orphan_record(self):
+        destinations.note(["SECRET_orphan"], "S1", None, [("network", "api.example.com")])
+        self.assertEqual(Vault(load_config()).forget("SECRET_orphan"), "unknown")
+        self.assertEqual(destinations.of("SECRET_orphan")["seen"], {})
+
+    def test_a_lock_file_that_cannot_be_opened_leaves_no_lock_counted(self):
+        with mock.patch("maisecrets.vault.os.open", side_effect=OSError("no")):
+            self.assertFalse(destinations.note(["K1"], "S1", None, [("network", "api.example.com")]))
+        self.assertEqual(destinations._LOCK.depth, 0, "a later call must take the lock again")
+        self.assertTrue(destinations.note(["K1"], "S1", None, [("network", "api.example.com")]) is not None)
+        self.assertEqual(set(destinations.of("K1")["seen"]), {"network:api.example.com"})
+
+
 class Hint(unittest.TestCase):
     def setUp(self):
         _reset()

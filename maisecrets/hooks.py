@@ -794,9 +794,12 @@ def user_prompt(payload: dict) -> dict:
     # a prompt the client injected (a scheduled task, a loop wakeup) can carry text the model chose: it grants and
     # sets nothing (C21, C22)
     typed = payload.get("source") in settings_mod.TYPED_SOURCES
-    if typed and session and not payload.get("agent_id"):
-        from . import destinations
-        destinations.mark_interactive(session)
+    if typed and session and not payload.get("agent_id") and cfg.get("secret_destinations", "observe") == "observe":
+        try:
+            from . import destinations
+            destinations.mark_interactive(session)
+        except Exception:                # observing never stops a prompt (Opus round 3: a nested file blocked it)
+            pass
     grant = _GRANT_RE.match(prompt) if cfg.get("ssh_consent") and typed else None
     if cfg.get("ssh_consent") and not grant and session:
         from . import consent_store

@@ -193,8 +193,12 @@ class _Lock:
         self.depth += 1
         if self.depth > 1:
             return self
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        except BaseException:
+            self.depth -= 1                  # no lock was taken: a later enter must try again (codex review)
+            raise
         deadline = time.time() + self.LOCK_DEADLINE
         try:
             while True:
@@ -1276,6 +1280,8 @@ class Vault:
         (the entry then stays, so nothing looks deleted that is not)."""
         meta = self._index["entries"].get(key)
         if meta is None:
+            from . import destinations
+            self.destinations_kept = not destinations.forget([key])   # a record a failed forget left behind
             return "unknown"
         if not meta.get("purged"):
             try:
@@ -1433,7 +1439,8 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
             except (RuntimeError, OSError):
                 problems.append(f"store item {key} not deleted")
         from . import destinations
-        destinations.wipe()                # under its lock: a writer holding it would write the record back
+        if not destinations.wipe():        # under its lock: a writer holding it would write the record back
+            problems.append("destinations.json not deleted")
         for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced"):
             try:
                 (HOME / name).unlink()

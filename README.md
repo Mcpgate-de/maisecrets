@@ -876,13 +876,16 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   (`rsync`, `tar -C`, `ln -s` …), so only reads are listed (`cat`, `ls`,
   `grep`, `head`, `diff` …), and a redirect into `.ss…` asks too. Write and
   Edit on `~/.ssh` ask as well.
-- **The word ssh in quoted text runs freely:** a quoted argument of a command
-  that only prints or searches (`echo "use ssh"`, `grep "ssh" log`), when no
-  redirect, no pipe and no option that starts a program (`rg --pre`, `sort
-  --compress-program`) is in that command; and the quoted text field of a
-  `gh` or `glab` issue, pr, mr or release (`gh issue create --body "… ssh …"`,
-  `-t`, `-d`, `-m`, `--notes`). Anywhere else, also unquoted
-  (`grep ssh README.md`), the hook cannot tell text from a call, and it asks.
+- **The word ssh in quoted text runs freely, if the whole line runs nothing
+  else:** a quoted argument of a command that only prints or searches
+  (`echo "use ssh"`, `grep "ssh" log`; not `rg`, `ag` or `sort`, which can
+  start a program), the quoted text field of a `gh` or `glab` issue, pr, mr
+  or release (`gh issue create --body "… ssh …"`), and the message of
+  `git commit -m` or `git tag -m`. Every part of the line must be one of these
+  commands, written as itself (no path, no variable, no wrapper), and outside
+  quotes the line has no `$`, backtick, redirect, bracket or brace. Anywhere
+  else, also unquoted (`grep ssh README.md`) or in a heredoc, the hook cannot
+  tell text from a call, and it asks.
 - **A short deny list is always refused:** `mkfs` or `wipefs` on a device,
   `dd` to a device, `rm -rf /`, a fork bomb, anywhere in a command that names
   an ssh-family call (quotes removed; as a command word, not as a file name;

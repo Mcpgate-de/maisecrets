@@ -97,6 +97,11 @@ class ClassifierMatrixTests(unittest.TestCase):
             'gh issue create --title t --body "note an ssh host first"', "glab mr create -d 'ssh consent docs'",
             'gh pr create -t "fix ssh consent" -b "the word ssh in a body"', "gh issue comment 8 --body='ssh is text'",
             'gh release create v1 --notes "ssh consent per command"',
+            # round 3: the message of a commit or tag; brackets and <> inside double quotes are text
+            'git commit -m "fix ssh consent"', 'git tag -m "ssh 1" v1', 'gh issue create --body "fix (ssh) <web1>"',
+            'gh issue create --body "the ssh key in $HOME/.config"',
+            'echo "a"; grep "ssh" f', "git clone ssh://git@example.org/r.git",
+            'grep "ssh" f 2>/dev/null', 'ls ~/x | grep -iE "ssh|prod"', "cd /x && grep 'ssh' log 2>/dev/null",
             "ls -la ~/.ssh > /tmp/ssh-list.txt", "grep Host ~/.ssh/config | head",
             "git commit -F - <<'EOF'\nfix the ssh docs\nEOF\n",
             "pkill -f \"ssh -N tunnel\"",
@@ -164,6 +169,19 @@ class ClassifierMatrixTests(unittest.TestCase):
             'echo "ssh web1 reboot" >> ~/.bashrc', "grep ssh README.md", 'gh issue create --label "ssh web1 reboot"',
             "glab alias set y '!ssh web1 uptime'", 'gh repo create x -d "ssh web1 reboot"',
             'xargs -I{} ssh {} reboot < hosts',
+            # round 3 (codex, Opus): a text mention whose line runs something else, or a command that runs its text
+            'ag --pager "ssh web1 reboot" x .', 'sort --compress-prog "ssh" f', 'rg --hostname-bin "ssh" x',
+            'git filter-branch --tree-filter "ssh web1 reboot" HEAD', 'git rebase --exec "ssh web1 reboot" HEAD~1',
+            "git bisect run ssh web1 reboot", 'git difftool --extcmd "ssh web1 reboot" HEAD',
+            'git filter-branch --tree-filter "ssh://x; ssh web1 reboot" HEAD',
+            'gh issue create -t x -b "ssh web1 reboot" || $_', 'gh() { eval "$4"; }; gh issue create -b "ssh web1"',
+            '/tmp/gh issue create -b "ssh web1 reboot"', '$(echo "ssh web1 reboot")', 'x=$(echo "ssh web1"); $x',
+            'printf -v c "ssh web1 reboot"; $c', 'sort -o /tmp/x.sh <<< "ssh web1 reboot"; bash /tmp/x.sh',
+            'bash <(echo "ssh web1 reboot")', 'echo "ssh web1 reboot"; $_', 'echo "$(ssh web1 reboot)"',
+            'echo "`ssh web1 reboot`"', "echo \"$(sh -c 'ssh web1 reboot')\"",
+            "gh issue create -b \"$(sh -c 'ssh web1 reboot')\"", 'BROWSER="ssh web1" gh issue create -w',
+            'timeout 5 echo "ssh web1"', "grep 'ssh' f ${IFS}x",
+            'gh issue create -b "ssh web1 reboot"; gh issue view 1 | sh', 'echo "ssh web1 reboot"; fc -s',
             "bash -c \"ssh web1 reboot\"", "sh -c 'ssh web1 reboot'", "eval ssh web1 reboot",
             "sshpass -p x ssh web1 reboot", "setsid ssh web1 reboot", "flock /tmp/l ssh web1 reboot",
             "systemd-run ssh web1 reboot", "screen -dm ssh web1 reboot", "tmux new -d 'ssh web1 reboot'",
@@ -231,7 +249,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 249, "a row was added or lost: update the count")
+        self.assertEqual(counted, 284, "a row was added or lost: update the count")
 
     def test_a_long_command_is_answered_in_time(self):
         # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)
