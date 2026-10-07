@@ -58,6 +58,7 @@ DEFAULT_CONFIG = {
     "ssh_approval": "per-command",   # under rehydration "confirm": "per-session" is one confirm per value and session
     "ssh_consent": False,            # every ssh-family command: a read runs, a write asks once per host (#8)
     "ssh_host_groups": {},           # {"group": ["host", …]}: one ssh consent covers the whole group
+    "ssh_autonomous_hosts": [],      # hosts (or group names) where the AI writes over ssh without asking, always
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
     "pass_agent_reports": True,      # the report of a subagent of this session is model text: not blocked (hooks.py)
@@ -81,7 +82,7 @@ _CONFIG_TYPES = {
     "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
-    "ssh_consent": bool, "ssh_host_groups": dict,
+    "ssh_consent": bool, "ssh_host_groups": dict, "ssh_autonomous_hosts": list,
     "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool,
 }
 

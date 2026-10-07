@@ -17,7 +17,7 @@ from .vault import (CONFIG, DEFAULT_CONFIG, HOME, ConfigError, LockTimeout, _che
                     load_config)
 
 # Every key of the config is in exactly one class (a test holds it): a new key without one is a test failure.
-DISCOVERABLE = ("ssh_consent", "rehydration")
+DISCOVERABLE = ("ssh_consent", "ssh_autonomous_hosts", "rehydration")
 ADVANCED = ("ssh_host_groups", "ssh_approval", "resolve_in_files", "ssh_via_sandbox", "block_at_mentions",
             "rewrite_prompts", "scrub_transcript", "strip_hidden_characters", "regions", "ttl_seconds",
             "renew_on_use", "tips", "shortcut", "guard", "pass_agent_reports", "gateway_servers")
@@ -25,7 +25,8 @@ INTERNAL = ("backend", "allow_plaintext_store", "report_url", "max_ttl_seconds",
             "max_keys_per_session", "max_resolves_per_hour", "keep_purged_days", "audit_max_lines", "pii_regions")
 
 TITLE = {
-    "ssh_consent": "SSH consent", "rehydration": "Rehydration", "ssh_host_groups": "SSH host groups",
+    "ssh_consent": "SSH consent", "ssh_autonomous_hosts": "Autonomous hosts",
+    "rehydration": "Rehydration", "ssh_host_groups": "SSH host groups",
     "ssh_approval": "SSH approval", "resolve_in_files": "Values in files", "ssh_via_sandbox": "Values over ssh",
     "block_at_mentions": "Block @file mentions", "rewrite_prompts": "Rewrite prompts",
     "scrub_transcript": "Clean the transcript", "strip_hidden_characters": "Remove invisible characters",
@@ -36,6 +37,7 @@ TITLE = {
 }
 MEANING = {
     "ssh_consent": "Ask before each ssh command that changes something on a host.",
+    "ssh_autonomous_hosts": "Hosts where the AI may change things over ssh without asking, in every session.",
     "rehydration": "How a stored value goes into a tool call.",
     "ssh_host_groups": "Hosts that one typed ssh window covers together.",
     "ssh_approval": "Under rehydration confirm: ask per command, or once per value and session for ssh.",
@@ -59,7 +61,7 @@ CHOICE_TEXT = {
                     ("block", "never put a stored value into a tool call")),
     "ssh_approval": (("per-command", "ask for each command"), ("per-session", "ask once per value and session")),
 }
-GROUPS = (("Protection", ("ssh_consent",)), ("Using stored values", ("rehydration",)))
+GROUPS = (("Protection", ("ssh_consent", "ssh_autonomous_hosts")), ("Using stored values", ("rehydration",)))
 ADVANCED_GROUPS = (("Stored values", ("ttl_seconds", "renew_on_use", "resolve_in_files", "gateway_servers")),
                    ("ssh", ("ssh_host_groups", "ssh_approval", "ssh_via_sandbox")),
                    ("Prompts and tool output", ("block_at_mentions", "rewrite_prompts", "scrub_transcript",
@@ -73,11 +75,16 @@ _BOOL_KEYS = tuple(k for k in DISCOVERABLE + ADVANCED if isinstance(DEFAULT_CONF
 
 # the whole prompt, nothing else: a sentence inside a longer prompt is text for the model, not an order
 _PROMPT_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+([a-z_]+)\s+([a-z-]+)\s*\Z", re.I)
+# the list of autonomous hosts: add or remove one host (as the ssh call writes it: user@host:port) or group name
+_HOST = r"([\w.@:\[\]-]+)"
+_AUTONOMOUS_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+ssh_autonomous_hosts\s+(add|remove)|maisecrets:\s*ssh\s+"
+                            r"(autonomous|ask))\s+" + _HOST + r"\s*\Z", re.I)
 _HINTS_RESET_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+hints\s+reset|maisecrets:\s*reset\s+hints)\s*\Z", re.I)
 # the same sentence anywhere in a tool call: a nested client (`codex exec 'maisecrets: set …'`, `claude -p`) would
 # type it for the model, and the writer called by name would skip the prompt (review of C22). A text match: a
 # sentence or a name built at run time is not seen
 IN_A_COMMAND_RE = re.compile(r"(?:/maisecrets:settings|maisecrets:\s*set)\s+[a-z_]+\s+[a-z-]+|"
+                             r"maisecrets:\s*ssh\s+(?:autonomous|ask)\s|"
                              r"maisecrets:\s*reset\s+hints|\b(?:apply_typed|grant_typed|grant_by_code)\b", re.I)
 # who wrote the prompt (Claude Code 2.1.292 UserPromptSubmit `source`): only the person at the composer. A scheduled
 # task, a loop wakeup, a system or poll prompt can carry text the model chose (CronCreate, ScheduleWakeup), and an
@@ -102,6 +109,8 @@ def _shown(value, key: str = "") -> str:
         return hours.get("default", "?") + (f" ({rest})" if rest else "")
     if isinstance(value, bool):
         return "on" if value else "off"
+    if key == "ssh_autonomous_hosts" and isinstance(value, list):
+        return ", ".join(str(h) for h in value) if value else "none"
     if isinstance(value, (dict, list)):
         return json.dumps(value, separators=(",", ":"))[:40] if value else "none"
     return str(value)
@@ -114,6 +123,13 @@ def _card(key: str, cfg: dict) -> list[str]:
         lines.append(f"    {mode:<12}{text}")
     if key in (cfg.get("policy_keys") or []):
         lines.append("    An administrator's policy sets it; it cannot be changed here.")
+    elif key == "ssh_autonomous_hosts":
+        lines.append("    Add: /maisecrets:settings ssh_autonomous_hosts add HOST   (as the ssh call writes it, "
+                     "user@host:port)")
+        if value:
+            lines.append(f"    Remove: /maisecrets:settings ssh_autonomous_hosts remove {value[0]}")
+        if not cfg.get("ssh_consent"):
+            lines.append("    It matters only while SSH consent is on.")
     elif key in _BOOL_KEYS:
         lines.append(f"    Turn {'off' if value else 'on'}: /maisecrets:settings {key} {'off' if value else 'on'}")
     elif key in _CHOICES:
@@ -163,6 +179,10 @@ def parse_prompt(prompt) -> tuple[str, str] | None:
         return None
     if _HINTS_RESET_RE.match(prompt):
         return ("hints", "reset")
+    m = _AUTONOMOUS_RE.match(prompt)
+    if m:
+        add = (m.group(1) or m.group(2)).lower() in ("add", "autonomous")
+        return ("ssh_autonomous_hosts", ("add:" if add else "remove:") + m.group(3))
     m = _PROMPT_RE.match(prompt)
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
@@ -182,11 +202,15 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
     cfg = load_config()
     if key in (cfg.get("policy_keys") or []):
         return False, f"maisecrets: {key} is managed by a machine policy; it cannot be changed here."
-    if key not in _BOOL_KEYS and key not in _CHOICES:
+    hosts_change = key == "ssh_autonomous_hosts" and (word == "default" or word.startswith(("add:", "remove:")))
+    if key not in _BOOL_KEYS and key not in _CHOICES and not hosts_change:
+        if key == "ssh_autonomous_hosts":
+            return False, ("maisecrets: send /maisecrets:settings ssh_autonomous_hosts add HOST (or remove HOST), "
+                           "or in Codex: maisecrets: ssh autonomous HOST (or ask HOST).")
         if key in MEANING:
             return False, f"maisecrets: {key} is not changed by a prompt; edit {CONFIG} by hand."
         return False, f"maisecrets: {key} is no setting this command changes. /maisecrets:settings --all lists them."
-    if word != "default":
+    if word != "default" and not hosts_change:
         if key in _BOOL_KEYS and word not in _BOOL_WORDS:
             return False, f"maisecrets: {key} takes on, off or default."
         if key in _CHOICES and word not in _CHOICES[key]:
@@ -214,6 +238,10 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
                 return False, f"maisecrets: {exc}; fix it first. Nothing was changed."
             if word == "default":
                 user.pop(key, None)
+            elif hosts_change:
+                verb, host = word.split(":", 1)
+                hosts = [h for h in user.get(key, []) if h != host]
+                user[key] = hosts + [host] if verb == "add" else hosts
             else:
                 user[key] = _BOOL_WORDS[word] if key in _BOOL_KEYS else word
             atomic_write(target, json.dumps(user, indent=2) + "\n")

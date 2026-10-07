@@ -2038,6 +2038,22 @@ def _expand_groups(hosts: list[str], groups: dict) -> list[str]:
     return sorted(out)
 
 
+def _autonomous(hosts: list[str], cfg: dict) -> bool:
+    """Every host of the call is one the person named in ssh_autonomous_hosts (a host as written, with user and
+    port, or the name of a group in ssh_host_groups): the AI may write there without asking, in every session. A
+    form the hook cannot read is never covered, and the deny list still holds."""
+    allowed = set()
+    groups = cfg.get("ssh_host_groups") or {}
+    for entry in cfg.get("ssh_autonomous_hosts") or []:
+        if not isinstance(entry, str):
+            continue
+        allowed.add(entry)
+        members = groups.get(entry) if isinstance(groups, dict) else None
+        if isinstance(members, list):
+            allowed.update(m for m in members if isinstance(m, str))
+    return bool(hosts) and all(h in allowed for h in hosts)
+
+
 def _ssh_consent(payload: dict, cfg: dict, command: str) -> dict | None:
     """None when consent is off or the command reads only; else the call's kind, hosts and whether an
     unexpired consent of this session and agent covers them (a form the hook cannot read never is)."""
@@ -2048,7 +2064,8 @@ def _ssh_consent(payload: dict, cfg: dict, command: str) -> dict | None:
     if v.kind in ("none", "read"):
         return None
     hosts = _expand_groups(v.hosts, cfg.get("ssh_host_groups") or {})
-    covered = v.kind == "write" and consent_store.covered(payload.get("session_id"), payload.get("agent_id"), hosts)
+    covered = v.kind == "write" and (_autonomous(v.hosts, cfg) or
+                                     consent_store.covered(payload.get("session_id"), payload.get("agent_id"), hosts))
     return {"kind": v.kind, "hosts": hosts, "named": v.hosts, "why": v.why, "covered": covered}
 
 
@@ -2063,7 +2080,8 @@ def _consent_text(c: dict) -> str:
     # the first sentence says what a yes means: this command only. The window is a separate, typed act
     return (f"maisecrets: approve this ssh write to {named}? A yes allows only this command ({c['why']}). "
             f"To let writes to {named}{group} run without asking for {consent_store.APPROVAL_SECONDS // 3600} hours "
-            f"in this session, send this as your own prompt: maisecrets: allow ssh {c['named'][0]}. "
+            f"in this session, send this as your own prompt: maisecrets: allow ssh {c['named'][0]}. For a host where "
+            f"the AI may always work without asking: maisecrets: ssh autonomous {c['named'][0]}. "
             "The deny list (mkfs, dd to a device, rm -rf /) always stays on.")
 
 

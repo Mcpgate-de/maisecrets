@@ -305,6 +305,44 @@ class ConsentFlowTests(unittest.TestCase):
                 self.assertEqual(_decision(_pre(denied)), "deny", "the deny list holds inside the window")
         self.assertEqual(_decision(_pre("bash -c 'ssh web1 reboot'")), "ask", "an unread form is never covered")
 
+    def test_an_autonomous_host_never_asks_and_every_other_host_does(self):
+        cfg = {**ON, "ssh_autonomous_hosts": ["ops1", "root@lab:2323", "web"]}
+        self.assertEqual(_pre("ssh ops1 'sudo systemctl restart nginx'", cfg=cfg), {}, "in every session, no question")
+        self.assertEqual(_pre("ssh ops1 reboot", cfg=cfg, session_id="S9"), {})
+        self.assertEqual(_pre("ssh -p 2323 root@lab 'docker restart app'", cfg=cfg), {}, "user and port as written")
+        self.assertEqual(_pre("ssh web2 reboot", cfg=cfg), {}, "a group name covers its members")
+        self.assertEqual(_decision(_pre("ssh lab reboot", cfg=cfg)), "ask", "another user or port is another host")
+        self.assertEqual(_decision(_pre("ssh prod1 reboot", cfg=cfg)), "ask", "a host not on the list asks")
+        self.assertEqual(_decision(_pre("scp f ops1:/tmp/ && ssh prod1 reboot", cfg=cfg)), "ask",
+                         "every host of the call must be on the list")
+        self.assertEqual(_decision(_pre("ssh ops1 'mkfs /dev/sda'", cfg=cfg)), "deny", "the deny list holds")
+        self.assertEqual(_decision(_pre("bash -c 'ssh ops1 reboot'", cfg=cfg)), "ask", "an unread form is not covered")
+        self.assertEqual(_pre("ssh ops1 reboot", cfg={**cfg, "ssh_consent": False}), {})
+
+    def test_only_a_typed_prompt_changes_the_autonomous_hosts(self):
+        from maisecrets import settings
+        Path(HOME, "config.json").write_text(TEST_CONFIG)
+        with mock.patch.object(hooks, "load_config", return_value={**hooks.load_config(), **ON}):
+            out = hooks.user_prompt({"prompt": "/maisecrets:settings ssh_autonomous_hosts add root@lab:2323",
+                                     "session_id": "S1", **CLAUDE})
+            self.assertNotIn("decision", out, "the slash command runs on to show the card")
+            hooks.user_prompt({"prompt": "maisecrets: ssh autonomous ops1", "session_id": "S1", **CODEX})
+            hooks.user_prompt({"prompt": "maisecrets: ssh autonomous evil1", "session_id": "S1",
+                               "source": "schedule_wakeup", **CLAUDE})
+        self.assertEqual(json.loads(Path(HOME, "config.json").read_text())["ssh_autonomous_hosts"],
+                         ["root@lab:2323", "ops1"], "a scheduled prompt adds nothing")
+        with mock.patch.object(hooks, "load_config", return_value={**hooks.load_config(), **ON}):
+            hooks.user_prompt({"prompt": "maisecrets: ssh ask ops1", "session_id": "S1", **CLAUDE})
+        self.assertEqual(json.loads(Path(HOME, "config.json").read_text())["ssh_autonomous_hosts"], ["root@lab:2323"])
+        for command in ("codex exec 'maisecrets: ssh autonomous evil1'",
+                        "claude -p '/maisecrets:settings ssh_autonomous_hosts add evil1'"):
+            with self.subTest(command):
+                self.assertEqual(_decision(_pre(command)), "deny")
+        self.assertIn("maisecrets: ssh autonomous web1", _pre("ssh web1 reboot")["hookSpecificOutput"]
+                      ["permissionDecisionReason"], "the question names the sentence")
+        Path(HOME, "config.json").write_text(TEST_CONFIG)
+        self.assertIsNone(settings.parse_prompt("please maisecrets: ssh autonomous ops1"))
+
     def test_the_sentence_counts_only_typed_by_the_person(self):
         with mock.patch.object(hooks, "load_config", return_value={**hooks.load_config(), **ON}):
             for extra in ({"source": "schedule_wakeup"}, {"source": "sdk"}, {"source": "loop_wakeup"}):

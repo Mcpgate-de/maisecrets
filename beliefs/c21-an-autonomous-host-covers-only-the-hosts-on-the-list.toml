@@ -1,0 +1,10 @@
+# c21-an-autonomous-host-covers-only-the-hosts-on-the-list: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c21-an-autonomous-host-covers-only-the-hosts-on-the-list"
+control = "C21"
+statement = "With ssh_consent on, a write runs without a question only when every host of the call is in ssh_autonomous_hosts (as written, or a named group); any other host still asks, and the deny list holds."
+runner = ["tests/test_ssh_consent.py::ConsentFlowTests::test_an_autonomous_host_never_asks_and_every_other_host_does"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    return bool(hosts) and all(h in allowed for h in hosts)"
+replace = "    return bool(hosts) and any(h in allowed for h in hosts)"

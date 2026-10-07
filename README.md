@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 28 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 89 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 90 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -823,6 +823,14 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   `root@web1` and `web1:2222` are other hosts than `web1`. Only a prompt you
   type counts: not a scheduled or SDK prompt, and a Bash or PowerShell command
   that carries the sentence is refused.
+- **Hosts where the AI may work on its own.** Your own lab or ops servers can
+  be autonomous: writes there never ask, in any session, while every other
+  host asks for each write. Send `/maisecrets:settings ssh_autonomous_hosts add
+  ops1` (or `maisecrets: ssh autonomous ops1`), and `remove ops1` (or
+  `maisecrets: ssh ask ops1`) to take one off. The host is as the ssh call
+  writes it (`root@lab:2323` is not `lab`), or the name of a group in
+  `ssh_host_groups`; every host of a call must be on the list. Only your own
+  prompt changes the list, and the deny list holds there too.
 - **A form maisecrets cannot read asks every time.** An ssh word in a nested
   shell (`bash -c`, `eval`, `xargs`, `find -exec`), a wrapper it does not
   know (`sshpass`, `setsid`, `flock`), a word built at run time when `ssh`
