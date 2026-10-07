@@ -62,8 +62,9 @@ _USER_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 # a command word (at the start, after a separator or a wrapper), never part of a file name or an option value
 _CMD_POS = r"(?:^|[\s;|&(`=])"
 _DENY = [
-    ("mkfs", re.compile(_CMD_POS + r"mkfs(?:\.\w+)?\s+(?:-\S+\s+)*/dev/")),
-    ("wipefs", re.compile(_CMD_POS + r"wipefs\s+(?:-\S+\s+)*/dev/")),
+    # the command word, then a device anywhere in the same simple command (options may take arguments: -t ext4)
+    ("mkfs", re.compile(_CMD_POS + r"mkfs(?:\.\w+)?\s[^\n;|&]*?/dev/")),
+    ("wipefs", re.compile(_CMD_POS + r"wipefs\s[^\n;|&]*?/dev/")),
     # /dev/null and the like are no device: `dd if=/dev/vda of=/dev/null` is a read benchmark (corpus, 2026-10-07)
     ("dd to a device", re.compile(_CMD_POS + r"dd\s[^\n;|&]*\bof=/dev/(?!(?:null|zero|stdout|stderr)\b)")),
     ("rm -rf /", re.compile(_CMD_POS + r"rm\s+(?:-{1,2}[\w-]+\s+)*(?:/|/\*|--no-preserve-root)(?:\s|$|;)")),
@@ -313,9 +314,11 @@ def _ssh_call(words: list[str], fed: bool, parse: Parser, unquoted: str = "") ->
 # options that take an argument, per copy tool; the ones that send the connection elsewhere or run a program
 _COPY_ARG = {"scp": set("cDFiJloPSX"), "sftp": set("BbcDFiJloPRSs"), "sshfs": set("opF"), "ssh-copy-id": set("iFJop"),
              "rsync": set()}
-_WRITES_RE = re.compile(r"(?<![<\d&-])>(?![&=])|>>|\btee\b|\bsort\b[^\n;|&]*\s-o|\buniq\b|\bcp\b|\bmv\b|"
-                        r"\binstall\b|\bln\b|\bdd\b|\bsed\b[^\n;|&]*\s-i|\bperl\b|\bpython\d*\b|\bnode\b|\bruby\b|"
-                        r"\bawk\b|\btruncate\b|\bchmod\b|\bchown\b|\brm\b|\bcd\b|\bpushd\b")
+# rsync's daemon syntax: `::` right after [user@]host, not inside the remote path (codex review of the repair)
+_DAEMON_RE = re.compile(r"^(?:[^@/:]+@)?[A-Za-z0-9][A-Za-z0-9._-]*::")
+# local commands that only read: a mention of ~/.ssh in any other command, or a redirect into it, asks
+_READ_LOCAL = {"cat", "less", "more", "head", "tail", "ls", "grep", "egrep", "fgrep", "rg", "stat", "wc", "file",
+               "diff", "cmp", "md5sum", "sha256sum", "shasum"}
 def _mosh_program(word: str) -> bool:
     """mosh --ssh/--server/--client, also abbreviated: mosh's Getopt::Long takes --se=… for --server (Gate B)."""
     name = word.split("=")[0]
@@ -382,7 +385,7 @@ def _copy_call(cmd: str, words: list[str]) -> "tuple[list[str], str]":
             return [], "a bracketed (IPv6) host this hook does not read"
         users, ports = list(opt.get("users", [])), list(opt.get("ports", []))
         m = _URI_RE.match(w)
-        daemon = bool(m and w.startswith("rsync://")) or (cmd == "rsync" and "::" in w)
+        daemon = bool(m and w.startswith("rsync://")) or (cmd == "rsync" and bool(_DAEMON_RE.match(w)))
         if cmd == "rsync" and not daemon:
             ports = []                       # --port is the daemon's; host:path goes over ssh, port 22 (Gate B)
         if m:
@@ -484,18 +487,35 @@ def classify(command: str, parse: Parser) -> Verdict:
         k = segs.index(sg)
         return k + 1 < len(segs) and bool(segs[k + 1].get("piped"))
 
-    # the airbag: when a command names an ssh-family call anywhere, the whole command, quotes removed, is checked.
-    # A narrower scan of the "remote fields" missed forms twice (Gate B rounds 1 and 2): ssh -A host 'mkfs …',
-    # mosh host mkfs …; the deny patterns match a command word only, not a file name or an option value
+    def data_only(sg: dict) -> bool:
+        text = command[sg["start"]:sg["end"]]
+        unq = "".join(ch if cx == "" else " " for ch, cx in zip(text, ctxs[sg["start"]:sg["end"]]))
+        return sg.get("cmd") in _DATA_CMDS and not piped_on(sg) and ">" not in unq
+
+    # the airbag: when a command names an ssh-family call, every part of it that is not plain data is checked,
+    # quotes removed (`echo '… mkfs …'` alone is data; `echo … | bash` is not). A narrower scan of "remote fields"
+    # missed forms twice (Gate B rounds 1 and 2); the patterns match a command word on a device
     if _TOKEN_RE.search(command):
-        hit = _deny_hit(command.replace('"', "").replace("'", "").replace("\\", ""))
-        if hit:
-            calls.append(Call("ssh", "", "deny", f"the command matches {hit}"))
-    # a change that can reach ~/.ssh (its config retargets every alias): any spelling of .ss… next to a construct
-    # that writes asks; a read alone (cat, grep, ls) does not (Gate B round 2: $HOME, sort -o, conf"ig", ln -s)
+        for sg in (segs or [{"start": 0, "end": len(command), "cmd": ""}]):
+            if data_only(sg):
+                continue
+            hit = _deny_hit(command[sg["start"]:sg["end"]].replace('"', "").replace("'", "").replace("\\", ""))
+            if hit:
+                calls.append(Call("ssh", "", "deny", f"the command matches {hit}"))
+                break
+    # a change that can reach ~/.ssh (its config retargets every alias): a mention of .ss… outside an ssh, autossh or
+    # mosh call is allowed only in a command that only reads, and no redirect may point into it. A list of writers
+    # was never complete (rsync, tar -C, patch …; codex review of the repair), so the reads are listed instead
+    for m in re.finditer(r"\.ss", command):
+        sg = next((x for x in segs if x["start"] <= m.start() < x["end"]), None)
+        if sg and sg.get("cmd") in ("ssh", "autossh", "mosh") and any(a <= m.start() < b for a, b in spans):
+            continue                         # an option value (-i ~/.ssh/key) or a path on the remote side
+        if not sg or sg.get("cmd") not in _READ_LOCAL:
+            calls.append(Call("ssh", "", "unknown", "a command that can change ~/.ssh, where ssh looks up hosts"))
+            break
     flat = command.replace('"', "").replace("'", "").replace("\\", "")
-    if re.search(r"\.ss", flat) and _WRITES_RE.search(flat):
-        calls.append(Call("ssh", "", "unknown", "a command that can change ~/.ssh, which decides where ssh connects"))
+    if re.search(r"(?:\d?>>?|&>>?|>\|)\s*\S*\.ss", flat):
+        calls.append(Call("ssh", "", "unknown", "a write into ~/.ssh, which decides where ssh connects"))
     fed_by_heredoc = any(c.kind != "unknown" for c in calls) and any(
         sg.get("heredoc") and sg.get("cmd") in SSH_CMDS for sg in segs)
     # a path into ~/.ssh that resolves to its config only after normalising (`~/.ssh/sub/../config`): a change there

@@ -100,7 +100,9 @@ class ClassifierMatrixTests(unittest.TestCase):
         "none": [
             "ls -la", "git status", "rsync -a ./a/ ./b/", "ls ~/.ssh", "grep \"ssh\" /var/log/auth.log",
             "echo 'use ssh keys'", "git push ssh://git@example.org/x.git main", "grep Host ~/.ssh/config",
-            "cat ~/.ssh/config", "ls -la ~/.ssh", "git commit -F - <<'EOF'\nfix the ssh docs\nEOF\n",
+            "cat ~/.ssh/config", "ls -la ~/.ssh", "echo 'ssh web1 mkfs.ext4 /dev/sda'",
+            "ls -la ~/.ssh > /tmp/ssh-list.txt", "grep Host ~/.ssh/config | head",
+            "git commit -F - <<'EOF'\nfix the ssh docs\nEOF\n",
             "pkill -f \"ssh -N tunnel\"",
             "# ssh web1 reboot\nls",
         ],
@@ -108,7 +110,8 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ssh web1 uptime", "ssh web1 'df -h'", "ssh web1 'systemctl is-active nginx'", "ssh web1 -- uptime",
             "ssh -p 2222 -l deploy web1 'free -m'", "ssh web1 'ls -la /var/log 2>&1'",
             "ssh web1 'du -sh /srv 2>/dev/null'", "ssh web1 'wc -l /var/log/syslog'", "cd /tmp && ssh web1 uptime",
-            "timeout 30 ssh web1 uptime", "ssh web1 uptime < /dev/null", "ssh web1 uptime 2>/dev/null",
+            "timeout 30 ssh web1 uptime", "ssh -i ~/.ssh/key web1 uptime", "ssh web1 uptime < /dev/null",
+            "ssh web1 uptime 2>/dev/null",
             "perl -e 'alarm 45; exec @ARGV' ssh web1 uptime",
             "ssh web1 'uname -a; df -h'",
         ],
@@ -186,6 +189,9 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ln -s ~/.ssh d; printf x >> d/config", "cd ~/.ss? && printf x >> config",
             "D=~/.ssh; printf x >> $D/config", "sshfs -F /tmp/evil web1:/ /mnt", "mosh --se=/x web1",
             "ssh -P prod web1 uptime", "ssh -o Tag=prod web1 uptime",
+            # codex round 3: writers into ~/.ssh outside any list of writers; a copy from a host into it
+            "rsync /tmp/evil ~/.ssh/config", "tar -xf a.tar -C ~/.ssh", "scp web1:x ~/.ssh/config",
+            "cat /tmp/evil > ~/.ssh/config", "grep x /tmp/keys >> ~/.ssh/authorized_keys",
         ],
         "deny": [
             "ssh web1 'mkfs.ext4 /dev/sda1'", "ssh web1 'dd if=/dev/zero of=/dev/sda bs=1M'", "ssh web1 'rm -rf /'",
@@ -196,6 +202,9 @@ class ClassifierMatrixTests(unittest.TestCase):
             # Gate B round 2: a forward, a jump, autossh or mosh without -- must not skip the airbag
             "ssh -A web1 'mkfs.ext4 /dev/sda'", "ssh -L 9:x:9 web1 'rm -rf /'", "mosh web1 mkfs.ext4 /dev/sda",
             "ssh -J jump web1 'rm -rf /'", "autossh -M 0 web1 'rm -rf /'",
+            # options with an argument before the device (codex round 3); data piped into a shell is no data
+            "ssh web1 'mkfs -t ext4 /dev/sda'", "ssh web1 'wipefs --output UUID /dev/sda'",
+            "ssh web1 'mkfs.ext4 -L data /dev/sda'", "echo 'ssh web1 mkfs.ext4 /dev/sda' | bash",
         ],
     }
 
@@ -206,7 +215,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 197, "a row was added or lost: update the count")
+        self.assertEqual(counted, 210, "a row was added or lost: update the count")
 
     def test_the_approval_key_carries_user_and_port(self):
         for command, host in (("ssh root@web1 -p 2222 uptime", "root@web1:2222"),
@@ -231,6 +240,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                               ("rsync --port 8873 a rsync://web1/module", "web1:8873"),
                               # --port is the daemon's: host:path goes over ssh on port 22 (Gate B round 2)
                               ("rsync --port=2222 /x web1:/y", "web1"),
+                              ("rsync --port=8873 /tmp/a web1:/tmp/a::b", "web1"),
                               # after `ssh -- host` the rest is the remote command, not options (Gate B round 2)
                               ("ssh -- web1 -l root uptime", "web1")):
             with self.subTest(command):
@@ -287,7 +297,9 @@ class ConsentFlowTests(unittest.TestCase):
                        # with consent on, any command that does not only print it (Gate B round 2)
                        "python3 -c 'import os; os.system(\"P/hooks/run.sh user-prompt < p.json\")'",
                        "perl -e 'system(\"run.sh user-prompt\")'", "echo 'run.sh user-prompt' | bash",
-                       "R=P/hooks/run.sh; $R user-prompt"):
+                       "R=P/hooks/run.sh; $R user-prompt",
+                       "printf '%s\\n' 'hooks/run.sh user-prompt < p.json' > /tmp/x; bash /tmp/x",
+                       "echo 'hooks/run.sh user-prompt'; true"):
             with self.subTest(nested):
                 self.assertEqual(_decision(_pre(nested)), "deny")
         # the client's own PostToolUse of the asked call is no proof either: it runs, and nothing is covered

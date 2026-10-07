@@ -781,14 +781,16 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   HostName`, `-o RemoteCommand`), `GIT_SSH_COMMAND`, `git -c core.sshCommand`,
   `RSYNC_RSH`, `DOCKER_HOST=ssh://`, the own ssh options of `sshfs` (also
   `-F`), `mosh` (also abbreviated) and `rsync -e`, `ssh -P` (a tag that
-  selects a block of your ssh config), and any command that names `.ss…` and
-  also writes (a redirect, `tee`, `cp`, `mv`, `ln`, `sort -o`, `sed -i`, an
-  interpreter …): a change to `~/.ssh` can send an approved alias elsewhere.
-  Write and Edit on `~/.ssh` ask too. A read of it (`cat`, `grep`, `ls`) does
-  not.
+  selects a block of your ssh config), and any mention of `.ss…` outside an
+  ssh call in a command that does not only read: a change to `~/.ssh` can send
+  an approved alias elsewhere, and a list of writers is never complete
+  (`rsync`, `tar -C`, `ln -s` …), so only reads are listed (`cat`, `ls`,
+  `grep`, `head`, `diff` …), and a redirect into `.ss…` asks too. Write and
+  Edit on `~/.ssh` ask as well.
 - **A short deny list is always refused:** `mkfs` or `wipefs` on a device,
   `dd` to a device, `rm -rf /`, a fork bomb, anywhere in a command that names
-  an ssh-family call (quotes removed; as a command word, not as a file name).
+  an ssh-family call (quotes removed; as a command word, not as a file name;
+  not in plain text that a lone `echo` only prints).
   It is an airbag, not the protection.
 - **Codex** cannot ask. It refuses and names a sentence with a code, for
   example `maisecrets: allow ssh web1 123456`. Typed alone as your very next

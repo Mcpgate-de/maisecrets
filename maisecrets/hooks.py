@@ -1973,19 +1973,25 @@ def _calls_a_hook_entry(command: str, broad: bool = False) -> bool:
         seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
         if seg and seg.get("cmd") in shells:
             return True
-        if broad:
-            k = segs.index(seg) if seg else -1
-            piped_on = seg is not None and k + 1 < len(segs) and bool(segs[k + 1].get("piped"))
-            if not seg or seg.get("cmd") not in printers or piped_on:
-                return True
+        if broad and not _only_prints(command, ctxs, segs, seg, printers):
+            return True
     if broad and re.search(r"\b(?:session-start|user-prompt|pre-tool|post-tool|mod-prompt)\b", command):
         # the entry and the event in different words (R=…/run.sh; $R user-prompt): any mention of an entry outside
         # a command that only prints it counts
         for m in re.finditer(r"run\.sh|run\.cmd|dispatch\.py", command):
             seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
-            if not seg or seg.get("cmd") not in printers:
+            if not _only_prints(command, ctxs, segs, seg, printers):
                 return True
     return False
+
+
+def _only_prints(command: str, ctxs: list[str], segs: list[dict], seg: dict | None, printers: set) -> bool:
+    """The whole command is one printing command with no pipe and no redirect: its text reaches nobody's shell.
+    `printf … > /tmp/x; bash /tmp/x` wrote it to a file a later part runs (codex review of the repair)."""
+    if not seg or len(segs) != 1 or seg.get("cmd") not in printers:
+        return False
+    unquoted = "".join(ch if cx == "" else " " for ch, cx in zip(command, ctxs))
+    return not re.search(r"[<>|]", unquoted)
 
 
 def _parse_for_consent(text: str):
