@@ -69,23 +69,28 @@ def _load(path: str) -> dict:
 
 
 def _switched_off(cwd: str) -> bool:
-    """maisecrets disabled in any settings Claude Code reads: user, managed, or a project's own."""
-    files = [os.path.join(_claude_dir(), "settings.json"), MANAGED.get(sys.platform, "")]
+    """maisecrets disabled in the settings Claude Code reads: user, a project's own, managed. Each plugin key takes
+    the value of the settings that win (user, then project, then project local, then managed), and maisecrets is
+    off only when every maisecrets key that is set is false. One key false beside another true is a second copy
+    switched off, not maisecrets: `maisecrets@anthropic-plugin-directory: false` with `maisecrets@synced: true`
+    kept the guard silent while the synced copy did not load (field report, 2026-10-07)."""
+    project: list[str] = []
     # the project's own settings: from cwd up to the project root (a .git) or the home directory
     d = os.path.abspath(cwd) if cwd else ""
     stop = os.path.expanduser("~")
     while d:
-        files += [os.path.join(d, ".claude", "settings.json"), os.path.join(d, ".claude", "settings.local.json")]
+        project[:0] = [os.path.join(d, ".claude", "settings.json"), os.path.join(d, ".claude", "settings.local.json")]
         parent = os.path.dirname(d)
         # a submodule has a .git file, not a folder: its superproject's settings count too
         if parent == d or d == stop or os.path.isdir(os.path.join(d, ".git")):
             break
         d = parent
-    for f in files:
+    effective: dict = {}
+    for f in [os.path.join(_claude_dir(), "settings.json"), *project, MANAGED.get(sys.platform, "")]:
         plugins = _load(f).get("enabledPlugins") if f else None
-        if isinstance(plugins, dict) and any("maisecrets" in k and v is False for k, v in plugins.items()):
-            return True
-    return False
+        if isinstance(plugins, dict):
+            effective.update({k: v for k, v in plugins.items() if "maisecrets" in k and isinstance(v, bool)})
+    return bool(effective) and not any(effective.values())
 
 
 def _account() -> str:

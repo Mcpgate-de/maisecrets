@@ -167,6 +167,31 @@ class ExpectedTests(_Env):
             json.dumps({"plugins": {"maisecrets@maisecrets": [{}]}}))
         self.assertFalse(guard.expected())
 
+    def test_a_second_copy_switched_off_is_not_maisecrets_switched_off(self):
+        # the directory copy off, the synced copy on: maisecrets is meant to run, so the guard watches it
+        # (field report, 2026-10-07: the guard stayed silent and a session without maisecrets let a@b.com through)
+        self.installed("synced")
+        self.account(synced=True)
+        (self.claude / "settings.json").write_text(json.dumps({"enabledPlugins": {
+            "maisecrets@anthropic-plugin-directory": False, "maisecrets@synced": True}}))
+        self.assertTrue(guard.expected())
+        (self.claude / "settings.json").write_text(json.dumps({"enabledPlugins": {
+            "maisecrets@anthropic-plugin-directory": False, "maisecrets@synced": False}}))
+        self.assertFalse(guard.expected(), "every copy off")
+
+    def test_a_project_switch_wins_over_the_user_switch(self):
+        self.installed("synced")
+        self.account(synced=True)
+        (self.claude / "settings.json").write_text(json.dumps({"enabledPlugins": {"maisecrets@synced": True}}))
+        project = Path(tempfile.mkdtemp(prefix="maisecrets-project-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(project, ignore_errors=True))
+        (project / ".claude").mkdir()
+        (project / ".claude" / "settings.json").write_text(json.dumps({"enabledPlugins": {"maisecrets@synced": False}}))
+        self.assertFalse(guard.expected(str(project)))
+        (project / ".claude" / "settings.local.json").write_text(
+            json.dumps({"enabledPlugins": {"maisecrets@synced": True}}))
+        self.assertTrue(guard.expected(str(project)), "local wins over the project file")
+
     def test_a_project_that_switches_maisecrets_off_is_left_alone(self):
         self.installed("always")
         project = Path(tempfile.mkdtemp(prefix="maisecrets-project-"))

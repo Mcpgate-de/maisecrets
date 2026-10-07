@@ -1,0 +1,10 @@
+# c13-a-second-copy-switched-off-keeps-the-guard-on: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-a-second-copy-switched-off-keeps-the-guard-on"
+control = "C13"
+statement = "The guard counts maisecrets as switched off only when every maisecrets plugin key that the settings set is false, by the precedence of user, project, local and managed settings; a second copy switched off beside one that is on keeps the guard watching."
+runner = ["tests/test_guard.py::ExpectedTests::test_a_second_copy_switched_off_is_not_maisecrets_switched_off"]
+
+[proof]
+file = "hooks/guard.py"
+find = "    return bool(effective) and not any(effective.values())"
+replace = "    return any(v is False for v in effective.values())"
