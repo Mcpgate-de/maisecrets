@@ -127,3 +127,14 @@ def grant_by_code(session: str, host: str, code: str) -> list[str] | None:
         data["approved"].setdefault(rec["who"], {}).update({h: until for h in rec["hosts"]})
         _save(data)
     return rec["hosts"]
+
+
+def drop_codes(session: str) -> None:
+    """A prompt that is not the sentence ends the open codes of its session: the refusal says "the next prompt"."""
+    data = _load()
+    if not any(v.get("who", "").startswith(session + "|") for v in data["codes"].values()):
+        return
+    with _lock_for(HOME / ".ssh-consent.lock"):
+        data = _load()
+        data["codes"] = {k: v for k, v in data["codes"].items() if not v.get("who", "").startswith(session + "|")}
+        _save(data)

@@ -7,10 +7,10 @@ It reads the Bash calls in Claude Code transcripts, classifies each one that nam
 and replays the consents per session: a write asks once per host (or group of hosts), a form the hook cannot read
 asks every time. It prints counts and reasons only: no host, no command, no value. A reality check, not a gate.
 
-Measured on 2026-10-06 over the maintainer's transcripts (this script, default directory: 292 sessions with ssh,
-4079 calls): write 83.9 %, unknown 11.8 %, none 3.7 %, read 0.5 %; questions per session median 1, 90th percentile
-4, at most 149, 833 in all. The sessions that work on maisecrets itself are in that count; their commands name ssh
-in test cases. Without them (116 sessions, 3582 calls): questions per session median 2, 90th percentile 8, at most 48.
+Measured on 2026-10-07 over the maintainer's transcripts (this script, default directory: 296 sessions with ssh,
+4155 calls): write 82.8 %, unknown 12.4 %, none 4.6 %, read 0.2 %; questions per session median 1, 90th percentile
+4, at most 150, 863 in all. The sessions that work on maisecrets itself are in that count; their commands name ssh
+in test cases. Without them (117 sessions, 3644 calls): questions per session median 2, 90th percentile 10, at most 48.
 Real ops commands almost always use sudo or docker on the remote side, so they are writes by design: the consent
 per host carries them, not the read list.
 """

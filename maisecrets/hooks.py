@@ -790,6 +790,9 @@ def user_prompt(payload: dict) -> dict:
     # the ssh consent sentence (#8): alone, with the code the refusal made, after the subagent report pass so a
     # report never grants. Blocked, so the sentence and its code never reach the model
     grant = _GRANT_RE.match(prompt) if cfg.get("ssh_consent") else None
+    if cfg.get("ssh_consent") and not grant and session:
+        from . import consent_store
+        consent_store.drop_codes(session)    # the sentence counts only as the very next prompt (Codex review)
     if grant:
         from . import consent_store
         hosts = consent_store.grant_by_code(session or "", grant.group(1), grant.group(2))
@@ -862,11 +865,7 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
                                       r"|MAISECRETS_HOME"),
     ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"
                            r"|(?<![\w-])resolve\s+\S+\s+--grant\b|cmd_resolve|\.redeem\("),
-    ("the ssh approval store", r"ssh-approvals|ssh_approval|ssh-consent|consent_store"),
-    # a hook entry called by the agent with a payload it wrote: a forged PostToolUse or prompt could confirm
-    # a consent or store values under another session (plan review of #8, 2026-10-06)
-    ("a maisecrets hook entry", r"(?<![\w-])(?:dispatch\.py|run\.sh|run\.cmd)[\"']?\s+[\"']?"
-                                r"(?:session-start|user-prompt|pre-tool|post-tool)\b"),
+    ("the ssh approval store", r"ssh-approvals|ssh_approval|ssh-consent\.json"),
     # the mod's question stores values and scrubs a transcript by session id: for the mod, not the agent
     ("the mod's question", r"(?<![\w-])(?:dispatch\.py|run\.sh|run\.cmd)[\"']?\s+[\"']?mod-prompt\b"),
     # the guard outside the plugin folder: `--off` in its refusal is for the person, not the agent
@@ -1926,9 +1925,6 @@ def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
     runs where Git Bash is missing, and the /maisecrets commands run through Bash: its reason says so."""
     matched = _store_read_match(command, windows_paths)
     also = _NEEDS_GIT_BASH if windows_paths else ""
-    if matched == "a maisecrets hook entry":
-        return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "
-                     "The command did not run.")
     if matched == "the maisecrets guard":
         # not the store: the person switches the guard off, and says so to the agent (live session, 2026-09-29)
         return _deny("maisecrets: this command touches the maisecrets guard, which only the person switches off "
@@ -1949,6 +1945,21 @@ def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
 # a write needs the person's consent for its host (consent_store.py), a form the hook cannot read asks
 # each time, a short deny list is refused. Codex cannot ask: it refuses and names the sentence that grants.
 _GRANT_RE = re.compile(r"\A\s*maisecrets:\s*allow\s+ssh\s+(\S+)\s+(\d{6})\s*\Z")
+
+
+_HOOK_ENTRIES = {"session-start", "user-prompt", "pre-tool", "post-tool", "mod-prompt"}
+
+
+def _calls_a_hook_entry(command: str) -> bool:
+    """A command word that runs a maisecrets hook entry with an event: the agent would hand the hook a payload it
+    wrote, a forged PostToolUse or prompt (plan review of #8, 2026-10-06). Read from the parsed words, so a mention
+    in quotes (`echo "… run.sh post-tool"`) is no call (Codex review)."""
+    for sg in _segments(command, _shell_contexts(command)):
+        words = sg.get("words") or []
+        for k, w in enumerate(words[:-1]):
+            if os.path.basename(w) in ("run.sh", "run.cmd", "dispatch.py") and words[k + 1] in _HOOK_ENTRIES:
+                return True
+    return False
 
 
 def _parse_for_consent(text: str):
@@ -2072,6 +2083,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     refused = _store_refusal(command)
     if refused:
         return refused
+    if _calls_a_hook_entry(command):
+        return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "
+                     "The command did not run.")
     ctxs = _shell_contexts(command)
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
     # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line

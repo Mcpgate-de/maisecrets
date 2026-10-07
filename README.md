@@ -750,14 +750,19 @@ maisecrets reads every ssh-family call (`ssh`, `scp`, `sftp`, `rsync` to a
 host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
 `timeout`, `nohup`, `env`, `sudo` and `perl -e 'alarm N; exec @ARGV'`:
 
-- **A read runs.** A remote command from a short list with named options
-  (`uptime`, `df -h`, `free`, `ps aux`, `cat`/`head`/`tail -n` of a literal
-  absolute path, `grep` with named options, `systemctl status`, `journalctl
-  -u … -n …`), with no expansion, no redirect except `2>&1` and `>/dev/null`,
-  and no sensitive path (`/etc/shadow`, `.env`, `id_*`, `*.pem`, `/proc`,
-  `/root` …). Its output reaches the model, and the output redaction applies.
+- **A read runs.** A remote command that prints only metadata about the host,
+  from a short list with named options (`uptime`, `df -h`, `free`, `uname`,
+  `ls`, `du`, `wc` of a literal absolute path, `systemctl is-active`), with no
+  expansion and no redirect except `2>&1` and `>/dev/null`. The content of a
+  file, a log or a process list (`cat`, `grep`, `journalctl`, `ps`,
+  `systemctl status`) is a write: it can carry a credential. Paths like
+  `/etc/shadow`, `.env`, `id_*`, `*.pem`, `/proc` or `/root` are never a read;
+  that check is a heuristic, not a guarantee.
 - **A write asks once per host.** Any other remote command, a login shell,
-  `sudo`, `docker`, a copy, or local data on stdin. If you allow it, writes to
+  `sudo`, `docker`, a copy, a port forward or tunnel (`-L`, `-R`, `-D`, `-w`),
+  or local data on stdin. The consent is for the host as written, with its
+  user and port (`-l`, `-p`, `-o User`, `-o Port`, `user@`, `scp://…:port`):
+  `root@web1` and `web1:2222` are other hosts than `web1`. If you allow it, writes to
   that host (and the hosts of its group in `"ssh_host_groups": {"web":
   ["web1", "web2"]}`) run without a question for 8 hours, in that session and
   for that agent only: a subagent asks for itself. The asked command first
@@ -774,15 +779,15 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
 - **A short deny list is always refused:** `mkfs`, `wipefs`, `dd` to a
   device, `rm -rf /`, a fork bomb. It is an airbag, not the protection.
 - **Codex** cannot ask. It refuses and names a sentence with a code, for
-  example `maisecrets: allow ssh web1 123456`. Typed alone as your next
+  example `maisecrets: allow ssh web1 123456`. Typed alone as your very next
   prompt within 10 minutes, it allows writes to that host for 8 hours; the
-  prompt does not reach the model.
+  prompt does not reach the model. Any other prompt ends the code.
 
 Measured on the maintainer's transcripts with `scripts/measure_ssh_consent.py`
 (2026-10-06): real ops commands use `sudo` or `docker` on the remote side
-almost always, so about 9 in 10 are writes, and the consent per host carries
-them. Without the sessions that work on maisecrets itself: 116 sessions with
-ssh, a median of 2 questions per session, 8 at the 90th percentile.
+almost always, so most are writes, and the consent per host carries them.
+Without the sessions that work on maisecrets itself: 117 sessions with ssh, a
+median of 2 questions per session, 10 at the 90th percentile.
 
 Limits: maisecrets sees only the command text. A script file, an alias or a
 variable that holds `ssh` and was set in an earlier command is not seen. The
