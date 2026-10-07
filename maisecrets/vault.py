@@ -239,10 +239,17 @@ class ConfigError(RuntimeError):
     """A config value of the wrong type; the message names the key, never a value."""
 
 
+_CONFIG_CHOICES = {"secret_destinations": ("observe", "off")}
+
+
 def _check_types(cfg: dict, source: str) -> None:
     for key, want in _CONFIG_TYPES.items():
         if key in cfg and (not isinstance(cfg[key], want) or (want is int and isinstance(cfg[key], bool))):
             raise ConfigError(f"{source}: {key} has the wrong type")
+    for key, choices in _CONFIG_CHOICES.items():
+        # "obesrve" read as "not observe" and silently stopped the record (codex review of 0.6.7)
+        if key in cfg and cfg[key] not in choices:
+            raise ConfigError(f"{source}: {key} must be one of {', '.join(choices)}")
     ttl = cfg.get("ttl_seconds")
     if isinstance(ttl, dict) and not all(isinstance(v, int) for v in ttl.values()):
         raise ConfigError(f"{source}: ttl_seconds values must be integers")
@@ -1281,7 +1288,8 @@ class Vault:
             del self._index["by_fingerprint"][fp]
         self._save_index()
         from . import destinations
-        destinations.forget([key])        # where a forgotten secret went is the person's to delete too
+        # where a forgotten secret went is the person's to delete too; a record that could not be written is said
+        self.destinations_kept = not destinations.forget([key])
         return "ok"
 
     @_mutating
@@ -1421,8 +1429,9 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
                 n += 1
             except (RuntimeError, OSError):
                 problems.append(f"store item {key} not deleted")
-        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced", "destinations.json",
-                     ".destinations.lock"):
+        from . import destinations
+        destinations.wipe()                # under its lock: a writer holding it would write the record back
+        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced"):
             try:
                 (HOME / name).unlink()
             except FileNotFoundError:

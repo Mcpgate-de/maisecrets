@@ -6,5 +6,5 @@ runner = ["tests/test_destinations.py::Recording::test_each_resolve_path_notes_i
 
 [proof]
 file = "maisecrets/destinations.py"
-find = "            rec.setdefault(\"allowed\", {})          # kept apart from seen; no decision reads it yet"
-replace = "            rec.setdefault(\"allowed\", {}).update({\"x\": True})"
+find = "    rec.setdefault(\"allowed\", {})          # kept apart from seen; no decision reads it yet"
+replace = "    rec.setdefault(\"allowed\", {}).update({\"x\": True})"

@@ -494,10 +494,10 @@ The settings list shows each hint as `not shown yet` or `shown` with its date;
 `/maisecrets:settings hints reset` (or `maisecrets: reset hints`) lets them
 come once more and changes no protection setting.
 
-### Where your secrets were sent
+### Where your secrets went
 
-maisecrets notes, on this computer only, where each stored secret was sent:
-a host from a URL, an ssh host, or an MCP server and tool. A file or a
+maisecrets notes, on this computer only, where each stored secret was handed
+to a tool call: a host from a URL, an ssh host, or an MCP server and tool. A file or a
 command without a host is listed apart, as a local use. `/maisecrets:list`
 shows it under each secret:
 
@@ -510,8 +510,9 @@ SECRET_c7      SECRET  github_pat            3d   14        21h  -
       a file in ~/proj/     2–9×   last 3 days ago
 ```
 
-This is a record, not a permission, and it stops nothing: a value has
-already gone where it is noted. `new` marks a destination that came after
+This is a record, not a permission, and it stops nothing. It is noted when
+the value is handed to the call, so a call you then decline in the client's
+dialog is listed too. `new` marks a destination that came after
 you last opened the list. When a secret that you used at one destination
 (3 times on one day) goes to a new one for the first time, the AI tells you
 once, in a sentence; this note does not come again. maisecrets does not

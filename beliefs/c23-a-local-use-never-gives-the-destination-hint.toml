@@ -6,5 +6,5 @@ runner = ["tests/test_destinations.py::Hint::test_a_local_use_never_gives_the_hi
 
 [proof]
 file = "maisecrets/destinations.py"
-find = "                    if kind == \"network\" and established:"
-replace = "                    if established:"
+find = "            if kind == \"network\" and established:"
+replace = "            if established:"

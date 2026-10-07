@@ -27,11 +27,17 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .vault import HOME, LockTimeout, _lock_for, atomic_write
+from .vault import HOME, LockTimeout, _Lock, atomic_write
 
 ESTABLISHED_USES = 3
 STORE = "destinations.json"
-_LOCK = HOME / ".destinations.lock"
+class _ShortLock(_Lock):
+    """The vault lock waits up to 6 s, which is right for the store and wrong here: a busy record must cost a call
+    at most this long, and then the record is skipped (codex review of 0.6.7: two keys waited 12 s)."""
+    LOCK_DEADLINE = 0.3
+
+
+_LOCK = _ShortLock(HOME / ".destinations.lock")
 _URL = re.compile(r"https?://[^\s'\"<>`|;)]+")
 _MAX_SESSIONS = 50
 
@@ -40,13 +46,43 @@ def _path() -> Path:
     return HOME / STORE
 
 
-def _load() -> dict:
+class Corrupt(ValueError):
+    pass
+
+
+def _clean(data: dict) -> dict:
+    """Keep only well-formed records: a file another program changed must not crash the list (codex review)."""
+    secrets = data.get("secrets") if isinstance(data.get("secrets"), dict) else {}
+    kept = {}
+    for key, rec in secrets.items():
+        if not (isinstance(key, str) and isinstance(rec, dict) and isinstance(rec.get("seen", {}), dict)):
+            continue
+        seen = {i: d for i, d in rec.get("seen", {}).items()
+                if isinstance(i, str) and isinstance(d, dict) and isinstance(d.get("label"), str)
+                and isinstance(d.get("uses", 0), int) and isinstance(d.get("last", 0), (int, float))
+                and isinstance(d.get("first", 0), (int, float)) and isinstance(d.get("max_day_uses", 0), int)
+                and isinstance(d.get("day_uses", 0), int)}
+        kept[key] = {"seen": seen, "allowed": rec.get("allowed") if isinstance(rec.get("allowed"), dict) else {}}
+    data["secrets"] = kept
+    return data
+
+
+def _load(strict: bool = False) -> dict:
+    """The store, cleaned. With strict, a file that exists and does not parse raises Corrupt: a writer must not
+    replace what it cannot read (it moves it aside first, see _load_for_write)."""
     try:
         data = json.loads(_path().read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        data = {}
     except (OSError, ValueError):
+        if strict:
+            raise Corrupt(STORE)
         data = {}
     if not isinstance(data, dict):
+        if strict:
+            raise Corrupt(STORE)
         data = {}
+    data = _clean(data)
     for k in ("secrets", "pending_hint", "interactive"):
         if not isinstance(data.get(k), dict if k != "interactive" else list):
             data[k] = {} if k != "interactive" else []
@@ -55,6 +91,19 @@ def _load() -> dict:
 
 def _save(data: dict) -> None:
     atomic_write(_path(), json.dumps(data, indent=1, sort_keys=True) + "\n")
+
+
+def _load_for_write() -> dict:
+    """Under the lock: the store to change. A corrupt file is moved aside (destinations.json.corrupt) and a new one
+    begins, so nothing the person had is overwritten unseen; /maisecrets:status lists the file."""
+    try:
+        return _load(strict=True)
+    except Corrupt:
+        try:
+            os.replace(_path(), _path().with_name(STORE + ".corrupt"))
+        except OSError:
+            pass
+        return _load()
 
 
 def hosts_in(command: str) -> list[str]:
@@ -69,70 +118,89 @@ def hosts_in(command: str) -> list[str]:
     return sorted(hosts)
 
 
+_UNPRINTABLE = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+
+
+def clean_label(text: str) -> str:
+    """One printable line of at most 80 characters: a label comes from a call the model wrote (a service field, a
+    path), and a newline or a terminal escape in it must not draw lines into /maisecrets:list (codex review)."""
+    text = _UNPRINTABLE.sub("?", str(text))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:77] + "..." if len(text) > 80 else text
+
+
 def destinations_of(tool: str, tool_input: dict, ssh_hosts: list[str] | None = None) -> list[tuple[str, str]]:
     """(kind, label) per destination of one call: kind "network" or "local". The label is what the person reads."""
     if tool in ("Bash", "PowerShell"):
         command = str(tool_input.get("command") or "")
         found = [("network", h) for h in hosts_in(command)]
         found += [("network", "ssh " + h) for h in sorted(set(ssh_hosts or []))]
-        return found or [("local", "a command on this computer")]
+        return [(k, clean_label(v)) for k, v in found] or [("local", "a command on this computer")]
     if tool.startswith("mcp__"):
         parts = tool.split("__")
         server, name = parts[1] if len(parts) > 1 else "?", parts[2] if len(parts) > 2 else "?"
         service = tool_input.get("service") or tool_input.get("provider")
         label = f"MCP {server} · {name}" + (f" · {service}" if isinstance(service, str) and service else "")
-        return [("network", label)]
+        return [("network", clean_label(label))]
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch"):
         path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
         folder = os.path.dirname(path) or "."
         home = str(Path.home())
         if folder.startswith(home):
             folder = "~" + folder[len(home):]
-        return [("local", f"a file in {folder}/")]
-    return [("local", f"a {tool} call")]
+        return [("local", clean_label(f"a file in {folder}/"))]
+    return [("local", clean_label(f"a {tool} call"))]
 
 
-def note(key: str, session: str | None, agent: str | None, destinations: list[tuple[str, str]]) -> bool:
-    """Record one use per destination. True when this use is the first pattern break the hint is for (the caller
-    gives the hint only once, globally). Never raises: a record that cannot be written must not stop the call."""
+def note(keys: list[str], session: str | None, agent: str | None, destinations: list[tuple[str, str]]) -> bool:
+    """Record one use per key and destination, all keys of a call under one short lock. True when the call is a
+    pattern break (the caller gives the hint only once, globally). Never raises: a record that cannot be written
+    must not stop the call."""
     try:
-        with _lock_for(_LOCK):
-            data = _load()
-            rec = data["secrets"].setdefault(key, {"seen": {}, "allowed": {}})
-            seen = rec.setdefault("seen", {})
-            rec.setdefault("allowed", {})          # kept apart from seen; no decision reads it yet
-            now = time.time()
-            today = time.strftime("%Y-%m-%d")
-            established = any(d.get("kind") == "network" and d.get("max_day_uses", 0) >= ESTABLISHED_USES
-                              for d in seen.values())
+        with _LOCK:
+            data = _load_for_write()
             pattern_break = False
-            for kind, label in destinations:
-                ident = f"{kind}:{label}"
-                d = seen.get(ident)
-                if d is None:
-                    if kind == "network" and established:
-                        pattern_break = True
-                    d = seen[ident] = {"kind": kind, "label": label, "uses": 0, "first": now, "last": now,
-                                       "day": today, "day_uses": 0, "max_day_uses": 0}
-                if d.get("day") != today:
-                    d["day"], d["day_uses"] = today, 0
-                d["uses"] += 1
-                d["day_uses"] += 1
-                d["max_day_uses"] = max(d.get("max_day_uses", 0), d["day_uses"])
-                d["last"] = now
+            for key in dict.fromkeys(keys):
+                pattern_break = _note_one(data, key, destinations) or pattern_break
             if pattern_break and session and not agent and session in data["interactive"]:
-                data["pending_hint"][session] = now
+                data["pending_hint"][session] = time.time()
             _save(data)
             return pattern_break
     except (OSError, LockTimeout, ValueError, TypeError):
         return False
 
 
+def _note_one(data: dict, key: str, destinations: list[tuple[str, str]]) -> bool:
+    rec = data["secrets"].setdefault(key, {"seen": {}, "allowed": {}})
+    seen = rec.setdefault("seen", {})
+    rec.setdefault("allowed", {})          # kept apart from seen; no decision reads it yet
+    now = time.time()
+    today = time.strftime("%Y-%m-%d")
+    established = any(d.get("kind") == "network" and d.get("max_day_uses", 0) >= ESTABLISHED_USES
+                      for d in seen.values())
+    pattern_break = False
+    for kind, label in destinations:
+        ident = f"{kind}:{label}"
+        d = seen.get(ident)
+        if d is None:
+            if kind == "network" and established:
+                pattern_break = True
+            d = seen[ident] = {"kind": kind, "label": label, "uses": 0, "first": now, "last": now,
+                               "day": today, "day_uses": 0, "max_day_uses": 0}
+        if d.get("day") != today:
+            d["day"], d["day_uses"] = today, 0
+        d["uses"] += 1
+        d["day_uses"] += 1
+        d["max_day_uses"] = max(d.get("max_day_uses", 0), d["day_uses"])
+        d["last"] = now
+    return pattern_break
+
+
 def mark_interactive(session: str) -> None:
     """The person typed a prompt in this session: a hint here has a reader (a headless run has none)."""
     try:
-        with _lock_for(_LOCK):
-            data = _load()
+        with _LOCK:
+            data = _load_for_write()
             if session in data["interactive"]:
                 return
             data["interactive"] = (data["interactive"] + [session])[-_MAX_SESSIONS:]
@@ -146,8 +214,8 @@ def take_pending(session: str | None) -> bool:
     if not session:
         return False
     try:
-        with _lock_for(_LOCK):
-            data = _load()
+        with _LOCK:
+            data = _load_for_write()
             if data["pending_hint"].pop(session, None) is None:
                 return False
             _save(data)
@@ -171,9 +239,10 @@ def summary() -> tuple[int, int, int]:
 def list_opened() -> float:
     """When /maisecrets:list was last shown, and note now: a destination first seen after it is marked `new`."""
     try:
-        with _lock_for(_LOCK):
-            data = _load()
-            before = float(data.get("list_shown", 0) or 0)
+        with _LOCK:
+            data = _load_for_write()
+            before = data.get("list_shown", 0)
+            before = float(before) if isinstance(before, (int, float)) else 0.0
             data["list_shown"] = time.time()
             _save(data)
             return before
@@ -195,12 +264,28 @@ def when_text(ts: float, now: float | None = None) -> str:
     return "1 day ago" if days == 1 else f"{days} days ago"
 
 
-def forget(keys: list[str]) -> None:
+def forget(keys: list[str]) -> bool:
+    """Drop the records of these keys. False when the record could not be written: the caller says so."""
     try:
-        with _lock_for(_LOCK):
-            data = _load()
+        with _LOCK:
+            data = _load_for_write()
             for k in keys:
                 data["secrets"].pop(k, None)
             _save(data)
+            return True
     except (OSError, LockTimeout, ValueError):
-        pass
+        return False
+
+
+def wipe() -> bool:
+    """Delete the whole record under its lock (a writer that holds it would write it back after an unlink)."""
+    try:
+        with _LOCK:
+            for p in (_path(), _path().with_name(STORE + ".corrupt")):
+                try:
+                    p.unlink()
+                except FileNotFoundError:
+                    pass
+            return True
+    except (OSError, LockTimeout):
+        return False

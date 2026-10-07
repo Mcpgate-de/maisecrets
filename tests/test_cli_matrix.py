@@ -324,6 +324,7 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     "settings": [([], "", {"ok": 0, "index": 0, "config": 1}), (["--all"], "", {"ok": 0, "index": 0, "config": 1}),
                  (["ssh_consent", "on"], "", {"ok": 0, "index": 0, "config": 1}),
                  (["ssh_autonomous_hosts", "add", "ops1"], "", {"ok": 0, "index": 0, "config": 1}),
+                 (["ssh_autonomous_hosts", "nonsense", "ops1"], "", _ALL1),
                  (["hints"], "", _ALL0), (["nosuchkey"], "", _ALL1)],
     # the labels are assembled so the repo's own pre-commit scan does not take the fixtures for secrets
     "scan": [(["pass" "word: SCANVALUE"], "", _ALL0), ([], "api" "_key=SCANVALUE", _ALL0)],
@@ -504,7 +505,8 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
         n = len(before.store or [])
         expect(r.stdout == f"wiped: {n} stored value(s), index, logs. The config file stays.\n", "wipe count")
         expect(not after.store and after.pending == [] and after.index is None, "wipe left a value or the index")
-        expect(set(after.files) <= {".lock", "config.json", "pending", "vault.json"}, f"wipe left {after.files}")
+        kept = {".lock", ".destinations.lock", "config.json", "pending", "vault.json"}   # locks stay with their files
+        expect(set(after.files) <= kept, f"wipe left {after.files}")
         return p
     if command == "repair":
         m = re.fullmatch(r"repaired: (\d+) stored value\(s\) deleted, counters (\{.*\})\n", r.stdout)

@@ -2054,8 +2054,7 @@ def _note_destinations(cfg: dict, payload: dict, tool: str, tool_input: dict, ke
         if ssh_command and ssh_consent._TOKEN_RE.search(ssh_command):
             ssh_hosts = list(ssh_consent.classify(ssh_command, _parse_for_consent).hosts)
         found = destinations.destinations_of(tool, tool_input, ssh_hosts)
-        for key in dict.fromkeys(keys):
-            destinations.note(key, payload.get("session_id"), payload.get("agent_id"), found)
+        destinations.note(keys, payload.get("session_id"), payload.get("agent_id"), found)
     except Exception as exc:  # noqa: BLE001 - observing must never stop a call
         _debug(f"destinations: {type(exc).__name__}")
 

@@ -150,6 +150,10 @@ class ClassifierMatrixTests(unittest.TestCase):
         "unknown": [
             # still unread: the text of these runs as a command (shell, alias, pipe into a shell, a program word)
             "gh alias set x '!ssh web1 reboot'", "echo ssh web1 reboot | bash", 'gh api x --jq "ssh" | sh',
+            # text written where a later part runs it (codex review of 0.6.7; the quoted form ran freely on 0.6.6)
+            "echo ssh web1 reboot > /tmp/x; bash /tmp/x", 'echo "ssh web1 reboot" > /tmp/x; bash /tmp/x',
+            'tee /tmp/x <<< "ssh web1 reboot"; bash /tmp/x', 'printf "ssh web1 reboot" >> run.sh && sh run.sh',
+            'grep ssh hosts.txt > /tmp/h; bash /tmp/h',
             "glab alias set y '!ssh web1 uptime'", 'xargs -I{} ssh {} reboot < hosts',
             "bash -c \"ssh web1 reboot\"", "sh -c 'ssh web1 reboot'", "eval ssh web1 reboot",
             "sshpass -p x ssh web1 reboot", "setsid ssh web1 reboot", "flock /tmp/l ssh web1 reboot",
@@ -218,7 +222,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 228, "a row was added or lost: update the count")
+        self.assertEqual(counted, 233, "a row was added or lost: update the count")
 
     def test_a_long_command_is_answered_in_time(self):
         # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)

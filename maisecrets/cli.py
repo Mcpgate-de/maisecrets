@@ -57,7 +57,8 @@ def _destination_lines(rec: dict, shown_before: float) -> list[str]:
 
     def row(d: dict) -> str:
         new = "   new" if d.get("first", 0) > shown_before and shown_before else ""
-        return (f"      {d.get('label', '?'):<{width}}  {destinations.uses_text(d.get('uses', 0)):<6} "
+        return (f"      {destinations.clean_label(d.get('label', '?')):<{width}}  "
+                f"{destinations.uses_text(d.get('uses', 0)):<6} "
                 f"last {destinations.when_text(d.get('last', 0))}{new}")
     if network:
         out.append("    Seen at (a record, not a permission)")
@@ -76,6 +77,8 @@ def cmd_forget(args: list[str]) -> int:
     for raw in args:
         key = raw.strip("⟦⟧").split(":", 1)[0]
         status = v.forget(key)
+        if getattr(v, "destinations_kept", False):
+            print(f"{key}: its destination record could not be deleted now; /maisecrets:forget {key} again later.")
         if status == "ok":
             print(f"{key}: deleted. A placeholder for it no longer resolves anywhere.")
         elif status == "unknown":
@@ -281,8 +284,8 @@ def cmd_settings(args: list[str]) -> int:
     from . import settings
     rest = [a for a in args if a != "--all"]
     # KEY, KEY VALUE, or for the host list KEY add|remove HOST (field report on 0.6.6: the list's own form exited 1)
-    longest = 3 if rest and rest[0].lower() == "ssh_autonomous_hosts" else 2
-    if rest and len(rest) <= longest and rest[0].lower() in settings.TITLE:
+    list_form = len(rest) == 3 and rest[0].lower() == "ssh_autonomous_hosts" and rest[1].lower() in ("add", "remove")
+    if rest and (len(rest) <= 2 or list_form) and rest[0].lower() in settings.TITLE:
         # after a typed change the prompt hook already wrote it: show the card with the new state
         print(settings.render(only=rest[0].lower()))
         return 0

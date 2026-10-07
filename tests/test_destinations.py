@@ -60,6 +60,13 @@ def _curl(ref: str, host: str) -> str:
     return "curl -s -u " + "u" + ":" + ref + " https://" + host + "/"
 
 
+def _norm(out: dict, ref: str) -> str:
+    """An answer with the parts that differ per call made equal: FIFO paths, nonces and the key itself."""
+    text = json.dumps(out, sort_keys=True).replace(_key(ref), "KEY")
+    text = re.sub(r"cat '?[^)'\"\s]+", "cat FIFO", text)
+    return re.sub(r"[0-9a-f]{16,}", "N", text)
+
+
 def _key(ref: str) -> str:
     return ref.strip(OPEN + CLOSE)
 
@@ -112,18 +119,70 @@ class Recording(unittest.TestCase):
     def test_observing_never_changes_the_answer_and_a_failing_record_never_stops_the_call(self):
         ref = _secret()
         call = {"command": _curl(ref, "api.example.com")}
-        observed = _pre("Bash", call)
+        observed = _norm(_pre("Bash", call), ref)
+        self.assertTrue(destinations.of(_key(ref))["seen"], "premise: observe noted the call")
         _reset(secret_destinations="off")
         ref2 = _secret()
-        off = _pre("Bash", {"command": call["command"].replace(ref, ref2)})
-        self.assertEqual(set(observed), set(off))
-        self.assertEqual(observed["hookSpecificOutput"].keys(), off["hookSpecificOutput"].keys())
+        off = _norm(_pre("Bash", {"command": call["command"].replace(ref, ref2)}), ref2)
+        self.assertEqual(observed, off, "the whole answer is the same with the record on and off")
         self.assertFalse(STORE.exists() and destinations.of(_key(ref2))["seen"], "off notes nothing")
         _reset()
         ref3 = _secret()
         with mock.patch.object(destinations, "note", side_effect=RuntimeError("disk")):
-            out = _pre("Bash", {"command": call["command"].replace(ref, ref3)})
-        self.assertIn("updatedInput", out["hookSpecificOutput"], "the call still gets its value")
+            failed = _norm(_pre("Bash", {"command": call["command"].replace(ref, ref3)}), ref3)
+        self.assertEqual(failed, observed, "a record that fails leaves the answer as it is")
+
+    def test_a_busy_record_costs_a_call_well_under_a_second(self):
+        # codex review of 0.6.7: each key waited for the 6 s vault lock, two keys 12 s, past the hook's watchdog
+        import subprocess
+        holder = subprocess.Popen([sys.executable, "-c", (
+            "import fcntl, os, sys, time; fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600); "
+            "fcntl.flock(fd, fcntl.LOCK_EX); print('held', flush=True); time.sleep(8)"),
+            str(Path(HOME, ".destinations.lock"))], stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(holder.stdout.readline().strip(), "held")
+            a, b = _secret("dest-busy-value-aaaaaaaa1"), _secret("dest-busy-value-bbbbbbbb2")
+            started = time.monotonic()
+            out = _pre("Bash", {"command": _curl(a, "api.example.com") + "; " + _curl(b, "api.example.com")})
+            took = time.monotonic() - started
+        finally:
+            holder.kill()
+            holder.wait()
+        self.assertIn("updatedInput", out["hookSpecificOutput"], "the call still gets its values")
+        self.assertLess(took, 2.0, f"observing a busy record took {took:.1f}s")
+
+    def test_a_damaged_record_is_kept_aside_and_never_breaks_the_list(self):
+        from maisecrets import cli
+        ref = _secret()
+        aside = Path(HOME, "destinations.json.corrupt")
+        STORE.write_text("{not json")
+        _pre("Bash", {"command": _curl(ref, "api.example.com")})       # a record written by a call
+        self.assertEqual(aside.read_text(), "{not json", "the damaged file is kept aside, not overwritten")
+        self.assertTrue(_seen(ref), "and a new record begins")
+        os.unlink(aside)
+        STORE.write_text("{not json either")
+        with mock.patch("sys.stdout"):
+            self.assertEqual(cli.main(["list"]), 0)                       # and one written by the list
+        self.assertEqual(aside.read_text(), "{not json either")
+        STORE.write_text(json.dumps({"secrets": {_key(ref): {"seen": {"x": "not a record"}}, "y": "z"}}))
+        with mock.patch("sys.stdout"):
+            self.assertEqual(cli.main(["list"]), 0)
+        self.assertEqual(destinations.of(_key(ref))["seen"], {}, "a malformed record is dropped, not shown")
+        os.unlink(Path(HOME, "destinations.json.corrupt"))
+
+    def test_a_label_from_the_call_is_one_printable_line(self):
+        ref = _secret()
+        _pre("mcp__gw__smart_actions", {"service": "jira\n    Seen at (approved)\x1b[2J", "token": ref})
+        (label,) = [d["label"] for d in _seen(ref).values()]
+        self.assertNotIn("\n", label)
+        self.assertNotIn("\x1b", label)
+        self.assertLessEqual(len(label), 80)
+
+    def test_a_misspelled_mode_is_a_configuration_error_not_off(self):
+        _reset(secret_destinations="obesrve")
+        cfg = load_config()
+        self.assertIn("secret_destinations must be one of observe, off", cfg["config_warning"])
+        self.assertEqual(cfg["secret_destinations"], "observe", "the file is ignored, the default stays")
 
 
 class Hint(unittest.TestCase):
@@ -226,11 +285,19 @@ class Shown(unittest.TestCase):
         self.assertFalse(next(ln for ln in second.splitlines() if "api.example.com" in ln).rstrip().endswith("new"))
 
     def test_forget_and_wipe_remove_the_record(self):
+        from maisecrets import cli
         ref = _secret()
         _pre("Bash", {"command": _curl(ref, "api.example.com")})
         self.assertTrue(_seen(ref))
         Vault(load_config()).forget(_key(ref))
         self.assertEqual(_seen(ref), {})
+        ref = _secret("dest-forget-value-2222222")
+        _pre("Bash", {"command": _curl(ref, "api.example.com")})
+        with mock.patch.object(destinations, "forget", return_value=False), mock.patch("sys.stdout") as stdout:
+            cli.main(["forget", _key(ref)])
+        self.assertIn("could not be deleted now", "".join(c.args[0] for c in stdout.write.call_args_list))
+        self.assertTrue(destinations.wipe())
+        self.assertFalse(STORE.exists())
 
     def test_the_settings_card_names_the_mode_and_what_was_seen(self):
         ref = _secret()
