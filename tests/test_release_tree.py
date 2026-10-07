@@ -124,7 +124,10 @@ class ReleaseTreeTests(unittest.TestCase):
         # the directory refused 0.5.15 and 0.5.16 (UNPINNED_NPX): no variable but the plugin root, no command
         # substitution, no wildcard, no inline program
         tree = json.loads((self.tree / "hooks" / "hooks.json").read_text(encoding="utf-8"))
-        main = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        # the hooks of the commit the tree was built from (HEAD), not of the working tree: in the pre-commit gate
+        # the two differ when the commit changes hooks/hooks.json
+        main = json.loads(subprocess.run(["git", "-C", str(ROOT), "show", "HEAD:hooks/hooks.json"],
+                                         capture_output=True, text=True, check=True).stdout)
         for event, entries in tree["hooks"].items():
             for i, entry in enumerate(entries):
                 for j, h in enumerate(entry["hooks"]):

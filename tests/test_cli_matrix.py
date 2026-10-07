@@ -1124,6 +1124,9 @@ class HookEventTests(unittest.TestCase):
             self.assertIn("usage: dispatch.py", r.stderr)
         r = self.sb.run("user-prompt", stdin="not json")
         self.assertEqual((r.returncode, json.loads(r.stdout)["decision"]), (0, "block"))
+        r = self.sb.run("post-tool-failure", stdin=json.dumps({"tool_name": "Bash", "session_id": "S1",
+                                                                "error": "Exit code 1\nnothing here"}))
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "{}"), r.stderr)
         r = self.sb.run("post-tool", stdin="not json")
         self.assertEqual(r.returncode, 0, "exit 2 is ignored after a tool; the answer must withhold instead")
         self.assertIn("its output is withheld", json.loads(r.stdout)["hookSpecificOutput"]["updatedToolOutput"])

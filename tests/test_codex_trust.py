@@ -19,6 +19,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 EVENTS = {"SessionStart": "session_start", "UserPromptSubmit": "user_prompt_submit", "PreToolUse": "pre_tool_use",
           "PostToolUse": "post_tool_use"}
+# events Codex does not have: it skips them and loads the others (PostToolUseFailure, measured with codex-cli 0.159.2:
+# harness/codex.py passed with it in hooks.json), so they carry no trust
+NOT_IN_CODEX = {"PostToolUseFailure"}
 
 # the hashes Codex stored when people trusted the hooks of 0.5.16 to 0.5.23 (posix) and 0.5.15 to 0.5.23 (windows)
 TRUSTED = {
@@ -41,6 +44,8 @@ def codex_hashes(platform: str) -> dict:
     hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
     out = {}
     for event, groups in hooks.items():
+        if event in NOT_IN_CODEX:
+            continue
         for g in groups:
             h = g["hooks"][0]
             command = (h.get("commandWindows") or h["command"]) if platform == "windows" else h["command"]

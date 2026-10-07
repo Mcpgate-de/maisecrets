@@ -8,6 +8,7 @@ Events:
   user-prompt  UserPromptSubmit  -> block + store + clipboard on a hit
   pre-tool     PreToolUse        -> rehydrate ⟦REF⟧ in Bash commands
   post-tool    PostToolUse       -> redact tool results before the model sees them
+  post-tool-failure PostToolUseFailure -> a failed call's output cannot be replaced: store, clean, tell
 """
 from __future__ import annotations
 
@@ -1971,11 +1972,11 @@ _SETTINGS_IN_A_COMMAND = ("maisecrets: this command carries a maisecrets setting
                           "as their own prompt (/maisecrets:settings KEY VALUE). The command did not run. Tell the "
                           "user the prompt to send.")
 _HOOK_ENTRY_TEXT_RE = re.compile(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
-                                 r"(?:session-start|user-prompt|pre-tool|post-tool|mod-prompt)\b", re.I)
+                                 r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt)\b", re.I)
 _GRANT_RE = re.compile(r"\A\s*maisecrets:\s*allow\s+ssh\s+([\w.@:\[\]-]+)(?:\s+(\d{6}))?\s*\Z")
 
 
-_HOOK_ENTRIES = {"session-start", "user-prompt", "pre-tool", "post-tool", "mod-prompt"}
+_HOOK_ENTRIES = {"session-start", "user-prompt", "pre-tool", "post-tool", "post-tool-failure", "mod-prompt"}
 
 
 def _calls_a_hook_entry(command: str, broad: bool = False) -> bool:
@@ -1998,13 +1999,13 @@ def _calls_a_hook_entry(command: str, broad: bool = False) -> bool:
     shells = {"bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "su", "xargs", "parallel", "watch", "script"}
     printers = {"echo", "printf", "grep", "egrep", "rg", "cat", "head", "tail", "less", "git"}
     for m in re.finditer(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
-                         r"(?:session-start|user-prompt|pre-tool|post-tool|mod-prompt)\b", command):
+                         r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt)\b", command):
         seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
         if seg and seg.get("cmd") in shells:
             return True
         if broad and not _only_prints(command, ctxs, segs, seg, printers):
             return True
-    if broad and re.search(r"\b(?:session-start|user-prompt|pre-tool|post-tool|mod-prompt)\b", command):
+    if broad and re.search(r"\b(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt)\b", command):
         # the entry and the event in different words (R=…/run.sh; $R user-prompt): any mention of an entry outside
         # a command that only prints it counts
         for m in re.finditer(r"run\.sh|run\.cmd|dispatch\.py", command):
@@ -3458,12 +3459,62 @@ def _post_tool_guarded(payload: dict) -> dict:
         return result
 
 
-HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post_tool_guarded}
+def post_tool_failure(payload: dict) -> dict:
+    """Claude Code answers a failed call (Bash with an exit code other than 0) with PostToolUseFailure, and the answer
+    to that event cannot replace the output (schema of 2.1.292; anthropics/claude-code#97278): what the command
+    printed reaches the model as it is. What is left to do: store each value, so a later output, file or command
+    that repeats it is redacted exactly; clean the transcript on disk; tell the model not to use the values and the
+    person what happened. Measured over one user's transcripts: 14 such outputs with a hit in 105,241 Bash calls."""
+    error = payload.get("error")
+    if not isinstance(error, str) or not error or client_of(payload) == "codex":
+        return {}
+    cfg = load_config()
+    session = payload.get("session_id")
+    matches = [m for m in detect.scan(error) if not detect.is_fixture(m, error, "")]
+    if not matches and not _has_live(cfg):
+        return {}
+    vault = Vault(cfg)
+    hit = {"n": 0}
+    entries: list = []
+    values: list[str] = []
+    out = error
+    if matches:
+        out, entries = _replace(error, matches, vault, session)
+        hit["n"] += len(matches)
+        values.extend(m.value for m in matches)
+    _exact_redact(out, vault, session, hit, entries, _resolved_values(vault, session), values)
+    if not hit["n"]:
+        return {}
+    refs = list(dict.fromkeys(e.ref for e in entries))
+    if cfg.get("scrub_transcript", True):
+        path = payload.get("transcript_path", "")
+        _scrub_transcript(path, values, refs)
+        _scrub_transcript_later(path, values, refs)
+    from . import events
+    events.record("PostToolUseFailure", "claude", entries,
+                  outcome="a failed call: seen by the model, transcript cleaned")
+    shown = ", ".join(refs) if refs else "values that are already stored"
+    tool = payload.get("tool_name") or "tool"
+    return {
+        "systemMessage": f"maisecrets: this failed {tool} call printed {hit['n']} value(s) ({shown}). Claude Code "
+                         "shows the output of a failed call to the AI as it is, so the AI saw them; the transcript "
+                         "on disk was cleaned.",
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUseFailure",
+            "additionalContext": (f"maisecrets: the output of this failed call held {hit['n']} value(s) the user "
+                                  f"keeps private, now stored as {shown}. Do not repeat, copy or use these values in "
+                                  "text, files or commands; where one is needed, write its placeholder instead."),
+        },
+    }
+
+
+HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post_tool_guarded,
+            "post-tool-failure": post_tool_failure}
 
 
 # under the timeouts hooks/hooks.json gives each event (10 s prompt and pre-tool, 20 s post-tool);
 # a client timeout fails OPEN, so the answer must come first
-WATCHDOG_SECONDS = {"user-prompt": 7.0, "pre-tool": 7.0, "post-tool": 16.0}
+WATCHDOG_SECONDS = {"user-prompt": 7.0, "pre-tool": 7.0, "post-tool": 16.0, "post-tool-failure": 16.0}
 
 
 def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict:
@@ -3473,6 +3524,9 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
     whether the tool ran, so the model does not repeat a push or a deploy (review, 2026-09-26)."""
     reason = f"maisecrets {event}: {why}"
     codex = client_of(payload) == "codex"
+    if event == "post-tool-failure":
+        # the client shows the failed output whatever this answer says: there is nothing to withhold
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": reason}}
     if event == "user-prompt":
         tail = (" The prompt was not sent; try again. If this message comes again, tell the user that "
                 "maisecrets cannot finish (a locked store or a slow disk)." if hint
@@ -3645,7 +3699,7 @@ def _scrub_failed_prompt(event: str, payload: dict) -> None:
 
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[1] not in HANDLERS:
-        sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|session-start\n")
+        sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|post-tool-failure|session-start\n")
         return 2
     event = argv[1]
     try:

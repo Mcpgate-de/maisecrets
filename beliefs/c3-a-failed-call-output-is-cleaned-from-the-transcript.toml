@@ -1,0 +1,10 @@
+# c3-a-failed-call-output-is-cleaned-from-the-transcript: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c3-a-failed-call-output-is-cleaned-from-the-transcript"
+control = "C3"
+statement = "A value in the output of a failed call (Claude Code PostToolUseFailure, whose output the hook cannot replace) is cleaned from the transcript on disk, stored, and named to the model by its placeholder."
+runner = ["tests/test_failed_output.py::FailedOutputTests::test_a_value_in_a_failed_output_is_stored_named_and_cleaned_from_the_transcript"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        _scrub_transcript(path, values, refs)\n        _scrub_transcript_later(path, values, refs)\n    from . import events\n    events.record(\"PostToolUseFailure\""
+replace = "        pass\n    from . import events\n    events.record(\"PostToolUseFailure\""

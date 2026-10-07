@@ -33,7 +33,7 @@ import _hygiene  # noqa: E402
 BASH = shutil.which("bash")
 RUN_SH = ROOT / "hooks" / "run.sh"
 RUN_CMD = ROOT / "hooks" / "run.cmd"
-EVENTS = ("user-prompt", "pre-tool", "post-tool", "session-start")
+EVENTS = ("user-prompt", "pre-tool", "post-tool-failure", "post-tool", "session-start")
 # the absolute places run.sh tries after the PATH; the test points them into the sandbox, so a
 # Python installed on this machine cannot answer for the missing one
 ABSOLUTE_PYTHONS = ("/opt/homebrew/bin/python3", "/usr/local/bin/python3",
@@ -173,7 +173,7 @@ class MovedPluginFolderFailsClosedTests(unittest.TestCase):
                 if event == "post-tool":
                     # exit 2 is ignored after a tool ran: the JSON itself must withhold the output
                     self.assert_refused(event, r)
-                elif event == "session-start":
+                elif event in ("session-start", "post-tool-failure"):
                     self.assertEqual(r.returncode, 0)
                     self.assertIn("folder is gone", json.loads(r.stdout)["systemMessage"])
                 else:
@@ -441,8 +441,12 @@ class RunCmdFailsClosedTests(unittest.TestCase):
         tail = self.lines[self.lines.index(")", start) + 1:]
         self.assertTrue(tail[0].startswith("echo maisecrets needs Python 3.9") and tail[0].endswith("1>&2"), tail[0])
         self.assertEqual(tail[1:], ["exit /b 2", ":done", "exit /b %errorlevel%"])
+        # a failed call's output cannot be withheld: that branch answers {} and exits 0
+        start = self.lines.index('if "%~1"=="post-tool-failure" (')
+        self.assertIn("systemMessage", json.loads(self.lines[start + 1][len("echo "):]))
+        self.assertEqual(self.lines[start + 2], "exit /b 0")
         exits = [ln for ln in self.lines if ln.startswith("exit ")]
-        self.assertEqual(exits, ["exit /b 0", "exit /b 2", "exit /b %errorlevel%"], "no other way out")
+        self.assertEqual(exits, ["exit /b 0", "exit /b 0", "exit /b 2", "exit /b %errorlevel%"], "no other way out")
 
 
 def _forms(value: str) -> list[str]:

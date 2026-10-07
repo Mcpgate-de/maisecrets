@@ -97,6 +97,9 @@ Four goals hold over every path, each with its own tests and a mutation per path
   (2026-07-10 to 2026-10-07, sessions on maisecrets itself left out): 105,241 Bash calls, 1,438 failed,
   14 failed with a detector hit in the output (1 secret, 13 personal data only). A command that ends in a
   pipe (`… | tail`) takes the exit code of the last command and is redacted as usual. Codex: not measured.
+  What maisecrets does on that event (`post_tool_failure`): it stores each value, so a later output, file or
+  command that repeats it is redacted exactly; it cleans the transcript on disk; it tells the model not to use
+  the values and names their placeholders; and the person sees a line about it. The model has seen the value.
 - **A3, a process of the same user.** The macOS keychain item's ACL trusts
   `/usr/bin/security`, so any `security find-generic-password` reads it. The
   Windows PasswordVault cannot be locked and roams through the Microsoft

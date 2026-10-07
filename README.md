@@ -274,9 +274,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 27 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 28 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 88 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 89 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -993,7 +993,9 @@ a to-do.
   stops) is not redacted, and it stays in the transcript. Measured over one
   user's transcripts: 14 such outputs with a hit in 105,241 Bash calls over 90
   days, 1 of them a secret. A command that ends in a pipe (`… | tail`) is
-  redacted as usual. See the threat model, "What is knowingly not defended".
+  redacted as usual. maisecrets then stores the value (a repeat is redacted),
+  cleans the transcript on disk, tells the AI not to use it, and shows you a
+  line about it. See the threat model, "What is knowingly not defended".
 - **No hook, no protection.** Claude Chat, ChatGPT Chat, the web and the
   mobile apps run no plugin hooks. Cowork does, Claude Code does, Codex does.
 - **A client that rejects the manifest loads nothing and says nothing.**
