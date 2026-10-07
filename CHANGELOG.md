@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## [0.6.6] - 2026-10-07
+
+### Features
+
+- autonomous hosts, where the AI may change things over ssh without asking in every session (df1680c)
+- a value in the output of a failed call is stored, cleaned from the transcript and named to the AI (16ae737)
+- the settings read as cards with the next command, a change shows its result, and hints can be reset (fcf41dc)
+
+### Fixes
+
+- a group name in the autonomous hosts stands for its members only; the failed-output message says when cleaning failed (dafba9b)
+- the failed-output message says what was stored and whether the transcript is cleaned (7a70dfe)
+- a command that calls a consent writer by name is refused, and a wrong Codex sentence ends the code (18c1ef4)
+- with ssh_consent on, a yes allows only the asked command; a host window opens only from your own prompt (8be6a89)
+
+### Other
+
+- Merge branch 'feat/settings-ux-ssh-per-command' into 'main' (26b7252)
+
 ## [0.6.5] - 2026-10-07
 
 ### Features
