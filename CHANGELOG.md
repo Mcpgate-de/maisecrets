@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## [0.6.4] - 2026-10-07
+
+### Features
+
+- with ssh_consent on, a write over ssh asks once per host, a read runs (c0c768d)
+
+### Fixes
+
+- the guard reads the switch of the copies that are installed, by their exact ids (codex review) (97b6950)
+- a second maisecrets copy switched off no longer silences the guard (1121958)
+- command names in any case, a size cap that answers in time (opus review, round 3) (7ba4ed8)
+- ~/.ssh is guarded by a list of reads, not of writers (codex review, round 3) (f6daea9)
+- the deny list and the ~/.ssh rule read the whole command (opus review of the repair) (6368ed8)
+- redirects are read from the raw text, mosh and rsync ports keep the host key (codex review of the repair) (2a3cbad)
+- consent keys follow ssh's first value, and the hidden targets ask (opus review) (ff33819)
+- consent keys carry user and port, forwards and content reads are writes (codex review) (9522730)
+
+### Other
+
+- Merge branch 'feat/8-every-ssh-command-can-ask-first' into 'main' (cdfd065)
+
 ## [0.6.3] - 2026-10-06
 
 ### Fixes
