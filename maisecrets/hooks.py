@@ -1959,8 +1959,9 @@ def _calls_a_hook_entry(command: str, broad: bool = False) -> bool:
     for sg in segs:
         words = sg.get("words") or []
         for k, w in enumerate(words[:-1]):
+            # an event in a variable counts only with consent on: `./run.sh $ENV` of another project (opus round 3)
             if os.path.basename(w) in ("run.sh", "run.cmd", "dispatch.py") and (
-                    words[k + 1] in _HOOK_ENTRIES or words[k + 1].startswith("$")):
+                    words[k + 1] in _HOOK_ENTRIES or (broad and words[k + 1].startswith("$"))):
                 return True
     # inside a nested shell or an interpreter (`bash -c '…run.sh user-prompt …'`, `python3 -c 'os.system(…)'`,
     # `find -exec sh -c`) the words are one string: the text decides. Always for a shell; with ssh consent on
@@ -2085,6 +2086,9 @@ def _is_ssh_config_path(path: str, cwd: str) -> bool:
     except OSError:
         real = p
     home_ssh = os.path.realpath(os.path.join(os.path.expanduser("~"), ".ssh"))
+    if platform.system() in ("Darwin", "Windows"):
+        # a case-insensitive file system: ~/.SSH/config is ~/.ssh/config (opus round 3)
+        real, home_ssh = os.path.normcase(real).casefold(), os.path.normcase(home_ssh).casefold()
     return real == home_ssh or real.startswith(home_ssh + os.sep)
 
 

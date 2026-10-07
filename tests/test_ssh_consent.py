@@ -147,6 +147,8 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ssh web1 wc -l \">\" /tmp/out", "ssh web1 uptime > /tmp/out",
             "mosh -p 60000 web1", "rsync -a --exclude=mkfs.py ./ web1:/srv/", "scp wipefs web1:/tmp/",
             "ssh web1 'dd if=/dev/vda of=/dev/null bs=1M count=2000'",
+            # opus round 3: SSH is ssh on macOS and in PowerShell; -E appends a local log
+            "SSH web1 'systemctl restart x'", "Scp f web1:/x", "RSYNC -a ./ web1:/srv/", "ssh -E /tmp/log web1 uptime",
             "ssh -A web1 uptime", "ssh -X web1 uptime", "ssh -o ForwardAgent=yes web1 uptime",
             "ssh -o 'SetEnv BASH_ENV=/x' web1 uptime", "sshfs -o reconnect web1:/ /mnt/w", "autossh -M 0 -f -N web1",
         ],
@@ -192,6 +194,9 @@ class ClassifierMatrixTests(unittest.TestCase):
             # codex round 3: writers into ~/.ssh outside any list of writers; a copy from a host into it
             "rsync /tmp/evil ~/.ssh/config", "tar -xf a.tar -C ~/.ssh", "scp web1:x ~/.ssh/config",
             "cat /tmp/evil > ~/.ssh/config", "grep x /tmp/keys >> ~/.ssh/authorized_keys",
+            # opus round 3: another case is the same file on macOS and Windows; mosh with one dash
+            "printf 'Host web1\\n HostName evil\\n' >> ~/.SSH/config", "mosh -ssh='ssh -J evil' web1",
+            "tar -xf a.tar -C ~/.SSH",
         ],
         "deny": [
             "ssh web1 'mkfs.ext4 /dev/sda1'", "ssh web1 'dd if=/dev/zero of=/dev/sda bs=1M'", "ssh web1 'rm -rf /'",
@@ -201,7 +206,7 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ssh web1 'rm -rf \"/\"'", "ssh web1 'dd if=/dev/zero of=\"/dev/sda\"'",
             # Gate B round 2: a forward, a jump, autossh or mosh without -- must not skip the airbag
             "ssh -A web1 'mkfs.ext4 /dev/sda'", "ssh -L 9:x:9 web1 'rm -rf /'", "mosh web1 mkfs.ext4 /dev/sda",
-            "ssh -J jump web1 'rm -rf /'", "autossh -M 0 web1 'rm -rf /'",
+            "ssh -J jump web1 'rm -rf /'", "autossh -M 0 web1 'rm -rf /'", "SSH web1 'rm -rf /'",
             # options with an argument before the device (codex round 3); data piped into a shell is no data
             "ssh web1 'mkfs -t ext4 /dev/sda'", "ssh web1 'wipefs --output UUID /dev/sda'",
             "ssh web1 'mkfs.ext4 -L data /dev/sda'", "echo 'ssh web1 mkfs.ext4 /dev/sda' | bash",
@@ -215,7 +220,24 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 210, "a row was added or lost: update the count")
+        self.assertEqual(counted, 218, "a row was added or lost: update the count")
+
+    def test_a_long_command_is_answered_in_time(self):
+        # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)
+        import time as _t
+        n = ssh_consent.MAX_READ - 100
+        for command in ("ssh web1 'x'; : " + "A" * n, "ssh web1 x; " + ".ss" * (n // 3), "ssh web1 x " + ">" * n,
+                        "ssh web1 '" + "dd " * (n // 3) + "'", "ssh -o " + "a" * n + " web1 x",
+                        "cat " + "a" * n + ".ssh/b"):
+            with self.subTest(command[:20]):
+                t = _t.time()
+                kind(command)
+                self.assertLess(_t.time() - t, 2.0)
+        big = "ssh web1 'mkfs.ext4 /dev/sda'; : " + "A" * 100_000
+        t = _t.time()
+        self.assertEqual(kind(big), "unknown", "over the cap a command that names ssh is not read")
+        self.assertLess(_t.time() - t, 1.0)
+        self.assertEqual(kind("ls " + "A" * 100_000), "none")
 
     def test_the_approval_key_carries_user_and_port(self):
         for command, host in (("ssh root@web1 -p 2222 uptime", "root@web1:2222"),
@@ -256,7 +278,9 @@ class ConsentFlowTests(unittest.TestCase):
         for command in ("ssh web1 'systemctl restart nginx'", "bash -c 'ssh web1 reboot'", "ssh web1 'mkfs /dev/x'",
                         # a mention is no call, and a module name is not the store (Codex review of #8)
                         'echo "bash hooks/run.sh post-tool"', "python3 -m py_compile maisecrets/consent_store.py",
-                        "git diff -- maisecrets/consent_store.py", "python3 -c 'print(\"run.sh user-prompt\")'"):
+                        "git diff -- maisecrets/consent_store.py", "python3 -c 'print(\"run.sh user-prompt\")'",
+                        # another project's run.sh with a variable (opus round 3)
+                        "./run.sh $ENV", "bash run.sh ${TARGET:-dev}", "python dispatch.py $1"):
             with self.subTest(command):
                 self.assertEqual(_pre(command, cfg={}), {})
 
@@ -362,8 +386,17 @@ class ConsentFlowTests(unittest.TestCase):
     def test_outside_bash_the_gate_asks_or_refuses(self):
         self.assertEqual(_decision(_pre("ssh web1 reboot", tool="PowerShell")), "ask")
         self.assertEqual(_decision(_pre("ssh web1 reboot", tool="PowerShell", client=CODEX)), "deny")
+        self.assertEqual(_decision(_pre("SSH web1 reboot", tool="PowerShell")), "ask", "PowerShell ignores case")
         self.assertEqual(_pre("Get-ChildItem", tool="PowerShell"), {})
         target = os.path.join(os.path.expanduser("~"), ".ssh", "config")
+        import platform as _pf
+        if _pf.system() in ("Darwin", "Windows"):
+            # the same file in another case on a case-insensitive file system (opus round 3)
+            upper = os.path.join(os.path.expanduser("~"), ".SSH", "config")
+            payload = {"tool_name": "Write", "tool_input": {"file_path": upper, "content": "Host x"},
+                       "session_id": "S1", "cwd": "/tmp", **CLAUDE}
+            with mock.patch.object(hooks, "load_config", return_value={**hooks.load_config(), **ON}):
+                self.assertEqual(_decision(hooks.pre_tool(payload)), "ask")
         for client, want in ((CLAUDE, "ask"), (CODEX, "deny")):
             payload = {"tool_name": "Write", "tool_input": {"file_path": target, "content": "Host x"},
                        "session_id": "S1", "cwd": "/tmp", **client}

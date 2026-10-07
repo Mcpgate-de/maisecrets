@@ -804,6 +804,11 @@ always, so most are writes (88 %), and the consent per host carries them. 112
 sessions with ssh, a median of 2 questions per session, 7 at the 90th
 percentile, 48 at most. The script ignores groups and the 8-hour expiry.
 
+A command name in another case (`SSH`, `Scp`) is the same program on macOS
+and in PowerShell, so it counts too. A command line over 8,192 characters
+that names ssh is not read at all: it asks (on Codex it is refused), so that
+the answer always comes before the client's timeout.
+
 Limits: maisecrets sees only the command text. A script file, an alias, a
 variable that holds `ssh` and was set in an earlier command, or a word built
 without the letters `ssh` in the text is not seen. A mount (`sshfs`) or a tunnel

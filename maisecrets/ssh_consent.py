@@ -37,7 +37,12 @@ SSH_CMDS = {"ssh", "autossh", "mosh", "scp", "sftp", "sshfs", "ssh-copy-id", "rs
 _TOKEN_RE = re.compile(
     r"(?<![\w./])(?:ssh|autossh|mosh|scp|sftp|sshfs|ssh-copy-id|sshpass|pssh|parallel-ssh|pscp|"
     r"pssh\.\w+|tsh|kitten|rsync)(?![\w-])"
-    r"|ssh://|rsync://|GIT_SSH|sshCommand|RSYNC_RSH|DOCKER_HOST|\.ssh/+(?:\./+)*config\b")
+    r"|ssh://|rsync://|GIT_SSH|sshCommand|RSYNC_RSH|DOCKER_HOST|\.ssh/+(?:\./+)*config\b",
+    re.I)                                    # SSH is ssh on macOS (APFS) and in PowerShell (opus round 3)
+# a command line longer than this is not read at all when it names ssh: it asks (on Codex it is refused). Every
+# pattern below is linear or bounded, but the shell parser and a few lazy patterns are not; the client's 10 s
+# timeout lets a command run, so the answer must come first (opus round 3: 80 KB took 12 s)
+MAX_READ = 8192
 
 # ssh options that take an argument (ssh(1)); the first word that is no option is the host
 _SSH_ARG_OPTS = set("BbcDEeFIiJLlmOoPpQRSWw")
@@ -177,7 +182,7 @@ def _args_ok(cmd: str, args: list[str], opts: set[str], mode: str) -> bool:
 
 
 # a port forward, a tunnel, the agent or X11 forwarded, an environment sent: state on the other side
-_FORWARD_FLAGS = set("LRDwAXY")
+_FORWARD_FLAGS = set("LRDwAXYE")        # -E: a log file appended on this side
 _FORWARD_O = re.compile(r"^(?:localforward|remoteforward|dynamicforward|tunnel|tunneldevice|forwardagent|forwardx11|"
                         r"forwardx11trusted|setenv|sendenv|streamlocalbindunlink)$", re.I)
 # ssh_config(5) reads "Name value" and "Name=value" with blanks around both; a leading blank hid HostName (Gate B)
@@ -321,9 +326,9 @@ _READ_LOCAL = {"cat", "less", "more", "head", "tail", "ls", "grep", "egrep", "fg
                "diff", "cmp", "md5sum", "sha256sum", "shasum"}
 def _mosh_program(word: str) -> bool:
     """mosh --ssh/--server/--client, also abbreviated: mosh's Getopt::Long takes --se=… for --server (Gate B)."""
-    name = word.split("=")[0]
-    return word.startswith("--") and len(name) >= 4 and any(o.startswith(name)
-                                                           for o in ("--server", "--client", "--ssh"))
+    name = word.split("=")[0].lstrip("-")
+    return word.startswith("-") and len(name) >= 2 and not word.startswith(("-p", "-a", "-n")) \
+        and any(o.startswith(name) for o in ("server", "client", "ssh"))
 
 
 _MOSH_ARG = {"-p", "--port", "--predict", "--family", "--bind-server", "--experimental-remote-ip"}
@@ -411,12 +416,19 @@ def _copy_call(cmd: str, words: list[str]) -> "tuple[list[str], str]":
 
 
 def classify(command: str, parse: Parser) -> Verdict:
+    if len(command) > MAX_READ:
+        low = command.lower()
+        if _TOKEN_RE.search(command) or ".ss" in low:
+            return Verdict("unknown", [Call("ssh", "", "unknown", f"a command over {MAX_READ} characters that names "
+                                                               "ssh; maisecrets does not read it")],
+                           f"a command over {MAX_READ} characters that names ssh")
+        return Verdict("none")
     segs, ctxs = parse(command)
     calls: list[Call] = []
     spans: list[tuple[int, int]] = []
     for sg in segs:
         words = sg.get("words") or []
-        cmd = sg.get("cmd", "")
+        cmd = sg.get("cmd", "").lower()      # SSH, Scp: the same program on a case-insensitive file system
         if cmd == "perl" and len(words) > 3 and words[1] == "-e" and _PERL_ALARM.match(words[2].strip()):
             words = words[3:]
             cmd = words[0].rsplit("/", 1)[-1]
@@ -506,25 +518,18 @@ def classify(command: str, parse: Parser) -> Verdict:
     # a change that can reach ~/.ssh (its config retargets every alias): a mention of .ss… outside an ssh, autossh or
     # mosh call is allowed only in a command that only reads, and no redirect may point into it. A list of writers
     # was never complete (rsync, tar -C, patch …; codex review of the repair), so the reads are listed instead
-    for m in re.finditer(r"\.ss", command):
+    for m in re.finditer(r"\.ss", command, re.I):
         sg = next((x for x in segs if x["start"] <= m.start() < x["end"]), None)
-        if sg and sg.get("cmd") in ("ssh", "autossh", "mosh") and any(a <= m.start() < b for a, b in spans):
+        if sg and sg.get("cmd", "").lower() in ("ssh", "autossh", "mosh") and any(a <= m.start() < b for a, b in spans):
             continue                         # an option value (-i ~/.ssh/key) or a path on the remote side
-        if not sg or sg.get("cmd") not in _READ_LOCAL:
+        if not sg or sg.get("cmd", "").lower() not in _READ_LOCAL:
             calls.append(Call("ssh", "", "unknown", "a command that can change ~/.ssh, where ssh looks up hosts"))
             break
     flat = command.replace('"', "").replace("'", "").replace("\\", "")
-    if re.search(r"(?:\d?>>?|&>>?|>\|)\s*\S*\.ss", flat):
+    if any(".ss" in t.lower() for t in re.findall(r"(?:\d?>>?|&>>?|>\|)[ \t]*([^\s]+)", flat)):
         calls.append(Call("ssh", "", "unknown", "a write into ~/.ssh, which decides where ssh connects"))
     fed_by_heredoc = any(c.kind != "unknown" for c in calls) and any(
         sg.get("heredoc") and sg.get("cmd") in SSH_CMDS for sg in segs)
-    # a path into ~/.ssh that resolves to its config only after normalising (`~/.ssh/sub/../config`): a change there
-    # retargets every alias; a read of it is cheap to ask about (codex review of the repair)
-    import posixpath
-    for m in re.finditer(r"[^\s'\"<>|;&]*\.ssh/[^\s'\"<>|;&]*", command):
-        if ".." in m.group(0) and posixpath.normpath(m.group(0)).endswith(".ssh/config"):
-            calls.append(Call("ssh", "", "unknown", "a path that resolves to ~/.ssh/config"))
-            break
     for m in _TOKEN_RE.finditer(command):
         ctx = ctxs[m.start()] if m.start() < len(ctxs) else ""
         if ctx == "comment":
