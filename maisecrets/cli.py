@@ -31,13 +31,41 @@ def cmd_list(_: list[str]) -> int:
     live = [e for e in rows if not e.purged]
     print(f"{len(live)} value(s) stored, {len(rows) - len(live)} expired (only the masked form is kept).")
     print(f"{'key':<14} {'type':<7} {'kind':<18} {'age':>5} {'uses':>4} {'expires in':>10}  shown as")
+    from . import destinations
+    shown_before = destinations.list_opened()
     for e in sorted(rows, key=lambda x: x.created):
         exp = "expired" if e.purged else f"{int(max(0, e.expires - time.time()) // 3600)}h"
         print(f"{e.key:<14} {e.type:<7} {e.kind:<18} {_age(e.created):>5} {e.uses:>4} {exp:>10}  {e.display or '-'}")
+        if not e.purged:
+            for line in _destination_lines(destinations.of(e.key), shown_before):
+                print(line)
     if v.backend.test_mode:
         print("\nbackend: jsonfile (TEST MODE, plaintext under ~/.maisecrets/)")
     print("\nTo delete one: /maisecrets:forget <key>. To delete everything: /maisecrets:status shows how.")
     return 0
+
+
+def _destination_lines(rec: dict, shown_before: float) -> list[str]:
+    """Where a secret was sent (secret_destinations, observe). A record, never a permission: the heading says so,
+    the count is coarse, and a local use is listed apart because nothing protects it."""
+    from . import destinations
+    seen = sorted(rec.get("seen", {}).values(), key=lambda d: -d.get("last", 0))
+    network = [d for d in seen if d.get("kind") == "network"]
+    local = [d for d in seen if d.get("kind") != "network"]
+    width = max([len(d.get("label", "")) for d in seen] + [20])
+    out = []
+
+    def row(d: dict) -> str:
+        new = "   new" if d.get("first", 0) > shown_before and shown_before else ""
+        return (f"      {d.get('label', '?'):<{width}}  {destinations.uses_text(d.get('uses', 0)):<6} "
+                f"last {destinations.when_text(d.get('last', 0))}{new}")
+    if network:
+        out.append("    Seen at (a record, not a permission)")
+        out += [row(d) for d in network]
+    if local:
+        out.append("    Local uses (not destination-protected)")
+        out += [row(d) for d in local]
+    return out
 
 
 def cmd_forget(args: list[str]) -> int:

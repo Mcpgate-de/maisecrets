@@ -274,9 +274,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 28 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 29 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 90 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 93 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -493,6 +493,31 @@ feature brings it back, once. `"tips": false` turns hints off with the tips.
 The settings list shows each hint as `not shown yet` or `shown` with its date;
 `/maisecrets:settings hints reset` (or `maisecrets: reset hints`) lets them
 come once more and changes no protection setting.
+
+### Where your secrets were sent
+
+maisecrets notes, on this computer only, where each stored secret was sent:
+a host from a URL, an ssh host, or an MCP server and tool. A file or a
+command without a host is listed apart, as a local use. `/maisecrets:list`
+shows it under each secret:
+
+```
+SECRET_c7      SECRET  github_pat            3d   14        21h  -
+    Seen at (a record, not a permission)
+      other.example.net     1×     last less than an hour ago   new
+      api.github.com        10+×   last 2 hours ago
+    Local uses (not destination-protected)
+      a file in ~/proj/     2–9×   last 3 days ago
+```
+
+This is a record, not a permission, and it stops nothing: a value has
+already gone where it is noted. `new` marks a destination that came after
+you last opened the list. When a secret that you used at one destination
+(3 times on one day) goes to a new one for the first time, the AI tells you
+once, in a sentence; this note does not come again. maisecrets does not
+judge whether a destination is safe. Asking before a new destination comes
+in a later version. `/maisecrets:settings secret_destinations off` stops the
+record; nothing leaves the computer either way.
 
 ## Vault
 

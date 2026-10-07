@@ -246,6 +246,18 @@ SCENARIOS = {
         "upstream_leak_is_a_known_gap": "anthropics/claude-code#97278",
         "expect_in_requests": ["the output of this failed call held"],
     },
+    # secret destinations (#13): the real client resolves a placeholder into a command for a host, and maisecrets
+    # notes the destination without stopping the call (observe)
+    "destination_noted": {
+        "prompt": "use the stored token \u27e6SECRET_c1\u27e7",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "turns": [{"tool": "Bash", "input": {"command": "printf 'got:%s' '\u27e6SECRET_c1\u27e7' > used.txt; "
+                                                        "curl -s --max-time 1 https://dest.invalid/ || true"}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_file": ("used.txt", f"got:{MARK}"),
+        "expect_home_json": ("destinations.json", ["secrets", "SECRET_c1", "seen", "network:dest.invalid"]),
+    },
     "ssh_consent_read_runs": {
         "prompt": "check the uptime",
         "config": {"ssh_consent": True},

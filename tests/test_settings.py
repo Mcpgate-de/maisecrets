@@ -119,9 +119,14 @@ class EveryShownCommandWorks(unittest.TestCase):
         from maisecrets import cli
         _reset(ssh_autonomous_hosts=["ops1"])
         text = settings.render(show_all=True)
+        _reset(ssh_autonomous_hosts=["ops1"], secret_destinations="off", ssh_consent=True)
+        text += settings.render(show_all=True)      # the commands a card shows only in another state
         shown = sorted(set(_re.findall(r"(/maisecrets:settings [^\n(]+?)\s*(?:\(|$)", text, _re.M)))
         commands = [c.replace("HOST", "ops2").replace("KEY default", "ssh_consent default").strip() for c in shown]
         self.assertGreater(len(commands), 10, commands)
+        for must in ("/maisecrets:settings secret_destinations observe", "/maisecrets:settings ssh_consent off",
+                     "/maisecrets:settings ssh_autonomous_hosts add ops2"):
+            self.assertIn(must, commands, "a command of a card is missing from the population")
         for command in commands:
             with self.subTest(command):
                 _reset(ssh_autonomous_hosts=["ops1"])

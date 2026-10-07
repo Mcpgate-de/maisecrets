@@ -1,0 +1,10 @@
+# c23-a-local-use-never-gives-the-destination-hint: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c23-a-local-use-never-gives-the-destination-hint"
+control = "C23"
+statement = "The secret destinations hint comes only when a secret goes to a new network destination; a file or a command without a host is a local use and never gives it."
+runner = ["tests/test_destinations.py::Hint::test_a_local_use_never_gives_the_hint"]
+
+[proof]
+file = "maisecrets/destinations.py"
+find = "                    if kind == \"network\" and established:"
+replace = "                    if established:"

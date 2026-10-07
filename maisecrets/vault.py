@@ -59,6 +59,7 @@ DEFAULT_CONFIG = {
     "ssh_consent": False,            # every ssh-family command: a read runs, a write asks once per host (#8)
     "ssh_host_groups": {},           # {"group": ["host", …]}: one ssh consent covers the whole group
     "ssh_autonomous_hosts": [],      # hosts (or group names) where the AI writes over ssh without asking, always
+    "secret_destinations": "observe",  # observe: note where each stored secret is sent (destinations.py); off
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
     "pass_agent_reports": True,      # the report of a subagent of this session is model text: not blocked (hooks.py)
@@ -82,7 +83,7 @@ _CONFIG_TYPES = {
     "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
-    "ssh_consent": bool, "ssh_host_groups": dict, "ssh_autonomous_hosts": list,
+    "ssh_consent": bool, "ssh_host_groups": dict, "ssh_autonomous_hosts": list, "secret_destinations": str,
     "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool,
 }
 
@@ -1279,6 +1280,8 @@ class Vault:
         if fp and self._index["by_fingerprint"].get(fp) == key:
             del self._index["by_fingerprint"][fp]
         self._save_index()
+        from . import destinations
+        destinations.forget([key])        # where a forgotten secret went is the person's to delete too
         return "ok"
 
     @_mutating
@@ -1418,7 +1421,8 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
                 n += 1
             except (RuntimeError, OSError):
                 problems.append(f"store item {key} not deleted")
-        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced"):
+        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced", "destinations.json",
+                     ".destinations.lock"):
             try:
                 (HOME / name).unlink()
             except FileNotFoundError:
