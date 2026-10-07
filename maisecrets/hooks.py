@@ -2047,10 +2047,12 @@ def _autonomous(hosts: list[str], cfg: dict) -> bool:
     for entry in cfg.get("ssh_autonomous_hosts") or []:
         if not isinstance(entry, str):
             continue
-        allowed.add(entry)
         members = groups.get(entry) if isinstance(groups, dict) else None
         if isinstance(members, list):
+            # a group name stands for its members only, not for a host that has the same name (codex review)
             allowed.update(m for m in members if isinstance(m, str))
+        else:
+            allowed.add(entry)
     return bool(hosts) and all(h in allowed for h in hosts)
 
 
@@ -3512,9 +3514,11 @@ def post_tool_failure(payload: dict) -> dict:
     elif not path or not os.path.exists(path):
         scrub = "the transcript file was not found, so it was not cleaned"
     else:
-        _scrub_transcript(path, values, refs)
-        _scrub_transcript_later(path, values, refs)
-        scrub = "maisecrets cleans the transcript on disk now and again shortly after"
+        now = _scrub_transcript(path, values, refs)
+        later = _scrub_transcript_later(path, values, refs) is not None
+        scrub = ("maisecrets cleans the transcript on disk now and again shortly after" if later else
+                 "maisecrets cleaned the transcript on disk now, but could not start the later pass" if now else
+                 "maisecrets could not clean the transcript on disk")
     unkeyed = max(0, len(dict.fromkeys(values)) - len(refs)) if matches else 0
     cap = (f" {unkeyed} more were not stored (above max_new_entries_per_result), so a repeat of those is found "
            "only by its shape." if unkeyed else "")

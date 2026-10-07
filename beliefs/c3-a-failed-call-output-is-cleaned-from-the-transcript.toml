@@ -6,5 +6,5 @@ runner = ["tests/test_failed_output.py::FailedOutputTests::test_a_value_in_a_fai
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "        _scrub_transcript(path, values, refs)\n        _scrub_transcript_later(path, values, refs)\n        scrub = \"maisecrets cleans the transcript on disk now and again shortly after\""
-replace = "        scrub = \"maisecrets cleans the transcript on disk now and again shortly after\""
+find = "        now = _scrub_transcript(path, values, refs)\n        later = _scrub_transcript_later(path, values, refs) is not None\n"
+replace = "        now = False\n        later = True\n"

@@ -829,8 +829,12 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   ops1` (or `maisecrets: ssh autonomous ops1`), and `remove ops1` (or
   `maisecrets: ssh ask ops1`) to take one off. The host is as the ssh call
   writes it (`root@lab:2323` is not `lab`), or the name of a group in
-  `ssh_host_groups`; every host of a call must be on the list. Only your own
-  prompt changes the list, and the deny list holds there too.
+  `ssh_host_groups` (then its members, not a host of that name); every host
+  of a call must be on the list. The list changes from your own prompt, and
+  the deny list holds there too. Limit: maisecrets reads commands as text, so
+  a program that builds the sentence at run time and feeds it to a nested
+  client (Codex does not say who wrote a prompt) can add a host; check the
+  list in `/maisecrets:settings`.
 - **A form maisecrets cannot read asks every time.** An ssh word in a nested
   shell (`bash -c`, `eval`, `xargs`, `find -exec`), a wrapper it does not
   know (`sshpass`, `setsid`, `flock`), a word built at run time when `ssh`

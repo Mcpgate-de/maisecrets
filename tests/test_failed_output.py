@@ -75,6 +75,13 @@ class FailedOutputTests(unittest.TestCase):
         self.assertIn("cleaning the transcript is off", out["systemMessage"])
         out = _failure(f"Exit code 3\nTOKEN={TOKEN}", transcript="/nonexistent/t.jsonl")
         self.assertIn("was not found", out["systemMessage"])
+        with tempfile.TemporaryDirectory() as d:
+            t = Path(d, "t.jsonl")
+            t.write_text("{}\n")
+            with mock.patch.object(hooks, "_scrub_transcript", return_value=False), \
+                    mock.patch.object(hooks, "_scrub_transcript_later", return_value=None):
+                out = _failure(f"Exit code 3\nTOKEN={TOKEN}", transcript=str(t))
+        self.assertIn("could not clean the transcript", out["systemMessage"], "no claim of a cleaning that failed")
 
     def test_values_above_the_cap_are_named_as_not_stored(self):
         many = "\n".join(f"TOKEN{i}=glpat-" + f"CapProbe{i:02d}Xyz123456789" for i in range(5))

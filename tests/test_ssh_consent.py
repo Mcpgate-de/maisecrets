@@ -311,6 +311,8 @@ class ConsentFlowTests(unittest.TestCase):
         self.assertEqual(_pre("ssh ops1 reboot", cfg=cfg, session_id="S9"), {})
         self.assertEqual(_pre("ssh -p 2323 root@lab 'docker restart app'", cfg=cfg), {}, "user and port as written")
         self.assertEqual(_pre("ssh web2 reboot", cfg=cfg), {}, "a group name covers its members")
+        self.assertEqual(_decision(_pre("ssh web reboot", cfg=cfg)), "ask",
+                         "a group name is not also a host of that name (codex review)")
         self.assertEqual(_decision(_pre("ssh lab reboot", cfg=cfg)), "ask", "another user or port is another host")
         self.assertEqual(_decision(_pre("ssh prod1 reboot", cfg=cfg)), "ask", "a host not on the list asks")
         self.assertEqual(_decision(_pre("scp f ops1:/tmp/ && ssh prod1 reboot", cfg=cfg)), "ask",
