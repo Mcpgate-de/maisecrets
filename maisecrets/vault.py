@@ -1333,6 +1333,9 @@ class Vault:
                 del self._index["by_fingerprint"][fp]
         if n or old:
             self._save_index()
+        if old:
+            from . import destinations
+            destinations.forget(old)       # where an entry went is retention too: it goes with the metadata
         return n
 
     @_mutating

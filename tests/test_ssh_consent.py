@@ -93,9 +93,10 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ls -la", "git status", "rsync -a ./a/ ./b/", "ls ~/.ssh", "grep \"ssh\" /var/log/auth.log",
             "echo 'use ssh keys'", "git push ssh://git@example.org/x.git main", "grep Host ~/.ssh/config",
             "cat ~/.ssh/config", "ls -la ~/.ssh", "echo 'ssh web1 mkfs.ext4 /dev/sda'",
-            # text that names ssh (0.6.6 asked for an issue body): unquoted in a data command, quoted in a text argument
-            "grep ssh README.md", 'gh issue create --title t --body "note an ssh host first"',
-            "glab mr create -d 'ssh consent docs'", 'jq --arg x "ssh" .a data.json', "curl -d 'ssh=1' https://example.org/",
+            # the quoted text field of an issue or merge request (0.6.6 asked for an issue body)
+            'gh issue create --title t --body "note an ssh host first"', "glab mr create -d 'ssh consent docs'",
+            'gh pr create -t "fix ssh consent" -b "the word ssh in a body"', "gh issue comment 8 --body='ssh is text'",
+            'gh release create v1 --notes "ssh consent per command"',
             "ls -la ~/.ssh > /tmp/ssh-list.txt", "grep Host ~/.ssh/config | head",
             "git commit -F - <<'EOF'\nfix the ssh docs\nEOF\n",
             "pkill -f \"ssh -N tunnel\"",
@@ -154,7 +155,15 @@ class ClassifierMatrixTests(unittest.TestCase):
             "echo ssh web1 reboot > /tmp/x; bash /tmp/x", 'echo "ssh web1 reboot" > /tmp/x; bash /tmp/x',
             'tee /tmp/x <<< "ssh web1 reboot"; bash /tmp/x', 'printf "ssh web1 reboot" >> run.sh && sh run.sh',
             'grep ssh hosts.txt > /tmp/h; bash /tmp/h',
-            "glab alias set y '!ssh web1 uptime'", 'xargs -I{} ssh {} reboot < hosts',
+            # Opus review of 0.6.7: a "data" command that starts ssh itself, or text that is not an issue field
+            "rg --pre ssh . web1", 'rg --pre "ssh" . web1', "echo reboot > web1; rg --pre ssh . web1",
+            "sort --compress-program=ssh f", "curl -T payload scp://web1/etc/cron.d/x",
+            "curl -Q 'rm /etc/x' sftp://web1/", "gh codespace ssh -c cs1 -- sudo reboot",
+            'GIT_SSH_COMMAND="ssh web1 reboot;:" gh repo clone git@github.com:o/r', "gh alias set x 'codespace ssh'",
+            "gh extension exec ssh", "true ssh web1 reboot", "grep -r ssh . > ~/.bashrc",
+            'echo "ssh web1 reboot" >> ~/.bashrc', "grep ssh README.md", 'gh issue create --label "ssh web1 reboot"',
+            "glab alias set y '!ssh web1 uptime'", 'gh repo create x -d "ssh web1 reboot"',
+            'xargs -I{} ssh {} reboot < hosts',
             "bash -c \"ssh web1 reboot\"", "sh -c 'ssh web1 reboot'", "eval ssh web1 reboot",
             "sshpass -p x ssh web1 reboot", "setsid ssh web1 reboot", "flock /tmp/l ssh web1 reboot",
             "systemd-run ssh web1 reboot", "screen -dm ssh web1 reboot", "tmux new -d 'ssh web1 reboot'",
@@ -222,7 +231,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 233, "a row was added or lost: update the count")
+        self.assertEqual(counted, 249, "a row was added or lost: update the count")
 
     def test_a_long_command_is_answered_in_time(self):
         # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)

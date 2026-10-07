@@ -2062,9 +2062,12 @@ def _note_destinations(cfg: dict, payload: dict, tool: str, tool_input: dict, ke
 def _destination_hint(payload: dict) -> str | None:
     """The one secret_destinations hint, when a pattern break of this session waits for it (destinations.note)."""
     from . import destinations, settings
-    if payload.get("agent_id") or not destinations.take_pending(payload.get("session_id")):
+    cfg = load_config()
+    if cfg.get("secret_destinations", "observe") != "observe" or payload.get("agent_id"):
         return None
-    if not settings.hint_due("secret_destinations", load_config()) or not settings.claim_hint("secret_destinations"):
+    if not destinations.take_pending(payload.get("session_id")):
+        return None
+    if not settings.hint_due("secret_destinations", cfg) or not settings.claim_hint("secret_destinations"):
         return None
     return settings.HINTS["secret_destinations"]["codex" if client_of(payload) == "codex" else "claude"]
 

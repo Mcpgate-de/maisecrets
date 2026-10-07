@@ -141,15 +141,15 @@ class Recording(unittest.TestCase):
             str(Path(HOME, ".destinations.lock"))], stdout=subprocess.PIPE, text=True)
         try:
             self.assertEqual(holder.stdout.readline().strip(), "held")
-            a, b = _secret("dest-busy-value-aaaaaaaa1"), _secret("dest-busy-value-bbbbbbbb2")
+            refs = [_secret(f"dest-busy-value-{i}xxxxxxxxx{i}") for i in range(8)]
             started = time.monotonic()
-            out = _pre("Bash", {"command": _curl(a, "api.example.com") + "; " + _curl(b, "api.example.com")})
+            out = _pre("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in refs)})
             took = time.monotonic() - started
         finally:
             holder.kill()
             holder.wait()
         self.assertIn("updatedInput", out["hookSpecificOutput"], "the call still gets its values")
-        self.assertLess(took, 2.0, f"observing a busy record took {took:.1f}s")
+        self.assertLess(took, 1.0, f"observing a busy record took {took:.1f}s for 8 keys")
 
     def test_a_damaged_record_is_kept_aside_and_never_breaks_the_list(self):
         from maisecrets import cli
@@ -159,16 +159,28 @@ class Recording(unittest.TestCase):
         _pre("Bash", {"command": _curl(ref, "api.example.com")})       # a record written by a call
         self.assertEqual(aside.read_text(), "{not json", "the damaged file is kept aside, not overwritten")
         self.assertTrue(_seen(ref), "and a new record begins")
-        os.unlink(aside)
         STORE.write_text("{not json either")
         with mock.patch("sys.stdout"):
-            self.assertEqual(cli.main(["list"]), 0)                       # and one written by the list
-        self.assertEqual(aside.read_text(), "{not json either")
-        STORE.write_text(json.dumps({"secrets": {_key(ref): {"seen": {"x": "not a record"}}, "y": "z"}}))
+            self.assertEqual(cli.main(["list"]), 0)                       # the list only reads
+        _pre("Bash", {"command": _curl(ref, "api.example.com")})
+        self.assertEqual(aside.read_text(), "{not json", "the first damaged copy is never overwritten")
+        later = [p for p in Path(HOME).iterdir() if p.name.startswith("destinations.json.corrupt.")]
+        self.assertEqual([p.read_text() for p in later], ["{not json either"])
+        for p in [aside, *later]:
+            os.unlink(p)
+        STORE.write_text(json.dumps({"secrets": {_key(ref): {"seen": {"x": "not a record",
+                                                                       "network:a": {"label": "a", "kind": "network"}}},
+                                                 "y": "z"}}))
+        _pre("Bash", {"command": _curl(ref, "api.example.com")})       # a record without its counters (Opus)
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com"}, "the malformed records are dropped")
+        today = time.strftime("%Y-%m-%d")
+        STORE.write_text(json.dumps({"secrets": {_key(ref): {"seen": {"network:a": {
+            "kind": "network", "label": "a", "uses": 1, "first": 1.0, "last": 1.0, "day": today, "day_uses": "1",
+            "max_day_uses": 1}}}}}))
+        _pre("Bash", {"command": _curl(ref, "api.example.com")})       # one field of the wrong type
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com"}, "a counter of the wrong type is dropped too")
         with mock.patch("sys.stdout"):
             self.assertEqual(cli.main(["list"]), 0)
-        self.assertEqual(destinations.of(_key(ref))["seen"], {}, "a malformed record is dropped, not shown")
-        os.unlink(Path(HOME, "destinations.json.corrupt"))
 
     def test_a_label_from_the_call_is_one_printable_line(self):
         ref = _secret()
@@ -183,6 +195,59 @@ class Recording(unittest.TestCase):
         cfg = load_config()
         self.assertIn("secret_destinations must be one of observe, off", cfg["config_warning"])
         self.assertEqual(cfg["secret_destinations"], "observe", "the file is ignored, the default stays")
+
+
+class Bounds(unittest.TestCase):
+    def setUp(self):
+        _reset()
+
+    def test_one_secret_keeps_its_most_recent_destinations_and_expiry_drops_the_record(self):
+        ref = _secret()
+        for i in range(destinations.MAX_PER_SECRET + 5):
+            destinations.note([_key(ref)], "S1", None, [("network", f"host{i}.example.com")])
+        seen = _seen(ref)
+        self.assertEqual(len(seen), destinations.MAX_PER_SECRET)
+        self.assertNotIn("network:host0.example.com", seen, "the oldest went")
+        v = Vault(load_config())
+        meta = v._index["entries"][_key(ref)]
+        meta.update(purged=True, purged_at=time.time() - 400 * 86400)
+        v._save_index()
+        Vault(load_config()).expire()
+        self.assertEqual(_seen(ref), {}, "the record goes with the metadata of an expired entry")
+
+    def test_the_list_of_sessions_with_a_reader_is_bounded(self):
+        for i in range(70):
+            destinations.mark_interactive(f"S-{i}")
+        data = json.loads(STORE.read_text())
+        self.assertEqual(len(data["interactive"]), 50)
+        self.assertEqual(data["interactive"][-1], "S-69", "the newest stay")
+
+    def test_a_call_with_many_keys_is_noted_quickly(self):
+        refs = [_secret(f"dest-many-value-{i}yyyyyyyy{i}") for i in range(8)]
+        started = time.monotonic()
+        _pre("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in refs)})
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertTrue(all(_seen(r) for r in refs))
+
+    def test_wipe_everything_takes_the_record(self):
+        ref = _secret()
+        _pre("Bash", {"command": _curl(ref, "api.example.com")})
+        with mock.patch.object(destinations, "wipe", wraps=destinations.wipe) as wiped:
+            from maisecrets import vault as vault_mod
+            vault_mod.wipe_everything(load_config())
+        self.assertEqual(wiped.call_count, 1)
+        self.assertFalse(STORE.exists())
+
+    def test_a_secret_shape_or_free_text_never_becomes_a_label(self):
+        ref = _secret()
+        token = "ghp_" + "aB3dE5fG7h" + "J9kL1mN2pQ" + "4rS6tU8vW0" + "xY2zA4"     # 40: it fits the name rule
+        _pre("mcp__gw__x_write", {"service": "token=" + token, "token": ref})
+        _pre("Bash", {"command": _curl(ref, "api.example.com") + " # " + token})
+        self.assertNotIn(token, STORE.read_text())
+        self.assertIn("MCP gw · x_write", {d["label"] for d in _seen(ref).values()})
+        _pre("mcp__gw__y_write", {"service": token, "token": ref})     # a secret shape that reads as a name
+        self.assertNotIn(token, STORE.read_text())
+        self.assertIn("MCP gw · y_write · <hidden>", {d["label"] for d in _seen(ref).values()})
 
 
 class Hint(unittest.TestCase):
@@ -226,6 +291,36 @@ class Hint(unittest.TestCase):
         _pre("Bash", {"command": f"printf '%s' {ref} > /tmp/dest-probe.txt"})
         self.assertNotIn("maisecrets notes", json.dumps(_post()))
         self.assertNotIn("S1", json.loads(STORE.read_text())["pending_hint"])
+
+    def test_a_prompt_in_a_subagent_does_not_make_the_session_interactive(self):
+        hooks.user_prompt({"prompt": "go on", "session_id": "S9", "agent_id": "sub1", **CLAUDE})
+        self.assertNotIn("S9", json.loads(STORE.read_text()).get("interactive", []) if STORE.exists() else [])
+        _typed("S9")
+        self.assertIn("S9", json.loads(STORE.read_text())["interactive"], "the premise: a typed prompt marks it")
+
+    def test_each_subagent_guard_holds_alone(self):
+        # Opus: the guard in note() and the one in the hint path masked each other; each must hold without the other
+        for leave_out in ("note", "hint"):
+            with self.subTest(leave_out):
+                _reset()
+                _typed()
+                ref = _secret()
+                self._establish(ref)
+                if leave_out == "note":
+                    real = destinations.note
+                    with mock.patch.object(destinations, "note", lambda k, s, a, d: real(k, s, None, d)):
+                        _pre("Bash", {"command": _curl(ref, "other.example.net")}, agent_id="sub1")
+                    self.assertNotIn("maisecrets notes", json.dumps(_post(agent_id="sub1")))
+                else:
+                    _pre("Bash", {"command": _curl(ref, "other.example.net")}, agent_id="sub1")
+                    with mock.patch.object(destinations, "take_pending", return_value=True):
+                        self.assertNotIn("maisecrets notes", json.dumps(_post(agent_id="sub1")))
+
+    def test_off_takes_no_lock_after_a_call(self):
+        _reset(secret_destinations="off")
+        with mock.patch.object(destinations, "take_pending") as taken:
+            _post()
+        self.assertEqual(taken.call_count, 0)
 
     def test_no_hint_in_a_subagent_without_a_typed_prompt_after_a_decision_or_with_tips_off(self):
         for why, setup, extra in (("no typed prompt", lambda: None, {}),
@@ -276,13 +371,18 @@ class Shown(unittest.TestCase):
         self.assertIn("Local uses (not destination-protected)", first)
         self.assertIn("api.example.com", first)
         self.assertNotIn("allowed", first.lower(), "observe shows no permission at all")
-        self.assertNotIn("new", first.split("Seen at")[1], "nothing is new before the list was ever shown")
-        time.sleep(0.01)
-        _pre("Bash", {"command": _curl(ref, "second.example.com")})
+        # `new` is the age of the destination, not state the list writes: the model runs the list too (Opus)
+        data = json.loads(STORE.read_text())
+        data["secrets"][_key(ref)]["seen"]["network:api.example.com"]["first"] = time.time() - 2 * 86400
+        STORE.write_text(json.dumps(data))
+        before = STORE.read_text()
         second = listing()
-        line = next(ln for ln in second.splitlines() if "second.example.com" in ln)
-        self.assertTrue(line.rstrip().endswith("new"), line)
+        self.assertEqual(STORE.read_text(), before, "showing the list changes nothing")
         self.assertFalse(next(ln for ln in second.splitlines() if "api.example.com" in ln).rstrip().endswith("new"))
+        _pre("Bash", {"command": _curl(ref, "second.example.com")})
+        third = listing()
+        line = next(ln for ln in third.splitlines() if "second.example.com" in ln)
+        self.assertTrue(line.rstrip().endswith("new"), line)
 
     def test_forget_and_wipe_remove_the_record(self):
         from maisecrets import cli

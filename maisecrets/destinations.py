@@ -12,6 +12,8 @@ Destinations:
   key 16 of 56 secrets would have several destinations, with server and tool 5). A tool that serves several services
   names its service in a `service` or `provider` field, which then joins the key.
 - local: a file (Write, Edit) or a Bash command without a host. Listed, never a destination, never a hint.
+A label is cleaned (one printable line, a secret shape hidden, a service field only as a name), and the record of a
+secret keeps its MAX_PER_SECRET most recent destinations.
 
 The one hint (maisecrets/settings.py HINTS) comes at the first pattern break: a secret with ESTABLISHED_USES uses on
 one day at one network destination goes to a network destination it never went to. 3 uses on one day was measured
@@ -50,6 +52,16 @@ class Corrupt(ValueError):
     pass
 
 
+_FIELDS = {"kind": str, "label": str, "uses": int, "first": (int, float), "last": (int, float), "day": str,
+           "day_uses": int, "max_day_uses": int}
+MAX_PER_SECRET = 50       # a call the model writes chooses a label; the record of one secret stays bounded
+
+
+def _well_formed(d) -> bool:
+    return isinstance(d, dict) and all(isinstance(d.get(k), t) and not isinstance(d.get(k), bool)
+                                       for k, t in _FIELDS.items())
+
+
 def _clean(data: dict) -> dict:
     """Keep only well-formed records: a file another program changed must not crash the list (codex review)."""
     secrets = data.get("secrets") if isinstance(data.get("secrets"), dict) else {}
@@ -57,11 +69,7 @@ def _clean(data: dict) -> dict:
     for key, rec in secrets.items():
         if not (isinstance(key, str) and isinstance(rec, dict) and isinstance(rec.get("seen", {}), dict)):
             continue
-        seen = {i: d for i, d in rec.get("seen", {}).items()
-                if isinstance(i, str) and isinstance(d, dict) and isinstance(d.get("label"), str)
-                and isinstance(d.get("uses", 0), int) and isinstance(d.get("last", 0), (int, float))
-                and isinstance(d.get("first", 0), (int, float)) and isinstance(d.get("max_day_uses", 0), int)
-                and isinstance(d.get("day_uses", 0), int)}
+        seen = {i: d for i, d in rec.get("seen", {}).items() if isinstance(i, str) and _well_formed(d)}
         kept[key] = {"seen": seen, "allowed": rec.get("allowed") if isinstance(rec.get("allowed"), dict) else {}}
     data["secrets"] = kept
     return data
@@ -99,8 +107,11 @@ def _load_for_write() -> dict:
     try:
         return _load(strict=True)
     except Corrupt:
+        aside = _path().with_name(STORE + ".corrupt")
+        if aside.exists():
+            aside = _path().with_name(f"{STORE}.corrupt.{int(time.time())}")
         try:
-            os.replace(_path(), _path().with_name(STORE + ".corrupt"))
+            os.replace(_path(), aside)
         except OSError:
             pass
         return _load()
@@ -126,6 +137,10 @@ def clean_label(text: str) -> str:
     path), and a newline or a terminal escape in it must not draw lines into /maisecrets:list (codex review)."""
     text = _UNPRINTABLE.sub("?", str(text))
     text = re.sub(r"\s+", " ", text).strip()
+    from . import detect
+    for m in sorted(detect.scan(text), key=lambda m: -m.start):
+        if m.type == "SECRET":
+            text = text[:m.start] + "<hidden>" + text[m.end:]
     return text[:77] + "..." if len(text) > 80 else text
 
 
@@ -140,7 +155,10 @@ def destinations_of(tool: str, tool_input: dict, ssh_hosts: list[str] | None = N
         parts = tool.split("__")
         server, name = parts[1] if len(parts) > 1 else "?", parts[2] if len(parts) > 2 else "?"
         service = tool_input.get("service") or tool_input.get("provider")
-        label = f"MCP {server} · {name}" + (f" · {service}" if isinstance(service, str) and service else "")
+        # a name, not free text: the model writes this field, and a value in it must not land in the record (Opus)
+        if not (isinstance(service, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", service)):
+            service = ""
+        label = f"MCP {server} · {name}" + (f" · {service}" if service else "")
         return [("network", clean_label(label))]
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch"):
         path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
@@ -164,9 +182,10 @@ def note(keys: list[str], session: str | None, agent: str | None, destinations: 
                 pattern_break = _note_one(data, key, destinations) or pattern_break
             if pattern_break and session and not agent and session in data["interactive"]:
                 data["pending_hint"][session] = time.time()
+            data["pending_hint"] = {s: t for s, t in data["pending_hint"].items() if s in data["interactive"]}
             _save(data)
             return pattern_break
-    except (OSError, LockTimeout, ValueError, TypeError):
+    except (OSError, LockTimeout, ValueError, TypeError, KeyError):
         return False
 
 
@@ -185,6 +204,8 @@ def _note_one(data: dict, key: str, destinations: list[tuple[str, str]]) -> bool
         if d is None:
             if kind == "network" and established:
                 pattern_break = True
+            if len(seen) >= MAX_PER_SECRET:
+                del seen[min(seen, key=lambda i: seen[i]["last"])]     # the oldest goes
             d = seen[ident] = {"kind": kind, "label": label, "uses": 0, "first": now, "last": now,
                                "day": today, "day_uses": 0, "max_day_uses": 0}
         if d.get("day") != today:
@@ -236,18 +257,8 @@ def summary() -> tuple[int, int, int]:
     return len(counts), sum(counts), sum(1 for c in counts if c > 1)
 
 
-def list_opened() -> float:
-    """When /maisecrets:list was last shown, and note now: a destination first seen after it is marked `new`."""
-    try:
-        with _LOCK:
-            data = _load_for_write()
-            before = data.get("list_shown", 0)
-            before = float(before) if isinstance(before, (int, float)) else 0.0
-            data["list_shown"] = time.time()
-            _save(data)
-            return before
-    except (OSError, LockTimeout, ValueError):
-        return 0.0
+NEW_SECONDS = 24 * 3600   # `new` in the list: first seen in the last day. Not "since the list was opened": the
+                          # model runs the list too (commands/list.md), and a list it ran would clear the marks (Opus)
 
 
 def uses_text(n: int) -> str:

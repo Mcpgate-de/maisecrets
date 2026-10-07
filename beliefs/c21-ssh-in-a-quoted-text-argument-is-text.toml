@@ -1,10 +1,10 @@
 # c21-ssh-in-a-quoted-text-argument-is-text: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c21-ssh-in-a-quoted-text-argument-is-text"
 control = "C21"
-statement = "With ssh_consent on, the word ssh is text only when the whole command runs nothing (grep, echo, gh, glab, jq, tee, cat, curl …), with no ! alias; when any part can run text (bash /tmp/x after an echo into it), the mention stays an unread call."
+statement = "With ssh_consent on, the word ssh is text only in quoted text: an argument of a data command with no redirect, no pipe and no option that starts a program (rg --pre), or the text field of a gh/glab issue, pr, mr or release; anywhere else it stays an unread call."
 runner = ["tests/test_ssh_consent.py::ClassifierMatrixTests::test_each_command_has_its_kind"]
 
 [proof]
 file = "maisecrets/ssh_consent.py"
-find = "        if not segs or any(sg.get(\"cmd\") not in _TEXT_ONLY_CMDS for sg in segs):"
-replace = "        if not segs:"
+find = "and not _EXEC_OPTION.search(text)"
+replace = ""

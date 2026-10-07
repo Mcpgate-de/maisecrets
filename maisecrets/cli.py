@@ -32,7 +32,7 @@ def cmd_list(_: list[str]) -> int:
     print(f"{len(live)} value(s) stored, {len(rows) - len(live)} expired (only the masked form is kept).")
     print(f"{'key':<14} {'type':<7} {'kind':<18} {'age':>5} {'uses':>4} {'expires in':>10}  shown as")
     from . import destinations
-    shown_before = destinations.list_opened()
+    shown_before = time.time() - destinations.NEW_SECONDS
     for e in sorted(rows, key=lambda x: x.created):
         exp = "expired" if e.purged else f"{int(max(0, e.expires - time.time()) // 3600)}h"
         print(f"{e.key:<14} {e.type:<7} {e.kind:<18} {_age(e.created):>5} {e.uses:>4} {exp:>10}  {e.display or '-'}")
@@ -56,7 +56,7 @@ def _destination_lines(rec: dict, shown_before: float) -> list[str]:
     out = []
 
     def row(d: dict) -> str:
-        new = "   new" if d.get("first", 0) > shown_before and shown_before else ""
+        new = "   new" if d.get("first", 0) > shown_before else ""
         return (f"      {destinations.clean_label(d.get('label', '?')):<{width}}  "
                 f"{destinations.uses_text(d.get('uses', 0)):<6} "
                 f"last {destinations.when_text(d.get('last', 0))}{new}")

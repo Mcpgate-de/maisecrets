@@ -512,8 +512,8 @@ SECRET_c7      SECRET  github_pat            3d   14        21h  -
 
 This is a record, not a permission, and it stops nothing. It is noted when
 the value is handed to the call, so a call you then decline in the client's
-dialog is listed too. `new` marks a destination that came after
-you last opened the list. When a secret that you used at one destination
+dialog is listed too. `new` marks a destination first seen in the
+last 24 hours. When a secret that you used at one destination
 (3 times on one day) goes to a new one for the first time, the AI tells you
 once, in a sentence; this note does not come again. maisecrets does not
 judge whether a destination is safe. Asking before a new destination comes
@@ -876,11 +876,13 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   (`rsync`, `tar -C`, `ln -s` …), so only reads are listed (`cat`, `ls`,
   `grep`, `head`, `diff` …), and a redirect into `.ss…` asks too. Write and
   Edit on `~/.ssh` ask as well.
-- **The word ssh in text runs freely:** an argument of a command that only
-  prints or searches (`grep ssh README.md`, `echo "use ssh"`), and a quoted
-  argument of a command that posts or stores text (`gh issue create --body
-  "… ssh …"`, `glab`, `jq`, `tee`, `cat`, `curl -d`), unless the text goes into
-  a pipe or the call holds a `!` (a shell alias).
+- **The word ssh in quoted text runs freely:** a quoted argument of a command
+  that only prints or searches (`echo "use ssh"`, `grep "ssh" log`), when no
+  redirect, no pipe and no option that starts a program (`rg --pre`, `sort
+  --compress-program`) is in that command; and the quoted text field of a
+  `gh` or `glab` issue, pr, mr or release (`gh issue create --body "… ssh …"`,
+  `-t`, `-d`, `-m`, `--notes`). Anywhere else, also unquoted
+  (`grep ssh README.md`), the hook cannot tell text from a call, and it asks.
 - **A short deny list is always refused:** `mkfs` or `wipefs` on a device,
   `dd` to a device, `rm -rf /`, a fork bomb, anywhere in a command that names
   an ssh-family call (quotes removed; as a command word, not as a file name;

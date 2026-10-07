@@ -54,12 +54,13 @@ _RETARGET_O = re.compile(r"^(?:proxyjump|proxycommand|hostname|remotecommand|con
 # commands whose quoted arguments are data, never run: a mention of ssh there is no call (`grep "ssh" log`)
 _DATA_CMDS = {"grep", "egrep", "fgrep", "rg", "ag", "echo", "printf", "cut", "tr", "wc", "sort", "uniq", "head",
               "tail", "diff", "test", "[", "pgrep", "pkill"}
-# a quoted argument of these is text they print, post or store, never a command they run: an issue body that names
-# ssh asked on 0.6.6 (`gh issue create --body "… an ssh host …"`). A `!` in the call is a shell alias (gh alias set,
-# glab alias), so it stays unread
-_TEXT_ARG_CMDS = {"gh", "glab", "jq", "tee", "cat", "curl"}
-# a whole command of these runs nothing, so a mention of ssh in it is text (with no redirect, see text_only)
-_TEXT_ONLY_CMDS = _DATA_CMDS | _TEXT_ARG_CMDS | {"cd", "true", "false", ":"}
+# options that make a data command start a program (rg --pre ssh . host ran ssh; sort --compress-program likewise):
+# with one of them a data command is no data (Opus review of 0.6.7)
+_EXEC_OPTION = re.compile(r"(?:^|\s)(?:--pre(?:-glob)?|--compress-program|--use-compress-program)(?:[=\s]|$)")
+# the text fields of gh and glab subcommands that only post text: a quoted value of one of these flags that names ssh
+# is the text of an issue, not a call (0.6.6 asked for `gh issue create --body "… an ssh host …"`)
+_TEXT_FLAG = re.compile(r"(?:^|\s)(?:--body|-b|--title|-t|--description|-d|--message|-m|--notes|-n)[=\s]*$")
+_TEXT_SUBCOMMANDS = {"issue", "pr", "mr", "release"}
 # a heredoc to these is text, not a script: a commit message or a file that mentions ssh
 _HEREDOC_DATA = {"cat", "tee", "git", "gh", "glab", "grep", "echo", "printf", "wc", "head", "tail", "jq", "less"}
 # stderr or all output to /dev/null, or stderr to stdout: no file is written
@@ -505,19 +506,24 @@ def classify(command: str, parse: Parser) -> Verdict:
         k = segs.index(sg)
         return k + 1 < len(segs) and bool(segs[k + 1].get("piped"))
 
-    def text_only() -> bool:
-        """The whole command only prints, searches or passes text on: every part is a command that runs nothing, so
-        no later part can run text an earlier one wrote, and no `!` alias. Then ssh in it is a word, not a call.
-        Per part this was not enough: `echo "ssh web1 reboot" > /tmp/x; bash /tmp/x` ran without a question on
-        0.6.6 (codex review of 0.6.7), because the echo part alone was data."""
-        if not segs or any(sg.get("cmd") not in _TEXT_ONLY_CMDS for sg in segs):
-            return False                 # a part that can run text (bash /tmp/x after an echo into it) decides
-        return not any(sg.get("cmd") in _TEXT_ARG_CMDS and "!" in command[sg["start"]:sg["end"]] for sg in segs)
+    def quoted_start(pos: int) -> int:
+        """Where the quoted string that holds pos begins (the index of its opening quote)."""
+        k = pos
+        while k > 0 and ctxs[k - 1] == ctxs[pos]:
+            k -= 1
+        return k - 1 if k > 0 else 0
+
+    def gh_text_field(sg: dict, pos: int) -> bool:
+        """pos is inside the quoted value of a text flag of `gh|glab issue|pr|mr|release …`: the text of an issue."""
+        words = sg.get("words") or []
+        if sg.get("cmd") not in ("gh", "glab") or len(words) < 2 or words[1] not in _TEXT_SUBCOMMANDS:
+            return False
+        return bool(_TEXT_FLAG.search(command[sg["start"]:quoted_start(pos)]))
 
     def data_only(sg: dict) -> bool:
         text = command[sg["start"]:sg["end"]]
         unq = "".join(ch if cx == "" else " " for ch, cx in zip(text, ctxs[sg["start"]:sg["end"]]))
-        return sg.get("cmd") in _DATA_CMDS and not piped_on(sg) and ">" not in unq
+        return sg.get("cmd") in _DATA_CMDS and not piped_on(sg) and ">" not in unq and not _EXEC_OPTION.search(text)
 
     # the airbag: when a command names an ssh-family call, every part of it that is not plain data is checked,
     # quotes removed (`echo '… mkfs …'` alone is data; `echo … | bash` is not). A narrower scan of "remote fields"
@@ -550,8 +556,10 @@ def classify(command: str, parse: Parser) -> Verdict:
         if ctx == "comment":
             continue
         seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
-        if ctx in ("", "sq", "dq") and text_only():
-            continue                         # text in a command that runs nothing: grep ssh log, gh … --body "… ssh …"
+        if seg and ctx in ("sq", "dq") and data_only(seg):
+            continue                         # quoted text a data command prints: echo "use ssh" (no > file, no pipe)
+        if seg and ctx in ("sq", "dq") and gh_text_field(seg, m.start()):
+            continue                         # the quoted body of an issue: gh issue create --body "… ssh …"
         if seg and seg.get("cmd") == "git" and m.group(0) in ("ssh", "ssh://") \
                 and not re.search(r"(?:^|\s)-c(?:\s|$)|!", command[seg["start"]:seg["end"]]):
             continue                         # git over ssh is out of scope (C21); -c and a ! alias run commands
