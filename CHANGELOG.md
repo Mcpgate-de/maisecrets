@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## [0.6.5] - 2026-10-07
+
+### Features
+
+- /maisecrets:settings shows what you decide, and a hint names ssh_consent once (f137459)
+
+### Fixes
+
+- an sdk prompt changes no setting, since a program a tool started can send one (09a02c3)
+- only a prompt the person typed changes a setting, and the hint comes once under parallel hooks (3694cf8)
+
+### Other
+
+- Merge branch 'feat/settings-and-hints' into 'main' (1fdb482)
+
 ## [0.6.4] - 2026-10-07
 
 ### Features
