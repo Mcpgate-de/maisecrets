@@ -753,7 +753,9 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
 - **A read runs.** A remote command that prints only metadata about the host,
   from a short list with named options (`uptime`, `df -h`, `free`, `uname`,
   `ls`, `du`, `wc` of a literal absolute path, `systemctl is-active`), with no
-  expansion and no redirect except `2>&1` and `>/dev/null`. The content of a
+  expansion and no redirect except `2>&1` and `>/dev/null` (any other
+  redirect asks, also a local one: the hook cannot tell a quoted `">"` that
+  ssh hands to the remote shell from a local one). The content of a
   file, a log or a process list (`cat`, `grep`, `journalctl`, `ps`,
   `systemctl status`) is a write: it can carry a credential. Paths like
   `/etc/shadow`, `.env`, `id_*`, `*.pem`, `/proc` or `/root` are never a read;
@@ -779,9 +781,12 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   HostName`, `-o RemoteCommand`), `GIT_SSH_COMMAND`, `git -c core.sshCommand`,
   `RSYNC_RSH`, `DOCKER_HOST=ssh://`, the own ssh options of `sshfs`, `mosh`
   and `rsync -e`, and a change to `~/.ssh/config` (also through Write or
-  Edit, and a command that works inside `~/.ssh`).
+  Edit, a command that works inside `~/.ssh`, and a path like
+  `~/.ssh/x/../config`).
 - **A short deny list is always refused:** `mkfs`, `wipefs`, `dd` to a
-  device, `rm -rf /`, a fork bomb. It is an airbag, not the protection.
+  device, `rm -rf /`, a fork bomb, in the command that runs on the remote side
+  (ssh's remote command, the command after `mosh … --`, `rsync
+  --rsync-path`). It is an airbag, not the protection.
 - **Codex** cannot ask. It refuses and names a sentence with a code, for
   example `maisecrets: allow ssh web1 123456`. Typed alone as your very next
   prompt within 10 minutes, it allows writes to that host for 8 hours; the

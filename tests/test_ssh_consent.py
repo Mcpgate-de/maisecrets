@@ -107,7 +107,7 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ssh web1 uptime", "ssh web1 'df -h'", "ssh web1 'systemctl is-active nginx'", "ssh web1 -- uptime",
             "ssh -p 2222 -l deploy web1 'free -m'", "ssh web1 'ls -la /var/log 2>&1'",
             "ssh web1 'du -sh /srv 2>/dev/null'", "ssh web1 'wc -l /var/log/syslog'", "cd /tmp && ssh web1 uptime",
-            "timeout 30 ssh web1 uptime", "ssh web1 uptime < /dev/null", "ssh web1 uptime > /tmp/out",
+            "timeout 30 ssh web1 uptime", "ssh web1 uptime < /dev/null", "ssh web1 uptime 2>/dev/null",
             "perl -e 'alarm 45; exec @ARGV' ssh web1 uptime",
             "ssh web1 'uname -a; df -h'",
         ],
@@ -138,6 +138,10 @@ class ClassifierMatrixTests(unittest.TestCase):
             # copies with a URI, a port, an option
             "scp f scp://web1/path", "sftp sftp://web1/path", "rsync -a f rsync://web1/module/",
             "rsync -a f web1::module/", "scp -P 2222 f web1:/tmp/",
+            # a quoted ">" goes to the remote shell (codex review of the repair); an unquoted local redirect asks too,
+            # since the dequoted words cannot tell them apart
+            "ssh web1 wc -l \">\" /tmp/out", "ssh web1 uptime > /tmp/out",
+            "mosh -p 60000 web1", "rsync -a --exclude=mkfs.py ./ web1:/srv/", "scp wipefs web1:/tmp/",
             "ssh -A web1 uptime", "ssh -X web1 uptime", "ssh -o ForwardAgent=yes web1 uptime",
             "ssh -o 'SetEnv BASH_ENV=/x' web1 uptime", "sshfs -o reconnect web1:/ /mnt/w", "autossh -M 0 -f -N web1",
         ],
@@ -173,7 +177,7 @@ class ClassifierMatrixTests(unittest.TestCase):
             "cd ~/.ssh && printf 'Host web1\\n HostName evil\\n' >> config", "printf x >> ~/.ssh/./config",
             "printf x >> ~/.ssh//config", "sshfs -o reconnect,HostName=evil.example web1:/ /mnt/w",
             "sshfs -o ssh_command='ssh -J evil' web1:/ /mnt/w", "mosh --ssh='ssh -o HostName=evil' web1",
-            "sudo -u bob ssh web1 'touch x'",
+            "sudo -u bob ssh web1 'touch x'", "printf x >> ~/.ssh/sub/../config", "mosh --server=/tmp/x web1",
         ],
         "deny": [
             "ssh web1 'mkfs.ext4 /dev/sda1'", "ssh web1 'dd if=/dev/zero of=/dev/sda bs=1M'", "ssh web1 'rm -rf /'",
@@ -191,7 +195,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertGreaterEqual(counted, 170)
+        self.assertEqual(counted, 178, "a row was added or lost: update the count")
 
     def test_the_approval_key_carries_user_and_port(self):
         for command, host in (("ssh root@web1 -p 2222 uptime", "root@web1:2222"),
@@ -209,7 +213,11 @@ class ClassifierMatrixTests(unittest.TestCase):
                               # scp -l is a bandwidth limit, not a user (Gate B of #8)
                               ("scp -l 1000 ./f web1:/x", "web1"),
                               # one user from two sources that agree stays one host
-                              ("ssh -l deploy deploy@web1 x", "deploy@web1")):
+                              ("ssh -l deploy deploy@web1 x", "deploy@web1"),
+                              # mosh -p is its UDP port, not the host; rsync --port is the daemon's (codex review)
+                              ("mosh -p 60000 web1", "web1"), ("mosh --port 60000 ops@web1", "ops@web1"),
+                              ("rsync --port=8873 a rsync://web1/module", "web1:8873"),
+                              ("rsync --port 8873 a rsync://web1/module", "web1:8873")):
             with self.subTest(command):
                 self.assertEqual(ssh_consent.classify(command, parse).hosts, [host])
 
@@ -223,7 +231,7 @@ class ConsentFlowTests(unittest.TestCase):
         for command in ("ssh web1 'systemctl restart nginx'", "bash -c 'ssh web1 reboot'", "ssh web1 'mkfs /dev/x'",
                         # a mention is no call, and a module name is not the store (Codex review of #8)
                         'echo "bash hooks/run.sh post-tool"', "python3 -m py_compile maisecrets/consent_store.py",
-                        "git diff -- maisecrets/consent_store.py"):
+                        "git diff -- maisecrets/consent_store.py", "python3 -c 'print(\"run.sh user-prompt\")'"):
             with self.subTest(command):
                 self.assertEqual(_pre(command, cfg={}), {})
 
@@ -260,6 +268,10 @@ class ConsentFlowTests(unittest.TestCase):
         for nested in ("bash -c 'hooks/run.sh user-prompt < f.json'", "P=user-prompt; bash hooks/run.sh $P"):
             with self.subTest(nested):
                 self.assertEqual(_decision(_pre(nested)), "deny")
+        # the client's own PostToolUse of the asked call is no proof either: it runs, and nothing is covered
+        with mock.patch.object(hooks, "load_config", return_value={**hooks.load_config(), **ON}):
+            hooks.post_tool({**json.loads(payload), "tool_input": {"command": "ssh web1 'systemctl restart nginx'"},
+                             "prompt_id": "p"})
         self.assertFalse(consent_store.covered("S1", None, ["web1"]))
 
     def test_codex_refuses_and_grants_only_by_the_sentence_alone_with_its_code(self):

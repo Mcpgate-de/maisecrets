@@ -1963,12 +1963,12 @@ def _calls_a_hook_entry(command: str) -> bool:
                     words[k + 1] in _HOOK_ENTRIES or words[k + 1].startswith("$")):
                 return True
     # inside a nested shell (`bash -c 'hooks/run.sh user-prompt …'`) the words are one string: the text decides,
-    # except as an argument of a command that only prints it (Gate B of #8)
-    data = {"echo", "printf", "grep", "egrep", "rg", "git", "cat", "head", "tail", "less"}
+    # for a command that runs its argument as shell code only (Gate B of #8; `python3 -c 'print(…)'` is no call)
+    shells = {"bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "su", "xargs", "parallel", "watch", "script"}
     for m in re.finditer(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
                          r"(?:session-start|user-prompt|pre-tool|post-tool|mod-prompt)\b", command):
         seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
-        if not seg or seg.get("cmd") not in data:
+        if seg and seg.get("cmd") in shells:
             return True
     return False
 

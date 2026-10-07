@@ -235,30 +235,30 @@ def _ssh_options(words: list[str], i: int, opt: dict) -> "tuple[int, str]":
     return i, ""
 
 
-_REDIR_WORD = re.compile(r"^\d*(?:<<<|<<|>>|<|>|&>>|&>)&?\d*$")
-_REDIR_GLUED = re.compile(r"^\d*(?:>>|<|>|&>)&?\S+$")
+# local redirections that change nothing on either side; stripped only when the raw text has them unquoted, so a
+# quoted ">" that ssh hands to the remote shell stays part of the remote command (codex review of the repair)
+_HARMLESS_WORDS = {"2>&1", "1>&2", ">&2", ">/dev/null", "1>/dev/null", "2>/dev/null", "&>/dev/null", "</dev/null"}
 
 
-def _drop_local_redirects(words: list[str]) -> list[str]:
-    """The words without the local shell's redirections (`< /dev/null`, `2>&1`, `> out`): they are not part of the
-    remote command. A quoted remote command is one word, so a lone `>` here was unquoted."""
+def _strip_harmless(words: list[str], unquoted: str) -> list[str]:
     out: list[str] = []
-    skip = False
-    for w in words:
-        if skip:
-            skip = False
+    i = 0
+    while i < len(words):
+        w = words[i]
+        if w in _HARMLESS_WORDS and w in unquoted.replace(" ", ""):
+            i += 1
             continue
-        if _REDIR_WORD.match(w):
-            skip = not w.endswith(("&1", "&2")) and not re.search(r"&\d$", w)
-            continue
-        if _REDIR_GLUED.match(w):
+        if w in (">", "2>", "1>", "&>", "<") and i + 1 < len(words) and words[i + 1] == "/dev/null" \
+                and re.search(re.escape(w) + r"\s*/dev/null", unquoted):
+            i += 2
             continue
         out.append(w)
+        i += 1
     return out
 
 
-def _ssh_call(words: list[str], fed: bool, parse: Parser) -> Call:
-    words = _drop_local_redirects(words)
+def _ssh_call(words: list[str], fed: bool, parse: Parser, unquoted: str = "") -> Call:
+    words = _strip_harmless(words, unquoted)
     opt: dict = {}
     i, why = _ssh_options(words, 1, opt)
     if why:
@@ -306,6 +306,7 @@ def _ssh_call(words: list[str], fed: bool, parse: Parser) -> Call:
 # options that take an argument, per copy tool; the ones that send the connection elsewhere or run a program
 _COPY_ARG = {"scp": set("cDFiJloPSX"), "sftp": set("BbcDFiJloPRSs"), "sshfs": set("op"), "ssh-copy-id": set("iFJop"),
              "rsync": set()}
+_MOSH_ARG = {"-p", "--port", "--predict", "--family", "--bind-server", "--experimental-remote-ip"}
 # sshfs passes ssh options in a comma list and can run another ssh program
 _SSHFS_PROGRAM = re.compile(r"^(?:ssh_command|ssh_protocol|sftp_server|directport|passive|slave)\b", re.I)
 _COPY_RETARGET = {"scp": set("JFS"), "sftp": set("JFSDs"), "sshfs": set(), "ssh-copy-id": set("JF"), "rsync": set()}
@@ -323,8 +324,12 @@ def _copy_call(cmd: str, words: list[str]) -> "tuple[list[str], str]":
     while i < len(words):
         w = words[i]
         if w.startswith("--"):
-            if cmd == "rsync" and w.startswith("--port="):
-                opt["p"] = w.split("=", 1)[1]
+            if cmd == "rsync" and w.startswith("--port"):
+                if w.startswith("--port="):
+                    opt.setdefault("ports", []).append(w.split("=", 1)[1])
+                elif i + 1 < len(words):
+                    opt.setdefault("ports", []).append(words[i + 1])
+                    i += 1
             i += 1
             continue
         if w.startswith("-") and w != "-":
@@ -409,19 +414,36 @@ def classify(command: str, parse: Parser) -> Verdict:
             # -M is autossh's monitor port, not ssh's -M (Gate B: `autossh -M 0` asked every time)
             words = [w for k, w in enumerate(words) if not (w.startswith("-M") or (k and words[k - 1] == "-M"))]
         if cmd == "ssh":
-            call = _ssh_call(words, fed, parse)
+            call = _ssh_call(words, fed, parse, masked)
         elif cmd == "autossh":
             # a connection that restarts itself, for tunnels: always a write, its host as ssh reads it
-            call = _ssh_call(words, fed, parse)
+            call = _ssh_call(words, fed, parse, masked)
             call.tool = cmd
             if call.kind == "read":
                 call.kind, call.why = "write", "autossh keeps a connection and its tunnels open"
         elif cmd == "mosh" and any(w.startswith("--ssh") for w in words):
             call = Call(cmd, "", "unknown", "mosh with its own ssh command")
+        elif cmd == "mosh" and any(w.startswith(("--server", "--client")) for w in words):
+            call = Call(cmd, "", "unknown", "mosh with its own server or client program")
         elif cmd == "mosh":
-            dest = next((w for w in words[1:] if not w.startswith("-")), "")
-            call = Call(cmd, dest, "write" if _HOST_RE.match(dest.split("@")[-1] or "-") else "unknown",
-                        "an interactive login")
+            # -p/--port is mosh's UDP port, not part of the host; skip the arguments of options (codex review)
+            dest, k = "", 1
+            while k < len(words):
+                w = words[k]
+                if w == "--":
+                    k += 1
+                    continue
+                if w in _MOSH_ARG:
+                    k += 2
+                    continue
+                if w.startswith("-"):
+                    k += 1
+                    continue
+                dest = w
+                break
+            user, _, bare = dest.rpartition("@")
+            ok = bool(dest) and _HOST_RE.match(bare) and (not user or _USER_RE.match(user))
+            call = Call(cmd, dest if ok else "", "write" if ok else "unknown", "an interactive login")
         else:
             if cmd == "rsync" and (any(w in ("-e", "--rsh") or w.startswith("--rsh=") or re.match(r"^-[A-Za-z]*e", w)
                                        for w in words) or "RSYNC_RSH" in text):
@@ -444,16 +466,34 @@ def classify(command: str, parse: Parser) -> Verdict:
         k = segs.index(sg)
         return k + 1 < len(segs) and bool(segs[k + 1].get("piped"))
 
-    # the airbag on every ssh-family call, not only on ssh's remote command: mosh --, rsync --rsync-path, quotes
+    # the airbag on the fields that run on the remote side, also outside ssh: the command after mosh's host or --,
+    # rsync's --rsync-path; never a host, a local file or a filter (codex review of the repair)
     for sg in segs:
-        if sg.get("cmd") in SSH_CMDS or (sg.get("cmd") == "perl" and "exec @ARGV" in command[sg["start"]:sg["end"]]):
-            hit = _deny_hit(command[sg["start"]:sg["end"]].replace('"', "").replace("'", ""))
+        ws = sg.get("words") or []
+        remote_parts = []
+        if sg.get("cmd") == "mosh" and "--" in ws:
+            remote_parts.append(" ".join(ws[ws.index("--") + 1:]))
+        if sg.get("cmd") == "rsync":
+            for k, w in enumerate(ws):
+                if w.startswith("--rsync-path="):
+                    remote_parts.append(w.split("=", 1)[1])
+                elif w == "--rsync-path" and k + 1 < len(ws):
+                    remote_parts.append(ws[k + 1])
+        for part in remote_parts:
+            hit = _deny_hit(part.replace('"', "").replace("'", ""))
             if hit:
-                calls.append(Call(sg.get("cmd", ""), "", "deny", f"the command matches {hit}"))
+                calls.append(Call(sg.get("cmd", ""), "", "deny", f"the remote command matches {hit}"))
         if sg.get("cmd") in ("cd", "pushd") and any(".ssh" in w for w in (sg.get("words") or [])[1:]):
             calls.append(Call("cd", "", "unknown", "a command inside ~/.ssh, which decides where ssh connects"))
     fed_by_heredoc = any(c.kind != "unknown" for c in calls) and any(
         sg.get("heredoc") and sg.get("cmd") in SSH_CMDS for sg in segs)
+    # a path into ~/.ssh that resolves to its config only after normalising (`~/.ssh/sub/../config`): a change there
+    # retargets every alias; a read of it is cheap to ask about (codex review of the repair)
+    import posixpath
+    for m in re.finditer(r"[^\s'\"<>|;&]*\.ssh/[^\s'\"<>|;&]*", command):
+        if ".." in m.group(0) and posixpath.normpath(m.group(0)).endswith(".ssh/config"):
+            calls.append(Call("ssh", "", "unknown", "a path that resolves to ~/.ssh/config"))
+            break
     for m in _TOKEN_RE.finditer(command):
         ctx = ctxs[m.start()] if m.start() < len(ctxs) else ""
         if ctx == "comment":
