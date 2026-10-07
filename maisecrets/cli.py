@@ -252,7 +252,9 @@ def cmd_settings(args: list[str]) -> int:
     prompt the person typed (maisecrets/settings.py), never from a command the model runs."""
     from . import settings
     rest = [a for a in args if a != "--all"]
-    if rest and len(rest) <= 2 and rest[0].lower() in settings.TITLE:
+    # KEY, KEY VALUE, or for the host list KEY add|remove HOST (field report on 0.6.6: the list's own form exited 1)
+    longest = 3 if rest and rest[0].lower() == "ssh_autonomous_hosts" else 2
+    if rest and len(rest) <= longest and rest[0].lower() in settings.TITLE:
         # after a typed change the prompt hook already wrote it: show the card with the new state
         print(settings.render(only=rest[0].lower()))
         return 0

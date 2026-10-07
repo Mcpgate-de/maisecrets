@@ -323,6 +323,7 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     # unknown word exits 1; none of them writes a setting (tests/test_settings.py)
     "settings": [([], "", {"ok": 0, "index": 0, "config": 1}), (["--all"], "", {"ok": 0, "index": 0, "config": 1}),
                  (["ssh_consent", "on"], "", {"ok": 0, "index": 0, "config": 1}),
+                 (["ssh_autonomous_hosts", "add", "ops1"], "", {"ok": 0, "index": 0, "config": 1}),
                  (["hints"], "", _ALL0), (["nosuchkey"], "", _ALL1)],
     # the labels are assembled so the repo's own pre-commit scan does not take the fixtures for secrets
     "scan": [(["pass" "word: SCANVALUE"], "", _ALL0), ([], "api" "_key=SCANVALUE", _ALL0)],
