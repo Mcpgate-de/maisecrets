@@ -55,10 +55,11 @@ _PROMPT_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+([a-
 # type it for the model, and the writer called by name would skip the prompt (review of C22). A text match: a
 # sentence or a name built at run time is not seen
 IN_A_COMMAND_RE = re.compile(r"(?:/maisecrets:settings|maisecrets:\s*set)\s+[a-z_]+\s+[a-z-]+|\bapply_typed\b", re.I)
-# who wrote the prompt (Claude Code 2.1.292 UserPromptSubmit `source`): the person at the composer, or a program
-# of theirs through -p or the SDK. A scheduled task, a loop wakeup, a system or poll prompt can carry text the
-# model chose (CronCreate, ScheduleWakeup), so it changes nothing. A client without the field is taken as the person
-TYPED_SOURCES = (None, "user", "sdk")
+# who wrote the prompt (Claude Code 2.1.292 UserPromptSubmit `source`): only the person at the composer. A scheduled
+# task, a loop wakeup, a system or poll prompt can carry text the model chose (CronCreate, ScheduleWakeup), and an
+# `sdk` prompt can come from a program a tool started (codex review round 2), so none of them changes anything. A
+# client without the field is taken as the person
+TYPED_SOURCES = (None, "user")
 _LOCK = HOME / ".settings.lock"
 
 
