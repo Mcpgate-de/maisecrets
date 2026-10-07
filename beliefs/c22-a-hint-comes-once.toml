@@ -1,10 +1,10 @@
 # c22-a-hint-comes-once: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c22-a-hint-comes-once"
 control = "C22"
-statement = "A hint goes to the model once per revision: a second ssh write, another host or another session gets none."
-runner = ["tests/test_settings.py::Hint::test_the_first_ssh_write_gives_the_hint_once"]
+statement = "A hint goes to the model once per revision: of hooks that run at the same time only the one that recorded it gives it, and a record that cannot be written gives none."
+runner = ["tests/test_settings.py::Hint::test_an_unwritable_record_gives_no_hint_and_parallel_hooks_give_it_once"]
 
 [proof]
-file = "maisecrets/hooks.py"
-find = "    settings.mark_given(\"ssh_consent\")\n"
+file = "maisecrets/settings.py"
+find = "            if _given_this_revision(feature, given):\n                return False\n"
 replace = ""

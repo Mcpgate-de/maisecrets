@@ -1,0 +1,10 @@
+# c22-a-prompt-the-client-injected-changes-no-setting: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-a-prompt-the-client-injected-changes-no-setting"
+control = "C22"
+statement = "A prompt the client injected (a scheduled task, a loop wakeup, a system or poll prompt) can carry text the model chose; it changes no setting, also when its whole text is a settings change."
+runner = ["tests/test_settings.py::Change::test_a_prompt_the_client_injected_changes_nothing"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    typed = payload.get(\"source\") in settings_mod.TYPED_SOURCES\n"
+replace = "    typed = True\n"

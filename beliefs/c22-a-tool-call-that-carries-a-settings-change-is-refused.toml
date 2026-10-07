@@ -1,0 +1,10 @@
+# c22-a-tool-call-that-carries-a-settings-change-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-a-tool-call-that-carries-a-settings-change-is-refused"
+control = "C22"
+statement = "A Bash or PowerShell call that carries a settings change (a nested client that would type it, or the writer called by name) is refused."
+runner = ["tests/test_settings.py::Change::test_a_tool_call_that_carries_a_settings_change_is_refused"]
+
+[proof]
+file = "maisecrets/settings.py"
+find = "IN_A_COMMAND_RE = re.compile(r\"(?:/maisecrets:settings|maisecrets:\\s*set)\\s+[a-z_]+\\s+[a-z-]+|\\bapply_typed\\b\", re.I)"
+replace = "IN_A_COMMAND_RE = re.compile(r\"(?!)\")"

@@ -12,7 +12,8 @@ import json
 import re
 import time
 
-from .vault import CONFIG, DEFAULT_CONFIG, HOME, atomic_write, load_config
+from .vault import (CONFIG, DEFAULT_CONFIG, HOME, ConfigError, LockTimeout, _check_types, _lock_for, atomic_write,
+                    load_config)
 
 # Every key of the config is in exactly one class (a test holds it): a new key without one is a test failure.
 DISCOVERABLE = ("ssh_consent", "rehydration")
@@ -50,6 +51,15 @@ _BOOL_KEYS = tuple(k for k in DISCOVERABLE + ADVANCED if isinstance(DEFAULT_CONF
 
 # the whole prompt, nothing else: a sentence inside a longer prompt is text for the model, not an order
 _PROMPT_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+([a-z_]+)\s+([a-z-]+)\s*\Z", re.I)
+# the same sentence anywhere in a tool call: a nested client (`codex exec 'maisecrets: set …'`, `claude -p`) would
+# type it for the model, and the writer called by name would skip the prompt (review of C22). A text match: a
+# sentence or a name built at run time is not seen
+IN_A_COMMAND_RE = re.compile(r"(?:/maisecrets:settings|maisecrets:\s*set)\s+[a-z_]+\s+[a-z-]+|\bapply_typed\b", re.I)
+# who wrote the prompt (Claude Code 2.1.292 UserPromptSubmit `source`): the person at the composer, or a program
+# of theirs through -p or the SDK. A scheduled task, a loop wakeup, a system or poll prompt can carry text the
+# model chose (CronCreate, ScheduleWakeup), so it changes nothing. A client without the field is taken as the person
+TYPED_SOURCES = (None, "user", "sdk")
+_LOCK = HOME / ".settings.lock"
 
 
 def state(key: str, cfg: dict) -> str:
@@ -97,8 +107,9 @@ def parse_prompt(prompt) -> tuple[str, str] | None:
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
 
-def apply(key: str, word: str) -> str:
-    """Write one change the person typed into config.json, keep every other key, and say what happened."""
+def apply_typed(key: str, word: str) -> str:
+    """Write one change the person typed into config.json, keep every other key, and say what happened. Only the
+    prompt hook calls this, for a prompt whose source is the person (TYPED_SOURCES)."""
     cfg = load_config()
     if key in (cfg.get("policy_keys") or []):
         return f"maisecrets: {key} is managed by a machine policy; it cannot be changed here."
@@ -111,24 +122,34 @@ def apply(key: str, word: str) -> str:
             return f"maisecrets: {key} takes on, off or default."
         if key in _CHOICES and word not in _CHOICES[key]:
             return f"maisecrets: {key} takes {', '.join(_CHOICES[key])} or default."
+    # a symlinked config.json (dotfiles) keeps its link: the new file replaces the target
+    target = CONFIG.resolve() if CONFIG.is_symlink() else CONFIG
     try:
-        text = CONFIG.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        text = "{}"
-    except OSError as exc:
-        return f"maisecrets: {CONFIG} cannot be read ({type(exc).__name__}); nothing was changed."
-    try:
-        user = json.loads(text)
-    except ValueError:
-        user = None
-    if not isinstance(user, dict):
-        # rewriting a file that does not parse would drop what the person wrote in it
-        return f"maisecrets: {CONFIG} is not one valid JSON object; fix it first. Nothing was changed."
-    if word == "default":
-        user.pop(key, None)
-    else:
-        user[key] = _BOOL_WORDS[word] if key in _BOOL_KEYS else word
-    atomic_write(CONFIG, json.dumps(user, indent=2) + "\n")
+        # read, change and write under one lock: two prompts at once must not drop each other's change
+        with _lock_for(_LOCK):
+            try:
+                text = target.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                text = "{}"
+            try:
+                user = json.loads(text)
+            except ValueError:
+                user = None
+            if not isinstance(user, dict):
+                # rewriting a file that does not parse would drop what the person wrote in it
+                return f"maisecrets: {CONFIG} is not one valid JSON object; fix it first. Nothing was changed."
+            try:
+                _check_types(user, CONFIG.name)
+            except ConfigError as exc:
+                # load_config ignores the whole file then: the change would be written and still not count
+                return f"maisecrets: {exc}; fix it first. Nothing was changed."
+            if word == "default":
+                user.pop(key, None)
+            else:
+                user[key] = _BOOL_WORDS[word] if key in _BOOL_KEYS else word
+            atomic_write(target, json.dumps(user, indent=2) + "\n")
+    except (OSError, LockTimeout) as exc:
+        return f"maisecrets: {CONFIG} cannot be written ({type(exc).__name__}); nothing was changed."
     after = load_config()
     return (f"maisecrets: {key} is {_shown(after.get(key))} ({state(key, after)}). "
             "This prompt was not sent to the model.")
@@ -155,6 +176,20 @@ HINTS = {
 _HINTS_FILE = HOME / "hints.json"
 
 
+def _given() -> dict:
+    try:
+        given = json.loads(_HINTS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return given if isinstance(given, dict) else {}
+
+
+def _given_this_revision(feature: str, given: dict) -> bool:
+    seen = given.get(feature)
+    return isinstance(seen, dict) and isinstance(seen.get("revision"), int) and \
+        seen["revision"] >= HINTS[feature]["revision"]
+
+
 def hint_due(feature: str, cfg: dict) -> bool:
     """The setting is undecided (not in config.json, not in a policy, still the default) and this revision
     of its hint was never given. `tips: false` silences every hint."""
@@ -164,23 +199,20 @@ def hint_due(feature: str, cfg: dict) -> bool:
         return False
     if cfg.get(feature) != DEFAULT_CONFIG.get(feature):
         return False      # a file that was ignored as a whole still turned it on (vault._keep_the_stricter)
-    try:
-        given = json.loads(_HINTS_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        given = {}
-    seen = given.get(feature) if isinstance(given, dict) else None
-    return not (isinstance(seen, dict) and seen.get("revision", 0) >= HINTS[feature]["revision"])
+    return not _given_this_revision(feature, _given())
 
 
-def mark_given(feature: str) -> None:
+def claim_hint(feature: str) -> bool:
+    """Record this revision of the hint as given, and say whether this process may give it: only the one that
+    wrote the record. Two hooks at once give it once; a record that cannot be written gives no hint, so an
+    unwritable home never makes it nag."""
     try:
-        given = json.loads(_HINTS_FILE.read_text(encoding="utf-8"))
-        if not isinstance(given, dict):
-            given = {}
-    except (OSError, ValueError):
-        given = {}
-    given[feature] = {"revision": HINTS[feature]["revision"], "given": time.strftime("%Y-%m-%d")}
-    try:
-        atomic_write(_HINTS_FILE, json.dumps(given, indent=2) + "\n")
-    except OSError:
-        pass
+        with _lock_for(_LOCK):
+            given = _given()
+            if _given_this_revision(feature, given):
+                return False
+            given[feature] = {"revision": HINTS[feature]["revision"], "given": time.strftime("%Y-%m-%d")}
+            atomic_write(_HINTS_FILE, json.dumps(given, indent=2) + "\n")
+            return True
+    except (OSError, LockTimeout):
+        return False
