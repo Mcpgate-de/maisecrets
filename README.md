@@ -971,6 +971,14 @@ printed: `scripts/replay_sessions.py --claude --codex`.
 What the plugin does not protect. Each item is a limit of the mechanism, not
 a to-do.
 
+- **The output of a command that fails reaches the model as it is (Claude
+  Code).** Claude Code reports a failed call through another hook event,
+  whose answer cannot replace the output. A value that a failing command
+  prints (`grep TOKEN .env` with exit 1, a script that prints its config and
+  stops) is not redacted, and it stays in the transcript. Measured over one
+  user's transcripts: 14 such outputs with a hit in 105,241 Bash calls over 90
+  days, 1 of them a secret. A command that ends in a pipe (`… | tail`) is
+  redacted as usual. See the threat model, "What is knowingly not defended".
 - **No hook, no protection.** Claude Chat, ChatGPT Chat, the web and the
   mobile apps run no plugin hooks. Cowork does, Claude Code does, Codex does.
 - **A client that rejects the manifest loads nothing and says nothing.**

@@ -89,6 +89,14 @@ Four goals hold over every path, each with its own tests and a mutation per path
 
 ## What is knowingly not defended
 
+- **The output of a tool call that fails (Claude Code).** Claude Code answers a failed call (for Bash, a
+  non-zero exit code) with `PostToolUseFailure`, not `PostToolUse`. The answer to that event may only add
+  `additionalContext`; it cannot replace or withhold the output (schema of 2.1.292). maisecrets does not
+  register for it, so a value that a failing command prints reaches the model unredacted and stays in the
+  transcript (measured in the harness: `cat .env >&2; exit 3`). Measured over the maintainer's transcripts
+  (2026-07-10 to 2026-10-07, sessions on maisecrets itself left out): 105,241 Bash calls, 1,438 failed,
+  14 failed with a detector hit in the output (1 secret, 13 personal data only). A command that ends in a
+  pipe (`… | tail`) takes the exit code of the last command and is redacted as usual. Codex: not measured.
 - **A3, a process of the same user.** The macOS keychain item's ACL trusts
   `/usr/bin/security`, so any `security find-generic-password` reads it. The
   Windows PasswordVault cannot be locked and roams through the Microsoft
