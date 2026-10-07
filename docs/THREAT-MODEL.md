@@ -91,14 +91,16 @@ Four goals hold over every path, each with its own tests and a mutation per path
 
 - **The output of a tool call that fails (Claude Code).** Claude Code answers a failed call (for Bash, a
   non-zero exit code) with `PostToolUseFailure`, not `PostToolUse`. The answer to that event may only add
-  `additionalContext`; it cannot replace or withhold the output (schema of 2.1.292). maisecrets does not
-  register for it, so a value that a failing command prints reaches the model unredacted and stays in the
-  transcript (measured in the harness: `cat .env >&2; exit 3`). Measured over the maintainer's transcripts
+  `additionalContext`; it cannot replace or withhold the output (schema of 2.1.292). So a value that a failing
+  command prints reaches the model unredacted (measured in the harness: `cat .env >&2; exit 3`); maisecrets is
+  registered for the event only to act afterwards. Measured over the maintainer's transcripts
   (2026-07-10 to 2026-10-07, sessions on maisecrets itself left out): 105,241 Bash calls, 1,438 failed,
   14 failed with a detector hit in the output (1 secret, 13 personal data only). A command that ends in a
   pipe (`… | tail`) takes the exit code of the last command and is redacted as usual. Codex: not measured.
-  What maisecrets does on that event (`post_tool_failure`): it stores each value, so a later output, file or
-  command that repeats it is redacted exactly; it cleans the transcript on disk; it tells the model not to use
+  What maisecrets does on that event (`post_tool_failure`): it stores each value (up to
+  `max_new_entries_per_result` per output, and says so when more were found), so a later output, file or
+  command that repeats it is redacted exactly; it cleans the transcript on disk unless `scrub_transcript` is off
+  (the message says which); it tells the model not to use
   the values and names their placeholders; and the person sees a line about it. The model has seen the value.
 - **A3, a process of the same user.** The macOS keychain item's ACL trusts
   `/usr/bin/security`, so any `security find-generic-password` reads it. The

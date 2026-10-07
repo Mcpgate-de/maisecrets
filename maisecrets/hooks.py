@@ -3485,24 +3485,32 @@ def post_tool_failure(payload: dict) -> dict:
     _exact_redact(out, vault, session, hit, entries, _resolved_values(vault, session), values)
     if not hit["n"]:
         return {}
-    refs = list(dict.fromkeys(e.ref for e in entries))
-    if cfg.get("scrub_transcript", True):
-        path = payload.get("transcript_path", "")
+    refs = list(dict.fromkeys(e.ref for e in entries if getattr(e, "ref", None)))
+    # say what really happened (codex review): the cap of new entries per result, and whether the transcript is
+    # cleaned at all. The record of this output is written after the hook, so the child cleans it shortly after
+    path = payload.get("transcript_path", "")
+    if not cfg.get("scrub_transcript", True):
+        scrub = "cleaning the transcript is off (scrub_transcript), so the value stays there"
+    elif not path or not os.path.exists(path):
+        scrub = "the transcript file was not found, so it was not cleaned"
+    else:
         _scrub_transcript(path, values, refs)
         _scrub_transcript_later(path, values, refs)
+        scrub = "maisecrets cleans the transcript on disk now and again shortly after"
+    unkeyed = max(0, len(dict.fromkeys(values)) - len(refs)) if matches else 0
+    cap = (f" {unkeyed} more were not stored (above max_new_entries_per_result), so a repeat of those is found "
+           "only by its shape." if unkeyed else "")
     from . import events
-    events.record("PostToolUseFailure", "claude", entries,
-                  outcome="a failed call: seen by the model, transcript cleaned")
+    events.record("PostToolUseFailure", "claude", entries, outcome=f"a failed call: seen by the model; {scrub}")
     shown = ", ".join(refs) if refs else "values that are already stored"
     tool = payload.get("tool_name") or "tool"
     return {
         "systemMessage": f"maisecrets: this failed {tool} call printed {hit['n']} value(s) ({shown}). Claude Code "
-                         "shows the output of a failed call to the AI as it is, so the AI saw them; the transcript "
-                         "on disk was cleaned.",
+                         f"shows the output of a failed call to the AI as it is, so the AI saw them; {scrub}.{cap}",
         "hookSpecificOutput": {
             "hookEventName": "PostToolUseFailure",
             "additionalContext": (f"maisecrets: the output of this failed call held {hit['n']} value(s) the user "
-                                  f"keeps private, now stored as {shown}. Do not repeat, copy or use these values in "
+                                  f"keeps private, stored as {shown}. Do not repeat, copy or use these values in "
                                   "text, files or commands; where one is needed, write its placeholder instead."),
         },
     }
