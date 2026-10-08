@@ -1,0 +1,16 @@
+{
+ "_captured": "codex-cli 0.159.2, codex exec against the harness's fake upstream, 2026-10-08 (harness/codex.py dump): a Bash command that exits 3; ids, paths and the model name replaced, the same tool_use_id in PreToolUse and PostToolUse as the client sent it",
+ "session_id": "00000000-0000-7000-8000-00000000c0de",
+ "turn_id": "00000000-0000-7000-8000-00000000c0df",
+ "transcript_path": "/tmp/codex_home/sessions/rollout.jsonl",
+ "cwd": "/tmp/proj",
+ "hook_event_name": "PostToolUse",
+ "model": "MODEL",
+ "permission_mode": "bypassPermissions",
+ "tool_name": "Bash",
+ "tool_input": {
+  "command": "sh -c 'echo before; exit 3'"
+ },
+ "tool_response": "before\n",
+ "tool_use_id": "exec-00000000-0000-4000-8000-0000000000e1"
+}

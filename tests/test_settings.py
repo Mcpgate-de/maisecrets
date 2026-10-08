@@ -202,13 +202,18 @@ class Change(unittest.TestCase):
         out = _prompt("maisecrets: set max_keys_per_session 500", CODEX)
         self.assertEqual(out["decision"], "block", "the sentence never reaches the model")
         self.assertEqual(_user()["max_keys_per_session"], 500)
-        for word in ("0", "many", "-5", "1000001"):
+        for word in ("0", "many", "-5", "1000001", "9" * 5000):
             with self.subTest(word):
                 _prompt(f"/maisecrets:settings max_keys_per_session {word}")
                 self.assertEqual(_user()["max_keys_per_session"], 500, "a value outside the range changes nothing")
         _prompt("/maisecrets:settings max_keys_per_session default")
         self.assertNotIn("max_keys_per_session", _user())
         self.assertEqual(load_config()["max_keys_per_session"], 200, "the default")
+        _prompt("/maisecrets:settings max_resolves_per_hour default")
+        self.assertEqual(load_config()["max_resolves_per_hour"], 1000, "the default")
+        card = settings.render(show_all=True)
+        self.assertIn("Raise: /maisecrets:settings max_keys_per_session 400", card, "the card names the command")
+        self.assertIn("Raise: /maisecrets:settings max_resolves_per_hour 2000", card)
 
     def test_a_tool_call_that_carries_a_limit_change_is_refused(self):
         out = hooks.pre_tool({"tool_name": "Bash", "session_id": "S1", **CLAUDE,

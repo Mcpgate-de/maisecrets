@@ -400,15 +400,19 @@ run".
 - The skill runs `skills/secret-hygiene/scripts/scan_secrets.py` (reads files and
   `git log`) and `redact_copy.py` (writes a new file) when the model follows it; neither
   opens a network connection.
-- Sends and fetches: nothing. No hook and no mod opens a network connection. The
-  only connection the plugin's code makes is the ssh route of your own ssh
-  command inside the Claude Code sandbox (`hooks/proxy_connect.py`, the
-  `ProxyCommand` of that ssh call: one CONNECT through Claude Code's local
-  sandbox proxy to the host you named).
-- Credentials: maisecrets reads no credential from your environment or your
-  files to send it anywhere. It reads the values you stored, from your
-  operating system's store, only to put each one into the tool call you allow,
-  which then goes where that call goes.
+- Sends and fetches: no telemetry and no download; no hook and no mod opens a
+  network connection. Two connections start from a command you run:
+  - the ssh route of your own ssh command inside the Claude Code sandbox
+    (`hooks/proxy_connect.py`, the `ProxyCommand` of that ssh call): one
+    CONNECT through Claude Code's local sandbox proxy (localhost only) to the
+    host you named, with the proxy login that Claude Code puts in
+    `HTTPS_PROXY` for that sandbox;
+  - `/maisecrets:report … --create`, which runs the GitHub CLI (`gh`) with your
+    own `gh` login to file the issue.
+- Credentials: maisecrets reads no credential of yours to send it to a server.
+  It reads the values you stored, from your operating system's store, only to
+  put each one into the tool call you allow, which then goes where that call
+  goes. The sandbox proxy login above goes only to the local sandbox proxy.
   `/maisecrets:report` prints the issue text and a prefilled link, and it
   files the issue only with `--create` (GitHub CLI, to `report_url`); the
   Windows Credential Locker may roam through a Microsoft account.
@@ -630,10 +634,12 @@ the plugin points into that folder.
 - **What it runs:** this computer's Python with the plugin's own
   `hooks/dispatch.py mod-prompt`, the same code the settings hooks run, in the
   plugin folder. Each call is fixed text, with no shell: `python3 hooks/dispatch.py
-  mod-prompt`, and when that cannot start (Windows) `py -3 …`, then `python …`. It
-  sets `PYTHONUTF8=1` for that process, so that Windows reads the pipe as UTF-8.
-  When no Python starts, the mod passes the prompt on unchanged and the settings
-  hook blocks it.
+  mod-prompt`; when that cannot start or ends with an error (on Windows `python3`
+  is often a store stub, and `dispatch.py` refuses a Python older than 3.9),
+  `py -3 …`, then `python …`. All tries share one limit of 8 seconds. It sets
+  `PYTHONUTF8=1` for that process (over the environment it inherits), so that
+  Windows reads the pipe as UTF-8. When no Python answers, the mod passes the
+  prompt on unchanged and the settings hook blocks it.
 - **What it sends, and where:** the prompt, the session id and the working
   directory go to that local process on stdin. The process detects the values,
   stores them in the local store, and answers with the prompt with placeholders.

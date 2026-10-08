@@ -241,7 +241,8 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
             return False, f"maisecrets: {key} takes {', '.join(_CHOICES[key])} or default."
         if key in _INT_KEYS:
             low, high = _INT_KEYS[key]
-            if not (word.isdigit() and low <= int(word) <= high):
+            # the length first: int() of thousands of digits raises instead of answering (codex review of 0.6.9)
+            if not (word.isdigit() and len(word) <= 8 and low <= int(word) <= high):
                 return False, f"maisecrets: {key} takes a whole number from {low} to {high:,}, or default."
     # a symlinked config.json (dotfiles) keeps its link: the new file replaces the target
     target = CONFIG.resolve() if CONFIG.is_symlink() else CONFIG

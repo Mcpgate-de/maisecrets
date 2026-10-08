@@ -787,6 +787,32 @@ class SeenOnlyAfterTheCall(unittest.TestCase):
         self.assertEqual(_norm(out, ref), _norm(plain, ref), "the PostToolUse answer is the one without a record")
         self.assertEqual(failed, {}, "and the PostToolUseFailure answer too")
 
+    def test_every_recorded_client_payload_carries_a_call_id_and_codex_ends_its_own_call(self):
+        # the client invariant that C23 rests on, from payloads the real clients sent (codex review of 0.6.9)
+        root = Path(__file__).resolve().parent
+        payloads = [json.loads(p.read_text(encoding="utf-8")) for p in (root / "client_payloads").glob("*.json")]
+        golden = (root.parent / "harness" / "golden").glob("*ToolUse*.json")
+        payloads += [json.loads(p.read_text(encoding="utf-8")) for p in golden]
+        tools = [p for p in payloads if "tool_name" in p or "top" in p]
+        self.assertGreaterEqual(len(tools), 10, "the premise: the recorded payloads were read")
+        for p in tools:
+            keys = p["top"] if "top" in p else p
+            self.assertIn("tool_use_id", keys)
+        pre = json.loads((root / "client_payloads" / "codex-exec-bash-pre.json").read_text(encoding="utf-8"))
+        post = json.loads((root / "client_payloads" / "codex-exec-bash-post.json").read_text(encoding="utf-8"))
+        self.assertEqual(pre["tool_use_id"], post["tool_use_id"])
+        self.assertEqual(pre["session_id"], post["session_id"])
+        # through the hooks: a value in that captured Codex call is seen once its PostToolUse comes
+        ref = _secret()
+        # through _pre, which collects the child that serves the value (the module's hygiene check)
+        fields = {k: v for k, v in pre.items() if k not in ("_captured", "tool_name", "tool_input", "session_id")}
+        _pre(pre["tool_name"], {"command": _curl(ref, "api.example.com")}, client={}, **fields)
+        self.assertEqual(_seen(ref), {}, "pending until the call ran")
+        end = {k: v for k, v in post.items() if k != "_captured"}
+        end.update(session_id="S1")
+        hooks._post_tool_guarded(end)
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com"})
+
     def test_with_the_setting_off_nothing_waits(self):
         _reset(secret_destinations="off")
         ref = _secret()

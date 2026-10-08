@@ -14,24 +14,46 @@ const PERSON = new Set(['composer', 'bridge', 'sdk'])
 
 // The plugin's own hooks/dispatch.py, started by this computer's Python, in the plugin folder: each call is
 // fixed text, no shell and no environment read (the directory review asks for one program by name with fixed
-// arguments). macOS and Linux have python3, Windows the py launcher or python. The first one that starts and
-// answers wins; when none does, the settings hook blocks the prompt (README, "The mod")
-async function runDispatch($, init) {
-  try {
-    return await $.process.run(['python3', 'hooks/dispatch.py', 'mod-prompt'], init)
-  } catch {}
-  try {
-    return await $.process.run(['py', '-3', 'hooks/dispatch.py', 'mod-prompt'], init)
-  } catch {}
+// arguments). macOS and Linux have python3, Windows the py launcher or python; on Windows `python3` is often a
+// store stub that starts and exits 9009. A call that cannot start or exits with an error hands on to the next
+// (dispatch.py exits 3 on a Python older than 3.9); a timeout ends the search. All of them share one budget, so a
+// prompt waits at most BUDGET_MS. When none answers, the settings hook blocks the prompt (README, "The mod")
+const BUDGET_MS = 8000
+
+async function runPython3($, init) {
+  return await $.process.run(['python3', 'hooks/dispatch.py', 'mod-prompt'], init)
+}
+
+async function runPyLauncher($, init) {
+  return await $.process.run(['py', '-3', 'hooks/dispatch.py', 'mod-prompt'], init)
+}
+
+async function runPython($, init) {
   return await $.process.run(['python', 'hooks/dispatch.py', 'mod-prompt'], init)
 }
 
+async function runDispatch($, stdin) {
+  const end = Date.now() + BUDGET_MS
+  for (let i = 0; i < 3; i++) {
+    const left = end - Date.now()
+    if (left <= 0) return null
+    // UTF-8 for the pipe: Windows Python would read it in the console code page, and a prompt with umlauts failed
+    const init = { cwd: $.plugin.root, stdin, timeoutMs: left, env: { PYTHONUTF8: '1' } }
+    let r
+    try {
+      r = i === 0 ? await runPython3($, init) : i === 1 ? await runPyLauncher($, init) : await runPython($, init)
+    } catch {
+      if (Date.now() >= end) return null    // the budget is spent (a timeout): no second rewrite
+      continue                              // this Python cannot start
+    }
+    if (r.exitCode === 0) return r
+  }
+  return null
+}
+
 async function ask($, prompt, session, cwd) {
-  const stdin = JSON.stringify({ prompt, session_id: session, cwd })
-  // UTF-8 for the pipe: Windows Python would read it in the console code page and a prompt with umlauts would fail
-  const init = { cwd: $.plugin.root, stdin, timeoutMs: 8000, env: { PYTHONUTF8: '1' } }
-  const r = await runDispatch($, init)
-  if (r.exitCode !== 0) return null
+  const r = await runDispatch($, JSON.stringify({ prompt, session_id: session, cwd }))
+  if (!r) return null
   const answer = JSON.parse(r.stdout)
   if (!answer || answer.maisecrets !== MARK || typeof answer.text !== 'string') return null
   return answer

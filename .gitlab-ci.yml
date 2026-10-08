@@ -199,6 +199,8 @@ harness_claude:
   script:
     - npm install --global --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
     - export HOME=$(mktemp -d)
+    # the mod's own tests (tests/mod.test.ts), with $.process.run stubbed: the fallback order and every failure path
+    - claude plugin test .
     - python3 harness/run.py
 
 harness_codex:
