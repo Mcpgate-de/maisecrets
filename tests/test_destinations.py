@@ -802,11 +802,18 @@ class SeenOnlyAfterTheCall(unittest.TestCase):
         post = json.loads((root / "client_payloads" / "codex-exec-bash-post.json").read_text(encoding="utf-8"))
         self.assertEqual(pre["tool_use_id"], post["tool_use_id"])
         self.assertEqual(pre["session_id"], post["session_id"])
-        # through the hooks: a value in that captured Codex call is seen once its PostToolUse comes
+
+    @unittest.skipIf(os.name == "nt", "Codex for Windows: a placeholder in a shell command is refused (hooks.py), "
+                                      "so no value goes out and no record is right")
+    def test_a_captured_codex_call_is_seen_once_its_post_event_comes(self):
+        root = Path(__file__).resolve().parent
+        pre = json.loads((root / "client_payloads" / "codex-exec-bash-pre.json").read_text(encoding="utf-8"))
+        post = json.loads((root / "client_payloads" / "codex-exec-bash-post.json").read_text(encoding="utf-8"))
         ref = _secret()
         # through _pre, which collects the child that serves the value (the module's hygiene check)
         fields = {k: v for k, v in pre.items() if k not in ("_captured", "tool_name", "tool_input", "session_id")}
-        _pre(pre["tool_name"], {"command": _curl(ref, "api.example.com")}, client={}, **fields)
+        out = _pre(pre["tool_name"], {"command": _curl(ref, "api.example.com")}, client={}, **fields)
+        self.assertIn("updatedInput", out.get("hookSpecificOutput", {}), "the premise: the value was handed out")
         self.assertEqual(_seen(ref), {}, "pending until the call ran")
         end = {k: v for k, v in post.items() if k != "_captured"}
         end.update(session_id="S1")
