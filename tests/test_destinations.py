@@ -64,6 +64,7 @@ def _norm(out: dict, ref: str) -> str:
     """An answer with the parts that differ per call made equal: FIFO paths, nonces and the key itself."""
     text = json.dumps(out, sort_keys=True).replace(_key(ref), "KEY")
     text = re.sub(r"cat '?[^)'\"\s]+", "cat FIFO", text)
+    text = re.sub(r"--grant [A-Za-z0-9_-]+", "--grant N", text)      # the Windows path: a one-time grant token
     return re.sub(r"[0-9a-f]{16,}", "N", text)
 
 
