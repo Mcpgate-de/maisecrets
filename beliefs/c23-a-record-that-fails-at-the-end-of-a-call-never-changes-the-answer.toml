@@ -1,0 +1,10 @@
+# c23-a-record-that-fails-at-the-end-of-a-call-never-changes-the-answer: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c23-a-record-that-fails-at-the-end-of-a-call-never-changes-the-answer"
+control = "C23"
+statement = "When the record of a call that ran cannot be written (PostToolUse or PostToolUseFailure), the hook gives the same answer as without a record."
+runner = ["tests/test_destinations.py::SeenOnlyAfterTheCall::test_a_commit_that_fails_never_changes_the_answer"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    except Exception as exc:  # noqa: BLE001 - a record that fails never changes what the tool's answer does"
+replace = "    except ZeroDivisionError as exc:  # noqa: BLE001 - a record that fails never changes what the tool's answer does"

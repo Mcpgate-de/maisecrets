@@ -455,6 +455,10 @@ OWN_RULES: list[dict] = [
     # bare token prefixes newer than the vendored rulesets live in rules/prefixes.txt (see _load_prefixes)
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
+    # a password with no user in a URL: redis://:pw@host, the form Redis and some brokers use. ds-basic-auth needs a
+    # user before the colon; same characters and the same value filter otherwise (corpus of 0.6.7)
+    {"id": "url-password-no-user", "type": "SECRET", "secret_group": 1, "validator": "ds_value",
+     "regex": r"://:([^:/?#\[\]@!$&'()*+,;=\s]+)@"},
     # the secret half of an AWS key pair has no prefix of its own; the console, a CSV export
     # and a chat paste show it within a few lines after the AKIA… id (field report, 2026-09-26)
     {"id": "aws-secret-after-access-key", "type": "SECRET", "secret_group": 1,
@@ -1079,6 +1083,33 @@ def _lower(text: str) -> str:
     return text.lower().replace("i\u0307", "i")
 
 
+# X-Amz-Credential=AKIA…/20261008/eu-central-1/s3/aws4_request: the access key id names the key, it is not the
+# secret half; a presigned URL carries it in the clear by design (corpus of 0.6.7: 142 such hits in tool output)
+_SIGV4_CREDENTIAL_RE = re.compile(r"\b(?i:x-amz-credential|credential)(?:=|%3[Dd])$")
+# and the scope that must follow it: /date/region/service/aws4_request, plain or percent-encoded. A bare
+# Credential=AKIA… is no SigV4 scope and stays a hit (codex review of 0.6.8)
+_SIGV4_SCOPE_RE = re.compile(r"(?:/|%2[Ff])\d{8}(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff])aws4_request"
+                             r"(?=$|[\s&,;\"'#])")    # then a query or header separator: not aws4_requestX (codex)
+# a whole reference or a whole date in the password place of a URL: redis://:%24%7BREDIS_PASSWORD%7D@…,
+# redis://:2026-10-08@…; an encoded $ or { inside a real password stays a value (codex, Opus review of 0.6.8)
+_URL_PASSWORD_NOT_A_VALUE_RE = re.compile(r"%24[A-Za-z_][A-Za-z0-9_]*|%24%7[Bb][A-Za-z_][A-Za-z0-9_]*%7[Dd]"
+                                          r"|\d{4}-\d{2}-\d{2}")    # a time has a colon, which this rule never takes
+
+
+def _url_password_not_a_value(v: str) -> bool:
+    """A whole encoded reference, or a date the calendar has (2026-02-31 is a value: codex review of 0.6.8)."""
+    if not _URL_PASSWORD_NOT_A_VALUE_RE.fullmatch(v):
+        return False
+    if v.startswith("%"):
+        return True
+    import datetime
+    try:
+        datetime.date.fromisoformat(v)
+    except ValueError:
+        return False
+    return True
+
+
 def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins."""
     if not text:
@@ -1158,6 +1189,11 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     or _DERIVED_LABEL_RE.search(text, max(_line_start(text, start), start - 60), start)):
                 continue   # a UUID, an elided value (sk-...), or a label that names a derived thing (secret_id)
             if rule.id in ("ds-basic-auth", "curl-auth-user") and _pass_equals_user(m.group(0), secret):
+                continue
+            if (rule.id == "aws-access-token" and _SIGV4_CREDENTIAL_RE.search(text, max(0, start - 24), start)
+                    and _SIGV4_SCOPE_RE.match(text, end)):
+                continue   # the key id in a SigV4 credential scope (a presigned URL, an Authorization header)
+            if rule.id == "url-password-no-user" and _url_password_not_a_value(secret):
                 continue
             if rule.id == "hashicorp-tf-password" and not _ds_value_ok(secret.strip("\"'")):
                 continue

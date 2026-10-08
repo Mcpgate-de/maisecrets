@@ -2073,8 +2073,10 @@ def _expand_groups(hosts: list[str], groups: dict) -> list[str]:
 def _note_destinations(cfg: dict, payload: dict, tool: str, tool_input: dict, keys: list[str],
                        ssh_command: str | None = None) -> None:
     """secret_destinations (Mcpgate-de/maisecrets#13): note where each value of this call goes. Observe only: it
-    never changes the answer, and a failure here never stops the call. Noted when the value is handed out, before
-    the client asks, so a call the person then declines is noted too."""
+    never changes the answer, and a failure here never stops the call. The value is handed out here, before the
+    client asks the person; so the call waits as pending and becomes `seen` only when a PostToolUse or
+    PostToolUseFailure of the same tool_use_id says it ran (_commit_destinations). A call the person declines has
+    no such event and leaves no record. A client that sends no tool_use_id is noted here, at the hand-out."""
     if cfg.get("secret_destinations", "observe") != "observe" or not keys:
         return
     try:
@@ -2083,9 +2085,26 @@ def _note_destinations(cfg: dict, payload: dict, tool: str, tool_input: dict, ke
         if ssh_command and ssh_consent._TOKEN_RE.search(ssh_command):
             ssh_hosts = list(ssh_consent.classify(ssh_command, _parse_for_consent).hosts)
         found = destinations.destinations_of(tool, tool_input, ssh_hosts)
-        destinations.note(keys, payload.get("session_id"), payload.get("agent_id"), found)
+        call = payload.get("tool_use_id")
+        if isinstance(call, str) and call:
+            destinations.pend(call, keys, payload.get("session_id"), payload.get("agent_id"), found)
+        else:
+            destinations.note(keys, payload.get("session_id"), payload.get("agent_id"), found)
     except Exception as exc:  # noqa: BLE001 - observing must never stop a call
         _debug(f"destinations: {type(exc).__name__}")
+
+
+def _commit_destinations(payload: dict) -> None:
+    """The client reports that a call ran (PostToolUse, or PostToolUseFailure: a failed call had the value too):
+    its pending destinations become `seen`. It reads and writes only the record; it never changes an answer."""
+    try:
+        call = payload.get("tool_use_id")
+        if not (isinstance(call, str) and call) or load_config().get("secret_destinations", "observe") != "observe":
+            return
+        from . import destinations
+        destinations.commit(call, payload.get("session_id"), payload.get("agent_id"))
+    except Exception as exc:  # noqa: BLE001 - a record that fails never changes what the tool's answer does
+        _debug(f"destinations commit: {type(exc).__name__}")
 
 
 def _destination_hint(payload: dict) -> str | None:
@@ -3514,7 +3533,8 @@ def _ssh_hint(payload: dict) -> str | None:
 
 def _with_hint(payload: dict, result: dict) -> dict:
     """Add a hint to the answer of a PostToolUse without changing what the answer does."""
-    hint = _ssh_hint(payload) or _destination_hint(payload)
+    # both, when both are due: with `or` the destination hint of this call waited for an unrelated later one (codex)
+    hint = "\n\n".join(h for h in (_ssh_hint(payload), _destination_hint(payload)) if h)
     if not hint:
         return result
     result = dict(result)
@@ -3531,6 +3551,7 @@ def _with_hint(payload: dict, result: dict) -> dict:
 def _post_tool_guarded(payload: dict) -> dict:
     """Claude Code ignores exit 2 from PostToolUse: the raw output would reach the model. So a
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
+    _commit_destinations(payload)    # first: the call ran even when the redaction below fails; and before the hint
     try:
         result = post_tool(payload)
     except ConfigError as exc:
@@ -3604,8 +3625,27 @@ def post_tool_failure(payload: dict) -> dict:
     }
 
 
+def _post_tool_failure_observed(payload: dict) -> dict:
+    _commit_destinations(payload)        # a failed call had the value: its destination counts
+    result = post_tool_failure(payload)
+    try:
+        # its pattern break gets its hint here, not on a later call (codex review of 0.6.8). Only this hint: the
+        # ssh_consent hint is for a write that ran (C22)
+        hint = _destination_hint(payload)
+    except Exception as exc:  # noqa: BLE001 - a hint that fails changes nothing
+        _debug(f"post-tool-failure hint: {type(exc).__name__}")
+        hint = None
+    if not hint:
+        return result
+    result = dict(result)
+    hso = dict(result.get("hookSpecificOutput") or {"hookEventName": "PostToolUseFailure"})
+    hso["additionalContext"] = f"{hso['additionalContext']}\n\n{hint}" if hso.get("additionalContext") else hint
+    result["hookSpecificOutput"] = hso
+    return result
+
+
 HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post_tool_guarded,
-            "post-tool-failure": post_tool_failure}
+            "post-tool-failure": _post_tool_failure_observed}
 
 
 # under the timeouts hooks/hooks.json gives each event (10 s prompt and pre-tool, 20 s post-tool);

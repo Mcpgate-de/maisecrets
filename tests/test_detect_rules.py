@@ -437,6 +437,45 @@ class ScanRuleTests(unittest.TestCase):
         self.assertEqual(kinds(text, enabled=set()), [])
         self.assertEqual(detect.scan(""), [])
 
+    def test_a_url_password_with_no_user_is_a_secret(self):
+        pw = rnd(14, AN)
+        self.assertEqual(kinds(f"REDIS_URL=redis://:{pw}@cache.example.org:6379/0"), [("url-password-no-user", pw)])
+        self.assertEqual(kinds(f"rediss://:{pw}@cache.internal:6380"), [("url-password-no-user", pw)])
+        # an encoded $ or { inside a real password stays a value, and so does a half reference or an impossible
+        # date (codex, Opus review of 0.6.8)
+        for enc in (pw[:4] + "%24" + pw[4:], pw[:4] + "%7B" + pw[4:], "%24%7BREDIS_PASS", "%24REDIS_PASS%7D",
+                    "2026-99-08", "2026-10-08T99", "2026-02-31", "2026-04-31", "2025-02-29", "0000-01-01"):
+            with self.subTest(enc=enc):
+                self.assertEqual(kinds(f"redis://:{enc}@cache:6379"), [("url-password-no-user", enc)])
+        # a reference, a default word, a short value and a port stay text
+        for text in ("redis://:${REDIS_PASSWORD}@redis:6379", "redis://:changeme@localhost", "redis://:pw@localhost",
+                     "see https://:443@x", "redis://:%24%7BREDIS_PASSWORD%7D@localhost", "redis://:2026-10-08@x",
+                     "redis://:%24REDIS_PASSWORD@localhost", "redis://:2024-02-29@x"):
+            with self.subTest(text=text):
+                self.assertEqual(kinds(text), [])
+        self.assertEqual(kinds(f"postgres://app:{pw}@db.example.org/app"), [("ds-basic-auth", pw)],
+                         "with a user the detect-secrets rule keeps the span")
+
+    def test_the_key_id_in_a_sigv4_credential_scope_is_not_a_secret(self):
+        kid = "AKIA" + rnd(16, string.ascii_uppercase + "234567")       # base32, as the gitleaks rule reads it
+        scope = f"{kid}%2F20261008%2Feu-central-1%2Fs3%2Faws4_request"
+        for text in (f"https://b.s3.amazonaws.com/k?X-Amz-Credential={scope}&X-Amz-Signature=" + "9f3c" * 16,
+                     f"https://b.s3.amazonaws.com/k?x-amz-algorithm=AWS4&X-Amz-Credential%3D{scope}",
+                     f"https://b.s3.amazonaws.com/k?x-amz-credential={scope}&x-amz-signature=" + "9f3c" * 16,
+                     f"Authorization: AWS4-HMAC-SHA256 Credential={kid}/20261008/eu-central-1/s3/aws4_request"):
+            with self.subTest(text=text[:40]):
+                self.assertEqual(kinds(text), [])
+        # the same id anywhere else stays a hit: it shows where the secret half is (and the premise of the cases)
+        # a bare Credential= with no date/region/service/aws4_request scope is no SigV4 scope (codex review of 0.6.8)
+        for text in (f"aws_access_key_id = {kid}", f"export AWS_ACCESS_KEY_ID={kid}", f"id {kid} in a note",
+                     f"Credential={kid}", f"Credential={kid} and more", f"X-Amz-Credential={kid}&x=1",
+                     f"Credential={kid}/20261008/eu-central-1/s3/aws4_requestX",
+                     f"Credential={kid}/20261008/eu-central-1/s3/aws4_request_extra",
+                     *(f"Credential={kid}/20261008/eu-central-1/s3/aws4_request{tail}"
+                       for tail in (".x", ":x", "%41", "/x", "%2Fx"))):
+            with self.subTest(text=text[:40]):
+                self.assertEqual(kinds(text), [("aws-access-token", kid)])
+
     def test_the_first_rule_to_claim_a_span_wins(self):
         ghp = "ghp_" + rnd(36)
         # detect-secrets runs before gitleaks: the keyword rule claims the span of the github token

@@ -274,9 +274,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 29 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 30 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 94 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 99 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -498,8 +498,10 @@ come once more and changes no protection setting.
 
 maisecrets notes, on this computer only, where each stored secret was handed
 to a tool call: a host named in the call (from a URL, also one in quoted text,
-not one in a shell comment), an ssh host, or an MCP server and tool. A file or a
-command without a host is listed apart, as a local use. `/maisecrets:list`
+not one in a shell comment), an ssh host, or an MCP server and tool. In a Bash
+command every host it names counts for each secret in it, also a second URL
+that the value does not reach. A file or a command without a host is listed
+apart, as a local use. `/maisecrets:list`
 shows it under each secret:
 
 ```
@@ -511,9 +513,14 @@ SECRET_c7      SECRET  github_pat            3d   14        21h  -
       a file in ~/proj/     2–9×   last 3 days ago
 ```
 
-This is a record, not a permission, and it stops nothing. It is noted when
-the value is handed to the call, so a call you then decline in the client's
-dialog is listed too. `new` marks a destination first seen in the
+This is a record, not a permission, and it stops nothing. The value is handed
+out before the client asks you, so a call waits until the client reports that
+it ran (also when it failed), and only then is it listed. A call you decline in
+Claude Code's dialog is not listed (measured with the real client, whose
+headless mode refuses the question). Codex sends
+the same report for a command that ran or failed; a call it declines by its
+approval policy never reaches the hooks. A client that sends no call id is
+listed at the hand-out. `new` marks a destination first seen in the
 last 24 hours. When a secret that you used at one destination
 (3 times on one day) goes to a new one for the first time, the AI tells you
 once, in a sentence; this note does not come again. maisecrets does not
@@ -996,6 +1003,9 @@ does not need to look like a real secret, and these forms are never a hit:
   at `.local` or `.internal` (a person's mailbox there is found); IP addresses in
   the documentation ranges `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and
   `2001:db8::/32`, private and loopback addresses.
+- **An AWS key id in a SigV4 credential scope:** `X-Amz-Credential=AKIA…` in a presigned
+  URL, `Credential=AKIA…` in an `Authorization` header. The id names the key; it is not
+  the secret half. The same id anywhere else is still found.
 
 If maisecrets stops something that is not a secret, `/maisecrets:report last <why>`
 sends the rule name, never the value.
@@ -1024,10 +1034,12 @@ Four sources, one scanner (`maisecrets/detect.py`):
   recognised by position (`password = …`, `api_key: "…"`, `user:pass@host`),
   with its heuristic filters ported (templated, indirect, sequential values
   are not secrets).
-- **Own rules**, six of them, for what none of the three covers: email (a
+- **Own rules** for what none of the three covers: email (a
   bounded regex; the unbounded one took 11 s on an 80 KB dotted run), phone
-  with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, and
-  full-length GitLab runner and deploy tokens.
+  with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, a
+  password with no user in a URL (`redis://:…@host`), the secret half of an AWS
+  key pair within a few lines after its `AKIA…` id, and full-length GitLab
+  runner and deploy tokens.
 - Prefixes newer than the vendored rulesets live in
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
   (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last
@@ -1035,6 +1047,10 @@ Four sources, one scanner (`maisecrets/detect.py`):
 - A secret shape with a fixed length (gitleaks: `glpat-[\w-]{20}`) is
   extended to the end of the token characters, so a longer token does not
   leave its tail in the clear (found with a 24-char token, 2026-09-26).
+  The extension stops at a line break: a token that a line break splits
+  (a hard-wrapped terminal line) keeps the part after the break in the clear.
+  Joining the next line was measured on five months of session logs and left
+  out: nearly every candidate was the next `.env` line, not the rest of a key.
 
 IBAN, credit card and IP come from Presidio's regexes with our validators
 (mod-97, Luhn, public-range check). A card number without a word like
