@@ -1097,6 +1097,23 @@ _URL_PASSWORD_NOT_A_VALUE_RE = re.compile(r"%24[A-Za-z_][A-Za-z0-9_]*|%24%7[Bb][
                                           r"(?:T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?Z?)?")
 
 
+def _url_password_not_a_value(v: str) -> bool:
+    """A whole encoded reference, or a date the calendar has (2026-02-31 is a value: codex review of 0.6.8)."""
+    if not _URL_PASSWORD_NOT_A_VALUE_RE.fullmatch(v):
+        return False
+    if v.startswith("%"):
+        return True
+    import datetime
+    try:
+        if "T" in v:
+            datetime.datetime.fromisoformat(v[:-1] if v.endswith("Z") else v)
+        else:
+            datetime.date.fromisoformat(v)
+    except ValueError:
+        return False
+    return True
+
+
 def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins."""
     if not text:
@@ -1180,7 +1197,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if (rule.id == "aws-access-token" and _SIGV4_CREDENTIAL_RE.search(text, max(0, start - 24), start)
                     and _SIGV4_SCOPE_RE.match(text, end)):
                 continue   # the key id in a SigV4 credential scope (a presigned URL, an Authorization header)
-            if rule.id == "url-password-no-user" and _URL_PASSWORD_NOT_A_VALUE_RE.fullmatch(secret):
+            if rule.id == "url-password-no-user" and _url_password_not_a_value(secret):
                 continue
             if rule.id == "hashicorp-tf-password" and not _ds_value_ok(secret.strip("\"'")):
                 continue

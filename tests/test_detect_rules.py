@@ -444,13 +444,13 @@ class ScanRuleTests(unittest.TestCase):
         # an encoded $ or { inside a real password stays a value, and so does a half reference or an impossible
         # date (codex, Opus review of 0.6.8)
         for enc in (pw[:4] + "%24" + pw[4:], pw[:4] + "%7B" + pw[4:], "%24%7BREDIS_PASS", "%24REDIS_PASS%7D",
-                    "2026-99-08", "2026-10-08T99"):
+                    "2026-99-08", "2026-10-08T99", "2026-02-31", "2026-04-31", "2025-02-29", "0000-01-01"):
             with self.subTest(enc=enc):
                 self.assertEqual(kinds(f"redis://:{enc}@cache:6379"), [("url-password-no-user", enc)])
         # a reference, a default word, a short value and a port stay text
         for text in ("redis://:${REDIS_PASSWORD}@redis:6379", "redis://:changeme@localhost", "redis://:pw@localhost",
                      "see https://:443@x", "redis://:%24%7BREDIS_PASSWORD%7D@localhost", "redis://:2026-10-08@x",
-                     "redis://:%24REDIS_PASSWORD@localhost", "redis://:2026-10-08T10:00Z@x"):
+                     "redis://:%24REDIS_PASSWORD@localhost", "redis://:2024-02-29@x"):
             with self.subTest(text=text):
                 self.assertEqual(kinds(text), [])
         self.assertEqual(kinds(f"postgres://app:{pw}@db.example.org/app"), [("ds-basic-auth", pw)],
