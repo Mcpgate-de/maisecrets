@@ -541,3 +541,8 @@ class RoundFour(unittest.TestCase):
         ref = _secret()
         _pre("Bash", {"command": _curl(ref, "api.example.com") + "  # mirror: https://other.example.net/x"})
         self.assertEqual(set(_seen(ref)), {"network:api.example.com"})
+
+    def test_a_hash_that_is_no_comment_hides_no_destination(self):
+        ref = _secret()
+        _pre("Bash", {"command": "(( x |# 2 )); " + _curl(ref, "api.example.com")})   # Opus round 5
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com"})

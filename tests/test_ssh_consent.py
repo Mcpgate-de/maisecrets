@@ -119,6 +119,11 @@ class ClassifierMatrixTests(unittest.TestCase):
         "write": [
             # round 4 (Opus): a # after an escaped space starts no comment, so the ssh after it runs
             "echo \\ #; ssh web1 sudo reboot", "echo x\\ #\nssh web1 sudo reboot",
+            # round 5 (Opus): inside (( )), $[ ], [[ ]], ${ } or after ( and | a # is no comment, << no heredoc
+            "(( x |# 2 )); ssh web1 reboot", "(( x=(#) )); ssh web1 reboot", "(( 1 # 2 )); ssh web1 reboot",
+            "[[ a =~ (#) ]]; ssh web1 reboot", "[[ a =~ x|# ]]; ssh web1 reboot", "echo $[(#)]; ssh web1 reboot",
+            "case a in (#) ;; esac; ssh web1 reboot", "ls *(#qN); ssh web1 reboot",
+            "echo $[1<<ZQ]\nssh web1 reboot\nZQ", "echo ${x# y}; ssh web1 reboot",
             "ssh web1 'systemctl restart nginx'", "ssh web1", "ssh web1 'sudo cat /etc/hosts'",
             "ssh web1 'cat /etc/shadow'", "ssh web1 'cat ../../etc/passwd'", "ssh web1 'cat /var/log/*.log'",
             "ssh web1 'cat ~/notes'", "ssh web1 'cat /proc/1/environ'", "ssh web1 'cat /root/.bashrc'",
@@ -257,7 +262,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 294, "a row was added or lost: update the count")
+        self.assertEqual(counted, 304, "a row was added or lost: update the count")
 
     def test_a_long_command_is_answered_in_time(self):
         # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)

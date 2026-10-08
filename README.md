@@ -520,7 +520,8 @@ once, in a sentence; this note does not come again. maisecrets does not
 judge whether a destination is safe. Asking before a new destination comes
 in a later version. `/maisecrets:settings secret_destinations off` stops the
 record; nothing leaves the computer either way. When a value expires, its
-record goes with it; forget and wipe delete it too.
+record goes with it (if the record is busy at that moment, it goes 30 days
+later with the metadata); forget and wipe delete it too.
 
 ## Vault
 
@@ -885,7 +886,7 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   or release (`gh issue create --body "… ssh …"`), and the message of
   `git commit -m` or `git tag -m`. Every part of the line must be one of these
   commands, written as itself (no path, no variable, no wrapper), and outside
-  quotes the line has no `$`, backtick, redirect, bracket or brace; `printf`
+  quotes the line has no `$`, backtick, redirect, parenthesis or brace; `printf`
   and `test` have no `-v`, which names a variable the shell evaluates. Anywhere
   else, also unquoted (`grep ssh README.md`) or in a heredoc, the hook cannot
   tell text from a call, and it asks.

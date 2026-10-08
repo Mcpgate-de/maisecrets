@@ -1031,6 +1031,15 @@ def _escaped(command: str, i: int) -> bool:
     return i >= 0 and (i - k) % 2 == 1
 
 
+def _open_group(command: str, out: list, i: int, opens: str) -> bool:
+    """The plain text of this line before i opens more of one of `opens` than it closes: inside (( )), $[ ], [[ ]]
+    or ${ } a # is no comment and << no heredoc, and the shell runs what follows (Opus round 5). A wrong guess here
+    reads more text as a command, never less."""
+    start = command.rfind("\n", 0, i) + 1
+    plain = "".join(command[k] for k in range(start, i) if out[k] == "")
+    return any(plain.count(o) > plain.count(c) for o, c in (("(", ")"), ("[", "]"), ("{", "}")) if o in opens)
+
+
 def _shell_contexts(command: str) -> list[str]:
     """One context per character position of a bash command line, as a small state machine
     reads it. Contexts: '' (plain word), 'sq' (inside '…'), 'dq' (inside "…"), 'hd' (body of
@@ -1146,7 +1155,8 @@ def _shell_contexts(command: str) -> list[str]:
                                     out[k] = "hdx"
                 pending = []
             continue
-        if c == "#" and (i == 0 or command[i - 1] in " \t\n;&|(") and not _escaped(command, i - 1):
+        if c == "#" and (i == 0 or command[i - 1] in " \t\n;&|(") and not _escaped(command, i - 1) \
+                and not _open_group(command, out, i, "([{"):
             eol = command.find("\n", i)
             eol = n if eol < 0 else eol
             for k in range(i, eol):
@@ -1204,7 +1214,7 @@ def _shell_contexts(command: str) -> list[str]:
             out[i] = out[i + 1] = out[i + 2] = ""      # a here-string is a word, not a heredoc
             i += 3
             continue
-        if c == "<" and command.startswith("<<", i):
+        if c == "<" and command.startswith("<<", i) and not _open_group(command, out, i, "["):
             m = _HEREDOC_RE.match(command, i)
             if m:
                 for k in range(i, m.end()):

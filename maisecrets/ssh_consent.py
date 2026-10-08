@@ -545,8 +545,8 @@ def classify(command: str, parse: Parser) -> Verdict:
             if not first or first[0] != sg.get("cmd"):
                 return False
             if sg["cmd"] in ("printf", "test", "[") and "-v" in words[1:]:
-                return False         # -v takes a variable name, and zsh runs $(…) in its array subscript: printf -v
-                #                      'a[$(ssh …)]' x (Opus round 4). The words are dequoted: -''v is -v (codex round 5)
+                return False     # -v takes a variable name, and zsh runs $(…) in its array subscript: printf -v
+                #                  'a[$(ssh …)]' x (Opus round 4). The words are dequoted: -''v is -v (codex round 5)
             if sg["cmd"] in _LINE_SAFE_CMDS:
                 continue
             if sg["cmd"] in ("gh", "glab") and len(words) >= 2 and words[1] in _TEXT_SUBCOMMANDS:
