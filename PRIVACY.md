@@ -35,11 +35,17 @@ everything at once.
 
 ## What leaves the machine
 
-Nothing. No hook opens a network connection. Two things to know:
+No telemetry and no download. The hooks and the mod send nothing to a server of their own.
+Connections start only from a command you run:
 
-- `/maisecrets:report` opens your browser on a prefilled issue page at the configured
-  `report_url`; the page carries the plugin version, your platform and the rule name of a
-  detection, never a value. Set `report_url` to your own tracker or to `null`.
+- Your own ssh command inside the Claude Code sandbox goes through Claude Code's local
+  sandbox proxy to the host you named, with the proxy login Claude Code sets for that
+  sandbox. Before an ssh command that carries a value, a check tries a few direct
+  connections that the sandbox must refuse; it sends no data.
+- `/maisecrets:report` prints the issue text and a prefilled link to the configured
+  `report_url`; it carries the plugin version, your platform and the rule name of a
+  detection, never a value. Only with `--create` does it file the issue, through the GitHub
+  CLI (`gh`) and its own login. Set `report_url` to your own tracker or to `null`.
 - The Windows Credential Locker may roam through a Microsoft account on a machine that is
   not domain-joined. Choose the `encrypted-file` store there if that matters.
 

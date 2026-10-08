@@ -16,7 +16,7 @@ const PERSON = new Set(['composer', 'bridge', 'sdk'])
 // fixed text, no shell and no environment read (the directory review asks for one program by name with fixed
 // arguments). macOS and Linux have python3, Windows the py launcher or python; on Windows `python3` is often a
 // store stub that starts and exits 9009. A call that cannot start or exits with an error hands on to the next
-// (dispatch.py exits 3 on a Python older than 3.9); a timeout ends the search. All of them share one budget, so a
+// (dispatch.py exits 3 on Python 3.6 to 3.8, and an older one cannot parse it); a timeout ends the search. All of them share one budget, so a
 // prompt waits at most BUDGET_MS. When none answers, the settings hook blocks the prompt (README, "The mod")
 const BUDGET_MS = 8000
 
@@ -33,18 +33,19 @@ async function runPython($, init) {
 }
 
 async function runDispatch($, stdin) {
-  const end = Date.now() + BUDGET_MS
+  // $.clock.now: the mods API's clock, which a test can set (wall-clock time; a clock that jumps ahead ends the
+  // search early, and the settings hook blocks)
+  const end = (await $.clock.now()) + BUDGET_MS
   for (let i = 0; i < 3; i++) {
-    const left = end - Date.now()
-    if (left <= 0) return null
+    const left = end - (await $.clock.now())
+    if (left <= 0) return null        // the budget is spent: no other Python starts, nor runs the rewrite again
     // UTF-8 for the pipe: Windows Python would read it in the console code page, and a prompt with umlauts failed
     const init = { cwd: $.plugin.root, stdin, timeoutMs: left, env: { PYTHONUTF8: '1' } }
     let r
     try {
       r = i === 0 ? await runPython3($, init) : i === 1 ? await runPyLauncher($, init) : await runPython($, init)
     } catch {
-      if (Date.now() >= end) return null    // the budget is spent (a timeout): no second rewrite
-      continue                              // this Python cannot start
+      continue        // this Python cannot start, or it timed out: then the check above ends the search
     }
     if (r.exitCode === 0) return r
   }

@@ -7,7 +7,10 @@ import { expect, test } from 'claude-code/testing'
 const TYPED = 'check TOKENWORD in CI'
 const REWRITTEN = 'check ⟦SECRET_c1⟧ in CI'
 
+const clock = { t: 1_000_000 }
+
 function common(on, run) {
+  on('clock.now', () => ({ value: clock.t }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.cwd', () => ({ value: '/work' }))
   // the mod reads no environment variable (the directory review flagged the read next to a program start)
@@ -141,5 +144,38 @@ test('when no Python answers, all three are tried once and the prompt goes on un
   })
   expect((await submit($)).text).toBe(TYPED)
   expect(runs).toBe(3)
+})
+
+test('all tries share one budget of 8 s: each gets what is left', async ($, on) => {
+  const timeouts = []
+  common(on, ($, e) => {
+    timeouts.push(e.init.timeoutMs)
+    clock.t += 3000                                  // each failed try takes 3 s
+    return { value: { exitCode: 9009, stderr: '', stdout: '' } }
+  })
+  expect((await submit($)).text).toBe(TYPED)
+  expect(timeouts).toEqual([8000, 5000, 2000])
+})
+
+test('no try starts after the budget is spent', async ($, on) => {
+  const timeouts = []
+  common(on, ($, e) => {
+    timeouts.push(e.init.timeoutMs)
+    clock.t += 5000                                  // two tries spend the budget: the third does not start
+    return { value: { exitCode: 9009, stderr: '', stdout: '' } }
+  })
+  expect((await submit($)).text).toBe(TYPED)
+  expect(timeouts).toEqual([8000, 3000])
+})
+
+test('a timeout ends the search: no second Python runs the rewrite again', async ($, on) => {
+  let runs = 0
+  common(on, () => {
+    runs += 1
+    clock.t += 8000                                  // the whole budget, then the call rejects
+    return { deny: 'timed out' }
+  })
+  expect((await submit($)).text).toBe(TYPED)
+  expect(runs).toBe(1)
 })
 

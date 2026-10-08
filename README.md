@@ -400,19 +400,26 @@ run".
 - The skill runs `skills/secret-hygiene/scripts/scan_secrets.py` (reads files and
   `git log`) and `redact_copy.py` (writes a new file) when the model follows it; neither
   opens a network connection.
-- Sends and fetches: no telemetry and no download; no hook and no mod opens a
-  network connection. Two connections start from a command you run:
+- Sends and fetches: no telemetry and no download. Three connections start from
+  a command you run, and nothing else in the plugin opens one:
   - the ssh route of your own ssh command inside the Claude Code sandbox
     (`hooks/proxy_connect.py`, the `ProxyCommand` of that ssh call): one
     CONNECT through Claude Code's local sandbox proxy (localhost only) to the
     host you named, with the proxy login that Claude Code puts in
     `HTTPS_PROXY` for that sandbox;
+  - before an ssh command that carries a value, `hooks/sandbox_probe.py` checks
+    that it runs inside that sandbox: it tries direct connections to 1.1.1.1:443,
+    8.8.8.8:53 and 9.9.9.9:443 (the sandbox must refuse them) and one CONNECT with
+    a wrong login to the local sandbox proxy. It sends no data, and it runs only
+    when `SANDBOX_RUNTIME=1` and a local sandbox proxy are set;
   - `/maisecrets:report … --create`, which runs the GitHub CLI (`gh`) with your
     own `gh` login to file the issue.
-- Credentials: maisecrets reads no credential of yours to send it to a server.
-  It reads the values you stored, from your operating system's store, only to
-  put each one into the tool call you allow, which then goes where that call
-  goes. The sandbox proxy login above goes only to the local sandbox proxy.
+- Credentials: the hooks and the mod fetch no credential for a request of
+  their own. They read the values you stored, from your operating system's
+  store, only to put each one into the tool call you allow, which then goes
+  where that call goes. The two commands above use the login that belongs to
+  them: the ssh route sends the sandbox proxy login from `HTTPS_PROXY` to the
+  local sandbox proxy, and `gh` uses its own GitHub login.
   `/maisecrets:report` prints the issue text and a prefilled link, and it
   files the issue only with `--create` (GitHub CLI, to `report_url`); the
   Windows Credential Locker may roam through a Microsoft account.
