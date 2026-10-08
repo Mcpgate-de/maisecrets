@@ -12,14 +12,25 @@ const MARK = 'mod-prompt'
 // claude -p. A subagent's report, a peer's or a channel's message stays with the settings hook (C19)
 const PERSON = new Set(['composer', 'bridge', 'sdk'])
 
+// The plugin's own hooks/dispatch.py, started by this computer's Python, in the plugin folder: each call is
+// fixed text, no shell and no environment read (the directory review asks for one program by name with fixed
+// arguments). macOS and Linux have python3, Windows the py launcher or python. The first one that starts and
+// answers wins; when none does, the settings hook blocks the prompt (README, "The mod")
+async function runDispatch($, init) {
+  try {
+    return await $.process.run(['python3', 'hooks/dispatch.py', 'mod-prompt'], init)
+  } catch {}
+  try {
+    return await $.process.run(['py', '-3', 'hooks/dispatch.py', 'mod-prompt'], init)
+  } catch {}
+  return await $.process.run(['python', 'hooks/dispatch.py', 'mod-prompt'], init)
+}
+
 async function ask($, prompt, session, cwd) {
   const stdin = JSON.stringify({ prompt, session_id: session, cwd })
-  // the plugin's own launcher, as fixed text, run in the plugin folder: no shell, and nothing but this
-  // computer's own Python gets the prompt (README, "The mod")
-  const init = { cwd: $.plugin.root, stdin, timeoutMs: 8000 }
-  const r = (await $.env.get('OS')) === 'Windows_NT'
-    ? await $.process.run(['cmd.exe', '/d', '/c', 'hooks\\run.cmd', 'mod-prompt'], init)
-    : await $.process.run(['bash', 'hooks/run.sh', 'mod-prompt'], init)
+  // UTF-8 for the pipe: Windows Python would read it in the console code page and a prompt with umlauts would fail
+  const init = { cwd: $.plugin.root, stdin, timeoutMs: 8000, env: { PYTHONUTF8: '1' } }
+  const r = await runDispatch($, init)
   if (r.exitCode !== 0) return null
   const answer = JSON.parse(r.stdout)
   if (!answer || answer.maisecrets !== MARK || typeof answer.text !== 'string') return null

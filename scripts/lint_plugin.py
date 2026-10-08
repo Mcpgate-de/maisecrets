@@ -188,12 +188,13 @@ def check_mod(root: Path = ROOT) -> list[str]:
             errors.append(f"claude-mod/maisecrets-mod.json names {module}, which does not exist")
             continue
         text = path.read_text(encoding="utf-8")
-        # the command lines are fixed text (the directory reads them): both launchers, one command
-        cmds = set(re.findall(r"'hooks/run\.sh', '([a-z][a-z-]*)'\]", text)) | set(
-            re.findall(r"'hooks\\\\run\.cmd', '([a-z][a-z-]*)'\]", text))
-        if len(cmds) != 1 or not cmds <= dispatcher_names(root)[0]:
-            errors.append(f"claude-mod/{module}: its launcher commands {sorted(cmds) or '(none)'} are not one command "
-                          "that hooks/dispatch.py handles, for run.sh and run.cmd")
+        # the command lines are fixed text (the directory reads them): the three Python names, one command each
+        calls = {argv: set(re.findall(argv + r", 'hooks/dispatch\.py', '([a-z][a-z-]*)'\]", text))
+                 for argv in (r"\['python3'", r"\['py', '-3'", r"\['python'")}
+        cmds = set().union(*calls.values())
+        if any(not c for c in calls.values()) or len(cmds) != 1 or not cmds <= dispatcher_names(root)[0]:
+            errors.append(f"claude-mod/{module}: its commands {sorted(cmds) or '(none)'} are not one command that "
+                          "hooks/dispatch.py handles, for each of python3, py -3 and python")
     return errors
 
 
