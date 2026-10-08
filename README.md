@@ -887,12 +887,14 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   `git commit -m` or `git tag -m`. Every part of the line must be one of these
   commands, written as itself (no path, no variable, no wrapper), and outside
   quotes the line has no `$`, backtick, parenthesis, brace or redirect (other
-  than `2>&1` or to `/dev/null`); `printf` and `test` have no `-v`, which names
-  a variable the shell evaluates. Anywhere else, also unquoted
+  than `2>&1` or to `/dev/null`); inside double quotes a `$` comes only before
+  a name (`"$HOME"`); `printf` and `test` have no `-v`, which names a variable
+  the shell evaluates. Anywhere else, also unquoted
   (`grep ssh README.md`) or in a heredoc, the hook cannot tell text from a call,
   and it asks. A `#` comment is text only when no bracket, brace, parenthesis,
-  backslash or backtick comes before it in the command: inside `(( ))`, `${ }`
-  or `[[ ]]` the shell reads no comment and runs what follows.
+  backslash, backtick or carriage return comes before it in the command:
+  inside `(( ))`, `${ }` or `[[ ]]` the shell reads no comment and runs what
+  follows. The same holds for a heredoc.
 - **A short deny list is always refused:** `mkfs` or `wipefs` on a device,
   `dd` to a device, `rm -rf /`, a fork bomb, anywhere in a command that names
   an ssh-family call (quotes removed; as a command word, not as a file name;
@@ -921,7 +923,10 @@ variable that holds `ssh` and was set in an earlier command, or a word built
 without the letters `ssh` in the text is not seen, and neither is a file that a
 heredoc writes and the same command then runs. A program that git or gh starts
 from its own configuration (a hook, an editor, a signing program, a browser)
-is not checked; it gets the quoted text only as data. A mount (`sshfs`) or a tunnel
+is not checked; it gets the quoted text only as data. maisecrets reads the
+command with its own small shell parser; other shell syntax that it reads
+differently from bash or zsh can still hide a call (the reviews of 0.6.7 found
+such forms only after one of the characters above). A mount (`sshfs`) or a tunnel
 (`ssh -f -N -L`) that one consent started stays after the 8 hours, and the
 local commands that use it ask nothing. On Codex the model sees the consent
 code; maisecrets refuses a command that carries the sentence, but not one that

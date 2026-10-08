@@ -1028,7 +1028,7 @@ _SLICE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#
 # reads no comment or heredoc there and runs what follows (reviews of 0.6.7, rounds 4 to 6). The parser itself is
 # not changed: a misread comment would flip its quote state and hide the next line.
 _UNSURE_BEFORE_COMMENT = re.compile(r"[()\[\]{}\\`]")
-_UNSURE_BEFORE_HEREDOC = re.compile(r"[{\[\\`]")
+_UNSURE_BEFORE_HEREDOC = re.compile(r"[(){}\[\\`]")       # ((1<<TAG)) is a shift, no heredoc (codex round 7)
 
 
 def comment_is_sure(command: str, ctxs: list[str], pos: int) -> bool:
@@ -1036,14 +1036,16 @@ def comment_is_sure(command: str, ctxs: list[str], pos: int) -> bool:
     k = pos
     while k > 0 and ctxs[k - 1] == "comment":
         k -= 1
-    return not _UNSURE_BEFORE_COMMENT.search(command, 0, k)
+    return "\r" not in command and not _UNSURE_BEFORE_COMMENT.search(command, 0, k)
 
 
 def heredoc_is_sure(command: str, ctxs: list[str], pos: int) -> bool:
-    """The heredoc body that holds pos is one for the shell too: the plain text before it opens no ${ or $[."""
+    """The heredoc body that holds pos is one for the shell too: the plain text before it opens no ((, ${ or $[."""
     k = pos
     while k > 0 and ctxs[k - 1] in ("hd", "hdq", "hdx"):
         k -= 1
+    if "\r" in command:         # the parser ends a heredoc at TAG\r, the shell does not, and the quotes move (Opus)
+        return False
     return not _UNSURE_BEFORE_HEREDOC.search("".join(c for c, cx in zip(command[:k], ctxs[:k]) if cx == ""))
 
 

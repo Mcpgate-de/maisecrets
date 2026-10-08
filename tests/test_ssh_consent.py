@@ -172,6 +172,16 @@ class ClassifierMatrixTests(unittest.TestCase):
             "echo \\) \\); (( x |# 2 )); ssh web1 reboot", "echo \\] \\]; echo $[1<<ZQ]\nssh web1 reboot\nZQ",
             # a false heredoc after an ssh call fed by a real one: web2 must not hide behind web1's write
             "ssh web1 cat <<A\nx\nA\necho ${x:-<<ZQ}\nssh web2 reboot\nZQ",
+            "ssh web1 cat <<A\nx\nA\n((1<<ZQ))\nssh web2 reboot\nZQ",   # codex round 7: a shift in (( ))
+            # Opus round 7: a << in a group that closes on its line is no heredoc; a CR moves the parser's quotes
+            "(( cat <<EOF ))\nssh web1 reboot\nEOF\n", "echo $(cat <<EOF)\nssh web1 reboot\nEOF\n",
+            "diff <(cat <<EOF) /dev/null\nssh web1 reboot\nEOF\n", "git commit -F <(cat <<EOF)\nssh web1 reboot\nEOF\n",
+            "cat <<A; echo $(cat <<EOF)\nA\nssh web1 reboot\nEOF\n",
+            "cat <<EOF\nEOF\r\n'\nEOF\n' # '; ssh web1 reboot\n",
+            "cat <<EOF\nEOF\r\ncat <<B\nEOF\nssh web1 reboot\nB\n",
+            # zsh runs a command substitution that ${(e)…} builds inside double quotes
+            'echo "${(e):-$""(ssh web1 reboot)}"', 'echo "${(e):-\\$(ssh web1 reboot)}"',
+            'echo "${(e):-\\`ssh web1 reboot\\`}"',
             # still unread: the text of these runs as a command (shell, alias, pipe into a shell, a program word)
             "gh alias set x '!ssh web1 reboot'", "echo ssh web1 reboot | bash", 'gh api x --jq "ssh" | sh',
             # text written where a later part runs it (codex review of 0.6.7; the quoted form ran freely on 0.6.6)
@@ -273,7 +283,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 317, "a row was added or lost: update the count")
+        self.assertEqual(counted, 328, "a row was added or lost: update the count")
 
     def test_a_long_command_is_answered_in_time(self):
         # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)

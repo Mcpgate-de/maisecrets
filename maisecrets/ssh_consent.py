@@ -71,6 +71,7 @@ _TEXT_SUBCOMMANDS = {"issue", "pr", "mr", "release"}
 _GIT_MESSAGE_FLAG = re.compile(r"(?:^|\s)(?:-m|--message)[=\s]*$")     # git commit -m "…", git tag -m "…"
 # outside quotes these start, feed or define a program. A $( or ` inside double quotes is plain context to
 # hooks._shell_contexts, so it is caught here too; a $VAR in double quotes runs nothing
+_LIVE_DQ = re.compile(r"\$(?![A-Za-z_])")
 _LIVE_PLAIN = re.compile(r"[$`<>(){}\\]")
 # a heredoc to these is text, not a script: a commit message or a file that mentions ssh
 _HEREDOC_DATA = {"cat", "tee", "git", "gh", "glab", "grep", "echo", "printf", "wc", "head", "tail", "jq", "less"}
@@ -544,6 +545,8 @@ def classify(command: str, parse: Parser) -> Verdict:
         plain = "".join(ch for ch, cx in zip(command, ctxs) if cx == "")
         if _LIVE_PLAIN.search(_HARMLESS_REDIRECT.sub(" ", plain)):
             return False
+        if _LIVE_DQ.search("".join(ch for ch, cx in zip(command, ctxs) if cx == "dq")):
+            return False             # zsh runs "${(e):-\$(ssh …)}": in double quotes only $NAME is text (Opus r7)
         for sg in segs:
             first = command[sg["start"]:sg["end"]].split(None, 1)
             words = sg.get("words") or []
