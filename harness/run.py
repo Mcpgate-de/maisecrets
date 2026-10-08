@@ -326,6 +326,19 @@ SCENARIOS = {
         "expect_text": "on stdin to ssh aux01: ssh aux01 'grep -F -f - /var/log/mail.log'",
         "expect_text_windows": "ssh hands the command line to another shell",
     },
+    # the value is handed out with an ask, and the client declines it (headless refuses every ask): the call waits
+    # as pending and leaves no record of a destination (ChatGPT review of 0.6.7)
+    "destination_declined": {
+        "prompt": "grep the mail log for \u27e6SECRET_c1\u27e7",
+        "preload": [(MARK, "SECRET", "gitlab_pat")],
+        "config": {"rehydration": "confirm"},
+        "turns": [{"tool": "Bash", "input": {"command": "printf '%s' \u27e6SECRET_c1\u27e7 | ssh aux01 "
+                                                        "'grep -F -f - /var/log/mail.log'"}},
+                  {"text": "done"}],
+        "expect_requests": 2,
+        "expect_home_json_nonempty": ("destinations.json", ["pending_calls"]),
+        "expect_no_home_json": ("destinations.json", ["secrets", "SECRET_c1", "seen"]),
+    },
     # rehydration "automatic": no ask, the allowed command runs, and outside the sandbox its guard stops
     # it with exit 97 before the value is read (the route in the real sandbox: harness/sandbox/ssh_e2e.py)
     "bash_ssh_automatic": {
@@ -636,6 +649,20 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                 node = node[part]
         except (OSError, ValueError, KeyError, TypeError):
             fails.append(f"{fname} in the vault home has no {'/'.join(path)}")
+    for key, must in (("expect_home_json_nonempty", True), ("expect_no_home_json", False)):
+        if not sc.get(key):
+            continue
+        # a record that must hold something (the premise), or a key path that must not exist
+        fname, path = sc[key]
+        try:
+            node = json.loads((home / fname).read_text())
+            for part in path:
+                node = node[part]
+            present = bool(node)
+        except (OSError, ValueError, KeyError, TypeError):
+            present = False
+        if present != must:
+            fails.append(f"{fname} in the vault home {'has no' if must else 'has'} {'/'.join(path)}")
     if sc.get("expect_no_file") and (cwd / sc["expect_no_file"]).exists():
         fails.append(f"{sc['expect_no_file']} exists: a shell ran text from the arguments as code")
     if sc.get("expect_no_text") and sc["expect_no_text"] in joined:

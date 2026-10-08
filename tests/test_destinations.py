@@ -571,3 +571,121 @@ class RoundFour(unittest.TestCase):
         self.assertNotIn("~", found[0][1], "a folder that only starts with the home path is not home")
         found = destinations.destinations_of("Write", {"file_path": os.path.join(home, "proj", "a.txt")})
         self.assertEqual(found, [("local", "a file in ~/proj/")])
+
+
+class SeenOnlyAfterTheCall(unittest.TestCase):
+    """A value is handed out in PreToolUse, before the client asks the person. The destination becomes `seen` only
+    when a PostToolUse or PostToolUseFailure of the same tool_use_id says the call ran (ChatGPT review of 0.6.7)."""
+
+    def setUp(self):
+        _reset()
+
+    def _ran(self, ref: str, host: str, call: str) -> None:
+        _pre("Bash", {"command": _curl(ref, host)}, tool_use_id=call)
+        _post(tool_use_id=call)
+
+    def test_a_declined_call_leaves_no_record(self):
+        ref = _secret()
+        out = _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
+        self.assertIn("updatedInput", out["hookSpecificOutput"], "the premise: the value was handed out")
+        self.assertEqual(_seen(ref), {}, "no PostToolUse came: the person declined, nothing was sent")
+        self.assertIn("T1", json.loads(STORE.read_text())["pending_calls"], "it waits as pending")
+
+    def test_a_call_that_ran_is_seen(self):
+        ref = _secret()
+        self._ran(ref, "api.example.com", "T1")
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com"})
+        self.assertEqual(json.loads(STORE.read_text())["pending_calls"], {}, "and waits no longer")
+
+    def test_a_failed_call_is_seen_too(self):
+        ref = _secret()
+        _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
+        hooks.HANDLERS["post-tool-failure"]({"hook_event_name": "PostToolUseFailure", "tool_name": "Bash",
+                                             "session_id": "S1", "tool_use_id": "T1", **CLAUDE,
+                                             "tool_input": {}, "error": "exit 1"})
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com"}, "the tool had the value")
+
+    def test_the_end_of_another_call_commits_nothing(self):
+        ref = _secret()
+        _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
+        _post(tool_use_id="T2")
+        _post()
+        self.assertEqual(_seen(ref), {})
+
+    def test_a_pattern_break_waits_for_the_call_and_its_hint_comes_with_it(self):
+        _typed()
+        ref = _secret()
+        for i in range(destinations.ESTABLISHED_USES):
+            self._ran(ref, "api.example.com", f"E{i}")
+        _pre("Bash", {"command": _curl(ref, "other.example.net")}, tool_use_id="B1")
+        self.assertEqual(json.loads(STORE.read_text())["pending_hint"], {}, "a declined break gives no hint")
+        self.assertNotIn("maisecrets notes", json.dumps(_post(tool_use_id="X9")))
+        out = _post(tool_use_id="B1")
+        self.assertIn("named a host that this secret was not used with before",
+                      out["hookSpecificOutput"]["additionalContext"], "the break of the call that ran, in its answer")
+
+    def test_a_pending_call_that_never_ran_expires(self):
+        ref = _secret()
+        _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
+        data = json.loads(STORE.read_text())
+        data["pending_calls"]["T1"]["t"] -= destinations.PENDING_SECONDS + 1
+        STORE.write_text(json.dumps(data))
+        _post(tool_use_id="T1")
+        self.assertEqual(_seen(ref), {}, "an hour later the end of a call is no proof that this value went")
+
+    def test_the_pending_calls_are_bounded(self):
+        _reset(max_resolves_per_hour=1000)          # the premise: more calls than the bound get their values
+        ref = _secret()
+        for i in range(destinations.MAX_PENDING + 5):
+            _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id=f"T{i}")
+        calls = json.loads(STORE.read_text())["pending_calls"]
+        self.assertEqual(len(calls), destinations.MAX_PENDING)
+        self.assertNotIn("T0", calls, "the oldest goes")
+
+    def test_forget_takes_a_pending_call_too(self):
+        ref = _secret()
+        _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
+        self.assertTrue(destinations.forget([_key(ref)]))
+        self.assertEqual(json.loads(STORE.read_text())["pending_calls"], {})
+        _post(tool_use_id="T1")
+        self.assertEqual(_seen(ref), {})
+
+    def test_a_malformed_pending_call_is_dropped(self):
+        STORE.write_text(json.dumps({"pending_calls": {"T1": {"keys": "K1", "found": [], "t": 1}},
+                                     "secrets": {}}))
+        self.assertEqual(destinations._load()["pending_calls"], {})
+        self.assertFalse(destinations.commit("T1"))
+
+    def test_a_client_without_a_call_id_is_noted_at_the_hand_out(self):
+        ref = _secret()
+        _pre("Bash", {"command": _curl(ref, "api.example.com")})
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com"})
+
+    def test_a_bash_command_names_its_hosts_for_each_secret_in_it(self):
+        # command-level, not value-flow-level (ChatGPT review of 0.6.7): the second URL gets no value, and it is
+        # noted for the secret all the same. Measured first, before any parser follows the value
+        ref = _secret()
+        self._ran_command(_curl(ref, "api.example.com") + "; curl -s https://status.example.org/", "T1")
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com", "network:status.example.org"})
+
+    def _ran_command(self, command: str, call: str) -> None:
+        _pre("Bash", {"command": command}, tool_use_id=call)
+        _post(tool_use_id=call)
+
+    def test_a_commit_that_fails_never_changes_the_answer(self):
+        ref = _secret()
+        _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
+        plain = _post(tool_use_id="T9")
+        with mock.patch.object(destinations, "commit", side_effect=RuntimeError("disk")):
+            out = _post(tool_use_id="T1")
+            failed = hooks.HANDLERS["post-tool-failure"]({"hook_event_name": "PostToolUseFailure", "tool_name": "Bash",
+                                                          "session_id": "S1", "tool_use_id": "T1", **CLAUDE,
+                                                          "tool_input": {}, "error": "exit 1"})
+        self.assertEqual(out, plain, "the PostToolUse answer is the one without a record")
+        self.assertEqual(failed, {}, "and the PostToolUseFailure answer too")
+
+    def test_with_the_setting_off_nothing_waits(self):
+        _reset(secret_destinations="off")
+        ref = _secret()
+        _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
+        self.assertFalse(STORE.exists() and json.loads(STORE.read_text()).get("pending_calls"))

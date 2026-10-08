@@ -1,0 +1,10 @@
+# c23-a-declined-call-leaves-no-record: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c23-a-declined-call-leaves-no-record"
+control = "C23"
+statement = "A value is handed out before the client asks the person, so a destination becomes seen only when a PostToolUse or PostToolUseFailure of the same call says it ran; a call the person declines leaves no record and no pattern break."
+runner = ["tests/test_destinations.py::SeenOnlyAfterTheCall::test_a_declined_call_leaves_no_record"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "            destinations.pend(call, keys, payload.get(\"session_id\"), payload.get(\"agent_id\"), found)"
+replace = "            destinations.note(keys, payload.get(\"session_id\"), payload.get(\"agent_id\"), found)"

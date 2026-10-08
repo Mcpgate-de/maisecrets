@@ -56,6 +56,11 @@ class Corrupt(ValueError):
 _FIELDS = {"kind": str, "label": str, "uses": int, "first": (int, float), "last": (int, float), "day": str,
            "day_uses": int, "max_day_uses": int}
 MAX_PER_SECRET = 50       # a call the model writes chooses a label; the record of one secret stays bounded
+# a call is noted as pending when the value is handed out (PreToolUse) and becomes `seen` only when the client
+# reports that it ran (PostToolUse or PostToolUseFailure): a call the person declines leaves no record (ChatGPT
+# review of 0.6.7). A pending call that never ran goes after this time; at most this many wait at once
+PENDING_SECONDS = 3600
+MAX_PENDING = 100
 
 
 def _well_formed(d) -> bool:
@@ -76,7 +81,18 @@ def _clean(data: dict) -> dict:
             seen = dict(sorted(seen.items(), key=lambda kv: kv[1]["last"])[-MAX_PER_SECRET:])
         kept[key] = {"seen": seen, "allowed": rec.get("allowed") if isinstance(rec.get("allowed"), dict) else {}}
     data["secrets"] = kept
+    calls = data.get("pending_calls") if isinstance(data.get("pending_calls"), dict) else {}
+    data["pending_calls"] = {i: c for i, c in calls.items() if isinstance(i, str) and _pending_well_formed(c)}
     return data
+
+
+def _pending_well_formed(c) -> bool:
+    return (isinstance(c, dict) and isinstance(c.get("keys"), list) and all(isinstance(k, str) for k in c["keys"])
+            and isinstance(c.get("found"), list)
+            and all(isinstance(f, list) and len(f) == 2 and f[0] in ("network", "local") and isinstance(f[1], str)
+                    for f in c["found"])
+            and all(c.get(k) is None or isinstance(c.get(k), str) for k in ("session", "agent"))
+            and isinstance(c.get("t"), (int, float)) and not isinstance(c.get("t"), bool) and math.isfinite(c["t"]))
 
 
 def _load(strict: bool = False) -> dict:
@@ -95,7 +111,7 @@ def _load(strict: bool = False) -> dict:
             raise Corrupt(STORE)
         data = {}
     data = _clean(data)
-    for k in ("secrets", "pending_hint", "interactive"):
+    for k in ("secrets", "pending_hint", "interactive", "pending_calls"):
         if not isinstance(data.get(k), dict if k != "interactive" else list):
             data[k] = {} if k != "interactive" else []
     return data
@@ -184,16 +200,61 @@ def destinations_of(tool: str, tool_input: dict, ssh_hosts: list[str] | None = N
 def note(keys: list[str], session: str | None, agent: str | None, destinations: list[tuple[str, str]]) -> bool:
     """Record one use per key and destination, all keys of a call under one short lock. True when the call is a
     pattern break (the caller gives the hint only once, globally). Never raises: a record that cannot be written
-    must not stop the call."""
+    must not stop the call. For a call the client did not yet report as run, use pend() and commit()."""
     try:
         with _LOCK:
             data = _load_for_write()
-            pattern_break = False
-            for key in dict.fromkeys(keys):
-                pattern_break = _note_one(data, key, destinations) or pattern_break
-            if pattern_break and session and not agent and session in data["interactive"]:
-                data["pending_hint"][session] = time.time()
-            data["pending_hint"] = {s: t for s, t in data["pending_hint"].items() if s in data["interactive"]}
+            pattern_break = _note_locked(data, keys, session, agent, destinations)
+            _save(data)
+            return pattern_break
+    except (OSError, LockTimeout, ValueError, TypeError, KeyError):
+        return False
+
+
+def _note_locked(data: dict, keys: list[str], session: str | None, agent: str | None,
+                 destinations: list[tuple[str, str]]) -> bool:
+    pattern_break = False
+    for key in dict.fromkeys(keys):
+        pattern_break = _note_one(data, key, destinations) or pattern_break
+    if pattern_break and session and not agent and session in data["interactive"]:
+        data["pending_hint"][session] = time.time()
+    data["pending_hint"] = {s: t for s, t in data["pending_hint"].items() if s in data["interactive"]}
+    return pattern_break
+
+
+def pend(call: str, keys: list[str], session: str | None, agent: str | None,
+         destinations: list[tuple[str, str]]) -> None:
+    """The value is handed out to this call: wait for the client to report that it ran. Nothing is `seen` yet and
+    no pattern break is counted. Never raises."""
+    try:
+        with _LOCK:
+            data = _load_for_write()
+            now = time.time()
+            calls = {i: c for i, c in data["pending_calls"].items() if now - c["t"] < PENDING_SECONDS}
+            calls[call] = {"keys": list(dict.fromkeys(keys)), "session": session, "agent": agent,
+                           "found": [[k, v] for k, v in destinations], "t": now}
+            if len(calls) > MAX_PENDING:
+                calls = dict(sorted(calls.items(), key=lambda kv: kv[1]["t"])[-MAX_PENDING:])
+            data["pending_calls"] = calls
+            _save(data)
+    except (OSError, LockTimeout, ValueError, TypeError, KeyError):
+        pass
+
+
+def commit(call: str) -> bool:
+    """The client reports that this call ran (also one that failed: the tool had the value). Its pending record
+    becomes `seen`. True when it is a pattern break. A call with no pending record changes nothing. Never raises."""
+    try:
+        with _LOCK:
+            data = _load_for_write()
+            c = data["pending_calls"].pop(call, None)
+            if c is None:
+                return False
+            if time.time() - c["t"] >= PENDING_SECONDS:
+                _save(data)
+                return False
+            pattern_break = _note_locked(data, c["keys"], c["session"], c["agent"],
+                                         [(k, v) for k, v in c["found"]])
             _save(data)
             return pattern_break
     except (OSError, LockTimeout, ValueError, TypeError, KeyError):
@@ -293,6 +354,11 @@ def forget(keys: list[str]) -> bool:
             data = _load_for_write()
             for k in keys:
                 data["secrets"].pop(k, None)
+            gone = set(keys)
+            for i, c in list(data["pending_calls"].items()):      # a call that did not yet run names the key too
+                c["keys"] = [k for k in c["keys"] if k not in gone]
+                if not c["keys"]:
+                    del data["pending_calls"][i]
             _save(data)
             return True
     except (OSError, LockTimeout, ValueError):

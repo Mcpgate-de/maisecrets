@@ -274,9 +274,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 29 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 30 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 94 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 96 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -498,8 +498,10 @@ come once more and changes no protection setting.
 
 maisecrets notes, on this computer only, where each stored secret was handed
 to a tool call: a host named in the call (from a URL, also one in quoted text,
-not one in a shell comment), an ssh host, or an MCP server and tool. A file or a
-command without a host is listed apart, as a local use. `/maisecrets:list`
+not one in a shell comment), an ssh host, or an MCP server and tool. In a Bash
+command every host it names counts for each secret in it, also a second URL
+that the value does not reach. A file or a command without a host is listed
+apart, as a local use. `/maisecrets:list`
 shows it under each secret:
 
 ```
@@ -511,9 +513,10 @@ SECRET_c7      SECRET  github_pat            3d   14        21h  -
       a file in ~/proj/     2–9×   last 3 days ago
 ```
 
-This is a record, not a permission, and it stops nothing. It is noted when
-the value is handed to the call, so a call you then decline in the client's
-dialog is listed too. `new` marks a destination first seen in the
+This is a record, not a permission, and it stops nothing. A call is listed
+only after it ran: the value is handed out before the client asks you, so the
+call waits until the client reports that it ran (also when it failed). A call
+you decline in the client's dialog is not listed. `new` marks a destination first seen in the
 last 24 hours. When a secret that you used at one destination
 (3 times on one day) goes to a new one for the first time, the AI tells you
 once, in a sentence; this note does not come again. maisecrets does not
