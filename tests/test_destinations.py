@@ -562,3 +562,11 @@ class RoundFour(unittest.TestCase):
             label = destinations.clean_label("api" + ch + ".example.com")
             self.assertTrue(label.isprintable(), repr(label))
             self.assertEqual(label.replace("?", "").replace(" ", ""), "api.example.com", repr(label))
+
+    def test_a_folder_next_to_home_is_not_shown_as_home(self):
+        home = str(Path.home())
+        sibling = home.rstrip(os.sep) + "x"
+        found = destinations.destinations_of("Write", {"file_path": os.path.join(sibling, "a.txt")})
+        self.assertNotIn("~", found[0][1], "a folder that only starts with the home path is not home")
+        found = destinations.destinations_of("Write", {"file_path": os.path.join(home, "proj", "a.txt")})
+        self.assertEqual(found, [("local", "a file in ~/proj/")])

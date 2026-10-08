@@ -173,8 +173,10 @@ def destinations_of(tool: str, tool_input: dict, ssh_hosts: list[str] | None = N
         path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
         folder = os.path.dirname(path) or "."
         home = str(Path.home())
-        if folder.startswith(home):
+        if folder == home or folder.startswith(home.rstrip(os.sep) + os.sep):    # not /home/anna for /home/ann
             folder = "~" + folder[len(home):]
+        if os.sep == "\\":
+            folder = folder.replace("\\", "/")         # one separator in a label: ~/proj/, not ~\proj/ (Windows CI)
         return [("local", clean_label(f"a file in {folder}/"))]
     return [("local", clean_label(f"a {tool} call"))]
 
