@@ -1093,8 +1093,7 @@ _SIGV4_SCOPE_RE = re.compile(r"(?:/|%2[Ff])\d{8}(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff
 # a whole reference or a whole date in the password place of a URL: redis://:%24%7BREDIS_PASSWORD%7D@…,
 # redis://:2026-10-08@…; an encoded $ or { inside a real password stays a value (codex, Opus review of 0.6.8)
 _URL_PASSWORD_NOT_A_VALUE_RE = re.compile(r"%24[A-Za-z_][A-Za-z0-9_]*|%24%7[Bb][A-Za-z_][A-Za-z0-9_]*%7[Dd]"
-                                          r"|\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])"
-                                          r"(?:T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?Z?)?")
+                                          r"|\d{4}-\d{2}-\d{2}")    # a time has a colon, which this rule never takes
 
 
 def _url_password_not_a_value(v: str) -> bool:
@@ -1105,10 +1104,7 @@ def _url_password_not_a_value(v: str) -> bool:
         return True
     import datetime
     try:
-        if "T" in v:
-            datetime.datetime.fromisoformat(v[:-1] if v.endswith("Z") else v)
-        else:
-            datetime.date.fromisoformat(v)
+        datetime.date.fromisoformat(v)
     except ValueError:
         return False
     return True
