@@ -1023,6 +1023,14 @@ WRAPPERS = {"env", "genv", "command", "exec", "nice", "time", "nohup", "sudo", "
 _SLICE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
 
 
+def _escaped(command: str, i: int) -> bool:
+    """The character at i follows an odd run of backslashes: `echo \\ #; ssh …` has no comment (Opus round 4)."""
+    k = i
+    while k > 0 and command[k - 1] == "\\":
+        k -= 1
+    return i >= 0 and (i - k) % 2 == 1
+
+
 def _shell_contexts(command: str) -> list[str]:
     """One context per character position of a bash command line, as a small state machine
     reads it. Contexts: '' (plain word), 'sq' (inside '…'), 'dq' (inside "…"), 'hd' (body of
@@ -1138,7 +1146,7 @@ def _shell_contexts(command: str) -> list[str]:
                                     out[k] = "hdx"
                 pending = []
             continue
-        if c == "#" and (i == 0 or command[i - 1] in " \t\n;&|("):
+        if c == "#" and (i == 0 or command[i - 1] in " \t\n;&|(") and not _escaped(command, i - 1):
             eol = command.find("\n", i)
             eol = n if eol < 0 else eol
             for k in range(i, eol):

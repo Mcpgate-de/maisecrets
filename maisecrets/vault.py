@@ -1311,6 +1311,7 @@ class Vault:
         now = time.time()
         n = tried = 0
         self.last_refused = 0
+        purged_now: list[str] = []
         for key, meta in self._index["entries"].items():
             if limit is not None and tried >= limit:
                 break
@@ -1326,6 +1327,7 @@ class Vault:
                     continue
                 meta["purged"] = True
                 meta["purged_at"] = now
+                purged_now.append(key)
                 n += 1
         # metadata of a purged entry (masked display, session ids) is retention too: gone after
         # keep_purged_days; the fingerprint map goes with it (operator review, 2026-09-26)
@@ -1339,9 +1341,10 @@ class Vault:
                 del self._index["by_fingerprint"][fp]
         if n or old:
             self._save_index()
-        if old:
+        if old or purged_now:
             from . import destinations
-            destinations.forget(old)       # where an entry went is retention too: it goes with the metadata
+            # where a value went goes with the value: the list shows no purged entry (codex review of 0.6.7)
+            destinations.forget(old + purged_now)
         return n
 
     @_mutating

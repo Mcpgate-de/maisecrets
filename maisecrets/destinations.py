@@ -151,6 +151,10 @@ def destinations_of(tool: str, tool_input: dict, ssh_hosts: list[str] | None = N
     """(kind, label) per destination of one call: kind "network" or "local". The label is what the person reads."""
     if tool in ("Bash", "PowerShell"):
         command = str(tool_input.get("command") or "")
+        if tool == "Bash":
+            from .hooks import _shell_contexts           # a URL in a # comment goes nowhere (codex review of 0.6.7)
+            ctxs = _shell_contexts(command)
+            command = "".join(ch if cx != "comment" else " " for ch, cx in zip(command, ctxs))
         found = [("network", h) for h in hosts_in(command)]
         found += [("network", "ssh " + h) for h in sorted(set(ssh_hosts or []))]
         return [(k, clean_label(v)) for k, v in found] or [("local", "a command on this computer")]

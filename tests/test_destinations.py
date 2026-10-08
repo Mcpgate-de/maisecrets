@@ -370,7 +370,7 @@ class Hint(unittest.TestCase):
         _pre("Bash", {"command": _curl(ref, "other.example.net")})
         out = _post()
         text = out["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("used with a destination it had not been used with before", text)
+        self.assertIn("named a host that this secret was not used with before", text)
         self.assertIn("/maisecrets:list", text)
         self.assertNotIn("other.example.net", text, "the hint names no destination")
         self.assertNotIn(_key(ref), text, "and no secret")
@@ -518,3 +518,26 @@ class Shown(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoundFour(unittest.TestCase):
+    """The repairs of review round 4 (codex)."""
+
+    def setUp(self):
+        _reset()
+
+    def test_a_value_that_expires_takes_its_record_at_once(self):
+        ref = _secret()
+        destinations.note([_key(ref)], "S1", None, [("network", "api.example.com")])
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com"}, "the premise: a record exists")
+        v = Vault(load_config())
+        v._index["entries"][_key(ref)]["expires"] = time.time() - 1
+        v._save_index()
+        Vault(load_config()).expire()
+        self.assertTrue(Vault(load_config())._index["entries"][_key(ref)]["purged"], "the metadata stays")
+        self.assertEqual(_seen(ref), {}, "the list shows no purged entry, so no record may stay behind it")
+
+    def test_a_url_in_a_shell_comment_is_no_destination(self):
+        ref = _secret()
+        _pre("Bash", {"command": _curl(ref, "api.example.com") + "  # mirror: https://other.example.net/x"})
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com"})

@@ -285,19 +285,19 @@ HINTS["secret_destinations"] = {
     "revision": 1,
     # no destination and no secret name in the text: an injection that caused the new destination cannot use the
     # hint as an instruction ("allow …"); the list, rendered by maisecrets, names the destination
-    "claude": ("maisecrets notes, on this computer only, where stored secrets are sent. A stored secret was just used "
-               "with a destination it had not been used with before. maisecrets only notes this and did not stop the "
-               "call; it does not judge whether a destination is safe. Mention this once, in one or two sentences, "
-               "after your answer, and tell the user that /maisecrets:list shows where each secret was used. If the "
-               "user does not want this note again, tell them to send this as their own prompt: "
-               "/maisecrets:settings secret_destinations observe. Do not change settings yourself and do not call "
-               "any destination safe or approved."),
-    "codex": ("maisecrets notes, on this computer only, where stored secrets are sent. A stored secret was just used "
-              "with a destination it had not been used with before. maisecrets only notes this and did not stop the "
-              "call; it does not judge whether a destination is safe. Mention this once, in one or two sentences, "
-              "after your answer. If the user does not want this note again, tell them to send this alone as their "
-              "own prompt: maisecrets: set secret_destinations observe. Do not change settings yourself and do not "
-              "call any destination safe or approved."),
+    "claude": ("maisecrets notes, on this computer only, where stored secrets are sent. A call with a stored secret "
+               "just named a host that this secret was not used with before. maisecrets only notes this and did not "
+               "stop the call; it does not judge whether a destination is safe. Mention this once, in one or two "
+               "sentences, after your answer, and tell the user that /maisecrets:list shows where each secret was "
+               "used. If the user does not want this note again, tell them to send this as their own prompt: "
+               "/maisecrets:settings secret_destinations observe. Do not change settings yourself and do not call any "
+               "destination safe or approved."),
+    "codex": ("maisecrets notes, on this computer only, where stored secrets are sent. A call with a stored secret "
+              "just named a host that this secret was not used with before. maisecrets only notes this and did not "
+              "stop the call; it does not judge whether a destination is safe. Mention this once, in one or two "
+              "sentences, after your answer. If the user does not want this note again, tell them to send this alone "
+              "as their own prompt: maisecrets: set secret_destinations observe. Do not change settings yourself and "
+              "do not call any destination safe or approved."),
 }
 _HINTS_FILE = HOME / "hints.json"
 

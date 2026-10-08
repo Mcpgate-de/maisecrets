@@ -63,6 +63,8 @@ _LINE_SAFE_CMDS = _TEXT_SAFE_CMDS | {"cd", "ls", "cat", "sleep", "true", "false"
 # is the text of an issue, not a call (0.6.6 asked for `gh issue create --body "… an ssh host …"`)
 _TEXT_FLAG = re.compile(r"(?:^|\s)(?:--body|-b|--title|-t|--description|-d|--message|-m|--notes|-n)[=\s]*$")
 _TEXT_SUBCOMMANDS = {"issue", "pr", "mr", "release"}
+# -v takes a variable name, and zsh and bash evaluate an array subscript in it: printf -v 'a[$(ssh …)]' x
+_ARRAY_NAME_FLAG = re.compile(r"""(?:^|\s)['"]?-v['"]?(?:\s|$)""")
 _GIT_MESSAGE_FLAG = re.compile(r"(?:^|\s)(?:-m|--message)[=\s]*$")     # git commit -m "…", git tag -m "…"
 # outside quotes these start, feed or define a program. A $( or ` inside double quotes is plain context to
 # hooks._shell_contexts, so it is caught here too; a $VAR in double quotes runs nothing
@@ -544,6 +546,8 @@ def classify(command: str, parse: Parser) -> Verdict:
             words = sg.get("words") or []
             if not first or first[0] != sg.get("cmd"):
                 return False
+            if sg["cmd"] in ("printf", "test", "[") and _ARRAY_NAME_FLAG.search(command[sg["start"]:sg["end"]]):
+                return False         # printf -v 'a[$(…)]', test -v: the shell runs the subscript (Opus round 4)
             if sg["cmd"] in _LINE_SAFE_CMDS:
                 continue
             if sg["cmd"] in ("gh", "glab") and len(words) >= 2 and words[1] in _TEXT_SUBCOMMANDS:

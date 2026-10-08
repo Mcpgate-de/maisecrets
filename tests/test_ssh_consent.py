@@ -117,6 +117,8 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ssh web1 'uname -a; df -h'",
         ],
         "write": [
+            # round 4 (Opus): a # after an escaped space starts no comment, so the ssh after it runs
+            "echo \\ #; ssh web1 sudo reboot", "echo x\\ #\nssh web1 sudo reboot",
             "ssh web1 'systemctl restart nginx'", "ssh web1", "ssh web1 'sudo cat /etc/hosts'",
             "ssh web1 'cat /etc/shadow'", "ssh web1 'cat ../../etc/passwd'", "ssh web1 'cat /var/log/*.log'",
             "ssh web1 'cat ~/notes'", "ssh web1 'cat /proc/1/environ'", "ssh web1 'cat /root/.bashrc'",
@@ -182,6 +184,9 @@ class ClassifierMatrixTests(unittest.TestCase):
             "gh issue create -b \"$(sh -c 'ssh web1 reboot')\"", 'BROWSER="ssh web1" gh issue create -w',
             'timeout 5 echo "ssh web1"', "grep 'ssh' f ${IFS}x",
             'gh issue create -b "ssh web1 reboot"; gh issue view 1 | sh', 'echo "ssh web1 reboot"; fc -s',
+            # round 4 (Opus): -v takes an array name, and zsh runs the $(…) in its subscript
+            "printf -v 'a[$(ssh web1 reboot)]' x", "test -v 'a[$(ssh web1 reboot)]'", "[ -v 'a[$(ssh web1 reboot)]' ]",
+            "printf '-v' 'a[$(ssh web1 reboot)]' x",
             "bash -c \"ssh web1 reboot\"", "sh -c 'ssh web1 reboot'", "eval ssh web1 reboot",
             "sshpass -p x ssh web1 reboot", "setsid ssh web1 reboot", "flock /tmp/l ssh web1 reboot",
             "systemd-run ssh web1 reboot", "screen -dm ssh web1 reboot", "tmux new -d 'ssh web1 reboot'",
@@ -249,7 +254,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 284, "a row was added or lost: update the count")
+        self.assertEqual(counted, 290, "a row was added or lost: update the count")
 
     def test_a_long_command_is_answered_in_time(self):
         # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)
