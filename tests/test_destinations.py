@@ -589,7 +589,7 @@ class SeenOnlyAfterTheCall(unittest.TestCase):
         out = _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
         self.assertIn("updatedInput", out["hookSpecificOutput"], "the premise: the value was handed out")
         self.assertEqual(_seen(ref), {}, "no PostToolUse came: the person declined, nothing was sent")
-        self.assertIn("T1", json.loads(STORE.read_text())["pending_calls"], "it waits as pending")
+        self.assertIn("S1\x1f\x1fT1", json.loads(STORE.read_text())["pending_calls"], "it waits as pending")
 
     def test_a_call_that_ran_is_seen(self):
         ref = _secret()
@@ -624,14 +624,65 @@ class SeenOnlyAfterTheCall(unittest.TestCase):
         self.assertIn("named a host that this secret was not used with before",
                       out["hookSpecificOutput"]["additionalContext"], "the break of the call that ran, in its answer")
 
-    def test_a_pending_call_that_never_ran_expires(self):
+    def _age(self, seconds: float) -> None:
+        data = json.loads(STORE.read_text())
+        for c in data["pending_calls"].values():
+            c["t"] -= seconds
+        STORE.write_text(json.dumps(data))
+
+    def test_a_late_end_of_the_call_still_counts(self):
+        # Opus review of 0.6.8: the time counts from the hand-out, and a permission dialog can stay open; the Post
+        # event of the same call is the proof however late it comes
         ref = _secret()
         _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
-        data = json.loads(STORE.read_text())
-        data["pending_calls"]["T1"]["t"] -= destinations.PENDING_SECONDS + 1
-        STORE.write_text(json.dumps(data))
+        self._age(destinations.PENDING_SECONDS - 60)
         _post(tool_use_id="T1")
-        self.assertEqual(_seen(ref), {}, "an hour later the end of a call is no proof that this value went")
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com"})
+
+    def test_a_pending_call_that_never_ran_goes_when_the_next_one_waits(self):
+        ref = _secret()
+        _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
+        self._age(destinations.PENDING_SECONDS + 1)
+        _pre("Bash", {"command": _curl(ref, "other.example.net")}, tool_use_id="T2")
+        self.assertEqual(list(json.loads(STORE.read_text())["pending_calls"]), ["S1\x1f\x1fT2"])
+
+    def test_the_same_call_id_in_another_session_or_agent_commits_nothing(self):
+        # codex review of 0.6.8: Codex numbers its calls (call_1), so an id is unique only in its session
+        ref = _secret()
+        _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="call_1")
+        _post(tool_use_id="call_1", session_id="S2")
+        _post(tool_use_id="call_1", agent_id="sub1")
+        self.assertEqual(_seen(ref), {}, "the declined call of S1 stays unseen")
+        _post(tool_use_id="call_1")
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com"}, "its own end commits it")
+
+    def test_a_failed_call_that_breaks_the_pattern_gets_its_hint_in_its_own_answer(self):
+        _typed()
+        ref = _secret()
+        for i in range(destinations.ESTABLISHED_USES):
+            self._ran(ref, "api.example.com", f"E{i}")
+        _pre("Bash", {"command": _curl(ref, "other.example.net")}, tool_use_id="B1")
+        out = hooks.HANDLERS["post-tool-failure"]({"hook_event_name": "PostToolUseFailure", "tool_name": "Bash",
+                                                   "session_id": "S1", "tool_use_id": "B1", **CLAUDE,
+                                                   "tool_input": {}, "error": "exit 1"})
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUseFailure")
+        self.assertIn("named a host that this secret was not used with before",
+                      out["hookSpecificOutput"]["additionalContext"])
+        self.assertNotIn("maisecrets notes", json.dumps(_post(tool_use_id="X9")), "and not again on the next call")
+
+    def test_a_pending_call_keeps_at_most_the_bound_of_destinations(self):
+        _reset(max_resolves_per_hour=1000)
+        ref = _secret()
+        hosts = " ".join(f"https://h{i}.example.com/" for i in range(destinations.MAX_PER_SECRET + 10))
+        _pre("Bash", {"command": _curl(ref, "api.example.com") + " " + hosts + " " + hosts}, tool_use_id="T1")
+        (c,) = json.loads(STORE.read_text())["pending_calls"].values()
+        self.assertEqual(len(c["found"]), destinations.MAX_PER_SECRET, "no duplicate, and no more than a record holds")
+
+    def test_the_end_of_a_call_with_no_value_takes_no_lock(self):
+        _secret()
+        # on the class: Python looks a dunder method up on the type, so a patch on the instance would not apply
+        with mock.patch.object(type(destinations._LOCK), "__enter__", side_effect=AssertionError("a lock was taken")):
+            self.assertFalse(destinations.commit("T1", "S1", None))
 
     def test_the_pending_calls_are_bounded(self):
         _reset(max_resolves_per_hour=1000)          # the premise: more calls than the bound get their values
@@ -640,7 +691,7 @@ class SeenOnlyAfterTheCall(unittest.TestCase):
             _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id=f"T{i}")
         calls = json.loads(STORE.read_text())["pending_calls"]
         self.assertEqual(len(calls), destinations.MAX_PENDING)
-        self.assertNotIn("T0", calls, "the oldest goes")
+        self.assertNotIn("S1\x1f\x1fT0", calls, "the oldest goes")
 
     def test_forget_takes_a_pending_call_too(self):
         ref = _secret()
@@ -654,7 +705,7 @@ class SeenOnlyAfterTheCall(unittest.TestCase):
         STORE.write_text(json.dumps({"pending_calls": {"T1": {"keys": "K1", "found": [], "t": 1}},
                                      "secrets": {}}))
         self.assertEqual(destinations._load()["pending_calls"], {})
-        self.assertFalse(destinations.commit("T1"))
+        self.assertFalse(destinations.commit("T1", "S1", None))
 
     def test_a_client_without_a_call_id_is_noted_at_the_hand_out(self):
         ref = _secret()
@@ -675,13 +726,19 @@ class SeenOnlyAfterTheCall(unittest.TestCase):
     def test_a_commit_that_fails_never_changes_the_answer(self):
         ref = _secret()
         _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
-        plain = _post(tool_use_id="T9")
+
+        def post(call):          # an output that holds the value: the answer redacts it, so it is not empty
+            return hooks._post_tool_guarded({"hook_event_name": "PostToolUse", "tool_name": "Bash", "session_id": "S1",
+                                             "tool_input": {"command": "true"}, **CLAUDE, "tool_use_id": call,
+                                             "tool_response": {"stdout": "got dest-probe-value-1234567", "stderr": ""}})
+        plain = post("T9")
+        self.assertTrue(plain, "the premise: an answer with something in it")
         with mock.patch.object(destinations, "commit", side_effect=RuntimeError("disk")):
-            out = _post(tool_use_id="T1")
+            out = post("T1")
             failed = hooks.HANDLERS["post-tool-failure"]({"hook_event_name": "PostToolUseFailure", "tool_name": "Bash",
                                                           "session_id": "S1", "tool_use_id": "T1", **CLAUDE,
                                                           "tool_input": {}, "error": "exit 1"})
-        self.assertEqual(out, plain, "the PostToolUse answer is the one without a record")
+        self.assertEqual(_norm(out, ref), _norm(plain, ref), "the PostToolUse answer is the one without a record")
         self.assertEqual(failed, {}, "and the PostToolUseFailure answer too")
 
     def test_with_the_setting_off_nothing_waits(self):

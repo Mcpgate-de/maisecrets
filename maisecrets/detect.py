@@ -1085,7 +1085,12 @@ def _lower(text: str) -> str:
 
 # X-Amz-Credential=AKIA…/20261008/eu-central-1/s3/aws4_request: the access key id names the key, it is not the
 # secret half; a presigned URL carries it in the clear by design (corpus of 0.6.7: 142 such hits in tool output)
-_SIGV4_CREDENTIAL_RE = re.compile(r"(?:\bX-Amz-Credential|\bCredential)(?:=|%3[Dd])$")
+_SIGV4_CREDENTIAL_RE = re.compile(r"\b(?i:x-amz-credential|credential)(?:=|%3[Dd])$")
+# and the scope that must follow it: /date/region/service/aws4_request, plain or percent-encoded. A bare
+# Credential=AKIA… is no SigV4 scope and stays a hit (codex review of 0.6.8)
+_SIGV4_SCOPE_RE = re.compile(r"(?:/|%2[Ff])\d{8}(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff])aws4_request")
+# a reference or a date in the password place of a URL: redis://:%24%7BREDIS_PASSWORD%7D@…, redis://:2026-10-08@…
+_URL_PASSWORD_NOT_A_VALUE_RE = re.compile(r".*%(?:24|7[Bb]).*|\d{4}-\d{2}-\d{2}")
 
 
 def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
@@ -1168,8 +1173,11 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue   # a UUID, an elided value (sk-...), or a label that names a derived thing (secret_id)
             if rule.id in ("ds-basic-auth", "curl-auth-user") and _pass_equals_user(m.group(0), secret):
                 continue
-            if rule.id == "aws-access-token" and _SIGV4_CREDENTIAL_RE.search(text, max(0, start - 24), start):
+            if (rule.id == "aws-access-token" and _SIGV4_CREDENTIAL_RE.search(text, max(0, start - 24), start)
+                    and _SIGV4_SCOPE_RE.match(text, end)):
                 continue   # the key id in a SigV4 credential scope (a presigned URL, an Authorization header)
+            if rule.id == "url-password-no-user" and _URL_PASSWORD_NOT_A_VALUE_RE.fullmatch(secret):
+                continue
             if rule.id == "hashicorp-tf-password" and not _ds_value_ok(secret.strip("\"'")):
                 continue
             if rule.id == "phone" and not _phone_ok(text, start, secret):

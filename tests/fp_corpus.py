@@ -236,7 +236,7 @@ NO_HIT = [
     ('env example 9', 'A§PI_T§OKEN=todo'),
     ('env local dev', 'DATABASE_URL=postgres://app:app@localhost:5432/app'),
     ('env local dev 2', 'DATABASE_URL=postgres://postgres:postgres@localhost:5432/app'),
-    ('env local dev 3', 'REDIS_URL=redis://:p§assword@localhost:6379/0'),
+    ('env local dev 3', 'REDIS_URL=redis:/§/:p§assword@localhost:6379/0'),
     ('env local dev 4', 'DATABASE_URL=mysql://root:root@db:3306/app'),
     ('dockerfile', 'FROM python:3.12-slim\nENV DB_P§ASSWORD=""\nARG N§PM_T§OKEN\nRUN npm ci'),
     ('dockerfile 2', 'ARG GITHUB_T§OKEN\nRUN --mount=type=s§ecret,id=npmrc npm ci'),

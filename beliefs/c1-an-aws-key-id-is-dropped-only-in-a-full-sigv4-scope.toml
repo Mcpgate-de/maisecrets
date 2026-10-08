@@ -1,0 +1,10 @@
+# c1-an-aws-key-id-is-dropped-only-in-a-full-sigv4-scope: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-an-aws-key-id-is-dropped-only-in-a-full-sigv4-scope"
+control = "C1"
+statement = "An AWS access key id after X-Amz-Credential= or Credential= is no secret only when a full SigV4 scope (date, region, service, aws4_request) follows it; a bare Credential=AKIA... stays a hit."
+runner = ["tests/test_detect_rules.py::ScanRuleTests::test_the_key_id_in_a_sigv4_credential_scope_is_not_a_secret"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "                    and _SIGV4_SCOPE_RE.match(text, end)):"
+replace = "                    and True):"

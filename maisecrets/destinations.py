@@ -58,9 +58,16 @@ _FIELDS = {"kind": str, "label": str, "uses": int, "first": (int, float), "last"
 MAX_PER_SECRET = 50       # a call the model writes chooses a label; the record of one secret stays bounded
 # a call is noted as pending when the value is handed out (PreToolUse) and becomes `seen` only when the client
 # reports that it ran (PostToolUse or PostToolUseFailure): a call the person declines leaves no record (ChatGPT
-# review of 0.6.7). A pending call that never ran goes after this time; at most this many wait at once
-PENDING_SECONDS = 3600
+# review of 0.6.7). A pending call that never ran goes after this time; at most this many wait at once. The time
+# counts from the hand-out, before the permission dialog, so it is long: a dialog left open is still a call to come
+PENDING_SECONDS = 24 * 3600
 MAX_PENDING = 100
+
+
+def _call_key(call: str, session: str | None, agent: str | None) -> str:
+    """A tool_use_id is unique only in its session (Codex numbers them: call_1): the end of a call in another
+    session or agent must not commit this one (codex review of 0.6.8)."""
+    return "\x1f".join((session or "", agent or "", call))
 
 
 def _well_formed(d) -> bool:
@@ -88,7 +95,7 @@ def _clean(data: dict) -> dict:
 
 def _pending_well_formed(c) -> bool:
     return (isinstance(c, dict) and isinstance(c.get("keys"), list) and all(isinstance(k, str) for k in c["keys"])
-            and isinstance(c.get("found"), list)
+            and isinstance(c.get("found"), list) and len(c["found"]) <= MAX_PER_SECRET
             and all(isinstance(f, list) and len(f) == 2 and f[0] in ("network", "local") and isinstance(f[1], str)
                     for f in c["found"])
             and all(c.get(k) is None or isinstance(c.get(k), str) for k in ("session", "agent"))
@@ -231,8 +238,9 @@ def pend(call: str, keys: list[str], session: str | None, agent: str | None,
             data = _load_for_write()
             now = time.time()
             calls = {i: c for i, c in data["pending_calls"].items() if now - c["t"] < PENDING_SECONDS}
-            calls[call] = {"keys": list(dict.fromkeys(keys)), "session": session, "agent": agent,
-                           "found": [[k, v] for k, v in destinations], "t": now}
+            found = list(dict.fromkeys((k, v) for k, v in destinations))[:MAX_PER_SECRET]   # bounded, as a record
+            calls[_call_key(call, session, agent)] = {"keys": list(dict.fromkeys(keys)), "session": session,
+                                                      "agent": agent, "found": [[k, v] for k, v in found], "t": now}
             if len(calls) > MAX_PENDING:
                 calls = dict(sorted(calls.items(), key=lambda kv: kv[1]["t"])[-MAX_PENDING:])
             data["pending_calls"] = calls
@@ -241,17 +249,18 @@ def pend(call: str, keys: list[str], session: str | None, agent: str | None,
         pass
 
 
-def commit(call: str) -> bool:
+def commit(call: str, session: str | None, agent: str | None) -> bool:
     """The client reports that this call ran (also one that failed: the tool had the value). Its pending record
-    becomes `seen`. True when it is a pattern break. A call with no pending record changes nothing. Never raises."""
+    becomes `seen`, however late the report comes: it is the proof (Opus review of 0.6.8). True when it is a pattern
+    break. A call with no pending record changes nothing and takes no lock. Never raises."""
+    key = _call_key(call, session, agent)
     try:
+        if key not in _load()["pending_calls"]:
+            return False                 # most calls carry no value: no lock and no write for them
         with _LOCK:
             data = _load_for_write()
-            c = data["pending_calls"].pop(call, None)
+            c = data["pending_calls"].pop(key, None)
             if c is None:
-                return False
-            if time.time() - c["t"] >= PENDING_SECONDS:
-                _save(data)
                 return False
             pattern_break = _note_locked(data, c["keys"], c["session"], c["agent"],
                                          [(k, v) for k, v in c["found"]])

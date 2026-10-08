@@ -443,7 +443,7 @@ class ScanRuleTests(unittest.TestCase):
         self.assertEqual(kinds(f"rediss://:{pw}@cache.internal:6380"), [("url-password-no-user", pw)])
         # a reference, a default word, a short value and a port stay text, as for a URL with a user
         for text in ("redis://:${REDIS_PASSWORD}@redis:6379", "redis://:changeme@localhost", "redis://:pw@localhost",
-                     "see https://:443@x"):
+                     "see https://:443@x", "redis://:%24%7BREDIS_PASSWORD%7D@localhost", "redis://:2026-10-08@x"):
             with self.subTest(text=text):
                 self.assertEqual(kinds(text), [])
         self.assertEqual(kinds(f"postgres://app:{pw}@db.example.org/app"), [("ds-basic-auth", pw)],
@@ -454,11 +454,14 @@ class ScanRuleTests(unittest.TestCase):
         scope = f"{kid}%2F20261008%2Feu-central-1%2Fs3%2Faws4_request"
         for text in (f"https://b.s3.amazonaws.com/k?X-Amz-Credential={scope}&X-Amz-Signature=" + "9f3c" * 16,
                      f"https://b.s3.amazonaws.com/k?x-amz-algorithm=AWS4&X-Amz-Credential%3D{scope}",
+                     f"https://b.s3.amazonaws.com/k?x-amz-credential={scope}&x-amz-signature=" + "9f3c" * 16,
                      f"Authorization: AWS4-HMAC-SHA256 Credential={kid}/20261008/eu-central-1/s3/aws4_request"):
             with self.subTest(text=text[:40]):
                 self.assertEqual(kinds(text), [])
         # the same id anywhere else stays a hit: it shows where the secret half is (and the premise of the cases)
-        for text in (f"aws_access_key_id = {kid}", f"export AWS_ACCESS_KEY_ID={kid}", f"id {kid} in a note"):
+        # a bare Credential= with no date/region/service/aws4_request scope is no SigV4 scope (codex review of 0.6.8)
+        for text in (f"aws_access_key_id = {kid}", f"export AWS_ACCESS_KEY_ID={kid}", f"id {kid} in a note",
+                     f"Credential={kid}", f"Credential={kid} and more", f"X-Amz-Credential={kid}&x=1"):
             with self.subTest(text=text[:40]):
                 self.assertEqual(kinds(text), [("aws-access-token", kid)])
 

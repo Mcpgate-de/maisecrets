@@ -2102,7 +2102,7 @@ def _commit_destinations(payload: dict) -> None:
         if not (isinstance(call, str) and call) or load_config().get("secret_destinations", "observe") != "observe":
             return
         from . import destinations
-        destinations.commit(call)
+        destinations.commit(call, payload.get("session_id"), payload.get("agent_id"))
     except Exception as exc:  # noqa: BLE001 - a record that fails never changes what the tool's answer does
         _debug(f"destinations commit: {type(exc).__name__}")
 
@@ -3626,7 +3626,21 @@ def post_tool_failure(payload: dict) -> dict:
 
 def _post_tool_failure_observed(payload: dict) -> dict:
     _commit_destinations(payload)        # a failed call had the value: its destination counts
-    return post_tool_failure(payload)
+    result = post_tool_failure(payload)
+    try:
+        # its pattern break gets its hint here, not on a later call (codex review of 0.6.8). Only this hint: the
+        # ssh_consent hint is for a write that ran (C22)
+        hint = _destination_hint(payload)
+    except Exception as exc:  # noqa: BLE001 - a hint that fails changes nothing
+        _debug(f"post-tool-failure hint: {type(exc).__name__}")
+        hint = None
+    if not hint:
+        return result
+    result = dict(result)
+    hso = dict(result.get("hookSpecificOutput") or {"hookEventName": "PostToolUseFailure"})
+    hso["additionalContext"] = f"{hso['additionalContext']}\n\n{hint}" if hso.get("additionalContext") else hint
+    result["hookSpecificOutput"] = hso
+    return result
 
 
 HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post_tool_guarded,

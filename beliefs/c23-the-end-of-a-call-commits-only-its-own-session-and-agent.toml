@@ -1,0 +1,10 @@
+# c23-the-end-of-a-call-commits-only-its-own-session-and-agent: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c23-the-end-of-a-call-commits-only-its-own-session-and-agent"
+control = "C23"
+statement = "A tool_use_id is unique only in its session: the end of a call with the same id in another session or agent does not make a declined call seen."
+runner = ["tests/test_destinations.py::SeenOnlyAfterTheCall::test_the_same_call_id_in_another_session_or_agent_commits_nothing"]
+
+[proof]
+file = "maisecrets/destinations.py"
+find = "    return \"\\x1f\".join((session or \"\", agent or \"\", call))"
+replace = "    return call"

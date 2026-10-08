@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 30 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 96 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 99 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -513,10 +513,13 @@ SECRET_c7      SECRET  github_pat            3d   14        21h  -
       a file in ~/proj/     2–9×   last 3 days ago
 ```
 
-This is a record, not a permission, and it stops nothing. A call is listed
-only after it ran: the value is handed out before the client asks you, so the
-call waits until the client reports that it ran (also when it failed). A call
-you decline in the client's dialog is not listed. `new` marks a destination first seen in the
+This is a record, not a permission, and it stops nothing. The value is handed
+out before the client asks you, so a call waits until the client reports that
+it ran (also when it failed), and only then is it listed. A call you decline in
+Claude Code's dialog is not listed (measured with the real client). Codex sends
+the same report for a command that ran or failed; a call it declines by its
+approval policy never reaches the hooks. A client that sends no call id is
+listed at the hand-out. `new` marks a destination first seen in the
 last 24 hours. When a secret that you used at one destination
 (3 times on one day) goes to a new one for the first time, the AI tells you
 once, in a sentence; this note does not come again. maisecrets does not
