@@ -187,6 +187,9 @@ class ClassifierMatrixTests(unittest.TestCase):
             # round 4 (Opus): -v takes an array name, and zsh runs the $(…) in its subscript
             "printf -v 'a[$(ssh web1 reboot)]' x", "test -v 'a[$(ssh web1 reboot)]'", "[ -v 'a[$(ssh web1 reboot)]' ]",
             "printf '-v' 'a[$(ssh web1 reboot)]' x",
+            # round 5 (codex): the shell joins adjacent quotes, so these are -v too
+            "printf -''v 'a[$(ssh web1 reboot)]' x", "printf -v'' 'a[$(ssh web1 reboot)]' x",
+            "test -''v 'a[$(ssh web1 reboot)]'", "[ '-'v 'a[$(ssh web1 reboot)]' ]",
             "bash -c \"ssh web1 reboot\"", "sh -c 'ssh web1 reboot'", "eval ssh web1 reboot",
             "sshpass -p x ssh web1 reboot", "setsid ssh web1 reboot", "flock /tmp/l ssh web1 reboot",
             "systemd-run ssh web1 reboot", "screen -dm ssh web1 reboot", "tmux new -d 'ssh web1 reboot'",
@@ -254,7 +257,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 290, "a row was added or lost: update the count")
+        self.assertEqual(counted, 294, "a row was added or lost: update the count")
 
     def test_a_long_command_is_answered_in_time(self):
         # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)
