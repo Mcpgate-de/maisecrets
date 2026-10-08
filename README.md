@@ -1043,6 +1043,10 @@ Four sources, one scanner (`maisecrets/detect.py`):
 - A secret shape with a fixed length (gitleaks: `glpat-[\w-]{20}`) is
   extended to the end of the token characters, so a longer token does not
   leave its tail in the clear (found with a 24-char token, 2026-09-26).
+  The extension stops at a line break: a token that a line break splits
+  (a hard-wrapped terminal line) keeps the part after the break in the clear.
+  Joining the next line was measured on five months of session logs and left
+  out: nearly every candidate was the next `.env` line, not the rest of a key.
 
 IBAN, credit card and IP come from Presidio's regexes with our validators
 (mod-97, Luhn, public-range check). A card number without a word like
