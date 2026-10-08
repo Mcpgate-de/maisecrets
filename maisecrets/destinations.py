@@ -180,8 +180,9 @@ def destinations_of(tool: str, tool_input: dict, ssh_hosts: list[str] | None = N
             ctxs = _shell_contexts(command)
             command = "".join(" " if cx == "comment" and comment_is_sure(command, ctxs, k) else ch
                               for k, (ch, cx) in enumerate(zip(command, ctxs)))
-        found = [("network", h) for h in hosts_in(command)]
-        found += [("network", "ssh " + h) for h in sorted(set(ssh_hosts or []))]
+        # the ssh hosts first: a bounded record keeps the first entries, and many URLs must not push them out (Opus)
+        found = [("network", "ssh " + h) for h in sorted(set(ssh_hosts or []))]
+        found += [("network", h) for h in hosts_in(command)]
         return [(k, clean_label(v)) for k, v in found] or [("local", "a command on this computer")]
     if tool.startswith("mcp__"):
         parts = tool.split("__")
@@ -238,7 +239,7 @@ def pend(call: str, keys: list[str], session: str | None, agent: str | None,
             data = _load_for_write()
             now = time.time()
             calls = {i: c for i, c in data["pending_calls"].items() if now - c["t"] < PENDING_SECONDS}
-            found = list(dict.fromkeys((k, v) for k, v in destinations))[:MAX_PER_SECRET]   # bounded, as a record
+            found = list(destinations)[:MAX_PER_SECRET]     # bounded, as a record (destinations_of names a host once)
             calls[_call_key(call, session, agent)] = {"keys": list(dict.fromkeys(keys)), "session": session,
                                                       "agent": agent, "found": [[k, v] for k, v in found], "t": now}
             if len(calls) > MAX_PENDING:

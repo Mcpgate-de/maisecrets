@@ -1088,9 +1088,12 @@ def _lower(text: str) -> str:
 _SIGV4_CREDENTIAL_RE = re.compile(r"\b(?i:x-amz-credential|credential)(?:=|%3[Dd])$")
 # and the scope that must follow it: /date/region/service/aws4_request, plain or percent-encoded. A bare
 # Credential=AKIA… is no SigV4 scope and stays a hit (codex review of 0.6.8)
-_SIGV4_SCOPE_RE = re.compile(r"(?:/|%2[Ff])\d{8}(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff])aws4_request")
-# a reference or a date in the password place of a URL: redis://:%24%7BREDIS_PASSWORD%7D@…, redis://:2026-10-08@…
-_URL_PASSWORD_NOT_A_VALUE_RE = re.compile(r".*%(?:24|7[Bb]).*|\d{4}-\d{2}-\d{2}")
+_SIGV4_SCOPE_RE = re.compile(r"(?:/|%2[Ff])\d{8}(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff])aws4_request"
+                             r"(?![A-Za-z0-9_-])")      # the whole last component: not aws4_requestX (codex)
+# a whole reference or a whole date in the password place of a URL: redis://:%24%7BREDIS_PASSWORD%7D@…,
+# redis://:2026-10-08@…; an encoded $ or { inside a real password stays a value (codex, Opus review of 0.6.8)
+_URL_PASSWORD_NOT_A_VALUE_RE = re.compile(r"%24(?:%7[Bb])?[A-Za-z_][A-Za-z0-9_]*(?:%7[Dd])?"
+                                          r"|\d{4}-\d{2}-\d{2}(?:T[0-9:.]+Z?)?")
 
 
 def scan(text: str, enabled: set[str] | None = None) -> list[Match]:

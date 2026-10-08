@@ -635,7 +635,7 @@ class SeenOnlyAfterTheCall(unittest.TestCase):
         # event of the same call is the proof however late it comes
         ref = _secret()
         _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
-        self._age(destinations.PENDING_SECONDS - 60)
+        self._age(destinations.PENDING_SECONDS + 3600)     # past the cleanup age: only pend() sweeps, not commit
         _post(tool_use_id="T1")
         self.assertEqual(set(_seen(ref)), {"network:api.example.com"})
 
@@ -676,7 +676,30 @@ class SeenOnlyAfterTheCall(unittest.TestCase):
         hosts = " ".join(f"https://h{i}.example.com/" for i in range(destinations.MAX_PER_SECRET + 10))
         _pre("Bash", {"command": _curl(ref, "api.example.com") + " " + hosts + " " + hosts}, tool_use_id="T1")
         (c,) = json.loads(STORE.read_text())["pending_calls"].values()
-        self.assertEqual(len(c["found"]), destinations.MAX_PER_SECRET, "no duplicate, and no more than a record holds")
+        self.assertEqual(len(c["found"]), destinations.MAX_PER_SECRET, "no more than a record holds")
+        _pre("Bash", {"command": _curl(ref, "api.example.com") + " https://h1.example.com/" * 3}, tool_use_id="T2")
+        calls = json.loads(STORE.read_text())["pending_calls"]
+        self.assertEqual(len(calls["S1\x1f\x1fT2"]["found"]), 2, "a host the command names twice counts once")
+
+    def test_an_ssh_hint_and_a_destination_hint_due_together_both_come(self):
+        # codex review of 0.6.8: with `or`, the destination hint of this call waited for an unrelated later one
+        with mock.patch.object(hooks, "_ssh_hint", return_value="SSH-HINT"), \
+                mock.patch.object(hooks, "_destination_hint", return_value="DEST-HINT"):
+            out = hooks._with_hint({"session_id": "S1", **CLAUDE}, {})
+        text = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("SSH-HINT", text)
+        self.assertIn("DEST-HINT", text)
+
+    def test_the_ssh_host_stays_when_many_urls_fill_the_bound(self):
+        found = destinations.destinations_of(
+            "Bash", {"command": " ".join(f"https://h{i}.example.com/" for i in range(80))}, ["web1"])
+        self.assertEqual(found[0], ("network", "ssh web1"))
+
+    def test_a_pending_call_with_more_destinations_than_the_bound_is_dropped(self):
+        big = [["network", f"h{i}.example.com"] for i in range(destinations.MAX_PER_SECRET + 1)]
+        STORE.write_text(json.dumps({"secrets": {}, "pending_calls": {"S1\x1f\x1fT1": {
+            "keys": ["K1"], "session": "S1", "agent": None, "found": big, "t": time.time()}}}))
+        self.assertEqual(destinations._load()["pending_calls"], {})
 
     def test_the_end_of_a_call_with_no_value_takes_no_lock(self):
         _secret()

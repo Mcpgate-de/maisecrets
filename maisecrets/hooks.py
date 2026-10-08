@@ -3533,7 +3533,8 @@ def _ssh_hint(payload: dict) -> str | None:
 
 def _with_hint(payload: dict, result: dict) -> dict:
     """Add a hint to the answer of a PostToolUse without changing what the answer does."""
-    hint = _ssh_hint(payload) or _destination_hint(payload)
+    # both, when both are due: with `or` the destination hint of this call waited for an unrelated later one (codex)
+    hint = "\n\n".join(h for h in (_ssh_hint(payload), _destination_hint(payload)) if h)
     if not hint:
         return result
     result = dict(result)

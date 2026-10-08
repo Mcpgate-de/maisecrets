@@ -516,7 +516,8 @@ SECRET_c7      SECRET  github_pat            3d   14        21h  -
 This is a record, not a permission, and it stops nothing. The value is handed
 out before the client asks you, so a call waits until the client reports that
 it ran (also when it failed), and only then is it listed. A call you decline in
-Claude Code's dialog is not listed (measured with the real client). Codex sends
+Claude Code's dialog is not listed (measured with the real client, whose
+headless mode refuses the question). Codex sends
 the same report for a command that ran or failed; a call it declines by its
 approval policy never reaches the hooks. A client that sends no call id is
 listed at the hand-out. `new` marks a destination first seen in the

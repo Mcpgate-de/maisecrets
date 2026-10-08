@@ -441,9 +441,14 @@ class ScanRuleTests(unittest.TestCase):
         pw = rnd(14, AN)
         self.assertEqual(kinds(f"REDIS_URL=redis://:{pw}@cache.example.org:6379/0"), [("url-password-no-user", pw)])
         self.assertEqual(kinds(f"rediss://:{pw}@cache.internal:6380"), [("url-password-no-user", pw)])
-        # a reference, a default word, a short value and a port stay text, as for a URL with a user
+        # an encoded $ or { inside a real password stays a value (codex, Opus review of 0.6.8)
+        for enc in (pw[:4] + "%24" + pw[4:], pw[:4] + "%7B" + pw[4:]):
+            with self.subTest(enc=enc):
+                self.assertEqual(kinds(f"redis://:{enc}@cache:6379"), [("url-password-no-user", enc)])
+        # a reference, a default word, a short value and a port stay text
         for text in ("redis://:${REDIS_PASSWORD}@redis:6379", "redis://:changeme@localhost", "redis://:pw@localhost",
-                     "see https://:443@x", "redis://:%24%7BREDIS_PASSWORD%7D@localhost", "redis://:2026-10-08@x"):
+                     "see https://:443@x", "redis://:%24%7BREDIS_PASSWORD%7D@localhost", "redis://:2026-10-08@x",
+                     "redis://:%24REDIS_PASSWORD@localhost", "redis://:2026-10-08T10:00Z@x"):
             with self.subTest(text=text):
                 self.assertEqual(kinds(text), [])
         self.assertEqual(kinds(f"postgres://app:{pw}@db.example.org/app"), [("ds-basic-auth", pw)],
@@ -461,7 +466,9 @@ class ScanRuleTests(unittest.TestCase):
         # the same id anywhere else stays a hit: it shows where the secret half is (and the premise of the cases)
         # a bare Credential= with no date/region/service/aws4_request scope is no SigV4 scope (codex review of 0.6.8)
         for text in (f"aws_access_key_id = {kid}", f"export AWS_ACCESS_KEY_ID={kid}", f"id {kid} in a note",
-                     f"Credential={kid}", f"Credential={kid} and more", f"X-Amz-Credential={kid}&x=1"):
+                     f"Credential={kid}", f"Credential={kid} and more", f"X-Amz-Credential={kid}&x=1",
+                     f"Credential={kid}/20261008/eu-central-1/s3/aws4_requestX",
+                     f"Credential={kid}/20261008/eu-central-1/s3/aws4_request_extra"):
             with self.subTest(text=text[:40]):
                 self.assertEqual(kinds(text), [("aws-access-token", kid)])
 
