@@ -135,9 +135,11 @@ class Recording(unittest.TestCase):
     def test_a_busy_record_costs_a_call_well_under_a_second(self):
         # codex review of 0.6.7: each key waited for the 6 s vault lock, two keys 12 s, past the hook's watchdog
         import subprocess
-        holder = subprocess.Popen([sys.executable, "-c", (
-            "import fcntl, os, sys, time; fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600); "
-            "fcntl.flock(fd, fcntl.LOCK_EX); print('held', flush=True); time.sleep(8)"),
+        holder = subprocess.Popen([sys.executable, "-c", (       # the same lock call as vault._Lock, per platform
+            "import os, sys, time; fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)\n"
+            "if os.name == 'nt':\n    import msvcrt; msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)\n"
+            "else:\n    import fcntl; fcntl.flock(fd, fcntl.LOCK_EX)\n"
+            "print('held', flush=True); time.sleep(8)"),
             str(Path(HOME, ".destinations.lock"))], stdout=subprocess.PIPE, text=True)
         try:
             self.assertEqual(holder.stdout.readline().strip(), "held")
