@@ -42,10 +42,12 @@ Connections start only from a command you run:
   sandbox proxy to the host you named, with the proxy login Claude Code sets for that
   sandbox. Before an ssh command that carries a value, a check tries a few direct
   connections that the sandbox must refuse; it sends no data.
-- `/maisecrets:report` prints the issue text and a prefilled link to the configured
-  `report_url`; it carries the plugin version, your platform and the rule name of a
-  detection, never a value. Only with `--create` does it file the issue, through the GitHub
-  CLI (`gh`) and its own login. Set `report_url` to your own tracker or to `null`.
+- `/maisecrets:report` prints the issue text and, on a computer with a desktop, opens your
+  browser on the prefilled issue page at the configured `report_url` (elsewhere it prints
+  the link). The page address carries the issue text, the plugin version, your platform and
+  the rule name of a detection, never a value. Only with `--create` does it file the issue
+  itself, through the GitHub CLI (`gh`) and its own login. Set `report_url` to your own
+  tracker or to `null`.
 - The Windows Credential Locker may roam through a Microsoft account on a machine that is
   not domain-joined. Choose the `encrypted-file` store there if that matters.
 
