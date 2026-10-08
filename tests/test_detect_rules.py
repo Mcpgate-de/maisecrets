@@ -441,8 +441,10 @@ class ScanRuleTests(unittest.TestCase):
         pw = rnd(14, AN)
         self.assertEqual(kinds(f"REDIS_URL=redis://:{pw}@cache.example.org:6379/0"), [("url-password-no-user", pw)])
         self.assertEqual(kinds(f"rediss://:{pw}@cache.internal:6380"), [("url-password-no-user", pw)])
-        # an encoded $ or { inside a real password stays a value (codex, Opus review of 0.6.8)
-        for enc in (pw[:4] + "%24" + pw[4:], pw[:4] + "%7B" + pw[4:]):
+        # an encoded $ or { inside a real password stays a value, and so does a half reference or an impossible
+        # date (codex, Opus review of 0.6.8)
+        for enc in (pw[:4] + "%24" + pw[4:], pw[:4] + "%7B" + pw[4:], "%24%7BREDIS_PASS", "%24REDIS_PASS%7D",
+                    "2026-99-08", "2026-10-08T99"):
             with self.subTest(enc=enc):
                 self.assertEqual(kinds(f"redis://:{enc}@cache:6379"), [("url-password-no-user", enc)])
         # a reference, a default word, a short value and a port stay text
@@ -468,7 +470,9 @@ class ScanRuleTests(unittest.TestCase):
         for text in (f"aws_access_key_id = {kid}", f"export AWS_ACCESS_KEY_ID={kid}", f"id {kid} in a note",
                      f"Credential={kid}", f"Credential={kid} and more", f"X-Amz-Credential={kid}&x=1",
                      f"Credential={kid}/20261008/eu-central-1/s3/aws4_requestX",
-                     f"Credential={kid}/20261008/eu-central-1/s3/aws4_request_extra"):
+                     f"Credential={kid}/20261008/eu-central-1/s3/aws4_request_extra",
+                     *(f"Credential={kid}/20261008/eu-central-1/s3/aws4_request{tail}"
+                       for tail in (".x", ":x", "%41", "/x", "%2Fx"))):
             with self.subTest(text=text[:40]):
                 self.assertEqual(kinds(text), [("aws-access-token", kid)])
 
