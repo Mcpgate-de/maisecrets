@@ -21,6 +21,7 @@
  ],
  "tool_response": [
   "agentId",
+  "canContinueAgent",
   "canReadOutputFile",
   "description",
   "isAsync",
