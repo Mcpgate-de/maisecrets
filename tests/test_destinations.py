@@ -133,8 +133,14 @@ class Recording(unittest.TestCase):
         self.assertEqual(failed, observed, "a record that fails leaves the answer as it is")
 
     def test_a_busy_record_costs_a_call_well_under_a_second(self):
-        # codex review of 0.6.7: each key waited for the 6 s vault lock, two keys 12 s, past the hook's watchdog
+        # codex review of 0.6.7: each key waited for the 6 s vault lock, two keys 12 s, past the hook's watchdog.
+        # Measured against the same call with a free lock: a slow runner makes the call itself slow (1.4 s on a
+        # GitHub macOS runner), and the claim is about what the busy lock adds
         import subprocess
+        free = [_secret(f"dest-free-value-{i}xxxxxxxxx{i}") for i in range(8)]
+        started = time.monotonic()
+        _pre("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in free)})
+        baseline = time.monotonic() - started
         holder = subprocess.Popen([sys.executable, "-c", (       # the same lock call as vault._Lock, per platform
             "import os, sys, time; fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)\n"
             "if os.name == 'nt':\n    import msvcrt; msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)\n"
@@ -151,7 +157,8 @@ class Recording(unittest.TestCase):
             holder.kill()
             holder.wait()
         self.assertIn("updatedInput", out["hookSpecificOutput"], "the call still gets its values")
-        self.assertLess(took, 1.0, f"observing a busy record took {took:.1f}s for 8 keys")
+        self.assertLess(took - baseline, 1.0,
+                        f"a busy record added {took - baseline:.1f}s for 8 keys ({took:.1f}s against {baseline:.1f}s)")
 
     def test_a_damaged_record_is_kept_aside_and_never_breaks_the_list(self):
         from maisecrets import cli
