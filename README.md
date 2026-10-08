@@ -892,9 +892,9 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   the shell evaluates. Anywhere else, also unquoted
   (`grep ssh README.md`) or in a heredoc, the hook cannot tell text from a call,
   and it asks. A `#` comment is text only when no bracket, brace, parenthesis,
-  backslash, backtick or carriage return comes before it in the command:
-  inside `(( ))`, `${ }` or `[[ ]]` the shell reads no comment and runs what
-  follows. The same holds for a heredoc.
+  backslash or backtick comes before it in the command, and the command has no
+  carriage return: inside `(( ))`, `${ }` or `[[ ]]` the shell reads no comment
+  and runs what follows. The same holds for a heredoc.
 - **A short deny list is always refused:** `mkfs` or `wipefs` on a device,
   `dd` to a device, `rm -rf /`, a fork bomb, anywhere in a command that names
   an ssh-family call (quotes removed; as a command word, not as a file name;
