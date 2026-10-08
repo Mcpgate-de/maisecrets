@@ -64,6 +64,10 @@ for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*" "%ProgramFiles%\Python3
   )
 )
 >>"%HERE%last-start.txt" echo no Python 3.9 or newer found
+if "%~1"=="post-tool-failure" (
+  echo {"systemMessage": "maisecrets needs Python 3.9 or newer. Install it for all users, as an administrator: winget install --id Python.Python.3.12 --exact --scope machine. Then restart the client."}
+  exit /b 0
+)
 if "%~1"=="post-tool" (
   rem both shapes: updatedToolOutput for Claude Code, decision/reason for Codex
   echo {"decision":"block","reason":"[maisecrets needs Python 3.9 or newer. Install it for all users, as an administrator: winget install --id Python.Python.3.12 --exact --scope machine - a Python for one user only cannot run in the Codex sandbox. Then restart the client. Tool output withheld; the tool ran and finished, do not run it again.]","hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"[maisecrets needs Python 3.9 or newer. Install it for all users, as an administrator: winget install --id Python.Python.3.12 --exact --scope machine - a Python for one user only cannot run in the Codex sandbox. Then restart the client. Tool output withheld; the tool ran and finished, do not run it again.]"}}

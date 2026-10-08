@@ -30,7 +30,7 @@ EVENTS = {"UserPromptSubmit": "user-prompt", "PreToolUse": "pre-tool", "PostTool
 MESSAGE = ("maisecrets did not run for this call: a plugin update replaced its folder, or it started too slowly.\n\n"
            "    claude --resume {session}\n\n"
            "Exit this session and run the command above in the directory where you started it.{clip} "
-           "/reload-plugins may help first; after a synced update it cannot (anthropics/claude-code#97847). "
+           "/reload-plugins does not help after an update of a synced plugin (anthropics/claude-code#97847). "
            "If maisecrets is off on purpose, switch the guard off in a terminal: python3 {script} --off")
 # no sign of an update: a busy computer delayed maisecrets, and a second try works. The refusal said "exit this
 # session" and an autonomous run stopped for a person, while the next call went through (measured 2026-09-29,
@@ -39,7 +39,7 @@ RETRY = ("maisecrets did not answer in time for this call (the computer may be b
          "Run it again. If every call fails this way, a plugin update replaced the maisecrets folder:\n\n"
          "    claude --resume {session}\n\n"
          "Exit this session and run the command above in the directory where you started it.{clip} "
-         "/reload-plugins may help first; after a synced update it cannot (anthropics/claude-code#97847). "
+         "/reload-plugins does not help after an update of a synced plugin (anthropics/claude-code#97847). "
          "If maisecrets is off on purpose, switch the guard off in a terminal: python3 {script} --off")
 # maisecrets started for this call: its folder is there, so no restart helps
 SLOW = ("maisecrets started for this call but did not answer in time (the computer may be busy), so the call did "
@@ -68,24 +68,64 @@ def _load(path: str) -> dict:
         return {}
 
 
-def _switched_off(cwd: str) -> bool:
-    """maisecrets disabled in any settings Claude Code reads: user, managed, or a project's own."""
-    files = [os.path.join(_claude_dir(), "settings.json"), MANAGED.get(sys.platform, "")]
-    # the project's own settings: from cwd up to the project root (a .git) or the home directory
+def _settings_files(cwd: str) -> list:
+    """The settings files that set enabledPlugins, lowest precedence first: user; each project .claude folder from
+    the outermost ancestor (the repository root, or the home directory) to the working directory; the repository
+    root's local settings again, which win over a local file an older Claude Code left in a subdirectory (codex
+    review, 2026-10-07); managed. What the guard cannot read: --settings on the command line and managed
+    settings that come from a server or MDM (docs/THREAT-MODEL.md C13)."""
+    files = [os.path.join(_claude_dir(), "settings.json")]
     d = os.path.abspath(cwd) if cwd else ""
-    stop = os.path.expanduser("~")
+    chain, root, stop = [], "", os.path.expanduser("~")
     while d:
-        files += [os.path.join(d, ".claude", "settings.json"), os.path.join(d, ".claude", "settings.local.json")]
+        chain.append(d)
         parent = os.path.dirname(d)
         # a submodule has a .git file, not a folder: its superproject's settings count too
-        if parent == d or d == stop or os.path.isdir(os.path.join(d, ".git")):
+        if os.path.isdir(os.path.join(d, ".git")):
+            root = d
+            break
+        if parent == d or d == stop:
             break
         d = parent
-    for f in files:
+    for d in reversed(chain):
+        files += [os.path.join(d, ".claude", "settings.json"), os.path.join(d, ".claude", "settings.local.json")]
+    if root:
+        files.append(os.path.join(root, ".claude", "settings.local.json"))
+    files.append(MANAGED.get(sys.platform, ""))
+    return files
+
+
+def _plugin_ids(claude: str, account: str) -> list:
+    """The exact plugin ids of the maisecrets copies Claude Code can load: the synced one of this account, and the
+    installed ones whose plugin is maisecrets (by its key or by the name in its manifest; a marketplace may list it
+    under another name). A key of a copy that is not installed is no copy (codex review, 2026-10-07)."""
+    ids = ["maisecrets@synced"] if account and _synced_copies(claude, account) else []
+    installed = _load(os.path.join(claude, "plugins", "installed_plugins.json")).get("plugins") or {}
+    for key, entries in installed.items() if isinstance(installed, dict) else []:
+        named = key.split("@", 1)[0] == "maisecrets"
+        for e in entries if isinstance(entries, list) else []:
+            path = e.get("installPath") if isinstance(e, dict) else None
+            if isinstance(path, str) and _load(os.path.join(path, ".claude-plugin", "plugin.json")).get("name") \
+                    == "maisecrets":
+                named = True
+        if named and key not in ids:
+            ids.append(key)
+    return ids
+
+
+def _switched_off(cwd: str, ids: list) -> bool:
+    """maisecrets switched off for every copy that could run here. Each id takes the value of the settings that
+    win; an id with no entry is on, as Claude Code enables a plugin by default. With no known copy, the
+    maisecrets@ keys the settings name stand in. One copy off beside another on keeps the guard watching: the
+    directory copy off and the synced copy on kept it silent while the synced copy did not load (field report,
+    2026-10-07)."""
+    effective: dict = {}
+    for f in _settings_files(cwd):
         plugins = _load(f).get("enabledPlugins") if f else None
-        if isinstance(plugins, dict) and any("maisecrets" in k and v is False for k, v in plugins.items()):
-            return True
-    return False
+        if isinstance(plugins, dict):
+            effective.update({k: v for k, v in plugins.items() if isinstance(v, bool)})
+    ids = ids or [k for k in effective if k.split("@", 1)[0] == "maisecrets"]
+    return bool(ids) and all(effective.get(i, True) is False for i in ids)
 
 
 def _account() -> str:
@@ -147,12 +187,12 @@ def expected(cwd: str = "") -> bool:
     mode = cfg.get("expect")
     if mode == "off":
         return False
-    if _switched_off(cwd):
+    claude = _claude_dir()
+    account = _account()
+    if _switched_off(cwd, _plugin_ids(claude, account)):
         return False
     if mode == "always":
         return True
-    claude = _claude_dir()
-    account = _account()
     # the synced copy that registered the guard wrote the account it ran as. For that account maisecrets is
     # meant to run while its synced folder is there, and in the minutes after an update moved it to the
     # trash (a folder that is gone is the case the guard is for). A folder gone for longer means the

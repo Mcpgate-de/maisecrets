@@ -49,6 +49,18 @@
           }
         ]
       }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" post-tool-failure",
+            "timeout": 20,
+            "commandWindows": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd\" post-tool-failure"
+          }
+        ]
+      }
     ]
   }
 }

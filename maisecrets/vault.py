@@ -56,9 +56,19 @@ DEFAULT_CONFIG = {
     "shortcut": True,                # the first SessionStart names /maisecrets:shortcut once; it installs nothing
     "ssh_via_sandbox": True,         # a value may go to ssh on stdin inside the Claude Code sandbox
     "ssh_approval": "per-command",   # under rehydration "confirm": "per-session" is one confirm per value and session
+    "ssh_consent": False,            # every ssh-family command: a read runs, a write asks once per host (#8)
+    "ssh_host_groups": {},           # {"group": ["host", …]}: one ssh consent covers the whole group
+    "ssh_autonomous_hosts": [],      # hosts (or group names) where the AI writes over ssh without asking, always
+    "secret_destinations": "observe",  # observe: note where each stored secret is sent (destinations.py); off
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
     "pass_agent_reports": True,      # the report of a subagent of this session is model text: not blocked (hooks.py)
+    "tips": True,                    # a tip at session start, and a hint when a case for a setting first comes up
+    # the limiter (C7): a brake for a session that sends its own values out in bulk; the session rule (C4) keeps the
+    # rest of the store closed anyway. Replayed over five months of sessions, the busiest hour needed 67 values and
+    # 118 resolves; 25 and 60 would have stopped 3 of 178 sessions that used values (0.6.9)
+    "max_keys_per_session": 200,     # distinct values one session resolves in an hour
+    "max_resolves_per_hour": 1000,   # resolves in an hour, all sessions
     "keep_purged_days": 30,          # metadata of an expired entry is deleted after this many days
     "audit_max_lines": 2000,
 }
@@ -78,6 +88,7 @@ _CONFIG_TYPES = {
     "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
+    "ssh_consent": bool, "ssh_host_groups": dict, "ssh_autonomous_hosts": list, "secret_destinations": str,
     "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool,
 }
 
@@ -187,8 +198,12 @@ class _Lock:
         self.depth += 1
         if self.depth > 1:
             return self
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        except BaseException:
+            self.depth -= 1                  # no lock was taken: a later enter must try again (codex review)
+            raise
         deadline = time.time() + self.LOCK_DEADLINE
         try:
             while True:
@@ -233,10 +248,17 @@ class ConfigError(RuntimeError):
     """A config value of the wrong type; the message names the key, never a value."""
 
 
+_CONFIG_CHOICES = {"secret_destinations": ("observe", "off")}
+
+
 def _check_types(cfg: dict, source: str) -> None:
     for key, want in _CONFIG_TYPES.items():
         if key in cfg and (not isinstance(cfg[key], want) or (want is int and isinstance(cfg[key], bool))):
             raise ConfigError(f"{source}: {key} has the wrong type")
+    for key, choices in _CONFIG_CHOICES.items():
+        # "obesrve" read as "not observe" and silently stopped the record (codex review of 0.6.7)
+        if key in cfg and cfg[key] not in choices:
+            raise ConfigError(f"{source}: {key} must be one of {', '.join(choices)}")
     ttl = cfg.get("ttl_seconds")
     if isinstance(ttl, dict) and not all(isinstance(v, int) for v in ttl.values()):
         raise ConfigError(f"{source}: ttl_seconds values must be integers")
@@ -253,7 +275,7 @@ def _old_region_key(layer: dict) -> dict:
 
 
 _STRICTNESS = {"automatic": 0, "confirm": 1, "block": 2}
-_SAFETY_KEYS = ("rehydration", "resolve_in_files", "ssh_via_sandbox")
+_SAFETY_KEYS = ("rehydration", "resolve_in_files", "ssh_via_sandbox", "ssh_consent")
 
 
 def _looks_misspelled(key: str) -> bool:
@@ -279,6 +301,8 @@ def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
     for key in ("resolve_in_files", "ssh_via_sandbox"):
         if parsed.get(key) is False:
             cfg[key] = False
+    if parsed.get("ssh_consent") is True:
+        cfg["ssh_consent"] = True
 
 
 def load_config() -> dict:
@@ -319,6 +343,8 @@ def load_config() -> dict:
         cfg["config_warning"] = f"{exc}; the file was ignored"
         if isinstance(user, dict):
             _keep_the_stricter(cfg, user)
+            # the file still says what the person decided: no hint asks about a key they wrote (settings.py)
+            cfg["user_keys_ignored"] = sorted(k for k in user if k in _CONFIG_TYPES)
         else:
             # JSON that is no object cannot be read either (it may wrap a block): the same as invalid JSON
             cfg["rehydration"] = "block"
@@ -344,6 +370,8 @@ def load_config() -> dict:
             cfg["rehydration_fallback"] = True
     user = _old_region_key(user)
     cfg.update(user)
+    # a key the user wrote is a decision, a missing one is not (maisecrets/settings.py): both read the same value
+    cfg["user_keys"] = sorted(set(user) | set(cfg.pop("user_keys_ignored", [])))
     cfg["regions_from"] = "config.json" if "regions" in user else "default"
     env = os.environ
     backend = env.get("CLAUDE_PLUGIN_OPTION_BACKEND", "").strip()
@@ -1157,8 +1185,8 @@ class Vault:
         now = time.time()
         rec = [r for r in self._index.get("resolves", []) if r["ts"] > now - 3600]
         self._index["resolves"] = rec
-        per_session = int(self.cfg.get("max_keys_per_session", 25))
-        per_hour = int(self.cfg.get("max_resolves_per_hour", 60))
+        per_session = int(self.cfg.get("max_keys_per_session", DEFAULT_CONFIG["max_keys_per_session"]))
+        per_hour = int(self.cfg.get("max_resolves_per_hour", DEFAULT_CONFIG["max_resolves_per_hour"]))
         keys_in_session = {r["key"] for r in rec if r["session"] == session}
         if key not in keys_in_session and len(keys_in_session) >= per_session:
             return f"limit: {per_session} distinct keys in this session this hour (max_keys_per_session)"
@@ -1177,8 +1205,8 @@ class Vault:
             return failed
         now = time.time()
         rec = [r for r in self._index.get("resolves", []) if r["ts"] > now - 3600]
-        per_session = int(self.cfg.get("max_keys_per_session", 25))
-        per_hour = int(self.cfg.get("max_resolves_per_hour", 60))
+        per_session = int(self.cfg.get("max_keys_per_session", DEFAULT_CONFIG["max_keys_per_session"]))
+        per_hour = int(self.cfg.get("max_resolves_per_hour", DEFAULT_CONFIG["max_resolves_per_hour"]))
         known = {r["key"] for r in rec if r["session"] == session}
         new = [k for k in dict.fromkeys(keys) if k not in known]
         if new and len(known) + len(new) > per_session:
@@ -1257,6 +1285,8 @@ class Vault:
         (the entry then stays, so nothing looks deleted that is not)."""
         meta = self._index["entries"].get(key)
         if meta is None:
+            from . import destinations
+            self.destinations_kept = not destinations.forget([key])   # a record a failed forget left behind
             return "unknown"
         if not meta.get("purged"):
             try:
@@ -1268,6 +1298,9 @@ class Vault:
         if fp and self._index["by_fingerprint"].get(fp) == key:
             del self._index["by_fingerprint"][fp]
         self._save_index()
+        from . import destinations
+        # where a forgotten secret went is the person's to delete too; a record that could not be written is said
+        self.destinations_kept = not destinations.forget([key])
         return "ok"
 
     @_mutating
@@ -1283,6 +1316,7 @@ class Vault:
         now = time.time()
         n = tried = 0
         self.last_refused = 0
+        purged_now: list[str] = []
         for key, meta in self._index["entries"].items():
             if limit is not None and tried >= limit:
                 break
@@ -1298,6 +1332,7 @@ class Vault:
                     continue
                 meta["purged"] = True
                 meta["purged_at"] = now
+                purged_now.append(key)
                 n += 1
         # metadata of a purged entry (masked display, session ids) is retention too: gone after
         # keep_purged_days; the fingerprint map goes with it (operator review, 2026-09-26)
@@ -1311,6 +1346,10 @@ class Vault:
                 del self._index["by_fingerprint"][fp]
         if n or old:
             self._save_index()
+        if old or purged_now:
+            from . import destinations
+            # where a value went goes with the value: the list shows no purged entry (codex review of 0.6.7)
+            destinations.forget(old + purged_now)
         return n
 
     @_mutating
@@ -1407,6 +1446,9 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
                 n += 1
             except (RuntimeError, OSError):
                 problems.append(f"store item {key} not deleted")
+        from . import destinations
+        if not destinations.wipe():        # under its lock: a writer holding it would write the record back
+            problems.append("destinations.json not deleted")
         for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced"):
             try:
                 (HOME / name).unlink()

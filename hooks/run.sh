@@ -4,7 +4,7 @@
 #                  a newer one in /opt/homebrew/bin, /usr/local/bin or /Library/Frameworks)
 #   Windows: Claude Code requires Git Bash, so this script runs there too; Python
 #            installs as python.exe or the py launcher (winget install Python.Python.3.12)
-# Usage: run.sh <user-prompt|pre-tool|post-tool|session-start> | run.sh <cli command…>
+# Usage: run.sh <user-prompt|pre-tool|post-tool|post-tool-failure|session-start> | run.sh <cli command…>
 set -u
 # the payload is UTF-8 JSON; on Windows python.exe would otherwise decode a pipe with the
 # console code page and a prompt with umlauts fails the hook (fail closed, but for no reason)
@@ -21,6 +21,10 @@ for PY in python3 python "py -3" python3.14 python3.13 python3.12 python3.11 pyt
 done
 MSG="maisecrets needs Python 3.9 or newer on the PATH of the client (found: ${FOUND:-none}). Install it: macOS 'brew install python' or python.org, Windows, as an administrator, 'winget install --id Python.Python.3.12 --exact --scope machine', Linux your package manager; then restart the client."
 case "${1:-}" in
+  post-tool-failure)
+    # the client shows a failed output as it is: there is nothing to withhold, only the reason to name
+    printf '{"systemMessage":"%s Until then every prompt is blocked."}' "$MSG"
+    exit 0 ;;
   post-tool)
     # Claude Code ignores exit 2 here and would show the raw output to the model: answer
     # fail-closed with the JSON the hook itself would give (review, 2026-09-26). One shape per

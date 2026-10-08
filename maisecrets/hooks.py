@@ -8,6 +8,7 @@ Events:
   user-prompt  UserPromptSubmit  -> block + store + clipboard on a hit
   pre-tool     PreToolUse        -> rehydrate ⟦REF⟧ in Bash commands
   post-tool    PostToolUse       -> redact tool results before the model sees them
+  post-tool-failure PostToolUseFailure -> a failed call's output cannot be replaced: store, clean, tell
 """
 from __future__ import annotations
 
@@ -759,6 +760,7 @@ def user_prompt(payload: dict) -> dict:
     if os.environ.get("MAISECRETS_TEST_FAULT") == "user-prompt-slow" and os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
         # tests only (tests/_isolate.py sets the second variable): the watchdog answers
         time.sleep(WATCHDOG_SECONDS["user-prompt"] + 3)
+    from . import settings as settings_mod
     cfg = load_config()
     prompt = payload.get("prompt", "")
     session = payload.get("session_id")
@@ -786,6 +788,60 @@ def user_prompt(payload: dict) -> dict:
             events.record("UserPromptSubmit", "claude", [SimpleNamespace(key="-", type=m.type, kind=m.kind)
                                                          for m in found], outcome="passed: a subagent report")
         return {}
+
+    # the ssh consent sentence (#8): alone, with the code the refusal made, after the subagent report pass so a
+    # report never grants. Blocked, so the sentence and its code never reach the model
+    # a prompt the client injected (a scheduled task, a loop wakeup) can carry text the model chose: it grants and
+    # sets nothing (C21, C22)
+    typed = payload.get("source") in settings_mod.TYPED_SOURCES
+    if typed and session and not payload.get("agent_id") and cfg.get("secret_destinations", "observe") == "observe":
+        try:
+            from . import destinations
+            destinations.mark_interactive(session)
+        except Exception:                # observing never stops a prompt (Opus round 3: a nested file blocked it)
+            pass
+    grant = _GRANT_RE.match(prompt) if cfg.get("ssh_consent") and typed else None
+    if cfg.get("ssh_consent") and not grant and session:
+        from . import consent_store
+        consent_store.drop_codes(session)    # the sentence counts only as the very next prompt (Codex review)
+    # a settings change the person typed (maisecrets/settings.py): the only way a setting changes. After the subagent
+    # report pass, so a report never changes one; blocked, so the prompt does not reach the model
+    change = settings_mod.parse_prompt(prompt)
+    if change:
+        changed, reason = settings_mod.apply_typed(*change) if typed else (False, (
+            "maisecrets: a settings change counts only when you type it as your prompt; this one came from the "
+            f"client ({payload.get('source')}), so nothing was changed."))
+        if changed and client_of(payload) != "codex" and prompt.lstrip().lower().startswith("/maisecrets:settings"):
+            # a success is no refusal: the slash command runs on and shows the new state (a block read as an
+            # error, "operation blocked by hook"). The prompt carries no value; the change is already written
+            return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": reason}}
+        if client_of(payload) == "codex":
+            return {"decision": "block", "reason": reason}
+        return {"decision": "block", "reason": reason,
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+    if grant:
+        from . import consent_store
+        if grant.group(2):
+            # Codex: the code ties the sentence to a refusal of this session (Codex sends no `source`, so a
+            # headless prompt built from an issue could otherwise carry the sentence)
+            hosts = consent_store.grant_by_code(session or "", grant.group(1), grant.group(2))
+        elif client_of(payload) != "codex" and session:
+            hosts = consent_store.grant_typed(session, _expand_groups([grant.group(1)],
+                                                                      cfg.get("ssh_host_groups") or {}))
+        else:
+            hosts = None
+        if not hosts and session:
+            consent_store.drop_codes(session)    # a wrong sentence is another prompt: the code ends (codex review)
+        reason = (f"maisecrets: writes over ssh to {', '.join(hosts)} run without asking for "
+                  f"{consent_store.APPROVAL_SECONDS // 3600} hours in this session. This prompt was not sent to the "
+                  "model; send your next request." if hosts else
+                  ("maisecrets: this consent code is not valid (wrong host, used, or older than "
+                   f"{consent_store.CODE_SECONDS // 60} minutes). Nothing was allowed; this prompt was not sent."
+                   if grant.group(2) else
+                   "maisecrets: in Codex this sentence needs the code from the refusal. Nothing was allowed; this "
+                   "prompt was not sent."))
+        return {"decision": "block", "reason": reason,
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
 
     # 2. references the human typed or pasted: this session may resolve them from now on
     typed = find_refs(prompt)
@@ -848,7 +904,7 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
                                       r"|MAISECRETS_HOME"),
     ("the value resolver", r"(?<![\w-])hooks[/\\]resolve\.py\b|resolve\.py\s+\S+\s+--grant\b"
                            r"|(?<![\w-])resolve\s+\S+\s+--grant\b|cmd_resolve|\.redeem\("),
-    ("the ssh approval store", r"ssh-approvals|ssh_approval"),
+    ("the ssh approval store", r"ssh-approvals|ssh_approval|ssh-consent\.json"),
     # the mod's question stores values and scrubs a transcript by session id: for the mod, not the agent
     ("the mod's question", r"(?<![\w-])(?:dispatch\.py|run\.sh|run\.cmd)[\"']?\s+[\"']?mod-prompt\b"),
     # the guard outside the plugin folder: `--off` in its refusal is for the person, not the agent
@@ -965,6 +1021,32 @@ WRAPPER_ARG_OPTIONS = {
 WRAPPERS = {"env", "genv", "command", "exec", "nice", "time", "nohup", "sudo", "doas", "builtin", "timeout", "stdbuf",
             "caffeinate", "ionice", "chronic"}
 _SLICE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
+
+
+# before a comment or a heredoc body: the parser's reading is sure only when no bracket, brace, parenthesis,
+# backslash or backtick comes first. Inside (( )), $[ ], [[ ]], ${ }, a zsh pattern or after an escape the shell
+# reads no comment or heredoc there and runs what follows (reviews of 0.6.7, rounds 4 to 6). The parser itself is
+# not changed: a misread comment would flip its quote state and hide the next line.
+_UNSURE_BEFORE_COMMENT = re.compile(r"[()\[\]{}\\`]")
+_UNSURE_BEFORE_HEREDOC = re.compile(r"[(){}\[\\`]")       # ((1<<TAG)) is a shift, no heredoc (codex round 7)
+
+
+def comment_is_sure(command: str, ctxs: list[str], pos: int) -> bool:
+    """The comment that holds pos is one for the shell too."""
+    k = pos
+    while k > 0 and ctxs[k - 1] == "comment":
+        k -= 1
+    return "\r" not in command and not _UNSURE_BEFORE_COMMENT.search(command, 0, k)
+
+
+def heredoc_is_sure(command: str, ctxs: list[str], pos: int) -> bool:
+    """The heredoc body that holds pos is one for the shell too: the plain text before it opens no ((, ${ or $[."""
+    k = pos
+    while k > 0 and ctxs[k - 1] in ("hd", "hdq", "hdx"):
+        k -= 1
+    if "\r" in command:         # the parser ends a heredoc at TAG\r, the shell does not, and the quotes move (Opus)
+        return False
+    return not _UNSURE_BEFORE_HEREDOC.search("".join(c for c, cx in zip(command[:k], ctxs[:k]) if cx == ""))
 
 
 def _shell_contexts(command: str) -> list[str]:
@@ -1872,7 +1954,7 @@ def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: st
 
 _ARGS_END = "MAISECRETS_ARGS_END"
 _ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" "
-                           r"(?:audit|forget|guard|put --clipboard|report|shortcut) "
+                           r"(?:audit|forget|guard|put --clipboard|report|settings|shortcut) "
                            r"--args-stdin <<'" + _ARGS_END + r"'\n(.*)\n" + _ARGS_END + r"\n?\Z", re.S)
 
 
@@ -1914,6 +1996,217 @@ def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
     return None
 
 
+# ------------------------------------------------------------- ssh consent (#8) --
+# opt-in (`ssh_consent: true`): every ssh-family call is classified (maisecrets/ssh_consent.py); a read runs,
+# a write needs the person's consent for its host (consent_store.py), a form the hook cannot read asks
+# each time, a short deny list is refused. Codex cannot ask: it refuses and names the sentence that grants.
+_SETTINGS_IN_A_COMMAND = ("maisecrets: this command carries a maisecrets settings change; only the person makes one, "
+                          "as their own prompt (/maisecrets:settings KEY VALUE). The command did not run. Tell the "
+                          "user the prompt to send.")
+_HOOK_ENTRY_TEXT_RE = re.compile(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
+                                 r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt)\b", re.I)
+_GRANT_RE = re.compile(r"\A\s*maisecrets:\s*allow\s+ssh\s+([\w.@:\[\]-]+)(?:\s+(\d{6}))?\s*\Z")
+
+
+_HOOK_ENTRIES = {"session-start", "user-prompt", "pre-tool", "post-tool", "post-tool-failure", "mod-prompt"}
+
+
+def _calls_a_hook_entry(command: str, broad: bool = False) -> bool:
+    """A command word that runs a maisecrets hook entry with an event: the agent would hand the hook a payload it
+    wrote, a forged PostToolUse or prompt (plan review of #8, 2026-10-06). Read from the parsed words, so a mention
+    in quotes (`echo "… run.sh post-tool"`) is no call (Codex review)."""
+    ctxs = _shell_contexts(command)
+    segs = _segments(command, ctxs)
+    for sg in segs:
+        words = sg.get("words") or []
+        for k, w in enumerate(words[:-1]):
+            # an event in a variable counts only with consent on: `./run.sh $ENV` of another project (opus round 3)
+            if os.path.basename(w) in ("run.sh", "run.cmd", "dispatch.py") and (
+                    words[k + 1] in _HOOK_ENTRIES or (broad and words[k + 1].startswith("$"))):
+                return True
+    # inside a nested shell or an interpreter (`bash -c '…run.sh user-prompt …'`, `python3 -c 'os.system(…)'`,
+    # `find -exec sh -c`) the words are one string: the text decides. Always for a shell; with ssh consent on
+    # (`broad`), for any command that does not only print the text (Gate B of #8, two rounds): a Codex consent has
+    # no second proof, so a forged prompt must not reach the hook. With consent off, `python3 -c 'print(…)'` passes.
+    shells = {"bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "su", "xargs", "parallel", "watch", "script"}
+    printers = {"echo", "printf", "grep", "egrep", "rg", "cat", "head", "tail", "less", "git"}
+    for m in re.finditer(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
+                         r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt)\b", command):
+        seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
+        if seg and seg.get("cmd") in shells:
+            return True
+        if broad and not _only_prints(command, ctxs, segs, seg, printers):
+            return True
+    if broad and re.search(r"\b(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt)\b", command):
+        # the entry and the event in different words (R=…/run.sh; $R user-prompt): any mention of an entry outside
+        # a command that only prints it counts
+        for m in re.finditer(r"run\.sh|run\.cmd|dispatch\.py", command):
+            seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
+            if not _only_prints(command, ctxs, segs, seg, printers):
+                return True
+    return False
+
+
+def _only_prints(command: str, ctxs: list[str], segs: list[dict], seg: dict | None, printers: set) -> bool:
+    """The whole command is one printing command with no pipe and no redirect: its text reaches nobody's shell.
+    `printf … > /tmp/x; bash /tmp/x` wrote it to a file a later part runs (codex review of the repair)."""
+    if not seg or len(segs) != 1 or seg.get("cmd") not in printers:
+        return False
+    unquoted = "".join(ch if cx == "" else " " for ch, cx in zip(command, ctxs))
+    return not re.search(r"[<>|]", unquoted)
+
+
+def _parse_for_consent(text: str):
+    ctxs = _shell_contexts(text)
+    return _segments(text, ctxs), ctxs
+
+
+def _expand_groups(hosts: list[str], groups: dict) -> list[str]:
+    """A host and every member of a group in `ssh_host_groups` that names it."""
+    out = set(hosts)
+    for members in (groups or {}).values():
+        if isinstance(members, list) and any(h in members for h in hosts):
+            out.update(m for m in members if isinstance(m, str))
+    return sorted(out)
+
+
+def _note_destinations(cfg: dict, payload: dict, tool: str, tool_input: dict, keys: list[str],
+                       ssh_command: str | None = None) -> None:
+    """secret_destinations (Mcpgate-de/maisecrets#13): note where each value of this call goes. Observe only: it
+    never changes the answer, and a failure here never stops the call. The value is handed out here, before the
+    client asks the person; so the call waits as pending and becomes `seen` only when a PostToolUse or
+    PostToolUseFailure of the same tool_use_id says it ran (_commit_destinations). A call the person declines has
+    no such event and leaves no record. A client that sends no tool_use_id leaves no record either."""
+    if cfg.get("secret_destinations", "observe") != "observe" or not keys:
+        return
+    try:
+        from . import destinations, ssh_consent
+        ssh_hosts: list[str] = []
+        if ssh_command and ssh_consent._TOKEN_RE.search(ssh_command):
+            ssh_hosts = list(ssh_consent.classify(ssh_command, _parse_for_consent).hosts)
+        found = destinations.destinations_of(tool, tool_input, ssh_hosts)
+        call = payload.get("tool_use_id")
+        if isinstance(call, str) and call:
+            destinations.pend(call, keys, payload.get("session_id"), payload.get("agent_id"), found)
+        # no call id, no record: without it nothing can show that the call ran, and a declined call must not be
+        # listed (ChatGPT review of 0.6.8). Claude Code and Codex send one in PreToolUse and PostToolUse
+    except Exception as exc:  # noqa: BLE001 - observing must never stop a call
+        _debug(f"destinations: {type(exc).__name__}")
+
+
+def _commit_destinations(payload: dict) -> None:
+    """The client reports that a call ran (PostToolUse, or PostToolUseFailure: a failed call had the value too):
+    its pending destinations become `seen`. It reads and writes only the record; it never changes an answer."""
+    try:
+        call = payload.get("tool_use_id")
+        if not (isinstance(call, str) and call) or load_config().get("secret_destinations", "observe") != "observe":
+            return
+        from . import destinations
+        destinations.commit(call, payload.get("session_id"), payload.get("agent_id"))
+    except Exception as exc:  # noqa: BLE001 - a record that fails never changes what the tool's answer does
+        _debug(f"destinations commit: {type(exc).__name__}")
+
+
+def _destination_hint(payload: dict) -> str | None:
+    """The one secret_destinations hint, when a pattern break of this session waits for it (destinations.note)."""
+    from . import destinations, settings
+    cfg = load_config()
+    if cfg.get("secret_destinations", "observe") != "observe" or payload.get("agent_id"):
+        return None
+    if not destinations.take_pending(payload.get("session_id")):
+        return None
+    if not settings.hint_due("secret_destinations", cfg) or not settings.claim_hint("secret_destinations"):
+        return None
+    return settings.HINTS["secret_destinations"]["codex" if client_of(payload) == "codex" else "claude"]
+
+
+def _autonomous(hosts: list[str], cfg: dict) -> bool:
+    """Every host of the call is one the person named in ssh_autonomous_hosts (a host as written, with user and
+    port, or the name of a group in ssh_host_groups): the AI may write there without asking, in every session. A
+    form the hook cannot read is never covered, and the deny list still holds."""
+    allowed = set()
+    groups = cfg.get("ssh_host_groups") or {}
+    for entry in cfg.get("ssh_autonomous_hosts") or []:
+        if not isinstance(entry, str):
+            continue
+        members = groups.get(entry) if isinstance(groups, dict) else None
+        if isinstance(members, list):
+            # a group name stands for its members only, not for a host that has the same name (codex review)
+            allowed.update(m for m in members if isinstance(m, str))
+        else:
+            allowed.add(entry)
+    return bool(hosts) and all(h in allowed for h in hosts)
+
+
+def _ssh_consent(payload: dict, cfg: dict, command: str) -> dict | None:
+    """None when consent is off or the command reads only; else the call's kind, hosts and whether an
+    unexpired consent of this session and agent covers them (a form the hook cannot read never is)."""
+    if not cfg.get("ssh_consent"):
+        return None
+    from . import consent_store, ssh_consent
+    v = ssh_consent.classify(command, _parse_for_consent)
+    if v.kind in ("none", "read"):
+        return None
+    hosts = _expand_groups(v.hosts, cfg.get("ssh_host_groups") or {})
+    covered = v.kind == "write" and (_autonomous(v.hosts, cfg) or
+                                     consent_store.covered(payload.get("session_id"), payload.get("agent_id"), hosts))
+    return {"kind": v.kind, "hosts": hosts, "named": v.hosts, "why": v.why, "covered": covered}
+
+
+def _consent_text(c: dict) -> str:
+    from . import consent_store
+    if c["kind"] == "unknown" or not c["hosts"]:
+        return (f"maisecrets: this command starts ssh in a form the hook cannot read ({c['why']}). Allow it only if "
+                "you know what it does on the remote side. The next one asks again.")
+    named = ", ".join(c["named"])
+    more = [h for h in c["hosts"] if h not in c["named"]]
+    group = f" and the hosts of its group ({', '.join(more)})" if more else ""
+    # the first sentence says what a yes means: this command only. The window is a separate, typed act
+    return (f"maisecrets: approve this ssh write to {named}? A yes allows only this command ({c['why']}). "
+            f"To let writes to {named}{group} run without asking for {consent_store.APPROVAL_SECONDS // 3600} hours "
+            f"in this session, send this as your own prompt: maisecrets: allow ssh {c['named'][0]}. For a host where "
+            f"the AI may always work without asking: maisecrets: ssh autonomous {c['named'][0]}. "
+            "The deny list (mkfs, dd to a device, rm -rf /) always stays on.")
+
+
+def _consent_codex_refusal(payload: dict, c: dict) -> str:
+    from . import consent_store
+    if c["kind"] == "unknown" or not c["hosts"]:
+        return (f"maisecrets: this command starts ssh in a form the hook cannot read ({c['why']}). The command did "
+                "not run. Write the call directly, as ssh HOST 'remote command', so maisecrets can read its host.")
+    code = consent_store.new_code(payload.get("session_id") or "", payload.get("agent_id"), c["hosts"])
+    return (f"maisecrets: this command writes over ssh to {', '.join(c['named'])} ({c['why']}), and ssh consent is "
+            f"on. The command did not run. To allow writes to {', '.join(c['hosts'])} for "
+            f"{consent_store.APPROVAL_SECONDS // 3600} hours in this session, the user types exactly this, alone, as "
+            f"the next prompt (valid for {consent_store.CODE_SECONDS // 60} minutes): "
+            f"maisecrets: allow ssh {c['named'][0]} {code}")
+
+
+def _consent_gate(payload: dict, tool_input: dict, why: str) -> dict:
+    """A call outside Bash that the consent rules stop: PowerShell text that names ssh, a file under ~/.ssh.
+    Claude Code asks with the input unchanged (no value is in it, nothing is recorded); Codex refuses."""
+    if client_of(payload) == "codex":
+        return _deny(f"maisecrets: {why}, and ssh consent is on. The call did not run.")
+    return _ask(dict(tool_input), f"maisecrets: {why}. Allow it only if you know what it does.")
+
+
+def _is_ssh_config_path(path: str, cwd: str) -> bool:
+    if not path:
+        return False
+    p = os.path.expanduser(path)
+    if not os.path.isabs(p):
+        p = os.path.join(cwd or os.getcwd(), p)
+    try:
+        real = os.path.realpath(p)
+    except OSError:
+        real = p
+    home_ssh = os.path.realpath(os.path.join(os.path.expanduser("~"), ".ssh"))
+    if platform.system() in ("Darwin", "Windows"):
+        # a case-insensitive file system: ~/.SSH/config is ~/.ssh/config (opus round 3)
+        real, home_ssh = os.path.normcase(real).casefold(), os.path.normcase(home_ssh).casefold()
+    return real == home_ssh or real.startswith(home_ssh + os.sep)
+
+
 def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     """Bash: every value is read into a shell variable in the MAIN shell before the command
     runs, and the placeholder becomes that variable in its quoting context. The read fails
@@ -1941,10 +2234,33 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     refused = _store_refusal(command)
     if refused:
         return refused
+    if _calls_a_hook_entry(command, broad=bool(cfg.get("ssh_consent"))):
+        return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "
+                     "The command did not run.")
     ctxs = _shell_contexts(command)
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
+    from . import settings as settings_mod
+    if settings_mod.IN_A_COMMAND_RE.search(command):
+        return _deny(_SETTINGS_IN_A_COMMAND)
+    # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line
+    if cfg.get("ssh_consent") and re.search(r"maisecrets:\s*allow\s+ssh\s+\S|allow\s+ssh\s+\S+\s+\d{6}", command,
+                                           re.I):
+        # the model saw the code in the refusal; a nested prompt (`codex exec resume …`) would type the sentence
+        # for it (Gate B of #8). Text matching: a code built at run time is not seen (C21)
+        return _deny("maisecrets: this command carries the ssh consent sentence; only the person types it, as a "
+                     "prompt. The command did not run.")
+    consent = _ssh_consent(payload, cfg, command)
+    if consent and consent["kind"] == "deny":
+        return _deny(f"maisecrets: the remote command matches the deny list ({consent['why']}); it never runs "
+                     "through maisecrets, also with consent. The command did not run.")
+    needs_yes = bool(consent) and not consent["covered"]
+    if needs_yes and client_of(payload) == "codex":
+        return _deny(_consent_codex_refusal(payload, consent))
     if not refs:
-        return {}
+        if not needs_yes:
+            return {}
+        # the native yes allows this one command; it records nothing (only a typed sentence opens a window)
+        return _ask(dict(tool_input), _consent_text(consent))
     keys = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(k for k, _a, _b in refs))
     windows = platform.system() == "Windows"
     if windows and client_of(payload) == "codex":
@@ -1989,7 +2305,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     # child, which confirms it when the approved command reads the value. After phase 1: a key
     # this session may not resolve leaves no pending token (review, 2026-09-29)
     ssh_auto, ssh_token = rehydration.policy(cfg, "ssh") == "automatic", None
-    if ssh_plan and not ssh_auto and cfg.get("ssh_approval") == "per-session" \
+    # with a consent question in the same ask, no hidden per-session value approval rides along (Gate B of #8)
+    if ssh_plan and not ssh_auto and not needs_yes and cfg.get("ssh_approval") == "per-session" \
             and _remote_is_read_only(ssh_plan["remote"]):
         from . import ssh_approval
         names = sorted({k for k, _a, _b in refs})
@@ -2016,6 +2333,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
             plan[key] = (None, value)
     if failed:
         return _deny(_deny_reason(failed))
+    _note_destinations(cfg, payload, "Bash", tool_input, list(plan), ssh_command=command)
     # phase 3: serve and rewrite
     prelude: list[str] = []
     var_by_key: dict[str, str] = {}
@@ -2067,6 +2385,10 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         prelude.insert(0, _sandbox_guard())
     new_input = dict(tool_input)
     new_input["command"] = "; ".join(prelude) + "; " + rewritten
+    if needs_yes:
+        # one question for both: the consent and the value; a consent window never skips C16 (plan review M4)
+        return _ask(new_input, _consent_text(consent) + f" The command also gets the value of {keys}; the command "
+                               "shown here carries no value.")
     if ssh_plan:
         base = (f"maisecrets: this command sends the value of {keys} on stdin to ssh "
                 f"{ssh_plan['dest']}: {ssh_plan['line'][:400]}. It runs only inside the Claude "
@@ -2131,8 +2453,9 @@ def _deny_reason(failed: list[str]) -> str:
         hints.append("A key marked (foreign-session) resolves only in a session where a human typed "
                      "it: ask the user to paste the placeholder, never the value.")
     if any("limit:" in f for f in failed):
-        hints.append("The cap is set by the user. Stop and tell the user; do not change maisecrets "
-                     "settings yourself.")
+        hints.append("The cap is set by the user. Stop and tell the user that they can raise it with their "
+                     "own prompt /maisecrets:settings max_keys_per_session NUMBER (or max_resolves_per_hour; "
+                     "in Codex: maisecrets: set KEY NUMBER); do not change maisecrets settings yourself.")
     if any("audit" in f for f in failed):
         hints.append("The audit log could not be written, so no value is released. Tell the user.")
     return ("maisecrets: cannot resolve " + ", ".join(failed) + ". The command did not run. "
@@ -2179,6 +2502,7 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
         values[key] = value
     if failed:
         return _deny(_deny_reason(failed))
+    _note_destinations(cfg, payload, tool, tool_input, list(values))
 
     def substitute(s: str) -> str:
         out = s
@@ -2471,6 +2795,11 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         if _in_the_home(path, cwd):
             return _deny(f"maisecrets: {tool} on {path} is refused; the maisecrets home is changed by the human "
                          "only. Nothing was written. Tell the user what you wanted to change there.")
+    if cfg.get("ssh_consent"):
+        # a changed ~/.ssh/config sends an approved alias to another host or runs a local command (plan review H3)
+        for path in paths:
+            if _is_ssh_config_path(path, cwd):
+                return _consent_gate(payload, tool_input, f"{tool} changes {path}, which decides where ssh connects")
     path = ", ".join(paths)
     found: list[str] = []
 
@@ -2502,6 +2831,7 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         values[key] = value
     if failed:
         return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
+    _note_destinations(cfg, payload, tool, tool_input, list(values))
 
     def substitute(v: str) -> str:
         out = v
@@ -2556,7 +2886,7 @@ def _resolve_patch(patch: str, values: dict) -> tuple:
     return rewritten, None
 
 
-def _pre_powershell(payload: dict, tool_input: dict) -> dict:
+def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) -> dict:
     """PowerShell: the shell tool of Claude Code on Windows without Git Bash (measured with 2.1.284 on
     a hosted Windows runner, 2026-09-29). The rewrite knows POSIX quoting only, so a placeholder is
     refused and no value goes in; the store backstop is the text match of Bash, with Windows paths in
@@ -2571,12 +2901,25 @@ def _pre_powershell(payload: dict, tool_input: dict) -> dict:
     refused = _store_refusal(command, windows_paths=True)
     if refused:
         return refused
+    from . import settings as settings_mod
+    if settings_mod.IN_A_COMMAND_RE.search(command):
+        return _deny(_SETTINGS_IN_A_COMMAND)
+    if _HOOK_ENTRY_TEXT_RE.search(command):
+        # PowerShell has no word parser here: any mention of a hook entry with its event is refused
+        return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "
+                     "The command did not run.")
     keys = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(k for k, _a, _b in find_refs(command)))
     if keys:
         return _deny(f"maisecrets: {keys} cannot be placed in a PowerShell command (maisecrets places values "
                      "in Bash commands only; PowerShell quoting is not supported). The command did not run. Use "
                      "the value through an MCP tool or a file tool, or ask the user to run the command "
                      "themselves. With Git for Windows installed, Claude Code offers Bash instead.")
+    if (cfg or {}).get("ssh_consent"):
+        from . import ssh_consent
+        m = ssh_consent._TOKEN_RE.search(command)
+        if m:
+            return _consent_gate(payload, tool_input, f"this PowerShell command names '{m.group(0)}', and maisecrets "
+                                                      "reads ssh calls in Bash only")
     return {}
 
 
@@ -2587,7 +2930,7 @@ def pre_tool(payload: dict) -> dict:
     if tool == "Bash":
         return _pre_bash(payload, cfg, tool_input)
     if tool == "PowerShell":
-        return _pre_powershell(payload, tool_input)
+        return _pre_powershell(payload, tool_input, cfg)
     if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS or tool.startswith("mcp__"):
         refused = _store_path_refusal(tool, tool_input, str(payload.get("cwd") or ""))
         if refused:
@@ -3166,24 +3509,149 @@ def _how_failed(exc: BaseException) -> str:
     return how
 
 
+def _ssh_hint(payload: dict) -> str | None:
+    """The ssh_consent hint (maisecrets/settings.py), the first time an ssh call that changes something runs while
+    the person has not decided. A read (`ssh host uptime`) is no case for it, and neither is a form the hook cannot
+    read: that class also holds a plain mention (`grep ssh README.md`). Not in a subagent: it has no conversation
+    with the person."""
+    if payload.get("tool_name") not in ("Bash", "PowerShell") or payload.get("agent_id"):
+        return None
+    command = (payload.get("tool_input") or {}).get("command") if isinstance(payload.get("tool_input"), dict) else None
+    if not isinstance(command, str):
+        return None
+    from . import settings, ssh_consent
+    if not ssh_consent._TOKEN_RE.search(command):
+        return None          # most commands: no parse, no file read
+    cfg = load_config()
+    if not settings.hint_due("ssh_consent", cfg):
+        return None
+    if ssh_consent.classify(command, _parse_for_consent).kind != "write":
+        return None
+    if not settings.claim_hint("ssh_consent"):
+        return None       # another hook gave it first, or the record cannot be written: no hint rather than many
+    return settings.HINTS["ssh_consent"]["codex" if client_of(payload) == "codex" else "claude"]
+
+
+def _with_hint(payload: dict, result: dict) -> dict:
+    """Add a hint to the answer of a PostToolUse without changing what the answer does."""
+    # both, when both are due: with `or` the destination hint of this call waited for an unrelated later one (codex)
+    hint = "\n\n".join(h for h in (_ssh_hint(payload), _destination_hint(payload)) if h)
+    if not hint:
+        return result
+    result = dict(result)
+    if result.get("decision") == "block":
+        # Codex: the reason replaces the output the model sees, so the hint goes after it
+        result["reason"] = f"{result.get('reason', '')}\n\n[{hint}]"
+        return result
+    hso = dict(result.get("hookSpecificOutput") or {"hookEventName": "PostToolUse"})
+    hso["additionalContext"] = f"{hso['additionalContext']}\n\n{hint}" if hso.get("additionalContext") else hint
+    result["hookSpecificOutput"] = hso
+    return result
+
+
 def _post_tool_guarded(payload: dict) -> dict:
     """Claude Code ignores exit 2 from PostToolUse: the raw output would reach the model. So a
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
+    _commit_destinations(payload)    # first: the call ran even when the redaction below fails; and before the hint
     try:
-        return post_tool(payload)
+        result = post_tool(payload)
     except ConfigError as exc:
         return _fail_closed("post-tool", payload, f"configuration error: {exc}. Fix the file named there.", hint=False)
     except Exception as exc:  # noqa: BLE001
         _debug(f"post-tool: {type(exc).__name__}")
         return _failure("post-tool", payload, exc)
+    try:
+        return _with_hint(payload, result)
+    except Exception as exc:  # noqa: BLE001 - a hint that fails must not withhold the output
+        _debug(f"post-tool hint: {type(exc).__name__}")
+        return result
 
 
-HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post_tool_guarded}
+def post_tool_failure(payload: dict) -> dict:
+    """Claude Code answers a failed call (Bash with an exit code other than 0) with PostToolUseFailure, and the answer
+    to that event cannot replace the output (schema of 2.1.292; anthropics/claude-code#97278): what the command
+    printed reaches the model as it is. What is left to do: store each value, so a later output, file or command
+    that repeats it is redacted exactly; clean the transcript on disk; tell the model not to use the values and the
+    person what happened. Measured over one user's transcripts: 14 such outputs with a hit in 105,241 Bash calls."""
+    error = payload.get("error")
+    if not isinstance(error, str) or not error or client_of(payload) == "codex":
+        return {}
+    cfg = load_config()
+    session = payload.get("session_id")
+    matches = [m for m in detect.scan(error) if not detect.is_fixture(m, error, "")]
+    if not matches and not _has_live(cfg):
+        return {}
+    vault = Vault(cfg)
+    hit = {"n": 0}
+    entries: list = []
+    values: list[str] = []
+    out = error
+    if matches:
+        out, entries = _replace(error, matches, vault, session)
+        hit["n"] += len(matches)
+        values.extend(m.value for m in matches)
+    _exact_redact(out, vault, session, hit, entries, _resolved_values(vault, session), values)
+    if not hit["n"]:
+        return {}
+    refs = list(dict.fromkeys(e.ref for e in entries if getattr(e, "ref", None)))
+    # say what really happened (codex review): the cap of new entries per result, and whether the transcript is
+    # cleaned at all. The record of this output is written after the hook, so the child cleans it shortly after
+    path = payload.get("transcript_path", "")
+    if not cfg.get("scrub_transcript", True):
+        scrub = "cleaning the transcript is off (scrub_transcript), so the value stays there"
+    elif not path or not os.path.exists(path):
+        scrub = "the transcript file was not found, so it was not cleaned"
+    else:
+        now = _scrub_transcript(path, values, refs)
+        later = _scrub_transcript_later(path, values, refs) is not None
+        scrub = ("maisecrets cleans the transcript on disk now and again shortly after" if later else
+                 "maisecrets cleaned the transcript on disk now, but could not start the later pass" if now else
+                 "maisecrets could not clean the transcript on disk")
+    unkeyed = max(0, len(dict.fromkeys(values)) - len(refs)) if matches else 0
+    cap = (f" {unkeyed} more were not stored (above max_new_entries_per_result), so a repeat of those is found "
+           "only by its shape." if unkeyed else "")
+    from . import events
+    events.record("PostToolUseFailure", "claude", entries, outcome=f"a failed call: seen by the model; {scrub}")
+    shown = ", ".join(refs) if refs else "values that are already stored"
+    tool = payload.get("tool_name") or "tool"
+    return {
+        "systemMessage": f"maisecrets: this failed {tool} call printed {hit['n']} value(s) ({shown}). Claude Code "
+                         f"shows the output of a failed call to the AI as it is, so the AI saw them; {scrub}.{cap}",
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUseFailure",
+            "additionalContext": (f"maisecrets: the output of this failed call held {hit['n']} value(s) the user "
+                                  f"keeps private, stored as {shown}. Do not repeat, copy or use these values in "
+                                  "text, files or commands; where one is needed, write its placeholder instead."),
+        },
+    }
+
+
+def _post_tool_failure_observed(payload: dict) -> dict:
+    _commit_destinations(payload)        # a failed call had the value: its destination counts
+    result = post_tool_failure(payload)
+    try:
+        # its pattern break gets its hint here, not on a later call (codex review of 0.6.8). Only this hint: the
+        # ssh_consent hint is for a write that ran (C22)
+        hint = _destination_hint(payload)
+    except Exception as exc:  # noqa: BLE001 - a hint that fails changes nothing
+        _debug(f"post-tool-failure hint: {type(exc).__name__}")
+        hint = None
+    if not hint:
+        return result
+    result = dict(result)
+    hso = dict(result.get("hookSpecificOutput") or {"hookEventName": "PostToolUseFailure"})
+    hso["additionalContext"] = f"{hso['additionalContext']}\n\n{hint}" if hso.get("additionalContext") else hint
+    result["hookSpecificOutput"] = hso
+    return result
+
+
+HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post_tool_guarded,
+            "post-tool-failure": _post_tool_failure_observed}
 
 
 # under the timeouts hooks/hooks.json gives each event (10 s prompt and pre-tool, 20 s post-tool);
 # a client timeout fails OPEN, so the answer must come first
-WATCHDOG_SECONDS = {"user-prompt": 7.0, "pre-tool": 7.0, "post-tool": 16.0}
+WATCHDOG_SECONDS = {"user-prompt": 7.0, "pre-tool": 7.0, "post-tool": 16.0, "post-tool-failure": 16.0}
 
 
 def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict:
@@ -3193,6 +3661,9 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
     whether the tool ran, so the model does not repeat a push or a deploy (review, 2026-09-26)."""
     reason = f"maisecrets {event}: {why}"
     codex = client_of(payload) == "codex"
+    if event == "post-tool-failure":
+        # the client shows the failed output whatever this answer says: there is nothing to withhold
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": reason}}
     if event == "user-prompt":
         tail = (" The prompt was not sent; try again. If this message comes again, tell the user that "
                 "maisecrets cannot finish (a locked store or a slow disk)." if hint
@@ -3365,7 +3836,7 @@ def _scrub_failed_prompt(event: str, payload: dict) -> None:
 
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[1] not in HANDLERS:
-        sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|session-start\n")
+        sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|post-tool-failure|session-start\n")
         return 2
     event = argv[1]
     try:

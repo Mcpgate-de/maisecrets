@@ -274,9 +274,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 23 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 30 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 78 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 99 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -385,9 +385,13 @@ run".
   placeholder reads the value from a FIFO in the per-user runtime or temp
   directory (POSIX) or through `hooks/resolve.py` under a one-time grant
   (Windows Git Bash).
+- The mod (Claude Code 2.1.287 and later) runs this computer's Python with the
+  plugin's own `hooks/dispatch.py mod-prompt`, with fixed arguments and no shell,
+  and hands it the prompt on stdin; "The mod" below lists each call.
 - Writes: under `~/.maisecrets`: `index.json` (metadata and keyed
   fingerprints, never a value), `audit.log`, `events.log`, `hooks.log`,
-  `pending/`, `.announced`; the value FIFOs in the per-user runtime or temp
+  `pending/`, `.announced`, `destinations.json` (where each value went, never a
+  value); the value FIFOs in the per-user runtime or temp
   directory; the vault backend; on a blocked prompt the clipboard. With
   `scrub_transcript` on, it masks the raw value inside the client's transcript
   file named in the hook payload, in place, because the client writes the
@@ -396,10 +400,31 @@ run".
 - The skill runs `skills/secret-hygiene/scripts/scan_secrets.py` (reads files and
   `git log`) and `redact_copy.py` (writes a new file) when the model follows it; neither
   opens a network connection.
-- Sends and fetches: nothing. No hook opens a network connection.
-  `/maisecrets:report` prints the issue text and a prefilled link, and it
-  files the issue only with `--create` (GitHub CLI, to `report_url`); the
-  Windows Credential Locker may roam through a Microsoft account.
+- Sends and fetches: no telemetry and no download. These connections start from
+  a command you run, and nothing else in the plugin opens one:
+  - the ssh route of your own ssh command inside the Claude Code sandbox
+    (`hooks/proxy_connect.py`, the `ProxyCommand` of that ssh call): one
+    CONNECT through Claude Code's local sandbox proxy (localhost only) to the
+    host you named, with the proxy login that Claude Code puts in
+    `HTTPS_PROXY` for that sandbox;
+  - before an ssh command that carries a value, `hooks/sandbox_probe.py` checks
+    that it runs inside that sandbox: it tries direct connections to 1.1.1.1:443,
+    8.8.8.8:53 and 9.9.9.9:443 (the sandbox must refuse them) and one CONNECT with
+    a wrong login to the local sandbox proxy. It sends no data, and it runs only
+    when `SANDBOX_RUNTIME=1` and a local sandbox proxy are set;
+  - `/maisecrets:report`: on a computer with a desktop it opens your browser on
+    the prefilled issue page at `report_url` (the address carries the issue text,
+    the plugin version, your platform and a rule name, never a value), elsewhere
+    it prints the link; with `--create` it runs the GitHub CLI (`gh`) with your
+    own `gh` login to file the issue.
+- Credentials: the hooks and the mod fetch no credential for a request of
+  their own. They read the values you stored, from your operating system's
+  store, only to put each one into the tool call you allow, which then goes
+  where that call goes. The two commands above use the login that belongs to
+  them: the ssh route sends the sandbox proxy login from `HTTPS_PROXY` to the
+  local sandbox proxy, and `gh` uses its own GitHub login. The Windows
+  Credential Locker may roam through a Microsoft account (the operating system
+  does that, not the plugin).
 
 ## Secret hygiene skill
 
@@ -444,6 +469,92 @@ than one without a settings dialog. At the first session start, and at every
 start in test mode, a notice names the active store, its path and where to
 change it. `python3 -m maisecrets.cli status` prints the same at any time.
 
+### Settings you decide
+
+`/maisecrets:settings` shows the settings that are yours to decide, grouped
+(Protection, Using stored values), one card each: the value, its state (`not
+decided`, `set by you`, `set by a policy`), what it does, and the command for
+the next step:
+
+```
+Protection
+  SSH consent · off · not decided
+    Ask before each ssh command that changes something on a host.
+    Turn on: /maisecrets:settings ssh_consent on
+```
+
+A key that is missing from `config.json` is not decided; `false` written there
+is a decision, with the same effect. `--all` shows the advanced settings too.
+
+To change one, send the change as your own prompt, alone:
+
+```
+/maisecrets:settings ssh_consent on
+maisecrets: set ssh_consent on          (the same, and the form for Codex)
+```
+
+`on`, `off`, a choice the card names (`rehydration confirm`), or `default`,
+which removes your decision so that the setting reads the default again.
+The prompt hook writes `config.json`. After the slash command it lets the
+command run on, which shows the new card; the sentence form is stopped and
+does not reach the model. maisecrets changes a setting for nothing else: not
+for a prompt the client injected (a scheduled task, a loop wakeup, an SDK
+prompt), not for a subagent's report, and a Bash or PowerShell command that
+carries the change (a nested `codex exec` or `claude -p` that would type it)
+is refused. The AI can tell you about a setting and the prompt to send. A
+setting from a machine policy cannot be changed here. The limit: a program
+that runs as you can write the file itself, and maisecrets sees a command only
+as text (C22 in the threat model).
+
+**Hints.** maisecrets stays quiet until a case comes up that one of these
+settings is about. Then the AI gets one sentence about it, and mentions it
+once. For `ssh_consent` that case is the first ssh command that changes
+something on a host (`ssh web1 'sudo systemctl restart nginx'`; not `ssh web1
+uptime`; and only when the command succeeds: Claude Code reports a failed one
+through another event). A hint comes once, also when hooks run at the same
+time; if maisecrets cannot record it, it does not come at all. It does not come again after you decided, and
+it does not come again because time passed: only a real change of the
+feature brings it back, once. `"tips": false` turns hints off with the tips.
+The settings list shows each hint as `not shown yet` or `shown` with its date;
+`/maisecrets:settings hints reset` (or `maisecrets: reset hints`) lets them
+come once more and changes no protection setting.
+
+### Where your secrets went
+
+maisecrets notes, on this computer only, where each stored secret was handed
+to a tool call: a host named in the call (from a URL, also one in quoted text,
+not one in a shell comment), an ssh host, or an MCP server and tool. In a Bash
+command every host it names counts for each secret in it, also a second URL
+that the value does not reach. A file or a command without a host is listed
+apart, as a local use. `/maisecrets:list`
+shows it under each secret:
+
+```
+SECRET_c7      SECRET  github_pat            3d   14        21h  -
+    Seen at (a record, not a permission)
+      other.example.net     1×     last less than an hour ago   new
+      api.github.com        10+×   last 2 hours ago
+    Local uses (not destination-protected)
+      a file in ~/proj/     2–9×   last 3 days ago
+```
+
+This is a record, not a permission, and it stops nothing. The value is handed
+out before the client asks you, so a call waits until the client reports that
+it ran (also when it failed), and only then is it listed. A call you decline in
+Claude Code's dialog is not listed (measured with the real client, whose
+headless mode refuses the question). Codex sends
+the same report for a command that ran or failed; a call it declines by its
+approval policy never reaches the hooks. A call without a call id is not
+listed: nothing could show that it ran. `new` marks a destination first seen in the
+last 24 hours. When a secret that you used at one destination
+(3 times on one day) goes to a new one for the first time, the AI tells you
+once, in a sentence; this note does not come again. maisecrets does not
+judge whether a destination is safe. Asking before a new destination comes
+in a later version. `/maisecrets:settings secret_destinations off` stops the
+record; nothing leaves the computer either way. When a value expires, its
+record goes with it (if the record is busy at that moment, it goes 30 days
+later with the metadata); forget and wipe delete it too.
+
 ## Vault
 
 `~/.maisecrets/config.json` (all optional):
@@ -459,8 +570,8 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
   "rewrite_prompts": true,
   "strip_hidden_characters": true,
   "regions": ["auto"],
-  "max_keys_per_session": 25,
-  "max_resolves_per_hour": 60,
+  "max_keys_per_session": 200,
+  "max_resolves_per_hour": 1000,
   "report_url": "https://github.com/Mcpgate-de/maisecrets/issues"
 }
 ```
@@ -527,14 +638,17 @@ the plugin points into that folder.
   person's own prompt only (typed or queued at the terminal, sent through Remote
   Control, or the turn of `claude -p`). A subagent's report, another session's or
   a channel's message goes on unchanged to the settings hook.
-- **What it reads:** the text of that prompt, the session id, the session's
-  working directory, and one environment variable, `OS`, to tell Windows from the
-  others.
-- **What it runs:** one program, the plugin's own launcher, with a fixed command
-  line, in the plugin folder: `bash hooks/run.sh mod-prompt`, or on Windows
-  `cmd.exe /d /c hooks\run.cmd mod-prompt`. The launcher starts this computer's
-  Python with `hooks/dispatch.py`, the same code the settings hooks run. No shell
-  reads the command line.
+- **What it reads:** the text of that prompt, the session id and the session's
+  working directory. It reads no environment variable and no file.
+- **What it runs:** this computer's Python with the plugin's own
+  `hooks/dispatch.py mod-prompt`, the same code the settings hooks run, in the
+  plugin folder. Each call is fixed text, with no shell: `python3 hooks/dispatch.py
+  mod-prompt`; when that cannot start or ends with an error (on Windows `python3`
+  is often a store stub, and `dispatch.py` refuses a Python older than 3.9),
+  `py -3 …`, then `python …`. All tries share one limit of 8 seconds. It sets
+  `PYTHONUTF8=1` for that process (over the environment it inherits), so that
+  Windows reads the pipe as UTF-8. When no Python answers, the mod passes the
+  prompt on unchanged and the settings hook blocks it.
 - **What it sends, and where:** the prompt, the session id and the working
   directory go to that local process on stdin. The process detects the values,
   stores them in the local store, and answers with the prompt with placeholders.
@@ -739,6 +853,125 @@ A placeholder turns back into its value only here:
   only the placeholder. The client's permission rules decide whether the call
   runs.
 
+## SSH consent (optional)
+
+An agent with your SSH keys can run any command on any host it reaches, also
+when no secret is in the command. Claude Code's own `permissions.ask:
+["Bash(ssh:*)"]` matches only the start of a command, so `cd x && ssh …`,
+`bash -c "ssh …"` and `timeout 30 ssh …` pass it. With `ssh_consent` on (send
+`/maisecrets:settings ssh_consent on` as your prompt, see "Settings you decide";
+a policy can set it; it is off by default),
+maisecrets reads every ssh-family call (`ssh`, `scp`, `sftp`, `rsync` to a
+host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
+`timeout`, `nohup`, `env`, `sudo` and `perl -e 'alarm N; exec @ARGV'`:
+
+- **A read runs.** A remote command that prints only metadata about the host,
+  from a short list with named options (`uptime`, `df -h`, `free`, `uname`,
+  `ls`, `du`, `wc` of a literal absolute path, `systemctl is-active`), with no
+  expansion and no redirect except `2>&1` and `>/dev/null` (any other
+  redirect asks, also a local one: the hook cannot tell a quoted `">"` that
+  ssh hands to the remote shell from a local one). The content of a
+  file, a log or a process list (`cat`, `grep`, `journalctl`, `ps`,
+  `systemctl status`) is a write: it can carry a credential. Paths like
+  `/etc/shadow`, `.env`, `id_*`, `*.pem`, `/proc` or `/root` are never a read;
+  that check is a heuristic, not a guarantee.
+- **Every write asks.** Any other remote command, a login shell, `sudo`,
+  `docker`, a copy, a port forward or tunnel (`-L`, `-R`, `-D`, `-w`), or local
+  data on stdin. A yes allows that one command; the next write asks again.
+- **A host you trust for a while: type it.** Send `maisecrets: allow ssh web1`
+  as your own prompt (the question names the exact sentence). Writes to that
+  host, and to the hosts of its group in `"ssh_host_groups": {"web": ["web1",
+  "web2"]}`, then run without a question for 8 hours, in that session, for the
+  main thread only: a subagent asks for itself. The host is as written, with
+  its user and port (`-l`, `-p`, `-o User`, `-o Port`, `user@`, `scp://…:port`):
+  `root@web1` and `web1:2222` are other hosts than `web1`. Only a prompt you
+  type counts: not a scheduled or SDK prompt, and a Bash or PowerShell command
+  that carries the sentence is refused.
+- **Hosts where the AI may work on its own.** Your own lab or ops servers can
+  be autonomous: writes there never ask, in any session, while every other
+  host asks for each write. Send `/maisecrets:settings ssh_autonomous_hosts add
+  ops1` (or `maisecrets: ssh autonomous ops1`), and `remove ops1` (or
+  `maisecrets: ssh ask ops1`) to take one off. The host is as the ssh call
+  writes it (`root@lab:2323` is not `lab`), or the name of a group in
+  `ssh_host_groups` (then its members, not a host of that name); every host
+  of a call must be on the list. The list changes from your own prompt, and
+  the deny list holds there too. Limit: maisecrets reads commands as text, so
+  a program that builds the sentence at run time and feeds it to a nested
+  client (Codex does not say who wrote a prompt) can add a host; check the
+  list in `/maisecrets:settings`.
+- **A form maisecrets cannot read asks every time.** An ssh word in a nested
+  shell (`bash -c`, `eval`, `xargs`, `find -exec`), a wrapper it does not
+  know (`sshpass`, `setsid`, `flock`), a word built at run time when `ssh`
+  is in its text (`$(which ssh)`, `S=ssh; $S`, `ssh $HOST`), two users or
+  ports for one connection, `sudo -u` (another user's ssh config), an option that sends the
+  connection elsewhere (`-J`, `-W`, `-S`, `-F`, `-o ProxyCommand`, `-o
+  HostName`, `-o RemoteCommand`), `GIT_SSH_COMMAND`, `git -c core.sshCommand`,
+  `RSYNC_RSH`, `DOCKER_HOST=ssh://`, the own ssh options of `sshfs` (also
+  `-F`), `mosh` (also abbreviated) and `rsync -e`, `ssh -P` (a tag that
+  selects a block of your ssh config), and any mention of `.ss…` outside an
+  ssh call in a command that does not only read: a change to `~/.ssh` can send
+  an approved alias elsewhere, and a list of writers is never complete
+  (`rsync`, `tar -C`, `ln -s` …), so only reads are listed (`cat`, `ls`,
+  `grep`, `head`, `diff` …), and a redirect into `.ss…` asks too. Write and
+  Edit on `~/.ssh` ask as well.
+- **The word ssh in quoted text runs freely, if every part of the line is a
+  text command:** a quoted argument of a command that only prints or searches
+  (`echo "use ssh"`, `grep "ssh" log`; not `rg`, `ag` or `sort`, which can
+  start a program), the quoted text field of a `gh` or `glab` issue, pr, mr
+  or release (`gh issue create --body "… ssh …"`), and the message of
+  `git commit -m` or `git tag -m`. Every part of the line must be one of these
+  commands, written as itself (no path, no variable, no wrapper), and outside
+  quotes the line has no `$`, backtick, parenthesis, brace or redirect (other
+  than `2>&1` or to `/dev/null`); inside double quotes a `$` comes only before
+  a name (`"$HOME"`); `printf` and `test` have no `-v`, which names a variable
+  the shell evaluates. Anywhere else, also unquoted
+  (`grep ssh README.md`) or in a heredoc, the hook cannot tell text from a call,
+  and it asks. A `#` comment is text only when no bracket, brace, parenthesis,
+  backslash or backtick comes before it in the command, and the command has no
+  carriage return: inside `(( ))`, `${ }` or `[[ ]]` the shell reads no comment
+  and runs what follows. The same holds for a heredoc.
+- **A short deny list is always refused:** `mkfs` or `wipefs` on a device,
+  `dd` to a device, `rm -rf /`, a fork bomb, anywhere in a command that names
+  an ssh-family call (quotes removed; as a command word, not as a file name;
+  not in plain text that a lone `echo` only prints).
+  It is an airbag, not the protection.
+- **Codex** cannot ask. It refuses and names a sentence with a code, for
+  example `maisecrets: allow ssh web1 123456`. Typed alone as your very next
+  prompt within 10 minutes, it allows writes to that host for 8 hours; the
+  prompt does not reach the model. Any other prompt ends the code. Codex sends
+  no sign of who wrote a prompt, so there the code is the proof.
+
+Measured on the maintainer's transcripts with `scripts/measure_ssh_consent.py
+--skip-cwd maisecrets` (2026-10-07, the sessions that work on maisecrets itself
+left out): real ops commands use `sudo` or `docker` on the remote side almost
+always, so most are writes (88 %), and the consent per host carries them. 112
+sessions with ssh, a median of 2 questions per session, 7 at the 90th
+percentile, 48 at most. The script ignores groups and the 8-hour expiry.
+
+A command name in another case (`SSH`, `Scp`) is the same program on macOS
+and in PowerShell, so it counts too. A command line over 8,192 characters
+that names ssh is not read at all: it asks (on Codex it is refused), so that
+the answer always comes before the client's timeout.
+
+Limits: maisecrets sees only the command text. A script file, an alias, a
+variable that holds `ssh` and was set in an earlier command, or a word built
+without the letters `ssh` in the text is not seen, and neither is a file that a
+heredoc writes and the same command then runs. A program that git or gh starts
+from its own configuration (a hook, an editor, a signing program, a browser)
+is not checked; it gets the quoted text only as data. maisecrets reads the
+command with its own small shell parser; other shell syntax that it reads
+differently from bash or zsh can still hide a call (the reviews of 0.6.7 found
+such forms only after one of the characters above). A mount (`sshfs`) or a tunnel
+(`ssh -f -N -L`) that one consent started stays after the 8 hours, and the
+local commands that use it ask nothing. On Codex the model sees the consent
+code; maisecrets refuses a command that carries the sentence, but not one that
+builds it at run time. The
+`Monitor` tool of Claude Code runs a shell command outside the maisecrets
+matcher (adding it would change the hook hash that Codex trusts). A program
+that runs as you outside the sandbox can write the consent store. A hard
+boundary needs host-side controls (restricted keys, `ForceCommand`, sudo
+rules). Git over ssh (`git push`) is out of scope.
+
 ## Rehydration policy (optional)
 
 The core does not change with this setting: a value stays out of the model on
@@ -762,9 +995,16 @@ one ignored for a wrong type keeps what it made stricter (`rehydration`,
 a setting. The refusal and `/maisecrets:status` name the file. In an unattended run (`claude -p`) nobody can answer a confirm, so the
 call is refused and the model reads the reason, never the value. The whole
 matrix, path by path: `tests/test_rehydration_matrix.py`.
-- **Under a cap.** `max_keys_per_session` (25) distinct keys per session and
-  `max_resolves_per_hour` (60) in total; above that the call is denied and the
-  reason names the cap. Every resolve writes one line to `~/.maisecrets/audit.log`
+- **Under a cap.** `max_keys_per_session` (200) distinct values per session and
+  hour, and `max_resolves_per_hour` (1000) in total; above that the call is
+  denied, and the reason names the command that raises the cap, for example
+  `/maisecrets:settings max_resolves_per_hour 2000` (in Codex
+  `maisecrets: set max_resolves_per_hour 2000`), typed as your own prompt. The cap
+  is a brake for a session that would send all of its values out at once; the
+  session rule above keeps every other value closed anyway. Replayed over five
+  months of the maintainer's sessions, the busiest hour needed 67 values and 118
+  uses; the old caps of 25 and 60 would have stopped 3 of 178 sessions that used
+  values. Every resolve writes one line to `~/.maisecrets/audit.log`
   (time, session, key, tool, command with placeholders; never a value):
   `python3 -m maisecrets.cli audit`.
 - **Not by the agent reading or changing the store.** A Bash command that
@@ -798,6 +1038,9 @@ does not need to look like a real secret, and these forms are never a hit:
   at `.local` or `.internal` (a person's mailbox there is found); IP addresses in
   the documentation ranges `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and
   `2001:db8::/32`, private and loopback addresses.
+- **An AWS key id in a SigV4 credential scope:** `X-Amz-Credential=AKIA…` in a presigned
+  URL, `Credential=AKIA…` in an `Authorization` header. The id names the key; it is not
+  the secret half. The same id anywhere else is still found.
 
 If maisecrets stops something that is not a secret, `/maisecrets:report last <why>`
 sends the rule name, never the value.
@@ -826,10 +1069,12 @@ Four sources, one scanner (`maisecrets/detect.py`):
   recognised by position (`password = …`, `api_key: "…"`, `user:pass@host`),
   with its heuristic filters ported (templated, indirect, sequential values
   are not secrets).
-- **Own rules**, six of them, for what none of the three covers: email (a
+- **Own rules** for what none of the three covers: email (a
   bounded regex; the unbounded one took 11 s on an 80 KB dotted run), phone
-  with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, and
-  full-length GitLab runner and deploy tokens.
+  with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, a
+  password with no user in a URL (`redis://:…@host`), the secret half of an AWS
+  key pair within a few lines after its `AKIA…` id, and full-length GitLab
+  runner and deploy tokens.
 - Prefixes newer than the vendored rulesets live in
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
   (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last
@@ -837,6 +1082,10 @@ Four sources, one scanner (`maisecrets/detect.py`):
 - A secret shape with a fixed length (gitleaks: `glpat-[\w-]{20}`) is
   extended to the end of the token characters, so a longer token does not
   leave its tail in the clear (found with a 24-char token, 2026-09-26).
+  The extension stops at a line break: a token that a line break splits
+  (a hard-wrapped terminal line) keeps the part after the break in the clear.
+  Joining the next line was measured on five months of session logs and left
+  out: nearly every candidate was the next `.env` line, not the rest of a key.
 
 IBAN, credit card and IP come from Presidio's regexes with our validators
 (mod-97, Luhn, public-range check). A card number without a word like
@@ -851,6 +1100,16 @@ printed: `scripts/replay_sessions.py --claude --codex`.
 What the plugin does not protect. Each item is a limit of the mechanism, not
 a to-do.
 
+- **The output of a command that fails reaches the model as it is (Claude
+  Code).** Claude Code reports a failed call through another hook event,
+  whose answer cannot replace the output. A value that a failing command
+  prints (`grep TOKEN .env` with exit 1, a script that prints its config and
+  stops) is not redacted, and it stays in the transcript. Measured over one
+  user's transcripts: 14 such outputs with a hit in 105,241 Bash calls over 90
+  days, 1 of them a secret. A command that ends in a pipe (`… | tail`) is
+  redacted as usual. maisecrets then stores the value (a repeat is redacted),
+  cleans the transcript on disk, tells the AI not to use it, and shows you a
+  line about it. See the threat model, "What is knowingly not defended".
 - **No hook, no protection.** Claude Chat, ChatGPT Chat, the web and the
   mobile apps run no plugin hooks. Cowork does, Claude Code does, Codex does.
 - **A client that rejects the manifest loads nothing and says nothing.**

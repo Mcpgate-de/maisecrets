@@ -31,13 +31,42 @@ def cmd_list(_: list[str]) -> int:
     live = [e for e in rows if not e.purged]
     print(f"{len(live)} value(s) stored, {len(rows) - len(live)} expired (only the masked form is kept).")
     print(f"{'key':<14} {'type':<7} {'kind':<18} {'age':>5} {'uses':>4} {'expires in':>10}  shown as")
+    from . import destinations
+    shown_before = time.time() - destinations.NEW_SECONDS
     for e in sorted(rows, key=lambda x: x.created):
         exp = "expired" if e.purged else f"{int(max(0, e.expires - time.time()) // 3600)}h"
         print(f"{e.key:<14} {e.type:<7} {e.kind:<18} {_age(e.created):>5} {e.uses:>4} {exp:>10}  {e.display or '-'}")
+        if not e.purged:
+            for line in _destination_lines(destinations.of(e.key), shown_before):
+                print(line)
     if v.backend.test_mode:
         print("\nbackend: jsonfile (TEST MODE, plaintext under ~/.maisecrets/)")
     print("\nTo delete one: /maisecrets:forget <key>. To delete everything: /maisecrets:status shows how.")
     return 0
+
+
+def _destination_lines(rec: dict, shown_before: float) -> list[str]:
+    """Where a secret was sent (secret_destinations, observe). A record, never a permission: the heading says so,
+    the count is coarse, and a local use is listed apart because nothing protects it."""
+    from . import destinations
+    seen = sorted(rec.get("seen", {}).values(), key=lambda d: -d.get("last", 0))
+    network = [d for d in seen if d.get("kind") == "network"]
+    local = [d for d in seen if d.get("kind") != "network"]
+    width = max([len(d.get("label", "")) for d in seen] + [20])
+    out = []
+
+    def row(d: dict) -> str:
+        new = "   new" if d.get("first", 0) > shown_before else ""
+        return (f"      {destinations.clean_label(d.get('label', '?')):<{width}}  "
+                f"{destinations.uses_text(d.get('uses', 0)):<6} "
+                f"last {destinations.when_text(d.get('last', 0))}{new}")
+    if network:
+        out.append("    Seen at (a record, not a permission)")
+        out += [row(d) for d in network]
+    if local:
+        out.append("    Local uses (not destination-protected)")
+        out += [row(d) for d in local]
+    return out
 
 
 def cmd_forget(args: list[str]) -> int:
@@ -48,6 +77,8 @@ def cmd_forget(args: list[str]) -> int:
     for raw in args:
         key = raw.strip("⟦⟧").split(":", 1)[0]
         status = v.forget(key)
+        if getattr(v, "destinations_kept", False):
+            print(f"{key}: its destination record could not be deleted now; /maisecrets:forget {key} again later.")
         if status == "ok":
             print(f"{key}: deleted. A placeholder for it no longer resolves anywhere.")
         elif status == "unknown":
@@ -245,6 +276,26 @@ def cmd_scan(args: list[str]) -> int:
 def cmd_config(_: list[str]) -> int:
     print(json.dumps(load_config(), indent=2))
     return 0
+
+
+def cmd_settings(args: list[str]) -> int:
+    """Show the settings a person decides, with their state. It changes nothing: a setting changes only from a
+    prompt the person typed (maisecrets/settings.py), never from a command the model runs."""
+    from . import settings
+    rest = [a for a in args if a != "--all"]
+    # KEY, KEY VALUE, or for the host list KEY add|remove HOST (field report on 0.6.6: the list's own form exited 1)
+    list_form = len(rest) == 3 and rest[0].lower() == "ssh_autonomous_hosts" and rest[1].lower() in ("add", "remove")
+    if rest and (len(rest) <= 2 or list_form) and rest[0].lower() in settings.TITLE:
+        # after a typed change the prompt hook already wrote it: show the card with the new state
+        print(settings.render(only=rest[0].lower()))
+        return 0
+    if rest and rest[0].lower() == "hints":
+        print("\n".join(settings._hint_lines()))
+        return 0
+    if rest:
+        print(f"maisecrets settings: {rest[0]!r} is no setting this command shows.\n")
+    print(settings.render(show_all="--all" in args))
+    return 1 if rest else 0
 
 
 def cmd_status(_: list[str]) -> int:
@@ -716,7 +767,7 @@ def cmd_repair(_: list[str]) -> int:
 COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_resolve, "audit": cmd_audit,
             "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
             "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut,
-            "forget": cmd_forget, "guard": cmd_guard}
+            "forget": cmd_forget, "guard": cmd_guard, "settings": cmd_settings}
 
 
 def _stdin_words() -> list[str]:
@@ -734,7 +785,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] in {"-h", "--help"}:
         print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | audit [n]\n"
-              "           | report [last|n|bug|feature] [text] | expire | scan [text] | config\n"
+              "           | report [last|n|bug|feature] [text] | expire | scan [text] | config | settings [--all]\n"
               "           | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>")
         return 0
     if argv[0] == "hook":

@@ -2,6 +2,117 @@
 
 ## Unreleased
 
+## [0.6.9] - 2026-10-08
+
+### Features
+
+- the caps on stored values are 200 per session and 1000 uses an hour, and you can raise them (493cf77)
+
+### Fixes
+
+- the mod's tries share one budget on the mods clock, and a test holds it; README and PRIVACY name every connection (26a2482)
+- the mod tries the next Python after an error exit too, within one 8 s budget; review round 1 of 0.6.9 (07fafe6)
+- the mod starts the plugin's Python with fixed arguments, without a shell or an environment read (0eec13d)
+
+### Other
+
+- Merge branch 'feat/limits-from-the-logs' into 'main' (8485966)
+
+## [0.6.8] - 2026-10-08
+
+### Fixes
+
+- a URL password that looks like a date counts as a date only if the calendar has it (3a46fc3)
+- the SigV4 scope ends at a separator; a URL password filter takes only a whole reference or a real date (567a1d5)
+- only a whole encoded reference or date in a URL password is text; the SigV4 scope must end at aws4_request (14b3402)
+- the end of a call commits only its own session and agent, however late; a failed call carries its hint (e68c7b7)
+- a password with no user in a URL is found (redis://:password@host) (282281e)
+- the AWS key id in a presigned URL or a SigV4 header is no secret (ebec40b)
+- a destination is seen only after the call ran; a declined call leaves no record (04f268b)
+
+### Other
+
+- Merge branch 'fix/seen-only-after-the-call' into 'main' (6ae1b4d)
+
+## [0.6.7] - 2026-10-08
+
+### Features
+
+- maisecrets notes where each stored secret was sent, and /maisecrets:list shows it (dd74bc9)
+
+### Fixes
+
+- a file label uses / on Windows, and only the home folder itself becomes ~ (cc1ee66)
+- a heredoc after a parenthesis, any carriage return, and $ in double quotes ask (review round 7) (adb691e)
+- an ssh word in a comment the shell may not read as one asks; the parser stays as in 0.6.6 (review round 6) (0de44da)
+- a # or << inside (( )), $[ ], [[ ]] or ${ } is no comment and no heredoc (review round 5) (d6c3339)
+- read -v from the dequoted words (review round 5) (aa05dc4)
+- escaped space before # and printf -v ask; a record goes when its value expires (review round 4) (3120795)
+- text exemption only for a line that runs nothing else (review round 3) (b335e82)
+- ssh text rule only for quoted text, destination record bounded (review round 2) (204d745)
+- review round 1 of 0.6.7 (codex): text that a later part runs stays an ssh call; observing never waits (9e7d60f)
+- the word ssh in text (an issue body, a grep pattern) no longer asks (25778ab)
+- /maisecrets:settings ssh_autonomous_hosts add HOST shows the card instead of an error (dff5443)
+
+### Other
+
+- Merge branch 'feat/secret-destinations-observe' into 'main' (0760a76)
+
+## [0.6.6] - 2026-10-07
+
+### Features
+
+- autonomous hosts, where the AI may change things over ssh without asking in every session (df1680c)
+- a value in the output of a failed call is stored, cleaned from the transcript and named to the AI (16ae737)
+- the settings read as cards with the next command, a change shows its result, and hints can be reset (fcf41dc)
+
+### Fixes
+
+- a group name in the autonomous hosts stands for its members only; the failed-output message says when cleaning failed (dafba9b)
+- the failed-output message says what was stored and whether the transcript is cleaned (7a70dfe)
+- a command that calls a consent writer by name is refused, and a wrong Codex sentence ends the code (18c1ef4)
+- with ssh_consent on, a yes allows only the asked command; a host window opens only from your own prompt (8be6a89)
+
+### Other
+
+- Merge branch 'feat/settings-ux-ssh-per-command' into 'main' (26b7252)
+
+## [0.6.5] - 2026-10-07
+
+### Features
+
+- /maisecrets:settings shows what you decide, and a hint names ssh_consent once (f137459)
+
+### Fixes
+
+- an sdk prompt changes no setting, since a program a tool started can send one (09a02c3)
+- only a prompt the person typed changes a setting, and the hint comes once under parallel hooks (3694cf8)
+
+### Other
+
+- Merge branch 'feat/settings-and-hints' into 'main' (1fdb482)
+
+## [0.6.4] - 2026-10-07
+
+### Features
+
+- with ssh_consent on, a write over ssh asks once per host, a read runs (c0c768d)
+
+### Fixes
+
+- the guard reads the switch of the copies that are installed, by their exact ids (codex review) (97b6950)
+- a second maisecrets copy switched off no longer silences the guard (1121958)
+- command names in any case, a size cap that answers in time (opus review, round 3) (7ba4ed8)
+- ~/.ssh is guarded by a list of reads, not of writers (codex review, round 3) (f6daea9)
+- the deny list and the ~/.ssh rule read the whole command (opus review of the repair) (6368ed8)
+- redirects are read from the raw text, mosh and rsync ports keep the host key (codex review of the repair) (2a3cbad)
+- consent keys follow ssh's first value, and the hidden targets ask (opus review) (ff33819)
+- consent keys carry user and port, forwards and content reads are writes (codex review) (9522730)
+
+### Other
+
+- Merge branch 'feat/8-every-ssh-command-can-ask-first' into 'main' (cdfd065)
+
 ## [0.6.3] - 2026-10-06
 
 ### Fixes
