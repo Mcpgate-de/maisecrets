@@ -999,6 +999,9 @@ does not need to look like a real secret, and these forms are never a hit:
   at `.local` or `.internal` (a person's mailbox there is found); IP addresses in
   the documentation ranges `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and
   `2001:db8::/32`, private and loopback addresses.
+- **An AWS key id in a SigV4 credential scope:** `X-Amz-Credential=AKIA…` in a presigned
+  URL, `Credential=AKIA…` in an `Authorization` header. The id names the key; it is not
+  the secret half. The same id anywhere else is still found.
 
 If maisecrets stops something that is not a secret, `/maisecrets:report last <why>`
 sends the rule name, never the value.

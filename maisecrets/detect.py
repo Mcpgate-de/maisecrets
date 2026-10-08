@@ -1079,6 +1079,11 @@ def _lower(text: str) -> str:
     return text.lower().replace("i\u0307", "i")
 
 
+# X-Amz-Credential=AKIA…/20261008/eu-central-1/s3/aws4_request: the access key id names the key, it is not the
+# secret half; a presigned URL carries it in the clear by design (corpus of 0.6.7: 142 such hits in tool output)
+_SIGV4_CREDENTIAL_RE = re.compile(r"(?:\bX-Amz-Credential|\bCredential)(?:=|%3[Dd])$")
+
+
 def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins."""
     if not text:
@@ -1159,6 +1164,8 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue   # a UUID, an elided value (sk-...), or a label that names a derived thing (secret_id)
             if rule.id in ("ds-basic-auth", "curl-auth-user") and _pass_equals_user(m.group(0), secret):
                 continue
+            if rule.id == "aws-access-token" and _SIGV4_CREDENTIAL_RE.search(text, max(0, start - 24), start):
+                continue   # the key id in a SigV4 credential scope (a presigned URL, an Authorization header)
             if rule.id == "hashicorp-tf-password" and not _ds_value_ok(secret.strip("\"'")):
                 continue
             if rule.id == "phone" and not _phone_ok(text, start, secret):

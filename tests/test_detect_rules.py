@@ -437,6 +437,19 @@ class ScanRuleTests(unittest.TestCase):
         self.assertEqual(kinds(text, enabled=set()), [])
         self.assertEqual(detect.scan(""), [])
 
+    def test_the_key_id_in_a_sigv4_credential_scope_is_not_a_secret(self):
+        kid = "AKIA" + rnd(16, string.ascii_uppercase + "234567")       # base32, as the gitleaks rule reads it
+        scope = f"{kid}%2F20261008%2Feu-central-1%2Fs3%2Faws4_request"
+        for text in (f"https://b.s3.amazonaws.com/k?X-Amz-Credential={scope}&X-Amz-Signature=" + "9f3c" * 16,
+                     f"https://b.s3.amazonaws.com/k?x-amz-algorithm=AWS4&X-Amz-Credential%3D{scope}",
+                     f"Authorization: AWS4-HMAC-SHA256 Credential={kid}/20261008/eu-central-1/s3/aws4_request"):
+            with self.subTest(text=text[:40]):
+                self.assertEqual(kinds(text), [])
+        # the same id anywhere else stays a hit: it shows where the secret half is (and the premise of the cases)
+        for text in (f"aws_access_key_id = {kid}", f"export AWS_ACCESS_KEY_ID={kid}", f"id {kid} in a note"):
+            with self.subTest(text=text[:40]):
+                self.assertEqual(kinds(text), [("aws-access-token", kid)])
+
     def test_the_first_rule_to_claim_a_span_wins(self):
         ghp = "ghp_" + rnd(36)
         # detect-secrets runs before gitleaks: the keyword rule claims the span of the github token
