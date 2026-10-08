@@ -437,6 +437,18 @@ class ScanRuleTests(unittest.TestCase):
         self.assertEqual(kinds(text, enabled=set()), [])
         self.assertEqual(detect.scan(""), [])
 
+    def test_a_url_password_with_no_user_is_a_secret(self):
+        pw = rnd(14, AN)
+        self.assertEqual(kinds(f"REDIS_URL=redis://:{pw}@cache.example.org:6379/0"), [("url-password-no-user", pw)])
+        self.assertEqual(kinds(f"rediss://:{pw}@cache.internal:6380"), [("url-password-no-user", pw)])
+        # a reference, a default word, a short value and a port stay text, as for a URL with a user
+        for text in ("redis://:${REDIS_PASSWORD}@redis:6379", "redis://:changeme@localhost", "redis://:pw@localhost",
+                     "see https://:443@x"):
+            with self.subTest(text=text):
+                self.assertEqual(kinds(text), [])
+        self.assertEqual(kinds(f"postgres://app:{pw}@db.example.org/app"), [("ds-basic-auth", pw)],
+                         "with a user the detect-secrets rule keeps the span")
+
     def test_the_key_id_in_a_sigv4_credential_scope_is_not_a_secret(self):
         kid = "AKIA" + rnd(16, string.ascii_uppercase + "234567")       # base32, as the gitleaks rule reads it
         scope = f"{kid}%2F20261008%2Feu-central-1%2Fs3%2Faws4_request"

@@ -455,6 +455,10 @@ OWN_RULES: list[dict] = [
     # bare token prefixes newer than the vendored rulesets live in rules/prefixes.txt (see _load_prefixes)
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
+    # a password with no user in a URL: redis://:pw@host, the form Redis and some brokers use. ds-basic-auth needs a
+    # user before the colon; same characters and the same value filter otherwise (corpus of 0.6.7)
+    {"id": "url-password-no-user", "type": "SECRET", "secret_group": 1, "validator": "ds_value",
+     "regex": r"://:([^:/?#\[\]@!$&'()*+,;=\s]+)@"},
     # the secret half of an AWS key pair has no prefix of its own; the console, a CSV export
     # and a chat paste show it within a few lines after the AKIA… id (field report, 2026-09-26)
     {"id": "aws-secret-after-access-key", "type": "SECRET", "secret_group": 1,
