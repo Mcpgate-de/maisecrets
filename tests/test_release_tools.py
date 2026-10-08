@@ -96,6 +96,32 @@ class GitHubWaitTests(unittest.TestCase):
         with mock.patch.object(w, "_main_moved", lambda sha: True), mock.patch.object(sys, "stdout", io.StringIO()):
             self.assertEqual(w.main(["wait", "deadbeef"]), 0)
 
+    def test_a_cancelled_run_that_a_newer_one_replaced_is_no_failure(self):
+        # release of 0.6.6: the commit had a cancelled run and, beside it, a newer green one; the gate went red
+        w = _load("wait_for_github_checks")
+
+        class _Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def runs(newest: str) -> dict:
+            return {"check_runs": [
+                {"id": 1, "name": "tests (windows-latest)", "status": "completed", "conclusion": "cancelled"},
+                {"id": 2, "name": "tests (macos-latest)", "status": "completed", "conclusion": "cancelled"},
+                {"id": 3, "name": "tests (windows-latest)", "status": "completed", "conclusion": newest},
+                {"id": 4, "name": "tests (macos-latest)", "status": "completed", "conclusion": "success"}]}
+        for newest, want in (("success", 0), ("failure", 1)):
+            with self.subTest(newest), \
+                    mock.patch.object(w.urllib.request, "urlopen",
+                                      lambda req, timeout=30, n=newest: _Resp(json.dumps(runs(n)).encode())), \
+                    mock.patch.object(w, "_main_moved", lambda sha: False), \
+                    mock.patch.object(w.time, "sleep", lambda s: None), \
+                    mock.patch.object(sys, "stdout", io.StringIO()):
+                self.assertEqual(w.main(["wait", "deadbeef"]), want)
+
 
 if __name__ == "__main__":
     unittest.main()

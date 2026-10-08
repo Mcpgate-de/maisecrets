@@ -18,7 +18,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | false alarms in a real tree | `python3 scripts/measure_false_alarms.py <dir> [--samples]` | by hand after a detector change: the hits a Read would act on, per rule, with the shape of each value and never the value; the regression corpus of normal work is `tests/fp_corpus.py` (`tests/test_fp_corpus.py`), a night of autonomous work is `tests/test_night_run.py` |
 | Windows end to end | `GITLAB_COM_TOKEN=… python3 scripts/windows_e2e.py [--rev REV]` | by hand before a release that touches the hooks, the launchers or the harness: GitLab-hosted Windows runners of a separate project, in three shapes (PowerShell 7, Windows PowerShell 5.1, Git Bash). Each job runs `harness/windows/shell_probe.py` (which shell runs a hook, and the `hooks.json` command in each shell) and `harness/run.py` with the shell tool the client offers (`MAISECRETS_HARNESS_SHELL_TOOL`) |
 
-916 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
+957 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
 the tested commit of a release (branch `ci`) and on a push to main without a release.
 
 ## What makes a test count

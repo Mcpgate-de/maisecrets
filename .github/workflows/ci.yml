@@ -3,8 +3,10 @@
 name: ci
 on:
   push:
-    # ci: the tested commit of a release, before the release commit reaches main
-    branches: [main, ci]
+    # ci: the tested commit of a release, before the release commit reaches main. ci-check: a commit a maintainer
+    # wants on Windows and macOS before a merge in GitLab (one branch, pushed over; no draft pull request, whose
+    # deleted branch GitHub keeps listing)
+    branches: [main, ci, ci-check]
   pull_request:
 # a newer push to the same ref makes the older run worthless: it is cancelled, not finished
 concurrency:

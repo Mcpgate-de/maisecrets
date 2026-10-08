@@ -109,6 +109,37 @@ class State(unittest.TestCase):
             self.assertIn("cannot be changed here", settings.render())
 
 
+class EveryShownCommandWorks(unittest.TestCase):
+    """Every /maisecrets:settings command the list prints runs through the hook and the command without an error.
+    The list told the user `ssh_autonomous_hosts add HOST`, and the command then exited 1 (field report on 0.6.6):
+    each part had a test, the path the user types had none."""
+
+    def test_each_printed_command_changes_or_shows_without_an_error(self):
+        import re as _re
+        from maisecrets import cli
+        _reset(ssh_autonomous_hosts=["ops1"])
+        text = settings.render(show_all=True)
+        _reset(ssh_autonomous_hosts=["ops1"], secret_destinations="off", ssh_consent=True)
+        text += settings.render(show_all=True)      # the commands a card shows only in another state
+        shown = sorted(set(_re.findall(r"(/maisecrets:settings [^\n(]+?)\s*(?:\(|$)", text, _re.M)))
+        commands = [c.replace("HOST", "ops2").replace("KEY default", "ssh_consent default").strip() for c in shown]
+        self.assertGreater(len(commands), 10, commands)
+        for must in ("/maisecrets:settings secret_destinations observe", "/maisecrets:settings ssh_consent off",
+                     "/maisecrets:settings ssh_autonomous_hosts add ops2"):
+            self.assertIn(must, commands, "a command of a card is missing from the population")
+        for command in commands:
+            with self.subTest(command):
+                _reset(ssh_autonomous_hosts=["ops1"])
+                out = _prompt(command)
+                self.assertNotEqual(out.get("decision"), "block", out)
+                args = command.split()[1:]
+                with mock.patch("sys.stdout") as stdout:
+                    rc = cli.main(["settings", *args])
+                said = "".join(c.args[0] for c in stdout.write.call_args_list)
+                self.assertEqual(rc, 0, said)
+                self.assertNotIn("is no setting", said)
+
+
 class Change(unittest.TestCase):
     def setUp(self):
         _reset()

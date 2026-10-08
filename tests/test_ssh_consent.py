@@ -93,6 +93,15 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ls -la", "git status", "rsync -a ./a/ ./b/", "ls ~/.ssh", "grep \"ssh\" /var/log/auth.log",
             "echo 'use ssh keys'", "git push ssh://git@example.org/x.git main", "grep Host ~/.ssh/config",
             "cat ~/.ssh/config", "ls -la ~/.ssh", "echo 'ssh web1 mkfs.ext4 /dev/sda'",
+            # the quoted text field of an issue or merge request (0.6.6 asked for an issue body)
+            'gh issue create --title t --body "note an ssh host first"', "glab mr create -d 'ssh consent docs'",
+            'gh pr create -t "fix ssh consent" -b "the word ssh in a body"', "gh issue comment 8 --body='ssh is text'",
+            'gh release create v1 --notes "ssh consent per command"',
+            # round 3: the message of a commit or tag; brackets and <> inside double quotes are text
+            'git commit -m "fix ssh consent"', 'git tag -m "ssh 1" v1', 'gh issue create --body "fix (ssh) <web1>"',
+            'gh issue create --body "the ssh key in $HOME/.config"',
+            'echo "a"; grep "ssh" f', "git clone ssh://git@example.org/r.git",
+            'grep "ssh" f 2>/dev/null', 'ls ~/x | grep -iE "ssh|prod"', "cd /x && grep 'ssh' log 2>/dev/null",
             "ls -la ~/.ssh > /tmp/ssh-list.txt", "grep Host ~/.ssh/config | head",
             "git commit -F - <<'EOF'\nfix the ssh docs\nEOF\n",
             "pkill -f \"ssh -N tunnel\"",
@@ -108,6 +117,10 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ssh web1 'uname -a; df -h'",
         ],
         "write": [
+            # round 6 (Opus): a parser that reads a real comment as code opens a quote at its apostrophe
+            "echo [ # don't\necho x; ssh web1 reboot # won\\'t", "grep -c x[ f # it's\nssh web1 reboot",
+            "echo x \\\n# don't\nssh web1 reboot", "echo ${x# y}; ssh web1 reboot",
+            "echo x\\ #\nssh web1 sudo reboot",
             "ssh web1 'systemctl restart nginx'", "ssh web1", "ssh web1 'sudo cat /etc/hosts'",
             "ssh web1 'cat /etc/shadow'", "ssh web1 'cat ../../etc/passwd'", "ssh web1 'cat /var/log/*.log'",
             "ssh web1 'cat ~/notes'", "ssh web1 'cat /proc/1/environ'", "ssh web1 'cat /root/.bashrc'",
@@ -145,6 +158,64 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ssh -o 'SetEnv BASH_ENV=/x' web1 uptime", "sshfs -o reconnect web1:/ /mnt/w", "autossh -M 0 -f -N web1",
         ],
         "unknown": [
+            # rounds 4 to 6 (Opus, codex): a # or << the parser reads as a comment or heredoc, where the shell does
+            # not and runs the ssh after it. A comment or heredoc after a bracket, brace, parenthesis, backslash or
+            # backtick is not sure, and an ssh word in it asks
+            "echo \\ #; ssh web1 sudo reboot",
+            "(( x |# 2 )); ssh web1 reboot", "(( x=(#) )); ssh web1 reboot", "(( 1 # 2 )); ssh web1 reboot",
+            "[[ a =~ (#) ]]; ssh web1 reboot", "[[ a =~ x|# ]]; ssh web1 reboot", "echo $[(#)]; ssh web1 reboot",
+            "case a in (#) ;; esac; ssh web1 reboot", "ls *(#qN); ssh web1 reboot",
+            "echo $[1<<ZQ]\nssh web1 reboot\nZQ", "echo ${x:-\\} # }; ssh web1 reboot",
+            "echo ${x/\\}/ # }; ssh web1 reboot", "case a in a) ;; b) ;; esac; (( x |# 2 )); ssh web1 reboot",
+            "echo ${y:-a}} ${x:- # }; ssh web1 reboot", "(( x = 1 +\n#2 )); ssh web1 reboot",
+            "echo ${x:-a\n# }; ssh web1 reboot", "echo ${x:-<<ZQ}\nssh web1 reboot\nZQ",
+            "echo \\) \\); (( x |# 2 )); ssh web1 reboot", "echo \\] \\]; echo $[1<<ZQ]\nssh web1 reboot\nZQ",
+            # a false heredoc after an ssh call fed by a real one: web2 must not hide behind web1's write
+            "ssh web1 cat <<A\nx\nA\necho ${x:-<<ZQ}\nssh web2 reboot\nZQ",
+            "ssh web1 cat <<A\nx\nA\n((1<<ZQ))\nssh web2 reboot\nZQ",   # codex round 7: a shift in (( ))
+            # Opus round 7: a << in a group that closes on its line is no heredoc; a CR moves the parser's quotes
+            "(( cat <<EOF ))\nssh web1 reboot\nEOF\n", "echo $(cat <<EOF)\nssh web1 reboot\nEOF\n",
+            "diff <(cat <<EOF) /dev/null\nssh web1 reboot\nEOF\n", "git commit -F <(cat <<EOF)\nssh web1 reboot\nEOF\n",
+            "cat <<A; echo $(cat <<EOF)\nA\nssh web1 reboot\nEOF\n",
+            "cat <<EOF\nEOF\r\n'\nEOF\n' # '; ssh web1 reboot\n",
+            "cat <<EOF\nEOF\r\ncat <<B\nEOF\nssh web1 reboot\nB\n",
+            # zsh runs a command substitution that ${(e)…} builds inside double quotes
+            'echo "${(e):-$""(ssh web1 reboot)}"', 'echo "${(e):-\\$(ssh web1 reboot)}"',
+            'echo "${(e):-\\`ssh web1 reboot\\`}"',
+            # still unread: the text of these runs as a command (shell, alias, pipe into a shell, a program word)
+            "gh alias set x '!ssh web1 reboot'", "echo ssh web1 reboot | bash", 'gh api x --jq "ssh" | sh',
+            # text written where a later part runs it (codex review of 0.6.7; the quoted form ran freely on 0.6.6)
+            "echo ssh web1 reboot > /tmp/x; bash /tmp/x", 'echo "ssh web1 reboot" > /tmp/x; bash /tmp/x',
+            'tee /tmp/x <<< "ssh web1 reboot"; bash /tmp/x', 'printf "ssh web1 reboot" >> run.sh && sh run.sh',
+            'grep ssh hosts.txt > /tmp/h; bash /tmp/h',
+            # Opus review of 0.6.7: a "data" command that starts ssh itself, or text that is not an issue field
+            "rg --pre ssh . web1", 'rg --pre "ssh" . web1', "echo reboot > web1; rg --pre ssh . web1",
+            "sort --compress-program=ssh f", "curl -T payload scp://web1/etc/cron.d/x",
+            "curl -Q 'rm /etc/x' sftp://web1/", "gh codespace ssh -c cs1 -- sudo reboot",
+            'GIT_SSH_COMMAND="ssh web1 reboot;:" gh repo clone git@github.com:o/r', "gh alias set x 'codespace ssh'",
+            "gh extension exec ssh", "true ssh web1 reboot", "grep -r ssh . > ~/.bashrc",
+            'echo "ssh web1 reboot" >> ~/.bashrc', "grep ssh README.md", 'gh issue create --label "ssh web1 reboot"',
+            "glab alias set y '!ssh web1 uptime'", 'gh repo create x -d "ssh web1 reboot"',
+            'xargs -I{} ssh {} reboot < hosts',
+            # round 3 (codex, Opus): a text mention whose line runs something else, or a command that runs its text
+            'ag --pager "ssh web1 reboot" x .', 'sort --compress-prog "ssh" f', 'rg --hostname-bin "ssh" x',
+            'git filter-branch --tree-filter "ssh web1 reboot" HEAD', 'git rebase --exec "ssh web1 reboot" HEAD~1',
+            "git bisect run ssh web1 reboot", 'git difftool --extcmd "ssh web1 reboot" HEAD',
+            'git filter-branch --tree-filter "ssh://x; ssh web1 reboot" HEAD',
+            'gh issue create -t x -b "ssh web1 reboot" || $_', 'gh() { eval "$4"; }; gh issue create -b "ssh web1"',
+            '/tmp/gh issue create -b "ssh web1 reboot"', '$(echo "ssh web1 reboot")', 'x=$(echo "ssh web1"); $x',
+            'printf -v c "ssh web1 reboot"; $c', 'sort -o /tmp/x.sh <<< "ssh web1 reboot"; bash /tmp/x.sh',
+            'bash <(echo "ssh web1 reboot")', 'echo "ssh web1 reboot"; $_', 'echo "$(ssh web1 reboot)"',
+            'echo "`ssh web1 reboot`"', "echo \"$(sh -c 'ssh web1 reboot')\"",
+            "gh issue create -b \"$(sh -c 'ssh web1 reboot')\"", 'BROWSER="ssh web1" gh issue create -w',
+            'timeout 5 echo "ssh web1"', "grep 'ssh' f ${IFS}x",
+            'gh issue create -b "ssh web1 reboot"; gh issue view 1 | sh', 'echo "ssh web1 reboot"; fc -s',
+            # round 4 (Opus): -v takes an array name, and zsh runs the $(…) in its subscript
+            "printf -v 'a[$(ssh web1 reboot)]' x", "test -v 'a[$(ssh web1 reboot)]'", "[ -v 'a[$(ssh web1 reboot)]' ]",
+            "printf '-v' 'a[$(ssh web1 reboot)]' x",
+            # round 5 (codex): the shell joins adjacent quotes, so these are -v too
+            "printf -''v 'a[$(ssh web1 reboot)]' x", "printf -v'' 'a[$(ssh web1 reboot)]' x",
+            "test -''v 'a[$(ssh web1 reboot)]'", "[ '-'v 'a[$(ssh web1 reboot)]' ]",
             "bash -c \"ssh web1 reboot\"", "sh -c 'ssh web1 reboot'", "eval ssh web1 reboot",
             "sshpass -p x ssh web1 reboot", "setsid ssh web1 reboot", "flock /tmp/l ssh web1 reboot",
             "systemd-run ssh web1 reboot", "screen -dm ssh web1 reboot", "tmux new -d 'ssh web1 reboot'",
@@ -212,7 +283,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 218, "a row was added or lost: update the count")
+        self.assertEqual(counted, 328, "a row was added or lost: update the count")
 
     def test_a_long_command_is_answered_in_time(self):
         # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)

@@ -274,9 +274,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 28 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 29 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 90 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 94 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -493,6 +493,35 @@ feature brings it back, once. `"tips": false` turns hints off with the tips.
 The settings list shows each hint as `not shown yet` or `shown` with its date;
 `/maisecrets:settings hints reset` (or `maisecrets: reset hints`) lets them
 come once more and changes no protection setting.
+
+### Where your secrets went
+
+maisecrets notes, on this computer only, where each stored secret was handed
+to a tool call: a host named in the call (from a URL, also one in quoted text,
+not one in a shell comment), an ssh host, or an MCP server and tool. A file or a
+command without a host is listed apart, as a local use. `/maisecrets:list`
+shows it under each secret:
+
+```
+SECRET_c7      SECRET  github_pat            3d   14        21h  -
+    Seen at (a record, not a permission)
+      other.example.net     1×     last less than an hour ago   new
+      api.github.com        10+×   last 2 hours ago
+    Local uses (not destination-protected)
+      a file in ~/proj/     2–9×   last 3 days ago
+```
+
+This is a record, not a permission, and it stops nothing. It is noted when
+the value is handed to the call, so a call you then decline in the client's
+dialog is listed too. `new` marks a destination first seen in the
+last 24 hours. When a secret that you used at one destination
+(3 times on one day) goes to a new one for the first time, the AI tells you
+once, in a sentence; this note does not come again. maisecrets does not
+judge whether a destination is safe. Asking before a new destination comes
+in a later version. `/maisecrets:settings secret_destinations off` stops the
+record; nothing leaves the computer either way. When a value expires, its
+record goes with it (if the record is busy at that moment, it goes 30 days
+later with the metadata); forget and wipe delete it too.
 
 ## Vault
 
@@ -850,6 +879,22 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   (`rsync`, `tar -C`, `ln -s` …), so only reads are listed (`cat`, `ls`,
   `grep`, `head`, `diff` …), and a redirect into `.ss…` asks too. Write and
   Edit on `~/.ssh` ask as well.
+- **The word ssh in quoted text runs freely, if every part of the line is a
+  text command:** a quoted argument of a command that only prints or searches
+  (`echo "use ssh"`, `grep "ssh" log`; not `rg`, `ag` or `sort`, which can
+  start a program), the quoted text field of a `gh` or `glab` issue, pr, mr
+  or release (`gh issue create --body "… ssh …"`), and the message of
+  `git commit -m` or `git tag -m`. Every part of the line must be one of these
+  commands, written as itself (no path, no variable, no wrapper), and outside
+  quotes the line has no `$`, backtick, parenthesis, brace or redirect (other
+  than `2>&1` or to `/dev/null`); inside double quotes a `$` comes only before
+  a name (`"$HOME"`); `printf` and `test` have no `-v`, which names a variable
+  the shell evaluates. Anywhere else, also unquoted
+  (`grep ssh README.md`) or in a heredoc, the hook cannot tell text from a call,
+  and it asks. A `#` comment is text only when no bracket, brace, parenthesis,
+  backslash or backtick comes before it in the command, and the command has no
+  carriage return: inside `(( ))`, `${ }` or `[[ ]]` the shell reads no comment
+  and runs what follows. The same holds for a heredoc.
 - **A short deny list is always refused:** `mkfs` or `wipefs` on a device,
   `dd` to a device, `rm -rf /`, a fork bomb, anywhere in a command that names
   an ssh-family call (quotes removed; as a command word, not as a file name;
@@ -875,7 +920,13 @@ the answer always comes before the client's timeout.
 
 Limits: maisecrets sees only the command text. A script file, an alias, a
 variable that holds `ssh` and was set in an earlier command, or a word built
-without the letters `ssh` in the text is not seen. A mount (`sshfs`) or a tunnel
+without the letters `ssh` in the text is not seen, and neither is a file that a
+heredoc writes and the same command then runs. A program that git or gh starts
+from its own configuration (a hook, an editor, a signing program, a browser)
+is not checked; it gets the quoted text only as data. maisecrets reads the
+command with its own small shell parser; other shell syntax that it reads
+differently from bash or zsh can still hide a call (the reviews of 0.6.7 found
+such forms only after one of the characters above). A mount (`sshfs`) or a tunnel
 (`ssh -f -N -L`) that one consent started stays after the 8 hours, and the
 local commands that use it ask nothing. On Codex the model sees the consent
 code; maisecrets refuses a command that carries the sentence, but not one that

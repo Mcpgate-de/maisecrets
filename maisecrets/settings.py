@@ -17,7 +17,7 @@ from .vault import (CONFIG, DEFAULT_CONFIG, HOME, ConfigError, LockTimeout, _che
                     load_config)
 
 # Every key of the config is in exactly one class (a test holds it): a new key without one is a test failure.
-DISCOVERABLE = ("ssh_consent", "ssh_autonomous_hosts", "rehydration")
+DISCOVERABLE = ("ssh_consent", "ssh_autonomous_hosts", "secret_destinations", "rehydration")
 ADVANCED = ("ssh_host_groups", "ssh_approval", "resolve_in_files", "ssh_via_sandbox", "block_at_mentions",
             "rewrite_prompts", "scrub_transcript", "strip_hidden_characters", "regions", "ttl_seconds",
             "renew_on_use", "tips", "shortcut", "guard", "pass_agent_reports", "gateway_servers")
@@ -26,6 +26,7 @@ INTERNAL = ("backend", "allow_plaintext_store", "report_url", "max_ttl_seconds",
 
 TITLE = {
     "ssh_consent": "SSH consent", "ssh_autonomous_hosts": "Autonomous hosts",
+    "secret_destinations": "Secret destinations",
     "rehydration": "Rehydration", "ssh_host_groups": "SSH host groups",
     "ssh_approval": "SSH approval", "resolve_in_files": "Values in files", "ssh_via_sandbox": "Values over ssh",
     "block_at_mentions": "Block @file mentions", "rewrite_prompts": "Rewrite prompts",
@@ -38,6 +39,7 @@ TITLE = {
 MEANING = {
     "ssh_consent": "Ask before each ssh command that changes something on a host.",
     "ssh_autonomous_hosts": "Hosts where the AI may change things over ssh without asking, in every session.",
+    "secret_destinations": "Notes where each stored secret is sent, on this computer only. Never stops a call.",
     "rehydration": "How a stored value goes into a tool call.",
     "ssh_host_groups": "Hosts that one typed ssh window covers together.",
     "ssh_approval": "Under rehydration confirm: ask per command, or once per value and session for ssh.",
@@ -61,7 +63,8 @@ CHOICE_TEXT = {
                     ("block", "never put a stored value into a tool call")),
     "ssh_approval": (("per-command", "ask for each command"), ("per-session", "ask once per value and session")),
 }
-GROUPS = (("Protection", ("ssh_consent", "ssh_autonomous_hosts")), ("Using stored values", ("rehydration",)))
+GROUPS = (("Protection", ("ssh_consent", "ssh_autonomous_hosts", "secret_destinations")),
+          ("Using stored values", ("rehydration",)))
 ADVANCED_GROUPS = (("Stored values", ("ttl_seconds", "renew_on_use", "resolve_in_files", "gateway_servers")),
                    ("ssh", ("ssh_host_groups", "ssh_approval", "ssh_via_sandbox")),
                    ("Prompts and tool output", ("block_at_mentions", "rewrite_prompts", "scrub_transcript",
@@ -70,7 +73,8 @@ ADVANCED_GROUPS = (("Stored values", ("ttl_seconds", "renew_on_use", "resolve_in
 
 # what a prompt may set; any other key is edited in config.json by hand
 _BOOL_WORDS = {"on": True, "true": True, "off": False, "false": False}
-_CHOICES = {"rehydration": ("automatic", "confirm", "block"), "ssh_approval": ("per-command", "per-session")}
+_CHOICES = {"rehydration": ("automatic", "confirm", "block"), "ssh_approval": ("per-command", "per-session"),
+            "secret_destinations": ("observe", "off")}
 _BOOL_KEYS = tuple(k for k in DISCOVERABLE + ADVANCED if isinstance(DEFAULT_CONFIG.get(k), bool))
 
 # the whole prompt, nothing else: a sentence inside a longer prompt is text for the model, not an order
@@ -123,6 +127,14 @@ def _card(key: str, cfg: dict) -> list[str]:
         lines.append(f"    {mode:<12}{text}")
     if key in (cfg.get("policy_keys") or []):
         lines.append("    An administrator's policy sets it; it cannot be changed here.")
+    elif key == "secret_destinations":
+        from . import destinations
+        n, total, multi = destinations.summary()
+        lines.append(f"    Seen so far: {n} secret(s), {total} destination(s), {multi} with more than one. "
+                     "/maisecrets:list shows them.")
+        lines.append("    Asking before a new destination (protect) comes in a later version.")
+        if value == "off":
+            lines.append("    Turn on: /maisecrets:settings secret_destinations observe")
     elif key == "ssh_autonomous_hosts":
         lines.append("    Add: /maisecrets:settings ssh_autonomous_hosts add HOST   (as the ssh call writes it, "
                      "user@host:port)")
@@ -268,6 +280,24 @@ HINTS = {
                   "prompt: maisecrets: set ssh_consent on (or off, so the question does not come again). "
                   "Do not change settings yourself."),
     },
+}
+HINTS["secret_destinations"] = {
+    "revision": 1,
+    # no destination and no secret name in the text: an injection that caused the new destination cannot use the
+    # hint as an instruction ("allow …"); the list, rendered by maisecrets, names the destination
+    "claude": ("maisecrets notes, on this computer only, where stored secrets are sent. A call with a stored secret "
+               "just named a host that this secret was not used with before. maisecrets only notes this and did not "
+               "stop the call; it does not judge whether a destination is safe. Mention this once, in one or two "
+               "sentences, after your answer, and tell the user that /maisecrets:list shows where each secret was "
+               "used. If the user does not want this note again, tell them to send this as their own prompt: "
+               "/maisecrets:settings secret_destinations observe. Do not change settings yourself and do not call any "
+               "destination safe or approved."),
+    "codex": ("maisecrets notes, on this computer only, where stored secrets are sent. A call with a stored secret "
+              "just named a host that this secret was not used with before. maisecrets only notes this and did not "
+              "stop the call; it does not judge whether a destination is safe. Mention this once, in one or two "
+              "sentences, after your answer. If the user does not want this note again, tell them to send this alone "
+              "as their own prompt: maisecrets: set secret_destinations observe. Do not change settings yourself and "
+              "do not call any destination safe or approved."),
 }
 _HINTS_FILE = HOME / "hints.json"
 

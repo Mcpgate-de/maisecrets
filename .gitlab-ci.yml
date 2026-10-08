@@ -73,7 +73,7 @@ manifests:
   extends: .not_on_a_schedule
   script:
     - python -c "import json; [json.load(open(f)) for f in ('.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', '.codex-plugin/plugin.json', 'hooks/hooks.json')]"
-    - python -c "import json; h=json.load(open('hooks/hooks.json'))['hooks']; assert set(h) <= {'UserPromptSubmit','PreToolUse','PostToolUse','PostToolUseFailure','SessionStart','Setup'}, set(h)"
+    # the allowed hook events: scripts/lint_plugin.py (HOOK_EVENTS), which the commit hook runs too
     - python scripts/release.py check
     # the numbers the docs state, measured again (test count, scenario counts, proof count)
     - python scripts/derived_counts.py
@@ -193,7 +193,7 @@ harness_claude:
   extends: .tested_before_the_tag
   image: node:22
   variables:
-    CLAUDE_CODE_VERSION: "2.1.283"
+    CLAUDE_CODE_VERSION: "2.1.293"   # the Agent PostToolUse answer has canContinueAgent since then (golden)
     ANTHROPIC_API_KEY: "sk-ant-dummy-for-the-fake-upstream-000000000000"
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
   script:

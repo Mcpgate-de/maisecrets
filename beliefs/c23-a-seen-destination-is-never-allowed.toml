@@ -1,0 +1,10 @@
+# c23-a-seen-destination-is-never-allowed: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c23-a-seen-destination-is-never-allowed"
+control = "C23"
+statement = "A destination a secret was seen going to is a record, never a permission: nothing in observe mode writes `allowed`."
+runner = ["tests/test_destinations.py::Recording::test_each_resolve_path_notes_its_destination_and_seen_is_never_allowed"]
+
+[proof]
+file = "maisecrets/destinations.py"
+find = "    rec.setdefault(\"allowed\", {})          # kept apart from seen; no decision reads it yet"
+replace = "    rec.setdefault(\"allowed\", {}).update({\"x\": True})"

@@ -794,6 +794,12 @@ def user_prompt(payload: dict) -> dict:
     # a prompt the client injected (a scheduled task, a loop wakeup) can carry text the model chose: it grants and
     # sets nothing (C21, C22)
     typed = payload.get("source") in settings_mod.TYPED_SOURCES
+    if typed and session and not payload.get("agent_id") and cfg.get("secret_destinations", "observe") == "observe":
+        try:
+            from . import destinations
+            destinations.mark_interactive(session)
+        except Exception:                # observing never stops a prompt (Opus round 3: a nested file blocked it)
+            pass
     grant = _GRANT_RE.match(prompt) if cfg.get("ssh_consent") and typed else None
     if cfg.get("ssh_consent") and not grant and session:
         from . import consent_store
@@ -1015,6 +1021,32 @@ WRAPPER_ARG_OPTIONS = {
 WRAPPERS = {"env", "genv", "command", "exec", "nice", "time", "nohup", "sudo", "doas", "builtin", "timeout", "stdbuf",
             "caffeinate", "ionice", "chronic"}
 _SLICE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
+
+
+# before a comment or a heredoc body: the parser's reading is sure only when no bracket, brace, parenthesis,
+# backslash or backtick comes first. Inside (( )), $[ ], [[ ]], ${ }, a zsh pattern or after an escape the shell
+# reads no comment or heredoc there and runs what follows (reviews of 0.6.7, rounds 4 to 6). The parser itself is
+# not changed: a misread comment would flip its quote state and hide the next line.
+_UNSURE_BEFORE_COMMENT = re.compile(r"[()\[\]{}\\`]")
+_UNSURE_BEFORE_HEREDOC = re.compile(r"[(){}\[\\`]")       # ((1<<TAG)) is a shift, no heredoc (codex round 7)
+
+
+def comment_is_sure(command: str, ctxs: list[str], pos: int) -> bool:
+    """The comment that holds pos is one for the shell too."""
+    k = pos
+    while k > 0 and ctxs[k - 1] == "comment":
+        k -= 1
+    return "\r" not in command and not _UNSURE_BEFORE_COMMENT.search(command, 0, k)
+
+
+def heredoc_is_sure(command: str, ctxs: list[str], pos: int) -> bool:
+    """The heredoc body that holds pos is one for the shell too: the plain text before it opens no ((, ${ or $[."""
+    k = pos
+    while k > 0 and ctxs[k - 1] in ("hd", "hdq", "hdx"):
+        k -= 1
+    if "\r" in command:         # the parser ends a heredoc at TAG\r, the shell does not, and the quotes move (Opus)
+        return False
+    return not _UNSURE_BEFORE_HEREDOC.search("".join(c for c, cx in zip(command[:k], ctxs[:k]) if cx == ""))
 
 
 def _shell_contexts(command: str) -> list[str]:
@@ -2038,6 +2070,37 @@ def _expand_groups(hosts: list[str], groups: dict) -> list[str]:
     return sorted(out)
 
 
+def _note_destinations(cfg: dict, payload: dict, tool: str, tool_input: dict, keys: list[str],
+                       ssh_command: str | None = None) -> None:
+    """secret_destinations (Mcpgate-de/maisecrets#13): note where each value of this call goes. Observe only: it
+    never changes the answer, and a failure here never stops the call. Noted when the value is handed out, before
+    the client asks, so a call the person then declines is noted too."""
+    if cfg.get("secret_destinations", "observe") != "observe" or not keys:
+        return
+    try:
+        from . import destinations, ssh_consent
+        ssh_hosts: list[str] = []
+        if ssh_command and ssh_consent._TOKEN_RE.search(ssh_command):
+            ssh_hosts = list(ssh_consent.classify(ssh_command, _parse_for_consent).hosts)
+        found = destinations.destinations_of(tool, tool_input, ssh_hosts)
+        destinations.note(keys, payload.get("session_id"), payload.get("agent_id"), found)
+    except Exception as exc:  # noqa: BLE001 - observing must never stop a call
+        _debug(f"destinations: {type(exc).__name__}")
+
+
+def _destination_hint(payload: dict) -> str | None:
+    """The one secret_destinations hint, when a pattern break of this session waits for it (destinations.note)."""
+    from . import destinations, settings
+    cfg = load_config()
+    if cfg.get("secret_destinations", "observe") != "observe" or payload.get("agent_id"):
+        return None
+    if not destinations.take_pending(payload.get("session_id")):
+        return None
+    if not settings.hint_due("secret_destinations", cfg) or not settings.claim_hint("secret_destinations"):
+        return None
+    return settings.HINTS["secret_destinations"]["codex" if client_of(payload) == "codex" else "claude"]
+
+
 def _autonomous(hosts: list[str], cfg: dict) -> bool:
     """Every host of the call is one the person named in ssh_autonomous_hosts (a host as written, with user and
     port, or the name of a group in ssh_host_groups): the AI may write there without asking, in every session. A
@@ -2251,6 +2314,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
             plan[key] = (None, value)
     if failed:
         return _deny(_deny_reason(failed))
+    _note_destinations(cfg, payload, "Bash", tool_input, list(plan), ssh_command=command)
     # phase 3: serve and rewrite
     prelude: list[str] = []
     var_by_key: dict[str, str] = {}
@@ -2418,6 +2482,7 @@ def _pre_mcp(payload: dict, cfg: dict, tool: str, tool_input: dict) -> dict:
         values[key] = value
     if failed:
         return _deny(_deny_reason(failed))
+    _note_destinations(cfg, payload, tool, tool_input, list(values))
 
     def substitute(s: str) -> str:
         out = s
@@ -2746,6 +2811,7 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         values[key] = value
     if failed:
         return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
+    _note_destinations(cfg, payload, tool, tool_input, list(values))
 
     def substitute(v: str) -> str:
         out = v
@@ -3448,7 +3514,7 @@ def _ssh_hint(payload: dict) -> str | None:
 
 def _with_hint(payload: dict, result: dict) -> dict:
     """Add a hint to the answer of a PostToolUse without changing what the answer does."""
-    hint = _ssh_hint(payload)
+    hint = _ssh_hint(payload) or _destination_hint(payload)
     if not hint:
         return result
     result = dict(result)
