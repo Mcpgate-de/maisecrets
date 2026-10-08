@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## [0.6.8] - 2026-10-08
+
+### Fixes
+
+- a URL password that looks like a date counts as a date only if the calendar has it (3a46fc3)
+- the SigV4 scope ends at a separator; a URL password filter takes only a whole reference or a real date (567a1d5)
+- only a whole encoded reference or date in a URL password is text; the SigV4 scope must end at aws4_request (14b3402)
+- the end of a call commits only its own session and agent, however late; a failed call carries its hint (e68c7b7)
+- a password with no user in a URL is found (redis://:password@host) (282281e)
+- the AWS key id in a presigned URL or a SigV4 header is no secret (ebec40b)
+- a destination is seen only after the call ran; a declined call leaves no record (04f268b)
+
+### Other
+
+- Merge branch 'fix/seen-only-after-the-call' into 'main' (6ae1b4d)
+
 ## [0.6.7] - 2026-10-08
 
 ### Features
