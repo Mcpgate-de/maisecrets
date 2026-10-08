@@ -886,10 +886,13 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   or release (`gh issue create --body "… ssh …"`), and the message of
   `git commit -m` or `git tag -m`. Every part of the line must be one of these
   commands, written as itself (no path, no variable, no wrapper), and outside
-  quotes the line has no `$`, backtick, redirect, parenthesis or brace; `printf`
-  and `test` have no `-v`, which names a variable the shell evaluates. Anywhere
-  else, also unquoted (`grep ssh README.md`) or in a heredoc, the hook cannot
-  tell text from a call, and it asks.
+  quotes the line has no `$`, backtick, parenthesis, brace or redirect (other
+  than `2>&1` or to `/dev/null`); `printf` and `test` have no `-v`, which names
+  a variable the shell evaluates. Anywhere else, also unquoted
+  (`grep ssh README.md`) or in a heredoc, the hook cannot tell text from a call,
+  and it asks. A `#` comment is text only when no bracket, brace, parenthesis,
+  backslash or backtick comes before it in the command: inside `(( ))`, `${ }`
+  or `[[ ]]` the shell reads no comment and runs what follows.
 - **A short deny list is always refused:** `mkfs` or `wipefs` on a device,
   `dd` to a device, `rm -rf /`, a fork bomb, anywhere in a command that names
   an ssh-family call (quotes removed; as a command word, not as a file name;

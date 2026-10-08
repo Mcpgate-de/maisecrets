@@ -27,6 +27,11 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Callable
 
+def _hooks():
+    from . import hooks              # the caller's module; imported late, since hooks imports this one
+    return hooks
+
+
 # the parser of the caller: (command) -> (segments, contexts), as maisecrets.hooks._segments reads them
 Parser = Callable[[str], "tuple[list[dict], list[str]]"]
 
@@ -589,8 +594,8 @@ def classify(command: str, parse: Parser) -> Verdict:
         sg.get("heredoc") and sg.get("cmd") in SSH_CMDS for sg in segs)
     for m in _TOKEN_RE.finditer(command):
         ctx = ctxs[m.start()] if m.start() < len(ctxs) else ""
-        if ctx == "comment":
-            continue
+        if ctx == "comment" and _hooks().comment_is_sure(command, ctxs, m.start()):
+            continue                         # a comment the shell reads as one; any other one asks
         seg = next((sg for sg in segs if sg["start"] <= m.start() < sg["end"]), None)
         if seg and ctx in ("sq", "dq") and data_only(seg) and seg.get("cmd") in _TEXT_SAFE_CMDS and text_line():
             continue                         # quoted text a data command prints: echo "use ssh" (no > file, no pipe)
@@ -603,14 +608,14 @@ def classify(command: str, parse: Parser) -> Verdict:
         if m.group(0) == ".ssh/config" and seg and not re.search(r">\s*\S*$", command[seg["start"]:m.start()]) \
                 and seg.get("cmd") in _DATA_CMDS | {"cat", "less", "ls", "stat"}:
             continue                         # reading the config; a redirect into it is a change
-        if ctx in ("hd", "hdq"):
+        if ctx in ("hd", "hdq") and _hooks().heredoc_is_sure(command, ctxs, m.start()):
             announcer = None
             for sg in segs:
                 if sg.get("heredoc") and sg["start"] < m.start():
                     announcer = sg
             if announcer and announcer.get("cmd") in _HEREDOC_DATA and not piped_on(announcer):
                 continue                     # a heredoc that is text for a command that runs nothing
-        if ctx in ("hd", "hdq") and fed_by_heredoc:
+        if ctx in ("hd", "hdq") and fed_by_heredoc and _hooks().heredoc_is_sure(command, ctxs, m.start()):
             continue                         # the heredoc of a call read above, already a write
         if not any(a <= m.start() < b for a, b in spans):
             calls.append(Call(m.group(0), "", "unknown", f"'{m.group(0)}' where this hook cannot read the call"))

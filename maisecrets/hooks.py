@@ -1023,21 +1023,28 @@ WRAPPERS = {"env", "genv", "command", "exec", "nice", "time", "nohup", "sudo", "
 _SLICE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
 
 
-def _escaped(command: str, i: int) -> bool:
-    """The character at i follows an odd run of backslashes: `echo \\ #; ssh …` has no comment (Opus round 4)."""
-    k = i
-    while k > 0 and command[k - 1] == "\\":
+# before a comment or a heredoc body: the parser's reading is sure only when no bracket, brace, parenthesis,
+# backslash or backtick comes first. Inside (( )), $[ ], [[ ]], ${ }, a zsh pattern or after an escape the shell
+# reads no comment or heredoc there and runs what follows (reviews of 0.6.7, rounds 4 to 6). The parser itself is
+# not changed: a misread comment would flip its quote state and hide the next line.
+_UNSURE_BEFORE_COMMENT = re.compile(r"[()\[\]{}\\`]")
+_UNSURE_BEFORE_HEREDOC = re.compile(r"[{\[\\`]")
+
+
+def comment_is_sure(command: str, ctxs: list[str], pos: int) -> bool:
+    """The comment that holds pos is one for the shell too."""
+    k = pos
+    while k > 0 and ctxs[k - 1] == "comment":
         k -= 1
-    return i >= 0 and (i - k) % 2 == 1
+    return not _UNSURE_BEFORE_COMMENT.search(command, 0, k)
 
 
-def _open_group(command: str, out: list, i: int, opens: str) -> bool:
-    """The plain text of this line before i opens more of one of `opens` than it closes: inside (( )), $[ ], [[ ]]
-    or ${ } a # is no comment and << no heredoc, and the shell runs what follows (Opus round 5). A wrong guess here
-    reads more text as a command, never less."""
-    start = command.rfind("\n", 0, i) + 1
-    plain = "".join(command[k] for k in range(start, i) if out[k] == "")
-    return any(plain.count(o) > plain.count(c) for o, c in (("(", ")"), ("[", "]"), ("{", "}")) if o in opens)
+def heredoc_is_sure(command: str, ctxs: list[str], pos: int) -> bool:
+    """The heredoc body that holds pos is one for the shell too: the plain text before it opens no ${ or $[."""
+    k = pos
+    while k > 0 and ctxs[k - 1] in ("hd", "hdq", "hdx"):
+        k -= 1
+    return not _UNSURE_BEFORE_HEREDOC.search("".join(c for c, cx in zip(command[:k], ctxs[:k]) if cx == ""))
 
 
 def _shell_contexts(command: str) -> list[str]:
@@ -1155,8 +1162,7 @@ def _shell_contexts(command: str) -> list[str]:
                                     out[k] = "hdx"
                 pending = []
             continue
-        if c == "#" and (i == 0 or command[i - 1] in " \t\n;&|(") and not _escaped(command, i - 1) \
-                and not _open_group(command, out, i, "([{"):
+        if c == "#" and (i == 0 or command[i - 1] in " \t\n;&|("):
             eol = command.find("\n", i)
             eol = n if eol < 0 else eol
             for k in range(i, eol):
@@ -1214,7 +1220,7 @@ def _shell_contexts(command: str) -> list[str]:
             out[i] = out[i + 1] = out[i + 2] = ""      # a here-string is a word, not a heredoc
             i += 3
             continue
-        if c == "<" and command.startswith("<<", i) and not _open_group(command, out, i, "["):
+        if c == "<" and command.startswith("<<", i):
             m = _HEREDOC_RE.match(command, i)
             if m:
                 for k in range(i, m.end()):

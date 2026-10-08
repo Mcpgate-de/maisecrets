@@ -544,5 +544,12 @@ class RoundFour(unittest.TestCase):
 
     def test_a_hash_that_is_no_comment_hides_no_destination(self):
         ref = _secret()
-        _pre("Bash", {"command": "(( x |# 2 )); " + _curl(ref, "api.example.com")})   # Opus round 5
-        self.assertEqual(set(_seen(ref)), {"network:api.example.com"})
+        # Opus round 5: the shell reads no comment after (( x |, and the second curl runs
+        _pre("Bash", {"command": _curl(ref, "api.example.com") + "; (( x |# 2 )); curl https://other.example.net/"})
+        self.assertEqual(set(_seen(ref)), {"network:api.example.com", "network:other.example.net"})
+
+    def test_a_label_keeps_no_character_that_does_not_print(self):
+        for ch in ("\u2060", "\ufff9", "\u00ad", "\u2028", "\ud800"):
+            label = destinations.clean_label("api" + ch + ".example.com")
+            self.assertTrue(label.isprintable(), repr(label))
+            self.assertEqual(label.replace("?", "").replace(" ", ""), "api.example.com", repr(label))

@@ -140,6 +140,7 @@ def clean_label(text: str) -> str:
     path), and a newline or a terminal escape in it must not draw lines into /maisecrets:list (codex review)."""
     text = _UNPRINTABLE.sub("?", str(text))
     text = re.sub(r"\s+", " ", text).strip()
+    text = "".join(c if c.isprintable() else "?" for c in text)   # format characters too: U+2060, U+00AD (codex)
     from . import detect
     for m in sorted(detect.scan(text), key=lambda m: -m.start):
         if m.type == "SECRET":
@@ -152,9 +153,10 @@ def destinations_of(tool: str, tool_input: dict, ssh_hosts: list[str] | None = N
     if tool in ("Bash", "PowerShell"):
         command = str(tool_input.get("command") or "")
         if tool == "Bash":
-            from .hooks import _shell_contexts           # a URL in a # comment goes nowhere (codex review of 0.6.7)
+            from .hooks import _shell_contexts, comment_is_sure   # a URL in a # comment goes nowhere (codex review)
             ctxs = _shell_contexts(command)
-            command = "".join(ch if cx != "comment" else " " for ch, cx in zip(command, ctxs))
+            command = "".join(" " if cx == "comment" and comment_is_sure(command, ctxs, k) else ch
+                              for k, (ch, cx) in enumerate(zip(command, ctxs)))
         found = [("network", h) for h in hosts_in(command)]
         found += [("network", "ssh " + h) for h in sorted(set(ssh_hosts or []))]
         return [(k, clean_label(v)) for k, v in found] or [("local", "a command on this computer")]

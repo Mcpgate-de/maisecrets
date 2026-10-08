@@ -117,13 +117,10 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ssh web1 'uname -a; df -h'",
         ],
         "write": [
-            # round 4 (Opus): a # after an escaped space starts no comment, so the ssh after it runs
-            "echo \\ #; ssh web1 sudo reboot", "echo x\\ #\nssh web1 sudo reboot",
-            # round 5 (Opus): inside (( )), $[ ], [[ ]], ${ } or after ( and | a # is no comment, << no heredoc
-            "(( x |# 2 )); ssh web1 reboot", "(( x=(#) )); ssh web1 reboot", "(( 1 # 2 )); ssh web1 reboot",
-            "[[ a =~ (#) ]]; ssh web1 reboot", "[[ a =~ x|# ]]; ssh web1 reboot", "echo $[(#)]; ssh web1 reboot",
-            "case a in (#) ;; esac; ssh web1 reboot", "ls *(#qN); ssh web1 reboot",
-            "echo $[1<<ZQ]\nssh web1 reboot\nZQ", "echo ${x# y}; ssh web1 reboot",
+            # round 6 (Opus): a parser that reads a real comment as code opens a quote at its apostrophe
+            "echo [ # don't\necho x; ssh web1 reboot # won\\'t", "grep -c x[ f # it's\nssh web1 reboot",
+            "echo x \\\n# don't\nssh web1 reboot", "echo ${x# y}; ssh web1 reboot",
+            "echo x\\ #\nssh web1 sudo reboot",
             "ssh web1 'systemctl restart nginx'", "ssh web1", "ssh web1 'sudo cat /etc/hosts'",
             "ssh web1 'cat /etc/shadow'", "ssh web1 'cat ../../etc/passwd'", "ssh web1 'cat /var/log/*.log'",
             "ssh web1 'cat ~/notes'", "ssh web1 'cat /proc/1/environ'", "ssh web1 'cat /root/.bashrc'",
@@ -161,6 +158,20 @@ class ClassifierMatrixTests(unittest.TestCase):
             "ssh -o 'SetEnv BASH_ENV=/x' web1 uptime", "sshfs -o reconnect web1:/ /mnt/w", "autossh -M 0 -f -N web1",
         ],
         "unknown": [
+            # rounds 4 to 6 (Opus, codex): a # or << the parser reads as a comment or heredoc, where the shell does
+            # not and runs the ssh after it. A comment or heredoc after a bracket, brace, parenthesis, backslash or
+            # backtick is not sure, and an ssh word in it asks
+            "echo \\ #; ssh web1 sudo reboot",
+            "(( x |# 2 )); ssh web1 reboot", "(( x=(#) )); ssh web1 reboot", "(( 1 # 2 )); ssh web1 reboot",
+            "[[ a =~ (#) ]]; ssh web1 reboot", "[[ a =~ x|# ]]; ssh web1 reboot", "echo $[(#)]; ssh web1 reboot",
+            "case a in (#) ;; esac; ssh web1 reboot", "ls *(#qN); ssh web1 reboot",
+            "echo $[1<<ZQ]\nssh web1 reboot\nZQ", "echo ${x:-\\} # }; ssh web1 reboot",
+            "echo ${x/\\}/ # }; ssh web1 reboot", "case a in a) ;; b) ;; esac; (( x |# 2 )); ssh web1 reboot",
+            "echo ${y:-a}} ${x:- # }; ssh web1 reboot", "(( x = 1 +\n#2 )); ssh web1 reboot",
+            "echo ${x:-a\n# }; ssh web1 reboot", "echo ${x:-<<ZQ}\nssh web1 reboot\nZQ",
+            "echo \\) \\); (( x |# 2 )); ssh web1 reboot", "echo \\] \\]; echo $[1<<ZQ]\nssh web1 reboot\nZQ",
+            # a false heredoc after an ssh call fed by a real one: web2 must not hide behind web1's write
+            "ssh web1 cat <<A\nx\nA\necho ${x:-<<ZQ}\nssh web2 reboot\nZQ",
             # still unread: the text of these runs as a command (shell, alias, pipe into a shell, a program word)
             "gh alias set x '!ssh web1 reboot'", "echo ssh web1 reboot | bash", 'gh api x --jq "ssh" | sh',
             # text written where a later part runs it (codex review of 0.6.7; the quoted form ran freely on 0.6.6)
@@ -262,7 +273,7 @@ class ClassifierMatrixTests(unittest.TestCase):
                 counted += 1
                 with self.subTest(want=want, command=command):
                     self.assertEqual(kind(command), want)
-        self.assertEqual(counted, 304, "a row was added or lost: update the count")
+        self.assertEqual(counted, 317, "a row was added or lost: update the count")
 
     def test_a_long_command_is_answered_in_time(self):
         # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)
