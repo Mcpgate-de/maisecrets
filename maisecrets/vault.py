@@ -64,6 +64,11 @@ DEFAULT_CONFIG = {
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
     "pass_agent_reports": True,      # the report of a subagent of this session is model text: not blocked (hooks.py)
     "tips": True,                    # a tip at session start, and a hint when a case for a setting first comes up
+    # the limiter (C7): a brake for a session that sends its own values out in bulk; the session rule (C4) keeps the
+    # rest of the store closed anyway. Replayed over five months of sessions, the busiest hour needed 67 values and
+    # 118 resolves; 25 and 60 would have stopped 3 of 178 sessions that used values (0.6.9)
+    "max_keys_per_session": 200,     # distinct values one session resolves in an hour
+    "max_resolves_per_hour": 1000,   # resolves in an hour, all sessions
     "keep_purged_days": 30,          # metadata of an expired entry is deleted after this many days
     "audit_max_lines": 2000,
 }
@@ -1180,8 +1185,8 @@ class Vault:
         now = time.time()
         rec = [r for r in self._index.get("resolves", []) if r["ts"] > now - 3600]
         self._index["resolves"] = rec
-        per_session = int(self.cfg.get("max_keys_per_session", 25))
-        per_hour = int(self.cfg.get("max_resolves_per_hour", 60))
+        per_session = int(self.cfg.get("max_keys_per_session", DEFAULT_CONFIG["max_keys_per_session"]))
+        per_hour = int(self.cfg.get("max_resolves_per_hour", DEFAULT_CONFIG["max_resolves_per_hour"]))
         keys_in_session = {r["key"] for r in rec if r["session"] == session}
         if key not in keys_in_session and len(keys_in_session) >= per_session:
             return f"limit: {per_session} distinct keys in this session this hour (max_keys_per_session)"
@@ -1200,8 +1205,8 @@ class Vault:
             return failed
         now = time.time()
         rec = [r for r in self._index.get("resolves", []) if r["ts"] > now - 3600]
-        per_session = int(self.cfg.get("max_keys_per_session", 25))
-        per_hour = int(self.cfg.get("max_resolves_per_hour", 60))
+        per_session = int(self.cfg.get("max_keys_per_session", DEFAULT_CONFIG["max_keys_per_session"]))
+        per_hour = int(self.cfg.get("max_resolves_per_hour", DEFAULT_CONFIG["max_resolves_per_hour"]))
         known = {r["key"] for r in rec if r["session"] == session}
         new = [k for k in dict.fromkeys(keys) if k not in known]
         if new and len(known) + len(new) > per_session:

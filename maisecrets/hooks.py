@@ -2076,7 +2076,7 @@ def _note_destinations(cfg: dict, payload: dict, tool: str, tool_input: dict, ke
     never changes the answer, and a failure here never stops the call. The value is handed out here, before the
     client asks the person; so the call waits as pending and becomes `seen` only when a PostToolUse or
     PostToolUseFailure of the same tool_use_id says it ran (_commit_destinations). A call the person declines has
-    no such event and leaves no record. A client that sends no tool_use_id is noted here, at the hand-out."""
+    no such event and leaves no record. A client that sends no tool_use_id leaves no record either."""
     if cfg.get("secret_destinations", "observe") != "observe" or not keys:
         return
     try:
@@ -2088,8 +2088,8 @@ def _note_destinations(cfg: dict, payload: dict, tool: str, tool_input: dict, ke
         call = payload.get("tool_use_id")
         if isinstance(call, str) and call:
             destinations.pend(call, keys, payload.get("session_id"), payload.get("agent_id"), found)
-        else:
-            destinations.note(keys, payload.get("session_id"), payload.get("agent_id"), found)
+        # no call id, no record: without it nothing can show that the call ran, and a declined call must not be
+        # listed (ChatGPT review of 0.6.8). Claude Code and Codex send one in PreToolUse and PostToolUse
     except Exception as exc:  # noqa: BLE001 - observing must never stop a call
         _debug(f"destinations: {type(exc).__name__}")
 
@@ -2453,8 +2453,9 @@ def _deny_reason(failed: list[str]) -> str:
         hints.append("A key marked (foreign-session) resolves only in a session where a human typed "
                      "it: ask the user to paste the placeholder, never the value.")
     if any("limit:" in f for f in failed):
-        hints.append("The cap is set by the user. Stop and tell the user; do not change maisecrets "
-                     "settings yourself.")
+        hints.append("The cap is set by the user. Stop and tell the user that they can raise it with their "
+                     "own prompt /maisecrets:settings max_keys_per_session NUMBER (or max_resolves_per_hour; "
+                     "in Codex: maisecrets: set KEY NUMBER); do not change maisecrets settings yourself.")
     if any("audit" in f for f in failed):
         hints.append("The audit log could not be written, so no value is released. Tell the user.")
     return ("maisecrets: cannot resolve " + ", ".join(failed) + ". The command did not run. "

@@ -72,14 +72,31 @@ def _key(ref: str) -> str:
     return ref.strip(OPEN + CLOSE)
 
 
+_CALLS = []          # the call ids _pre handed out: a real client sends one in PreToolUse and PostToolUse
+
+
 def _pre(tool: str, tool_input: dict, client: dict = CLAUDE, **extra) -> dict:
+    extra.setdefault("tool_use_id", f"auto-{len(_CALLS)}")
+    _CALLS.append(extra["tool_use_id"])
     out = hooks.pre_tool({"tool_name": tool, "tool_input": tool_input, "session_id": "S1", **client, **extra})
     cmd = out.get("hookSpecificOutput", {}).get("updatedInput", {}).get("command", "")
     _SERVED.extend(re.findall(r"\$\(cat '?([^')]+)'?\)", cmd if isinstance(cmd, str) else ""))
     return out
 
 
+def _ran(tool: str, tool_input: dict, client: dict = CLAUDE, **extra) -> dict:
+    """A call that ran: its PreToolUse, then the end of the same call commits its destinations (the PostToolUse
+    path itself is tested in SeenOnlyAfterTheCall). Returns the PreToolUse answer."""
+    out = _pre(tool, tool_input, client, **extra)
+    hooks._commit_destinations({"session_id": "S1", **client, **{k: v for k, v in extra.items() if k == "agent_id"},
+                                "tool_use_id": _CALLS[-1]})
+    return out
+
+
 def _post(command: str = "true", client: dict = CLAUDE, **extra) -> dict:
+    """The end of the last call _pre handed out, unless the test names another id."""
+    if _CALLS:
+        extra.setdefault("tool_use_id", _CALLS[-1])
     return hooks._post_tool_guarded({"hook_event_name": "PostToolUse", "tool_name": "Bash", "session_id": "S1",
                                      "tool_input": {"command": command}, **client, **extra,
                                      "tool_response": {"stdout": "ok", "stderr": ""}})
@@ -99,11 +116,11 @@ class Recording(unittest.TestCase):
 
     def test_each_resolve_path_notes_its_destination_and_seen_is_never_allowed(self):
         ref = _secret()
-        _pre("Bash", {"command": f"curl -s -H 'Authorization: Bearer {ref}' https://API.example.com/v1/x"})
-        _pre("mcp__gw__gitlab_write_actions", {"action": "create_issue", "token": ref})
-        _pre("mcp__multi__smart_actions", {"service": "jira", "token": ref})
-        _pre("Write", {"file_path": str(Path.home() / "proj" / ".env"), "content": f"T={ref}\n"})
-        _pre("Bash", {"command": f"printf '%s' {ref} > /tmp/dest-probe.txt"})
+        _ran("Bash", {"command": f"curl -s -H 'Authorization: Bearer {ref}' https://API.example.com/v1/x"})
+        _ran("mcp__gw__gitlab_write_actions", {"action": "create_issue", "token": ref})
+        _ran("mcp__multi__smart_actions", {"service": "jira", "token": ref})
+        _ran("Write", {"file_path": str(Path.home() / "proj" / ".env"), "content": f"T={ref}\n"})
+        _ran("Bash", {"command": f"printf '%s' {ref} > /tmp/dest-probe.txt"})
         seen = _seen(ref)
         labels = {d["label"]: d["kind"] for d in seen.values()}
         self.assertEqual(labels, {"api.example.com": "network", "MCP gw · gitlab_write_actions": "network",
@@ -120,17 +137,18 @@ class Recording(unittest.TestCase):
     def test_observing_never_changes_the_answer_and_a_failing_record_never_stops_the_call(self):
         ref = _secret()
         call = {"command": _curl(ref, "api.example.com")}
-        observed = _norm(_pre("Bash", call), ref)
+        observed = _norm(_ran("Bash", call), ref)
         self.assertTrue(destinations.of(_key(ref))["seen"], "premise: observe noted the call")
         _reset(secret_destinations="off")
         ref2 = _secret()
-        off = _norm(_pre("Bash", {"command": call["command"].replace(ref, ref2)}), ref2)
+        off = _norm(_ran("Bash", {"command": call["command"].replace(ref, ref2)}), ref2)
         self.assertEqual(observed, off, "the whole answer is the same with the record on and off")
         self.assertFalse(STORE.exists() and destinations.of(_key(ref2))["seen"], "off notes nothing")
         _reset()
         ref3 = _secret()
-        with mock.patch.object(destinations, "note", side_effect=RuntimeError("disk")):
-            failed = _norm(_pre("Bash", {"command": call["command"].replace(ref, ref3)}), ref3)
+        # pend: a client with a call id, as Claude Code and Codex are, records through it in PreToolUse
+        with mock.patch.object(destinations, "pend", side_effect=RuntimeError("disk")):
+            failed = _norm(_ran("Bash", {"command": call["command"].replace(ref, ref3)}), ref3)
         self.assertEqual(failed, observed, "a record that fails leaves the answer as it is")
 
     def test_a_busy_record_costs_a_call_well_under_a_second(self):
@@ -140,7 +158,7 @@ class Recording(unittest.TestCase):
         import subprocess
         free = [_secret(f"dest-free-value-{i}xxxxxxxxx{i}") for i in range(8)]
         started = time.monotonic()
-        _pre("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in free)})
+        _ran("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in free)})
         baseline = time.monotonic() - started
         holder = subprocess.Popen([sys.executable, "-c", (       # the same lock call as vault._Lock, per platform
             "import os, sys, time; fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)\n"
@@ -152,7 +170,7 @@ class Recording(unittest.TestCase):
             self.assertEqual(holder.stdout.readline().strip(), "held")
             refs = [_secret(f"dest-busy-value-{i}xxxxxxxxx{i}") for i in range(8)]
             started = time.monotonic()
-            out = _pre("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in refs)})
+            out = _ran("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in refs)})
             took = time.monotonic() - started
         finally:
             holder.kill()
@@ -166,13 +184,13 @@ class Recording(unittest.TestCase):
         ref = _secret()
         aside = Path(HOME, "destinations.json.corrupt")
         STORE.write_text("{not json")
-        _pre("Bash", {"command": _curl(ref, "api.example.com")})       # a record written by a call
+        _ran("Bash", {"command": _curl(ref, "api.example.com")})       # a record written by a call
         self.assertEqual(aside.read_text(), "{not json", "the damaged file is kept aside, not overwritten")
         self.assertTrue(_seen(ref), "and a new record begins")
         STORE.write_text("{not json either")
         with mock.patch("sys.stdout"):
             self.assertEqual(cli.main(["list"]), 0)                       # the list only reads
-        _pre("Bash", {"command": _curl(ref, "api.example.com")})
+        _ran("Bash", {"command": _curl(ref, "api.example.com")})
         self.assertEqual(aside.read_text(), "{not json", "the first damaged copy is never overwritten")
         later = [p for p in Path(HOME).iterdir() if p.name.startswith("destinations.json.corrupt.")]
         self.assertEqual([p.read_text() for p in later], ["{not json either"])
@@ -181,20 +199,20 @@ class Recording(unittest.TestCase):
         STORE.write_text(json.dumps({"secrets": {_key(ref): {"seen": {"x": "not a record",
                                                                        "network:a": {"label": "a", "kind": "network"}}},
                                                  "y": "z"}}))
-        _pre("Bash", {"command": _curl(ref, "api.example.com")})       # a record without its counters (Opus)
+        _ran("Bash", {"command": _curl(ref, "api.example.com")})       # a record without its counters (Opus)
         self.assertEqual(set(_seen(ref)), {"network:api.example.com"}, "the malformed records are dropped")
         today = time.strftime("%Y-%m-%d")
         STORE.write_text(json.dumps({"secrets": {_key(ref): {"seen": {"network:a": {
             "kind": "network", "label": "a", "uses": 1, "first": 1.0, "last": 1.0, "day": today, "day_uses": "1",
             "max_day_uses": 1}}}}}))
-        _pre("Bash", {"command": _curl(ref, "api.example.com")})       # one field of the wrong type
+        _ran("Bash", {"command": _curl(ref, "api.example.com")})       # one field of the wrong type
         self.assertEqual(set(_seen(ref)), {"network:api.example.com"}, "a counter of the wrong type is dropped too")
         with mock.patch("sys.stdout"):
             self.assertEqual(cli.main(["list"]), 0)
 
     def test_a_label_from_the_call_is_one_printable_line(self):
         ref = _secret()
-        _pre("mcp__gw__smart_actions", {"service": "jira\n    Seen at (approved)\x1b[2J", "token": ref})
+        _ran("mcp__gw__smart_actions", {"service": "jira\n    Seen at (approved)\x1b[2J", "token": ref})
         (label,) = [d["label"] for d in _seen(ref).values()]
         self.assertNotIn("\n", label)
         self.assertNotIn("\x1b", label)
@@ -235,13 +253,13 @@ class Bounds(unittest.TestCase):
     def test_a_call_with_many_keys_is_noted_quickly(self):
         refs = [_secret(f"dest-many-value-{i}yyyyyyyy{i}") for i in range(8)]
         started = time.monotonic()
-        _pre("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in refs)})
+        _ran("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in refs)})
         self.assertLess(time.monotonic() - started, 1.0)
         self.assertTrue(all(_seen(r) for r in refs))
 
     def test_wipe_everything_takes_the_record(self):
         ref = _secret()
-        _pre("Bash", {"command": _curl(ref, "api.example.com")})
+        _ran("Bash", {"command": _curl(ref, "api.example.com")})
         with mock.patch.object(destinations, "wipe", wraps=destinations.wipe) as wiped:
             from maisecrets import vault as vault_mod
             vault_mod.wipe_everything(load_config())
@@ -251,11 +269,11 @@ class Bounds(unittest.TestCase):
     def test_a_secret_shape_or_free_text_never_becomes_a_label(self):
         ref = _secret()
         token = "ghp_" + "aB3dE5fG7h" + "J9kL1mN2pQ" + "4rS6tU8vW0" + "xY2zA4"     # 40: it fits the name rule
-        _pre("mcp__gw__x_write", {"service": "token=" + token, "token": ref})
-        _pre("Bash", {"command": _curl(ref, "api.example.com") + " # " + token})
+        _ran("mcp__gw__x_write", {"service": "token=" + token, "token": ref})
+        _ran("Bash", {"command": _curl(ref, "api.example.com") + " # " + token})
         self.assertNotIn(token, STORE.read_text())
         self.assertIn("MCP gw · x_write", {d["label"] for d in _seen(ref).values()})
-        _pre("mcp__gw__y_write", {"service": token, "token": ref})     # a secret shape that reads as a name
+        _ran("mcp__gw__y_write", {"service": token, "token": ref})     # a secret shape that reads as a name
         self.assertNotIn(token, STORE.read_text())
         self.assertIn("MCP gw · y_write · <hidden>", {d["label"] for d in _seen(ref).values()})
 
@@ -297,7 +315,7 @@ class RoundThree(unittest.TestCase):
         with mock.patch("sys.stdout"):
             self.assertEqual(cli.main(["list"]), 0, "the list reads past it")
         ref = _secret()
-        self.assertIn("updatedInput", json.dumps(_pre("Bash", {"command": _curl(ref, "api.example.com")})))
+        self.assertIn("updatedInput", json.dumps(_ran("Bash", {"command": _curl(ref, "api.example.com")})))
         copies = list(Path(HOME).glob("destinations.json.corrupt*"))
         self.assertEqual(len(copies), 1, "the nested file is damage: it is moved aside, and the record goes on")
         self.assertEqual(set(_seen(ref)), {"network:api.example.com"})
@@ -370,14 +388,14 @@ class Hint(unittest.TestCase):
 
     def _establish(self, ref: str, host: str = "api.example.com", n: int = destinations.ESTABLISHED_USES) -> None:
         for _ in range(n):
-            _pre("Bash", {"command": _curl(ref, host)})
+            _ran("Bash", {"command": _curl(ref, host)})
 
     def test_the_first_pattern_break_on_a_network_destination_gives_one_hint(self):
         _typed()
         ref = _secret()
         self._establish(ref)
         self.assertNotIn("maisecrets notes", json.dumps(_post()), "an established destination alone is no break")
-        _pre("Bash", {"command": _curl(ref, "other.example.net")})
+        _ran("Bash", {"command": _curl(ref, "other.example.net")})
         out = _post()
         text = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("named a host that this secret was not used with before", text)
@@ -387,22 +405,22 @@ class Hint(unittest.TestCase):
         # once, globally: a second break, another secret, another session
         ref2 = _secret("dest-probe-value-other-99")
         self._establish(ref2, "b.example.org")
-        _pre("Bash", {"command": _curl(ref2, "c.example.org")})
+        _ran("Bash", {"command": _curl(ref2, "c.example.org")})
         self.assertNotIn("maisecrets notes", json.dumps(_post()))
 
     def test_one_use_short_of_the_threshold_is_no_break(self):
         _typed()
         ref = _secret()
         self._establish(ref, n=destinations.ESTABLISHED_USES - 1)
-        _pre("Bash", {"command": _curl(ref, "other.example.net")})
+        _ran("Bash", {"command": _curl(ref, "other.example.net")})
         self.assertNotIn("maisecrets notes", json.dumps(_post()))
 
     def test_a_local_use_never_gives_the_hint(self):
         _typed()
         ref = _secret()
         self._establish(ref)
-        _pre("Write", {"file_path": "/tmp/dest-probe/.env", "content": f"T={ref}\n"})
-        _pre("Bash", {"command": f"printf '%s' {ref} > /tmp/dest-probe.txt"})
+        _ran("Write", {"file_path": "/tmp/dest-probe/.env", "content": f"T={ref}\n"})
+        _ran("Bash", {"command": f"printf '%s' {ref} > /tmp/dest-probe.txt"})
         self.assertNotIn("maisecrets notes", json.dumps(_post()))
         self.assertNotIn("S1", json.loads(STORE.read_text())["pending_hint"])
 
@@ -423,10 +441,10 @@ class Hint(unittest.TestCase):
                 if leave_out == "note":
                     real = destinations.note
                     with mock.patch.object(destinations, "note", lambda k, s, a, d: real(k, s, None, d)):
-                        _pre("Bash", {"command": _curl(ref, "other.example.net")}, agent_id="sub1")
+                        _ran("Bash", {"command": _curl(ref, "other.example.net")}, agent_id="sub1")
                     self.assertNotIn("maisecrets notes", json.dumps(_post(agent_id="sub1")))
                 else:
-                    _pre("Bash", {"command": _curl(ref, "other.example.net")}, agent_id="sub1")
+                    _ran("Bash", {"command": _curl(ref, "other.example.net")}, agent_id="sub1")
                     with mock.patch.object(destinations, "take_pending", return_value=True):
                         self.assertNotIn("maisecrets notes", json.dumps(_post(agent_id="sub1")))
 
@@ -446,14 +464,14 @@ class Hint(unittest.TestCase):
                 setup()
                 ref = _secret()
                 self._establish(ref)
-                _pre("Bash", {"command": _curl(ref, "other.example.net")}, **extra)
+                _ran("Bash", {"command": _curl(ref, "other.example.net")}, **extra)
                 self.assertNotIn("maisecrets notes", json.dumps(_post(**extra)))
 
     def test_codex_gets_the_hint_in_its_block_answer(self):
         _typed()
         ref = _secret()
         self._establish(ref)
-        _pre("Bash", {"command": _curl(ref, "other.example.net")})
+        _ran("Bash", {"command": _curl(ref, "other.example.net")})
         result = {"decision": "block", "reason": "[maisecrets: the command ran and finished]\n\nok"}
         with mock.patch.object(hooks, "post_tool", return_value=result):
             out = _post(client=CODEX)
@@ -473,8 +491,8 @@ class Shown(unittest.TestCase):
     def test_the_list_says_record_not_permission_and_marks_what_is_new(self):
         from maisecrets import cli
         ref = _secret()
-        _pre("Bash", {"command": _curl(ref, "api.example.com")})
-        _pre("Write", {"file_path": "/tmp/dest-probe/x.cfg", "content": ref})
+        _ran("Bash", {"command": _curl(ref, "api.example.com")})
+        _ran("Write", {"file_path": "/tmp/dest-probe/x.cfg", "content": ref})
 
         def listing() -> str:
             with mock.patch("sys.stdout") as stdout:
@@ -493,7 +511,7 @@ class Shown(unittest.TestCase):
         second = listing()
         self.assertEqual(STORE.read_text(), before, "showing the list changes nothing")
         self.assertFalse(next(ln for ln in second.splitlines() if "api.example.com" in ln).rstrip().endswith("new"))
-        _pre("Bash", {"command": _curl(ref, "second.example.com")})
+        _ran("Bash", {"command": _curl(ref, "second.example.com")})
         third = listing()
         line = next(ln for ln in third.splitlines() if "second.example.com" in ln)
         self.assertTrue(line.rstrip().endswith("new"), line)
@@ -501,12 +519,12 @@ class Shown(unittest.TestCase):
     def test_forget_and_wipe_remove_the_record(self):
         from maisecrets import cli
         ref = _secret()
-        _pre("Bash", {"command": _curl(ref, "api.example.com")})
+        _ran("Bash", {"command": _curl(ref, "api.example.com")})
         self.assertTrue(_seen(ref))
         Vault(load_config()).forget(_key(ref))
         self.assertEqual(_seen(ref), {})
         ref = _secret("dest-forget-value-2222222")
-        _pre("Bash", {"command": _curl(ref, "api.example.com")})
+        _ran("Bash", {"command": _curl(ref, "api.example.com")})
         with mock.patch.object(destinations, "forget", return_value=False), mock.patch("sys.stdout") as stdout:
             cli.main(["forget", _key(ref)])
         self.assertIn("could not be deleted now", "".join(c.args[0] for c in stdout.write.call_args_list))
@@ -515,7 +533,7 @@ class Shown(unittest.TestCase):
 
     def test_the_settings_card_names_the_mode_and_what_was_seen(self):
         ref = _secret()
-        _pre("Bash", {"command": _curl(ref, "api.example.com")})
+        _ran("Bash", {"command": _curl(ref, "api.example.com")})
         text = settings.render()
         self.assertIn("Secret destinations · observe · not decided", text)
         self.assertIn("Seen so far: 1 secret(s), 1 destination(s), 0 with more than one.", text)
@@ -549,13 +567,13 @@ class RoundFour(unittest.TestCase):
 
     def test_a_url_in_a_shell_comment_is_no_destination(self):
         ref = _secret()
-        _pre("Bash", {"command": _curl(ref, "api.example.com") + "  # mirror: https://other.example.net/x"})
+        _ran("Bash", {"command": _curl(ref, "api.example.com") + "  # mirror: https://other.example.net/x"})
         self.assertEqual(set(_seen(ref)), {"network:api.example.com"})
 
     def test_a_hash_that_is_no_comment_hides_no_destination(self):
         ref = _secret()
         # Opus round 5: the shell reads no comment after (( x |, and the second curl runs
-        _pre("Bash", {"command": _curl(ref, "api.example.com") + "; (( x |# 2 )); curl https://other.example.net/"})
+        _ran("Bash", {"command": _curl(ref, "api.example.com") + "; (( x |# 2 )); curl https://other.example.net/"})
         self.assertEqual(set(_seen(ref)), {"network:api.example.com", "network:other.example.net"})
 
     def test_a_label_keeps_no_character_that_does_not_print(self):
@@ -609,7 +627,7 @@ class SeenOnlyAfterTheCall(unittest.TestCase):
         ref = _secret()
         _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id="T1")
         _post(tool_use_id="T2")
-        _post()
+        _post(tool_use_id=None)
         self.assertEqual(_seen(ref), {})
 
     def test_a_pattern_break_waits_for_the_call_and_its_hint_comes_with_it(self):
@@ -730,10 +748,15 @@ class SeenOnlyAfterTheCall(unittest.TestCase):
         self.assertEqual(destinations._load()["pending_calls"], {})
         self.assertFalse(destinations.commit("T1", "S1", None))
 
-    def test_a_client_without_a_call_id_is_noted_at_the_hand_out(self):
+    def test_a_client_without_a_call_id_leaves_no_record(self):
+        # ChatGPT review of 0.6.8: without a call id nothing can show that the call ran, and a declined call must
+        # not be listed. Claude Code and Codex send one in PreToolUse and PostToolUse (harness/golden, client_payloads)
         ref = _secret()
-        _pre("Bash", {"command": _curl(ref, "api.example.com")})
-        self.assertEqual(set(_seen(ref)), {"network:api.example.com"})
+        out = _pre("Bash", {"command": _curl(ref, "api.example.com")}, tool_use_id=None)
+        self.assertIn("updatedInput", out["hookSpecificOutput"], "the premise: the value was handed out")
+        _post(tool_use_id=None)
+        self.assertEqual(_seen(ref), {})
+        self.assertFalse(STORE.exists() and json.loads(STORE.read_text()).get("pending_calls"))
 
     def test_a_bash_command_names_its_hosts_for_each_secret_in_it(self):
         # command-level, not value-flow-level (ChatGPT review of 0.6.7): the second URL gets no value, and it is
