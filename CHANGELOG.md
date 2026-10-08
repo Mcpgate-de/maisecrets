@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## [0.6.9] - 2026-10-08
+
+### Features
+
+- the caps on stored values are 200 per session and 1000 uses an hour, and you can raise them (493cf77)
+
+### Fixes
+
+- the mod's tries share one budget on the mods clock, and a test holds it; README and PRIVACY name every connection (26a2482)
+- the mod tries the next Python after an error exit too, within one 8 s budget; review round 1 of 0.6.9 (07fafe6)
+- the mod starts the plugin's Python with fixed arguments, without a shell or an environment read (0eec13d)
+
+### Other
+
+- Merge branch 'feat/limits-from-the-logs' into 'main' (8485966)
+
 ## [0.6.8] - 2026-10-08
 
 ### Fixes
