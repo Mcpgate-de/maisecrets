@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## [0.6.7] - 2026-10-08
+
+### Features
+
+- maisecrets notes where each stored secret was sent, and /maisecrets:list shows it (dd74bc9)
+
+### Fixes
+
+- a file label uses / on Windows, and only the home folder itself becomes ~ (cc1ee66)
+- a heredoc after a parenthesis, any carriage return, and $ in double quotes ask (review round 7) (adb691e)
+- an ssh word in a comment the shell may not read as one asks; the parser stays as in 0.6.6 (review round 6) (0de44da)
+- a # or << inside (( )), $[ ], [[ ]] or ${ } is no comment and no heredoc (review round 5) (d6c3339)
+- read -v from the dequoted words (review round 5) (aa05dc4)
+- escaped space before # and printf -v ask; a record goes when its value expires (review round 4) (3120795)
+- text exemption only for a line that runs nothing else (review round 3) (b335e82)
+- ssh text rule only for quoted text, destination record bounded (review round 2) (204d745)
+- review round 1 of 0.6.7 (codex): text that a later part runs stays an ssh call; observing never waits (9e7d60f)
+- the word ssh in text (an issue body, a grep pattern) no longer asks (25778ab)
+- /maisecrets:settings ssh_autonomous_hosts add HOST shows the card instead of an error (dff5443)
+
+### Other
+
+- Merge branch 'feat/secret-destinations-observe' into 'main' (0760a76)
+
 ## [0.6.6] - 2026-10-07
 
 ### Features
