@@ -3,6 +3,9 @@
 import os
 import sys
 
+if len(sys.argv) == 2 and sys.argv[1] == "mod-prompt" and sys.version_info < (3, 9):
+    sys.exit(3)   # the mod then tries its next Python (claude-mod/maisecrets-mod.mjs); run.sh checks 3.9 for the hooks
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 HOOK_EVENTS = ("user-prompt", "pre-tool", "post-tool", "post-tool-failure", "session-start")
 

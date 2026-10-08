@@ -6,5 +6,5 @@ runner = ["tests/test_settings.py::Change::test_a_tool_call_that_carries_a_setti
 
 [proof]
 file = "maisecrets/settings.py"
-find = "IN_A_COMMAND_RE = re.compile(r\"(?:/maisecrets:settings|maisecrets:\\s*set)\\s+[a-z_]+\\s+[a-z-]+|\"\n                             r\"maisecrets:\\s*ssh\\s+(?:autonomous|ask)\\s|\"\n                             r\"maisecrets:\\s*reset\\s+hints|\\b(?:apply_typed|grant_typed|grant_by_code)\\b\", re.I)"
+find = "IN_A_COMMAND_RE = re.compile(r\"(?:/maisecrets:settings|maisecrets:\\s*set)\\s+[a-z_]+\\s+[a-z0-9-]+|\"\n                             r\"maisecrets:\\s*ssh\\s+(?:autonomous|ask)\\s|\"\n                             r\"maisecrets:\\s*reset\\s+hints|\\b(?:apply_typed|grant_typed|grant_by_code)\\b\", re.I)"
 replace = "IN_A_COMMAND_RE = re.compile(r\"(?!)\")"

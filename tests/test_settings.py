@@ -194,6 +194,32 @@ class Change(unittest.TestCase):
         _prompt("/maisecrets:settings rehydration confirm")
         self.assertEqual(_user()["rehydration"], "confirm")
 
+    def test_a_limit_takes_a_whole_number_from_a_typed_prompt(self):
+        # 0.6.9: the limiter is a setting the person can raise; replayed over five months the old caps stopped work
+        out = _prompt("/maisecrets:settings max_resolves_per_hour 2000")
+        self.assertNotIn("decision", out)
+        self.assertEqual(_user()["max_resolves_per_hour"], 2000, "stored as a number, not as text")
+        out = _prompt("maisecrets: set max_keys_per_session 500", CODEX)
+        self.assertEqual(out["decision"], "block", "the sentence never reaches the model")
+        self.assertEqual(_user()["max_keys_per_session"], 500)
+        for word in ("0", "many", "-5", "1000001", "9" * 5000):
+            with self.subTest(word):
+                _prompt(f"/maisecrets:settings max_keys_per_session {word}")
+                self.assertEqual(_user()["max_keys_per_session"], 500, "a value outside the range changes nothing")
+        _prompt("/maisecrets:settings max_keys_per_session default")
+        self.assertNotIn("max_keys_per_session", _user())
+        self.assertEqual(load_config()["max_keys_per_session"], 200, "the default")
+        _prompt("/maisecrets:settings max_resolves_per_hour default")
+        self.assertEqual(load_config()["max_resolves_per_hour"], 1000, "the default")
+        card = settings.render(show_all=True)
+        self.assertIn("Raise: /maisecrets:settings max_keys_per_session 400", card, "the card names the command")
+        self.assertIn("Raise: /maisecrets:settings max_resolves_per_hour 2000", card)
+
+    def test_a_tool_call_that_carries_a_limit_change_is_refused(self):
+        out = hooks.pre_tool({"tool_name": "Bash", "session_id": "S1", **CLAUDE,
+                              "tool_input": {"command": "codex exec 'maisecrets: set max_resolves_per_hour 99999'"}})
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
     def test_only_the_whole_prompt_counts(self):
         for text in ("please maisecrets: set ssh_consent on", "maisecrets: set ssh_consent on and run ls",
                      "/maisecrets:settings", "/maisecrets:settings --all", "set ssh_consent on"):

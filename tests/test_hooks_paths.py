@@ -686,6 +686,8 @@ class BashPathTests(unittest.TestCase):
         out = _hso(_bash_pre("echo " + third.ref))
         self.assertIn("limit: 1 distinct keys", out["permissionDecisionReason"])
         self.assertIn("do not change maisecrets settings yourself", out["permissionDecisionReason"])
+        # 0.6.9: the person learns how to raise the cap (a typed prompt; the model may not type it for them)
+        self.assertIn("/maisecrets:settings max_keys_per_session NUMBER", out["permissionDecisionReason"])
         _cfg()
         with mock.patch.object(Vault, "_record", return_value=False):
             out = _hso(_bash_pre("echo " + third.ref))

@@ -385,9 +385,13 @@ run".
   placeholder reads the value from a FIFO in the per-user runtime or temp
   directory (POSIX) or through `hooks/resolve.py` under a one-time grant
   (Windows Git Bash).
+- The mod (Claude Code 2.1.287 and later) runs this computer's Python with the
+  plugin's own `hooks/dispatch.py mod-prompt`, with fixed arguments and no shell,
+  and hands it the prompt on stdin; "The mod" below lists each call.
 - Writes: under `~/.maisecrets`: `index.json` (metadata and keyed
   fingerprints, never a value), `audit.log`, `events.log`, `hooks.log`,
-  `pending/`, `.announced`; the value FIFOs in the per-user runtime or temp
+  `pending/`, `.announced`, `destinations.json` (where each value went, never a
+  value); the value FIFOs in the per-user runtime or temp
   directory; the vault backend; on a blocked prompt the clipboard. With
   `scrub_transcript` on, it masks the raw value inside the client's transcript
   file named in the hook payload, in place, because the client writes the
@@ -396,10 +400,31 @@ run".
 - The skill runs `skills/secret-hygiene/scripts/scan_secrets.py` (reads files and
   `git log`) and `redact_copy.py` (writes a new file) when the model follows it; neither
   opens a network connection.
-- Sends and fetches: nothing. No hook opens a network connection.
-  `/maisecrets:report` prints the issue text and a prefilled link, and it
-  files the issue only with `--create` (GitHub CLI, to `report_url`); the
-  Windows Credential Locker may roam through a Microsoft account.
+- Sends and fetches: no telemetry and no download. These connections start from
+  a command you run, and nothing else in the plugin opens one:
+  - the ssh route of your own ssh command inside the Claude Code sandbox
+    (`hooks/proxy_connect.py`, the `ProxyCommand` of that ssh call): one
+    CONNECT through Claude Code's local sandbox proxy (localhost only) to the
+    host you named, with the proxy login that Claude Code puts in
+    `HTTPS_PROXY` for that sandbox;
+  - before an ssh command that carries a value, `hooks/sandbox_probe.py` checks
+    that it runs inside that sandbox: it tries direct connections to 1.1.1.1:443,
+    8.8.8.8:53 and 9.9.9.9:443 (the sandbox must refuse them) and one CONNECT with
+    a wrong login to the local sandbox proxy. It sends no data, and it runs only
+    when `SANDBOX_RUNTIME=1` and a local sandbox proxy are set;
+  - `/maisecrets:report`: on a computer with a desktop it opens your browser on
+    the prefilled issue page at `report_url` (the address carries the issue text,
+    the plugin version, your platform and a rule name, never a value), elsewhere
+    it prints the link; with `--create` it runs the GitHub CLI (`gh`) with your
+    own `gh` login to file the issue.
+- Credentials: the hooks and the mod fetch no credential for a request of
+  their own. They read the values you stored, from your operating system's
+  store, only to put each one into the tool call you allow, which then goes
+  where that call goes. The two commands above use the login that belongs to
+  them: the ssh route sends the sandbox proxy login from `HTTPS_PROXY` to the
+  local sandbox proxy, and `gh` uses its own GitHub login. The Windows
+  Credential Locker may roam through a Microsoft account (the operating system
+  does that, not the plugin).
 
 ## Secret hygiene skill
 
@@ -519,8 +544,8 @@ it ran (also when it failed), and only then is it listed. A call you decline in
 Claude Code's dialog is not listed (measured with the real client, whose
 headless mode refuses the question). Codex sends
 the same report for a command that ran or failed; a call it declines by its
-approval policy never reaches the hooks. A client that sends no call id is
-listed at the hand-out. `new` marks a destination first seen in the
+approval policy never reaches the hooks. A call without a call id is not
+listed: nothing could show that it ran. `new` marks a destination first seen in the
 last 24 hours. When a secret that you used at one destination
 (3 times on one day) goes to a new one for the first time, the AI tells you
 once, in a sentence; this note does not come again. maisecrets does not
@@ -545,8 +570,8 @@ later with the metadata); forget and wipe delete it too.
   "rewrite_prompts": true,
   "strip_hidden_characters": true,
   "regions": ["auto"],
-  "max_keys_per_session": 25,
-  "max_resolves_per_hour": 60,
+  "max_keys_per_session": 200,
+  "max_resolves_per_hour": 1000,
   "report_url": "https://github.com/Mcpgate-de/maisecrets/issues"
 }
 ```
@@ -613,14 +638,17 @@ the plugin points into that folder.
   person's own prompt only (typed or queued at the terminal, sent through Remote
   Control, or the turn of `claude -p`). A subagent's report, another session's or
   a channel's message goes on unchanged to the settings hook.
-- **What it reads:** the text of that prompt, the session id, the session's
-  working directory, and one environment variable, `OS`, to tell Windows from the
-  others.
-- **What it runs:** one program, the plugin's own launcher, with a fixed command
-  line, in the plugin folder: `bash hooks/run.sh mod-prompt`, or on Windows
-  `cmd.exe /d /c hooks\run.cmd mod-prompt`. The launcher starts this computer's
-  Python with `hooks/dispatch.py`, the same code the settings hooks run. No shell
-  reads the command line.
+- **What it reads:** the text of that prompt, the session id and the session's
+  working directory. It reads no environment variable and no file.
+- **What it runs:** this computer's Python with the plugin's own
+  `hooks/dispatch.py mod-prompt`, the same code the settings hooks run, in the
+  plugin folder. Each call is fixed text, with no shell: `python3 hooks/dispatch.py
+  mod-prompt`; when that cannot start or ends with an error (on Windows `python3`
+  is often a store stub, and `dispatch.py` refuses a Python older than 3.9),
+  `py -3 …`, then `python …`. All tries share one limit of 8 seconds. It sets
+  `PYTHONUTF8=1` for that process (over the environment it inherits), so that
+  Windows reads the pipe as UTF-8. When no Python answers, the mod passes the
+  prompt on unchanged and the settings hook blocks it.
 - **What it sends, and where:** the prompt, the session id and the working
   directory go to that local process on stdin. The process detects the values,
   stores them in the local store, and answers with the prompt with placeholders.
@@ -967,9 +995,16 @@ one ignored for a wrong type keeps what it made stricter (`rehydration`,
 a setting. The refusal and `/maisecrets:status` name the file. In an unattended run (`claude -p`) nobody can answer a confirm, so the
 call is refused and the model reads the reason, never the value. The whole
 matrix, path by path: `tests/test_rehydration_matrix.py`.
-- **Under a cap.** `max_keys_per_session` (25) distinct keys per session and
-  `max_resolves_per_hour` (60) in total; above that the call is denied and the
-  reason names the cap. Every resolve writes one line to `~/.maisecrets/audit.log`
+- **Under a cap.** `max_keys_per_session` (200) distinct values per session and
+  hour, and `max_resolves_per_hour` (1000) in total; above that the call is
+  denied, and the reason names the command that raises the cap, for example
+  `/maisecrets:settings max_resolves_per_hour 2000` (in Codex
+  `maisecrets: set max_resolves_per_hour 2000`), typed as your own prompt. The cap
+  is a brake for a session that would send all of its values out at once; the
+  session rule above keeps every other value closed anyway. Replayed over five
+  months of the maintainer's sessions, the busiest hour needed 67 values and 118
+  uses; the old caps of 25 and 60 would have stopped 3 of 178 sessions that used
+  values. Every resolve writes one line to `~/.maisecrets/audit.log`
   (time, session, key, tool, command with placeholders; never a value):
   `python3 -m maisecrets.cli audit`.
 - **Not by the agent reading or changing the store.** A Bash command that

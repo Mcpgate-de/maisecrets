@@ -7,10 +7,14 @@ import { expect, test } from 'claude-code/testing'
 const TYPED = 'check TOKENWORD in CI'
 const REWRITTEN = 'check ⟦SECRET_c1⟧ in CI'
 
+const clock = { t: 1_000_000 }
+
 function common(on, run) {
+  on('clock.now', () => ({ value: clock.t }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.cwd', () => ({ value: '/work' }))
-  on('env.get', () => ({ value: undefined }))
+  // the mod reads no environment variable (the directory review flagged the read next to a program start)
+  on('env.get', () => { throw new Error('the mod read an environment variable') })
   on('ui.log', () => ({ value: undefined }))
   on('process.run', run)
   // Claude Code's own answer to a prompt: the text that arrived
@@ -30,9 +34,11 @@ test('a well-formed answer replaces the prompt', async ($, on) => {
   })
   const r = await submit($)
   expect(r.text).toBe(REWRITTEN)
-  // the plugin's own launcher, with the prompt and the session on stdin
-  expect(seen.argv).toEqual(['bash', 'hooks/run.sh', 'mod-prompt'])
+  // the plugin's own dispatch.py, by python3 first, fixed text, with the prompt and the session on stdin
+  expect(seen.argv).toEqual(['python3', 'hooks/dispatch.py', 'mod-prompt'])
   expect(typeof seen.init.cwd).toBe('string')        // the plugin folder: the command line is fixed text
+  expect(seen.init.env).toEqual({ PYTHONUTF8: '1' })  // set over the environment, which stays
+  expect(seen.init.timeoutMs > 0 && seen.init.timeoutMs <= 8000).toBe(true)
   expect(JSON.parse(seen.init.stdin)).toEqual({ prompt: TYPED, session_id: 'sess-1', cwd: '/work' })
 })
 
@@ -91,7 +97,8 @@ test('a failure after the prompt was passed on drops it and sends nothing a seco
   let downstream = 0
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.cwd', () => ({ value: '/work' }))
-  on('env.get', () => ({ value: undefined }))
+  // the mod reads no environment variable (the directory review flagged the read next to a program start)
+  on('env.get', () => { throw new Error('the mod read an environment variable') })
   on('ui.log', () => ({ value: undefined }))
   on('process.run', () => ({ value: { exitCode: 0, stderr: '',
                                       stdout: JSON.stringify({ maisecrets: 'mod-prompt', text: REWRITTEN, count: 1 }) } }))
@@ -103,3 +110,72 @@ test('a failure after the prompt was passed on drops it and sends nothing a seco
   expect(downstream).toBe(1)
   expect(typeof r.drop).toBe('string')
 })
+
+test('a Python that starts and fails hands on to the next one, in a fixed order', async ($, on) => {
+  // Windows: python3 is often a store stub that starts and exits 9009; py -3 is the launcher that works
+  const argvs = []
+  common(on, ($, e) => {
+    argvs.push(e.argv.join(' '))
+    if (e.argv[0] === 'python3') return { value: { exitCode: 9009, stderr: '', stdout: '' } }
+    return { value: { exitCode: 0, stderr: '',
+                      stdout: JSON.stringify({ maisecrets: 'mod-prompt', text: REWRITTEN, count: 1 }) } }
+  })
+  expect((await submit($)).text).toBe(REWRITTEN)
+  expect(argvs).toEqual(['python3 hooks/dispatch.py mod-prompt', 'py -3 hooks/dispatch.py mod-prompt'])
+})
+
+test('a Python that cannot start hands on to the next one', async ($, on) => {
+  const argvs = []
+  common(on, ($, e) => {
+    argvs.push(e.argv[0])
+    if (e.argv[0] !== 'python') return { deny: 'cannot start' }
+    return { value: { exitCode: 0, stderr: '',
+                      stdout: JSON.stringify({ maisecrets: 'mod-prompt', text: REWRITTEN, count: 1 }) } }
+  })
+  expect((await submit($)).text).toBe(REWRITTEN)
+  expect(argvs).toEqual(['python3', 'py', 'python'])
+})
+
+test('when no Python answers, all three are tried once and the prompt goes on unchanged', async ($, on) => {
+  let runs = 0
+  common(on, () => {
+    runs += 1
+    return { value: { exitCode: 3, stderr: '', stdout: '' } }     // 3: dispatch.py on a Python older than 3.9
+  })
+  expect((await submit($)).text).toBe(TYPED)
+  expect(runs).toBe(3)
+})
+
+test('all tries share one budget of 8 s: each gets what is left', async ($, on) => {
+  const timeouts = []
+  common(on, ($, e) => {
+    timeouts.push(e.init.timeoutMs)
+    clock.t += 3000                                  // each failed try takes 3 s
+    return { value: { exitCode: 9009, stderr: '', stdout: '' } }
+  })
+  expect((await submit($)).text).toBe(TYPED)
+  expect(timeouts).toEqual([8000, 5000, 2000])
+})
+
+test('no try starts after the budget is spent', async ($, on) => {
+  const timeouts = []
+  common(on, ($, e) => {
+    timeouts.push(e.init.timeoutMs)
+    clock.t += 5000                                  // two tries spend the budget: the third does not start
+    return { value: { exitCode: 9009, stderr: '', stdout: '' } }
+  })
+  expect((await submit($)).text).toBe(TYPED)
+  expect(timeouts).toEqual([8000, 3000])
+})
+
+test('a timeout ends the search: no second Python runs the rewrite again', async ($, on) => {
+  let runs = 0
+  common(on, () => {
+    runs += 1
+    clock.t += 8000                                  // the whole budget, then the call rejects
+    return { deny: 'timed out' }
+  })
+  expect((await submit($)).text).toBe(TYPED)
+  expect(runs).toBe(1)
+})
+

@@ -20,9 +20,10 @@ from .vault import (CONFIG, DEFAULT_CONFIG, HOME, ConfigError, LockTimeout, _che
 DISCOVERABLE = ("ssh_consent", "ssh_autonomous_hosts", "secret_destinations", "rehydration")
 ADVANCED = ("ssh_host_groups", "ssh_approval", "resolve_in_files", "ssh_via_sandbox", "block_at_mentions",
             "rewrite_prompts", "scrub_transcript", "strip_hidden_characters", "regions", "ttl_seconds",
-            "renew_on_use", "tips", "shortcut", "guard", "pass_agent_reports", "gateway_servers")
+            "renew_on_use", "tips", "shortcut", "guard", "pass_agent_reports", "gateway_servers",
+            "max_keys_per_session", "max_resolves_per_hour")
 INTERNAL = ("backend", "allow_plaintext_store", "report_url", "max_ttl_seconds", "max_new_entries_per_result",
-            "max_keys_per_session", "max_resolves_per_hour", "keep_purged_days", "audit_max_lines", "pii_regions")
+            "keep_purged_days", "audit_max_lines", "pii_regions")
 
 TITLE = {
     "ssh_consent": "SSH consent", "ssh_autonomous_hosts": "Autonomous hosts",
@@ -35,6 +36,7 @@ TITLE = {
     "tips": "Tips and hints",
     "shortcut": "/ms shortcut", "guard": "Update guard", "pass_agent_reports": "Subagent reports",
     "gateway_servers": "Gateway servers",
+    "max_keys_per_session": "Values per session and hour", "max_resolves_per_hour": "Uses per hour",
 }
 MEANING = {
     "ssh_consent": "Ask before each ssh command that changes something on a host.",
@@ -57,6 +59,9 @@ MEANING = {
     "guard": "A synced install registers the guard outside its folder.",
     "pass_agent_reports": "A subagent's report is not blocked.",
     "gateway_servers": "MCP servers that resolve placeholders themselves.",
+    "max_keys_per_session": "How many different stored values one session may use in an hour. A brake against "
+                            "sending all values out at once; normal work stays far below it.",
+    "max_resolves_per_hour": "How often stored values may go into tool calls in an hour, all sessions together.",
 }
 CHOICE_TEXT = {
     "rehydration": (("automatic", "use a stored value in a tool call"), ("confirm", "ask before each use"),
@@ -65,7 +70,8 @@ CHOICE_TEXT = {
 }
 GROUPS = (("Protection", ("ssh_consent", "ssh_autonomous_hosts", "secret_destinations")),
           ("Using stored values", ("rehydration",)))
-ADVANCED_GROUPS = (("Stored values", ("ttl_seconds", "renew_on_use", "resolve_in_files", "gateway_servers")),
+ADVANCED_GROUPS = (("Stored values", ("ttl_seconds", "renew_on_use", "resolve_in_files", "gateway_servers",
+                                      "max_keys_per_session", "max_resolves_per_hour")),
                    ("ssh", ("ssh_host_groups", "ssh_approval", "ssh_via_sandbox")),
                    ("Prompts and tool output", ("block_at_mentions", "rewrite_prompts", "scrub_transcript",
                                                 "strip_hidden_characters", "regions", "pass_agent_reports")),
@@ -76,9 +82,11 @@ _BOOL_WORDS = {"on": True, "true": True, "off": False, "false": False}
 _CHOICES = {"rehydration": ("automatic", "confirm", "block"), "ssh_approval": ("per-command", "per-session"),
             "secret_destinations": ("observe", "off")}
 _BOOL_KEYS = tuple(k for k in DISCOVERABLE + ADVANCED if isinstance(DEFAULT_CONFIG.get(k), bool))
+# a whole number in this range: the limiter (C7). 0 would stop every use; a person who wants that sets rehydration block
+_INT_KEYS = {"max_keys_per_session": (1, 1_000_000), "max_resolves_per_hour": (1, 1_000_000)}
 
 # the whole prompt, nothing else: a sentence inside a longer prompt is text for the model, not an order
-_PROMPT_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+([a-z_]+)\s+([a-z-]+)\s*\Z", re.I)
+_PROMPT_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+([a-z_]+)\s+([a-z0-9-]+)\s*\Z", re.I)
 # the list of autonomous hosts: add or remove one host (as the ssh call writes it: user@host:port) or group name
 _HOST = r"([\w.@:\[\]-]+)"
 _AUTONOMOUS_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+ssh_autonomous_hosts\s+(add|remove)|maisecrets:\s*ssh\s+"
@@ -87,7 +95,7 @@ _HINTS_RESET_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+hints\s+reset|mais
 # the same sentence anywhere in a tool call: a nested client (`codex exec 'maisecrets: set …'`, `claude -p`) would
 # type it for the model, and the writer called by name would skip the prompt (review of C22). A text match: a
 # sentence or a name built at run time is not seen
-IN_A_COMMAND_RE = re.compile(r"(?:/maisecrets:settings|maisecrets:\s*set)\s+[a-z_]+\s+[a-z-]+|"
+IN_A_COMMAND_RE = re.compile(r"(?:/maisecrets:settings|maisecrets:\s*set)\s+[a-z_]+\s+[a-z0-9-]+|"
                              r"maisecrets:\s*ssh\s+(?:autonomous|ask)\s|"
                              r"maisecrets:\s*reset\s+hints|\b(?:apply_typed|grant_typed|grant_by_code)\b", re.I)
 # who wrote the prompt (Claude Code 2.1.292 UserPromptSubmit `source`): only the person at the composer. A scheduled
@@ -147,6 +155,10 @@ def _card(key: str, cfg: dict) -> list[str]:
     elif key in _CHOICES:
         other = next(m for m in _CHOICES[key] if m != value) if value in _CHOICES[key] else _CHOICES[key][0]
         lines.append(f"    Change: /maisecrets:settings {key} {other}")
+    elif key in _INT_KEYS:
+        n = value if isinstance(value, int) and not isinstance(value, bool) else DEFAULT_CONFIG[key]
+        lines.append(f"    Raise: /maisecrets:settings {key} {min(n * 2, _INT_KEYS[key][1])}   (any whole number "
+                     f"from {_INT_KEYS[key][0]})")
     else:
         lines.append(f"    Change it in {str(CONFIG).replace(str(Path.home()), '~', 1)}.")
     return lines
@@ -215,7 +227,7 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
     if key in (cfg.get("policy_keys") or []):
         return False, f"maisecrets: {key} is managed by a machine policy; it cannot be changed here."
     hosts_change = key == "ssh_autonomous_hosts" and (word == "default" or word.startswith(("add:", "remove:")))
-    if key not in _BOOL_KEYS and key not in _CHOICES and not hosts_change:
+    if key not in _BOOL_KEYS and key not in _CHOICES and key not in _INT_KEYS and not hosts_change:
         if key == "ssh_autonomous_hosts":
             return False, ("maisecrets: send /maisecrets:settings ssh_autonomous_hosts add HOST (or remove HOST), "
                            "or in Codex: maisecrets: ssh autonomous HOST (or ask HOST).")
@@ -227,6 +239,11 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
             return False, f"maisecrets: {key} takes on, off or default."
         if key in _CHOICES and word not in _CHOICES[key]:
             return False, f"maisecrets: {key} takes {', '.join(_CHOICES[key])} or default."
+        if key in _INT_KEYS:
+            low, high = _INT_KEYS[key]
+            # the length first: int() of thousands of digits raises instead of answering (codex review of 0.6.9)
+            if not (word.isdigit() and len(word) <= 8 and low <= int(word) <= high):
+                return False, f"maisecrets: {key} takes a whole number from {low} to {high:,}, or default."
     # a symlinked config.json (dotfiles) keeps its link: the new file replaces the target
     target = CONFIG.resolve() if CONFIG.is_symlink() else CONFIG
     try:
@@ -255,7 +272,8 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
                 hosts = [h for h in user.get(key, []) if h != host]
                 user[key] = hosts + [host] if verb == "add" else hosts
             else:
-                user[key] = _BOOL_WORDS[word] if key in _BOOL_KEYS else word
+                user[key] = (_BOOL_WORDS[word] if key in _BOOL_KEYS else int(word) if key in _INT_KEYS
+                             else word)
             atomic_write(target, json.dumps(user, indent=2) + "\n")
     except (OSError, LockTimeout) as exc:
         return False, f"maisecrets: {CONFIG} cannot be written ({type(exc).__name__}); nothing was changed."
