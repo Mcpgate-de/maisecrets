@@ -527,9 +527,10 @@ def issue(g: dict) -> tuple[str, str]:
         f"- plugin version: {g['plugin_version']} · {_platform()} · "
         f"Python {sys.version_info.major}.{sys.version_info.minor}",
         "",
-        "## What you were doing (optional)",
+        "## Notes (optional)",
+        "Do not paste a prompt, a command, a value, a path or a name here: the codes above are enough.",
         "",
-        "_Prepared by `maisecrets report incident`. It holds closed values only; please add no value._",
+        "_Prepared by `maisecrets report incident` from closed values only._",
     ]
     return title, "\n".join(lines)
 

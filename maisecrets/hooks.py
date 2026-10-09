@@ -12,6 +12,7 @@ Events:
 """
 from __future__ import annotations
 
+import functools
 import html
 import json
 import os
@@ -22,7 +23,7 @@ import time
 import sys
 from typing import Any
 
-from . import detect, rehydration
+from . import detect, incidents, rehydration
 from .placeholder import KEY_RE, find_refs
 from .vault import ConfigError, Vault, load_config
 
@@ -707,12 +708,32 @@ def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str 
     return rewritten, entries, values, stored
 
 
+def _run_sh() -> str:
+    """The absolute path of this plugin's launcher, for a line the person runs in a terminal."""
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", "run.sh")
+
+
+def _incident_answer(kind: str, selector: str | None) -> dict:
+    """The incident report as a block reason: shown to the person, never to the model, and no tool call runs, so a
+    damaged store or config cannot withhold it (docs/DIAGNOSTICS.md, section 7). Reads only."""
+    if kind == "show":
+        text = incidents.report_text(selector)
+    elif kind == "clear":
+        text = f"maisecrets: clear the incident record in a terminal: {_run_sh()} report incident clear"
+    else:
+        text = incidents.USAGE
+    return {"decision": "block", "reason": text,
+            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+
+
 def rewrite_prompt(payload: dict) -> dict:
     """The question of the mod (claude-mod/maisecrets-mod.mjs, Claude Code 2.1.287 and later): this prompt with a
     placeholder in place of each value, so it goes through instead of being blocked. ``{}`` leaves
     the prompt as it is, and the settings hook, which runs after the mod on what the mod passes on,
     decides it as without the mod: a clean prompt, an @file mention, a subagent report, a setting
     that turns the rewrite off. The answer carries placeholders, never a value."""
+    if incidents.recognize(payload.get("prompt"), client_of(payload)):
+        return {}            # the prompt hook answers it, before the config and the store (docs/DIAGNOSTICS.md, 7)
     cfg = load_config()
     if not cfg.get("rewrite_prompts", True):
         return {}
@@ -757,6 +778,9 @@ def rewrite_prompt(payload: dict) -> dict:
 
 
 def user_prompt(payload: dict) -> dict:
+    asked = incidents.recognize(payload.get("prompt"), client_of(payload))
+    if asked:
+        return _incident_answer(*asked)
     if os.environ.get("MAISECRETS_TEST_FAULT") == "user-prompt-slow" and os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
         # tests only (tests/_isolate.py sets the second variable): the watchdog answers
         time.sleep(WATCHDOG_SECONDS["user-prompt"] + 3)
@@ -3649,6 +3673,20 @@ HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post
             "post-tool-failure": _post_tool_failure_observed}
 
 
+def _record(step) -> None:
+    """One step of the incident recorder; it never raises (docs/DIAGNOSTICS.md, D4)."""
+    try:
+        step()
+    except Exception:  # noqa: BLE001 - recording never changes an answer
+        pass
+
+
+def _queue_failure(exc: BaseException, event: str, tool_class: str, client: str) -> None:
+    """Queue the incident of an exception that ended a hook: its code, cause and exit code; never its message."""
+    code, cause, kind, number = incidents.code_of(exc, event)
+    incidents.queue(code, cause, "fail-closed", _EVENT_NAMES[event], tool_class, client, kind, number)
+
+
 _EVENT_NAMES = {"user-prompt": "UserPromptSubmit", "pre-tool": "PreToolUse", "post-tool": "PostToolUse",
                 "post-tool-failure": "PostToolUseFailure"}
 
@@ -3677,8 +3715,8 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
     deny the tool, withhold the tool output. Never a value, never an exception text (a keychain
     error carried the value in its argument list; Codex review, 2026-09-26). Each text says
     whether the tool ran, so the model does not repeat a push or a deploy (review, 2026-09-26)."""
-    reason = f"maisecrets {event}: {why}"
     codex = client_of(payload) == "codex"
+    reason = f"maisecrets {event}: {why}" + _incident_line(codex)
     if event == "post-tool-failure":
         # the client shows the failed output whatever this answer says: there is nothing to withhold
         return {"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": reason}}
@@ -3700,6 +3738,16 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
     if codex:
         return {"decision": "block", "reason": reason + tail}
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": f"[{reason}{tail}]"}}
+
+
+def _incident_line(codex: bool) -> str:
+    """The fixed line of every fail-closed answer: where the person finds a report they can read and send
+    themselves (docs/DIAGNOSTICS.md, section 5). Codex shows no block reason of a typed form yet, so it names the
+    terminal form."""
+    if codex:
+        return (f" maisecrets sent no report. Run {_run_sh()} report incident in a terminal to see one you can read "
+                "and send yourself.")
+    return " maisecrets sent no report. Type /maisecrets:report incident to see one you can read and send yourself."
 
 
 def _decision_of(event: str, obj: dict) -> str:
@@ -3868,11 +3916,9 @@ def main(argv: list[str]) -> int:
         # an answer in JSON for every event: exit 2 is ignored after a tool, and Codex runs the tool on
         # exit 2 before one (Codex review, 2026-09-28)
         _out(_fail_closed(event, {}, "got a payload that is not JSON."))
-        from . import incidents
         incidents.write_marker_bounded("hook.payload")       # it answers before the timer: a marker, bounded
         return 0
     import threading
-    from . import incidents
     started = time.time()
     lock = threading.Lock()
     answered = {"v": False}
@@ -3923,25 +3969,27 @@ def main(argv: list[str]) -> int:
     except ConfigError as exc:
         # the policy file is wrong: fail closed, and say which key (its message never carries
         # a value; a bare type name sent the user to "a locked store"; review, 2026-09-26)
-        incidents.queue("config.policy-invalid", "parse", "fail-closed", _EVENT_NAMES[event], tool_class, client)
         won = answer(_fail_closed(event, payload, f"configuration error: {exc}. Fix the file named there.",
                                   hint=False), "config-error")
+        _record(functools.partial(incidents.queue, "config.policy-invalid", "parse", "fail-closed",
+                                  _EVENT_NAMES[event], tool_class, client))
         if won:
             _scrub_failed_prompt(event, payload)
         return 0
     except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         # the type only: an exception message may carry a value (subprocess errors list the argv)
-        code, cause, kind, number = incidents.code_of(exc, event)
-        incidents.queue(code, cause, "fail-closed", _EVENT_NAMES[event], tool_class, client, kind, number)
         won = answer(_failure(event, payload, exc), _how_failed(exc))
+        _record(functools.partial(_queue_failure, exc, event, tool_class, client))
         if won:
             _scrub_failed_prompt(event, payload)
         return 0
     finally:
+        # the recorder runs after the answer and never raises out of here: an exception would end the process
+        # with exit 1, and a client ignores the JSON answer of a hook that exits 1
         if won:
-            incidents.flush()                        # after the answer, still under the watchdog
+            _record(incidents.flush)                 # still under the watchdog
         else:
-            incidents.discard()
+            _record(incidents.discard)
             if answered["v"]:
                 watchdog.join()                      # the watchdog answered: its thread ends the process
         # cancel, then wait: a daemon timer thread that still runs while the interpreter shuts down
