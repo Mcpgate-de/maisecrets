@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 30 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 99 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 104 proofs: each control's test, and each path of the four invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -351,6 +351,8 @@ value is deleted after `keep_purged_days` (30). `audit.log` holds one line per
 resolve (time, session, key, tool, the command with placeholders; capped at
 `audit_max_lines`). `events.log` holds the last 200 detections (rule name and
 type). `pending/` holds a blocked prompt with placeholders for 15 minutes.
+`incidents.json` holds maisecrets' own internal failures as closed codes (at most
+50 groups; see "Reporting an internal failure").
 `hooks.log` holds one line per hook run (capped at 2000); the client column names
 the entry point, `claude/local-agent` for a Cowork session. The FIFOs a value
 is delivered through live in `$XDG_RUNTIME_DIR/maisecrets` or
@@ -362,9 +364,9 @@ server: no hook opens a network connection. Two exceptions to state to a data-pr
 officer: the Windows Credential Locker can roam through a Microsoft account on
 a machine that is not domain-joined (set `backend` to `encrypted-file` by
 policy if that matters), and `/maisecrets:report` prints an issue text and a
-link to `report_url`. It opens a browser only on a local desktop, and it files
-the issue only with `--create` through the GitHub CLI. Set `report_url` to your
-tracker, or set it to `null` to turn reporting off.
+link to `report_url`. It opens no browser and files nothing: you open the link
+and decide in GitHub's form. Set `report_url` to your tracker, or set it to
+`null` to turn reporting off.
 
 **Diagnosis.** `/maisecrets:status` prints version, plugin folder, Python,
 store, policy keys and log counts. `/maisecrets:audit` prints the last
@@ -391,7 +393,8 @@ run".
 - Writes: under `~/.maisecrets`: `index.json` (metadata and keyed
   fingerprints, never a value), `audit.log`, `events.log`, `hooks.log`,
   `pending/`, `.announced`, `destinations.json` (where each value went, never a
-  value); the value FIFOs in the per-user runtime or temp
+  value), `incidents.json` and `incident-marker.*` folders (maisecrets' own
+  failures as closed codes); the value FIFOs in the per-user runtime or temp
   directory; the vault backend; on a blocked prompt the clipboard. With
   `scrub_transcript` on, it masks the raw value inside the client's transcript
   file named in the hook payload, in place, because the client writes the
@@ -412,11 +415,10 @@ run".
     8.8.8.8:53 and 9.9.9.9:443 (the sandbox must refuse them) and one CONNECT with
     a wrong login to the local sandbox proxy. It sends no data, and it runs only
     when `SANDBOX_RUNTIME=1` and a local sandbox proxy are set;
-  - `/maisecrets:report`: on a computer with a desktop it opens your browser on
-    the prefilled issue page at `report_url` (the address carries the issue text,
-    the plugin version, your platform and a rule name, never a value), elsewhere
-    it prints the link; with `--create` it runs the GitHub CLI (`gh`) with your
-    own `gh` login to file the issue.
+  - `/maisecrets:report`: it prints the issue text and a prefilled link to
+    `report_url` (the address carries the issue text, the plugin version, your
+    platform and a rule name, never a value). It opens no browser and runs no
+    program: the connection starts when you open the link.
 - Credentials: the hooks and the mod fetch no credential for a request of
   their own. They read the values you stored, from your operating system's
   store, only to put each one into the tool call you allow, which then goes
@@ -720,12 +722,31 @@ Every block and every redaction leaves an event in `~/.maisecrets/events.log`
 event; `/maisecrets:report bug <what happened>` and
 `/maisecrets:report feature <what it should do>` prepare one without an event.
 The command prints the text and a prefilled link, so it also works over ssh and
-in Remote Control. It opens a browser only on a local desktop, never in an ssh
-session. Add `--create` to file the issue at once with the GitHub CLI (`gh`,
-logged in). The arguments reach the CLI in a quoted heredoc, so a shell never
-reads a reported command as code.
+in Remote Control. It opens no browser and files nothing: you open the link,
+check the text in GitHub's form and decide there (`--create` is gone; to file
+from a terminal, use `gh issue create` yourself). The arguments reach the CLI in
+a quoted heredoc, so a shell never reads a reported command as code.
 The CLI form is `python3 -m maisecrets.cli report …`. The value is not in the
 event, so it cannot be in the issue; describe its shape in words.
+
+## Reporting an internal failure
+
+When maisecrets itself fails (a locked store, a store call that times out, no
+Python for the hooks), it notes a closed code in `~/.maisecrets/incidents.json`
+on this computer: the code, a cause, the client, the tool class (`Bash`, `MCP`,
+…, never a tool's name), a count, the number of days in the last 30 and the
+plugin version. It never holds an error text, a path, a prompt, a command, a
+tool's input or output, a session id or a value; a field outside its closed
+form drops the entry. Nothing is sent.
+
+In Claude Code, type `/maisecrets:report incident`. The prompt hook shows the
+report to you only; the model sees neither the report nor the link, and it works
+also while the store is damaged. Open the link, check the text in GitHub's form
+and decide there. In Codex and in a terminal, run
+`<plugin folder>/hooks/run.sh report incident`; `report incident clear` deletes
+the record, and `wipe` deletes it too. A refusal caused by maisecrets' own
+failure names this command. The design is in `docs/DIAGNOSTICS.md` of the
+repository.
 
 ## Gates around a resolve
 

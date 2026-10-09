@@ -1,6 +1,7 @@
 # Local diagnostics and reporting (design v6, 0.6.10)
 
-Status: the design to build from, after six review rounds (round 6: codex and Opus, build with changes; the changes are in section 10). Issue: Mcpgate-de/maisecrets#14.
+Status: built on branch `feat/local-diagnostics-build` (sections 3 to 11); the design to build from, after six
+review rounds (round 6: codex and Opus, build with changes; the changes are in section 10). Issue: Mcpgate-de/maisecrets#14.
 
 maisecrets has no telemetry, no server and no automatic error upload, and it keeps it that way. This design
 adds a way to learn about real problems: maisecrets records its own internal failures **on this computer**, as

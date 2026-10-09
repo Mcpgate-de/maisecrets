@@ -22,7 +22,10 @@ reads it.
 - `~/.maisecrets/audit.log` holds one line per resolve (time, session, key, tool, the
   command with placeholders). `events.log` holds the last detections (rule and type).
   `hooks.log` holds one line per hook run. `pending/` holds a blocked prompt with
-  placeholders for 15 minutes. None of them holds a value.
+  placeholders for 15 minutes. `incidents.json` and the `incident-marker.*` folders hold
+  maisecrets' own internal failures as closed codes (code, cause, client, tool class, a
+  count, the number of days, the plugin version); never an error text, a path, a prompt, a
+  command, a session id or a value. None of them holds a value.
 - With `scrub_transcript` on (the default), the plugin masks a detected value inside the
   client's own transcript file on your disk, in place.
 
@@ -42,12 +45,11 @@ Connections start only from a command you run:
   sandbox proxy to the host you named, with the proxy login Claude Code sets for that
   sandbox. Before an ssh command that carries a value, a check tries a few direct
   connections that the sandbox must refuse; it sends no data.
-- `/maisecrets:report` prints the issue text and, on a computer with a desktop, opens your
-  browser on the prefilled issue page at the configured `report_url` (elsewhere it prints
-  the link). The page address carries the issue text, the plugin version, your platform and
-  the rule name of a detection, never a value. Only with `--create` does it file the issue
-  itself, through the GitHub CLI (`gh`) and its own login. Set `report_url` to your own
-  tracker or to `null`.
+- `/maisecrets:report` prints the issue text and a prefilled link to the configured
+  `report_url`. It opens no browser and files nothing: the connection starts when you open
+  the link, and you decide in GitHub's form. The link carries the issue text, the plugin
+  version, your platform and the rule name of a detection or the closed codes of an internal
+  failure, never a value. Set `report_url` to your own tracker or to `null`.
 - The Windows Credential Locker may roam through a Microsoft account on a machine that is
   not domain-joined. Choose the `encrypted-file` store there if that matters.
 
