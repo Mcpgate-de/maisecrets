@@ -19,7 +19,10 @@ ALLOWED = ("MAISECRETS_NATIVE_BACKEND_TEST", "MAISECRETS_NATIVE_CLIPBOARD_TEST",
            # images of GitLab do not
            "pwsh is not installed",
            # the commandWindows part of hooks.json (28c64d0): cmd.exe exists on the Windows runners only
-           "cmd.exe runs on Windows only")
+           "cmd.exe runs on Windows only",
+           # a home the hook cannot search (test_guard): CI runs as root, which ignores the mode bits. The unit
+           # test beside it raises the same PermissionError on every OS; the GitHub macOS runner runs this one
+           "root and Windows ignore the mode bits")
 
 
 def main(path: str, *extra: str) -> int:
