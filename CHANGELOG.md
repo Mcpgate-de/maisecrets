@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+## [0.6.10] - 2026-10-09
+
+### Breaking
+
+- no report form opens a browser or runs gh; the person files the issue in GitHub's form (4c91c53)
+
+### Features
+
+- every failure site records its code, and the launchers and the guard leave markers (4703c64)
+- /maisecrets:report incident shows the report to the person, also with a damaged store (327ef52)
+- hooks record their failures after the answer, and the hook always ends in time (5a53a88)
+- a local incident record with closed values, markers that follow nothing, and a report that sends nothing (3f908c0)
+
+### Fixes
+
+- without Python, run.cmd refuses every hook event in JSON with exit 0, so Codex no longer runs the tool (7e98099)
+- clear returns the plugin marker it removed also when the home cannot be listed (dd5e7b7)
+- run.cmd leaves its marker in its own hooks folder, with no child and no touch of the home (dc8d7b5)
+- run.cmd makes its marker in a detached child, so a stalled home cannot hold the hook (38fb21c)
+- code review round 1 - a winning watchdog writes no heartbeat before its exit, and markers never hold a hook (4f07b23)
+- one layer against a symlinked record, so its test can fail (c5617e8)
+
+### Security
+
+- a home the hook cannot search no longer lets a prompt through on Python 3.9 (e45ab0a)
+
+### Other
+
+- Merge branch 'feat/local-diagnostics-build' into 'main' (5c79d73)
+
 ## [0.6.9] - 2026-10-08
 
 ### Features
