@@ -525,7 +525,7 @@ def _clear_locked(home: Path) -> int:
     try:
         names = os.listdir(home)
     except OSError:
-        return 0
+        return n
     for name in names:
         p = home / name
         try:
