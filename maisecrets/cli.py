@@ -245,7 +245,8 @@ def _report_incident(kind: str, selector: str | None) -> int:
               "Claude Code, or run this command in a terminal.")
         return 0
     if kind == "clear":
-        print(f"cleared: {incidents.clear()} incident file(s)")
+        n = incidents.clear()
+        print("the incident record is busy; try again" if n < 0 else f"cleared: {n} incident file(s)")
         return 0
     print(incidents.report_text(selector))
     return 0
@@ -360,6 +361,11 @@ def cmd_status(_: list[str]) -> int:
         except OSError:
             n = 0
         print(f"{name}: {n} lines")
+    from . import incidents
+    groups, damaged = incidents.load()
+    markers = incidents.unfolded_markers()
+    print(f"incidents: {len(groups)} group(s)" + (f", {len(markers)} not yet folded" if markers else "")
+          + (", the record is damaged" if damaged else "") + "; /maisecrets:report incident shows them")
     return 0
 
 

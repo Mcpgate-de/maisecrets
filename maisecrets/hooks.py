@@ -715,8 +715,10 @@ def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str 
 
 
 def _run_sh() -> str:
-    """The absolute path of this plugin's launcher, for a line the person runs in a terminal."""
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", "run.sh")
+    """The absolute path of this plugin's launcher for this OS, for a line the person runs in a terminal (run.sh does
+    not run in cmd or PowerShell)."""
+    name = "run.cmd" if os.name == "nt" else "run.sh"
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", name)
 
 
 def _incident_answer(kind: str, selector: str | None) -> dict:
@@ -786,6 +788,8 @@ def rewrite_prompt(payload: dict) -> dict:
 def user_prompt(payload: dict) -> dict:
     asked = incidents.recognize(payload.get("prompt"), client_of(payload))
     if asked:
+        if asked[0] == "usage":
+            _scrub_failed_prompt("user-prompt", payload)   # free text after the form: the client keeps the prompt
         return _incident_answer(*asked)
     if os.environ.get("MAISECRETS_TEST_FAULT") == "user-prompt-slow" and os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
         # tests only (tests/_isolate.py sets the second variable): the watchdog answers
@@ -3946,6 +3950,7 @@ def main(argv: list[str]) -> int:
         process: the watchdog and the handler both call here, and two concatenated objects fail open (review,
         2026-09-26). The lock has a limit, so a handler stuck in its own write cannot hold the watchdog
         (docs/DIAGNOSTICS.md section 10)."""
+        json.dumps(obj)                              # before the claim: an object that cannot be written claims nothing
         if not lock.acquire(timeout=1):
             return False
         try:
@@ -3953,7 +3958,10 @@ def main(argv: list[str]) -> int:
                 return False
             answered["v"] = True
             _out(obj)
-            _heartbeat(event, payload, done=True)     # the guard waits for it, on both paths
+            if how != "watchdog":
+                # the guard waits for it; the watchdog writes it in its bounded thread, so a stalled home cannot
+                # hold the process past the client's timeout (Opus code review, round 1, measured)
+                _heartbeat(event, payload, done=True)
         finally:
             lock.release()
         ms = int((time.time() - started) * 1000)
@@ -3966,6 +3974,7 @@ def main(argv: list[str]) -> int:
     def on_timeout() -> None:
         if answer(_fail_closed(event, payload, f"took longer than {WATCHDOG_SECONDS[event]:.0f}s."), "watchdog"):
             def last() -> None:
+                _heartbeat(event, payload, done=True)
                 _scrub_failed_prompt(event, payload)
                 incidents.write_marker(f"hook.{event}.watchdog")
             t = threading.Thread(target=last, daemon=True)

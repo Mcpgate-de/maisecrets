@@ -25,7 +25,7 @@ from pathlib import Path
 
 from .placeholder import display_for
 
-HOME = Path(os.environ.get("MAISECRETS_HOME", Path.home() / ".maisecrets"))
+HOME = Path(os.environ.get("MAISECRETS_HOME") or Path.home() / ".maisecrets")   # empty: the default, as in run.sh
 INDEX = HOME / "index.json"
 CONFIG = HOME / "config.json"
 # The keychain namespace is per service name, not per vault home. A second home

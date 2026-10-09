@@ -140,7 +140,7 @@ class RecordFileTests(_Home):
 
     def test_flush_skips_when_the_lock_is_busy_and_never_raises(self):
         incidents.queue("store.lock", "lock", "fail-closed", "UserPromptSubmit")
-        with incidents._OneTry(self.home / "incidents.lock") as locked:
+        with incidents._OneTry(self.home / incidents.LOCK_NAME) as locked:
             self.assertTrue(locked)
             incidents.flush()
         self.assertFalse(incidents.record_path().exists())
@@ -237,12 +237,18 @@ class MarkerTests(_Home):
         self.assertTrue(other.exists())
 
     def test_clear_removes_record_aside_lock_temp_and_markers_and_nothing_else(self):
-        for n in ("incidents.json", "incidents.json.corrupt", "incidents.lock", "incidents.json.77.tmp",
-                  "index.json"):
+        for n in ("incidents.json", "incidents.json.corrupt", "incidents.json.77.tmp", "index.json"):
             (self.home / n).write_text("x")
         incidents.write_marker("guard.fired")
-        self.assertEqual(incidents.clear(), 5)
-        self.assertEqual(os.listdir(self.home), ["index.json"])
+        self.assertEqual(incidents.clear(), 4)
+        self.assertEqual(sorted(os.listdir(self.home)), [incidents.LOCK_NAME, "index.json"],
+                         "the lock stays: a second hook must not lock a new file while the first holds the old one")
+
+    def test_clear_waits_for_no_busy_lock_and_removes_nothing_then(self):
+        incidents.record_path().write_text("x")
+        with incidents._OneTry(self.home / incidents.LOCK_NAME):
+            self.assertEqual(incidents.clear(), -1)
+        self.assertTrue(incidents.record_path().exists())
 
 
 class FormTests(unittest.TestCase):

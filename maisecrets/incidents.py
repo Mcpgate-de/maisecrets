@@ -50,6 +50,8 @@ _VERSION_RE = re.compile(r"\A(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\
 _DAY_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
 _SELECTOR_RE = re.compile(r"\A([a-z0-9.-]{1,48})/([a-z]{1,12})\Z")
 MARKER_PREFIX = "incident-marker."
+# a dot name, as the other locks of the home (.lock, .destinations.lock): a lock stays with its files
+LOCK_NAME = ".incidents.lock"
 _CLAIMED_RE = re.compile(r"\A" + re.escape(MARKER_PREFIX) + r"([a-z0-9.-]{1,48})\.claimed-\d{1,10}-\d{1,20}\Z")
 # the command as Claude Code writes it before it expands it: a leading space or another spelling is not expanded
 # and reaches the model as plain text (measured, Claude Code 2.1.295)
@@ -337,9 +339,9 @@ def flush(today: str | None = None) -> None:
         home = _home()
         if not home.is_dir() or home.is_symlink():
             return
-        if not items and not _marker_names(home):
+        if not items and not _takeable_markers(home):
             return                                   # nothing to write: no file is touched
-        with _OneTry(home / "incidents.lock") as locked:
+        with _OneTry(home / LOCK_NAME) as locked:
             if not locked:
                 return
             today = today or _today()
@@ -347,11 +349,12 @@ def flush(today: str | None = None) -> None:
             groups, damaged = load(path, today)
             if damaged:
                 _set_aside(path)
-            for code, day in _claim_markers(home):
+            taken = _claim_markers(home)
+            for code, day in taken:
                 groups = add(groups, _marker_item(code), day if _valid_day(day, *_window(today)) else today)
             for item in items:
                 groups = add(groups, item, today)
-            if groups or damaged:
+            if items or taken or damaged:
                 from .vault import atomic_write
                 atomic_write(path, dumps(groups))
     except Exception:  # noqa: BLE001 - recording never changes an answer
@@ -399,11 +402,31 @@ def write_marker(code: str) -> None:
 
 
 def write_marker_bounded(code: str, seconds: float = 0.3) -> None:
-    """write_marker in a daemon thread, waited for at most `seconds`: a slow disk cannot hold the hook."""
-    import threading
-    t = threading.Thread(target=write_marker, args=(code,), daemon=True)
-    t.start()
-    t.join(seconds)
+    """write_marker in a daemon thread, waited for at most `seconds`: a slow disk cannot hold the hook. Called after
+    the answer, right before the process ends: a thread still alive then ends the process at once, as a thread
+    alive at the shutdown of the interpreter can crash it (signal 11 on a macOS runner, 2026-09-27). Never raises."""
+    try:
+        import threading
+        t = threading.Thread(target=write_marker, args=(code,), daemon=True)
+        t.start()
+        t.join(seconds)
+        if t.is_alive():
+            sys.stdout.flush()
+            os._exit(0)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _takeable_markers(home: Path) -> bool:
+    """A marker the fold can take: a real directory under a marker code's name, or a claimed name left by a crash."""
+    for name in _marker_names(home):
+        code = name[len(MARKER_PREFIX):]
+        try:
+            if (code in MARKER_CODES or _CLAIMED_RE.match(name)) and stat.S_ISDIR(os.lstat(home / name).st_mode):
+                return True
+        except OSError:
+            pass
+    return False
 
 
 def _marker_names(home: Path) -> list[str]:
@@ -433,8 +456,8 @@ def _claim_markers(home: Path) -> list[tuple[str, str]]:
             continue
         try:
             st = os.lstat(p)
-            if not stat.S_ISDIR(st.st_mode):
-                continue
+            if not stat.S_ISDIR(st.st_mode) or os.listdir(p):
+                continue                             # a full folder is no marker: it stays where it is
             target = home / f"{name}.claimed-{os.getpid()}-{time.time_ns()}"
             os.rename(p, target)
             os.rmdir(target)
@@ -459,9 +482,19 @@ def unfolded_markers(home: Path | None = None) -> list[str]:
 
 
 def clear(home: Path | None = None) -> int:
-    """Remove the record, its aside, its lock, its temp files and the markers: rmdir only for markers, never
-    recursive. The number of objects removed."""
+    """Remove the record, its aside, its temp files and the markers, under the record's lock: rmdir only for markers,
+    never recursive. The lock file stays: removed, a second hook would lock a new file while the first one holds the
+    old one (codex code review, round 1). The number of objects removed, or -1 when the lock is busy."""
     home = home or _home()
+    if not home.is_dir() or home.is_symlink():
+        return 0
+    with _OneTry(home / LOCK_NAME) as locked:
+        if not locked:
+            return -1
+        return _clear_locked(home)
+
+
+def _clear_locked(home: Path) -> int:
     n = 0
     try:
         names = os.listdir(home)
@@ -475,7 +508,7 @@ def clear(home: Path | None = None) -> int:
                 if stat.S_ISDIR(st.st_mode):
                     os.rmdir(p)
                     n += 1
-            elif name in ("incidents.json", "incidents.json.corrupt", "incidents.lock") or (
+            elif name in ("incidents.json", "incidents.json.corrupt") or (
                     name.startswith("incidents.json.") and name.endswith(".tmp")):
                 if not stat.S_ISDIR(st.st_mode):
                     os.unlink(p)
@@ -528,7 +561,7 @@ def recognize(prompt, client: str) -> tuple[str, str | None] | None:
 
 USAGE = ("maisecrets: /maisecrets:report incident shows the incident report; "
          "/maisecrets:report incident <code/cause> shows one group. "
-         "Clear the record in a terminal: run.sh report incident clear.")
+         "Clear the record in a terminal: hooks/run.sh report incident clear (hooks\\run.cmd on Windows).")
 
 
 def _platform() -> str:

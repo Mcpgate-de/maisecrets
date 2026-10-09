@@ -128,7 +128,7 @@ class RecordAfterTheAnswerTests(_Clean):
                                                  handler=self.failing))
                 except RuntimeError:
                     answers.append("raised")
-        with incidents._OneTry(HOME / "incidents.lock"):
+        with incidents._OneTry(HOME / incidents.LOCK_NAME):
             answers.append(self.run_main("pre-tool", dict(CLAUDE, tool_name="Bash", tool_input={"command": "ls"},
                                                           tool_use_id="c1"), handler=self.failing))
         self.assertEqual(answers[1:], [on] * 4, "off, flush raising, queue raising, lock held")

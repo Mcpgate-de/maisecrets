@@ -505,7 +505,8 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
         n = len(before.store or [])
         expect(r.stdout == f"wiped: {n} stored value(s), index, logs. The config file stays.\n", "wipe count")
         expect(not after.store and after.pending == [] and after.index is None, "wipe left a value or the index")
-        kept = {".lock", ".destinations.lock", "config.json", "pending", "vault.json"}   # locks stay with their files
+        # locks stay with their files
+        kept = {".lock", ".destinations.lock", ".incidents.lock", "config.json", "pending", "vault.json"}
         expect(set(after.files) <= kept, f"wipe left {after.files}")
         return p
     if command == "repair":

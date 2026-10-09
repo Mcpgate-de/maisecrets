@@ -23,7 +23,10 @@ done
 # in a home that exists and is no link; it never fails the launcher
 mark() {
   H="${MAISECRETS_HOME:-${HOME:-}/.maisecrets}"
-  if [ -d "$H" ] && [ ! -L "$H" ]; then (umask 077; mkdir "$H/incident-marker.launcher.no-python") 2>/dev/null; fi
+  # in the background with no output of its own: a stalled home cannot hold the launcher past the client's timeout
+  if [ -d "$H" ] && [ ! -L "$H" ]; then
+    (umask 077; mkdir "$H/incident-marker.launcher.no-python") </dev/null >/dev/null 2>&1 &
+  fi
   return 0
 }
 MSG="maisecrets needs Python 3.9 or newer on the PATH of the client (found: ${FOUND:-none}). Install it: macOS 'brew install python' or python.org, Windows, as an administrator, 'winget install --id Python.Python.3.12 --exact --scope machine', Linux your package manager; then restart the client."

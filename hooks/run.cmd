@@ -82,7 +82,9 @@ exit /b 2
 exit /b %errorlevel%
 
 rem an incident marker for /maisecrets:report incident (docs/DIAGNOSTICS.md, section 3): after the answer, one md in a
-rem home that exists and is no reparse point (a junction), so md creates no parent and follows nothing
+rem home that exists and is no reparse point (a junction), so md creates no parent and follows nothing. It runs in
+rem the foreground, as the write of last-start.txt above does before every start: cmd has no detached child without
+rem a window
 :mark
 set "MS_HOME=%MAISECRETS_HOME%"
 if "%MS_HOME%"=="" set "MS_HOME=%USERPROFILE%\.maisecrets"

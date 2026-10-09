@@ -72,6 +72,8 @@ def _marker(code: str) -> None:
         t = threading.Thread(target=make, daemon=True)
         t.start()
         t.join(0.3)
+        if t.is_alive():
+            os._exit(0)          # a thread alive at the shutdown of the interpreter can crash it (signal 11)
     except Exception:  # noqa: BLE001
         pass
 
