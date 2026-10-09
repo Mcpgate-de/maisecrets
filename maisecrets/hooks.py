@@ -25,6 +25,7 @@ from typing import Any
 
 from . import detect, incidents, rehydration
 from .placeholder import KEY_RE, find_refs
+from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config
 
 # a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
@@ -83,7 +84,11 @@ def _clipboard(text: str) -> bool:
             cmd = ["xclip", "-selection", "clipboard"]
         subprocess.run(cmd, input=data, check=True, timeout=_CLIPBOARD_TIMEOUT)
         return True
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        # a missing tool and an SSH session are normal (a headless Linux, a remote shell): no incident
+        if not isinstance(exc, FileNotFoundError) and not any(
+                os.environ.get(k) for k in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")):
+            incidents.note("prompt.clipboard", exc)
         return False
 
 
@@ -222,8 +227,9 @@ def _scrub_transcript_later(path: str, values: list[str], refs: list[str], secon
                                       "bases": bases, "session": session or "", "hidden": hidden}).encode())
         child.stdin.close()
         return child          # the tests wait for it; the hooks never do
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
         _debug("scrub-later: could not start")
+        incidents.note("scrub.start", exc)
     return None
 
 
@@ -400,8 +406,8 @@ def _save_pending(rewritten: str, session: str | None) -> None:
         fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(rewritten)
-    except OSError:
-        pass
+    except OSError as exc:
+        incidents.note("prompt.pending", exc)
 
 
 def take_pending(session: str | None = None) -> str | None:
@@ -1895,7 +1901,7 @@ def _run_dir() -> str:
         pass
     st = os.lstat(base)
     if not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or (st.st_mode & 0o077):
-        raise RuntimeError(base)
+        raise vault_mod.CodedError(base, "hook.run-dir", "permission")
     return base
 
 
@@ -1913,7 +1919,7 @@ def _sealed_dir() -> str:
         pass
     st = os.lstat(d)
     if not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
-        raise RuntimeError(d)
+        raise vault_mod.CodedError(d, "hook.sealed-dir", "permission")
     # never readable again once made: a sweep that opened it for a moment let a blind reader list it
     # (Codex review, 2026-09-28). Each serving child removes its own FIFO; wipe clears the rest
     if _stat.S_IMODE(st.st_mode) != 0o300:
@@ -3580,10 +3586,15 @@ def _post_tool_guarded(payload: dict) -> dict:
     try:
         result = post_tool(payload)
     except ConfigError as exc:
-        return _fail_closed("post-tool", payload, f"configuration error: {exc}. Fix the file named there.", hint=False)
+        out = _fail_closed("post-tool", payload, f"configuration error: {exc}. Fix the file named there.", hint=False)
+        _record(functools.partial(incidents.queue, "config.policy-invalid", "parse", "fail-closed", "PostToolUse",
+                                  _tool_class(payload), client_of(payload)))
+        return out
     except Exception as exc:  # noqa: BLE001
         _debug(f"post-tool: {type(exc).__name__}")
-        return _failure("post-tool", payload, exc)
+        out = _failure("post-tool", payload, exc)
+        _record(functools.partial(_queue_failure, exc, "post-tool", _tool_class(payload), client_of(payload)))
+        return out
     try:
         return _with_hint(payload, result)
     except Exception as exc:  # noqa: BLE001 - a hint that fails must not withhold the output
@@ -3852,6 +3863,7 @@ def _scrub_failed_prompt_now(prompt: str, path: str) -> None:
             _scrub_transcript_later(path, values, [])
     except Exception:  # noqa: BLE001 - the block stands either way
         _debug("scrub-failed-prompt: could not finish")
+        incidents.write_marker("scrub.write")      # this runs in the scrub child: a marker, not the record
 
 
 def _scrub_failed_prompt(event: str, payload: dict) -> None:
@@ -3963,6 +3975,8 @@ def main(argv: list[str]) -> int:
     won = False
     tool_class = _tool_class(payload)
     client = client_of(payload)
+    _record(incidents.discard)
+    _record(functools.partial(incidents.set_context, _EVENT_NAMES[event], tool_class, client))
     try:
         won = answer(HANDLERS[event](payload), "ok")
         return 0
@@ -3992,6 +4006,7 @@ def main(argv: list[str]) -> int:
             _record(incidents.discard)
             if answered["v"]:
                 watchdog.join()                      # the watchdog answered: its thread ends the process
+        _record(functools.partial(incidents.set_context, None))
         # cancel, then wait: a daemon timer thread that still runs while the interpreter shuts down
         # can crash the process, and one hook ended with signal 11 after its answer on a macOS
         # runner (2026-09-27)

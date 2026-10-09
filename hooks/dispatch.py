@@ -10,6 +10,27 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 HOOK_EVENTS = ("user-prompt", "pre-tool", "post-tool", "post-tool-failure", "session-start")
 
 
+def _marker(code: str) -> None:
+    """An incident marker for /maisecrets:report incident (docs/DIAGNOSTICS.md, section 3): one empty folder made with
+    one mkdir in a home that exists and is no link, after the answer, waited for at most 0.3 s. Never raises."""
+    import threading
+
+    def make() -> None:
+        try:
+            home = os.environ.get("MAISECRETS_HOME") or os.path.join(os.path.expanduser("~"), ".maisecrets")
+            if os.path.isdir(home) and not os.path.islink(home):
+                os.mkdir(os.path.join(home, "incident-marker." + code), 0o700)
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        sys.stdout.flush()
+        t = threading.Thread(target=make, daemon=True)
+        t.start()
+        t.join(0.3)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _refuse_without_the_code(why: str) -> None:
     """The plugin's own code cannot be loaded (a half-synced folder, a missing module): answer as the
     launcher does without Python. A failed import ended the process with exit 1, which the client
@@ -21,6 +42,7 @@ def _refuse_without_the_code(why: str) -> None:
     if event == "post-tool-failure":
         import json
         print(json.dumps({"systemMessage": msg}))    # a failed output cannot be withheld: only the reason is named
+        _marker("launcher.import")
         sys.exit(0)
     if event == "post-tool":
         import json
@@ -29,10 +51,12 @@ def _refuse_without_the_code(why: str) -> None:
         codex = '"turn_id"' in sys.stdin.read()
         print(json.dumps({"decision": "block", "reason": text} if codex else
                          {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": text}}))
+        _marker("launcher.import")
         sys.exit(0)
     if event == "session-start":
         import json
         print(json.dumps({"systemMessage": msg + " Until then every prompt is blocked."}))
+        _marker("launcher.import")
         sys.exit(0)
     import json
     text = msg + " Until then every prompt is blocked."
@@ -42,6 +66,7 @@ def _refuse_without_the_code(why: str) -> None:
                                                  "permissionDecisionReason": text}}))
     else:
         print(json.dumps({"decision": "block", "reason": text}))
+    _marker("launcher.import")
     sys.exit(0)
 
 
@@ -126,6 +151,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     except ConfigError as exc:
         print(json.dumps({"systemMessage": f"maisecrets: configuration error: {exc}. Every prompt is blocked "
                                            "until the file is fixed."}))
+        _marker("hook.session-start")
         sys.exit(0)
     try:
         v = Vault(cfg)
@@ -136,6 +162,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         # a damaged index: the message names `maisecrets repair`; a traceback here gave the
         # client no JSON and the person no hint
         print(json.dumps({"systemMessage": f"maisecrets: {exc}."}))
+        _marker("hook.session-start")
         sys.exit(0)
     # a blocked prompt older than 15 minutes is never sent; the file goes too (retention)
     pending = HOME / "pending"

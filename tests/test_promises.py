@@ -89,7 +89,8 @@ class LauncherFailsClosedTests(unittest.TestCase):
         # only the tools run.sh needs besides a Python; no python3, python or py on this PATH
         self.tools = self.sb.root / "tools"
         self.tools.mkdir()
-        for tool in ("dirname",):
+        # mkdir: the incident marker after the answer (docs/DIAGNOSTICS.md, section 3)
+        for tool in ("dirname", "mkdir"):
             os.symlink(shutil.which(tool), self.tools / tool)
 
     def launch(self, event: str) -> subprocess.CompletedProcess:
@@ -123,6 +124,28 @@ class LauncherFailsClosedTests(unittest.TestCase):
 
     def test_no_python_on_the_path_blocks_every_event(self):
         self.check_all_events("none")
+
+    def test_no_python_leaves_one_marker_for_the_incident_report(self):
+        # docs/DIAGNOSTICS.md, section 3: the launcher cannot write the record, so it leaves a marker after its answer
+        self.launch("user-prompt")
+        self.launch("pre-tool")
+        self.assertEqual(sorted(p.name for p in self.sb.home.glob("incident-marker.*")),
+                         ["incident-marker.launcher.no-python"], "one marker; a second failure coalesces")
+        self.assertTrue((self.sb.home / "incident-marker.launcher.no-python").is_dir())
+
+    def test_no_marker_into_a_symlinked_home(self):
+        if os.name == "nt":
+            self.skipTest("symlinks need privileges on Windows")
+        target = Path(tempfile.mkdtemp(prefix="maisecrets-target-"))
+        self.addCleanup(shutil.rmtree, target, True)
+        link = self.sb.root / "linked-home"
+        link.symlink_to(target)
+        env = self.sb.env()
+        env["PATH"] = os.pathsep.join((str(self.sb.bin), str(self.tools)))
+        env["MAISECRETS_HOME"] = str(link)
+        subprocess.run([BASH, str(self.hooks / "run.sh"), "user-prompt"], input='{"prompt": "x"}',
+                       capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(os.listdir(target), [])
 
     def test_a_python_older_than_3_11_blocks_every_event_and_is_named(self):
         fake = self.tools / "python3"
@@ -411,6 +434,20 @@ class BrokenImportFailsClosedTests(unittest.TestCase):
                 self.assertNotIn("half-synced", r.stdout + r.stderr, "the type only, never the message")
                 assert_refuses(self, event, r)
 
+    def test_a_broken_package_leaves_a_marker_for_the_incident_report(self):
+        root = Path(tempfile.mkdtemp(prefix="maisecrets-broken-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        shutil.copytree(ROOT / "hooks", root / "hooks")
+        (root / "maisecrets").mkdir()
+        (root / "maisecrets" / "__init__.py").write_text("raise ImportError('half-synced')\n", encoding="utf-8")
+        home = root / "home"
+        home.mkdir()
+        env = dict(os.environ, MAISECRETS_HOME=str(home))
+        r = subprocess.run([sys.executable, str(root / "hooks" / "dispatch.py"), "user-prompt"],
+                           input='{"prompt": "x"}', capture_output=True, text=True, timeout=30, env=env)
+        assert_refuses(self, "user-prompt", r)
+        self.assertTrue((home / "incident-marker.launcher.import").is_dir())
+
 
 class RunCmdFailsClosedTests(unittest.TestCase):
     """run.cmd cannot run on this OS; its logic is read from the file: each interpreter runs
@@ -440,13 +477,18 @@ class RunCmdFailsClosedTests(unittest.TestCase):
         self.assertEqual(branch[-1], "exit /b 0")
         tail = self.lines[self.lines.index(")", start) + 1:]
         self.assertTrue(tail[0].startswith("echo maisecrets needs Python 3.9") and tail[0].endswith("1>&2"), tail[0])
-        self.assertEqual(tail[1:], ["exit /b 2", ":done", "exit /b %errorlevel%"])
+        self.assertEqual(tail[1:5], ["call :mark", "exit /b 2", ":done", "exit /b %errorlevel%"])
         # a failed call's output cannot be withheld: that branch answers {} and exits 0
         start = self.lines.index('if "%~1"=="post-tool-failure" (')
         self.assertIn("systemMessage", json.loads(self.lines[start + 1][len("echo "):]))
-        self.assertEqual(self.lines[start + 2], "exit /b 0")
-        exits = [ln for ln in self.lines if ln.startswith("exit ")]
+        self.assertEqual(self.lines[start + 2:start + 4], ["call :mark", "exit /b 0"])
+        main = self.lines[:self.lines.index(":mark")]
+        exits = [ln for ln in main if ln.startswith("exit ")]
         self.assertEqual(exits, ["exit /b 0", "exit /b 0", "exit /b 2", "exit /b %errorlevel%"], "no other way out")
+        # the marker subroutine (docs/DIAGNOSTICS.md, section 3) runs after each answer and only returns
+        mark = self.lines[self.lines.index(":mark"):]
+        self.assertTrue(all(ln == "exit /b 0" for ln in mark if ln.startswith("exit ")), mark)
+        self.assertEqual([ln for ln in main if ln == "call :mark"], ["call :mark"] * 3)
 
 
 def _forms(value: str) -> list[str]:

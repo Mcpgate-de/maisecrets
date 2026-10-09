@@ -281,6 +281,20 @@ class DecisionTests(_Env):
                 self.assertIn(f"\n\n    claude --resume {payload['session_id']}\n\n", _reason(out))
                 self.assertGreaterEqual(time.monotonic() - started, 0.3, "it waits before it refuses")
 
+    def test_a_refusal_leaves_a_marker_for_the_incident_report_and_a_pass_leaves_none(self):
+        import io
+        self.installed("always")
+        marker = Path(HOME, "incident-marker.guard.fired")
+        with mock.patch.dict(os.environ, {"MAISECRETS_GUARD_WAIT": "0.1"}), \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps(PAYLOADS["UserPromptSubmit"]))), \
+                mock.patch.object(sys, "stdout", io.StringIO()):
+            guard.main()
+        self.assertTrue(marker.is_dir())
+        marker.rmdir()
+        with mock.patch.object(sys, "stdin", io.StringIO("{}")), mock.patch.object(sys, "stdout", io.StringIO()):
+            guard.main()
+        self.assertFalse(marker.exists(), "no refusal, no marker")
+
     def test_the_resume_command_goes_to_the_clipboard_once_per_session(self):
         self.installed("always")
         clip = Path(tempfile.mkdtemp()) / "clip.txt"

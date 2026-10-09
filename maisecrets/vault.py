@@ -177,6 +177,11 @@ def _lock_for(path: Path) -> "_Lock":
     return _LOCKS[key]
 
 
+def _note_user_config(exc: BaseException | None, cause: str = "other") -> None:
+    from . import incidents
+    incidents.note("config.user-ignored", exc, cause)
+
+
 class CodedError(RuntimeError):
     """A store failure with its incident code (maisecrets/incidents.py). The message stays for the CLI; the hook's
     record takes only the code, the cause and the exit code (docs/DIAGNOSTICS.md, D2)."""
@@ -337,6 +342,7 @@ def load_config() -> dict:
         # a file that exists and cannot be read may say block: it loosens nothing (review, 2026-09-29)
         user = {}
         cfg["config_warning"] = f"{CONFIG.name} cannot be read ({type(exc).__name__}) and was ignored"
+        _note_user_config(exc)
         cfg["rehydration"] = "block"
         cfg["rehydration_fallback"] = True
     except ValueError:
@@ -345,11 +351,13 @@ def load_config() -> dict:
         # warning is shown at session start and in the block notice.
         user = {}
         cfg["config_warning"] = f"{CONFIG.name} is not valid JSON and was ignored"
+        _note_user_config(None, "parse")
         # the file may have set block: an ignored file loosens nothing, so nothing is rehydrated until it is fixed
         cfg["rehydration"] = "block"
         cfg["rehydration_fallback"] = True
     except ConfigError as exc:
         cfg["config_warning"] = f"{exc}; the file was ignored"
+        _note_user_config(None, "shape")
         if isinstance(user, dict):
             _keep_the_stricter(cfg, user)
             # the file still says what the person decided: no hint asks about a key they wrote (settings.py)
@@ -801,7 +809,9 @@ class EncryptedFileBackend:
             return None   # tampered or foreign key: fail closed
         try:
             return self._openssl(["-d"], blob).decode()
-        except RuntimeError:
+        except RuntimeError as exc:
+            from . import incidents
+            incidents.note("store.decrypt", exc)
             return None
 
     def delete(self, key: str) -> None:
@@ -1010,7 +1020,9 @@ class Vault:
         for key in todo:
             try:
                 value = self.backend.get(key)
-            except RuntimeError:
+            except RuntimeError as exc:
+                from . import incidents
+                incidents.note("store.mark-weak", exc)
                 continue
             if value is None:
                 continue
@@ -1340,7 +1352,9 @@ class Vault:
                 tried += 1       # a refused delete costs time too, so it counts against the cap
                 try:
                     self.backend.delete(key)
-                except RuntimeError:
+                except RuntimeError as exc:
+                    from . import incidents
+                    incidents.note("store.expire", exc)
                     # one item that refuses to go (a locked keychain over SSH) must not block
                     # every hook; the entry stays unpurged and the next sweep tries again. It is
                     # not counted as purged: the value is still in the store.

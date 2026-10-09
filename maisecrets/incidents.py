@@ -214,6 +214,28 @@ def dumps(groups: dict) -> str:
 # --- the queue of a hook process and its write after the answer (D4) ---
 
 _QUEUE: list[dict] = []
+# the hook that runs in this process (hooks.main sets it): a swallowed failure is recorded only in a hook, never in
+# a CLI run, which prints its own error and never writes the record
+_CONTEXT: dict = {}
+
+
+def set_context(event: str | None, tool_class: str = "-", client: str = "-") -> None:
+    _CONTEXT.clear()
+    if event:
+        _CONTEXT.update(event=event, tool_class=tool_class, client=client)
+
+
+def note(code: str, exc: BaseException | None = None, cause: str = "other") -> None:
+    """A best-effort failure that the code swallows: queued in a hook process, ignored elsewhere. Never raises."""
+    try:
+        if not _CONTEXT:
+            return
+        kind = number = None
+        if exc is not None:
+            cause, kind, number = cause_of(exc)
+        queue(code, cause, "best-effort", _CONTEXT["event"], _CONTEXT["tool_class"], _CONTEXT["client"], kind, number)
+    except Exception:  # noqa: BLE001 - recording never changes an answer
+        pass
 
 
 def queue(code: str, cause: str, cls: str, event: str, tool_class: str = "-", client: str = "-",
