@@ -1,14 +1,14 @@
-# Local diagnostics and reporting (design v5, 0.6.10)
+# Local diagnostics and reporting (design v6, 0.6.10)
 
-Status: design for review, round 5. Nothing here is built yet. Issue: Mcpgate-de/maisecrets#14.
+Status: the design to build from, after five review rounds. Issue: Mcpgate-de/maisecrets#14.
 
 maisecrets has no telemetry, no server and no automatic error upload, and it keeps it that way. This design
 adds a way to learn about real problems: maisecrets records its own internal failures **on this computer**, as
-closed codes. When the person types the report command, the prompt hook shows the report and a prefilled link
-**to the person only**; the prompt does not reach the model. The person clicks the link, checks the text in
-GitHub's own issue form and decides there. maisecrets itself sends nothing.
+closed codes. When the person types the report command in Claude Code, the prompt hook shows the report and a
+prefilled link **to the person only**; the prompt does not reach the model. The person clicks the link, checks
+the text in GitHub's own issue form and decides there. maisecrets itself sends nothing.
 
-v5 follows the design reviews of rounds 1 to 4 (codex gpt-5.6-sol, Opus, ChatGPT). Section 13 lists the changes.
+Section 13 lists the changes after the reviews (codex gpt-5.6-sol, Opus, ChatGPT; rounds 1 to 5).
 
 ## 1. Rules (the invariants)
 
@@ -24,12 +24,14 @@ v5 follows the design reviews of rounds 1 to 4 (codex gpt-5.6-sol, Opus, ChatGPT
 - **D3 maisecrets never files a report.** It shows the text and a link; the intended step is that the person
   clicks the link, checks the text in GitHub's form and presses Submit. Limits, stated in the threat model (C24):
   the click on the link already sends the prefilled text to GitHub in the URL; an agent with its own browser,
-  shell or GitHub tools can file an issue, which maisecrets cannot tell from a person; and a model can read the
-  record file itself. maisecrets does not hand the incident report or its link to the model (section 7).
-- **D4 Recording never changes an answer.** Codes are queued while the hook works. Only the code path whose answer
-  won writes its queue, after the answer, with one try of a lock on the record's own lock file and a deadline
-  below the remaining watchdog budget. A failure of the recorder is never recorded. No diagnostics write happens
-  before an answer.
+  shell or GitHub tools can file an issue, which maisecrets cannot tell from a person; a model with a shell can
+  get the report through a pseudo-terminal (`script`, `pty`) and can clear the record, as it can already run
+  `wipe --yes`. maisecrets does not hand the incident report or its link to the model on its own paths (section 7).
+- **D4 Recording never changes an answer, and never keeps the hook alive.** Codes are queued while the hook works.
+  Only the code path whose answer won writes its queue, after the answer. All file work after an answer runs in
+  one daemon thread, and the process ends by `os._exit(0)` at the watchdog deadline at the latest, whoever won
+  (measured, round 5: a hook that answers and does not exit before the client's timeout lets the prompt
+  through). A failure of the recorder is never recorded. No diagnostics write happens before an answer.
 - **D5 Bounded and removable.** At most 50 groups, one aside copy of a damaged record, at most one marker per code;
   `wipe` and the terminal `report incident clear` delete them.
 
@@ -47,10 +49,9 @@ v5 follows the design reviews of rounds 1 to 4 (codex gpt-5.6-sol, Opus, ChatGPT
   Bash call is withheld again by PostToolUse (`hooks.py:3318`), so today no report about a damaged store reaches
   the person.
 
-`events.log` and `hooks.log` stay as they are. A separate fix found on the way (round 4, Opus H2): the guard
-heartbeat raised before the hook's `try` on Python 3.9 with a home that cannot be searched, and the prompt went
-through; fixed on its own branch (`fix/a-heartbeat-that-cannot-stat-the-home-does-not-fail-open`), not part of
-this design.
+`events.log` and `hooks.log` stay as they are. Found on the way and fixed on its own branch
+(`fix/a-heartbeat-that-cannot-stat-the-home-does-not-fail-open`): the guard heartbeat raised before the hook's
+`try` on Python 3.9 with a home that cannot be searched, and the prompt went through.
 
 ## 3. Data model
 
@@ -72,7 +73,7 @@ this design.
 | Field | Closed form |
 |---|---|
 | `code` | one of `incidents.CODES` (section 4) |
-| `cause` | `permission`, `timeout`, `lock`, `parse`, `io`, `missing`, `rc`, `shape`, `other`, mapped at the call site |
+| `cause` | `permission`, `timeout`, `lock`, `parse`, `io`, `missing`, `rc`, `shape`, `other`, mapped at the outcome site |
 | `number_kind`, `number` | absent, or `errno` 0–4095, `winerror` 0–65535, `exit` −255–255 |
 | `class` | `best-effort`, `fail-closed` |
 | `event` | a hook event name, `launcher`, `guard` |
@@ -88,39 +89,44 @@ this design.
   "1 group withheld".
 - **Reading the record:** `O_NOFOLLOW|O_NONBLOCK` where the platform has them, then `fstat`: a regular file of at
   most 64 KB, else it counts as damaged (section 8). A FIFO or a symlink cannot make a hook wait.
-- **Markers** for places that cannot write the record: `~/.maisecrets/incident-markers/<code>/`, **one empty
-  directory per code**.
-  - **Writers** (each after its own answer is out, each ignoring every error): `run.sh` and `run.cmd`
-    (`launcher.no-python`), `dispatch.py` (`launcher.import`), `guard.py` (`guard.fired`), the watchdog
-    (`hook.<event>.watchdog`), the scrub child (`scrub.start`, `scrub.write`). A writer makes a marker only when
-    the home already exists: two single `mkdir` steps (the marker root, then the code), never `mkdir -p` or cmd
-    `md` with folders in between, with `umask 077` in `run.sh`. An empty home variable resolves the same way in
-    all of them: `vault.py`, `guard.py` and `run.sh` use the default home for an empty value (today `vault.py:28`
-    differs).
-  - **The marker root** must be a real directory owned by the user: the fold `lstat`s it and skips the fold
-    otherwise. On POSIX it opens the root with `O_DIRECTORY|O_NOFOLLOW` and does every `listdir`, `rename` and
-    `rmdir` relative to that descriptor; on Windows it skips the fold when the root is a reparse point.
-  - **The fold** runs in a hook, after the answer, under the record's lock: it renames `<code>` to
-    `<code>.claimed-<pid>-<ns>` (a unique name), removes the claimed directory with `rmdir`, and then writes the
-    record. **At most once:** a crash between the two loses the occurrence, and it is never counted twice. A
-    marker made while one exists coalesces with it (the day of the second is lost), on purpose.
-  - **Never `unlink`.** An entry whose name is not in `CODES` and not a claimed name is left alone; a claimed name
-    left by a crash is removed with `rmdir` and not counted.
-- **The report lists unfolded markers** (read only, the fold stays with the hooks), so the terminal form shows a
-  launcher failure before any hook ran again.
+- **Markers** for places that cannot write the record: **flat empty directories in the home**,
+  `~/.maisecrets/incident-marker.<code>`, each made with one single `mkdir`. There is no marker root to replace: a
+  symlink or any other object at the final name makes `mkdir` fail, and nothing is followed. The home itself is
+  the store's own folder, which every other part of maisecrets already trusts.
+  - **Writers** (each after its own answer is out, each ignoring every error): `run.sh` (`launcher.no-python`,
+    only when `[ -d "$HOME_DIR" ] && [ ! -L "$HOME_DIR" ]`, `umask 077`), `run.cmd` (`launcher.no-python`, only
+    when the home exists, so `md` creates no parent), `dispatch.py` (`launcher.import`), `guard.py`
+    (`guard.fired`), the watchdog (`hook.<event>.watchdog`), the scrub child (`scrub.write`). An empty home
+    variable resolves the same way in all of them: `vault.py`, `guard.py` and `run.sh` use the default home for an
+    empty value (today `vault.py:28` differs).
+  - **The fold** runs in the post-answer thread of a hook, under the record's lock. It lists the home, takes only
+    names of the strict form `incident-marker.<code>` with `<code>` in `CODES`, and for each: `rename` to
+    `incident-marker.<code>.claimed-<pid>-<ns>`, `rmdir` the claimed name, and only when `rmdir` succeeded count
+    the occurrence (its `lstat` mtime is the day) and write the record. **At most once:** a crash between the
+    steps loses the occurrence and never counts it twice. A marker made while one exists coalesces with it (the
+    day of the second is lost), on purpose.
+  - **Never `unlink`, never recursive.** A claimed name left by a crash is removed with `rmdir` when it is an
+    empty real directory and is not counted; every other object (a symlink, a file, a full folder) is left alone.
+  - **Windows** has no `dir_fd`: a race between the check and the `rename` stays, for an attacker who already
+    runs as the same user. It is written down in C24.
+- **The report lists unfolded markers** (read only, with the same name rule; the fold stays with the hooks), so the
+  terminal form shows a launcher failure before any hook ran again.
 
 ## 4. Where failures are recorded
 
-Each line maps one site to one code. A test walks the AST of `maisecrets/` for every `raise` of `RuntimeError`
-and its subclasses (`LockTimeout`, `ConfigError`) and every `except` that ends a hook path, and checks it against
-an explicit registry of sites (function name and code, not line numbers); a raise with no entry fails, and a code
-with no site fails.
+Codes sit at the **outcome site**: the place where a failure ends a hook path or is swallowed, where the context is
+known. A raise that several callers share (`_check_types` for the user file and for the policy) gets its code
+from the catch, not from the raise.
 
-| Code | Site (`vault.py` unless named) | Class |
+A test walks the AST of `maisecrets/` and checks two things against an explicit registry (function name and code,
+not line numbers): every `raise` of `RuntimeError` and its subclasses (`LockTimeout`, `ConfigError`) is
+catalogued with the outcome site it reaches; and every outcome site records exactly one code. A code with no
+site fails. `scrub.write` is a string of code in the child and is checked by its own test, not by the walker.
+
+| Code | Outcome site (`vault.py` unless named) | Class |
 |---|---|---|
-| `store.file-read` | 551 (jsonfile), 749 (openssl file) | fail-closed |
+| `store.file-read` | 551 (jsonfile), 749 (openssl file), as they reach the hook's `_failure` | fail-closed |
 | `store.keychain-add`, `store.keychain-readback` | 649, 651 | fail-closed |
-| `store.keychain-delete` | 679 | fail-closed |
 | `store.openssl` | 733 | fail-closed |
 | `store.locker-add` | 823 | fail-closed |
 | `store.index-read`, `store.index-shape` | 949, 952 | fail-closed |
@@ -128,18 +134,19 @@ with no site fails.
 | `store.timeout-keychain`, `store.timeout-openssl`, `store.timeout-locker` | 598; `_run_store` gets a closed backend id instead of display text. A store timeout longer than the watchdog shows up as `hook.<event>.watchdog` | fail-closed |
 | `store.decrypt` | the swallowed decrypt failure at 789 (the value is then "not available") | best-effort |
 | `store.mark-weak` | 997 | best-effort |
-| `store.expire` | the swallowed failure in expiry (`except` at 1327) | best-effort |
-| `config.policy-invalid` | a `ConfigError` (raises at `vault.py` 257, 261, 264, 323, 402, 404, 407, 434) that reaches the hook's `config-error` answer | fail-closed |
-| `config.user-ignored` | a user `config.json` ignored with a warning: the `except ConfigError` at `vault.py:342` (it catches 323 and the type checks of the user file) | best-effort |
-| `hook.run-dir`, `hook.sealed-dir` | `hooks.py` 1874 (`_run_dir`), 1892 (`_sealed_dir`) | fail-closed |
-| `hook.payload` | a payload that is no JSON object (`hooks.py:3843`) | fail-closed |
-| `hook.<event>.unexpected` | an exception that reaches `_failure` (`hooks.py:3891`), and the inner catch of `_post_tool_guarded` (`hooks.py:3560`) | fail-closed |
+| `store.expire` | the `except` at 1327 (also a keychain delete that fails there, 679) | best-effort |
+| `config.policy-invalid` | a policy that does not read, parse or type-check (402, 404, 407, and `_check_types` 257/261/264 through the policy call at 408), and the jsonfile rule at 434, at the hook's `config-error` answer | fail-closed |
+| `config.user-ignored` | the `except ConfigError` at 342 (it catches 323 and `_check_types` for the user file) | best-effort |
+| `hook.run-dir`, `hook.sealed-dir` | `hooks.py` 1874 (`_run_dir`), 1892 (`_sealed_dir`), as they reach `_failure` | fail-closed |
+| `hook.payload` | the non-object payload answer (`hooks.py:3846`); it answers before the timer, so it writes a marker in a 0.3 s thread | fail-closed |
+| `hook.<event>.unexpected` | the call of `_failure` (`hooks.py:3893`), and the inner catch of `_post_tool_guarded` (`hooks.py:3560`) | fail-closed |
 | `hook.<event>.watchdog` | the watchdog's answer won (a marker) | fail-closed |
 | `hook.session-start` | the SessionStart path in `dispatch.py:96` (no watchdog there: its recording has its own 0.3 s limit) | best-effort |
 | `destinations.pend`, `destinations.commit` | `pend` and `commit` (`destinations.py` 233, 253) return a closed result instead of swallowing it | best-effort |
-| `scrub.start`, `scrub.write` | the scrub child (`hooks.py:216`; a marker) | best-effort |
-| `prompt.pending` | the pending prompt could not be written (`hooks.py:392`) | best-effort |
-| `prompt.clipboard` | an unexpected clipboard failure only: not a missing tool, not in an SSH session | best-effort |
+| `scrub.start` | the catch after `Popen` in `_scrub_transcript_later` (`hooks.py:224`) and the catch in `_scrub_failed_prompt_now` (`hooks.py:3787`), queued in process | best-effort |
+| `scrub.write` | the scrub child (a marker) | best-effort |
+| `prompt.pending` | the catch at `hooks.py:402` | best-effort |
+| `prompt.clipboard` | `_clipboard` (`hooks.py:85`) returns a reason: a missing tool and an SSH session record nothing; a timeout, a non-zero exit and any other failure record this code | best-effort |
 | `launcher.no-python`, `launcher.import` | `run.sh`/`run.cmd` found no Python; `dispatch.py` could not import the plugin (markers) | fail-closed |
 | `guard.fired` | the guard refused (a marker; `guard.py` has its own `_home()`) | fail-closed |
 
@@ -148,7 +155,7 @@ with no site fails.
 (`rewrite_prompt`): its failure ends in the hook, which records it there. **Not observable** (in the docs): a
 manifest the client rejects, a client timeout that fails open, the "plugin folder is gone" answers in
 `hooks/hooks.json` (a change there changes the hook hash that Codex trusts), a failure in the mod's JavaScript, a
-failure of the recorder itself.
+failure of the recorder itself, and the stdin read in `main()` (`hooks.py:3843`), which runs before the timer.
 
 ## 5. Who sees what
 
@@ -156,9 +163,10 @@ failure of the recorder itself.
   (section 12).
 - **fail-closed:** the refusal gets one fixed line, whether or not the record could be written. Claude Code:
   `maisecrets sent no report. Type /maisecrets:report incident to see one you can read and send yourself.`
-  Codex: `maisecrets sent no report. Run hooks/run.sh report incident in a terminal to see one you can read and send
-  yourself.` (until the Codex display is measured, section 7). The refusals for `launcher.*` and `guard.fired` keep
-  their own text: no Python or no plugin folder can show a report.
+  Codex: `maisecrets sent no report. Run <the hook's own absolute folder>/run.sh report incident in a terminal to
+  see one you can read and send yourself.` (a local path, never part of a report; Codex shows it where it shows the
+  refusal). The refusals for `launcher.*` and `guard.fired` keep their own text: no Python or no plugin folder can
+  show a report.
 
 ## 6. (removed: the hint)
 
@@ -169,37 +177,40 @@ and it needed the typed-session mark in every mode.
 
 | Step | Claude Code | Codex | Own terminal |
 |---|---|---|---|
-| read the incident report | type `/maisecrets:report incident [code/cause]` | the terminal form (the typed form only after the display is measured) | `run.sh report incident [code/cause]` |
+| read the incident report | type `/maisecrets:report incident [code/cause]` | the terminal form (a typed form only after the display is measured) | `run.sh report incident [code/cause]` |
 | send | click the link, check the text in GitHub's form, Submit | the same | the same |
 | clear the record | the terminal form | the terminal form | `run.sh report incident clear` |
 | detections, bugs, features | `/maisecrets:report [last [why] \| bug \| feature …]` as today, without browser and `gh` | as today | as today |
 
-- **The incident report in Claude Code is answered by the prompt hook**, as the typed settings change is today
-  (`hooks.py:807-821`).
-  - **One shared recognizer**, a pure function, runs first in two places: at the top of `user_prompt` and at the
-    top of `rewrite_prompt` (the mod's question), each before `load_config()` and before the store. In the mod
-    path it returns `{}` (no rewrite), so the prompt reaches the hook unchanged.
-  - It **owns every prompt that starts with `/maisecrets:report incident`**. A closed form (`incident`,
-    `incident <code/cause>`) gets the report; any other text after `incident` gets a fixed usage line. So a near
-    miss never falls through to the slash command, which would run the CLI and print the link into the model's
-    context.
-  - The answer is a block whose reason is the report and the link, with `suppressOriginalPrompt`. Its first line
-    says it is no error: `maisecrets: your incident report (shown to you only; this is not an error).` The model
-    sees neither the prompt nor the report, and no Bash call, PreToolUse or PostToolUse runs, so a damaged store or
-    config cannot withhold it. Measured in round 4 (`claude -p` 2.1.295): the 20 lines and the whole URL are
-    shown.
-  - The C21 rule (a pending Codex consent code ends with any other prompt) does not apply: the incident form is
-    Claude Code only, and Claude Code has no consent code.
-  - `commands/report.md` gets `disable-model-invocation: true`, so the model cannot call the slash command itself.
-- **The CLI form** (`run.sh report incident`, also reached by a model's Bash call) prints the report only when
-  stdout is a terminal. Otherwise it prints one line that names the typed form and the terminal form. A model can
-  still read the record file directly; C24 states it.
-- **Codex:** `codex exec` 0.159.2 shows only `hook: UserPromptSubmit Blocked`, without the reason (round 4,
-  probe 6). Before Codex gets a typed form, the TUI and the ChatGPT app are measured with the report in
-  `systemMessage` and a short fixed `reason`; the measurement also checks that `systemMessage` does not reach the
-  model. Until then the terminal form is the Codex path.
-- **`clear` only in the terminal** (and `wipe`). Codex sends no `source`, so a prompt cannot prove that a person
-  typed it, and a model's Bash call does not reach the terminal-only path (no terminal on stdout).
+- **One form function decides the report form from the words**, and both the CLI and the recognizer call it: the
+  words come from `shlex` (with the fallback to a plain split, as `_stdin_words` does today), `--create` is
+  dropped, and the comparison ignores case. So the CLI and the recognizer can never disagree on what is an
+  incident report.
+- **The recognizer** is a pure function, the **first statement** of `user_prompt` and of `rewrite_prompt` (before
+  the test fault, the imports, `load_config()` and the store). It applies only to a Claude Code payload whose
+  prompt matches `^/maisecrets:report(\s|$)` (ASCII, as the client writes the command name; a leading space or
+  another spelling is not expanded by the client and reaches the model as plain text, measured in round 5). When
+  the form function says `incident`, the recognizer owns the prompt: a closed form (`incident`,
+  `incident <code/cause>`) gets the report, any other text gets a fixed usage line. In the mod path it returns `{}`
+  (no rewrite), so the prompt reaches the hook unchanged. The tests take the six forms that Claude Code expands and
+  that a plain prefix missed (a tab, two spaces, a newline, `"incident"` in quotes, `Incident`,
+  `--create incident`). What runs before the recognizer, in `main()`: the stdin read, the payload check and the
+  start heartbeat (after the timer, section 10).
+- The answer is a block whose reason is the report and the link, with `suppressOriginalPrompt`. Its first line says
+  it is no error: `maisecrets: your incident report (shown to you only; this is not an error).` The model sees
+  neither the prompt nor the report, and no Bash call, PreToolUse or PostToolUse runs, so a damaged store or config
+  cannot withhold it. Measured in round 4 (`claude -p` 2.1.295): the 20 lines and the whole URL are shown.
+- `commands/report.md` gets `disable-model-invocation: true`. Measured in round 5: the model's `Skill` call on it
+  fails, and the person's own `/maisecrets:report bug …` still expands and runs.
+- **The CLI form** (`run.sh report incident`) prints the report only when stdout is a terminal, else one line that
+  names the typed form and the terminal form. This check stops an accidental echo into the model's context and
+  nothing more: a model with a shell can get a pseudo-terminal (D3, C24). The check applies to `incident` and
+  `incident clear` only, never to the detection, bug and feature reports.
+- **Codex:** `codex exec` 0.159.2 shows only `hook: UserPromptSubmit Blocked`, without the reason (round 4). Before
+  Codex gets a typed form, the TUI and the ChatGPT app are measured with the report in `systemMessage` and a short
+  fixed `reason`; the measurement also checks that `systemMessage` does not reach the model. Until then the
+  terminal form is the Codex path, and the recognizer returns no match for a Codex payload.
+- **`clear`** is a terminal form, for the person's convenience; it is no protected step (D3).
 - **One group per link.** Without a selector the report lists the groups (code/cause, class, days, seen) and gives
   the link for the newest one; each other group names its own command. The URL is tested to stay under 4,000
   characters (measured in round 3: 1 group 410, 50 groups 15,845).
@@ -217,20 +228,21 @@ and it needed the typed-session mark in every mode.
   kept as the one aside copy `incidents.json.corrupt` (an older aside is overwritten: the record holds nothing of
   the person). A symlink is removed, not followed and not kept.
 - Only a hook writes the record and folds markers. A CLI read never writes; `clear` removes the files.
-- `wipe` (`wipe_everything`, `vault.py:1459`) and `clear` remove `incidents.json`, its aside, its lock file, any
-  `incidents.json.*.tmp` (`os._exit` can leave one) and `incident-markers/` with its directories, under the same
-  root checks as the fold; `/maisecrets:status` shows the number of groups.
+- `wipe` (`wipe_everything`, `vault.py:1424`) and `clear` remove `incidents.json`, its aside, its lock file, any
+  `incidents.json.*.tmp` (`os._exit` can leave one) and the marker directories, with the same name rule and `rmdir`
+  as the fold, never recursive; `/maisecrets:status` shows the number of groups.
 
 ## 9. What changes with the removal of the browser and `gh`
 
 - Code: `events.open_in_browser`, `has_local_browser`, `create_with_gh` deleted; `cli.cmd_report` and
   `_report_out` print text and link only; `cli.py` docstring and help (174-177, 192-193) and the top-level help
-  (788); the texts "records it" in `hooks.py` (1995, 2714).
+  (788, which also adds `incident`); the texts "records it" in `hooks.py` (1995, 2714).
 - Command: `commands/report.md` description, `argument-hint` (adds `incident [code/cause]`, keeps the YAML
   quoting), the paragraph about `--create`, and `disable-model-invocation: true`; `allowed-tools` keeps
   `run.sh report *` for the other forms.
 - Tests: `test_cli_matrix.py` 783, 1416-1450, 1454-1478, 1480-1499; `test_hidden_characters.py` 77, 430;
-  `test_frontmatter.py` 38, 44, 66-67; a test of `cli.main(["--help"])`.
+  `test_frontmatter.py` 4 (docstring), 38, 44, 66-67; a test of `cli.main(["--help"])`; the comment in
+  `harness/run.py` 362-375 (`report_args_stay_text`).
 - Beliefs and scripts: `c6-a-report-files-only-to-report-url` becomes "no report form runs a subprocess or opens a
   browser", with a new mutation (a `subprocess.run` call added to `_report_out`), because its old `find` targets
   the deleted `gh` code; the `find` string of `manifest-every-frontmatter-parses-as-yaml` follows the new
@@ -240,15 +252,29 @@ and it needed the typed-session mark in every mode.
 
 ## 10. Watchdog and recording
 
-- The watchdog timer starts **before** the start heartbeat (`hooks.py:3854`), so no file work runs unguarded.
-- `answer()` holds its lock only to claim the win and to write and flush the JSON; it returns whether it won.
-  The done heartbeat and `_run_log` run after the lock, and only for the winner.
-- `on_timeout` returns at once when its `answer()` did not win: no scrub, no `os._exit`, no marker.
-- When the watchdog wins, it makes its marker in a daemon thread joined with 0.3 s, then runs
-  `_scrub_failed_prompt` and `os._exit`, so a slow disk cannot push the hook past the client's timeout (watchdog
-  7 s, client 10 s).
-- When the handler wins, its queue is written in the `finally` block **before** `watchdog.cancel()`, so the
-  watchdog still guards it, atomically (temp file and rename).
+In pseudocode, for `main()` (`hooks.py:3837`):
+
+```
+timer = start(on_timeout, WATCHDOG_SECONDS[event])   # first, before any file work
+heartbeat(start)                                     # guarded by the timer
+try:    won = answer(handler(payload), "ok")         # answer(): lock, claim, write and flush JSON; return won
+except: won = answer(fail_closed(...), ...)          # as today, incl. the config-error answer and the scrub
+finally:
+    if won: post_answer_thread(heartbeat(done), run_log, write queue, fold markers).start()
+    else:   discard the queue
+    join the post-answer thread until the watchdog deadline
+    timer.cancel()
+
+on_timeout():
+    won = answer(fail_closed("took longer than …"), "watchdog")
+    if won: marker thread (join 0.3 s); scrub_failed_prompt   # the scrub as today, bounded at 1 s
+    os._exit(0)                                       # always: a hook that answered must still end in time
+```
+
+- The answers stay the same as today, apart from the fixed line of section 5. "The same answers" in the tests
+  means: identical with the recorder on, off, raising, slow and holding its lock.
+- The watchdog no longer runs the done heartbeat or `_run_log` on its own path; its JSON answer is what counts, and
+  the guard already refuses a call whose heartbeat it does not see.
 
 ## 11. Tests that must exist
 
@@ -256,52 +282,58 @@ and it needed the typed-session mark in every mode.
   non-finite number, a deep object, an unknown code, an impossible date, a date out of the window, a poisoned
   version); a group with one bad field is dropped; a detector hit drops the group; a FIFO, a symlink and a 65 KB
   file at `incidents.json` do not make a hook wait;
-- the AST walker against the site registry, both ways;
+- the AST walker against the site registry, both ways; the `_check_types` raises map to `config.user-ignored`
+  through the user file and to `config.policy-invalid` through the policy;
 - the rendered report of every code holds no detector hit, also when the exception message held a synthetic
   secret and a path; a config error that names a path does not appear;
+- the form function: the six measured forms, a leading space, an upper-case command name, `incidentally`,
+  `incident please`, multi-line text; the CLI and the recognizer give the same result for each;
 - the prompt-hook report: a damaged index, a broken config and a broken policy each still give the report as a
   block reason with `suppressOriginalPrompt`; the store is patched to raise and is not called; `load_config` is
-  called only inside `try`, after the text is rendered; near misses (`incident please`, a selector with a typo) get
-  the usage line and never fall through; free text after `report` (`last <why>`, `bug`) does not take the path;
+  called only inside `try`, after the text is rendered; a Codex payload gets no match; free text after `report`
+  (`last <why>`, `bug`) does not take the path;
 - the mod path: `rewrite_prompt` returns `{}` for every incident form with `load_config`, `_has_live` and `Vault`
   patched to raise, none of them called;
-- the CLI form prints the report to a terminal only; through a pipe it prints the one line;
-- recording and the watchdog: the same answers with the recorder on, off, raising, slow and with a held lock; a
+- the CLI form prints the incident report to a terminal only; through a pipe it prints the one line; the detection,
+  bug and feature reports print through a pipe as today;
+- recording and the watchdog: the same answers with the recorder on, off, raising, slow and holding its lock; a
   handler paused after it queued a code, a watchdog that wins, then the handler resumes: only the watchdog marker
-  survives; a watchdog that fires after the handler won does nothing; `_heartbeat` and `_run_log` blocked do not
-  delay the watchdog's answer or exit;
-- markers: a symlinked marker root (and on Windows a junction) is not followed, and nothing in its target changes;
-  a symlink at a marker name and at a claimed name is not followed; a marker made during a fold survives as the
-  next occurrence; a crash after the claim counts the occurrence at most once; unknown entries stay; `pending/` is
-  never touched;
+  survives; post-answer work that hangs (heartbeat, `_run_log`, the queue, the fold) still ends the process at the
+  watchdog deadline, without a scrub and without a marker from the losing watchdog; a winning watchdog with a
+  blocked disk still exits within its deadline;
+- markers: a symlink, a file and a full folder at a marker name and at a claimed name are not followed, not
+  counted and left alone; a marker made during a fold survives as the next occurrence; a crash after the claim
+  counts the occurrence at most once; `pending/` and every name outside the strict form are never touched; the
+  `run.sh` writer makes no marker when the home is missing or a symlink;
 - no report form calls a browser or `gh` (both patched to raise), also `report last`, `bug` and `--create`;
 - the URL of the largest valid group stays under the limit;
-- `wipe` and `clear` remove every file and directory; a CLI read writes nothing.
+- `wipe` and `clear` remove every file and marker; a CLI read writes nothing.
 
 ## 12. In 0.6.10, and later
 
 In 0.6.10: sections 3 to 11, a threat-model row C24 with beliefs for D1 to D5, README and PRIVACY.md.
 
 Later, on purpose: the hint to the model after a repeated best-effort failure (needs a write before the answer and
-the typed-session mark in every mode); the typed incident form for Codex (after the display measurement); failures
-in the mod's JavaScript; the client's own version; any telemetry (not planned).
+the typed-session mark in every mode); the typed incident form for Codex (after the display measurement); the
+recognizer on `UserPromptExpansion`, which gives `command_name` and the parsed arguments (after a measurement that
+its block reason reaches the person only); failures in the mod's JavaScript; the client's own version; any
+telemetry (not planned).
 
-## 13. Changes against v4 (review round 4)
+## 13. Changes against v5 (review round 5: codex rework, Opus build with changes)
 
-- **The mod path:** the shared recognizer runs at the top of `rewrite_prompt` too (both reviewers: it loaded the
-  config and the store first, `hooks.py:710`).
-- **Near misses and the model:** the recognizer owns every `report incident` prompt; the CLI form prints the report
-  to a terminal only; the slash command gets `disable-model-invocation` (Opus H3).
-- **Codex:** no typed incident form until the display is measured (Opus probe: `codex exec` shows no reason;
-  codex: `systemMessage` is the documented person-facing field); `clear` is terminal-only (Codex sends no
-  `source`).
-- **Markers:** the root is checked and opened without following links, all operations relative to it; never
-  `unlink`; a unique claimed name; at-most-once order (claim, `rmdir`, then write); a crash leftover is not counted.
-- **Watchdog:** the timer starts before the heartbeat; the winner section only claims and flushes; a losing
-  watchdog does nothing; `incidents.json.*.tmp` is wiped.
-- **Record read:** no follow, no block, regular file, 64 KB cap.
-- **Cut:** the hint (the only write before an answer), the backend variable for the watchdog, the `mod.dispatch`
-  marker, `drop_codes` in the early path (the form is Claude Code only).
-- **Sites:** expiry 1327 and forget 1294 (they were swapped); `ConfigError` by its raises, not the class line;
-  `hooks.py` 1874 and 1892 added; a site registry instead of line numbers; `cli.py:788`.
-- **Found on the way:** the heartbeat fail-open on Python 3.9, fixed on its own branch.
+- **Watchdog (Opus BLOCKER, measured):** the process always ends at the watchdog deadline; a losing watchdog skips
+  the scrub and the marker but still exits; all post-answer work runs in one thread; the winning watchdog runs no
+  heartbeat and no log (codex HIGH-2). Pseudocode in section 10.
+- **Recognizer (Opus HIGH-1, measured; codex HIGH-3):** one form function shared with the CLI (`shlex`, no case,
+  `--create` dropped); `^/maisecrets:report(\s|$)` for Claude Code payloads only; the first statement of both
+  functions; what precedes it in `main()` is stated.
+- **Markers (codex BLOCKER, Opus MEDIUM-1/2):** flat `incident-marker.<code>` directories in the home, one `mkdir`
+  each, no root to swap; count only after a successful `rmdir`; every other object is left alone; the Windows race
+  is stated.
+- **isatty (both):** an accidental-echo guard only; a model can get a pty, read the report and clear the record, as
+  it can run `wipe --yes`; stated in D3 and C24.
+- **Sites (codex MEDIUM-1/2, Opus LOW-1/2/3):** codes at outcome sites; `_check_types` by its caller;
+  `store.keychain-delete` folded into `store.expire`; `hook.payload` at 3846 with its own marker; `_failure` at
+  3893; both scrub starters; the pending catch at 402; a clipboard reason; `wipe_everything` at 1424.
+- **Smaller:** the Codex line names the absolute hook folder; section 9 adds `test_frontmatter.py:4` and
+  `harness/run.py:362-375`; the stdin read before the timer is stated as not observable.
