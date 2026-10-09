@@ -1,192 +1,201 @@
-# Local diagnostics and reporting (design, 0.6.10)
+# Local diagnostics and reporting (design v3, 0.6.10)
 
-Status: design for review. Nothing here is built yet.
+Status: design for review, round 3. Nothing here is built yet. Issue: Mcpgate-de/maisecrets#14.
 
 maisecrets has no telemetry, no server and no automatic error upload, and it keeps it that way. This design
 adds a way to learn about real problems: maisecrets records its own internal failures **on this computer**, as
-fixed codes, and the person can turn one into a report that they read **before** anything leaves the machine.
+closed codes. The person reads a report and a prefilled link; GitHub's own issue form, with its Submit button,
+is where the person looks at the text once more and decides to send it. maisecrets itself sends nothing.
+
+v3 follows the design reviews of rounds 1 and 2 (codex gpt-5.6-sol, Opus, ChatGPT). Section 13 lists the changes.
 
 ## 1. Rules (the invariants)
 
-- **D1 Nothing leaves the machine by itself.** The incident record has no network code. No version, no hash,
-  no id is sent anywhere without a step the person takes.
-- **D2 A record holds no data of the person.** An incident is a fixed error code, a Python exception class
-  name, a hook event, a tool class, a client family, counts, times, the plugin version and the platform. It
-  never holds an exception message, a path, a command, a tool name of an MCP server, a prompt, a tool input or
-  output, a session id, a user or host name, a key or a value.
-- **D3 Only the person sends.** Opening the browser on the issue page and filing with `gh` happen only for a
-  prompt the person typed (`source` user, as C22). A tool call never sends: the CLI prints the text and the
-  link and does nothing else, and a Bash or PowerShell command that carries the send form is refused.
-- **D4 Recording never changes an answer.** A best-effort failure stays best-effort, a fail-closed path stays
-  fail-closed. The only visible change: a fail-closed message gets one line that names `/maisecrets:report`.
-- **D5 The record is bounded and can go.** At most 50 incident groups; `wipe` deletes it; a damaged file is
-  moved aside and never stops a hook.
+- **D1 maisecrets sends nothing.** No incident code and no report code opens a network connection, starts a
+  browser or runs `gh`. No telemetry, no id, no ping.
+- **D2 An incident record and an incident report hold only closed values.** Every field is a value from a
+  closed list, a bounded number or a date in a short window. The record never holds an exception message, a
+  path, a command, an MCP tool name, a prompt, a tool input or output, a session id, a user or host name, a key
+  or a value. What it does show about use: the client family, the tool class, the days a failure was seen and a
+  coarse count. (The false-positive, bug and feature reports carry text the person typed; that text goes through
+  the normal prompt path and its detector, and D2 does not cover it.)
+- **D3 Every report needs the person's own Submit.** maisecrets prints the report and a prefilled link to the
+  configured tracker; only the person's click on GitHub's Submit button files an issue. Not claimed: a model that
+  has read the link can load the page itself; that files nothing, and by D2 the text holds nothing of the person.
+- **D4 Recording never changes an answer.** It is queued while the hook works and written after the answer is
+  decided, within the watchdog, with one try of a short lock; a failure of the recorder is never recorded.
+- **D5 Bounded and removable.** At most 50 groups, one aside copy of a damaged file, at most one marker per code;
+  `wipe` and `report incident clear` delete them.
 
-## 2. What happens today
+## 2. What happens today (and changes)
 
-- `events.log`: one line per detection (rule, type, key), for false-positive reports. Not for failures.
-- `hooks.log`: one line per hook run, with `failed <ExceptionType> (<errno>, <file name>)` on a failure. It
-  has a session id prefix and a tool name, so it is no report material as it is.
-- `_debug()`: 16 places write a line to `$MAISECRETS_DEBUG_LOG` only when that variable is set (harness).
-  Nothing keeps them otherwise. 7 places answer fail-closed (`_fail_closed`, `_failure`).
-- `/maisecrets:report` (`cli.cmd_report`): `report last` prepares a false-positive issue from `events.log`,
-  `report bug|feature <text>` one without an event. On a computer with a desktop it **opens the browser at
-  once** on the prefilled issue page, so the issue text reaches GitHub in the page address before the person
-  read it. `--create` files it with `gh`. The command text tells the model to use `--create` only when the
-  person wrote it; nothing enforces that, and a model can run `run.sh report … --create` as a Bash call.
+- `/maisecrets:report last` (a false positive) **opens the browser at once** on a desktop, so the text reaches
+  GitHub before the person read it; `--create` files it with `gh` under the person's login, and a model can run
+  that. **Both go:** the report prints the text and the link, the person clicks. `report bug|feature <text>`
+  likewise. `report last` keeps its meaning (the newest detection).
+- `vault.py` raises `RuntimeError` at 13 places with no code; `destinations.pend` and `commit` swallow their
+  errors; 15 `_debug` calls keep nothing unless a debug variable is set; 7 places answer fail-closed.
+- A damaged store makes the prompt hook fail closed before it reads the prompt, so the report about it is
+  blocked too.
 
-The design keeps `events.log` and `hooks.log` as they are, reuses the report renderer (`events.link`,
-`_report_out`) and the hint record (`settings.claim_hint`), and fixes the two send paths above (D3).
+`events.log` and `hooks.log` stay as they are.
 
-## 3. Data model: `~/.maisecrets/incidents.json`
+## 3. Data model
+
+`~/.maisecrets/incidents.json`:
 
 ```json
 {
   "version": 1,
   "groups": {
-    "destinations.commit/LockTimeout": {
-      "code": "destinations.commit", "error": "LockTimeout", "class": "best-effort",
-      "event": "PostToolUse", "tool_class": "Bash", "client": "claude",
-      "count": 3, "first": "2026-10-09T08:14", "last": "2026-10-09T08:21",
-      "version_first": "0.6.10", "version_last": "0.6.10",
-      "hinted": false
+    "store.locker-add/rc": {
+      "code": "store.locker-add", "cause": "rc", "number_kind": "exit", "number": 1,
+      "class": "fail-closed", "event": "UserPromptSubmit", "tool_class": "-", "client": "codex",
+      "days": ["2026-10-08", "2026-10-09"], "seen": "3+", "plugin_version": "0.6.10", "hinted": false
     }
   }
 }
 ```
 
-- **Key and fingerprint.** The group key is `code/error`. The fingerprint shown to the person and put in the
-  report is `code/error/` plus the first 6 hex characters of `sha256(code|error|client)`, for example
-  `destinations.commit/LockTimeout/4f73a9`. Two persons with the same failure on the same client family get
-  the same fingerprint; nothing in it is theirs.
-- **`code`** is a fixed string at the call site, from a closed list in `maisecrets/incidents.py`
-  (`CODES`). A test checks that every call site uses a listed code.
-- **`error`** is `type(exc).__name__`. Only the class name, never `str(exc)`: an exception message can carry
-  a path or a value (a keychain error once carried the value in its argument list).
-- **`tool_class`** is one of `Bash`, `PowerShell`, `MCP`, `File`, `Other`, `-`. An MCP tool name names a
-  server, which can name a company or a person's service, so only the class is kept.
-- **`client`** is `claude` or `codex`.
-- **Times** are kept to the minute locally; a report shows the date and the count only.
-- **Bound.** 50 groups; above that the group with the oldest `last` goes. A group never grows: it only counts.
-- **Version and platform** are not stored per group. The report reads them when it is made: plugin version,
-  `platform.system()` and `platform.machine()`, Python `major.minor`. The client's own version is not known to
-  the hook (no payload field), so a report says only "Claude Code" or "Codex".
+| Field | Closed form |
+|---|---|
+| `code` | one of `incidents.CODES` (section 4) |
+| `cause` | `permission`, `timeout`, `lock`, `parse`, `io`, `missing`, `rc`, `shape`, `other`, mapped at the call site |
+| `number_kind`, `number` | absent, or `errno` 0–4095, `winerror` 0–65535, `exit` −255–255 |
+| `class` | `best-effort`, `fail-closed` |
+| `event` | a hook event name, `cli`, `launcher`, `guard` |
+| `tool_class` | `Bash`, `PowerShell`, `MCP`, `File`, `Other`, `-` |
+| `client` | `claude`, `codex`, `-` |
+| `days` | real dates within the last 30 days, at most 7 |
+| `seen` | `1`, `2`, `3+`, `10+` |
+| `plugin_version` | three numbers of at most 3 digits each, no leading zero, or `unknown` |
+| `hinted` | `true` or `false` |
 
-**What could still point to a person (Q2):** the times (a work pattern) and the platform. Both stay local; a
-report carries the date and the platform family. The counts say how much the person used maisecrets, which is
-why the report shows them per failure and not in total.
+- **Key and selector:** `code/cause`. No hash.
+- **One schema function** builds a group, loads the file and renders a report: a field outside its form drops
+  the whole group; the rendered report is scanned by the detector before it is shown.
+- **Sessions with a typed prompt** (for the hint) live in a separate file, `hint-sessions.json` (at most 50,
+  never in a report, deleted by `wipe`).
+- **Markers** for places that cannot write the record: `~/.maisecrets/pending/<code>`, one empty file per code
+  (bash `: >`, cmd `type nul >`, Python `open(…, "w")`); the next hook folds a marker into the record (its mtime
+  is the day) and unlinks it. Only file names from `CODES` are folded; any other file there is deleted.
 
-## 4. Error codes, not stack hashes (Q3)
+## 4. Where failures are recorded
 
-The failure places are few and known, so each gets a fixed code:
-
-| Code | Place | Class |
+| Codes | Place | Class |
 |---|---|---|
-| `destinations.pend`, `destinations.commit` | the destination record (C23) | best-effort |
-| `hint.post-tool`, `hint.post-tool-failure` | a hint that could not be given | best-effort |
-| `scrub.later-start`, `scrub.failed-prompt` | the transcript scrub child | best-effort |
-| `mask-hidden` | removal of invisible characters in a file | best-effort |
-| `hook.<event>.unexpected` | an exception that reaches `_failure` (each hook event) | fail-closed |
-| `config.unreadable` | `config.json` that does not parse (block until fixed) | fail-closed |
+| `store.keychain-add`, `store.keychain-readback`, `store.keychain-delete`, `store.locker-add`, `store.file-read`, `store.file-write`, `store.openssl`, `store.not-deleted`, `store.index-read`, `store.index-shape`, `store.repair` | the 13 `RuntimeError` raise sites in `vault.py` get a code (`vault.py` 551, 649, 651, 679, 701, 733, 749, 767, 823, 949, 952, 1384) | fail-closed |
+| `store.timeout-keychain`, `store.timeout-openssl`, `store.timeout-locker` | `_run_store`'s timeout, per backend (598) | fail-closed |
 | `store.no-write-access` | a `PermissionError` on the store folder | fail-closed |
-| `hook.<event>.watchdog` | the watchdog answered before the hook finished | fail-closed |
+| `store.expire`, `store.forget` | failures that expiry and forget swallow (1292, 1325) | best-effort |
+| `config.policy-invalid`, `config.user-ignored` | a machine policy that does not load; a user `config.json` ignored with a warning | fail-closed / best-effort |
+| `hook.payload` | a payload that is no JSON object | fail-closed |
+| `hook.<event>.unexpected` | an exception that reaches `_failure`, and the inner catch of `_post_tool_guarded` | fail-closed |
+| `hook.<event>.watchdog` | the watchdog answered (a marker, no JSON write in that path) | fail-closed |
+| `hook.session-start` | the separate SessionStart path in `dispatch.py` | best-effort |
+| `destinations.pend`, `destinations.commit` | `pend` and `commit` return a closed result instead of swallowing it | best-effort |
+| `scrub.start`, `scrub.write` | the scrub child (a marker from the child) | best-effort |
+| `prompt.pending`, `prompt.clipboard` | the pending prompt, the clipboard | best-effort |
+| `hint.give` | a hint that could not be given | best-effort |
+| `mod.dispatch` | the Python side of the mod (`dispatch.py mod-prompt`) | best-effort |
+| `launcher.no-python`, `launcher.import` | `run.sh`/`run.cmd` found no Python; `dispatch.py` could not import the plugin (markers) | fail-closed |
+| `guard.fired` | the guard refused (a marker) | fail-closed |
+| `cli.<command>` | an uncaught exception in a CLI command (in the hook's process only: a CLI run never writes) | best-effort |
 
-A stack hash changes with every refactor, can carry a path in a frame name of another package, and says
-nothing to a reader. A code is stable across versions, short, and says where to look. An exception that has
-no code of its own lands in `hook.<event>.unexpected` with its class name, so it is still grouped.
+A test walks every `raise RuntimeError` and every `except` that ends a hook path, and fails when one has no
+listed code; a listed code that no site uses fails too.
 
-## 5. Which failures are aggregated, and who sees what (Q4)
+**Not observable** (in the docs): a manifest the client rejects, a client timeout that fails open, a failure in
+the mod's JavaScript before Python, a failure of the recorder itself.
 
-All of them are aggregated by `code/error`. What the person sees depends on the class:
+## 5. Who sees what
 
-- **best-effort** (the call goes on unchanged): recorded only. One hint after the **third** time in the same
-  group (see 6). Example: the destination record could not be written.
-- **fail-closed** (maisecrets blocks or withholds, as today): the person already sees the refusal. Its text
-  gets one line: `This is a maisecrets problem; nothing was sent anywhere. /maisecrets:report last prepares a
-  report you can read first.` No extra hint.
-- **compatibility** (a part of the client does not work as expected): recorded; one hint after the **second**
-  time. V1 has no compatibility code of its own (see 11): the mod's own failures cannot be recorded from the
-  mod without a new file-writing call.
+- **best-effort:** recorded only; one hint when `seen` reaches `3+` (section 6).
+- **fail-closed:** the refusal gets one fixed line, whether or not the record could be written:
+  `maisecrets sent no report. /maisecrets:report incident shows one you can read and then send yourself.`
+  The refusals for `launcher.*` and `guard.fired` do not name it (no Python or no plugin folder can run it); they
+  keep their own text.
 
-## 6. The hint (Q5, Q6)
+## 6. The hint
 
-The hint goes through the same channel as the existing hints (`additionalContext` of a PostToolUse), and only
-the model reads it. Text:
+Through the existing PostToolUse `additionalContext`, read only by the model:
 
-> maisecrets recorded the same internal problem more than once (nothing was sent anywhere). Tell the user once,
-> in one sentence, that /maisecrets:report last prepares a report they can read before they send it. Do not run
-> that command yourself and do not open or file anything.
+> maisecrets recorded the same internal problem more than once (it sent no report). Tell the user once, in one
+> sentence, that /maisecrets:report incident shows a report they can read and send themselves.
 
-Anti-spam rules:
-- one hint per fingerprint and hint revision, claimed under the lock of `hints.json` (`claim_hint`), so two
-  hooks at once give it once;
-- at most one incident hint per session;
-- never in a subagent, never in a session without a typed prompt (the `interactive` list of C23), never with
-  `tips: false`;
-- never in the answer of a fail-closed path (that answer already names the report).
+Once per group (`hinted`, set under the record's lock); never in a subagent, never in a session without a typed
+prompt (`hint-sessions.json`), never with `tips: false`, never in a fail-closed answer.
 
-## 7. Only the person sends (Q7)
+## 7. Reading and sending
 
-- `maisecrets report …` (the CLI, which a model can run) prints the report and the link. It never opens a
-  browser and never runs `gh`. The old behavior (open at once on a desktop) goes.
-- The send forms are typed prompts: `/maisecrets:report last --open` opens the browser on the prefilled page,
-  `/maisecrets:report last --create` files it with `gh`; in Codex `maisecrets: report last open|create`. The
-  UserPromptSubmit hook does it for a prompt whose `source` is the person (`TYPED_SOURCES`, as C22), and then
-  lets the slash command run on to show what was done.
-- A Bash or PowerShell command that carries a send form (`report … --open|--create`, the Codex sentence) is
-  refused, as `IN_A_COMMAND_RE` refuses a settings change.
-- Residual, as C22: a nested client fed the sentence built at run time, and Codex, which sends no `source`.
+| Step | Claude Code | Codex | Own terminal |
+|---|---|---|---|
+| list | `/maisecrets:report` (detections and incidents) | `maisecrets: report` | `run.sh report` |
+| read an incident report | `/maisecrets:report incident [code/cause]` | the same, as a sentence | `run.sh report incident` |
+| send | click the printed link, check the text on GitHub, Submit | the same | the same |
+| clear the record | `/maisecrets:report incident clear` | the same | the same |
 
-## 8. The same flow in Claude Code and Codex (Q8)
+- The report prints the full text first, then the link. The link is built from the configured `report_url`
+  (a policy may set its own tracker or `null`); when the config does not load, the text comes without a link.
+- No form of the report opens a browser or runs `gh`; `--create` is removed (the README names
+  `gh issue create` for a person who wants it in their terminal).
+- **While the hooks fail closed:** `user_prompt` and `pre_tool` recognize only the closed forms (`report`,
+  `report incident`, `report incident <code/cause>`, `report incident clear`, full match, no free text) before
+  they load the config or open the store; `user_prompt` still ends a pending Codex consent code (C21) first.
+  `report last <why>`, `bug` and `feature` take the normal path, so their free text meets the detector.
 
-| Step | Claude Code | Codex |
-|---|---|---|
-| see what is recorded | `/maisecrets:diagnostics` | `maisecrets: diagnostics` |
-| read the report | `/maisecrets:report last` (or `<fingerprint>`) | `maisecrets: report last` |
-| open it in the browser | `/maisecrets:report last --open` | `maisecrets: report last open` |
-| file it with `gh` | `/maisecrets:report last --create` | `maisecrets: report last create` |
+## 8. Damaged record, wipe, clear
 
-`report last` now means the newest **incident**; the false-positive report of the newest detection becomes
-`report detection` (a rename, with `report last` kept for a detection when no incident exists).
+- A record that does not parse is replaced by an empty one; the old file is kept as the one aside copy
+  `incidents.json.corrupt` (an older aside is overwritten: the record holds nothing of the person).
+- Only a hook writes the record and folds markers. A CLI read never writes; `report incident clear` deletes
+  the files (an unlink, no write of a store file).
+- `wipe` deletes `incidents.json`, its aside, `hint-sessions.json` and `pending/`; `/maisecrets:status` shows the
+  number of groups.
 
-## 9. Damaged store and `wipe` (Q9, Q10)
+## 9. What is reused
 
-- A file that does not parse is moved aside (`incidents.json.corrupt`, a copy is never written over) and a new
-  one begins, as `destinations.json` does. A read that fails returns an empty record. Recording catches every
-  exception: it never stops a hook and never changes an answer (D4).
-- The record is written under a short lock (0.3 s, as the destination record); a busy lock skips the count.
-- `wipe` deletes `incidents.json` and its aside copies and says so; `/maisecrets:status` shows the number of
-  groups.
+`events.link` and `events.tracker_or_error` for the link (the browser and `gh` calls go); the full-match prompt
+forms of C22; the aside handling of `destinations.json`; the PostToolUse hint channel.
 
-## 10. What is reused (Q11)
+## 10. In 0.6.10, and later
 
-- `events.link`, `events.tracker_or_error`, `cli._report_out` for the issue page and `gh`;
-- `settings.claim_hint` and `hints.json` for the once-only hint, with the key `incident:<fingerprint>`;
-- the `interactive` session list of `destinations.json` for "a session with a typed prompt";
-- the typed-prompt path of C22 for the send forms;
-- `hooks.log` stays as it is (it has session ids and tool names, so it is no report material).
+In 0.6.10: sections 3 to 9, a threat-model row C24 with beliefs for D1 to D5, README and PRIVACY.md.
 
-## 11. In 0.6.10, and later (Q12)
+Later, on purpose: failures in the mod's JavaScript; the client's own version; a send from inside the client
+(the confirm dialog), which needs a client signal for a declined dialog; any telemetry (not planned).
 
-In 0.6.10: the record, the codes at the places in 4, `/maisecrets:diagnostics`, `report last|<fingerprint>`,
-the typed send forms, the refusal of the send forms in a command, the hint, `wipe` and `status`, README,
-PRIVACY.md and a threat-model row (C24) with beliefs for D1 to D5.
+## 11. Tests that must exist
 
-Later, on purpose:
-- failures inside the mod (no Python, a timeout): the mod would need `$.fs.write` to record them, a new mod
-  call the plugin directory reviews;
-- the client's own version in a report (no payload field gives it);
-- any telemetry, opt-in or not, any id, any ping: not planned.
+- schema: every field rejects hostile forms (newline, Unicode, a huge or negative number out of range, a boolean
+  as a number, a non-finite number, a deep object, an unknown code, an impossible date, a date out of the window,
+  a poisoned version); a group with one bad field is dropped;
+- every raise and every hook-ending catch has a listed code, and every listed code has a site (both ways);
+- the rendered report of every code holds no detector hit, also when the exception message held a synthetic
+  secret and a path;
+- recording after the answer: the same answers with the recorder on, off, raising, slow and with a held lock; near
+  the watchdog the original refusal still wins; the watchdog path writes only a marker;
+- no report form calls a browser or `gh` (both patched to raise), also `report last` and `bug`;
+- the closed report forms run with a damaged store and a broken config (text without link); free-text forms do
+  not take that path; a pending Codex consent code still ends;
+- markers: only listed names are folded, others are deleted, a marker is unlinked after the fold;
+- the hint: once per group, never in a subagent, never without a typed prompt, never with `tips: false`;
+- `wipe` and `clear` remove every file; a CLI read writes nothing.
 
-## 12. Tests that must exist
+## 12. Open for the review
 
-- every call site uses a code from `CODES`; a code that no site uses fails the test;
-- a record written after each failure kind holds only the allowed fields and value forms (an allow list per
-  field), and the detector finds nothing in the rendered report, also when the exception message held a
-  synthetic secret and a path;
-- the CLI `report` never calls the browser or `gh` (patched to raise);
-- a typed `/maisecrets:report last --open` opens, the same text from a source other than the person does not,
-  and a Bash command with `--open` or `--create` is refused;
-- the hint comes once per fingerprint, never in a subagent, never with `tips: false`;
-- a damaged or deeply nested `incidents.json` never stops a hook; `wipe` removes it;
-- recording on and failing gives the same hook answers (D4), measured on every place in 4.
+- Is the GitHub issue form a sufficient consent step for the product owner's goal (read, then decide)?
+- Is `--create` worth keeping for anyone, given that it is the one send without a form in between?
+
+## 13. Changes against v2 (review round 2)
+
+- The send step is gone (codex: the terminal `y/N` is no proof of a person, a declined dialog leaves a grant;
+  Opus: the same with a probe, the recognizer and the heredoc, and "a link that the person clicks, and GitHub's
+  own Submit button, are both acts of a person"). D3 now says what holds.
+- D2 is scoped to incident reports and names the usage metadata it shows; session ids moved to their own file;
+  `entry` dropped; tighter bounds (numbers by kind, version, dates, `hinted`).
+- The full list of `vault.py` raise sites, the per-backend timeout, the swallowed expiry and forget failures, the
+  inner PostToolUse catch, the SessionStart path; a both-ways test.
+- Markers (one empty file per code) instead of an append file; the watchdog path writes only a marker.
+- The early report path takes closed forms only, needs no config for reading, keeps the C21 code rule.
+- The fail-closed line is fixed text, and the launcher and guard refusals do not name a report they cannot run.
