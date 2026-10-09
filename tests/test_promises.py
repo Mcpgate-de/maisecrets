@@ -373,14 +373,15 @@ class RunCmdFindsAnInstallOffThePathTests(unittest.TestCase):
 
 
 class RunCmdMarkerTests(unittest.TestCase):
-    """run.cmd without Python leaves its incident marker from a detached child (docs/DIAGNOSTICS.md, section 3): the
-    hook answers and ends at once, and only the child touches the home (codex code review, round 2)."""
+    """run.cmd without Python leaves its incident marker in its own hooks folder, where last-start.txt is written
+    (docs/DIAGNOSTICS.md, section 3): no detached child, which would inherit the hook's pipe handles, and the
+    configured home is not touched (codex code review, round 3)."""
 
     def setUp(self):
         if os.name != "nt":
             self.skipTest("cmd.exe runs on Windows only; the GitHub Windows runner runs it")
 
-    def test_without_python_the_marker_comes_from_a_detached_child(self):
+    def test_without_python_the_marker_is_in_the_hooks_folder_and_the_home_is_untouched(self):
         base = Path(tempfile.mkdtemp(prefix="maisecrets-runcmd-mark-"))
         self.addCleanup(shutil.rmtree, base, True)
         (base / "hooks").mkdir()
@@ -401,12 +402,8 @@ class RunCmdMarkerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("withheld", r.stdout)
         self.assertLess(took, 20)
-        marker = home / "incident-marker.launcher.no-python"
-        for _ in range(100):
-            if marker.is_dir():
-                break
-            time.sleep(0.1)
-        self.assertTrue(marker.is_dir(), "the detached child made the marker")
+        self.assertTrue((base / "hooks" / "incident-marker.launcher.no-python").is_dir())
+        self.assertEqual(os.listdir(home), [], "the configured home is not touched")
 
 
 class RunCmdClearedEnvironmentTests(unittest.TestCase):

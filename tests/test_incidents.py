@@ -222,6 +222,26 @@ class MarkerTests(_Home):
         self.assertFalse(left.exists())
         self.assertEqual(incidents.load()[0], {})
 
+    def test_the_marker_run_cmd_leaves_in_the_hooks_folder_is_listed_folded_once_and_cleared(self):
+        plugin = self.home / "plugin-hooks" / (incidents.MARKER_PREFIX + "launcher.no-python")
+        plugin.parent.mkdir()
+        with mock.patch.object(incidents, "_plugin_marker", return_value=plugin):
+            plugin.mkdir()
+            self.assertEqual(incidents.unfolded_markers(), ["launcher.no-python"])
+            incidents.flush()
+            self.assertFalse(plugin.exists())
+            self.assertEqual(incidents.load()[0]["launcher.no-python/missing"]["count"], 1)
+            incidents.flush()
+            self.assertEqual(incidents.load()[0]["launcher.no-python/missing"]["count"], 1)
+            plugin.mkdir()
+            (plugin / "x").write_text("x")
+            incidents.flush()
+            self.assertTrue((plugin / "x").exists(), "a full folder stays and counts for nothing")
+            self.assertEqual(incidents.load()[0]["launcher.no-python/missing"]["count"], 1)
+            (plugin / "x").unlink()
+            self.assertEqual(incidents.clear(), 2)
+            self.assertFalse(plugin.exists())
+
     def test_a_failed_rmdir_counts_nothing(self):
         incidents.write_marker("guard.fired")
         with mock.patch.object(incidents.os, "rmdir", side_effect=OSError(39, "not empty")):

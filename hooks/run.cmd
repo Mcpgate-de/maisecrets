@@ -1,7 +1,4 @@
 @echo off
-rem the detached marker child of :mark (below): only it touches the home, so a stalled home cannot hold the hook
-if "%~1"=="__mark" goto :mark_now
-set "MS_SELF=%~f0"
 rem Hook launcher for Windows without Git Bash. Codex runs the commandWindows entry of
 rem hooks/hooks.json as   cmd.exe /C "<command>"   with the payload on stdin (codex-rs,
 rem hooks/src/engine/command_runner.rs, read 2026-09-26). A batch file hands stdin to its
@@ -84,20 +81,10 @@ exit /b 2
 :done
 exit /b %errorlevel%
 
-rem an incident marker for /maisecrets:report incident (docs/DIAGNOSTICS.md, section 3): after the answer, this file
-rem starts itself again as a detached child with no window and no stream of the hook (start /b, every stream on nul),
-rem so the client's pipe closes when the hook ends, and a stalled home cannot hold it (codex code review, round 2)
+rem an incident marker for /maisecrets:report incident (docs/DIAGNOSTICS.md, section 3): after the answer, one md in
+rem this plugin's own hooks folder, where last-start.txt is written on every start. Not in the home: a detached child
+rem inherits the hook's pipe handles on Windows (codex code review, round 3), and the home is another, configured
+rem folder. The hooks fold it from there once Python runs.
 :mark
-start "" /b cmd /d /c call "%MS_SELF%" __mark <nul >nul 2>&1
-exit /b 0
-
-rem the child: one md in a home that exists and is no reparse point (a junction), so md creates no parent and
-rem follows nothing
-:mark_now
-set "MS_HOME=%MAISECRETS_HOME%"
-if "%MS_HOME%"=="" set "MS_HOME=%USERPROFILE%\.maisecrets"
-if not exist "%MS_HOME%\" exit /b 0
-for %%A in ("%MS_HOME%") do set "MS_ATTR=%%~aA"
-if /i "%MS_ATTR:~8,1%"=="l" exit /b 0
-md "%MS_HOME%\incident-marker.launcher.no-python" >nul 2>&1
+md "%HERE%incident-marker.launcher.no-python" >nul 2>&1
 exit /b 0

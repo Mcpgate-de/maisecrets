@@ -339,7 +339,7 @@ def flush(today: str | None = None) -> None:
         home = _home()
         if not home.is_dir() or home.is_symlink():
             return
-        if not items and not _takeable_markers(home):
+        if not items and not _takeable_markers(home) and not _plugin_marker_is_there():
             return                                   # nothing to write: no file is touched
         with _OneTry(home / LOCK_NAME) as locked:
             if not locked:
@@ -349,7 +349,7 @@ def flush(today: str | None = None) -> None:
             groups, damaged = load(path, today)
             if damaged:
                 _set_aside(path)
-            taken = _claim_markers(home)
+            taken = _claim_markers(home) + _claim_plugin_marker()
             for code, day in taken:
                 groups = add(groups, _marker_item(code), day if _valid_day(day, *_window(today)) else today)
             for item in items:
@@ -417,6 +417,32 @@ def write_marker_bounded(code: str, seconds: float = 0.3) -> None:
         pass
 
 
+def _plugin_marker() -> Path:
+    """The marker run.cmd leaves in this plugin's own hooks folder: it never touches the home, as a detached child
+    on Windows would inherit the hook's pipe handles (codex code review, round 3)."""
+    return Path(__file__).resolve().parent.parent / "hooks" / (MARKER_PREFIX + "launcher.no-python")
+
+
+def _plugin_marker_is_there() -> bool:
+    try:
+        return stat.S_ISDIR(os.lstat(_plugin_marker()).st_mode)
+    except OSError:
+        return False
+
+
+def _claim_plugin_marker() -> list[tuple[str, str]]:
+    """The plugin folder's marker, counted only when its rmdir succeeded (at most once)."""
+    p = _plugin_marker()
+    try:
+        st = os.lstat(p)
+        if not stat.S_ISDIR(st.st_mode) or os.listdir(p):
+            return []
+        os.rmdir(p)
+    except OSError:
+        return []
+    return [("launcher.no-python", time.strftime("%Y-%m-%d", time.localtime(st.st_mtime)))]
+
+
 def _takeable_markers(home: Path) -> bool:
     """A marker the fold can take: a real directory under a marker code's name, or a claimed name left by a crash."""
     for name in _marker_names(home):
@@ -470,7 +496,7 @@ def _claim_markers(home: Path) -> list[tuple[str, str]]:
 def unfolded_markers(home: Path | None = None) -> list[str]:
     """The codes of markers no hook folded yet, read only."""
     home = home or _home()
-    out = []
+    out = ["launcher.no-python"] if _plugin_marker_is_there() else []
     for name in _marker_names(home):
         code = name[len(MARKER_PREFIX):]
         try:
@@ -478,7 +504,7 @@ def unfolded_markers(home: Path | None = None) -> list[str]:
                 out.append(code)
         except OSError:
             pass
-    return sorted(out)
+    return sorted(set(out))
 
 
 def clear(home: Path | None = None) -> int:
@@ -495,7 +521,7 @@ def clear(home: Path | None = None) -> int:
 
 
 def _clear_locked(home: Path) -> int:
-    n = 0
+    n = len(_claim_plugin_marker())
     try:
         names = os.listdir(home)
     except OSError:

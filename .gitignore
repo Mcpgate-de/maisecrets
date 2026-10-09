@@ -14,6 +14,7 @@ dist/
 # agent worktrees (Claude Code)
 .claude/
 hooks/last-start.txt
+hooks/incident-marker.*
 
 # written by `claude plugin test` and `--plugin-dir` (mod types): generated, never shipped
 /tsconfig.json
