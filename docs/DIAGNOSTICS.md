@@ -1,6 +1,6 @@
 # Local diagnostics and reporting (design v6, 0.6.10)
 
-Status: the design to build from, after five review rounds. Issue: Mcpgate-de/maisecrets#14.
+Status: the design to build from, after six review rounds (round 6: codex and Opus, build with changes; the changes are in section 10). Issue: Mcpgate-de/maisecrets#14.
 
 maisecrets has no telemetry, no server and no automatic error upload, and it keeps it that way. This design
 adds a way to learn about real problems: maisecrets records its own internal failures **on this computer**, as
@@ -64,7 +64,7 @@ Section 13 lists the changes after the reviews (codex gpt-5.6-sol, Opus, ChatGPT
     "store.locker-add/rc": {
       "code": "store.locker-add", "cause": "rc", "number_kind": "exit", "number": 1,
       "class": "fail-closed", "event": "UserPromptSubmit", "tool_class": "-", "client": "codex",
-      "days": ["2026-10-08", "2026-10-09"], "seen": "3+", "plugin_version": "0.6.10"
+      "days": ["2026-10-08", "2026-10-09"], "count": 3, "plugin_version": "0.6.10"
     }
   }
 }
@@ -80,7 +80,7 @@ Section 13 lists the changes after the reviews (codex gpt-5.6-sol, Opus, ChatGPT
 | `tool_class` | `Bash`, `PowerShell`, `MCP`, `File`, `Other`, `-` |
 | `client` | `claude`, `codex`, `-` |
 | `days` | real dates within the last 30 days, at most 7 (the report shows only their number) |
-| `seen` | `1`, `2`, `3+`, `10+` |
+| `count` | 1–9999 (the report shows only the level `1`, `2`, `3+` or `10+`) |
 | `plugin_version` | three numbers of at most 3 digits each, no leading zero, or `unknown` |
 
 - **Key and selector:** `code/cause`. No hash.
@@ -252,29 +252,41 @@ and it needed the typed-session mark in every mode.
 
 ## 10. Watchdog and recording
 
-In pseudocode, for `main()` (`hooks.py:3837`):
+In pseudocode, for `main()` (`hooks.py:3837`), after review round 6 (both: build with changes):
 
 ```
 timer = start(on_timeout, WATCHDOG_SECONDS[event])   # first, before any file work
 heartbeat(start)                                     # guarded by the timer
-try:    won = answer(handler(payload), "ok")         # answer(): lock, claim, write and flush JSON; return won
+try:    won = answer(handler(payload), "ok")
 except: won = answer(fail_closed(...), ...)          # as today, incl. the config-error answer and the scrub
 finally:
-    if won: post_answer_thread(heartbeat(done), run_log, write queue, fold markers).start()
-    else:   discard the queue
-    join the post-answer thread until the watchdog deadline
-    timer.cancel()
+    if won:
+        post_answer_thread(run_log, write queue, fold markers).start()
+        join the post-answer thread until the watchdog deadline
+        timer.cancel(); timer.join(1)                # as today (hooks.py:3896-3901)
+    else:
+        discard the queue
+        timer.join()                                 # the watchdog's thread ends the process
+
+answer(obj, how):                                    # as today, plus a bounded lock and a return value
+    if not lock.acquire(timeout=1): return False     # a handler stuck in its own write cannot hold the watchdog
+    if answered: release; return False
+    answered = True; write and flush JSON; heartbeat(done)   # the guard needs the done heartbeat, as today
+    release; return True
 
 on_timeout():
     won = answer(fail_closed("took longer than …"), "watchdog")
-    if won: marker thread (join 0.3 s); scrub_failed_prompt   # the scrub as today, bounded at 1 s
-    os._exit(0)                                       # always: a hook that answered must still end in time
+    if won: one daemon thread: scrub_failed_prompt, then the marker; join it for at most 1.5 s
+    os._exit(0)                                      # always: a hook that answered must still end in time
 ```
 
 - The answers stay the same as today, apart from the fixed line of section 5. "The same answers" in the tests
   means: identical with the recorder on, off, raising, slow and holding its lock.
-- The watchdog no longer runs the done heartbeat or `_run_log` on its own path; its JSON answer is what counts, and
-  the guard already refuses a call whose heartbeat it does not see.
+- The done heartbeat stays inside `answer()` on both paths, as today: the guard waits for it, and without it the
+  guard adds its own refusal after 13 s (Opus round 6). It is no diagnostics write.
+- The process ends at the latest about 1.5 s after the watchdog deadline (7 s, 16 s after a tool), below the
+  client's timeout (10 s, 20 s). When the watchdog cannot take the answer lock within 1 s, the handler is in the
+  middle of its own answer, and the watchdog still exits.
 
 ## 11. Tests that must exist
 
