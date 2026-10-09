@@ -156,6 +156,44 @@ class ExitCodeTests(_Clean):
         self.assertNotIn("number", incidents.load()[0]["store.locker-add/rc"])
 
 
+class LockLimitTests(_Clean):
+    def test_a_handler_stuck_in_its_own_write_cannot_hold_the_watchdog(self):
+        exits = []
+        real_out = hooks._out
+
+        def stuck(obj):
+            if not exits and "took longer" not in json.dumps(obj):
+                time.sleep(3)                         # the handler's write hangs while it holds the answer lock
+            real_out(obj)
+        started = time.monotonic()
+        with mock.patch.object(hooks.sys, "stdin", io.StringIO(json.dumps(dict(CLAUDE, prompt="hello")))), \
+                mock.patch.object(hooks.sys, "stdout", io.StringIO()), \
+                mock.patch.object(hooks.os, "_exit", lambda code: exits.append(time.monotonic() - started)), \
+                mock.patch.object(hooks, "_out", stuck), \
+                mock.patch.dict(hooks.HANDLERS, {"user-prompt": lambda p: {}}), \
+                mock.patch.dict(hooks.WATCHDOG_SECONDS, {"user-prompt": 0.2}):
+            hooks.main(["hook", "user-prompt"])
+        self.assertTrue(exits, "the watchdog reached its exit")
+        self.assertLess(exits[0], 2.0, "after at most 1 s of waiting for the lock, not after the 3 s write")
+
+
+class ConfigCodeTests(_Clean):
+    def test_a_user_file_of_a_wrong_type_is_noted_as_ignored(self):
+        (HOME / "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true, "tips": "x"}')
+        self.run_main("user-prompt", dict(CLAUDE, prompt="hello"))
+        self.assertIn("config.user-ignored/shape", incidents.load()[0])
+
+    def test_a_policy_of_a_wrong_type_is_recorded_as_invalid(self):
+        import platform
+        import tempfile
+        policy = Path(tempfile.mkdtemp(prefix="maisecrets-policy-")) / "policy.json"
+        policy.write_text('{"tips": "x"}')
+        with mock.patch.dict(vault.POLICY_PATHS, {platform.system(): policy}):
+            out = self.run_main("user-prompt", dict(CLAUDE, prompt="hello"))
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("config.policy-invalid/parse", incidents.load()[0])
+
+
 class WatchdogTests(_Clean):
     def test_a_winning_watchdog_leaves_its_marker_and_the_losing_handler_records_nothing(self):
         def slow(payload):
@@ -187,6 +225,54 @@ class WatchdogTests(_Clean):
         self.assertFalse((HOME / (incidents.MARKER_PREFIX + "hook.user-prompt.watchdog")).exists(),
                          "a losing watchdog leaves no marker")
         self.assertLess(time.monotonic() - started, 3)
+
+
+WRAPPER = (
+    "import sys; sys.path.insert(0, sys.argv[1]); from maisecrets import hooks; "
+    "hooks.WATCHDOG_SECONDS['user-prompt'] = float(sys.argv[2]); sys.exit(hooks.main(['hook', 'user-prompt']))")
+
+
+@unittest.skipIf(os.name == "nt", "FIFOs and the signal-free exit are measured on POSIX")
+class RealProcessTests(unittest.TestCase):
+    """The hook as a process with its real os._exit: it must end, with one JSON answer, before the client's timeout."""
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        self.home = Path(tempfile.mkdtemp(prefix="maisecrets-process-"))
+        self.addCleanup(shutil.rmtree, self.home, True)
+        (self.home / "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
+
+    def run_hook(self, payload: dict, watchdog: float, **env) -> tuple:
+        import subprocess
+        e = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX_"))}
+        e.update({"MAISECRETS_HOME": str(self.home), "PYTHONDONTWRITEBYTECODE": "1", **env})
+        started = time.monotonic()
+        r = subprocess.run([sys.executable, "-c", WRAPPER, str(ROOT), str(watchdog)], input=json.dumps(payload),
+                           capture_output=True, text=True, env=e, timeout=20)
+        return r, time.monotonic() - started
+
+    def test_a_hanging_handler_ends_at_the_watchdog_with_one_answer(self):
+        r, took = self.run_hook(dict(CLAUDE, prompt="hello"), 0.5, MAISECRETS_TEST_FAULT="user-prompt-slow",
+                                MAISECRETS_TEST_HOME_OWNED="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("took longer", json.loads(r.stdout)["reason"])
+        self.assertLess(took, 3.0, "the watchdog's real exit, not the handler's sleep")
+
+    def test_a_stalled_home_cannot_hold_the_winning_watchdog(self):
+        # FIFOs with no reader stand in for a stalled disk at both heartbeat files (Opus code review, round 1)
+        sys.path.insert(0, str(ROOT / "hooks"))
+        import guard
+        (self.home / "guard.json").write_text('{"expect": "always"}')
+        alive = self.home / "alive"
+        alive.mkdir()
+        name = guard.heartbeat_name("S1", "user-prompt", "p1")
+        for n in (name, name + ".s"):
+            os.mkfifo(alive / n)
+        r, took = self.run_hook(dict(CLAUDE, prompt="hello"), 0.5)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("took longer", json.loads(r.stdout)["reason"])
+        self.assertLess(took, 4.0, "the watchdog writes the done heartbeat only in its bounded thread")
 
 
 if __name__ == "__main__":

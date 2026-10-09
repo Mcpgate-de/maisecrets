@@ -89,13 +89,15 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(incidents.seen(2), "2")
         self.assertEqual(incidents.seen(3), "3+")
         self.assertEqual(incidents.seen(10), "10+")
-        groups = {}
-        codes = sorted(incidents.CODES)
-        for i, c in enumerate(codes[:51] if len(codes) >= 51 else codes):
-            groups = incidents.add(groups, item(code=c))
-        for c in incidents.CAUSES:
-            groups = incidents.add(groups, item(cause=c))
-        self.assertLessEqual(len(groups), incidents.MAX_GROUPS)
+        pairs = [(c, cause) for c in sorted(incidents.CODES) for cause in incidents.CAUSES][:incidents.MAX_GROUPS + 1]
+        self.assertEqual(len(pairs), 51, "the premise: 51 distinct groups")
+        old_day = time.strftime("%Y-%m-%d", time.localtime(time.time() - 5 * 86400))
+        groups = incidents.add({}, item(code=pairs[0][0], cause=pairs[0][1]), old_day)
+        for c, cause in pairs[1:]:
+            groups = incidents.add(groups, item(code=c, cause=cause))
+        self.assertEqual(len(groups), incidents.MAX_GROUPS)
+        self.assertNotIn(f"{pairs[0][0]}/{pairs[0][1]}", groups, "the oldest group went")
+        self.assertIn(f"{pairs[-1][0]}/{pairs[-1][1]}", groups)
 
     def test_an_item_outside_the_schema_changes_nothing(self):
         self.assertEqual(incidents.add({}, item(code="store.lock /Users/x")), {})

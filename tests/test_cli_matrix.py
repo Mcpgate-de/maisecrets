@@ -1426,8 +1426,33 @@ class EventsTests(unittest.TestCase):
                     mock.patch("subprocess.Popen", side_effect=AssertionError("a program")), \
                     mock.patch.object(webbrowser, "open", side_effect=AssertionError("a browser")), \
                     mock.patch.object(os, "startfile", side_effect=AssertionError("a browser"), create=True), \
+                    mock.patch.object(os, "system", side_effect=AssertionError("a program")), \
+                    mock.patch.object(sys.stdout, "isatty", return_value=False), \
                     redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 self.assertEqual(cli.cmd_report(list(args)), 0)
+
+    def test_the_incident_report_prints_to_a_terminal_only_and_starts_nothing_there(self):
+        # the terminal branch (codex and Opus, code review round 1: no test reached it)
+        from maisecrets import cli, incidents
+        incidents.record_path().write_text(incidents.dumps(incidents.add({}, {
+            "code": "store.lock", "cause": "lock", "class": "fail-closed", "event": "UserPromptSubmit"})))
+        self.addCleanup(lambda: incidents.clear())
+        for tty, want in ((True, "store.lock/lock"), (False, "shown to a person only")):
+            out = io.StringIO()
+            out.isatty = lambda tty=tty: tty
+            with self.subTest(tty=tty), mock.patch("subprocess.run", side_effect=AssertionError("a program")), \
+                    mock.patch("subprocess.Popen", side_effect=AssertionError("a program")), \
+                    mock.patch.object(os, "system", side_effect=AssertionError("a program")), \
+                    mock.patch.object(sys, "stdout", out):
+                self.assertEqual(cli.cmd_report(["incident"]), 0)
+            self.assertIn(want, out.getvalue())
+            self.assertEqual("store.lock/lock" in out.getvalue(), tty, "the report only to a terminal")
+        out = io.StringIO()
+        out.isatty = lambda: True
+        with mock.patch.object(sys, "stdout", out):
+            cli.cmd_report(["incident", "clear"])
+        self.assertIn("cleared:", out.getvalue())
+        self.assertFalse(incidents.record_path().exists())
 
     def test_report_prints_the_text_and_the_link_and_create_is_gone(self):
         from maisecrets import cli
