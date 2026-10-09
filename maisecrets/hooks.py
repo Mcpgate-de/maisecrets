@@ -3820,7 +3820,13 @@ def _heartbeat(event: str, payload: dict, done: bool = False) -> None:
     from .vault import HOME
     if event not in ("user-prompt", "pre-tool", "post-tool") or client_of(payload) != "claude":
         return
-    if not ((HOME / "guard.json").exists() or _from_a_synced_folder()):
+    try:
+        # before Python 3.12, exists() raises on a home the hook cannot search, and this call runs before
+        # the hook's try: the process exited 1 without an answer, which lets the prompt through
+        installed = (HOME / "guard.json").exists()
+    except OSError:
+        installed = False
+    if not (installed or _from_a_synced_folder()):
         return
     ident = payload.get("prompt_id") if event == "user-prompt" else payload.get("tool_use_id")
     session = payload.get("session_id")
