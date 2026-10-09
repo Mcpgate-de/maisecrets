@@ -86,7 +86,7 @@ class ReportFromThePromptHookTests(_Clean):
         self.assertEqual(out["reason"], incidents.USAGE)
         out = hooks.user_prompt(dict(CLAUDE, prompt="/maisecrets:report incident clear"))
         self.assertIn("in a terminal", out["reason"])
-        self.assertIn(os.path.join("hooks", "run.sh"), out["reason"])
+        self.assertIn(os.path.join("hooks", "run.cmd" if os.name == "nt" else "run.sh"), out["reason"])
 
     def test_the_mod_passes_the_prompt_on_without_config_or_store(self):
         with mock.patch.object(hooks, "load_config", boom), mock.patch.object(hooks, "Vault", boom), \
