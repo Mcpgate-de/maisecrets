@@ -1,0 +1,10 @@
+# c24-a-hook-ends-in-time-after-a-lost-race: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c24-a-hook-ends-in-time-after-a-lost-race"
+control = "C24"
+statement = "A hook whose work after the answer hangs still ends at the watchdog deadline: the watchdog exits also when it lost the race (D4)."
+runner = ["tests/test_incident_hooks.py::WatchdogTests::test_post_answer_work_that_hangs_still_ends_at_the_deadline"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        os._exit(0)\n    watchdog = threading.Timer"
+replace = "        if False:\n            os._exit(0)\n    watchdog = threading.Timer"

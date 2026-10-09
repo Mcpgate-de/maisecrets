@@ -173,13 +173,18 @@ def cmd_put(args: list[str]) -> int:
 def cmd_report(args: list[str]) -> int:
     """`report` lists the last detections; `report last [note]` or `report <n> [note]` prepares a
     false-positive issue for one of them; `report bug <text>` and `report feature <text>` prepare
-    one without an event. It prints the text and a prefilled link, opens the link only on a local
-    desktop, and with --create files the issue through the GitHub CLI. Nothing in it is a value."""
-    from . import events
-    create = "--create" in args
-    args = [a for a in args if a != "--create"]
+    one without an event; `report incident [code/cause | clear]` shows the incident record. It prints the
+    text and a prefilled link, and the person opens the link and decides in GitHub's form: it opens no
+    browser and runs no program (docs/DIAGNOSTICS.md, D1). Nothing in it is a value."""
+    from . import events, incidents
+    if any(a.lower() == "--create" for a in args):
+        print("--create is gone: maisecrets files nothing itself. Open the link and decide in GitHub's form.")
+    args = [a for a in args if a.lower() != "--create"]
+    asked = incidents.form(args)
+    if asked:
+        return _report_incident(*asked)
     if args and args[0] in ("bug", "feature"):
-        return _report_out(events, *events.generic_issue_parts(args[0], " ".join(args[1:])), create=create)
+        return _report_out(events, *events.generic_issue_parts(args[0], " ".join(args[1:])))
     evs = events.load(20)
     if not evs:
         print("(no detection recorded yet)")
@@ -190,7 +195,7 @@ def cmd_report(args: list[str]) -> int:
             hits = ", ".join(f"{h['type']}/{h['kind']}" for h in e.get("hits", []))
             print(f"{i:<3} {e.get('ts', ''):<20} {e.get('hook', ''):<17} {e.get('client', ''):<7} {hits}")
         print("\nmaisecrets report last [note] | report <n> [note] | report bug <text> | report feature <text>"
-              "  (add --create to file it with the GitHub CLI)")
+              " | report incident")
         return 0
     if args[0] == "last":
         # a removal of invisible characters is no detection to report as a false alarm; the list shows it. The
@@ -205,7 +210,7 @@ def cmd_report(args: list[str]) -> int:
         if not any(h.get("type") != "HIDDEN" for h in ev.get("hits", [])):
             print("that event only removed invisible characters; there is no detection to report as a false alarm")
             return 0
-    rc = _report_out(events, *events.issue_parts(ev, " ".join(args[1:])), create=create)
+    rc = _report_out(events, *events.issue_parts(ev, " ".join(args[1:])))
     _forget_the_false_positive(ev)
     return rc
 
@@ -227,7 +232,26 @@ def _forget_the_false_positive(ev: dict) -> None:
               + " ".join(f"/maisecrets:forget {k}" for k in keys))
 
 
-def _report_out(events, title: str, body: str, label: str, create: bool) -> int:
+def _report_incident(kind: str, selector: str | None) -> int:
+    """The incident report in a terminal. Only to a terminal: through a pipe (a model's Bash call) it prints one
+    line, so the report does not end up in the model's context by accident. That is no check of a person: a model
+    with a shell can get a pseudo-terminal (docs/DIAGNOSTICS.md, D3)."""
+    from . import incidents
+    if kind == "usage":
+        print(incidents.USAGE)
+        return 0
+    if not sys.stdout.isatty():
+        print("maisecrets: the incident report is shown to a person only: type /maisecrets:report incident in "
+              "Claude Code, or run this command in a terminal.")
+        return 0
+    if kind == "clear":
+        print(f"cleared: {incidents.clear()} incident file(s)")
+        return 0
+    print(incidents.report_text(selector))
+    return 0
+
+
+def _report_out(events, title: str, body: str, label: str) -> int:
     url, broken = events.tracker_or_error()
     if url is None and not broken:
         print("reporting is turned off here (report_url is null in the policy or the config)")
@@ -237,19 +261,9 @@ def _report_out(events, title: str, body: str, label: str, create: bool) -> int:
     if broken:
         print(f"no link and no issue: the configuration cannot be read ({broken}). Copy the text above.")
         return 0
-    if create:
-        made = events.create_with_gh(title, body, label)
-        if made:
-            print(f"created: {made}")
-            return 0
-        why = ("the tracker is not a GitHub repository" if not events.github_repo(events.tracker())
-               else "install gh and run `gh auth login`")
-        print(f"could not create it with the GitHub CLI ({why}); copy the text above or use the link.",
-              file=sys.stderr)
     url = events.link(title, body, label)
-    opened = not create and events.open_in_browser(url)
-    prefilled = bool(events.github_repo(url))
-    print(("opened in the browser: " if opened else "prefilled link: " if prefilled else "tracker: ") + url)
+    print(("prefilled link: " if events.github_repo(url) else "tracker: ") + url)
+    print("maisecrets sent nothing: open the link, check the text in the form, and decide there.")
     return 0
 
 
@@ -785,8 +799,9 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] in {"-h", "--help"}:
         print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | audit [n]\n"
-              "           | report [last|n|bug|feature] [text] | expire | scan [text] | config | settings [--all]\n"
-              "           | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>")
+              "           | report [last|n|bug|feature|incident] [text] | expire | scan [text] | config\n"
+              "           | settings [--all]"
+              " | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>")
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])

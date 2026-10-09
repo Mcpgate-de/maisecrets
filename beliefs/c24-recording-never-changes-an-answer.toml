@@ -1,0 +1,10 @@
+# c24-recording-never-changes-an-answer: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c24-recording-never-changes-an-answer"
+control = "C24"
+statement = "The hook's answer is the same with the recorder on, off, raising and holding its lock: no recorder step can raise out of the hook (D4)."
+runner = ["tests/test_incident_hooks.py::RecordAfterTheAnswerTests::test_the_answer_is_the_same_with_the_recorder_on_off_raising_and_locked"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "            _record(incidents.flush)                 # still under the watchdog\n"
+replace = "            incidents.flush()\n"

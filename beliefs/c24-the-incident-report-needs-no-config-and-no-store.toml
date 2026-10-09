@@ -1,0 +1,10 @@
+# c24-the-incident-report-needs-no-config-and-no-store: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c24-the-incident-report-needs-no-config-and-no-store"
+control = "C24"
+statement = "The prompt hook answers /maisecrets:report incident before it loads the config or opens the store, so a damaged store cannot withhold the report about it."
+runner = ["tests/test_incident_hooks.py::ReportFromThePromptHookTests::test_the_report_needs_no_config_and_no_store"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    asked = incidents.recognize(payload.get(\"prompt\"), client_of(payload))\n"
+replace = "    load_config()\n    asked = incidents.recognize(payload.get(\"prompt\"), client_of(payload))\n"

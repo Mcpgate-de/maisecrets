@@ -1,6 +1,7 @@
 ---
-description: Report to the maisecrets maintainers - a false positive (last detection), a bug, or a feature request. Prints the issue text and a prefilled link; --create files it with the GitHub CLI. Carries no value.
-argument-hint: "[last | bug <text> | feature <text>] [--create]"
+description: Report to the maisecrets maintainers - a false positive (last detection), a bug, a feature request, or the incident record. Prints the issue text and a prefilled link; the person opens the link and decides in GitHub's form. Carries no value.
+argument-hint: "[last | bug <text> | feature <text> | incident [code/cause]]"
+disable-model-invocation: true
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" report *), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" report *)
 ---
 
@@ -28,8 +29,10 @@ Forms: `/maisecrets:report` lists the last detections; `/maisecrets:report last 
 prepares a false-positive issue from the last one and names the `/maisecrets:forget` command that
 deletes its stored value, so the text is not redacted or blocked again; `/maisecrets:report bug <what happened>` and
 `/maisecrets:report feature <what it should do>` prepare an issue without a detection.
-With `--create` among the arguments, the command files the issue at once through the GitHub CLI
-(`gh`, logged in). Use it only when the user wrote `--create`: it publishes the text.
+`/maisecrets:report incident` shows the incident record: maisecrets' own internal failures, as
+closed codes. The prompt hook answers it to the user before this command runs, and the model does
+not see it. maisecrets opens no browser and files nothing: the user opens the link and decides in
+GitHub's form.
 
 The link opens a GitHub issue prefilled with the plugin version and platform, plus the rule name
 and type for a false positive. It carries no value. Do not add detected text to the issue; the

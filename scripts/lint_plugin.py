@@ -80,7 +80,15 @@ def yaml_problems(block: str) -> list[str] | None:
         return [f"YAML: {str(exc).splitlines()[0]}"]
     if not isinstance(data, dict):
         return ["YAML: the frontmatter is not a mapping"]
-    return [f"YAML: {k} is read as {type(v).__name__}, not as text" for k, v in data.items() if not isinstance(v, str)]
+    # a key the client documents as a boolean must be one; every other key must be text
+    return [f"YAML: {k} is read as {type(v).__name__}, not as "
+            + ("a boolean" if k in BOOLEAN_KEYS else "text")
+            for k, v in data.items() if not isinstance(v, bool if k in BOOLEAN_KEYS else str)]
+
+
+# the frontmatter keys Claude Code reads as a boolean (disable-model-invocation: the model cannot run the command
+# itself; measured with claude -p 2.1.295 in the diagnostics review, round 5)
+BOOLEAN_KEYS = frozenset({"disable-model-invocation"})
 
 
 def check_frontmatter(root: Path = ROOT) -> tuple[list[str], bool]:

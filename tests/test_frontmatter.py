@@ -45,6 +45,15 @@ class PluginLintTests(unittest.TestCase):
                 'allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" report)\n')
         self.assertEqual(lint.line_problems(good), [])
 
+    def test_a_boolean_key_must_be_a_boolean_and_no_other_key_may_be_one(self):
+        try:
+            import yaml  # noqa: F401
+        except ImportError:
+            self.skipTest("PyYAML is not installed")
+        self.assertEqual(lint.yaml_problems("disable-model-invocation: true\n"), [])
+        self.assertNotEqual(lint.yaml_problems('disable-model-invocation: "true"\n'), [])
+        self.assertNotEqual(lint.yaml_problems("description: true\n"), [])
+
 
 class PluginLintCatchesBreaksTests(unittest.TestCase):
     """Each check on a copy of the plugin with one break in it."""
@@ -63,8 +72,8 @@ class PluginLintCatchesBreaksTests(unittest.TestCase):
         p.write_text(text.replace(old, new, 1), encoding="utf-8")
 
     def test_the_break_of_0_5_4_is_caught(self):
-        self.edit("commands/report.md", 'argument-hint: "[last | bug <text> | feature <text>] [--create]"',
-                  "argument-hint: [last | bug <text> | feature <text>] [--create]")
+        self.edit("commands/report.md", 'argument-hint: "[last | bug <text> | feature <text> | incident [code/cause]]"',
+                  "argument-hint: [last | bug <text> | feature <text> | incident [code/cause]]")
         errors, _ = lint.check_frontmatter(self.root)
         self.assertTrue(any("commands/report.md" in e and "argument-hint" in e for e in errors), errors)
 

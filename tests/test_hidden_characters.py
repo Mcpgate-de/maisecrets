@@ -74,7 +74,7 @@ class HiddenCharacterTests(unittest.TestCase):
 
     def report_last(self) -> str:
         buf = io.StringIO()
-        with redirect_stdout(buf), mock.patch("maisecrets.events.open_in_browser", return_value=False):
+        with redirect_stdout(buf):
             cli.cmd_report(["last"])
         return buf.getvalue()
 
@@ -427,7 +427,7 @@ class HiddenCharacterTests(unittest.TestCase):
     def test_report_n_refuses_an_event_that_only_removed_characters(self):
         self.post({"result": "a" + tags("hidden")})
         buf = io.StringIO()
-        with redirect_stdout(buf), mock.patch("maisecrets.events.open_in_browser", return_value=False):
+        with redirect_stdout(buf):
             cli.cmd_report(["1"])
         self.assertIn("no detection to report", buf.getvalue())
 
