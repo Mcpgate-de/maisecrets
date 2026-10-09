@@ -158,15 +158,9 @@ def load(path: Path | None = None, today: str | None = None) -> tuple[dict, bool
     """(groups by key, damaged). A missing file is empty and not damaged; a file that does not parse, is not a
     regular file or is too large is damaged. Groups outside the schema are dropped one by one."""
     path = path or record_path()
-    try:
-        st = os.lstat(path)
-    except FileNotFoundError:
+    if not os.path.lexists(path):
         return {}, False
-    except OSError:
-        return {}, True
-    if not stat.S_ISREG(st.st_mode):
-        return {}, True
-    data = _read_bounded(path)
+    data = _read_bounded(path)          # no link followed, no FIFO waited on, a regular file only
     if data is None:
         return {}, True
     try:
