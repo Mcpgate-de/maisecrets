@@ -47,9 +47,10 @@ Connections start only from a command you run:
   connections that the sandbox must refuse; it sends no data.
 - `/maisecrets:report` prints the issue text and a prefilled link to the configured
   `report_url`. It opens no browser and files nothing: the connection starts when you open
-  the link, and you decide in GitHub's form. The link carries the issue text, the plugin
-  version, your platform and the rule name of a detection or the closed codes of an internal
-  failure, never a value. Set `report_url` to your own tracker or to `null`.
+  the link, and you decide in GitHub's form. A prefilled GitHub link carries the issue text,
+  the plugin version, your platform and the rule name of a detection or the closed codes of an
+  internal failure, never a value. Another tracker set in `report_url` is printed as it is
+  configured, with no text in it. Set `report_url` to your own tracker or to `null`.
 - The Windows Credential Locker may roam through a Microsoft account on a machine that is
   not domain-joined. Choose the `encrypted-file` store there if that matters.
 

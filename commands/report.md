@@ -30,8 +30,8 @@ prepares a false-positive issue from the last one and names the `/maisecrets:for
 deletes its stored value, so the text is not redacted or blocked again; `/maisecrets:report bug <what happened>` and
 `/maisecrets:report feature <what it should do>` prepare an issue without a detection.
 `/maisecrets:report incident` shows the incident record: maisecrets' own internal failures, as
-closed codes. The prompt hook answers it to the user before this command runs, and the model does
-not see it. maisecrets opens no browser and files nothing: the user opens the link and decides in
+closed codes. In Claude Code the prompt hook answers it to the user before this command runs, and
+the model does not see it. In Codex, run the terminal form that a refusal names. maisecrets opens no browser and files nothing: the user opens the link and decides in
 GitHub's form.
 
 The link opens a GitHub issue prefilled with the plugin version and platform, plus the rule name

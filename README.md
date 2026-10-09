@@ -743,8 +743,9 @@ In Claude Code, type `/maisecrets:report incident`. The prompt hook shows the
 report to you only; the model sees neither the report nor the link, and it works
 also while the store is damaged. Open the link, check the text in GitHub's form
 and decide there. In Codex and in a terminal, run
-`<plugin folder>/hooks/run.sh report incident`; `report incident clear` deletes
-the record, and `wipe` deletes it too. A refusal caused by maisecrets' own
+`<plugin folder>/hooks/run.sh report incident` (`hooks\run.cmd` on Windows; a
+refusal names the full path); `report incident clear` deletes the record, and
+`wipe` deletes it too. A refusal caused by maisecrets' own
 failure names this command. The design is in `docs/DIAGNOSTICS.md` of the
 repository.
 

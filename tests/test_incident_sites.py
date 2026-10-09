@@ -91,20 +91,41 @@ class SiteRegistryTests(unittest.TestCase):
                                     self.assertIn(a.value, incidents.MARKER_CODES)
 
     def test_every_code_has_a_site(self):
-        texts = "\n".join(p.read_text(encoding="utf-8") for p in RUNTIME_FILES + SHELL_FILES
-                          if p.name != "incidents.py")
+        # sites are real calls, read from the AST, so a code left in a comment or a docstring counts for nothing
+        # (codex code review, round 1); the launchers are shell and cmd, read by their one marker line
+        from maisecrets import vault
+        found = set(vault._TIMEOUT_CODES.values()) | {vault.LockTimeout.incident_code}
+        templates = set()
+        for path in RUNTIME_FILES:
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if not (isinstance(node, ast.Call) and _name(node.func) in RECORDING_CALLS | {"partial"}):
+                    continue
+                args = list(node.args)
+                if _name(node.func) == "partial":
+                    if not args or _name(args[0]) not in RECORDING_CALLS:
+                        continue
+                    args = args[1:]
+                args = args[1:2] if _name(node.func) == "CodedError" else args[:1]
+                for a in args:
+                    if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                        found.add(a.value)
+                    elif isinstance(a, ast.JoinedStr):
+                        templates.add(ast.unparse(a))
         own = (ROOT / "maisecrets" / "incidents.py").read_text(encoding="utf-8")
+        tree = ast.parse(own)
+        code_of = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "code_of")
+        templates |= {ast.unparse(n) for n in ast.walk(code_of) if isinstance(n, ast.JoinedStr)}
+        for path in SHELL_FILES:
+            text = path.read_text(encoding="utf-8")
+            for m in re.finditer(r"^[^#\n]*?(?:mkdir|md) [^\n]*incident-marker\.([a-z.-]+)", text, re.M):
+                found.add(m.group(1).rstrip("."))
         for code in sorted(incidents.CODES):
             with self.subTest(code):
                 event = re.match(r"\Ahook\.(user-prompt|pre-tool|post-tool|post-tool-failure)\.(\w+)\Z", code)
                 if event:
-                    # one site per kind, for every event: the unexpected code in code_of, the watchdog's marker
-                    template = {"unexpected": ('f"hook.{event}.unexpected"', own),
-                                "watchdog": ('f"hook.{event}.watchdog"', texts)}[event.group(2)]
-                    self.assertIn(template[0], template[1])
-                    continue
-                self.assertRegex(texts, r"(?:[\"']|incident-marker\.)" + re.escape(code) + r"(?:[\"']|\b)")
-
+                    self.assertIn("f'hook.{event}." + event.group(2) + "'", templates)
+                else:
+                    self.assertIn(code, found)
 
 if __name__ == "__main__":
     unittest.main()

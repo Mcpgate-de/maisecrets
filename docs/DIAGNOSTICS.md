@@ -262,29 +262,36 @@ try:    won = answer(handler(payload), "ok")
 except: won = answer(fail_closed(...), ...)          # as today, incl. the config-error answer and the scrub
 finally:
     if won:
-        post_answer_thread(run_log, write queue, fold markers).start()
-        join the post-answer thread until the watchdog deadline
+        run_log; write queue, fold markers           # inline, still under the timer: if it hangs, the timer's
+                                                     # losing watchdog ends the process at the deadline
         timer.cancel(); timer.join(1)                # as today (hooks.py:3896-3901)
     else:
         discard the queue
         timer.join()                                 # the watchdog's thread ends the process
 
 answer(obj, how):                                    # as today, plus a bounded lock and a return value
+    serialize obj                                    # an object that cannot be written claims nothing
     if not lock.acquire(timeout=1): return False     # a handler stuck in its own write cannot hold the watchdog
     if answered: release; return False
-    answered = True; write and flush JSON; heartbeat(done)   # the guard needs the done heartbeat, as today
+    answered = True; write and flush JSON
+    if how != "watchdog": heartbeat(done)            # the guard needs it; the watchdog writes it in its thread
     release; return True
 
 on_timeout():
     won = answer(fail_closed("took longer than …"), "watchdog")
-    if won: one daemon thread: scrub_failed_prompt, then the marker; join it for at most 1.5 s
+    if won: one daemon thread: heartbeat(done), scrub_failed_prompt, the marker; join it for at most 1.5 s
     os._exit(0)                                      # always: a hook that answered must still end in time
 ```
 
 - The answers stay the same as today, apart from the fixed line of section 5. "The same answers" in the tests
   means: identical with the recorder on, off, raising, slow and holding its lock.
-- The done heartbeat stays inside `answer()` on both paths, as today: the guard waits for it, and without it the
-  guard adds its own refusal after 13 s (Opus round 6). It is no diagnostics write.
+- The done heartbeat is written on both paths, as today: the guard waits for it, and without it the guard adds its
+  own refusal after 13 s (Opus round 6). The handler writes it inside `answer()`; the winning watchdog writes it
+  in its bounded thread, so a stalled home cannot hold the process past the client's timeout (code review round 1,
+  measured with FIFOs: alive at 25 s before, ended at 8.6 s after).
+- The work after a won answer runs inline, not in a thread of its own: the timer still runs, and a losing watchdog
+  ends the process at the deadline (code review round 1: the design named a thread; the inline form is as safe and
+  simpler).
 - The process ends at the latest about 1.5 s after the watchdog deadline (7 s, 16 s after a tool), below the
   client's timeout (10 s, 20 s). When the watchdog cannot take the answer lock within 1 s, the handler is in the
   middle of its own answer, and the watchdog still exits.
