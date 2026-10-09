@@ -177,8 +177,17 @@ def _lock_for(path: Path) -> "_Lock":
     return _LOCKS[key]
 
 
+class CodedError(RuntimeError):
+    """A store failure with its incident code (maisecrets/incidents.py). The message stays for the CLI; the hook's
+    record takes only the code, the cause and the exit code (docs/DIAGNOSTICS.md, D2)."""
+
+    def __init__(self, message: str, code: str, cause: str = "other", rc: int | None = None) -> None:
+        super().__init__(message)
+        self.incident_code, self.incident_cause, self.incident_rc = code, cause, rc
+
+
 class LockTimeout(RuntimeError):
-    pass
+    incident_code, incident_cause, incident_rc = "store.lock", "lock", None
 
 
 class _Lock:
@@ -548,7 +557,7 @@ class JsonFileBackend:
             return {}
         except ValueError:
             if for_write:
-                raise RuntimeError("vault store file unreadable; not overwritten")
+                raise CodedError("vault store file unreadable; not overwritten", "store.file-read", "parse")
             return {}
 
     def _save(self, data: dict) -> None:
@@ -588,6 +597,10 @@ def parse_keychain_dump(text: str, service: str) -> list[str]:
     return out
 
 
+_TIMEOUT_CODES = {"keychain": "store.timeout-keychain", "openssl": "store.timeout-openssl",
+                  "Credential Locker": "store.timeout-locker"}
+
+
 def _run_store(what: str, args: list[str], **kw) -> subprocess.CompletedProcess:
     """subprocess.run for a store call. A call that hits its timeout raised TimeoutExpired, which
     passed every `except RuntimeError` of the sweep, forget and wipe, and whose text lists the
@@ -595,7 +608,8 @@ def _run_store(what: str, args: list[str], **kw) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(args, **kw)
     except subprocess.TimeoutExpired:
-        raise RuntimeError(f"{what} call timed out") from None
+        raise CodedError(f"{what} call timed out", _TIMEOUT_CODES.get(what, "store.timeout-keychain"),
+                         "timeout") from None
 
 
 class KeychainBackend:
@@ -646,9 +660,9 @@ class KeychainBackend:
                                 "-w", stored] + (["-j", comment] if comment else []),
                                capture_output=True, timeout=5)
         if r.returncode != 0:
-            raise RuntimeError(f"keychain add failed (rc {r.returncode})")
+            raise CodedError(f"keychain add failed (rc {r.returncode})", "store.keychain-add", "rc", r.returncode)
         if self.get(key) != value:
-            raise RuntimeError("keychain add failed (read-back differs)")
+            raise CodedError("keychain add failed (read-back differs)", "store.keychain-readback", "shape")
 
     def get(self, key: str) -> str | None:
         r = _run_store(
@@ -730,7 +744,8 @@ class EncryptedFileBackend:
         r = _run_store("openssl", ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "100000", "-salt",
                             "-pass", f"file:{self.key_file}", *args], input=data, capture_output=True, timeout=5)
         if r.returncode != 0:
-            raise RuntimeError("openssl failed: " + r.stderr.decode(errors="ignore")[:200])
+            raise CodedError("openssl failed: " + r.stderr.decode(errors="ignore")[:200], "store.openssl", "rc",
+                             r.returncode)
         return r.stdout
 
     def _tag(self, blob: bytes) -> str:
@@ -746,7 +761,7 @@ class EncryptedFileBackend:
             # a damaged vault file must not be replaced by one with a single new entry: every
             # other value would be lost without a message (review, 2026-09-26)
             if for_write:
-                raise RuntimeError("vault store file unreadable; not overwritten")
+                raise CodedError("vault store file unreadable; not overwritten", "store.file-read", "parse")
             return {}
 
     def _save(self, data: dict) -> None:
@@ -820,7 +835,7 @@ class WindowsVaultBackend:
                      f"$v.Add((New-Object Windows.Security.Credentials.PasswordCredential('{SERVICE}', '{key}', $p)))",
                      stdin=b64)
         if r.returncode != 0:
-            raise RuntimeError(f"PasswordVault add failed (rc {r.returncode})")
+            raise CodedError(f"PasswordVault add failed (rc {r.returncode})", "store.locker-add", "rc", r.returncode)
 
     def get(self, key: str) -> str | None:
         import base64
@@ -946,10 +961,11 @@ class Vault:
             # next put would overwrite SECRET_c1 in the store. The file stays in place, so every
             # later call raises too (moving it away made the guard last one call; review,
             # 2026-09-26). `maisecrets repair` rebuilds the counters from the store.
-            raise RuntimeError(f"vault index unreadable ({INDEX.name}); nothing is stored or resolved until "
-                               f"`maisecrets repair` ran or the file was fixed by hand") from exc
+            raise CodedError(f"vault index unreadable ({INDEX.name}); nothing is stored or resolved until "
+                             f"`maisecrets repair` ran or the file was fixed by hand",
+                             "store.index-read", "parse") from exc
         if not isinstance(data, dict) or "entries" not in data:
-            raise RuntimeError("vault index has an unexpected shape")
+            raise CodedError("vault index has an unexpected shape", "store.index-shape", "shape")
         return data
 
     def _save_index(self) -> None:
@@ -1449,6 +1465,8 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
         from . import destinations
         if not destinations.wipe():        # under its lock: a writer holding it would write the record back
             problems.append("destinations.json not deleted")
+        from . import incidents
+        incidents.clear(HOME)              # the incident record, its aside, lock and temp files, the markers
         for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced"):
             try:
                 (HOME / name).unlink()

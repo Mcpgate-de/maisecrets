@@ -222,7 +222,8 @@ def queue(code: str, cause: str, cls: str, event: str, tool_class: str = "-", cl
     try:
         item = {"code": code, "cause": cause, "class": cls, "event": event, "tool_class": tool_class,
                 "client": client}
-        if number_kind is not None:
+        low, high = NUMBER_RANGES.get(number_kind, (0, -1))
+        if _is_int(number) and low <= number <= high:     # a number out of its range goes, the occurrence stays
             item.update(number_kind=number_kind, number=number)
         _QUEUE.append(item)
     except Exception:  # noqa: BLE001 - recording never changes an answer
@@ -231,6 +232,18 @@ def queue(code: str, cause: str, cls: str, event: str, tool_class: str = "-", cl
 
 def discard() -> None:
     _QUEUE.clear()
+
+
+def code_of(exc: BaseException, event: str) -> tuple[str, str, str | None, int | None]:
+    """(code, cause, number kind, number) for an exception that ended a hook: the code the raise site gave it
+    (vault.CodedError, LockTimeout), else the hook's own unexpected code. The message is never read."""
+    code = getattr(exc, "incident_code", None)
+    if code in CODES:
+        cause = getattr(exc, "incident_cause", "other")
+        rc = getattr(exc, "incident_rc", None)
+        return code, cause if cause in CAUSES else "other", ("exit" if _is_int(rc) else None), rc
+    cause, kind, number = cause_of(exc)
+    return f"hook.{event}.unexpected", cause, kind, number
 
 
 def cause_of(exc: BaseException) -> tuple[str, str | None, int | None]:
@@ -302,6 +315,8 @@ def flush(today: str | None = None) -> None:
         home = _home()
         if not home.is_dir() or home.is_symlink():
             return
+        if not items and not _marker_names(home):
+            return                                   # nothing to write: no file is touched
         with _OneTry(home / "incidents.lock") as locked:
             if not locked:
                 return

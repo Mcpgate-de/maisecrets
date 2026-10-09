@@ -3649,6 +3649,24 @@ HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post
             "post-tool-failure": _post_tool_failure_observed}
 
 
+_EVENT_NAMES = {"user-prompt": "UserPromptSubmit", "pre-tool": "PreToolUse", "post-tool": "PostToolUse",
+                "post-tool-failure": "PostToolUseFailure"}
+
+
+def _tool_class(payload: dict) -> str:
+    """The closed tool class of a payload for an incident record; never the tool's own name."""
+    name = payload.get("tool_name")
+    if not isinstance(name, str):
+        return "-"
+    if name in ("Bash", "PowerShell"):
+        return name
+    if name.startswith("mcp__"):
+        return "MCP"
+    if name in ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch"):
+        return "File"
+    return "Other"
+
+
 # under the timeouts hooks/hooks.json gives each event (10 s prompt and pre-tool, 20 s post-tool);
 # a client timeout fails OPEN, so the answer must come first
 WATCHDOG_SECONDS = {"user-prompt": 7.0, "pre-tool": 7.0, "post-tool": 16.0, "post-tool-failure": 16.0}
@@ -3850,50 +3868,82 @@ def main(argv: list[str]) -> int:
         # an answer in JSON for every event: exit 2 is ignored after a tool, and Codex runs the tool on
         # exit 2 before one (Codex review, 2026-09-28)
         _out(_fail_closed(event, {}, "got a payload that is not JSON."))
+        from . import incidents
+        incidents.write_marker_bounded("hook.payload")       # it answers before the timer: a marker, bounded
         return 0
-    _heartbeat(event, payload)
     import threading
+    from . import incidents
     started = time.time()
     lock = threading.Lock()
     answered = {"v": False}
 
-    def answer(obj: dict, how: str) -> None:
-        # exactly one JSON object leaves this process: the watchdog and the handler both call
-        # here, and two concatenated objects fail open (review, 2026-09-26)
-        with lock:
+    def answer(obj: dict, how: str) -> bool:
+        """Write the one answer of this process; True when this call wrote it. Exactly one JSON object leaves the
+        process: the watchdog and the handler both call here, and two concatenated objects fail open (review,
+        2026-09-26). The lock has a limit, so a handler stuck in its own write cannot hold the watchdog
+        (docs/DIAGNOSTICS.md section 10)."""
+        if not lock.acquire(timeout=1):
+            return False
+        try:
             if answered["v"]:
-                return
+                return False
             answered["v"] = True
             _out(obj)
-            _heartbeat(event, payload, done=True)
+            _heartbeat(event, payload, done=True)     # the guard waits for it, on both paths
+        finally:
+            lock.release()
         ms = int((time.time() - started) * 1000)
         decision = _decision_of(event, obj)
         _debug(f"{event}: {how} {client_of(payload)} {ms}ms {decision}")
-        _run_log(event, payload, how, decision, ms)
+        if how != "watchdog":                        # the watchdog does no file work before its exit
+            _run_log(event, payload, how, decision, ms)
+        return True
 
     def on_timeout() -> None:
-        answer(_fail_closed(event, payload, f"took longer than {WATCHDOG_SECONDS[event]:.0f}s."), "watchdog")
-        _scrub_failed_prompt(event, payload)
+        if answer(_fail_closed(event, payload, f"took longer than {WATCHDOG_SECONDS[event]:.0f}s."), "watchdog"):
+            def last() -> None:
+                _scrub_failed_prompt(event, payload)
+                incidents.write_marker(f"hook.{event}.watchdog")
+            t = threading.Thread(target=last, daemon=True)
+            t.start()
+            t.join(1.5)
+        # always, also after a lost race: a hook that answered must still end before the client's timeout, which
+        # lets the action through (measured, review round 5)
         os._exit(0)
     watchdog = threading.Timer(WATCHDOG_SECONDS[event], on_timeout)
     watchdog.daemon = True
-    watchdog.start()
+    watchdog.start()                                 # first, so no file work runs unguarded
+    _heartbeat(event, payload)
+    won = False
+    tool_class = _tool_class(payload)
+    client = client_of(payload)
     try:
-        answer(HANDLERS[event](payload), "ok")
+        won = answer(HANDLERS[event](payload), "ok")
         return 0
     except ConfigError as exc:
         # the policy file is wrong: fail closed, and say which key (its message never carries
         # a value; a bare type name sent the user to "a locked store"; review, 2026-09-26)
-        answer(_fail_closed(event, payload, f"configuration error: {exc}. Fix the file named there.", hint=False),
-               "config-error")
-        _scrub_failed_prompt(event, payload)
+        incidents.queue("config.policy-invalid", "parse", "fail-closed", _EVENT_NAMES[event], tool_class, client)
+        won = answer(_fail_closed(event, payload, f"configuration error: {exc}. Fix the file named there.",
+                                  hint=False), "config-error")
+        if won:
+            _scrub_failed_prompt(event, payload)
         return 0
     except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         # the type only: an exception message may carry a value (subprocess errors list the argv)
-        answer(_failure(event, payload, exc), _how_failed(exc))
-        _scrub_failed_prompt(event, payload)
+        code, cause, kind, number = incidents.code_of(exc, event)
+        incidents.queue(code, cause, "fail-closed", _EVENT_NAMES[event], tool_class, client, kind, number)
+        won = answer(_failure(event, payload, exc), _how_failed(exc))
+        if won:
+            _scrub_failed_prompt(event, payload)
         return 0
     finally:
+        if won:
+            incidents.flush()                        # after the answer, still under the watchdog
+        else:
+            incidents.discard()
+            if answered["v"]:
+                watchdog.join()                      # the watchdog answered: its thread ends the process
         # cancel, then wait: a daemon timer thread that still runs while the interpreter shuts down
         # can crash the process, and one hook ended with signal 11 after its answer on a macOS
         # runner (2026-09-27)
