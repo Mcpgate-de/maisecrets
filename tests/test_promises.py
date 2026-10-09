@@ -372,6 +372,43 @@ class RunCmdFindsAnInstallOffThePathTests(unittest.TestCase):
         self.assertNotIn('"prompt"', record)
 
 
+class RunCmdMarkerTests(unittest.TestCase):
+    """run.cmd without Python leaves its incident marker from a detached child (docs/DIAGNOSTICS.md, section 3): the
+    hook answers and ends at once, and only the child touches the home (codex code review, round 2)."""
+
+    def setUp(self):
+        if os.name != "nt":
+            self.skipTest("cmd.exe runs on Windows only; the GitHub Windows runner runs it")
+
+    def test_without_python_the_marker_comes_from_a_detached_child(self):
+        base = Path(tempfile.mkdtemp(prefix="maisecrets-runcmd-mark-"))
+        self.addCleanup(shutil.rmtree, base, True)
+        (base / "hooks").mkdir()
+        shutil.copyfile(RUN_CMD, base / "hooks" / "run.cmd")
+        (base / "hooks" / "dispatch.py").write_text("raise SystemExit('dispatch.py ran')\n", encoding="utf-8")
+        home, empty = base / "home", base / "empty"
+        home.mkdir()
+        empty.mkdir()
+        system32 = os.path.join(os.environ["SystemRoot"], "System32")
+        # no Python anywhere run.cmd looks: SystemRoot (the py launcher) and the install folders point to an empty one
+        env = {"SystemRoot": str(empty), "PATH": system32, "COMSPEC": os.path.join(system32, "cmd.exe"),
+               "USERPROFILE": str(base), "LOCALAPPDATA": str(empty), "ProgramFiles": str(empty),
+               "MAISECRETS_HOME": str(home)}
+        started = time.monotonic()
+        r = subprocess.run([os.path.join(system32, "cmd.exe"), "/C", str(base / "hooks" / "run.cmd"), "post-tool"],
+                           input="{}", capture_output=True, text=True, env=env, timeout=60)
+        took = time.monotonic() - started
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("withheld", r.stdout)
+        self.assertLess(took, 20)
+        marker = home / "incident-marker.launcher.no-python"
+        for _ in range(100):
+            if marker.is_dir():
+                break
+            time.sleep(0.1)
+        self.assertTrue(marker.is_dir(), "the detached child made the marker")
+
+
 class RunCmdClearedEnvironmentTests(unittest.TestCase):
     """Codex clears the environment of a hook and replays a snapshot (codex-rs command_runner.rs). With no
     variables at all run.cmd found no Python (exit 2, a failed hook), and with SystemRoot and PATH only, Python
