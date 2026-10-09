@@ -281,6 +281,20 @@ class DecisionTests(_Env):
                 self.assertIn(f"\n\n    claude --resume {payload['session_id']}\n\n", _reason(out))
                 self.assertGreaterEqual(time.monotonic() - started, 0.3, "it waits before it refuses")
 
+    def test_a_refusal_leaves_a_marker_for_the_incident_report_and_a_pass_leaves_none(self):
+        import io
+        self.installed("always")
+        marker = Path(HOME, "incident-marker.guard.fired")
+        with mock.patch.dict(os.environ, {"MAISECRETS_GUARD_WAIT": "0.1"}), \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps(PAYLOADS["UserPromptSubmit"]))), \
+                mock.patch.object(sys, "stdout", io.StringIO()):
+            guard.main()
+        self.assertTrue(marker.is_dir())
+        marker.rmdir()
+        with mock.patch.object(sys, "stdin", io.StringIO("{}")), mock.patch.object(sys, "stdout", io.StringIO()):
+            guard.main()
+        self.assertFalse(marker.exists(), "no refusal, no marker")
+
     def test_the_resume_command_goes_to_the_clipboard_once_per_session(self):
         self.installed("always")
         clip = Path(tempfile.mkdtemp()) / "clip.txt"
@@ -392,6 +406,35 @@ class HeartbeatTests(_Env):
         hooks._heartbeat("pre-tool", codex)
         self.assertFalse(Path(HOME, "alive").exists() and any(Path(HOME, "alive").iterdir()),
                          "Codex: no heartbeat")
+
+    def test_a_home_it_cannot_stat_does_not_raise(self):
+        # Path.exists raises PermissionError before Python 3.12 when the home cannot be searched; the call
+        # stood before the hook's try, so the process exited 1 without an answer, and exit 1 lets the prompt
+        # through (Opus review, 2026-10-09)
+        with mock.patch("pathlib.Path.exists", side_effect=PermissionError(13, "denied")):
+            hooks._heartbeat("user-prompt", PAYLOADS["UserPromptSubmit"])
+            hooks._heartbeat("pre-tool", PAYLOADS["PreToolUse"], done=True)
+
+    @unittest.skipIf(os.name == "nt" or os.geteuid() == 0, "root and Windows ignore the mode bits")
+    def test_a_prompt_with_a_token_is_blocked_when_the_home_cannot_be_searched(self):
+        import random
+        import string
+        import shutil
+        base = Path(tempfile.mkdtemp(prefix="maisecrets-nosearch-"))
+        home = base / "home"
+        home.mkdir()
+        (home / "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
+        os.chmod(home, 0o600)
+        self.addCleanup(lambda: (os.chmod(home, 0o700), shutil.rmtree(base, ignore_errors=True)))
+        token = "glpat-" + "".join(random.choice(string.ascii_letters + string.digits) for _ in range(20))
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX_"))}
+        env.update(MAISECRETS_HOME=str(home), PYTHONUTF8="1", MS_TEST_CLIP=str(base / "clip"))
+        payload = dict(PAYLOADS["UserPromptSubmit"], prompt=f"use {token}", cwd=str(base))
+        r = subprocess.run([sys.executable, str(DISPATCH), "user-prompt"], input=json.dumps(payload),
+                           capture_output=True, text=True, env=env, timeout=60, cwd=str(base))
+        self.assertEqual(r.returncode, 0, r.stderr.replace(token, "<token>"))
+        self.assertEqual(json.loads(r.stdout).get("decision"), "block")
+        self.assertNotIn(token, r.stdout)
 
     def test_an_old_heartbeat_is_swept(self):
         self.installed("synced")

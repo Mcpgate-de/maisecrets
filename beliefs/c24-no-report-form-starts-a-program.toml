@@ -1,0 +1,10 @@
+# c24-no-report-form-starts-a-program: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c24-no-report-form-starts-a-program"
+control = "C24"
+statement = "No report form opens a browser or starts a program: the person opens the printed link and files the issue in GitHub's own form (D1)."
+runner = ["tests/test_cli_matrix.py::EventsTests::test_no_report_form_opens_a_browser_or_starts_a_program"]
+
+[proof]
+file = "maisecrets/cli.py"
+find = "    url = events.link(title, body, label)\n"
+replace = "    url = events.link(title, body, label)\n    __import__(\"subprocess\").run([\"true\"])\n"

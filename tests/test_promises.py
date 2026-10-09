@@ -89,7 +89,8 @@ class LauncherFailsClosedTests(unittest.TestCase):
         # only the tools run.sh needs besides a Python; no python3, python or py on this PATH
         self.tools = self.sb.root / "tools"
         self.tools.mkdir()
-        for tool in ("dirname",):
+        # mkdir: the incident marker after the answer (docs/DIAGNOSTICS.md, section 3)
+        for tool in ("dirname", "mkdir"):
             os.symlink(shutil.which(tool), self.tools / tool)
 
     def launch(self, event: str) -> subprocess.CompletedProcess:
@@ -123,6 +124,28 @@ class LauncherFailsClosedTests(unittest.TestCase):
 
     def test_no_python_on_the_path_blocks_every_event(self):
         self.check_all_events("none")
+
+    def test_no_python_leaves_one_marker_for_the_incident_report(self):
+        # docs/DIAGNOSTICS.md, section 3: the launcher cannot write the record, so it leaves a marker after its answer
+        self.launch("user-prompt")
+        self.launch("pre-tool")
+        self.assertEqual(sorted(p.name for p in self.sb.home.glob("incident-marker.*")),
+                         ["incident-marker.launcher.no-python"], "one marker; a second failure coalesces")
+        self.assertTrue((self.sb.home / "incident-marker.launcher.no-python").is_dir())
+
+    def test_no_marker_into_a_symlinked_home(self):
+        if os.name == "nt":
+            self.skipTest("symlinks need privileges on Windows")
+        target = Path(tempfile.mkdtemp(prefix="maisecrets-target-"))
+        self.addCleanup(shutil.rmtree, target, True)
+        link = self.sb.root / "linked-home"
+        link.symlink_to(target)
+        env = self.sb.env()
+        env["PATH"] = os.pathsep.join((str(self.sb.bin), str(self.tools)))
+        env["MAISECRETS_HOME"] = str(link)
+        subprocess.run([BASH, str(self.hooks / "run.sh"), "user-prompt"], input='{"prompt": "x"}',
+                       capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(os.listdir(target), [])
 
     def test_a_python_older_than_3_11_blocks_every_event_and_is_named(self):
         fake = self.tools / "python3"
@@ -349,6 +372,69 @@ class RunCmdFindsAnInstallOffThePathTests(unittest.TestCase):
         self.assertNotIn('"prompt"', record)
 
 
+class RunCmdMarkerTests(unittest.TestCase):
+    """run.cmd without Python leaves its incident marker in its own hooks folder, where last-start.txt is written
+    (docs/DIAGNOSTICS.md, section 3): no detached child, which would inherit the hook's pipe handles, and the
+    configured home is not touched (codex code review, round 3)."""
+
+    def setUp(self):
+        if os.name != "nt":
+            self.skipTest("cmd.exe runs on Windows only; the GitHub Windows runner runs it")
+
+    def test_without_python_the_marker_is_in_the_hooks_folder_and_the_home_is_untouched(self):
+        base = Path(tempfile.mkdtemp(prefix="maisecrets-runcmd-mark-"))
+        self.addCleanup(shutil.rmtree, base, True)
+        (base / "hooks").mkdir()
+        shutil.copyfile(RUN_CMD, base / "hooks" / "run.cmd")
+        (base / "hooks" / "dispatch.py").write_text("raise SystemExit('dispatch.py ran')\n", encoding="utf-8")
+        home, empty = base / "home", base / "empty"
+        home.mkdir()
+        empty.mkdir()
+        system32 = os.path.join(os.environ["SystemRoot"], "System32")
+        # no Python anywhere run.cmd looks: SystemRoot (the py launcher) and the install folders point to an empty one
+        env = {"SystemRoot": str(empty), "PATH": system32, "COMSPEC": os.path.join(system32, "cmd.exe"),
+               "USERPROFILE": str(base), "LOCALAPPDATA": str(empty), "ProgramFiles": str(empty),
+               "MAISECRETS_HOME": str(home)}
+        started = time.monotonic()
+        r = subprocess.run([os.path.join(system32, "cmd.exe"), "/C", str(base / "hooks" / "run.cmd"), "post-tool"],
+                           input="{}", capture_output=True, text=True, env=env, timeout=60)
+        took = time.monotonic() - started
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("withheld", r.stdout)
+        self.assertLess(took, 20)
+        self.assertTrue((base / "hooks" / "incident-marker.launcher.no-python").is_dir())
+        self.assertEqual(os.listdir(home), [], "the configured home is not touched")
+
+    def test_without_python_each_event_refuses_in_the_form_of_each_client(self):
+        # the real cmd.exe: JSON and exit 0 for every hook event; post-tool in the shape of each client
+        base = Path(tempfile.mkdtemp(prefix="maisecrets-runcmd-json-"))
+        self.addCleanup(shutil.rmtree, base, True)
+        (base / "hooks").mkdir()
+        shutil.copyfile(RUN_CMD, base / "hooks" / "run.cmd")
+        (base / "hooks" / "dispatch.py").write_text("raise SystemExit('dispatch.py ran')\n", encoding="utf-8")
+        empty = base / "empty"
+        empty.mkdir()
+        system32 = os.path.join(os.environ["SystemRoot"], "System32")
+        env = {"SystemRoot": str(empty), "PATH": system32, "COMSPEC": os.path.join(system32, "cmd.exe"),
+               "USERPROFILE": str(base), "LOCALAPPDATA": str(empty), "ProgramFiles": str(empty),
+               "MAISECRETS_HOME": str(base / "home")}
+        claude = '{"prompt": "x", "session_id": "S", "prompt_id": "p"}'
+        codex = '{"prompt": "x", "session_id": "S", "turn_id": "t", "model": "m"}'
+        for event in ("user-prompt", "pre-tool", "post-tool", "post-tool-failure", "session-start"):
+            for name, payload in (("claude", claude), ("codex", codex)):
+                with self.subTest(event=event, client=name):
+                    r = subprocess.run([os.path.join(system32, "cmd.exe"), "/C", str(base / "hooks" / "run.cmd"),
+                                        event], input=payload, capture_output=True, text=True, env=env, timeout=60)
+                    self.assertNotIn("dispatch.py ran", r.stdout + r.stderr)
+                    self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                    out = json.loads(r.stdout)
+                    if event == "post-tool" and name == "codex":
+                        self.assertEqual(out.get("decision"), "block", out)
+                        self.assertNotIn("hookSpecificOutput", out)
+                    else:
+                        assert_refuses(self, event, r)
+
+
 class RunCmdClearedEnvironmentTests(unittest.TestCase):
     """Codex clears the environment of a hook and replays a snapshot (codex-rs command_runner.rs). With no
     variables at all run.cmd found no Python (exit 2, a failed hook), and with SystemRoot and PATH only, Python
@@ -411,11 +497,25 @@ class BrokenImportFailsClosedTests(unittest.TestCase):
                 self.assertNotIn("half-synced", r.stdout + r.stderr, "the type only, never the message")
                 assert_refuses(self, event, r)
 
+    def test_a_broken_package_leaves_a_marker_for_the_incident_report(self):
+        root = Path(tempfile.mkdtemp(prefix="maisecrets-broken-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        shutil.copytree(ROOT / "hooks", root / "hooks")
+        (root / "maisecrets").mkdir()
+        (root / "maisecrets" / "__init__.py").write_text("raise ImportError('half-synced')\n", encoding="utf-8")
+        home = root / "home"
+        home.mkdir()
+        env = dict(os.environ, MAISECRETS_HOME=str(home))
+        r = subprocess.run([sys.executable, str(root / "hooks" / "dispatch.py"), "user-prompt"],
+                           input='{"prompt": "x"}', capture_output=True, text=True, timeout=30, env=env)
+        assert_refuses(self, "user-prompt", r)
+        self.assertTrue((home / "incident-marker.launcher.import").is_dir())
+
 
 class RunCmdFailsClosedTests(unittest.TestCase):
     """run.cmd cannot run on this OS; its logic is read from the file: each interpreter runs
-    dispatch.py only after it passed the 3.9 probe, post-tool withholds with exit 0, and every
-    other event ends in exit /b 2."""
+    dispatch.py only after it passed the 3.9 probe, and without Python every hook event refuses in
+    JSON with exit 0; only a CLI use of the launcher ends in exit /b 2."""
 
     def setUp(self):
         self.lines = [ln.strip() for ln in RUN_CMD.read_text(encoding="utf-8").splitlines()]
@@ -430,23 +530,50 @@ class RunCmdFailsClosedTests(unittest.TestCase):
                              f'{interp} -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" >nul 2>&1')
             self.assertEqual(self.lines[i + 1], "goto :done")
 
-    def test_without_python_post_tool_withholds_and_everything_else_exits_2(self):
-        start = self.lines.index('if "%~1"=="post-tool" (')
-        branch = self.lines[start:self.lines.index(")", start)]
-        (echo,) = [ln for ln in branch if ln.startswith("echo ")]
-        out = json.loads(echo[len("echo "):])
-        self.assertEqual(out["decision"], "block")
-        self.assertIn("Tool output withheld", out["hookSpecificOutput"]["updatedToolOutput"])
-        self.assertEqual(branch[-1], "exit /b 0")
-        tail = self.lines[self.lines.index(")", start) + 1:]
-        self.assertTrue(tail[0].startswith("echo maisecrets needs Python 3.9") and tail[0].endswith("1>&2"), tail[0])
-        self.assertEqual(tail[1:], ["exit /b 2", ":done", "exit /b %errorlevel%"])
-        # a failed call's output cannot be withheld: that branch answers {} and exits 0
-        start = self.lines.index('if "%~1"=="post-tool-failure" (')
-        self.assertIn("systemMessage", json.loads(self.lines[start + 1][len("echo "):]))
-        self.assertEqual(self.lines[start + 2], "exit /b 0")
-        exits = [ln for ln in self.lines if ln.startswith("exit ")]
-        self.assertEqual(exits, ["exit /b 0", "exit /b 0", "exit /b 2", "exit /b %errorlevel%"], "no other way out")
+    def branch(self, label: str) -> list[str]:
+        start = self.lines.index(label)
+        end = next(i for i in range(start + 1, len(self.lines)) if self.lines[i].startswith(":"))
+        return [ln for ln in self.lines[start + 1:end] if not ln.startswith("rem")]
+
+    def test_without_python_every_hook_event_answers_json_and_exit_0(self):
+        # exit 2 is a block in Claude Code only; Codex runs the tool on it (codex code review, 2026-10-09)
+        events = {"post-tool-failure": ":np_post_tool_failure", "post-tool": ":np_post_tool",
+                  "pre-tool": ":np_pre_tool", "user-prompt": ":np_user_prompt", "session-start": ":np_session_start"}
+        for event, label in events.items():
+            with self.subTest(event):
+                self.assertIn(f'if "%~1"=="{event}" goto {label}', self.lines)
+        claude = []
+        for label in (":np_post_tool_failure", ":np_post_tool", ":np_pre_tool", ":np_user_prompt",
+                      ":np_session_start", ":np_post_tool_codex"):
+            with self.subTest(label):
+                body = self.branch(label)
+                (echo,) = [ln for ln in body if ln.startswith("echo ")]
+                self.assertEqual(body[-2:], ["call :mark", "exit /b 0"])
+                claude.append(json.loads(echo[len("echo "):]))
+        failure, post, pre, prompt, session, post_codex = claude
+        self.assertIn("systemMessage", failure)
+        self.assertEqual(set(post), {"hookSpecificOutput"}, "Claude Code's shape only")
+        self.assertIn("withheld", post["hookSpecificOutput"]["updatedToolOutput"])
+        self.assertEqual(post_codex, {"decision": "block", "reason": post_codex["reason"]}, "Codex's shape only")
+        self.assertIn("withheld", post_codex["reason"])
+        self.assertEqual(pre["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(prompt["decision"], "block")
+        self.assertIn("systemMessage", session)
+        # the Codex branch is taken on the same test as run.sh: "turn_id" in the payload
+        self.assertIn('findstr /l /c:"\\"turn_id\\"" >nul 2>&1', self.lines)
+        # only a CLI use of the launcher still ends in exit 2, after its reason on stderr
+        main = self.lines[:self.lines.index(":mark")]
+        cli = main[main.index('if "%~1"=="session-start" goto :np_session_start') + 1:]
+        cli = [ln for ln in cli if not ln.startswith("rem")]
+        self.assertTrue(cli[0].startswith("echo maisecrets needs Python 3.9") and cli[0].endswith("1>&2"), cli[0])
+        self.assertEqual(cli[1:3], ["call :mark", "exit /b 2"])
+        exits = [ln for ln in main if ln.startswith("exit ")]
+        self.assertEqual(sorted(set(exits)), ["exit /b %errorlevel%", "exit /b 0", "exit /b 2"], "no other way out")
+        self.assertEqual(exits.count("exit /b 2"), 1)
+        # the marker subroutine (docs/DIAGNOSTICS.md, section 3) runs after each answer and only returns
+        mark = self.lines[self.lines.index(":mark"):]
+        self.assertTrue(all(ln == "exit /b 0" for ln in mark if ln.startswith("exit ")), mark)
+        self.assertEqual(sum(1 for ln in main if ln == "call :mark"), 7, "every branch leaves the marker")
 
 
 def _forms(value: str) -> list[str]:

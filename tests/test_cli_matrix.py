@@ -505,7 +505,8 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
         n = len(before.store or [])
         expect(r.stdout == f"wiped: {n} stored value(s), index, logs. The config file stays.\n", "wipe count")
         expect(not after.store and after.pending == [] and after.index is None, "wipe left a value or the index")
-        kept = {".lock", ".destinations.lock", "config.json", "pending", "vault.json"}   # locks stay with their files
+        # locks stay with their files
+        kept = {".lock", ".destinations.lock", ".incidents.lock", "config.json", "pending", "vault.json"}
         expect(set(after.files) <= kept, f"wipe left {after.files}")
         return p
     if command == "repair":
@@ -778,13 +779,15 @@ class StateMatrixTests(unittest.TestCase):
         self.assertTrue((sb.home / "config.json").exists())
         self.assertEqual(sb.run("get", "SECRET_c1").returncode, 1)
 
-    def test_report_opens_a_link_that_names_the_rule_and_carries_no_value(self):
+    def test_report_prints_a_link_that_names_the_rule_carries_no_value_and_opens_nothing(self):
         sb, r = self._run("live", "report", "last", "a build id")
-        self.assertIn("opened in the browser: https://github.com/Mcpgate-de/maisecrets/issues/new?", r.stdout)
-        opened = sb.opened.read_text(encoding="utf-8")
-        self.assertIn("ds-keyword-colon", opened)
-        self.assertIn("a+build+id", opened)
-        self.assertFalse(any(v in opened for v in sb.values))
+        link = [x for x in r.stdout.splitlines() if x.startswith("prefilled link: ")]
+        self.assertEqual(len(link), 1, r.stdout)
+        self.assertIn("https://github.com/Mcpgate-de/maisecrets/issues/new?", link[0])
+        self.assertIn("ds-keyword-colon", link[0])
+        self.assertIn("a+build+id", link[0])
+        self.assertFalse(any(v in r.stdout for v in sb.values))
+        self.assertFalse(sb.opened.exists(), "no browser: the person opens the link (docs/DIAGNOSTICS.md, D1)")
         _sb, r = self._run("live", "report")
         self.assertRegex(r.stdout, r"1\s+\S+\s+UserPromptSubmit\s+claude\s+SECRET/ds-keyword-colon")
 
@@ -1413,88 +1416,73 @@ class EventsTests(unittest.TestCase):
         with mock.patch("pathlib.Path.read_text", side_effect=OSError):
             self.assertEqual(self.events.plugin_version(), "?")
 
-    def test_open_in_browser_uses_the_opener_of_each_platform(self):
-        url = "https://example.invalid/x"
-        desktop = {k: v for k, v in os.environ.items() if not k.startswith("SSH_")} | {"DISPLAY": ":0"}
-        patcher = mock.patch.dict(os.environ, desktop, clear=True)   # enterContext is Python 3.11+
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        for system, argv in (("Darwin", ["open", url]), ("Linux", ["xdg-open", url])):
-            with self.subTest(system), mock.patch.object(self.events.platform, "system", return_value=system), \
-                    mock.patch("subprocess.run") as run:
-                self.assertTrue(self.events.open_in_browser(url))
-                self.assertEqual(run.call_args.args[0], argv)
-        with mock.patch.object(self.events.platform, "system", return_value="Windows"), \
-                mock.patch.object(os, "startfile", create=True) as start:
-            self.assertTrue(self.events.open_in_browser(url))
-            start.assert_called_once_with(url)
-        with mock.patch.object(self.events.platform, "system", return_value="Linux"), \
-                mock.patch("subprocess.run", side_effect=OSError):
-            self.assertFalse(self.events.open_in_browser(url))
+    def test_no_report_form_opens_a_browser_or_starts_a_program(self):
+        # docs/DIAGNOSTICS.md, D1: the person opens the link; maisecrets runs neither a browser nor gh
+        from maisecrets import cli
+        import webbrowser
+        for args in (["bug", "a", "text"], ["feature", "x"], ["bug", "--create", "x"], ["--create", "incident"],
+                     ["incident"], ["incident", "clear"], ["last"], []):
+            with self.subTest(args), mock.patch("subprocess.run", side_effect=AssertionError("a program")), \
+                    mock.patch("subprocess.Popen", side_effect=AssertionError("a program")), \
+                    mock.patch.object(webbrowser, "open", side_effect=AssertionError("a browser")), \
+                    mock.patch.object(os, "startfile", side_effect=AssertionError("a browser"), create=True), \
+                    mock.patch.object(os, "system", side_effect=AssertionError("a program")), \
+                    mock.patch.object(sys.stdout, "isatty", return_value=False), \
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(cli.cmd_report(list(args)), 0)
 
-    def test_no_browser_over_ssh_or_without_a_display_and_the_opener_gets_no_terminal(self):
-        # feedback on 0.5.2: over ssh xdg-open started w3m, which took over the Claude Code terminal
-        url = "https://example.invalid/x"
-        base = {k: v for k, v in os.environ.items()
-                if not k.startswith("SSH_") and k not in ("DISPLAY", "WAYLAND_DISPLAY")}
-        for system, env in (("Linux", base), ("Linux", base | {"DISPLAY": ":0", "SSH_CONNECTION": "a 1 b 22"}),
-                            ("Darwin", base | {"SSH_TTY": "/dev/ttys001"})):
-            with self.subTest(system, env=sorted(set(env) - set(base))), mock.patch.dict(os.environ, env, clear=True), \
-                    mock.patch.object(self.events.platform, "system", return_value=system), \
-                    mock.patch("subprocess.run") as run:
-                self.assertFalse(self.events.open_in_browser(url))
-                run.assert_not_called()
-        with mock.patch.dict(os.environ, base | {"DISPLAY": ":0"}, clear=True), \
-                mock.patch.object(self.events.platform, "system", return_value="Linux"), \
-                mock.patch("subprocess.run") as run:
-            self.assertTrue(self.events.open_in_browser(url))
-            for stream in ("stdin", "stdout", "stderr"):
-                self.assertEqual(run.call_args.kwargs[stream], subprocess.DEVNULL, stream)
+    def test_the_incident_report_prints_to_a_terminal_only_and_starts_nothing_there(self):
+        # the terminal branch (codex and Opus, code review round 1: no test reached it)
+        from maisecrets import cli, incidents
+        incidents.record_path().write_text(incidents.dumps(incidents.add({}, {
+            "code": "store.lock", "cause": "lock", "class": "fail-closed", "event": "UserPromptSubmit"})))
+        self.addCleanup(lambda: incidents.clear())
+        for tty, want in ((True, "store.lock/lock"), (False, "shown to a person only")):
+            out = io.StringIO()
+            out.isatty = lambda tty=tty: tty
+            with self.subTest(tty=tty), mock.patch("subprocess.run", side_effect=AssertionError("a program")), \
+                    mock.patch("subprocess.Popen", side_effect=AssertionError("a program")), \
+                    mock.patch.object(os, "system", side_effect=AssertionError("a program")), \
+                    mock.patch.object(sys, "stdout", out):
+                self.assertEqual(cli.cmd_report(["incident"]), 0)
+            self.assertIn(want, out.getvalue())
+            self.assertEqual("store.lock/lock" in out.getvalue(), tty, "the report only to a terminal")
+        out = io.StringIO()
+        out.isatty = lambda: True
+        with mock.patch.object(sys, "stdout", out):
+            cli.cmd_report(["incident", "clear"])
+        self.assertIn("cleared:", out.getvalue())
+        self.assertFalse(incidents.record_path().exists())
 
-    def test_report_prints_the_text_and_creates_only_on_request_through_an_argument_list(self):
+    def test_report_prints_the_text_and_the_link_and_create_is_gone(self):
         from maisecrets import cli
         out = io.StringIO()
-        with mock.patch.object(self.events, "open_in_browser", return_value=False), redirect_stdout(out):
+        with redirect_stdout(out):
             cli.cmd_report(["bug", "the", "hook", "refused", "$(touch", "x)"])
         text = out.getvalue()
         self.assertIn("Title: Bug: the hook refused $(touch x)", text)
         self.assertIn("## What happened\nthe hook refused $(touch x)", text, "the text itself, not only a link")
         self.assertIn("prefilled link: https://github.com/", text)
-        seen = {}
-        def fake(argv, **kw):
-            seen["argv"], seen["input"], seen["env"] = argv, kw.get("input"), kw.get("env") or {}
-            return subprocess.CompletedProcess(argv, 0, stdout="https://github.com/o/r/issues/7\n")
-        with mock.patch.dict(os.environ, {"GH_HOST": "ghe.example.invalid", "GH_REPO": "other/repo"}), \
-                mock.patch("shutil.which", return_value="/usr/bin/gh"), mock.patch("subprocess.run", fake), \
-                mock.patch.object(self.events, "open_in_browser") as opener, redirect_stdout(io.StringIO()) as o2:
+        with redirect_stdout(io.StringIO()) as o2:
             cli.cmd_report(["bug", "--create", "a", "text"])
-        opener.assert_not_called()
-        self.assertIn("created: https://github.com/o/r/issues/7", o2.getvalue())
-        self.assertEqual(seen["argv"][:6], ["/usr/bin/gh", "issue", "create", "-R", "github.com/Mcpgate-de/maisecrets",
-                                            "--title"])
-        self.assertEqual(seen["env"]["GH_HOST"], "github.com", "the host comes from report_url, not the environment")
-        self.assertNotIn("GH_REPO", seen["env"])
-        self.assertIn("--body-file", seen["argv"])
-        self.assertIn("a text", seen["input"], "the body goes on stdin")
+        self.assertIn("--create is gone", o2.getvalue())
+        self.assertIn("prefilled link: https://github.com/", o2.getvalue())
+        self.assertIn("a+text", o2.getvalue(), "--create is no part of the text")
 
     def test_report_follows_report_url_null_another_tracker_or_a_fork(self):
         from maisecrets import cli
-        def run(url, create=False):
+        def run(url):
             out = io.StringIO()
             with mock.patch.object(self.events, "tracker", return_value=url), \
-                    mock.patch.object(self.events, "open_in_browser", return_value=False), \
-                    mock.patch("shutil.which", return_value="/usr/bin/gh"), mock.patch("subprocess.run") as gh, \
                     redirect_stdout(out), redirect_stderr(io.StringIO()):
-                cli.cmd_report(["bug", "--create", "x"] if create else ["bug", "x"])
-            return out.getvalue(), gh
-        text, gh = run(None, create=True)
+                cli.cmd_report(["bug", "x"])
+            return out.getvalue()
+        text = run(None)
         self.assertIn("reporting is turned off", text)
         self.assertNotIn("Title:", text)
-        gh.assert_not_called()
-        text, gh = run("https://tracker.example.org/new", create=True)
+        text = run("https://tracker.example.org/new")
         self.assertIn("tracker: https://tracker.example.org/new", text)
-        gh.assert_not_called()   # gh files only to a GitHub repository, never past the policy's tracker
-        text, _ = run("https://github.com/acme/fork/issues")
+        text = run("https://github.com/acme/fork/issues")
         self.assertIn("prefilled link: https://github.com/acme/fork/issues/new?", text)
 
     def test_slash_command_arguments_arrive_on_stdin_and_are_never_run(self):

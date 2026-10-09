@@ -215,6 +215,19 @@ SCENARIOS = {
         "expect_no_file": "ran.txt",
         "expect_text": "approve this ssh write to nohost.invalid",
     },
+    # the incident report (docs/DIAGNOSTICS.md, section 7): the prompt hook answers the typed command to the person,
+    # before the config and the store, and no request carries it (0 requests: the model sees neither report nor link)
+    "report_incident_person_only": {
+        "prompt": "/maisecrets:report incident",
+        "home_files": {"incidents.json": json.dumps({"version": 1, "groups": {"store.lock/lock": {
+            "code": "store.lock", "cause": "lock", "class": "fail-closed", "event": "UserPromptSubmit",
+            "tool_class": "-", "client": "claude", "days": [time.strftime("%Y-%m-%d")], "count": 3,
+            "plugin_version": "0.6.9"}}}), "index.json": "{damaged"},
+        "turns": [{"text": "unreachable"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+        "expect_output": ["your incident report (shown to you only", "store.lock/lock", "/issues/new?"],
+    },
     # a setting changes only from the person's own prompt (C22): the prompt hook writes the setting the typed slash
     # command names, and the command runs on to show the new state (a success is no block)
     "settings_typed_prompt": {
@@ -635,6 +648,10 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             fails.append(f"{text[:12]!r}... reached the model")
     if sc.get("expect_blocked") and "blocked by hook" not in (r.stdout + r.stderr):
         fails.append("prompt was not blocked")
+    for text in sc.get("expect_output", []):
+        # what the person sees in the client's own output, not what reaches the model
+        if text not in r.stdout + r.stderr:
+            fails.append(f"expected {text!r} in the client's output")
     if sc.get("expect_file"):
         fname, content = sc["expect_file"]
         got = (cwd / fname).read_text() if (cwd / fname).exists() else "<missing>"

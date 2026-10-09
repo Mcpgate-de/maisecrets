@@ -12,6 +12,7 @@ Events:
 """
 from __future__ import annotations
 
+import functools
 import html
 import json
 import os
@@ -22,8 +23,9 @@ import time
 import sys
 from typing import Any
 
-from . import detect, rehydration
+from . import detect, incidents, rehydration
 from .placeholder import KEY_RE, find_refs
+from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config
 
 # a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
@@ -82,7 +84,11 @@ def _clipboard(text: str) -> bool:
             cmd = ["xclip", "-selection", "clipboard"]
         subprocess.run(cmd, input=data, check=True, timeout=_CLIPBOARD_TIMEOUT)
         return True
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        # a missing tool and an SSH session are normal (a headless Linux, a remote shell): no incident
+        if not isinstance(exc, FileNotFoundError) and not any(
+                os.environ.get(k) for k in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")):
+            incidents.note("prompt.clipboard", exc)
         return False
 
 
@@ -221,8 +227,9 @@ def _scrub_transcript_later(path: str, values: list[str], refs: list[str], secon
                                       "bases": bases, "session": session or "", "hidden": hidden}).encode())
         child.stdin.close()
         return child          # the tests wait for it; the hooks never do
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
         _debug("scrub-later: could not start")
+        incidents.note("scrub.start", exc)
     return None
 
 
@@ -399,8 +406,8 @@ def _save_pending(rewritten: str, session: str | None) -> None:
         fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(rewritten)
-    except OSError:
-        pass
+    except OSError as exc:
+        incidents.note("prompt.pending", exc)
 
 
 def take_pending(session: str | None = None) -> str | None:
@@ -707,12 +714,34 @@ def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str 
     return rewritten, entries, values, stored
 
 
+def _run_sh() -> str:
+    """The absolute path of this plugin's launcher for this OS, for a line the person runs in a terminal (run.sh does
+    not run in cmd or PowerShell)."""
+    name = "run.cmd" if os.name == "nt" else "run.sh"
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", name)
+
+
+def _incident_answer(kind: str, selector: str | None) -> dict:
+    """The incident report as a block reason: shown to the person, never to the model, and no tool call runs, so a
+    damaged store or config cannot withhold it (docs/DIAGNOSTICS.md, section 7). Reads only."""
+    if kind == "show":
+        text = incidents.report_text(selector)
+    elif kind == "clear":
+        text = f"maisecrets: clear the incident record in a terminal: {_run_sh()} report incident clear"
+    else:
+        text = incidents.USAGE
+    return {"decision": "block", "reason": text,
+            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+
+
 def rewrite_prompt(payload: dict) -> dict:
     """The question of the mod (claude-mod/maisecrets-mod.mjs, Claude Code 2.1.287 and later): this prompt with a
     placeholder in place of each value, so it goes through instead of being blocked. ``{}`` leaves
     the prompt as it is, and the settings hook, which runs after the mod on what the mod passes on,
     decides it as without the mod: a clean prompt, an @file mention, a subagent report, a setting
     that turns the rewrite off. The answer carries placeholders, never a value."""
+    if incidents.recognize(payload.get("prompt"), client_of(payload)):
+        return {}            # the prompt hook answers it, before the config and the store (docs/DIAGNOSTICS.md, 7)
     cfg = load_config()
     if not cfg.get("rewrite_prompts", True):
         return {}
@@ -757,6 +786,11 @@ def rewrite_prompt(payload: dict) -> dict:
 
 
 def user_prompt(payload: dict) -> dict:
+    asked = incidents.recognize(payload.get("prompt"), client_of(payload))
+    if asked:
+        if asked[0] == "usage":
+            _scrub_failed_prompt("user-prompt", payload)   # free text after the form: the client keeps the prompt
+        return _incident_answer(*asked)
     if os.environ.get("MAISECRETS_TEST_FAULT") == "user-prompt-slow" and os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
         # tests only (tests/_isolate.py sets the second variable): the watchdog answers
         time.sleep(WATCHDOG_SECONDS["user-prompt"] + 3)
@@ -1871,7 +1905,7 @@ def _run_dir() -> str:
         pass
     st = os.lstat(base)
     if not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or (st.st_mode & 0o077):
-        raise RuntimeError(base)
+        raise vault_mod.CodedError(base, "hook.run-dir", "permission")
     return base
 
 
@@ -1889,7 +1923,7 @@ def _sealed_dir() -> str:
         pass
     st = os.lstat(d)
     if not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
-        raise RuntimeError(d)
+        raise vault_mod.CodedError(d, "hook.sealed-dir", "permission")
     # never readable again once made: a sweep that opened it for a moment let a blind reader list it
     # (Codex review, 2026-09-28). Each serving child removes its own FIFO; wipe clears the rest
     if _stat.S_IMODE(st.st_mode) != 0o300:
@@ -3556,10 +3590,15 @@ def _post_tool_guarded(payload: dict) -> dict:
     try:
         result = post_tool(payload)
     except ConfigError as exc:
-        return _fail_closed("post-tool", payload, f"configuration error: {exc}. Fix the file named there.", hint=False)
+        out = _fail_closed("post-tool", payload, f"configuration error: {exc}. Fix the file named there.", hint=False)
+        _record(functools.partial(incidents.queue, "config.policy-invalid", "parse", "fail-closed", "PostToolUse",
+                                  _tool_class(payload), client_of(payload)))
+        return out
     except Exception as exc:  # noqa: BLE001
         _debug(f"post-tool: {type(exc).__name__}")
-        return _failure("post-tool", payload, exc)
+        out = _failure("post-tool", payload, exc)
+        _record(functools.partial(_queue_failure, exc, "post-tool", _tool_class(payload), client_of(payload)))
+        return out
     try:
         return _with_hint(payload, result)
     except Exception as exc:  # noqa: BLE001 - a hint that fails must not withhold the output
@@ -3649,6 +3688,38 @@ HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post
             "post-tool-failure": _post_tool_failure_observed}
 
 
+def _record(step) -> None:
+    """One step of the incident recorder; it never raises (docs/DIAGNOSTICS.md, D4)."""
+    try:
+        step()
+    except Exception:  # noqa: BLE001 - recording never changes an answer
+        pass
+
+
+def _queue_failure(exc: BaseException, event: str, tool_class: str, client: str) -> None:
+    """Queue the incident of an exception that ended a hook: its code, cause and exit code; never its message."""
+    code, cause, kind, number = incidents.code_of(exc, event)
+    incidents.queue(code, cause, "fail-closed", _EVENT_NAMES[event], tool_class, client, kind, number)
+
+
+_EVENT_NAMES = {"user-prompt": "UserPromptSubmit", "pre-tool": "PreToolUse", "post-tool": "PostToolUse",
+                "post-tool-failure": "PostToolUseFailure"}
+
+
+def _tool_class(payload: dict) -> str:
+    """The closed tool class of a payload for an incident record; never the tool's own name."""
+    name = payload.get("tool_name")
+    if not isinstance(name, str):
+        return "-"
+    if name in ("Bash", "PowerShell"):
+        return name
+    if name.startswith("mcp__"):
+        return "MCP"
+    if name in ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch"):
+        return "File"
+    return "Other"
+
+
 # under the timeouts hooks/hooks.json gives each event (10 s prompt and pre-tool, 20 s post-tool);
 # a client timeout fails OPEN, so the answer must come first
 WATCHDOG_SECONDS = {"user-prompt": 7.0, "pre-tool": 7.0, "post-tool": 16.0, "post-tool-failure": 16.0}
@@ -3659,8 +3730,8 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
     deny the tool, withhold the tool output. Never a value, never an exception text (a keychain
     error carried the value in its argument list; Codex review, 2026-09-26). Each text says
     whether the tool ran, so the model does not repeat a push or a deploy (review, 2026-09-26)."""
-    reason = f"maisecrets {event}: {why}"
     codex = client_of(payload) == "codex"
+    reason = f"maisecrets {event}: {why}" + _incident_line(codex)
     if event == "post-tool-failure":
         # the client shows the failed output whatever this answer says: there is nothing to withhold
         return {"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": reason}}
@@ -3682,6 +3753,16 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
     if codex:
         return {"decision": "block", "reason": reason + tail}
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": f"[{reason}{tail}]"}}
+
+
+def _incident_line(codex: bool) -> str:
+    """The fixed line of every fail-closed answer: where the person finds a report they can read and send
+    themselves (docs/DIAGNOSTICS.md, section 5). Codex shows no block reason of a typed form yet, so it names the
+    terminal form."""
+    if codex:
+        return (f" maisecrets sent no report. Run {_run_sh()} report incident in a terminal to see one you can read "
+                "and send yourself.")
+    return " maisecrets sent no report. Type /maisecrets:report incident to see one you can read and send yourself."
 
 
 def _decision_of(event: str, obj: dict) -> str:
@@ -3743,7 +3824,13 @@ def _heartbeat(event: str, payload: dict, done: bool = False) -> None:
     from .vault import HOME
     if event not in ("user-prompt", "pre-tool", "post-tool") or client_of(payload) != "claude":
         return
-    if not ((HOME / "guard.json").exists() or _from_a_synced_folder()):
+    try:
+        # before Python 3.12, exists() raises on a home the hook cannot search, and this call runs before
+        # the hook's try: the process exited 1 without an answer, which lets the prompt through
+        installed = (HOME / "guard.json").exists()
+    except OSError:
+        installed = False
+    if not (installed or _from_a_synced_folder()):
         return
     ident = payload.get("prompt_id") if event == "user-prompt" else payload.get("tool_use_id")
     session = payload.get("session_id")
@@ -3786,6 +3873,7 @@ def _scrub_failed_prompt_now(prompt: str, path: str) -> None:
             _scrub_transcript_later(path, values, [])
     except Exception:  # noqa: BLE001 - the block stands either way
         _debug("scrub-failed-prompt: could not finish")
+        incidents.write_marker("scrub.write")      # this runs in the scrub child: a marker, not the record
 
 
 def _scrub_failed_prompt(event: str, payload: dict) -> None:
@@ -3850,50 +3938,90 @@ def main(argv: list[str]) -> int:
         # an answer in JSON for every event: exit 2 is ignored after a tool, and Codex runs the tool on
         # exit 2 before one (Codex review, 2026-09-28)
         _out(_fail_closed(event, {}, "got a payload that is not JSON."))
+        incidents.write_marker_bounded("hook.payload")       # it answers before the timer: a marker, bounded
         return 0
-    _heartbeat(event, payload)
     import threading
     started = time.time()
     lock = threading.Lock()
     answered = {"v": False}
 
-    def answer(obj: dict, how: str) -> None:
-        # exactly one JSON object leaves this process: the watchdog and the handler both call
-        # here, and two concatenated objects fail open (review, 2026-09-26)
-        with lock:
+    def answer(obj: dict, how: str) -> bool:
+        """Write the one answer of this process; True when this call wrote it. Exactly one JSON object leaves the
+        process: the watchdog and the handler both call here, and two concatenated objects fail open (review,
+        2026-09-26). The lock has a limit, so a handler stuck in its own write cannot hold the watchdog
+        (docs/DIAGNOSTICS.md section 10)."""
+        json.dumps(obj)                              # before the claim: an object that cannot be written claims nothing
+        if not lock.acquire(timeout=1):
+            return False
+        try:
             if answered["v"]:
-                return
+                return False
             answered["v"] = True
             _out(obj)
-            _heartbeat(event, payload, done=True)
+            if how != "watchdog":
+                # the guard waits for it; the watchdog writes it in its bounded thread, so a stalled home cannot
+                # hold the process past the client's timeout (Opus code review, round 1, measured)
+                _heartbeat(event, payload, done=True)
+        finally:
+            lock.release()
         ms = int((time.time() - started) * 1000)
         decision = _decision_of(event, obj)
         _debug(f"{event}: {how} {client_of(payload)} {ms}ms {decision}")
-        _run_log(event, payload, how, decision, ms)
+        if how != "watchdog":                        # the watchdog does no file work before its exit
+            _run_log(event, payload, how, decision, ms)
+        return True
 
     def on_timeout() -> None:
-        answer(_fail_closed(event, payload, f"took longer than {WATCHDOG_SECONDS[event]:.0f}s."), "watchdog")
-        _scrub_failed_prompt(event, payload)
+        if answer(_fail_closed(event, payload, f"took longer than {WATCHDOG_SECONDS[event]:.0f}s."), "watchdog"):
+            def last() -> None:
+                _heartbeat(event, payload, done=True)
+                _scrub_failed_prompt(event, payload)
+                incidents.write_marker(f"hook.{event}.watchdog")
+            t = threading.Thread(target=last, daemon=True)
+            t.start()
+            t.join(1.5)
+        # always, also after a lost race: a hook that answered must still end before the client's timeout, which
+        # lets the action through (measured, review round 5)
         os._exit(0)
     watchdog = threading.Timer(WATCHDOG_SECONDS[event], on_timeout)
     watchdog.daemon = True
-    watchdog.start()
+    watchdog.start()                                 # first, so no file work runs unguarded
+    _heartbeat(event, payload)
+    won = False
+    tool_class = _tool_class(payload)
+    client = client_of(payload)
+    _record(incidents.discard)
+    _record(functools.partial(incidents.set_context, _EVENT_NAMES[event], tool_class, client))
     try:
-        answer(HANDLERS[event](payload), "ok")
+        won = answer(HANDLERS[event](payload), "ok")
         return 0
     except ConfigError as exc:
         # the policy file is wrong: fail closed, and say which key (its message never carries
         # a value; a bare type name sent the user to "a locked store"; review, 2026-09-26)
-        answer(_fail_closed(event, payload, f"configuration error: {exc}. Fix the file named there.", hint=False),
-               "config-error")
-        _scrub_failed_prompt(event, payload)
+        won = answer(_fail_closed(event, payload, f"configuration error: {exc}. Fix the file named there.",
+                                  hint=False), "config-error")
+        _record(functools.partial(incidents.queue, "config.policy-invalid", "parse", "fail-closed",
+                                  _EVENT_NAMES[event], tool_class, client))
+        if won:
+            _scrub_failed_prompt(event, payload)
         return 0
     except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         # the type only: an exception message may carry a value (subprocess errors list the argv)
-        answer(_failure(event, payload, exc), _how_failed(exc))
-        _scrub_failed_prompt(event, payload)
+        won = answer(_failure(event, payload, exc), _how_failed(exc))
+        _record(functools.partial(_queue_failure, exc, event, tool_class, client))
+        if won:
+            _scrub_failed_prompt(event, payload)
         return 0
     finally:
+        # the recorder runs after the answer and never raises out of here: an exception would end the process
+        # with exit 1, and a client ignores the JSON answer of a hook that exits 1
+        if won:
+            _record(incidents.flush)                 # still under the watchdog
+        else:
+            _record(incidents.discard)
+            if answered["v"]:
+                watchdog.join()                      # the watchdog answered: its thread ends the process
+        _record(functools.partial(incidents.set_context, None))
         # cancel, then wait: a daemon timer thread that still runs while the interpreter shuts down
         # can crash the process, and one hook ended with signal 11 after its answer on a macOS
         # runner (2026-09-27)

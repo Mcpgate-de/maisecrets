@@ -6,5 +6,5 @@ runner = ["tests/test_frontmatter.py::PluginLintTests::test_the_plugin_passes_ev
 
 [proof]
 file = "commands/report.md"
-find = "argument-hint: \"[last | bug <text> | feature <text>] [--create]\"\n"
-replace = "argument-hint: [last | bug <text> | feature <text>] [--create]\n"
+find = "argument-hint: \"[last | bug <text> | feature <text> | incident [code/cause]]\"\n"
+replace = "argument-hint: [last | bug <text> | feature <text> | incident [code/cause]]\n"

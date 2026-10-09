@@ -1,0 +1,10 @@
+# c24-a-marker-follows-nothing: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c24-a-marker-follows-nothing"
+control = "C24"
+statement = "A marker is written only into a home that is a real folder, with one mkdir that follows nothing (D5)."
+runner = ["tests/test_incidents.py::MarkerTests::test_a_symlinked_home_gets_no_marker_and_no_record"]
+
+[proof]
+file = "maisecrets/incidents.py"
+find = "        if not home.is_dir() or home.is_symlink():\n            return\n        os.mkdir"
+replace = "        os.mkdir"

@@ -1,0 +1,10 @@
+# c24-the-record-holds-closed-values-only: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c24-the-record-holds-closed-values-only"
+control = "C24"
+statement = "A field of an incident record outside its closed form, a boolean as a number included, drops the whole entry (D2)."
+runner = ["tests/test_incidents.py::SchemaTests::test_each_hostile_form_drops_the_whole_group"]
+
+[proof]
+file = "maisecrets/incidents.py"
+find = "    return type(x) is int"
+replace = "    return isinstance(x, int)"

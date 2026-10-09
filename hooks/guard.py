@@ -55,6 +55,29 @@ def _home() -> str:
     return os.environ.get("MAISECRETS_HOME") or os.path.join(os.path.expanduser("~"), ".maisecrets")
 
 
+def _marker(code: str) -> None:
+    """An incident marker for /maisecrets:report incident (docs/DIAGNOSTICS.md, section 3): one empty folder made with
+    one mkdir in a home that exists and is no link, after the answer, waited for at most 0.3 s. Never raises."""
+    import threading
+
+    def make() -> None:
+        try:
+            home = _home()
+            if os.path.isdir(home) and not os.path.islink(home):
+                os.mkdir(os.path.join(home, "incident-marker." + code), 0o700)
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        sys.stdout.flush()
+        t = threading.Thread(target=make, daemon=True)
+        t.start()
+        t.join(0.3)
+        if t.is_alive():
+            os._exit(0)          # a thread alive at the shutdown of the interpreter can crash it (signal 11)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _claude_dir() -> str:
     return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
 
@@ -325,6 +348,8 @@ def main() -> int:
         wait = 5.0
     out = decide(payload if isinstance(payload, dict) else {}, wait)
     sys.stdout.write(json.dumps(out))
+    if out:
+        _marker("guard.fired")
     return 0
 
 
