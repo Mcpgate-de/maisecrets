@@ -399,6 +399,8 @@ class VisibleIntentTests(unittest.TestCase):
         # review round 8 (Opus, codex): pytest -v is no printf -v; a commit message next to a git -c program key
         "pytest -v tests && git commit -m 'Use `ssh` for deploys'", "git -c core.editor=vim commit -m 'fix ssh parser'",
         "[ -v HOME ] && git commit -m 'use `ssh` now'",
+        # review round 9 (codex): a search a find -exec clause runs
+        "find . -exec grep ssh {} +",
     ]
 
     # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
@@ -501,16 +503,22 @@ class VisibleIntentTests(unittest.TestCase):
         # review round 8 (Opus, codex): a here-string into a shell, a trap's code, env -S
         ("bash <<< 'ssh web1 uptime'", "here-string"), ("trap 'ssh web1 touch x' EXIT", "trap"),
         ("env -S 'ssh host'", "env -S"),
+        # review round 9 (codex, Opus): a package manager's exec, a long xargs option, a redirect glued to the shell,
+        # at with a here-string, a shell in a find -exec clause
+        ("npm exec -- ssh web1", "argument of npm"), ("pnpm dlx ssh web1", "argument of pnpm"),
+        ("printf 'ssh web1' | xargs --delimiter x sh -c", "piped into xargs"),
+        ("bash<<<'ssh web1 touch x'", "here-string"), ("at now <<< 'ssh web1 touch x'", "here-string"),
+        ("find . -exec sh -c 'ssh web1 \"$1\"' _ {} \\;", "started by find"),
     ]
 
     def test_a_mention_that_starts_nothing_does_not_ask(self):
-        self.assertEqual(len(self.MENTIONS), 74, "the premise: every measured shape is here")
+        self.assertEqual(len(self.MENTIONS), 75, "the premise: every measured shape is here")
         for command in self.MENTIONS:
             with self.subTest(command):
                 self.assertEqual(kind(command), "none")
 
     def test_each_start_form_asks(self):
-        self.assertEqual(len(self.STARTS), 98, "the premise: every start form is here")
+        self.assertEqual(len(self.STARTS), 104, "the premise: every start form is here")
         for command, rule in self.STARTS:
             with self.subTest(command):
                 verdict = ssh_consent.classify(command, parse)

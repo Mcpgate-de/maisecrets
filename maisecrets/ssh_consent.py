@@ -554,8 +554,10 @@ def _program_of(sg: dict) -> str:
     words, k = sg.get("words") or [], 1
     while k < len(words):
         w = words[k]
-        if w in ("-I", "-n", "-L", "-P", "-d", "-E", "-s", "-a", "-j", "-S", "-R"):
-            k += 2
+        if w in ("-I", "-n", "-L", "-P", "-d", "-E", "-s", "-a", "-j", "-S", "-R", "--delimiter", "--max-args",
+                 "--max-lines", "--max-procs", "--arg-file", "--eof", "--max-chars", "--process-slot-var", "--jobs",
+                 "--sshlogin", "--joblog", "--results", "--colsep", "--timeout", "--delay", "--tagstring"):
+            k += 2                           # xargs --delimiter '\n' sh -c (codex, round 9)
         elif w.startswith("-") or w.isdigit() or w == "{}" or w == ":::":
             k += 1
         else:
@@ -592,6 +594,22 @@ def _launched(words: list[str], word: str) -> str:
         prev = words[j - 1]
         return "" if len(prev) == 2 and prev.startswith("-") else _base(w)
     return ""
+
+
+def _find_runs(text: str, word: str, parse: Parser) -> bool:
+    """A find -exec clause starts the word: its program is the word, or a shell or launcher whose clause starts it.
+    The clause is read from the text: the parser's words mask a quoted string (find . -exec sh -c '…' _ {} \\;)."""
+    for m in re.finditer(r"(?:^|\s)-(?:exec|execdir|ok|okdir)\s+", text):
+        end = re.search(r"\s(?:\\;|';'|\";\"|;|\+)(?=\s|$)", text[m.end():])
+        clause = text[m.end():m.end() + end.start()] if end else text[m.end():]
+        clause = clause.rstrip().rstrip("\\").rstrip()     # the parser ends the part before ;, after its \\
+        first = clause.split(None, 1)[0] if clause.split() else ""
+        program = _base(first.strip("'\""))
+        if program == word:
+            return True
+        if program in _SHELLS | _LAUNCHERS | {"eval"} and word in clause and classify(clause, parse).kind != "none":
+            return True
+    return False
 
 
 def _write_runs(command: str, ctxs: list[str], segs: list[dict], writers: list[dict], after: int, raw: str) -> str:
@@ -680,7 +698,7 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     word = raw.lower()
     ctx = ctxs[pos] if pos < len(ctxs) else ""
     seg = next((sg for sg in segs if sg["start"] <= pos < sg["end"]), None)
-    cmd = _base(seg.get("cmd", "")) if seg else ""
+    cmd = _base(re.split(r"[<>]", seg.get("cmd", ""), 1)[0]) if seg else ""     # bash<<<'…' (Opus, round 9)
     words = (seg.get("words") or []) if seg else []
     if _CONFIG_WORD_RE.match(raw):
         if seg and data_only(seg) and cmd in _TEXT_SAFE_CMDS and ctx != "hd":
@@ -699,10 +717,10 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         for sg in segs:
             if sg.get("heredoc") and sg["start"] < pos:
                 owner = sg
-        name = _base(owner.get("cmd", "")) if owner else ""
+        name = _base(re.split(r"[<>]", owner.get("cmd", ""), 1)[0]) if owner else ""
         if fed and name in SSH_CMDS:
             return ""                        # the remote commands of a call read above
-        if name in _SHELLS | _RUN_TEXT | {"xargs", "parallel"} or owner and piped_on(owner) and any(
+        if name in _SHELLS | _RUN_TEXT | {"xargs", "parallel", "at", "batch"} or owner and piped_on(owner) and any(
                 _base(x.get("cmd", "")) in _SHELLS for x in segs if x["start"] > owner["start"]):
             return f"'{raw}' in the heredoc of a shell"
         if owner:                            # cat > run.sh <<'EOF' … EOF; bash run.sh (Opus, review of #15)
@@ -757,7 +775,7 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         return f"'{raw}' in a command word built at run time"
     if seg.get("env_split"):
         return f"'{raw}' in the command env -S builds"                # env -S 'ssh host' (codex, round 8)
-    if cmd in _SHELLS | _RUN_TEXT and "<<<" in command[seg["start"]:pos]:
+    if cmd in _SHELLS | _RUN_TEXT | {"at", "batch", "xargs", "parallel"} and "<<<" in command[seg["start"]:pos]:
         return f"'{raw}' in a here-string a shell runs"               # bash <<< 'ssh …' (Opus, round 8)
     if cmd == "trap":
         code = next((w for w in words[1:] if not w.startswith("-")), "")
@@ -783,9 +801,8 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         r"(?:^|\s)-[sStn]\s+['\"]?$", command[seg["start"]:pos])))   # this word names the session, not another one
     if cmd in _LAUNCHERS and not searched and not session_name:
         return f"'{raw}' started by {cmd}"
-    if cmd == "find" and any(w in _FIND_EXEC for w in words) and \
-            min((command.find(w, seg["start"]) for w in _FIND_EXEC if w in words), default=pos) < pos:
-        return f"'{raw}' started by find"
+    if cmd == "find" and _find_runs(command[seg["start"]:seg["end"]], word, parse):
+        return f"'{raw}' started by find"     # not find . -exec grep ssh {} + (codex, round 9)
     program = _container_program(words) if cmd in _CONTAINER_EXEC else None
     if program == "":
         return f"'{raw}' started in a container"     # an option hides which program starts
@@ -855,7 +872,8 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     alone = (left <= 0 or command[left - 1] in " \t\n{(") and (q == 0 or command[pos - 1] in "'\"") and \
         (m.end() + q >= len(command) or command[m.end() + q] in " \t\n;&|)}") and \
         (q == 0 or command[m.end():m.end() + 1] in ("'", '"'))
-    if alone and cmd not in _DATA_CMDS | _LOOKS_UP | _INTERPRETERS and not searched:
+    runs_package = cmd in ("npm", "pnpm", "yarn") and len(words) > 1 and words[1] in ("exec", "x", "dlx")
+    if alone and (cmd not in _DATA_CMDS | _LOOKS_UP | _INTERPRETERS or runs_package) and not searched:
         k_word = next((j for j, w in enumerate(words) if _base(w) == word), -1)
         before_word = [w.lower() for w in words[1:k_word]] if k_word > 0 else []
         prev = words[k_word - 1] if k_word > 0 else ""
