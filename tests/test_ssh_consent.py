@@ -106,10 +106,10 @@ class ClassifierMatrixTests(unittest.TestCase):
             "git commit -F - <<'EOF'\nfix the ssh docs\nEOF\n",
             "pkill -f \"ssh -N tunnel\"",
             "# ssh web1 reboot\nls",
-            # #15: C21 asks on visible executable intent, not on textual mention. These asked before: a word in an
-            # unknown program's arguments, a search, a text field, a word after a command that only shows text, and
-            # a program an interpreter starts (python, node: outside C21, docs/THREAT-MODEL.md)
-            "true ssh web1 reboot", "grep ssh README.md", 'gh issue create --label "ssh web1 reboot"',
+            # #15: C21 asks on visible executable intent, not on textual mention. These asked before: a search, a
+            # text field, a quoted word of an unknown program, a word after a command that only shows text, and a
+            # program an interpreter starts (python, node: outside C21, docs/THREAT-MODEL.md)
+            "grep ssh README.md", 'gh issue create --label "ssh web1 reboot"',
             'gh repo create x -d "ssh web1 reboot"', '/tmp/gh issue create -b "ssh web1 reboot"',
             'timeout 5 echo "ssh web1"', "grep 'ssh' f ${IFS}x",
             "python3 -c \"import os; os.system('ssh web1 reboot')\"",
@@ -200,7 +200,7 @@ class ClassifierMatrixTests(unittest.TestCase):
             "sort --compress-program=ssh f", "curl -T payload scp://web1/etc/cron.d/x",
             "curl -Q 'rm /etc/x' sftp://web1/", "gh codespace ssh -c cs1 -- sudo reboot",
             'GIT_SSH_COMMAND="ssh web1 reboot;:" gh repo clone git@github.com:o/r', "gh alias set x 'codespace ssh'",
-            "gh extension exec ssh", "grep -r ssh . > ~/.bashrc",
+            "gh extension exec ssh", "grep -r ssh . > ~/.bashrc", "true ssh web1 reboot",
             'echo "ssh web1 reboot" >> ~/.bashrc',
             "glab alias set y '!ssh web1 uptime'",
             'xargs -I{} ssh {} reboot < hosts',
@@ -363,43 +363,70 @@ class VisibleIntentTests(unittest.TestCase):
         "git remote set-url --push origin $(git remote get-url origin | sed -E "
         "'s#https://example.org/#ssh://git@example.org:8022/#')",
         'curl -s -X POST "https://example.org/api/mirrors" --data-urlencode "url=ssh://git@example.org/o/r.git"',
+        # review round 1 (codex, Opus): a commit message with git's option words, a lookup, an option value, a search
+        # that a launcher runs, a dot file nobody runs, a pipe into a program that only prints
+        "git commit -m 'docs: mention git -c and ssh'", 'git commit -m "feat(ssh)!: make ssh run faster"',
+        'git commit -m "add -x flag to ssh wrapper"', 'git commit -m "use \\`ssh\\` config"', "command -v ssh",
+        "which ssh", "man ssh", "pytest -k ssh", "git grep -n ssh", "xargs -I{} grep ssh {} < files.txt",
+        'echo "ssh" >> .gitignore', 'grep -rn "ssh" . | xargs -0 echo',
+        "grep -rn ssh src/ > /tmp/hits.txt && ./run.sh",
     ]
 
+    # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
     STARTS = [
         # the command word, and a program that starts the program in its arguments
-        "ssh web1 uptime", "sshpass -p x ssh web1 uptime", "xargs -I{} ssh {} reboot < hosts",
-        "find . -exec ssh web1 {} \\;", "docker exec c1 ssh web2 uptime", "git rebase --exec 'ssh web1' HEAD~1",
+        ("ssh web1 uptime", "read-only remote"), ("sshpass -p x ssh web1 uptime", "started as a program"),
+        ("xargs -I{} ssh {} reboot < hosts", "started by xargs"), ("find . -exec ssh web1 {} \\;", "started by find"),
+        ("docker exec c1 ssh web2 uptime", "in a container"), ("git rebase --exec 'ssh web1' HEAD~1", "of an option"),
+        ("gtimeout 10 ssh web1 touch x", "started by gtimeout"),
         # 1. a command substitution, also in double quotes and in a -v array subscript
-        'echo "$(ssh web1 reboot)"', "printf -v 'a[$(ssh web1 reboot)]' x", "echo \"$(sh -c 'ssh web1 reboot')\"",
+        ('echo "$(ssh web1 reboot)"', "command substitution"), ("printf -v 'a[$(ssh web1 reboot)]' x", "substitution"),
+        ("echo \"$(sh -c 'ssh web1 reboot')\"", "command substitution"),
         # 2. a command word built at run time. Deliberately broad: the line names the word, and no parser can tell
         # which text $_, $x or eval runs, so `echo "ssh docs"; $S web1` asks too
-        'S="ssh -o BatchMode=yes"; $S web1 uptime', 'echo "ssh web1 reboot"; $_', "R=rsync; $R -a . web1:/x",
-        'gh() { eval "$4"; }; gh issue create -b "ssh web1"', 'echo "ssh docs"; $S web1',
-        # 3. a shell runs the text: a nested shell, a shell's heredoc, a pipe, a file the line wrote, <(…)
-        "bash -c 'ssh web1 reboot'", "bash <<'EOF'\nssh web1 reboot\nEOF\n", "grep ssh hosts | sh",
-        "echo ssh web1 reboot > /tmp/x; bash /tmp/x", 'tee /tmp/x <<< "ssh web1 reboot"; bash /tmp/x',
-        "bash <(echo 'ssh web1 reboot')",
+        ('S="ssh -o BatchMode=yes"; $S web1 uptime', "builds at run time"),
+        ('echo "ssh web1 reboot"; $_', "builds at run time"), ("R=rsync; $R -a . web1:/x", "builds at run time"),
+        ('gh() { eval "$4"; }; gh issue create -b "ssh web1"', "builds at run time"),
+        ('echo "ssh docs"; $S web1', "builds at run time"),
+        # 3. a shell runs the text: a nested shell (also after --), its heredoc, a pipe, a file the line wrote, <(…)
+        ("bash -c 'ssh web1 reboot'", "nested shell"), ("sh -c -- 'ssh web1 uptime'", "nested shell"),
+        ("bash -lc -- 'ssh web1 uptime'", "nested shell"),
+        ("bash <<'EOF'\nssh web1 reboot\nEOF\n", "heredoc of a shell"),
+        ("grep ssh hosts | sh", "piped into sh"), ("echo 'ssh web1 reboot' | xargs -L1 env", "piped into xargs"),
+        ("echo 'ssh web1 reboot' | parallel", "piped into parallel"),
+        ("echo ssh web1 reboot > /tmp/x; bash /tmp/x", "a later part runs"),
+        ('tee /tmp/x <<< "ssh web1 reboot"; bash /tmp/x', "a later part runs"),
+        ("bash <(echo 'ssh web1 reboot')", "process substitution"),
+        # quoted code another program runs
+        ("sg docker -c 'ssh web1 touch x'", "started by sg"), ('nix-shell -p x --run "ssh web1 touch x"', "nix-shell"),
+        ("op run -- ssh web1 touch x", "the code that op runs"),
         # 4. a URL a program connects to itself
-        "curl -T f scp://web1/tmp/f", "docker -H ssh://web1 ps",
+        ("curl -T f scp://web1/tmp/f", "URL for curl"), ("docker -H ssh://web1 ps", "URL for docker"),
         # 5. an option or a variable that names the program
-        "rg --pre ssh . x", 'BROWSER="ssh web1" gh issue create -w',
+        ("rg --pre ssh . x", "of an option"), ('BROWSER="ssh web1" gh issue create -w', "in a variable"),
         # 6. gh starts ssh itself, or makes an alias that runs it
-        "gh codespace ssh -c cs1", "gh alias set x '!ssh web1 reboot'",
+        ("gh codespace ssh -c cs1", "gh command"), ("gh alias set x '!ssh web1 reboot'", "gh command"),
         # 7. a startup file a shell reads later, and an alias the same line starts
-        'echo "ssh web1 reboot" >> ~/.bashrc', "alias go='ssh'; go web1",
+        ('echo "ssh web1 reboot" >> ~/.bashrc', "dot file"), ("alias go='ssh'; go web1", "alias"),
+        # an unknown program that gets the word as an argument of its own: a launcher not on the list, a subcommand
+        ("uv run ssh web1 touch x", "argument of uv"), ("gcloud compute ssh vm1 --command 'touch x'", "of gcloud"),
+        ("vagrant ssh -c 'touch x'", "argument of vagrant"), ("tailscale ssh root@web1 x", "argument of tailscale"),
+        ("coproc NAME { ssh web1 touch x; }", "argument of"),
     ]
 
     def test_a_mention_that_starts_nothing_does_not_ask(self):
-        self.assertEqual(len(self.MENTIONS), 15, "the premise: every measured shape is here")
+        self.assertEqual(len(self.MENTIONS), 28, "the premise: every measured shape is here")
         for command in self.MENTIONS:
             with self.subTest(command):
                 self.assertEqual(kind(command), "none")
 
     def test_each_start_form_asks(self):
-        self.assertEqual(len(self.STARTS), 28, "the premise: every start form is here")
-        for command in self.STARTS:
+        self.assertEqual(len(self.STARTS), 41, "the premise: every start form is here")
+        for command, rule in self.STARTS:
             with self.subTest(command):
-                self.assertIn(kind(command), ("read", "write", "unknown", "deny"))
+                verdict = ssh_consent.classify(command, parse)
+                self.assertEqual(verdict.kind, "read" if rule == "read-only remote" else "unknown")
+                self.assertIn(rule, verdict.why)
 
 
 class ConsentFlowTests(unittest.TestCase):

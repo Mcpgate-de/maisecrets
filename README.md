@@ -936,12 +936,16 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   Edit on `~/.ssh` ask as well.
 - **An ssh word asks only where a command starts it** (#15): as the command
   word; after a launcher (`env`, `xargs`, `timeout`, `setsid`, `sshpass`,
-  `tmux` …); in `find -exec`, `docker exec` or `git rebase --exec`; in the
+  `tmux` …) or as an argument of its own of any other program, unless it
+  follows an option (`pytest -k ssh`) or the program only searches, shows or
+  looks up (`grep`, `which`, `git`, `gh` …): `uv run ssh`, `gcloud compute
+  ssh`; in quoted code after `-c`, `--run` or `--`; in `find -exec`, `docker exec` or `git rebase --exec`; in the
   code of `bash -c` or `eval` and in a shell's heredoc; in a command
   substitution, also inside double quotes; in a pipe into a shell; in a file
   the line writes and then runs; as a URL that `curl` or `docker -H` connects
   to; as the program of an option (`rg --pre`); in a variable before a
-  command (`BROWSER="ssh …"`); in a write to a dot file (`~/.bashrc`); and in
+  command (`BROWSER="ssh …"`); in a write to a startup file (`~/.bashrc`,
+  `.envrc`, `.git/hooks/…`); and in
   any line that runs a command word it builds at run time (`S=ssh; $S web1`,
   `…; $_`, `eval`), since no parser can tell which text that runs. A mention
   that starts nothing does not ask: `grep ssh README.md`, a path such as
@@ -975,8 +979,9 @@ ssh` reads the Claude Code transcripts of the last 30 days on this computer
 (`--last 7d`, or `--last 200` for the newest 200), classifies each command
 that names an ssh-family word, and prints counts per verdict and per reason,
 with no host, command or value. `--json` prints the same as JSON.
-`--excerpts FILE` writes a short masked window around each question into a
-new file of yours, to look at by hand; share only what you may share. It runs
+`--excerpts FILE` writes a short window around each question into a new
+file of yours, to look at by hand: the values the detectors find are masked,
+hosts and commands stay in it, so share only what you may share. It runs
 nothing, changes no setting or consent, and sends nothing. Codex sessions are
 not read.
 

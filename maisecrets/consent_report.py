@@ -4,8 +4,9 @@ turning it on (#15: the rules were tuned on one person's sessions).
 
 It reads the local transcripts, classifies each Bash command that names an ssh-family word with the check of this
 version, and prints counts per verdict and per reason. A reason names no host, no command and no value. It runs
-nothing, changes no setting or consent, and sends nothing. With --excerpts FILE it writes a short masked window
-around each question into a new file of the person's own, for a look by hand; the person decides what to share.
+nothing, changes no setting or consent, and sends nothing. With --excerpts FILE it writes a short window around
+each question into a new file of the person's own, for a look by hand: the values the detectors find are masked,
+hosts and commands stay in it, and the person decides what to share.
 """
 from __future__ import annotations
 
@@ -28,11 +29,17 @@ def _parse(text: str):
 
 def _sessions(base: Path, last: str) -> list[Path]:
     """The transcripts of the last N days (30d) or the N newest ones (200), oldest first."""
-    paths = sorted(base.glob("*/*.jsonl"), key=lambda p: p.stat().st_mtime)
+    found = []
+    for p in base.glob("*/*.jsonl"):
+        try:
+            found.append((p.stat().st_mtime, p))
+        except OSError:
+            continue                         # a dangling link or a file that went away
+    found.sort()
     if last.endswith("d"):
         cutoff = time.time() - int(last[:-1]) * 86400
-        return [p for p in paths if p.stat().st_mtime >= cutoff]
-    return paths[-int(last):]
+        return [p for t, p in found if t >= cutoff]
+    return [p for _t, p in found[-int(last):]]
 
 
 def _commands(path: Path) -> list[str]:
@@ -46,9 +53,12 @@ def _commands(path: Path) -> list[str]:
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                for block in (rec.get("message") or {}).get("content") or []:
+                msg = rec.get("message") if isinstance(rec, dict) else None
+                content = msg.get("content") if isinstance(msg, dict) else None
+                for block in content if isinstance(content, list) else []:
                     if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "Bash":
-                        cmd = (block.get("input") or {}).get("command", "")
+                        tool_input = block.get("input")
+                        cmd = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
                         if isinstance(cmd, str) and ssh_consent._TOKEN_RE.search(cmd):
                             out.append(cmd)
     except OSError:
@@ -57,7 +67,8 @@ def _commands(path: Path) -> list[str]:
 
 
 def _reason(why: str) -> str:
-    return re.sub(r"'[^']*'", "'…'", why or "")
+    """The reason with its quoted word removed; a reason of the check names no host and no value."""
+    return re.sub(r"'[^']*'|\"[^\"]*\"", "'…'", why or "")
 
 
 def _excerpt(cmd: str, why: str) -> str:
@@ -88,7 +99,7 @@ def run(args: list[str]) -> int:
         a = args.pop(0)
         if a == "--json":
             as_json = True
-        elif a == "--last" and args and re.fullmatch(r"\d+d?", args[0]):
+        elif a == "--last" and args and re.fullmatch(r"[1-9]\d*d?", args[0]):
             last = args.pop(0)
         elif a == "--excerpts" and args:
             excerpts = args.pop(0)

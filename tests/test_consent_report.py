@@ -4,8 +4,10 @@ import contextlib
 import io
 import json
 import os
+import random
 import shutil
 import stat
+import string
 import sys
 import tempfile
 import unittest
@@ -68,8 +70,45 @@ class ConsentReportTests(unittest.TestCase):
         code, text = self.run_report("--excerpts", str(target))
         self.assertEqual(code, 1, "an existing file is not replaced")
 
+    def test_a_reason_that_held_a_value_names_none(self):
+        # codex and Opus, review of #15: the sshfs reason quoted its option, and an -o value came back in repr quotes
+        _session(self.home / "projects" / "p1", "s3", ["sshfs -o 'ssh_command=ssh -J jump1' web1:/ /mnt",
+                                                         "ssh -o \"Bogus'x=hidden-host.internal\" web1 uptime"])
+        for args in ((), ("--json",)):
+            code, text = self.run_report(*args)
+            self.assertEqual(code, 0)
+            for leak in ("jump1", "ssh_command", "hidden-host", "Bogus"):
+                self.assertNotIn(leak, text)
+
+    def test_a_quoted_part_of_a_reason_is_removed(self):
+        # the second layer behind the reasons of the check: a future reason that quotes a value in either quote
+        self.assertEqual(consent_report._reason("the option \"x=hidden\" and 'y' end"), "the option '…' and '…' end")
+
+    def test_a_record_of_another_shape_is_skipped(self):
+        folder = self.home / "projects" / "p1"
+        (folder / "odd.jsonl").write_text('["Bash", 1]\n{"message": "Bash"}\n'
+                                          '{"message": {"content": [{"type": "tool_use", "name": "Bash", '
+                                          '"input": ["ssh web1"]}]}}\n\xff\n', encoding="utf-8", errors="replace")
+        if hasattr(os, "symlink"):
+            try:
+                os.symlink(folder / "gone.jsonl", folder / "dangling.jsonl")
+            except OSError:
+                pass                         # Windows without the right to make a link
+        code, text = self.run_report("--json")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(text)["commands"], 7, "the odd records add nothing")
+
+    def test_a_detected_value_is_masked_in_a_window(self):
+        token = "glp" + "at-" + "".join(random.choices(string.ascii_letters + string.digits, k=20))
+        _session(self.home / "projects" / "p1", "s4", [f"S=ssh; $S web9 'curl -H \"PRIVATE-TOKEN: {token}\" x'"])
+        target = self.home / "masked.jsonl"
+        self.assertEqual(self.run_report("--excerpts", str(target))[0], 0)
+        windows = target.read_text(encoding="utf-8")
+        self.assertEqual(windows.count("<value>"), 1, "the premise: the detectors find the token")
+        self.assertNotIn(token, windows)
+
     def test_a_wrong_argument_shows_the_usage(self):
-        for args in (["--last", "x"], ["--nope"]):
+        for args in (["--last", "x"], ["--last", "0"], ["--nope"]):
             with self.subTest(args):
                 self.assertEqual(self.run_report(*args)[0], 2)
         out = io.StringIO()
