@@ -40,7 +40,7 @@ SSH_CMDS = {"ssh", "autossh", "mosh", "scp", "sftp", "sshfs", "ssh-copy-id", "rs
 # a mention of ssh that this module must have read as a call, or the command is not understood.
 # `.ssh/` paths are not a call (the lookbehind skips `~/.ssh`), except the config that retargets a host.
 _TOKEN_RE = re.compile(
-    r"(?<![\w./])(?:ssh|autossh|mosh|scp|sftp|sshfs|ssh-copy-id|sshpass|pssh|parallel-ssh|pscp|"
+    r"(?:(?<=\\[nt])|(?<![\w.]))(?:ssh|autossh|mosh|scp|sftp|sshfs|ssh-copy-id|sshpass|pssh|parallel-ssh|pscp|"
     r"pssh\.\w+|tsh|kitten|rsync)(?![\w-])"
     r"|ssh://|rsync://|GIT_SSH|sshCommand|RSYNC_RSH|DOCKER_HOST|\.ssh/+(?:\./+)*config\b",
     re.I)                                    # SSH is ssh on macOS (APFS) and in PowerShell (opus round 3)
@@ -446,7 +446,7 @@ _LOOKS_UP = {"cd", "ls", "cat", "less", "more", "head", "tail", "which", "wherei
              "pip3", "brew", "apt", "apt-get", "apk", "dnf", "yum", "port", "npm", "pnpm", "yarn", "cargo", "rustup",
              "find", "locate", "mdfind", "jq", "yq", "diff", "cp", "mv", "rm", "touch", "mkdir", "chmod", "chown",
              "ln", "tar", "zip", "unzip", "sed", "systemctl", "service", "ufw", "vim", "vi", "nano", "emacs", "code",
-             "subl", "helm", "tree", "fd", "ansible-doc"} | _CONTAINER_EXEC
+             "subl", "helm", "tree", "fd", "ansible-doc", "pytest"} | _CONTAINER_EXEC
 # interpreters: their code is outside C21 (docs/THREAT-MODEL.md), so a word in it is no start this check reads
 _INTERPRETERS = {"python", "python3", "node", "nodejs", "ruby", "perl", "php", "lua", "rscript", "julia", "deno", "bun",
                  "awk", "gawk", "osascript", "java", "groovy", "tclsh", "pwsh"}
@@ -461,7 +461,8 @@ _CODE_OPTIONS = {"-c", "--run", "--command", "-e", "--exec", "-x", "--"}
 _FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
 # an option whose value is a program the command starts (rg --pre, sort --compress-program, git difftool --extcmd)
 _PROGRAM_OPTION = re.compile(r"(?:^|\s)(?:--(?:pre|hostname-bin|compress-prog\w*|use-compress-program|pager|extcmd|"
-                             r"\w+-filter|exec|rsh|command|editor|program|ssh)|-[xI])(?:=|\s+)[\"']?$")
+                             r"\w+-filter|exec|rsh|command|editor|program|ssh)|-[xI])(?:=|\s+)[\"']?"
+                             r"(?:[\w.~-]*/)*$")
 _ALIAS_RE = re.compile(r"(?:^|[\s;&|(])alias\s+([\w.-]+)=(\"[^\"]*\"|'[^']*'|[^\s;&|)]*)")
 _HEAD_ASSIGN = re.compile(r"\s*(?:[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|[^\s;&|)]*)\s+)+")
 # a part that runs text it did not write itself: a word the shell builds at run time, the last argument, history,
@@ -509,16 +510,23 @@ def _git_runs(words: list[str]) -> bool:
                                                               for w in rest) \
         or sub == "bisect" and rest[:1] == ["run"] or sub == "submodule" and "foreach" in rest \
         or sub == "difftool" and any(w.startswith("--extcmd") for w in rest) \
-        or sub == "config" and any(w.startswith("!") for w in rest)
+        or sub == "config" and any(w.startswith("!") or _GIT_PROGRAM_KEY.match(w) for w in rest)
 
 
-def _shell_code(words: list[str]) -> str:
-    """The code of `sh -c CODE`, `bash -lc -- CODE`: the first word after the options, when one of them holds c."""
+def _shell_code(words: list[str], shell: str = "") -> str:
+    """The code of `sh -c CODE`, `bash -lc -- CODE`, `fish -C CODE`, `--command=CODE`: the first word after the
+    options, when one of them runs code (fish's -C and --init-command; codex, review round 3 of #15)."""
     k, has_c = 1, False
+    code_short = "cC" if shell == "fish" else "c"
     while k < len(words) and words[k].startswith(("-", "+")) and len(words[k]) > 1:
-        if not words[k].startswith("--") and "c" in words[k][1:]:
+        w = words[k]
+        if w.startswith(("--command=", "--init-command=")):
+            return w.split("=", 1)[1]
+        if w in ("--command", "--init-command") and k + 1 < len(words):
+            return words[k + 1]
+        if not w.startswith("--") and any(ch in w[1:] for ch in code_short):
             has_c = True
-        k += 2 if words[k] in ("-o", "+o", "-O", "+O", "--rcfile", "--init-file") else 1
+        k += 2 if w in ("-o", "+o", "-O", "+O", "--rcfile", "--init-file") else 1
     return words[k] if has_c and k < len(words) else ""
 
 
@@ -580,6 +588,38 @@ def _write_runs(command: str, ctxs: list[str], segs: list[dict], writers: list[d
     return ""
 
 
+def _continues_args(command: str, segs: list[dict], k: int) -> dict | None:
+    """The part k is the rest of an outer command's arguments after a command substitution, which the parser takes for
+    a new command (echo $(date) ssh). It returns the outer part, or None. Not after an assignment (x=$(date) ssh web1
+    starts ssh) and not after a substitution in the command word ($(which ssh) web1)."""
+    if k <= 0 or not command[:segs[k]["start"]].rstrip().endswith(")"):
+        return None
+    opener = segs[k - 1]["start"] - 2
+    if opener < 0 or command[opener:opener + 2] != "$(":
+        return None
+    pre = command[:opener].rstrip()
+    if not pre or pre[-1] in ";&|(\n=" or pre.endswith(("then", "do", "else")):
+        return None
+    outer = next((sg for sg in segs if sg["start"] <= opener - 1 < sg["end"] or sg["end"] == opener - 1
+                  or sg["start"] < opener and command[sg["end"]:opener].strip() == ""), None)
+    if outer is not None and outer is not segs[k]:   # echo $(date) and $(whoami) ssh: back to the first part
+        before = _continues_args(command, segs, segs.index(outer))
+        return before or outer
+    return outer
+
+
+def _container_program(words: list[str]) -> str:
+    """The program `docker exec c1 ssh …` or `kubectl exec pod -- ssh …` starts: the word after --, else the word
+    after the container; "" when the options hide it (then the check asks). Not `kubectl exec pod -- ls /etc/ssh`."""
+    if "--" in words:
+        k = words.index("--")
+        return words[k + 1] if k + 1 < len(words) else ""
+    rest = [w for w in words[2:] if not w.startswith("-")]
+    if any(w.startswith("-") and "=" not in w and len(w) > 2 for w in words[2:]):
+        return ""                            # a long option may take a value: the program cannot be told
+    return rest[1] if len(rest) > 1 else ""
+
+
 def _dynamic_word(command: str, sg: dict) -> bool:
     """The part's command word is built at run time: $x, ${…}, $_, `…`, $(…) (the parser's command word)."""
     return sg.get("cmd", "").lstrip('"').startswith(("$", "`"))
@@ -625,13 +665,18 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     if word in _PROGRAM_WORDS and before.endswith(("$(", "`")):
         return f"'{raw}' in a command substitution"
     opener = max(command.rfind("$(", 0, pos), command.rfind("`", 0, pos))
-    if opener >= 0 and ctxs[opener] != "sq":     # a substitution the parser keeps whole: "$(sh -c 'ssh …')"
+    still_open = opener >= 0 and (")" not in command[opener:pos] if command[opener] == "$"
+                                   else command.count("`", opener + 1, pos) % 2 == 0)
+    if still_open and ctxs[opener] != "sq":     # a substitution the parser keeps whole: "$(sh -c 'ssh …')"
         close = command.find(")" if command[opener] == "$" else "`", pos)
         inner = command[opener + (2 if command[opener] == "$" else 1):close if close > 0 else len(command)]
         if raw in inner and inner != command and classify(inner, parse).kind != "none":
             return f"'{raw}' in a command substitution"
     if word not in _PROGRAM_WORDS and word != "ssh://":
         return ""                            # rsync:// is rsync's own protocol; .ssh/config: the ~/.ssh rules
+    if pos > 0 and command[pos - 1] == "/" and command[m.end():m.end() + 1] not in ("", " ", "\t", "\n", ";", "&", "|",
+                                                                                 ")", "'", '"'):
+        return ""                            # /etc/ssh/sshd_config, /var/log/ssh.log: a path, not the program
     if command[m.end():m.end() + 3] == "://" or word == "ssh://":
         # 4. a URL a program connects to itself (curl scp://, docker -H ssh://), as an argument of its own; in git, sed,
         # or a data value (url=ssh://…) it is text
@@ -639,6 +684,9 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
             pos == 1 or command[pos - 2] in " \t\n=")
         return f"'{raw}' URL for {cmd}" if seg and own and cmd in _URL_CLIENTS else ""
     k = segs.index(seg) if seg else -1
+    outer = _continues_args(command, segs, k) if seg else None
+    if outer is not None and _base(outer.get("cmd", "")) in _DATA_CMDS | _LOOKS_UP:
+        return ""                            # echo $(date) ssh: an argument of a command that shows text
     later = segs[k + 1:] if seg else segs
     # 2. another part runs text: a command word built at run time, $_, fc, eval (also in a function the line calls).
     # The line names the word, and no parser can tell which text that part runs (S=ssh; $S, x=$(echo …); $x, … ; $_)
@@ -666,14 +714,20 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     if cmd == "find" and any(w in _FIND_EXEC for w in words) and \
             min((command.find(w, seg["start"]) for w in _FIND_EXEC if w in words), default=pos) < pos:
         return f"'{raw}' started by find"
-    if cmd in _CONTAINER_EXEC and any(w in ("exec", "run", "debug") for w in words[1:3]):
+    if cmd in _CONTAINER_EXEC and any(w in ("exec", "run", "debug") for w in words[1:3]) \
+            and _base(_container_program(words)) in (word, ""):
         return f"'{raw}' started in a container"
     if cmd == "git" and _git_runs(words):
         return f"'{raw}' in a git command that runs a program"
     if cmd in ("gh", "glab") and len(words) > 1 and words[1] in _GH_RUNS:
         return f"'{raw}' in a {cmd} command that runs a program"    # 6. gh codespace ssh, gh alias set x '!…'
+    if cmd == "osascript":                   # AppleScript hands its shell code on: do shell script "ssh …"
+        for w in words[1:]:
+            for code in re.findall(r'do (?:shell )?script\s+"((?:[^"\\]|\\.)*)"', w):
+                if raw in code and classify(code.replace('\\"', '"'), parse).kind != "none":
+                    return f"'{raw}' in the shell code of an AppleScript"
     if cmd in _SHELLS | {"eval"}:
-        code = " ".join(words[1:]) if cmd == "eval" else _shell_code(words)
+        code = " ".join(words[1:]) if cmd == "eval" else _shell_code(words, cmd)
         if code and raw in code and classify(code, parse).kind != "none":
             return f"'{raw}' in the code of a nested shell"
     elif cmd not in _DATA_CMDS | _LOOKS_UP | _INTERPRETERS:
@@ -709,11 +763,13 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     # can be (pytest -k ssh), and not for a command that searches, shows or looks up (Opus, review of #15)
     q = 1 if ctx in ("sq", "dq") else 0      # 'ssh' as a word of its own is the same argument (codex, review of #15)
     left = pos - q
+    while q == 0 and left > 0 and command[left - 1] not in " \t\n{(;&|'\"":
+        left -= 1                            # /usr/bin/ssh: the start of the path is the start of the word
     alone = (left <= 0 or command[left - 1] in " \t\n{(") and (q == 0 or command[pos - 1] in "'\"") and \
         (m.end() + q >= len(command) or command[m.end() + q] in " \t\n;&|)}") and \
         (q == 0 or command[m.end():m.end() + 1] in ("'", '"'))
     if alone and cmd not in _DATA_CMDS | _LOOKS_UP | _INTERPRETERS and not searched:
-        k_word = next((j for j, w in enumerate(words) if w.lower() == word), -1)
+        k_word = next((j for j, w in enumerate(words) if _base(w) == word), -1)
         before_word = [w.lower() for w in words[1:k_word]] if k_word > 0 else []
         prev = words[k_word - 1] if k_word > 0 else ""
         # uv run --no-sync ssh: the run verb's flags; uv run pytest -k ssh: pytest's option (Opus, review round 3)
@@ -752,6 +808,8 @@ def classify(command: str, parse: Parser) -> Verdict:
             continue
         if re.match(r"\s*command\s+-[vV]\b", command[sg["start"]:sg["end"]]):
             continue                         # command -v ssh: a lookup, the program does not start
+        if _continues_args(command, segs, segs.index(sg)):
+            continue                         # echo $(date) ssh: an argument of echo, not a command
         text = command[sg["start"]:sg["end"]]
         # stdin from the local side: a pipe into ssh, a redirect, a here-string or a heredoc
         masked = "".join(ch if ctx == "" else " " for ch, ctx in

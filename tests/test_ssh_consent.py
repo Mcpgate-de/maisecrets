@@ -380,6 +380,11 @@ class VisibleIntentTests(unittest.TestCase):
         # command of a multiplexer, a name that holds .ssh
         "uv run pytest -k ssh", "tree -L 2 ssh", "fd ssh", "tmux attach -t ssh", "screen -r ssh",
         "terraform plan -target=module.ssh",
+        # the open points of 0.6.11: a path that names a directory or a log, an argument after a substitution, a test
+        # path, the program of a container that is not the word
+        "cat /etc/ssh/sshd_config", "nohup tail -f /var/log/ssh.log", "ls /usr/bin/ssh", "echo $(date) ssh",
+        "echo $(date) and $(whoami) ssh", "pytest ssh", "kubectl exec pod -- ls /etc/ssh",
+        "printf 'a\\nssh b\\n'", "flock /tmp/l cat /etc/ssh/sshd_config",
     ]
 
     # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
@@ -439,16 +444,24 @@ class VisibleIntentTests(unittest.TestCase):
         # review round 3 (Opus): more launchers, a -- after a manage verb, a URL that open hands on
         ("xvfb-run -a ssh web1 touch x", "started by xvfb-run"), ("pueue add -- ssh web1 touch x", "started by pueue"),
         ("open ssh://web1", "URL for open"),
+        # the open points of 0.6.11: fish's code options, a path to the program, an escape before the word, AppleScript
+        # that hands on shell code, git config with a program key
+        ("fish -C 'ssh web1 uptime'", "nested shell"), ("fish --init-command 'ssh web1 uptime'", "nested shell"),
+        ("find . -execdir /usr/bin/ssh web1 {} +", "started by find"), ("rg --pre /usr/bin/ssh . x", "of an option"),
+        ("uv run /usr/bin/ssh web1 x", "argument of uv"), ("/usr/bin/ssh web1 uptime", "read-only remote"),
+        ("printf '#!/bin/sh\\nssh web1 touch x\\n' > r.sh; sh r.sh", "a later part runs"),
+        ("osascript -e 'do shell script \"ssh web1 touch x\"'", "AppleScript"),
+        ("git config mergetool.x.cmd 'ssh web1 x'", "git command"),
     ]
 
     def test_a_mention_that_starts_nothing_does_not_ask(self):
-        self.assertEqual(len(self.MENTIONS), 47, "the premise: every measured shape is here")
+        self.assertEqual(len(self.MENTIONS), 56, "the premise: every measured shape is here")
         for command in self.MENTIONS:
             with self.subTest(command):
                 self.assertEqual(kind(command), "none")
 
     def test_each_start_form_asks(self):
-        self.assertEqual(len(self.STARTS), 59, "the premise: every start form is here")
+        self.assertEqual(len(self.STARTS), 68, "the premise: every start form is here")
         for command, rule in self.STARTS:
             with self.subTest(command):
                 verdict = ssh_consent.classify(command, parse)

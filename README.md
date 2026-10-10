@@ -940,7 +940,9 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   follows an option (`pytest -k ssh`) or the program only searches, shows or
   looks up (`grep`, `which`, `git`, `gh` …): `uv run ssh`, `gcloud compute
   ssh`; in quoted code after `-c`, `--run` or `--`; in `find -exec`, `docker exec` or `git rebase --exec`; in the
-  code of `bash -c` or `eval` and in a shell's heredoc; in a command
+  code of `bash -c`, `fish -C` or `eval`, in a shell's heredoc and in the
+  shell code of AppleScript's `do shell script`; as a path (`/usr/bin/ssh`)
+  or after an escape in a string (`printf '…\nssh …'`); in a command
   substitution, also inside double quotes; in a pipe into a shell; in a file
   the line writes and then runs; as a URL that `curl` or `docker -H` connects
   to; as the program of an option (`rg --pre`); in a variable before a
