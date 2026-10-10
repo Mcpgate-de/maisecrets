@@ -106,6 +106,13 @@ class ClassifierMatrixTests(unittest.TestCase):
             "git commit -F - <<'EOF'\nfix the ssh docs\nEOF\n",
             "pkill -f \"ssh -N tunnel\"",
             "# ssh web1 reboot\nls",
+            # #15: C21 asks on visible executable intent, not on textual mention. These asked before: a word in an
+            # unknown program's arguments, a search, a text field, a word after a command that only shows text, and
+            # a program an interpreter starts (python, node: outside C21, docs/THREAT-MODEL.md)
+            "true ssh web1 reboot", "grep ssh README.md", 'gh issue create --label "ssh web1 reboot"',
+            'gh repo create x -d "ssh web1 reboot"', '/tmp/gh issue create -b "ssh web1 reboot"',
+            'timeout 5 echo "ssh web1"', "grep 'ssh' f ${IFS}x",
+            "python3 -c \"import os; os.system('ssh web1 reboot')\"",
         ],
         "read": [
             "ssh web1 uptime", "ssh web1 'df -h'", "ssh web1 'systemctl is-active nginx'", "ssh web1 -- uptime",
@@ -193,9 +200,9 @@ class ClassifierMatrixTests(unittest.TestCase):
             "sort --compress-program=ssh f", "curl -T payload scp://web1/etc/cron.d/x",
             "curl -Q 'rm /etc/x' sftp://web1/", "gh codespace ssh -c cs1 -- sudo reboot",
             'GIT_SSH_COMMAND="ssh web1 reboot;:" gh repo clone git@github.com:o/r', "gh alias set x 'codespace ssh'",
-            "gh extension exec ssh", "true ssh web1 reboot", "grep -r ssh . > ~/.bashrc",
-            'echo "ssh web1 reboot" >> ~/.bashrc', "grep ssh README.md", 'gh issue create --label "ssh web1 reboot"',
-            "glab alias set y '!ssh web1 uptime'", 'gh repo create x -d "ssh web1 reboot"',
+            "gh extension exec ssh", "grep -r ssh . > ~/.bashrc",
+            'echo "ssh web1 reboot" >> ~/.bashrc',
+            "glab alias set y '!ssh web1 uptime'",
             'xargs -I{} ssh {} reboot < hosts',
             # round 3 (codex, Opus): a text mention whose line runs something else, or a command that runs its text
             'ag --pager "ssh web1 reboot" x .', 'sort --compress-prog "ssh" f', 'rg --hostname-bin "ssh" x',
@@ -203,12 +210,12 @@ class ClassifierMatrixTests(unittest.TestCase):
             "git bisect run ssh web1 reboot", 'git difftool --extcmd "ssh web1 reboot" HEAD',
             'git filter-branch --tree-filter "ssh://x; ssh web1 reboot" HEAD',
             'gh issue create -t x -b "ssh web1 reboot" || $_', 'gh() { eval "$4"; }; gh issue create -b "ssh web1"',
-            '/tmp/gh issue create -b "ssh web1 reboot"', '$(echo "ssh web1 reboot")', 'x=$(echo "ssh web1"); $x',
+            '$(echo "ssh web1 reboot")', 'x=$(echo "ssh web1"); $x',
             'printf -v c "ssh web1 reboot"; $c', 'sort -o /tmp/x.sh <<< "ssh web1 reboot"; bash /tmp/x.sh',
             'bash <(echo "ssh web1 reboot")', 'echo "ssh web1 reboot"; $_', 'echo "$(ssh web1 reboot)"',
             'echo "`ssh web1 reboot`"', "echo \"$(sh -c 'ssh web1 reboot')\"",
             "gh issue create -b \"$(sh -c 'ssh web1 reboot')\"", 'BROWSER="ssh web1" gh issue create -w',
-            'timeout 5 echo "ssh web1"', "grep 'ssh' f ${IFS}x",
+
             'gh issue create -b "ssh web1 reboot"; gh issue view 1 | sh', 'echo "ssh web1 reboot"; fc -s',
             # round 4 (Opus): -v takes an array name, and zsh runs the $(…) in its subscript
             "printf -v 'a[$(ssh web1 reboot)]' x", "test -v 'a[$(ssh web1 reboot)]'", "[ -v 'a[$(ssh web1 reboot)]' ]",
@@ -222,7 +229,6 @@ class ClassifierMatrixTests(unittest.TestCase):
             "$(which ssh) web1 reboot", "`which ssh` web1 reboot", "S=ssh; $S web1 reboot",
             "${SSH:-ssh} web1 reboot", "alias s=ssh; s web1 reboot", "xargs ssh web1 < cmds",
             "find . -exec ssh web1 reboot \\;", "watch ssh web1 reboot",
-            "python3 -c \"import os; os.system('ssh web1 reboot')\"",
             "echo \"ssh web1 reboot\" | bash", "cat <<'EOF' | bash\nssh web1 reboot\nEOF\n",
             "git -c alias.x='!ssh web1 reboot' x", "GIT_SSH_COMMAND='ssh -i k' git push",
             "git -c core.sshCommand='ssh -o ProxyCommand=x' push", "RSYNC_RSH=ssh rsync -a . web1:/x",
@@ -330,6 +336,70 @@ class ClassifierMatrixTests(unittest.TestCase):
                               ("ssh -- web1 -l root uptime", "web1")):
             with self.subTest(command):
                 self.assertEqual(ssh_consent.classify(command, parse).hosts, [host])
+
+
+class VisibleIntentTests(unittest.TestCase):
+    """C21 asks on visible executable intent, not on textual mention (Mcpgate-de/maisecrets#15: an autonomous run
+    waited all night on a question for the word "SSH" in a Python heredoc). MENTIONS are the shapes measured in real
+    sessions, written with synthetic hosts; STARTS are the forms in which the shell, or a program the line names,
+    starts the word."""
+
+    MENTIONS = [
+        # a search, a listing, a path with the word in it
+        'grep -n "ssh host1" scripts/*.sh', "grep -rn ssh docs | head -5", "cd /work/ms-ssh && git status",
+        "ls /work/ms-ssh/tests", "sed -n 1,80p NOTES.md | grep -n -i 'log\\|ssh' | head -30",
+        'ps aux | grep -i -E "tunnel|ssh .*-R" | grep -v grep | head -3',
+        # a comment, a commit message, the text of a doc
+        "ls\n# the class rsync carried nothing away\npwd",
+        "git commit -q -F - <<'EOF'\nfix: the rsync of the classes deletes nothing\nEOF\n",
+        "cat > docs/setup.md <<'EOF'\nRepo: git clone ssh://git@example.org:8022/docs/x.git\nEOF\n",
+        # a Python edit script: interpreters are outside C21 (docs/THREAT-MODEL.md)
+        "python3 - <<'EOF'\ns = open('README.md').read()\n"
+        "open('README.md', 'w').write(s.replace('over SSH', 'over SSH and HTTPS'))\nEOF\n",
+        "python3 - <<'EOF'\nrows = [{'note': 'New SSH route through the sandbox'}]\nprint(len(rows))\nEOF\n",
+        # a URL: git over ssh is outside C21; in sed or in a data value it is text
+        "git clone -q ssh://git@example.org:8022/a/b.git && cd b",
+        "for r in a b; do d=$(basename $r); [ -d $d ] || git clone -q ssh://git@example.org:8022/$r.git $d; done",
+        "git remote set-url --push origin $(git remote get-url origin | sed -E "
+        "'s#https://example.org/#ssh://git@example.org:8022/#')",
+        'curl -s -X POST "https://example.org/api/mirrors" --data-urlencode "url=ssh://git@example.org/o/r.git"',
+    ]
+
+    STARTS = [
+        # the command word, and a program that starts the program in its arguments
+        "ssh web1 uptime", "sshpass -p x ssh web1 uptime", "xargs -I{} ssh {} reboot < hosts",
+        "find . -exec ssh web1 {} \\;", "docker exec c1 ssh web2 uptime", "git rebase --exec 'ssh web1' HEAD~1",
+        # 1. a command substitution, also in double quotes and in a -v array subscript
+        'echo "$(ssh web1 reboot)"', "printf -v 'a[$(ssh web1 reboot)]' x", "echo \"$(sh -c 'ssh web1 reboot')\"",
+        # 2. a command word built at run time. Deliberately broad: the line names the word, and no parser can tell
+        # which text $_, $x or eval runs, so `echo "ssh docs"; $S web1` asks too
+        'S="ssh -o BatchMode=yes"; $S web1 uptime', 'echo "ssh web1 reboot"; $_', "R=rsync; $R -a . web1:/x",
+        'gh() { eval "$4"; }; gh issue create -b "ssh web1"', 'echo "ssh docs"; $S web1',
+        # 3. a shell runs the text: a nested shell, a shell's heredoc, a pipe, a file the line wrote, <(…)
+        "bash -c 'ssh web1 reboot'", "bash <<'EOF'\nssh web1 reboot\nEOF\n", "grep ssh hosts | sh",
+        "echo ssh web1 reboot > /tmp/x; bash /tmp/x", 'tee /tmp/x <<< "ssh web1 reboot"; bash /tmp/x',
+        "bash <(echo 'ssh web1 reboot')",
+        # 4. a URL a program connects to itself
+        "curl -T f scp://web1/tmp/f", "docker -H ssh://web1 ps",
+        # 5. an option or a variable that names the program
+        "rg --pre ssh . x", 'BROWSER="ssh web1" gh issue create -w',
+        # 6. gh starts ssh itself, or makes an alias that runs it
+        "gh codespace ssh -c cs1", "gh alias set x '!ssh web1 reboot'",
+        # 7. a startup file a shell reads later, and an alias the same line starts
+        'echo "ssh web1 reboot" >> ~/.bashrc', "alias go='ssh'; go web1",
+    ]
+
+    def test_a_mention_that_starts_nothing_does_not_ask(self):
+        self.assertEqual(len(self.MENTIONS), 15, "the premise: every measured shape is here")
+        for command in self.MENTIONS:
+            with self.subTest(command):
+                self.assertEqual(kind(command), "none")
+
+    def test_each_start_form_asks(self):
+        self.assertEqual(len(self.STARTS), 28, "the premise: every start form is here")
+        for command in self.STARTS:
+            with self.subTest(command):
+                self.assertIn(kind(command), ("read", "write", "unknown", "deny"))
 
 
 class ConsentFlowTests(unittest.TestCase):
