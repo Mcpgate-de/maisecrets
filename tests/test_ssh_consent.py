@@ -392,6 +392,8 @@ class VisibleIntentTests(unittest.TestCase):
         "watch curl https://example.org/docs/ssh",
         # review round 5 (Opus, codex): a test filter in a container, a lookup a launcher starts
         "docker compose exec web pytest -k ssh", "kubectl exec pod -- journalctl -u ssh", "watch -n 1 pgrep -af ssh",
+        # review round 6 (Opus, codex): a test path after a run verb, a tmux session name
+        "uv run pytest tests/ssh -q", "bundle exec rspec spec/ssh", "tmux new-session -d -s ssh",
     ]
 
     # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
@@ -483,16 +485,19 @@ class VisibleIntentTests(unittest.TestCase):
         ("git config --unset core.sshCommand", "sets the command"),
         ("alias prod='command ssh'; prod web1 uptime", "alias"),
         ("podman unshare ssh web1 uptime", "in a container"),
+        # review round 6 (Opus, codex): the shell's $0 repeats the program; a program path after an unknown launcher
+        ("docker exec c1 sh -c 'ssh web1 touch x' sh", "in a container"),
+        ("taskset -c 0 /usr/bin/ssh web1 reboot", "argument of taskset"),
     ]
 
     def test_a_mention_that_starts_nothing_does_not_ask(self):
-        self.assertEqual(len(self.MENTIONS), 67, "the premise: every measured shape is here")
+        self.assertEqual(len(self.MENTIONS), 70, "the premise: every measured shape is here")
         for command in self.MENTIONS:
             with self.subTest(command):
                 self.assertEqual(kind(command), "none")
 
     def test_each_start_form_asks(self):
-        self.assertEqual(len(self.STARTS), 88, "the premise: every start form is here")
+        self.assertEqual(len(self.STARTS), 90, "the premise: every start form is here")
         for command, rule in self.STARTS:
             with self.subTest(command):
                 verdict = ssh_consent.classify(command, parse)

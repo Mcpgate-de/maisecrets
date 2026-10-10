@@ -447,7 +447,9 @@ _LOOKS_UP = {"cd", "ls", "cat", "less", "more", "head", "tail", "which", "wherei
              "pip3", "brew", "apt", "apt-get", "apk", "dnf", "yum", "port", "npm", "pnpm", "yarn", "cargo", "rustup",
              "find", "locate", "mdfind", "jq", "yq", "diff", "cp", "mv", "rm", "touch", "mkdir", "chmod", "chown",
              "ln", "tar", "zip", "unzip", "sed", "systemctl", "service", "ufw", "vim", "vi", "nano", "emacs", "code",
-             "subl", "helm", "tree", "fd", "ansible-doc", "pytest"} | _CONTAINER_EXEC
+             "subl", "helm", "tree", "fd", "ansible-doc", "pytest", "du", "strings", "shasum", "sha256sum",
+             "md5sum", "md5", "otool", "ldd", "nm", "codesign", "xattr", "lipo", "basename", "dirname", "realpath",
+             "readlink"} | _CONTAINER_EXEC
 # interpreters: their code is outside C21 (docs/THREAT-MODEL.md), so a word in it is no start this check reads
 _INTERPRETERS = {"python", "python3", "node", "nodejs", "ruby", "perl", "php", "lua", "rscript", "julia", "deno", "bun",
                  "awk", "gawk", "osascript", "java", "groovy", "tclsh", "pwsh"}
@@ -628,27 +630,31 @@ def _continues_args(command: str, segs: list[dict], k: int) -> dict | None:
 
 
 def _container_program(words: list[str]) -> str | None:
-    """The program a container client starts, past its global options and `compose`: the word after --, else the
-    word after the container or image. None when this is no exec, run or debug; "" when an option may hide the
-    program (then the check asks). Not `kubectl exec pod -- ls /etc/ssh` (Opus and codex, review round 4)."""
+    at = _container_program_at(words)
+    return None if at is None else (words[at] if at >= 0 else "")
+
+
+def _container_program_at(words: list[str]) -> int | None:
+    """The index of the program in words, -1 when an option may hide it, None when this is no exec, run, debug or
+    unshare. The index, not the name: docker exec c1 sh -c '…' sh names sh twice (Opus, review round 6)."""
     verb = next((j for j, w in enumerate(words[1:], 1) if w in ("exec", "run", "debug", "unshare")
                  and "--" not in words[1:j]), None)
     if verb is None:
         return None
     rest = words[verb + 1:]
-    if words[verb] == "unshare":             # podman unshare COMMAND: no container in between (codex, round 5)
-        return "" if any(w.startswith("-") for w in rest[:1]) else (rest[0] if rest else "")
+    if words[verb] == "unshare":
+        return -1 if not rest or rest[0].startswith("-") else verb + 1
     if "--" in rest:
         k = rest.index("--")
-        return rest[k + 1] if k + 1 < len(rest) else ""
+        return verb + 2 + k if k + 1 < len(rest) else -1
     seen = 0
-    for w in rest:                           # the options before the program, not those of the program (pytest -k)
+    for j, w in enumerate(rest):
         if w.startswith("-"):
-            return ""                        # -u root, -v a:b, -w /app: an option may take a value
+            return -1
         seen += 1
         if seen == 2:
-            return w
-    return ""
+            return verb + 1 + j
+    return -1
 
 
 def _quiet_continuation(command: str, segs: list[dict], k: int, data_only) -> bool:
@@ -760,7 +766,9 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         return f"'{raw}' in a variable the command reads as a program"
     if _PROGRAM_OPTION.search(command[seg["start"]:pos]):
         return f"'{raw}' as the program of an option"
-    if cmd in _LAUNCHERS and not searched and not (cmd in ("tmux", "screen") and set(words[1:2]) & _SESSION_ONLY):
+    session_name = cmd in ("tmux", "screen") and (set(words[1:2]) & _SESSION_ONLY or any(
+        words[j - 1] in ("-s", "-S", "-t", "-n") and _base(w) == word for j, w in enumerate(words) if j > 0))
+    if cmd in _LAUNCHERS and not searched and not session_name:
         return f"'{raw}' started by {cmd}"
     if cmd == "find" and any(w in _FIND_EXEC for w in words) and \
             min((command.find(w, seg["start"]) for w in _FIND_EXEC if w in words), default=pos) < pos:
@@ -771,7 +779,7 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     if program is not None and _base(program) not in _DATA_CMDS | _LOOKS_UP:
         # the inner command read as a command line: docker exec c1 sh -c 'ssh …' asks, compose exec web pytest -k
         # ssh does not (Opus, review round 5)
-        start = len(words) - 1 - words[::-1].index(program)
+        start = _container_program_at(words)
         inner = " ".join(shlex.quote(w) for w in words[start:])
         if raw in inner and classify(inner, parse).kind != "none":
             return f"'{raw}' started in a container"
@@ -843,7 +851,10 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         direct_run = run_at >= 0 and all(w.startswith("-") for w in before_word[run_at + 1:])
         after_option = len(prev) == 2 and prev.startswith("-") and prev != "--" and not direct_run
         managed = set(before_word) & _MANAGE_VERBS and prev != "--"     # pueue add -- ssh runs it
-        path_only = pathed and run_at < 0 and prev != "--"    # go build ./cmd/ssh; direnv exec . /usr/bin/ssh asks
+        # a path that names a program directory (/usr/bin/ssh, ./bin/ssh) is the program: taskset -c 0 /usr/bin/ssh,
+        # direnv exec . /usr/bin/ssh. Any other path is data: go build ./cmd/ssh, uv run pytest tests/ssh (codex and
+        # Opus, review round 6)
+        path_only = pathed and prev != "--" and not re.search(r"(?:^|/)s?bin/$", command[left:pos])
         if cmd == "nix" and prev in ("-c", "--command"):
             after_option = False             # nix develop -c ssh, nix shell pkgs -c ssh (codex, review round 4)
         if k_word > 0 and not after_option and not managed and not path_only:
