@@ -162,7 +162,7 @@ def run(args: list[str]) -> int:
         try:
             _write_new(excerpts, windows)
         except OSError as exc:
-            print(f"maisecrets consent-report: cannot write {excerpts}: {exc.strerror}. Name a new file.")
+            print(f"maisecrets consent-report: cannot create the file you named ({exc.strerror}). Name a new file.")
             return 1
     result = {"sessions": sessions, "commands": commands, "kinds": dict(kinds), "write_hosts": write_hosts,
               "questions": [{"kind": k, "why": w, "n": n} for (k, w), n in reasons.most_common()], "last": last}
@@ -170,7 +170,7 @@ def run(args: list[str]) -> int:
         print(json.dumps(result, ensure_ascii=False))
         return 0
     print(f"ssh consent report, sessions of the last {last if last.endswith('d') else last + ' sessions'} "
-          f"(Claude Code, {base}):")
+          "(the Claude Code transcripts on this computer):")
     print(f"  {sessions} sessions, {commands} Bash commands that name an ssh-family word")
     print(f"  none {kinds['none']}, read {kinds['read']} (no question), write {kinds['write']} "
           f"({write_hosts} questions without a consent: one per host and session), "
@@ -180,6 +180,6 @@ def run(args: list[str]) -> int:
         for (k, w), n in reasons.most_common():
             print(f"    {n:5}  {k:7}  {w}")
     if excerpts:
-        print(f"  {len(windows)} masked windows in {excerpts}, for a look by hand; share only what you may share.")
+        print(f"  {len(windows)} windows in the file you named, for a look by hand; share only what you may share.")
     print("  Nothing ran and nothing was sent; Codex sessions are not read.")
     return 0

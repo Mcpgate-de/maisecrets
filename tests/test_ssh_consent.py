@@ -385,6 +385,11 @@ class VisibleIntentTests(unittest.TestCase):
         "cat /etc/ssh/sshd_config", "nohup tail -f /var/log/ssh.log", "ls /usr/bin/ssh", "echo $(date) ssh",
         "echo $(date) and $(whoami) ssh", "pytest ssh", "kubectl exec pod -- ls /etc/ssh",
         "printf 'a\\nssh b\\n'", "flock /tmp/l cat /etc/ssh/sshd_config",
+        # review round 4 (codex, Opus): the last word of a path or a URL, a read of git config, a shell's positional
+        # argument, a lookup in a container
+        "curl https://example.org/docs/ssh", "go build ./cmd/ssh", "ruff check src/ssh", "du -sh /usr/bin/ssh",
+        "git config --get core.sshCommand", "bash -c 'printf %s \"$1\"' _ ssh", "docker exec c1 grep ssh /etc/passwd",
+        "watch curl https://example.org/docs/ssh",
     ]
 
     # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
@@ -452,20 +457,36 @@ class VisibleIntentTests(unittest.TestCase):
         ("printf '#!/bin/sh\\nssh web1 touch x\\n' > r.sh; sh r.sh", "a later part runs"),
         ("osascript -e 'do shell script \"ssh web1 touch x\"'", "AppleScript"),
         ("git config mergetool.x.cmd 'ssh web1 x'", "git command"),
+        # review round 4 (Opus, codex): a substitution in find's or a container's arguments, a newline after it, the
+        # text piped on; a container's program past its options, compose and global options; AppleScript in any
+        # spelling and JXA; fish with -C and -c; nix develop -c
+        ("find $(pwd) -exec ssh web1 touch x \\;", "can start it"),
+        ("echo $(true) ssh web1 touch x | sh", "not on the read list"),
+        ("echo $(date)\nssh web1 reboot", "not on the read list"),
+        ("docker exec -u root c1 ssh web1 touch x", "in a container"),
+        ("docker compose exec app ssh web1 touch x", "in a container"),
+        ("docker exec c1 sh -c 'ssh web1 touch x'", "in a container"),
+        ("kubectl --namespace prod exec pod -- ssh web1 reboot", "in a container"),
+        ("osascript -e 'DO SHELL SCRIPT \"ssh web1 touch x\"'", "AppleScript"),
+        ("osascript -e 'set c to \"ssh web1 touch x\"' -e 'do shell script c'", "AppleScript"),
+        ("osascript -l JavaScript -e 'app.doShellScript(\"ssh web1 touch x\")'", "AppleScript"),
+        ("fish -C 'set -gx X 1' -c 'ssh web1 reboot'", "nested shell"),
+        ("nix develop -c ssh web1 reboot", "argument of nix"), ("docker exec -u cat c1 ssh web1", "in a container"),
     ]
 
     def test_a_mention_that_starts_nothing_does_not_ask(self):
-        self.assertEqual(len(self.MENTIONS), 56, "the premise: every measured shape is here")
+        self.assertEqual(len(self.MENTIONS), 64, "the premise: every measured shape is here")
         for command in self.MENTIONS:
             with self.subTest(command):
                 self.assertEqual(kind(command), "none")
 
     def test_each_start_form_asks(self):
-        self.assertEqual(len(self.STARTS), 68, "the premise: every start form is here")
+        self.assertEqual(len(self.STARTS), 81, "the premise: every start form is here")
         for command, rule in self.STARTS:
             with self.subTest(command):
                 verdict = ssh_consent.classify(command, parse)
-                self.assertEqual(verdict.kind, "read" if rule == "read-only remote" else "unknown")
+                self.assertEqual(verdict.kind, "read" if rule == "read-only remote" else
+                                 "write" if rule == "not on the read list" else "unknown")
                 self.assertIn(rule, verdict.why)
 
 

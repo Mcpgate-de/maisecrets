@@ -54,8 +54,8 @@ class ConsentReportTests(unittest.TestCase):
         self.assertEqual(result["write_hosts"], 2, "a write asks once per host and session: web1 once, web2 once")
         self.assertEqual([q["kind"] for q in result["questions"]], ["unknown"])
         code, text = self.run_report()
-        for host in ("web1", "web2", "web7", "web9", "reboot", "notes.md"):
-            self.assertNotIn(host, text)
+        for host in ("web1", "web2", "web7", "web9", "reboot", "notes.md", str(self.home)):
+            self.assertNotIn(host, text)        # no host, command, or path of the person's (codex, round 4)
 
     def test_the_windows_go_into_a_new_file_of_the_persons_own(self):
         target = self.home / "windows.jsonl"
