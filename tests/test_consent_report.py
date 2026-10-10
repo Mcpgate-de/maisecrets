@@ -89,6 +89,16 @@ class ConsentReportTests(unittest.TestCase):
         self.assertEqual(consent_report._reason("the option \"x=hidden\" and 'y' end"), "the option '…' and '…' end")
         self.assertEqual(consent_report._reason("'ssh' as an argument of acme-billing-prod, which can start it"),
                          "'…' as an argument of …, which can start it")
+        # Opus, review round 3: a host as the program word, also one that the check's own source names
+        for program in ("root@web1:~#", "deploy@db1", "web1", "host"):
+            with self.subTest(program):
+                self.assertEqual(consent_report._reason(f"'ssh' as an argument of {program}, which can start it"),
+                                 "'…' as an argument of …, which can start it")
+        self.assertEqual(consent_report._reason("'ssh' started by tmux"), "'…' started by tmux")
+        for why in ("'ssh' in a line that runs a command word it builds at run time", "'ssh' in a gh command that runs "
+                    "a program", "a command over 8192 characters that names ssh"):
+            with self.subTest(why):
+                self.assertEqual(consent_report._reason(why), why.replace("'ssh'", "'…'"), "the reason stays")
 
     def test_a_record_of_another_shape_is_skipped(self):
         folder = self.home / "projects" / "p1"

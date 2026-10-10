@@ -67,16 +67,36 @@ def _commands(path: Path) -> list[str]:
 
 
 _VOCABULARY: set = set()
+# the slot of a reason that names the program the check saw: `argument of X`, `started by X`, `URL for X`, …
+_PROGRAM_SLOT = re.compile(r"(argument of|started by|URL for|piped into|pipes text into|code that) ([^\s,]+)|"
+                           r"(in a) ([^\s,]+)(?= command that runs)")
+
+
+def _known_programs() -> set:
+    return (ssh_consent._LAUNCHERS | ssh_consent._SHELLS | ssh_consent._URL_CLIENTS | ssh_consent._CONTAINER_EXEC
+            | ssh_consent._RUN_TEXT | {"gh", "glab", "git", "find", "xargs", "parallel", "crontab", "at", "batch"})
 
 
 def _reason(why: str) -> str:
-    """The reason with its quoted parts removed and every word the check's own source does not hold replaced: a reason
-    names the program it saw (./acme-billing-prod), and that name is the person's (codex and Opus, review of #15)."""
+    """The reason with no host, command or value of the person's: the program slot keeps a name only from a closed
+    list of program names (./acme-billing-prod, root@web1:~# are the person's); a quoted part goes; and, as a second
+    layer, a word that holds a host character (@ : ~ / #) or that the check's own source does not hold goes too
+    (codex and Opus, review of #15)."""
     if not _VOCABULARY:
         _VOCABULARY.update(w.lower() for w in re.findall(r"[A-Za-z][\w.-]*", Path(ssh_consent.__file__).read_text(
             encoding="utf-8")))
-    text = re.sub(r"'[^']*'|\"[^\"]*\"", "'…'", why or "")
-    return re.sub(r"[A-Za-z0-9][\w./-]*", lambda w: w.group(0) if w.group(0).lower() in _VOCABULARY else "…", text)
+    known = _known_programs()
+    def slot(m: re.Match) -> str:
+        verb, name = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
+        return f"{verb} {name if name.lower() in known else '…'}"
+    text = _PROGRAM_SLOT.sub(slot, why or "")
+    text = re.sub(r"'[^']*'|\"[^\"]*\"", "'…'", text)
+    def word(w: re.Match) -> str:
+        x = w.group(0)
+        kept = x in ("~/.ssh", "~/.ssh,") or x.isdigit() or re.fullmatch(r"[A-Za-z][A-Za-z-]*\.?", x) \
+            and x.rstrip(".").lower() in _VOCABULARY
+        return x if kept else "…"
+    return re.sub(r"[^\s,'…]+", word, text)
 
 
 def _excerpt(cmd: str, why: str) -> str:

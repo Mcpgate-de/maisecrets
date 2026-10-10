@@ -376,6 +376,10 @@ class VisibleIntentTests(unittest.TestCase):
         "cargo add ssh", "cp ssh /tmp/", "chmod 600 ssh", "tox -e ssh", "cargo test -- ssh",
         "python3 -c 'ssh = None; print(ssh)'", "git -c color.ui=never commit -m 'docs: ssh'",
         "printf '[run]\\nomit = ssh\\n' > .coveragerc",
+        # review round 3 (Opus): a run verb's program that takes the word as an option value, a listing, a session
+        # command of a multiplexer, a name that holds .ssh
+        "uv run pytest -k ssh", "tree -L 2 ssh", "fd ssh", "tmux attach -t ssh", "screen -r ssh",
+        "terraform plan -target=module.ssh",
     ]
 
     # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
@@ -432,16 +436,19 @@ class VisibleIntentTests(unittest.TestCase):
         ("(crontab -l; echo '0 * * * * ssh web1 x') | crontab -", "piped into crontab"),
         ("distrobox enter x -- 'ssh web1 touch x'", "the code that distrobox runs"),
         ("git -c alias.x='!ssh web1' x", "git command"),
+        # review round 3 (Opus): more launchers, a -- after a manage verb, a URL that open hands on
+        ("xvfb-run -a ssh web1 touch x", "started by xvfb-run"), ("pueue add -- ssh web1 touch x", "started by pueue"),
+        ("open ssh://web1", "URL for open"),
     ]
 
     def test_a_mention_that_starts_nothing_does_not_ask(self):
-        self.assertEqual(len(self.MENTIONS), 41, "the premise: every measured shape is here")
+        self.assertEqual(len(self.MENTIONS), 47, "the premise: every measured shape is here")
         for command in self.MENTIONS:
             with self.subTest(command):
                 self.assertEqual(kind(command), "none")
 
     def test_each_start_form_asks(self):
-        self.assertEqual(len(self.STARTS), 56, "the premise: every start form is here")
+        self.assertEqual(len(self.STARTS), 59, "the premise: every start form is here")
         for command, rule in self.STARTS:
             with self.subTest(command):
                 verdict = ssh_consent.classify(command, parse)

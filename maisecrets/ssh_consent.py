@@ -435,7 +435,10 @@ _LAUNCHERS = {"env", "xargs", "timeout", "nohup", "exec", "nice", "ionice", "chr
               "su", "runuser", "unbuffer", "torsocks", "proxychains", "proxychains4", "tsocks", "strace", "nsenter",
               "chroot", "firejail", "unshare", "systemd-run", "expect", "sudo", "doas", "pkexec", "open", "xterm",
               "gtimeout", "hyperfine", "entr", "sg", "nix-shell", "gnome-terminal", "konsole", "alacritty", "wezterm",
-              "kitty", "ssh-agent", "rlwrap", "noglob", "coproc"}
+              "kitty", "ssh-agent", "rlwrap", "noglob", "coproc", "xvfb-run", "tsp", "nq", "pueue"}
+# session commands of a terminal multiplexer: they attach or list, and start no program (tmux attach -t ssh)
+_SESSION_ONLY = {"attach", "a", "attach-session", "kill-session", "ls", "list-sessions", "has-session", "-r", "-x",
+                 "-ls", "-list", "-d"}
 _CONTAINER_EXEC = {"docker", "podman", "nerdctl", "kubectl", "lxc"}
 # commands that search, show, list or look up: an ssh word as their argument is data (grep ssh README.md, which ssh)
 _LOOKS_UP = {"cd", "ls", "cat", "less", "more", "head", "tail", "which", "whereis", "type", "hash", "man", "info",
@@ -443,7 +446,7 @@ _LOOKS_UP = {"cd", "ls", "cat", "less", "more", "head", "tail", "which", "wherei
              "pip3", "brew", "apt", "apt-get", "apk", "dnf", "yum", "port", "npm", "pnpm", "yarn", "cargo", "rustup",
              "find", "locate", "mdfind", "jq", "yq", "diff", "cp", "mv", "rm", "touch", "mkdir", "chmod", "chown",
              "ln", "tar", "zip", "unzip", "sed", "systemctl", "service", "ufw", "vim", "vi", "nano", "emacs", "code",
-             "subl", "helm"} | _CONTAINER_EXEC
+             "subl", "helm", "tree", "fd", "ansible-doc"} | _CONTAINER_EXEC
 # interpreters: their code is outside C21 (docs/THREAT-MODEL.md), so a word in it is no start this check reads
 _INTERPRETERS = {"python", "python3", "node", "nodejs", "ruby", "perl", "php", "lua", "rscript", "julia", "deno", "bun",
                  "awk", "gawk", "osascript", "java", "groovy", "tclsh", "pwsh"}
@@ -475,7 +478,7 @@ _GIT_PROGRAM_KEY = re.compile(r"(?i)^(?:alias\.|core\.(?:editor|pager|hookspath|
 _GH_RUNS = {"codespace", "extension", "alias"}
 # programs that connect to an scp://, sftp:// or ssh:// URL themselves (git over ssh is outside C21)
 _URL_CLIENTS = {"curl", "docker", "podman", "nerdctl", "lftp", "rclone", "duplicity", "restic", "borg", "kubectl",
-                "helm", "ansible", "ansible-playbook", "virsh", "ncftp", "gio"}
+                "helm", "ansible", "ansible-playbook", "virsh", "ncftp", "gio", "open", "xdg-open"}
 
 
 def _base(word: str) -> str:
@@ -658,7 +661,7 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         return f"'{raw}' in a variable the command reads as a program"
     if _PROGRAM_OPTION.search(command[seg["start"]:pos]):
         return f"'{raw}' as the program of an option"
-    if cmd in _LAUNCHERS and not searched:
+    if cmd in _LAUNCHERS and not searched and not (cmd in ("tmux", "screen") and set(words[1:2]) & _SESSION_ONLY):
         return f"'{raw}' started by {cmd}"
     if cmd == "find" and any(w in _FIND_EXEC for w in words) and \
             min((command.find(w, seg["start"]) for w in _FIND_EXEC if w in words), default=pos) < pos:
@@ -713,8 +716,12 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         k_word = next((j for j, w in enumerate(words) if w.lower() == word), -1)
         before_word = [w.lower() for w in words[1:k_word]] if k_word > 0 else []
         prev = words[k_word - 1] if k_word > 0 else ""
-        after_option = len(prev) == 2 and prev.startswith("-") and prev != "--" and not set(before_word) & _RUN_VERBS
-        if k_word > 0 and not after_option and not set(before_word) & _MANAGE_VERBS:
+        # uv run --no-sync ssh: the run verb's flags; uv run pytest -k ssh: pytest's option (Opus, review round 3)
+        run_at = max((j for j, w in enumerate(before_word) if w in _RUN_VERBS), default=-1)
+        direct_run = run_at >= 0 and all(w.startswith("-") for w in before_word[run_at + 1:])
+        after_option = len(prev) == 2 and prev.startswith("-") and prev != "--" and not direct_run
+        managed = set(before_word) & _MANAGE_VERBS and prev != "--"     # pueue add -- ssh runs it
+        if k_word > 0 and not after_option and not managed:
             return f"'{raw}' as an argument of {cmd}, which can start it"
     # an alias of the word that the same line starts: alias go=ssh; go host
     for a in _ALIAS_RE.finditer(command):
@@ -829,7 +836,7 @@ def classify(command: str, parse: Parser) -> Verdict:
     # a change that can reach ~/.ssh (its config retargets every alias): a mention of .ss… outside an ssh, autossh or
     # mosh call is allowed only in a command that only reads, and no redirect may point into it. A list of writers
     # was never complete (rsync, tar -C, patch …; codex review of the repair), so the reads are listed instead
-    for m in re.finditer(r"\.ss", command, re.I):
+    for m in re.finditer(r"(?<![\w-])\.ss", command, re.I):
         sg = next((x for x in segs if x["start"] <= m.start() < x["end"]), None)
         if sg and sg.get("cmd", "").lower() in ("ssh", "autossh", "mosh") and any(a <= m.start() < b for a, b in spans):
             continue                         # an option value (-i ~/.ssh/key) or a path on the remote side
