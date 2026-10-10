@@ -396,6 +396,9 @@ class VisibleIntentTests(unittest.TestCase):
         "uv run pytest tests/ssh -q", "bundle exec rspec spec/ssh", "tmux new-session -d -s ssh",
         # review round 7 (codex): a backtick in single quotes is text
         "gh issue create --title docs --body 'Use `ssh` to connect.'",
+        # review round 8 (Opus, codex): pytest -v is no printf -v; a commit message next to a git -c program key
+        "pytest -v tests && git commit -m 'Use `ssh` for deploys'", "git -c core.editor=vim commit -m 'fix ssh parser'",
+        "[ -v HOME ] && git commit -m 'use `ssh` now'",
     ]
 
     # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
@@ -495,16 +498,19 @@ class VisibleIntentTests(unittest.TestCase):
         ("tmux new-window -n ssh 'ssh web1'", "started by tmux"), ("docker exec c1 ssh web1 -- ls", "in a container"),
         ("docker --host=ssh://web1 ps", "URL for docker"), ("fish -C'ssh web1 uptime'", "nested shell"),
         ("uv run ./build/ssh web1 uptime", "argument of uv"),
+        # review round 8 (Opus, codex): a here-string into a shell, a trap's code, env -S
+        ("bash <<< 'ssh web1 uptime'", "here-string"), ("trap 'ssh web1 touch x' EXIT", "trap"),
+        ("env -S 'ssh host'", "env -S"),
     ]
 
     def test_a_mention_that_starts_nothing_does_not_ask(self):
-        self.assertEqual(len(self.MENTIONS), 71, "the premise: every measured shape is here")
+        self.assertEqual(len(self.MENTIONS), 74, "the premise: every measured shape is here")
         for command in self.MENTIONS:
             with self.subTest(command):
                 self.assertEqual(kind(command), "none")
 
     def test_each_start_form_asks(self):
-        self.assertEqual(len(self.STARTS), 95, "the premise: every start form is here")
+        self.assertEqual(len(self.STARTS), 98, "the premise: every start form is here")
         for command, rule in self.STARTS:
             with self.subTest(command):
                 verdict = ssh_consent.classify(command, parse)

@@ -716,7 +716,9 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     if "${(e)" not in command:
         before = re.sub(r"\\[`$]", "", before)        # "use \`ssh\` config": an escaped backtick is text
     before = before.replace("\\", "")
-    evaluated = "${(e)" in command or re.search(r"(?:printf|test|\[)\s[^;|&]*-['\"]*v", command)
+    own_part = command[seg["start"]:seg["end"]] if seg else command
+    evaluated = "${(e)" in command or re.search(r"(?:^|[\s;&|(])(?:printf|test|\[\[?)\s+(?:-\w+\s+)*-v\b",
+                                                re.sub(r"['\"]", "", own_part))   # not pytest -v (Opus, round 8)
     if word in _PROGRAM_WORDS and before.endswith(("$(", "`")) and (ctx != "sq" or evaluated):
         return f"'{raw}' in a command substitution"   # 'Use `ssh` …' in single quotes is text (codex, round 7)
     opener = max(command.rfind("$(", 0, pos), command.rfind("`", 0, pos))
@@ -753,6 +755,16 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         return f"'{raw}' where this hook cannot read the call"
     if _dynamic_word(command, seg):
         return f"'{raw}' in a command word built at run time"
+    if seg.get("env_split"):
+        return f"'{raw}' in the command env -S builds"                # env -S 'ssh host' (codex, round 8)
+    if cmd in _SHELLS | _RUN_TEXT and "<<<" in command[seg["start"]:pos]:
+        return f"'{raw}' in a here-string a shell runs"               # bash <<< 'ssh …' (Opus, round 8)
+    if cmd == "trap":
+        code = next((w for w in words[1:] if not w.startswith("-")), "")
+        if raw in code and classify(code, parse).kind != "none":
+            return f"'{raw}' in the code of a trap"                     # trap 'ssh …' EXIT (Opus, round 8)
+    if cmd == "git" and re.search(r"(?:^|\s)(?:-m|--message)[=\s]*['\"][^'\"]*$", command[seg["start"]:pos]):
+        return ""                            # the commit message names it (codex, round 8)
     if re.match(r"\s*command\s+-[vV]\b", command[seg["start"]:seg["end"]]):
         return ""                            # command -v ssh: a lookup
     # a search program that xargs or parallel runs takes the word as its argument: xargs -I{} grep ssh {}. Only
