@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## [0.6.11] - 2026-10-10
+
+### Features
+
+- consent-report shows what the ssh consent check would ask on your own sessions (2ea0184)
+
+### Fixes
+
+- the consent check reads a package manager's exec, long xargs options and a find -exec clause (f757dc6)
+- the consent check reads a here-string into a shell, a trap's code and env -S (c018436)
+- the consent check reads a session name, a -- and a URL option where they stand, and fish code glued to its option (c5f7d22)
+- the consent check finds a container's program by its place and a program path by its directory (8d6dc0e)
+- the consent check reads a shell's arguments, a container's inner command and a launcher's program (a16f23f)
+- the consent check reads a container command, a continued argument list and AppleScript the way the shell does (60f58c3)
+- the consent check sees ssh as a path, after an escape and in fish or AppleScript code, and no longer after a substitution in an argument (291ce37)
+- consent-report names no host in a reason, and the check reads a few more launchers and lookups (034c520)
+- the consent check reads launchers past their flags and stops asking for a daemon, a package or a file named like ssh (d822281)
+- the consent check asks for a launcher or a subcommand it does not know, and no longer for git's option words in a message (7da266c)
+- the ssh consent check asks where a command starts ssh, not where a command mentions it (9a04d72)
+
+### Other
+
+- Merge branch 'fix/c21-asks-on-visible-executable-intent' into 'main' (b06ab19)
+
 ## [0.6.10] - 2026-10-09
 
 ### Breaking
