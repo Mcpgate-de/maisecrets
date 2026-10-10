@@ -165,6 +165,9 @@ def run(args: list[str]) -> int:
                 new = set(v.hosts) - seen
                 write_hosts += len(new)      # without a consent, a write asks once per host and session
                 seen |= set(v.hosts)
+                if excerpts and new:         # a window for each question, the writes too (codex, round 7)
+                    windows.append(json.dumps({"kind": v.kind, "why": _reason(v.why), "excerpt": _excerpt(cmd, v.why)},
+                                              ensure_ascii=False))
             elif v.kind in ("unknown", "deny"):
                 reasons[(v.kind, _reason(v.why))] += 1
                 if excerpts:

@@ -62,9 +62,10 @@ class ConsentReportTests(unittest.TestCase):
         code, text = self.run_report("--excerpts", str(target))
         self.assertEqual(code, 0)
         self.assertNotIn("web9", text)
-        lines = target.read_text(encoding="utf-8").splitlines()
-        self.assertEqual(len(lines), 1)
-        self.assertIn("web9", json.loads(lines[0])["excerpt"])
+        lines = [json.loads(x) for x in target.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(sorted(x["kind"] for x in lines), ["unknown", "write", "write"],
+                         "a window for each question: one unknown, one write per new host and session")
+        self.assertIn("web9", next(x for x in lines if x["kind"] == "unknown")["excerpt"])
         if os.name == "posix":
             self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
         code, text = self.run_report("--excerpts", str(target))

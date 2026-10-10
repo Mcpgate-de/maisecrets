@@ -436,7 +436,7 @@ _LAUNCHERS = {"env", "xargs", "timeout", "nohup", "exec", "nice", "ionice", "chr
               "chroot", "firejail", "unshare", "systemd-run", "expect", "sudo", "doas", "pkexec", "open", "xterm",
               "gtimeout", "hyperfine", "entr", "sg", "nix-shell", "gnome-terminal", "konsole", "alacritty", "wezterm",
               "kitty", "ssh-agent", "rlwrap", "noglob", "coproc", "xvfb-run", "tsp", "nq", "pueue", "arch",
-              "dotenv"}
+              "dotenv", "taskset", "valgrind", "gdb", "lldb", "perf", "ltrace", "heaptrack", "numactl"}
 # session commands of a terminal multiplexer: they attach or list, and start no program (tmux attach -t ssh)
 _SESSION_ONLY = {"attach", "a", "attach-session", "kill-session", "ls", "list-sessions", "has-session", "-r", "-x",
                  "-ls", "-list", "-d"}
@@ -644,11 +644,10 @@ def _container_program_at(words: list[str]) -> int | None:
     rest = words[verb + 1:]
     if words[verb] == "unshare":
         return -1 if not rest or rest[0].startswith("-") else verb + 1
-    if "--" in rest:
-        k = rest.index("--")
-        return verb + 2 + k if k + 1 < len(rest) else -1
     seen = 0
     for j, w in enumerate(rest):
+        if w == "--":                        # kubectl exec pod -- ssh: only a -- before the program (Opus, round 7)
+            return verb + 2 + j if j + 1 < len(rest) else -1
         if w.startswith("-"):
             return -1
         seen += 1
@@ -717,8 +716,9 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     if "${(e)" not in command:
         before = re.sub(r"\\[`$]", "", before)        # "use \`ssh\` config": an escaped backtick is text
     before = before.replace("\\", "")
-    if word in _PROGRAM_WORDS and before.endswith(("$(", "`")):
-        return f"'{raw}' in a command substitution"
+    evaluated = "${(e)" in command or re.search(r"(?:printf|test|\[)\s[^;|&]*-['\"]*v", command)
+    if word in _PROGRAM_WORDS and before.endswith(("$(", "`")) and (ctx != "sq" or evaluated):
+        return f"'{raw}' in a command substitution"   # 'Use `ssh` …' in single quotes is text (codex, round 7)
     opener = max(command.rfind("$(", 0, pos), command.rfind("`", 0, pos))
     still_open = opener >= 0 and (")" not in command[opener:pos] if command[opener] == "$"
                                    else command.count("`", opener + 1, pos) % 2 == 0)
@@ -738,7 +738,8 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         # 4. a URL a program connects to itself (curl scp://, docker -H ssh://), as an argument of its own; in git, sed,
         # or a data value (url=ssh://…) it is text
         own = pos == 0 or command[pos - 1] in " \t\n" or command[pos - 1] in "\"'" and (
-            pos == 1 or command[pos - 2] in " \t\n=")
+            pos == 1 or command[pos - 2] in " \t\n=") or bool(re.search(r"(?:^|\s)-{1,2}[\w-]+=['\"]?$",
+                                                                     command[:pos]))
         return f"'{raw}' URL for {cmd}" if seg and own and cmd in _URL_CLIENTS else ""
     k = segs.index(seg) if seg else -1
     if seg and _quiet_continuation(command, segs, k, data_only):
@@ -766,8 +767,8 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         return f"'{raw}' in a variable the command reads as a program"
     if _PROGRAM_OPTION.search(command[seg["start"]:pos]):
         return f"'{raw}' as the program of an option"
-    session_name = cmd in ("tmux", "screen") and (set(words[1:2]) & _SESSION_ONLY or any(
-        words[j - 1] in ("-s", "-S", "-t", "-n") and _base(w) == word for j, w in enumerate(words) if j > 0))
+    session_name = cmd in ("tmux", "screen") and (set(words[1:2]) & _SESSION_ONLY or bool(re.search(
+        r"(?:^|\s)-[sStn]\s+['\"]?$", command[seg["start"]:pos])))   # this word names the session, not another one
     if cmd in _LAUNCHERS and not searched and not session_name:
         return f"'{raw}' started by {cmd}"
     if cmd == "find" and any(w in _FIND_EXEC for w in words) and \
@@ -854,7 +855,8 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         # a path that names a program directory (/usr/bin/ssh, ./bin/ssh) is the program: taskset -c 0 /usr/bin/ssh,
         # direnv exec . /usr/bin/ssh. Any other path is data: go build ./cmd/ssh, uv run pytest tests/ssh (codex and
         # Opus, review round 6)
-        path_only = pathed and prev != "--" and not re.search(r"(?:^|/)s?bin/$", command[left:pos])
+        path_only = pathed and prev != "--" and not direct_run and not re.search(r"(?:^|/)s?bin/$",
+                                                                                  command[left:pos])
         if cmd == "nix" and prev in ("-c", "--command"):
             after_option = False             # nix develop -c ssh, nix shell pkgs -c ssh (codex, review round 4)
         if k_word > 0 and not after_option and not managed and not path_only:
@@ -996,6 +998,14 @@ def classify(command: str, parse: Parser) -> Verdict:
         if why:
             calls.append(Call(m.group(0), "", "unknown", why))
             break
+    if not calls:
+        for sg in segs:                      # fish -C'ssh …': the code is glued to the option (codex, round 7)
+            words = sg.get("words") or []
+            if _base(sg.get("cmd", "")) in _SHELLS:
+                glued = [w[2:] for w in words[1:] if re.match(r"-[cC].", w) and not w.startswith("--")]
+                if any(classify(code, parse).kind != "none" for code in glued):
+                    calls.append(Call("ssh", "", "unknown", "an ssh-family start in the code of a nested shell"))
+                    break
     if not calls:
         return Verdict("none")
     worst = max(calls, key=lambda c: _RANK[c.kind])

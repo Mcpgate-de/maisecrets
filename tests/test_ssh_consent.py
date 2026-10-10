@@ -394,6 +394,8 @@ class VisibleIntentTests(unittest.TestCase):
         "docker compose exec web pytest -k ssh", "kubectl exec pod -- journalctl -u ssh", "watch -n 1 pgrep -af ssh",
         # review round 6 (Opus, codex): a test path after a run verb, a tmux session name
         "uv run pytest tests/ssh -q", "bundle exec rspec spec/ssh", "tmux new-session -d -s ssh",
+        # review round 7 (codex): a backtick in single quotes is text
+        "gh issue create --title docs --body 'Use `ssh` to connect.'",
     ]
 
     # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
@@ -487,17 +489,22 @@ class VisibleIntentTests(unittest.TestCase):
         ("podman unshare ssh web1 uptime", "in a container"),
         # review round 6 (Opus, codex): the shell's $0 repeats the program; a program path after an unknown launcher
         ("docker exec c1 sh -c 'ssh web1 touch x' sh", "in a container"),
-        ("taskset -c 0 /usr/bin/ssh web1 reboot", "argument of taskset"),
+        ("taskset -c 0 /usr/bin/ssh web1 reboot", "started by taskset"),
+        # review round 7 (Opus, codex): a session named like the word next to a real start, a -- after the
+        # container's program, a URL after an option's =, code glued to fish's option, a path at a run verb's place
+        ("tmux new-window -n ssh 'ssh web1'", "started by tmux"), ("docker exec c1 ssh web1 -- ls", "in a container"),
+        ("docker --host=ssh://web1 ps", "URL for docker"), ("fish -C'ssh web1 uptime'", "nested shell"),
+        ("uv run ./build/ssh web1 uptime", "argument of uv"),
     ]
 
     def test_a_mention_that_starts_nothing_does_not_ask(self):
-        self.assertEqual(len(self.MENTIONS), 70, "the premise: every measured shape is here")
+        self.assertEqual(len(self.MENTIONS), 71, "the premise: every measured shape is here")
         for command in self.MENTIONS:
             with self.subTest(command):
                 self.assertEqual(kind(command), "none")
 
     def test_each_start_form_asks(self):
-        self.assertEqual(len(self.STARTS), 90, "the premise: every start form is here")
+        self.assertEqual(len(self.STARTS), 95, "the premise: every start form is here")
         for command, rule in self.STARTS:
             with self.subTest(command):
                 verdict = ssh_consent.classify(command, parse)
