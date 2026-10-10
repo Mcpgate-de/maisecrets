@@ -784,10 +784,16 @@ def cmd_repair(_: list[str]) -> int:
     return 0
 
 
+def cmd_consent_report(args: list[str]) -> int:
+    from . import consent_report
+    return consent_report.run(args)
+
+
 COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_resolve, "audit": cmd_audit,
             "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
             "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut,
-            "forget": cmd_forget, "guard": cmd_guard, "settings": cmd_settings}
+            "forget": cmd_forget, "guard": cmd_guard, "settings": cmd_settings,
+            "consent-report": cmd_consent_report}
 
 
 def _stdin_words() -> list[str]:
@@ -807,7 +813,8 @@ def main(argv: list[str] | None = None) -> int:
         print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | audit [n]\n"
               "           | report [last|n|bug|feature|incident] [text] | expire | scan [text] | config\n"
               "           | settings [--all]"
-              " | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>")
+              " | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>\n"
+              "           | consent-report ssh [--last 30d|N] [--json] [--excerpts FILE]")
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])

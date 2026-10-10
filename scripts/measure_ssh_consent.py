@@ -2,6 +2,13 @@
 """Measure what ssh consent (#8) would do with the ssh commands an agent really ran: how often it would ask.
 
     python3 scripts/measure_ssh_consent.py [transcript-dir] [--skip-cwd TEXT]   # default: ~/.claude/projects
+        [--last N] [--code ROOT] [--dump FILE] [--excerpts FILE] [--json]
+
+`--last N` reads the N newest transcripts; `--code ROOT` takes the recognizer of another checkout (a release), so
+two runs compare old and new on the same transcripts; `--dump FILE` writes a hash, the kind and the reason per
+command (no command); `--excerpts FILE` writes a short masked window around the word of each question that cannot
+be read, for labelling by hand. Both files stay local; nothing of them goes into the repository. `--json`
+prints the same numbers as one JSON object, for a script that compares two runs.
 
 It reads the Bash calls in Claude Code transcripts, classifies each one that names ssh (maisecrets/ssh_consent.py)
 and replays the consents per session: a write asks once per host (or group of hosts), a form the hook cannot read
@@ -20,6 +27,7 @@ from __future__ import annotations
 
 import collections
 import glob
+import hashlib
 import json
 import os
 import re
@@ -29,9 +37,12 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# --code ROOT: the recognizer of another checkout (a release), to compare it with this one on the same transcripts
+if "--code" in sys.argv:
+    ROOT = Path(sys.argv[sys.argv.index("--code") + 1]).resolve()
 os.environ["MAISECRETS_HOME"] = tempfile.mkdtemp(prefix="maisecrets-measure-")   # never the real store
 sys.path.insert(0, str(ROOT))
-from maisecrets import hooks, ssh_consent  # noqa: E402
+from maisecrets import detect, hooks, ssh_consent  # noqa: E402
 
 
 def parse(text: str):
@@ -61,16 +72,41 @@ def commands(path: str, skip_cwd: str = "") -> list[str]:
     return out
 
 
+def _option(argv: list[str], name: str) -> tuple[str, list[str]]:
+    if name not in argv:
+        return "", argv
+    k = argv.index(name)
+    return (argv[k + 1] if k + 1 < len(argv) else ""), argv[:k] + argv[k + 2:]
+
+
+def _excerpt(cmd: str, why: str) -> str:
+    """A short window around the word the verdict names, with every detected value masked: for a person who labels
+    the questions by hand. Written only to a local file the caller names, never printed."""
+    word = re.search(r"'([^']*)'", why)
+    m = re.search(re.escape(word.group(1)), cmd) if word else ssh_consent._TOKEN_RE.search(cmd)
+    lo, hi = (max(0, m.start() - 60), min(len(cmd), m.end() + 60)) if m else (0, 120)
+    text = cmd[lo:hi]
+    for hit in sorted(detect.scan(text), key=lambda h: -len(h.value)):
+        text = text.replace(hit.value, "<value>")
+    return text.replace("\n", "\\n")
+
+
 def main(argv: list[str]) -> int:
-    skip = ""
-    if "--skip-cwd" in argv:
-        k = argv.index("--skip-cwd")
-        skip = argv[k + 1] if k + 1 < len(argv) else ""
-        argv = argv[:k] + argv[k + 2:]
+    skip, argv = _option(argv, "--skip-cwd")
+    _code, argv = _option(argv, "--code")
+    last, argv = _option(argv, "--last")
+    dump, argv = _option(argv, "--dump")
+    excerpts, argv = _option(argv, "--excerpts")
+    as_json = "--json" in argv
+    argv = [a for a in argv if a != "--json"]
     base = Path(argv[0]).expanduser() if argv else Path.home() / ".claude" / "projects"
     kinds, why, asks = collections.Counter(), collections.Counter(), []
     total = 0
-    for path in glob.glob(str(base / "*" / "*.jsonl")):
+    paths = sorted(glob.glob(str(base / "*" / "*.jsonl")), key=os.path.getmtime)
+    if last:
+        paths = paths[-int(last):]          # the newest sessions
+    rows = []
+    for path in paths:
         cmds = commands(path, skip)
         if not cmds:
             continue
@@ -80,6 +116,9 @@ def main(argv: list[str]) -> int:
             total += 1
             v = ssh_consent.classify(cmd, parse)
             kinds[v.kind] += 1
+            if dump or excerpts:
+                rows.append((hashlib.sha256(cmd.encode()).hexdigest()[:16], v.kind,
+                             re.sub(r"'[^']*'", "'…'", v.why or ""), cmd, v.why or ""))
             if v.kind in ("write", "unknown", "deny"):
                 why[(v.kind, re.sub(r"'[^']*'", "'…'", v.why))] += 1
             if v.kind == "unknown":
@@ -91,15 +130,39 @@ def main(argv: list[str]) -> int:
     if not total:
         print("no ssh command found")
         return 0
+    asks.sort()
+    if as_json:                          # the same numbers for a script that compares two runs
+        print(json.dumps({"sessions": len(asks), "calls": total, "kinds": dict(kinds), "questions": sum(asks),
+                          "median": statistics.median(asks), "p90": asks[int(0.9 * len(asks))], "max": asks[-1],
+                          "reasons": [{"kind": k, "why": w, "n": n} for (k, w), n in why.most_common()]}))
+    else:
+        _print_summary(kinds, why, asks, total)
+    _write_files(rows, dump, excerpts)
+    return 0
+
+
+def _print_summary(kinds, why, asks, total) -> None:
     print(f"sessions with ssh: {len(asks)}, calls: {total}")
     for k, n in kinds.most_common():
         print(f"  {k:8} {n:6}  {100 * n / total:5.1f} %")
-    asks.sort()
     print(f"questions per session: median {statistics.median(asks)}, 90th percentile {asks[int(0.9 * len(asks))]}, "
           f"at most {asks[-1]}, {sum(asks)} in all")
     for (k, w), n in why.most_common(10):
         print(f"  {n:6}  {k:8} {w}")
-    return 0
+
+
+def _write_files(rows, dump, excerpts) -> None:
+    if dump:
+        # per command: a hash, the kind and the reason, never the command: two runs on the same transcripts (this
+        # checkout and --code of a release) compare command by command
+        with open(dump, "w", encoding="utf-8") as f:
+            for h, kind, reason, _cmd, _why in rows:
+                f.write(json.dumps({"h": h, "kind": kind, "why": reason}) + "\n")
+    if excerpts:
+        with open(excerpts, "w", encoding="utf-8") as f:
+            for h, kind, reason, cmd, raw in rows:
+                if kind == "unknown":
+                    f.write(json.dumps({"h": h, "why": reason, "excerpt": _excerpt(cmd, raw)}) + "\n")
 
 
 if __name__ == "__main__":

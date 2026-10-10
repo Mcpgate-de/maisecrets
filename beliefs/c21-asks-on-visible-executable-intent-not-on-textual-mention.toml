@@ -1,0 +1,21 @@
+# c21-asks-on-visible-executable-intent-not-on-textual-mention: an invariant belief. One goal, two directions; each mutation removes one and must turn at least one owning test red, and each owning test must be red under at least one mutation.
+belief = "c21-asks-on-visible-executable-intent-not-on-textual-mention"
+kind = "invariant"
+control = "C21"
+statement = "With ssh_consent on, an ssh-family word asks where the shell, or a program the line names, starts it (the command word, a launcher, find -exec, a nested shell or its heredoc, a command substitution, a command word built at run time, a file or pipe a shell runs, a URL a client connects to, a program option, gh codespace or alias, a startup file); a mention that starts nothing (a search, a path, a comment, a commit message, a URL in git or a text, the code of an interpreter) does not ask."
+runner = [
+  "tests/test_ssh_consent.py::VisibleIntentTests::test_a_mention_that_starts_nothing_does_not_ask",
+  "tests/test_ssh_consent.py::VisibleIntentTests::test_each_start_form_asks",
+]
+
+[[proof]]
+path = "a mention asks again, as the airbag of 0.6.10 did"
+file = "maisecrets/ssh_consent.py"
+find = "        why = _starts_here(command, segs, ctxs, m, parse, fed_by_heredoc, piped_on, data_only)"
+replace = "        why = _starts_here(command, segs, ctxs, m, parse, fed_by_heredoc, piped_on, data_only) or \"a mention\""
+
+[[proof]]
+path = "a start form that is not a call is missed"
+file = "maisecrets/ssh_consent.py"
+find = "        why = _starts_here(command, segs, ctxs, m, parse, fed_by_heredoc, piped_on, data_only)"
+replace = "        why = \"\""

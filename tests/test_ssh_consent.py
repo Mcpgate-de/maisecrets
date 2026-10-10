@@ -106,6 +106,13 @@ class ClassifierMatrixTests(unittest.TestCase):
             "git commit -F - <<'EOF'\nfix the ssh docs\nEOF\n",
             "pkill -f \"ssh -N tunnel\"",
             "# ssh web1 reboot\nls",
+            # #15: C21 asks on visible executable intent, not on textual mention. These asked before: a search, a
+            # text field, a quoted word of an unknown program, a word after a command that only shows text, and a
+            # program an interpreter starts (python, node: outside C21, docs/THREAT-MODEL.md)
+            "grep ssh README.md", 'gh issue create --label "ssh web1 reboot"',
+            'gh repo create x -d "ssh web1 reboot"', '/tmp/gh issue create -b "ssh web1 reboot"',
+            'timeout 5 echo "ssh web1"', "grep 'ssh' f ${IFS}x",
+            "python3 -c \"import os; os.system('ssh web1 reboot')\"",
         ],
         "read": [
             "ssh web1 uptime", "ssh web1 'df -h'", "ssh web1 'systemctl is-active nginx'", "ssh web1 -- uptime",
@@ -193,9 +200,9 @@ class ClassifierMatrixTests(unittest.TestCase):
             "sort --compress-program=ssh f", "curl -T payload scp://web1/etc/cron.d/x",
             "curl -Q 'rm /etc/x' sftp://web1/", "gh codespace ssh -c cs1 -- sudo reboot",
             'GIT_SSH_COMMAND="ssh web1 reboot;:" gh repo clone git@github.com:o/r', "gh alias set x 'codespace ssh'",
-            "gh extension exec ssh", "true ssh web1 reboot", "grep -r ssh . > ~/.bashrc",
-            'echo "ssh web1 reboot" >> ~/.bashrc', "grep ssh README.md", 'gh issue create --label "ssh web1 reboot"',
-            "glab alias set y '!ssh web1 uptime'", 'gh repo create x -d "ssh web1 reboot"',
+            "gh extension exec ssh", "grep -r ssh . > ~/.bashrc", "true ssh web1 reboot",
+            'echo "ssh web1 reboot" >> ~/.bashrc',
+            "glab alias set y '!ssh web1 uptime'",
             'xargs -I{} ssh {} reboot < hosts',
             # round 3 (codex, Opus): a text mention whose line runs something else, or a command that runs its text
             'ag --pager "ssh web1 reboot" x .', 'sort --compress-prog "ssh" f', 'rg --hostname-bin "ssh" x',
@@ -203,12 +210,12 @@ class ClassifierMatrixTests(unittest.TestCase):
             "git bisect run ssh web1 reboot", 'git difftool --extcmd "ssh web1 reboot" HEAD',
             'git filter-branch --tree-filter "ssh://x; ssh web1 reboot" HEAD',
             'gh issue create -t x -b "ssh web1 reboot" || $_', 'gh() { eval "$4"; }; gh issue create -b "ssh web1"',
-            '/tmp/gh issue create -b "ssh web1 reboot"', '$(echo "ssh web1 reboot")', 'x=$(echo "ssh web1"); $x',
+            '$(echo "ssh web1 reboot")', 'x=$(echo "ssh web1"); $x',
             'printf -v c "ssh web1 reboot"; $c', 'sort -o /tmp/x.sh <<< "ssh web1 reboot"; bash /tmp/x.sh',
             'bash <(echo "ssh web1 reboot")', 'echo "ssh web1 reboot"; $_', 'echo "$(ssh web1 reboot)"',
             'echo "`ssh web1 reboot`"', "echo \"$(sh -c 'ssh web1 reboot')\"",
             "gh issue create -b \"$(sh -c 'ssh web1 reboot')\"", 'BROWSER="ssh web1" gh issue create -w',
-            'timeout 5 echo "ssh web1"', "grep 'ssh' f ${IFS}x",
+
             'gh issue create -b "ssh web1 reboot"; gh issue view 1 | sh', 'echo "ssh web1 reboot"; fc -s',
             # round 4 (Opus): -v takes an array name, and zsh runs the $(…) in its subscript
             "printf -v 'a[$(ssh web1 reboot)]' x", "test -v 'a[$(ssh web1 reboot)]'", "[ -v 'a[$(ssh web1 reboot)]' ]",
@@ -222,7 +229,6 @@ class ClassifierMatrixTests(unittest.TestCase):
             "$(which ssh) web1 reboot", "`which ssh` web1 reboot", "S=ssh; $S web1 reboot",
             "${SSH:-ssh} web1 reboot", "alias s=ssh; s web1 reboot", "xargs ssh web1 < cmds",
             "find . -exec ssh web1 reboot \\;", "watch ssh web1 reboot",
-            "python3 -c \"import os; os.system('ssh web1 reboot')\"",
             "echo \"ssh web1 reboot\" | bash", "cat <<'EOF' | bash\nssh web1 reboot\nEOF\n",
             "git -c alias.x='!ssh web1 reboot' x", "GIT_SSH_COMMAND='ssh -i k' git push",
             "git -c core.sshCommand='ssh -o ProxyCommand=x' push", "RSYNC_RSH=ssh rsync -a . web1:/x",
@@ -330,6 +336,195 @@ class ClassifierMatrixTests(unittest.TestCase):
                               ("ssh -- web1 -l root uptime", "web1")):
             with self.subTest(command):
                 self.assertEqual(ssh_consent.classify(command, parse).hosts, [host])
+
+
+class VisibleIntentTests(unittest.TestCase):
+    """C21 asks on visible executable intent, not on textual mention (Mcpgate-de/maisecrets#15: an autonomous run
+    waited all night on a question for the word "SSH" in a Python heredoc). MENTIONS are the shapes measured in real
+    sessions, written with synthetic hosts; STARTS are the forms in which the shell, or a program the line names,
+    starts the word."""
+
+    MENTIONS = [
+        # a search, a listing, a path with the word in it
+        'grep -n "ssh host1" scripts/*.sh', "grep -rn ssh docs | head -5", "cd /work/ms-ssh && git status",
+        "ls /work/ms-ssh/tests", "sed -n 1,80p NOTES.md | grep -n -i 'log\\|ssh' | head -30",
+        'ps aux | grep -i -E "tunnel|ssh .*-R" | grep -v grep | head -3',
+        # a comment, a commit message, the text of a doc
+        "ls\n# the class rsync carried nothing away\npwd",
+        "git commit -q -F - <<'EOF'\nfix: the rsync of the classes deletes nothing\nEOF\n",
+        "cat > docs/setup.md <<'EOF'\nRepo: git clone ssh://git@example.org:8022/docs/x.git\nEOF\n",
+        # a Python edit script: interpreters are outside C21 (docs/THREAT-MODEL.md)
+        "python3 - <<'EOF'\ns = open('README.md').read()\n"
+        "open('README.md', 'w').write(s.replace('over SSH', 'over SSH and HTTPS'))\nEOF\n",
+        "python3 - <<'EOF'\nrows = [{'note': 'New SSH route through the sandbox'}]\nprint(len(rows))\nEOF\n",
+        # a URL: git over ssh is outside C21; in sed or in a data value it is text
+        "git clone -q ssh://git@example.org:8022/a/b.git && cd b",
+        "for r in a b; do d=$(basename $r); [ -d $d ] || git clone -q ssh://git@example.org:8022/$r.git $d; done",
+        "git remote set-url --push origin $(git remote get-url origin | sed -E "
+        "'s#https://example.org/#ssh://git@example.org:8022/#')",
+        'curl -s -X POST "https://example.org/api/mirrors" --data-urlencode "url=ssh://git@example.org/o/r.git"',
+        # review round 1 (codex, Opus): a commit message with git's option words, a lookup, an option value, a search
+        # that a launcher runs, a dot file nobody runs, a pipe into a program that only prints
+        "git commit -m 'docs: mention git -c and ssh'", 'git commit -m "feat(ssh)!: make ssh run faster"',
+        'git commit -m "add -x flag to ssh wrapper"', 'git commit -m "use \\`ssh\\` config"', "command -v ssh",
+        "which ssh", "man ssh", "pytest -k ssh", "git grep -n ssh", "xargs -I{} grep ssh {} < files.txt",
+        'echo "ssh" >> .gitignore', 'grep -rn "ssh" . | xargs -0 echo',
+        "grep -rn ssh src/ > /tmp/hits.txt && ./run.sh",
+        # review round 2 (codex, Opus): the daemon, a container or a package named like the word, a file tool, an
+        # option value, an interpreter's code, a git -c that names no program, a settings file nobody runs
+        "systemctl restart ssh", "service ssh restart", "docker logs ssh", "kubectl logs ssh", "npm install ssh",
+        "cargo add ssh", "cp ssh /tmp/", "chmod 600 ssh", "tox -e ssh", "cargo test -- ssh",
+        "python3 -c 'ssh = None; print(ssh)'", "git -c color.ui=never commit -m 'docs: ssh'",
+        "printf '[run]\\nomit = ssh\\n' > .coveragerc",
+        # review round 3 (Opus): a run verb's program that takes the word as an option value, a listing, a session
+        # command of a multiplexer, a name that holds .ssh
+        "uv run pytest -k ssh", "tree -L 2 ssh", "fd ssh", "tmux attach -t ssh", "screen -r ssh",
+        "terraform plan -target=module.ssh",
+        # the open points of 0.6.11: a path that names a directory or a log, an argument after a substitution, a test
+        # path, the program of a container that is not the word
+        "cat /etc/ssh/sshd_config", "nohup tail -f /var/log/ssh.log", "ls /usr/bin/ssh", "echo $(date) ssh",
+        "echo $(date) and $(whoami) ssh", "pytest ssh", "kubectl exec pod -- ls /etc/ssh",
+        "printf 'a\\nssh b\\n'", "flock /tmp/l cat /etc/ssh/sshd_config",
+        # review round 4 (codex, Opus): the last word of a path or a URL, a read of git config, a shell's positional
+        # argument, a lookup in a container
+        "curl https://example.org/docs/ssh", "go build ./cmd/ssh", "ruff check src/ssh", "du -sh /usr/bin/ssh",
+        "git config --get core.sshCommand", "bash -c 'printf %s \"$1\"' _ ssh", "docker exec c1 grep ssh /etc/passwd",
+        "watch curl https://example.org/docs/ssh",
+        # review round 5 (Opus, codex): a test filter in a container, a lookup a launcher starts
+        "docker compose exec web pytest -k ssh", "kubectl exec pod -- journalctl -u ssh", "watch -n 1 pgrep -af ssh",
+        # review round 6 (Opus, codex): a test path after a run verb, a tmux session name
+        "uv run pytest tests/ssh -q", "bundle exec rspec spec/ssh", "tmux new-session -d -s ssh",
+        # review round 7 (codex): a backtick in single quotes is text
+        "gh issue create --title docs --body 'Use `ssh` to connect.'",
+        # review round 8 (Opus, codex): pytest -v is no printf -v; a commit message next to a git -c program key
+        "pytest -v tests && git commit -m 'Use `ssh` for deploys'", "git -c core.editor=vim commit -m 'fix ssh parser'",
+        "[ -v HOME ] && git commit -m 'use `ssh` now'",
+        # review round 9 (codex): a search a find -exec clause runs
+        "find . -exec grep ssh {} +",
+    ]
+
+    # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
+    STARTS = [
+        # the command word, and a program that starts the program in its arguments
+        ("ssh web1 uptime", "read-only remote"), ("sshpass -p x ssh web1 uptime", "started as a program"),
+        ("xargs -I{} ssh {} reboot < hosts", "started by xargs"), ("find . -exec ssh web1 {} \\;", "started by find"),
+        ("docker exec c1 ssh web2 uptime", "in a container"), ("git rebase --exec 'ssh web1' HEAD~1", "of an option"),
+        ("gtimeout 10 ssh web1 touch x", "started by gtimeout"),
+        # 1. a command substitution, also in double quotes and in a -v array subscript
+        ('echo "$(ssh web1 reboot)"', "command substitution"), ("printf -v 'a[$(ssh web1 reboot)]' x", "substitution"),
+        ("echo \"$(sh -c 'ssh web1 reboot')\"", "command substitution"),
+        # 2. a command word built at run time. Deliberately broad: the line names the word, and no parser can tell
+        # which text $_, $x or eval runs, so `echo "ssh docs"; $S web1` asks too
+        ('S="ssh -o BatchMode=yes"; $S web1 uptime', "builds at run time"),
+        ('echo "ssh web1 reboot"; $_', "builds at run time"), ("R=rsync; $R -a . web1:/x", "builds at run time"),
+        ('gh() { eval "$4"; }; gh issue create -b "ssh web1"', "builds at run time"),
+        ('echo "ssh docs"; $S web1', "builds at run time"),
+        # 3. a shell runs the text: a nested shell (also after --), its heredoc, a pipe, a file the line wrote, <(…)
+        ("bash -c 'ssh web1 reboot'", "nested shell"), ("sh -c -- 'ssh web1 uptime'", "nested shell"),
+        ("bash -lc -- 'ssh web1 uptime'", "nested shell"),
+        ("bash <<'EOF'\nssh web1 reboot\nEOF\n", "heredoc of a shell"),
+        ("grep ssh hosts | sh", "piped into sh"), ("echo 'ssh web1 reboot' | xargs -L1 env", "piped into xargs"),
+        ("echo 'ssh web1 reboot' | parallel", "piped into parallel"),
+        ("echo ssh web1 reboot > /tmp/x; bash /tmp/x", "a later part runs"),
+        ('tee /tmp/x <<< "ssh web1 reboot"; bash /tmp/x', "a later part runs"),
+        ("bash <(echo 'ssh web1 reboot')", "process substitution"),
+        # quoted code another program runs
+        ("sg docker -c 'ssh web1 touch x'", "sg"), ('nix-shell -p x --run "ssh web1 touch x"', "nix-shell"),
+        ("op run -- ssh web1 touch x", "argument of op"),
+        # 4. a URL a program connects to itself
+        ("curl -T f scp://web1/tmp/f", "URL for curl"), ("docker -H ssh://web1 ps", "URL for docker"),
+        # 5. an option or a variable that names the program
+        ("rg --pre ssh . x", "of an option"), ('BROWSER="ssh web1" gh issue create -w', "in a variable"),
+        # 6. gh starts ssh itself, or makes an alias that runs it
+        ("gh codespace ssh -c cs1", "gh command"), ("gh alias set x '!ssh web1 reboot'", "gh command"),
+        # 7. a startup file a shell reads later, and an alias the same line starts
+        ('echo "ssh web1 reboot" >> ~/.bashrc', "startup file"), ("alias go='ssh'; go web1", "alias"),
+        # an unknown program that gets the word as an argument of its own: a launcher not on the list, a subcommand
+        ("uv run ssh web1 touch x", "argument of uv"), ("gcloud compute ssh vm1 --command 'touch x'", "of gcloud"),
+        ("vagrant ssh -c 'touch x'", "argument of vagrant"), ("tailscale ssh root@web1 x", "argument of tailscale"),
+        ("coproc NAME { ssh web1 touch x; }", "argument of name"), ("true ssh web1 reboot", "argument of true"),
+        # review round 2 (codex, Opus): a quoted word of its own, a run verb's flags, a launcher whose argument is
+        # named like a search, long xargs options, a quoted file name, a heredoc or a tee that writes, crontab
+        ("uv run 'ssh' web1 touch x", "argument of uv"), ("uv run --no-sync ssh web1 touch x", "argument of uv"),
+        ("gcloud compute --quiet ssh vm1 --command 'touch x'", "argument of gcloud"),
+        ("cpulimit -l 50 -- ssh web1 touch x", "argument of cpulimit"),
+        ("tmux new -s cat ssh web1 touch x", "started by tmux"), ("flock /var/lock/git ssh web1 x", "started by flock"),
+        ("printf 'ssh web1 touch x' | xargs --max-args 1 -0 sh -c", "piped into xargs"),
+        ("printf 'ssh web1 touch x' > '/tmp/run-me'; bash '/tmp/run-me'", "a later part runs"),
+        ("cat > run.sh <<'EOF'\nssh web1 touch x\nEOF\nbash run.sh", "a later part runs"),
+        ("cat >> ~/.bashrc <<'EOF'\nalias w='ssh web1'\nEOF\n", "startup file"),
+        ("echo 'alias w=\"ssh web1\"' | tee -a ~/.zshrc", "startup file"),
+        ("(crontab -l; echo '0 * * * * ssh web1 x') | crontab -", "piped into crontab"),
+        ("distrobox enter x -- 'ssh web1 touch x'", "the code that distrobox runs"),
+        ("git -c alias.x='!ssh web1' x", "git command"),
+        # review round 3 (Opus): more launchers, a -- after a manage verb, a URL that open hands on
+        ("xvfb-run -a ssh web1 touch x", "started by xvfb-run"), ("pueue add -- ssh web1 touch x", "started by pueue"),
+        ("open ssh://web1", "URL for open"),
+        # the open points of 0.6.11: fish's code options, a path to the program, an escape before the word, AppleScript
+        # that hands on shell code, git config with a program key
+        ("fish -C 'ssh web1 uptime'", "nested shell"), ("fish --init-command 'ssh web1 uptime'", "nested shell"),
+        ("find . -execdir /usr/bin/ssh web1 {} +", "started by find"), ("rg --pre /usr/bin/ssh . x", "of an option"),
+        ("uv run /usr/bin/ssh web1 x", "argument of uv"), ("/usr/bin/ssh web1 uptime", "read-only remote"),
+        ("printf '#!/bin/sh\\nssh web1 touch x\\n' > r.sh; sh r.sh", "a later part runs"),
+        ("osascript -e 'do shell script \"ssh web1 touch x\"'", "AppleScript"),
+        ("git config mergetool.x.cmd 'ssh web1 x'", "git command"),
+        # review round 4 (Opus, codex): a substitution in find's or a container's arguments, a newline after it, the
+        # text piped on; a container's program past its options, compose and global options; AppleScript in any
+        # spelling and JXA; fish with -C and -c; nix develop -c
+        ("find $(pwd) -exec ssh web1 touch x \\;", "can start it"),
+        ("echo $(true) ssh web1 touch x | sh", "not on the read list"),
+        ("echo $(date)\nssh web1 reboot", "not on the read list"),
+        ("docker exec -u root c1 ssh web1 touch x", "in a container"),
+        ("docker compose exec app ssh web1 touch x", "in a container"),
+        ("docker exec c1 sh -c 'ssh web1 touch x'", "in a container"),
+        ("kubectl --namespace prod exec pod -- ssh web1 reboot", "in a container"),
+        ("osascript -e 'DO SHELL SCRIPT \"ssh web1 touch x\"'", "AppleScript"),
+        ("osascript -e 'set c to \"ssh web1 touch x\"' -e 'do shell script c'", "AppleScript"),
+        ("osascript -l JavaScript -e 'app.doShellScript(\"ssh web1 touch x\")'", "AppleScript"),
+        ("fish -C 'set -gx X 1' -c 'ssh web1 reboot'", "nested shell"),
+        ("nix develop -c ssh web1 reboot", "argument of nix"), ("docker exec -u cat c1 ssh web1", "in a container"),
+        # review round 5 (Opus, codex): shell code that runs its arguments, a path after a run verb with a word
+        # between, git config --unset, an alias whose value starts a launcher, podman unshare
+        ("bash -c 'exec \"$@\"' _ ssh web1 touch x", "arguments a nested shell runs"),
+        ("bash -c '$1 web1 touch x' _ ssh", "arguments a nested shell runs"),
+        ("direnv exec . /usr/bin/ssh web1 touch x", "argument of direnv"),
+        ("arch -arm64 /usr/bin/ssh web1 touch x", "started by arch"),
+        ("git config --unset core.sshCommand", "sets the command"),
+        ("alias prod='command ssh'; prod web1 uptime", "alias"),
+        ("podman unshare ssh web1 uptime", "in a container"),
+        # review round 6 (Opus, codex): the shell's $0 repeats the program; a program path after an unknown launcher
+        ("docker exec c1 sh -c 'ssh web1 touch x' sh", "in a container"),
+        ("taskset -c 0 /usr/bin/ssh web1 reboot", "started by taskset"),
+        # review round 7 (Opus, codex): a session named like the word next to a real start, a -- after the
+        # container's program, a URL after an option's =, code glued to fish's option, a path at a run verb's place
+        ("tmux new-window -n ssh 'ssh web1'", "started by tmux"), ("docker exec c1 ssh web1 -- ls", "in a container"),
+        ("docker --host=ssh://web1 ps", "URL for docker"), ("fish -C'ssh web1 uptime'", "nested shell"),
+        ("uv run ./build/ssh web1 uptime", "argument of uv"),
+        # review round 8 (Opus, codex): a here-string into a shell, a trap's code, env -S
+        ("bash <<< 'ssh web1 uptime'", "here-string"), ("trap 'ssh web1 touch x' EXIT", "trap"),
+        ("env -S 'ssh host'", "env -S"),
+        # review round 9 (codex, Opus): a package manager's exec, a long xargs option, a redirect glued to the shell,
+        # at with a here-string, a shell in a find -exec clause
+        ("npm exec -- ssh web1", "argument of npm"), ("pnpm dlx ssh web1", "argument of pnpm"),
+        ("printf 'ssh web1' | xargs --delimiter x sh -c", "piped into xargs"),
+        ("bash<<<'ssh web1 touch x'", "here-string"), ("at now <<< 'ssh web1 touch x'", "here-string"),
+        ("find . -exec sh -c 'ssh web1 \"$1\"' _ {} \\;", "started by find"),
+    ]
+
+    def test_a_mention_that_starts_nothing_does_not_ask(self):
+        self.assertEqual(len(self.MENTIONS), 75, "the premise: every measured shape is here")
+        for command in self.MENTIONS:
+            with self.subTest(command):
+                self.assertEqual(kind(command), "none")
+
+    def test_each_start_form_asks(self):
+        self.assertEqual(len(self.STARTS), 104, "the premise: every start form is here")
+        for command, rule in self.STARTS:
+            with self.subTest(command):
+                verdict = ssh_consent.classify(command, parse)
+                self.assertEqual(verdict.kind, "read" if rule == "read-only remote" else
+                                 "write" if rule == "not on the read list" else "unknown")
+                self.assertIn(rule, verdict.why)
 
 
 class ConsentFlowTests(unittest.TestCase):

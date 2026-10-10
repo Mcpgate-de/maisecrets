@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 104 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 103 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -921,10 +921,8 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   a program that builds the sentence at run time and feeds it to a nested
   client (Codex does not say who wrote a prompt) can add a host; check the
   list in `/maisecrets:settings`.
-- **A form maisecrets cannot read asks every time.** An ssh word in a nested
-  shell (`bash -c`, `eval`, `xargs`, `find -exec`), a wrapper it does not
-  know (`sshpass`, `setsid`, `flock`), a word built at run time when `ssh`
-  is in its text (`$(which ssh)`, `S=ssh; $S`, `ssh $HOST`), two users or
+- **A form maisecrets cannot read asks every time.** A host built at run
+  time (`ssh $HOST`), two users or
   ports for one connection, `sudo -u` (another user's ssh config), an option that sends the
   connection elsewhere (`-J`, `-W`, `-S`, `-F`, `-o ProxyCommand`, `-o
   HostName`, `-o RemoteCommand`), `GIT_SSH_COMMAND`, `git -c core.sshCommand`,
@@ -936,22 +934,26 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   (`rsync`, `tar -C`, `ln -s` …), so only reads are listed (`cat`, `ls`,
   `grep`, `head`, `diff` …), and a redirect into `.ss…` asks too. Write and
   Edit on `~/.ssh` ask as well.
-- **The word ssh in quoted text runs freely, if every part of the line is a
-  text command:** a quoted argument of a command that only prints or searches
-  (`echo "use ssh"`, `grep "ssh" log`; not `rg`, `ag` or `sort`, which can
-  start a program), the quoted text field of a `gh` or `glab` issue, pr, mr
-  or release (`gh issue create --body "… ssh …"`), and the message of
-  `git commit -m` or `git tag -m`. Every part of the line must be one of these
-  commands, written as itself (no path, no variable, no wrapper), and outside
-  quotes the line has no `$`, backtick, parenthesis, brace or redirect (other
-  than `2>&1` or to `/dev/null`); inside double quotes a `$` comes only before
-  a name (`"$HOME"`); `printf` and `test` have no `-v`, which names a variable
-  the shell evaluates. Anywhere else, also unquoted
-  (`grep ssh README.md`) or in a heredoc, the hook cannot tell text from a call,
-  and it asks. A `#` comment is text only when no bracket, brace, parenthesis,
-  backslash or backtick comes before it in the command, and the command has no
-  carriage return: inside `(( ))`, `${ }` or `[[ ]]` the shell reads no comment
-  and runs what follows. The same holds for a heredoc.
+- **An ssh word asks only where a command starts it** (#15): as the command
+  word; after a launcher (`env`, `xargs`, `timeout`, `setsid`, `sshpass`,
+  `tmux` …) or as an argument of its own of any other program, unless it
+  follows an option (`pytest -k ssh`) or the program only searches, shows or
+  looks up (`grep`, `which`, `git`, `gh` …): `uv run ssh`, `gcloud compute
+  ssh`; in quoted code after `-c`, `--run` or `--`; in `find -exec`, `docker exec` or `git rebase --exec`; in the
+  code of `bash -c`, `fish -C` or `eval`, in a shell's heredoc and in the
+  shell code of AppleScript's `do shell script`; as a path (`/usr/bin/ssh`)
+  or after an escape in a string (`printf '…\nssh …'`); in a command
+  substitution, also inside double quotes; in a pipe into a shell; in a file
+  the line writes and then runs; as a URL that `curl` or `docker -H` connects
+  to; as the program of an option (`rg --pre`); in a variable before a
+  command (`BROWSER="ssh …"`); in a write to a startup file (`~/.bashrc`,
+  `.envrc`, `.git/hooks/…`); and in
+  any line that runs a command word it builds at run time (`S=ssh; $S web1`,
+  `…; $_`, `eval`), since no parser can tell which text that runs. A mention
+  that starts nothing does not ask: `grep ssh README.md`, a path such as
+  `~/work/ms-ssh`, a comment, a commit message, a `git clone ssh://…` URL,
+  or the word in Python code. A comment or heredoc whose end the parser cannot
+  be sure of still asks.
 - **A short deny list is always refused:** `mkfs` or `wipefs` on a device,
   `dd` to a device, `rm -rf /`, a fork bomb, anywhere in a command that names
   an ssh-family call (quotes removed; as a command word, not as a file name;
@@ -970,15 +972,34 @@ always, so most are writes (88 %), and the consent per host carries them. 112
 sessions with ssh, a median of 2 questions per session, 7 at the 90th
 percentile, 48 at most. The script ignores groups and the 8-hour expiry.
 
+The mention rule, on the newest 600 sessions without the maisecrets ones
+(2026-10-10): 0.6.10 asked 69 times, about 10 of them for a real reason;
+0.6.11 asks 10 times, 8 of them for a real reason (labelled by hand).
+
+**Check it on your own sessions.** `python3 -m maisecrets.cli consent-report
+ssh` reads the Claude Code transcripts of the last 30 days on this computer
+(`--last 7d`, or `--last 200` for the newest 200), classifies each command
+that names an ssh-family word, and prints counts per verdict and per reason,
+with no host, command or value. `--json` prints the same as JSON.
+`--excerpts FILE` writes a short window around each question into a new
+file of yours, to look at by hand: the values the detectors find are masked,
+hosts and commands stay in it, so share only what you may share. It runs
+nothing, changes no setting or consent, and sends nothing. Codex sessions are
+not read.
+
 A command name in another case (`SSH`, `Scp`) is the same program on macOS
 and in PowerShell, so it counts too. A command line over 8,192 characters
 that names ssh is not read at all: it asks (on Codex it is refused), so that
 the answer always comes before the client's timeout.
 
-Limits: maisecrets sees only the command text. A script file, an alias, a
-variable that holds `ssh` and was set in an earlier command, or a word built
-without the letters `ssh` in the text is not seen, and neither is a file that a
-heredoc writes and the same command then runs. A program that git or gh starts
+Limits: maisecrets sees only the command text, and checks the ssh-family
+starts that it shows. A program the line starts that starts ssh itself (a
+script, `make`, `npm run`, `python3 -c`, `node -e`), an alias or a variable
+set in an earlier command or in your profile, or a word built without the
+letters `ssh` in the text is not seen. The check is built against an agent
+that starts ssh openly without asking, not against one that tries to evade
+it; consent before any connection needs a network layer (a sandbox with a host
+allowlist). A program that git or gh starts
 from its own configuration (a hook, an editor, a signing program, a browser)
 is not checked; it gets the quoted text only as data. maisecrets reads the
 command with its own small shell parser; other shell syntax that it reads
