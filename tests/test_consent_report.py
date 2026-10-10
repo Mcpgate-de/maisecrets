@@ -123,6 +123,16 @@ class ConsentReportTests(unittest.TestCase):
         self.assertEqual(windows.count("<value>"), 1, "the premise: the detectors find the token")
         self.assertNotIn(token, windows)
 
+    def test_a_value_the_window_cuts_is_masked_whole(self):
+        # codex, review round 5: the window cut a token, and the detectors no longer saw the rest of it
+        token = "glp" + "at-" + "".join(random.choices(string.ascii_letters + string.digits, k=24))
+        for cmd in (f"x{'y' * 40} {token}; S=ssh; $S web9", f"S=ssh; $S web9 {'z' * 40} {token}x"):
+            with self.subTest(cmd[:10]):
+                excerpt = consent_report._excerpt(cmd, "'ssh' x")
+                self.assertIn("<value>", excerpt, "the premise: the window touches the token")
+                self.assertNotIn(token[-8:], excerpt)
+                self.assertNotIn(token[:12], excerpt)
+
     def test_a_wrong_argument_shows_the_usage(self):
         for args in (["--last", "x"], ["--last", "0"], ["--nope"]):
             with self.subTest(args):

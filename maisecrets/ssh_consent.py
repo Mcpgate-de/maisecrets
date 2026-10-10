@@ -435,7 +435,8 @@ _LAUNCHERS = {"env", "xargs", "timeout", "nohup", "exec", "nice", "ionice", "chr
               "su", "runuser", "unbuffer", "torsocks", "proxychains", "proxychains4", "tsocks", "strace", "nsenter",
               "chroot", "firejail", "unshare", "systemd-run", "expect", "sudo", "doas", "pkexec", "open", "xterm",
               "gtimeout", "hyperfine", "entr", "sg", "nix-shell", "gnome-terminal", "konsole", "alacritty", "wezterm",
-              "kitty", "ssh-agent", "rlwrap", "noglob", "coproc", "xvfb-run", "tsp", "nq", "pueue"}
+              "kitty", "ssh-agent", "rlwrap", "noglob", "coproc", "xvfb-run", "tsp", "nq", "pueue", "arch",
+              "dotenv"}
 # session commands of a terminal multiplexer: they attach or list, and start no program (tmux attach -t ssh)
 _SESSION_ONLY = {"attach", "a", "attach-session", "kill-session", "ls", "list-sessions", "has-session", "-r", "-x",
                  "-ls", "-list", "-d"}
@@ -577,6 +578,20 @@ def _writes_of(command: str, ctxs: list[str], sg: dict) -> list[str]:
     return [w for w in out if w]
 
 
+def _launched(words: list[str], word: str) -> str:
+    """The program a launcher starts, when it can be told: the first word that is no option, no number, no path and no
+    value of a two-letter option (watch -n 1 pgrep -af ssh: pgrep). "" when the word itself comes first (flock
+    /var/lock/x ssh) or when a two-letter option may take the program as its value (screen -S cat ssh)."""
+    for j, w in enumerate(words[1:], 1):
+        if w.startswith("-") or w.isdigit() or "/" in w:
+            continue
+        if _base(w) == word:
+            return ""
+        prev = words[j - 1]
+        return "" if len(prev) == 2 and prev.startswith("-") else _base(w)
+    return ""
+
+
 def _write_runs(command: str, ctxs: list[str], segs: list[dict], writers: list[dict], after: int, raw: str) -> str:
     """The word goes into a file a later part runs, or into a startup file (the writers: the part itself, a tee it is
     piped into, the command that owns its heredoc)."""
@@ -616,17 +631,24 @@ def _container_program(words: list[str]) -> str | None:
     """The program a container client starts, past its global options and `compose`: the word after --, else the
     word after the container or image. None when this is no exec, run or debug; "" when an option may hide the
     program (then the check asks). Not `kubectl exec pod -- ls /etc/ssh` (Opus and codex, review round 4)."""
-    verb = next((j for j, w in enumerate(words[1:], 1) if w in ("exec", "run", "debug") and "--" not in words[1:j]),
-                None)
+    verb = next((j for j, w in enumerate(words[1:], 1) if w in ("exec", "run", "debug", "unshare")
+                 and "--" not in words[1:j]), None)
     if verb is None:
         return None
     rest = words[verb + 1:]
+    if words[verb] == "unshare":             # podman unshare COMMAND: no container in between (codex, round 5)
+        return "" if any(w.startswith("-") for w in rest[:1]) else (rest[0] if rest else "")
     if "--" in rest:
         k = rest.index("--")
         return rest[k + 1] if k + 1 < len(rest) else ""
-    if any(w.startswith("-") for w in rest):
-        return ""                            # -u root, -v a:b, -w /app: an option may take a value
-    return rest[1] if len(rest) > 1 else ""
+    seen = 0
+    for w in rest:                           # the options before the program, not those of the program (pytest -k)
+        if w.startswith("-"):
+            return ""                        # -u root, -v a:b, -w /app: an option may take a value
+        seen += 1
+        if seen == 2:
+            return w
+    return ""
 
 
 def _quiet_continuation(command: str, segs: list[dict], k: int, data_only) -> bool:
@@ -658,7 +680,9 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     if _CONFIG_WORD_RE.match(raw):
         if seg and data_only(seg) and cmd in _TEXT_SAFE_CMDS and ctx != "hd":
             return ""                        # grep sshCommand docs: a search, not a setting
-        if cmd == "git" and "config" in words[1:3] and (
+        writes = {"--unset", "--unset-all", "--add", "--replace-all", "--rename-section", "--remove-section", "--edit",
+                  "-e", "set", "unset"}
+        if cmd == "git" and "config" in words[1:3] and not writes & set(words) and (
                 {"--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin"} & set(words)
                 or len([w for w in words[words.index("config") + 1:] if not w.startswith("-")]) == 1):
             return ""                        # git config --get core.sshCommand: a read (codex, review round 4)
@@ -726,7 +750,8 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         return ""                            # command -v ssh: a lookup
     # a search program that xargs or parallel runs takes the word as its argument: xargs -I{} grep ssh {}. Only
     # there: tmux new -s cat ssh … starts ssh (Opus, review of #15)
-    searched = cmd in ("xargs", "parallel") and _program_of(seg) in _DATA_CMDS | _LOOKS_UP
+    searched = cmd in ("xargs", "parallel") and _program_of(seg) in _DATA_CMDS | _LOOKS_UP \
+        or cmd in _LAUNCHERS and _launched(words, word) in _DATA_CMDS | _LOOKS_UP
     if words and (_base(words[0]) == word or _base(words[0]).startswith(word + ".")):
         return f"'{raw}' started as a program this hook cannot read"
     # 5. a variable before the command or an option names the program: BROWSER="ssh web1" gh …, rg --pre ssh
@@ -741,8 +766,15 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
             min((command.find(w, seg["start"]) for w in _FIND_EXEC if w in words), default=pos) < pos:
         return f"'{raw}' started by find"
     program = _container_program(words) if cmd in _CONTAINER_EXEC else None
+    if program == "":
+        return f"'{raw}' started in a container"     # an option hides which program starts
     if program is not None and _base(program) not in _DATA_CMDS | _LOOKS_UP:
-        return f"'{raw}' started in a container"     # a shell, sudo, env or ssh itself in it
+        # the inner command read as a command line: docker exec c1 sh -c 'ssh …' asks, compose exec web pytest -k
+        # ssh does not (Opus, review round 5)
+        start = len(words) - 1 - words[::-1].index(program)
+        inner = " ".join(shlex.quote(w) for w in words[start:])
+        if raw in inner and classify(inner, parse).kind != "none":
+            return f"'{raw}' started in a container"
     if cmd == "git" and _git_runs(words):
         return f"'{raw}' in a git command that runs a program"
     if cmd in ("gh", "glab") and len(words) > 1 and words[1] in _GH_RUNS:
@@ -758,8 +790,12 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         code = " ".join(words[1:]) if cmd == "eval" else _shell_code(words, cmd)
         if code and raw in code and classify(code, parse).kind != "none":
             return f"'{raw}' in the code of a nested shell"
+        runs_args = re.search(r"\$\{?[@*]", code) or re.search(
+            r"(?:^|[;&|(\n]|\b(?:exec|then|do|else|time|nohup|sudo|env|command))\s*\"?\$\{?[0-9]", code)
+        if code and cmd != "eval" and raw not in code and not runs_args:
+            return ""                        # bash -c 'printf %s "$1"' _ ssh: $1 is printed (codex, round 4)
         if code and cmd != "eval" and raw not in code:
-            return ""                        # bash -c 'printf %s "$1"' _ ssh: $1, not a program (codex, round 4)
+            return f"'{raw}' in the arguments a nested shell runs"   # bash -c 'exec "$@"' _ ssh … (Opus, round 5)
     elif cmd not in _DATA_CMDS | _LOOKS_UP | _INTERPRETERS:
         # quoted code that another program runs: sg docker -c '…', nix-shell --run "…", op run -- '…'. A word with no
         # space is a name, not code (tox -e ssh); an interpreter's code is outside C21 (python3 -c 'ssh = 1')
@@ -807,14 +843,16 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         direct_run = run_at >= 0 and all(w.startswith("-") for w in before_word[run_at + 1:])
         after_option = len(prev) == 2 and prev.startswith("-") and prev != "--" and not direct_run
         managed = set(before_word) & _MANAGE_VERBS and prev != "--"     # pueue add -- ssh runs it
-        path_only = pathed and not direct_run and prev != "--"    # go build ./cmd/ssh, ruff check src/ssh
+        path_only = pathed and run_at < 0 and prev != "--"    # go build ./cmd/ssh; direnv exec . /usr/bin/ssh asks
         if cmd == "nix" and prev in ("-c", "--command"):
             after_option = False             # nix develop -c ssh, nix shell pkgs -c ssh (codex, review round 4)
         if k_word > 0 and not after_option and not managed and not path_only:
             return f"'{raw}' as an argument of {cmd}, which can start it"
     # an alias of the word that the same line starts: alias go=ssh; go host
     for a in _ALIAS_RE.finditer(command):
-        if a.start(2) <= pos < a.end(2) and _first_word(a.group(2)) in _PROGRAM_WORDS and any(
+        value = a.group(2).strip("\"'")
+        starts = _first_word(value) in _PROGRAM_WORDS or classify(value, parse).kind != "none"
+        if a.start(2) <= pos < a.end(2) and starts and any(
                 _base(sg.get("cmd", "")) == a.group(1).lower() for sg in segs if sg["start"] >= a.end(2)):
             return f"'{raw}' in an alias that the line starts"
     return ""

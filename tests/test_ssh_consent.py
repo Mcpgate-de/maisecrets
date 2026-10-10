@@ -390,6 +390,8 @@ class VisibleIntentTests(unittest.TestCase):
         "curl https://example.org/docs/ssh", "go build ./cmd/ssh", "ruff check src/ssh", "du -sh /usr/bin/ssh",
         "git config --get core.sshCommand", "bash -c 'printf %s \"$1\"' _ ssh", "docker exec c1 grep ssh /etc/passwd",
         "watch curl https://example.org/docs/ssh",
+        # review round 5 (Opus, codex): a test filter in a container, a lookup a launcher starts
+        "docker compose exec web pytest -k ssh", "kubectl exec pod -- journalctl -u ssh", "watch -n 1 pgrep -af ssh",
     ]
 
     # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
@@ -418,7 +420,7 @@ class VisibleIntentTests(unittest.TestCase):
         ('tee /tmp/x <<< "ssh web1 reboot"; bash /tmp/x', "a later part runs"),
         ("bash <(echo 'ssh web1 reboot')", "process substitution"),
         # quoted code another program runs
-        ("sg docker -c 'ssh web1 touch x'", "started by sg"), ('nix-shell -p x --run "ssh web1 touch x"', "nix-shell"),
+        ("sg docker -c 'ssh web1 touch x'", "sg"), ('nix-shell -p x --run "ssh web1 touch x"', "nix-shell"),
         ("op run -- ssh web1 touch x", "argument of op"),
         # 4. a URL a program connects to itself
         ("curl -T f scp://web1/tmp/f", "URL for curl"), ("docker -H ssh://web1 ps", "URL for docker"),
@@ -472,16 +474,25 @@ class VisibleIntentTests(unittest.TestCase):
         ("osascript -l JavaScript -e 'app.doShellScript(\"ssh web1 touch x\")'", "AppleScript"),
         ("fish -C 'set -gx X 1' -c 'ssh web1 reboot'", "nested shell"),
         ("nix develop -c ssh web1 reboot", "argument of nix"), ("docker exec -u cat c1 ssh web1", "in a container"),
+        # review round 5 (Opus, codex): shell code that runs its arguments, a path after a run verb with a word
+        # between, git config --unset, an alias whose value starts a launcher, podman unshare
+        ("bash -c 'exec \"$@\"' _ ssh web1 touch x", "arguments a nested shell runs"),
+        ("bash -c '$1 web1 touch x' _ ssh", "arguments a nested shell runs"),
+        ("direnv exec . /usr/bin/ssh web1 touch x", "argument of direnv"),
+        ("arch -arm64 /usr/bin/ssh web1 touch x", "started by arch"),
+        ("git config --unset core.sshCommand", "sets the command"),
+        ("alias prod='command ssh'; prod web1 uptime", "alias"),
+        ("podman unshare ssh web1 uptime", "in a container"),
     ]
 
     def test_a_mention_that_starts_nothing_does_not_ask(self):
-        self.assertEqual(len(self.MENTIONS), 64, "the premise: every measured shape is here")
+        self.assertEqual(len(self.MENTIONS), 67, "the premise: every measured shape is here")
         for command in self.MENTIONS:
             with self.subTest(command):
                 self.assertEqual(kind(command), "none")
 
     def test_each_start_form_asks(self):
-        self.assertEqual(len(self.STARTS), 81, "the premise: every start form is here")
+        self.assertEqual(len(self.STARTS), 88, "the premise: every start form is here")
         for command, rule in self.STARTS:
             with self.subTest(command):
                 verdict = ssh_consent.classify(command, parse)

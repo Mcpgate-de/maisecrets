@@ -104,10 +104,22 @@ def _excerpt(cmd: str, why: str) -> str:
     word = re.search(r"'([^']*)'", why or "")
     m = re.search(re.escape(word.group(1)), cmd) if word else ssh_consent._TOKEN_RE.search(cmd)
     lo, hi = (max(0, m.start() - 60), min(len(cmd), m.end() + 60)) if m else (0, 120)
-    text = cmd[lo:hi]
-    for hit in sorted(detect.scan(text), key=lambda h: -len(h.value)):
-        text = text.replace(hit.value, "<value>")
-    return text.replace("\n", "\\n")
+    # the whole command is scanned first: a window that cuts a value would hide it from the detectors (codex, round 5)
+    spans = []
+    for hit in detect.scan(cmd):
+        at = cmd.find(hit.value)
+        while at >= 0:
+            spans.append((at, at + len(hit.value)))
+            at = cmd.find(hit.value, at + 1)
+    out, k = [], lo
+    for a, b in sorted(spans):
+        if b <= k or a >= hi:
+            continue
+        out.append(cmd[k:max(a, k)])
+        out.append("<value>")
+        k = max(k, b)
+    out.append(cmd[k:hi] if k < hi else "")
+    return "".join(out).replace("\n", "\\n")
 
 
 def _write_new(path: str, lines: list[str]) -> None:
