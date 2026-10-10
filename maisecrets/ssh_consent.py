@@ -436,13 +436,25 @@ _LAUNCHERS = {"env", "xargs", "timeout", "nohup", "exec", "nice", "ionice", "chr
               "chroot", "firejail", "unshare", "systemd-run", "expect", "sudo", "doas", "pkexec", "open", "xterm",
               "gtimeout", "hyperfine", "entr", "sg", "nix-shell", "gnome-terminal", "konsole", "alacritty", "wezterm",
               "kitty", "ssh-agent", "rlwrap", "noglob", "coproc"}
+_CONTAINER_EXEC = {"docker", "podman", "nerdctl", "kubectl", "lxc"}
 # commands that search, show, list or look up: an ssh word as their argument is data (grep ssh README.md, which ssh)
 _LOOKS_UP = {"cd", "ls", "cat", "less", "more", "head", "tail", "which", "whereis", "type", "hash", "man", "info",
-             "apropos", "file", "stat", "ps", "pgrep", "pkill", "killall", "lsof", "git", "gh", "glab", "pip", "brew",
-             "apt", "apt-get", "dnf", "yum", "port", "find", "locate", "mdfind", "jq", "yq", "diff"}
+             "apropos", "tldr", "file", "stat", "ps", "pgrep", "pkill", "killall", "lsof", "git", "gh", "glab", "pip",
+             "pip3", "brew", "apt", "apt-get", "apk", "dnf", "yum", "port", "npm", "pnpm", "yarn", "cargo", "rustup",
+             "find", "locate", "mdfind", "jq", "yq", "diff", "cp", "mv", "rm", "touch", "mkdir", "chmod", "chown",
+             "ln", "tar", "zip", "unzip", "sed", "systemctl", "service", "ufw", "vim", "vi", "nano", "emacs", "code",
+             "subl", "helm"} | _CONTAINER_EXEC
+# interpreters: their code is outside C21 (docs/THREAT-MODEL.md), so a word in it is no start this check reads
+_INTERPRETERS = {"python", "python3", "node", "nodejs", "ruby", "perl", "php", "lua", "rscript", "julia", "deno", "bun",
+                 "awk", "gawk", "osascript", "java", "groovy", "tclsh", "pwsh"}
+# a verb before the word that names something to manage, not a program to start: systemctl restart ssh, npm i ssh
+_MANAGE_VERBS = {"install", "add", "i", "view", "show", "info", "logs", "log", "status", "restart", "stop", "start",
+                 "reload", "enable", "disable", "get", "describe", "delete", "rm", "tag", "allow", "deny", "remove",
+                 "uninstall", "search", "list", "ls", "inspect", "pull", "top", "kill", "test", "upgrade"}
+# a verb after which the next word is the program to run, also past its flags: uv run --no-sync ssh, gcloud compute
+_RUN_VERBS = {"run", "exec", "x", "compute", "enter", "shell", "dlx"}
 # options after which a quoted word is code that the command runs (sg docker -c '…', nix-shell --run "…")
 _CODE_OPTIONS = {"-c", "--run", "--command", "-e", "--exec", "-x", "--"}
-_CONTAINER_EXEC = {"docker", "podman", "nerdctl", "kubectl", "lxc"}
 _FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
 # an option whose value is a program the command starts (rg --pre, sort --compress-program, git difftool --extcmd)
 _PROGRAM_OPTION = re.compile(r"(?:^|\s)(?:--(?:pre|hostname-bin|compress-prog\w*|use-compress-program|pager|extcmd|"
@@ -453,8 +465,13 @@ _HEAD_ASSIGN = re.compile(r"\s*(?:[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|[^\s;&|)]*)
 # eval; a shell or source that runs a file or its input
 _RUN_TEXT = {"eval", "fc", "source", "."}
 # a file a shell, git or direnv reads as settings or runs later: ~/.bashrc, .envrc, .git/hooks/pre-commit
-_STARTUP_FILE = re.compile(r"(?:^|/)\.(?:\w*rc|\w*profile|zshenv|zlogin|zlogout|envrc|gitconfig|config/git/|"
-                           r"git/(?:config|hooks/)|config/fish/|bash_\w+)")
+_STARTUP_FILE = re.compile(r"(?:^|/)\.(?:bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|"
+                           r"zlogin|zlogout|kshrc|mkshrc|envrc|tmux\.conf|gitconfig|config/git/|git/(?:config|hooks/)|"
+                           r"config/fish/)")
+# git -c keys whose value is a program git runs (codex, review of #15: git -c color.ui=never commit asked)
+_GIT_PROGRAM_KEY = re.compile(r"(?i)^(?:alias\.|core\.(?:editor|pager|hookspath|fsmonitor|sshcommand|askpass)|"
+                              r"sequence\.editor|gpg\.|credential\.|.*\.(?:command|cmd|textconv|clean|smudge|process|"
+                              r"driver|program|helper|tool)(?:=|$))")
 _GH_RUNS = {"codespace", "extension", "alias"}
 # programs that connect to an scp://, sftp:// or ssh:// URL themselves (git over ssh is outside C21)
 _URL_CLIENTS = {"curl", "docker", "podman", "nerdctl", "lftp", "rclone", "duplicity", "restic", "borg", "kubectl",
@@ -475,22 +492,13 @@ def _plain(command: str, ctxs: list[str], sg: dict) -> str:
     return "".join(ch if cx == "" else " " for ch, cx in span)
 
 
-def _writes(command: str, ctxs: list[str], sg: dict) -> list[str]:
-    """The files the part writes: a redirect target, tee's arguments, sort -o."""
-    plain = _HARMLESS_REDIRECT.sub(" ", _plain(command, ctxs, sg))
-    out = re.findall(r"(?<![<\d&])>>?\|?\s*(\S+)", plain) + re.findall(r"(?:^|\s)-o\s*(\S+)", plain)
-    if _base(sg.get("cmd", "")) == "tee":
-        out += [w for w in (sg.get("words") or [])[1:] if not w.startswith("-")]
-    return out
-
-
 def _git_runs(words: list[str]) -> bool:
     """git runs a program from its parsed words: -c before the subcommand (it can set an ssh command), rebase --exec,
     filter-branch, bisect run, submodule foreach, difftool --extcmd, a `!` alias. The words of a message (commit -m
     "feat(ssh)!: …") are not looked at (codex and Opus, review of #15)."""
     ws, k = words[1:], 0
     while k < len(ws) and ws[k].startswith("-"):
-        if ws[k] == "-c":
+        if ws[k] == "-c" and k + 1 < len(ws) and _GIT_PROGRAM_KEY.match(ws[k + 1]):
             return True
         k += 2 if ws[k] in ("-C", "--git-dir", "--work-tree", "--namespace") else 1
     sub, rest = (ws[k], ws[k + 1:]) if k < len(ws) else ("", [])
@@ -505,9 +513,6 @@ def _shell_code(words: list[str]) -> str:
     """The code of `sh -c CODE`, `bash -lc -- CODE`: the first word after the options, when one of them holds c."""
     k, has_c = 1, False
     while k < len(words) and words[k].startswith(("-", "+")) and len(words[k]) > 1:
-        if words[k] == "--":
-            k += 1
-            break
         if not words[k].startswith("--") and "c" in words[k][1:]:
             has_c = True
         k += 2 if words[k] in ("-o", "+o", "-O", "+O", "--rcfile", "--init-file") else 1
@@ -518,15 +523,58 @@ def _runs_its_input(sg: dict) -> bool:
     """A part that runs the text piped into it: a shell, source or eval; xargs whose program is a shell or a launcher;
     parallel with no program of its own (it runs each line). Not `xargs -0 echo`."""
     name = _base(sg.get("cmd", ""))
-    if name in _SHELLS | _RUN_TEXT:
-        return True
+    if name in _SHELLS | _RUN_TEXT | {"crontab", "at", "batch"}:
+        return True                          # crontab - and at run the text later (Opus, review of #15)
     if name not in ("xargs", "parallel"):
         return False
-    words, k = sg.get("words") or [], 1
-    while k < len(words) and words[k].startswith("-"):
-        k += 2 if words[k] in ("-I", "-n", "-L", "-P", "-d", "-E", "-s", "-a", "-j") else 1
-    program = _base(words[k]) if k < len(words) else ""
+    program = _program_of(sg)
     return program in _SHELLS | _RUN_TEXT | _LAUNCHERS or name == "parallel" and not program
+
+
+def _program_of(sg: dict) -> str:
+    """The program xargs or parallel starts: the first word that is no option, no option value and no number
+    (xargs --max-args 1 -0 sh -c; codex, review of #15)."""
+    words, k = sg.get("words") or [], 1
+    while k < len(words):
+        w = words[k]
+        if w in ("-I", "-n", "-L", "-P", "-d", "-E", "-s", "-a", "-j", "-S", "-R"):
+            k += 2
+        elif w.startswith("-") or w.isdigit() or w == "{}" or w == ":::":
+            k += 1
+        else:
+            return _base(w)
+    return ""
+
+
+def _writes_of(command: str, ctxs: list[str], sg: dict) -> list[str]:
+    """The files the part writes, with the quotes taken off: a redirect target, tee's arguments, -o FILE."""
+    text = command[sg["start"]:sg["end"]]
+    plain = _HARMLESS_REDIRECT.sub(lambda h: " " * len(h.group(0)), _plain(command, ctxs, sg))
+    out = []
+    for r in list(re.finditer(r"(?<![<\d&])>>?\|?", plain)) + list(re.finditer(r"(?:^|\s)-o(?=\s)", plain)):
+        rest = text[r.end():].lstrip()
+        if rest[:1] in ("'", '"'):
+            end = rest.find(rest[0], 1)
+            out.append(rest[1:end] if end > 0 else rest[1:])
+        elif rest:
+            out.append(re.split(r"[\s;&|)]", rest, 1)[0])
+    if _base(sg.get("cmd", "")) == "tee":
+        out += [w for w in (sg.get("words") or [])[1:] if not w.startswith("-")]
+    return [w for w in out if w]
+
+
+def _write_runs(command: str, ctxs: list[str], segs: list[dict], writers: list[dict], after: int, raw: str) -> str:
+    """The word goes into a file a later part runs, or into a startup file (the writers: the part itself, a tee it is
+    piped into, the command that owns its heredoc)."""
+    wrote = [w for sg in writers for w in _writes_of(command, ctxs, sg)]
+    names = {_base(w) for w in wrote}
+    later = [sg for sg in segs if sg["start"] > after and not sg.get("cmd", "").startswith("QQQ")]
+    if names and any(_base(w) in names for sg in later for w in (sg.get("words") or [])[:1] + [
+            x for x in (sg.get("words") or [])[1:] if _base(sg.get("cmd", "")) in _SHELLS | _RUN_TEXT]):
+        return f"'{raw}' written to a file that a later part runs"
+    if any(_STARTUP_FILE.search(w) for w in wrote):
+        return f"'{raw}' written into a startup file, which a shell or a tool runs later"
+    return ""
 
 
 def _dynamic_word(command: str, sg: dict) -> bool:
@@ -560,6 +608,8 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         if name in _SHELLS | _RUN_TEXT | {"xargs", "parallel"} or owner and piped_on(owner) and any(
                 _base(x.get("cmd", "")) in _SHELLS for x in segs if x["start"] > owner["start"]):
             return f"'{raw}' in the heredoc of a shell"
+        if owner:                            # cat > run.sh <<'EOF' … EOF; bash run.sh (Opus, review of #15)
+            return _write_runs(command, ctxs, segs, [owner], pos, raw)
         return ""                            # the text of another program: python, cat, git commit -F -
     if ctx == "comment":
         return "" if _hooks().comment_is_sure(command, ctxs, pos) else \
@@ -597,8 +647,9 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         return f"'{raw}' in a command word built at run time"
     if re.match(r"\s*command\s+-[vV]\b", command[seg["start"]:seg["end"]]):
         return ""                            # command -v ssh: a lookup
-    # a search program the part runs before the word takes it as its argument: xargs -I{} grep ssh {}
-    searched = any(_base(w) in _DATA_CMDS | _LOOKS_UP for w in words[1:] if command.find(w, seg["start"]) < pos)
+    # a search program that xargs or parallel runs takes the word as its argument: xargs -I{} grep ssh {}. Only
+    # there: tmux new -s cat ssh … starts ssh (Opus, review of #15)
+    searched = cmd in ("xargs", "parallel") and _program_of(seg) in _DATA_CMDS | _LOOKS_UP
     if words and (_base(words[0]) == word or _base(words[0]).startswith(word + ".")):
         return f"'{raw}' started as a program this hook cannot read"
     # 5. a variable before the command or an option names the program: BROWSER="ssh web1" gh …, rg --pre ssh
@@ -622,10 +673,11 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         code = " ".join(words[1:]) if cmd == "eval" else _shell_code(words)
         if code and raw in code and classify(code, parse).kind != "none":
             return f"'{raw}' in the code of a nested shell"
-    elif cmd not in _DATA_CMDS | _LOOKS_UP:
-        # quoted code that another program runs: sg docker -c '…', nix-shell --run "…", op run -- '…'
+    elif cmd not in _DATA_CMDS | _LOOKS_UP | _INTERPRETERS:
+        # quoted code that another program runs: sg docker -c '…', nix-shell --run "…", op run -- '…'. A word with no
+        # space is a name, not code (tox -e ssh); an interpreter's code is outside C21 (python3 -c 'ssh = 1')
         for j, w in enumerate(words[1:-1], 1):
-            if w in _CODE_OPTIONS and raw in words[j + 1] and words[j + 1] != command \
+            if w in _CODE_OPTIONS and raw in words[j + 1] and " " in words[j + 1] and words[j + 1] != command \
                     and classify(words[j + 1], parse).kind != "none":
                 return f"'{raw}' in the code that {cmd} runs"
     # 3. a shell runs the text: a pipe into it, a file this line wrote, a process substitution it reads
@@ -637,13 +689,14 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     runs_input = [sg for sg in later if sg.get("piped") and _runs_its_input(sg)]
     if runs_input:
         return f"'{raw}' in a line that pipes text into {_base(runs_input[0].get('cmd', ''))}"
-    wrote = _writes(command, ctxs, seg)
-    names = {_base(w) for w in wrote}
-    if names and any(_base(w) in names for sg in later for w in (sg.get("words") or [])[:1] + [
-            x for x in (sg.get("words") or [])[1:] if _base(sg.get("cmd", "")) in _SHELLS | _RUN_TEXT]):
-        return f"'{raw}' written to a file that a later part runs"
-    if any(_STARTUP_FILE.search(w) for w in wrote):
-        return f"'{raw}' written into a dot file, which a shell or a tool reads as settings"   # 7. ~/.bashrc
+    writers = [seg]
+    j = k
+    while j + 1 < len(segs) and segs[j + 1].get("piped"):
+        j += 1
+        writers.append(segs[j])              # echo 'alias w="ssh …"' | tee -a ~/.zshrc
+    why = _write_runs(command, ctxs, segs, writers, seg["start"], raw)
+    if why:
+        return why                           # 7. a file a later part runs, or a startup file (~/.bashrc)
     opener = command.rfind("<(", 0, pos)
     if opener >= 0 and command.find(")", opener) > pos and any(
             _base(sg.get("cmd", "")) in _SHELLS | _RUN_TEXT for sg in segs if sg["start"] < opener):
@@ -651,12 +704,17 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     # an unknown program that gets the word as an argument of its own: a launcher not on the list (gtimeout 10 ssh, uv
     # run ssh, op run -- ssh) or a subcommand (gcloud compute ssh, vagrant ssh). Not after an option, whose value it
     # can be (pytest -k ssh), and not for a command that searches, shows or looks up (Opus, review of #15)
-    alone = ctx == "" and (pos == 0 or command[pos - 1] in " \t\n{(") and \
-        (m.end() >= len(command) or command[m.end()] in " \t\n;&|)}")
-    if alone and cmd not in _DATA_CMDS | _LOOKS_UP and not searched:
+    q = 1 if ctx in ("sq", "dq") else 0      # 'ssh' as a word of its own is the same argument (codex, review of #15)
+    left = pos - q
+    alone = (left <= 0 or command[left - 1] in " \t\n{(") and (q == 0 or command[pos - 1] in "'\"") and \
+        (m.end() + q >= len(command) or command[m.end() + q] in " \t\n;&|)}") and \
+        (q == 0 or command[m.end():m.end() + 1] in ("'", '"'))
+    if alone and cmd not in _DATA_CMDS | _LOOKS_UP | _INTERPRETERS and not searched:
         k_word = next((j for j, w in enumerate(words) if w.lower() == word), -1)
+        before_word = [w.lower() for w in words[1:k_word]] if k_word > 0 else []
         prev = words[k_word - 1] if k_word > 0 else ""
-        if k_word > 0 and not (prev.startswith("-") and prev != "--"):
+        after_option = len(prev) == 2 and prev.startswith("-") and prev != "--" and not set(before_word) & _RUN_VERBS
+        if k_word > 0 and not after_option and not set(before_word) & _MANAGE_VERBS:
             return f"'{raw}' as an argument of {cmd}, which can start it"
     # an alias of the word that the same line starts: alias go=ssh; go host
     for a in _ALIAS_RE.finditer(command):

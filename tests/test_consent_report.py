@@ -73,16 +73,22 @@ class ConsentReportTests(unittest.TestCase):
     def test_a_reason_that_held_a_value_names_none(self):
         # codex and Opus, review of #15: the sshfs reason quoted its option, and an -o value came back in repr quotes
         _session(self.home / "projects" / "p1", "s3", ["sshfs -o 'ssh_command=ssh -J jump1' web1:/ /mnt",
-                                                         "ssh -o \"Bogus'x=hidden-host.internal\" web1 uptime"])
+                                                         "ssh -o \"Bogus'x=hidden-host.internal\" web1 uptime",
+                                                         "./acme-billing-prod ssh web1 touch x"])
+        code, text = self.run_report("--json")
+        result = json.loads(text)
+        self.assertEqual((result["sessions"], result["kinds"]["unknown"]), (3, 4), "the premise: all three were read")
         for args in ((), ("--json",)):
             code, text = self.run_report(*args)
             self.assertEqual(code, 0)
-            for leak in ("jump1", "ssh_command", "hidden-host", "Bogus"):
+            for leak in ("jump1", "ssh_command", "hidden-host", "Bogus", "acme", "billing"):
                 self.assertNotIn(leak, text)
 
     def test_a_quoted_part_of_a_reason_is_removed(self):
         # the second layer behind the reasons of the check: a future reason that quotes a value in either quote
         self.assertEqual(consent_report._reason("the option \"x=hidden\" and 'y' end"), "the option '…' and '…' end")
+        self.assertEqual(consent_report._reason("'ssh' as an argument of acme-billing-prod, which can start it"),
+                         "'…' as an argument of …, which can start it")
 
     def test_a_record_of_another_shape_is_skipped(self):
         folder = self.home / "projects" / "p1"

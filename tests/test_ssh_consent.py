@@ -370,6 +370,12 @@ class VisibleIntentTests(unittest.TestCase):
         "which ssh", "man ssh", "pytest -k ssh", "git grep -n ssh", "xargs -I{} grep ssh {} < files.txt",
         'echo "ssh" >> .gitignore', 'grep -rn "ssh" . | xargs -0 echo',
         "grep -rn ssh src/ > /tmp/hits.txt && ./run.sh",
+        # review round 2 (codex, Opus): the daemon, a container or a package named like the word, a file tool, an
+        # option value, an interpreter's code, a git -c that names no program, a settings file nobody runs
+        "systemctl restart ssh", "service ssh restart", "docker logs ssh", "kubectl logs ssh", "npm install ssh",
+        "cargo add ssh", "cp ssh /tmp/", "chmod 600 ssh", "tox -e ssh", "cargo test -- ssh",
+        "python3 -c 'ssh = None; print(ssh)'", "git -c color.ui=never commit -m 'docs: ssh'",
+        "printf '[run]\\nomit = ssh\\n' > .coveragerc",
     ]
 
     # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
@@ -399,7 +405,7 @@ class VisibleIntentTests(unittest.TestCase):
         ("bash <(echo 'ssh web1 reboot')", "process substitution"),
         # quoted code another program runs
         ("sg docker -c 'ssh web1 touch x'", "started by sg"), ('nix-shell -p x --run "ssh web1 touch x"', "nix-shell"),
-        ("op run -- ssh web1 touch x", "the code that op runs"),
+        ("op run -- ssh web1 touch x", "argument of op"),
         # 4. a URL a program connects to itself
         ("curl -T f scp://web1/tmp/f", "URL for curl"), ("docker -H ssh://web1 ps", "URL for docker"),
         # 5. an option or a variable that names the program
@@ -407,21 +413,35 @@ class VisibleIntentTests(unittest.TestCase):
         # 6. gh starts ssh itself, or makes an alias that runs it
         ("gh codespace ssh -c cs1", "gh command"), ("gh alias set x '!ssh web1 reboot'", "gh command"),
         # 7. a startup file a shell reads later, and an alias the same line starts
-        ('echo "ssh web1 reboot" >> ~/.bashrc', "dot file"), ("alias go='ssh'; go web1", "alias"),
+        ('echo "ssh web1 reboot" >> ~/.bashrc', "startup file"), ("alias go='ssh'; go web1", "alias"),
         # an unknown program that gets the word as an argument of its own: a launcher not on the list, a subcommand
         ("uv run ssh web1 touch x", "argument of uv"), ("gcloud compute ssh vm1 --command 'touch x'", "of gcloud"),
         ("vagrant ssh -c 'touch x'", "argument of vagrant"), ("tailscale ssh root@web1 x", "argument of tailscale"),
-        ("coproc NAME { ssh web1 touch x; }", "argument of"),
+        ("coproc NAME { ssh web1 touch x; }", "argument of name"), ("true ssh web1 reboot", "argument of true"),
+        # review round 2 (codex, Opus): a quoted word of its own, a run verb's flags, a launcher whose argument is
+        # named like a search, long xargs options, a quoted file name, a heredoc or a tee that writes, crontab
+        ("uv run 'ssh' web1 touch x", "argument of uv"), ("uv run --no-sync ssh web1 touch x", "argument of uv"),
+        ("gcloud compute --quiet ssh vm1 --command 'touch x'", "argument of gcloud"),
+        ("cpulimit -l 50 -- ssh web1 touch x", "argument of cpulimit"),
+        ("tmux new -s cat ssh web1 touch x", "started by tmux"), ("flock /var/lock/git ssh web1 x", "started by flock"),
+        ("printf 'ssh web1 touch x' | xargs --max-args 1 -0 sh -c", "piped into xargs"),
+        ("printf 'ssh web1 touch x' > '/tmp/run-me'; bash '/tmp/run-me'", "a later part runs"),
+        ("cat > run.sh <<'EOF'\nssh web1 touch x\nEOF\nbash run.sh", "a later part runs"),
+        ("cat >> ~/.bashrc <<'EOF'\nalias w='ssh web1'\nEOF\n", "startup file"),
+        ("echo 'alias w=\"ssh web1\"' | tee -a ~/.zshrc", "startup file"),
+        ("(crontab -l; echo '0 * * * * ssh web1 x') | crontab -", "piped into crontab"),
+        ("distrobox enter x -- 'ssh web1 touch x'", "the code that distrobox runs"),
+        ("git -c alias.x='!ssh web1' x", "git command"),
     ]
 
     def test_a_mention_that_starts_nothing_does_not_ask(self):
-        self.assertEqual(len(self.MENTIONS), 28, "the premise: every measured shape is here")
+        self.assertEqual(len(self.MENTIONS), 41, "the premise: every measured shape is here")
         for command in self.MENTIONS:
             with self.subTest(command):
                 self.assertEqual(kind(command), "none")
 
     def test_each_start_form_asks(self):
-        self.assertEqual(len(self.STARTS), 41, "the premise: every start form is here")
+        self.assertEqual(len(self.STARTS), 56, "the premise: every start form is here")
         for command, rule in self.STARTS:
             with self.subTest(command):
                 verdict = ssh_consent.classify(command, parse)

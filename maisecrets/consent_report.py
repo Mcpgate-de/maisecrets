@@ -66,9 +66,17 @@ def _commands(path: Path) -> list[str]:
     return out
 
 
+_VOCABULARY: set = set()
+
+
 def _reason(why: str) -> str:
-    """The reason with its quoted word removed; a reason of the check names no host and no value."""
-    return re.sub(r"'[^']*'|\"[^\"]*\"", "'…'", why or "")
+    """The reason with its quoted parts removed and every word the check's own source does not hold replaced: a reason
+    names the program it saw (./acme-billing-prod), and that name is the person's (codex and Opus, review of #15)."""
+    if not _VOCABULARY:
+        _VOCABULARY.update(w.lower() for w in re.findall(r"[A-Za-z][\w.-]*", Path(ssh_consent.__file__).read_text(
+            encoding="utf-8")))
+    text = re.sub(r"'[^']*'|\"[^\"]*\"", "'…'", why or "")
+    return re.sub(r"[A-Za-z0-9][\w./-]*", lambda w: w.group(0) if w.group(0).lower() in _VOCABULARY else "…", text)
 
 
 def _excerpt(cmd: str, why: str) -> str:
