@@ -1,0 +1,43 @@
+# Values that vendor documentation publishes for tests. A hit on one of them is no secret and no person.
+# One line per value: the first 16 hex digits of sha256 over the value, then a comment that names the source.
+# A value of digits only (a card, an account ID, a phone number) is hashed as its digits alone.
+# The values themselves stay out of the tree, so the tree scan never reads this file as a leak.
+
+2a33349e7e606a8a  # AWS documentation account ID
+8aeee14dfb6ff0cf  # AWS documentation account ID
+aeb221660ff09134  # AWS documentation account ID
+b1471f544ceeea31  # Stripe API reference publishable key
+2cafc0970149a84f  # Stripe API reference secret key
+3ab2216433dd6f05  # Twilio test number
+654e529668bd309e  # Twilio test number
+9f3e944123c20706  # Twilio test number
+af411f76144cfd1e  # Twilio test number
+afb5ffeb75a77e56  # Twilio test number
+7f75367e78812551  # jwt.io example token
+10f6a49b3088d981  # payment test card (Stripe, Braintree docs)
+1789612b7ca1f7d8  # payment test card (Stripe, Braintree docs)
+19ff47cc8024c133  # payment test card (Stripe, Braintree docs)
+1d942407169d8f20  # payment test card (Stripe, Braintree docs)
+20e6583871d36495  # payment test card (Stripe, Braintree docs)
+2f725bbd1f405a1e  # payment test card (Stripe, Braintree docs)
+304945e91de3deff  # payment test card (Stripe, Braintree docs)
+3a134ef77d4e2e4c  # payment test card (Stripe, Braintree docs)
+477bba133c182267  # payment test card (Stripe, Braintree docs)
+4e606641b79221a2  # payment test card (Stripe, Braintree docs)
+53a8fc816e63b7a5  # payment test card (Stripe, Braintree docs)
+576c15a8072461c2  # payment test card (Stripe, Braintree docs)
+5a65d383fa6b08bc  # payment test card (Stripe, Braintree docs)
+62ac087033ba812f  # payment test card (Stripe, Braintree docs)
+68594afe9c9cda52  # payment test card (Stripe, Braintree docs)
+75997d50623ab744  # payment test card (Stripe, Braintree docs)
+7cbcc57fc39e4317  # payment test card (Stripe, Braintree docs)
+975136130120262d  # payment test card (Stripe, Braintree docs)
+9830b424b7a69ba9  # payment test card (Stripe, Braintree docs)
+9bbef19476623ca5  # payment test card (Stripe, Braintree docs)
+acd08f29a41f2e55  # payment test card (Stripe, Braintree docs)
+b40e9bc7a74d50ab  # payment test card (Stripe, Braintree docs)
+d79449f462cec9af  # payment test card (Stripe, Braintree docs)
+d8086d483c15c711  # payment test card (Stripe, Braintree docs)
+dd13cdf9af9dd3ba  # payment test card (Stripe, Braintree docs)
+e5de3c3d9fcb43b1  # payment test card (Stripe, Braintree docs)
+f2e5869113fb2e20  # payment test card (Stripe, Braintree docs)

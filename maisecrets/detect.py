@@ -29,6 +29,7 @@ slightly different rules is how a redaction leaks.
 from __future__ import annotations
 
 import bisect
+import hashlib
 import ipaddress
 import json
 import math
@@ -240,6 +241,18 @@ def _de_vat_id_ok(v: str) -> bool:
     return len(n) == 11 and n.startswith("DE") and n[2:].isdigit()
 
 
+def _us_ssn_ok(v: str) -> bool:
+    """Presidio's UsSsnRecognizer.invalidate_result: one digit repeated, a group of zeros, area 666, or a number
+    that starts like a published sample is no SSN. The vendored rule had no validator, so `000-00-0000` in a form
+    and the Woolworth sample were hits (public benchmark, 2026-10-11)."""
+    d = re.sub(r"\D", "", v)
+    if len(d) != 9 or len(set(d)) == 1:
+        return False
+    if d[:3] in ("000", "666") or d[3:5] == "00" or d[5:] == "0000":
+        return False
+    return not d.startswith(("123456789", "98765432", "078051120"))
+
+
 _DS_TEMPLATED = re.compile(r"^(\{\{.*\}\}|\$\{.*\}|<.*>|%.*%|\$[A-Za-z_][A-Za-z0-9_]*)$")
 _DS_INDIRECT = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*\s*(\(.*\)|\[.*\])$")
 # words joined by `.`, `_` or `-`, optionally ending where the regex cut the line (`:` of a
@@ -408,6 +421,9 @@ VALIDATORS = {
     "not_placeholder": lambda v: v.lower() not in {"placeholder", "changeme", "redacted", "example"}
     and not v.startswith("<"),
     "person_email": lambda v: v.split("@", 1)[0].lower() not in _SYSTEM_USERS and not _reserved_domain(v),
+    # name%40firma.de in a URL query, a form body or an access log: the same address, percent-encoded
+    "person_email_encoded": lambda v: VALIDATORS["person_email"](v.replace("%40", "@")),
+    "us_ssn": _us_ssn_ok,
 }
 
 
@@ -450,6 +466,10 @@ OWN_RULES: list[dict] = [
      # `python@3.14/3.14.7` are version pins, not addresses (review, 2026-09-26)
      "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})"
               r"@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
+    {"id": "email-percent-encoded", "type": "EMAIL", "validator": "person_email_encoded",
+     # the @ as %40: a query string, a form body, an access log (public benchmark, 2026-10-11: 7 addresses passed)
+     "regex": r"(?:(?<![\w.+%-])|(?<=%[0-9A-Fa-f]{2}))[\w.+-]{1,64}%40"
+              r"[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "phone", "type": "PHONE",
      "regex": r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?![\w.]\d|\w)"},
     # bare token prefixes newer than the vendored rulesets live in rules/prefixes.txt (see _load_prefixes)
@@ -505,7 +525,7 @@ PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
                       "de-tax-id": "de_tax_id", "de-social-security": "de_social_security",
                       "de-id-card": "de_id_card", "de-passport": "de_passport",
                       "de-health-insurance": "de_health_insurance", "de-lanr": "de_lanr",
-                      "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id"}
+                      "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id", "us-ssn": "us_ssn"}
 # shapes that are plain digit runs: even with a valid checksum, ask for a context word
 PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "de-plz", "de-kfz",
                            "de-handelsregister", "de-fuehrerschein", "nhs", "aba-routing", "medical-license"}
@@ -656,6 +676,25 @@ _TEMPLATE_NAME = re.compile(r"^[A-Z]+(?:_[A-Z]+)+$")   # YOUR_PORTKEY_API_KEY: w
 # test token on windows-latest, 2026-09-27)
 _PARTS = "|".join(re.escape(p) for p in PLACEHOLDER_PARTS)
 _PLACEHOLDER_PART_RE = re.compile(f"(?<![a-z0-9])(?:{_PARTS})|(?:{_PARTS})(?:key)?$")
+
+
+_PUBLIC_TEST_VALUES: list = []
+_DIGITS_ONLY_RE = re.compile(r"\+?[\d\s().-]+")
+
+
+def is_public_test_value(value: str) -> bool:
+    """A value that vendor documentation publishes for tests (rules/public_test_values.txt): a payment test card, the
+    Stripe API reference key, the jwt.io example, an AWS documentation account ID, a Twilio test number. All 21 false
+    alarms of a public benchmark were such values (2026-10-11). The file holds digests, never the values."""
+    if not _PUBLIC_TEST_VALUES:
+        _PUBLIC_TEST_VALUES.append(frozenset(
+            line.split("#", 1)[0].strip()
+            for line in (RULES_DIR / "public_test_values.txt").read_text(encoding="utf-8").splitlines()
+            if line.split("#", 1)[0].strip()))
+    v = value.strip("\"'` ")
+    if _DIGITS_ONLY_RE.fullmatch(v):
+        v = re.sub(r"\D", "", v)
+    return hashlib.sha256(v.encode("utf-8")).hexdigest()[:16] in _PUBLIC_TEST_VALUES[0]
 
 
 def looks_like_placeholder(value: str) -> bool:
@@ -1221,6 +1260,8 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     continue
             if rule.type == "SECRET" and looks_like_placeholder(secret):
                 continue
+            if is_public_test_value(secret):
+                continue   # a documented test card, key, account ID or number: no secret and no person
             if rule.type == "SECRET" and len(secret) >= 16 and len(set(secret[-12:])) <= 1:
                 continue   # a prefix and one repeated character: glpat-AAAAAAAAAAAAAAAAAAAA is a placeholder
             if rule.score < 1.0 or rule.require_context:
