@@ -44,7 +44,7 @@ GHP = "ghp_" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"  # mixed: gitleaks needs e
 GLRT = "glrt-" + "AbCdEfGhIjKlMnOpQrStUv.01.1a2b3c4d5"
 # canonical public test values, assembled at runtime so no literal sits in the tree
 IBAN_OK = " ".join(["DE89", "3704", "0044", "0532", "0130", "00"])
-CARD_OK = " ".join(["4532", "0151", "1283", "0366"])   # a Luhn number no vendor documents for tests
+CARD_OK = " ".join(["4929", "1844", "0817", "2239"])   # synthetic Luhn number, not in rules/public_test_values.txt
 JWT = ".".join(["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"])
 
 

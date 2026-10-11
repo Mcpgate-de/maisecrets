@@ -242,15 +242,17 @@ def _de_vat_id_ok(v: str) -> bool:
 
 
 def _us_ssn_ok(v: str) -> bool:
-    """Presidio's UsSsnRecognizer.invalidate_result: one digit repeated, a group of zeros, area 666, or a number
-    that starts like a published sample is no SSN. The vendored rule had no validator, so `000-00-0000` in a form
-    and the Woolworth sample were hits (public benchmark, 2026-10-11)."""
-    d = re.sub(r"\D", "", v)
-    if len(d) != 9 or len(set(d)) == 1:
+    """Presidio's UsSsnRecognizer.invalidate_result (microsoft/presidio main, 2026-10-11), ported: mixed delimiters,
+    one digit repeated, a group of zeros, area 000 or 666, or one of the published sample numbers is no SSN. The
+    vendored rule had no validator, so `000-00-0000` in a form was a hit (public benchmark, 2026-10-11)."""
+    if len({c for c in v if c in ".- "}) > 1:
         return False
-    if d[:3] in ("000", "666") or d[3:5] == "00" or d[5:] == "0000":
+    d = "".join(c for c in v if c.isdigit())
+    if not d or len(set(d)) == 1:
         return False
-    return not d.startswith(("123456789", "98765432", "078051120"))
+    if d[3:5] == "00" or d[5:] == "0000" or d[:3] in ("000", "666"):
+        return False
+    return d not in ("1234" + "56789", "9876" + "54320", "0780" + "51120")
 
 
 _DS_TEMPLATED = re.compile(r"^(\{\{.*\}\}|\$\{.*\}|<.*>|%.*%|\$[A-Za-z_][A-Za-z0-9_]*)$")
@@ -467,8 +469,9 @@ OWN_RULES: list[dict] = [
      "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})"
               r"@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "email-percent-encoded", "type": "EMAIL", "validator": "person_email_encoded",
-     # the @ as %40: a query string, a form body, an access log (public benchmark, 2026-10-11: 7 addresses passed)
-     "regex": r"(?:(?<![\w.+%-])|(?<=%[0-9A-Fa-f]{2}))[\w.+-]{1,64}%40"
+     # the @ as %40 in a query string, a form body, an access log (public benchmark, 2026-10-11: 7 addresses
+     # passed); scan() keeps it only where an address is expected (_ENCODED_MAIL_CONTEXT_RE)
+     "regex": r"(?:(?<![\w.+%-])|(?<=mailto%3[Aa]))[\w.+-]{1,64}%40"
               r"[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "phone", "type": "PHONE",
      "regex": r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?![\w.]\d|\w)"},
@@ -679,22 +682,30 @@ _PLACEHOLDER_PART_RE = re.compile(f"(?<![a-z0-9])(?:{_PARTS})|(?:{_PARTS})(?:key
 
 
 _PUBLIC_TEST_VALUES: list = []
+# an encoded address is an address after `=` (email=, to=, login=), after mailto%3A, or after a mail word; elsewhere
+# name%40version.com is a package, a git ref or an asset name (codex review)
+_ENCODED_MAIL_CONTEXT_RE = re.compile(r"(?i)(?:=|mailto%3a|\b(?:e-?mail|mail|to|from|cc|bcc|sender|recipient|bounce"
+                                      r"|reply-to|contact|login|user(?:name)?)\b[^\n]{0,12})$")
 _DIGITS_ONLY_RE = re.compile(r"\+?[\d\s().-]+")
 
 
-def is_public_test_value(value: str) -> bool:
-    """A value that vendor documentation publishes for tests (rules/public_test_values.txt): a payment test card, the
-    Stripe API reference key, the jwt.io example, an AWS documentation account ID, a Twilio test number. All 21 false
-    alarms of a public benchmark were such values (2026-10-11). The file holds digests, never the values."""
+def is_public_test_value(value: str, kind: str) -> bool:
+    """A value that vendor documentation publishes for tests, for one placeholder type (rules/public_test_values.txt):
+    a payment test card is no CARD, the Stripe API reference key and the jwt.io example are no SECRET, a Twilio test
+    number is no PHONE. The same digits under another type stay a hit: a bank account that happens to equal a test
+    card is still a bank account (codex review). 18 of 21 false alarms of a public benchmark were such values
+    (2026-10-11). The file holds full sha256 digests, never the values."""
     if not _PUBLIC_TEST_VALUES:
-        _PUBLIC_TEST_VALUES.append(frozenset(
-            line.split("#", 1)[0].strip()
-            for line in (RULES_DIR / "public_test_values.txt").read_text(encoding="utf-8").splitlines()
-            if line.split("#", 1)[0].strip()))
+        entries = set()
+        for line in (RULES_DIR / "public_test_values.txt").read_text(encoding="utf-8").splitlines():
+            fields = line.split("#", 1)[0].split()
+            if fields:
+                entries.add((fields[1], fields[0]))
+        _PUBLIC_TEST_VALUES.append(frozenset(entries))
     v = value.strip("\"'` ")
     if _DIGITS_ONLY_RE.fullmatch(v):
         v = re.sub(r"\D", "", v)
-    return hashlib.sha256(v.encode("utf-8")).hexdigest()[:16] in _PUBLIC_TEST_VALUES[0]
+    return (kind, hashlib.sha256(v.encode("utf-8")).hexdigest()) in _PUBLIC_TEST_VALUES[0]
 
 
 def looks_like_placeholder(value: str) -> bool:
@@ -1236,6 +1247,9 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue
             if rule.id == "hashicorp-tf-password" and not _ds_value_ok(secret.strip("\"'")):
                 continue
+            if rule.id == "email-percent-encoded" and not _ENCODED_MAIL_CONTEXT_RE.search(
+                    text, max(_line_start(text, start), start - 40), start):
+                continue
             if rule.id == "phone" and not _phone_ok(text, start, secret):
                 continue
             if rule.type == "IP" and _SECTION_BEFORE_RE.search(text, max(0, start - 24), start):
@@ -1260,8 +1274,12 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     continue
             if rule.type == "SECRET" and looks_like_placeholder(secret):
                 continue
-            if is_public_test_value(secret):
-                continue   # a documented test card, key, account ID or number: no secret and no person
+            if is_public_test_value(secret, rule.type):
+                # a documented test card, key or number: its span stays taken, so no weaker rule claims a part of it
+                i = bisect.bisect_left(taken_starts, start)
+                taken_starts.insert(i, start)
+                taken_ends.insert(i, end)
+                continue
             if rule.type == "SECRET" and len(secret) >= 16 and len(set(secret[-12:])) <= 1:
                 continue   # a prefix and one repeated character: glpat-AAAAAAAAAAAAAAAAAAAA is a placeholder
             if rule.score < 1.0 or rule.require_context:

@@ -46,14 +46,19 @@ def luhn_complete(prefix: str, length: int) -> str:
     raise AssertionError("no check digit")
 
 
+JWT_IO = J(["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", ".",
+            "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ", ".",
+            "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"])
+
+
 class PublicTestValueTests(unittest.TestCase):
     def test_the_rule_file_holds_digests_and_never_a_value(self):
         lines = [ln.split("#", 1)[0].strip()
                  for ln in (ROOT / "maisecrets" / "rules" / "public_test_values.txt").read_text().splitlines()]
-        digests = [ln for ln in lines if ln]
-        self.assertGreaterEqual(len(digests), 30)
-        for d in digests:
-            self.assertRegex(d, r"^[0-9a-f]{16}$")
+        entries = [ln for ln in lines if ln]
+        self.assertGreaterEqual(len(entries), 30)
+        for e in entries:
+            self.assertRegex(e, r"^[0-9a-f]{64}  (?:CARD|SECRET|PHONE)$")
 
     def test_a_documented_test_card_is_no_hit_and_a_card_beside_it_is(self):
         stripe_visa = " ".join(["4242"] * 4)
@@ -69,14 +74,15 @@ class PublicTestValueTests(unittest.TestCase):
         self.assertEqual(found(f"STRIPE_KEY={other}"), [("SECRET", other)])
 
     def test_the_jwt_io_example_is_no_hit(self):
-        token = J(["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", ".",
-                   "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ", ".",
-                   "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"])
-        self.assertEqual(found(f"Example JWT from jwt.io docs: {token}"), [])
+        self.assertEqual(found(f"Example JWT from jwt.io docs: {JWT_IO}"), [])
 
-    def test_an_aws_documentation_account_is_no_bank_number(self):
-        account = J(["1111", "2222", "3333"])
-        self.assertEqual(found(f"Example from the IAM docs (account {account})", ("us",)), [])
+    def test_a_test_card_number_under_another_type_stays_a_hit(self):
+        digits = "4242" * 4
+        self.assertEqual(found(f"customer bank account {digits}", ("us",)), [("US_BANK_NUMBER", digits)])
+
+    def test_a_skipped_test_value_keeps_its_span_from_weaker_rules(self):
+        # without the kept span a label rule claims `<token>&x=1`, which is no longer the published value
+        self.assertEqual(found(f"GET /callback?token={JWT_IO}&x=1"), [])
 
     def test_a_twilio_test_number_is_no_phone_and_a_number_beside_it_is(self):
         magic = J(["+1", "500", "555", "0006"])
@@ -91,12 +97,20 @@ class PercentEncodedEmailTests(unittest.TestCase):
         self.assertEqual(found(f"GET /login?email={address}&next=/ HTTP/1.1"), [("EMAIL", address)])
         self.assertEqual(found(f"bounce: {address} -- retry"), [("EMAIL", address)])
 
-    def test_after_another_percent_escape_the_address_starts_at_its_name(self):
+    def test_after_an_encoded_mailto_the_address_starts_at_its_name(self):
         address = J(["jane", "%40", "firma-xyz", ".de"])
         self.assertEqual(found(J(["href=mailto%3A", address])), [("EMAIL", address)])
 
     def test_a_reserved_domain_stays_no_hit_encoded_too(self):
+        self.assertEqual(found(J(["?email=jane", "%40", "firma-xyz", ".com"])),
+                         [("EMAIL", J(["jane", "%40", "firma-xyz", ".com"]))])
         self.assertEqual(found(J(["?email=jane", "%40", "example", ".com"])), [])
+
+    def test_an_encoded_at_outside_an_address_context_is_no_hit(self):
+        for text in (J(["dependency name", "%40", "version.com"]), J(["git ref refs/tags/name", "%40", "version.dev"]),
+                     J(["GET /asset/name", "%40", "version.js HTTP/1.1"]), J(["foo%20bar", "%40", "firma.de"])):
+            with self.subTest(text=text):
+                self.assertEqual(found(text), [])
 
     def test_the_display_masks_an_encoded_address_like_a_plain_one(self):
         shown = pii_display.display(J(["jane.doe", "%40", "firma-xyz", ".de"]), "email")
@@ -112,6 +126,16 @@ class SsnValidatorTests(unittest.TestCase):
             with self.subTest(shape=re.sub(r"\d", "9", v)):
                 self.assertFalse(detect.VALIDATORS["us_ssn"](v))
                 self.assertEqual(found(f"SSN {v}", ("us",)), [])
+
+    def test_the_descending_sample_is_no_ssn(self):
+        # only the validator: an area of 9 is the shape of an ITIN, and the us-itin rule claims it on its own
+        self.assertFalse(detect.VALIDATORS["us_ssn"](J(["987", "-65-", "4320"])))
+
+    def test_mixed_delimiters_are_no_ssn(self):
+        self.assertFalse(detect.VALIDATORS["us_ssn"](J(["536", "-22 ", "8147"])))
+
+    def test_a_number_beside_a_sample_stays_a_hit(self):
+        self.assertTrue(detect.VALIDATORS["us_ssn"](J(["987", "-65-", "4322"])))
 
     def test_a_plausible_number_stays_a_hit(self):
         v = J(["536", "-22-", "8147"])

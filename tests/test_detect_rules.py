@@ -401,7 +401,8 @@ class ContextWordTests(unittest.TestCase):
         self.assertEqual(kinds("Steuer-ID bitte. " + "x " * 60 + tax), [])
 
     def test_a_weak_card_shape_needs_a_context_word_near_it(self):
-        card = " ".join(["4532", "0151", "1283", "0366"])   # not a documented test card (public_test_values.txt)
+        card = " ".join(["4929", "1844", "0817", "2239"])   # synthetic, not in rules/public_test_values.txt
+        self.assertFalse(detect.is_public_test_value(card, "CARD"))
         self.assertEqual(kinds(f"card {card}"), [("credit-card", card)])
         self.assertEqual(kinds(card), [])
         self.assertEqual(kinds("card " + "x " * 60 + card), [])
@@ -776,7 +777,7 @@ class TruePositiveCorpusTests(unittest.TestCase):
                 self.assertEqual(sorted(got), sorted(expected))
 
     def test_pii_shapes(self):
-        card = luhn_complete("453201511283036")
+        card = luhn_complete("492918440817223")   # synthetic, not in rules/public_test_values.txt
         iban = iban_complete("DE", "370400440532013000")
         for text, expected in [("mail anna.berg@acme.de now", [("email", "anna.berg@acme.de")]),
                                ("call +49 170 1234567", [("phone", "+49 170 1234567")]),
