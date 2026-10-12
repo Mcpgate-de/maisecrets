@@ -21,7 +21,7 @@ DISCOVERABLE = ("ssh_consent", "ssh_autonomous_hosts", "secret_destinations", "r
 ADVANCED = ("ssh_host_groups", "ssh_approval", "resolve_in_files", "ssh_via_sandbox", "block_at_mentions",
             "rewrite_prompts", "scrub_transcript", "strip_hidden_characters", "regions", "ttl_seconds",
             "renew_on_use", "tips", "shortcut", "guard", "pass_agent_reports", "gateway_servers",
-            "max_keys_per_session", "max_resolves_per_hour", "rule_dirs")
+            "max_keys_per_session", "max_resolves_per_hour", "rule_dirs", "value_files")
 INTERNAL = ("backend", "allow_plaintext_store", "report_url", "max_ttl_seconds", "max_new_entries_per_result",
             "keep_purged_days", "audit_max_lines", "pii_regions")
 
@@ -35,7 +35,7 @@ TITLE = {
     "regions": "Regions", "ttl_seconds": "Lifetime of a value", "renew_on_use": "Renew on use",
     "tips": "Tips and hints",
     "shortcut": "/ms shortcut", "guard": "Update guard", "pass_agent_reports": "Subagent reports",
-    "gateway_servers": "Gateway servers", "rule_dirs": "Rule folders",
+    "gateway_servers": "Gateway servers", "rule_dirs": "Rule folders", "value_files": "Value files",
     "max_keys_per_session": "Values per session and hour", "max_resolves_per_hour": "Uses per hour",
 }
 MEANING = {
@@ -53,6 +53,8 @@ MEANING = {
     "strip_hidden_characters": "Remove invisible characters from tool results.",
     "regions": "Countries for the personal-data rules.",
     "rule_dirs": "Folders with detection rules of your own or of your team, read with ~/.maisecrets/rules.d.",
+    "value_files": "Files of values from your own tools (JSON lines), imported again at session start when they "
+                   "change.",
     "ttl_seconds": "How long a stored value lives.",
     "renew_on_use": "A use of a value extends its life.",
     "tips": "A short tip at session start, and a hint when a setting first matters.",
@@ -76,7 +78,7 @@ ADVANCED_GROUPS = (("Stored values", ("ttl_seconds", "renew_on_use", "resolve_in
                    ("ssh", ("ssh_host_groups", "ssh_approval", "ssh_via_sandbox")),
                    ("Prompts and tool output", ("block_at_mentions", "rewrite_prompts", "scrub_transcript",
                                                 "strip_hidden_characters", "regions", "rule_dirs",
-                                                "pass_agent_reports")),
+                                                "value_files", "pass_agent_reports")),
                    ("Help and updates", ("tips", "shortcut", "guard")))
 
 # what a prompt may set; any other key is edited in config.json by hand
@@ -96,7 +98,11 @@ _AUTONOMOUS_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+ssh_autonomous_host
 # the rule folders: add or remove one folder, the rest of the prompt as typed (a path can hold spaces)
 _RULE_DIRS_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+rule_dirs\s+(add|remove)\s+(\S(?:.*\S)?)"
                            r"\s*\Z", re.I)
-_LIST_KEYS = ("ssh_autonomous_hosts", "rule_dirs")
+# the value files (maisecrets/value_import.py): the same form, one file per prompt
+_VALUE_FILES_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+value_files\s+(add|remove)\s+"
+                             r"(\S(?:.*\S)?)\s*\Z", re.I)
+_LIST_KEYS = ("ssh_autonomous_hosts", "rule_dirs", "value_files")
+_PATH_KEYS = ("rule_dirs", "value_files")
 _HINTS_RESET_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+hints\s+reset|maisecrets:\s*reset\s+hints)\s*\Z", re.I)
 # the same sentence anywhere in a tool call: a nested client (`codex exec 'maisecrets: set …'`, `claude -p`) would
 # type it for the model, and the writer called by name would skip the prompt (review of C22). A text match: a
@@ -156,6 +162,11 @@ def _card(key: str, cfg: dict) -> list[str]:
             lines.append(f"    Remove: /maisecrets:settings ssh_autonomous_hosts remove {value[0]}")
         if not cfg.get("ssh_consent"):
             lines.append("    It matters only while SSH consent is on.")
+    elif key == "value_files":
+        lines.append("    Add: /maisecrets:settings value_files add FILE   (a full path or ~/…; "
+                     "maisecrets values import FILE imports one now)")
+        if value:
+            lines.append(f"    Remove: /maisecrets:settings value_files remove {value[0]}")
     elif key == "rule_dirs":
         lines.append("    Add: /maisecrets:settings rule_dirs add DIR   (a full path or ~/…; "
                      "/maisecrets:rules shows what each folder loaded)")
@@ -223,6 +234,9 @@ def parse_prompt(prompt) -> tuple[str, str] | None:
     m = _RULE_DIRS_RE.match(prompt)
     if m:
         return ("rule_dirs", m.group(1).lower() + ":" + m.group(2))
+    m = _VALUE_FILES_RE.match(prompt)
+    if m:
+        return ("value_files", m.group(1).lower() + ":" + m.group(2))
     m = _PROMPT_RE.match(prompt)
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
@@ -250,6 +264,9 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
         if key == "rule_dirs":
             return False, ("maisecrets: send /maisecrets:settings rule_dirs add DIR (or remove DIR), "
                            "or in Codex: maisecrets: set rule_dirs add DIR.")
+        if key == "value_files":
+            return False, ("maisecrets: send /maisecrets:settings value_files add FILE (or remove FILE), "
+                           "or in Codex: maisecrets: set value_files add FILE.")
         if key in MEANING:
             return False, f"maisecrets: {key} is not changed by a prompt; edit {CONFIG} by hand."
         return False, f"maisecrets: {key} is no setting this command changes. /maisecrets:settings --all lists them."
@@ -271,6 +288,15 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
             return False, f"maisecrets: the folder is not added ({why.split(': ', 1)[-1]}). Nothing was changed."
         if not expand(word[4:]).is_dir():
             note = " The folder does not exist yet; maisecrets reads it once it does."
+    if key == "value_files" and word.startswith("add:"):
+        from .user_rules import expand
+        path = expand(word[4:])
+        if not path.is_absolute():
+            return False, "maisecrets: the file is not added (not an absolute path). Nothing was changed."
+        if path.is_dir():
+            return False, "maisecrets: the file is not added (it is a folder). Nothing was changed."
+        note = (" maisecrets imports it at the next session start." if path.is_file() else
+                " The file does not exist yet; maisecrets imports it once it does.")
     # a symlinked config.json (dotfiles) keeps its link: the new file replaces the target
     target = CONFIG.resolve() if CONFIG.is_symlink() else CONFIG
     try:
@@ -296,7 +322,7 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
                 user.pop(key, None)
             elif hosts_change:
                 verb, host = word.split(":", 1)
-                if key == "rule_dirs":
+                if key in _PATH_KEYS:
                     # ~/team and the same folder written in full are one folder
                     from .user_rules import expand
                     hosts = [h for h in user.get(key, []) if not isinstance(h, str) or expand(h) != expand(host)]

@@ -30,7 +30,11 @@ def cmd_list(_: list[str]) -> int:
         return 0
     live = [e for e in rows if not e.purged]
     print(f"{len(live)} value(s) stored, {len(rows) - len(live)} expired (only the masked form is kept).")
-    print(f"{'key':<14} {'type':<7} {'kind':<18} {'age':>5} {'uses':>4} {'expires in':>10}  shown as")
+    # an import is one line with its counts, not one row per value: a list of 2000 names hid everything else
+    imported = _import_lines(v)
+    rows = [e for e in rows if not e.source]
+    if rows:
+        print(f"{'key':<14} {'type':<7} {'kind':<18} {'age':>5} {'uses':>4} {'expires in':>10}  shown as")
     from . import destinations
     shown_before = time.time() - destinations.NEW_SECONDS
     for e in sorted(rows, key=lambda x: x.created):
@@ -39,10 +43,29 @@ def cmd_list(_: list[str]) -> int:
         if not e.purged:
             for line in _destination_lines(destinations.of(e.key), shown_before):
                 print(line)
+    if imported:
+        print("\n" + "\n".join(imported))
     if v.backend.test_mode:
         print("\nbackend: jsonfile (TEST MODE, plaintext under ~/.maisecrets/)")
     print("\nTo delete one: /maisecrets:forget <key>. To delete everything: /maisecrets:status shows how.")
     return 0
+
+
+def _import_lines(v) -> list[str]:
+    """One line per import (maisecrets/value_import.py): name, live counts per type, age, soonest expiry, file."""
+    from . import value_import
+    rows = value_import.sources(v)
+    if not rows:
+        return []
+    out = ["Imported values (maisecrets values import, value_files):"]
+    for r in rows:
+        total = sum(r["counts"].values())
+        what = f"{total} value(s) ({value_import.type_text(r['counts'])})" if total else "0 values (expired)"
+        exp = f", expire in {int(max(0, r['expires'] - time.time()) // 86400)}d" if r["expires"] else ""
+        age = f", imported {_age(r['at'])} ago" if r["at"] else ""
+        out.append(f"  import:{r['name']:<22} {what}{age}{exp}" + (f"  from {r['path']}" if r["path"] else ""))
+    out.append("  To remove an import: /maisecrets:forget import:NAME")
+    return out
 
 
 def _destination_lines(rec: dict, shown_before: float) -> list[str]:
@@ -75,6 +98,9 @@ def cmd_forget(args: list[str]) -> int:
         return 2
     v, rc = Vault(), 0
     for raw in args:
+        if raw.startswith("import:"):
+            rc = max(rc, _forget_import(v, raw[len("import:"):]))
+            continue
         key = raw.strip("⟦⟧").split(":", 1)[0]
         status = v.forget(key)
         if getattr(v, "destinations_kept", False):
@@ -88,6 +114,58 @@ def cmd_forget(args: list[str]) -> int:
             print(f"{key}: the store refused to delete it; nothing was changed")
             rc = 1
     return rc
+
+
+def _forget_import(v, name: str) -> int:
+    from . import value_import
+    known = {r["name"] for r in value_import.sources(v)}
+    if name not in known:
+        print(f"import:{name}: not found (/maisecrets:list names each import)")
+        return 1
+    deleted, refused = value_import.remove(v, name)
+    if refused:
+        print(f"import:{name}: {deleted} value(s) deleted; the store refused {refused}, which stay. Try again later.")
+        return 1
+    again = (" The file is still in value_files, so the next session start imports it again; "
+             "/maisecrets:settings value_files remove FILE stops that." if _in_value_files(v, name) else "")
+    print(f"import:{name}: {deleted} value(s) deleted. maisecrets no longer masks them, and their placeholders no "
+          f"longer resolve.{again}")
+    return 0
+
+
+def _in_value_files(v, name: str) -> bool:
+    from pathlib import Path as _P
+    from . import value_import
+    return any(value_import.source_name(_P(os.path.expanduser(f))) == name
+               for f in v.cfg.get("value_files") or [] if isinstance(f, str))
+
+
+def cmd_values(args: list[str]) -> int:
+    """`values import FILE`: put the values of a JSON-lines file into the vault (maisecrets/value_import.py);
+    `values remove NAME`: forget one import; `values`: the imports and their counts. Prints counts and line
+    numbers, never a value."""
+    from . import value_import
+    if not args or args[0] in ("list", "show"):
+        lines = _import_lines(Vault())
+        print("\n".join(lines) if lines else "No values are imported. maisecrets values import FILE adds them.")
+        return 0
+    if args[0] == "import" and len(args) == 2:
+        try:
+            result = value_import.import_file(args[1])
+        except ValueError as exc:
+            print(f"maisecrets values import: {exc}", file=sys.stderr)
+            return 1
+        print(value_import.summary(result))
+        days = int(load_config().get("max_ttl_seconds", 30 * 86400)) // 86400
+        print(f"They are masked in every tool result and prompt from now on, and live {days} days. "
+              f"/maisecrets:list shows the import; /maisecrets:forget import:{result.source} removes it.")
+        return 1 if result.refused or result.stopped else 0
+    if args[0] == "remove" and len(args) == 2:
+        return _forget_import(Vault(), args[1].removeprefix("import:"))
+    print("usage: maisecrets values [import FILE | remove NAME]\n"
+          "  FILE holds one JSON object per line: {\"value\": \"...\", \"type\": \"NAME\"}\n"
+          f"  (type optional, SECRET when missing; one of {', '.join(value_import.TYPES)})", file=sys.stderr)
+    return 2
 
 
 def cmd_get(args: list[str]) -> int:
@@ -307,8 +385,9 @@ def cmd_settings(args: list[str]) -> int:
     from . import settings
     rest = [a for a in args if a != "--all"]
     # KEY, KEY VALUE, or for the host list KEY add|remove HOST (field report on 0.6.6: the list's own form exited 1)
-    list_form = (len(rest) >= 3 and rest[0].lower() in ("ssh_autonomous_hosts", "rule_dirs")
-                 and rest[1].lower() in ("add", "remove") and (len(rest) == 3 or rest[0].lower() == "rule_dirs"))
+    list_form = (len(rest) >= 3 and rest[0].lower() in ("ssh_autonomous_hosts", "rule_dirs", "value_files")
+                 and rest[1].lower() in ("add", "remove")
+                 and (len(rest) == 3 or rest[0].lower() in ("rule_dirs", "value_files")))
     if rest and (len(rest) <= 2 or list_form) and rest[0].lower() in settings.TITLE:
         # after a typed change the prompt hook already wrote it: show the card with the new state
         print(settings.render(only=rest[0].lower()))
@@ -806,7 +885,7 @@ COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_res
             "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
             "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut,
             "forget": cmd_forget, "guard": cmd_guard, "settings": cmd_settings,
-            "consent-report": cmd_consent_report, "rules": cmd_rules}
+            "consent-report": cmd_consent_report, "rules": cmd_rules, "values": cmd_values}
 
 
 def _stdin_words() -> list[str]:
@@ -828,7 +907,8 @@ def main(argv: list[str] | None = None) -> int:
               "           | settings [--all]"
               " | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>\n"
               "           | consent-report ssh [--last 30d|N] [--json] [--excerpts FILE]\n"
-              "           | rules [check [DIR] | test [text] | init DIR | import FILE.toml]")
+              "           | rules [check [DIR] | test [text] | init DIR | import FILE.toml]\n"
+              "           | values [import FILE | remove NAME]")
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])

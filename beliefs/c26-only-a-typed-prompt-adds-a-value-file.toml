@@ -1,0 +1,10 @@
+# c26-only-a-typed-prompt-adds-a-value-file: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-only-a-typed-prompt-adds-a-value-file"
+control = "C26"
+statement = "A file joins value_files only when the person's own prompt is the settings sentence and nothing else; a longer prompt, a scheduled prompt or a tool call that carries the sentence adds nothing."
+runner = ["tests/test_value_import.py::ValueFilesSetting::test_only_a_typed_prompt_adds_a_value_file"]
+
+[proof]
+file = "maisecrets/settings.py"
+find = "                             r\"(\\S(?:.*\\S)?)\\s*\\Z\", re.I)"
+replace = "                             r\"(\\S(?:.*\\S)?)\\s*\", re.I)"

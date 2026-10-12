@@ -116,7 +116,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "pending":
 
 if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put", "status", "list", "audit", "expire", "config",
                                           "wipe", "repair", "scan", "get", "shortcut", "forget", "guard",
-                                          "settings", "consent-report", "rules"):
+                                          "settings", "consent-report", "rules", "values"):
     from maisecrets.cli import main as cli_main  # noqa: E402
     sys.exit(cli_main(sys.argv[1:]))
 
@@ -212,6 +212,14 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         note = session_note()
     except Exception:  # noqa: BLE001 - rules of your own never stop a session start
         note = None
+    if note:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + note
+    # the files of value_files: imported again when they changed or a day passed, within a time budget
+    try:
+        from maisecrets.value_import import session_import  # noqa: E402
+        note = session_import(cfg, v)
+    except Exception:  # noqa: BLE001 - a value file never stops a session start
+        note = "maisecrets value files: the import failed; maisecrets values import FILE says why."
     if note:
         out["systemMessage"] = out.get("systemMessage", "") + " " + note
     # /ms is offered once, not installed: writing ~/.claude/commands without a question was a

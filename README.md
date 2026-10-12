@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 106 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 109 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1238,6 +1238,71 @@ same lines in `allow` of the machine policy. A folder of `rule_dirs` carries
 no allow list: the AI can write a shared checkout, and the AI may only make
 detection stricter. A value that is already stored stays redacted by its
 exact match; `/maisecrets:forget` deletes it.
+
+## Values from your own tools
+
+Some values have no shape that a rule can find: the names of your colleagues
+or customers, an internal project code name, a password list. Let a tool you
+already have write them as JSON lines, one value per line:
+
+```
+{"value": "Quilla Examplestein", "type": "NAME"}
+{"value": "an internal value without a shape"}
+```
+
+`type` is optional; without it the value is a `SECRET`. The other types are
+`NAME`, `EMAIL`, `PHONE`, `IBAN`, `CARD` and `IP`. Then import the file:
+
+```
+maisecrets values import ~/exports/names.jsonl     (in the plugin folder: bash hooks/run.sh values import FILE)
+```
+
+```
+imported 120 value(s) from names.jsonl (SECRET 100, NAME 20), 3 line(s) refused: line 4 too long (at most 512
+characters); line 9 not JSON; line 17 an ordinary word (lower-case letters only).
+```
+
+From then on maisecrets masks each value in every tool result and every
+prompt, as it masks a value it stored itself. A value of 2 to 6 words is
+found as a phrase, also with quotes, punctuation or a line break between its
+words. The match is exact: `QUILLA EXAMPLESTEIN` is not `Quilla
+Examplestein`. The command prints counts and line numbers, never a value.
+
+A tool writes the file in a few lines, for example from a CSV export:
+
+```python
+import csv, json
+with open("people.csv", newline="") as src, open("names.jsonl", "w") as out:
+    for row in csv.DictReader(src):
+        out.write(json.dumps({"value": row["name"], "type": "NAME"}) + "\n")
+        out.write(json.dumps({"value": row["email"], "type": "EMAIL"}) + "\n")
+```
+
+**Import at every session start.** Add the file to the setting `value_files`
+with your own prompt, and maisecrets imports it again at session start when
+it changed, and once a day to keep its values alive:
+
+```
+/maisecrets:settings value_files add ~/exports/names.jsonl
+maisecrets: set value_files add ~/exports/names.jsonl     (the same, and the form for Codex)
+```
+
+**See and remove.** `/maisecrets:list` shows one line per import with its
+counts per type, when it ran and when its values expire.
+`/maisecrets:forget import:names.jsonl` deletes every value of that import.
+An imported value lives `max_ttl_seconds` (30 days unless you set less); a use
+does not cut it to the lifetime of its type.
+
+**Limits.** An import only adds: it never deletes, retypes or shortens a value
+the vault holds. So the AI may run it too. It can only make detection
+stricter. To keep a large or crafted file from slowing every hook, an import
+reads at most 1 MB and 2000 values. The vault holds at most 5000 imported
+values; a full vault refuses the next import and drops nothing. A value has 8
+to 512 characters on one line, and a single word of lower-case letters is
+refused as an ordinary word. A value you delete from the file stays masked
+until it expires or you remove the import. Each imported value adds about
+450 bytes to the index that each hook reads: with 6000 stored values a hook
+takes 20 to 35 ms more (measured on Python 3.9 and 3.14).
 
 ## Known gaps (measured or documented)
 

@@ -60,6 +60,7 @@ DEFAULT_CONFIG = {
     "ssh_host_groups": {},           # {"group": ["host", …]}: one ssh consent covers the whole group
     "ssh_autonomous_hosts": [],      # hosts (or group names) where the AI writes over ssh without asking, always
     "rule_dirs": [],                 # folders of detection rules of your own (user_rules.py); a typed prompt adds one
+    "value_files": [],               # JSON-lines files imported at session start (value_import.py); typed prompt adds
     "secret_destinations": "observe",  # observe: note where each stored secret is sent (destinations.py); off
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
@@ -91,6 +92,7 @@ _CONFIG_TYPES = {
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
     "ssh_consent": bool, "ssh_host_groups": dict, "ssh_autonomous_hosts": list, "secret_destinations": str,
     "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool, "rule_dirs": list,
+    "value_files": list,
 }
 
 
@@ -320,6 +322,8 @@ def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
         cfg["ssh_consent"] = True
     if isinstance(parsed.get("rule_dirs"), list):
         cfg["rule_dirs"] = parsed["rule_dirs"]    # more rules only make detection stricter
+    if isinstance(parsed.get("value_files"), list):
+        cfg["value_files"] = parsed["value_files"]   # more values to mask only make detection stricter
 
 
 def load_config() -> dict:
@@ -499,7 +503,21 @@ def fingerprint(value: str, key: bytes) -> str:
     be reversed by trying every candidate against the index file; the key lives in the
     backend, so the index alone gives nothing to try against."""
     import hmac
-    return hmac.new(key, value.encode(), "sha256").hexdigest()[:16]
+    # hmac.digest is the one-shot C path: the same tag as hmac.new(...).hexdigest(), a third of the time. The
+    # phrase search of the hooks computes one per word of a tool result
+    return hmac.digest(key, value.encode(), "sha256").hex()[:16]
+
+
+MAX_PHRASE_WORDS = 6     # a stored value of 2 to 6 words is found as a phrase (hooks._phrase_spans); more: the line
+
+
+def phrase_words(value: str) -> list[str] | None:
+    """The words of a value that the hooks find as a phrase: 2 to MAX_PHRASE_WORDS words with one space between
+    them. A value with a tab or two spaces in it is matched as before, as a whole token or line."""
+    words = value.split()
+    if 2 <= len(words) <= MAX_PHRASE_WORDS and " ".join(words) == value:
+        return words
+    return None
 
 
 @dataclass
@@ -520,6 +538,12 @@ class Entry:
     sessions: list = field(default_factory=list)  # sessions allowed to resolve the entry (see Vault.get)
     # a word that only a label rule found (letters only): replaced where it was found, never hunted in other texts
     weak: bool = False
+    # where an imported value came from (`maisecrets values import`, value_files): the import's name, else ""
+    source: str = ""
+    # a value of 2 to 6 words: the word count and the keyed fingerprint of its first word, so the hooks find it as a
+    # phrase and look further only after a word whose fingerprint is a head (hooks._phrase_spans)
+    words: int = 0
+    head: str = ""
     # no purged_at field: from_meta drops it, so the proof below can remove the filter and
     # the owning test sees the TypeError of the field report again
 
@@ -1011,12 +1035,36 @@ class Vault:
     def fingerprint(self, value: str) -> str:
         return fingerprint(value, self.fp_key())
 
+    _derived: tuple | None = None
+
+    def _hunted(self) -> tuple[dict, dict]:
+        """(fingerprint -> key, head -> word counts) of the entries hunted in any text, built once per index: the
+        output hook asks for them for every string of a tool result, and an import makes the index large. A new
+        index object (each mutation re-reads the file) or a change below drops the cache."""
+        if self._derived is None or self._derived[0] is not self._index:
+            live: dict[str, str] = {}
+            heads: dict[str, set] = {}
+            for k, m in self._index["entries"].items():
+                if m.get("purged") or m.get("weak"):
+                    continue
+                live[m["fingerprint"]] = k
+                if m.get("words", 0) >= 2 and m.get("head"):
+                    heads.setdefault(m["head"], set()).add(int(m["words"]))
+            self._derived = (self._index, live, {h: tuple(sorted(n, reverse=True)) for h, n in heads.items()})
+        return self._derived[1], self._derived[2]
+
+    def _drop_derived(self) -> None:
+        self._derived = None
+
     def live_fingerprints(self) -> dict[str, str]:
         """fingerprint -> key for every entry whose value is still stored and may be hunted in any text. A weak entry
         is not: `DB_PASSWORD=postgres` stored `postgres`, and every later text with the word was redacted and every
         prompt with it blocked, in every session, for a day (review, 2026-09-29)."""
-        return {m["fingerprint"]: k for k, m in self._index["entries"].items()
-                if not m.get("purged") and not m.get("weak")}
+        return self._hunted()[0]
+
+    def phrase_heads(self) -> dict[str, tuple]:
+        """head fingerprint -> word counts (longest first) of the live values of 2 to 6 words."""
+        return self._hunted()[1]
 
     @_mutating
     def mark_weak_entries(self) -> int:
@@ -1038,6 +1086,7 @@ class Vault:
                 continue
             weak = is_weak(self._index["entries"][key]["kind"], value)
             self._index["entries"][key]["weak"] = weak
+            self._drop_derived()
             n += weak
         return n
 
@@ -1059,8 +1108,10 @@ class Vault:
         self._save_index()
         return e
 
-    def _put_new(self, value: str, type_: str, kind: str, session: str | None, ttl: int | None) -> "Entry":
+    def _put_new(self, value: str, type_: str, kind: str, session: str | None, ttl: int | None,
+                 source: str = "") -> "Entry":
         fp = self.fingerprint(value)
+        self._drop_derived()
         n = self._index["counters"].get(type_, 0) + 1
         self._index["counters"][type_] = n
         key = f"{type_}_c{n}"
@@ -1069,7 +1120,11 @@ class Vault:
         e = Entry(key=key, type=type_, kind=kind, fingerprint=fp,
                   display=display_for(type_, value), created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
-                  session=session, uses=0, sessions=[session] if session else [], weak=is_weak(kind, value))
+                  session=session, uses=0, sessions=[session] if session else [], weak=is_weak(kind, value),
+                  source=source)
+        words = phrase_words(value)
+        if words:
+            e.words, e.head = len(words), self.fingerprint(words[0])
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
         self.backend.put(
             key, value,
@@ -1082,14 +1137,16 @@ class Vault:
         return e
 
     @_mutating
-    def put_many(self, items: list[tuple[str, str, str]], session: str | None = None) -> list["Entry | None"]:
+    def put_many(self, items: list[tuple[str, str, str]], session: str | None = None, cap: int | None = None,
+                 source: str = "", ttl: int | None = None) -> list["Entry | None"]:
         """Store many values in one lock, one sweep and one index save; a tool result with
         hundreds of addresses called put() per value and rewrote the growing index each time
         (measured: 1000 e-mails 8.7 s, above the watchdog; review, 2026-09-26). Above
         `max_new_entries_per_result` new values, the rest is not stored: None in the result,
-        the caller masks the value without a key."""
+        the caller masks the value without a key. An import (maisecrets/value_import.py) passes its own cap, its
+        source name and its lifetime."""
         self.expire()
-        cap = int(self.cfg.get("max_new_entries_per_result", 100))
+        cap = int(self.cfg.get("max_new_entries_per_result", 100)) if cap is None else cap
         out: list[Entry | None] = []
         new = 0
         dirty = False
@@ -1107,7 +1164,7 @@ class Vault:
             if new >= cap:
                 out.append(None)
                 continue
-            out.append(self._put_new(value, type_, kind, session, None))
+            out.append(self._put_new(value, type_, kind, session, ttl, source))
             new += 1
             dirty = True
             if new % 10 == 0:
@@ -1149,6 +1206,20 @@ class Vault:
             return
         meta.setdefault("sessions", []).append(session)
         self._save_index()
+
+    def admit_many(self, keys, session: str | None) -> None:
+        """admit() for every key one text brought in, in one hold of the lock and one index write; nothing at all
+        when the session holds each key already. A hit in a tool result admitted its key alone, and each admit
+        re-read and rewrote the whole index: five stored names in one result cost 1.6 s on Python 3.9 with 6,000
+        values in the vault (measured 2026-10-12)."""
+        keys = [k for k in dict.fromkeys(keys) if k in self._index["entries"]]
+        if not session or all(session in (self._index["entries"][k].get("sessions") or []) for k in keys):
+            return
+        with self._exclusive():
+            for key in keys:
+                meta = self._index["entries"].get(key)
+                if meta is not None and session not in meta.get("sessions", []):
+                    meta.setdefault("sessions", []).append(session)
 
     @_mutating
     def get(self, key: str, session: str | None = None, human: bool = False) -> tuple[str | None, str]:
@@ -1307,7 +1378,9 @@ class Vault:
         e.last_used = now
         e.uses += 1
         if self.cfg.get("renew_on_use", True):
-            e.expires = min(now + self._ttl_for(e.type), e.max_expires)
+            # an imported value lives max_ttl_seconds (value_import.py): a use must not cut it to its type's lifetime
+            ttl = int(self.cfg.get("max_ttl_seconds", 30 * 86400)) if e.source else self._ttl_for(e.type)
+            e.expires = min(now + ttl, e.max_expires)
         self._index["entries"][e.key] = asdict(e)
         if save:
             self._save_index()
@@ -1333,6 +1406,7 @@ class Vault:
                 return "store"
         fp = meta.get("fingerprint")
         del self._index["entries"][key]
+        self._drop_derived()
         if fp and self._index["by_fingerprint"].get(fp) == key:
             del self._index["by_fingerprint"][fp]
         self._save_index()
@@ -1385,6 +1459,7 @@ class Vault:
             if fp and self._index["by_fingerprint"].get(fp) == k:
                 del self._index["by_fingerprint"][fp]
         if n or old:
+            self._drop_derived()
             self._save_index()
         if old or purged_now:
             from . import destinations
@@ -1413,6 +1488,7 @@ class Vault:
                     or not str(meta.get("kind", "")).startswith("ds-keyword")):
                 continue
             meta["weak"] = True
+            self._drop_derived()
             quieted.append(key)
         return quieted
 

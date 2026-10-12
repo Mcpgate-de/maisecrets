@@ -1,6 +1,6 @@
 ---
-description: Delete stored values by key, for example /maisecrets:forget SECRET_c3. A placeholder for a deleted key no longer resolves.
-argument-hint: <key> [key ...]
+description: Delete stored values by key, for example /maisecrets:forget SECRET_c3, or every value of one import with /maisecrets:forget import:NAME. A placeholder for a deleted key no longer resolves.
+argument-hint: <key|import:NAME> [...]
 allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" forget:*), PowerShell(& "${CLAUDE_PLUGIN_ROOT}/hooks/run.cmd" forget:*)
 ---
 

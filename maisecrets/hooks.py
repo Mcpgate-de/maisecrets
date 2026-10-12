@@ -3106,6 +3106,9 @@ def _inserted_values(text: str, vault: Vault) -> list[tuple[str, str]]:
     if not live:
         return []
     out: list[tuple[str, str]] = []
+    from .vault import Entry
+    for start, end, key in _phrase_spans(text, vault):
+        out.append((text[start:end], Entry.from_meta(vault._index["entries"][key]).ref))
     seen: set[str] = set()
     for token in _TOKEN_SPLIT_RE.split(text):
         for cand in _candidates(token):
@@ -3152,6 +3155,24 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
     live = vault.live_fingerprints()
     if not live:
         return out
+    # a stored value of 2 to 6 words (a name) survives no tokenizer: found as a phrase first, before a stored single
+    # word inside it takes its part and leaves the rest of the name in the text
+    found: list[str] = []          # admitted together at the end: one index write, not one per hit
+    spans = _phrase_spans(out, vault)
+    if spans:
+        from .vault import Entry
+        pieces, pos = [], 0
+        found += [key for _s, _e, key in spans]
+        for start, end, key in spans:
+            e = Entry.from_meta(vault._index["entries"][key])
+            raw = out[start:end]
+            pieces += [out[pos:start], e.ref]
+            pos = end
+            hit["n"] += 1
+            entries.append(e)
+            if values is not None and raw not in values:
+                values.append(raw)
+        out = "".join(pieces) + out[pos:]
     seen: set[str] = set()
     tokens = list(_TOKEN_SPLIT_RE.split(out))
     # a value with spaces or quotes survives no tokenizer; the rest of a KEY=value line does
@@ -3171,7 +3192,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
             key = live.get(vault.fingerprint(cand))
             if key is None:
                 continue
-            vault.admit(key, session)
+            found.append(key)
             from .vault import Entry
             e = Entry.from_meta(vault._index["entries"][key])
             # a URL-decoded or JSON-unescaped candidate is not in the text; its encoded form is
@@ -3182,6 +3203,74 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
             entries.append(e)
             if values is not None and raw not in values:
                 values.append(raw)
+    vault.admit_many(found, session)
+    return out
+
+
+_WORD_RE = re.compile(r"\S+")
+_PHRASE_OPEN = "\"'`([{<"
+_PHRASE_CLOSE = ".,;:!?\"'`)]}>"
+
+
+def _phrase_spans(text: str, vault: Vault) -> list[tuple[int, int, str]]:
+    """(start, end, key) of each stored value of 2 to 6 words in ``text``, longest first, left to right, no overlap.
+
+    The text is read as words (runs without white space). Only a word whose keyed fingerprint is the first word of a
+    stored phrase (`Entry.head`) starts a look at the next words, so a vault without phrases costs nothing, and a
+    phrase costs one fingerprint per distinct word plus one per head found. The first word may carry an opening quote
+    or bracket or sit behind `=` or `:`; the last may carry closing punctuation. White space between the words can be
+    any (a name broken over a line is the same name). No value is read from the store."""
+    heads = vault.phrase_heads()
+    if not heads:
+        return []
+    live = vault.live_fingerprints()
+    words = [(m.start(), m.end()) for m in _WORD_RE.finditer(text)]
+    tags: dict[str, str] = {}
+
+    def tag(piece: str) -> str:
+        if piece not in tags:
+            tags[piece] = vault.fingerprint(piece)
+        return tags[piece]
+
+    out: list[tuple[int, int, str]] = []
+    i = 0
+    while i < len(words):
+        start, end = words[i]
+        word = text[start:end]
+        firsts = {word: start}
+        bare = word.lstrip(_PHRASE_OPEN)
+        firsts.setdefault(bare, end - len(bare))
+        cut = max(word.rfind("="), word.rfind(":"))
+        if cut >= 0:
+            after = word[cut + 1:].lstrip(_PHRASE_OPEN)
+            firsts.setdefault(after, end - len(after))
+        found = None
+        for first, first_at in firsts.items():
+            if not first:
+                continue
+            counts = heads.get(tag(first))
+            for n in counts or ():
+                if i + n > len(words):
+                    continue
+                middle = [text[a:b] for a, b in words[i + 1:i + n - 1]]
+                last_start, last_end = words[i + n - 1]
+                last = text[last_start:last_end]
+                for tail in dict.fromkeys((last, last.rstrip(_PHRASE_CLOSE))):
+                    if not tail:
+                        continue
+                    key = live.get(vault.fingerprint(" ".join([first] + middle + [tail])))
+                    if key is not None:
+                        found = (first_at, last_start + len(tail), key, n)
+                        break
+                if found:
+                    break
+            if found:
+                break
+        if found:
+            out.append(found[:3])
+            i += found[3]
+        else:
+            i += 1
     return out
 
 

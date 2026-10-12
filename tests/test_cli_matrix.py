@@ -342,6 +342,9 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     # the rule folders are read without the store, and a config that does not load means no extra folder: every
     # state answers alike (tests/test_user_rules.py)
     "rules": [([], "", _ALL0), (["check"], "", _ALL0), (["nonsense"], "", _ALL2)],
+    # the imports are read from the index: a damaged index or config answers 1 with the reason; the usage needs neither
+    # (tests/test_value_import.py)
+    "values": [([], "", {"ok": 0, "index": 1, "config": 1}), (["nonsense"], "", _ALL2)],
 }
 
 _BASES: dict[str, Sandbox] = {}
