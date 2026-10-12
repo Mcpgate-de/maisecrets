@@ -118,6 +118,9 @@ _RULES = {
     "iban": lambda v, level, fm: _mask_iban(v),
     "ip_address": lambda v, level, fm: _mask_ipv4(v, level),
     "ip_address_v6": lambda v, level, fm: _mask_ipv6(v, level),
+    # a name (NAME, rules of your own): two letters of a name and its length already narrow it to a few people, so a
+    # display shows nothing of it and the placeholder is the key alone
+    "person": lambda v, level, fm: "",
 }
 
 

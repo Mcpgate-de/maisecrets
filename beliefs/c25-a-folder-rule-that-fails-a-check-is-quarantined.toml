@@ -1,0 +1,10 @@
+# c25-a-folder-rule-that-fails-a-check-is-quarantined: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c25-a-folder-rule-that-fails-a-check-is-quarantined"
+control = "C25"
+statement = "A rule of your own that fails a static check (here a repeat inside a repeat, the shape of catastrophic backtracking) is left out with its reason, and the other rules of the same file still load."
+runner = ["tests/test_user_rules.py::RuleFolders::test_a_rule_that_fails_a_check_is_quarantined_and_the_rest_load"]
+
+[proof]
+file = "maisecrets/user_rules.py"
+find = "    if _nested(items):\n"
+replace = "    if False:\n"

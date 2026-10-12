@@ -116,7 +116,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "pending":
 
 if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put", "status", "list", "audit", "expire", "config",
                                           "wipe", "repair", "scan", "get", "shortcut", "forget", "guard",
-                                          "settings", "consent-report"):
+                                          "settings", "consent-report", "rules"):
     from maisecrets.cli import main as cli_main  # noqa: E402
     sys.exit(cli_main(sys.argv[1:]))
 
@@ -214,6 +214,14 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         loosened = None
     if loosened:
         out["systemMessage"] = (out.get("systemMessage", "") + " " + loosened).strip()
+    # a rule of your own that fails a check is left out; the person hears it once, when the set changes
+    try:
+        from maisecrets.user_rules import session_note  # noqa: E402
+        note = session_note()
+    except Exception:  # noqa: BLE001 - rules of your own never stop a session start
+        note = None
+    if note:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + note
     # /ms is offered once, not installed: writing ~/.claude/commands without a question was a
     # change behind the user's back, and Codex cannot use it (UX review, 2026-09-27)
     if not codex and cfg.get("shortcut", True) and not (HOME / ".shortcut").exists():
