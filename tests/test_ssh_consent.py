@@ -401,6 +401,10 @@ class VisibleIntentTests(unittest.TestCase):
         "[ -v HOME ] && git commit -m 'use `ssh` now'",
         # review round 9 (codex): a search a find -exec clause runs
         "find . -exec grep ssh {} +",
+        # the low findings of #16: a path a run verb builds or reads, a quiet argument piped into a program that saves
+        # it, an option value with an argument after it, an escaped substitution in double quotes
+        "go run ./cmd/ssh", "pre-commit run --files src/ssh", "echo $(date) ssh web1 | tee log",
+        "pytest -k ssh tests", 'python3 probe.py "declare -r x=\\$(ssh web1 uptime)"',
     ]
 
     # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
@@ -501,7 +505,7 @@ class VisibleIntentTests(unittest.TestCase):
         ("docker --host=ssh://web1 ps", "URL for docker"), ("fish -C'ssh web1 uptime'", "nested shell"),
         ("uv run ./build/ssh web1 uptime", "argument of uv"),
         # review round 8 (Opus, codex): a here-string into a shell, a trap's code, env -S
-        ("bash <<< 'ssh web1 uptime'", "here-string"), ("trap 'ssh web1 touch x' EXIT", "trap"),
+        ("bash <<< 'ssh web1 uptime'", "here-string"), ("trap 'ssh web1 touch x' EXIT", "not on the read list"),
         ("env -S 'ssh host'", "env -S"),
         # review round 9 (codex, Opus): a package manager's exec, a long xargs option, a redirect glued to the shell,
         # at with a here-string, a shell in a find -exec clause
@@ -509,16 +513,29 @@ class VisibleIntentTests(unittest.TestCase):
         ("printf 'ssh web1' | xargs --delimiter x sh -c", "piped into xargs"),
         ("bash<<<'ssh web1 touch x'", "here-string"), ("at now <<< 'ssh web1 touch x'", "here-string"),
         ("find . -exec sh -c 'ssh web1 \"$1\"' _ {} \\;", "started by find"),
+        # the low findings of #16: an evaluated subscript, an unknown launcher with an option, JXA through Objective-C,
+        # a program path after xargs, a trap's read-only code, a pipe of a quiet argument into a shell or a startup file
+        ("let 'a[$(ssh web1 uptime)]'", "command substitution"),
+        ("declare -i 'n=a[$(ssh web1 uptime)]'", "command substitution"),
+        ("typeset -i 'a[$(ssh web1 uptime)]'", "command substitution"),
+        ("with-env -q ssh web1 uptime", "argument of with-env"),
+        ("osascript -l JavaScript -e 'ObjC.import(\"Foundation\"); "
+         "$.NSTask.launchedTaskWithLaunchPathArguments(\"/usr/bin/ssh\", [\"web1\"])'", "through Objective-C"),
+        ("xargs -n1 ./tools/ssh < hosts", "started by xargs"), ("parallel ./tools/ssh ::: a b", "started by parallel"),
+        ("trap 'ssh web1 uptime' EXIT", "read-only remote"),
+        ("echo $(date) ssh web1 touch x | tee ~/.bashrc", "not on the read list"),
+        ("echo $(date) ssh web1 touch x | tee run.sh; bash run.sh", "not on the read list"),
+        ("go run ./cmd/ssh web1 uptime", "argument of go"), ("uv run ./ssh web1", "argument of uv"),
     ]
 
     def test_a_mention_that_starts_nothing_does_not_ask(self):
-        self.assertEqual(len(self.MENTIONS), 75, "the premise: every measured shape is here")
+        self.assertEqual(len(self.MENTIONS), 80, "the premise: every measured shape is here")
         for command in self.MENTIONS:
             with self.subTest(command):
                 self.assertEqual(kind(command), "none")
 
     def test_each_start_form_asks(self):
-        self.assertEqual(len(self.STARTS), 104, "the premise: every start form is here")
+        self.assertEqual(len(self.STARTS), 116, "the premise: every start form is here")
         for command, rule in self.STARTS:
             with self.subTest(command):
                 verdict = ssh_consent.classify(command, parse)
