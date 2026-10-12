@@ -57,7 +57,7 @@ Everything a hook runs is readable source in this folder. No download, no
 package install, no dependency outside the Python standard library and the
 system tools it names (`security`, PowerShell, `openssl`, a clipboard tool).
 
-What it does not do: detect a name without a label, follow a value through an encoding a
+What it does not do: detect a name without a label (it masks the names on your term list), follow a value through an encoding a
 command applies, or protect against a process that runs as you. "Known gaps"
 below lists every limit that was measured.
 
@@ -1420,7 +1420,7 @@ let single values through. maisecrets reads the rules from three places:
   gets a note when you add it and in `/maisecrets:rules`.
 - each folder of `rule_dirs` in the machine policy. You cannot remove those.
 
-A folder holds two kinds of file, and maisecrets reads nothing else from it
+A folder holds three kinds of file, and maisecrets reads nothing else from it
 (no symbolic link, no git metadata):
 
 - `*.json` in the gitleaks form: `{"rules": [{"id": …, "regex": …,
@@ -1432,6 +1432,8 @@ A folder holds two kinds of file, and maisecrets reads nothing else from it
   `/maisecrets:rules` says so.
 - `*.prefixes`, one rule per line, `id  regex`, as in
   `maisecrets/rules/prefixes.txt`. The whole match is the secret.
+- `*.terms`, a team term list with a floor against common words (Terms). Not
+  in `rules.d`: your own list is `~/.maisecrets/terms.txt`.
 
 A hook reads these files in every call, so each rule passes checks when it is
 loaded: a keyword or a literal of at least 4 characters, at most 300
@@ -1648,6 +1650,97 @@ image into Claude Code) reaches the model without passing any hook; the
 prompt hook sees only your typed text. maisecrets cannot stop or mask it. An
 image in the result of an MCP tool is not covered either.
 
+## Terms: names, case numbers, customer names
+
+A name has no shape, so no rule finds it. Tell maisecrets the names you keep
+from the AI, and it masks them like a secret. The design is based on the
+personal-terms design by [@danszymkowiak](https://github.com/danszymkowiak):
+his file form, his match modes, and his rule that no message shows a term.
+
+**Add a name.** Type it as your own prompt:
+
+```
+/maisecrets:term add Jan Kowalski
+maisecrets: term add Jan Kowalski          (the same, and the form for Codex)
+```
+
+maisecrets writes the name to `~/.maisecrets/terms.txt` and does not send the
+prompt to the model. From the next tool result on, `Jan Kowalski` becomes a
+placeholder such as `⟦NAME_c3⟧`. `/maisecrets:term remove Jan Kowalski` (or
+`remove ⟦NAME_c3⟧`, the placeholder copied from a result) takes it off.
+`/maisecrets:term` alone shows your lists. Only your typed prompt changes the
+list, as with a setting (C22): a removal in a tool call is refused.
+
+**Mark a name once.** Write `{{Jan Kowalski}}` in a prompt. maisecrets masks
+the name in that prompt and in every tool result until the lifetime of a
+name value ends (`ttl_seconds`, one day by default); it does not write
+`terms.txt`. A marker is 1 to 5 words of letters (a hyphen or an apostrophe
+inside a word), and one word starts with a capital letter. So
+`{{ .Values.image.tag }}` and `{{ item }}` stay text. A marker counts only in
+a prompt that you typed.
+
+**The file.** `~/.maisecrets/terms.txt` holds one entity per line: a label,
+then the variants, separated by `|`. `#` starts a comment.
+
+```
+# label      variants
+PERSON_A     Jan Kowalski | Kowalsk* | Jan
+CLIENT_B     Acme Holding | *acme-0042*
+EMAIL_BOSS   boss at work
+```
+
+| variant | matches | does not match |
+|---|---|---|
+| `Jan` | the whole word: `Jan`, `Jan,`, `(Jan)`, `Jan's` | `January`, `Jan2`, `jan_report` |
+| `Kowalsk*` | a word that starts so: `Kowalski`, `Kowalskiego`, `Kowalski_report` | `Nowakowalski` |
+| `*kowalski` | a word that ends so: `Kowalski`, `JanKowalski` | `Kowalskiego` |
+| `*acme-0042*` | the whole word around it: `x-acme-0042-b`, `acme-0042@example.com` | none |
+
+- Case does not matter (`ŁÓDŹ` matches `łódź`). A space in a variant matches
+  any run of whitespace, also a line break. Other characters are literal.
+- A word is a run of letters, digits and `_`. So `Kowalski_report.pdf` is one
+  word: `Kowalski` does not mask a part of it. Write `*kowalski*` to mask
+  file names too.
+- The longest variant wins: `Jan Kowalski` is one hit, not two.
+- All variants of an entity get the same placeholder. The type is `NAME`,
+  or the type in the label (`EMAIL_BOSS` gives `EMAIL`).
+- A stem before or after a `*` needs 3 letters or digits, a `*…*` variant 4
+  characters. maisecrets uses at most 50 `*…*` variants.
+- The file must be private. If others can read it, maisecrets sets it to
+  `0600`. If a line is wrong, every hook fails closed and the message names
+  the line, never its text. Fix the line, and the next hook works. Only you
+  write this file, so a silent skip would let through exactly the names you
+  listed.
+
+**A team list.** Put a `*.terms` file in a folder of `rule_dirs` (Rules of
+your own). The AI can write a shared checkout, so a team list has a floor: an
+entry of fewer than 3 characters, or one word of
+`maisecrets/rules/term_stoplist.txt` (the closed word classes of English and
+German, and the common words of a developer session), is left out. A line
+that fails is left out with its reason; the rest of the file loads, and a bad
+team file never stops a hook. The session start says when a team list
+changed. `/maisecrets:rules` and `maisecrets terms` show the counts, the
+files and each line left out, never a term. A file can be up to 4 MB.
+
+**Mask only.** maisecrets never puts a name back. A term placeholder in a
+command, an MCP argument or a file that the AI writes stays as it is: a
+letter that the AI drafts holds `⟦NAME_c3⟧`, and you put in the name. The
+store holds no term: one entry per entity, with an id, so the placeholder
+stays the same across documents and sessions while the entry lives.
+
+**Find the names in a document.** `maisecrets terms suggest FILE` (in the
+plugin folder: `bash hooks/run.sh terms suggest FILE`) proposes lines for
+`terms.txt` from a text or CSV file: names after a salutation, after
+`Name:`, in a name column of a CSV file, and pairs of capitalised words. If
+a surname comes in two or more endings, it proposes the stem
+(`Kowalski | Kowalski*`). It writes nothing, and it shows the names only in
+a terminal: a tool call gets the count.
+
+**Cost.** maisecrets keeps an index of the lists in `~/.maisecrets/.terms-cache`.
+With 100,000 entries a hook loads it in about 5 ms and scans 10 KB in 2 to 4 ms.
+After you change a list, the first hook builds the index again: about 1 to
+2.5 s for 100,000 entries.
+
 ## Known gaps (measured or documented)
 
 What the plugin does not protect. Each item is a limit of the mechanism, not
@@ -1690,7 +1783,7 @@ a to-do.
   Bash output that Claude Code sends as an image.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt
   hook blocks them when the path exists; ask Claude to read the file instead.
-- **A name without a label is not detected.** Regex only, by design: "Emma Johansson" alone looks like any two
+- **A name without a label is not detected, unless it is on a term list** (Terms). Regex only, by design: "Emma Johansson" alone looks like any two
   capitalised words. A name after a name label, before an e-mail address or in a CSV name column is masked
   in a tool result (0.6.21); in a typed prompt no name is detected. A name in a non-Latin script is masked only after
   a person label (`full name`, `native name`, `patient_name`, vCard `FN:`, also with parameters such as
@@ -1727,6 +1820,8 @@ a to-do.
   move the note and make a copied file count as clean. A client started
   under another program name (an npm install runs as `node`) is not seen as
   nested. Windows: no file counts as clean.
+- **A term placeholder is never resolved** (Terms, mask only): a command or a
+  file the AI writes keeps the placeholder.
 - **A transformed value can pass.** For a value this session resolved, the
   output is checked as a substring in plain, base64, hex, URL-encoded and
   JSON-escaped form, and a resolving command may not encode it in the first
