@@ -1,28 +1,25 @@
 """`maisecrets rules`: show, check, test, start and import the rules of your own (maisecrets/user_rules.py).
 
-Every line names a folder, a file, a rule id, a reason, a count or a time. None prints a regex match, a sample text
-or a value: the output goes to the model when the agent runs the command.
+Every line names a folder, a file, a rule id or the place of a refused rule, a reason, a count or a time. None prints
+a regex match, a sample text, the text of a refused line or a value: the output goes to the model when the agent runs
+the command.
 """
 from __future__ import annotations
 
 import json
 import re
 import sys
-import time
 from pathlib import Path
 
 from . import detect, user_rules
 
 USAGE = ("maisecrets rules                       the folders, their rules and what was left out\n"
-         "maisecrets rules check [DIR]           check a folder (or every active one) and its samples.txt\n"
+         "maisecrets rules check [DIR]           check a folder (or every folder the hooks read) and its samples.txt\n"
          "maisecrets rules test [text]           what the rules find in the text (or stdin); never the value\n"
          "maisecrets rules init DIR              start a rule folder for a team\n"
          "maisecrets rules import FILE.toml      a gitleaks or betterleaks config in the JSON form (Python 3.11+)")
 
-# the text a rule runs over in `rules check`: prose, numbers, paths and a long run of one letter, which a regex that
-# backtracks pays for. The rule's own keywords are added, so its regex really runs
-_PROBE = ("The build 20261012 ran in 3.2 s on host build-07; path=/usr/lib/python3/site.py mode=0644 key=value "
-          + "abcdefghij0123456789" * 3 + " " + "a" * 200 + "\n") * 60
+_NO_FILES = "no *.json or *.prefixes file here (a team repository keeps them in rules/)"
 
 
 def _q(q: "user_rules.Quarantined") -> str:
@@ -35,13 +32,21 @@ def show() -> int:
     values, ids = detect.allow_list()
     print("maisecrets rules of your own\n")
     for f in loaded.folders:
-        extra = (f" · {f.rules} rule(s) · hash {f.digest}" + (f" · commit {f.commit}" if f.commit else "")
-                 if f.state == "ok" else f" · {f.state}")
-        print(f"  {f.shown} ({f.source}){extra}")
+        if f.state != "ok":
+            print(f"  {f.shown} ({f.source}) · {f.state}")
+            continue
+        print(f"  {f.shown} ({f.source}) · {f.rules} rule(s) · hash {f.digest}"
+              + (f" · {_NO_FILES}" if not f.files and f.source != "own" else ""))
     print(f"\nRules of your own loaded: {len(loaded.rules)}; all rules: {len(detect.rules())}")
-    if loaded.quarantined:
-        print(f"\nLeft out ({len(loaded.quarantined)}), each with the check it failed:")
-        for q in loaded.quarantined:
+    left = [q for q in loaded.quarantined if not q.kept]
+    notes = [q for q in loaded.quarantined if q.kept]
+    if left:
+        print(f"\nLeft out ({len(left)}), each with the check it failed:")
+        for q in left:
+            print(f"  {_q(q)}")
+    if notes:
+        print(f"\nLoaded with a part dropped ({len(notes)}):")
+        for q in notes:
             print(f"  {_q(q)}")
     print(f"\nAllow list: {len(values)} exact value(s), {len(ids)} rule id(s) switched off"
           + (f" ({', '.join(sorted(ids))})" if ids else ""))
@@ -50,14 +55,12 @@ def show() -> int:
     return 0
 
 
-def _rule_folder(target: Path) -> tuple[Path, Path | None]:
-    """The rule folder and the samples file of a check target: a team repository keeps its rules in `rules/` and
-    samples.txt at its top; a plain folder holds both."""
-    folder = target / "rules" if (target / "rules").is_dir() else target
+def _samples_file(target: Path, folder: Path) -> Path | None:
+    """samples.txt at the top of a team repository, or in the rule folder itself."""
     for cand in (target / "samples.txt", folder / "samples.txt"):
         if cand.is_file():
-            return folder, cand
-    return folder, None
+            return cand
+    return None
 
 
 def _samples(path: Path, rules: list) -> list[str]:
@@ -73,7 +76,7 @@ def _samples(path: Path, rules: list) -> list[str]:
             kind = rid if rid.startswith(user_rules.ID_PREFIX) else user_rules.ID_PREFIX + rid
             kinds = {m.kind for m in detect.scan(text, rule_list=rules)}
             if kind not in kinds:
-                failed.append(f"samples.txt line {n}: no hit of {rid}"
+                failed.append(f"samples.txt line {n}: no hit of {kind}"
                               + (f" (found: {', '.join(sorted(kinds))})" if kinds else ""))
         elif verb == "miss":
             kinds = {m.kind for m in detect.scan(rest, rule_list=rules)}
@@ -84,40 +87,87 @@ def _samples(path: Path, rules: list) -> list[str]:
     return failed
 
 
+def _check_folder(shown: str, folder: Path, samples: Path | None, taken: set, need_rules: bool) -> int:
+    """Check one folder as the hook reads it, and time each rule on the texts that make a backtracking regex slow.
+    Returns the number of problems."""
+    sources: dict = {}
+    rules, quarantined, digest = user_rules.load_folder(folder, shown, taken, sources=sources)
+    left = [q for q in quarantined if not q.kept]
+    print(f"{shown}: {len(rules)} rule(s), {len(left)} refused, hash {digest}")
+    bad = len(left)
+    if not user_rules._rule_files(folder):
+        print(f"  {_NO_FILES}")
+        bad += need_rules
+    timed = user_rules.probe([sources[r.id] for r in rules if r.id in sources])
+    fast = []
+    for rule in rules:
+        ms = timed.get(sources[rule.id].hash, "untested") if rule.id in sources else "untested"
+        if ms == "untested":
+            print(f"  ok      {rule.id}  (not timed)")
+            fast.append(rule)
+        elif ms is None or ms > user_rules.PROBE_LIMIT_MS:
+            print(f"  slow    {rule.id}  {user_rules._slow_reason(ms)}")
+            bad += 1
+        else:
+            print(f"  ok      {rule.id}  {ms:.1f} ms")
+            fast.append(rule)
+    for q in quarantined:
+        if q.kept:
+            print(f"  note    {q.file}:{q.rule}  {q.reason}")
+        else:
+            print(f"  refused {q.file}:{q.rule or '(whole file)'}  {q.reason}" if q.file else f"  refused {q.reason}")
+    if samples is not None:
+        failed = _samples(samples, fast)
+        print(f"  samples: {'all pass' if not failed else f'{len(failed)} failed'}")
+        for line in failed:
+            print(f"  {line}")
+        bad += len(failed)
+    return bad
+
+
 def check(args: list[str]) -> int:
+    """`rules check DIR` checks one folder; `rules check` every folder the hooks read. Exit 1 on a refused or slow
+    rule, a failed sample, a folder without rule files, and a missing or refused folder of the setting or the
+    policy (codex review of block 1: a folder that was gone passed)."""
+    taken: set = set()
     if args:
         target = Path(args[0]).expanduser()
         if not target.is_dir():
             print(f"maisecrets rules check: {args[0]} is no folder", file=sys.stderr)
             return 2
-        folder, samples = _rule_folder(target)
-        todo = [(str(folder), folder, samples)]
-    else:
-        todo = [(f.shown, f.path, None) for f in user_rules.load().folders if f.state == "ok"]
+        folder = user_rules.rule_folder(target)
+        return 1 if _check_folder(str(folder), folder, _samples_file(target, folder), taken, True) else 0
     bad = 0
-    for shown, folder, samples in todo:
-        rules, quarantined, digest = user_rules.load_folder(folder, shown)
-        print(f"{shown}: {len(rules)} rule(s), {len(quarantined)} refused, hash {digest}")
-        for rule in rules:
-            t = time.perf_counter()
-            detect.scan(_PROBE + " ".join(rule.keywords), rule_list=[rule])
-            print(f"  ok      {rule.id[len(user_rules.ID_PREFIX):]}  {(time.perf_counter() - t) * 1000:.1f} ms")
-        for q in quarantined:
-            print(f"  refused {q.file}:{q.rule or '(whole file)'}  {q.reason}" if q.file else f"  refused {q.reason}")
-        bad += len(quarantined)
-        if samples is not None:
-            failed = _samples(samples, rules)
-            print(f"  samples: {'all pass' if not failed else f'{len(failed)} failed'}")
-            for line in failed:
-                print(f"  {line}")
-            bad += len(failed)
+    for shown, path, source in user_rules.folders(user_rules._config()):
+        why = user_rules.refused_folder(path) if source != "own" else ""
+        folder = user_rules.rule_folder(path)
+        if why or not folder.is_dir():
+            print(f"{shown} ({source}): {why or 'missing'}")
+            bad += source != "own"     # the own folder rules.d need not exist
+            continue
+        try:
+            bad += _check_folder(f"{shown} ({source})", folder, _samples_file(path, folder), taken, source != "own")
+        except OSError:
+            print(f"{shown} ({source}): refused: the folder cannot be read")
+            bad += 1
     return 1 if bad else 0
+
+
+def test(args: list[str]) -> int:
+    """What the rules find: type, rule id, span and length; never the value."""
+    text = " ".join(args) if args else sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    found = detect.scan(text)
+    if not found:
+        print("no finding")
+    for m in found:
+        print(f"{m.type:<7} {m.kind:<18} at {m.start}-{m.end} (len {len(m.value)})")
+    return 0
 
 
 _README = """# Detection rules for maisecrets
 
 maisecrets reads the rules in `rules/` in addition to its own. To use them, clone this repository and type this as
-your own prompt in Claude Code:
+your own prompt in Claude Code, with the folder you cloned it to:
 
     /maisecrets:settings rule_dirs add {path}
 
@@ -131,13 +181,17 @@ In Codex, send this alone as your prompt: `maisecrets: set rule_dirs add {path}`
 
 Check a change before you commit it: `maisecrets rules check .` (the CI files here run the same).
 
-A rule needs a keyword or a literal of 4 characters, at most 300 characters of regex, no repeat inside a repeat and
-no quantifier at the start; a folder holds at most 500 rules, a file at most 64 KB. A rule that fails a check is left
-out, not the folder.
+A rule needs a keyword or a literal of 4 characters and at most 300 characters of regex. It must not backtrack: no
+repeat inside a repeat, no quantifier at the start, no two repeats in a row that take the same characters. Each rule
+is also timed on test texts; a rule slower than 50 ms is left out. A folder holds at most 500 rules, a file at most
+64 KB. A rule that fails a check is left out, not the folder.
 
 No names, no customer data and no real values in here. A rule describes a shape; the samples use made-up values.
 """
 
+# The CI files take maisecrets from the newest release (the `release` branch), not from a fixed version: the hooks of
+# the team update to the newest release too, so CI checks with the checks that the hooks run. A fixed version
+# (`--branch v0.6.N`) makes the CI repeatable; it must be one that has `maisecrets rules check`.
 _GITHUB = """name: rules
 on: [push, pull_request]
 jobs:
@@ -145,6 +199,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # the newest maisecrets release: the same checks the hooks of your team run. For a fixed version, write
+      # --branch v0.6.N (a release that has `maisecrets rules check`)
       - run: git clone --depth 1 --branch release https://github.com/Mcpgate-de/maisecrets.git "$RUNNER_TEMP/ms"
       - run: python3 -m maisecrets.cli rules check .
         env:
@@ -155,9 +211,21 @@ jobs:
 _GITLAB = """rules:
   image: python:3.12
   script:
+    # the newest maisecrets release: the same checks the hooks of your team run. For a fixed version, write
+    # --branch v0.6.N (a release that has `maisecrets rules check`)
     - git clone --depth 1 --branch release https://github.com/Mcpgate-de/maisecrets.git /tmp/ms
     - PYTHONPATH=/tmp/ms MAISECRETS_HOME=/tmp/ms-home python3 -m maisecrets.cli rules check .
 """
+
+
+def _home_form(path: Path) -> str:
+    """The path as a person types it: `~/…` under the home folder."""
+    for home in (Path.home(), Path.home().resolve()):
+        try:
+            return "~/" + path.relative_to(home).as_posix()
+        except ValueError:
+            continue
+    return str(path)
 
 
 def init(args: list[str]) -> int:
@@ -166,7 +234,7 @@ def init(args: list[str]) -> int:
         return 2
     top = Path(args[0]).expanduser()
     files = {
-        "README.md": _README.format(path=f"~/src/{top.resolve().name}/rules"),
+        "README.md": _README.format(path=_home_form(top.resolve())),
         "rules/example.json": json.dumps({"rules": [{
             "id": "example-internal-token", "description": "An example: a token of an internal service.",
             "regex": r"exmpl_[A-Za-z0-9]{24}", "keywords": ["exmpl_"], "entropy": 3.0}]}, indent=2) + "\n",
@@ -263,14 +331,14 @@ def import_toml(args: list[str]) -> int:
     return 1 if any(n.startswith("refused") for n in notes) else 0
 
 
-def main(args: list[str], scan) -> int:
+def main(args: list[str], scan=None) -> int:
     if not args:
         return show()
     sub, rest = args[0], args[1:]
     if sub == "check":
         return check(rest)
     if sub == "test":
-        return scan(rest)
+        return test(rest)
     if sub == "init":
         return init(rest)
     if sub == "import":
