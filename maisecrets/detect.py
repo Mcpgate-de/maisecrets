@@ -242,7 +242,8 @@ def _de_vat_id_ok(v: str) -> bool:
 
 
 def _us_ssn_ok(v: str) -> bool:
-    """Presidio's UsSsnRecognizer.invalidate_result (microsoft/presidio main, 2026-10-11), ported: mixed delimiters,
+    """Presidio's UsSsnRecognizer.invalidate_result (microsoft/presidio 8c98180a46, the last change of
+    us_ssn_recognizer.py on main as of 2026-10-11), ported: mixed delimiters,
     one digit repeated, a group of zeros, area 000 or 666, or one of the published sample numbers is no SSN. The
     vendored rule had no validator, so `000-00-0000` in a form was a hit (public benchmark, 2026-10-11)."""
     if len({c for c in v if c in ".- "}) > 1:
@@ -471,7 +472,7 @@ OWN_RULES: list[dict] = [
     {"id": "email-percent-encoded", "type": "EMAIL", "validator": "person_email_encoded",
      # the @ as %40 in a query string, a form body, an access log (public benchmark, 2026-10-11: 7 addresses
      # passed); scan() keeps it only where an address is expected (_ENCODED_MAIL_CONTEXT_RE)
-     "regex": r"(?:(?<![\w.+%-])|(?<=mailto%3[Aa]))[\w.+-]{1,64}%40"
+     "regex": r"(?:(?<![\w.+%-])|(?<=(?i:mailto%3a))|(?<=%3[Dd]))[\w.+-]{1,64}%40"
               r"[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "phone", "type": "PHONE",
      "regex": r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?![\w.]\d|\w)"},
@@ -684,8 +685,10 @@ _PLACEHOLDER_PART_RE = re.compile(f"(?<![a-z0-9])(?:{_PARTS})|(?:{_PARTS})(?:key
 _PUBLIC_TEST_VALUES: list = []
 # an encoded address is an address after `=` (email=, to=, login=), after mailto%3A, or after a mail word; elsewhere
 # name%40version.com is a package, a git ref or an asset name (codex review)
-_ENCODED_MAIL_CONTEXT_RE = re.compile(r"(?i)(?:=|mailto%3a|\b(?:e-?mail|mail|to|from|cc|bcc|sender|recipient|bounce"
-                                      r"|reply-to|contact|login|user(?:name)?)\b[^\n]{0,12})$")
+_ENCODED_MAIL_CONTEXT_RE = re.compile(
+    r"(?i)(?:=|%3d|mailto(?::|%3a)"
+    r"|\b(?:to|from|cc|bcc)[ \t]*[:=][ \t]*"   # `to` and `from` alone are paths and imports: path/to/pkg%40v.com
+    r"|\b(?:e-?mail|mail|sender|recipient|bounce|reply-to|contact|login|users?|username)[ \t]*[:=/]?[ \t]*)$")
 _DIGITS_ONLY_RE = re.compile(r"\+?[\d\s().-]+")
 
 
@@ -699,7 +702,7 @@ def is_public_test_value(value: str, kind: str) -> bool:
         entries = set()
         for line in (RULES_DIR / "public_test_values.txt").read_text(encoding="utf-8").splitlines():
             fields = line.split("#", 1)[0].split()
-            if fields:
+            if len(fields) == 2:   # digest and type; a malformed line must not break every scan
                 entries.add((fields[1], fields[0]))
         _PUBLIC_TEST_VALUES.append(frozenset(entries))
     v = value.strip("\"'` ")
@@ -1168,6 +1171,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
     found: list[Match] = []
     taken_starts: list[int] = []
     taken_ends: list[int] = []
+    exempt: list[tuple[int, int, str]] = []   # spans of published test values, per type
 
     def overlaps(a: int, b: int) -> bool:
         """Whether [a, b) overlaps a span already taken. The spans never overlap each other, so only the two
@@ -1256,6 +1260,8 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue   # a section number: RFC 6749 4.1.2.1, OIDC Core 3.1.2.1, section 7.1.2.3
             if overlaps(start, end):
                 continue
+            if any(t == rule.type and s < end and start < e for s, e, t in exempt):
+                continue
             if rule.entropy and shannon_entropy(secret) < rule.entropy:
                 continue
             if rule.validator:
@@ -1275,10 +1281,10 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if rule.type == "SECRET" and looks_like_placeholder(secret):
                 continue
             if is_public_test_value(secret, rule.type):
-                # a documented test card, key or number: its span stays taken, so no weaker rule claims a part of it
-                i = bisect.bisect_left(taken_starts, start)
-                taken_starts.insert(i, start)
-                taken_ends.insert(i, end)
+                # a documented test card, key or number: no later rule of the same type may claim a longer or shorter
+                # span around it (`?token=<example>&x=1`). Another type still may: an IBAN that holds a test card's
+                # digits is an IBAN (Opus review)
+                exempt.append((start, end, rule.type))
                 continue
             if rule.type == "SECRET" and len(secret) >= 16 and len(set(secret[-12:])) <= 1:
                 continue   # a prefix and one repeated character: glpat-AAAAAAAAAAAAAAAAAAAA is a placeholder

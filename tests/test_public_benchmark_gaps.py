@@ -80,6 +80,21 @@ class PublicTestValueTests(unittest.TestCase):
         digits = "4242" * 4
         self.assertEqual(found(f"customer bank account {digits}", ("us",)), [("US_BANK_NUMBER", digits)])
 
+    def test_a_test_value_does_not_hide_a_value_of_another_type_around_it(self):
+        bban = "4242" * 4 + "00"
+        iban = "DE" + f"{98 - int(bban + '131400') % 97:02d}" + bban   # DE = 13 14, mod 97
+        grouped = " ".join(iban[i:i + 4] for i in range(0, len(iban), 4))   # DExx 4242 4242 4242 4242 00
+        self.assertTrue(detect._iban_ok(grouped))
+        self.assertEqual(found(f"card on file, IBAN {grouped}"), [("IBAN", grouped)])
+
+    def test_a_malformed_line_in_the_rules_file_is_skipped(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "public_test_values.txt").write_text("# a comment\nonlyonefield\n" + "0" * 64 + "  CARD\n")
+            with mock.patch.object(detect, "RULES_DIR", Path(tmp)), \
+                    mock.patch.object(detect, "_PUBLIC_TEST_VALUES", []):
+                self.assertFalse(detect.is_public_test_value("4242" * 4, "CARD"))
+
     def test_a_skipped_test_value_keeps_its_span_from_weaker_rules(self):
         # without the kept span a label rule claims `<token>&x=1`, which is no longer the published value
         self.assertEqual(found(f"GET /callback?token={JWT_IO}&x=1"), [])
@@ -108,9 +123,19 @@ class PercentEncodedEmailTests(unittest.TestCase):
 
     def test_an_encoded_at_outside_an_address_context_is_no_hit(self):
         for text in (J(["dependency name", "%40", "version.com"]), J(["git ref refs/tags/name", "%40", "version.dev"]),
-                     J(["GET /asset/name", "%40", "version.js HTTP/1.1"]), J(["foo%20bar", "%40", "firma.de"])):
+                     J(["GET /asset/name", "%40", "version.js HTTP/1.1"]), J(["foo%20bar", "%40", "firma.de"]),
+                     J(["path/to/pkg", "%40", "version.com"]), J(["import x from pkg", "%40", "version.dev"]),
+                     J(["email sent; pkg x", "%40", "version.com"]), J(["email=\n", "jane", "%40", "firma-xyz.de"])):
             with self.subTest(text=text):
                 self.assertEqual(found(text), [])
+
+    def test_the_contexts_an_encoded_address_comes_in(self):
+        address = J(["jane", "%40", "firma-xyz", ".de"])
+        for text in (J(["href=MAILTO%3A", address]), J(['href="mailto:', address, '"']),
+                     J(["GET /v1.0/users/", address, "/messages"]), J(["?return_to=%2Flogin%3Femail%3D", address]),
+                     J(["To: ", address]), J(["bounce: ", address])):
+            with self.subTest(text=text):
+                self.assertEqual(found(text), [("EMAIL", address)])
 
     def test_the_display_masks_an_encoded_address_like_a_plain_one(self):
         shown = pii_display.display(J(["jane.doe", "%40", "firma-xyz", ".de"]), "email")
@@ -122,7 +147,7 @@ class PercentEncodedEmailTests(unittest.TestCase):
 class SsnValidatorTests(unittest.TestCase):
     def test_numbers_presidio_rejects_are_no_ssn(self):
         for v in ("000-00-0000", J(["078", "-05-", "1120"]), J(["123", "-45-", "6789"]), "666-12-3456",
-                  "123-00-4567", "123-45-0000", "111-11-1111"):
+                  "000-12-3456", "123-00-4567", "123-45-0000", "111-11-1111"):
             with self.subTest(shape=re.sub(r"\d", "9", v)):
                 self.assertFalse(detect.VALIDATORS["us_ssn"](v))
                 self.assertEqual(found(f"SSN {v}", ("us",)), [])
