@@ -42,7 +42,8 @@ def normalise_level(raw: object) -> str:
 
 
 def _mask_email(value: str, level: str, freemail: FrozenSet[str]) -> str:
-    local, sep, domain = value.rpartition("@")
+    # a percent-encoded address (name%40firma.de) has no @: without this it got no display at all
+    local, sep, domain = (value if "@" in value else value.replace("%40", "@")).rpartition("@")
     if not sep or not local:
         return value
     shown = local.rstrip(BULLET)

@@ -1081,6 +1081,11 @@ does not need to look like a real secret, and these forms are never a hit:
   at `.local` or `.internal` (a person's mailbox there is found); IP addresses in
   the documentation ranges `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and
   `2001:db8::/32`, private and loopback addresses.
+- **A test value that vendor documentation publishes,** for its own type only: the payment
+  test cards (Stripe, Braintree), the Stripe API reference keys, the jwt.io example token and
+  the Twilio test numbers (`maisecrets/rules/public_test_values.txt`, as sha256 digests). The
+  same digits under another type stay a hit: an IBAN or a bank account that holds a test
+  card's digits is found.
 - **An AWS key id in a SigV4 credential scope:** `X-Amz-Credential=AKIA…` in a presigned
   URL, `Credential=AKIA…` in an `Authorization` header. The id names the key; it is not
   the secret half. The same id anywhere else is still found.
@@ -1113,7 +1118,9 @@ Four sources, one scanner (`maisecrets/detect.py`):
   with its heuristic filters ported (templated, indirect, sequential values
   are not secrets).
 - **Own rules** for what none of the three covers: email (a
-  bounded regex; the unbounded one took 11 s on an 80 KB dotted run), phone
+  bounded regex; the unbounded one took 11 s on an 80 KB dotted run), an email with its
+  `@` written `%40` where an address is expected (after `=`, `mailto:`, `users/` or a mail
+  word such as `To:`), phone
   with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, a
   password with no user in a URL (`redis://:…@host`), the secret half of an AWS
   key pair within a few lines after its `AKIA…` id, and full-length GitLab

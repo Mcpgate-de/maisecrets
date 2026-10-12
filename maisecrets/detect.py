@@ -29,6 +29,7 @@ slightly different rules is how a redaction leaks.
 from __future__ import annotations
 
 import bisect
+import hashlib
 import ipaddress
 import json
 import math
@@ -240,6 +241,21 @@ def _de_vat_id_ok(v: str) -> bool:
     return len(n) == 11 and n.startswith("DE") and n[2:].isdigit()
 
 
+def _us_ssn_ok(v: str) -> bool:
+    """Presidio's UsSsnRecognizer.invalidate_result (microsoft/presidio 8c98180a46, the last change of
+    us_ssn_recognizer.py on main as of 2026-10-11), ported: mixed delimiters,
+    one digit repeated, a group of zeros, area 000 or 666, or one of the published sample numbers is no SSN. The
+    vendored rule had no validator, so `000-00-0000` in a form was a hit (public benchmark, 2026-10-11)."""
+    if len({c for c in v if c in ".- "}) > 1:
+        return False
+    d = "".join(c for c in v if c.isdigit())
+    if not d or len(set(d)) == 1:
+        return False
+    if d[3:5] == "00" or d[5:] == "0000" or d[:3] in ("000", "666"):
+        return False
+    return d not in ("1234" + "56789", "9876" + "54320", "0780" + "51120")
+
+
 _DS_TEMPLATED = re.compile(r"^(\{\{.*\}\}|\$\{.*\}|<.*>|%.*%|\$[A-Za-z_][A-Za-z0-9_]*)$")
 _DS_INDIRECT = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*\s*(\(.*\)|\[.*\])$")
 # words joined by `.`, `_` or `-`, optionally ending where the regex cut the line (`:` of a
@@ -408,6 +424,9 @@ VALIDATORS = {
     "not_placeholder": lambda v: v.lower() not in {"placeholder", "changeme", "redacted", "example"}
     and not v.startswith("<"),
     "person_email": lambda v: v.split("@", 1)[0].lower() not in _SYSTEM_USERS and not _reserved_domain(v),
+    # name%40firma.de in a URL query, a form body or an access log: the same address, percent-encoded
+    "person_email_encoded": lambda v: VALIDATORS["person_email"](v.replace("%40", "@")),
+    "us_ssn": _us_ssn_ok,
 }
 
 
@@ -450,6 +469,11 @@ OWN_RULES: list[dict] = [
      # `python@3.14/3.14.7` are version pins, not addresses (review, 2026-09-26)
      "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})"
               r"@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
+    {"id": "email-percent-encoded", "type": "EMAIL", "validator": "person_email_encoded",
+     # the @ as %40 in a query string, a form body, an access log (public benchmark, 2026-10-11: 7 addresses
+     # passed); scan() keeps it only where an address is expected (_ENCODED_MAIL_CONTEXT_RE)
+     "regex": r"(?:(?<![\w.+%-])|(?<=(?i:mailto%3a))|(?<=%3[Dd]))[\w.+-]{1,64}%40"
+              r"[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "phone", "type": "PHONE",
      "regex": r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?![\w.]\d|\w)"},
     # bare token prefixes newer than the vendored rulesets live in rules/prefixes.txt (see _load_prefixes)
@@ -505,7 +529,7 @@ PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
                       "de-tax-id": "de_tax_id", "de-social-security": "de_social_security",
                       "de-id-card": "de_id_card", "de-passport": "de_passport",
                       "de-health-insurance": "de_health_insurance", "de-lanr": "de_lanr",
-                      "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id"}
+                      "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id", "us-ssn": "us_ssn"}
 # shapes that are plain digit runs: even with a valid checksum, ask for a context word
 PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "de-plz", "de-kfz",
                            "de-handelsregister", "de-fuehrerschein", "nhs", "aba-routing", "medical-license"}
@@ -656,6 +680,35 @@ _TEMPLATE_NAME = re.compile(r"^[A-Z]+(?:_[A-Z]+)+$")   # YOUR_PORTKEY_API_KEY: w
 # test token on windows-latest, 2026-09-27)
 _PARTS = "|".join(re.escape(p) for p in PLACEHOLDER_PARTS)
 _PLACEHOLDER_PART_RE = re.compile(f"(?<![a-z0-9])(?:{_PARTS})|(?:{_PARTS})(?:key)?$")
+
+
+_PUBLIC_TEST_VALUES: list = []
+# an encoded address is an address after `=` (email=, to=, login=), after mailto%3A, or after a mail word; elsewhere
+# name%40version.com is a package, a git ref or an asset name (codex review)
+_ENCODED_MAIL_CONTEXT_RE = re.compile(
+    r"(?i)(?:=|%3d|mailto(?::|%3a)"
+    r"|\b(?:to|from|cc|bcc)[ \t]*[:=][ \t]*"   # `to` and `from` alone are paths and imports: path/to/pkg%40v.com
+    r"|\b(?:e-?mail|mail|sender|recipient|bounce|reply-to|contact|login|users?|username)[ \t]*[:=/]?[ \t]*)$")
+_DIGITS_ONLY_RE = re.compile(r"\+?[\d\s().-]+")
+
+
+def is_public_test_value(value: str, kind: str) -> bool:
+    """A value that vendor documentation publishes for tests, for one placeholder type (rules/public_test_values.txt):
+    a payment test card is no CARD, the Stripe API reference key and the jwt.io example are no SECRET, a Twilio test
+    number is no PHONE. The same digits under another type stay a hit: a bank account that happens to equal a test
+    card is still a bank account (codex review). 18 of 21 false alarms of a public benchmark were such values
+    (2026-10-11). The file holds full sha256 digests, never the values."""
+    if not _PUBLIC_TEST_VALUES:
+        entries = set()
+        for line in (RULES_DIR / "public_test_values.txt").read_text(encoding="utf-8").splitlines():
+            fields = line.split("#", 1)[0].split()
+            if len(fields) == 2:   # digest and type; a malformed line must not break every scan
+                entries.add((fields[1], fields[0]))
+        _PUBLIC_TEST_VALUES.append(frozenset(entries))
+    v = value.strip("\"'` ")
+    if _DIGITS_ONLY_RE.fullmatch(v):
+        v = re.sub(r"\D", "", v)
+    return (kind, hashlib.sha256(v.encode("utf-8")).hexdigest()) in _PUBLIC_TEST_VALUES[0]
 
 
 def looks_like_placeholder(value: str) -> bool:
@@ -1118,6 +1171,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
     found: list[Match] = []
     taken_starts: list[int] = []
     taken_ends: list[int] = []
+    exempt: list[tuple[int, int, str]] = []   # spans of published test values, per type
 
     def overlaps(a: int, b: int) -> bool:
         """Whether [a, b) overlaps a span already taken. The spans never overlap each other, so only the two
@@ -1197,11 +1251,16 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue
             if rule.id == "hashicorp-tf-password" and not _ds_value_ok(secret.strip("\"'")):
                 continue
+            if rule.id == "email-percent-encoded" and not _ENCODED_MAIL_CONTEXT_RE.search(
+                    text, max(_line_start(text, start), start - 40), start):
+                continue
             if rule.id == "phone" and not _phone_ok(text, start, secret):
                 continue
             if rule.type == "IP" and _SECTION_BEFORE_RE.search(text, max(0, start - 24), start):
                 continue   # a section number: RFC 6749 4.1.2.1, OIDC Core 3.1.2.1, section 7.1.2.3
             if overlaps(start, end):
+                continue
+            if any(t == rule.type and s < end and start < e for s, e, t in exempt):
                 continue
             if rule.entropy and shannon_entropy(secret) < rule.entropy:
                 continue
@@ -1220,6 +1279,12 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 if not ok:
                     continue
             if rule.type == "SECRET" and looks_like_placeholder(secret):
+                continue
+            if is_public_test_value(secret, rule.type):
+                # a documented test card, key or number: no later rule of the same type may claim a longer or shorter
+                # span around it (`?token=<example>&x=1`). Another type still may: an IBAN that holds a test card's
+                # digits is an IBAN (Opus review)
+                exempt.append((start, end, rule.type))
                 continue
             if rule.type == "SECRET" and len(secret) >= 16 and len(set(secret[-12:])) <= 1:
                 continue   # a prefix and one repeated character: glpat-AAAAAAAAAAAAAAAAAAAA is a placeholder
