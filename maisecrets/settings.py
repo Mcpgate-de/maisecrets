@@ -17,11 +17,12 @@ from .vault import (CONFIG, DEFAULT_CONFIG, HOME, ConfigError, LockTimeout, _che
                     load_config)
 
 # Every key of the config is in exactly one class (a test holds it): a new key without one is a test failure.
-DISCOVERABLE = ("ssh_consent", "ssh_autonomous_hosts", "secret_destinations", "rehydration")
+DISCOVERABLE = ("ssh_consent", "ssh_autonomous_hosts", "secret_destinations", "rehydration", "read_pdf",
+                "read_image")
 ADVANCED = ("ssh_host_groups", "ssh_approval", "resolve_in_files", "ssh_via_sandbox", "block_at_mentions",
             "rewrite_prompts", "scrub_transcript", "strip_hidden_characters", "regions", "ttl_seconds",
             "renew_on_use", "tips", "shortcut", "guard", "pass_agent_reports", "gateway_servers",
-            "max_keys_per_session", "max_resolves_per_hour", "rule_dirs")
+            "max_keys_per_session", "max_resolves_per_hour", "rule_dirs", "clean_dirs")
 INTERNAL = ("backend", "allow_plaintext_store", "report_url", "max_ttl_seconds", "max_new_entries_per_result",
             "keep_purged_days", "audit_max_lines", "pii_regions")
 
@@ -36,6 +37,7 @@ TITLE = {
     "tips": "Tips and hints",
     "shortcut": "/ms shortcut", "guard": "Update guard", "pass_agent_reports": "Subagent reports",
     "gateway_servers": "Gateway servers", "rule_dirs": "Rule folders",
+    "read_pdf": "PDFs the AI reads", "read_image": "Images the AI reads", "clean_dirs": "Folders with clean files",
     "max_keys_per_session": "Values per session and hour", "max_resolves_per_hour": "Uses per hour",
 }
 MEANING = {
@@ -52,6 +54,9 @@ MEANING = {
     "scrub_transcript": "Remove a value from the session transcript on disk.",
     "strip_hidden_characters": "Remove invisible characters from tool results.",
     "regions": "Countries for the personal-data rules.",
+    "read_pdf": "maisecrets cannot look inside a PDF. What happens when the AI reads one.",
+    "read_image": "maisecrets cannot look inside an image. What happens when the AI reads one.",
+    "clean_dirs": "Folders whose PDFs and images you know are clean: a read there is always allowed.",
     "rule_dirs": "Folders with detection rules of your own or of your team, read with ~/.maisecrets/rules.d.",
     "ttl_seconds": "How long a stored value lives.",
     "renew_on_use": "A use of a value extends its life.",
@@ -68,21 +73,28 @@ CHOICE_TEXT = {
     "rehydration": (("automatic", "use a stored value in a tool call"), ("confirm", "ask before each use"),
                     ("block", "never put a stored value into a tool call")),
     "ssh_approval": (("per-command", "ask for each command"), ("per-session", "ask once per value and session")),
+    "read_pdf": (("allow", "the PDF goes to the AI as it is"), ("ask", "ask you before each PDF"),
+                 ("block", "never send a PDF to the AI"),
+                 ("convert", "send only its text, with secrets and personal data masked (needs pdftotext)")),
+    "read_image": (("allow", "the image goes to the AI as it is"), ("ask", "ask you before each image"),
+                   ("block", "never send an image to the AI")),
 }
 GROUPS = (("Protection", ("ssh_consent", "ssh_autonomous_hosts", "secret_destinations")),
-          ("Using stored values", ("rehydration",)))
+          ("Using stored values", ("rehydration",)),
+          ("PDFs and images", ("read_pdf", "read_image")))
 ADVANCED_GROUPS = (("Stored values", ("ttl_seconds", "renew_on_use", "resolve_in_files", "gateway_servers",
                                       "max_keys_per_session", "max_resolves_per_hour")),
                    ("ssh", ("ssh_host_groups", "ssh_approval", "ssh_via_sandbox")),
                    ("Prompts and tool output", ("block_at_mentions", "rewrite_prompts", "scrub_transcript",
                                                 "strip_hidden_characters", "regions", "rule_dirs",
-                                                "pass_agent_reports")),
+                                                "clean_dirs", "pass_agent_reports")),
                    ("Help and updates", ("tips", "shortcut", "guard")))
 
 # what a prompt may set; any other key is edited in config.json by hand
 _BOOL_WORDS = {"on": True, "true": True, "off": False, "false": False}
 _CHOICES = {"rehydration": ("automatic", "confirm", "block"), "ssh_approval": ("per-command", "per-session"),
-            "secret_destinations": ("observe", "off")}
+            "secret_destinations": ("observe", "off"), "read_pdf": ("allow", "ask", "block", "convert"),
+            "read_image": ("allow", "ask", "block")}
 _BOOL_KEYS = tuple(k for k in DISCOVERABLE + ADVANCED if isinstance(DEFAULT_CONFIG.get(k), bool))
 # a whole number in this range: the limiter (C7). 0 would stop every use; a person who wants that sets rehydration block
 _INT_KEYS = {"max_keys_per_session": (1, 1_000_000), "max_resolves_per_hour": (1, 1_000_000)}
@@ -96,7 +108,11 @@ _AUTONOMOUS_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+ssh_autonomous_host
 # the rule folders: add or remove one folder, the rest of the prompt as typed (a path can hold spaces)
 _RULE_DIRS_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+rule_dirs\s+(add|remove)\s+(\S(?:.*\S)?)"
                            r"\s*\Z", re.I)
-_LIST_KEYS = ("ssh_autonomous_hosts", "rule_dirs")
+# the clean folders: the same form (file_reads.py)
+_CLEAN_DIRS_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+clean_dirs\s+(add|remove)\s+"
+                            r"(\S(?:.*\S)?)\s*\Z", re.I)
+_LIST_KEYS = ("ssh_autonomous_hosts", "rule_dirs", "clean_dirs")
+_FOLDER_KEYS = ("rule_dirs", "clean_dirs")
 _HINTS_RESET_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+hints\s+reset|maisecrets:\s*reset\s+hints)\s*\Z", re.I)
 # the same sentence anywhere in a tool call: a nested client (`codex exec 'maisecrets: set …'`, `claude -p`) would
 # type it for the model, and the writer called by name would skip the prompt (review of C22). A text match: a
@@ -163,6 +179,17 @@ def _card(key: str, cfg: dict) -> list[str]:
             lines.append(f"    Remove: /maisecrets:settings rule_dirs remove {value[0]}")
         if cfg.get("policy_rule_dirs"):
             lines.append(f"    From the machine policy, always read: {', '.join(cfg['policy_rule_dirs'])}")
+    elif key == "clean_dirs":
+        lines.append("    Add: /maisecrets:settings clean_dirs add DIR   (a full path or ~/…)")
+        if value:
+            lines.append(f"    Remove: /maisecrets:settings clean_dirs remove {value[0]}")
+    elif key in ("read_pdf", "read_image"):
+        suggest = "convert" if key == "read_pdf" else "ask"
+        lines.append(f"    Change: /maisecrets:settings {key} {suggest if value != suggest else 'allow'}")
+        if key == "read_pdf" and value == "convert":
+            from .file_reads import INSTALL, pdftotext
+            if not pdftotext():
+                lines.append(f"    pdftotext is not installed, so every PDF is refused until it is. {INSTALL}.")
     elif key in _BOOL_KEYS:
         lines.append(f"    Turn {'off' if value else 'on'}: /maisecrets:settings {key} {'off' if value else 'on'}")
     elif key in _CHOICES:
@@ -223,6 +250,9 @@ def parse_prompt(prompt) -> tuple[str, str] | None:
     m = _RULE_DIRS_RE.match(prompt)
     if m:
         return ("rule_dirs", m.group(1).lower() + ":" + m.group(2))
+    m = _CLEAN_DIRS_RE.match(prompt)
+    if m:
+        return ("clean_dirs", m.group(1).lower() + ":" + m.group(2))
     m = _PROMPT_RE.match(prompt)
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
@@ -250,12 +280,18 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
         if key == "rule_dirs":
             return False, ("maisecrets: send /maisecrets:settings rule_dirs add DIR (or remove DIR), "
                            "or in Codex: maisecrets: set rule_dirs add DIR.")
+        if key == "clean_dirs":
+            return False, ("maisecrets: send /maisecrets:settings clean_dirs add DIR (or remove DIR), "
+                           "or in Codex: maisecrets: set clean_dirs add DIR.")
         if key in MEANING:
             return False, f"maisecrets: {key} is not changed by a prompt; edit {CONFIG} by hand."
         return False, f"maisecrets: {key} is no setting this command changes. /maisecrets:settings --all lists them."
     if word != "default" and not hosts_change:
         if key in _BOOL_KEYS and word not in _BOOL_WORDS:
             return False, f"maisecrets: {key} takes on, off or default."
+        if key == "read_image" and word == "convert":
+            return False, ("maisecrets: convert is for PDFs only; maisecrets does no OCR. read_image takes allow, "
+                           "ask, block or default.")
         if key in _CHOICES and word not in _CHOICES[key]:
             return False, f"maisecrets: {key} takes {', '.join(_CHOICES[key])} or default."
         if key in _INT_KEYS:
@@ -264,13 +300,18 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
             if not (word.isdigit() and len(word) <= 8 and low <= int(word) <= high):
                 return False, f"maisecrets: {key} takes a whole number from {low} to {high:,}, or default."
     note = ""
-    if key == "rule_dirs" and word.startswith("add:"):
+    if key == "read_pdf" and word == "convert":
+        from .file_reads import INSTALL, pdftotext
+        if not pdftotext():
+            note = f" pdftotext is not installed, so maisecrets refuses every PDF until it is. Install it: {INSTALL}."
+    if key in _FOLDER_KEYS and word.startswith("add:"):
         from .user_rules import expand, refused_folder
         why = refused_folder(expand(word[4:]))
         if why:
             return False, f"maisecrets: the folder is not added ({why.split(': ', 1)[-1]}). Nothing was changed."
         if not expand(word[4:]).is_dir():
-            note = " The folder does not exist yet; maisecrets reads it once it does."
+            note = (" The folder does not exist yet; maisecrets reads it once it does." if key == "rule_dirs"
+                    else " The folder does not exist yet.")
     # a symlinked config.json (dotfiles) keeps its link: the new file replaces the target
     target = CONFIG.resolve() if CONFIG.is_symlink() else CONFIG
     try:
@@ -296,7 +337,7 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
                 user.pop(key, None)
             elif hosts_change:
                 verb, host = word.split(":", 1)
-                if key == "rule_dirs":
+                if key in _FOLDER_KEYS:
                     # ~/team and the same folder written in full are one folder
                     from .user_rules import expand
                     hosts = [h for h in user.get(key, []) if not isinstance(h, str) or expand(h) != expand(host)]
@@ -349,6 +390,25 @@ HINTS["secret_destinations"] = {
               "as their own prompt: maisecrets: set secret_destinations observe. Do not change settings yourself and "
               "do not call any destination safe or approved."),
 }
+for _key, _noun, _more in (("read_pdf", "PDF", "convert (only its text goes to you, with secrets and personal data "
+                                               "masked), ask (the user is asked each time), block"),
+                           ("read_image", "image", "ask (the user is asked each time), block")):
+    # the same sentence for every file: nothing of the file or its name is in it (C26)
+    HINTS[_key] = {
+        "revision": 1,
+        "claude": (f"maisecrets cannot look inside an image or a PDF: the {_noun} you just read went to you as it is, "
+                   f"with any password or personal data in it (setting {_key}; it is allow, and the user has not "
+                   "decided). Mention this once, in one or two sentences, after your answer. If the user wants "
+                   f"another way, tell them to send this as their own prompt: /maisecrets:settings {_key} MODE, "
+                   f"where MODE is {_more}, or allow so this note does not come again. Do not change settings "
+                   "yourself."),
+        "codex": (f"maisecrets cannot look inside an image or a PDF: the {_noun} you just read went to you as it is, "
+                  f"with any password or personal data in it (setting {_key}; it is allow, and the user has not "
+                  "decided). Mention this once, in one or two sentences, after your answer. If the user wants "
+                  f"another way, tell them to send this alone as their own prompt: maisecrets: set {_key} MODE, "
+                  f"where MODE is {_more}, or allow so this note does not come again. Do not change settings "
+                  "yourself."),
+    }
 _HINTS_FILE = HOME / "hints.json"
 
 

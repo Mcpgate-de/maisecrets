@@ -60,6 +60,9 @@ DEFAULT_CONFIG = {
     "ssh_host_groups": {},           # {"group": ["host", …]}: one ssh consent covers the whole group
     "ssh_autonomous_hosts": [],      # hosts (or group names) where the AI writes over ssh without asking, always
     "rule_dirs": [],                 # folders of detection rules of your own (user_rules.py); a typed prompt adds one
+    "read_pdf": "allow",             # allow | ask | block | convert: a PDF that the AI reads (file_reads.py, C26)
+    "read_image": "allow",           # allow | ask | block: an image that the AI reads
+    "clean_dirs": [],                # folders whose PDFs and images pass as allow; a typed prompt adds one
     "secret_destinations": "observe",  # observe: note where each stored secret is sent (destinations.py); off
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
@@ -91,6 +94,7 @@ _CONFIG_TYPES = {
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
     "ssh_consent": bool, "ssh_host_groups": dict, "ssh_autonomous_hosts": list, "secret_destinations": str,
     "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool, "rule_dirs": list,
+    "read_pdf": str, "read_image": str, "clean_dirs": list,
 }
 
 
@@ -320,6 +324,9 @@ def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
         cfg["ssh_consent"] = True
     if isinstance(parsed.get("rule_dirs"), list):
         cfg["rule_dirs"] = parsed["rule_dirs"]    # more rules only make detection stricter
+    for key in ("read_pdf", "read_image"):
+        if parsed.get(key) in ("ask", "block", "convert"):
+            cfg[key] = parsed[key]                 # each stops more than the default allow; clean_dirs only loosens
 
 
 def load_config() -> dict:

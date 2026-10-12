@@ -1,0 +1,10 @@
+# c26-a-file-is-replaced-only-by-the-text-shape: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-file-is-replaced-only-by-the-text-shape"
+control = "C26"
+statement = "Every answer that stands in for a PDF or an image read is the measured text shape of Read; a string would fail the client's shape check and the original file would reach the model."
+runner = ["tests/test_file_reads.py::OnlyTheTextShapeLeaves::test_every_mode_and_every_payload"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "    return text_result(path, text)\n"
+replace = "    return text\n"

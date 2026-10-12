@@ -1,0 +1,10 @@
+# c26-convert-without-pdftotext-refuses: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-convert-without-pdftotext-refuses"
+control = "C26"
+statement = "Under read_pdf convert, a machine without pdftotext refuses the PDF before the read and names the tool and how to install it; it never lets the PDF through."
+runner = ["tests/test_file_reads.py::Convert::test_without_pdftotext_the_read_is_refused_and_the_message_says_how_to_install"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "    if not pdftotext():\n        return _deny(refusal(kind, \"missing\", codex))\n"
+replace = "    if False:\n        return _deny(refusal(kind, \"missing\", codex))\n"

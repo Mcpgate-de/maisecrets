@@ -1,0 +1,10 @@
+# c26-a-clean-folder-resolves-links-first: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-clean-folder-resolves-links-first"
+control = "C26"
+statement = "A read passes as clean only when the resolved file lies inside a resolved folder of clean_dirs; a link in the folder that points out of it, or a path that climbs out with .., is not clean."
+runner = ["tests/test_file_reads.py::CleanDirs::test_a_read_inside_passes_and_a_way_out_does_not"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "    return os.path.normcase(os.path.realpath(path))\n"
+replace = "    return os.path.normcase(os.path.normpath(path))\n"

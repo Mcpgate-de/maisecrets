@@ -2970,6 +2970,9 @@ def pre_tool(payload: dict) -> dict:
         refused = _store_path_refusal(tool, tool_input, str(payload.get("cwd") or ""))
         if refused:
             return refused
+        if tool == "Read":
+            from . import file_reads      # a PDF or an image: the person's read_pdf / read_image (C26)
+            return file_reads.pre_read(payload, cfg, client_of(payload) == "codex")
         if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS:
             return {}
     if tool in _FILE_TOOLS or tool == "apply_patch":
@@ -3354,6 +3357,14 @@ def post_tool(payload: dict) -> dict:
     response = payload.get("tool_response")
     if response is None:
         return {}
+    # an image or a PDF (C26): its base64 is no text to scan (1 MB took 30 s, and a false hit broke the image).
+    # It passes as it is, or a text Read takes its place, which the redaction below then masks
+    from . import file_reads
+    swap = file_reads.post_read(payload, cfg, client_of(payload) == "codex")
+    if swap and swap[0] == "pass":
+        return {}
+    if swap:
+        response = swap[1]
     session = payload.get("session_id")
     vault: Vault | None = None
     hit = {"n": 0}
@@ -3427,6 +3438,11 @@ def post_tool(payload: dict) -> dict:
         return node
 
     new_response = walk(response)
+    if swap and not hit["n"] and not hidden["n"]:
+        if client_of(payload) == "codex":
+            return {"decision": "block", "reason": f"[maisecrets: {swap[2]}]\n\n{file_reads.as_text(new_response)}"}
+        return {"systemMessage": swap[2],
+                "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": new_response}}
     if not hit["n"] and not hidden["n"]:
         return {}
     from . import events
@@ -3472,6 +3488,8 @@ def post_tool(payload: dict) -> dict:
         # (item_completed / CommandExecution), so that file is scrubbed too, with every matched
         # form, not only the detector values (review, 2026-09-26).
         text = new_response if isinstance(new_response, str) else json.dumps(new_response, ensure_ascii=False)
+        if swap:
+            text = file_reads.as_text(new_response)
         if cfg.get("scrub_transcript", True):
             path = payload.get("transcript_path", "")
             _scrub_transcript(path, values, refs)
@@ -3486,7 +3504,8 @@ def post_tool(payload: dict) -> dict:
         # the person sees what was replaced, not only the model (UX review, 2026-09-27)
         "systemMessage": f"maisecrets replaced {hit['n']} value(s) in this {tool} "
                          f"result before the AI saw it: {shown}."
-                         + (f" It also removed {hidden['n']} invisible character(s)." if hidden["n"] else ""),
+                         + (f" It also removed {hidden['n']} invisible character(s)." if hidden["n"] else "")
+                         + (f" {swap[2]}" if swap else ""),
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
             "updatedToolOutput": new_response,
@@ -3567,10 +3586,17 @@ def _ssh_hint(payload: dict) -> str | None:
     return settings.HINTS["ssh_consent"]["codex" if client_of(payload) == "codex" else "claude"]
 
 
+def _file_read_hint(payload: dict) -> str | None:
+    from . import file_reads
+    if not file_reads.kind_of_response(payload.get("tool_name") or "", payload.get("tool_response")):
+        return None          # most calls: no config read
+    return file_reads.hint(payload, load_config(), client_of(payload) == "codex")
+
+
 def _with_hint(payload: dict, result: dict) -> dict:
     """Add a hint to the answer of a PostToolUse without changing what the answer does."""
     # both, when both are due: with `or` the destination hint of this call waited for an unrelated later one (codex)
-    hint = "\n\n".join(h for h in (_ssh_hint(payload), _destination_hint(payload)) if h)
+    hint = "\n\n".join(h for h in (_ssh_hint(payload), _destination_hint(payload), _file_read_hint(payload)) if h)
     if not hint:
         return result
     result = dict(result)
@@ -3753,6 +3779,13 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
             "Do NOT run it again to see the output; tell the user to check the result in their terminal.")
     if codex:
         return {"decision": "block", "reason": reason + tail}
+    if payload.get("tool_name") == "Read":
+        # a string fails the shape check of Read and the client sends the original, a PDF or an image too (measured,
+        # harness/probe_file_reads.py): only a text Read withholds it
+        from .file_reads import text_result
+        path = (payload.get("tool_input") or {}).get("file_path") if isinstance(payload.get("tool_input"), dict) else ""
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                       "updatedToolOutput": text_result(str(path or ""), f"[{reason}{tail}]")}}
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": f"[{reason}{tail}]"}}
 
 

@@ -129,6 +129,19 @@ SCENARIOS = {
         "expect_requests": 0,
         "expect_blocked": True,
     },
+    # read_pdf convert (C26): the model reads a PDF with the marker in it and gets only its text, masked, in the
+    # measured text shape of Read. Without pdftotext on this machine the read is refused and names the tool; the PDF
+    # (its base64 starts with JVBERi0) reaches the model in neither case
+    "read_pdf_convert": {
+        "prompt": "Read invoice.pdf and tell me what it says.",
+        "config": {"read_pdf": "convert"},
+        "binary_files": {"invoice.pdf": ("Invoice 2026", f"deploy token {MARK}")},
+        "turns": [{"tool": "Read", "input": {"file_path": "{cwd}/invoice.pdf"}}, {"text": "done"}],
+        "expect_requests": 2,
+        "expect_not_in_requests": ["JVBERi0"],
+        "expect_in_requests": (["Invoice 2026", "deploy token \u27e6SECRET_c"] if shutil.which("pdftotext")
+                               else ["pdftotext"]),
+    },
     # the index is damaged: the prompt hook fails closed and blocks, and the prompt as typed still leaves the
     # transcript (Mcpgate-de/maisecrets#3; before, the hook failed before it started the scrub)
     "prompt_damaged_index": {
@@ -477,6 +490,9 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                MAISECRETS_GUARD_CLIPBOARD="off")   # a guarded scenario must not write the real clipboard
     for fname, content in sc.get("files", {}).items():
         (cwd / fname).write_text(content, encoding="utf-8")
+    for fname, lines in sc.get("binary_files", {}).items():
+        from probe_file_reads import pdf_lines
+        (cwd / fname).write_bytes(pdf_lines(*lines))
     if sc.get("preload"):
         # in a subprocess: maisecrets.vault fixes its home at import, and this process runs
         # several scenarios (the second preload landed in the first home, 2026-09-26)

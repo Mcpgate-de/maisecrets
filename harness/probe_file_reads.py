@@ -33,7 +33,13 @@ def png_2x2() -> bytes:
 
 
 def pdf_hello() -> bytes:
-    content = b"BT /F1 24 Tf 72 720 Td (hello) Tj ET"
+    return pdf_lines("hello", size=24)
+
+
+def pdf_lines(*lines: str, size: int = 12) -> bytes:
+    """A one-page PDF with these lines in Helvetica (latin-1 text), standard library only."""
+    content = b" ".join(b"BT /F1 %d Tf 72 %d Td (%s) Tj ET" % (size, 720 - 2 * size * i, ln.encode("latin-1"))
+                        for i, ln in enumerate(lines))
     objs = [b"<< /Type /Catalog /Pages 2 0 R >>",
             b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
             b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
