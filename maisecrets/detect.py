@@ -8,9 +8,10 @@ Three rule sources, one scanner:
    expressions, read by `rule_filter.py`; a rule whose filter is a program
    that module cannot read is left out. Refresh with
    `scripts/sync_betterleaks.py vX.Y.Z`. betterleaks is the successor of
-   gitleaks; a few gitleaks v8.30.1 rules stay (`rules/gitleaks_compat.json`,
-   MIT): generic-api-key, to which the label filters below are tuned, and the
-   shapes betterleaks no longer finds.
+   gitleaks.
+2a. **Own secret rules** (`rules/own_secret_rules.json`, patterns derived from
+   gitleaks v8.30.1, MIT): generic-api-key, to which the label filters below
+   are tuned, and the token forms the betterleaks rules miss.
 2. **Presidio** (`rules/presidio.json`, derived from Microsoft Presidio's
    pattern recognizers, MIT, version in `rules/PRESIDIO_VERSION`): country
    and generic PII shapes with scores and context words. Regions are
@@ -503,18 +504,18 @@ OWN_RULES: list[dict] = [
 BETTERLEAKS_SKIP_UNSUPPORTED = True
 
 
-def _load_gitleaks_compat() -> list[Rule]:
-    """The rules kept from gitleaks v8.30.1 (rules/gitleaks_compat.json, MIT), with their entropy and allowlists:
-    generic-api-key, to which the keyword window (_WINDOWED) and the label filters of scan() are tuned, and the rules
-    whose shapes betterleaks v1.9.0 no longer finds (etsy, jfrog, a bare Fly.io token, a labelled Atlassian token, a
-    legacy Vault token, …). They run after betterleaks, so they only fill its gaps."""
-    cfg = json.loads((RULES_DIR / "gitleaks_compat.json").read_text(encoding="utf-8"))
+def _load_own_secret_rules() -> list[Rule]:
+    """maisecrets' own secret rules (rules/own_secret_rules.json; patterns derived from gitleaks v8.30.1, MIT), with
+    their entropy and allowlists: generic-api-key, to which the keyword window (_WINDOWED) and the label filters of
+    scan() are tuned, and the token forms the betterleaks rules miss (etsy, jfrog, a bare Fly.io token, a labelled
+    Atlassian token, a legacy Vault token, …). They run after betterleaks, so they only fill its gaps."""
+    cfg = json.loads((RULES_DIR / "own_secret_rules.json").read_text(encoding="utf-8"))
     rules: list[Rule] = []
     for r in cfg["rules"]:
         allow: list[tuple[re.Pattern[str], str]] = []
         stop: list[str] = []
         for al in r.get("allowlists", []) or []:
-            # gitleaks: no regexTarget means the secret, "match" the whole match, "line" the line
+            # as in gitleaks: no regexTarget means the secret, "match" the whole match, "line" the line
             target = al.get("regexTarget", "secret")
             for arx in al.get("regexes", []) or []:
                 allow.append((_Lazy(_re2_to_python(arx)), target))
@@ -685,15 +686,15 @@ _RULES: list[Rule] | None = None
 
 
 def rules() -> list[Rule]:
-    """Own secret rules first (longer shapes win the span), then betterleaks and the kept gitleaks rules, then
-    PII."""
+    """Own secret rules first (longer shapes win the span), then betterleaks and the own rules of
+    own_secret_rules.json, then PII."""
     global _RULES
     if _RULES is None:
         own = _load_own()
         secrets = [r for r in own if r.type == "SECRET"]
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
-        _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_gitleaks_compat()
+        _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
                   + _load_presidio(active.regions) + pii)
     return _RULES
 
@@ -1357,7 +1358,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if "\u27e6" in secret or re.search(r"<[A-Z][A-Z_]*_c\d+>", secret):
                 continue
             if rule.type == "SECRET":
-                # a fixed-length shape (gitleaks: glpat-[\w-]{20}) stops inside a longer token and
+                # a fixed-length shape (betterleaks: glpat-[\w-]{20}) stops inside a longer token and
                 # the tail would stay in the clear (4 chars of a 24-char token, 2026-09-26): the
                 # value runs to the end of the token characters
                 end2 = end

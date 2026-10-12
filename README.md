@@ -1109,13 +1109,16 @@ Four sources, one scanner (`maisecrets/detect.py`):
   betterleaks never reports alone (`skipReport`). The BPE token ratio filter needs
   a tokenizer the standard library does not have; maisecrets answers 0 there, as
   betterleaks does without a tokenizer.
-- **gitleaks v8.30.1, the rules kept** (`maisecrets/rules/gitleaks_compat.json`,
-  MIT): `generic-api-key`, to which the label filters of the detector are tuned,
-  and the shapes betterleaks no longer finds (Etsy, JFrog, a bare Fly.io token, an
-  Atlassian token after a product name, a legacy Vault token, and a few more).
-  They run after betterleaks and only fill its gaps. Measured on Samsung CredData
-  (15,753 labelled credentials) against the gitleaks rules of 0.6.12: the same
-  precision (76.5 %) and recall (60.6 %), with a few more hits.
+- **Own secret rules** (`maisecrets/rules/own_secret_rules.json`, patterns
+  derived from gitleaks v8.30.1, MIT): `generic-api-key`, to which the label
+  filters of the detector are tuned, and nine token forms the betterleaks rules
+  miss (Alibaba `LTAI`, Etsy, JFrog twice, a bare Fly.io token, an Atlassian
+  token after a product name, a legacy Vault token, Twilio `SK`, Codecov). They
+  run after betterleaks and only fill its gaps; a test drops each one that a
+  later betterleaks finds itself. gitleaks itself is no longer vendored.
+  Measured on Samsung CredData (15,753 labelled credentials) against the
+  gitleaks rules of 0.6.12: the same precision (76.5 %) and recall (60.6 %),
+  with a few more hits.
 - **Presidio** pattern recognizers, vendored as data under `maisecrets/rules/`
   (MIT, version in `PRESIDIO_VERSION`, refresh with `scripts/sync_presidio.py`):
   country-specific PII with scores and context words. The config key

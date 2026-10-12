@@ -109,15 +109,15 @@ class BetterleaksRuleTests(unittest.TestCase):
         value = "ddp_" + tok(36)                   # a Deno account token: no gitleaks v8.30.1 rule
         self.assertIn(("deno-account-token", value), kinds(f"DENO_DEPLOY={value}\n"))
 
-    def test_the_shapes_betterleaks_lost_stay_found_through_the_kept_gitleaks_rules(self):
+    def test_the_shapes_betterleaks_lacks_stay_found_through_the_own_rules(self):
         lower = string.ascii_lowercase + string.digits
         for text, value in (("etsy: {v}", tok(24, lower)), ("artifactory: {v}", tok(73, lower)),
                             ("jfrog = {v}", tok(64, lower)), ("deploy with {v} now", "fo1_" + tok(43))):
             with self.subTest(text):
                 self.assertIn(value, [v for _, v in kinds(text.format(v=value))])
 
-    def test_each_kept_gitleaks_rule_finds_what_betterleaks_alone_misses(self):
-        """The population of rules/gitleaks_compat.json: each rule but generic-api-key stays only while betterleaks
+    def test_each_own_secret_rule_finds_what_betterleaks_alone_misses(self):
+        """The population of rules/own_secret_rules.json: each rule but generic-api-key stays only while betterleaks
         misses a realistic token of its shape. A later betterleaks that closes a gap turns this red: drop the rule."""
         low, hexd = string.ascii_lowercase + string.digits, "0123456789abcdef"
         samples = {
@@ -125,13 +125,13 @@ class BetterleaksRuleTests(unittest.TestCase):
             "etsy-access-token": "etsy: " + tok(24, low),
             "jfrog-api-key": "artifactory: " + tok(73, low),
             "jfrog-identity-token": "jfrog = " + tok(64, low),
-            "flyio-access-token.gitleaks8": "fo1_" + tok(43, string.ascii_letters + string.digits + "_-"),
-            "atlassian-api-token.gitleaks8": "confluence: " + tok(20, low) + tok(4, hexd),
-            "vault-service-token.gitleaks8": "s." + tok(24, low),
-            "twilio-api-key.gitleaks8": "SK" + tok(32, hexd),
-            "codecov-access-token.gitleaks8": "codecov: " + tok(32, low),
+            "flyio-access-token.legacy": "fo1_" + tok(43, string.ascii_letters + string.digits + "_-"),
+            "atlassian-api-token.legacy": "confluence: " + tok(20, low) + tok(4, hexd),
+            "vault-service-token.legacy": "s." + tok(24, low),
+            "twilio-api-key.legacy": "SK" + tok(32, hexd),
+            "codecov-access-token.legacy": "codecov: " + tok(32, low),
         }
-        kept = [r for r in detect._load_gitleaks_compat() if r.id != "generic-api-key"]
+        kept = [r for r in detect._load_own_secret_rules() if r.id != "generic-api-key"]
         self.assertEqual(sorted(r.id for r in kept), sorted(samples), "the premise: one sample per kept rule")
         full = detect.rules()
         alone = [r for r in full if r.id not in samples]

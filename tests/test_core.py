@@ -40,7 +40,7 @@ def tearDownModule():  # noqa: N802 - unittest hook
 
 GLPAT = "glpat-" + "A1b2C3d4E5f6G7h8I9j0"          # 20 chars after prefix
 AKIA = "AKIA" + "ABCDEFGHIJKLMNOP"
-GHP = "ghp_" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"  # mixed: gitleaks needs entropy >= 3
+GHP = "ghp_" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"  # mixed: the github-pat rule needs entropy >= 3
 GLRT = "glrt-" + "AbCdEfGhIjKlMnOpQrStUv.01.1a2b3c4d5"
 # canonical public test values, assembled at runtime so no literal sits in the tree
 IBAN_OK = " ".join(["DE89", "3704", "0044", "0532", "0130", "00"])
