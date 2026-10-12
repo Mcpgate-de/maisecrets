@@ -4065,6 +4065,18 @@ def _disarm_alarm(before) -> None:
         pass
 
 
+def _quarantine_running_rule() -> None:
+    """The watchdog answered while a rule of your own ran: that rule is left out from the next call on
+    (maisecrets/user_rules.py). Never raises."""
+    try:
+        rule = detect.running_user_rule()
+        if rule is not None:
+            from . import user_rules
+            user_rules.note_slow(rule, None)
+    except Exception:  # noqa: BLE001 - the answer is out; this only spares the next call
+        pass
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[1] not in HANDLERS:
         sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|post-tool-failure|session-start\n")
@@ -4126,6 +4138,7 @@ def main(argv: list[str]) -> int:
         if answer(_fail_closed(event, payload, f"took longer than {seconds:.0f}s."), "watchdog"):
             def last() -> None:
                 _heartbeat(event, payload, done=True)
+                _quarantine_running_rule()
                 _scrub_failed_prompt(event, payload)
                 incidents.write_marker(f"hook.{event}.watchdog")
             t = threading.Thread(target=last, daemon=True)
