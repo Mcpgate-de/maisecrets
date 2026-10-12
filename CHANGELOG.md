@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.6.13] - 2026-10-12
+
+### Features
+
+- secrets of about 200 more services, from betterleaks instead of gitleaks (baf8e64)
+
+### Other
+
+- Merge branch 'feat/18-the-detector-uses-the-betterleaks-rules' into 'main' (4859e60)
+
 ## [0.6.12] - 2026-10-12
 
 ### Fixes
