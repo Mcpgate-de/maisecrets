@@ -1,0 +1,10 @@
+# c26-a-bad-terms-file-fails-closed: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-bad-terms-file-fails-closed"
+control = "C26"
+statement = "A terms.txt with a line the loader refuses stops every hook (fail closed); the message names the file and the line, never a term."
+runner = ["tests/test_terms_hooks.py::TermHookTests::test_a_bad_terms_file_fails_closed_without_a_term"]
+
+[proof]
+file = "maisecrets/terms.py"
+find = "class TermsError(ConfigError):\n"
+replace = "class TermsError(ValueError):\n"

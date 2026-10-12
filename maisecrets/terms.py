@@ -1,0 +1,866 @@
+"""Terms: names, case numbers and customer names, which have no shape (README "Terms", C26).
+
+Based on the personal-terms design by @danszymkowiak (github.com/danszymkowiak/maisecrets, docs/TERMS.md): his file
+form, his four match modes and his rule that no message shows a term. What is different here, and why, is in the
+README section "Terms".
+
+The sources, read once per hook process:
+
+- `~/.maisecrets/terms.txt`, the person's own list. The agent cannot read or write it (C8). A line the loader cannot
+  read stops every hook (fail closed): only the person writes the file, the message names the line, and the
+  alternative is a silent leak of exactly the names the person listed.
+- `*.terms` in each folder of `rule_dirs` (a team list). An agent can write a shared checkout, so a team entry has a
+  floor (3 characters, not a word of rules/term_stoplist.txt), and a line that fails is QUARANTINED: left out and
+  named in /maisecrets:rules, never fatal.
+- the names the person marked in a typed prompt as `{{Jan Kowalski}}`: in `terms.marked.json` until the lifetime of a
+  NAME value ends.
+
+A hit is a detect.Match of kind `term:<id>`: the id is a hash of the source and the label, never the term. hooks.py
+stores no term in the store: the vault keeps one entry per entity, whose value is the text `maisecrets-term:<id>`,
+so every spelling of an entity gets the same placeholder, and the placeholder is never resolved back (mask only).
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import marshal
+import os
+import re
+import stat
+import sys
+import time
+import zlib
+from array import array
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .vault import HOME, ConfigError
+
+WORD = "word"        # Jan: the whole word
+STARTS = "starts"    # Kowalsk*: word start, any ending
+ENDS = "ends"        # *kowalski: any start, word end
+INSIDE = "inside"    # *kowalski*: anywhere inside a word
+
+PERSONAL = HOME / "terms.txt"
+MARKED = HOME / "terms.marked.json"
+STATE_FILE = HOME / ".terms-state"
+SUFFIX = ".terms"
+STORE_PREFIX = "maisecrets-term:"   # the store value of a term entry: the id, never the term
+
+MIN_INSIDE = 4        # *x*: a shorter x would mask half of every text
+MIN_AFFIX = 3         # the stem of Kowalsk* or *kowalski
+MIN_TEAM = 3          # a team entry, without its stars
+MAX_INSIDE = 50       # *x* variants in all: each one is a search over the whole text
+MAX_WORDS = 8
+MAX_TEAM_BYTES = 4 * 1024 * 1024   # about 130,000 entries; a build of 100,000 takes 1 to 2.3 s
+LABEL_RE = re.compile(r"[A-Z][A-Z0-9_]{0,31}")
+TYPES = ("SECRET", "NAME", "EMAIL", "PHONE", "IBAN", "CARD", "IP")
+# a word: letters, digits and the underscore, so Kowalski_report.pdf holds the word kowalski_report, not kowalski
+_WORD_RE = re.compile(r"\w+")
+_SPACE_RE = re.compile(r"\s+")
+
+
+class TermsError(ConfigError):
+    """A ConfigError: every hook fails closed on it, as on a broken config. The message names the file and a line
+    number, never the text of a line."""
+
+    def __init__(self, message: str, line: int | None = None):
+        super().__init__(message)
+        self.line = line
+
+
+@dataclass(frozen=True)
+class Variant:
+    text: str
+    mode: str
+
+
+@dataclass(frozen=True)
+class Entity:
+    label: str
+    variants: tuple
+    line: int
+    source: str = "own"     # own | marked | <folder>/<file>
+
+    @property
+    def id(self) -> str:
+        return hashlib.sha256(f"{self.source}\0{self.label}".encode("utf-8")).hexdigest()[:12]
+
+    @property
+    def type(self) -> str:
+        """The placeholder type: the label when it is a type (EMAIL, or EMAIL_BOSS), else NAME."""
+        return next((t for t in TYPES if self.label == t or self.label.startswith(t + "_")), "NAME")
+
+
+@dataclass(frozen=True)
+class Refused:
+    source: str
+    line: int
+    reason: str      # fixed text, never a term
+
+
+# ---------------------------------------------------------------- parsing --
+def _variant(raw: str, n: int, floor: frozenset | None) -> Variant:
+    """One variant; raises TermsError with a reason that names the line only. `floor` is the stop list of a team
+    list (None for the person's own list)."""
+    text = raw.strip()
+    starts, ends = text.startswith("*"), text.endswith("*") and len(text) > 1
+    text = text[1 if starts else 0:len(text) - 1 if ends else len(text)].strip()
+    if not text:
+        raise TermsError(f"line {n}: an empty variant", n)
+    if "*" in text:
+        raise TermsError(f"line {n}: a * may stand only at the start or the end of a variant", n)
+    text = " ".join(text.split())
+    if any(ord(ch) < 32 for ch in text):
+        raise TermsError(f"line {n}: a control character in a variant", n)
+    words = _WORD_RE.findall(_lower(text))
+    if not words:
+        raise TermsError(f"line {n}: a variant needs a letter or a digit", n)
+    if len(words) > MAX_WORDS:
+        raise TermsError(f"line {n}: a variant of more than {MAX_WORDS} words", n)
+    mode = INSIDE if starts and ends else STARTS if ends else ENDS if starts else WORD
+    if mode == INSIDE and len(text) < MIN_INSIDE:
+        raise TermsError(f"line {n}: a *…* variant needs at least {MIN_INSIDE} characters", n)
+    if mode == STARTS and (len(words[-1]) < MIN_AFFIX or not _WORD_RE.fullmatch(text[-1])):
+        raise TermsError(f"line {n}: the word before a * needs at least {MIN_AFFIX} letters or digits", n)
+    if mode == ENDS and (len(words[0]) < MIN_AFFIX or not _WORD_RE.fullmatch(text[0])):
+        raise TermsError(f"line {n}: the word after a * needs at least {MIN_AFFIX} letters or digits", n)
+    if floor is not None:
+        if len(text) < MIN_TEAM:
+            raise TermsError(f"line {n}: a team entry needs at least {MIN_TEAM} characters", n)
+        if len(words) == 1 and words[0] in floor:
+            raise TermsError(f"line {n}: a common word (rules/term_stoplist.txt) in a team list", n)
+    return Variant(text, mode)
+
+
+def parse(text: str, source: str = "own", strict: bool = True,
+          floor: frozenset | None = None) -> tuple[list, list]:
+    """(entities, refused) of a term list. One entity per line: `LABEL  variant | variant`, `#` comments. Strict (the
+    person's own list): the first bad line raises TermsError. Not strict (a team list): a bad line or variant is
+    refused and the rest loads."""
+    entities: list = []
+    refused: list = []
+    seen: set = set()
+    for n, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            parts = line.split(None, 1)
+            label, rest = parts[0], parts[1] if len(parts) > 1 else ""
+            if not LABEL_RE.fullmatch(label):
+                raise TermsError(f"line {n}: the line must start with a label of capital letters, digits and _ "
+                                 "(at most 32), then the variants", n)
+            if label in seen:
+                raise TermsError(f"line {n}: the label appears on an earlier line", n)
+            seen.add(label)
+            variants = []
+            for raw in rest.split("|"):
+                try:
+                    variants.append(_variant(raw, n, floor))
+                except TermsError as exc:
+                    if strict or floor is None:
+                        raise
+                    refused.append(Refused(source, n, str(exc).split(": ", 1)[1]))
+            if variants:
+                entities.append(Entity(label, tuple(variants), n, source))
+        except TermsError as exc:
+            if strict:
+                raise
+            refused.append(Refused(source, n, str(exc).split(": ", 1)[1]))
+    return entities, refused
+
+
+# ---------------------------------------------------------------- matcher --
+def _lower(text: str) -> str:
+    """Lower case as detect._lower: the Turkish capital İ lowers to i plus a combining dot, which is no letter and
+    would split the word; the dot is dropped."""
+    return text.lower().replace("i\u0307", "i")
+
+
+def _shape(text: str) -> tuple:
+    """(words, gaps, lead, trail) of a variant: its words lower-cased, the text between them with whitespace as one
+    space, and what stands before the first word and after the last."""
+    low = _lower(text)
+    spans = [(m.start(), m.end()) for m in _WORD_RE.finditer(low)]
+    words = tuple(low[a:b] for a, b in spans)
+    gaps = tuple(_SPACE_RE.sub(" ", low[spans[i][1]:spans[i + 1][0]]) for i in range(len(spans) - 1))
+    return words, gaps, low[:spans[0][0]], low[spans[-1][1]:]
+
+
+class Matcher:
+    """Every variant of every entity, in one index: the words of a whole-word variant (its n-gram), the first three
+    letters of the stem of `stem*`, the last three of `*stem`. A text costs one pass over its words, one lookup per
+    distinct word and kind, plus at most 50 `*inside*` needles searched in the whole text.
+
+    The index is two byte strings and an array, so it loads from the disk cache without building an object per
+    entry (100,000 entries as Python dicts took 150 ms to unmarshal; this takes a few): `_blob` holds one record per
+    key, `key \\x1f most-words \\x1f candidate \\x1e candidate … \\n`, and `_table` is an open-addressing hash table of
+    record offsets (zlib.crc32 of the key). A candidate is `entity \\x1d words \\x1d gaps \\x1d lead \\x1d trail \\x1d
+    stem`, the lists joined with \\x1c. `_ents` holds `label \\x1f source \\x1f line \\n` per entity."""
+
+    def __init__(self, entities=(), data: tuple | None = None):
+        if data is None:
+            data = _index(list(entities))
+        table, self._blob, ent_offsets, self._ents, self.inside, self._kinds = data
+        self._table = array(_ARRAY)
+        self._table.frombytes(table)
+        self._ent_offsets = array(_ARRAY)
+        self._ent_offsets.frombytes(ent_offsets)
+        self._mask = len(self._table) - 1
+        self._data = data
+        self._records: dict = {}
+        self._objs: dict = {}
+
+    def data(self) -> tuple:
+        return self._data
+
+    def __len__(self) -> int:
+        return len(self._ent_offsets)
+
+    def entity(self, ei: int) -> Entity:
+        ent = self._objs.get(ei)
+        if ent is None:
+            off = self._ent_offsets[ei]
+            label, source, line = self._ents[off:self._ents.index(b"\n", off)].decode("utf-8").split("\x1f")
+            ent = self._objs[ei] = Entity(label, (), int(line), source)
+        return ent
+
+    def _get(self, key: str):
+        """(most words, [candidate]) of a key, or None."""
+        kb = key.encode("utf-8")
+        tab, blob, mask = self._table, self._blob, self._mask
+        i = zlib.crc32(kb) & mask
+        n = len(kb)
+        while True:
+            off = tab[i]
+            if not off:
+                return None
+            off -= 1
+            if blob[off:off + n] == kb and blob[off + n:off + n + 1] == b"\x1f":
+                rec = self._records.get(off)
+                if rec is None:
+                    _k, most, cands = blob[off:blob.index(b"\n", off)].decode("utf-8").split("\x1f", 2)
+                    rec = self._records[off] = (int(most), [_cand(c) for c in cands.split("\x1e")] if cands else [])
+                return rec
+            i = (i + 1) & mask
+
+    @staticmethod
+    def _fits(text: str, toks: list, i: int, c: tuple) -> tuple | None:
+        """(start, end) when the words from toks[i] on are the variant's, with its gaps, lead and trail."""
+        _ei, words, gaps, lead, trail, _stem = c
+        n = len(words)
+        for j in range(n - 1):
+            gap = text[toks[i + j][1]:toks[i + j + 1][0]]
+            want = gaps[j]
+            if want == " " and gap.isspace():
+                continue
+            if _SPACE_RE.sub(" ", gap).lower() != want:
+                return None
+        start, end = toks[i][0], toks[i + n - 1][1]
+        if lead:
+            if text[max(0, start - len(lead)):start].lower() != lead:
+                return None
+            start -= len(lead)
+        if trail:
+            if text[end:end + len(trail)].lower() != trail:
+                return None
+            end += len(trail)
+        return start, end
+
+    def find(self, text: str) -> list:
+        """(start, end, entity) of each run, left to right, the longest first where two start alike; no overlap."""
+        return _select(self.hits(text))
+
+    def hits(self, text: str) -> list:
+        """Every (start, end, entity) any variant finds, overlapping."""
+        if not len(self) or not text:
+            return []
+        low = text.lower()
+        aligned = len(low) == len(text)
+        src = low if aligned else text
+        toks = [(m.start(), m.end(), m.group() if aligned else _lower(m.group())) for m in _WORD_RE.finditer(src)]
+        hits: list = []
+        get, has_pre, has_suf = self._get, "p" in self._kinds, "s" in self._kinds
+        seen: dict = {}
+        count = len(toks)
+        for i, (s, e, t) in enumerate(toks):
+            found = seen.get(t)
+            if found is None:
+                found = seen[t] = (get("g:" + t), get("p:" + t[:MIN_AFFIX]) if has_pre and len(t) >= MIN_AFFIX
+                                   else None, get("s:" + t[-MIN_AFFIX:]) if has_suf and len(t) >= MIN_AFFIX else None)
+            gram, pre, suf = found
+            if gram:
+                most, cands = gram
+                for c in cands:
+                    span = self._fits(text, toks, i, c)
+                    if span:
+                        hits.append((span[0], span[1], c[0]))
+                for n in range(min(most, count - i), 1, -1):
+                    rec = get("g:" + " ".join(x[2] for x in toks[i:i + n]))
+                    for c in rec[1] if rec else ():
+                        span = self._fits(text, toks, i, c)
+                        if span:
+                            hits.append((span[0], span[1], c[0]))
+            for c in pre[1] if pre else ():
+                words, k = c[1], len(c[1]) - 1
+                if t.startswith(c[5]) and i >= k and all(toks[i - k + j][2] == words[j] for j in range(k)):
+                    span = self._fits(text, toks, i - k, c)
+                    if span:
+                        hits.append((span[0], e, c[0]))
+            for c in suf[1] if suf else ():
+                words, k = c[1], len(c[1]) - 1
+                if t.endswith(c[5]) and i + k < count and all(toks[i + 1 + j][2] == words[1 + j] for j in range(k)):
+                    span = self._fits(text, toks, i, c)
+                    if span:
+                        hits.append((s, span[1], c[0]))
+        for needle, spaced, ei in self.inside:
+            if aligned and not spaced:
+                at = low.find(needle)
+                while at >= 0:
+                    hits.append(self._widen(text, at, at + len(needle), ei))
+                    at = low.find(needle, at + len(needle))
+            else:
+                rx = re.compile(r"\\s+".join(re.escape(w) for w in needle.split()), re.IGNORECASE)
+                hits.extend(self._widen(text, m.start(), m.end(), ei) for m in rx.finditer(text))
+        return [(a, b, self.entity(ei)) for a, b, ei in hits]
+
+    @staticmethod
+    def _widen(text: str, a: int, b: int, ei: int) -> tuple:
+        """The whole word around an *inside* hit: no part of the word stays."""
+        while a > 0 and (text[a - 1].isalnum() or text[a - 1] == "_"):
+            a -= 1
+        while b < len(text) and (text[b].isalnum() or text[b] == "_"):
+            b += 1
+        return a, b, ei
+
+
+_ARRAY = "I" if array("I").itemsize == 4 else "L"
+
+
+def _cand(c: str) -> tuple:
+    ei, words, gaps, lead, trail, stem = c.split("\x1d")
+    return int(ei), tuple(words.split("\x1c")), tuple(gaps.split("\x1c")) if gaps else (), lead, trail, stem
+
+
+def _index(entities: list) -> tuple:
+    """The data of a Matcher: (table, blob, entity offsets, entity blob, inside needles, kinds)."""
+    records: dict = {}
+    inside: list = []
+    ents: list = []
+    for ei, ent in enumerate(entities):
+        ents.append(f"{ent.label}\x1f{_CTRL_RE.sub('?', ent.source)}\x1f{ent.line}\n")
+        for v in ent.variants:
+            words, gaps, lead, trail = _shape(v.text)
+            stem = words[-1] if v.mode == STARTS else words[0] if v.mode == ENDS else ""
+            cand = "\x1d".join((str(ei), "\x1c".join(words), "\x1c".join(gaps), lead if v.mode != ENDS else "",
+                                trail if v.mode != STARTS else "", stem))
+            if v.mode == WORD:
+                records.setdefault("g:" + " ".join(words), [0, []])[1].append(cand)
+                first = records.setdefault("g:" + words[0], [0, []])
+                first[0] = max(first[0], len(words))
+            elif v.mode == STARTS:
+                records.setdefault("p:" + stem[:MIN_AFFIX], [0, []])[1].append(cand)
+            elif v.mode == ENDS:
+                records.setdefault("s:" + stem[-MIN_AFFIX:], [0, []])[1].append(cand)
+            elif len(inside) < MAX_INSIDE:
+                low = _lower(v.text)
+                inside.append((low, " " in low, ei))
+    size = 8
+    while size < 2 * len(records):
+        size *= 2
+    table = array(_ARRAY, bytes(size * array(_ARRAY).itemsize))
+    parts: list = []
+    pos = 0
+    for key, (most, cands) in records.items():
+        line = f"{key}\x1f{most}\x1f{chr(0x1e).join(cands)}\n".encode("utf-8")
+        i = zlib.crc32(key.encode("utf-8")) & (size - 1)
+        while table[i]:
+            i = (i + 1) & (size - 1)
+        table[i] = pos + 1
+        parts.append(line)
+        pos += len(line)
+    ent_offsets = array(_ARRAY)
+    pos = 0
+    ent_parts: list = []
+    for line in ents:
+        b = line.encode("utf-8")
+        ent_offsets.append(pos)
+        ent_parts.append(b)
+        pos += len(b)
+    kinds = "".join(sorted({k[0] for k in records}))
+    return table.tobytes(), b"".join(parts), ent_offsets.tobytes(), b"".join(ent_parts), inside, kinds
+
+
+_CTRL_RE = re.compile(r"[\x00-\x1f]")
+
+
+def _select(hits: list) -> list:
+    """Left to right; where two start alike, the longer; no overlap."""
+    hits.sort(key=lambda h: (h[0], -h[1]))
+    out, end = [], -1
+    for h in hits:
+        if h[0] >= end:
+            out.append(h)
+            end = h[1]
+    return out
+
+
+class _Union:
+    """The cached index and the small one of the marked names, as one matcher."""
+
+    def __init__(self, parts: list):
+        self.parts = parts
+
+    def __len__(self) -> int:
+        return sum(len(p) for p in self.parts)
+
+    def find(self, text: str) -> list:
+        return _select([h for p in self.parts for h in p.hits(text)])
+
+
+# ------------------------------------------------------------------ files --
+def _read_personal(path: Path | None = None) -> bytes | None:
+    """The bytes of the person's terms.txt; None without the file. A file that the group or others can read is set
+    to 0600 (it is in the maisecrets folder, which only the person writes); one that cannot be set or read raises
+    TermsError: the hooks fail closed."""
+    path = Path(path) if path is not None else PERSONAL
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise TermsError(f"{path}: cannot read it ({type(exc).__name__})") from None
+    if os.name != "nt" and st.st_mode & 0o077:
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            raise TermsError(f"{path}: mode {stat.S_IMODE(st.st_mode):04o} lets others read it, and maisecrets "
+                             f"cannot change it; run chmod 600 {path}") from None
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        raise TermsError(f"{path}: cannot read it ({type(exc).__name__})") from None
+
+
+def _parse_personal(raw: bytes | None, path: Path | None = None) -> list:
+    """The entities of terms.txt; a line the parser refuses raises TermsError with the file and the line."""
+    if raw is None:
+        return []
+    path = Path(path) if path is not None else PERSONAL
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise TermsError(f"{path}: not UTF-8 text") from None
+    try:
+        return parse(text, "own")[0]
+    except TermsError as exc:
+        raise TermsError(f"{path}: {exc}", exc.line) from None
+
+
+def _personal(path: Path | None = None) -> list:
+    return _parse_personal(_read_personal(path), path)
+
+
+_STOP: list = []
+
+
+def stoplist() -> frozenset:
+    if not _STOP:
+        path = Path(__file__).resolve().parent / "rules" / "term_stoplist.txt"
+        _STOP.append(frozenset(line.strip() for line in path.read_text(encoding="utf-8").splitlines()
+                               if line.strip() and not line.startswith("#")))
+    return _STOP[0]
+
+
+@dataclass
+class TeamFile:
+    source: str      # <folder as configured>/<file>
+    entities: int
+    digest: str
+
+
+@dataclass
+class Loaded:
+    entities: list = field(default_factory=list)
+    refused: list = field(default_factory=list)     # Refused, team lists only
+    files: list = field(default_factory=list)       # TeamFile
+    personal: int = 0
+    marked: int = 0
+    error: str = ""                                  # the TermsError of terms.txt, if any
+
+
+def _team_sources(cfg: dict) -> tuple[list, list]:
+    """([(source, bytes)], [Refused]) of the *.terms files in the folders of rule_dirs (the setting and the policy;
+    not rules.d, the person's own folder: their list is terms.txt)."""
+    from . import user_rules
+    found, refused = [], []
+    for shown, path, src in user_rules.folders(cfg):
+        if src == "own" or user_rules.refused_folder(path) or not path.is_dir():
+            continue
+        try:
+            names = sorted(p.name for p in path.iterdir() if p.suffix == SUFFIX and p.is_file())
+        except OSError:
+            continue
+        for name in names:
+            source = f"{shown.rstrip('/')}/{name}"
+            try:
+                if (path / name).stat().st_size > MAX_TEAM_BYTES:
+                    refused.append(Refused(source, 0, f"a file larger than {MAX_TEAM_BYTES >> 20} MB"))
+                    continue
+                found.append((source, (path / name).read_bytes()))
+            except OSError:
+                refused.append(Refused(source, 0, "a file that cannot be read as UTF-8"))
+    return found, refused
+
+
+def _parse_team(sources: list, out: Loaded) -> None:
+    for source, raw in sources:
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            out.refused.append(Refused(source, 0, "a file that cannot be read as UTF-8"))
+            continue
+        ents, refused = parse(text, source, strict=False, floor=stoplist())
+        out.entities += ents
+        out.refused += refused
+        out.files.append(TeamFile(source, len(ents), hashlib.sha256(raw).hexdigest()[:12]))
+
+
+def _marked(now: float | None = None) -> list:
+    now = time.time() if now is None else now
+    try:
+        data = json.loads(MARKED.read_text(encoding="utf-8"))
+        items = [x for x in data.get("terms", []) if isinstance(x, dict) and x.get("expires", 0) > now]
+    except (OSError, ValueError, AttributeError):
+        return []
+    out = []
+    for x in items:
+        text = x.get("text")
+        if isinstance(text, str) and _WORD_RE.search(text):
+            label = "MARKED_" + hashlib.sha256(text.lower().encode("utf-8")).hexdigest()[:8].upper()
+            out.append(Entity(label, (Variant(text, WORD),), 0, "marked"))
+    return out
+
+
+def load(cfg: dict | None = None, strict: bool = True) -> Loaded:
+    """Every source. Strict (the hooks): a bad terms.txt raises TermsError. Not strict (status, /maisecrets:rules):
+    the error is in `error`, and the other sources still load."""
+    if cfg is None:
+        from .user_rules import _config
+        cfg = _config()
+    out = Loaded()
+    try:
+        own = _personal()
+    except TermsError as exc:
+        if strict:
+            raise
+        own, out.error = [], str(exc)
+    out.entities += own
+    out.personal = len(own)
+    team, out.refused = _team_sources(cfg)
+    _parse_team(team, out)
+    marked = _marked()
+    out.entities += marked
+    out.marked = len(marked)
+    return out
+
+
+_CACHE: list = []    # [Matcher] or [TermsError]
+CACHE_FILE = HOME / ".terms-cache"
+_FORMAT = 1
+
+
+def _cache_key(personal: bytes | None, team: list) -> str:
+    h = hashlib.sha256(f"{_FORMAT} {sys.version_info[0]}.{sys.version_info[1]}".encode())
+    for source, raw in [("own", personal or b"")] + team:
+        h.update(source.encode("utf-8") + b"\0" + str(len(raw)).encode() + b"\0" + raw)
+    return h.hexdigest()
+
+
+def _cached(key: str) -> Matcher | None:
+    """The index of the last build, when its sources are byte for byte the same. The file is in the maisecrets
+    folder (C8) and holds data only: marshal builds no class and runs nothing. Anything unexpected is a miss."""
+    try:
+        fmt, k, data = marshal.loads(CACHE_FILE.read_bytes())
+        if fmt == _FORMAT and k == key and isinstance(data, tuple) and len(data) == 6:
+            return Matcher(data=data)
+    except (OSError, ValueError, EOFError, TypeError):
+        pass
+    return None
+
+
+def _store(key: str, m: Matcher) -> None:
+    tmp = CACHE_FILE.with_name(CACHE_FILE.name + f".{os.getpid()}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(marshal.dumps((_FORMAT, key, m.data())))
+        os.replace(tmp, CACHE_FILE)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _build() -> Matcher:
+    """The person's list and the team lists from the cache or parsed (and then cached), plus the marked names,
+    which expire and so are never cached."""
+    from .user_rules import _config
+    raw = _read_personal()
+    team, _refused = _team_sources(_config())
+    if raw is None and not team:
+        m = Matcher()
+    else:
+        key = _cache_key(raw, team)
+        m = _cached(key)
+        if m is None:
+            out = Loaded()
+            out.entities = _parse_personal(raw)
+            _parse_team(team, out)
+            m = Matcher(out.entities)
+            _store(key, m)
+    marked = _marked()
+    return _Union([m, Matcher(marked)]) if marked else m
+
+
+def matcher() -> Matcher:
+    """The matcher of every source, built once per process. A bad terms.txt raises at every call."""
+    if not _CACHE:
+        try:
+            _CACHE.append(_build())
+        except TermsError as exc:
+            _CACHE.append(exc)
+    if isinstance(_CACHE[0], TermsError):
+        raise _CACHE[0]
+    return _CACHE[0]
+
+
+def reset() -> None:
+    _CACHE.clear()
+
+
+def matches(text: str) -> list:
+    """The detect.extra_matchers entry: a Match of kind term:<id> per run."""
+    from .detect import Match
+    return [Match("term:" + ent.id, ent.type, text[s:e], s, e) for s, e, ent in matcher().find(text)]
+
+
+def store_value(kind: str) -> str:
+    """What the store keeps for a term hit: the entity id, never the term. One entry per entity, so every spelling
+    of it gets the same placeholder."""
+    return STORE_PREFIX + kind[5:]
+
+
+def is_term_kind(kind) -> bool:
+    return isinstance(kind, str) and kind.startswith("term:")
+
+
+# --------------------------------------------------------- inline markers --
+_MARKER_RE = re.compile(r"\{\{([^{}\n]{1,200})\}\}")
+_MARK_WORD_RE = re.compile(r"[^\W\d_](?:[^\W\d_]|['’-](?=[^\W\d_]))*")
+
+
+def markers(prompt: str) -> list:
+    """(start, end, name) of each `{{Jan Kowalski}}` in a prompt: 1 to 5 words of letters (a hyphen or an apostrophe
+    inside a word), at least one of them capitalised. `{{ .Values.x }}` and `{{ item }}` stay text."""
+    out = []
+    for m in _MARKER_RE.finditer(prompt):
+        words = m.group(1).split()
+        if 1 <= len(words) <= 5 and all(_MARK_WORD_RE.fullmatch(w) for w in words) \
+                and any(w[0].isupper() for w in words):
+            out.append((m.start(), m.end(), " ".join(words)))
+    return out
+
+
+def take_markers(prompt: str, ttl: int) -> tuple[str, int]:
+    """(the prompt without the braces of each marker, how many names were marked). Each name goes into
+    terms.marked.json for `ttl` seconds, so it is masked from now on: in this prompt, in tool results, in every
+    session. Only the prompt hook and the mod call this, for a prompt the person typed."""
+    found = markers(prompt)
+    if not found:
+        return prompt, 0
+    now = time.time()
+    try:
+        data = json.loads(MARKED.read_text(encoding="utf-8"))
+        items = [x for x in data.get("terms", []) if isinstance(x, dict) and x.get("expires", 0) > now]
+    except (OSError, ValueError, AttributeError):
+        items = []
+    names = {x.get("text", "").lower(): x for x in items}
+    for _a, _b, name in found:
+        x = names.setdefault(name.lower(), {"text": name})
+        x["expires"] = max(x.get("expires", 0), now + ttl)
+    from .vault import atomic_write
+    atomic_write(MARKED, json.dumps({"terms": list(names.values())}))
+    reset()
+    out = prompt
+    for a, b, name in reversed(found):
+        out = out[:a] + name + out[b:]
+    return out, len(found)
+
+
+# ------------------------------------------------------- typed commands --
+_COMMAND_RE = re.compile(r"\A\s*(?:/maisecrets:term|maisecrets:\s*term)(?:\s+(\S.*?))?\s*\Z", re.I | re.S)
+
+
+def parse_command(prompt) -> tuple[str, str] | None:
+    """("add"|"remove", words), ("usage", text) for any other text after the command, or None. A bare
+    /maisecrets:term or `/maisecrets:term list` is None: the slash command shows the lists."""
+    if not isinstance(prompt, str):
+        return None
+    m = _COMMAND_RE.match(prompt)
+    if not m:
+        return None
+    rest = (m.group(1) or "").strip()
+    if not rest or rest.lower() == "list":
+        return None
+    verb, _, words = rest.partition(" ")
+    if verb.lower() in ("add", "remove") and words.strip():
+        return verb.lower(), " ".join(words.split())
+    return "usage", rest      # the text goes to the transcript scrub: it may be a name
+
+
+USAGE = ("maisecrets: send /maisecrets:term add NAME (for example /maisecrets:term add Jan Kowalski | Kowalsk*) or "
+         "/maisecrets:term remove NAME as your own prompt; in Codex: maisecrets: term add NAME. /maisecrets:term "
+         "alone shows your lists. This prompt was not sent to the model.")
+
+
+def _shown_path() -> str:
+    return "~/.maisecrets/terms.txt" if HOME == Path.home() / ".maisecrets" else str(PERSONAL)
+
+
+def add_typed(words: str) -> tuple[bool, str, list]:
+    """Add one entity to terms.txt. (changed, message, texts to scrub from the transcript). The message names a
+    label and a line, never the term."""
+    try:
+        for v in words.split("|"):
+            _variant(v, 1, None)
+    except TermsError as exc:
+        return False, (f"maisecrets: the term was not added ({str(exc).split(': ', 1)[1]}). "
+                       "This prompt was not sent to the model."), [words]
+    try:
+        text = PERSONAL.read_text(encoding="utf-8") if PERSONAL.exists() else ""
+    except (OSError, UnicodeDecodeError):
+        return False, f"maisecrets: {_shown_path()} cannot be read; nothing was changed.", [words]
+    ents, _ = parse(text, strict=False)
+    wanted = {v.strip().strip("*").strip().lower() for v in words.split("|")}
+    for e in ents:
+        if wanted & {v.text.lower() for v in e.variants}:
+            return False, (f"maisecrets: this term is already on your list ({e.label}, line {e.line} of "
+                           f"{_shown_path()}). This prompt was not sent to the model."), [words]
+    labels = {line.split(None, 1)[0] for line in text.splitlines() if line.strip()}
+    n = 1
+    while f"NAME_{n}" in labels:
+        n += 1
+    label = f"NAME_{n}"
+    head = "" if text else ("# maisecrets terms: one name per line, `LABEL  variant | variant`; Kowalsk* = any "
+                            "ending, *kowalski* = anywhere in a word. README, section Terms.\n")
+    variants = " | ".join(v.strip() for v in words.split("|"))
+    new = head + text + ("" if not text or text.endswith("\n") else "\n") + f"{label}  {variants}\n"
+    from .vault import atomic_write
+    try:
+        atomic_write(PERSONAL, new, mode=0o600)
+    except OSError as exc:
+        return False, f"maisecrets: {_shown_path()} cannot be written ({type(exc).__name__}); nothing was changed.", \
+            [words]
+    reset()
+    line = new.count("\n")
+    note = ""
+    common = [v for v in wanted if v in stoplist()]
+    if common:
+        note = (" Note: the term is a common word (rules/term_stoplist.txt), so it is masked in every text; a longer "
+                "variant, such as the full name, masks less.")
+    try:
+        parse(new)
+    except TermsError as exc:
+        note += (f" Your list has an error at line {exc.line}: until you fix it, maisecrets withholds every tool "
+                "result.")
+    return True, (f"maisecrets: the term is on your list now as {label} (line {line} of {_shown_path()}). From the "
+                  f"next tool result on it is replaced by a placeholder. This prompt was not sent to the model.{note}"
+                  ), [v.strip().strip("*").strip() for v in words.split("|")] + [words]
+
+
+def term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, str, list]:
+    """Remove from terms.txt each entity that has the variant `words` (or the id of a placeholder the person
+    copied), and the same name from the marked names. Only the prompt hook calls this, for a prompt the person
+    typed (settings.IN_A_COMMAND_RE refuses the name in a tool call): a removal makes detection weaker."""
+    want = words.strip().strip("*").strip().lower()
+    removed = []
+    try:
+        text = PERSONAL.read_text(encoding="utf-8") if PERSONAL.exists() else ""
+    except (OSError, UnicodeDecodeError):
+        return False, f"maisecrets: {_shown_path()} cannot be read; nothing was changed.", [words]
+    ents, _ = parse(text, strict=False)
+    drop = {e.line for e in ents
+            if (entity_id and e.id == entity_id) or want in {v.text.lower() for v in e.variants}}
+    lines = text.splitlines(keepends=True)
+    kept = [x for i, x in enumerate(lines, 1) if i not in drop]
+    removed += [e.label for e in ents if e.line in drop]
+    from .vault import atomic_write
+    if drop:
+        try:
+            atomic_write(PERSONAL, "".join(kept), mode=0o600)
+        except OSError as exc:
+            return False, (f"maisecrets: {_shown_path()} cannot be written ({type(exc).__name__}); nothing was "
+                           "changed."), [words]
+    try:
+        data = json.loads(MARKED.read_text(encoding="utf-8"))
+        items = data.get("terms", [])
+        left = [x for x in items if not (isinstance(x, dict) and (str(x.get("text", "")).lower() == want or (
+            entity_id and Entity("MARKED_" + hashlib.sha256(str(x.get("text", "")).lower().encode("utf-8"))
+                                 .hexdigest()[:8].upper(), (), 0, "marked").id == entity_id)))]
+        if len(left) != len(items):
+            atomic_write(MARKED, json.dumps({"terms": left}))
+            removed.append("a marked name")
+    except (OSError, ValueError, AttributeError):
+        pass
+    reset()
+    if not removed:
+        return False, ("maisecrets: this term is not on your own list, and it is no name you marked; nothing was "
+                       "changed. A team list is changed in its folder. This prompt was not sent to the model."), \
+            [words]
+    return True, (f"maisecrets: removed {', '.join(removed)} from your terms. This prompt was not sent to the model."
+                  ), [words]
+
+
+# ---------------------------------------------------------- session start --
+def session_note() -> str | None:
+    """At session start: when the team lists changed since the last start, one sentence with the count and the
+    entries left out. Unchanged, it says nothing again. A bad terms.txt is said at every start."""
+    loaded = load(strict=False)
+    digest = hashlib.sha256(json.dumps([[f.source, f.digest] for f in loaded.files]
+                                       + [[r.source, r.line, r.reason] for r in loaded.refused]).encode()).hexdigest()
+    try:
+        before = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        before = {}
+    team = sum(f.entities for f in loaded.files)
+    parts = []
+    if loaded.error:
+        parts.append(f"your term list cannot be used ({loaded.error}); maisecrets withholds every tool result until "
+                     "you fix it.")
+    if isinstance(before, dict) and before.get("digest") != digest[:16] and (loaded.files or before.get("team")):
+        was = before.get("team")
+        parts.append(f"the team term lists changed: {team} term(s) in {len(loaded.files)} file(s)"
+                     + (f" (before: {was})" if isinstance(was, int) else "")
+                     + (f", {len(loaded.refused)} line(s) left out" if loaded.refused else "")
+                     + "; /maisecrets:rules shows them.")
+    try:
+        from .vault import atomic_write
+        atomic_write(STATE_FILE, json.dumps({"digest": digest[:16], "team": team}))
+    except OSError:
+        return None    # a state that cannot be written would repeat the sentence at every start
+    return ("maisecrets: " + " ".join(parts)) if parts else None
+
+
+def summary(loaded: Loaded | None = None) -> str:
+    loaded = load(strict=False) if loaded is None else loaded
+    team = sum(f.entities for f in loaded.files)
+    if loaded.error:
+        own = "unusable (" + loaded.error + ")"
+    else:
+        own = str(loaded.personal)
+    return (f"terms: {own} of your own, {team} from {len(loaded.files)} team file(s)"
+            + (f" ({len(loaded.refused)} line(s) left out)" if loaded.refused else "")
+            + f", {loaded.marked} marked in prompts")

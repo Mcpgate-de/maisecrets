@@ -23,7 +23,7 @@ import time
 import sys
 from typing import Any
 
-from . import detect, incidents, rehydration
+from . import detect, incidents, rehydration, terms
 from .placeholder import KEY_RE, find_refs
 from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config
@@ -121,7 +121,10 @@ def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str 
     ⟦TYPE⟧ without a key (it is not stored and cannot be resolved). tool: the text is a tool result
     or a file, where a word after a label is stored weak (vault.is_weak)."""
     ordered = sorted(matches, key=lambda x: x.start)
-    entries = vault.put_many([(m.value, m.type, m.kind) for m in ordered], session=session, tool=tool)
+    # a term (terms.py) goes into the store as its entity id: every spelling gets the entity's one placeholder, and
+    # the store never holds the term
+    entries = vault.put_many([(terms.store_value(m.kind) if terms.is_term_kind(m.kind) else m.value, m.type, m.kind)
+                              for m in ordered], session=session, tool=tool)
     out = text
     for m, e in sorted(zip(ordered, entries), key=lambda me: me[0].start, reverse=True):
         out = out[: m.start] + (e.ref if e is not None else f"⟦{m.type}⟧") + out[m.end:]
@@ -759,12 +762,19 @@ def rewrite_prompt(payload: dict) -> dict:
     # a subagent's report is the hook's to judge (C19); a model wrote it, so nothing of it is stored
     if "<task-notification>" in prompt:
         return {}
+    # /maisecrets:term add|remove carries a name: the hook answers it, and the mod must not rewrite the name first
+    if terms.parse_command(prompt):
+        return {}
     # the hook blocks an @file mention before it stores anything; without a working directory a relative
     # mention cannot be checked, so any mention goes to the hook
     cwd = payload.get("cwd")
     if _blocking_mention(prompt, cwd if isinstance(cwd, str) else "", cfg) or (
             not cwd and cfg.get("block_at_mentions", True) and AT_MENTION_RE.search(prompt)):
         return {}
+    try:
+        prompt, _marked = terms.take_markers(prompt, _name_ttl(cfg))   # {{Jan Kowalski}}: the person typed it
+    except OSError:
+        return {}           # the hook answers it, and blocks when it cannot record the name either
     matches = _prompt_hits(prompt)
     if not matches and not _has_live(cfg):
         return {}
@@ -789,6 +799,51 @@ def rewrite_prompt(payload: dict) -> dict:
     events.record("UserPromptSubmit", "claude", entries, outcome="rewritten by the mod")
     # what the person reads: each value taken out, a detected one per place and a stored one per place
     return {"text": rewritten, "count": len(matches) + stored["n"]}
+
+
+def _name_ttl(cfg: dict) -> int:
+    """The lifetime of a NAME value: how long a name marked with {{…}} in a prompt stays masked."""
+    ttls = cfg.get("ttl_seconds") if isinstance(cfg.get("ttl_seconds"), dict) else {}
+    try:
+        ttl = int(ttls.get("NAME", ttls.get("default", 86400)))
+        return max(60, min(ttl, int(cfg.get("max_ttl_seconds", 30 * 86400))))
+    except (TypeError, ValueError):
+        return 86400
+
+
+def _term_command(payload: dict, cmd: tuple, typed: bool, cfg: dict) -> dict:
+    """The answer to /maisecrets:term add|remove (Codex: maisecrets: term add …): always a block, because the prompt
+    carries the name. Only the person's typed prompt changes the list (as a setting, C22); the name is masked in the
+    transcript, and the answer names a label and a line, never the name."""
+    verb, words = cmd
+    scrub: list = [words] if words else []
+    if verb == "usage":
+        reason = terms.USAGE
+    elif not typed:
+        reason = ("maisecrets: a change of your terms counts only when you type it as your prompt; this one came from "
+                  f"the client ({payload.get('source')}), so nothing was changed.")
+    elif verb == "add":
+        _ok, reason, scrub = terms.add_typed(words)
+    else:
+        entity = None
+        refs = find_refs(words)
+        if len(refs) == 1 and refs[0][1] == 0 and refs[0][2] == len(words):
+            # the placeholder the person copied from a tool result: the entity of that key
+            from .vault import INDEX
+            try:
+                meta = json.loads(INDEX.read_text(encoding="utf-8")).get("entries", {}).get(refs[0][0]) or {}
+            except (OSError, ValueError):
+                meta = {}
+            entity = meta.get("kind", "")[5:] if terms.is_term_kind(meta.get("kind")) else None
+        _ok, reason, scrub = terms.term_remove_typed(words, entity)
+    if cfg.get("scrub_transcript", True) and scrub:
+        path = payload.get("transcript_path", "")
+        _scrub_transcript(path, scrub, [])
+        _scrub_transcript_later(path, scrub, [], session=payload.get("session_id"))
+    if client_of(payload) == "codex":
+        return {"decision": "block", "reason": reason}
+    return {"decision": "block", "reason": reason,
+            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
 
 
 def user_prompt(payload: dict) -> dict:
@@ -862,6 +917,21 @@ def user_prompt(payload: dict) -> dict:
         if client_of(payload) == "codex":
             return {"decision": "block", "reason": reason}
         return {"decision": "block", "reason": reason,
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+    # /maisecrets:term add|remove (maisecrets/terms.py): before the detector, which would take the name out first.
+    # Blocked in every case: the prompt carries the name
+    term_cmd = terms.parse_command(prompt)
+    if term_cmd:
+        return _term_command(payload, term_cmd, typed, cfg)
+    if typed and not payload.get("agent_id"):
+        # {{Jan Kowalski}} in a prompt the person typed: the name is masked from now on (terms.take_markers)
+        try:
+            prompt, _marked = terms.take_markers(prompt, _name_ttl(cfg))
+        except OSError as exc:
+            return {"decision": "block", "reason": (
+                f"maisecrets: the name you marked with {{{{…}}}} cannot be recorded ({type(exc).__name__}), so it "
+                "would reach the model unmasked. This prompt was not sent; send it again without the marker, or "
+                "write the name as /maisecrets:term add NAME."),
                 "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
     if grant:
         from . import consent_store
@@ -2967,7 +3037,46 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
     return {}
 
 
+# a placeholder of a term (terms.py) is never resolved (mask only): it is hidden from the resolvers under these two
+# private-use characters, and put back in the answer as it was written
+_HIDE = ("\ue000", "\ue001")
+
+
+def _term_keys() -> set:
+    """The keys of the term entries in the index, purged ones too: such a key never resolves, at any age."""
+    from .vault import INDEX
+    try:
+        entries = json.loads(INDEX.read_text(encoding="utf-8")).get("entries", {})
+    except (OSError, ValueError, AttributeError):
+        return set()
+    return {k for k, m in entries.items() if isinstance(m, dict) and terms.is_term_kind(m.get("kind"))}
+
+
 def pre_tool(payload: dict) -> dict:
+    """Mask only (README "Terms"): a term placeholder in a command, an argument or a file stays as written. The tool
+    call runs with the placeholder; maisecrets never puts the name back in v1."""
+    tool_input = payload.get("tool_input")
+    keys: list = []
+
+    def hide(s: str) -> str:
+        refs = find_refs(s)
+        if not refs:
+            return s
+        if not keys:
+            keys.append(_term_keys())
+        for key, a, b in sorted(refs, key=lambda r: r[1], reverse=True):
+            if key in keys[0]:
+                s = s[:a] + _HIDE[0] + s[a + 1:b - 1] + _HIDE[1] + s[b:]
+        return s
+    hidden = _walk_strings(tool_input, hide) if isinstance(tool_input, dict) else tool_input
+    if hidden == tool_input:
+        return _pre_tool(payload)
+    out = _pre_tool(dict(payload, tool_input=hidden))
+    from .placeholder import CLOSE, OPEN
+    return _walk_strings(out, lambda s: s.replace(_HIDE[0], OPEN).replace(_HIDE[1], CLOSE))
+
+
+def _pre_tool(payload: dict) -> dict:
     cfg = load_config()
     tool = payload.get("tool_name", "")
     tool_input = payload.get("tool_input") or {}
@@ -3580,6 +3689,10 @@ def post_tool(payload: dict) -> dict:
             "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": new_response,
                                    "additionalContext": note},
         }
+    term_refs = list(dict.fromkeys(e.ref for e in entries if terms.is_term_kind(getattr(e, "kind", ""))))
+    if term_refs:
+        note = (f"{note} {', '.join(term_refs)} stand for names from the person's term list: maisecrets never puts "
+                "the name back, also not in a command or a file. Write them as they are.").strip()
     refs = [e.ref for e in entries]
     if client_of(payload) == "codex":
         # Codex has no updatedToolOutput. A "block" replaces the model-visible result with the

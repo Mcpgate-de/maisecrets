@@ -302,6 +302,12 @@ def cmd_rules(args: list[str]) -> int:
     return rules_cli.main(args)
 
 
+def cmd_terms(args: list[str]) -> int:
+    """The term lists (maisecrets/terms_cli.py): counts, and `suggest FILE`."""
+    from . import terms_cli
+    return terms_cli.main(args)
+
+
 def cmd_config(_: list[str]) -> int:
     print(json.dumps(load_config(), indent=2))
     return 0
@@ -370,6 +376,8 @@ def cmd_status(_: list[str]) -> int:
     own = user_rules.load()
     print(f"rules of your own: {len(own.rules)} from {sum(f.state == 'ok' for f in own.folders)} folder(s), "
           f"{sum(not q.kept for q in own.quarantined)} left out; /maisecrets:rules shows them")
+    from . import terms
+    print(terms.summary())
     active = detect.active_regions()
     print(f"regions: {', '.join(active.regions)} ({active.source}); "
           f"label languages: {', '.join(active.languages)}")
@@ -813,7 +821,7 @@ COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_res
             "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
             "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut,
             "forget": cmd_forget, "guard": cmd_guard, "settings": cmd_settings,
-            "consent-report": cmd_consent_report, "rules": cmd_rules}
+            "consent-report": cmd_consent_report, "rules": cmd_rules, "terms": cmd_terms}
 
 
 def _stdin_words() -> list[str]:
@@ -835,7 +843,8 @@ def main(argv: list[str] | None = None) -> int:
               "           | settings [--all]"
               " | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>\n"
               "           | consent-report ssh [--last 30d|N] [--json] [--excerpts FILE]\n"
-              "           | rules [check [DIR] | test [text] | init DIR | import FILE.toml]")
+              "           | rules [check [DIR] | test [text] | init DIR | import FILE.toml]\n"
+              "           | terms [suggest FILE]")
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])

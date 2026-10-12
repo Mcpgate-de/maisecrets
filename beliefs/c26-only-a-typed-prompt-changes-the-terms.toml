@@ -1,0 +1,10 @@
+# c26-only-a-typed-prompt-changes-the-terms: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-only-a-typed-prompt-changes-the-terms"
+control = "C26"
+statement = "/maisecrets:term add and remove change terms.txt only in a prompt the person typed; a prompt the client injected changes nothing, and is blocked because it carries the name."
+runner = ["tests/test_terms_hooks.py::TypedCommandTests::test_a_prompt_the_client_injected_changes_nothing"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    elif not typed:\n"
+replace = "    elif False:\n"

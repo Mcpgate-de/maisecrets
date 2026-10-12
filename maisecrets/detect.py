@@ -2340,6 +2340,11 @@ def reset_rules() -> None:
         times.clear()
     from . import user_rules
     user_rules.reset()
+    try:
+        from . import terms
+        terms.reset()
+    except ImportError:   # the standalone skill ships detect.py alone (scripts/build_skill_zip.py)
+        pass
 
 
 # Matchers of other kinds than a regex rule (a list of names, a value import): each is a callable text -> list[Match],
@@ -2411,6 +2416,19 @@ def _too_slow(rule: Rule, spent: float) -> None:
         user_rules.note_slow(rule, spent * 1000)
     except Exception:  # noqa: BLE001 - the rule is out of this process either way
         pass
+
+
+def _term_matches(text: str) -> list:
+    """The terms (maisecrets/terms.py): names, case numbers, customer names. A bad terms.txt raises
+    terms.TermsError, a ConfigError: the hook fails closed."""
+    try:
+        from . import terms
+    except ImportError:   # the standalone skill ships detect.py alone (scripts/build_skill_zip.py): no terms
+        return []
+    return terms.matches(text)
+
+
+extra_matchers.append(_term_matches)
 
 
 def active_regions():
