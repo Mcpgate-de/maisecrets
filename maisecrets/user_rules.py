@@ -7,7 +7,8 @@ The sources, read once per process (detect.rules() keeps the result):
 - each folder of `rule_dirs` in the machine policy; the person cannot remove those.
 
 A folder holds `*.json` (the gitleaks form of rules/own_secret_rules.json) and `*.prefixes` (the line form of
-rules/prefixes.txt, `id  regex`). Nothing else in it is read: no code, no word lists, no allow list. A folder is data
+rules/prefixes.txt, `id  regex`), and terms.py reads `*.terms` (a team term list with a floor). Nothing else in it
+is read: no code, no allow list. A folder is data
 that a hook reads in every call, so each rule passes static checks at load; a rule that fails one is QUARANTINED: it is
 left out, and /maisecrets:rules, the status and events.log name it with its reason. A broken rule file never stops a
 hook. A broken machine policy still does (vault.load_config).

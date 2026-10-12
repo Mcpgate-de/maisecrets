@@ -342,6 +342,8 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     # the rule folders are read without the store, and a config that does not load means no extra folder: every
     # state answers alike (tests/test_user_rules.py)
     "rules": [([], "", _ALL0), (["check"], "", _ALL0), (["nonsense"], "", _ALL2)],
+    # the term lists are read without the store; suggest of a missing file exits 1 (tests/test_terms_hooks.py)
+    "terms": [([], "", _ALL0), (["suggest", "/nonexistent/notes.txt"], "", _ALL1), (["nonsense"], "", _ALL2)],
 }
 
 _BASES: dict[str, Sandbox] = {}

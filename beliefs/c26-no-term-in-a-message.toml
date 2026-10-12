@@ -1,0 +1,10 @@
+# c26-no-term-in-a-message: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-no-term-in-a-message"
+control = "C26"
+statement = "A refusal of a term list names a line number, never the text of the line."
+runner = ["tests/test_terms.py::RejectTests::test_duplicate_label_and_the_first_bad_line"]
+
+[proof]
+file = "maisecrets/terms.py"
+find = "                raise TermsError(f\"line {n}: the label appears on an earlier line\", n)\n"
+replace = "                raise TermsError(f\"line {n}: the label appears on an earlier line: {rest}\", n)\n"

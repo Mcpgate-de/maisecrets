@@ -734,11 +734,29 @@ def reset_rules() -> None:
     _SHAPE_IDS.clear()
     from . import user_rules
     user_rules.reset()
+    try:
+        from . import terms
+        terms.reset()
+    except ImportError:   # the standalone skill ships detect.py alone (scripts/build_skill_zip.py)
+        pass
 
 
 # Matchers of other kinds than a regex rule (a list of names, a value import): each is a callable text -> list[Match],
 # run in scan() after the rules. A span a rule took stays taken, and the allow list holds for them too.
 extra_matchers: list = []
+
+
+def _term_matches(text: str) -> list:
+    """The terms (maisecrets/terms.py): names, case numbers, customer names. A bad terms.txt raises
+    terms.TermsError, a ConfigError: the hook fails closed."""
+    try:
+        from . import terms
+    except ImportError:   # the standalone skill ships detect.py alone (scripts/build_skill_zip.py): no terms
+        return []
+    return terms.matches(text)
+
+
+extra_matchers.append(_term_matches)
 
 
 def active_regions():

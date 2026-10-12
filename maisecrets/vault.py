@@ -1067,7 +1067,8 @@ class Vault:
         now = time.time()
         ttl = min(ttl or self._ttl_for(type_), int(self.cfg.get("max_ttl_seconds", 30 * 86400)))
         e = Entry(key=key, type=type_, kind=kind, fingerprint=fp,
-                  display=display_for(type_, value), created=now, last_used=now,
+                  # a term (terms.py) stores its entity id, not the term: a display of that would mean nothing
+                  display=None if kind.startswith("term:") else display_for(type_, value), created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
                   session=session, uses=0, sessions=[session] if session else [], weak=is_weak(kind, value))
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
@@ -1491,7 +1492,9 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
             problems.append("destinations.json not deleted")
         from . import incidents
         incidents.clear(HOME)              # the incident record, its aside, lock and temp files, the markers
-        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced"):
+        # the names marked with {{…}} and the term index (terms.py); terms.txt is the person's list and stays
+        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced", "terms.marked.json",
+                     ".terms-cache"):
             try:
                 (HOME / name).unlink()
             except FileNotFoundError:

@@ -289,7 +289,7 @@ class ExtraMatchers(Base):
             at = t.index(address)
             out.append(detect.Match("term:person", "NAME", address, at, at + len(address)))   # taken by email
             return out
-        self.assertEqual(detect.extra_matchers, [], "empty in block 1")
+        self.assertEqual(detect.extra_matchers, [detect._term_matches], "the terms (block 2) only")
         with mock.patch.object(detect, "extra_matchers", [names]):
             found = detect.scan(text)
             self.assertEqual([(m.kind, m.value) for m in found], [("term:person", "Ada Lovelace"), ("email", address)])

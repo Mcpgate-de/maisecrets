@@ -116,7 +116,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "pending":
 
 if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put", "status", "list", "audit", "expire", "config",
                                           "wipe", "repair", "scan", "get", "shortcut", "forget", "guard",
-                                          "settings", "consent-report", "rules"):
+                                          "settings", "consent-report", "rules", "terms"):
     from maisecrets.cli import main as cli_main  # noqa: E402
     sys.exit(cli_main(sys.argv[1:]))
 
@@ -211,6 +211,14 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         from maisecrets.user_rules import session_note  # noqa: E402
         note = session_note()
     except Exception:  # noqa: BLE001 - rules of your own never stop a session start
+        note = None
+    if note:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + note
+    # the terms (maisecrets/terms.py): a changed team list, or a terms.txt that stops the hooks
+    try:
+        from maisecrets.terms import session_note as terms_note  # noqa: E402
+        note = terms_note()
+    except Exception:  # noqa: BLE001 - terms never stop a session start; a bad terms.txt stops the next hook
         note = None
     if note:
         out["systemMessage"] = out.get("systemMessage", "") + " " + note
