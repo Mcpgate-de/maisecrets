@@ -109,10 +109,10 @@ class RuleLoaderTests(unittest.TestCase):
                 r.regex.search("")
 
     def test_generic_api_key_keeps_its_gitleaks_form_with_its_allowlists(self):
-        rules = detect._load_gitleaks_compat()
+        rules = detect._load_own_secret_rules()
         self.assertEqual(rules[0].id, "generic-api-key")
         loaded = {r.id for r in detect._load_betterleaks()}
-        self.assertFalse({r.id for r in rules} & loaded, "a kept gitleaks rule never shares an id with betterleaks")
+        self.assertFalse({r.id for r in rules} & loaded, "an own rule never shares an id with betterleaks")
         by_id = {r.id: r for r in rules}
         generic = by_id["generic-api-key"]
         self.assertEqual(generic.entropy, 3.5)
@@ -468,7 +468,7 @@ class ScanRuleTests(unittest.TestCase):
                          "with a user the detect-secrets rule keeps the span")
 
     def test_the_key_id_in_a_sigv4_credential_scope_is_not_a_secret(self):
-        kid = "AKIA" + rnd(16, string.ascii_uppercase + "234567")       # base32, as the gitleaks rule reads it
+        kid = "AKIA" + rnd(16, string.ascii_uppercase + "234567")       # base32, as the aws-access-token rule reads it
         scope = f"{kid}%2F20261008%2Feu-central-1%2Fs3%2Faws4_request"
         for text in (f"https://b.s3.amazonaws.com/k?X-Amz-Credential={scope}&X-Amz-Signature=" + "9f3c" * 16,
                      f"https://b.s3.amazonaws.com/k?x-amz-algorithm=AWS4&X-Amz-Credential%3D{scope}",
@@ -489,7 +489,7 @@ class ScanRuleTests(unittest.TestCase):
 
     def test_the_first_rule_to_claim_a_span_wins(self):
         ghp = "ghp_" + rnd(36)
-        # detect-secrets runs before gitleaks: the keyword rule claims the span of the github token
+        # detect-secrets runs before betterleaks: the keyword rule claims the span of the github token
         self.assertEqual(kinds(f"password = {ghp}"), [("ds-keyword-equal-signs", ghp)])
         self.assertEqual(kinds(f"password = {ghp}", enabled={"github-pat"}), [("github-pat", ghp)])
 
@@ -714,8 +714,8 @@ class LabelValueTests(unittest.TestCase):
                 self.assertEqual(kinds(text), [])
 
 
-class GitleaksAllowlistTests(unittest.TestCase):
-    """gitleaks' regexTarget "match" means the whole match; the default target is the secret."""
+class OwnRuleAllowlistTests(unittest.TestCase):
+    """In the own secret rules, as in gitleaks, regexTarget "match" means the whole match; the default is the secret."""
 
     V = PW16
 
