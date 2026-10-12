@@ -274,9 +274,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 32 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 106 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 109 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -477,7 +477,7 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
 ### Settings you decide
 
 `/maisecrets:settings` shows the settings that are yours to decide, grouped
-(Protection, Using stored values), one card each: the value, its state (`not
+(Protection, Using stored values, PDFs and images), one card each: the value, its state (`not
 decided`, `set by you`, `set by a policy`), what it does, and the command for
 the next step:
 
@@ -1239,6 +1239,56 @@ no allow list: the AI can write a shared checkout, and the AI may only make
 detection stricter. A value that is already stored stays redacted by its
 exact match; `/maisecrets:forget` deletes it.
 
+## PDFs and images
+
+maisecrets cannot look inside an image or a PDF. When the AI reads one, the
+client sends its bytes to the model, and a password or an address in it goes
+along. You decide what happens, per type:
+
+| Setting | `allow` (default) | `ask` | `block` | `convert` |
+|---|---|---|---|---|
+| `read_pdf` | the PDF goes as it is | Claude Code asks you first | refused | only its text goes, masked |
+| `read_image` | the image goes as it is | Claude Code asks you first | refused | (no: maisecrets does no OCR) |
+
+Send one setting as your own prompt, for example:
+
+```
+/maisecrets:settings read_pdf convert
+maisecrets: set read_pdf convert          (the same, and the form for Codex)
+```
+
+Then drag a PDF into the session or ask the AI to read one. With `convert`,
+the program `pdftotext` extracts the text on your computer, the normal
+redaction masks it, and the model gets that text in place of the PDF, with
+placeholders of the form `⟦SECRET_cN⟧`. The PDF itself never reaches the
+model and does not stay in the session transcript. A page range (`pages`)
+works. `convert` needs `pdftotext`: macOS `brew install poppler`, Debian or
+Ubuntu `sudo apt install poppler-utils`. Without it, maisecrets refuses every
+PDF and says so; it never lets the PDF through. A PDF that pdftotext cannot
+read in 6 seconds, or that is damaged, is refused too. Text after 256K
+characters is cut, and the AI is told to read a smaller page range. A scanned
+PDF has no text: maisecrets says so, and the AI gets nothing of it.
+
+Codex cannot ask, so `ask` there refuses the read and the AI tells you the
+prompt that allows it. Until you decide, the first PDF and the first image
+the AI reads bring one sentence about the setting (`"tips": false` silences
+it).
+
+`clean_dirs` lists folders whose PDFs and images you know are clean (your own
+screenshots, for example). A read there is always allowed:
+`/maisecrets:settings clean_dirs add ~/Pictures/Screenshots`, and `remove` the
+same way. maisecrets resolves links and `..` first, so a link inside a clean
+folder that points out of it does not count.
+
+A Bash command whose output starts with `data:image/…;base64,` sends an image
+to the model too (Claude Code shows it as one); `read_image` decides about it.
+`ask` cannot ask after the command ran, so it withholds the output, like
+`block`.
+
+**Not covered:** an image you paste into the prompt (Ctrl+V or drag of an
+image into Claude Code) reaches the model without passing any hook; the
+prompt hook sees only your typed text. maisecrets cannot stop or mask it.
+
 ## Known gaps (measured or documented)
 
 What the plugin does not protect. Each item is a limit of the mechanism, not
@@ -1272,6 +1322,10 @@ a to-do.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt
   hook blocks them when the path exists; ask Claude to read the file instead.
 - **Names are not detected.** Regex only, by design.
+- **A pasted image is invisible to the hooks.** Claude Code gives the prompt
+  hook only the typed text (measured on 2.1.296). An image or a PDF that the
+  AI reads is in your hands ("PDFs and images"); maisecrets does not scan or
+  clean an image, and does no OCR.
 - **A transformed value can pass.** For a value this session resolved, the
   output is checked as a substring in plain, base64, hex, URL-encoded and
   JSON-escaped form, and a resolving command may not encode it in the first
