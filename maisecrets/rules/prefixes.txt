@@ -1,4 +1,4 @@
-# Bare token prefixes that the vendored rulesets (gitleaks, detect-secrets) do not know yet.
+# Bare token prefixes that the vendored rulesets (betterleaks, detect-secrets) do not know yet.
 # One rule per line:  <id>  <regex>   - the whole match is the secret; anchor on the prefix.
 # Add a line by pull request when a real token of a service went through undetected. Keep the
 # tail length at the service's minimum so a short look-alike is not a hit. No test values here.

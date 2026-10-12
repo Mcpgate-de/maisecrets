@@ -248,7 +248,7 @@ renovate:
     RENOVATE_REQUIRE_CONFIG: required
     # the sync commands of renovate.json and nothing else. Renovate 39 matches the command before it fills
     # in the version (40 after), so both forms pass; a version is digits only
-    RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS: '["^python3 scripts/sync_(gitleaks|detect_secrets|presidio)\\.py (\\{\\{\\{newValue\\}\\}\\}|v?\\d+\\.\\d+\\.\\d+)$"]'
+    RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS: '["^python3 scripts/sync_(betterleaks|detect_secrets|presidio)\\.py (\\{\\{\\{newValue\\}\\}\\}|v?\\d+\\.\\d+\\.\\d+)$"]'
   script:
     - renovate
 

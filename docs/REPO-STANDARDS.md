@@ -50,7 +50,7 @@ and OpenAI plugin directories.
   `deps(rules)` patch release. A version of detect-secrets or Presidio moved without its JSON is red
   (`scripts/check_vendored_rules.py`, `tests/test_vendored_rules.py`).
 
-  The sync scripts execute no upstream code: gitleaks ships TOML, and the detect-secrets and Presidio
+  The sync scripts execute no upstream code: betterleaks ships TOML, and the detect-secrets and Presidio
   regexes are read from their Python source as data (`scripts/_static_python.py` knows literals,
   f-strings, `+`, `.format`, `join`, `re.compile` and `Pattern(...)`, and refuses the rest; the
   Presidio wheel is checked against the sha256 PyPI lists, which proves only that the download is the
@@ -157,7 +157,7 @@ and OpenAI plugin directories.
 
 - Apache-2.0 for the plugin. A gateway-side implementation lives in its
   own repository under its own licence; this repo owns the protocol spec.
-- Detection rules: gitleaks (MIT), Presidio (MIT) and detect-secrets
+- Detection rules: betterleaks (MIT), Presidio (MIT) and detect-secrets
   (Apache-2.0) are vendored as data under `maisecrets/rules/`, each with its
   licence file, version file and sync script. The six own rules in
   `detect.py` are plain regular expressions; `NOTICE` records every origin.

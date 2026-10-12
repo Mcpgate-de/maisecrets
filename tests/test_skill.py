@@ -353,7 +353,7 @@ class SkillZipTests(unittest.TestCase):
                             self.assertTrue(stat.S_ISREG(mode) and mode & 0o644 == 0o644, oct(mode))
             if shutil.which("unzip"):
                 subprocess.run(["unzip", "-q", str(flat), "-d", str(work / "unzipped")], check=True)
-                self.assertTrue((work / "unzipped" / "scripts" / "maisecrets" / "rules" / "gitleaks.toml").is_file())
+                self.assertTrue((work / "unzipped" / "scripts" / "maisecrets" / "rules" / "betterleaks.json").is_file())
             out = mod.build(work / "secret-hygiene.zip")
             with zipfile.ZipFile(out) as z:
                 names = z.namelist()
@@ -361,7 +361,8 @@ class SkillZipTests(unittest.TestCase):
                 self.assertIn("secret-hygiene/", names)
                 self.assertIn("secret-hygiene/SKILL.md", names)
                 self.assertIn("secret-hygiene/scripts/maisecrets/detect.py", names)
-                self.assertIn("secret-hygiene/scripts/maisecrets/rules/gitleaks.toml", names)
+                self.assertIn("secret-hygiene/scripts/maisecrets/rules/betterleaks.json", names)
+                self.assertIn("secret-hygiene/scripts/maisecrets/rule_filter.py", names)
                 self.assertFalse([n for n in names if "vault" in n or "hooks" in n or "__pycache__" in n], names)
                 z.extractall(work / "x")
             repo = work / "repo"

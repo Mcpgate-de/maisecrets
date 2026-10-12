@@ -91,7 +91,7 @@ default prompt of this skill is not a yes: make the offer and wait. Then:
      (`git filter-repo`) is a second step; it needs a force push and every collaborator must
      clone again.
    - The value is a test fixture or a placeholder: say so, and suggest a clearly fake value.
-6. Suggest a guard against the next leak: a pre-commit secret scan (for example gitleaks),
+6. Suggest a guard against the next leak: a pre-commit secret scan (for example betterleaks, the successor of gitleaks),
    and the maisecrets plugin for the agent itself.
 
 ## Check what the AI agents already received

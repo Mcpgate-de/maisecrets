@@ -258,7 +258,7 @@ class DetectTests(unittest.TestCase):
         ms = detect.scan("GET https://x/api?api_key=" + "0123456789abcdef0123")
         self.assertEqual(ms[0].type, "SECRET")
 
-    def test_gitleaks_ruleset_is_loaded(self):
+    def test_betterleaks_ruleset_is_loaded(self):
         ids = {r.id for r in detect.rules()}
         self.assertGreater(len(ids), 200)
         self.assertTrue({"gitlab-pat", "aws-access-token", "private-key", "email", "ds-basic-auth"} <= ids)
