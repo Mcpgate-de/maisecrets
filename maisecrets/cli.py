@@ -348,7 +348,7 @@ def cmd_status(_: list[str]) -> int:
     from . import detect
     def version(name: str) -> str:
         return (detect.RULES_DIR / f"{name}_VERSION").read_text(encoding="utf-8").strip()
-    print(f"rules: {len(detect.rules())} (gitleaks {version('GITLEAKS')}, presidio {version('PRESIDIO')}, "
+    print(f"rules: {len(detect.rules())} (betterleaks {version('BETTERLEAKS')}, presidio {version('PRESIDIO')}, "
           f"detect-secrets {version('DETECT_SECRETS')})")
     active = detect.active_regions()
     print(f"regions: {', '.join(active.regions)} ({active.source}); "

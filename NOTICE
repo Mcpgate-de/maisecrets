@@ -1,9 +1,14 @@
 maisecrets
 Copyright 2026 Andreas Kruse (Sprinterli)
 
-This product includes the gitleaks ruleset (maisecrets/rules/gitleaks.toml),
-Copyright (c) 2019 Zachary Rice, MIT License (see maisecrets/rules/LICENSE-gitleaks),
-consumed as data. The vendored version is recorded in maisecrets/rules/GITLEAKS_VERSION.
+This product includes the betterleaks ruleset (maisecrets/rules/betterleaks.toml),
+Copyright (c) 2026 Zachary Rice, MIT License (see maisecrets/rules/LICENSE-betterleaks),
+consumed as data. The vendored version is recorded in maisecrets/rules/BETTERLEAKS_VERSION.
+Its filter expressions are read by maisecrets/rule_filter.py.
+
+This product includes rules of the gitleaks ruleset v8.30.1 (maisecrets/rules/gitleaks_compat.json:
+generic-api-key and the shapes betterleaks does not find), Copyright (c) 2019 Zachary Rice,
+MIT License (see maisecrets/rules/LICENSE-gitleaks).
 
 This product includes PII detection patterns derived from Microsoft Presidio
 (maisecrets/rules/presidio.json: regexes, scores and context words of its

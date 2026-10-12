@@ -98,11 +98,21 @@ def tax_id_check(first10: str) -> str:
 
 # ------------------------------------------------------------------ loaders --
 class RuleLoaderTests(unittest.TestCase):
-    def test_gitleaks_rules_are_secret_rules_with_their_allowlists(self):
-        rules = detect._load_gitleaks()
-        self.assertGreater(len(rules), 150)
+    def test_betterleaks_rules_are_secret_rules_with_their_filters(self):
+        rules = detect._load_betterleaks()
+        self.assertGreater(len(rules), 350)
         self.assertEqual({r.type for r in rules}, {"SECRET"})
         self.assertEqual(len({r.id for r in rules}), len(rules))
+        self.assertTrue(all(r.drop is not None for r in rules), "the global filter applies to every rule")
+        for r in rules:
+            with self.subTest(rule=r.id):
+                r.regex.search("")
+
+    def test_generic_api_key_keeps_its_gitleaks_form_with_its_allowlists(self):
+        rules = detect._load_gitleaks_compat()
+        self.assertEqual(rules[0].id, "generic-api-key")
+        loaded = {r.id for r in detect._load_betterleaks()}
+        self.assertFalse({r.id for r in rules} & loaded, "a kept gitleaks rule never shares an id with betterleaks")
         by_id = {r.id: r for r in rules}
         generic = by_id["generic-api-key"]
         self.assertEqual(generic.entropy, 3.5)
@@ -169,7 +179,7 @@ class RuleLoaderTests(unittest.TestCase):
         live = [ln for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
         self.assertEqual(len(rules), len(live))
 
-    def test_rule_order_is_own_secrets_then_detect_secrets_gitleaks_presidio_then_own_pii(self):
+    def test_rule_order_is_own_secrets_then_detect_secrets_betterleaks_presidio_then_own_pii(self):
         ids = [r.id for r in detect.rules()]
         pos = {i: n for n, i in enumerate(ids)}
         self.assertLess(pos["url-query-secret"], pos["ds-keyword-colon"])
@@ -976,14 +986,14 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class GitleaksJsonTests(unittest.TestCase):
-    """The detector reads gitleaks.json, because tomllib is Python 3.11+ and the stock python3 of
-    macOS is 3.9. The JSON must hold exactly the rules of the vendored gitleaks.toml."""
+class BetterleaksJsonTests(unittest.TestCase):
+    """The detector reads betterleaks.json, because tomllib is Python 3.11+ and the stock python3 of
+    macOS is 3.9. The JSON must hold exactly the rules of the vendored betterleaks.toml."""
 
     @unittest.skipIf(sys.version_info < (3, 11), "tomllib is Python 3.11+")
     def test_the_json_rules_equal_the_vendored_toml(self):
         import tomllib
         rules = Path(__file__).resolve().parent.parent / "maisecrets" / "rules"
-        self.assertEqual(json.loads((rules / "gitleaks.json").read_text(encoding="utf-8")),
-                         tomllib.loads((rules / "gitleaks.toml").read_text(encoding="utf-8")),
-                         "run scripts/sync_gitleaks.py: it writes both")
+        self.assertEqual(json.loads((rules / "betterleaks.json").read_text(encoding="utf-8")),
+                         tomllib.loads((rules / "betterleaks.toml").read_text(encoding="utf-8")),
+                         "run scripts/sync_betterleaks.py: it writes both")

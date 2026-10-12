@@ -95,9 +95,14 @@ class PublicTestValueTests(unittest.TestCase):
                     mock.patch.object(detect, "_PUBLIC_TEST_VALUES", []):
                 self.assertFalse(detect.is_public_test_value("4242" * 4, "CARD"))
 
-    def test_a_skipped_test_value_keeps_its_span_from_weaker_rules(self):
-        # without the kept span a label rule claims `<token>&x=1`, which is no longer the published value
-        self.assertEqual(found(f"GET /callback?token={JWT_IO}&x=1"), [])
+    def test_a_published_key_that_a_label_assigns_is_a_credential_use(self):
+        # being public does not make the same bytes no secret where something uses them as one (review of 0.6.12)
+        key = J(["sk", "_test_", "4eC39HqLyjWDarjtT1zdp7dc"])
+        self.assertEqual(found(f"The Stripe API reference shows {key}"), [])
+        self.assertEqual(found(f"PROD_PASSWORD={key}"), [("SECRET", key)])
+        self.assertEqual(found(f"api_key: {key}"), [("SECRET", key)])
+        # a token in a URL parameter is used as a credential too; the value stays exact, never `<token>&x=1`
+        self.assertEqual(found(f"GET /callback?token={JWT_IO}&x=1"), [("SECRET", JWT_IO)])
 
     def test_a_twilio_test_number_is_no_phone_and_a_number_beside_it_is(self):
         magic = J(["+1", "500", "555", "0006"])

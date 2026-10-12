@@ -127,7 +127,7 @@ class StaticPythonTests(unittest.TestCase):
             sync_presidio.recognizers(wheel({"a.py": GOOD, "b.py": GOOD}))
 
     def test_no_sync_script_executes_or_imports_upstream_code(self):
-        for name in ("sync_detect_secrets.py", "sync_presidio.py", "sync_gitleaks.py", "_static_python.py"):
+        for name in ("sync_detect_secrets.py", "sync_presidio.py", "sync_betterleaks.py", "_static_python.py"):
             with self.subTest(name):
                 tree = ast.parse((ROOT / "scripts" / name).read_text(encoding="utf-8"))
                 calls = {n.func.id for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}

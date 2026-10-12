@@ -1085,7 +1085,8 @@ does not need to look like a real secret, and these forms are never a hit:
   test cards (Stripe, Braintree), the Stripe API reference keys, the jwt.io example token and
   the Twilio test numbers (`maisecrets/rules/public_test_values.txt`, as sha256 digests). The
   same digits under another type stay a hit: an IBAN or a bank account that holds a test
-  card's digits is found.
+  card's digits is found. A published key that a label assigns (`PROD_PASSWORD=…`,
+  `api_key: …`, `?token=…`) is used as a credential there and stays a hit.
 - **An AWS key id in a SigV4 credential scope:** `X-Amz-Credential=AKIA…` in a presigned
   URL, `Credential=AKIA…` in an `Authorization` header. The id names the key; it is not
   the secret half. The same id anywhere else is still found.
@@ -1097,10 +1098,24 @@ sends the rule name, never the value.
 
 Four sources, one scanner (`maisecrets/detect.py`):
 
-- **gitleaks** ruleset, vendored as data under `maisecrets/rules/` (MIT,
-  version in `GITLEAKS_VERSION`, refresh with `scripts/sync_gitleaks.py vX.Y.Z`):
-  ~220 secret shapes with keywords, entropy thresholds and allowlists. No
-  gitleaks binary is used.
+- **betterleaks** ruleset, vendored as data under `maisecrets/rules/` (MIT,
+  version in `BETTERLEAKS_VERSION`, refresh with `scripts/sync_betterleaks.py vX.Y.Z`):
+  463 rules, 416 of them loaded. No betterleaks binary is used. betterleaks is the
+  successor of gitleaks by the same maintainers; gitleaks takes security patches
+  only since v8.30.1. Each rule's filter (an Expr expression: entropy limits,
+  pattern lists) is read by `maisecrets/rule_filter.py`; a rule whose filter is a
+  program that module cannot read is left out (`generic-password`,
+  `generic-username`, `generic-credential-uri`), and so are the 43 components that
+  betterleaks never reports alone (`skipReport`). The BPE token ratio filter needs
+  a tokenizer the standard library does not have; maisecrets answers 0 there, as
+  betterleaks does without a tokenizer.
+- **gitleaks v8.30.1, the rules kept** (`maisecrets/rules/gitleaks_compat.json`,
+  MIT): `generic-api-key`, to which the label filters of the detector are tuned,
+  and the shapes betterleaks no longer finds (Etsy, JFrog, a bare Fly.io token, an
+  Atlassian token after a product name, a legacy Vault token, and a few more).
+  They run after betterleaks and only fill its gaps. Measured on Samsung CredData
+  (15,753 labelled credentials) against the gitleaks rules of 0.6.12: the same
+  precision (76.5 %) and recall (60.6 %), with a few more hits.
 - **Presidio** pattern recognizers, vendored as data under `maisecrets/rules/`
   (MIT, version in `PRESIDIO_VERSION`, refresh with `scripts/sync_presidio.py`):
   country-specific PII with scores and context words. The config key
@@ -1129,7 +1144,7 @@ Four sources, one scanner (`maisecrets/detect.py`):
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
   (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last
   two found bare in real prompts on 2026-09-26.
-- A secret shape with a fixed length (gitleaks: `glpat-[\w-]{20}`) is
+- A secret shape with a fixed length (betterleaks: `glpat-[\w-]{20}`) is
   extended to the end of the token characters, so a longer token does not
   leave its tail in the clear (found with a 24-char token, 2026-09-26).
   The extension stops at a line break: a token that a line break splits

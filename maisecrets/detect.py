@@ -2,10 +2,15 @@
 
 Three rule sources, one scanner:
 
-1. **gitleaks** (`rules/gitleaks.toml`, vendored, MIT, version in
-   `rules/GITLEAKS_VERSION`): ~220 secret shapes with keywords, entropy
-   thresholds and allowlists. Consumed as data; no gitleaks binary. Refresh
-   with `scripts/sync_gitleaks.py vX.Y.Z`.
+1. **betterleaks** (`rules/betterleaks.toml`, vendored, MIT, version in
+   `rules/BETTERLEAKS_VERSION`): about 400 secret shapes with keywords and
+   filters. Consumed as data; no betterleaks binary. The filters are Expr
+   expressions, read by `rule_filter.py`; a rule whose filter is a program
+   that module cannot read is left out. Refresh with
+   `scripts/sync_betterleaks.py vX.Y.Z`. betterleaks is the successor of
+   gitleaks; a few gitleaks v8.30.1 rules stay (`rules/gitleaks_compat.json`,
+   MIT): generic-api-key, to which the label filters below are tuned, and the
+   shapes betterleaks no longer finds.
 2. **Presidio** (`rules/presidio.json`, derived from Microsoft Presidio's
    pattern recognizers, MIT, version in `rules/PRESIDIO_VERSION`): country
    and generic PII shapes with scores and context words. Regions are
@@ -90,11 +95,12 @@ class Rule:
     require_context: bool = False      # weak shape: accept only with a context word nearby
     whole_match: bool = False          # presidio: the entity is the whole match, never a sub-group
     quote_group: int = 0               # detect-secrets: group of the optional opening quote
+    drop: object = None                # betterleaks: the rule's filter and the global one; True drops the finding
 
 
 # ----------------------------------------------------------------- helpers --
 def _re2_to_python(rx: str) -> str:
-    """gitleaks regexes are RE2. Python differs in two spots we hit."""
+    """betterleaks (and gitleaks) regexes are RE2. Python differs in two spots we hit."""
     flags = ""
     if "(?i)" in rx:
         rx = rx.replace("(?i)", "")
@@ -492,30 +498,72 @@ OWN_RULES: list[dict] = [
 
 
 # ------------------------------------------------------------- rule loading --
-def _load_gitleaks() -> list[Rule]:
+# betterleaks rules left out: a filter that is a program (let bindings; rule_filter.Unsupported) would run without
+# it, and maisecrets' own label rules cover these shapes (ds-keyword, url-query-secret, the email rule)
+BETTERLEAKS_SKIP_UNSUPPORTED = True
+
+
+def _load_gitleaks_compat() -> list[Rule]:
+    """The rules kept from gitleaks v8.30.1 (rules/gitleaks_compat.json, MIT), with their entropy and allowlists:
+    generic-api-key, to which the keyword window (_WINDOWED) and the label filters of scan() are tuned, and the rules
+    whose shapes betterleaks v1.9.0 no longer finds (etsy, jfrog, a bare Fly.io token, a labelled Atlassian token, a
+    legacy Vault token, …). They run after betterleaks, so they only fill its gaps."""
+    cfg = json.loads((RULES_DIR / "gitleaks_compat.json").read_text(encoding="utf-8"))
+    rules: list[Rule] = []
+    for r in cfg["rules"]:
+        allow: list[tuple[re.Pattern[str], str]] = []
+        stop: list[str] = []
+        for al in r.get("allowlists", []) or []:
+            # gitleaks: no regexTarget means the secret, "match" the whole match, "line" the line
+            target = al.get("regexTarget", "secret")
+            for arx in al.get("regexes", []) or []:
+                allow.append((_Lazy(_re2_to_python(arx)), target))
+            stop += [s.lower() for s in al.get("stopwords", []) or []]
+        rules.append(Rule(
+            id=r["id"], type="SECRET", regex=_Lazy(_re2_to_python(r["regex"])),
+            keywords=tuple(k.lower() for k in r.get("keywords", []) or ()),
+            entropy=float(r.get("entropy", 0) or 0), secret_group=int(r.get("secretGroup", 0) or 0),
+            allow_regexes=tuple(allow), stopwords=tuple(stop),
+        ))
+    return rules
+
+
+def _load_betterleaks() -> list[Rule]:
+    """The vendored betterleaks rules (rules/betterleaks.json, synced by scripts/sync_betterleaks.py). A rule with
+    skipReport is a component that betterleaks never reports alone (a client id beside its secret); a rule without a
+    regex matches by file path only. Each filter, and the global one, is read by rule_filter; a filter that module
+    cannot read leaves its rule out."""
+    from . import rule_filter
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore")   # "possible nested set" in two gitleaks regexes
-        # gitleaks.json is the same rules as JSON, for a Python without tomllib; a test keeps the two equal
-        cfg = json.loads((RULES_DIR / "gitleaks.json").read_text(encoding="utf-8"))
+        warnings.simplefilter("ignore")   # "possible nested set" in some regexes
+        # betterleaks.json is the same rules as JSON, for a Python without tomllib; a test keeps the two equal
+        cfg = json.loads((RULES_DIR / "betterleaks.json").read_text(encoding="utf-8"))
+        global_drop = rule_filter.compile_filter(cfg["filter"]) if cfg.get("filter") else None
         rules: list[Rule] = []
         for r in cfg.get("rules", []):
-            if "regex" not in r:
+            if "regex" not in r or r.get("skipReport"):
                 continue
-            allow: list[tuple[re.Pattern[str], str]] = []
-            stop: list[str] = []
-            for al in r.get("allowlists", []) or []:
-                # gitleaks: no regexTarget means the secret, "match" the whole match, "line" the line
-                target = al.get("regexTarget", "secret")
-                for arx in al.get("regexes", []) or []:
-                    allow.append((_Lazy(_re2_to_python(arx)), target))
-                stop += [s.lower() for s in al.get("stopwords", []) or []]
+            own = None
+            if r.get("filter"):
+                try:
+                    own = rule_filter.compile_filter(r["filter"])
+                except rule_filter.Unsupported:
+                    if BETTERLEAKS_SKIP_UNSUPPORTED:
+                        continue
+            drop = _combine_drops(own, global_drop)
             rules.append(Rule(
                 id=r["id"], type="SECRET", regex=_Lazy(_re2_to_python(r["regex"])),
                 keywords=tuple(k.lower() for k in r.get("keywords", []) or ()),
-                entropy=float(r.get("entropy", 0) or 0), secret_group=int(r.get("secretGroup", 0) or 0),
-                allow_regexes=tuple(allow), stopwords=tuple(stop),
+                secret_group=int(r.get("secretGroup", 0) or 0), drop=drop,
             ))
     return rules
+
+
+def _combine_drops(*drops):
+    live = [d for d in drops if d is not None]
+    if not live:
+        return None
+    return lambda env: any(d(env) for d in live)
 
 
 # entity -> placeholder type (short, stable); anything else keeps its entity name
@@ -637,14 +685,15 @@ _RULES: list[Rule] | None = None
 
 
 def rules() -> list[Rule]:
-    """Own secret rules first (longer shapes win the span), then gitleaks, then PII."""
+    """Own secret rules first (longer shapes win the span), then betterleaks and the kept gitleaks rules, then
+    PII."""
     global _RULES
     if _RULES is None:
         own = _load_own()
         secrets = [r for r in own if r.type == "SECRET"]
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
-        _RULES = (secrets + _load_detect_secrets(active.languages) + _load_gitleaks()
+        _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_gitleaks_compat()
                   + _load_presidio(active.regions) + pii)
     return _RULES
 
@@ -1171,7 +1220,6 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
     found: list[Match] = []
     taken_starts: list[int] = []
     taken_ends: list[int] = []
-    exempt: list[tuple[int, int, str]] = []   # spans of published test values, per type
 
     def overlaps(a: int, b: int) -> bool:
         """Whether [a, b) overlaps a span already taken. The spans never overlap each other, so only the two
@@ -1260,10 +1308,11 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue   # a section number: RFC 6749 4.1.2.1, OIDC Core 3.1.2.1, section 7.1.2.3
             if overlaps(start, end):
                 continue
-            if any(t == rule.type and s < end and start < e for s, e, t in exempt):
-                continue
             if rule.entropy and shannon_entropy(secret) < rule.entropy:
                 continue
+            if rule.drop is not None and rule.drop({"secret": secret, "match": m.group(0), "path": "",
+                                                    "line": text[_line_start(text, start):_line_end(text, end)]}):
+                continue                     # the betterleaks filter of the rule, or the global one
             if rule.validator:
                 try:
                     if (rule.validator == "ds_value" and 0 < start and text[start - 1] in ":="
@@ -1280,11 +1329,12 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     continue
             if rule.type == "SECRET" and looks_like_placeholder(secret):
                 continue
-            if is_public_test_value(secret, rule.type):
-                # a documented test card, key or number: no later rule of the same type may claim a longer or shorter
-                # span around it (`?token=<example>&x=1`). Another type still may: an IBAN that holds a test card's
-                # digits is an IBAN (Opus review)
-                exempt.append((start, end, rule.type))
+            labelled = rule.type == "SECRET" and rule.id.startswith(LABEL_RULES)
+            if is_public_test_value(secret, rule.type) and not labelled:
+                # a documented test card, key or number that a shape rule found. A published key that a label assigns
+                # (PROD_PASSWORD=<the Stripe docs key>) is used as a credential and stays a hit: being public does not
+                # make the same bytes no secret there (review of 0.6.12). The label rules run first, so no later rule
+                # claims a span around a skipped key; a value of another type around a test card stays its own hit
                 continue
             if rule.type == "SECRET" and len(secret) >= 16 and len(set(secret[-12:])) <= 1:
                 continue   # a prefix and one repeated character: glpat-AAAAAAAAAAAAAAAAAAAA is a placeholder

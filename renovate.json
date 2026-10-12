@@ -23,14 +23,14 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "gitleaks: the rules come from config/gitleaks.toml at the release tag",
+      "description": "betterleaks: the rules come from config/betterleaks.toml at the release tag",
       "fileMatch": [
-        "^maisecrets/rules/GITLEAKS_VERSION$"
+        "^maisecrets/rules/BETTERLEAKS_VERSION$"
       ],
       "matchStrings": [
         "^(?<currentValue>v\\d+\\.\\d+\\.\\d+)\\s*$"
       ],
-      "depNameTemplate": "gitleaks/gitleaks",
+      "depNameTemplate": "betterleaks/betterleaks",
       "datasourceTemplate": "github-releases",
       "versioningTemplate": "semver"
     },
@@ -72,11 +72,11 @@
     },
     {
       "matchDepNames": [
-        "gitleaks/gitleaks"
+        "betterleaks/betterleaks"
       ],
       "postUpgradeTasks": {
         "commands": [
-          "python3 scripts/sync_gitleaks.py {{{newValue}}}"
+          "python3 scripts/sync_betterleaks.py {{{newValue}}}"
         ],
         "fileFilters": [
           "maisecrets/rules/**"

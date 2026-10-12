@@ -52,9 +52,9 @@ class VendoredRulesTests(unittest.TestCase):
         if not symlinked and os.name != "nt":
             self.fail("a symlink could not be made outside Windows")
 
-    def test_a_gitleaks_json_without_rules_is_refused(self):
-        (self.rules / "gitleaks.json").write_text(json.dumps({"title": "x"}), encoding="utf-8")
-        self.assertIn("gitleaks.json: no rules", cvr.problems(self.root))
+    def test_a_betterleaks_json_without_rules_is_refused(self):
+        (self.rules / "betterleaks.json").write_text(json.dumps({"title": "x"}), encoding="utf-8")
+        self.assertIn("betterleaks.json: no rules", cvr.problems(self.root))
 
 
 if __name__ == "__main__":

@@ -25,6 +25,13 @@ output. `README.md` says what it does for users; `docs/` holds the design.
   changelog line, so write them for the user.
 - **Commit often, push rarely.** Each push runs the GitLab pipeline and two GitHub runners. Collect
   commits and push them together.
+- **C21 is frozen since 0.6.12.** A new syntax rule in `maisecrets/ssh_consent.py` needs a field example
+  (a command an ordinary agent really ran) or a demonstrated ordinary-agent pattern, not a form that a
+  reviewer constructed. #15 took nine review rounds because each round found new long-tail forms; C21
+  guards the ssh starts the command line shows to an agent that does not try to evade it
+  (`docs/THREAT-MODEL.md`).
+- **Commit subjects are release notes.** Write them for a user ("detects secrets in 245 more formats"),
+  not for a developer ("a test value hides only its own type").
 
 ## Where the code lives
 
