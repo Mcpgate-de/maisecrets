@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## [0.6.12] - 2026-10-12
+
+### Fixes
+
+- the review of the #16 change: pipes, paths after a run verb, values after an option (ae39418)
+- the consent check reads the low findings left from #15 (bea15d5)
+- a test value hides only its own type, and %40 needs an address context (fb771c3)
+- a test value counts only for its own type, and %40 only where an address is expected (b16d6e6)
+- documented test values, percent-encoded emails and invalid SSNs (6432d2c)
+
+### Other
+
+- Merge branch 'fix/detector-gaps-from-public-benchmark' into 'main' (b7806b2)
+
 ## [0.6.11] - 2026-10-10
 
 ### Features
