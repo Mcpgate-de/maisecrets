@@ -708,8 +708,9 @@ def allow_list() -> tuple[frozenset, frozenset]:
 
 def rules() -> list[Rule]:
     """Own secret rules first (longer shapes win the span), then betterleaks and the own rules of
-    own_secret_rules.json, then the rules of your own, then PII. A user rule never takes a span before a built-in
-    secret rule. A rule id on the allow list is switched off."""
+    own_secret_rules.json, then PII, then the rules of your own. A user rule never takes a span before a built-in
+    rule: a NAME rule that took a part of an e-mail address left the rest of it in the clear (Opus review of
+    block 1). A rule id on the allow list is switched off."""
     global _RULES
     if _RULES is None:
         own = _load_own()
@@ -717,7 +718,7 @@ def rules() -> list[Rule]:
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
         every = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
-                 + _user_rules() + _load_presidio(active.regions) + pii)
+                 + _load_presidio(active.regions) + pii + _user_rules())
         off = allow_list()[1]
         if off:
             from .user_rules import switched_off
@@ -1265,6 +1266,7 @@ def scan(text: str, enabled: set[str] | None = None, rule_list: list[Rule] | Non
     taken_starts: list[int] = []
     taken_ends: list[int] = []
     allowed = allow_list()[0] if rule_list is None else frozenset()
+    allowed_spans: list[tuple[int, int]] = []
 
     def overlaps(a: int, b: int) -> bool:
         """Whether [a, b) overlaps a span already taken. The spans never overlap each other, so only the two
@@ -1272,14 +1274,21 @@ def scan(text: str, enabled: set[str] | None = None, rule_list: list[Rule] | Non
         i = bisect.bisect_left(taken_starts, a)
         return (i > 0 and taken_ends[i - 1] > a) or (i < len(taken_starts) and taken_starts[i] < b)
 
-    def take(m: Match) -> None:
-        """Take the span; report it unless the allow list names the value exactly. An allowed value keeps its span,
-        so no later rule reports a part of it."""
+    def take(m: Match, own: bool = False) -> None:
+        """Take the span and report it, unless the allow list names the value exactly. An allowed value takes no span:
+        a later rule whose hit is longer still reports it (an allowed domain let the whole e-mail address through;
+        Opus review of block 1). A later hit inside an allowed value of a built-in rule is a part of that value and
+        is not reported; an allowed hit of a rule of your own (`own`) reserves nothing."""
+        if m.value in allowed:
+            if not own:
+                allowed_spans.append((m.start, m.end))
+            return
+        if any(a <= m.start and m.end <= b for a, b in allowed_spans):
+            return
         i = bisect.bisect_left(taken_starts, m.start)
         taken_starts.insert(i, m.start)
         taken_ends.insert(i, m.end)
-        if m.value not in allowed:
-            found.append(m)
+        found.append(m)
     for rule in (rules() if rule_list is None else rule_list):
         if enabled is not None and rule.id not in enabled:
             continue
@@ -1288,6 +1297,7 @@ def scan(text: str, enabled: set[str] | None = None, rule_list: list[Rule] | Non
         # a rule that cannot fire without a context word need not run its regex without one
         if rule.context and (rule.require_context or rule.score < 0.5) and not _has_context_word(low, rule.context):
             continue
+        own = rule.id.startswith("user:")
         for m in _matches(rule, text):
             ngroups = rule.regex.groups or 0
             if rule.whole_match:
@@ -1426,11 +1436,11 @@ def scan(text: str, enabled: set[str] | None = None, rule_list: list[Rule] | Non
                 if tail and not overlaps(end, tail.end()):
                     end = tail.end()
                     secret = text[start:end]
-            take(Match(rule.id, rule.type, secret, start, end))
+            take(Match(rule.id, rule.type, secret, start, end), own)
     for matcher in (extra_matchers if rule_list is None else ()):
         for m in sorted(matcher(text), key=lambda x: x.start):
             if (enabled is None or m.kind in enabled) and m.end > m.start and not overlaps(m.start, m.end):
-                take(m)
+                take(m, True)
     found.sort(key=lambda x: x.start)
     return found
 
