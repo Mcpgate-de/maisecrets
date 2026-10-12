@@ -405,6 +405,9 @@ class VisibleIntentTests(unittest.TestCase):
         # it, an option value with an argument after it, an escaped substitution in double quotes
         "go run ./cmd/ssh", "pre-commit run --files src/ssh", "echo $(date) ssh web1 | tee log",
         "pytest -k ssh tests", 'python3 probe.py "declare -r x=\\$(ssh web1 uptime)"',
+        "go run ./cmd/ssh -v", "coverage run -m pytest -k ssh tests/a tests/b", "make -C ssh all install",
+        "tox -e ssh -- tests/a tests/b", "go build -o ssh ./cmd/x ./cmd/y",
+        "osascript -l JavaScript -e 'console.log(\"NSTask can launch ssh\")'",
     ]
 
     # each row with the verdict and the rule that must fire: a row that a different rule catches pins nothing
@@ -525,17 +528,23 @@ class VisibleIntentTests(unittest.TestCase):
         ("trap 'ssh web1 uptime' EXIT", "read-only remote"),
         ("echo $(date) ssh web1 touch x | tee ~/.bashrc", "not on the read list"),
         ("echo $(date) ssh web1 touch x | tee run.sh; bash run.sh", "not on the read list"),
-        ("go run ./cmd/ssh web1 uptime", "argument of go"), ("uv run ./ssh web1", "argument of uv"),
+        ("uv run ./ssh web1", "argument of uv"), ("uv run ./tools/ssh web1", "argument of uv"),
+        ("echo $(true) ssh web1 touch x | cat > run.sh; bash run.sh", "not on the read list"),
+        ("echo $(true) ssh web1 touch x | tee >(sh)", "not on the read list"),
+        ("F=~/.bashrc; echo $(true) ssh web1 touch x | tee -a $F", "not on the read list"),
+        ("go run ./cmd/ssh web1", "argument of go"), ("poetry run ./scripts/ssh web1", "argument of poetry"),
+        ("declare -ia 'a[$(ssh web1 uptime)]'", "command substitution"),
+        ("trap 'ssh web1 uptime' EXIT; eval \"$(trap -p EXIT | sed s/a/b/)\"", "run time"),
     ]
 
     def test_a_mention_that_starts_nothing_does_not_ask(self):
-        self.assertEqual(len(self.MENTIONS), 80, "the premise: every measured shape is here")
+        self.assertEqual(len(self.MENTIONS), 86, "the premise: every measured shape is here")
         for command in self.MENTIONS:
             with self.subTest(command):
                 self.assertEqual(kind(command), "none")
 
     def test_each_start_form_asks(self):
-        self.assertEqual(len(self.STARTS), 116, "the premise: every start form is here")
+        self.assertEqual(len(self.STARTS), 123, "the premise: every start form is here")
         for command, rule in self.STARTS:
             with self.subTest(command):
                 verdict = ssh_consent.classify(command, parse)

@@ -691,10 +691,11 @@ def _quiet_continuation(command: str, segs: list[dict], k: int, data_only) -> bo
         j += 1
         nxt = segs[j]
         name = _base(nxt.get("cmd", ""))
-        if name not in _TEXT_SAFE_CMDS | {"tee", "cat", "less", "more"} or _runs_its_input(nxt):
-            return False
+        if name not in _TEXT_SAFE_CMDS | {"tee", "cat", "less", "more"} or _runs_its_input(nxt) or ">" in \
+                _HARMLESS_REDIRECT.sub(" ", command[nxt["start"]:nxt["end"]]):
+            return False                     # | cat > run.sh; bash run.sh writes a file the line runs (codex)
         files = [w for w in (nxt.get("words") or [])[1:] if not w.startswith("-")] if name == "tee" else []
-        if any(_STARTUP_FILE.search(w) for w in files) or {_base(w) for w in files} & {
+        if any(_STARTUP_FILE.search(w) or "$" in w for w in files) or {_base(w) for w in files} & {
                 _base(w) for x in segs if x["start"] > nxt["start"] for w in (x.get("words") or [])}:
             return False
     return True
@@ -751,7 +752,7 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
     own_part = command[seg["start"]:seg["end"]] if seg else command
     evaluated = "${(e)" in command or re.search(r"(?:^|[\s;&|(])(?:printf|test|\[\[?)\s+(?:-\w+\s+)*-v\b",
                                                 re.sub(r"['\"]", "", own_part)) \
-        or re.match(r"\s*(?:let|(?:declare|typeset|local|readonly|export)\s+(?:-\w+\s+)*-\w*i)\b",
+        or re.match(r"\s*(?:let|(?:declare|typeset|local|readonly)\s+(?:-\w+\s+)*-\w*i\w*)\b",
                     own_part)   # let 'a[$(…)]', declare -i 'n=a[$(…)]': bash evaluates the subscript (#16)
     if word in _PROGRAM_WORDS and before.endswith(("$(", "`")) and (ctx != "sq" or evaluated):
         return f"'{raw}' in a command substitution"   # 'Use `ssh` …' in single quotes is text (codex, round 7)
@@ -838,7 +839,8 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         return f"'{raw}' in a git command that runs a program"
     if cmd in ("gh", "glab") and len(words) > 1 and words[1] in _GH_RUNS:
         return f"'{raw}' in a {cmd} command that runs a program"    # 6. gh codespace ssh, gh alias set x '!…'
-    if cmd == "osascript" and any(re.search(r"NSTask|launchedTaskWith|NSWorkspace|launchApplication", w) and raw in w
+    if cmd == "osascript" and any(re.search(r"NSTask|launchedTaskWith|NSWorkspace|launchApplication", w)
+                                  and re.search(r"[\"'](?:[\w./-]*/)?" + re.escape(raw) + r"[\"']", w)
                                   for w in words[1:]):
         return f"'{raw}' in a program that an AppleScript starts through Objective-C"   # $.NSTask (#16)
     if cmd == "osascript" and any(re.search(r"(?i)\bdo\s+(?:shell\s+)?script\b|doShellScript", w) for w in words):
@@ -905,16 +907,19 @@ def _starts_here(command: str, segs: list[dict], ctxs: list[str], m: "re.Match",
         run_at = max((j for j, w in enumerate(before_word) if w in _RUN_VERBS), default=-1)
         direct_run = run_at >= 0 and all(w.startswith("-") for w in before_word[run_at + 1:])
         rest = words[k_word + 1:] if k_word > 0 else []
-        call_after = len([w for w in rest if not w.startswith("-")]) >= 2 or any("@" in w for w in rest) or any(
-            w in ("-p", "-i", "-o", "-l", "-T", "-t", "-N", "-L", "-R", "-D", "-J", "-A") for w in rest)
+        plain = [w for w in rest if not w.startswith("-")]
+        call_after = prev not in ("-C", "-o", "-f") and (len(plain) >= 2 and bool(_HOST_RE.match(plain[0])) or any(
+            "@" in w for w in rest) or any(
+            w in ("-p", "-i", "-o", "-l", "-T", "-t", "-N", "-L", "-R", "-D", "-J", "-A") for w in rest))
         after_option = len(prev) == 2 and prev.startswith("-") and prev != "--" and not direct_run and not call_after
         managed = set(before_word) & _MANAGE_VERBS and prev != "--"     # pueue add -- ssh runs it
         # a path that names a program directory (/usr/bin/ssh, ./bin/ssh) is the program: taskset -c 0 /usr/bin/ssh,
         # direnv exec . /usr/bin/ssh. Any other path is data: go build ./cmd/ssh, uv run pytest tests/ssh (codex and
         # Opus, review round 6)
-        path_only = pathed and prev != "--" and not re.search(r"(?:^|/)s?bin/$", command[left:pos]) and not (
-            direct_run and (command[left:pos] in ("./", "../") or call_after))
-        # go run ./cmd/ssh and --files src/ssh are data; uv run ./build/ssh web1 uptime starts it (#16)
+        path_only = pathed and prev != "--" and not re.search(r"(?:^|/)s?bin/$", command[left:pos]) and (
+            not direct_run or cmd == "go" and not plain or prev.startswith("--") and len(prev) > 2)
+        # go run ./cmd/ssh builds a package and --files src/ssh is an option value; uv run ./tools/ssh web1 starts it
+        # (#16, codex)
         if cmd == "nix" and prev in ("-c", "--command"):
             after_option = False             # nix develop -c ssh, nix shell pkgs -c ssh (codex, review round 4)
         if k_word > 0 and not after_option and not managed and not path_only:
@@ -1050,7 +1055,12 @@ def classify(command: str, parse: Parser) -> Verdict:
     # trap 'ssh web1 uptime' EXIT runs the call when the shell exits: the trap's code gets the verdict of that call, so
     # a read-only command runs without a question (#16). The code is the first word that is no option
     for sg in segs:
-        if _base(sg.get("cmd", "")) == "trap" and not any(a <= sg["start"] < b for a, b in spans):
+        # eval "$(trap -p EXIT | sed …)" runs a changed copy of the trap's code (Opus)
+        runs_text = any(x is not sg and (_dynamic_word(command, x)
+                                         or _base(x.get("cmd", "")) in _SHELLS | {"eval", "fc"}
+                                         or _base(x.get("cmd", "")) == "trap" and "-p" in (x.get("words") or []))
+                        for x in segs)
+        if _base(sg.get("cmd", "")) == "trap" and not runs_text and not any(a <= sg["start"] < b for a, b in spans):
             code = next((w for w in (sg.get("words") or [])[1:] if not w.startswith("-")), "")
             inner = classify(code, parse) if _TOKEN_RE.search(code) and code != command else None
             if inner and inner.kind in ("read", "write"):
