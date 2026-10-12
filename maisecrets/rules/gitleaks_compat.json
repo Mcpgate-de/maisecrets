@@ -1,5 +1,5 @@
 {
- "_source": "gitleaks v8.30.1 config/gitleaks.toml (MIT, see LICENSE-gitleaks). maisecrets replaced the gitleaks ruleset with betterleaks (Mcpgate-de/maisecrets#18) and keeps these rules: generic-api-key, to which the detector's keyword window and label filters are tuned, and the rules whose shapes betterleaks v1.9.0 no longer finds (review of the switch). A rule whose id betterleaks also loads carries the suffix .gitleaks8 and runs after it.",
+ "_source": "gitleaks v8.30.1 config/gitleaks.toml (MIT, see LICENSE-gitleaks). maisecrets replaced the gitleaks ruleset with betterleaks (Mcpgate-de/maisecrets#18) and keeps these rules: generic-api-key, to which the detector's keyword window and label filters are tuned, and the rules whose shapes betterleaks v1.9.0 no longer finds, each checked with a realistic token (review of the switch). A rule whose id betterleaks also loads carries the suffix .gitleaks8 and runs after it.",
  "rules": [
   {
    "allowlists": [
@@ -1593,84 +1593,12 @@
    "regex": "SK[0-9a-fA-F]{32}"
   },
   {
-   "description": "Identified an Asana Client Secret, which could lead to compromised project management integrity and unauthorized access.",
-   "id": "asana-client-secret.gitleaks8",
-   "keywords": [
-    "asana"
-   ],
-   "regex": "(?i)[\\w.-]{0,50}?(?:asana)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)"
-  },
-  {
-   "description": "Discovered a potential Asana Client ID, risking unauthorized access to Asana projects and sensitive task information.",
-   "id": "asana-client-id.gitleaks8",
-   "keywords": [
-    "asana"
-   ],
-   "regex": "(?i)[\\w.-]{0,50}?(?:asana)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)"
-  },
-  {
-   "description": "Uncovered a Fastly API key, which may compromise CDN and edge cloud services, leading to content delivery and security issues.",
-   "id": "fastly-api-token.gitleaks8",
-   "keywords": [
-    "fastly"
-   ],
-   "regex": "(?i)[\\w.-]{0,50}?(?:fastly)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)"
-  },
-  {
-   "description": "Uncovered a possible Authress Service Client Access Key, which may compromise access control services and sensitive data.",
-   "entropy": 2,
-   "id": "authress-service-client-access-key.gitleaks8",
-   "keywords": [
-    "sc_",
-    "ext_",
-    "scauth_",
-    "authress_"
-   ],
-   "regex": "\\b((?:sc|ext|scauth|authress)_(?i)[a-z0-9]{5,30}\\.[a-z0-9]{4,6}\\.(?-i:acc)[_-][a-z0-9-]{10,32}\\.[a-z0-9+/_=-]{30,120})(?:[\\x60'\"\\s;]|\\\\[nr]|$)"
-  },
-  {
-   "description": "Identified a Grafana API key, which could compromise monitoring dashboards and sensitive data analytics.",
-   "entropy": 3,
-   "id": "grafana-api-key.gitleaks8",
-   "keywords": [
-    "eyjrijoi"
-   ],
-   "regex": "(?i)\\b(eyJrIjoi[A-Za-z0-9]{70,400}={0,3})(?:[\\x60'\"\\s;]|\\\\[nr]|$)"
-  },
-  {
-   "description": "Found a Grafana cloud API token, risking unauthorized access to cloud-based monitoring services and data exposure.",
-   "entropy": 3,
-   "id": "grafana-cloud-api-token.gitleaks8",
-   "keywords": [
-    "glc_"
-   ],
-   "regex": "(?i)\\b(glc_[A-Za-z0-9+/]{32,400}={0,3})(?:[\\x60'\"\\s;]|\\\\[nr]|$)"
-  },
-  {
    "description": "Found a pattern resembling a Codecov Access Token, posing a risk of unauthorized access to code coverage reports and sensitive data.",
    "id": "codecov-access-token.gitleaks8",
    "keywords": [
     "codecov"
    ],
    "regex": "(?i)[\\w.-]{0,50}?(?:codecov)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)"
-  },
-  {
-   "description": "Identified a Harness Access Token (PAT or SAT), risking unauthorized access to a Harness account.",
-   "id": "harness-api-key.gitleaks8",
-   "keywords": [
-    "pat.",
-    "sat."
-   ],
-   "regex": "(?:pat|sat)\\.[a-zA-Z0-9_-]{22}\\.[a-zA-Z0-9]{24}\\.[a-zA-Z0-9]{20}"
-  },
-  {
-   "description": "Uncovered a JSON Web Token, which may lead to unauthorized access to web applications and sensitive user data.",
-   "entropy": 3,
-   "id": "jwt.gitleaks8",
-   "keywords": [
-    "ey"
-   ],
-   "regex": "\\b(ey[a-zA-Z0-9]{17,}\\.ey[a-zA-Z0-9\\/\\\\_-]{17,}\\.(?:[a-zA-Z0-9\\/\\\\_-]{10,}={0,2})?)(?:[\\x60'\"\\s;]|\\\\[nr]|$)"
   }
  ]
 }
