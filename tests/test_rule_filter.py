@@ -116,6 +116,36 @@ class BetterleaksRuleTests(unittest.TestCase):
             with self.subTest(text):
                 self.assertIn(value, [v for _, v in kinds(text.format(v=value))])
 
+    def test_each_kept_gitleaks_rule_finds_what_betterleaks_alone_misses(self):
+        """The population of rules/gitleaks_compat.json: each rule but generic-api-key stays only while betterleaks
+        misses a realistic token of its shape. A later betterleaks that closes a gap turns this red: drop the rule."""
+        low, hexd = string.ascii_lowercase + string.digits, "0123456789abcdef"
+        samples = {
+            "alibaba-access-key-id": "LTAI" + tok(20, low + string.ascii_uppercase),
+            "etsy-access-token": "etsy: " + tok(24, low),
+            "jfrog-api-key": "artifactory: " + tok(73, low),
+            "jfrog-identity-token": "jfrog = " + tok(64, low),
+            "flyio-access-token.gitleaks8": "fo1_" + tok(43, string.ascii_letters + string.digits + "_-"),
+            "atlassian-api-token.gitleaks8": "confluence: " + tok(20, low) + tok(4, hexd),
+            "vault-service-token.gitleaks8": "s." + tok(24, low),
+            "twilio-api-key.gitleaks8": "SK" + tok(32, hexd),
+            "codecov-access-token.gitleaks8": "codecov: " + tok(32, low),
+        }
+        kept = [r for r in detect._load_gitleaks_compat() if r.id != "generic-api-key"]
+        self.assertEqual(sorted(r.id for r in kept), sorted(samples), "the premise: one sample per kept rule")
+        full = detect.rules()
+        alone = [r for r in full if r.id not in samples]
+        saved = detect._RULES
+        try:
+            for rid, text in samples.items():
+                with self.subTest(rid):
+                    detect._RULES = alone
+                    self.assertEqual([m.kind for m in detect.scan(text + "\n")], [], "betterleaks finds it alone")
+                    detect._RULES = full
+                    self.assertIn(rid, [m.kind for m in detect.scan(text + "\n")])
+        finally:
+            detect._RULES = saved
+
     def test_the_rule_filter_drops_a_low_entropy_value(self):
         value = "ddp_" + "ab" * 18                 # entropy 1.x: the rule's filter drops it
         self.assertNotIn("deno-account-token", [k for k, _ in kinds(f"x {value} y")])
