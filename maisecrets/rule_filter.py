@@ -12,6 +12,7 @@ tokenizer is loaded (internal/exprruntime/bindings_filter.go, v1.9.0), and this 
 """
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections import Counter
@@ -40,7 +41,9 @@ def to_python_regex(rx: str) -> "re.Pattern[str]":
     Python only knows it at the start or as a scoped group, so `a(?i)b` becomes `a(?i:b)`. Making the whole pattern
     case-insensitive would widen a filter that drops findings (^/Users/(?i)… in the global filter; codex review). A
     rest that holds an alternation of its group cannot be scoped faithfully and raises Unsupported. \\z is \\Z."""
-    return re.compile(_scope_inline_i(rx).replace(r"\z", r"\Z"))
+    # RE2 reads \\w, \\d, \\s and \\b as ASCII; Python as Unicode. A filter drops findings, so the wider Python
+    # reading would drop a value with an umlaut that betterleaks keeps (Opus review of the switch)
+    return re.compile(_scope_inline_i(rx).replace(r"\z", r"\Z"), re.ASCII)
 
 
 def _scope_inline_i(rx: str) -> str:
@@ -164,7 +167,7 @@ class _Parser:
             return ("lit", val[1:-1])
         if kind == "str":
             self.take()
-            return ("lit", bytes(val[1:-1], "utf-8").decode("unicode_escape"))
+            return ("lit", json.loads(val))      # Expr escapes as JSON; unicode_escape broke non-ASCII text
         if val == "(":
             self.take()
             node = self.or_()

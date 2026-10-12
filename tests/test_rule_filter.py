@@ -84,6 +84,17 @@ class FilterReaderTests(unittest.TestCase):
         self.assertAlmostEqual(rule_filter.entropy("abcd"), 2.0)
         self.assertAlmostEqual(rule_filter.entropy("\u00e4\u00e4"), 1.0)   # two bytes each: c3 a4 c3 a4, not one rune
 
+    def test_word_classes_are_ascii_as_in_re2(self):
+        # a filter that drops a value made of word characters must not drop one with an umlaut: RE2's \\w is ASCII
+        drop = rule_filter.compile_filter('matchesAny(finding["secret"], [`^\\w+$`])')
+        self.assertTrue(drop(env("abc123")))
+        self.assertFalse(drop(env("ab\u00e4c123")))
+
+    def test_a_string_literal_keeps_non_ascii_text(self):
+        drop = rule_filter.compile_filter('containsAny(finding["secret"], ["Schl\u00fcssel", "a\\"b"])')
+        self.assertTrue(drop(env("mein Schl\u00fcssel")))
+        self.assertTrue(drop(env('a"b')))
+
     def test_an_inline_case_flag_applies_from_its_place_as_in_re2(self):
         rx = rule_filter.to_python_regex("^/Users/(?i)[a-z0-9]+/x$")
         self.assertTrue(rx.search("/Users/AbC/x"))
