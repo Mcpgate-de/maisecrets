@@ -126,18 +126,20 @@ def _forget_import(v, name: str) -> int:
     if refused:
         print(f"import:{name}: {deleted} value(s) deleted; the store refused {refused}, which stay. Try again later.")
         return 1
+    listed = _in_value_files(v, name)
     again = (" The file is still in value_files, so the next session start imports it again; "
-             "/maisecrets:settings value_files remove FILE stops that." if _in_value_files(v, name) else "")
+             f"/maisecrets:settings value_files remove {listed} stops that." if listed else "")
     print(f"import:{name}: {deleted} value(s) deleted. maisecrets no longer masks them, and their placeholders no "
           f"longer resolve.{again}")
     return 0
 
 
-def _in_value_files(v, name: str) -> bool:
+def _in_value_files(v, name: str) -> str:
+    """The entry of value_files whose import is ``name``, as the person wrote it, or ""."""
     from pathlib import Path as _P
     from . import value_import
-    return any(value_import.source_name(_P(os.path.expanduser(f))) == name
-               for f in v.cfg.get("value_files") or [] if isinstance(f, str))
+    return next((f for f in v.cfg.get("value_files") or []
+                 if isinstance(f, str) and value_import.source_name(_P(os.path.expanduser(f))) == name), "")
 
 
 def cmd_values(args: list[str]) -> int:

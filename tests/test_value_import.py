@@ -201,7 +201,7 @@ class Caps(Base):
         with mock.patch.object(Vault, "put_many", spy):
             value_import.import_file(self.file(lines(*synth_names(60))))
         self.assertEqual(sum(sizes), 60)
-        self.assertLessEqual(max(sizes), value_import.BATCH)
+        self.assertLessEqual(max(sizes), 25, "a hook waits for one batch, never for the whole file")
 
     def test_an_import_never_shortens_or_retypes_a_value_the_vault_holds(self):
         mine = Vault().put(NAME, "NAME", "manual")
@@ -279,7 +279,7 @@ class Phrases(Base):
 
     def test_a_stored_name_of_two_words_is_found_in_running_text(self):
         self.put(NAME)
-        for text in (f"Report by {NAME}.", f'"author": "{NAME}"', f"owner={NAME}", f"({NAME})",
+        for text in (f"Report by {NAME}.", f'"author": "{NAME}"', f"set owner={NAME} today", f"({NAME})",
                      "Quilla\nExamplestein wrote it", f"{NAME}, {NAME}!"):
             with self.subTest(text=text):
                 out = redact(text)
@@ -288,8 +288,9 @@ class Phrases(Base):
                 self.assertIn(ref("NAME_c1"), out)
 
     def test_the_longest_stored_phrase_wins_and_no_part_of_it_stays(self):
-        self.put(NAME, LONG_NAME)
-        self.assertEqual(redact(f"{LONG_NAME} and {NAME}"), f"{ref('NAME_c2')} and {ref('NAME_c1')}")
+        self.put("Quilla Mara", LONG_NAME, NAME)        # the first is the start of the second
+        self.assertEqual(redact(f"{LONG_NAME} and {NAME} and Quilla Mara"),
+                         f"{ref('NAME_c2')} and {ref('NAME_c3')} and {ref('NAME_c1')}")
 
     def test_a_phrase_takes_its_words_before_a_stored_single_word_does(self):
         self.put("Examplestein", NAME)
@@ -444,7 +445,9 @@ class SessionStartImport(Base):
         note = value_import.session_import(cfg)
         self.assertIn("imported 1 value(s) from names.jsonl (NAME 1)", note)
         self.assertNotIn("Examplestein", note)
-        self.assertIsNone(value_import.session_import(cfg), "unchanged: nothing to say, nothing done")
+        uses = Vault().list()[0].uses
+        self.assertIsNone(value_import.session_import(cfg), "unchanged: nothing to say")
+        self.assertEqual(Vault().list()[0].uses, uses, "unchanged: nothing done")
         f.write_text(lines({"value": NAME, "type": "NAME"}, {"value": LONG_NAME, "type": "NAME"}))
         self.assertIn("imported 1 value(s)", value_import.session_import(cfg))
         self.assertEqual(len(Vault().list()), 2)
@@ -521,6 +524,8 @@ class EndToEnd(Base):
         out = self.hook("post-tool", {"session_id": "S1", "tool_name": "Bash", "tool_input": {"command": "cat x"},
                                       "tool_response": {"stdout": f"{NAME} wrote", "stderr": ""}})
         self.assertEqual(out["hookSpecificOutput"]["updatedToolOutput"]["stdout"], f"{ref('NAME_c1')} wrote")
+        rc, said, _ = self.run_cli("forget", "import:names.jsonl")
+        self.assertIn(f"/maisecrets:settings value_files remove {f} stops that", said, "the forget names the file")
 
 
 if __name__ == "__main__":
