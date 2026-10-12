@@ -1,0 +1,203 @@
+{
+ "bash_base64": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD9...",
+   "is_error": false
+  }
+ ],
+ "bash_datauri": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": [
+    {
+     "type": "image",
+     "source": {
+      "type": "base64",
+      "media_type": "image/png",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD9..."
+     }
+    }
+   ]
+  }
+ ],
+ "paste_stream_json": [
+  {
+   "type": "text",
+   "text": "what is in this image?"
+  },
+  {
+   "type": "image",
+   "source": {
+    "type": "base64",
+    "media_type": "image/png",
+    "data": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD9..."
+   }
+  },
+  {
+   "type": "text",
+   "text": "[Image: source: {tmp}/{project}/{session_id}/images/1.png]"
+  }
+ ],
+ "paste_stream_json_block": "no request reached the upstream",
+ "pdf_replace": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": [
+    {
+     "type": "text",
+     "text": "PDF file read: {cwd}/hello.pdf (580 bytes)"
+    },
+    {
+     "type": "document",
+     "source": {
+      "type": "base64",
+      "media_type": "application/pdf",
+      "data": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0..."
+     }
+    }
+   ]
+  }
+ ],
+ "pdf_replace_obj": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": [
+    {
+     "type": "text",
+     "text": "PDF file read: {cwd}/hello.pdf (580 bytes)"
+    },
+    {
+     "type": "document",
+     "source": {
+      "type": "base64",
+      "media_type": "application/pdf",
+      "data": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0..."
+     }
+    }
+   ]
+  }
+ ],
+ "pdf_replace_text": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": "1\tPROBE-REPLACED-TEXT: withheld"
+  }
+ ],
+ "png_ask": [
+  {
+   "type": "tool_result",
+   "content": "PROBE-ASK: withheld",
+   "is_error": true,
+   "tool_use_id": "{tool_use_id}"
+  }
+ ],
+ "png_deny": [
+  {
+   "type": "tool_result",
+   "content": "PreToolUse:Read hook error: PROBE-DENY: withheld",
+   "is_error": true,
+   "tool_use_id": "{tool_use_id}"
+  }
+ ],
+ "png_replace": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": [
+    {
+     "type": "image",
+     "source": {
+      "type": "base64",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD9...",
+      "media_type": "image/png"
+     }
+    }
+   ]
+  }
+ ],
+ "png_replace_obj": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": [
+    {
+     "type": "image",
+     "source": {
+      "type": "base64",
+      "data": "",
+      "media_type": "image/png"
+     }
+    }
+   ]
+  }
+ ],
+ "png_replace_text": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": "1\tPROBE-REPLACED-TEXT: withheld"
+  }
+ ],
+ "read_pdf": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": [
+    {
+     "type": "text",
+     "text": "PDF file read: {cwd}/hello.pdf (580 bytes)"
+    },
+    {
+     "type": "document",
+     "source": {
+      "type": "base64",
+      "media_type": "application/pdf",
+      "data": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0..."
+     }
+    }
+   ]
+  }
+ ],
+ "read_pdf_pages": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": [
+    {
+     "type": "text",
+     "text": "PDF pages extracted: 1 page(s) from {cwd}/hello.pdf (580 bytes)"
+    },
+    {
+     "type": "image",
+     "source": {
+      "type": "base64",
+      "data": "/9j/4AAQSkZJRgABAQEAZABkAAD/2wBDAAgGBgcG...",
+      "media_type": "image/jpeg"
+     }
+    }
+   ]
+  }
+ ],
+ "read_png": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": [
+    {
+     "type": "image",
+     "source": {
+      "type": "base64",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD9...",
+      "media_type": "image/png"
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,31 @@
+{
+ "session_id": "{session_id}",
+ "transcript_path": "{transcript_path}",
+ "cwd": "{cwd}",
+ "prompt_id": "{prompt_id}",
+ "permission_mode": "default",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PostToolUse",
+ "tool_name": "Read",
+ "tool_input": {
+  "file_path": "{cwd}/tiny.png"
+ },
+ "tool_response": {
+  "type": "image",
+  "file": {
+   "base64": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD9...",
+   "type": "image/png",
+   "originalSize": 73,
+   "dimensions": {
+    "originalWidth": 2,
+    "originalHeight": 2,
+    "displayWidth": 2,
+    "displayHeight": 2
+   }
+  }
+ },
+ "tool_use_id": "{tool_use_id}",
+ "duration_ms": 0
+}
