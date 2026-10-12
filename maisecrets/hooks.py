@@ -3923,6 +3923,52 @@ def _scrub_failed_prompt(event: str, payload: dict) -> None:
         _debug("scrub-failed-prompt: could not start")
 
 
+def _arm_alarm(seconds: float, on_timeout, answering: dict):
+    """The second watchdog, in the main thread: a SIGALRM timer whose handler gives the answer of the thread watchdog.
+    A regex search holds the GIL for its whole run, so the thread watchdog cannot run while one backtracks; the
+    client then ends the hook at its timeout, and that timeout lets the action through (Opus review of block 1: a
+    rule of your own held a hook for 53 s). The `re` engine checks for signals while it runs, so the handler runs
+    inside the search. Windows has no SIGALRM: there the thread watchdog stays alone, and a slow regex can still
+    outrun it (README, "Rules of your own"). Returns what _disarm_alarm needs, or None."""
+    import signal
+    import threading
+    if not hasattr(signal, "setitimer") or threading.current_thread() is not threading.main_thread():
+        return None
+
+    def on_alarm(signum, frame) -> None:
+        if not answering["v"]:                       # an answer in writing finishes; the thread watchdog stays
+            on_timeout()
+    try:
+        before = signal.signal(signal.SIGALRM, on_alarm)
+        signal.setitimer(signal.ITIMER_REAL, max(0.05, seconds))
+    except (ValueError, OSError):
+        return None
+    return before
+
+
+def _disarm_alarm(before) -> None:
+    if before is None:
+        return
+    import signal
+    try:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, before)
+    except (ValueError, OSError):
+        pass
+
+
+def _quarantine_running_rule() -> None:
+    """The watchdog answered while a rule of your own ran: that rule is left out from the next call on
+    (maisecrets/user_rules.py). Never raises."""
+    try:
+        rule = detect.running_user_rule()
+        if rule is not None:
+            from . import user_rules
+            user_rules.note_slow(rule, None)
+    except Exception:  # noqa: BLE001 - the answer is out; this only spares the next call
+        pass
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[1] not in HANDLERS:
         sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|post-tool-failure|session-start\n")
@@ -3945,6 +3991,10 @@ def main(argv: list[str]) -> int:
     started = time.time()
     lock = threading.Lock()
     answered = {"v": False}
+    answering = {"v": False}
+    seconds = WATCHDOG_SECONDS[event]
+    if os.environ.get("MAISECRETS_TEST_WATCHDOG") and os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
+        seconds = float(os.environ["MAISECRETS_TEST_WATCHDOG"])   # tests only (tests/_isolate.py sets the second)
 
     def answer(obj: dict, how: str) -> bool:
         """Write the one answer of this process; True when this call wrote it. Exactly one JSON object leaves the
@@ -3952,6 +4002,7 @@ def main(argv: list[str]) -> int:
         2026-09-26). The lock has a limit, so a handler stuck in its own write cannot hold the watchdog
         (docs/DIAGNOSTICS.md section 10)."""
         json.dumps(obj)                              # before the claim: an object that cannot be written claims nothing
+        answering["v"] = True                        # the alarm handler leaves an answer in writing alone
         if not lock.acquire(timeout=1):
             return False
         try:
@@ -3972,10 +4023,16 @@ def main(argv: list[str]) -> int:
             _run_log(event, payload, how, decision, ms)
         return True
 
+    fired = {"v": False}
+
     def on_timeout() -> None:
-        if answer(_fail_closed(event, payload, f"took longer than {WATCHDOG_SECONDS[event]:.0f}s."), "watchdog"):
+        if fired["v"]:
+            return                                   # the other watchdog runs it already
+        fired["v"] = True
+        if answer(_fail_closed(event, payload, f"took longer than {seconds:.0f}s."), "watchdog"):
             def last() -> None:
                 _heartbeat(event, payload, done=True)
+                _quarantine_running_rule()
                 _scrub_failed_prompt(event, payload)
                 incidents.write_marker(f"hook.{event}.watchdog")
             t = threading.Thread(target=last, daemon=True)
@@ -3984,9 +4041,10 @@ def main(argv: list[str]) -> int:
         # always, also after a lost race: a hook that answered must still end before the client's timeout, which
         # lets the action through (measured, review round 5)
         os._exit(0)
-    watchdog = threading.Timer(WATCHDOG_SECONDS[event], on_timeout)
+    watchdog = threading.Timer(seconds, on_timeout)
     watchdog.daemon = True
     watchdog.start()                                 # first, so no file work runs unguarded
+    alarm = _arm_alarm(seconds - 0.25, on_timeout, answering)
     _heartbeat(event, payload)
     won = False
     tool_class = _tool_class(payload)
@@ -4014,6 +4072,7 @@ def main(argv: list[str]) -> int:
             _scrub_failed_prompt(event, payload)
         return 0
     finally:
+        _disarm_alarm(alarm)
         # the recorder runs after the answer and never raises out of here: an exception would end the process
         # with exit 1, and a client ignores the JSON answer of a hook that exits 1
         if won:
