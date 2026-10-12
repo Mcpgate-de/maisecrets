@@ -200,14 +200,16 @@ def cmd_report(args: list[str]) -> int:
     if args[0] == "last":
         # a removal of invisible characters is no detection to report as a false alarm; the list shows it. The
         # whole log is searched: twenty removals pushed a detection out of the last twenty (codex review)
-        real = [e for e in events.load(events.KEEP) if any(h.get("type") != "HIDDEN" for h in e.get("hits", []))]
+        # a quarantined rule of your own (RULE) is no detection either
+        real = [e for e in events.load(events.KEEP)
+                if any(h.get("type") not in ("HIDDEN", "RULE") for h in e.get("hits", []))]
         if not real:
             print("(no detection recorded yet)")
             return 0
         ev = real[-1]
     else:
         ev = evs[int(args[0]) - 1]
-        if not any(h.get("type") != "HIDDEN" for h in ev.get("hits", [])):
+        if not any(h.get("type") not in ("HIDDEN", "RULE") for h in ev.get("hits", [])):
             print("that event only removed invisible characters; there is no detection to report as a false alarm")
             return 0
     rc = _report_out(events, *events.issue_parts(ev, " ".join(args[1:])))
@@ -288,6 +290,12 @@ def cmd_scan(args: list[str]) -> int:
     return 0
 
 
+def cmd_rules(args: list[str]) -> int:
+    """The rules of your own (maisecrets/rules_cli.py): show, check, test, init, import."""
+    from . import rules_cli
+    return rules_cli.main(args, cmd_scan)
+
+
 def cmd_config(_: list[str]) -> int:
     print(json.dumps(load_config(), indent=2))
     return 0
@@ -299,7 +307,8 @@ def cmd_settings(args: list[str]) -> int:
     from . import settings
     rest = [a for a in args if a != "--all"]
     # KEY, KEY VALUE, or for the host list KEY add|remove HOST (field report on 0.6.6: the list's own form exited 1)
-    list_form = len(rest) == 3 and rest[0].lower() == "ssh_autonomous_hosts" and rest[1].lower() in ("add", "remove")
+    list_form = (len(rest) >= 3 and rest[0].lower() in ("ssh_autonomous_hosts", "rule_dirs")
+                 and rest[1].lower() in ("add", "remove") and (len(rest) == 3 or rest[0].lower() == "rule_dirs"))
     if rest and (len(rest) <= 2 or list_form) and rest[0].lower() in settings.TITLE:
         # after a typed change the prompt hook already wrote it: show the card with the new state
         print(settings.render(only=rest[0].lower()))
@@ -350,6 +359,10 @@ def cmd_status(_: list[str]) -> int:
         return (detect.RULES_DIR / f"{name}_VERSION").read_text(encoding="utf-8").strip()
     print(f"rules: {len(detect.rules())} (betterleaks {version('BETTERLEAKS')}, presidio {version('PRESIDIO')}, "
           f"detect-secrets {version('DETECT_SECRETS')})")
+    from . import user_rules
+    own = user_rules.load()
+    print(f"rules of your own: {len(own.rules)} from {sum(f.state == 'ok' for f in own.folders)} folder(s), "
+          f"{len(own.quarantined)} left out; /maisecrets:rules shows them")
     active = detect.active_regions()
     print(f"regions: {', '.join(active.regions)} ({active.source}); "
           f"label languages: {', '.join(active.languages)}")
@@ -793,7 +806,7 @@ COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_res
             "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
             "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut,
             "forget": cmd_forget, "guard": cmd_guard, "settings": cmd_settings,
-            "consent-report": cmd_consent_report}
+            "consent-report": cmd_consent_report, "rules": cmd_rules}
 
 
 def _stdin_words() -> list[str]:
@@ -814,7 +827,8 @@ def main(argv: list[str] | None = None) -> int:
               "           | report [last|n|bug|feature|incident] [text] | expire | scan [text] | config\n"
               "           | settings [--all]"
               " | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>\n"
-              "           | consent-report ssh [--last 30d|N] [--json] [--excerpts FILE]")
+              "           | consent-report ssh [--last 30d|N] [--json] [--excerpts FILE]\n"
+              "           | rules [check [DIR] | test [text] | init DIR | import FILE.toml]")
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])

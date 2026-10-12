@@ -683,20 +683,62 @@ def _load_own() -> list[Rule]:
 
 
 _RULES: list[Rule] | None = None
+_ALLOW: list = []   # (exact values, rule ids) of the allow list, read once per process
+
+
+def _user_rules() -> list[Rule]:
+    """The rules of the person's folders (maisecrets/user_rules.py). A rule that fails a check is quarantined there;
+    anything else that fails leaves them out, never the built-in rules."""
+    try:
+        from . import user_rules
+        return list(user_rules.load().rules)
+    except Exception:  # noqa: BLE001 - rules of your own are an addition; they never stop a hook
+        return []
+
+
+def allow_list() -> tuple[frozenset, frozenset]:
+    if not _ALLOW:
+        try:
+            from . import user_rules
+            _ALLOW.append(user_rules.allow_list())
+        except Exception:  # noqa: BLE001 - an allow list that cannot be read allows nothing
+            _ALLOW.append((frozenset(), frozenset()))
+    return _ALLOW[0]
 
 
 def rules() -> list[Rule]:
     """Own secret rules first (longer shapes win the span), then betterleaks and the own rules of
-    own_secret_rules.json, then PII."""
+    own_secret_rules.json, then the rules of your own, then PII. A user rule never takes a span before a built-in
+    secret rule. A rule id on the allow list is switched off."""
     global _RULES
     if _RULES is None:
         own = _load_own()
         secrets = [r for r in own if r.type == "SECRET"]
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
-        _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
-                  + _load_presidio(active.regions) + pii)
+        every = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
+                 + _user_rules() + _load_presidio(active.regions) + pii)
+        off = allow_list()[1]
+        if off:
+            from .user_rules import switched_off
+            every = [r for r in every if not switched_off(r.id, off)]
+        _RULES = every
     return _RULES
+
+
+def reset_rules() -> None:
+    """Read every rule and the allow list again at the next scan (tests, and a CLI run after a change)."""
+    global _RULES
+    _RULES = None
+    _ALLOW.clear()
+    _SHAPE_IDS.clear()
+    from . import user_rules
+    user_rules.reset()
+
+
+# Matchers of other kinds than a regex rule (a list of names, a value import): each is a callable text -> list[Match],
+# run in scan() after the rules. A span a rule took stays taken, and the allow list holds for them too.
+extra_matchers: list = []
 
 
 def active_regions():
@@ -1213,21 +1255,32 @@ def _url_password_not_a_value(v: str) -> bool:
     return True
 
 
-def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
-    """Return non-overlapping matches, leftmost first; the first rule to claim a span wins."""
+def scan(text: str, enabled: set[str] | None = None, rule_list: list[Rule] | None = None) -> list[Match]:
+    """Return non-overlapping matches, leftmost first; the first rule to claim a span wins. `rule_list` scans with
+    those rules alone, without the allow list and the extra matchers (`maisecrets rules check`)."""
     if not text:
         return []
     low = _lower(text)
     found: list[Match] = []
     taken_starts: list[int] = []
     taken_ends: list[int] = []
+    allowed = allow_list()[0] if rule_list is None else frozenset()
 
     def overlaps(a: int, b: int) -> bool:
         """Whether [a, b) overlaps a span already taken. The spans never overlap each other, so only the two
         neighbours by start can; a scan over all of them was quadratic in the hits (review of b4a7c54)."""
         i = bisect.bisect_left(taken_starts, a)
         return (i > 0 and taken_ends[i - 1] > a) or (i < len(taken_starts) and taken_starts[i] < b)
-    for rule in rules():
+
+    def take(m: Match) -> None:
+        """Take the span; report it unless the allow list names the value exactly. An allowed value keeps its span,
+        so no later rule reports a part of it."""
+        i = bisect.bisect_left(taken_starts, m.start)
+        taken_starts.insert(i, m.start)
+        taken_ends.insert(i, m.end)
+        if m.value not in allowed:
+            found.append(m)
+    for rule in (rules() if rule_list is None else rule_list):
         if enabled is not None and rule.id not in enabled:
             continue
         if rule.keywords and not any(k in low for k in rule.keywords):
@@ -1373,10 +1426,11 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 if tail and not overlaps(end, tail.end()):
                     end = tail.end()
                     secret = text[start:end]
-            found.append(Match(rule.id, rule.type, secret, start, end))
-            i = bisect.bisect_left(taken_starts, start)
-            taken_starts.insert(i, start)
-            taken_ends.insert(i, end)
+            take(Match(rule.id, rule.type, secret, start, end))
+    for matcher in (extra_matchers if rule_list is None else ()):
+        for m in sorted(matcher(text), key=lambda x: x.start):
+            if (enabled is None or m.kind in enabled) and m.end > m.start and not overlaps(m.start, m.end):
+                take(m)
     found.sort(key=lambda x: x.start)
     return found
 

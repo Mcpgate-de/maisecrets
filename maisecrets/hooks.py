@@ -463,7 +463,8 @@ PRIMER = (
 # --------------------------------------------------------- UserPromptSubmit --
 TYPE_WORDS = {"SECRET": ("secret", "secrets"), "EMAIL": ("e-mail address", "e-mail addresses"),
               "IBAN": ("IBAN", "IBANs"), "CARD": ("card number", "card numbers"),
-              "PHONE": ("phone number", "phone numbers"), "IP": ("IP address", "IP addresses")}
+              "PHONE": ("phone number", "phone numbers"), "IP": ("IP address", "IP addresses"),
+              "NAME": ("name", "names")}
 STORE_NAMES = {"KeychainBackend": "the macOS Keychain", "WindowsVaultBackend": "the Windows Credential Locker",
                "EncryptedFileBackend": "an encrypted file in ~/.maisecrets",
                "JsonFileBackend": "a PLAIN TEXT test file"}

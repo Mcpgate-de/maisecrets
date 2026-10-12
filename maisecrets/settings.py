@@ -21,7 +21,7 @@ DISCOVERABLE = ("ssh_consent", "ssh_autonomous_hosts", "secret_destinations", "r
 ADVANCED = ("ssh_host_groups", "ssh_approval", "resolve_in_files", "ssh_via_sandbox", "block_at_mentions",
             "rewrite_prompts", "scrub_transcript", "strip_hidden_characters", "regions", "ttl_seconds",
             "renew_on_use", "tips", "shortcut", "guard", "pass_agent_reports", "gateway_servers",
-            "max_keys_per_session", "max_resolves_per_hour")
+            "max_keys_per_session", "max_resolves_per_hour", "rule_dirs")
 INTERNAL = ("backend", "allow_plaintext_store", "report_url", "max_ttl_seconds", "max_new_entries_per_result",
             "keep_purged_days", "audit_max_lines", "pii_regions")
 
@@ -35,7 +35,7 @@ TITLE = {
     "regions": "Regions", "ttl_seconds": "Lifetime of a value", "renew_on_use": "Renew on use",
     "tips": "Tips and hints",
     "shortcut": "/ms shortcut", "guard": "Update guard", "pass_agent_reports": "Subagent reports",
-    "gateway_servers": "Gateway servers",
+    "gateway_servers": "Gateway servers", "rule_dirs": "Rule folders",
     "max_keys_per_session": "Values per session and hour", "max_resolves_per_hour": "Uses per hour",
 }
 MEANING = {
@@ -52,6 +52,7 @@ MEANING = {
     "scrub_transcript": "Remove a value from the session transcript on disk.",
     "strip_hidden_characters": "Remove invisible characters from tool results.",
     "regions": "Countries for the personal-data rules.",
+    "rule_dirs": "Folders with detection rules of your own or of your team, read with ~/.maisecrets/rules.d.",
     "ttl_seconds": "How long a stored value lives.",
     "renew_on_use": "A use of a value extends its life.",
     "tips": "A short tip at session start, and a hint when a setting first matters.",
@@ -74,7 +75,8 @@ ADVANCED_GROUPS = (("Stored values", ("ttl_seconds", "renew_on_use", "resolve_in
                                       "max_keys_per_session", "max_resolves_per_hour")),
                    ("ssh", ("ssh_host_groups", "ssh_approval", "ssh_via_sandbox")),
                    ("Prompts and tool output", ("block_at_mentions", "rewrite_prompts", "scrub_transcript",
-                                                "strip_hidden_characters", "regions", "pass_agent_reports")),
+                                                "strip_hidden_characters", "regions", "rule_dirs",
+                                                "pass_agent_reports")),
                    ("Help and updates", ("tips", "shortcut", "guard")))
 
 # what a prompt may set; any other key is edited in config.json by hand
@@ -91,6 +93,10 @@ _PROMPT_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+([a-
 _HOST = r"([\w.@:\[\]-]+)"
 _AUTONOMOUS_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+ssh_autonomous_hosts\s+(add|remove)|maisecrets:\s*ssh\s+"
                             r"(autonomous|ask))\s+" + _HOST + r"\s*\Z", re.I)
+# the rule folders: add or remove one folder, the rest of the prompt as typed (a path can hold spaces)
+_RULE_DIRS_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+rule_dirs\s+(add|remove)\s+(\S(?:.*\S)?)"
+                           r"\s*\Z", re.I)
+_LIST_KEYS = ("ssh_autonomous_hosts", "rule_dirs")
 _HINTS_RESET_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+hints\s+reset|maisecrets:\s*reset\s+hints)\s*\Z", re.I)
 # the same sentence anywhere in a tool call: a nested client (`codex exec 'maisecrets: set …'`, `claude -p`) would
 # type it for the model, and the writer called by name would skip the prompt (review of C22). A text match: a
@@ -121,7 +127,7 @@ def _shown(value, key: str = "") -> str:
         return hours.get("default", "?") + (f" ({rest})" if rest else "")
     if isinstance(value, bool):
         return "on" if value else "off"
-    if key == "ssh_autonomous_hosts" and isinstance(value, list):
+    if key in _LIST_KEYS and isinstance(value, list):
         return ", ".join(str(h) for h in value) if value else "none"
     if isinstance(value, (dict, list)):
         return json.dumps(value, separators=(",", ":"))[:40] if value else "none"
@@ -150,6 +156,13 @@ def _card(key: str, cfg: dict) -> list[str]:
             lines.append(f"    Remove: /maisecrets:settings ssh_autonomous_hosts remove {value[0]}")
         if not cfg.get("ssh_consent"):
             lines.append("    It matters only while SSH consent is on.")
+    elif key == "rule_dirs":
+        lines.append("    Add: /maisecrets:settings rule_dirs add DIR   (a full path or ~/…; "
+                     "/maisecrets:rules shows what each folder loaded)")
+        if value:
+            lines.append(f"    Remove: /maisecrets:settings rule_dirs remove {value[0]}")
+        if cfg.get("policy_rule_dirs"):
+            lines.append(f"    From the machine policy, always read: {', '.join(cfg['policy_rule_dirs'])}")
     elif key in _BOOL_KEYS:
         lines.append(f"    Turn {'off' if value else 'on'}: /maisecrets:settings {key} {'off' if value else 'on'}")
     elif key in _CHOICES:
@@ -207,6 +220,9 @@ def parse_prompt(prompt) -> tuple[str, str] | None:
     if m:
         add = (m.group(1) or m.group(2)).lower() in ("add", "autonomous")
         return ("ssh_autonomous_hosts", ("add:" if add else "remove:") + m.group(3))
+    m = _RULE_DIRS_RE.match(prompt)
+    if m:
+        return ("rule_dirs", m.group(1).lower() + ":" + m.group(2))
     m = _PROMPT_RE.match(prompt)
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
@@ -226,11 +242,14 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
     cfg = load_config()
     if key in (cfg.get("policy_keys") or []):
         return False, f"maisecrets: {key} is managed by a machine policy; it cannot be changed here."
-    hosts_change = key == "ssh_autonomous_hosts" and (word == "default" or word.startswith(("add:", "remove:")))
+    hosts_change = key in _LIST_KEYS and (word == "default" or word.startswith(("add:", "remove:")))
     if key not in _BOOL_KEYS and key not in _CHOICES and key not in _INT_KEYS and not hosts_change:
         if key == "ssh_autonomous_hosts":
             return False, ("maisecrets: send /maisecrets:settings ssh_autonomous_hosts add HOST (or remove HOST), "
                            "or in Codex: maisecrets: ssh autonomous HOST (or ask HOST).")
+        if key == "rule_dirs":
+            return False, ("maisecrets: send /maisecrets:settings rule_dirs add DIR (or remove DIR), "
+                           "or in Codex: maisecrets: set rule_dirs add DIR.")
         if key in MEANING:
             return False, f"maisecrets: {key} is not changed by a prompt; edit {CONFIG} by hand."
         return False, f"maisecrets: {key} is no setting this command changes. /maisecrets:settings --all lists them."
@@ -244,6 +263,14 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
             # the length first: int() of thousands of digits raises instead of answering (codex review of 0.6.9)
             if not (word.isdigit() and len(word) <= 8 and low <= int(word) <= high):
                 return False, f"maisecrets: {key} takes a whole number from {low} to {high:,}, or default."
+    note = ""
+    if key == "rule_dirs" and word.startswith("add:"):
+        from .user_rules import expand, refused_folder
+        why = refused_folder(expand(word[4:]))
+        if why:
+            return False, f"maisecrets: the folder is not added ({why.split(': ', 1)[-1]}). Nothing was changed."
+        if not expand(word[4:]).is_dir():
+            note = " The folder does not exist yet; maisecrets reads it once it does."
     # a symlinked config.json (dotfiles) keeps its link: the new file replaces the target
     target = CONFIG.resolve() if CONFIG.is_symlink() else CONFIG
     try:
@@ -269,7 +296,12 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
                 user.pop(key, None)
             elif hosts_change:
                 verb, host = word.split(":", 1)
-                hosts = [h for h in user.get(key, []) if h != host]
+                if key == "rule_dirs":
+                    # ~/team and the same folder written in full are one folder
+                    from .user_rules import expand
+                    hosts = [h for h in user.get(key, []) if not isinstance(h, str) or expand(h) != expand(host)]
+                else:
+                    hosts = [h for h in user.get(key, []) if h != host]
                 user[key] = hosts + [host] if verb == "add" else hosts
             else:
                 user[key] = (_BOOL_WORDS[word] if key in _BOOL_KEYS else int(word) if key in _INT_KEYS
@@ -278,7 +310,7 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
     except (OSError, LockTimeout) as exc:
         return False, f"maisecrets: {CONFIG} cannot be written ({type(exc).__name__}); nothing was changed."
     after = load_config()
-    return True, f"maisecrets: {TITLE.get(key, key)} is {_shown(after.get(key))} ({state(key, after)})."
+    return True, f"maisecrets: {TITLE.get(key, key)} is {_shown(after.get(key), key)} ({state(key, after)}).{note}"
 
 
 # ------------------------------------------------------------------ hints --

@@ -339,6 +339,9 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     "pending": [([], "", _ALL0)],
     # it reads the transcripts of the sandbox's own CLAUDE_CONFIG_DIR, never the store: every state answers alike
     "consent-report": [(["ssh", "--json"], "", _ALL0), (["ssh", "--last", "7d"], "", _ALL0), ([], "", _ALL2)],
+    # the rule folders are read without the store, and a config that does not load means no extra folder: every
+    # state answers alike (tests/test_user_rules.py)
+    "rules": [([], "", _ALL0), (["check"], "", _ALL0), (["nonsense"], "", _ALL2)],
 }
 
 _BASES: dict[str, Sandbox] = {}
