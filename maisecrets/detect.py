@@ -40,6 +40,7 @@ import ipaddress
 import json
 import math
 import re
+import time
 import warnings
 from collections import Counter
 from dataclasses import dataclass
@@ -741,6 +742,49 @@ def reset_rules() -> None:
 # run in scan() after the rules. A span a rule took stays taken, and the allow list holds for them too.
 extra_matchers: list = []
 
+# The rule of your own that scan() runs at this moment: the hook's watchdog names it, so the next call leaves it out
+_RUNNING: list = [None]
+# A rule of your own may take this long in one scan (seconds, plus USER_RULE_BUDGET_PER_MB for each MB of text);
+# a rule that takes longer is left out from then on (maisecrets/user_rules.py, note_slow)
+USER_RULE_BUDGET = 0.5
+USER_RULE_BUDGET_PER_MB = 0.1
+
+
+def running_user_rule():
+    return _RUNNING[0]
+
+
+def _timed(rule: Rule, found, budget: float):
+    """The matches of a rule of your own, with the time its regex takes. Over the budget, the rule is left out of
+    this process and, by the state file, of the next ones."""
+    spent = 0.0
+    _RUNNING[0] = rule
+    try:
+        while True:
+            t = time.perf_counter()
+            try:
+                m = next(found)
+            except StopIteration:
+                break
+            finally:
+                spent += time.perf_counter() - t
+            yield m
+    finally:
+        _RUNNING[0] = None
+        if spent > budget:
+            _too_slow(rule, spent)
+
+
+def _too_slow(rule: Rule, spent: float) -> None:
+    global _RULES
+    if _RULES is not None:
+        _RULES = [r for r in _RULES if r is not rule]
+    try:
+        from . import user_rules
+        user_rules.note_slow(rule, spent * 1000)
+    except Exception:  # noqa: BLE001 - the rule is out of this process either way
+        pass
+
 
 def active_regions():
     """The regions and label languages of the config (maisecrets/regions.py)."""
@@ -1267,6 +1311,7 @@ def scan(text: str, enabled: set[str] | None = None, rule_list: list[Rule] | Non
     taken_ends: list[int] = []
     allowed = allow_list()[0] if rule_list is None else frozenset()
     allowed_spans: list[tuple[int, int]] = []
+    budget = USER_RULE_BUDGET + USER_RULE_BUDGET_PER_MB * len(text) / 1e6
 
     def overlaps(a: int, b: int) -> bool:
         """Whether [a, b) overlaps a span already taken. The spans never overlap each other, so only the two
@@ -1298,7 +1343,8 @@ def scan(text: str, enabled: set[str] | None = None, rule_list: list[Rule] | Non
         if rule.context and (rule.require_context or rule.score < 0.5) and not _has_context_word(low, rule.context):
             continue
         own = rule.id.startswith("user:")
-        for m in _matches(rule, text):
+        hits = _matches(rule, text)
+        for m in (_timed(rule, hits, budget) if own and rule_list is None else hits):
             ngroups = rule.regex.groups or 0
             if rule.whole_match:
                 g = 0

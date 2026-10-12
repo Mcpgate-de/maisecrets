@@ -210,7 +210,10 @@ def cmd_report(args: list[str]) -> int:
     else:
         ev = evs[int(args[0]) - 1]
         if not any(h.get("type") not in ("HIDDEN", "RULE") for h in ev.get("hits", [])):
-            print("that event only removed invisible characters; there is no detection to report as a false alarm")
+            what = ("only left out a rule of your own (/maisecrets:rules says why)"
+                    if any(h.get("type") == "RULE" for h in ev.get("hits", []))
+                    else "only removed invisible characters")
+            print(f"that event {what}; there is no detection to report as a false alarm")
             return 0
     rc = _report_out(events, *events.issue_parts(ev, " ".join(args[1:])))
     _forget_the_false_positive(ev)
@@ -293,7 +296,7 @@ def cmd_scan(args: list[str]) -> int:
 def cmd_rules(args: list[str]) -> int:
     """The rules of your own (maisecrets/rules_cli.py): show, check, test, init, import."""
     from . import rules_cli
-    return rules_cli.main(args, cmd_scan)
+    return rules_cli.main(args)
 
 
 def cmd_config(_: list[str]) -> int:
@@ -362,7 +365,7 @@ def cmd_status(_: list[str]) -> int:
     from . import user_rules
     own = user_rules.load()
     print(f"rules of your own: {len(own.rules)} from {sum(f.state == 'ok' for f in own.folders)} folder(s), "
-          f"{len(own.quarantined)} left out; /maisecrets:rules shows them")
+          f"{sum(not q.kept for q in own.quarantined)} left out; /maisecrets:rules shows them")
     active = detect.active_regions()
     print(f"regions: {', '.join(active.regions)} ({active.source}); "
           f"label languages: {', '.join(active.languages)}")

@@ -84,10 +84,17 @@ class RuleFolders(Base):
         self.assertEqual([(m.kind, m.type, m.value) for m in found], [("user:team-token", "SECRET", token())])
         self.assertEqual(kinds("key bkx-" + "0123456789abcdef" * 2), ["user:build-key"])
         ids = [r.id for r in detect.rules()]
-        self.assertLess(ids.index("own_secret_rules" if "own_secret_rules" in ids else ids[0]),
-                        ids.index("user:team-token"))
-        first_pii = next(i for i, r in enumerate(detect.rules()) if r.type != "SECRET" and not r.id.startswith("user:"))
-        self.assertLess(ids.index("user:team-token"), first_pii, "user rules run before the PII rules")
+        active = detect.active_regions()
+        own = detect._load_own()
+        parts = {"own secret rules": [r for r in own if r.type == "SECRET"],
+                 "detect-secrets": detect._load_detect_secrets(active.languages),
+                 "betterleaks": detect._load_betterleaks(), "own_secret_rules.json": detect._load_own_secret_rules(),
+                 "presidio": detect._load_presidio(active.regions), "own PII": [r for r in own if r.type != "SECRET"]}
+        for part, rules in parts.items():
+            with self.subTest(part):
+                self.assertTrue(rules)
+                self.assertLess(max(ids.index(r.id) for r in rules if r.id in ids), ids.index("user:team-token"),
+                                "every built-in rule runs before the rules of your own")
         # a built-in shape stays the built-in's: the user rule never takes the span first
         write_rules(OWN, [{"id": "my-webhook", "regex": r"whsec_[A-Za-z0-9+/=_-]{24,}", "keywords": ["whsec_"]}])
         detect.reset_rules()
@@ -97,6 +104,7 @@ class RuleFolders(Base):
         good = {"id": "team-token", "regex": r"tkx_[A-Za-z0-9]{24}", "keywords": ["tkx_"]}
         bad = {
             "nested": ({"id": "nested", "regex": r"tky_(?:[a-z]+)+"}, "a nested quantifier"),
+            "in-a-row": ({"id": "in-a-row", "regex": r"tkr_.*.*Z"}, "two repeats in a row"),
             "leading": ({"id": "leading", "regex": r"\w+tkz_secret"}, "starts with a quantifier"),
             "short": ({"id": "short", "regex": r"ab[0-9]{30}"}, "no keyword or literal of 4"),
             "long": ({"id": "long", "regex": "tkq_" + "a" * 300}, "longer than 300"),
@@ -106,6 +114,7 @@ class RuleFolders(Base):
             "short-kw": ({"id": "short-kw", "regex": r"[a-z]{3}_[0-9]{20}", "keywords": ["ab"]}, "no keyword or"),
         }
         write_rules(OWN, [good] + [r for r, _ in bad.values()])
+        places = {rid: f"rule {n}" for n, rid in enumerate(bad, 2)}
         (OWN / "broken.json").write_text("{not json", encoding="utf-8")
         (OWN / "huge.prefixes").write_text("# x\n" * (user_rules.MAX_FILE_BYTES // 4 + 10), encoding="utf-8")
         detect.reset_rules()
@@ -114,13 +123,13 @@ class RuleFolders(Base):
         reasons = {(q.file, q.rule): q.reason for q in loaded.quarantined}
         for rid, (rule, why) in bad.items():
             with self.subTest(rid):
-                shown = "?" if rid == "bad-id" else rule["id"]
-                self.assertIn(why, reasons.get(("team.json", shown), ""), reasons)
+                self.assertIn(why, reasons.get(("team.json", places[rid]), ""), reasons)
         self.assertIn("not valid JSON", reasons[("broken.json", "")])
         self.assertIn("larger than 64 KB", reasons[("huge.prefixes", "")])
         self.assertEqual(kinds(token()), ["user:team-token"], "the good rule of the same file still works")
         for q in loaded.quarantined:
             self.assertNotIn("tky_", q.reason + q.rule, "a reason names the check, never the regex")
+            self.assertNotIn("nested", q.rule, "a refused rule is named by its place, never by a text of its own")
 
     def test_bounded_repeats_and_lookarounds_pass_the_checks(self):
         for rx in (r"(?<![a-z])tkb_(?:-[a-z0-9]{4}){3}", r"\btkc_[a-z]{1,63}(?:\.[a-z]{1,63}){1,5}",
@@ -306,7 +315,7 @@ class Quarantine(Base):
         note = user_rules.session_note()
         self.assertIn("1 rule(s) of your own were left out", note)
         (line,) = events.load()
-        self.assertEqual(line["hits"], [{"key": "", "type": "RULE", "kind": "user:nested"}])
+        self.assertEqual(line["hits"], [{"key": "", "type": "RULE", "kind": "user:?"}])
         self.assertIn("a nested quantifier", line["outcome"])
         self.assertIsNone(user_rules.session_note(), "unchanged: said once")
         with redirect_stdout(io.StringIO()) as out:
@@ -330,11 +339,11 @@ class RulesCommand(Base):
                      ".github/workflows/rules.yml", ".gitlab-ci.yml"):
             self.assertTrue((top / name).is_file(), name)
         readme = (top / "README.md").read_text()
-        self.assertIn("/maisecrets:settings rule_dirs add ~/src/team-rules/rules", readme)
+        self.assertIn("/maisecrets:settings rule_dirs add " + str(top.resolve()), readme)
         self.assertIn("No names", readme)
         rc, out, _ = self.run_cli("check", str(top))
         self.assertEqual(rc, 0, out)
-        self.assertRegex(out, r"ok      example-internal-token  \d+\.\d ms")
+        self.assertRegex(out, r"ok      user:example-internal-token  \d+\.\d ms")
         self.assertIn("samples: all pass", out)
         self.assertEqual(self.run_cli("init", str(top))[0], 1, "never over a folder that has the files")
 
@@ -345,7 +354,7 @@ class RulesCommand(Base):
         (top / "samples.txt").write_text(f"hit tok {token()}\nmiss plain words\nmiss {token()}\n", encoding="utf-8")
         rc, out, _ = self.run_cli("check", str(top))
         self.assertEqual(rc, 1)
-        self.assertIn("refused team.json:nested  a nested quantifier", out)
+        self.assertIn("refused team.json:rule 2  a nested quantifier", out)
         self.assertIn("samples.txt line 3: a hit of user:tok where none belongs", out)
         self.assertNotIn(TAIL, out, "a sample's text is never printed")
 
@@ -356,7 +365,7 @@ class RulesCommand(Base):
         rc, out, _ = self.run_cli()
         self.assertEqual(rc, 0)
         self.assertRegex(out, r"rules\.d \(own\) · 1 rule\(s\) · hash [0-9a-f]{12}")
-        self.assertIn("team.json · bad · a regex that starts with a quantifier", out)
+        self.assertIn("team.json · rule 2 · a regex that starts with a quantifier", out)
         self.assertIn("1 exact value(s), 1 rule id(s) switched off (email)", out)
         self.assertNotIn(TAIL, out)
         ALLOW.unlink()
@@ -390,5 +399,338 @@ class RulesCommand(Base):
         self.assertEqual(len(user_rules.load_folder(team, "x")[0]), 2, "the output loads")
 
 
-if __name__ == "__main__":
-    unittest.main()
+def iban_complete(cc: str, bban: str) -> str:
+    """ISO 13616 check digits (independent of detect._iban_ok)."""
+    num = "".join(str(int(c, 36)) for c in bban + cc + "00")
+    return f"{cc}{98 - int(num) % 97:02d}{bban}"
+
+
+SLOW_RX = r"abcd(a|aa)+Z"          # exponential: each `a` doubles the tries when the Z is missing
+SLOW_TEXT = "abcd" + "a" * 40 + "!"
+SLOW_SHAPES = (r"abcd.*.*.*.*Z", r"abcd(?:[a-z]{1,30}){1,30}Z", r"abcd(?=.*.*.*Z)", r"xkey(a|a)*$",
+               r"abcd(?:a?){25}a{25}", r"x?[a-z]+abcd", r"acme_(a|aa)+$", r"abcd(x)\1", r"abcd\w+\d+Z")
+
+
+class OrderAndAllow(Base):
+    """Opus review of block 1 (H1): a rule of your own took a span before the PII rules, and an allowed value kept a
+    span that a longer built-in hit needed."""
+
+    def test_a_rule_of_your_own_never_cuts_a_built_in_hit(self):
+        mail = "max.mueller" + "@" + "example-firma.de"
+        iban = iban_complete("DE", "370400440532013000")
+        phone = "+49 30 9" + "1234567"
+        write_rules(OWN, [{"id": "surname", "type": "NAME", "regex": r"(?i)mueller"},
+                          {"id": "bank", "type": "NAME", "regex": iban[4:12]},
+                          {"id": "line", "type": "NAME", "regex": r"9" + phone[-7:-3]}])
+        detect.reset_rules()
+        for text, kind, value in ((f"mail {mail} now", "email", mail), (f"IBAN {iban}", "iban", iban),
+                                  (f"Tel. {phone}", "phone", phone)):
+            with self.subTest(kind):
+                found = detect.scan(text)
+                self.assertEqual([(m.kind, m.value == value) for m in found], [(kind, True)])
+
+    def test_an_allowed_domain_and_a_team_rule_leave_the_address_masked(self):
+        domain = "example-firma.de"
+        mail = "ada" + "@" + domain
+        ALLOW.write_text(domain + "\n", encoding="utf-8")
+        write_rules(OWN, [{"id": "domain", "type": "NAME", "regex": r"example-firma\.de"}])
+        detect.reset_rules()
+        self.assertEqual([(m.kind, m.value == mail) for m in detect.scan(f"write to {mail}")], [("email", True)])
+        self.assertEqual(kinds(f"see {domain} today"), [], "the exact value alone stays allowed")
+
+    def test_an_allowed_hit_of_a_rule_of_your_own_reserves_no_span(self):
+        write_rules(OWN, [{"id": "tok", "regex": r"tkx_[A-Za-z0-9]{24}"}])
+        ALLOW.write_text(token() + "\n", encoding="utf-8")
+        detect.reset_rules()
+
+        def part(t: str) -> list:          # a later matcher that finds a part of the allowed token
+            at = t.find(TAIL)
+            return [detect.Match("term:x", "NAME", TAIL[:8], at, at + 8)] if at >= 0 else []
+        with mock.patch.object(detect, "extra_matchers", [part]):
+            self.assertEqual(kinds(f"use {token()} here"), ["term:x"])
+
+    def test_an_allowed_value_never_hides_a_longer_built_in_hit(self):
+        short = detect.Rule(id="short-shape", type="SECRET", regex=detect._Lazy(r"tks_[a-z]{8}"))
+        long_ = detect.Rule(id="long-shape", type="SECRET", regex=detect._Lazy(r"tks_[a-z]{8}\.[A-Za-z0-9]{24}"))
+        value = "tks_abcdefgh"
+        ALLOW.write_text(value + "\n", encoding="utf-8")
+        detect.reset_rules()
+        detect.allow_list()
+        with mock.patch.object(detect, "rules", lambda: [short, long_]):
+            self.assertEqual(kinds(f"{value}.{TAIL}"), ["long-shape"])
+            self.assertEqual(kinds(f"{value} alone"), [])
+
+
+class Robust(Base):
+    """Opus and codex review of block 1 (H2): one odd file, name or number lost every rule of every folder."""
+
+    def _team(self, rules=None, name="team.json"):
+        team = self.tmp / "team"
+        write_rules(team, rules or [], name)
+        return team
+
+    def test_a_number_out_of_range_quarantines_one_rule_and_the_others_stay(self):
+        team = self.tmp / "team"
+        team.mkdir()
+        (team / "big.json").write_text('{"rules": [{"id": "big", "regex": "tkx_[a-z]{20}", "secretGroup": 1e400},'
+                                       ' {"id": "inf", "regex": "tki_[a-z]{20}", "entropy": "inf"},'
+                                       ' {"id": "ok", "regex": "tkk_[a-z]{20}"}]}', encoding="utf-8")
+        write_rules(OWN, [{"id": "mine", "regex": r"tkx_[A-Za-z0-9]{24}"}])
+        loaded = user_rules.load({"rule_dirs": [str(team)]})
+        self.assertEqual(sorted(r.id for r in loaded.rules), ["user:mine", "user:ok"])
+        self.assertEqual({(q.rule, q.reason[:10]) for q in loaded.quarantined},
+                         {("rule 1", "an entropy"), ("rule 2", "an entropy")})
+
+    def test_random_rule_files_never_stop_the_load_and_never_cost_another_folder(self):
+        import random
+        rnd = random.Random(20261012)
+        keys = ["rules", "id", "regex", "keywords", "entropy", "secretGroup", "allowlists", "regexes", "stopwords",
+                "regexTarget", "condition", "type", "paths"]
+
+        def value(depth: int = 0):
+            forms = [lambda: None, lambda: True, lambda: rnd.randint(-10**30, 10**30),
+                     lambda: rnd.choice([1e308, -0.0, 3.5]),
+                     lambda: rnd.choice(["", "tkf_[a-z]{9}", "(a+)+", "AND", "line", "x" * 400, "\udcff"]),
+                     lambda: rnd.choice(["SECRET", "NAME", "zz"]),
+                     lambda: [value(depth + 1) for _ in range(rnd.randrange(4))],
+                     lambda: {rnd.choice(keys): value(depth + 1) for _ in range(rnd.randrange(5))},
+                     lambda: {"rules": [{rnd.choice(keys): value(depth + 1) for _ in range(5)}]}]
+            return forms[rnd.randrange(9 if depth < 3 else 6)]()
+        write_rules(OWN, [{"id": "mine", "regex": r"tkx_[A-Za-z0-9]{24}"}])
+        team = self.tmp / "team"
+        team.mkdir()
+        for i in range(300):
+            data = value()
+            text = json.dumps(data) if rnd.random() < 0.9 else json.dumps(data)[:-1]
+            (team / "fuzz.json").write_text(text, encoding="utf-8", errors="surrogatepass")
+            (team / "fuzz.prefixes").write_text(rnd.choice(["", "id", "id  (", "x" * 70 + " tkp_[a-z]{9}",
+                                                            "ok  tkq_[a-z]{9}\n#\n  \n"]), encoding="utf-8")
+            loaded = user_rules.load({"rule_dirs": [str(team)]}, budget=0)
+            self.assertIn("user:mine", [r.id for r in loaded.rules], f"round {i}")
+
+    def test_a_file_name_that_is_no_utf_8_is_read_and_named(self):
+        team = self._team([{"id": "ok", "regex": r"tkk_[a-z]{20}"}])
+        try:
+            fd = os.open(os.path.join(os.fsencode(team), b"bad\xff.json"), os.O_WRONLY | os.O_CREAT, 0o600)
+        except OSError:
+            self.skipTest("this file system refuses a name that is no UTF-8 (APFS)")
+        os.write(fd, json.dumps({"rules": [{"id": "odd", "regex": r"tko_[a-z]{20}"}]}).encode())
+        os.close(fd)
+        write_rules(OWN, [{"id": "mine", "regex": r"tkx_[A-Za-z0-9]{24}"}])
+        loaded = user_rules.load({"rule_dirs": [str(team)]})
+        self.assertEqual(sorted(r.id for r in loaded.rules), ["user:mine", "user:odd", "user:ok"])
+        with redirect_stdout(io.StringIO()):
+            user_rules.reset()
+            CONFIG.write_text(json.dumps({**TEST_CONFIG, "rule_dirs": [str(team)]}))
+            self.assertEqual(cli.main(["rules"]), 0)
+
+    def test_a_file_name_that_is_no_utf_8_counts_in_the_hash_and_prints(self):
+        # APFS refuses such a name, so the listing is faked here; Linux runs the test above with a real file
+        name = os.fsdecode(b"bad\xff.prefixes")
+        entry = mock.Mock(is_symlink=lambda: False, is_file=lambda follow_symlinks=True: True)
+        entry.name = name
+        listing = mock.MagicMock()
+        listing.__enter__.return_value = [entry]
+        with mock.patch.object(user_rules.os, "scandir", return_value=listing), \
+                mock.patch.object(user_rules, "_read", return_value=b"odd  tko_[a-z]{20}\nodd  (\n"):
+            rules, quarantined, digest = user_rules.load_folder(self.tmp, "x")
+        self.assertEqual([r.id for r in rules], ["user:odd"])
+        self.assertEqual([(q.file, q.rule) for q in quarantined], [("bad�.prefixes", "line 2")])
+        self.assertRegex(digest, r"\A[0-9a-f]{12}\Z")
+
+    def test_a_folder_that_fails_costs_only_its_own_rules(self):
+        team, other = self._team([{"id": "ok", "regex": r"tkk_[a-z]{20}"}]), self.tmp / "other"
+        write_rules(other, [{"id": "more", "regex": r"tkm_[a-z]{20}"}])
+        real = user_rules.load_folder
+
+        def broken(path, *a, **k):
+            if path == team:
+                raise RuntimeError("a folder that fails in a way nobody planned")
+            return real(path, *a, **k)
+        with mock.patch.object(user_rules, "load_folder", broken):
+            loaded = user_rules.load({"rule_dirs": [str(team), str(other)]})
+        self.assertEqual([r.id for r in loaded.rules], ["user:more"])
+        self.assertEqual([f.state for f in loaded.folders if f.source == "setting"],
+                         ["refused: the folder cannot be read", "ok"])
+
+    def test_a_symbolic_link_is_not_followed_and_a_linked_folder_is_read_once(self):
+        outside = self.tmp / "notes.txt"
+        line = "SYNTH" + "VALUEAAAA1111BBBB2222"
+        outside.write_text(f"{line}\nnext tkn_[a-z]{{20}}\n", encoding="utf-8")
+        team = self._team([{"id": "ok", "regex": r"tkk_[a-z]{20}"}])
+        try:
+            (team / "linked.prefixes").symlink_to(outside)
+            (self.tmp / "alias").symlink_to(team)
+        except (OSError, NotImplementedError):
+            self.skipTest("no symbolic links here")
+        (team / ".git").mkdir()
+        (team / ".git" / "HEAD").write_text("ref: ../../notes.txt\n", encoding="utf-8")
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "rule_dirs": [str(team), str(self.tmp / "alias")]}))
+        detect.reset_rules()
+        loaded = user_rules.load()
+        self.assertEqual([r.id for r in loaded.rules], ["user:ok"], "the linked file is not read")
+        self.assertEqual(len([f for f in loaded.folders if f.source == "setting"]), 1, "one folder under two names")
+        self.assertEqual([(q.file, q.reason[:15]) for q in loaded.quarantined],
+                         [("linked.prefixes", "a symbolic link")])
+        rc, out, err = RulesCommand.run_cli(self, "check")
+        self.assertNotIn("commit", RulesCommand.run_cli(self)[1], "no git metadata is read")
+        self.assertNotIn(line, out + err)
+
+    def test_a_refused_line_is_named_by_its_number_never_by_its_text(self):
+        line = "SYNTH" + "VALUEAAAA1111BBBB2222"
+        OWN.mkdir(parents=True)
+        (OWN / "team.prefixes").write_text(f"# rules\n{line}\nok  tkk_[a-z]{{20}}\n{line}x  (\n", encoding="utf-8")
+        detect.reset_rules()
+        loaded = user_rules.load()
+        self.assertEqual([(q.rule, q.reason) for q in loaded.quarantined],
+                         [("line 2", "a line without a regex"), ("line 4", "a regex that does not compile")])
+        user_rules.session_note()
+        rc, out, err = RulesCommand.run_cli(self)
+        rc2, out2, err2 = RulesCommand.run_cli(self, "check", str(OWN))
+        self.assertIn("refused team.prefixes:line 2", out2)
+        for text in (out, err, out2, err2, events.EVENTS.read_text(encoding="utf-8")):
+            self.assertNotIn(line, text)
+
+    def test_unreadable_and_non_utf_8_files_say_which(self):
+        OWN.mkdir(parents=True)
+        (OWN / "latin.prefixes").write_bytes(b"ok tkk_[a-z]{20} \xe4\n")
+        (OWN / "locked.prefixes").write_text("ok2 tkl_[a-z]{20}\n", encoding="utf-8")
+        os.chmod(OWN / "locked.prefixes", 0)
+        self.addCleanup(os.chmod, OWN / "locked.prefixes", 0o600)
+        loaded = user_rules.load({})
+        reasons = {q.file: q.reason for q in loaded.quarantined}
+        self.assertEqual(reasons["latin.prefixes"], "a file that is not UTF-8")
+        if os.geteuid() != 0:          # root reads the file anyway (CI)
+            self.assertEqual(reasons["locked.prefixes"], "a file that cannot be read")
+
+
+class FolderForms(Base):
+    def test_a_team_repository_is_read_from_rules_by_the_hook_and_the_check_alike(self):
+        top = self.tmp / "team-rules"
+        write_rules(top / "rules", [{"id": "tok", "regex": r"tkx_[A-Za-z0-9]{24}"}])
+        (top / "package.json").write_text('{"name": "x"}', encoding="utf-8")
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "rule_dirs": [str(top)]}))
+        detect.reset_rules()
+        loaded = user_rules.load()
+        self.assertEqual([r.id for r in loaded.rules], ["user:tok"])
+        self.assertEqual(loaded.quarantined, [], "the files at the top are not read")
+        self.assertEqual(kinds(token()), ["user:tok"])
+        rc, out, _ = RulesCommand.run_cli(self, "check", str(top))
+        self.assertEqual((rc, out.count("ok      user:tok")), (0, 1))
+
+    def test_a_folder_without_rule_files_says_so(self):
+        empty = self.tmp / "empty"
+        empty.mkdir()
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "rule_dirs": [str(empty)]}))
+        detect.reset_rules()
+        rc, out, _ = RulesCommand.run_cli(self)
+        self.assertIn("0 rule(s)", out)
+        self.assertIn("no *.json or *.prefixes file here", out)
+        self.assertEqual(RulesCommand.run_cli(self, "check", str(empty))[0], 1)
+        CONFIG.write_text(json.dumps(TEST_CONFIG))
+        said = hooks.user_prompt({"prompt": f"/maisecrets:settings rule_dirs add {empty}", "session_id": "S1",
+                                  **CLAUDE})
+        self.assertIn("holds no *.json or *.prefixes file", said["hookSpecificOutput"]["additionalContext"])
+
+    def test_an_allowlist_with_condition_and_is_dropped_and_named(self):
+        write_rules(OWN, [{"id": "tok", "regex": r"tkx_[A-Za-z0-9]{24}", "allowlists": [
+            {"condition": "AND", "regexes": [r"tkx_"], "stopwords": ["zzzz"]}]}])
+        detect.reset_rules()
+        self.assertEqual(kinds(token()), ["user:tok"], "the AND allowlist allows nothing")
+        (note,) = user_rules.load().quarantined
+        self.assertEqual((note.rule, note.kept), ("user:tok", True))
+        self.assertIn("condition AND was dropped", note.reason)
+        self.assertIsNone(user_rules.session_note(), "a dropped allowlist is no rule left out")
+
+    def test_check_without_a_folder_fails_on_a_missing_setting_folder_only(self):
+        rc, out, _ = RulesCommand.run_cli(self, "check")
+        self.assertEqual(rc, 0, out)
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "rule_dirs": [str(self.tmp / "gone")]}))
+        rc, out, _ = RulesCommand.run_cli(self, "check")
+        self.assertEqual(rc, 1)
+        self.assertIn("gone (setting): missing", out)
+
+    def test_test_says_no_finding_and_report_names_a_rule_event(self):
+        rc, out, _ = RulesCommand.run_cli(self, "test", "hello")
+        self.assertEqual((rc, out), (0, "no finding\n"))
+        write_rules(OWN, [{"id": "nested", "regex": r"tky_(?:[a-z]+)+"}])
+        detect.reset_rules()
+        user_rules.session_note()
+        with redirect_stdout(io.StringIO()) as out:
+            cli.cmd_report(["1"])
+        self.assertIn("only left out a rule of your own", out.getvalue())
+
+
+class Backtracking(Base):
+    """Opus review of block 1 (B1): a rule of your own held a hook for 53 s; the thread watchdog could not run, and
+    the client's timeout lets the action through."""
+
+    def test_the_shapes_that_backtrack_are_refused(self):
+        for rx in SLOW_SHAPES:
+            with self.subTest(rx):
+                self.assertTrue(user_rules.check_regex(rx)[0])
+                self.assertTrue(user_rules.check_regex(rx, allowlist=True)[0] or rx.startswith("x?"),
+                                "an allowlist regex must not backtrack either")
+
+    def _slow_rule_passes_the_static_checks(self):
+        return mock.patch.object(user_rules, "_backtracks", lambda items: "")
+
+    def test_a_slow_rule_is_timed_out_at_load_once_and_the_verdict_is_kept(self):
+        write_rules(OWN, [{"id": "slow", "regex": SLOW_RX}, {"id": "ok", "regex": r"tkk_[a-z]{20}"}])
+        with self._slow_rule_passes_the_static_checks(), mock.patch.object(user_rules, "PROBE_DEADLINE", 0.3):
+            detect.reset_rules()
+            loaded = user_rules.load()
+            self.assertEqual([r.id for r in loaded.rules], ["user:ok"])
+            (q,) = loaded.quarantined
+            self.assertEqual(q.rule, "user:slow")
+            self.assertIn("slow: a test text took more than 300 ms", q.reason)
+            detect.reset_rules()
+            with mock.patch.object(user_rules, "probe", side_effect=AssertionError("tested again")):
+                self.assertEqual([r.id for r in user_rules.load().rules], ["user:ok"], "the verdict is kept")
+            rc, out, _ = RulesCommand.run_cli(self, "check", str(OWN))
+        self.assertEqual(rc, 1)
+        self.assertIn("slow    user:slow", out)
+
+    def test_a_rule_over_its_budget_in_a_scan_is_left_out_from_then_on(self):
+        write_rules(OWN, [{"id": "tok", "regex": r"tkx_[A-Za-z0-9]{24}"}])
+        detect.reset_rules()
+        with mock.patch.object(detect, "USER_RULE_BUDGET", -1.0):
+            self.assertEqual(kinds(token()), ["user:tok"], "the scan that measured it still reports")
+        self.assertEqual(kinds(token()), [], "out of this process")
+        (line,) = events.load()
+        self.assertEqual(line["hits"][0]["kind"], "user:tok")
+        detect.reset_rules()
+        (q,) = user_rules.load().quarantined
+        self.assertEqual(q.rule, "user:tok")
+        self.assertIn("slow: one scan took", q.reason)
+
+    @unittest.skipIf(os.name == "nt", "Windows has no SIGALRM: the thread watchdog stays alone there (README)")
+    def test_a_hook_process_answers_fail_closed_inside_a_slow_regex_and_leaves_the_rule_out(self):
+        import subprocess
+        import time
+        home = self.tmp / "home"
+        home.mkdir()
+        team = self.tmp / "team"
+        write_rules(team, [{"id": "slow", "regex": SLOW_RX}])
+        (home / "config.json").write_text(json.dumps({**TEST_CONFIG, "rule_dirs": [str(team)]}))
+        key = user_rules._hash("json", SLOW_RX, [], [], [])       # the checks passed and the test was fast: seeded
+        (home / ".rules-state").write_text(json.dumps({"checks": {key: {"why": None, "kw": ["abcd"]}},
+                                                       "tested": {key: 1.0}}))
+        env = {**os.environ, "MAISECRETS_HOME": str(home), "MAISECRETS_TEST_HOME_OWNED": str(home),
+               "MAISECRETS_TEST_WATCHDOG": "2"}
+        payload = {"hook_event_name": "PostToolUse", "session_id": "s1", "tool_name": "Bash", "tool_use_id": "t1",
+                   "tool_input": {"command": "cat notes.txt"}, "tool_response": {"stdout": SLOW_TEXT, "stderr": ""}}
+
+        def run() -> tuple[float, str]:
+            started = time.monotonic()
+            p = subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "post-tool"],
+                               input=json.dumps(payload), capture_output=True, text=True, env=env, timeout=30)
+            return time.monotonic() - started, p.stdout
+        took, out = run()
+        self.assertIn("took longer than 2s", out, "the alarm answers inside the regex")
+        self.assertLess(took, 2 + 3)
+        state = json.loads((home / ".rules-state").read_text())
+        self.assertIn(key, state["slow"], "the rule that ran is left out from the next call on")
+        took, out = run()
+        self.assertNotIn("took longer", out)
+        self.assertLess(took, 2)

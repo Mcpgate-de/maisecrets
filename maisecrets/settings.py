@@ -271,6 +271,11 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
             return False, f"maisecrets: the folder is not added ({why.split(': ', 1)[-1]}). Nothing was changed."
         if not expand(word[4:]).is_dir():
             note = " The folder does not exist yet; maisecrets reads it once it does."
+        else:
+            from .user_rules import rule_folder, _rule_files
+            if not _rule_files(rule_folder(expand(word[4:]))):
+                note = (" It holds no *.json or *.prefixes file, neither at its top nor in rules/, so it adds no rule"
+                        " yet; /maisecrets:rules shows what each folder loads.")
     # a symlinked config.json (dotfiles) keeps its link: the new file replaces the target
     target = CONFIG.resolve() if CONFIG.is_symlink() else CONFIG
     try:
