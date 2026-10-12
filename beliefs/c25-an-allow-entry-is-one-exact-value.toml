@@ -6,5 +6,5 @@ runner = ["tests/test_user_rules.py::AllowList::test_an_allow_entry_is_one_exact
 
 [proof]
 file = "maisecrets/detect.py"
-find = "        if m.value not in allowed:\n"
-replace = "        if not any(a in m.value for a in allowed):\n"
+find = "        if m.value in allowed:\n"
+replace = "        if any(a in m.value for a in allowed):\n"

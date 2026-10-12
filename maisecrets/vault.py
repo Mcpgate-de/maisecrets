@@ -319,7 +319,8 @@ def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
     if parsed.get("ssh_consent") is True:
         cfg["ssh_consent"] = True
     if isinstance(parsed.get("rule_dirs"), list):
-        cfg["rule_dirs"] = parsed["rule_dirs"]    # more rules only make detection stricter
+        # more rules only make detection stricter: they run after every built-in rule, so none takes a span first
+        cfg["rule_dirs"] = parsed["rule_dirs"]
 
 
 def load_config() -> dict:
