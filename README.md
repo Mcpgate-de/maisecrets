@@ -346,6 +346,9 @@ cannot tell what the policy says. A key it does not know is ignored with a
 warning; a key that starts with `_` or `$` is a comment or a schema link. A key
 that looks like a misspelled `rehydration`, `resolve_in_files` or
 `ssh_via_sandbox` blocks rehydration until it is fixed.
+Two keys add to what the user has instead of replacing it: `rule_dirs`, rule
+folders that every user reads and cannot remove, and `allow`, lines of the
+allow list (both lists of strings; see "Rules of your own").
 `/maisecrets:status` names the keys that come from the policy. The plaintext
 `jsonfile` store is refused unless the policy or the user sets
 `allow_plaintext_store`.
@@ -1376,6 +1379,79 @@ shape low, and a 16-digit number passes Luhn one time in ten.
 Measure what the rules would catch on your own recordings, values never
 printed: `scripts/replay_sessions.py --claude --codex`.
 
+## Rules of your own
+
+You can add detection rules for the tokens of your own services, and you can
+let single values through. maisecrets reads the rules from three places:
+
+- `~/.maisecrets/rules.d`, your own folder. The AI cannot write there.
+- each folder of the setting `rule_dirs`, for example a checkout of your
+  team's rule repository. Type the change as your own prompt:
+
+  ```
+  /maisecrets:settings rule_dirs add ~/src/team-rules/rules
+  maisecrets: set rule_dirs add ~/src/team-rules/rules     (the same, and the form for Codex)
+  ```
+
+  `remove` takes a folder off the list. Like every setting, only your typed
+  prompt changes it (C22).
+- each folder of `rule_dirs` in the machine policy. You cannot remove those.
+
+A folder holds two kinds of file, and maisecrets reads nothing else from it:
+
+- `*.json` in the gitleaks form: `{"rules": [{"id": …, "regex": …,
+  "keywords": […], "entropy": …, "secretGroup": …, "allowlists": [{"regexes":
+  […], "regexTarget": "secret|match|line", "stopwords": […]}]}]}`. An optional
+  `"type"` (`SECRET`, the default, or `NAME`, `EMAIL`, `PHONE`, `IBAN`, `CARD`,
+  `IP`) sets the placeholder type.
+- `*.prefixes`, one rule per line, `id  regex`, as in
+  `maisecrets/rules/prefixes.txt`. The whole match is the secret.
+
+A hook reads these files in every call, so each rule passes checks when it is
+loaded: a keyword or a literal of at least 4 characters, at most 300
+characters of regex, no repeat inside a repeat (`(a+)+`), no quantifier of
+variable length at the start (`\w+…`, `.*…`), at most 500 rules per folder
+and 64 KB per file, and an id that no earlier rule has. A rule that fails a
+check is left out, with its reason; the rest of the file still loads. A
+broken file never stops a hook. The session start names a new failure once,
+and `/maisecrets:rules` shows each folder, its rule count, a hash of its
+files, its commit when it is a git checkout, and each rule that was left out.
+Your rules run after the built-in secret rules and before the personal-data
+rules; a hit carries the id with `user:` in front (`user:acme-token`).
+
+`maisecrets rules` (in the plugin folder: `bash hooks/run.sh rules …`) does
+the rest:
+
+```
+maisecrets rules check [DIR]        each rule: ok with its time, or refused with the reason; exit 1 on a refusal
+maisecrets rules test [text]        what the rules find in the text or stdin: type, rule, place, length
+maisecrets rules init DIR           a team folder: README.md, rules/, samples.txt, CI for GitHub and GitLab
+maisecrets rules import FILE.toml   a gitleaks or betterleaks config in the JSON form (Python 3.11+)
+```
+
+`rules check` also reads `samples.txt`: a line `hit <rule-id> <text>` must be
+found by that rule, a line `miss <text>` by no rule of the folder. A failure
+names the line, never its text. `rules import` leaves out a rule with a
+filter it cannot read and a rule that fails a check, and says which.
+
+**The allow list.** `~/.maisecrets/allow.txt` lists what is not a hit, one
+entry per line, `#` for a comment:
+
+```
+# my own address in every git log
+name@my-company.example
+rule: phone
+```
+
+A line is one exact value: the value with nothing before or after it is not
+reported, a longer value that contains it still is. `rule: <id>` switches a
+rule off (`rule: user:acme-token`, or a built-in id from
+`maisecrets scan`). An entry is never a pattern. An administrator puts the
+same lines in `allow` of the machine policy. A folder of `rule_dirs` carries
+no allow list: the AI can write a shared checkout, and the AI may only make
+detection stricter. A value that is already stored stays redacted by its
+exact match; `/maisecrets:forget` deletes it.
+
 ## Known gaps (measured or documented)
 
 What the plugin does not protect. Each item is a limit of the mechanism, not
@@ -1437,7 +1513,8 @@ a to-do.
 - **Every e-mail address, phone number with a country code and public IP
   counts**, also your own and your colleagues'. `git log`, `dig` and `ip addr`
   come back with placeholders. Set `"regions": []` to drop the country
-  identifiers; there is no allow-list for single values yet.
+  identifiers, and list your own values in `~/.maisecrets/allow.txt` (see
+  "Rules of your own").
 - **Placeholders resolve in Bash, MCP tool arguments and the file tools.** In
   WebFetch or a subagent prompt they stay text. A subagent shares its parent's session; a
   headless run (`codex exec`, `claude -p`) is a session of its own, so a
