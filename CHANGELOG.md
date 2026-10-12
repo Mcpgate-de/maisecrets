@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.6.14] - 2026-10-12
+
+### Fixes
+
+- faster scans: only the gitleaks rules that betterleaks lacks stay (7083dac)
+
+### Other
+
+- Merge branch 'fix/only-the-gitleaks-rules-betterleaks-lacks-stay' into 'main' (b3c7473)
+
 ## [0.6.13] - 2026-10-12
 
 ### Features
