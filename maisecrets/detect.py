@@ -561,6 +561,245 @@ def _apikey_value_ok(v: str) -> bool:
     return False
 
 
+# ------------------------------------------------------- label and literal value --
+# A password label and a literal value that is no word: `db_password = "<value>"`, `<password><value></password>`,
+# `?pwd=<value>`, `IDENTIFIED BY '<value>'`, `ConvertTo-SecureString '<value>'`. The label is read from a frozen list
+# of label words; the value must be no word of English or of developer text after undoing leet (P4ssw0rd is a word),
+# which keeps `password = "changeme"`, `password: hunter`, `password = os.environ[...]` and `password: ${DB_PASS}`
+# text. Word-likeness and the label word classes follow Dan Szymkowiak's backlog ideas (TASK-11.22, TASK-11.23).
+# Measured on CredData without repository 2ba83c6a (split by repository: discovery half, validation half).
+_WORDS_FILE = "words_en.txt"   # SCOWL en_US 60, 4 to 8 letters (rules/LICENSE-scowl, scripts/sync_words.py)
+_WORDS: list = []
+# words that the English list lacks: short words, code identifiers, algorithm names, German words of developer prose
+_EXTRA_WORDS = frozenset({
+    "api", "key", "id", "db", "url", "uri", "app", "dev", "prod", "test", "user", "pass", "pwd", "sql", "web",
+    "admin", "root", "my", "new", "old", "the", "and", "for", "get", "set", "put", "add", "max", "min", "log",
+    "tmp", "env", "var", "val", "str", "int", "num", "src", "dst", "cfg", "conf", "auth", "oauth", "jwt", "aws",
+    "gcp", "ssh", "rsa", "pem", "http", "https", "www", "com", "org", "net", "io", "js", "py", "go", "is", "on",
+    "of", "to", "in", "at", "by", "no", "ok", "yes", "let", "me", "foo", "bar", "baz", "abc", "xyz", "qwerty", "pw",
+    "secret", "token", "hello", "world", "demo", "mock", "fake", "dummy", "sample", "example", "default",
+    "kwargs", "args", "argv", "self", "this", "opts", "params", "nil", "none", "null", "undefined",
+    "md5", "sha1", "sha2", "sha3", "sha224", "sha256", "sha384", "sha512", "pbkdf2", "bcrypt", "scrypt", "argon2",
+    "argon2i", "argon2d", "argon2id", "aes", "aes128", "aes192", "aes256", "gcm", "cbc", "ctr", "hmac", "des",
+    "blake2b", "blake2s", "blake3", "sha", "crypt", "ntlm", "ntlmv2", "chacha20", "poly1305", "ecdsa", "ed25519",
+    "x25519", "pkcs1", "pkcs5", "pkcs8", "pkcs12", "oaep", "pss", "utf8", "utf16", "latin1", "ascii", "base64",
+    "base32", "hex", "wpa", "wpa2", "psk", "tls", "ssl", "totp", "hotp", "jwe", "jws", "oauth2", "varchar",
+    "bigint", "secretstr", "securestring", "bool", "float", "char", "byte", "bytes", "uuid", "json",
+    "yaml", "html", "xml", "csv", "ldap", "smtp", "imap", "ftp", "sftp", "redis", "mysql", "postgres",
+    "psql", "mongo", "mongodb", "sqlite", "oracle", "guest", "anon", "localhost",
+    "siehe", "geheim", "kennwort", "passwort", "benutzer", "zugang", "zugangsdaten", "anmeldung", "nutzer", "wird",
+    "nicht", "oder", "und", "mit", "ohne", "bitte", "hier", "dort", "neu", "alt", "leer", "fehlt", "falsch",
+    "richtig", "geheimnis", "schluessel", "sommer", "winter", "herbst", "fruehling",
+})
+
+
+def _word_set() -> frozenset:
+    """The word list, read on the first password label (about 3 ms). A missing file makes every value a non-word:
+    stricter, never silent."""
+    if not _WORDS:
+        try:
+            words = set((RULES_DIR / _WORDS_FILE).read_text(encoding="utf-8").split())
+        except OSError:
+            words = set()
+        _WORDS.append(frozenset(words | _EXTRA_WORDS))
+    return _WORDS[0]
+
+
+_COVER_CACHE: dict = {}
+
+
+def _cover(run: str) -> int:
+    """The most letters of `run` that words of the list cover (dynamic programming over words of 2 to 20 letters)."""
+    got = _COVER_CACHE.get(run)
+    if got is None:
+        words = _word_set()
+        n = len(run)
+        best = [0] * (n + 1)
+        for i in range(1, n + 1):
+            best[i] = best[i - 1]
+            for j in range(max(0, i - 20), i - 1):
+                if run[j:i] in words:
+                    best[i] = max(best[i], best[j] + (i - j))
+        got = best[n]
+        if len(_COVER_CACHE) > 20000:
+            _COVER_CACHE.clear()
+        _COVER_CACHE[run] = got
+    return got
+
+
+_WORD_RUN_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|[0-9]+")
+
+
+def _wordlike(v: str) -> float:
+    """The share of the letters of `v` that words cover, after an identifier split (0 to 1)."""
+    letters = sum(c.isalpha() for c in v)
+    if not letters:
+        return 0.0
+    words = _word_set()
+    covered = 0
+    for part in _WORD_RUN_RE.findall(v):
+        if part.isalpha():
+            low = part.lower()
+            covered += len(low) if low in words else _cover(low)
+    return covered / letters
+
+
+def _charset(v: str) -> str:
+    if v.isdigit() and v.isascii():
+        return "digits"
+    if re.fullmatch(r"[0-9a-f]+|[0-9A-F]+", v):
+        return "hex"
+    if re.fullmatch(r"[A-Za-z]+", v):
+        return "alpha"
+    if re.fullmatch(r"[A-Za-z0-9]+", v):
+        return "alnum"
+    return "other"
+
+
+# a value that says it is no value: a mask, a template, a reference, a word of a form
+_LITERAL_PLACEHOLDER_RE = re.compile(
+    r"(?i)x{3,}|\*{3,}|\.{3}|<[^>]*>|\{\{|\}\}|\$\{|%\(|%s|\$[A-Za-z_]|your[_-]?|example|sample|dummy|placeholder|"
+    r"changeme|change_me|redacted|replace|insert|enter[_-]|todo|fixme|foobar|lorem|secret_here|here$|^test|test$|"
+    r"^fake|^mock|^none$|^null$|^true$|^false$|^undefined$|^password$|^secret$|^token$|^string$|^empty$|^default$")
+_DOTTED_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+")
+_CAMEL_SPLIT_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def _norm_label(name: str) -> list:
+    """`dbPassword`, `DB_PASSWORD`, `db.password`, `db-password`, `db:Password` -> ["db", "password"]."""
+    name = _CAMEL_SPLIT_RE.sub("_", name.lstrip("$@-"))
+    return [t for t in re.split(r"[._:\-]+", name.lower()) if t]
+
+
+# the last word of a password label, and the words before it that make the label name something else
+_PW_LAST = frozenset({"password", "passwd", "passphrase", "passwort", "pwd", "userpwd", "pass", "pw", "passcode",
+                      "passw", "pword", "pswd", "psw"})
+# the label words of a language that is on (regions.py): Kennwort is a label only with German on, as for the keyword
+# rules; passwort counts always, as the English `pass` label allows letters after it
+_PW_LAST_OF = {"de": frozenset({"kennwort"})}
+_PW_LAST_ON: list = [_PW_LAST]
+_PASS_NEG_PREV = frozenset({"two", "one", "single", "multi", "first", "second", "third", "by", "no", "skip", "sur",
+                            "over", "under", "compass", "render", "shader", "high", "low", "band", "all", "each",
+                            "next", "last", "test", "tests"})
+_LABEL_NEG_WORDS = frozenset({
+    "hint", "label", "title", "text", "message", "msg", "error", "err", "prompt", "placeholder", "field", "policy",
+    "length", "len", "min", "max", "required", "confirm", "confirmation", "reset", "forgot", "invalid", "incorrect",
+    "wrong", "strength", "rule", "rules", "regex", "pattern", "hash", "hashed", "salt", "file", "path", "env", "var",
+    "type", "mode", "enabled", "expire", "expires", "expiry", "changed", "change", "validation", "valid", "show",
+    "hide", "toggle", "visible", "icon", "button", "btn", "no", "without", "skip", "ask", "input", "form", "dialog",
+    "tooltip", "description", "desc", "help", "name", "id", "count", "cmd", "command", "url", "uri", "key", "column",
+    "col", "header", "param", "arg", "option", "opt", "flag", "set", "get", "update", "lbl", "str", "string", "i18n",
+    "translation", "not", "missing", "empty", "format", "fmt", "encoder", "encoded", "encrypted", "digest",
+    "algorithm", "manager", "provider", "store", "storage", "service", "handler", "callback", "validator", "widget"})
+
+
+def _pw_label(toks: list) -> bool:
+    if not toks:
+        return False
+    last = toks[-1].rstrip("0123456789") or toks[-1]
+    if last not in _PW_LAST_ON[0]:
+        return False
+    if last in ("pass", "pw") and len(toks) > 1 and toks[-2] in _PASS_NEG_PREV:
+        return False
+    return not any(t in _LABEL_NEG_WORDS for t in toks[:-1])
+
+
+def _sequential(low: str) -> bool:
+    return len(low) > 2 and (all(ord(low[i + 1]) - ord(low[i]) == 1 for i in range(len(low) - 1))
+                             or all(ord(low[i]) - ord(low[i + 1]) == 1 for i in range(len(low) - 1)))
+
+
+def _pw_literal_ok(v: str) -> bool:
+    """A password value: 4 to 64 characters, no word after undoing leet, not digits only, 3 distinct characters or
+    more, no run such as abcd, no placeholder, no space, no dotted reference, no fixture word (testpass)."""
+    if not 4 <= len(v) <= 64 or any(c.isspace() for c in v) or _charset(v) == "digits" or len(set(v)) < 3:
+        return False
+    if _sequential(v.lower()) or _LITERAL_PLACEHOLDER_RE.search(v) or _DOTTED_RE.fullmatch(v) or _names_itself(v):
+        return False
+    if _PART_TEMPLATE_RE.search(v):
+        return False   # a template of a format string: f'pwd = "{pw}"', "password: {password}"
+    return _wordlike(_deleet(v)) < 0.3
+
+
+# the forms of label and literal value. A label, then = => := == : , or ( and a quoted value (also inside a wrapper
+# such as SecretStr("…")); a label, then = or : and an unquoted value to the end of the line; a query parameter; an
+# XML element; SQL's IDENTIFIED BY '…' and PowerShell's ConvertTo-SecureString '…'
+_LIT_WRAP = (r"(?:(?:Some|Ok|String::from|str|bytes|SecretString::new|Secret::new|SecretStr|SecretBytes|Optional\.of"
+             r"|Box::new|Sensitive|new[ \t]+String)[ \t]*\([ \t]*)?")
+_LIT_LABEL = r"(?<![\w.\-$@])([A-Za-z_$@][\w.\-]{0,60})[\"'\]]?[ \t]*"
+_LIT_FORMS = (
+    (re.compile(_LIT_LABEL + r"(?:=>|:=|==|=|:|,|\()[ \t]*" + _LIT_WRAP + r"([\"'`])([^\"'`\n\\]{4,300})\2"), 1, 3),
+    (re.compile(r"(?m)" + _LIT_LABEL + r"(?:=|:)[ \t]*([^\s\"'`,;()\[\]{}<>]{4,300})[ \t]*(?:(?:#|//|;).*)?$"), 1, 2),
+    (re.compile(r"[?&;]([\w.\-\[\]]{1,60})=([^&\s\"'#<>]{4,400})"), 1, 2),
+    (re.compile(r"<([\w:.-]{1,60})(?:\s[^<>]{0,200})?>([^<>\s]{4,400})</"), 1, 2),
+)
+_LIT_SQL_PS = (
+    re.compile(r"(?i)\bidentified[ \t]+(?:with[ \t]+\w+[ \t]+)?by[ \t]*(?:password[ \t]*)?([\"'])([^\"'\n]{4,64})\1"),
+    re.compile(r"(?i)ConvertTo-SecureString[ \t]+(?:-String[ \t]+)?([\"'])([^\"'\n]{4,64})\1"),
+)
+
+
+def _judge_literal(label: str, v: str) -> str:
+    """The rule a label and its literal value fall under, or ""."""
+    toks = _norm_label(label)
+    if _pw_label(toks) and _pw_literal_ok(v):
+        return "label-pw-literal"
+    return ""
+
+
+def _literal_hits(text: str) -> list:
+    """(rule id, start of the label, start and end of the value) of each label and literal value of `text`, computed
+    once per text for all the rules that read them."""
+    _newlines(text)
+    cache = _INDEX[1]
+    if "literal" not in cache:
+        hits = []
+        for rx, gl, gv in _LIT_FORMS:
+            for m in rx.finditer(text):
+                rid = _judge_literal(m.group(gl), m.group(gv))
+                if rid:
+                    hits.append((rid, m.start(), m.start(gv), m.end(gv)))
+        for rx in _LIT_SQL_PS:
+            for m in rx.finditer(text):
+                if _pw_literal_ok(m.group(2)):
+                    hits.append(("label-pw-literal", m.start(), m.start(2), m.end(2)))
+        hits.sort(key=lambda h: h[2])
+        cache["literal"] = hits
+    return cache["literal"]
+
+
+class _Literal:
+    """A match of a label and literal rule: group 0 runs from the label to the end of the value, group 1 is the
+    value."""
+    __slots__ = ("_text", "_a", "_s", "_e")
+
+    def __init__(self, text: str, a: int, s: int, e: int) -> None:
+        self._text, self._a, self._s, self._e = text, a, s, e
+
+    def group(self, i: int = 0):
+        return self._text[self._a if i == 0 else self._s:self._e]
+
+    def start(self, i: int = 0) -> int:
+        return self._a if i == 0 else self._s
+
+    def end(self, i: int = 0) -> int:
+        return self._e
+
+
+def _literal_matches(rule_id: str, text: str):
+    for rid, a, s, e in _literal_hits(text):
+        if rid == rule_id:
+            yield _Literal(text, a, s, e)
+
+
+# the rules that read labels and literal values; they run after every other rule and take only a span no other rule
+# took. The keywords skip a text without the label words
+LITERAL_RULES = (
+    {"id": "label-pw-literal", "keywords": ("pass", "pw", "pwd", "kennwort", "psw", "identified", "securestring")},
+)
+_LITERAL_IDS = frozenset(d["id"] for d in LITERAL_RULES)
+
+
 VALIDATORS = {
     "ds_value": _ds_value_ok,
     "apikey_value": _apikey_value_ok,
@@ -900,6 +1139,12 @@ def _load_prefixes() -> list[Rule]:
     return out
 
 
+def _load_literal(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
+    _PW_LAST_ON[0] = _PW_LAST.union(*(_PW_LAST_OF.get(lang, ()) for lang in languages))
+    return [Rule(id=d["id"], type="SECRET", regex=_Lazy(r"(?!)()"), secret_group=1, keywords=d["keywords"])
+            for d in LITERAL_RULES]
+
+
 def _load_own() -> list[Rule]:
     return [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"]),
                  secret_group=d.get("secret_group", 0), validator=d.get("validator"))
@@ -919,7 +1164,7 @@ def rules() -> list[Rule]:
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
         _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
-                  + _load_presidio(active.regions) + pii)
+                  + _load_presidio(active.regions) + pii + _load_literal(active.languages))
     return _RULES
 
 
@@ -1279,6 +1524,9 @@ def _matches(rule: Rule, text: str):
         return
     if rule.id == "label-secret-list":
         yield from _list_matches(rule, text)
+        return
+    if rule.id in _LITERAL_IDS:
+        yield from _literal_matches(rule.id, text)
         return
     kw = _WINDOWED.get(rule.id)
     if kw is not None and len(text) > 4096:

@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 105 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 106 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1157,6 +1157,19 @@ Four sources, one scanner (`maisecrets/detect.py`):
   stays text: a nonce, a checksum, an etag, a commit id and a key that a hex literal decodes
   into (`key = unhexlify('…')`, mostly published test vectors) are left out, as developer
   text is full of them (`tests/fp_corpus.py`).
+- A password label and a literal value that is no word (0.6.16, `label-pw-literal`):
+  `db_password = "…"`, `<password>…</password>`, `IDENTIFIED BY '…'`,
+  `ConvertTo-SecureString '…'`, a value of 4 to 7 characters. The label comes from a frozen
+  list of password words (`password`, `passwd`, `pwd`, `passphrase`, `kennwort`, …) and a list
+  of words that make it name something else (`password_hint`, `passwordPolicy`, `bypass`). The
+  value must be no word after undoing leet (`P4ssw0rd` is a word), no fixture (`testpass`),
+  no mask, template or reference (`${DB_PASSWORD}`, `{{ … }}`, `settings.DB_PASSWORD`). The
+  words come from `maisecrets/rules/words_en.txt`, about 21,000 English words of 4 to 8
+  letters from SCOWL (see `NOTICE`), read only when a password label is in the text. A
+  password made of words is left to the keyword rules: they take `password: Sommer2024!`, but
+  `<password>Sommer2024!</password>` and `passphrase: correct-horse-battery-staple` stay text,
+  as this rule cannot tell such a value from a word or a reference. Word-likeness and the label
+  word classes follow Dan Szymkowiak's backlog ideas.
 - Prefixes newer than the vendored rulesets live in
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
   (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last

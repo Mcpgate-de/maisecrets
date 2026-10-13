@@ -186,7 +186,9 @@ class RuleLoaderTests(unittest.TestCase):
         self.assertLess(pos["ds-keyword-colon"], pos["generic-api-key"])
         self.assertLess(pos["generic-api-key"], pos["iban"])
         self.assertLess(pos["iban"], pos["email"])
-        self.assertEqual(ids[-3:], ["email", "email-percent-encoded", "phone"])
+        n = len(detect.LITERAL_RULES)   # the label and literal rules run last: they take only what no rule took
+        self.assertEqual(ids[-n:], [d["id"] for d in detect.LITERAL_RULES])
+        self.assertEqual(ids[-n - 3:-n], ["email", "email-percent-encoded", "phone"])
         self.assertIs(detect.rules(), detect.rules())
 
     def test_a_broken_config_falls_back_to_the_default_regions(self):
@@ -649,9 +651,12 @@ class LabelValueTests(unittest.TestCase):
                             ("a@b.c pass§:" + PW11[:7].lower(), PW11[:7].lower())):
             with self.subTest(text=text):
                 self.assertEqual([v for _, v in kinds(text)], [value])
-        # with a space between them the floor stays 8: "password: string" is prose in API docs
-        self.assertEqual(kinds("pass§word: " + PW11[:7]), [])
-        self.assertEqual(kinds("pass§:" + PW11[:5]), [], "5 characters are too few in any case")
+        # with a space between them the floor of the keyword rules stays 8: "password: string" is prose in API docs.
+        # A value that is no word is a password at 4 characters and more (label-pw-literal, 0.6.16)
+        self.assertEqual(kinds("pass§word: string"), [])
+        self.assertEqual([k for k, _ in kinds("pass§word: " + PW11[:7])], ["label-pw-literal"])
+        self.assertEqual([x for x in kinds("pass§:" + PW11[:5]) if x[0] != "label-pw-literal"], [],
+                         "5 characters are too few for a keyword rule in any case")
         # a colon inside our own placeholder is no label
         self.assertEqual(kinds("api§_key: ⟦SECRET_c5:ab•••⟧"), [])
         # a type, a keyword or a camelCase name glued to a label is code, not a value (final review, 2026-09-28)
