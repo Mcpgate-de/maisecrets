@@ -1141,7 +1141,10 @@ Four sources, one scanner (`maisecrets/detect.py`):
   word such as `To:`), phone
   with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, a
   password with no user in a URL (`redis://:…@host`), the secret half of an AWS
-  key pair within a few lines after its `AKIA…` id, and full-length GitLab
+  key pair within a few lines after its `AKIA…` id (at most 4 lines on, and at most
+  400 characters into its line, so a long line scans in linear time; the `-p` of mysql and
+  the `-a` of redis-cli count only within 400 characters after the command word, for the same
+  reason), and full-length GitLab
   runner and deploy tokens.
 - Prefixes newer than the vendored rulesets live in
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
@@ -1189,10 +1192,20 @@ a to-do.
   block, deny, or withheld output), and a hook that crashes answers the same
   way; Claude Code ignores exit 2 from `PostToolUse`, so the raw output would
   otherwise reach the model. Codex runs the tool anyway when a hook fails, so
-  there the watchdog is the only net. A tool result with more than 100 new
+  there the watchdog is the only net. On Windows the watchdog can come too
+  late: Python has no SIGALRM there, and a detector regex that runs long
+  holds the interpreter until it ends, so a hook past the client's timeout
+  fails open. A tool result with more than 100 new
   values is masked without storing the rest.
 - **Tool output above 50K characters** is spilled to a file by Claude Code
   and is not rewritten.
+- **An image or a PDF that Claude reads** goes to the model as a picture or a
+  document, not as text. maisecrets does not look for shapes in it: a secret
+  in the text of a PDF or in a screenshot reaches the model. Only the exact
+  match of your stored values checks its base64 form, and it finds a value
+  only where the file holds its bytes uncompressed at an offset that is a
+  multiple of 3 (no OCR, no decompression, by design). The same holds for a
+  Bash output that Claude Code sends as an image.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt
   hook blocks them when the path exists; ask Claude to read the file instead.
 - **Names are not detected.** Regex only, by design.

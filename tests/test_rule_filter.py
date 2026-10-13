@@ -63,6 +63,12 @@ class FilterReaderTests(unittest.TestCase):
         self.assertFalse(f(env(tok(24), "")))
         self.assertTrue(f(env("aaaa", "keep it")))   # A || (B && C): A alone is enough; (A || B) && C would be False
 
+    def test_a_string_with_an_escape_json_does_not_know_is_read_as_written(self):
+        # json.loads raised on \\x41 and the ruleset load left every rule out (Gate A of 0.6.15)
+        f = rule_filter.compile_filter('finding["secret"] == "a\\x41"')
+        self.assertTrue(f(env("a\\x41", "")))
+        self.assertFalse(f(env("aA", "")))
+
     def test_token_ratio_is_zero_as_betterleaks_answers_without_a_tokenizer(self):
         f = rule_filter.compile_filter('filter.entropy(finding["secret"]) < 3.0 || '
                                        'filter.tokenRatio(finding["secret"]) >= 2.5')
@@ -83,6 +89,17 @@ class FilterReaderTests(unittest.TestCase):
         self.assertEqual(rule_filter.entropy("aaaa"), 0.0)
         self.assertAlmostEqual(rule_filter.entropy("abcd"), 2.0)
         self.assertAlmostEqual(rule_filter.entropy("\u00e4\u00e4"), 1.0)   # two bytes each: c3 a4 c3 a4, not one rune
+
+    def test_word_classes_are_ascii_as_in_re2(self):
+        # a filter that drops a value made of word characters must not drop one with an umlaut: RE2's \\w is ASCII
+        drop = rule_filter.compile_filter('matchesAny(finding["secret"], [`^\\w+$`])')
+        self.assertTrue(drop(env("abc123")))
+        self.assertFalse(drop(env("ab\u00e4c123")))
+
+    def test_a_string_literal_keeps_non_ascii_text(self):
+        drop = rule_filter.compile_filter('containsAny(finding["secret"], ["Schl\u00fcssel", "a\\"b"])')
+        self.assertTrue(drop(env("mein Schl\u00fcssel")))
+        self.assertTrue(drop(env('a"b')))
 
     def test_an_inline_case_flag_applies_from_its_place_as_in_re2(self):
         rx = rule_filter.to_python_regex("^/Users/(?i)[a-z0-9]+/x$")

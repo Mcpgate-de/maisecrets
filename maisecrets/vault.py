@@ -613,6 +613,11 @@ def _run_store(what: str, args: list[str], **kw) -> subprocess.CompletedProcess:
     """subprocess.run for a store call. A call that hits its timeout raised TimeoutExpired, which
     passed every `except RuntimeError` of the sweep, forget and wipe, and whose text lists the
     argv, the value included on the keychain's long-value path (CLI test agent, 2026-09-27)."""
+    if not kw.get("capture_output"):
+        # a store tool must never write to the hook's own stdout or stderr: the client reads the hook's answer there,
+        # and a child that keeps them open holds the client (Gate A of 0.6.15)
+        kw.setdefault("stdout", subprocess.PIPE)
+        kw.setdefault("stderr", subprocess.PIPE)
     try:
         return subprocess.run(args, **kw)
     except subprocess.TimeoutExpired:
@@ -1139,6 +1144,20 @@ class Vault:
             return
         meta.setdefault("sessions", []).append(session)
         self._save_index()
+
+    def admit_many(self, keys, session: str | None) -> None:
+        """admit() for every key one text brought in, in one hold of the lock and one index write; nothing at all
+        when the session holds each key already. A hit in a tool result admitted its key alone, and each admit
+        re-read and rewrote the whole index: five stored names in one result cost 1.6 s on Python 3.9 with 6,000
+        values in the vault (measured 2026-10-12)."""
+        keys = [k for k in dict.fromkeys(keys) if k in self._index["entries"]]
+        if not session or all(session in (self._index["entries"][k].get("sessions") or []) for k in keys):
+            return
+        with self._exclusive():
+            for key in keys:
+                meta = self._index["entries"].get(key)
+                if meta is not None and session not in meta.get("sessions", []):
+                    meta.setdefault("sessions", []).append(session)
 
     @_mutating
     def get(self, key: str, session: str | None = None, human: bool = False) -> tuple[str | None, str]:

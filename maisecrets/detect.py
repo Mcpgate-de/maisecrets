@@ -381,8 +381,8 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False   # an address after a label (user_tokens:<address>): the e-mail rule decides, not a secret
     if _names_itself(v):
         return False   # a value that names itself a password, a secret, a token or a test is a fixture
-    if re.match(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?![\w])", v):
-        return False   # a shell variable: $PASSWORD, ${DB_PASSWORD}
+    if re.match(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?![\w])|\$\$\{?[A-Z_][A-Z0-9_]*\}?(?![\w])", v):
+        return False   # a shell variable: $PASSWORD, ${DB_PASSWORD}; $$NAME in docker compose (upper case only)
     if "(" in v or ")" in v or "`" in v or "|" in v:
         return False   # a call, an expression or markdown (`re.compile(r"…`, "`/maisecrets:report` |"), not a value
     if not any(c.isalnum() for c in v):
@@ -415,8 +415,84 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
     return True
 
 
+_LOWER_WORDS_RE = re.compile(r"[a-z0-9]+(?:[-_.][a-z0-9]+)*")
+
+
+_MARKER_RE = re.compile(r"\[[^\]]*\]|<[^>]*>|\{[^}]*\}")
+# values the new label paths of 0.6.15 read that hold no password (release review of 0.6.15, Gate B): a date or a
+# timestamp (passwordLastChanged, AUTH 2024-10-13), a file a tool reads (--password @/run/secrets/pw), a template
+# variable a build fills (-p@MYSQL_PWD@), a placeholder to replace (CHANGE_ME_2024). The ds rules keep their own filter
+_LABEL_NOT_A_VALUE_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
+    r"|@[~.]?/[^\s]*|@[A-Za-z_][A-Za-z0-9_]*@"
+    r"|(?i:change[_-]?me)(?:[_-]?[A-Za-z0-9]+)*")
+
+
+def _label_value_ok(v: str) -> bool:
+    # the whole value, its last character too: `2024-10-13!` is a password, no date (codex, verification of 0.6.15).
+    # The prose rule ends its value before the punctuation of the sentence, so it needs no strip here
+    return not _LABEL_NOT_A_VALUE_RE.fullmatch(v.strip())
+
+
+def _word_value_ok(v: str, min_len: int = 8, prose_punct: bool = False) -> bool:
+    """A value after a label with no `=` or `:` (a CLI flag, Redis AUTH, netrc): as _ds_value_ok, and not letters
+    only. Docs write `--password argument`, `AUTH LOGIN`, `--password PASSWORD`; a password of letters alone after such
+    a label stays a gap, as it is after the colon forms below 8 characters. A marker a log wrote (`[REDACTED]`,
+    `<pw>`, `{password}`) and a Windows path (a backslash) are no value (round 2 of 0.6.15). With prose_punct (the CLI
+    flag in a typed sentence) the punctuation after a word is no part of it: "give --password explicitly?" is a
+    question (Gate B of 0.6.15); after AUTH or in a netrc, `Sommerurlaub!` stays a value."""
+    w = v.strip()
+    if _MARKER_RE.fullmatch(w) or w[:1] in "[{<" or "\\" in w:   # the flag regex ends a value at ]: [REDACTED
+        return False
+    if not _label_value_ok(w):
+        return False
+    core = w.rstrip(".,;:!?)") if prose_punct else w
+    return _ds_value_ok(v, min_len=min_len) and not core.isalpha()
+
+
+# prose about a password, not one: a hyphen compound whose last part says what was done to it (SHA256-hashed,
+# AES-256-encrypted, 1Password-managed, OWASP-ASVS-4.0-compliant), and names of algorithms, encodings and standards
+# with their numbers and versions (PBKDF2-SHA256, ISO-8859-1, UTF-16LE, WPA2-PSK, Argon2id-v19, RFC-7617, ARGON2ID).
+# A compound with a word of its own stays a value: Xk9-q2-secret, Winter-2024-berlin, Sha256-2024! (round 2)
+_PROSE_LAST = frozenset({
+    "hashed", "encrypted", "encoded", "decoded", "managed", "protected", "enabled", "disabled", "signed", "salted",
+    "compliant", "based", "derived", "generated", "stored", "secured", "wrapped", "rotated", "required", "enforced",
+    "backed", "verified", "validated", "compatible", "formatted", "only", "free", "safe", "aware", "style", "format",
+    "encryption", "hashing", "encoding"})
+_VERSION_PART_RE = re.compile(r"v?\d+(?:\.\d+)*")
+_ALGORITHM_PARTS = frozenset({
+    "md5", "sha1", "sha2", "sha3", "sha224", "sha256", "sha384", "sha512", "pbkdf2", "bcrypt", "scrypt", "argon2",
+    "argon2i", "argon2d", "argon2id", "aes", "aes128", "aes192", "aes256", "gcm", "cbc", "ctr", "rsa", "hmac", "des",
+    "3des", "blake2b", "blake2s", "blake3", "sha", "crypt", "ntlm", "ntlmv2", "chacha20", "poly1305", "ecdsa",
+    "ed25519", "x25519", "pkcs1", "pkcs5", "pkcs8", "pkcs12", "oaep", "pss",
+    "iso", "utf", "utf8", "utf16", "utf16le", "utf16be", "utf32", "16le", "16be", "latin1", "cp1252", "ascii",
+    "base64", "base32", "hex", "wpa", "wpa2", "wpa3", "psk", "sae", "eap", "tls", "ssl", "rfc", "owasp", "asvs", "nist",
+    "fips", "scram", "chap", "totp", "hotp", "kerberos", "x509", "plus", "jwt", "jwe", "jws", "oauth", "oauth2"})
+
+
+def _prose_word(v: str) -> bool:
+    parts = v.lower().split("-")
+    if len(parts) >= 2 and parts[-1] in _PROSE_LAST:
+        return True
+    names = [x for x in parts if not _VERSION_PART_RE.fullmatch(x)]
+    return bool(names) and all(x in _ALGORITHM_PARTS for x in names)
+
+
+def _prose_value_ok(v: str) -> bool:
+    """`my password is <value>`: no word of a sentence. A letter and a digit must be in it, and a capital or a
+    symbol beyond - _ .: `incorrect`, `base64-encoded`, `hunter2`, `valid.\\n@param` (an escaped line break in
+    generated docs) are prose; the shapes `Aa9#aA9a` and `aAA%aAA9A` are values."""
+    v = v.strip()
+    return (_word_value_ok(v) and not _LOWER_WORDS_RE.fullmatch(v) and "\\" not in v and not _prose_word(v)
+            and any(c.isdigit() for c in v) and any(c.isalpha() for c in v))
+
+
 VALIDATORS = {
     "ds_value": _ds_value_ok,
+    "word_value": _word_value_ok,
+    "flag_value": lambda v: _word_value_ok(v, prose_punct=True),
+    "glued_value": lambda v: _word_value_ok(v, min_len=6),
+    "prose_value": _prose_value_ok,
     "de_tax_id": _de_tax_id_ok,
     "de_social_security": _de_social_security_ok,
     "de_id_card": _de_id_card_ok,
@@ -491,10 +567,53 @@ OWN_RULES: list[dict] = [
     {"id": "url-password-no-user", "type": "SECRET", "secret_group": 1, "validator": "ds_value",
      "regex": r"://:([^:/?#\[\]@!$&'()*+,;=\s]+)@"},
     # the secret half of an AWS key pair has no prefix of its own; the console, a CSV export
-    # and a chat paste show it within a few lines after the AKIA… id (field report, 2026-09-26)
+    # and a chat paste show it within a few lines after the AKIA… id (field report, 2026-09-26). Each line part is
+    # bounded at 400 characters: unbounded, each id scanned the rest of its line, and a line of ids took O(n^2)
+    # (32K: 2.3 s, 256K: 97 s, past the client's timeout). The longest field form, the console's credentials CSV
+    # row (user, password, id, secret, console link), puts about 150 characters around the secret.
     {"id": "aws-secret-after-access-key", "type": "SECRET", "secret_group": 1,
-     "regex": r"(?<![A-Z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Z0-9])(?:[^\n]*\n){0,4}?[^\n]*?"
+     "regex": r"(?<![A-Z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Z0-9])(?:[^\n]{0,400}\n){0,4}?[^\n]{0,400}?"
               r"(?<![A-Za-z0-9/+=])([A-Za-z0-9/+]{40})(?![A-Za-z0-9/+=])"},
+    # a password with no shape where no `=` or `:` stands between label and value (public benchmark holdout v7,
+    # 2026-10-12: all ten leaked passwords had one of these five forms). They are label rules (LABEL_RULES): the
+    # keyword filters of scan() and the test-code rule apply as to `password=<value>`.
+    # `pg_dump --password '<value>'`, `--db-password <value>`, PowerShell `-Password <value>`; the `=` form is
+    # ds-keyword-equal-signs. A flag before a space, so `--password-stdin` and `--password-file` stay options
+    {"id": "label-cli-password", "type": "SECRET", "secret_group": 2, "validator": "flag_value",
+     "regex": r"(?<![\w-])--?(?!(?i:no|ask|skip|prompt|without|one|two|single|multi|first|second)[-_])"
+              r"(?:[A-Za-z][A-Za-z0-9]*[-_])*"
+              r"(?i:password|passwd|passphrase|pass|pwd)[ \t]+"
+              r"(['\"]?)(?!-|(?:file|env|fd):|stdin(?![\w-]))(?:pass:)?([^\s'\"<>]{1,256}?)\1(?=$|[\s;|&)\]\\])"},
+    # `mysql -u app -p'<value>' db`: the value glued to -p (a space after -p asks for it; -P is the port)
+    {"id": "label-mysql-p", "type": "SECRET", "secret_group": 2, "validator": "glued_value",
+     "regex": r"(?<![\w-])(?:mysql|mysqldump|mysqladmin|mysqlimport|mysqlshow|mysqlcheck|mysqlpump|mariadb"
+              r"|mariadb-dump|mariadb-admin)(?:\.exe)?(?![\w-])[^\n|;&]{0,400}?[ \t]-p(['\"]?)([^\s'\"<>]{1,256}?)\1"
+              r"(?=$|[\s;|&)\]])"},
+    # redis-cli: `127.0.0.1:6379> AUTH <value>` (or AUTH <user> <value>) at a prompt or the start of a line, and
+    # `redis-cli -a <value>`. AUTH in capitals, as Redis documents it; `auth token expired` is prose
+    {"id": "label-redis-auth", "type": "SECRET", "secret_group": 2, "validator": "word_value",
+     "regex": r"(?m)(?:^[ \t]*|>[ \t]?)AUTH[ \t]+(?![=:]|LOGIN[ \t])(?:[^\s'\"]+[ \t]+)?"
+              r"(?!(?:CRAM-MD5|DIGEST-MD5|SCRAM-SHA-[0-9]+(?:-PLUS)?|XOAUTH2|OAUTHBEARER|GSSAPI|NTLM|EXTERNAL"
+              r"|ANONYMOUS|PLAIN|LOGIN)[ \t]*$)"   # an SMTP or IMAP AUTH names a SASL mechanism (Gate B of 0.6.15)
+              r"(['\"]?)([^\s'\"<>]{1,256})\1[ \t]*$"},
+    {"id": "label-redis-cli-a", "type": "SECRET", "secret_group": 2, "validator": "word_value",
+     "regex": r"(?<![\w-])redis-cli(?![\w-])[^\n|;&]{0,400}?[ \t]-a[ \t]+"
+              r"(['\"]?)([^\s'\"<>]{1,256}?)\1(?=$|[\s;|&)\]])"},
+    # .netrc: `machine <host> login <user> password <value>`, on one line or on several. The host has a dot, a colon
+    # or a digit (or is localhost): "on my dev machine the password changed" is prose. `default` starts an entry at a
+    # line start, or anywhere before `login` (a second entry on the line, a grep prefix); "the default password
+    # policy_v2" is prose (round 2 of 0.6.15)
+    {"id": "label-netrc-password", "type": "SECRET", "secret_group": 1, "validator": "word_value",
+     "regex": r"(?:(?<![\w-])machine[ \t]+(?:[^\s]*[.:0-9][^\s]*|localhost)"
+              r"|(?<![^\n])[ \t]*default|(?<![\w-])default(?=[ \t]+login[ \t]))"
+              r"(?:\s+(?:login|account|port)[ \t]+[^\s]+)*"
+              r"\s+password[ \t]+([^\s]{1,256})"},
+    # prose: "my password is <value>". Only a value that is no word of a sentence: it holds a capital or a symbol
+    # beyond - _ . and a digit or a symbol ("the password is incorrect" stays prose). English only: the German
+    # sentence of tests/fp_corpus.py (`Das Passwort ist` and a season and a year) is kept silent
+    {"id": "label-prose-password", "type": "SECRET", "secret_group": 1, "validator": "prose_value",
+     "regex": r"(?i)(?<![\w-])(?:password|passwd|passphrase)[ \t]+(?:is|was)[ \t]*:?[ \t]+"
+              r"[\"'„“]?([^\s\"'“”]{0,255}[^\s\"'“”.,;:!?)])[\"'“”]?(?=[.,;:!?)]*(?:[\s\"'<\\]|$))"},
 ]
 
 
@@ -629,6 +748,14 @@ _DS_QUOTE_GROUP = {"ds-keyword-colon": 3, "ds-keyword-equal-signs": 4}
 # no-break or narrow no-break spaces before the colon
 _COLON_AFTER_LABEL = "([]\\'\"]{0,2})?:"
 _COLON_AFTER_LABEL_SPACED = "([]\\'\"]{0,2})?[ \\t\u00a0\u202f]{0,3}:"
+# and with a backslash before each quote: a JSON object inside a string, as a log line, an HTTP body in a test or a
+# tool output shows it (`{\"password\":\"<value>\"}`). The label's quotes were no closer, so no value was read
+# (Samsung CredData, line by line: 62 such credentials missed, 2026-10-12). The backslash before the value's opening
+# quote is skipped only before a quote; the one before its closing quote is cut in scan()
+_COLON_AFTER_LABEL_ESCAPED = "((?:\\\\?[]'\"]){0,2})?[ \\t\u00a0\u202f]{0,3}:"
+_ESCAPABLE_COLON_RULES = ("ds-keyword-colon", "ds-keyword-colon-quotes-required")   # group 2: the label's quote
+_COLON_THEN_QUOTE = (":\\s*([\\'\"`]?)", ":(\\s*)([\\'\"`])")
+_ESCAPED_QUOTE_SKIP = "(?:\\\\(?=[\"']))?"
 _WHITESPACE_RE = re.compile(r"\s")
 _CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
 
@@ -656,6 +783,11 @@ def _load_detect_secrets(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
         # `password : x` in every language; the vendored colon rules allowed none, so
         # `mot de passe : <value>` and `password : <value>` were no hit (2026-09-28)
         regex = regex.replace(_COLON_AFTER_LABEL, _COLON_AFTER_LABEL_SPACED, 1)
+        if _COLON_AFTER_LABEL_SPACED in regex:
+            regex = regex.replace(_COLON_AFTER_LABEL_SPACED, _COLON_AFTER_LABEL_ESCAPED, 1)
+            for q in _COLON_THEN_QUOTE:   # the skip goes right before the group of the opening quote
+                at = q.rindex("([")
+                regex = regex.replace(q, q[:at] + _ESCAPED_QUOTE_SKIP + q[at:], 1)
         out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(regex, flags),
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
                         secret_group=int(r["group"]), validator="ds_value",
@@ -772,7 +904,9 @@ def looks_like_placeholder(value: str) -> bool:
 # tests of the Python standard library (2026-09-29). In test code the value is a fixture, and a
 # block or a placeholder there only stops the work. A token shape (glpat-, AKIA, a PEM key) and personal data stay
 # hits in test code too: a real token or a copy of customer data in a test is a leak.
-LABEL_RULES = ("ds-keyword", "generic-api-key", "url-query-secret", "auth-scheme")
+LABEL_RULES = ("ds-keyword", "label-", "generic-api-key", "url-query-secret", "auth-scheme")
+# the keyword rules: the detect-secrets ones and maisecrets' own label rules with no `=` or `:` (OWN_RULES)
+KEYWORD_RULES = ("ds-keyword", "label-")
 _TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?i:tests?|__tests__|spec|testdata|test_data|e2e)[/\\]"
                            r"|(?:^|[/\\]|[a-z])Tests?\.\w+$"
                            r"|(?:^|[/\\])[^/\\]*[._-]e2e[._-][^/\\]*$"
@@ -955,7 +1089,7 @@ _LABEL_WINDOW = 200   # characters before a value in which its label is looked f
 def _before_value(text: str, start: int) -> str:
     """The text of the value's line before it, at most _LABEL_WINDOW characters."""
     return text[max(_line_start(text, start), start - _LABEL_WINDOW):start]
-_LABEL_TAIL_RE = re.compile(r"([A-Za-z_][\w.]*)[\"']?\s*(?::=|=|:)\s*[\"'`]?$")
+_LABEL_TAIL_RE = re.compile(r"([A-Za-z_][\w.]*)\\?[\"']?\s*(?::=|=|:)\s*\\?[\"'`]?$")   # \" in JSON in a string
 _OPERATOR_AFTER_RE = re.compile(r"[ \t]+[|&^*+][ \t]+[A-Za-z_(]")
 _SELF_ATTR_RE = re.compile(r"(?:^|[\s,(])(?:self|this|cls)\.\w+$")
 
@@ -1047,6 +1181,10 @@ def _matches(rule: Rule, text: str):
     A label that ends its line (``passwort:`` and the value on the next line, as a console
     or a chat renders it) is scanned together with the next non-empty line; only a hit whose
     value starts in that next line is taken from the pair (field report, 2026-09-26)."""
+    curl = _curl_parts(rule)
+    if curl is not None:
+        yield from _curl_matches(curl, text)
+        return
     kw = _WINDOWED.get(rule.id)
     if kw is not None and len(text) > 4096:
         yield from _windowed(rule, kw, text)
@@ -1076,6 +1214,79 @@ def _matches(rule: Rule, text: str):
                     if m.start(g) > len(line):
                         yield _Shifted(m, pos)
         pos += len(line) + 1
+
+
+# betterleaks' two curl rules start with `\bcurl\b` and then `.*` (or `.*?`) over up to 5 more lines before the -H or
+# -u part. RE2 runs that in linear time; Python's `re` scans the rest of the line again from each `curl`, and a line
+# with many of them took O(n^2) (32K characters: 10 s, past the hook's time limit). Here the -H/-u part (the tail)
+# is found on its own, and the nearest `curl` before it must stand within the same line breaks as the regex allows.
+_CURL_HEADS = (r"\bcurl\b(?:.*?|.*?(?:[\r\n]{1,2}.*?){1,5})", r"\bcurl\b(?:.*|.*(?:[\r\n]{1,2}.*){1,5})")
+_CURL_PARTS: dict = {}
+
+
+def _curl_parts(rule: Rule):
+    """(curl regex, tail regex) of a curl rule whose regex starts with a known head; None for any other rule, and
+    for a curl rule whose regex a sync changed (it then runs as it is: correct, only slower)."""
+    if not rule.id.startswith("curl-"):
+        return None
+    if rule.id not in _CURL_PARTS:
+        p = rule.regex.pattern
+        flags = "(?i)" if p.startswith("(?i)") else ""
+        body = p[len(flags):]
+        head = next((h for h in _CURL_HEADS if body.startswith(h)), None)
+        tail = body[len(head):] if head else ""
+        if tail.endswith(r"(?:\s|\Z)"):
+            # the space after a credential was part of the match, so finditer skipped a credential that started
+            # right after it: `-u a:x --user b:y` lost b:y (Gate B of 0.6.15); a lookahead keeps it
+            tail = tail[:-len(r"(?:\s|\Z)")] + r"(?=\s|\Z)"
+        _CURL_PARTS[rule.id] = None if head is None else (re.compile(flags + r"\bcurl\b"), re.compile(flags + tail))
+    return _CURL_PARTS[rule.id]
+
+
+def _curl_matches(parts, text: str):
+    """The matches of a curl rule in linear time. A match takes each -H/-u part whose nearest `curl` before it is
+    at most 5 line breaks away (`[\\r\\n]{1,2}` is one break, so a blank line counts once); its group 0 starts at
+    that `curl`. The regex took only the first (-H, lazy) or the last (-u, greedy) part after one `curl`; this
+    takes each one."""
+    head, tail = parts
+    starts: list[int] = []
+    ends: list[int] = []
+    for c in head.finditer(text):
+        starts.append(c.start())
+        ends.append(c.end())
+    if not starts:
+        return
+    nl = _newlines(text)
+    for t in tail.finditer(text):
+        i = bisect.bisect_right(ends, t.start()) - 1
+        if i < 0:
+            continue
+        lo, hi = bisect.bisect_left(nl, ends[i]), bisect.bisect_left(nl, t.start())
+        if hi - lo > 10:
+            continue
+        breaks = run = 0
+        for j in range(lo, hi):
+            run = run + 1 if j > lo and nl[j] == nl[j - 1] + 1 else 1
+            breaks += run % 2                    # two line feeds in a row are one `[\r\n]{1,2}`
+        if breaks <= 5:
+            yield _Spanned(t, starts[i], text)
+
+
+class _Spanned:
+    """A tail match whose group 0 starts earlier, at its `curl`."""
+    __slots__ = ("_m", "_start", "_text")
+
+    def __init__(self, m: re.Match, start: int, text: str) -> None:
+        self._m, self._start, self._text = m, start, text
+
+    def group(self, i: int = 0):
+        return self._text[self._start:self._m.end()] if i == 0 else self._m.group(i)
+
+    def start(self, i: int = 0) -> int:
+        return self._start if i == 0 else self._m.start(i)
+
+    def end(self, i: int = 0) -> int:
+        return self._m.end(i)
 
 
 class _Shifted:
@@ -1122,14 +1333,14 @@ _MEASURE_LABEL_RE = re.compile(r"(?i)(?<![a-z])(?:ttl|timeout|expir\w*|lifetime|
                                r"|generation)(?![a-z])")
 # a label that names a secret: a UUID after it is one (Postmark server token, Scaleway secret key, a uuid4 API key)
 _SECRET_LABEL_RE = re.compile(r"(?i)(?:token|secret[_-]?key|secret|secret[_-]?value|api[_-]?key|apikey|access[_-]?key"
-                              r"|auth[_-]?key|\w+[_-]key|password|passwd|pwd|passphrase)[\"']?\s*(?::=|=>|[:=])\s*[\"'`]?$")
+                              r"|auth[_-]?key|\w+[_-]key|password|passwd|pwd|passphrase)\\?[\"']?\s*(?::=|=>|[:=])\s*\\?[\"'`]?$")
 _ELISION_RE = re.compile(r"(?:\.\.\.|\u2026)$")
 # a label that names a derived thing: secret_id, password_hash, token_type, hashed_secret. Anchored at the value: in
 # `secret_name: x, password: <value>` the password stays a hit
 _DERIVED_LABEL_RE = re.compile(
     r"(?i)(?:(?:secret|password|passwd|pwd|token|key)[_-]?(?:id|name|hash|hashed|len|length|path|file|arn|ref|url|uri"
-    r"|version|type|policy|rules?)|hashed_(?:secret|password)|(?:secret|password|token|key)Id"
-    r"|(?:secret|password|token)Name)[\"']?\s*(?::=|=>|[:=])\s*[\"'`]?$")
+    r"|version|type|policy|rules?|last(?:_\w+)?)|hashed_(?:secret|password|token)|(?:secret|password|token|key)Id"
+    r"|(?:secret|password|token)Name)\\?[\"']?\s*(?::=|=>|[:=])\s*\\?[\"'`]?$")
 
 
 def _label_before(text: str, start: int) -> str:
@@ -1213,6 +1424,18 @@ def _url_password_not_a_value(v: str) -> bool:
     return True
 
 
+# PostgreSQL's tools take --password (-W) as a switch with no value (Gate B of 0.6.15)
+_PG_TOOL_RE = re.compile(r"(?<![\w-])(?:psql|pg_dump|pg_dumpall|pg_restore|pg_basebackup|createdb|dropdb|createuser"
+                         r"|dropuser|vacuumdb|reindexdb|clusterdb|pgbench)(?:\.exe)?(?![\w-])")
+
+
+def _command_start(text: str, pos: int) -> int:
+    """The start of the shell command that holds pos: after the last | ; & on its line (round 2 of 0.6.15)."""
+    a = _line_start(text, pos)
+    cut = max(text.rfind(c, a, pos) for c in "|;&")
+    return cut + 1 if cut >= a else a
+
+
 def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins."""
     if not text:
@@ -1247,6 +1470,17 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if end <= start:
                 continue
             secret = m.group(g)
+            if (rule.id in _ESCAPABLE_COLON_RULES and "\\" in (m.group(2) or "")
+                    and text[start - 2:start] not in ('\\"', "\\'")):
+                # the label's quote is escaped: JSON inside a string, whose values are escaped strings. A value without
+                # an escaped quote is code or a literal: `\"access_token\": finding[\"secret\"]` (19 hits in the
+                # vendored rules file, Gate A of 0.6.15), an escaped null (Gate B)
+                continue
+            if secret.endswith("\\") and text[end:end + 1] in ("\"", "'") and rule.id.startswith("ds-keyword"):
+                secret, end = secret[:-1], end - 1   # {\"password\":\"<value>\"}: the backslash escapes the quote
+            if (rule.id in _ESCAPABLE_COLON_RULES and "\\" in (m.group(2) or "")
+                    and not _label_value_ok(secret)):
+                continue   # {\"passwordLastChanged\":\"2024-10-01T12:00:00Z\"}: the new escaped path, no password
             if rule.quote_group and not m.group(rule.quote_group):
                 cut = _WHITESPACE_RE.search(secret)
                 if cut:
@@ -1255,7 +1489,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     end = start + len(secret)
                     if _CAPITALISED_WORD_RE.fullmatch(secret):
                         continue
-            if rule.id.startswith("ds-keyword") and _ANCHOR_OR_TAG_RE.fullmatch(secret.strip()):
+            if rule.id.startswith(KEYWORD_RULES) and _ANCHOR_OR_TAG_RE.fullmatch(secret.strip()):
                 # a quoted scalar is never an anchor: the colon must stand right before it (review of b4a7c54)
                 nxt = re.match(r"[ \t]+([^\s#]+)", text[end:end + 300])
                 if nxt:
@@ -1268,16 +1502,16 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     secret = text[start:end]
                 elif _before_value(text, start).rstrip(" \t").endswith(":"):
                     continue   # a YAML anchor or alias alone after a colon label: &gitlab_token_fields
-            if rule.id.startswith("ds-keyword") and (is_code_word(secret) or value_is_code(text, start, end, secret)):
+            if rule.id.startswith(KEYWORD_RULES) and (is_code_word(secret) or value_is_code(text, start, end, secret)):
                 continue
             if rule.id == "generic-api-key" and _WORD_PATH_RE.fullmatch(secret.strip("'\"")):
                 continue
-            if rule.id.startswith("ds-keyword") and _names_its_label(text, start, secret):
+            if rule.id.startswith(KEYWORD_RULES) and _names_its_label(text, start, secret):
                 continue
-            if (rule.id.startswith("ds-keyword") and _LABEL_SHAPE.fullmatch(secret.strip())
+            if (rule.id.startswith(KEYWORD_RULES) and _LABEL_SHAPE.fullmatch(secret.strip())
                     and _NAME_LABEL_RE.fullmatch(secret.strip()) and "\n" in text[m.start():start]):
                 continue   # the next line is a label of its own: `DB_PASSWORD=\nAPI_KEY=`, `Zugangsdaten:\nBenutzer:`
-            if (rule.id.startswith("ds-keyword") and secret.strip("\"' ").isdigit()
+            if (rule.id.startswith(KEYWORD_RULES) and secret.strip("\"' ").isdigit()
                     and _MEASURE_LABEL_RE.search(_label_before(text, start))):
                 continue   # a limit or a duration: TTL_REFRESH_TOKEN = 2592000
             if rule.id == "url-query-secret" and secret.startswith("{"):
@@ -1285,7 +1519,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if (rule.id == "auth-scheme" and not any(c.isdigit() for c in secret)
                     and re.fullmatch(r"[A-Za-z]+(?:[_-][A-Za-z]+)+", secret)):
                 continue   # words, not a token: Bearer test_access_token
-            if (rule.id.startswith("ds-keyword") or rule.id == "generic-api-key") and (
+            if (rule.id.startswith(KEYWORD_RULES) or rule.id == "generic-api-key") and (
                     (_UUID_RE.fullmatch(secret.strip("\"'` ")) and not _SECRET_LABEL_RE.search(
                         text, max(_line_start(text, start), start - 60), start))
                     or (_ELISION_RE.search(secret) and len(secret.rstrip(".\u2026")) < 20)
@@ -1296,6 +1530,9 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if (rule.id == "aws-access-token" and _SIGV4_CREDENTIAL_RE.search(text, max(0, start - 24), start)
                     and _SIGV4_SCOPE_RE.match(text, end)):
                 continue   # the key id in a SigV4 credential scope (a presigned URL, an Authorization header)
+            if (rule.id == "label-cli-password" and text[start - 1:start] not in "'\""
+                    and _PG_TOOL_RE.search(text, _command_start(text, start), start)):
+                continue   # `psql --password app_db`: a switch that asks for the password, then the database
             if rule.id == "url-password-no-user" and _url_password_not_a_value(secret):
                 continue
             if rule.id == "hashicorp-tf-password" and not _ds_value_ok(secret.strip("\"'")):

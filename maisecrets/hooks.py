@@ -82,7 +82,10 @@ def _clipboard(text: str) -> bool:
             cmd, data = ["clip"], text.encode("utf-16-le")
         else:
             cmd = ["xclip", "-selection", "clipboard"]
-        subprocess.run(cmd, input=data, check=True, timeout=_CLIPBOARD_TIMEOUT)
+        # xclip stays in the background to serve the selection: with the hook's stdout and stderr it held the
+        # client's pipe open after the hook ended (Gate A of 0.6.15). A child of the hook never gets those streams
+        subprocess.run(cmd, input=data, check=True, timeout=_CLIPBOARD_TIMEOUT,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except (OSError, subprocess.SubprocessError) as exc:
         # a missing tool and an SSH session are normal (a headless Linux, a remote shell): no incident
@@ -3151,6 +3154,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
     live = vault.live_fingerprints()
     if not live:
         return out
+    found: list[str] = []          # admitted together at the end: one index write, not one per hit
     seen: set[str] = set()
     tokens = list(_TOKEN_SPLIT_RE.split(out))
     # a value with spaces or quotes survives no tokenizer; the rest of a KEY=value line does
@@ -3170,7 +3174,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
             key = live.get(vault.fingerprint(cand))
             if key is None:
                 continue
-            vault.admit(key, session)
+            found.append(key)
             from .vault import Entry
             e = Entry.from_meta(vault._index["entries"][key])
             # a URL-decoded or JSON-unescaped candidate is not in the text; its encoded form is
@@ -3181,6 +3185,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
             entries.append(e)
             if values is not None and raw not in values:
                 values.append(raw)
+    vault.admit_many(found, session)
     return out
 
 
@@ -3348,6 +3353,67 @@ def _mask_hidden_in_transcript(path: str, start: int = 0) -> int:
         return 0
 
 
+# A Read of an image or a PDF returns the file as base64: tool_response type "image" or "pdf" (file.base64) or
+# "parts" (pages[].base64), and the client gives it to the model as an image or a document block, never as text
+# (tests/client_payloads/claude-read-*-post.json, recorded from Claude Code 2.1.296). A scan of it as text cost
+# 10.9 s for 1 MB and found only chance shapes, and a placeholder inside it would break the image.
+_BINARY_READ_TYPES = ("image", "pdf", "parts")
+_DATA_URI_RE = re.compile(r"data:image/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/=\s]*)")
+_IMAGE_MAGIC = {"png": (b"\x89PNG\r\n\x1a\n",), "jpeg": (b"\xff\xd8\xff",), "gif": (b"GIF87a", b"GIF89a"),
+                "webp": (b"RIFF",)}
+
+
+_IMAGE_TRAILER = {"png": b"IEND\xaeB`\x82", "jpeg": b"\xff\xd9", "gif": b";"}
+
+
+def _is_image_data_uri(s: Any) -> bool:
+    """The whole text is a data URI whose whole body decodes as base64 to a file of its image type: the magic number
+    at the start and the end of the format at the end (the IEND chunk of a PNG, the EOI marker of a JPEG, the trailer
+    of a GIF, the RIFF length of a WebP). Claude Code sets `isImage` on a Bash output that starts with `data:image/`
+    (recorded: `printf 'data:image/png;base64,'; base64 < tiny.png`), so the flag alone is a text the agent can print,
+    and a prefix check let an agent switch off the redaction of a whole output (review of the 0.6.15 fixes). A check
+    of the first bytes only let a key glued after the image (`…==AKIA…`, or on the next line) through (Gate A)."""
+    if not isinstance(s, str):
+        return False
+    m = _DATA_URI_RE.fullmatch(s)
+    if not m:
+        return False
+    import base64
+    import binascii
+    try:
+        raw = base64.b64decode("".join(m.group(2).split()), validate=True)
+    except (ValueError, binascii.Error):
+        return False
+    kind = m.group(1)
+    if not raw.startswith(_IMAGE_MAGIC[kind]):
+        return False
+    if kind == "webp":
+        return raw[8:12] == b"WEBP" and int.from_bytes(raw[4:8], "little") + 8 == len(raw)
+    return raw.endswith(_IMAGE_TRAILER[kind])
+
+
+def _binary_paths(payload: dict) -> set:
+    """The places in tool_response that hold a file as base64 and are not scanned as text: the base64 of a Read of an
+    image or a PDF, and the stdout of a Bash output that the client sends as an image (`isImage` true and the
+    whole stdout an image data URI). Every other field is scanned as before; stderr always."""
+    resp = payload.get("tool_response")
+    if not isinstance(resp, dict):
+        return set()
+    tool = payload.get("tool_name")
+    if tool == "Read" and resp.get("type") in _BINARY_READ_TYPES:
+        out = set()
+        if isinstance(resp.get("file"), dict) and isinstance(resp["file"].get("base64"), str):
+            out.add(("file", "base64"))
+        pages = resp.get("pages")
+        for i, page in enumerate(pages if isinstance(pages, list) else []):
+            if isinstance(page, dict) and isinstance(page.get("base64"), str):
+                out.add(("pages", i, "base64"))
+        return out
+    if tool == "Bash" and resp.get("isImage") is True and _is_image_data_uri(resp.get("stdout")):
+        return {("stdout",)}
+    return set()
+
+
 def post_tool(payload: dict) -> dict:
     cfg = load_config()
     response = payload.get("tool_response")
@@ -3402,12 +3468,27 @@ def post_tool(payload: dict) -> dict:
         hit["n"] += hits
         return cleaned
 
-    def walk(node: Any) -> Any:
+    binary = _binary_paths(payload)
+
+    def redact_binary(s: str) -> str:
+        """A file as base64: no shape scan, but the exact match of the stored values as before (a value this session
+        resolved, written into an uncompressed PDF, can stand in its base64 form; a hit breaks the file)."""
+        nonlocal vault, resolved
+        if not _has_live(cfg):
+            return s
+        if vault is None:
+            vault = Vault(cfg)
+            resolved = _resolved_values(vault, session)
+        return _exact_redact(s, vault, session, hit, entries, resolved, values)
+
+    def walk(node: Any, at: tuple = ()) -> Any:
         # keys too: a tool result's JSON can hide an instruction or a value in a key (Codex review, 2026-10-06)
+        if at in binary and isinstance(node, str):
+            return redact_binary(node)
         if isinstance(node, str):
             return redact(node)
         if isinstance(node, list):
-            return [walk(x) for x in node]
+            return [walk(x, at + (i,)) for i, x in enumerate(node)]
         if isinstance(node, dict):
             pairs = [(clean_key(k) if isinstance(k, str) else k, k, v) for k, v in node.items()]
             # a key that the cleaning did not change keeps its name; a cleaned key that is now alike another gets
@@ -3421,7 +3502,7 @@ def post_tool(payload: dict) -> dict:
                     while f"{nk}<{n}>" in taken or f"{nk}<{n}>" in out:
                         n += 1
                     nk = f"{nk}<{n}>"
-                out[nk] = walk(v)
+                out[nk] = walk(v, at + (k,))
             return out
         return node
 
@@ -3725,6 +3806,25 @@ def _tool_class(payload: dict) -> str:
 WATCHDOG_SECONDS = {"user-prompt": 7.0, "pre-tool": 7.0, "post-tool": 16.0, "post-tool-failure": 16.0}
 
 
+_TEST_WATCHDOG_MAX = 6.0   # below the shortest client timeout (10 s, hooks/hooks.json) with room for the answer
+
+
+def _test_watchdog_seconds(default: float) -> float:
+    """The watchdog time, shortened only for the tests. MAISECRETS_TEST_WATCHDOG counts only when the test marker
+    names the active home (tests/_isolate.py sets both), and only as a finite number above 0 and at most 6 s: an
+    inherited environment cannot move the fail-closed answer past the client's timeout (codex review of 0.6.15)."""
+    raw = os.environ.get("MAISECRETS_TEST_WATCHDOG")
+    owned, home = os.environ.get("MAISECRETS_TEST_HOME_OWNED"), os.environ.get("MAISECRETS_HOME")
+    if not (raw and owned and home) or os.path.realpath(owned) != os.path.realpath(home):
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    import math
+    return value if math.isfinite(value) and 0 < value <= _TEST_WATCHDOG_MAX else default
+
+
 def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict:
     """The answer that keeps the guard up when the hook itself cannot finish: block the prompt,
     deny the tool, withhold the tool output. Never a value, never an exception text (a keychain
@@ -3922,6 +4022,40 @@ def _scrub_failed_prompt(event: str, payload: dict) -> None:
         _debug("scrub-failed-prompt: could not start")
 
 
+def _arm_alarm(seconds: float, on_timeout, answering: dict):
+    """The second watchdog, in the main thread: a SIGALRM timer whose handler gives the answer of the thread watchdog.
+    A regex search holds the GIL for its whole run, so the thread watchdog cannot run while one backtracks; the
+    client then ends the hook at its timeout, and that timeout lets the action through (measured on 0.6.14: a line
+    of AWS key ids held a PostToolUse hook for 97 s). The `re` engine checks for signals while it runs, so the
+    handler runs inside the search. Windows has no SIGALRM: there the thread watchdog stays alone, and a slow regex
+    can still outrun it. Returns what _disarm_alarm needs, or None."""
+    import signal
+    import threading
+    if not hasattr(signal, "setitimer") or threading.current_thread() is not threading.main_thread():
+        return None
+
+    def on_alarm(signum, frame) -> None:
+        if not answering["v"]:                       # an answer in writing finishes; the thread watchdog stays
+            on_timeout()
+    try:
+        before = signal.signal(signal.SIGALRM, on_alarm)
+        signal.setitimer(signal.ITIMER_REAL, max(0.05, seconds))
+    except (ValueError, OSError):
+        return None
+    return before
+
+
+def _disarm_alarm(before) -> None:
+    if before is None:
+        return
+    import signal
+    try:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, before)
+    except (ValueError, OSError):
+        pass
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[1] not in HANDLERS:
         sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|post-tool-failure|session-start\n")
@@ -3944,6 +4078,8 @@ def main(argv: list[str]) -> int:
     started = time.time()
     lock = threading.Lock()
     answered = {"v": False}
+    answering = {"v": False}
+    seconds = _test_watchdog_seconds(WATCHDOG_SECONDS[event])
 
     def answer(obj: dict, how: str) -> bool:
         """Write the one answer of this process; True when this call wrote it. Exactly one JSON object leaves the
@@ -3951,6 +4087,7 @@ def main(argv: list[str]) -> int:
         2026-09-26). The lock has a limit, so a handler stuck in its own write cannot hold the watchdog
         (docs/DIAGNOSTICS.md section 10)."""
         json.dumps(obj)                              # before the claim: an object that cannot be written claims nothing
+        answering["v"] = True                        # the alarm handler leaves an answer in writing alone
         if not lock.acquire(timeout=1):
             return False
         try:
@@ -3971,8 +4108,13 @@ def main(argv: list[str]) -> int:
             _run_log(event, payload, how, decision, ms)
         return True
 
+    fired = {"v": False}
+
     def on_timeout() -> None:
-        if answer(_fail_closed(event, payload, f"took longer than {WATCHDOG_SECONDS[event]:.0f}s."), "watchdog"):
+        if fired["v"]:
+            return                                   # the other watchdog runs it already
+        fired["v"] = True
+        if answer(_fail_closed(event, payload, f"took longer than {seconds:.0f}s."), "watchdog"):
             def last() -> None:
                 _heartbeat(event, payload, done=True)
                 _scrub_failed_prompt(event, payload)
@@ -3983,9 +4125,10 @@ def main(argv: list[str]) -> int:
         # always, also after a lost race: a hook that answered must still end before the client's timeout, which
         # lets the action through (measured, review round 5)
         os._exit(0)
-    watchdog = threading.Timer(WATCHDOG_SECONDS[event], on_timeout)
+    watchdog = threading.Timer(seconds, on_timeout)
     watchdog.daemon = True
     watchdog.start()                                 # first, so no file work runs unguarded
+    alarm = _arm_alarm(seconds - 0.25, on_timeout, answering)
     _heartbeat(event, payload)
     won = False
     tool_class = _tool_class(payload)
@@ -4013,6 +4156,7 @@ def main(argv: list[str]) -> int:
             _scrub_failed_prompt(event, payload)
         return 0
     finally:
+        _disarm_alarm(alarm)
         # the recorder runs after the answer and never raises out of here: an exception would end the process
         # with exit 1, and a client ignores the JSON answer of a hook that exits 1
         if won:
