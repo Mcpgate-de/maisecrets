@@ -113,25 +113,79 @@ def _real(path: str) -> str:
     return os.path.normcase(os.path.realpath(path))
 
 
-def in_clean_dir(path: str, cwd: str, cfg: dict) -> bool:
-    """The file lies in a folder of clean_dirs. Both sides are resolved first (links and ..), so a link inside a
-    clean folder that points out of it, or a path that climbs out with .., is not inside."""
+_SESSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+SEEN_DAYS = 30
+
+
+def _seen_path(session):
+    from .vault import HOME
+    if not isinstance(session, str) or not _SESSION_RE.fullmatch(session):
+        return None
+    return os.path.join(str(HOME), "sessions-seen", session)
+
+
+def mark_session(session) -> None:
+    """Note the first time maisecrets sees this session (SessionStart and every prompt; only the first call writes).
+    The client sends no start time, and a clean folder trusts only files that were there before it (C26)."""
+    path = _seen_path(session)
+    if not path or os.path.exists(path):
+        return
+    try:
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    except OSError:
+        pass
+
+
+def prune_sessions() -> None:
+    """SessionStart: the notes of sessions older than SEEN_DAYS go."""
+    import time
+    folder = os.path.dirname(_seen_path("x"))
+    try:
+        for name in os.listdir(folder):
+            f = os.path.join(folder, name)
+            if os.stat(f).st_mtime < time.time() - SEEN_DAYS * 86400:
+                os.unlink(f)
+    except OSError:
+        pass
+
+
+def session_start(session) -> float | None:
+    path = _seen_path(session)
+    try:
+        return os.stat(path).st_mtime if path else None
+    except OSError:
+        return None
+
+
+def in_clean_dir(path: str, cwd: str, cfg: dict, session=None) -> bool:
+    """The file lies in a folder of clean_dirs and was there before the session began. Both sides are resolved first
+    (links and ..), so a link inside a clean folder that points out of it, or a path that climbs out with .., is not
+    inside. The file itself must have one name only (a hard link from outside has two) and an inode change time
+    older than the first time maisecrets saw this session: a copy, a move or a link that the agent makes into the
+    folder changes that time, and the agent cannot set it back. No note of the session: nothing is clean."""
     dirs = [d for d in cfg.get("clean_dirs") or [] if isinstance(d, str) and d.strip()]
     if not dirs or not path:
         return False
     full = path if os.path.isabs(os.path.expanduser(path)) else os.path.join(cwd or os.getcwd(), path)
     try:
         real = _real(os.path.expanduser(full))
+        inside = False
         for d in dirs:
             d = os.path.expanduser(d.strip())
             if not os.path.isabs(d):
                 continue
             base = _real(d)
             if real != base and os.path.commonpath([real, base]) == base:
-                return True
+                inside = True
+                break
+        if not inside:
+            return False
+        started = session_start(session)
+        st = os.stat(os.path.realpath(os.path.expanduser(full)))
+        return started is not None and st.st_nlink == 1 and st.st_ctime < started
     except (OSError, ValueError):
         return False
-    return False
 
 
 def text_result(file_path: str, content: str) -> dict:
@@ -318,7 +372,7 @@ def pre_read(payload: dict, cfg: dict, codex: bool) -> dict:
     tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     path = tool_input.get("file_path")
     kind = kind_of_path(path) if isinstance(path, str) else None
-    if not kind or in_clean_dir(path, str(payload.get("cwd") or ""), cfg):
+    if not kind or in_clean_dir(path, str(payload.get("cwd") or ""), cfg, payload.get("session_id")):
         return {}
     how = mode(cfg, kind)
     if how == "allow":
@@ -359,7 +413,7 @@ def post_read(payload: dict, cfg: dict, codex: bool) -> tuple | None:
     path = tool_input.get("file_path") if isinstance(tool_input.get("file_path"), str) else ""
     if not path and isinstance(response.get("file"), dict):
         path = str(response["file"].get("filePath") or "")
-    clean = tool == "Read" and in_clean_dir(path, str(payload.get("cwd") or ""), cfg)
+    clean = tool == "Read" and in_clean_dir(path, str(payload.get("cwd") or ""), cfg, payload.get("session_id"))
     how = mode(cfg, kind)
     if tool == "Read" and response.get("type") == "notebook":
         # its cells are text and are scanned as always; only ask and block take the images out
@@ -405,7 +459,7 @@ def hint(payload: dict, cfg: dict, codex: bool) -> str | None:
         return None
     tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     path = tool_input.get("file_path")
-    if isinstance(path, str) and in_clean_dir(path, str(payload.get("cwd") or ""), cfg):
+    if isinstance(path, str) and in_clean_dir(path, str(payload.get("cwd") or ""), cfg, payload.get("session_id")):
         return None
     from . import settings
     key = SETTING[kind]

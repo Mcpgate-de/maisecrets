@@ -53,6 +53,7 @@ def _reset(**user) -> None:
             os.unlink(f)
         except FileNotFoundError:
             pass
+    shutil.rmtree(Path(HOME, "sessions-seen"), ignore_errors=True)    # the session S1 starts anew
     hooks._live_cache.clear()
 
 
@@ -428,6 +429,12 @@ class Convert(_Work):
 
 
 class CleanDirs(_Work):
+    def begin(self) -> None:
+        """The session S1 starts now: every file that exists already is older than it."""
+        time.sleep(0.02)
+        file_reads.mark_session("S1")
+        time.sleep(0.02)
+
     @unittest.skipIf(os.name == "nt", "a symbolic link needs a privilege on Windows")
     def test_a_read_inside_passes_and_a_way_out_does_not(self):
         clean = self.dir / "clean"
@@ -437,6 +444,7 @@ class CleanDirs(_Work):
         os.symlink(self.pdf, clean / "link.pdf")                 # a link in the clean folder to a file outside
         os.symlink(clean, self.dir / "clean-link")               # the clean folder through a link
         _reset(read_pdf="block", clean_dirs=[str(clean)])
+        self.begin()
         cases = ((str(inside), "pass"), (str(self.dir / "clean-link" / "a.pdf"), "pass"),
                  (str(clean / "link.pdf"), "deny"), (str(clean / ".." / "work" / "hello.pdf"), "deny"),
                  (str(self.dir / "clean2" / "a.pdf"), "deny"))
@@ -452,7 +460,62 @@ class CleanDirs(_Work):
 
     def test_a_relative_path_resolves_from_the_cwd(self):
         _reset(read_pdf="block", clean_dirs=[self.cwd])
+        self.begin()
         self.assertEqual(self.pre(file_path="hello.pdf"), {})
+
+    def test_a_file_the_agent_puts_there_in_the_session_is_not_clean(self):
+        # review of block 4: cp, mv or ln of a file from outside into the clean folder undid the block
+        clean = self.dir / "clean"
+        clean.mkdir()
+        old = clean / "old.pdf"
+        old.write_bytes(b"%PDF-1.4\n")
+        moved = self.dir / "moved.pdf"
+        moved.write_bytes(b"%PDF-1.4\n")                         # older than the session, outside the folder
+        _reset(read_pdf="block", clean_dirs=[str(clean)])
+        self.begin()
+        shutil.copy2(self.pdf, clean / "copied.pdf")              # cp -p keeps the mtime, not the change time
+        os.rename(moved, clean / "moved.pdf")
+        os.link(self.pdf, clean / "hard.pdf")
+        self.assertEqual(self.pre(file_path=str(old)), {}, "a file that was there before the session passes")
+        for name in ("copied.pdf", "moved.pdf", "hard.pdf"):
+            with self.subTest(name):
+                self.assertEqual(decision(self.pre(file_path=str(clean / name))), "deny")
+                self.assertEqual(output(self.post(file_path=str(clean / name)))["type"], "text")
+
+    def test_a_link_to_a_file_that_also_has_a_name_outside_is_not_clean(self):
+        clean = self.dir / "clean"
+        clean.mkdir()
+        os.link(self.pdf, clean / "hard.pdf")                     # made before the session: still two names
+        _reset(read_pdf="block", clean_dirs=[str(clean)])
+        self.begin()
+        self.assertEqual(decision(self.pre(file_path=str(clean / "hard.pdf"))), "deny")
+
+    def test_without_a_note_of_the_session_nothing_is_clean(self):
+        _reset(read_pdf="block", clean_dirs=[self.cwd])
+        self.assertEqual(decision(self.pre(file_path=self.pdf)), "deny")
+
+    def test_the_first_prompt_notes_the_session_and_a_later_one_keeps_the_time(self):
+        p = golden("UserPromptSubmit_pasted_image", self.cwd, prompt="hello")
+        run_hook("user-prompt", p)
+        first = file_reads.session_start("S1")
+        self.assertIsNotNone(first)
+        time.sleep(0.02)
+        run_hook("user-prompt", p)
+        self.assertEqual(file_reads.session_start("S1"), first)
+        self.assertIsNone(file_reads.session_start("../x"), "a session id is no path")
+
+    def test_a_folder_that_holds_the_work_is_refused(self):
+        def add(folder):
+            p = golden("UserPromptSubmit_pasted_image", self.cwd,
+                       prompt=f"/maisecrets:settings clean_dirs add {folder}")
+            return said(run_hook("user-prompt", p))
+        for folder, why in (("/", "home folder"), ("~", "home folder"), (str(self.dir), "works in"),
+                            (self.cwd, "works in")):
+            with self.subTest(folder):
+                self.assertIn(why, add(folder))
+                self.assertEqual(load_config()["clean_dirs"], [])
+        add(str(self.dir / "scans"))
+        self.assertEqual(load_config()["clean_dirs"], [str(self.dir / "scans")], "a folder beside the work")
 
 
 class BashDataUri(_Work):

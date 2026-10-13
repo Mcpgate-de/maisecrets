@@ -799,6 +799,8 @@ def user_prompt(payload: dict) -> dict:
     cfg = load_config()
     prompt = payload.get("prompt", "")
     session = payload.get("session_id")
+    from . import file_reads
+    file_reads.mark_session(session)      # the first time seen: a clean folder trusts only older files (C26)
 
     # 1. @file mentions inline the file OUTSIDE the hook pipeline. Force a Read.
     mention = _blocking_mention(prompt, payload.get("cwd", ""), cfg)
@@ -843,7 +845,7 @@ def user_prompt(payload: dict) -> dict:
     # report pass, so a report never changes one; blocked, so the prompt does not reach the model
     change = settings_mod.parse_prompt(prompt)
     if change:
-        changed, reason = settings_mod.apply_typed(*change) if typed else (False, (
+        changed, reason = settings_mod.apply_typed(*change, cwd=str(payload.get("cwd") or "")) if typed else (False, (
             "maisecrets: a settings change counts only when you type it as your prompt; this one came from the "
             f"client ({payload.get('source')}), so nothing was changed."))
         if changed and client_of(payload) != "codex" and prompt.lstrip().lower().startswith("/maisecrets:settings"):

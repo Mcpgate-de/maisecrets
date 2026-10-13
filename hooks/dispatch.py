@@ -166,6 +166,12 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         print(json.dumps({"systemMessage": f"maisecrets: {exc}."}))
         _marker("hook.session-start")
         sys.exit(0)
+    try:
+        from maisecrets import file_reads  # noqa: E402
+        file_reads.mark_session(payload.get("session_id"))   # a clean folder trusts only older files (C26)
+        file_reads.prune_sessions()
+    except Exception:  # noqa: BLE001 - the note never stops a session start; without it no folder is clean
+        pass
     # a blocked prompt older than 15 minutes is never sent; the file goes too (retention)
     pending = HOME / "pending"
     if pending.is_dir():

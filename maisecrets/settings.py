@@ -9,6 +9,7 @@ default. A hint goes to the model once, when the case it is about first happens.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -257,7 +258,24 @@ def parse_prompt(prompt) -> tuple[str, str] | None:
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
 
-def apply_typed(key: str, word: str) -> tuple[bool, str]:
+def _too_wide(folder, cwd: str) -> str:
+    """A clean folder must not hold the work of the agent: not /, not the home folder, not a folder that holds the
+    folder the session works in (the agent writes there)."""
+    real = os.path.realpath(str(folder))
+    home = os.path.realpath(os.path.expanduser("~"))
+    if real == os.path.dirname(real) or real == home:
+        return "it is / or your home folder; choose the folder that holds only the clean files"
+    if cwd:
+        work = os.path.realpath(cwd)
+        try:
+            if os.path.commonpath([work, real]) == real:
+                return "it holds the folder this session works in, where the AI writes files"
+        except ValueError:
+            pass
+    return ""
+
+
+def apply_typed(key: str, word: str, cwd: str = "") -> tuple[bool, str]:
     """Write one change the person typed into config.json, keep every other key, and say what happened: (changed,
     text). Only the prompt hook calls this, for a prompt whose source is the person (TYPED_SOURCES). It is the
     only writer, under one name that a tool call is refused for (IN_A_COMMAND_RE)."""
@@ -309,6 +327,10 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
         why = refused_folder(expand(word[4:]))
         if why:
             return False, f"maisecrets: the folder is not added ({why.split(': ', 1)[-1]}). Nothing was changed."
+        if key == "clean_dirs":
+            why = _too_wide(expand(word[4:]), cwd)
+            if why:
+                return False, f"maisecrets: the folder is not added ({why}). Nothing was changed."
         if not expand(word[4:]).is_dir():
             note = (" The folder does not exist yet; maisecrets reads it once it does." if key == "rule_dirs"
                     else " The folder does not exist yet.")
