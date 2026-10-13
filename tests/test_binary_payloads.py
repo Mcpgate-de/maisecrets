@@ -33,6 +33,7 @@ from maisecrets import hooks  # noqa: E402
 PAYLOADS = Path(__file__).resolve().parent / "client_payloads"
 _R = random.Random(1506)
 PNG = b"\x89PNG\r\n\x1a\n"
+TRAILER = {PNG: b"\x00\x00\x00\x00IEND\xaeB`\x82"}   # the IEND chunk: a PNG ends here
 PDF = b"%PDF-1.4\n"
 JPEG = b"\xff\xd8\xff\xe0"
 
@@ -55,7 +56,7 @@ def glpat() -> str:
 def body(magic: bytes, size: int = 3000, plant: str = "") -> str:
     """Base64 of a file that starts with `magic`; `plant` (base64 characters) replaces a slice in the middle, between
     two slashes, so a rule that wants a word boundary sees one."""
-    b = base64.b64encode(magic + os.urandom(size)).decode()
+    b = base64.b64encode(magic + os.urandom(size) + TRAILER.get(magic, b"")).decode()
     if plant:
         mid = (len(b) // 2) // 4 * 4
         cut = "/" + plant + "/"
@@ -154,7 +155,15 @@ class BashImageOutputTests(unittest.TestCase):
                                  ("data:image/png;base64," + kid, True),                   # base64 letters, no PNG
                                  ("data:image/png;base64," + body(PNG) + "\n" + glpat(), True),
                                  ("data:image/jpeg;base64," + body(PNG, plant=kid), True),  # type and magic differ
-                                 ("data:image/png;base64," + body(PNG, plant=kid), False)):
+                                 ("data:image/png;base64," + body(PNG, plant=kid), False),
+                                 # a whole PNG, and a key glued after it or on the next line (Gate A of 0.6.15)
+                                 ("data:image/png;base64," + body(PNG) + kid, True),
+                                 ("data:image/png;base64," + body(PNG) + "==" + kid, True),
+                                 ("data:image/png;base64," + body(PNG) + "\n" + kid, True),
+                                 # 3009 bytes: base64 with no padding, so the key after it keeps it valid base64; only
+                                 # the missing end of the PNG tells (Gate A of 0.6.15)
+                                 ("data:image/png;base64," + base64.b64encode(PNG + os.urandom(3001)).decode()
+                                  + "\n" + kid, True)):
             with self.subTest(stdout[:30], is_image=is_image):
                 out = self.run_bash(stdout, is_image)
                 self.assertIsNotNone(out, "the output is scanned")

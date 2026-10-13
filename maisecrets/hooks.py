@@ -82,7 +82,10 @@ def _clipboard(text: str) -> bool:
             cmd, data = ["clip"], text.encode("utf-16-le")
         else:
             cmd = ["xclip", "-selection", "clipboard"]
-        subprocess.run(cmd, input=data, check=True, timeout=_CLIPBOARD_TIMEOUT)
+        # xclip stays in the background to serve the selection: with the hook's stdout and stderr it held the
+        # client's pipe open after the hook ended (Gate A of 0.6.15). A child of the hook never gets those streams
+        subprocess.run(cmd, input=data, check=True, timeout=_CLIPBOARD_TIMEOUT,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except (OSError, subprocess.SubprocessError) as exc:
         # a missing tool and an SSH session are normal (a headless Linux, a remote shell): no incident
@@ -3360,11 +3363,16 @@ _IMAGE_MAGIC = {"png": (b"\x89PNG\r\n\x1a\n",), "jpeg": (b"\xff\xd8\xff",), "gif
                 "webp": (b"RIFF",)}
 
 
+_IMAGE_TRAILER = {"png": b"IEND\xaeB`\x82", "jpeg": b"\xff\xd9", "gif": b";"}
+
+
 def _is_image_data_uri(s: Any) -> bool:
-    """The whole text is a data URI of base64 characters whose first bytes are the magic number of its image type.
-    Claude Code sets `isImage` on a Bash output that starts with `data:image/` (recorded: `printf 'data:image/png;
-    base64,'; base64 < tiny.png`), so the flag alone is a text the agent can print, and a prefix check let an agent
-    switch off the redaction of a whole output (review of the 0.6.15 fixes)."""
+    """The whole text is a data URI whose whole body decodes as base64 to a file of its image type: the magic number
+    at the start and the end of the format at the end (the IEND chunk of a PNG, the EOI marker of a JPEG, the trailer
+    of a GIF, the RIFF length of a WebP). Claude Code sets `isImage` on a Bash output that starts with `data:image/`
+    (recorded: `printf 'data:image/png;base64,'; base64 < tiny.png`), so the flag alone is a text the agent can print,
+    and a prefix check let an agent switch off the redaction of a whole output (review of the 0.6.15 fixes). A check
+    of the first bytes only let a key glued after the image (`…==AKIA…`, or on the next line) through (Gate A)."""
     if not isinstance(s, str):
         return False
     m = _DATA_URI_RE.fullmatch(s)
@@ -3372,12 +3380,16 @@ def _is_image_data_uri(s: Any) -> bool:
         return False
     import base64
     import binascii
-    head = "".join(m.group(2)[:64].split())[:16]
     try:
-        raw = base64.b64decode(head, validate=True) if len(head) == 16 else b""
+        raw = base64.b64decode("".join(m.group(2).split()), validate=True)
     except (ValueError, binascii.Error):
         return False
-    return raw.startswith(_IMAGE_MAGIC[m.group(1)]) and (m.group(1) != "webp" or raw[8:12] == b"WEBP")
+    kind = m.group(1)
+    if not raw.startswith(_IMAGE_MAGIC[kind]):
+        return False
+    if kind == "webp":
+        return raw[8:12] == b"WEBP" and int.from_bytes(raw[4:8], "little") + 8 == len(raw)
+    return raw.endswith(_IMAGE_TRAILER[kind])
 
 
 def _binary_paths(payload: dict) -> set:

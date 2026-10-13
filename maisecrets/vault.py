@@ -613,6 +613,11 @@ def _run_store(what: str, args: list[str], **kw) -> subprocess.CompletedProcess:
     """subprocess.run for a store call. A call that hits its timeout raised TimeoutExpired, which
     passed every `except RuntimeError` of the sweep, forget and wipe, and whose text lists the
     argv, the value included on the keychain's long-value path (CLI test agent, 2026-09-27)."""
+    if not kw.get("capture_output"):
+        # a store tool must never write to the hook's own stdout or stderr: the client reads the hook's answer there,
+        # and a child that keeps them open holds the client (Gate A of 0.6.15)
+        kw.setdefault("stdout", subprocess.PIPE)
+        kw.setdefault("stderr", subprocess.PIPE)
     try:
         return subprocess.run(args, **kw)
     except subprocess.TimeoutExpired:
