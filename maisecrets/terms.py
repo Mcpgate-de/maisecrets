@@ -818,12 +818,14 @@ _MARK_WORD_RE = re.compile(r"[^\W\d_](?:[^\W\d_]|['’-](?=[^\W\d_]))*")
 
 def markers(prompt: str) -> list:
     """(start, end, name) of each `{{Jan Kowalski}}` in a prompt: 1 to 5 words of letters (a hyphen or an apostrophe
-    inside a word), at least one of them capitalised. `{{ .Values.x }}` and `{{ item }}` stay text."""
+    inside a word), at least one of them capitalised. `{{ .Values.x }}` and `{{ item }}` stay text, and so do one letter
+    and one common word alone (rules/term_stoplist.txt)."""
     out = []
     for m in _MARKER_RE.finditer(prompt):
         words = m.group(1).split()
         if 1 <= len(words) <= 5 and all(_MARK_WORD_RE.fullmatch(w) for w in words) \
-                and any(w[0].isupper() for w in words):
+                and any(w[0].isupper() for w in words) \
+                and not (len(words) == 1 and (len(words[0]) < 2 or _lower(words[0]) in stoplist())):
             out.append((m.start(), m.end(), " ".join(words)))
     return out
 
@@ -856,6 +858,8 @@ def take_markers(prompt: str, ttl: int) -> tuple[str, int]:
 
 # ------------------------------------------------------- typed commands --
 _COMMAND_RE = re.compile(r"\A\s*(?:/maisecrets:term|maisecrets:\s*term)(?:\s+(\S.*?))?\s*\Z", re.I | re.S)
+# a near miss carries the name too, and the model must not get it: /maisecrets:terms add, maisecrets term add
+_NEAR_RE = re.compile(r"\A\s*/?maisecrets(?::\s*|\s+)terms?\s+(?:add|remove)\b(.*)\Z", re.I | re.S)
 
 
 def parse_command(prompt) -> tuple[str, str] | None:
@@ -865,7 +869,8 @@ def parse_command(prompt) -> tuple[str, str] | None:
         return None
     m = _COMMAND_RE.match(prompt)
     if not m:
-        return None
+        near = _NEAR_RE.match(prompt)
+        return ("usage", " ".join(near.group(1).split())) if near else None
     rest = (m.group(1) or "").strip()
     if not rest or rest.lower() == "list":
         return None
@@ -910,7 +915,9 @@ def add_typed(words: str) -> tuple[bool, str, list]:
     label = f"NAME_{n}"
     head = "" if text else ("# maisecrets terms: one name per line, `LABEL  variant | variant`; Kowalsk* = any "
                             "ending, *kowalski* = anywhere in a word. README, section Terms.\n")
-    variants = " | ".join(v.strip() for v in words.split("|"))
+    given = [v.strip() for v in words.split("|")]
+    surnames = _surnames(given)
+    variants = " | ".join(given + [f"{w}*" for w in surnames])
     new = head + text + ("" if not text or text.endswith("\n") else "\n") + f"{label}  {variants}\n"
     from .vault import atomic_write
     try:
@@ -930,9 +937,31 @@ def add_typed(words: str) -> tuple[bool, str, list]:
     except TermsError as exc:
         note += (f" Your list has an error at line {exc.line}: until you fix it, maisecrets withholds every tool "
                 "result.")
+    if surnames:
+        note += (" Also added: the last word with any ending (as Surname*), so a salutation, a genitive and "
+                 "\"Surname, First name\" are masked too. Masked as well: the joined forms first.last, "
+                 "first-last and first_last. "
+                 "The first name alone stays visible; to mask it, add it as a term of its own.")
     return True, (f"maisecrets: the term is on your list now as {label} (line {line} of {_shown_path()}). From the "
                   f"next tool result on it is replaced by a placeholder. This prompt was not sent to the model.{note}"
                   ), [v.strip().strip("*").strip() for v in words.split("|")] + [words]
+
+
+def _surnames(given: list) -> list:
+    """The last word of each full name the person adds (2 or more words, no *): it is added as `Surname*`, so `Herr
+    Kowalski`, `Kowalskis Bericht` and `Kowalski, Jan` are masked too (gate review of block 2, H3). Not a word under 4
+    letters, not a common word, not one the variants hold already."""
+    have = {_lower(v) for v in given}
+    out = []
+    for v in given:
+        if "*" in v:
+            continue
+        words = v.split()
+        last = words[-1] if len(words) > 1 else ""
+        if len(last) >= 4 and last.isalpha() and _lower(last) not in stoplist() and _lower(last) not in have \
+                and f"{_lower(last)}*" not in have and last not in out:
+            out.append(last)
+    return out
 
 
 def term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, str, list]:
@@ -950,7 +979,8 @@ def term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, s
             if (entity_id and e.id == entity_id) or want in {v.text.lower() for v in e.variants}}
     lines = text.splitlines(keepends=True)
     kept = [x for i, x in enumerate(lines, 1) if i not in drop]
-    removed += [e.label for e in ents if e.line in drop]
+    removed += [f"{e.label} ({len(e.variants)} variant{'s' if len(e.variants) != 1 else ''})"
+                for e in ents if e.line in drop]
     from .vault import atomic_write
     if drop:
         try:

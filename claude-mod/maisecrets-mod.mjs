@@ -52,8 +52,9 @@ async function runDispatch($, stdin) {
   return null
 }
 
-async function ask($, prompt, session, cwd) {
-  const r = await runDispatch($, JSON.stringify({ prompt, session_id: session, cwd }))
+async function ask($, prompt, session, cwd, origin) {
+  // origin: the hook takes a {{name}} marker only from a prompt the person typed (composer, bridge)
+  const r = await runDispatch($, JSON.stringify({ prompt, session_id: session, cwd, origin }))
   if (!r) return null
   const answer = JSON.parse(r.stdout)
   if (!answer || answer.maisecrets !== MARK || typeof answer.text !== 'string') return null
@@ -65,7 +66,7 @@ export function register(on) {
     if (!PERSON.has(e.origin?.kind)) return next(e)
     let answer = null
     try {
-      answer = await ask($, e.text, await $.session.id(), await $.session.cwd())
+      answer = await ask($, e.text, await $.session.id(), await $.session.cwd(), e.origin?.kind)
     } catch {
       // the hook decides it
     }

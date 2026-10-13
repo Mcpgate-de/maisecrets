@@ -1666,7 +1666,20 @@ maisecrets: term add Jan Kowalski          (the same, and the form for Codex)
 
 maisecrets writes the name to `~/.maisecrets/terms.txt` and does not send the
 prompt to the model. From the next tool result on, `Jan Kowalski` becomes a
-placeholder such as `⟦NAME_c3⟧`. `/maisecrets:term remove Jan Kowalski` (or
+placeholder such as `⟦NAME_c3⟧`.
+
+When you add a name of two or more words, maisecrets also adds the last word
+with any ending (`Kowalski*`), if it has 4 letters or more and is not a common
+word. So `Herr Kowalski`, `Kowalskis Bericht`, `Kowalski, Jan` and
+`J. Kowalski` are masked too. The joined forms `jan.kowalski`,
+`Jan-Kowalski` and `jan_kowalski` (also in `jan_kowalski.pdf`) are masked as
+one word. The first name alone stays visible: `Jan` is a common word, and
+masking it would hide every other Jan. To mask it anyway, add it as a term
+of its own. The answer to the command says what maisecrets added. A typing
+error such as `/maisecrets:terms add …` or `maisecrets term add …` is not
+sent to the model either: maisecrets shows the correct form.
+
+`/maisecrets:term remove Jan Kowalski` (or
 `remove ⟦NAME_c3⟧`, the placeholder copied from a result) takes it off.
 `/maisecrets:term` alone shows your lists. Only your typed prompt changes the
 list, as with a setting (C22): a removal in a tool call is refused.
@@ -1676,8 +1689,10 @@ the name in that prompt and in every tool result until the lifetime of a
 name value ends (`ttl_seconds`, one day by default); it does not write
 `terms.txt`. A marker is 1 to 5 words of letters (a hyphen or an apostrophe
 inside a word), and one word starts with a capital letter. So
-`{{ .Values.image.tag }}` and `{{ item }}` stay text. A marker counts only in
-a prompt that you typed.
+`{{ .Values.image.tag }}` and `{{ item }}` stay text, and so do one letter
+and one common word alone (`{{A}}`, `{{The}}`). A marker counts only in a
+prompt that you typed at the composer or over Remote Control, not in one that
+a program or a subagent sent.
 
 **The file.** `~/.maisecrets/terms.txt` holds one entity per line: a label,
 then the variants, separated by `|`. `#` starts a comment.
@@ -1694,10 +1709,18 @@ EMAIL_BOSS   boss at work
 | `Jan` | the whole word: `Jan`, `Jan,`, `(Jan)`, `Jan's` | `January`, `Jan2`, `jan_report` |
 | `Kowalsk*` | a word that starts so: `Kowalski`, `Kowalskiego`, `Kowalski_report` | `Nowakowalski` |
 | `*kowalski` | a word that ends so: `Kowalski`, `JanKowalski` | `Kowalskiego` |
-| `*acme-0042*` | the whole word around it: `x-acme-0042-b`, `acme-0042@example.com` | none |
+| `*acme-0042*` | the text and the letters, digits and `_` around it: `xacme-0042b` whole; in `x-acme-0042-b` and `acme-0042@example.com` the part `acme-0042` | none |
 
 - Case does not matter (`ŁÓDŹ` matches `łódź`). A space in a variant matches
   any run of whitespace, also a line break. Other characters are literal.
+- Composed and decomposed letters match alike (a macOS file name holds
+  `Mu` plus a combining diaeresis for `Mü`), and a soft hyphen or a
+  zero-width character inside a name does not hide it. A spelling with other
+  letters does not match: `MUELLER` is not `Müller`, `GROSSMANN` is not
+  `Großmann`, and fullwidth letters (`Ｍüller`) are not `Müller`. List such a
+  spelling as a variant of its own.
+- Two names that overlap (`Anna Maria` and `Maria Kowalski` in
+  `Anna Maria Kowalski`) become one placeholder.
 - A word is a run of letters, digits and `_`. So `Kowalski_report.pdf` is one
   word: `Kowalski` does not mask a part of it. Write `*kowalski*` to mask
   file names too.
@@ -1705,7 +1728,9 @@ EMAIL_BOSS   boss at work
 - All variants of an entity get the same placeholder. The type is `NAME`,
   or the type in the label (`EMAIL_BOSS` gives `EMAIL`).
 - A stem before or after a `*` needs 3 letters or digits, a `*…*` variant 4
-  characters. maisecrets uses at most 50 `*…*` variants.
+  characters. maisecrets uses at most 50 `*…*` variants in all the lists: the
+  51st stops your own list with its line, and a team list leaves it out and
+  names it.
 - The file must be private. If others can read it, maisecrets sets it to
   `0600`. If a line is wrong, every hook fails closed and the message names
   the line, never its text. Fix the line, and the next hook works. Only you
@@ -1714,13 +1739,18 @@ EMAIL_BOSS   boss at work
 
 **A team list.** Put a `*.terms` file in a folder of `rule_dirs` (Rules of
 your own). The AI can write a shared checkout, so a team list has a floor: an
-entry of fewer than 3 characters, or one word of
+entry of fewer than 3 characters, an entry of only words of
 `maisecrets/rules/term_stoplist.txt` (the closed word classes of English and
-German, and the common words of a developer session), is left out. A line
+German, and the common words of a developer session), a `*` with a stem of
+fewer than 5 letters (`ret*`, `*ing`), and a stem that 3 or more words of
+that list share (`*ation*`), are left out. A line
 that fails is left out with its reason; the rest of the file loads, and a bad
 team file never stops a hook. The session start says when a team list
 changed. `/maisecrets:rules` and `maisecrets terms` show the counts, the
 files and each line left out, never a term. A file can be up to 4 MB.
+
+**Not in a PDF or an image.** The matcher reads text. A name inside a PDF, an
+image or another binary file that a tool reads reaches the model as it is.
 
 **Mask only.** maisecrets never puts a name back. A term placeholder in a
 command, an MCP argument or a file that the AI writes stays as it is: a
