@@ -3957,19 +3957,16 @@ def _disarm_alarm(before) -> None:
         pass
 
 
-def _quarantine_running_rule() -> None:
-    """The watchdog answered while a rule of your own ran, and that rule itself ran longer than its budget: it is left
-    out from the next call on (maisecrets/user_rules.py). A rule that ran only for a moment stays: the time went to the
-    work before it, and an agent could else take out one correct rule per call with a large output (Fable review,
-    round 2). Never raises."""
+def _quarantine_running_rule(elapsed: float) -> None:
+    """The watchdog answered after `elapsed` seconds. The rule of your own with the most time inside its regex is left
+    out from the next call on, when that time is more than half of `elapsed`: then that rule held the hook. Else the
+    time went to other work, and no rule is blamed: an agent could else take out one correct rule per call with a
+    large output (Fable review, round 2; Opus review, round 3). Never raises."""
     try:
-        running = detect.running_user_rule()
-        if running is not None:
-            rule, started, budget = running
-            took = time.perf_counter() - started
-            if took > budget:
-                from . import user_rules
-                user_rules.note_slow(rule, took * 1000)
+        slowest = detect.slowest_user_rule()
+        if slowest is not None and slowest[1] > 0.5 * elapsed:
+            from . import user_rules
+            user_rules.note_slow(slowest[0], slowest[1] * 1000)
     except Exception:  # noqa: BLE001 - the answer is out; this only spares the next call
         pass
 
@@ -3994,6 +3991,7 @@ def main(argv: list[str]) -> int:
         return 0
     import threading
     started = time.time()
+    clock = time.perf_counter()
     lock = threading.Lock()
     answered = {"v": False}
     answering = {"v": False}
@@ -4036,7 +4034,7 @@ def main(argv: list[str]) -> int:
         if answer(_fail_closed(event, payload, f"took longer than {seconds:.0f}s."), "watchdog"):
             def last() -> None:
                 _heartbeat(event, payload, done=True)
-                _quarantine_running_rule()
+                _quarantine_running_rule(time.perf_counter() - clock)
                 _scrub_failed_prompt(event, payload)
                 incidents.write_marker(f"hook.{event}.watchdog")
             t = threading.Thread(target=last, daemon=True)

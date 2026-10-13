@@ -734,6 +734,8 @@ def reset_rules() -> None:
     _RULES = None
     _ALLOW.clear()
     _SHAPE_IDS.clear()
+    for times in (_REGEX_TIME, _REGEX_CHARS, _REGEX_RULE):
+        times.clear()
     from . import user_rules
     user_rules.reset()
 
@@ -742,38 +744,60 @@ def reset_rules() -> None:
 # run in scan() after the rules. A span a rule took stays taken, and the allow list holds for them too.
 extra_matchers: list = []
 
-# The rule of your own that scan() runs at this moment: the hook's watchdog names it, so the next call leaves it out
+# The time each rule of your own spent inside its regex in this process (seconds), and the characters it ran over.
+# Only the regex counts, around each step of its finditer: the work on each hit is no time of the rule (Opus review,
+# round 3: a correct rule with 170k hits was taken out by the wall time of its loop). The sum runs over every scan of
+# the process, so a slow text split over many strings of one tool result adds up (same review).
+_REGEX_TIME: dict = {}
+_REGEX_CHARS: dict = {}
+_REGEX_RULE: dict = {}
+# (rule, perf_counter at the start of the step) while a step of a rule of your own runs, else None
 _RUNNING: list = [None]
-# A rule of your own may take this long in one scan (seconds, plus USER_RULE_BUDGET_PER_MB for each MB of text);
-# a rule that takes longer is left out from then on (maisecrets/user_rules.py, note_slow)
+# A rule of your own may spend this long in its regex in one process (seconds, plus USER_RULE_BUDGET_PER_MB for each
+# MB of text it ran over); a rule that spends more is left out from then on (maisecrets/user_rules.py, note_slow)
 USER_RULE_BUDGET = 0.5
 USER_RULE_BUDGET_PER_MB = 0.1
 
 
-def running_user_rule():
-    """(rule, started, budget) of the rule of your own that scan() runs at this moment, or None."""
-    return _RUNNING[0]
+def slowest_user_rule():
+    """(rule, seconds) of the rule of your own with the most time inside its regex in this process, the step that
+    runs now included; None when no rule of your own ran."""
+    best = None
+    running = _RUNNING[0]
+    now = time.perf_counter()
+    times = dict(_REGEX_TIME)
+    rules_by_id = dict(_REGEX_RULE)
+    if running is not None:
+        rule, since = running
+        times[rule.id] = times.get(rule.id, 0.0) + (now - since)
+        rules_by_id[rule.id] = rule
+    for rid, took in times.items():
+        if best is None or took > best[1]:
+            best = (rules_by_id[rid], took)
+    return best
 
 
-def _timed(rule: Rule, found, budget: float):
-    """The matches of a rule of your own, with the time its regex takes. Over the budget, the rule is left out of
-    this process and, by the state file, of the next ones."""
-    spent = 0.0
-    _RUNNING[0] = (rule, time.perf_counter(), budget)
+def _timed(rule: Rule, found, chars: int):
+    """The matches of a rule of your own; the time inside its regex adds to the rule's sum for the process. Over the
+    budget, the rule is left out of this process and, by the state file, of the next ones."""
+    _REGEX_RULE[rule.id] = rule
+    _REGEX_CHARS[rule.id] = _REGEX_CHARS.get(rule.id, 0) + chars
     try:
         while True:
             t = time.perf_counter()
+            _RUNNING[0] = (rule, t)
             try:
                 m = next(found)
             except StopIteration:
                 break
             finally:
-                spent += time.perf_counter() - t
+                _RUNNING[0] = None
+                _REGEX_TIME[rule.id] = _REGEX_TIME.get(rule.id, 0.0) + (time.perf_counter() - t)
             yield m
     finally:
-        _RUNNING[0] = None
-        if spent > budget:
-            _too_slow(rule, spent)
+        took = _REGEX_TIME.get(rule.id, 0.0)
+        if took > USER_RULE_BUDGET + USER_RULE_BUDGET_PER_MB * _REGEX_CHARS[rule.id] / 1e6:
+            _too_slow(rule, took)
 
 
 def _too_slow(rule: Rule, spent: float) -> None:
@@ -1312,7 +1336,6 @@ def scan(text: str, enabled: set[str] | None = None, rule_list: list[Rule] | Non
     taken_ends: list[int] = []
     allowed = allow_list()[0] if rule_list is None else frozenset()
     allowed_spans: list[tuple[int, int]] = []
-    budget = USER_RULE_BUDGET + USER_RULE_BUDGET_PER_MB * len(text) / 1e6
 
     def overlaps(a: int, b: int) -> bool:
         """Whether [a, b) overlaps a span already taken. The spans never overlap each other, so only the two
@@ -1345,7 +1368,7 @@ def scan(text: str, enabled: set[str] | None = None, rule_list: list[Rule] | Non
             continue
         own = rule.id.startswith("user:")
         hits = _matches(rule, text)
-        for m in (_timed(rule, hits, budget) if own and rule_list is None else hits):
+        for m in (_timed(rule, hits, len(text)) if own and rule_list is None else hits):
             ngroups = rule.regex.groups or 0
             if rule.whole_match:
                 g = 0

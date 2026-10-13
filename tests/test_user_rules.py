@@ -407,6 +407,7 @@ def iban_complete(cc: str, bban: str) -> str:
 
 SLOW_RX = r"abcd(a|aa)+Z"          # exponential: each `a` doubles the tries when the Z is missing
 SLOW_TEXT = "abcd" + "a" * 40 + "!"
+SPLIT_RX = r"abcd[ac-y]{1,99}[bc-y]{1,99}[ac-y]{1,99}[bc-y]{1,99}[ac-y]{1,99}Z"   # slow on a run of c only
 SLOW_SHAPES = (r"abcd.*.*.*.*Z", r"abcd(?:[a-z]{1,30}){1,30}Z", r"abcd(?=.*.*.*Z)", r"xkey(a|a)*$",
                r"abcd(?:a?){25}a{25}", r"x?[a-z]+abcd", r"acme_(a|aa)+$", r"abcd(x)\1", r"abcd\w+\d+Z")
 
@@ -704,30 +705,52 @@ class Backtracking(Base):
         self.assertEqual(q.rule, "user:tok")
         self.assertIn("slow: one scan took", q.reason)
 
-    def test_a_fast_rule_survives_a_watchdog_answer_and_a_slow_one_is_named_with_its_time(self):
+    def test_a_slow_text_split_over_many_strings_adds_up(self):
+        # each string costs the rule about 15 ms, far under the budget; 100 of them do not (Opus review, round 3)
+        write_rules(OWN, [{"id": "rows", "regex": SPLIT_RX}])
+        detect.reset_rules()
+        with mock.patch.object(user_rules, "probe", return_value={}):     # the load test is not the subject here
+            user_rules.load()
+        scans = 0
+        while "user:rows" in {r.id for r in detect.rules()} and scans < 400:
+            detect.scan("row: abcd" + "c" * 50 + "!")
+            scans += 1
+        self.assertLess(scans, 400, "the regex time of the many scans adds up to the budget")
+        self.assertGreater(scans, 1, "one scan alone stays under the budget")
+        detect.reset_rules()
+        (q,) = user_rules.load(budget=0).quarantined
+        self.assertEqual(q.rule, "user:rows")
+        self.assertRegex(q.reason, r"slow: one scan took \d+ ms")
+
+    def test_a_correct_rule_with_many_hits_survives_a_watchdog_answer(self):
+        # the work on each hit is no time of the rule: only its regex counts (Opus review, round 3). The scan is
+        # real and so is its clock; the watchdog's question is asked right after it
         import time
-        write_rules(OWN, [{"id": "tok", "regex": r"tkx_[A-Za-z0-9]{24}"}])
+        write_rules(OWN, [{"id": "tok", "regex": r"tkx_[A-Za-z0-9]{24}", "keywords": ["tkx_"]}])
         detect.reset_rules()
-        (rule,) = user_rules.load().rules
-        detect._RUNNING[0] = (rule, time.perf_counter() - 0.003, 0.5)       # it ran 3 ms when the watchdog fired
-        self.addCleanup(detect._RUNNING.__setitem__, 0, None)
-        hooks._quarantine_running_rule()
-        self.assertEqual(user_rules._read_state().get("slow", {}), {}, "the time went to other work")
-        detect._RUNNING[0] = (rule, time.perf_counter() - 1.2, 0.5)
-        hooks._quarantine_running_rule()
-        detect.reset_rules()
-        (q,) = user_rules.load().quarantined
-        self.assertRegex(q.reason, r"slow: one scan took 1[0-9]{3} ms")
+        text = " ".join("tkx_" + "ab" * 6 + "%012d" % i for i in range(40000))
+        started = time.perf_counter()
+        self.assertGreater(len(detect.scan(text)), 30000)
+        elapsed = time.perf_counter() - started
+        rule, took = detect.slowest_user_rule()
+        self.assertEqual(rule.id, "user:tok", "the rule ran: the test is not empty")
+        self.assertLess(took, 0.5 * elapsed, "its regex is a small part of the scan")
+        hooks._quarantine_running_rule(elapsed)
+        self.assertEqual(user_rules._read_state().get("slow", {}), {}, "a correct rule is not blamed for its hits")
+        hooks._quarantine_running_rule(took * 1.5)        # had the regex held the call, it would be the one
+        self.assertEqual(len(user_rules._read_state().get("slow", {})), 1)
 
     def test_the_timing_runs_the_characters_of_the_rule_s_own_repeats(self):
-        rx = r"tkr_" + r"[b-y]{1,99}" * 5 + "Z"      # passes the static checks; slow only on a run of b..y
-        self.assertIsNone(user_rules.check_regex(rx)[0])
-        write_rules(OWN, [{"id": "rows", "regex": rx}])
-        with mock.patch.object(user_rules, "PROBE_DEADLINE", 0.5):
-            detect.reset_rules()
-            (q,) = user_rules.load().quarantined
-        self.assertEqual(q.rule, "user:rows")
-        self.assertIn("slow: a test text took more than 500 ms", q.reason)
+        for rx in (r"tkr_" + r"[b-y]{1,99}" * 5 + "Z",      # slow only on a run of b..y
+                   SPLIT_RX):                                 # slow only on a run of what both sets take
+            with self.subTest(rx):
+                self.assertIsNone(user_rules.check_regex(rx)[0], "passes the static checks")
+                write_rules(OWN, [{"id": "rows", "regex": rx}])
+                with mock.patch.object(user_rules, "PROBE_DEADLINE", 0.5):
+                    detect.reset_rules()
+                    (q,) = user_rules.load().quarantined
+                self.assertEqual(q.rule, "user:rows")
+                self.assertIn("slow: a test text took more than 500 ms", q.reason)
 
     @unittest.skipIf(os.name == "nt", "a shell script as the interpreter")
     def test_the_test_child_start_counts_against_the_budget(self):
@@ -741,20 +764,20 @@ class Backtracking(Base):
             self.assertEqual(user_rules.probe([src], budget=0.3), {})
         self.assertLess(time.monotonic() - started, 3)
 
-    def test_check_reads_a_rule_again_that_a_scan_left_out(self):
+    def test_check_keeps_a_rule_out_that_a_real_scan_found_slow(self):
         write_rules(OWN, [{"id": "tok", "regex": r"tkx_[A-Za-z0-9]{24}"}])
         detect.reset_rules()
         user_rules.load()
         (rule,) = detect.rules()[-1:]
         user_rules.note_slow(rule, 900.0)
-        detect.reset_rules()
-        self.assertEqual(user_rules.load().rules, [], "left out")
         rc, out, _ = RulesCommand.run_cli(self, "check", str(OWN))
-        self.assertEqual(rc, 0, out)
-        self.assertIn("ok      user:tok", out)
-        self.assertIn("the hooks left it out (slow in a scan), and read it again from now on", out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("slow    user:tok  the hooks leave it out: a real scan found it slow; change the rule", out)
         detect.reset_rules()
-        self.assertEqual([r.id for r in user_rules.load().rules], ["user:tok"])
+        self.assertEqual(user_rules.load().rules, [], "the check cannot take the verdict back")
+        write_rules(OWN, [{"id": "tok", "regex": r"tkx_[A-Za-z0-9]{25}"}])
+        detect.reset_rules()
+        self.assertEqual([r.id for r in user_rules.load().rules], ["user:tok"], "a changed rule is checked again")
 
     @unittest.skipIf(os.name == "nt", "Windows has no SIGALRM: the thread watchdog stays alone there (README)")
     def test_a_hook_process_answers_fail_closed_inside_a_slow_regex_and_leaves_the_rule_out(self):
