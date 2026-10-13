@@ -1141,7 +1141,8 @@ Four sources, one scanner (`maisecrets/detect.py`):
   word such as `To:`), phone
   with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, a
   password with no user in a URL (`redis://:…@host`), the secret half of an AWS
-  key pair within a few lines after its `AKIA…` id, and full-length GitLab
+  key pair within a few lines after its `AKIA…` id (at most 4 lines on, and at most
+  400 characters into its line, so a long line scans in linear time), and full-length GitLab
   runner and deploy tokens.
 - Prefixes newer than the vendored rulesets live in
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
