@@ -564,7 +564,7 @@ OWN_RULES: list[dict] = [
     # `mysql -u app -p'<value>' db`: the value glued to -p (a space after -p asks for it; -P is the port)
     {"id": "label-mysql-p", "type": "SECRET", "secret_group": 2, "validator": "glued_value",
      "regex": r"(?<![\w-])(?:mysql|mysqldump|mysqladmin|mysqlimport|mysqlshow|mysqlcheck|mysqlpump|mariadb"
-              r"|mariadb-dump|mariadb-admin)(?:\.exe)?(?![\w-])[^\n|;&]*?[ \t]-p(['\"]?)([^\s'\"<>]{1,256}?)\1"
+              r"|mariadb-dump|mariadb-admin)(?:\.exe)?(?![\w-])[^\n|;&]{0,400}?[ \t]-p(['\"]?)([^\s'\"<>]{1,256}?)\1"
               r"(?=$|[\s;|&)\]])"},
     # redis-cli: `127.0.0.1:6379> AUTH <value>` (or AUTH <user> <value>) at a prompt or the start of a line, and
     # `redis-cli -a <value>`. AUTH in capitals, as Redis documents it; `auth token expired` is prose
@@ -574,7 +574,8 @@ OWN_RULES: list[dict] = [
               r"|ANONYMOUS|PLAIN|LOGIN)[ \t]*$)"   # an SMTP or IMAP AUTH names a SASL mechanism (Gate B of 0.6.15)
               r"(['\"]?)([^\s'\"<>]{1,256})\1[ \t]*$"},
     {"id": "label-redis-cli-a", "type": "SECRET", "secret_group": 2, "validator": "word_value",
-     "regex": r"(?<![\w-])redis-cli(?![\w-])[^\n|;&]*?[ \t]-a[ \t]+(['\"]?)([^\s'\"<>]{1,256}?)\1(?=$|[\s;|&)\]])"},
+     "regex": r"(?<![\w-])redis-cli(?![\w-])[^\n|;&]{0,400}?[ \t]-a[ \t]+"
+              r"(['\"]?)([^\s'\"<>]{1,256}?)\1(?=$|[\s;|&)\]])"},
     # .netrc: `machine <host> login <user> password <value>`, on one line or on several
     {"id": "label-netrc-password", "type": "SECRET", "secret_group": 1, "validator": "word_value",
      "regex": r"(?:(?<![\w-])machine[ \t]+[^\s]+|(?<![^\n])[ \t]*default)(?:\s+(?:login|account|port)[ \t]+[^\s]+)*"
@@ -724,6 +725,7 @@ _COLON_AFTER_LABEL_SPACED = "([]\\'\"]{0,2})?[ \\t\u00a0\u202f]{0,3}:"
 # (Samsung CredData, line by line: 62 such credentials missed, 2026-10-12). The backslash before the value's opening
 # quote is skipped only before a quote; the one before its closing quote is cut in scan()
 _COLON_AFTER_LABEL_ESCAPED = "((?:\\\\?[]'\"]){0,2})?[ \\t\u00a0\u202f]{0,3}:"
+_ESCAPABLE_COLON_RULES = ("ds-keyword-colon", "ds-keyword-colon-quotes-required")   # group 2: the label's quote
 _COLON_THEN_QUOTE = (":\\s*([\\'\"`]?)", ":(\\s*)([\\'\"`])")
 _ESCAPED_QUOTE_SKIP = "(?:\\\\(?=[\"']))?"
 _WHITESPACE_RE = re.compile(r"\s")
@@ -1433,13 +1435,14 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if end <= start:
                 continue
             secret = m.group(g)
+            if (rule.id in _ESCAPABLE_COLON_RULES and "\\" in (m.group(2) or "")
+                    and text[start - 2:start] not in ('\\"', "\\'")):
+                # the label's quote is escaped: JSON inside a string, whose values are escaped strings. A value without
+                # an escaped quote is code or a literal: `\"access_token\": finding[\"secret\"]` (19 hits in the
+                # vendored rules file, Gate A of 0.6.15), an escaped null (Gate B)
+                continue
             if secret.endswith("\\") and text[end:end + 1] in ("\"", "'") and rule.id.startswith("ds-keyword"):
-                # {\"password\":\"<value>\"}: the backslash escapes the quote. An unquoted value ends there too, and
-                # without the comma the plain-JSON value never holds: an escaped null reads as null (Gate B of 0.6.15)
-                secret = secret[:-1]
-                if text[start - 2:start - 1] != "\\":
-                    secret = secret.rstrip(",")
-                end = start + len(secret)
+                secret, end = secret[:-1], end - 1   # {\"password\":\"<value>\"}: the backslash escapes the quote
             if rule.quote_group and not m.group(rule.quote_group):
                 cut = _WHITESPACE_RE.search(secret)
                 if cut:

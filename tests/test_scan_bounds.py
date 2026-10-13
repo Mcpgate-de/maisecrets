@@ -153,5 +153,19 @@ class CurlRuleTests(unittest.TestCase):
                 self.assertLess(took((tok * 7000)[:32000], CURL), 1.0)
 
 
+class LabelRuleTests(unittest.TestCase):
+    def test_a_long_line_of_a_command_word_scans_in_under_a_second(self):
+        # `mysql … -p` and `redis-cli … -a` looked for the option over the rest of the line from each command word:
+        # 32K characters took 0.35 s, 256K about 22 s (Gate A of 0.6.15); bounded to 400 characters as the AWS rule
+        for tok in ("mysql -u root ", "redis-cli -h cache "):
+            with self.subTest(tok):
+                self.assertLess(took((tok * 8000)[:96000], ("label-mysql-p", "label-redis-cli-a")), 1.0)
+
+    def test_the_option_400_characters_after_the_command_is_still_found(self):
+        pw = rnd(10) + "#7"
+        text = "mysql " + "--host db " * 39 + f"-p{pw} shop"
+        self.assertEqual([m.value for m in detect.scan(text) if m.kind == "label-mysql-p"], [pw])
+
+
 if __name__ == "__main__":
     unittest.main()

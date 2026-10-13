@@ -625,6 +625,7 @@ NO_HIT = [
     ('gateb escaped null', '"body": "{\\"p§assword\\":null,\\"remember\\":true}"'),
     ('gateb escaped number', '"{\\"a§pi_k§ey\\":1234567,\\"x\\":1}"'),
     ('gateb no-password tool', 'backup-tool --no-p§assword analytics_v2 --verbose'),
+    ('gatea escaped label code', '"description": "{\\"access_t§oken\\": finding[\\"s§ecret\\"]}"'),
 ]
 
 HIT = [
