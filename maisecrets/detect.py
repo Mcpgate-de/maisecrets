@@ -419,6 +419,17 @@ _LOWER_WORDS_RE = re.compile(r"[a-z0-9]+(?:[-_.][a-z0-9]+)*")
 
 
 _MARKER_RE = re.compile(r"\[[^\]]*\]|<[^>]*>|\{[^}]*\}")
+# values the new label paths of 0.6.15 read that hold no password (release review of 0.6.15, Gate B): a date or a
+# timestamp (passwordLastChanged, AUTH 2024-10-13), a file a tool reads (--password @/run/secrets/pw), a template
+# variable a build fills (-p@MYSQL_PWD@), a placeholder to replace (CHANGE_ME_2024). The ds rules keep their own filter
+_LABEL_NOT_A_VALUE_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
+    r"|@[~.]?/[^\s]*|@[A-Za-z_][A-Za-z0-9_]*@"
+    r"|(?i:change[_-]?me)(?:[_-]?[A-Za-z0-9]+)*")
+
+
+def _label_value_ok(v: str) -> bool:
+    return not _LABEL_NOT_A_VALUE_RE.fullmatch(v.strip().rstrip(".,;:!?)"))
 
 
 def _word_value_ok(v: str, min_len: int = 8, prose_punct: bool = False) -> bool:
@@ -430,6 +441,8 @@ def _word_value_ok(v: str, min_len: int = 8, prose_punct: bool = False) -> bool:
     question (Gate B of 0.6.15); after AUTH or in a netrc, `Sommerurlaub!` stays a value."""
     w = v.strip()
     if _MARKER_RE.fullmatch(w) or w[:1] in "[{<" or "\\" in w:   # the flag regex ends a value at ]: [REDACTED
+        return False
+    if not _label_value_ok(w):
         return False
     core = w.rstrip(".,;:!?)") if prose_punct else w
     return _ds_value_ok(v, min_len=min_len) and not core.isalpha()
@@ -1463,6 +1476,9 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                 continue
             if secret.endswith("\\") and text[end:end + 1] in ("\"", "'") and rule.id.startswith("ds-keyword"):
                 secret, end = secret[:-1], end - 1   # {\"password\":\"<value>\"}: the backslash escapes the quote
+            if (rule.id in _ESCAPABLE_COLON_RULES and "\\" in (m.group(2) or "")
+                    and not _label_value_ok(secret)):
+                continue   # {\"passwordLastChanged\":\"2024-10-01T12:00:00Z\"}: the new escaped path, no password
             if rule.quote_group and not m.group(rule.quote_group):
                 cut = _WHITESPACE_RE.search(secret)
                 if cut:

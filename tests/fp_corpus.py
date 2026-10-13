@@ -659,6 +659,13 @@ NO_HIT = [
     ('round2 opus prompt 20', 'the def§aul§t pas§swo§rd pol§icy§_v2 req§uir§es 12 cha§rac§ter§s'),
     ('round2 opus prompt 21', 'my pas§swo§rd is in the vau§lt, not her§e'),
     ('round2 opus prompt 22', 'the pas§swo§rd is SHA§256§-ha§she§d and sal§ted'),
+    # release review of 0.6.15 (Gate B): a date, a file a tool reads, a template variable, a placeholder
+    ('rel escaped date', '"{\\"pas§swo§rdL§ast§Cha§nge§d\\":\\"20§24-§10-§01T§12:§00:§00Z§\\"}"'),
+    ('rel prose timestamp', 'the pas§swo§rd is 20§24-§10-§13T§12:§00:§00Z§'),
+    ('rel redis auth date', 'red§is 127§.0.§0.1§:63§79> AUT§H 20§24-§10-§13'),
+    ('rel flag at file', 'mya§pp --p§ass§wor§d @/r§un/§sec§ret§s/p§w'),
+    ('rel mysql template', 'mys§ql -u roo§t -§p@MYSQL_PWD@ < sch§ema§.sq§l'),
+    ('rel flag change me', 'mya§pp --p§ass§wor§d CHA§NGE§_ME§_20§24'),
 ]
 
 HIT = [

@@ -209,5 +209,36 @@ class EscapedJsonTests(unittest.TestCase):
         self.assertEqual(found('{\\"refresh_token_ttl\\":\\"15552000\\"}'), [])
 
 
+class NoPasswordAfterTheNewLabelsTests(unittest.TestCase):
+    """The label paths of 0.6.15 read no password in a date or a timestamp, a file a tool reads (@/path), a template
+    variable a build fills (@NAME@) or a CHANGE_ME placeholder (release review of 0.6.15, Gate B)."""
+
+    def test_dates_files_templates_and_placeholders_are_no_hit(self):
+        day, stamp = J(["2024-10", "-13"]), J(["2024-10-01", "T12:00:00Z"])
+        texts = [
+            J(['"{\\"', PW, 'LastChanged\\":\\"', stamp, '\\"}"']),
+            f"the {PW} is {stamp}",
+            f"redis 127.0.0.1:6379> AUTH {day}",
+            f"myapp {PW_FLAG} @/run/secrets/pw",
+            J(["mysql -u root -p@", "MYSQL_PWD@ < schema.sql"]),
+            f"myapp {PW_FLAG} {J(['CHANGE', '_ME_2024'])}",
+        ]
+        for text in texts:
+            with self.subTest(text=text[:30]):
+                self.assertEqual(found(text), [])
+
+    def test_a_real_value_after_the_same_labels_stays_a_hit(self):
+        pw = password()
+        for text in (f"myapp {PW_FLAG} {pw}", f"redis> AUTH default {pw}", f"mysql -u root -p{pw} db",
+                     J(['"{\\"', PW, '\\":\\"', pw, '\\"}"'])):
+            with self.subTest(text=text[:24]):
+                self.assertEqual(found(text), [("SECRET", pw)])
+
+    def test_a_date_after_a_plain_json_label_is_as_in_0_6_14(self):
+        # the shared ds path is not changed: it took this value in 0.6.14 too
+        stamp = J(["2024-10-01", "T12:00:00Z"])
+        self.assertEqual(found(J(['{"', PW, 'LastChanged":"', stamp, '"}'])), [("SECRET", stamp)])
+
+
 if __name__ == "__main__":
     unittest.main()
