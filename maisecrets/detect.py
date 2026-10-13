@@ -1100,18 +1100,19 @@ OWN_RULES: list[dict] = [
      "regex": r"(?i)(?<![\w$.-])[\"']?(passwords?|passwd|secrets?|api[_-]?(?:keys?|tokens?|secrets?)"
               r"|(?:access|auth|refresh|bearer)[_-]?tokens?|client[_-]?secrets?|private[_-]?keys?|secret[_-]?keys?"
               r"|credentials)[\"']?[ \t]*(?::=|=>|[:=])[ \t]*(\[\][\w.]*[ \t]*\{|[\w.]*\[\][ \t]*\{|\[)"},
-    # four token formats with a public prefix and no rule in the vendored sets (0.6.16). An NTLMSSP message in base64
-    # (`Authorization: NTLM TlRMTVNTUA…`: the response of its third message is derived from the password hash); a
+    # four token formats with a public prefix and no rule in the vendored sets (0.6.16). The third NTLMSSP message in
+    # base64 (`Authorization: NTLM TlRMTVNTUAAD…`: its response is derived from the password hash; the negotiate and
+    # challenge messages carry none); a
     # NATS nkey seed (S, the key type, 56 base32 characters; the public key starts with N, U, A … and stays text);
     # a PASERK secret, local or wrapped key (k1. to k4.; k4.public., k4.lid. and the other ids stay text); a PASETO
     # token (v1. to v4., local or public: a bearer token as a JWT is one)
     {"id": "ntlmssp-message", "type": "SECRET",
-     "regex": r"(?<![A-Za-z0-9+/])TlRMTVNTUA[A-Za-z0-9+/]{30,}={0,2}"},
+     "regex": r"(?<![A-Za-z0-9+/])TlRMTVNTUAAD[A-Za-z0-9+/]{30,}={0,2}"},
     {"id": "nats-nkey-seed", "type": "SECRET",
      "regex": r"(?<![A-Za-z0-9])S[UNOACXP][A-Z2-7]{56}(?![A-Za-z0-9])"},
     {"id": "paserk-secret-key", "type": "SECRET",
      "regex": r"(?<![\w.])k[1-4]\.(?:local|secret|local-wrap|secret-wrap|local-pw|secret-pw|seal)\."
-              r"[A-Za-z0-9_.\-]{20,}"},
+              r"(?:[A-Za-z0-9_-]+\.){0,3}[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])"},   # dot-separated parts, no end dot
     {"id": "paseto-token", "type": "SECRET",
      "regex": r"(?<![\w.])v[1-4]\.(?:local|public)\.[A-Za-z0-9_-]{30,}(?:\.[A-Za-z0-9_-]+)?"},
     # the STS session token of temporary AWS credentials: a presigned URL carries it as the query parameter

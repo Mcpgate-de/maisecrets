@@ -238,7 +238,7 @@ class TokenFormatTests(unittest.TestCase):
         paserk = "k4.local." + b64(rnd(32), url=True)
         paseto = "v4.local." + b64(rnd(64), url=True)
         return [("ntlmssp-message", f"Authorization: NTLM {ntlm}", ntlm),
-                ("ntlmssp-message", f"WWW-Authenticate: Negotiate {ntlm}", ntlm),
+                ("ntlmssp-message", f"Authorization: Negotiate {ntlm}", ntlm),
                 ("nats-nkey-seed", f"seed: {seed}", seed),
                 ("nats-nkey-seed", f"nkeys.FromSeed([]byte(\"{seed}\"))", seed),
                 ("paserk-secret-key", f"PASERK={paserk}", paserk),
@@ -251,6 +251,15 @@ class TokenFormatTests(unittest.TestCase):
             with self.subTest(rule=rule, form=text.split(value)[0]):
                 self.assertIn((rule, value), kinds(text))
 
+    def test_a_paserk_key_ends_before_sentence_punctuation(self):
+        """codex Gate A of 0.6.16: the period after a key in a sentence was part of the hit."""
+        key = "k4.local." + b64(rnd(32), url=True)
+        wrapped = "k4.local-wrap.pie." + b64(rnd(64), url=True)
+        for k in (key, wrapped):
+            for after in (".", ". Next sentence.", ",", ");", "!", ":"):
+                with self.subTest(form=k[:14], after=after):
+                    self.assertIn(("paserk-secret-key", k), kinds(f"The key is {k}{after}"))
+
     def test_public_parts_and_short_lookalikes_stay_text(self):
         pub = "U" + "".join(RNG.choice(B32) for _ in range(55))
         for text in (f"nkey public: {pub}",                                   # a public nkey: U, N, A …
@@ -258,6 +267,8 @@ class TokenFormatTests(unittest.TestCase):
                      "k4.lid." + b64(rnd(33), url=True),                        # a PASERK key id
                      "v4.local.short",                                          # no token
                      "TlRMTVNTUA",                                              # the prefix alone, in prose
+                     "Authorization: Negotiate " + b64(b"NTLMSSP\x00\x01\x00\x00\x00" + rnd(30)),   # type 1, negotiate
+                     "WWW-Authenticate: NTLM " + b64(b"NTLMSSP\x00\x02\x00\x00\x00" + rnd(40)),     # type 2, challenge
                      "the field SUPERCALIFRAGILISTICEXPIALIDOCIOUS is long"):
             with self.subTest(text=text[:12]):
                 self.assertEqual([k for k, _ in kinds(text) if k in ("ntlmssp-message", "nats-nkey-seed",

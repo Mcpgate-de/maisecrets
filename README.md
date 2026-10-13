@@ -1190,11 +1190,13 @@ Four sources, one scanner (`maisecrets/detect.py`):
   value of `X-Amz-Security-Token` in a presigned URL (percent-encoded) or a header, 100 to 4096
   characters. The other `X-Amz-` parameters stay text: the key id in `X-Amz-Credential`, the
   signature, the date.
-- Four token formats with a public prefix that the vendored rulesets lack (0.6.16): an NTLMSSP
-  message in base64 (`Authorization: NTLM TlRMTVNTUA…`), a NATS nkey seed (`SU…`, 58
+- Four token formats with a public prefix that the vendored rulesets lack (0.6.16): the third
+  NTLMSSP message in base64 (`Authorization: NTLM TlRMTVNTUAAD…`; the negotiate and challenge
+  messages carry no password-derived response and stay text), a NATS nkey seed (`SU…`, 58
   characters of base32), a PASERK secret, local or wrapped key (`k4.local.…`, `k4.secret.…`)
   and a PASETO token (`v4.local.…`, `v4.public.…`). A public nkey and a PASERK public key or
-  key id stay text.
+  key id stay text. A PASERK key ends at its last base64url character, never on a period of the
+  sentence around it.
 - Prefixes newer than the vendored rulesets live in
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
   (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last
