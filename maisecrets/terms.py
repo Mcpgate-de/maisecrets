@@ -768,6 +768,9 @@ def _marked(now: float | None = None) -> list:
     items = _marked_items()
     if any(x.get("expires", 0) <= now for x in items):
         from .vault import atomic_write
+        # every hook passes here, so a lock that another process holds for 6 s (vault._Lock.LOCK_DEADLINE) makes
+        # this hook fail closed with LockTimeout. Accepted: a holder only reads, merges and writes two small files,
+        # and a purge that waited without a bound would run into the client's timeout, which fails open
         with _lock():
             items = _marked_items()
             live = [x for x in items if x.get("expires", 0) > now]

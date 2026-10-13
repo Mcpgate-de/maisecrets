@@ -470,13 +470,22 @@ class TeamFileTests(unittest.TestCase):
         self.assertEqual(reasons, {"a variant that an earlier entry holds",
                                    f"more than {terms.MAX_BUCKET} variants that share a stem or a first word"})
         m = terms.Matcher(out.entities)
+        base = terms.Matcher(terms.parse("S_1  Testowsk*\n")[0])
         text = " ".join(f"Testowski{i % 97}" for i in range(1000))[:10240]
-        m.find(text)
-        t = time.perf_counter()
-        found = m.find(text)
-        took = time.perf_counter() - t
+
+        def best(matcher):
+            # the fastest of five runs: a loaded CI runner slows both scans alike, so their ratio holds
+            times = []
+            for _ in range(5):
+                t = time.perf_counter()
+                found = matcher.find(text)
+                times.append(time.perf_counter() - t)
+            return min(times), found
+        took, found = best(m)
+        alone, _found = best(base)
         self.assertEqual(len(found), len(text.split()))
-        self.assertLess(took, 0.05, f"10 KB took {took * 1000:.0f} ms (README: 3 to 10 ms)")
+        self.assertLess(took, 20 * alone, f"10 KB took {took * 1000:.1f} ms, {took / alone:.1f} times the scan of "
+                                          f"one entry ({alone * 1000:.1f} ms); without the bound it was thousands")
 
     def test_all_the_team_lists_together_have_one_size_cap(self):
         from unittest import mock
