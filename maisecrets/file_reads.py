@@ -239,6 +239,17 @@ def _write_note(path: str, data: dict) -> None:
         raise
 
 
+def link_roots(cfg: dict) -> list:
+    """The clean folders that are a link or lie under one: never clean (a hand-edited file; add refuses them)."""
+    out = []
+    for d in cfg.get("clean_dirs") or []:
+        if isinstance(d, str) and d.strip():
+            key = _root_key(d)
+            if os.path.isabs(key) and os.path.exists(key) and os.path.realpath(key) != key:
+                out.append(d)
+    return out
+
+
 def note_session_start(payload: dict, cfg: dict | None = None) -> None:
     """SessionStart: note when this session began, the anchor of clean_dirs (C26). Only here: a prompt or a tool call
     never writes the note, so a note that the agent deletes is not made again with a later time (nothing is clean
@@ -289,7 +300,8 @@ def note_clean_root(session, folder: str) -> None:
 
 
 def _ask_path(payload: dict, kind: str, path: str):
-    """The one-use note that the PreToolUse of this call asked the person (C26): session, tool use, kind, file."""
+    """The one-use note that the PreToolUse of this call asked the person (C26): session, tool use, kind, file, and
+    the file's device and inode, so a file swapped in under the same name between the two hooks is another file."""
     from .vault import HOME
     session, tid = payload.get("session_id"), payload.get("tool_use_id")
     if not isinstance(session, str) or not _SESSION_RE.fullmatch(session) or not isinstance(tid, str) or not tid:
@@ -298,7 +310,12 @@ def _ask_path(payload: dict, kind: str, path: str):
         return None
     import hashlib
     full = path if os.path.isabs(path) else os.path.join(str(payload.get("cwd") or ""), path)
-    key = hashlib.sha256("\0".join((session, tid, kind, _real(full))).encode()).hexdigest()[:40]
+    try:
+        st = os.stat(full)
+    except OSError:
+        return None
+    key = hashlib.sha256("\0".join((session, tid, kind, _real(full), str(st.st_dev), str(st.st_ino)))
+                         .encode()).hexdigest()[:40]
     return os.path.join(str(HOME), "asked", key)
 
 

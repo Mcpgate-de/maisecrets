@@ -308,6 +308,16 @@ class AskAndBlock(_Work):
         other["tool_use_id"] = "another-call"
         self.assertEqual(output(run_hook("post-tool", other))["type"], "text", "the ask of another call")
 
+    def test_a_file_swapped_in_under_the_same_name_after_the_ask_is_withheld(self):
+        # verification of block 4: the ask note named the path only; another file under the same name passed
+        _reset(read_pdf="ask")
+        pre = golden("PreToolUse_Read_pdf_pages", self.cwd, file_path=self.pdf)
+        self.assertEqual(decision(run_hook("pre-tool", pre)), "ask")
+        other = Path(self.cwd, "other.pdf")
+        other.write_bytes(pdf_bytes("another file"))
+        os.replace(other, self.pdf)                                   # a new inode under the asked name
+        self.assertEqual(output(self.post())["type"], "text")
+
     @unittest.skipIf(os.name == "nt", "clean_dirs is for macOS and Linux")
     def test_clean_at_the_pre_tool_and_not_clean_at_the_post_tool_is_withheld(self):
         _reset(read_pdf="ask", clean_dirs=[self.cwd])
@@ -675,6 +685,21 @@ class CleanDirs(_Work):
         run_hook("user-prompt", p)
         self.assertEqual(load_config()["clean_dirs"], [str(clean)])
         self.assertEqual(self.pre(file_path=str(clean / "old.pdf")), {})
+
+    @unittest.skipIf(os.name == "nt", "a symbolic link needs a privilege on Windows")
+    def test_the_session_start_names_a_clean_folder_that_is_a_link(self):
+        real = self._old_tree("real")
+        os.symlink(real, self.dir / "link")
+        self.assertEqual(file_reads.link_roots({"clean_dirs": [str(self.dir / "link"), str(real)]}),
+                         [str(self.dir / "link")])
+        home = self.dir / "home"
+        (home / "store").mkdir(parents=True)
+        (home / "store" / "config.json").write_text(json.dumps({**TEST_CONFIG, "clean_dirs": [str(self.dir / "link")]}))
+        path = f"{os.path.dirname(sys.executable)}{os.pathsep}/usr/bin{os.pathsep}/bin"
+        out = _launcher("session-start", {"session_id": "S2", "source": "startup", "cwd": self.cwd,
+                                          "hook_event_name": "SessionStart"}, home, path)
+        self.assertIn("is a link or lies under one", out.get("systemMessage", ""))
+        self.assertIn(f"clean_dirs add {real}", out["systemMessage"])
 
     def test_a_folder_that_holds_the_work_is_refused(self):
         def add(folder):

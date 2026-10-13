@@ -1269,7 +1269,8 @@ its own on your disk, and maisecrets does not clean those. `convert` needs
 install folders (`/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`,
 `/usr/bin`), never from the PATH, and not when others can change the program
 or its folder: a program the AI puts on the PATH must not run inside the
-hook. On Windows there is no such folder, so `convert` refuses there. Without
+hook. The Homebrew folder belongs to you, and the AI runs as you: it could
+still replace the pdftotext there, and maisecrets cannot tell. On Windows there is no such folder, so `convert` refuses there. Without
 pdftotext, maisecrets refuses every PDF and says so; it never lets the PDF
 through. A PDF that pdftotext cannot read in 6
 seconds, or that is damaged, is refused too. Text after 32K characters is cut,

@@ -166,9 +166,16 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         print(json.dumps({"systemMessage": f"maisecrets: {exc}."}))
         _marker("hook.session-start")
         sys.exit(0)
+    _clean_note = None
     try:
         from maisecrets import file_reads  # noqa: E402
         file_reads.note_session_start(payload, cfg)    # the anchor of a clean folder: only here, never later (C26)
+        _links = file_reads.link_roots(cfg)
+        if _links:
+            _clean_note = (f"maisecrets: the clean folder {_links[0]} is a link or lies under one, so nothing in it "
+                           "counts as clean. Add the real folder: /maisecrets:settings clean_dirs add "
+                           f"{os.path.realpath(os.path.expanduser(_links[0]))}"
+                           + (f" ({len(_links) - 1} more such folder(s))." if len(_links) > 1 else "."))
         file_reads.prune_sessions()
     except Exception:  # noqa: BLE001 - the note never stops a session start; without it no folder is clean
         pass
@@ -212,6 +219,8 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
                                 "/maisecrets:forget deletes them.")
     if cfg.get("config_warning"):
         out["systemMessage"] = out.get("systemMessage", "") + f" Warning: {cfg['config_warning']}."
+    if _clean_note:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + _clean_note
     # a rule of your own that fails a check is left out; the person hears it once, when the set changes
     try:
         from maisecrets.user_rules import session_note  # noqa: E402
