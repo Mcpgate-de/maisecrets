@@ -58,12 +58,19 @@ def _import_lines(v) -> list[str]:
     if not rows:
         return []
     out = ["Imported values (values import, value_files):"]
+    # an import is named by its id and, for a value file, by its place in value_files: never by its file name, which
+    # can be one of its values (value_import.source_name)
+    from pathlib import Path as _P
+    places = {value_import.source_name(_P(os.path.expanduser(f)), vault=v): n
+              for n, f in enumerate(v.cfg.get("value_files") or [], 1) if isinstance(f, str) and f.strip()}
     for r in rows:
         total = sum(r["counts"].values())
         what = f"{total} value(s) ({value_import.type_text(r['counts'])})" if total else "0 values (expired)"
         exp = f", expire in {int(max(0, r['expires'] - time.time()) // 86400)}d" if r["expires"] else ""
         age = f", imported {_age(r['at'])} ago" if r["at"] else ""
-        out.append(f"  import:{r['name']:<22} {what}{age}{exp}" + (f"  from {r['path']}" if r["path"] else ""))
+        where = (f"  value file {places[r['name']]} of value_files" if r["name"] in places else
+                 "  run by a command (the AI or you)")
+        out.append(f"  import:{r['name']:<10} {what}{age}{exp}{where}")
     out.append("  To remove an import: /maisecrets:forget import:NAME")
     return out
 
@@ -92,13 +99,32 @@ def _destination_lines(rec: dict, shown_before: float) -> list[str]:
     return out
 
 
-def cmd_forget(args: list[str]) -> int:
+IMPORT_REMOVAL_ONLY_BY_PROMPT = ("removing an import takes your own prompt: /maisecrets:forget import:NAME (in Codex: "
+                                 "maisecrets: forget import:NAME), or this command in your own terminal. An import "
+                                 "removed makes detection weaker, so the AI cannot do it (C26).")
+
+
+def _person_at_a_terminal() -> bool:
+    """The person runs this in their own terminal: stdin and stdout are a terminal. An agent's Bash call has none."""
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def cmd_forget(args: list[str], person: bool = False) -> int:
+    """``person``: the prompt hook runs this for a prompt the person typed (hooks.user_prompt); only then, or in the
+    person's own terminal, does an `import:NAME` argument remove an import."""
     if not args:
         print("usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets:list shows them)", file=sys.stderr)
         return 2
     v, rc = Vault(), 0
     for raw in args:
         if raw.startswith("import:"):
+            if not (person or _person_at_a_terminal()):
+                print(f"{raw}: not removed; {IMPORT_REMOVAL_ONLY_BY_PROMPT}")
+                rc = max(rc, 1)
+                continue
             rc = max(rc, _forget_import(v, raw[len("import:"):]))
             continue
         key = raw.strip("⟦⟧").split(":", 1)[0]
@@ -128,8 +154,9 @@ def _forget_import(v, name: str) -> int:
         print(f"import:{name}: {deleted} value(s) deleted; the store refused {refused}, which stay. Try again later.")
         return 1
     listed = _in_value_files(v, name)
+    # the path is not printed: its file name can be one of its values (value_import.source_name)
     again = (" The file is still in value_files, so the next session start imports it again; "
-             f"/maisecrets:settings value_files remove {listed} stops that." if listed else "")
+             "/maisecrets:settings value_files shows the entry to remove." if listed else "")
     # a value another import lists stays: say which import, and do not call it unmasked (round-2 review)
     gone = (f"{deleted} value(s) deleted; maisecrets no longer masks them, and their placeholders no longer resolve."
             if deleted else "no value deleted.")
@@ -144,7 +171,7 @@ def _in_value_files(v, name: str) -> str:
     from pathlib import Path as _P
     from . import value_import
     return next((f for f in v.cfg.get("value_files") or []
-                 if isinstance(f, str) and value_import.source_name(_P(os.path.expanduser(f))) == name), "")
+                 if isinstance(f, str) and value_import.source_name(_P(os.path.expanduser(f)), vault=v) == name), "")
 
 
 def cmd_values(args: list[str]) -> int:
@@ -171,6 +198,9 @@ def cmd_values(args: list[str]) -> int:
               f"/maisecrets:list shows the import; /maisecrets:forget import:{result.source} removes it.")
         return 1 if result.refused or result.stopped else 0
     if args[0] == "remove" and len(args) == 2:
+        if not _person_at_a_terminal():
+            print(f"maisecrets: {IMPORT_REMOVAL_ONLY_BY_PROMPT}", file=sys.stderr)
+            return 1
         try:
             return _forget_import(Vault(), args[1].removeprefix("import:"))
         except RuntimeError as exc:

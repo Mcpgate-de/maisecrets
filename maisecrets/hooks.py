@@ -858,6 +858,28 @@ def user_prompt(payload: dict) -> dict:
             return {"decision": "block", "reason": reason}
         return {"decision": "block", "reason": reason,
                 "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+    # the removal of an import the person typed (C26): the only way an import is removed but the person's own terminal.
+    # It weakens detection, so a tool call that carries it is refused (_pre_bash); blocked, so it does not reach the
+    # model, and the answer is the result
+    removal = _IMPORT_REMOVAL_PROMPT_RE.match(prompt) if isinstance(prompt, str) else None
+    # only a prompt of import names and keys: any other text in it may be a value and takes the normal path
+    if (removal and re.search(r"(?<![\w-])import:\S", removal.group(1))
+            and all(_FORGET_ARG_RE.fullmatch(a) for a in removal.group(1).split())):
+        if payload.get("source") in settings_mod.TYPED_SOURCES and not payload.get("agent_id"):
+            import contextlib
+            import io
+            from . import cli
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                cli.cmd_forget(removal.group(1).split(), person=True)
+            reason = "maisecrets: " + buf.getvalue().strip()
+        else:
+            reason = ("maisecrets: the removal of an import counts only when you type it as your prompt; this one came "
+                      f"from the client ({payload.get('source')}), so nothing was removed.")
+        if client_of(payload) == "codex":
+            return {"decision": "block", "reason": reason}
+        return {"decision": "block", "reason": reason,
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
     if grant:
         from . import consent_store
         if grant.group(2):
@@ -2039,6 +2061,18 @@ def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
 # opt-in (`ssh_consent: true`): every ssh-family call is classified (maisecrets/ssh_consent.py); a read runs,
 # a write needs the person's consent for its host (consent_store.py), a form the hook cannot read asks
 # each time, a short deny list is refused. Codex cannot ask: it refuses and names the sentence that grants.
+# /maisecrets:forget with an import (and its Codex form): the person's prompt that removes an import
+_IMPORT_REMOVAL_PROMPT_RE = re.compile(r"\A\s*(?:/maisecrets:forget|maisecrets:[ \t]*forget)\s+(\S.*?)\s*\Z",
+                                       re.I | re.S)
+# the same removal in a tool call: the CLI forms and the prompt forms; text matching, a backstop to the terminal check
+# of the CLI (cli._person_at_a_terminal)
+_FORGET_ARG_RE = re.compile(r"import:\S+|\u27e6?[A-Z]+_c\d+(?::[^\s\u27e7]*)?\u27e7?")
+_IMPORT_REMOVAL_IN_A_COMMAND_RE = re.compile(r"\bforget\b[\s\S]*?(?<![\w-])import:|\bvalues[\s\"']+remove\b"
+                                             r"|\b(?:_forget_import|value_import\.remove|forget_many)\b", re.I)
+_IMPORT_REMOVAL_IN_A_COMMAND = ("maisecrets: this command removes an import of values, which makes detection weaker; "
+                                "only the person removes one, as their own prompt (/maisecrets:forget import:NAME, in "
+                                "Codex: maisecrets: forget import:NAME). The command did not run. Tell the user the "
+                                "prompt to send.")
 _SETTINGS_IN_A_COMMAND = ("maisecrets: this command carries a maisecrets settings change; only the person makes one, "
                           "as their own prompt (/maisecrets:settings KEY VALUE). The command did not run. Tell the "
                           "user the prompt to send.")
@@ -2281,6 +2315,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
+    if _IMPORT_REMOVAL_IN_A_COMMAND_RE.search(command):
+        return _deny(_IMPORT_REMOVAL_IN_A_COMMAND)
     # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line
     if cfg.get("ssh_consent") and re.search(r"maisecrets:\s*allow\s+ssh\s+\S|allow\s+ssh\s+\S+\s+\d{6}", command,
                                            re.I):
@@ -2943,6 +2979,8 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
+    if _IMPORT_REMOVAL_IN_A_COMMAND_RE.search(command):
+        return _deny(_IMPORT_REMOVAL_IN_A_COMMAND)
     if _HOOK_ENTRY_TEXT_RE.search(command):
         # PowerShell has no word parser here: any mention of a hook entry with its event is refused
         return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "

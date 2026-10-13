@@ -58,7 +58,9 @@ RUN_SHARE = 0.6            # of MAX_IMPORTED: the imports that no value file nam
 EXPIRE_PER_IMPORT = 200     # expired values one import deletes; a keychain delete costs about 10 ms
 FORGET_BATCH = 200          # values one hold of the lock forgets when an import is removed
 REIMPORT_AFTER = 86400     # a value file is imported again after a day, which renews its values
-SESSION_BUDGET = 8.0       # seconds of a session start for value_files; the rest follows at the next start
+SESSION_BUDGET = 8.0       # seconds from the start of a session start to the end of its value_files work
+MAX_FILES_PER_START = 20   # value files one session start reads; the rest follow at the next start
+MAX_RUN_IMPORTS = 50       # imports that no value file names, each with a state record; past it an import is refused
 STATE_FILE = HOME / ".values-state"
 KIND = "import"
 _PLAIN_WORD = re.compile(r"[a-zß-ÿ]+")
@@ -166,16 +168,28 @@ def _save_state(state: dict) -> None:
         pass
 
 
-def source_name(path: Path, state: dict | None = None) -> str:
-    """The name of an import: the file name, plus a short tag when another file of that name came first."""
-    state = _load_state() if state is None else state
+def _state_lock():
+    """The lock of a read-modify-write of STATE_FILE: two imports at once lost a record (codex review of block 3)."""
+    from .vault import _lock_for
+    return _lock_for(HOME / ".values-state.lock")
+
+
+def _update_state(change) -> dict:
+    """Run ``change(state)`` on the state under its lock and save it; returns the state."""
+    with _state_lock():
+        state = _load_state()
+        change(state)
+        _save_state(state)
+    return state
+
+
+def source_name(path: Path, state: dict | None = None, vault=None) -> str:
+    """The name of an import: `f` and 8 hex digits of the keyed fingerprint of the file's full path. Never the file
+    name: a file named like one of its values printed that value to the model and into events.log (codex review of
+    block 3). The same file keeps its name; the person sees which file it is in /maisecrets:list on their own."""
+    from .vault import Vault
     real = str(path.resolve())
-    for name, rec in state.get("sources", {}).items():
-        if rec.get("path") == real:
-            return name
-    base = re.sub(r"[^\w.-]", "_", path.name)[:48] or "values"
-    taken = set(state.get("sources", {}))
-    return base if base not in taken else f"{base}~{hashlib.sha256(real.encode()).hexdigest()[:6]}"
+    return "f" + (vault or Vault()).fingerprint("value-import:" + real)[:8]
 
 
 def _names(meta: dict) -> list[str]:
@@ -185,10 +199,12 @@ def _names(meta: dict) -> list[str]:
 
 
 def counts_by_source(vault) -> dict[str, dict[str, int]]:
-    """source -> type -> live values, from the index (no value is read). A value two imports list counts in both."""
+    """source -> type -> live values, from the index (no value is read). A value two imports list counts in both. An
+    expired value counts nowhere, whether the sweep deleted it yet or not."""
     out: dict[str, dict[str, int]] = {}
+    now = time.time()
     for meta in vault._index["entries"].values():
-        if meta.get("purged"):
+        if meta.get("purged") or meta["expires"] < now:
             continue
         for src in _names(meta):
             by_type = out.setdefault(src, {})
@@ -201,8 +217,9 @@ def sources(vault) -> list[dict]:
     state = _load_state().get("sources", {})
     live = counts_by_source(vault)
     expiry: dict[str, float] = {}
+    now = time.time()
     for meta in vault._index["entries"].values():
-        if meta.get("purged"):
+        if meta.get("purged") or meta["expires"] < now:
             continue
         for src in _names(meta):
             expiry[src] = min(expiry.get(src, meta["expires"]), meta["expires"])
@@ -276,13 +293,13 @@ def read_capped(path: Path) -> bytes:
     try:
         fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
     except OSError as exc:
-        raise ValueError(f"{path.name}: cannot be read ({type(exc).__name__})") from None
+        raise ValueError(f"cannot be read ({type(exc).__name__})") from None
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
-            raise ValueError(f"{path.name}: not a file")
+            raise ValueError("not a file")
         if info.st_size > MAX_FILE_BYTES:
-            raise ValueError(f"{path.name}: {info.st_size:,} bytes, over the limit of {MAX_FILE_BYTES:,}; split it")
+            raise ValueError(f"{info.st_size:,} bytes, over the limit of {MAX_FILE_BYTES:,}; split it")
         chunks, left = [], MAX_FILE_BYTES + 1
         while left > 0:
             chunk = os.read(fd, min(left, 1 << 16))
@@ -291,67 +308,83 @@ def read_capped(path: Path) -> bytes:
             chunks.append(chunk)
             left -= len(chunk)
     except OSError as exc:
-        raise ValueError(f"{path.name}: cannot be read ({type(exc).__name__})") from None
+        raise ValueError(f"cannot be read ({type(exc).__name__})") from None
     finally:
         os.close(fd)
     raw = b"".join(chunks)
     if len(raw) > MAX_FILE_BYTES:
-        raise ValueError(f"{path.name}: over the limit of {MAX_FILE_BYTES:,} bytes; split it")
+        raise ValueError(f"over the limit of {MAX_FILE_BYTES:,} bytes; split it")
     return raw
 
 
 def import_file(path: str | Path, vault=None, deadline: float | None = None, raw: bytes | None = None,
                 origin: str = "run") -> Result:
-    """Import one file. Raises ValueError with a message for the person when the file itself cannot be used."""
+    """Import one file. Raises ValueError with a message for the person when the file itself cannot be used; the
+    message never holds the file name (source_name)."""
     from .vault import Vault
     path = Path(os.path.expanduser(str(path)))
     raw = read_capped(path) if raw is None else raw
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise ValueError(f"{path.name}: not UTF-8 text") from None
+        raise ValueError("not UTF-8 text") from None
     vault = vault or Vault()
-    state = _load_state()
-    result = Result(source=source_name(path, state))
+    result = Result(source=source_name(path, vault=vault))
+    if origin != "file":
+        runs = [n for n, rec in _load_state().get("sources", {}).items() if rec.get("origin") != "file"]
+        if result.source not in runs and len(runs) >= MAX_RUN_IMPORTS:
+            # each import is a record the hooks and the list read: an agent that imports from many paths grew the
+            # state without a bound (codex review of block 3)
+            raise ValueError(f"maisecrets holds {MAX_RUN_IMPORTS} imports that are no value file, the limit; "
+                             "/maisecrets:list names them, and your prompt /maisecrets:forget import:NAME removes one")
     items, result.refused, result.duplicates = parse(text)
     if len(items) > MAX_VALUES_PER_FILE:
         result.stopped = (f"line {items[MAX_VALUES_PER_FILE][2]} and later not read: at most "
                           f"{MAX_VALUES_PER_FILE} values per import")
         items = items[:MAX_VALUES_PER_FILE]
-    vault.expire(limit=EXPIRE_PER_IMPORT)
-    # a run import (an agent's) may fill RUN_SHARE of the cap; the rest stays for the person's value files, so an agent
-    # cannot fill the vault and have the person's names refused (review of block 3, Opus M1)
-    room, cap, biggest = _room(vault, origin, result.source)
+    vault.expire(limit=EXPIRE_PER_IMPORT, deadline=deadline)
+    ttl = int(vault.cfg.get("max_ttl_seconds", 30 * 86400))
     for i in range(0, len(items), BATCH):
         if deadline is not None and time.time() > deadline:
             result.pending = len(items) - i
             break
         batch = items[i:i + BATCH]
-        out = vault.put_many([(v, t, KIND) for v, t, _n in batch], cap=max(room, 0), source=result.source,
-                             ttl=int(vault.cfg.get("max_ttl_seconds", 30 * 86400)), renew=origin == "file")
+        # the room is counted and the batch written in one hold of the vault lock: two imports at once each counted
+        # the same room outside it and together passed the cap (codex review of block 3)
+        with vault._exclusive():
+            room, cap, biggest = _room(vault, origin, result.source)
+            # a value file links a value it lists to itself (and renews it); an agent's import links nothing it did
+            # not store, so it cannot keep alive what the person removes, nor grow a value's list of sources
+            out = vault.put_many([(v, t, KIND) for v, t, _n in batch], cap=max(room, 0), source=result.source,
+                                 ttl=ttl, renew=origin == "file", link=origin == "file")
         for (value, type_, n), entry in zip(batch, out):
             if entry is None:
                 if not result.stopped:
                     result.stopped = (f"line {n} and later not stored: the vault holds {cap} imported values, the "
                                       "limit" + ("" if cap == MAX_IMPORTED else " of imports that are no value file")
-                                      + (f"; import:{biggest} holds the most of them, /maisecrets:forget "
+                                      + (f"; import:{biggest} holds the most of them, your prompt /maisecrets:forget "
                                          f"import:{biggest} removes it" if biggest else
-                                         "; /maisecrets:forget import:NAME removes an import"))
+                                         "; your prompt /maisecrets:forget import:NAME removes an import"))
                 continue
             if entry.uses == 0:          # made now; a value the vault held was touched (uses went up)
                 result.new[type_] = result.new.get(type_, 0) + 1
-                room -= 1
             else:
                 result.known += 1
     real = str(path.resolve())
-    rec = state.setdefault("sources", {}).setdefault(result.source, {})
     # count: the live values that carry this import's name, the number _due compares with; a value the vault held
     # from elsewhere (a /maisecrets:put) carries none, and counting it made every start import again (round 2)
-    rec.update({"path": real, "at": time.time(), "origin": "file" if origin == "file" or rec.get("origin") == "file"
-                else "run", "count": sum(counts_by_source(vault).get(result.source, {}).values())})
-    if not result.pending:
-        rec["hash"] = hashlib.sha256(raw).hexdigest()[:16]
-    _save_state(state)
+    count = sum(counts_by_source(vault).get(result.source, {}).values())
+
+    def record(state: dict) -> None:
+        srcs = state.setdefault("sources", {})
+        if origin != "file" and not count and result.source not in srcs:
+            return                       # an import that holds no value leaves no record (codex review of block 3)
+        rec = srcs.setdefault(result.source, {})
+        rec.update({"path": real, "at": time.time(), "count": count,
+                    "origin": "file" if origin == "file" or rec.get("origin") == "file" else "run"})
+        if not result.pending:
+            rec["hash"] = hashlib.sha256(raw).hexdigest()[:16]
+    _update_state(record)
     _log(result, origin)
     return result
 
@@ -410,9 +443,7 @@ def remove(vault, name: str) -> tuple[int, int, dict]:
             deleted += status == "ok"
             refused += status == "store"
     if not refused:
-        state = _load_state()
-        if state.get("sources", {}).pop(name, None) is not None:
-            _save_state(state)
+        _update_state(lambda state: state.get("sources", {}).pop(name, None))
     return deleted, refused, kept
 
 
@@ -428,48 +459,54 @@ def _due(rec: dict, digest: str, live: int, soonest: float | None, max_ttl: int)
             or (soonest is not None and soonest < now + window) or live < int(rec.get("count", 0)))
 
 
-def session_import(cfg: dict, vault=None) -> str | None:
-    """Import each file of `value_files` that is due (_due), within SESSION_BUDGET seconds; then say once when the set
-    of imports changed since the last start (imports_note). One text for the person, or None."""
+def session_import(cfg: dict, vault=None, started: float | None = None) -> str | None:
+    """Import each file of `value_files` that is due (_due), at most MAX_FILES_PER_START, until SESSION_BUDGET seconds
+    after ``started`` (the start of the session-start hook, so the expire sweep before it counts too); then say once
+    when the set of imports changed since the last start (imports_note). One text for the person, or None."""
     files = [f for f in cfg.get("value_files") or [] if isinstance(f, str) and f.strip()]
     from .vault import Vault
     vault = vault or Vault(cfg)
+    deadline = (started if started is not None else time.time()) + SESSION_BUDGET
     notes: list[str] = []
     if files:
-        notes = _import_files(files, vault)
+        notes = _import_files(files, vault, deadline)
     text = ("maisecrets value files: " + "; ".join(notes) + ". /maisecrets:list shows each import.") if notes else ""
     note = imports_note(vault)
     return " ".join(t for t in (text, note) if t) or None
 
 
-def _import_files(files: list[str], vault) -> list[str]:
+def _import_files(files: list[str], vault, deadline: float) -> list[str]:
     state = _load_state()
-    deadline = time.time() + SESSION_BUDGET
     live = counts_by_source(vault)
     soonest = {r["name"]: r["expires"] for r in sources(vault)}
     notes: list[str] = []
-    for shown in files:
+    done = 0
+    for number, shown in enumerate(files, 1):
+        # a value file is named by its place in value_files, never by its name (source_name)
+        label = f"value file {number}"
+        if time.time() > deadline or done >= MAX_FILES_PER_START:
+            notes.append(f"{label} and later follow at the next session start")
+            break
         path = Path(os.path.expanduser(shown.strip()))
         try:
             raw = read_capped(path)
             digest = hashlib.sha256(raw).hexdigest()[:16]
-            name = source_name(path, state)
+            name = source_name(path, vault=vault)
             rec = state.get("sources", {}).get(name, {})
             if not _due(rec, digest, sum(live.get(name, {}).values()), soonest.get(name),
                         int(vault.cfg.get("max_ttl_seconds", 30 * 86400))):
                 continue
+            done += 1
             result = import_file(path, vault, deadline=deadline, raw=raw, origin="file")
         except ValueError as exc:
             # a file that cannot be used is said once, not at every start (review of block 3, LOW)
-            state = _load_state()
-            if state.setdefault("refused", {}).get(shown) != str(exc):
-                state["refused"][shown] = str(exc)
-                _save_state(state)
-                notes.append(str(exc))
+            said = f"{label}: {exc}"
+            if _load_state().get("refused", {}).get(shown) != said:
+                _update_state(lambda st: st.setdefault("refused", {}).__setitem__(shown, said))
+                notes.append(said)
             continue
-        state = _load_state()
-        if state.get("refused", {}).pop(shown, None) is not None:
-            _save_state(state)
+        if _load_state().get("refused", {}).get(shown) is not None:
+            _update_state(lambda st: st.get("refused", {}).pop(shown, None))
         if result.stored or result.refused or result.stopped or result.pending:
             notes.append(summary(result).rstrip("."))
     return notes
@@ -480,12 +517,10 @@ def imports_note(vault) -> str | None:
     and its counts, so an import an agent ran is seen (review of block 3, Fable M2). Unchanged, it says nothing."""
     rows = sources(vault)
     names = sorted(r["name"] for r in rows if sum(r["counts"].values()))
-    state = _load_state()
-    before = state.get("announced")
+    before = _load_state().get("announced")
     if before is not None and set(before) == set(names):
         return None
-    state["announced"] = names
-    _save_state(state)
+    _update_state(lambda st: st.__setitem__("announced", names))
     new = [r for r in rows if r["name"] in set(names) - set(before or [])]
     if not new:
         return None

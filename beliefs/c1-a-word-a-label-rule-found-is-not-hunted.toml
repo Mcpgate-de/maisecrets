@@ -6,5 +6,5 @@ runner = ["tests/test_weak_entries.py::WeakEntryTests::test_a_word_is_replaced_w
 
 [proof]
 file = "maisecrets/vault.py"
-find = "                if m.get(\"purged\") or m.get(\"weak\"):\n"
-replace = "                if m.get(\"purged\"):\n"
+find = "                if m.get(\"purged\") or m.get(\"weak\") or m[\"expires\"] < now:\n"
+replace = "                if m.get(\"purged\") or m[\"expires\"] < now:\n"

@@ -6,6 +6,9 @@ allowed-tools: Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh" forget:*), PowerSh
 
 The user wants to delete these stored values: $ARGUMENTS
 
+An `import:NAME` argument is handled by maisecrets itself when the person types the prompt; the command below refuses
+to remove an import. If it says so, tell the user to type /maisecrets:forget import:NAME as their own prompt.
+
 If no key is given, tell the user to run /maisecrets:list and name the keys, then stop.
 Otherwise run exactly this command with the keys the user gave, and show its output as is:
 

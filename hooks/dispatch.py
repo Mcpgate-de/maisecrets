@@ -155,11 +155,13 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
                                            "until the file is fixed."}))
         _marker("hook.session-start")
         sys.exit(0)
+    started = time.time()
     try:
         v = Vault(cfg)
-        # bounded: 5000 imported values expire on one day, and a keychain delete costs about 10 ms; the rest go
-        # 25 per later hook call (review of block 3, LOW: day 30 passed the session-start timeout)
-        v.expire(limit=500)
+        # bounded in count and time: 5000 imported values expire on one day, and a keychain delete costs about
+        # 10 ms. The rest go with later sweeps (a put, a get, a list, the next start); an expired value is no longer
+        # hunted in any text from its expiry on, deleted or not (Vault._hunted)
+        v.expire(limit=500, deadline=started + 4)
         quieted = v.quiet_code_words()
         v.mark_weak_entries()
     except RuntimeError as exc:
@@ -219,7 +221,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     # the files of value_files: imported again when they changed or a day passed, within a time budget
     try:
         from maisecrets.value_import import session_import  # noqa: E402
-        note = session_import(cfg, v)
+        note = session_import(cfg, v, started)
     except Exception:  # noqa: BLE001 - a value file never stops a session start
         from maisecrets.value_import import command  # noqa: E402
         note = f"maisecrets value files: the import failed; {command('import FILE')} in a terminal says why."

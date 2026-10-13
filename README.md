@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 111 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 112 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1247,7 +1247,7 @@ already have write them as JSON lines, one value per line:
 
 ```
 {"value": "Quilla Examplestein", "type": "NAME"}
-{"value": "an internal value without a shape"}
+{"value": "Internal-Code-Zq7"}
 ```
 
 `type` is optional; without it the value is a `SECRET`. The other types are
@@ -1258,13 +1258,15 @@ PLUGIN/hooks/run.sh values import ~/exports/names.jsonl     (PLUGIN: the plugin 
 ```
 
 ```
-imported 120 value(s) from names.jsonl (SECRET 100, NAME 20), 3 line(s) refused: line 4 too long (at most 512
+imported 120 value(s) from f3a9c01d2 (SECRET 100, NAME 20), 3 line(s) refused: line 4 too long (at most 512
 characters); line 9 not JSON; line 17 an ordinary word (lower-case letters only).
 ```
 
 From then on maisecrets masks each value in every tool result and every
 prompt, as it masks a value it stored itself. The command prints counts and
-line numbers, never a value. A value of 2 to 6 words is found as a phrase.
+line numbers, never a value. An import is named by an id (`f3a9c01d2`, a
+keyed tag of the file's path), never by the file name: a file can be named
+like one of its values. A value of 2 to 6 words is found as a phrase.
 The tests (`tests/test_value_import.py`, class `Phrases`) show it found with
 any white space or a line break between its words, behind `=` or `:`, in
 quotes or brackets, in Markdown (`**Name**`, `*Name*`, `_Name_`), in an HTML
@@ -1303,8 +1305,12 @@ maisecrets: set value_files add ~/exports/names.jsonl     (the same, and the for
 ```
 
 **See and remove.** `/maisecrets:list` shows one line per import with its
-counts per type, when it ran and when its values expire.
-`/maisecrets:forget import:names.jsonl` deletes every value of that import.
+id, its counts per type, when it ran, when its values expire, and which entry
+of `value_files` it is. Your prompt `/maisecrets:forget import:f3a9c01d2`
+(in Codex: `maisecrets: forget import:f3a9c01d2`) deletes every value of that
+import. Only you remove an import: it makes detection weaker, so a tool call
+that tries it is refused, and the command line removes one only in your own
+terminal.
 An imported value lives `max_ttl_seconds` (30 days unless you set less); a use
 does not cut it to the lifetime of its type. When another import lists the
 same value, the value stays masked, and the answer names that import.

@@ -81,6 +81,14 @@ class Base(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="values-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
+    def iid(self, name: str = "names.jsonl") -> str:
+        """The id of the import of a file in self.tmp (value_import.source_name)."""
+        return value_import.source_name(self.tmp / name)
+
+    def as_person(self):
+        """The CLI as the person runs it in their own terminal (cli._person_at_a_terminal)."""
+        return mock.patch.object(cli, "_person_at_a_terminal", return_value=True)
+
     def file(self, text: str, name: str = "names.jsonl") -> Path:
         p = self.tmp / name
         p.write_text(text, encoding="utf-8")
@@ -133,9 +141,9 @@ class ImportCommand(Base):
         f = self.file(lines({"value": NAME, "type": "NAME"}, {"value": SHAPELESS}, {"value": "short"}))
         rc, out, _ = self.run_cli("values", "import", str(f))
         self.assertEqual(rc, 1, "a refused line makes the exit code 1, for a script")
-        self.assertIn("imported 2 value(s) from names.jsonl (SECRET 1, NAME 1), 1 line(s) refused: line 3 too short",
+        self.assertIn(f"imported 2 value(s) from {self.iid()} (SECRET 1, NAME 1), 1 line(s) refused: line 3 too short",
                       out)
-        self.assertIn("/maisecrets:forget import:names.jsonl removes it", out)
+        self.assertIn(f"/maisecrets:forget import:{self.iid()} removes it", out)
         self.assertNotIn(NAME, out)
         self.assertNotIn(SHAPELESS, out)
         masked = redact(f"owner {NAME}, token {SHAPELESS}")
@@ -148,7 +156,7 @@ class ImportCommand(Base):
         self.run_cli("values", "import", str(f))
         rc, out, _ = self.run_cli("values", "import", str(f))
         self.assertEqual(rc, 0)
-        self.assertIn("imported 0 value(s) from names.jsonl, 1 already stored", out)
+        self.assertIn(f"imported 0 value(s) from {self.iid()}, 1 already stored", out)
         self.assertEqual(len(Vault().list()), 1)
 
     def test_a_file_that_cannot_be_used_names_why_and_stores_nothing(self):
@@ -190,7 +198,7 @@ class Caps(Base):
         entries = {e.key: e for e in Vault().list()}
         self.assertIn(mine.key, entries, "the person's own value stays")
         self.assertFalse(entries[mine.key].purged)
-        self.assertEqual(sum(1 for e in entries.values() if e.source == "a.jsonl" and not e.purged), 8)
+        self.assertEqual(sum(1 for e in entries.values() if e.source == self.iid("a.jsonl") and not e.purged), 8)
 
     def test_the_import_holds_the_vault_lock_for_one_batch_at_a_time(self):
         sizes = []
@@ -240,22 +248,29 @@ class SeeAndRemove(Base):
                                                  {"value": "other-" + SHAPELESS})))
         rc, out, _ = self.run_cli("list")
         self.assertEqual(rc, 0)
-        self.assertRegex(out, r"import:names\.jsonl +2 value\(s\) \(SECRET 1, NAME 1\), imported 0m ago, "
-                              r"expire in 29d")
+        self.assertRegex(out, rf"import:{self.iid()} +2 value\(s\) \(SECRET 1, NAME 1\), imported 0m ago, "
+                              r"expire in 29d  run by a command")
+        self.assertNotIn("names.jsonl", out, "no file name: it can be one of its values")
         self.assertIn("SECRET_c1", out, "the person's own value keeps its row")
         self.assertNotIn("NAME_c1", out, "an import is one line, not a row per value")
-        rc, out, _ = self.run_cli("forget", "import:names.jsonl")
+        rc, out, _ = self.run_cli("forget", f"import:{self.iid()}")
+        self.assertEqual(rc, 1, "not at the person's terminal: refused")
+        self.assertIn("removing an import takes your own prompt", out)
+        with self.as_person():
+            rc, out, _ = self.run_cli("forget", f"import:{self.iid()}")
         self.assertEqual(rc, 0)
-        self.assertIn("import:names.jsonl: 2 value(s) deleted", out)
+        self.assertIn(f"import:{self.iid()}: 2 value(s) deleted", out)
         self.assertEqual([e.key for e in Vault().list()], ["SECRET_c1"])
         self.assertEqual(redact(f"hello {NAME}"), f"hello {NAME}")
-        rc, out, _ = self.run_cli("forget", "import:names.jsonl")
+        with self.as_person():
+            rc, out, _ = self.run_cli("forget", f"import:{self.iid()}")
         self.assertEqual(rc, 1)
         self.assertIn("not found", out)
 
     def test_values_remove_is_the_same_as_forget_import(self):
         value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"})))
-        rc, out, _ = self.run_cli("values", "remove", "import:names.jsonl")
+        with self.as_person():
+            rc, out, _ = self.run_cli("values", "remove", f"import:{self.iid()}")
         self.assertEqual(rc, 0, out)
         self.assertEqual(Vault().list(), [])
 
@@ -267,9 +282,9 @@ class SeeAndRemove(Base):
         (b / "names.jsonl").write_text(lines({"value": LONG_NAME, "type": "NAME"}))
         first = value_import.import_file(a / "names.jsonl")
         second = value_import.import_file(b / "names.jsonl")
-        self.assertEqual(first.source, "names.jsonl")
-        self.assertRegex(second.source, r"names\.jsonl~[0-9a-f]{6}")
-        self.assertEqual(value_import.import_file(a / "names.jsonl").source, "names.jsonl", "a file keeps its name")
+        self.assertRegex(first.source, r"\Af[0-9a-f]{8}\Z")
+        self.assertNotEqual(first.source, second.source)
+        self.assertEqual(value_import.import_file(a / "names.jsonl").source, first.source, "a file keeps its name")
 
 
 class Phrases(Base):
@@ -520,7 +535,7 @@ class SessionStartImport(Base):
         f = self.file(lines({"value": NAME, "type": "NAME"}))
         cfg = {**load_config(), "value_files": [str(f)]}
         note = value_import.session_import(cfg)
-        self.assertIn("imported 1 value(s) from names.jsonl (NAME 1)", note)
+        self.assertIn(f"imported 1 value(s) from {self.iid()} (NAME 1)", note)
         self.assertNotIn("Examplestein", note)
         uses = Vault().list()[0].uses
         self.assertIsNone(value_import.session_import(cfg), "unchanged: nothing to say")
@@ -534,7 +549,7 @@ class SessionStartImport(Base):
         cfg = {**load_config(), "value_files": [str(f)]}
         value_import.session_import(cfg)
         state = json.loads(value_import.STATE_FILE.read_text())
-        state["sources"]["names.jsonl"]["at"] -= value_import.REIMPORT_AFTER + 1
+        state["sources"][self.iid()]["at"] -= value_import.REIMPORT_AFTER + 1
         value_import.STATE_FILE.write_text(json.dumps(state))
         uses = Vault().list()[0].uses
         value_import.session_import(cfg)
@@ -545,13 +560,17 @@ class SessionStartImport(Base):
         cfg = {**load_config(), "value_files": [str(f)]}
         with mock.patch.object(value_import, "SESSION_BUDGET", -1):
             note = value_import.session_import(cfg)
-        self.assertIn("60 more follow at the next session start", note)
-        self.assertNotIn("hash", json.loads(value_import.STATE_FILE.read_text())["sources"]["names.jsonl"])
+        self.assertIn("value file 1 and later follow at the next session start", note)
+        self.assertEqual(Vault().list(), [], "past the deadline no file is read")
+        result = value_import.import_file(f, deadline=time.time() - 1, origin="file")
+        self.assertEqual(result.pending, 60)
+        self.assertIn("60 more follow at the next session start", value_import.summary(result))
+        self.assertNotIn("hash", json.loads(value_import.STATE_FILE.read_text()).get("sources", {}).get(self.iid(), {}))
         self.assertIn("imported 60 value(s)", value_import.session_import(cfg))
 
     def test_a_missing_file_is_named_and_stops_nothing(self):
         cfg = {**load_config(), "value_files": [str(self.tmp / "gone.jsonl")]}
-        self.assertIn("gone.jsonl: cannot be read", value_import.session_import(cfg))
+        self.assertIn("value file 1: cannot be read", value_import.session_import(cfg))
 
 
 class ReviewFixes(Base):
@@ -608,7 +627,7 @@ class ReviewFixes(Base):
         t.start()
         t.join(5)
         self.assertFalse(t.is_alive(), "the session start waited for a writer of the FIFO")
-        self.assertIn("names.jsonl: not a file", out[0])
+        self.assertIn("value file 1: not a file", out[0])
         with self.assertRaisesRegex(ValueError, "not a file"):
             value_import.import_file(fifo)
 
@@ -666,10 +685,10 @@ class ReviewFixes(Base):
         self.run_cli("values", "import", str(self.file(lines({"value": NAME, "type": "NAME"}), "agent.jsonl")))
         events = [json.loads(x) for x in (HOME / "events.log").read_text().splitlines()]
         self.assertEqual([(e["hook"], e["client"], e["hits"][0]["key"]) for e in events],
-                         [("ValueImport", "run", "import:agent.jsonl")])
+                         [("ValueImport", "run", f"import:{self.iid('agent.jsonl')}")])
         self.assertNotIn("Examplestein", (HOME / "events.log").read_text())
         note = value_import.session_import(load_config())
-        self.assertIn("import:agent.jsonl (NAME 1)", note)
+        self.assertIn(f"import:{self.iid('agent.jsonl')} (NAME 1)", note)
         self.assertNotIn("Examplestein", note)
         self.assertIsNone(value_import.session_import(load_config()), "said once")
 
@@ -722,7 +741,7 @@ class ReviewFixes(Base):
             value_import.session_import({**load_config(), "value_files": [str(f)]})
             run = value_import.import_file(self.file(lines(*synth_names(14)[10:]), "agent.jsonl"))
         self.assertEqual(run.stored, 0)
-        self.assertIn("import:team.jsonl holds the most of them", value_import.summary(run))
+        self.assertIn(f"import:{self.iid('team.jsonl')} holds the most of them", value_import.summary(run))
 
     def test_a_value_known_from_elsewhere_or_a_short_lifetime_does_not_import_at_every_start(self):
         rows = synth_names(5)
@@ -747,19 +766,21 @@ class ReviewFixes(Base):
             value_import.session_import({**load_config(), "value_files": [str(f)]})
         self.assertEqual(run.stored, 6)
         self.assertIn("the limit of imports that are no value file", value_import.summary(run))
-        self.assertEqual(value_import.counts_by_source(Vault())["team.jsonl"], {"NAME": 4})
+        self.assertEqual(value_import.counts_by_source(Vault())[self.iid("team.jsonl")], {"NAME": 4})
 
     # Opus M2: a value two imports list stays when one of them is removed
     def test_a_value_in_two_imports_stays_until_both_are_removed(self):
-        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "a.jsonl"))
-        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "b.jsonl"))
-        self.assertEqual(value_import.counts_by_source(Vault()), {"a.jsonl": {"NAME": 1}, "b.jsonl": {"NAME": 1}})
-        rc, out, _ = self.run_cli("forget", "import:a.jsonl")
-        self.assertIn("import:a.jsonl: no value deleted. 1 value(s) stay masked because another import lists them "
-                      "too: import:b.jsonl (1)", out)
+        a, b = self.iid("a.jsonl"), self.iid("b.jsonl")
+        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "a.jsonl"), origin="file")
+        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "b.jsonl"), origin="file")
+        self.assertEqual(value_import.counts_by_source(Vault()), {a: {"NAME": 1}, b: {"NAME": 1}})
+        with self.as_person():
+            rc, out, _ = self.run_cli("forget", f"import:{a}")
+        self.assertIn(f"import:{a}: no value deleted. 1 value(s) stay masked because another import lists them "
+                      f"too: import:{b} (1)", out)
         self.assertNotIn("no longer masks", out)
         self.assertNotIn("Examplestein", redact(f"by {NAME}"))
-        self.assertEqual(value_import.remove(Vault(), "b.jsonl"), (1, 0, {}))
+        self.assertEqual(value_import.remove(Vault(), b), (1, 0, {}))
         self.assertEqual(redact(f"by {NAME}"), f"by {NAME}")
 
     # Opus M3: removing an import writes the index once per batch, not once per value
@@ -772,7 +793,7 @@ class ReviewFixes(Base):
             writes.append(1)
             return real(self)
         with mock.patch.object(Vault, "_save_index", count):
-            result = value_import.remove(Vault(), "names.jsonl")
+            result = value_import.remove(Vault(), self.iid())
         self.assertEqual(result, (450, 0, {}))
         self.assertLessEqual(len(writes), 2 * (450 // value_import.FORGET_BATCH + 2))
 
@@ -783,7 +804,7 @@ class ReviewFixes(Base):
         with v._exclusive():
             v._index["entries"]["NAME_c1"]["expires"] = time.time() - 1
         Vault().expire(limit=None)
-        self.assertEqual(value_import.remove(Vault(), "names.jsonl"), (1, 0, {}))
+        self.assertEqual(value_import.remove(Vault(), self.iid()), (1, 0, {}))
 
     # LOWs of the review
     def test_a_locked_vault_gives_a_message_not_a_traceback(self):
@@ -809,7 +830,7 @@ class ReviewFixes(Base):
         f = self.file(lines({"value": NAME, "type": "NAME"}))
         r = subprocess.run([launcher, "values", "import", str(f)], capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("imported 1 value(s) from names.jsonl (NAME 1).", r.stdout)
+        self.assertIn(f"imported 1 value(s) from {self.iid()} (NAME 1).", r.stdout)
 
     def test_the_session_start_bounds_the_expire_work(self):
         v = Vault()
@@ -822,6 +843,149 @@ class ReviewFixes(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         purged = sum(1 for m in Vault()._index["entries"].values() if m.get("purged"))
         self.assertEqual(purged, 500, "at most 500 deletes per start; the rest go with later hook calls")
+
+
+class Round3(Base):
+    """The findings of the codex review of block 3 at 45a2f4d."""
+
+    def prompt(self, text: str, client: dict = CLAUDE, **extra) -> dict:
+        hooks._live_cache.clear()
+        with mock.patch.object(hooks, "_clipboard", return_value=False):
+            return hooks.user_prompt({"prompt": text, "session_id": "S1", **client, **extra})
+
+    # BLOCKER 1: only the person removes an import
+    def test_a_tool_call_that_removes_an_import_is_refused(self):
+        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"})))
+        iid = self.iid()
+        run = '"/x/hooks/run.sh"'
+        END = "MAISECRETS_" + "ARGS_END"
+        for command in (f"bash {run} values remove import:{iid}", f"bash {run} forget import:{iid}",
+                        f"bash {run} forget --args-stdin <<'{END}'\nimport:{iid}\n{END}",
+                        f"python3 -c 'from maisecrets import value_import; value_import.remove(None, \"{iid}\")'",
+                        f"codex exec 'maisecrets: forget import:{iid}'"):
+            for tool in ("Bash", "PowerShell"):
+                with self.subTest(command=command, tool=tool):
+                    out = hooks.pre_tool({"tool_name": tool, "tool_input": {"command": command},
+                                          "session_id": "S1", **CLAUDE})
+                    self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+                    self.assertIn("removes an import", out["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertEqual(hooks.pre_tool({"tool_name": "Bash", "session_id": "S1", **CLAUDE,
+                                         "tool_input": {"command": f"bash {run} forget SECRET_c1"}}), {})
+        rc, out, _ = self.run_cli("values", "remove", f"import:{iid}")
+        self.assertEqual(rc, 1, "the CLI outside the person's terminal removes nothing")
+        self.assertNotIn("Examplestein", redact(f"by {NAME}"))
+
+    def test_the_persons_typed_prompt_removes_an_import(self):
+        for client, form in ((CLAUDE, "/maisecrets:forget import:{}"), (CODEX, "maisecrets: forget import:{}")):
+            with self.subTest(client=client):
+                _clean()
+                value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"})))
+                out = self.prompt(form.format(self.iid()), client)
+                self.assertEqual(out["decision"], "block", "the answer is the result; the prompt goes nowhere")
+                self.assertIn(f"import:{self.iid()}: 1 value(s) deleted", out["reason"])
+                self.assertEqual(redact(f"by {NAME}"), f"by {NAME}")
+        _clean()
+        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"})))
+        out = self.prompt(f"/maisecrets:forget import:{self.iid()}", CLAUDE, source="scheduled")
+        self.assertIn("counts only when you type it", out["reason"])
+        self.assertNotIn("Examplestein", redact(f"by {NAME}"), "a prompt the client injected removes nothing")
+
+    # BLOCKER 2: a file named like one of its values never prints the value
+    def test_a_file_named_like_its_value_never_shows_the_value(self):
+        word = "ProjectCode99"
+        f = self.file(lines({"value": word}), word)
+        rc, out, err = self.run_cli("values", "import", str(f))
+        cfg = {**load_config(), "value_files": [str(f)]}
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "value_files": [str(f)]}))
+        f.write_text(lines({"value": word}, {"value": "Other" + word}))
+        note = value_import.session_import(cfg)
+        _rc, listed, _ = self.run_cli("list")
+        texts = {"cli import": out + err, "session start": note or "", "list": listed,
+                 "events.log": (HOME / "events.log").read_text()}
+        for where, text in texts.items():
+            with self.subTest(where):
+                self.assertNotIn(word, text)
+        self.assertIn(f"import:{self.iid(word)}", note)
+
+    # HIGH 3: a value past its lifetime is not hunted, deleted by the sweep or not
+    def test_a_value_past_its_lifetime_is_not_masked_before_the_sweep_deletes_it(self):
+        v = Vault()
+        v.put_many([(f"Synth{i:05d} Persona", "NAME", "manual") for i in range(501)], cap=10_000)
+        with v._exclusive():
+            for meta in v._index["entries"].values():
+                meta["expires"] = time.time() - 1
+        v = Vault()
+        v.expire(limit=500)
+        last = [k for k, m in Vault()._index["entries"].items() if not m.get("purged")]
+        self.assertEqual(len(last), 1, "the 501st is still in the store")
+        self.assertEqual(redact("by Synth00500 Persona"), "by Synth00500 Persona")
+        self.assertEqual(Vault().status(last[0], "S1"), "expired")
+
+    # HIGH 4: bounds on sources, records and concurrent imports
+    def test_one_value_from_many_paths_keeps_a_bounded_list_of_sources(self):
+        for i in range(vault.MAX_SOURCES + 5):
+            value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), f"p{i}.jsonl"), origin="file")
+        meta = Vault()._index["entries"]["NAME_c1"]
+        self.assertEqual(len(meta["also"]), vault.MAX_SOURCES - 1)
+
+    def test_an_agents_import_of_known_values_links_nothing_and_leaves_no_record(self):
+        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "team.jsonl"), origin="file")
+        for i in range(5):
+            value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), f"copy{i}.jsonl"))
+        self.assertEqual(Vault()._index["entries"]["NAME_c1"]["also"], [])
+        self.assertEqual(list(json.loads(value_import.STATE_FILE.read_text())["sources"]), [self.iid("team.jsonl")])
+
+    def test_imports_that_are_no_value_file_are_bounded_in_number(self):
+        with mock.patch.object(value_import, "MAX_RUN_IMPORTS", 3):
+            for i in range(3):
+                value_import.import_file(self.file(lines({"value": f"Synth{i:05d} Persona", "type": "NAME"}),
+                                                   f"r{i}.jsonl"))
+            with self.assertRaisesRegex(ValueError, "3 imports that are no value file, the limit"):
+                value_import.import_file(self.file(lines({"value": LONG_NAME, "type": "NAME"}), "r9.jsonl"))
+
+    def test_concurrent_run_imports_stay_inside_the_cap(self):
+        # the first process counts its room and then waits a second before it writes; the second imports meanwhile.
+        # Counted outside the lock, both saw the same room and together passed the cap
+        code = ("import sys, time; sys.path.insert(0, sys.argv[1]); from maisecrets import value_import as v; "
+                "v.MAX_IMPORTED = 10\n"
+                "if sys.argv[3] == 'slow':\n"
+                "    real = v._room\n"
+                "    def slow(*a):\n"
+                "        out = real(*a); time.sleep(1.0); return out\n"
+                "    v._room = slow\n"
+                "v.import_file(sys.argv[2])")
+        procs = []
+        for i, mode in enumerate(("slow", "fast")):
+            f = self.file(lines(*({"value": f"Proc{i}x{j:03d} Persona", "type": "NAME"} for j in range(5))),
+                          f"proc{i}.jsonl")
+            procs.append(subprocess.Popen([sys.executable, "-c", code, str(ROOT), str(f), mode],
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+            time.sleep(0.4)
+        for p in procs:
+            _o, err = p.communicate(timeout=60)
+            self.assertEqual(p.returncode, 0, err)
+        live = [m for m in Vault()._index["entries"].values() if m.get("source")]
+        self.assertLessEqual(len(live), 6, "the run share of a cap of 10")
+        self.assertEqual(len(live), 6, "the second import filled what the first left")
+
+    # MEDIUM 5: one deadline for the session start, and a bound on files per start
+    def test_a_session_start_reads_a_bounded_number_of_files(self):
+        files = [self.file(lines({"value": f"Synth{i:05d} Persona", "type": "NAME"}), f"v{i}.jsonl") for i in range(4)]
+        cfg = {**load_config(), "value_files": [str(f) for f in files]}
+        with mock.patch.object(value_import, "MAX_FILES_PER_START", 2):
+            note = value_import.session_import(cfg)
+            self.assertIn("value file 3 and later follow at the next session start", note)
+            self.assertEqual(len(value_import.counts_by_source(Vault())), 2)
+            value_import.session_import(cfg)
+        self.assertEqual(len(value_import.counts_by_source(Vault())), 4)
+
+    def test_the_expire_sweep_stops_at_its_deadline(self):
+        v = Vault()
+        v.put_many([(f"Synth{i:05d} Persona", "NAME", "manual") for i in range(30)], cap=10_000)
+        with v._exclusive():
+            for meta in v._index["entries"].values():
+                meta["expires"] = time.time() - 1
+        self.assertEqual(Vault().expire(limit=500, deadline=time.time() - 1), 0)
 
 
 class EndToEnd(Base):
@@ -851,7 +1015,7 @@ class EndToEnd(Base):
         r = subprocess.run(launcher + ["values", "import", str(f)], capture_output=True, text=True, env=self.env(),
                            timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("imported 2 value(s) from names.jsonl (SECRET 1, NAME 1).", r.stdout)
+        self.assertIn(f"imported 2 value(s) from {self.iid()} (SECRET 1, NAME 1).", r.stdout)
         self.assertNotIn(NAME, r.stdout + r.stderr)
         out = self.hook("post-tool", {"session_id": "S1", "tool_name": "Bash", "tool_input": {"command": "cat x"},
                                       "tool_response": {"stdout": f"by {NAME}.\nkey={SHAPELESS}\n", "stderr": ""}})
@@ -867,12 +1031,15 @@ class EndToEnd(Base):
         f = self.file(lines({"value": NAME, "type": "NAME"}))
         CONFIG.write_text(json.dumps({**TEST_CONFIG, "value_files": [str(f)]}))
         out = self.hook("session-start", {"session_id": "S1"})
-        self.assertIn("maisecrets value files: imported 1 value(s) from names.jsonl (NAME 1)", out["systemMessage"])
+        self.assertIn(f"maisecrets value files: imported 1 value(s) from {self.iid()} (NAME 1)", out["systemMessage"])
         out = self.hook("post-tool", {"session_id": "S1", "tool_name": "Bash", "tool_input": {"command": "cat x"},
                                       "tool_response": {"stdout": f"{NAME} wrote", "stderr": ""}})
         self.assertEqual(out["hookSpecificOutput"]["updatedToolOutput"]["stdout"], f"{ref('NAME_c1')} wrote")
-        rc, said, _ = self.run_cli("forget", "import:names.jsonl")
-        self.assertIn(f"/maisecrets:settings value_files remove {f} stops that", said, "the forget names the file")
+        with self.as_person():
+            rc, said, _ = self.run_cli("forget", f"import:{self.iid()}")
+        self.assertIn("still in value_files, so the next session start imports it again; /maisecrets:settings "
+                      "value_files shows the entry to remove", said)
+        self.assertNotIn(str(f), said, "no path: its file name can be one of its values")
 
 
 if __name__ == "__main__":

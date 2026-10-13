@@ -1,7 +1,7 @@
 # c26-a-stored-name-of-several-words-is-found-as-a-phrase: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c26-a-stored-name-of-several-words-is-found-as-a-phrase"
 control = "C26"
-statement = "A stored value of 2 to 6 words is masked where it stands in running text, also with quotes, punctuation or a line break around or between its words; no word of it stays in the text."
+statement = "A stored value of 2 to 6 words is masked where it stands in running text, also with quotes or punctuation around it or a line break between its words; no word of it stays in the text."
 runner = ["tests/test_value_import.py::Phrases::test_a_stored_name_of_two_words_is_found_in_running_text"]
 
 [proof]

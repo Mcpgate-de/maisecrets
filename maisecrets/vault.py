@@ -510,6 +510,7 @@ def fingerprint(value: str, key: bytes) -> str:
     return hmac.digest(key, value.encode("utf-8", "surrogatepass"), "sha256").hex()[:16]
 
 
+MAX_SOURCES = 8          # names of imports one stored value keeps (value_import.py)
 MAX_PHRASE_WORDS = 6     # a stored value of 2 to 6 words is found as a phrase (hooks._phrase_spans); more: the line
 
 
@@ -1045,17 +1046,22 @@ class Vault:
     def _hunted(self) -> tuple[dict, dict]:
         """(fingerprint -> key, head -> word counts) of the entries hunted in any text, built once per index: the
         output hook asks for them for every string of a tool result, and an import makes the index large. A new
-        index object (each mutation re-reads the file) or a change below drops the cache."""
-        if self._derived is None or self._derived[0] is not self._index:
+        index object (each mutation re-reads the file) or a change below drops the cache. An expired entry is not
+        hunted, whether the sweep deleted its value yet or not: the sweep is bounded, and a value past its lifetime
+        stayed masked until it ran (codex review of block 3); the cache ends when its first entry expires."""
+        now = time.time()
+        if self._derived is None or self._derived[0] is not self._index or now >= self._derived[3]:
             live: dict[str, str] = {}
             heads: dict[str, set] = {}
+            until = float("inf")
             for k, m in self._index["entries"].items():
-                if m.get("purged") or m.get("weak"):
+                if m.get("purged") or m.get("weak") or m["expires"] < now:
                     continue
+                until = min(until, m["expires"])
                 live[m["fingerprint"]] = k
                 if m.get("words", 0) >= 2 and m.get("head"):
                     heads.setdefault(m["head"], set()).add(int(m["words"]))
-            self._derived = (self._index, live, {h: tuple(sorted(n, reverse=True)) for h, n in heads.items()})
+            self._derived = (self._index, live, {h: tuple(sorted(n, reverse=True)) for h, n in heads.items()}, until)
         return self._derived[1], self._derived[2]
 
     def _drop_derived(self) -> None:
@@ -1144,7 +1150,8 @@ class Vault:
 
     @_mutating
     def put_many(self, items: list[tuple[str, str, str]], session: str | None = None, cap: int | None = None,
-                 source: str = "", ttl: int | None = None, renew: bool = False) -> list["Entry | None"]:
+                 source: str = "", ttl: int | None = None, renew: bool = False,
+                 link: bool = True) -> list["Entry | None"]:
         """Store many values in one lock, one sweep and one index save; a tool result with
         hundreds of addresses called put() per value and rewrote the growing index each time
         (measured: 1000 e-mails 8.7 s, above the watchdog; review, 2026-09-26). Above
@@ -1163,8 +1170,10 @@ class Vault:
                 e = Entry.from_meta(self._index["entries"][existing])
                 if session and session not in e.sessions:
                     e.sessions.append(session)
-                if source and e.source:
-                    if source != e.source and source not in e.also:
+                if source and e.source and link:
+                    # a value keeps at most MAX_SOURCES names of imports: many paths with one value grew the index
+                    # without a bound (codex review of block 3)
+                    if source != e.source and source not in e.also and len(e.also) < MAX_SOURCES - 1:
                         e.also.append(source)
                     if renew:
                         # a file of value_files that lists an imported value again re-affirms it: it lives
@@ -1463,21 +1472,21 @@ class Vault:
         return out
 
     @_mutating
-    def expire(self, limit: int | None = 25) -> int:
+    def expire(self, limit: int | None = 25, deadline: float | None = None) -> int:
         """Delete expired values; keep their metadata. Returns the count of values deleted;
         `last_refused` holds the count the store refused to delete.
 
         Runs on every put/get/list, so every hook call sweeps. A keychain
         delete costs ~10 ms (measured 2026-09-26), so a sweep is capped at
         `limit` deletes per call; the rest go on the next call. `limit=None`
-        sweeps everything (SessionStart, `maisecrets expire`).
+        sweeps everything (`maisecrets expire`). A ``deadline`` (time.time()) ends the sweep early too.
         """
         now = time.time()
         n = tried = 0
         self.last_refused = 0
         purged_now: list[str] = []
         for key, meta in self._index["entries"].items():
-            if limit is not None and tried >= limit:
+            if (limit is not None and tried >= limit) or (deadline is not None and time.time() > deadline):
                 break
             if not meta.get("purged") and meta["expires"] < now:
                 tried += 1       # a refused delete costs time too, so it counts against the cap
