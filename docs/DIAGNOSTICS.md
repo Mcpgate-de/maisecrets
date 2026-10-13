@@ -297,6 +297,13 @@ on_timeout():
 - The process ends at the latest about 1.5 s after the watchdog deadline (7 s, 16 s after a tool), below the
   client's timeout (10 s, 20 s). When the watchdog cannot take the answer lock within 1 s, the handler is in the
   middle of its own answer, and the watchdog still exits.
+- A regex search holds the GIL, so the timer thread cannot run while one backtracks. Where the platform has
+  SIGALRM, `main()` also arms a timer in the main thread 0.25 s before the thread watchdog (`_arm_alarm`); its
+  handler runs `on_timeout()` inside the search. Both share `on_timeout()` and `answer()`, so one answer leaves
+  the process; the handler does nothing while an answer is in writing. Measured on 0.6.14 with a real PostToolUse
+  process and a 256K line of AWS key ids: no answer within 25 s (3.14) and 23.3 s (3.9), past the client's 20 s;
+  with the alarm, the fail-closed answer after 15.9 s on both. Windows has no SIGALRM: there the thread watchdog
+  stays alone (`tests/test_hook_time.py`).
 
 ## 11. Tests that must exist
 
