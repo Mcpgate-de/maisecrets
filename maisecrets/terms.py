@@ -678,15 +678,51 @@ def _parse_team(sources: list, out: Loaded) -> None:
         out.files.append(TeamFile(source, len(ents), hashlib.sha256(raw).hexdigest()[:12]))
 
 
-def _marked(now: float | None = None) -> list:
-    now = time.time() if now is None else now
+def _lock():
+    """One lock for every read-modify-write of terms.txt and terms.marked.json: two hooks at once lost an add, a
+    removal or a marked name (codex review of block 2). Re-entrant in the process; a lock that stays busy raises,
+    and the hook fails closed."""
+    from .vault import _lock_for
+    return _lock_for(HOME / ".terms.lock")
+
+
+def _marked_items() -> list:
+    """Every record of terms.marked.json, expired ones too. No file: none. A file that cannot be read or parsed
+    raises TermsError, so the hooks fail closed: an empty list would let every marked name through (codex review of
+    block 2). The file is never overwritten then; the person deletes it to start again."""
     try:
-        data = json.loads(MARKED.read_text(encoding="utf-8"))
-        items = [x for x in data.get("terms", []) if isinstance(x, dict) and x.get("expires", 0) > now]
-    except (OSError, ValueError, AttributeError):
+        raw = MARKED.read_text(encoding="utf-8")
+    except FileNotFoundError:
         return []
-    return [_marked_entity(x.get("text")) for x in items
-            if isinstance(x.get("text"), str) and _WORD_RE.search(x.get("text"))]
+    except (OSError, UnicodeDecodeError) as exc:
+        raise TermsError(f"{MARKED}: cannot read it ({type(exc).__name__})") from None
+    try:
+        data = json.loads(raw)
+        items = data["terms"]
+        if not isinstance(items, list) or not all(isinstance(x, dict) and isinstance(x.get("text"), str)
+                                                  and isinstance(x.get("expires", 0), (int, float)) for x in items):
+            raise ValueError
+    except (ValueError, KeyError, TypeError):
+        raise TermsError(f"{MARKED}: damaged, so the names marked with {{{{…}}}} cannot be masked. maisecrets does "
+                         "not overwrite it: delete the file in a terminal to start again (those marks are then "
+                         "gone).") from None
+    return items
+
+
+def _marked(now: float | None = None) -> list:
+    """The live marked names. An expired one is deleted from the file here (under the lock), so its clear text
+    does not stay on disk after its lifetime (codex review of block 2)."""
+    now = time.time() if now is None else now
+    items = _marked_items()
+    if any(x.get("expires", 0) <= now for x in items):
+        from .vault import atomic_write
+        with _lock():
+            items = _marked_items()
+            live = [x for x in items if x.get("expires", 0) > now]
+            if len(live) != len(items):
+                atomic_write(MARKED, json.dumps({"terms": live}))
+            items = live
+    return [_marked_entity(x["text"]) for x in items if x.get("expires", 0) > now and _WORD_RE.search(x["text"])]
 
 
 def _marked_entity(text: str) -> Entity:
@@ -711,7 +747,12 @@ def load(cfg: dict | None = None, strict: bool = True) -> Loaded:
     out.personal = len(own)
     team, out.refused = _team_sources(cfg)
     _parse_team(team, out)
-    marked = _marked()
+    try:
+        marked = _marked()
+    except TermsError as exc:
+        if strict:
+            raise
+        marked, out.error = [], (out.error + " " if out.error else "") + str(exc)
     out.entities += marked
     out.marked = len(marked)
     return out
@@ -867,17 +908,15 @@ def take_markers(prompt: str, ttl: int) -> tuple[str, int]:
     if not found:
         return prompt, 0
     now = time.time()
-    try:
-        data = json.loads(MARKED.read_text(encoding="utf-8"))
-        items = [x for x in data.get("terms", []) if isinstance(x, dict) and x.get("expires", 0) > now]
-    except (OSError, ValueError, AttributeError):
-        items = []
-    names = {x.get("text", "").lower(): x for x in items}
-    for _a, _b, name in found:
-        x = names.setdefault(name.lower(), {"text": name})
-        x["expires"] = max(x.get("expires", 0), now + ttl)
     from .vault import atomic_write
-    atomic_write(MARKED, json.dumps({"terms": list(names.values())}))
+    with _lock():
+        # read after the lock, and a damaged file raises before anything is written
+        items = [x for x in _marked_items() if x.get("expires", 0) > now]
+        names = {x["text"].lower(): x for x in items}
+        for _a, _b, name in found:
+            x = names.setdefault(name.lower(), {"text": name})
+            x["expires"] = max(x.get("expires", 0), now + ttl)
+        atomic_write(MARKED, json.dumps({"terms": list(names.values())}))
     reset()
     out = prompt
     for a, b, name in reversed(found):
@@ -919,6 +958,11 @@ def _shown_path() -> str:
 
 
 def add_typed(words: str, floor: bool = False) -> tuple[bool, str, list]:
+    with _lock():
+        return _add_typed(words, floor)
+
+
+def _add_typed(words: str, floor: bool = False) -> tuple[bool, str, list]:
     """Add one entity to terms.txt. (changed, message, texts to scrub from the transcript). The message names a
     label and a line, never the term. `floor`: the prompt has no source (Codex, an older client), so it may not come
     from the person, and the entry gets the floor of a team list."""
@@ -1011,6 +1055,11 @@ def _ids(e: Entity) -> tuple:
 
 
 def term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, str, list]:
+    with _lock():
+        return _term_remove_typed(words, entity_id)
+
+
+def _term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, str, list]:
     """Remove from terms.txt each entity that has the variant `words` (or the id of a placeholder the person
     copied), and the same name from the marked names. Only the prompt hook calls this, for a prompt the person
     typed (settings.IN_A_COMMAND_RE refuses the name in a tool call): a removal makes detection weaker."""
@@ -1035,15 +1084,14 @@ def term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, s
             return False, (f"maisecrets: {_shown_path()} cannot be written ({type(exc).__name__}); nothing was "
                            "changed."), [words]
     try:
-        data = json.loads(MARKED.read_text(encoding="utf-8"))
-        items = data.get("terms", [])
-        left = [x for x in items if not (isinstance(x, dict) and (str(x.get("text", "")).lower() == want or (
-            entity_id and entity_id in _ids(_marked_entity(str(x.get("text", "")))))))]
-        if len(left) != len(items):
-            atomic_write(MARKED, json.dumps({"terms": left}))
-            removed.append("a marked name")
-    except (OSError, ValueError, AttributeError):
-        pass
+        items = _marked_items()
+    except TermsError:
+        items = []        # damaged: never overwritten; the hooks say so
+    left = [x for x in items if not (x["text"].lower() == want or (
+        entity_id and entity_id in _ids(_marked_entity(x["text"]))))]
+    if len(left) != len(items):
+        atomic_write(MARKED, json.dumps({"terms": left}))
+        removed.append("a marked name")
     prebuild()
     if not removed:
         return False, ("maisecrets: this term is not on your own list, and it is no name you marked; nothing was "
