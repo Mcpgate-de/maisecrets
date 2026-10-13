@@ -3348,6 +3348,58 @@ def _mask_hidden_in_transcript(path: str, start: int = 0) -> int:
         return 0
 
 
+# A Read of an image or a PDF returns the file as base64: tool_response type "image" or "pdf" (file.base64) or
+# "parts" (pages[].base64), and the client gives it to the model as an image or a document block, never as text
+# (tests/client_payloads/claude-read-*-post.json, recorded from Claude Code 2.1.296). A scan of it as text cost
+# 10.9 s for 1 MB and found only chance shapes, and a placeholder inside it would break the image.
+_BINARY_READ_TYPES = ("image", "pdf", "parts")
+_DATA_URI_RE = re.compile(r"data:image/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/=\s]*)")
+_IMAGE_MAGIC = {"png": (b"\x89PNG\r\n\x1a\n",), "jpeg": (b"\xff\xd8\xff",), "gif": (b"GIF87a", b"GIF89a"),
+                "webp": (b"RIFF",)}
+
+
+def _is_image_data_uri(s: Any) -> bool:
+    """The whole text is a data URI of base64 characters whose first bytes are the magic number of its image type.
+    Claude Code sets `isImage` on a Bash output that starts with `data:image/` (recorded: `printf 'data:image/png;
+    base64,'; base64 < tiny.png`), so the flag alone is a text the agent can print, and a prefix check let an agent
+    switch off the redaction of a whole output (review of the 0.6.15 fixes)."""
+    if not isinstance(s, str):
+        return False
+    m = _DATA_URI_RE.fullmatch(s)
+    if not m:
+        return False
+    import base64
+    import binascii
+    head = "".join(m.group(2)[:64].split())[:16]
+    try:
+        raw = base64.b64decode(head, validate=True) if len(head) == 16 else b""
+    except (ValueError, binascii.Error):
+        return False
+    return raw.startswith(_IMAGE_MAGIC[m.group(1)]) and (m.group(1) != "webp" or raw[8:12] == b"WEBP")
+
+
+def _binary_paths(payload: dict) -> set:
+    """The places in tool_response that hold a file as base64 and are not scanned as text: the base64 of a Read of an
+    image or a PDF, and the stdout of a Bash output that the client sends as an image (`isImage` true and the
+    whole stdout an image data URI). Every other field is scanned as before; stderr always."""
+    resp = payload.get("tool_response")
+    if not isinstance(resp, dict):
+        return set()
+    tool = payload.get("tool_name")
+    if tool == "Read" and resp.get("type") in _BINARY_READ_TYPES:
+        out = set()
+        if isinstance(resp.get("file"), dict) and isinstance(resp["file"].get("base64"), str):
+            out.add(("file", "base64"))
+        pages = resp.get("pages")
+        for i, page in enumerate(pages if isinstance(pages, list) else []):
+            if isinstance(page, dict) and isinstance(page.get("base64"), str):
+                out.add(("pages", i, "base64"))
+        return out
+    if tool == "Bash" and resp.get("isImage") is True and _is_image_data_uri(resp.get("stdout")):
+        return {("stdout",)}
+    return set()
+
+
 def post_tool(payload: dict) -> dict:
     cfg = load_config()
     response = payload.get("tool_response")
@@ -3402,12 +3454,27 @@ def post_tool(payload: dict) -> dict:
         hit["n"] += hits
         return cleaned
 
-    def walk(node: Any) -> Any:
+    binary = _binary_paths(payload)
+
+    def redact_binary(s: str) -> str:
+        """A file as base64: no shape scan, but the exact match of the stored values as before (a value this session
+        resolved, written into an uncompressed PDF, can stand in its base64 form; a hit breaks the file)."""
+        nonlocal vault, resolved
+        if not _has_live(cfg):
+            return s
+        if vault is None:
+            vault = Vault(cfg)
+            resolved = _resolved_values(vault, session)
+        return _exact_redact(s, vault, session, hit, entries, resolved, values)
+
+    def walk(node: Any, at: tuple = ()) -> Any:
         # keys too: a tool result's JSON can hide an instruction or a value in a key (Codex review, 2026-10-06)
+        if at in binary and isinstance(node, str):
+            return redact_binary(node)
         if isinstance(node, str):
             return redact(node)
         if isinstance(node, list):
-            return [walk(x) for x in node]
+            return [walk(x, at + (i,)) for i, x in enumerate(node)]
         if isinstance(node, dict):
             pairs = [(clean_key(k) if isinstance(k, str) else k, k, v) for k, v in node.items()]
             # a key that the cleaning did not change keeps its name; a cleaned key that is now alike another gets
@@ -3421,7 +3488,7 @@ def post_tool(payload: dict) -> dict:
                     while f"{nk}<{n}>" in taken or f"{nk}<{n}>" in out:
                         n += 1
                     nk = f"{nk}<{n}>"
-                out[nk] = walk(v)
+                out[nk] = walk(v, at + (k,))
             return out
         return node
 

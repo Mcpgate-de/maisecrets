@@ -1193,6 +1193,11 @@ a to-do.
   values is masked without storing the rest.
 - **Tool output above 50K characters** is spilled to a file by Claude Code
   and is not rewritten.
+- **An image or a PDF that Claude reads** goes to the model as a picture or a
+  document, not as text. maisecrets does not look for shapes in it: a secret
+  in the text of a PDF or in a screenshot reaches the model. Only the exact
+  match of your stored values checks its base64 form. The same holds for a
+  Bash output that Claude Code sends as an image.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt
   hook blocks them when the path exists; ask Claude to read the file instead.
 - **Names are not detected.** Regex only, by design.
