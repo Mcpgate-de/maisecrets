@@ -59,7 +59,7 @@ MAX_REGEX = 300
 MIN_LITERAL = 4
 TYPES = ("SECRET", "NAME", "EMAIL", "PHONE", "IBAN", "CARD", "IP")
 TARGETS = ("secret", "match", "line")
-CHECK_VERSION = 2                    # a new check makes every cached verdict old
+CHECK_VERSION = 3                    # a new check makes every cached verdict old
 PROBE_LIMIT_MS = 50.0                # a rule slower than this on the test texts is quarantined
 PROBE_DEADLINE = 1.0                 # seconds; the test child is ended when one rule takes longer
 PROBE_BUDGET = 2.0                   # seconds of tests per hook call; the rest are tested in the next call
@@ -105,6 +105,7 @@ class _Source:
     pattern: str
     literals: tuple
     allows: tuple
+    fills: tuple = ()      # runs of the characters the rule's own repeats take (_fills)
 
 
 # ----------------------------------------------------------- regex shapes --
@@ -392,6 +393,56 @@ def check_regex(rx: str, keywords: tuple = (), allowlist: bool = False):
     return f"no keyword or literal of {MIN_LITERAL} characters", None, ()
 
 
+def _one(chars) -> str:
+    """One character of a set to build a test run from: a small letter first, as the sets of rules are written."""
+    for group in (str.islower, str.isupper, str.isdigit, lambda c: True):
+        got = sorted(c for c in chars if group(c))
+        if got:
+            return got[0]
+    return ""
+
+
+def _example(items) -> str:
+    """A short text one round of a repeat body can take: one character per item (a repeat: its least count)."""
+    out = ""
+    for op, av in items:
+        if op in _ZERO_WIDTH:
+            continue
+        if op in _REPEATS:
+            out += _example(list(av[2])) * max(1, min(av[0], 3))
+        elif op == _sre.SUBPATTERN:
+            out += _example(list(av[-1]))
+        elif op == _sre.BRANCH:
+            out += _example(list(av[1][0])) if av[1] else ""
+        else:
+            got = _chars([(op, av)])
+            out += _one(got) if got is not _ANY_CHAR else "a"
+    return out
+
+
+def _fills(rx: str) -> tuple:
+    """Runs for the timing texts that the rule's own repeats take: the fixed runs (a, Z, 0, space) never hold a
+    `[b-y]`, and `abcd[b-y]{1,99}[b-y]{1,99}…Z` passed them in 0.5 ms and ran for 8 s on a run of b (Fable review,
+    round 2). One run per repeat: a character of its set, and one round of its body."""
+    out: list = []
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            items = list(_sre.parse(rx))
+        for seq in _sequences(items):
+            for op, av in seq:
+                if op not in _REPEATS:
+                    continue
+                body = list(av[2])
+                chars = _chars(body)
+                for fill in ((_one(chars) if chars is not _ANY_CHAR else ""), _example(body)):
+                    if fill and fill not in out:
+                        out.append(fill)
+    except Exception:  # noqa: BLE001 - the fixed runs still run
+        return ()
+    return tuple(out[:8])
+
+
 def _regex_literal(rx: str) -> str:
     try:
         with warnings.catch_warnings():
@@ -408,29 +459,29 @@ spec = json.loads(sys.stdin.read())
 limit = spec["limit"] / 1000.0
 print("ready", flush=True)
 
-def texts(lits):
+def texts(lits, fills):
     for lit in lits:
         for n in (25, 40, 16384):        # a short run makes an exponential regex fail slowly, a long one a polynomial
-            for fill in ("a", "Z", "0", " ", "aZ0_", "a-0.", "\t\n"):
+            for fill in ("a", "Z", "0", " ", "aZ0_", "a-0.", "\t\n") + tuple(fills):
                 yield lit + (fill * (n // len(fill) + 1))[:n] + "!"
         yield (lit + " ") * (65536 // (len(lit) + 1))
         yield "a" * 65536 + lit
 
-def once(rx, allows, lits):
+def once(rx, allows, lits, fills):
     t = time.perf_counter()
-    for text in texts(lits):
+    for text in texts(lits, fills):
         for _ in rx.finditer(text):
             pass
         for a in allows:
             a.search(text)
     return time.perf_counter() - t
 
-for key, pattern, lits, allows in spec["rules"]:
+for key, pattern, lits, allows, fills in spec["rules"]:
     rx = re.compile(pattern)
     allows = [re.compile(a) for a in allows]
-    took = once(rx, allows, lits)
+    took = once(rx, allows, lits, fills)
     if took > limit:
-        took = min(took, once(rx, allows, lits))     # a busy machine: the second run decides
+        took = min(took, once(rx, allows, lits, fills))     # a busy machine: the second run decides
     print(key, round(took * 1000, 1), flush=True)
 """
 
@@ -461,11 +512,13 @@ def probe(sources: list, budget: float | None = None, limit_ms: float | None = N
                 lines.put(raw.decode("ascii", "replace").split())
             lines.put(None)
         threading.Thread(target=read, daemon=True).start()
-        spec = {"limit": limit_ms, "rules": [[s.hash, s.pattern, list(s.literals), list(s.allows)] for s in todo]}
+        spec = {"limit": limit_ms,
+                "rules": [[s.hash, s.pattern, list(s.literals), list(s.allows), list(s.fills)] for s in todo]}
         try:
             child.stdin.write(json.dumps(spec).encode("utf-8"))
             child.stdin.close()
-            ready = lines.get(timeout=10)
+            # the child starts within the budget too (Fable review, round 2: the wait was 10 s whatever the budget)
+            ready = lines.get(timeout=10 if end is None else max(0.0, min(10.0, end - time.monotonic())))
         except (OSError, queue.Empty):
             ready = None
         stop = ready != ["ready"]
@@ -737,7 +790,7 @@ def load_folder(path: Path, shown: str, taken: set | None = None, cache: dict | 
                 rules.append(rule)
                 if sources is not None:
                     lits = tuple(dict.fromkeys(x for x in (_regex_literal(pattern),) + rule.keywords[:1] if x))
-                    sources[rule.id] = _Source(key, shown, file, pattern, lits, allows)
+                    sources[rule.id] = _Source(key, shown, file, pattern, lits, allows, _fills(pattern))
         try:
             digest.update(os.fsencode(name) + b"\0")
             try:

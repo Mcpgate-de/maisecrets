@@ -1209,11 +1209,13 @@ branches that start alike inside a repeat (`(a|aa)+`), no two repeats in a
 row that take the same characters (`.*.*`, `\w+\d+`), no backreference, and
 no quantifier of variable length at the start (`\w+…`, `x?[a-z]+…`). Then
 maisecrets times each new rule once on test texts that make a backtracking
-regex slow; a rule slower than 50 ms is left out. A rule that is still slow
-in a real scan (more than half a second), or that runs when a hook runs out
-of time, is left out from the next call on. Each verdict is kept by a hash
-of the rule in `~/.maisecrets/.rules-state`, so a hook pays for the checks
-once; a changed rule is checked again.
+regex slow, also on runs of the characters its own repeats take; a rule
+slower than 50 ms is left out. A rule that is still slow in a real scan
+(more than half a second of its own) is left out from the next call on. Each
+verdict is kept by a hash of the rule in `~/.maisecrets/.rules-state`, so a
+hook pays for the checks once; a changed rule is checked again, and
+`maisecrets rules check DIR` reads a rule that a scan left out again when
+its test now passes.
 
 A rule that fails a check is left out, with its reason; the rest of the file
 still loads. A refused rule is named by its place (`rule 3`, `line 7`), never

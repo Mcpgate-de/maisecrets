@@ -99,18 +99,32 @@ def _check_folder(shown: str, folder: Path, samples: Path | None, taken: set, ne
         print(f"  {_NO_FILES}")
         bad += need_rules
     timed = user_rules.probe([sources[r.id] for r in rules if r.id in sources])
+    # a rule that a scan of the hooks found too slow stays out until it changes, or until this check passes it
+    # (Fable review, round 2: the check printed ok for a rule the hooks left out)
+    state = user_rules._read_state()
+    slow = state.get("slow") if isinstance(state.get("slow"), dict) else {}
+    cleared = 0
     fast = []
     for rule in rules:
-        ms = timed.get(sources[rule.id].hash, "untested") if rule.id in sources else "untested"
+        key = sources[rule.id].hash if rule.id in sources else ""
+        ms = timed.get(key, "untested")
+        was = key in slow
         if ms == "untested":
-            print(f"  ok      {rule.id}  (not timed)")
+            print(f"  ok      {rule.id}  (not timed)" + ("; the hooks leave it out (slow in a scan)" if was else ""))
             fast.append(rule)
         elif ms is None or ms > user_rules.PROBE_LIMIT_MS:
             print(f"  slow    {rule.id}  {user_rules._slow_reason(ms)}")
             bad += 1
         else:
-            print(f"  ok      {rule.id}  {ms:.1f} ms")
+            print(f"  ok      {rule.id}  {ms:.1f} ms"
+                  + ("; the hooks left it out (slow in a scan), and read it again from now on" if was else ""))
             fast.append(rule)
+            if was:
+                del slow[key]
+                cleared += 1
+    if cleared:
+        state["slow"] = slow
+        user_rules._write_state(state)
     for q in quarantined:
         if q.kept:
             print(f"  note    {q.file}:{q.rule}  {q.reason}")

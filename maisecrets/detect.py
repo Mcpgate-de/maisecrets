@@ -751,6 +751,7 @@ USER_RULE_BUDGET_PER_MB = 0.1
 
 
 def running_user_rule():
+    """(rule, started, budget) of the rule of your own that scan() runs at this moment, or None."""
     return _RUNNING[0]
 
 
@@ -758,7 +759,7 @@ def _timed(rule: Rule, found, budget: float):
     """The matches of a rule of your own, with the time its regex takes. Over the budget, the rule is left out of
     this process and, by the state file, of the next ones."""
     spent = 0.0
-    _RUNNING[0] = rule
+    _RUNNING[0] = (rule, time.perf_counter(), budget)
     try:
         while True:
             t = time.perf_counter()
