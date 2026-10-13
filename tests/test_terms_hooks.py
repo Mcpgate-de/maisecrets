@@ -466,7 +466,8 @@ class LongestSpanTests(_Base):
 class ShapedTermTests(_Base):
     """A listed term that a built-in rule finds too keeps the rule's type, but it is a term: the store keeps the
     entity id, and the placeholder is never resolved (codex review of block 2, HIGH 2)."""
-    EMAIL = "zbigniew.testowski" + "@" + "example.com"
+    # not example.com: the email rule leaves the documentation domains alone, so the overlap would not happen
+    EMAIL = "zbigniew.testowski" + "@" + "firma-xyz.de"
     PHONE = "+49 30 " + "98765432"
     CASE = "glpat-" + "Testowski0123456789x"
 
