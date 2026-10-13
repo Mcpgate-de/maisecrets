@@ -705,17 +705,23 @@ def _prompt_hits(prompt: str) -> list:
 def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str | None) -> tuple:
     """(rewritten, entries, values, stored): the prompt with a placeholder for each detected value and
     for each value the store already holds; the hook and the mod share it, so both take out the same."""
-    rewritten, entries = _replace(prompt, matches, vault, session) if matches else (prompt, [])
-    values = [m.value for m in matches]
     stored = {"n": 0}
+    known: list = []
+    values: list = []
+    text = prompt
     if vault is not None and _has_live(cfg):
         # a value the store already holds has a known shape: its fingerprint. Without this a stored
         # password typed again, or a value without a detector shape next to a detected one, went to
         # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
         # from 8 characters; a shorter one would block ordinary words in a prompt.
+        # Before the detector: a listed term inside a stored value split it, and the rest stayed in clear (C26)
         resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]
-        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values)
-    return rewritten, entries, values, stored
+        text = _exact_redact(prompt, vault, session, stored, known, resolved, values)
+        if text != prompt:
+            matches = _prompt_hits(text)
+    rewritten, entries = _replace(text, matches, vault, session) if matches else (text, [])
+    values = [m.value for m in matches] + [v for v in values if v not in {m.value for m in matches}]
+    return rewritten, entries + known, values, stored
 
 
 def _run_sh() -> str:
@@ -3483,19 +3489,23 @@ def post_tool(payload: dict) -> dict:
             s, gone, runs = strip_hidden(s)
             hidden["n"] += gone
             hidden_runs.extend(runs)
+        if _has_live(cfg):
+            if vault is None:
+                vault = Vault(cfg)
+                resolved = _resolved_values(vault, session)
+            # the stored values first: a listed term inside a stored value split it, and the rest stayed in clear
+            s = _exact_redact(s, vault, session, hit, entries, resolved, values)
         matches = [m for m in detect.scan(s) if not detect.is_fixture(m, s, path)]
-        if not matches and not _has_live(cfg):
+        if not matches:
             return s
         if vault is None:
             vault = Vault(cfg)
             resolved = _resolved_values(vault, session)
-        out = s
-        if matches:
-            out, ents = _replace(s, matches, vault, session)
-            hit["n"] += len(matches)
-            values.extend(m.value for m in matches)
-            entries.extend(ents)
-        return _exact_redact(out, vault, session, hit, entries, resolved, values)
+        out, ents = _replace(s, matches, vault, session)
+        hit["n"] += len(matches)
+        values.extend(m.value for m in matches)
+        entries.extend(ents)
+        return out
 
     # a result with many objects repeats its keys: each key text is redacted once, and what it removed is counted
     # for every place it stands (codex review, 2026-10-06)
@@ -3738,12 +3748,15 @@ def post_tool_failure(payload: dict) -> dict:
     hit = {"n": 0}
     entries: list = []
     values: list[str] = []
-    out = error
+    # the stored values first: a listed term inside a stored value split it (C26)
+    out = _exact_redact(error, vault, session, hit, entries, _resolved_values(vault, session), values)
+    if out != error:
+        matches = [m for m in detect.scan(out) if not detect.is_fixture(m, out, "")]
     if matches:
-        out, entries = _replace(error, matches, vault, session)
+        out, ents = _replace(out, matches, vault, session)
+        entries += ents
         hit["n"] += len(matches)
         values.extend(m.value for m in matches)
-    _exact_redact(out, vault, session, hit, entries, _resolved_values(vault, session), values)
     if not hit["n"]:
         return {}
     refs = list(dict.fromkeys(e.ref for e in entries if getattr(e, "ref", None)))

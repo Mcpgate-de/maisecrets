@@ -250,6 +250,47 @@ class TermHookTests(_Base):
         self.assertNoTerm(_home_text(), "the incident record and the logs")
 
 
+class StoredValueTests(_Base):
+    """A listed term inside a value the store holds (a password without a shape): the stored value is taken out
+    whole, before the term matcher can split it (gate review of block 2, B1)."""
+    VALUE = "Testowski#Sommer" + "2024"
+    REST = "sommer2024"
+
+    def setUp(self):
+        super().setUp()
+        self.assertEqual(_prompt(f"password: {self.VALUE}")["decision"], "block")
+        _write_terms("PERSON_A  Testowski\n")
+        self.secret = re.compile(re.escape(OPEN) + r"SECRET_c\d+" + re.escape(CLOSE))
+
+    def test_a_tool_result_masks_the_stored_value_whole(self):
+        for text in (self.VALUE, f"the value is {self.VALUE} ok", f"echo {self.VALUE}"):
+            with self.subTest(text=text):
+                out = _out(_bash(text))
+                self.assertNotIn(self.REST, out.lower(), "the rest of the stored value is in clear")
+                self.assertRegex(out, self.secret)
+
+    def test_a_prompt_and_the_mod_mask_the_stored_value_whole(self):
+        out = _prompt(f"try {self.VALUE} again")
+        self.assertEqual(out["decision"], "block")
+        sent = hooks.take_pending("S1")
+        self.assertNotIn(self.REST, sent.lower(), "/maisecrets:send would send the rest")
+        self.assertRegex(sent, r"\Atry " + self.secret.pattern + r" again\Z")
+        mod = hooks.rewrite_prompt({"prompt": f"try {self.VALUE} again", "session_id": "S1", "cwd": ""})
+        self.assertRegex(mod["text"], r"\Atry " + self.secret.pattern + r" again\Z")
+
+    def test_a_failed_call_cleans_the_stored_value_whole_from_the_transcript(self):
+        tmp = Path(tempfile.mkdtemp(prefix="transcript-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = tmp / "session.jsonl"
+        path.write_text(json.dumps({"type": "tool_result", "content": f"bad: {self.VALUE}"}) + "\n", encoding="utf-8")
+        with mock.patch.object(hooks, "_scrub_transcript_later", lambda *a, **k: None):
+            out = hooks.post_tool_failure({"hook_event_name": "PostToolUseFailure", "tool_name": "Bash",
+                                           "session_id": "S1", "transcript_path": str(path), **CLAUDE,
+                                           "tool_input": {"command": "x"}, "error": f"bad: {self.VALUE}"})
+        self.assertNotIn(self.REST, json.dumps(out).lower())
+        self.assertNotIn(self.REST, path.read_text(encoding="utf-8").lower(), "the transcript keeps the rest")
+
+
 class MarkerHookTests(_Base):
     def test_a_marked_name_is_masked_in_its_prompt_and_in_later_output(self):
         out = _prompt(f"draft a letter to {{{{{NAME}}}}}; {NAME} asked for it")
