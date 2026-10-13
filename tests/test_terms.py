@@ -259,6 +259,9 @@ class GateReviewMatchTests(unittest.TestCase):
                     self.assertEqual(got, [(want, "PERSON_A")])
         self.assertEqual(runs(matcher("PERSON_A  Mu\u0308ller\n"), "Müller"), [("Müller", "PERSON_A")],
                          "a list written in NFD matches NFC text")
+        # Hangul in jamo: the vowel and the final consonant are of class 0 and still compose
+        jamo = "\u1112\u1161\u11ab\u1100\u116e\u11a8"          # 한국 in NFD
+        self.assertEqual(runs(matcher("PLACE_A  한국\n"), f"in {jamo}."), [(jamo, "PLACE_A")])
 
     def test_joined_forms_of_a_full_name(self):
         m = matcher("PERSON_A  Jan Kowalski\n")

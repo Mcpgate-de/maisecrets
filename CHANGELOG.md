@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Terms: the placeholder of a term now depends on its variants too (index format 2). A name keeps one placeholder
+  as long as its line stays the same; after you edit the line, it gets a new one. A placeholder copied from an
+  older result still works with `/maisecrets:term remove`.
+- Terms: more than 50 `*…*` variants in your own `terms.txt` now stop every hook until you fix the file, and the
+  message names the line. Before, the variants past 50 were left out without a word.
+
 ## [0.6.14] - 2026-10-12
 
 ### Fixes

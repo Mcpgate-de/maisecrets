@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 114 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 115 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1260,9 +1260,12 @@ prompt to the model. From the next tool result on, `Jan Kowalski` becomes a
 placeholder such as `⟦NAME_c3⟧`.
 
 When you add a name of two or more words, maisecrets also adds the last word
-with any ending (`Kowalski*`), if it has 4 letters or more and is not a common
-word. So `Herr Kowalski`, `Kowalskis Bericht`, `Kowalski, Jan` and
-`J. Kowalski` are masked too. The joined forms `jan.kowalski`,
+alone and its genitive (`Kowalski | Kowalskis`), if it has 4 letters or more
+and is not a common word. So `Herr Kowalski`, `Kowalskis Bericht`,
+`Kowalski, Jan` and `J. Kowalski` are masked too. It adds them as whole words,
+never as a stem with `*`: `Koch*` would mask `Kochen`, `Lang*` would mask
+`language`. Type a stem yourself when you want one (`Kowalsk*`). A surname that
+is also a word (`Jobs`, `Wolf`) is masked where it stands alone as that word. The joined forms `jan.kowalski`,
 `Jan-Kowalski` and `jan_kowalski` (also in `jan_kowalski.pdf`) are masked as
 one word. The first name alone stays visible: `Jan` is a common word, and
 masking it would hide every other Jan. To mask it anyway, add it as a term

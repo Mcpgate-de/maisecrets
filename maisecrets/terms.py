@@ -237,9 +237,18 @@ def _prepare(text: str) -> tuple:
             i += 1
             continue
         j = i + 1
-        while j < n and (unicodedata.combining(text[j]) or text[j] in _CF):
-            j += 1
-        nf = unicodedata.normalize("NFC", "".join(ch for ch in text[i:j] if ch not in _CF))
+        seg = text[i]
+        nf = unicodedata.normalize("NFC", seg)
+        while j < n:
+            c = text[j]
+            if c in _CF:
+                j += 1
+                continue
+            # a combining mark, or a character of class 0 that still composes (Hangul jamo, some Indic vowels)
+            nxt = unicodedata.normalize("NFC", seg + c)
+            if not unicodedata.combining(c) and len(nxt) > len(nf):
+                break
+            seg, nf, j = seg + c, nxt, j + 1
         starts += [i] * len(nf)
         ends += [j] * len(nf)
         parts.append(nf)
@@ -917,7 +926,10 @@ def add_typed(words: str, floor: bool = False) -> tuple[bool, str, list]:
         for v in words.split("|"):
             _variant(v, 1, stoplist() if floor else None)
     except TermsError as exc:
-        return False, (f"maisecrets: the term was not added ({str(exc).split(': ', 1)[1]}). "
+        reason = str(exc).split(": ", 1)[1]
+        if floor:
+            reason = reason.replace("in a team list", "in a prompt without a source, which may not come from you")
+        return False, (f"maisecrets: the term was not added ({reason}). "
                        "This prompt was not sent to the model."), [words]
     try:
         text = PERSONAL.read_text(encoding="utf-8") if PERSONAL.exists() else ""
@@ -938,7 +950,7 @@ def add_typed(words: str, floor: bool = False) -> tuple[bool, str, list]:
                             "ending, *kowalski* = anywhere in a word. README, section Terms.\n")
     given = [v.strip() for v in words.split("|")]
     surnames = _surnames(given)
-    variants = " | ".join(given + [f"{w}*" for w in surnames])
+    variants = " | ".join(given + surnames)
     new = head + text + ("" if not text or text.endswith("\n") else "\n") + f"{label}  {variants}\n"
     from .vault import atomic_write
     try:
@@ -959,30 +971,42 @@ def add_typed(words: str, floor: bool = False) -> tuple[bool, str, list]:
         note += (f" Your list has an error at line {exc.line}: until you fix it, maisecrets withholds every tool "
                 "result.")
     if surnames:
-        note += (" Also added: the last word with any ending (as Surname*), so a salutation, a genitive and "
-                 "\"Surname, First name\" are masked too. Masked as well: the joined forms first.last, "
-                 "first-last and first_last. "
-                 "The first name alone stays visible; to mask it, add it as a term of its own.")
+        note += (f" Also added: {len(surnames)} variant(s), the last name alone and its genitive, so \"Herr Surname\" "
+                 "and \"Surname, First name\" are masked too; /maisecrets:term shows them. Masked as well: the joined "
+                 "forms first.last, first-last and first_last. The first name alone stays visible; to mask it, add "
+                 "it as a term of its own.")
     return True, (f"maisecrets: the term is on your list now as {label} (line {line} of {_shown_path()}). From the "
                   f"next tool result on it is replaced by a placeholder. This prompt was not sent to the model.{note}"
                   ), [v.strip().strip("*").strip() for v in words.split("|")] + [words]
 
 
 def _surnames(given: list) -> list:
-    """The last word of each full name the person adds (2 or more words, no *): it is added as `Surname*`, so `Herr
-    Kowalski`, `Kowalskis Bericht` and `Kowalski, Jan` are masked too (gate review of block 2, H3). Not a word under 4
-    letters, not a common word, not one the variants hold already."""
+    """The last word of each full name the person adds (2 or more words, no *), as whole words: the surname and its
+    genitive (`Kowalski | Kowalskis`), so `Herr Kowalski`, `Kowalskis Bericht` and `Kowalski, Jan` are masked too
+    (gate review of block 2, H3). Never a `*` stem: `Koch*` masked `Kochen`, `Lang*` masked `language` (round 2); a
+    stem only when the person types it. Not a word under 4 letters, not a common word, not one the variants hold."""
     have = {_lower(v) for v in given}
-    out = []
+    out: list = []
     for v in given:
         if "*" in v:
             continue
         words = v.split()
         last = words[-1] if len(words) > 1 else ""
-        if len(last) >= 4 and last.isalpha() and _lower(last) not in stoplist() and _lower(last) not in have \
-                and f"{_lower(last)}*" not in have and last not in out:
-            out.append(last)
+        if not (len(last) >= 4 and last.isalpha() and _lower(last) not in stoplist()):
+            continue
+        forms = [last] + ([] if _lower(last)[-1] in "sxzß" else [last + "s"])
+        out += [f for f in forms if _lower(f) not in have and f not in out]
     return out
+
+
+def _old_id(e: Entity) -> str:
+    """The id before cache format 2 (source and label only): a placeholder the person copied from a result of an
+    older version still removes its entity."""
+    return hashlib.sha256(f"{e.source}\0{e.label}".encode("utf-8")).hexdigest()[:12]
+
+
+def _ids(e: Entity) -> tuple:
+    return e.id, _old_id(e)
 
 
 def term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, str, list]:
@@ -997,7 +1021,7 @@ def term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, s
         return False, f"maisecrets: {_shown_path()} cannot be read; nothing was changed.", [words]
     ents, _ = parse(text, strict=False)
     drop = {e.line for e in ents
-            if (entity_id and e.id == entity_id) or want in {v.text.lower() for v in e.variants}}
+            if (entity_id and entity_id in _ids(e)) or want in {v.text.lower() for v in e.variants}}
     lines = text.splitlines(keepends=True)
     kept = [x for i, x in enumerate(lines, 1) if i not in drop]
     removed += [f"{e.label} ({len(e.variants)} variant{'s' if len(e.variants) != 1 else ''})"
@@ -1013,7 +1037,7 @@ def term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, s
         data = json.loads(MARKED.read_text(encoding="utf-8"))
         items = data.get("terms", [])
         left = [x for x in items if not (isinstance(x, dict) and (str(x.get("text", "")).lower() == want or (
-            entity_id and _marked_entity(str(x.get("text", ""))).id == entity_id)))]
+            entity_id and entity_id in _ids(_marked_entity(str(x.get("text", "")))))))]
         if len(left) != len(items):
             atomic_write(MARKED, json.dumps({"terms": left}))
             removed.append("a marked name")
