@@ -418,6 +418,32 @@ class Convert(_Work):
         self.assertIn("larger than", out["file"]["content"])
         self.assertFalse(self.calls.exists(), "pdftotext did not run")
 
+    def test_an_endless_output_is_read_up_to_the_cap_and_the_child_ends(self):
+        _reset(read_pdf="convert")
+        self.stub("/usr/bin/yes 'some words in a line'")
+        t0 = time.monotonic()
+        content = output(self.post())["file"]["content"]
+        self.assertLess(time.monotonic() - t0, file_reads.EXTRACT_SECONDS, "it stops at the cap, not at the timeout")
+        self.assertIn("the text stops here", content)
+
+    def test_the_fixed_folders_come_before_the_path(self):
+        fixed = self.dir / "fixed"
+        fixed.mkdir()
+        for folder in (fixed, self.bin):
+            tool = folder / "pdftotext"
+            tool.write_text("#!/bin/sh\n")
+            tool.chmod(0o755)
+        with mock.patch.object(file_reads, "_EXTRA_DIRS", (str(fixed),)):
+            self.assertEqual(file_reads.pdftotext(), str(fixed / "pdftotext"),
+                             "a folder on the PATH that the agent can write to does not win")
+
+    def test_the_module_loads_without_subprocess(self):
+        # it loads on every PostToolUse: subprocess and shutil cost about 30 ms and load only for a conversion
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import maisecrets.file_reads; "
+                "print(sorted(m for m in ('subprocess', 'shutil') if m in sys.modules))")
+        r = subprocess.run([sys.executable, "-I", "-c", code, str(ROOT)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.stdout.strip(), "[]", r.stderr)
+
     def test_a_pdf_without_text_says_so(self):
         _reset(read_pdf="convert")
         self.stub("printf '\\f'")
