@@ -394,8 +394,8 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False   # an address after a label (user_tokens:<address>): the e-mail rule decides, not a secret
     if _names_itself(v):
         return False   # a value that names itself a password, a secret, a token or a test is a fixture
-    if re.match(r"\$\$?\{?[A-Za-z_][A-Za-z0-9_]*\}?(?![\w])", v):   # $$NAME: docker compose escapes the $
-        return False   # a shell variable: $PASSWORD, ${DB_PASSWORD}
+    if re.match(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?![\w])|\$\$\{?[A-Z_][A-Z0-9_]*\}?(?![\w])", v):
+        return False   # a shell variable: $PASSWORD, ${DB_PASSWORD}; $$NAME in docker compose (upper case only)
     if "(" in v or ")" in v or "`" in v or "|" in v:
         return False   # a call, an expression or markdown (`re.compile(r"…`, "`/maisecrets:report` |"), not a value
     if not any(c.isalnum() for c in v):
@@ -433,28 +433,49 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
 _LOWER_WORDS_RE = re.compile(r"[a-z0-9]+(?:[-_.][a-z0-9]+)*")
 
 
-def _word_value_ok(v: str, min_len: int = 8) -> bool:
-    """A value after a label with no `=` or `:` (a CLI flag, Redis AUTH): as _ds_value_ok, and not letters only.
-    Docs write `--password argument`, `AUTH LOGIN`, `--password PASSWORD`; a password of letters alone after such a
-    label stays a gap, as it is after the colon forms below 8 characters. The punctuation after a word is no part of
-    it: "give --password explicitly?" is a question, not a password (Gate B of 0.6.15)."""
-    return _ds_value_ok(v, min_len=min_len) and not v.strip().rstrip(".,;:!?)").isalpha()
+_MARKER_RE = re.compile(r"\[[^\]]*\]|<[^>]*>|\{[^}]*\}")
 
 
-# a hyphen compound that ends in a lower-case word (SHA256-hashed, AES-256-encrypted, 1Password-managed,
-# OAuth2-protected), and names of algorithms joined by hyphens (PBKDF2-SHA256): prose about a password, not one
-_PROSE_COMPOUND_RE = re.compile(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*-[a-z]{2,}")
+def _word_value_ok(v: str, min_len: int = 8, prose_punct: bool = False) -> bool:
+    """A value after a label with no `=` or `:` (a CLI flag, Redis AUTH, netrc): as _ds_value_ok, and not letters
+    only. Docs write `--password argument`, `AUTH LOGIN`, `--password PASSWORD`; a password of letters alone after such
+    a label stays a gap, as it is after the colon forms below 8 characters. A marker a log wrote (`[REDACTED]`,
+    `<pw>`, `{password}`) and a Windows path (a backslash) are no value (round 2 of 0.6.15). With prose_punct (the CLI
+    flag in a typed sentence) the punctuation after a word is no part of it: "give --password explicitly?" is a
+    question (Gate B of 0.6.15); after AUTH or in a netrc, `Sommerurlaub!` stays a value."""
+    w = v.strip()
+    if _MARKER_RE.fullmatch(w) or w[:1] in "[{<" or "\\" in w:   # the flag regex ends a value at ]: [REDACTED
+        return False
+    core = w.rstrip(".,;:!?)") if prose_punct else w
+    return _ds_value_ok(v, min_len=min_len) and not core.isalpha()
+
+
+# prose about a password, not one: a hyphen compound whose last part says what was done to it (SHA256-hashed,
+# AES-256-encrypted, 1Password-managed, OWASP-ASVS-4.0-compliant), and names of algorithms, encodings and standards
+# with their numbers and versions (PBKDF2-SHA256, ISO-8859-1, UTF-16LE, WPA2-PSK, Argon2id-v19, RFC-7617, ARGON2ID).
+# A compound with a word of its own stays a value: Xk9-q2-secret, Winter-2024-berlin, Sha256-2024! (round 2)
+_PROSE_LAST = frozenset({
+    "hashed", "encrypted", "encoded", "decoded", "managed", "protected", "enabled", "disabled", "signed", "salted",
+    "compliant", "based", "derived", "generated", "stored", "secured", "wrapped", "rotated", "required", "enforced",
+    "backed", "verified", "validated", "compatible", "formatted", "only", "free", "safe", "aware", "style", "format",
+    "encryption", "hashing", "encoding"})
+_VERSION_PART_RE = re.compile(r"v?\d+(?:\.\d+)*")
 _ALGORITHM_PARTS = frozenset({
     "md5", "sha1", "sha2", "sha3", "sha224", "sha256", "sha384", "sha512", "pbkdf2", "bcrypt", "scrypt", "argon2",
     "argon2i", "argon2d", "argon2id", "aes", "aes128", "aes192", "aes256", "gcm", "cbc", "ctr", "rsa", "hmac", "des",
     "3des", "blake2b", "blake2s", "blake3", "sha", "crypt", "ntlm", "ntlmv2", "chacha20", "poly1305", "ecdsa",
-    "ed25519", "x25519", "pkcs1", "pkcs5", "pkcs8", "pkcs12", "oaep", "pss"})
+    "ed25519", "x25519", "pkcs1", "pkcs5", "pkcs8", "pkcs12", "oaep", "pss",
+    "iso", "utf", "utf8", "utf16", "utf16le", "utf16be", "utf32", "16le", "16be", "latin1", "cp1252", "ascii",
+    "base64", "base32", "hex", "wpa", "wpa2", "wpa3", "psk", "sae", "eap", "tls", "ssl", "rfc", "owasp", "asvs", "nist",
+    "fips", "scram", "chap", "totp", "hotp", "kerberos", "x509", "plus", "jwt", "jwe", "jws", "oauth", "oauth2"})
 
 
 def _prose_word(v: str) -> bool:
     parts = v.lower().split("-")
-    return bool(_PROSE_COMPOUND_RE.fullmatch(v)) or (
-        len(parts) >= 2 and all(x in _ALGORITHM_PARTS or x.isdigit() for x in parts))
+    if len(parts) >= 2 and parts[-1] in _PROSE_LAST:
+        return True
+    names = [x for x in parts if not _VERSION_PART_RE.fullmatch(x)]
+    return bool(names) and all(x in _ALGORITHM_PARTS for x in names)
 
 
 def _prose_value_ok(v: str) -> bool:
@@ -469,6 +490,7 @@ def _prose_value_ok(v: str) -> bool:
 VALIDATORS = {
     "ds_value": _ds_value_ok,
     "word_value": _word_value_ok,
+    "flag_value": lambda v: _word_value_ok(v, prose_punct=True),
     "glued_value": lambda v: _word_value_ok(v, min_len=6),
     "prose_value": _prose_value_ok,
     "de_tax_id": _de_tax_id_ok,
@@ -557,10 +579,11 @@ OWN_RULES: list[dict] = [
     # keyword filters of scan() and the test-code rule apply as to `password=<value>`.
     # `pg_dump --password '<value>'`, `--db-password <value>`, PowerShell `-Password <value>`; the `=` form is
     # ds-keyword-equal-signs. A flag before a space, so `--password-stdin` and `--password-file` stay options
-    {"id": "label-cli-password", "type": "SECRET", "secret_group": 2, "validator": "word_value",
-     "regex": r"(?<![\w-])--?(?!(?i:no|ask|skip|prompt|without)[-_])(?:[A-Za-z][A-Za-z0-9]*[-_])*"
+    {"id": "label-cli-password", "type": "SECRET", "secret_group": 2, "validator": "flag_value",
+     "regex": r"(?<![\w-])--?(?!(?i:no|ask|skip|prompt|without|one|two|single|multi|first|second)[-_])"
+              r"(?:[A-Za-z][A-Za-z0-9]*[-_])*"
               r"(?i:password|passwd|passphrase|pass|pwd)[ \t]+"
-              r"(['\"]?)(?!-|(?:file|env|fd):|stdin(?![\w-]))([^\s'\"<>]{1,256}?)\1(?=$|[\s;|&)\]\\])"},
+              r"(['\"]?)(?!-|(?:file|env|fd):|stdin(?![\w-]))(?:pass:)?([^\s'\"<>]{1,256}?)\1(?=$|[\s;|&)\]\\])"},
     # `mysql -u app -p'<value>' db`: the value glued to -p (a space after -p asks for it; -P is the port)
     {"id": "label-mysql-p", "type": "SECRET", "secret_group": 2, "validator": "glued_value",
      "regex": r"(?<![\w-])(?:mysql|mysqldump|mysqladmin|mysqlimport|mysqlshow|mysqlcheck|mysqlpump|mariadb"
@@ -569,16 +592,21 @@ OWN_RULES: list[dict] = [
     # redis-cli: `127.0.0.1:6379> AUTH <value>` (or AUTH <user> <value>) at a prompt or the start of a line, and
     # `redis-cli -a <value>`. AUTH in capitals, as Redis documents it; `auth token expired` is prose
     {"id": "label-redis-auth", "type": "SECRET", "secret_group": 2, "validator": "word_value",
-     "regex": r"(?m)(?:^[ \t]*|>[ \t]?)AUTH[ \t]+(?:[^\s'\"]+[ \t]+)?"
+     "regex": r"(?m)(?:^[ \t]*|>[ \t]?)AUTH[ \t]+(?![=:]|LOGIN[ \t])(?:[^\s'\"]+[ \t]+)?"
               r"(?!(?:CRAM-MD5|DIGEST-MD5|SCRAM-SHA-[0-9]+(?:-PLUS)?|XOAUTH2|OAUTHBEARER|GSSAPI|NTLM|EXTERNAL"
               r"|ANONYMOUS|PLAIN|LOGIN)[ \t]*$)"   # an SMTP or IMAP AUTH names a SASL mechanism (Gate B of 0.6.15)
               r"(['\"]?)([^\s'\"<>]{1,256})\1[ \t]*$"},
     {"id": "label-redis-cli-a", "type": "SECRET", "secret_group": 2, "validator": "word_value",
      "regex": r"(?<![\w-])redis-cli(?![\w-])[^\n|;&]{0,400}?[ \t]-a[ \t]+"
               r"(['\"]?)([^\s'\"<>]{1,256}?)\1(?=$|[\s;|&)\]])"},
-    # .netrc: `machine <host> login <user> password <value>`, on one line or on several
+    # .netrc: `machine <host> login <user> password <value>`, on one line or on several. The host has a dot, a colon
+    # or a digit (or is localhost): "on my dev machine the password changed" is prose. `default` starts an entry at a
+    # line start, or anywhere before `login` (a second entry on the line, a grep prefix); "the default password
+    # policy_v2" is prose (round 2 of 0.6.15)
     {"id": "label-netrc-password", "type": "SECRET", "secret_group": 1, "validator": "word_value",
-     "regex": r"(?:(?<![\w-])machine[ \t]+[^\s]+|(?<![^\n])[ \t]*default)(?:\s+(?:login|account|port)[ \t]+[^\s]+)*"
+     "regex": r"(?:(?<![\w-])machine[ \t]+(?:[^\s]*[.:0-9][^\s]*|localhost)"
+              r"|(?<![^\n])[ \t]*default|(?<![\w-])default(?=[ \t]+login[ \t]))"
+              r"(?:\s+(?:login|account|port)[ \t]+[^\s]+)*"
               r"\s+password[ \t]+([^\s]{1,256})"},
     # prose: "my password is <value>". Only a value that is no word of a sentence: it holds a capital or a symbol
     # beyond - _ . and a digit or a symbol ("the password is incorrect" stays prose). English only: the German
@@ -1401,6 +1429,13 @@ _PG_TOOL_RE = re.compile(r"(?<![\w-])(?:psql|pg_dump|pg_dumpall|pg_restore|pg_ba
                          r"|dropuser|vacuumdb|reindexdb|clusterdb|pgbench)(?:\.exe)?(?![\w-])")
 
 
+def _command_start(text: str, pos: int) -> int:
+    """The start of the shell command that holds pos: after the last | ; & on its line (round 2 of 0.6.15)."""
+    a = _line_start(text, pos)
+    cut = max(text.rfind(c, a, pos) for c in "|;&")
+    return cut + 1 if cut >= a else a
+
+
 def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins."""
     if not text:
@@ -1493,7 +1528,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     and _SIGV4_SCOPE_RE.match(text, end)):
                 continue   # the key id in a SigV4 credential scope (a presigned URL, an Authorization header)
             if (rule.id == "label-cli-password" and text[start - 1:start] not in "'\""
-                    and _PG_TOOL_RE.search(text, _line_start(text, start), start)):
+                    and _PG_TOOL_RE.search(text, _command_start(text, start), start)):
                 continue   # `psql --password app_db`: a switch that asks for the password, then the database
             if rule.id == "url-password-no-user" and _url_password_not_a_value(secret):
                 continue

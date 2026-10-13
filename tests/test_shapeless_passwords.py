@@ -126,6 +126,11 @@ class NetrcTests(unittest.TestCase):
             with self.subTest(text=text.replace(pw, "<pw>")):
                 self.assertEqual(found(text), [("SECRET", pw)])
 
+    def test_a_default_entry_after_another_entry_on_its_line_is_a_hit(self):
+        pw, other = password(10), password(10)
+        text = f"machine api.example-corp.net login ci {PW} {other} default login anonymous {PW} {pw}"
+        self.assertEqual(found(text), [("SECRET", other), ("SECRET", pw)])
+
     def test_prose_with_machine_or_default_is_no_hit(self):
         for text in (f"the default {PW} is printed on the label", f"machine learning {PW} reset flow",
                      f"==== Disabling default {PW} expiration",
