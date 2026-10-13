@@ -799,8 +799,6 @@ def user_prompt(payload: dict) -> dict:
     cfg = load_config()
     prompt = payload.get("prompt", "")
     session = payload.get("session_id")
-    from . import file_reads
-    file_reads.mark_session(session)      # the first time seen: a clean folder trusts only older files (C26)
 
     # 1. @file mentions inline the file OUTSIDE the hook pipeline. Force a Read.
     mention = _blocking_mention(prompt, payload.get("cwd", ""), cfg)
@@ -3364,6 +3362,7 @@ def post_tool(payload: dict) -> dict:
     from . import file_reads
     swap = file_reads.post_read(payload, cfg, client_of(payload) == "codex")
     held = None
+    images: list = []
     if swap and swap[0] == "pass":
         if payload.get("tool_name") != "Bash" or not isinstance(response, dict):
             return {}
@@ -3371,6 +3370,9 @@ def post_tool(payload: dict) -> dict:
         # of the whole result let a token in stderr through, review of block 4)
         held = response.get("stdout")
         response = {k: ("" if k == "stdout" else v) for k, v in response.items()}
+        swap = None
+    elif swap and swap[0] == "hold":
+        response, images = file_reads.hold_images(response)
         swap = None
     elif swap:
         response = swap[1]
@@ -3449,6 +3451,8 @@ def post_tool(payload: dict) -> dict:
     new_response = walk(response)
     if held is not None and isinstance(new_response, dict):
         new_response["stdout"] = held
+    if images:
+        file_reads.put_back_images(new_response, images)
     if swap and not hit["n"] and not hidden["n"]:
         if client_of(payload) == "codex":
             return {"decision": "block", "reason": f"[maisecrets: {swap[2]}]\n\n{file_reads.as_text(new_response)}"}

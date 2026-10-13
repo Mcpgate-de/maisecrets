@@ -168,7 +168,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         sys.exit(0)
     try:
         from maisecrets import file_reads  # noqa: E402
-        file_reads.mark_session(payload.get("session_id"))   # a clean folder trusts only older files (C26)
+        file_reads.note_session_start(payload)    # the anchor of a clean folder: only here, never later (C26)
         file_reads.prune_sessions()
     except Exception:  # noqa: BLE001 - the note never stops a session start; without it no folder is clean
         pass

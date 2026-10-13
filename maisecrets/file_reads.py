@@ -83,6 +83,41 @@ def _notebook_images(response: dict) -> int:
     return sum(1 for _c, out in _notebook_outputs(response) if out.get("image"))
 
 
+def hold_images(response: dict) -> tuple:
+    """A copy of a notebook result whose image data is empty, and the data taken out, in order. The scan walks the
+    rest: base64 is no text to scan (300 KB took 7.5 s, review of block 4), the cells are."""
+    import copy
+    held = []
+    out = copy.deepcopy(response)
+    for _cell, o in _notebook_outputs(out):
+        img = o.get("image")
+        if isinstance(img, dict) and isinstance(img.get("image_data"), str):
+            held.append(img["image_data"])
+            img["image_data"] = ""
+    return out, held
+
+
+def put_back_images(response, held: list) -> None:
+    if not isinstance(response, dict):
+        return
+    data = iter(held)
+    for _cell, o in _notebook_outputs(response):
+        img = o.get("image")
+        if isinstance(img, dict) and img.get("image_data") == "":
+            img["image_data"] = next(data, "")
+
+
+def notebook_has_image(path: str) -> bool:
+    """The file holds an image output (a mime type image/... in it). Too large or unreadable: True (ask)."""
+    try:
+        if os.path.getsize(path) > 50 * 1024 * 1024:
+            return True
+        with open(path, "rb") as f:
+            return b'"image/' in f.read()
+    except OSError:
+        return True
+
+
 def notebook_text(response: dict, note: str) -> str:
     """A notebook as text, every image output replaced by the note (measured: the text shape takes a notebook's
     image out of the request too, harness/golden/file_reads_model_view.json nb_replace_text)."""
@@ -98,6 +133,10 @@ def notebook_text(response: dict, note: str) -> str:
                 continue
             if out.get("text"):
                 parts.append(str(out["text"]))
+            if out.get("ename") or out.get("evalue") or out.get("traceback"):
+                tb = out.get("traceback")
+                tb = "\n".join(map(str, tb)) if isinstance(tb, list) else str(tb or "")
+                parts.append(f"{out.get('ename') or ''}: {out.get('evalue') or ''}" + (f"\n{tb}" if tb else ""))
             if out.get("image"):
                 parts.append(f"[{note}]")
     return "\n\n".join(parts)
@@ -125,15 +164,58 @@ def _seen_path(session):
     return os.path.join(str(HOME), "sessions-seen", session)
 
 
-def mark_session(session) -> None:
-    """Note the first time maisecrets sees this session (SessionStart and every prompt; only the first call writes).
-    The client sends no start time, and a clean folder trusts only files that were there before it (C26)."""
-    path = _seen_path(session)
-    if not path or os.path.exists(path):
-        return
+NESTED = "nested"
+_CLIENTS = ("claude", "codex")
+
+
+def nested_client() -> bool:
+    """A client that runs below another client (an agent that started `claude -p` or `codex exec` in its shell). The
+    environment cannot tell: Claude Code sets CLAUDECODE=1 and its own session id for a top-level session too
+    (measured on 2.1.296). The process chain can: above the hook there is one client, or two. A process list that
+    cannot be read counts as nested (no clean folder)."""
+    import subprocess
     try:
-        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,comm="], capture_output=True, text=True, timeout=3,
+                             stdin=subprocess.DEVNULL).stdout
+    except (OSError, subprocess.SubprocessError):
+        return True
+    parent, name = {}, {}
+    for line in out.splitlines():
+        bits = line.split(None, 2)
+        if len(bits) == 3 and bits[0].isdigit() and bits[1].isdigit():
+            parent[int(bits[0])], name[int(bits[0])] = int(bits[1]), os.path.basename(bits[2].strip())
+    pid, clients, steps = os.getpid(), 0, 0
+    if pid not in parent:
+        return True
+    while pid in parent and pid > 1 and steps < 64:
+        clients += name.get(pid) in _CLIENTS
+        pid, steps = parent[pid], steps + 1
+    # the session's own client and one more above it. A client that runs under another name (an npm install runs as
+    # node) is not counted, so one nested in it is not seen (C26)
+    return clients >= 2
+
+
+def note_session_start(payload: dict) -> None:
+    """SessionStart: note when this session began, the anchor of clean_dirs (C26). Only here: a prompt or a tool call
+    never writes the note, so a note that the agent deletes is not made again with a later time (nothing is clean
+    then). Not at a compaction, which the agent can bring about with a long output. A nested client gets a note that
+    makes no folder clean."""
+    if payload.get("source") == "compact":
+        return
+    session = payload.get("session_id")
+    path = _seen_path(session)
+    if not path or os.name == "nt":
+        return
+    folder = os.path.dirname(path)
+    try:
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        if os.path.islink(folder) or os.path.lexists(path):
+            return
+        import time
+        text = NESTED if nested_client() else repr(time.time())
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
     except OSError:
         pass
 
@@ -143,19 +225,37 @@ def prune_sessions() -> None:
     import time
     folder = os.path.dirname(_seen_path("x"))
     try:
+        if os.path.islink(folder):
+            return
         for name in os.listdir(folder):
             f = os.path.join(folder, name)
-            if os.stat(f).st_mtime < time.time() - SEEN_DAYS * 86400:
+            if os.lstat(f).st_mtime < time.time() - SEEN_DAYS * 86400:
                 os.unlink(f)
     except OSError:
         pass
 
 
 def session_start(session) -> float | None:
+    """When this session began, or None (no note, a link, a nested client: nothing is clean). The earliest of the
+    time written in the note, its mtime and its inode change time: a touch or utime moves the two times of the file,
+    never the text in it, and a rewrite of the text moves the change time to now."""
+    import stat
     path = _seen_path(session)
+    if not path:
+        return None
     try:
-        return os.stat(path).st_mtime if path else None
-    except OSError:
+        if stat.S_ISLNK(os.lstat(os.path.dirname(path)).st_mode):
+            return None
+        st = os.lstat(path)
+        if not stat.S_ISREG(st.st_mode):
+            return None
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd) as f:
+            text = f.read(64).strip()
+        if text == NESTED:
+            return None
+        return min(float(text), st.st_mtime, st.st_ctime)
+    except (OSError, ValueError):
         return None
 
 
@@ -163,10 +263,13 @@ def in_clean_dir(path: str, cwd: str, cfg: dict, session=None) -> bool:
     """The file lies in a folder of clean_dirs and was there before the session began. Both sides are resolved first
     (links and ..), so a link inside a clean folder that points out of it, or a path that climbs out with .., is not
     inside. The file itself must have one name only (a hard link from outside has two) and an inode change time
-    older than the first time maisecrets saw this session: a copy, a move or a link that the agent makes into the
-    folder changes that time, and the agent cannot set it back. No note of the session: nothing is clean."""
+    older than the start of this session (session_start): a copy, a move or a link that the agent makes into the
+    folder changes that time, and no command sets it back. The note of the start lies in the maisecrets folder, which
+    the agent's tools may not touch (C8); an obfuscated command can still move it (C8 matches the command text). No
+    note: nothing is clean."""
     dirs = [d for d in cfg.get("clean_dirs") or [] if isinstance(d, str) and d.strip()]
-    if not dirs or not path:
+    if not dirs or not path or os.name == "nt":
+        # Windows: st_ctime is the creation time there, and a move keeps it. clean_dirs is for macOS and Linux
         return False
     full = path if os.path.isabs(os.path.expanduser(path)) else os.path.join(cwd or os.getcwd(), path)
     try:
@@ -372,6 +475,14 @@ def pre_read(payload: dict, cfg: dict, codex: bool) -> dict:
     them). {} lets the read run."""
     tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     path = tool_input.get("file_path")
+    if isinstance(path, str) and path.lower().endswith(".ipynb") and not codex and mode(cfg, "image") == "ask":
+        # a notebook with an image output: ask before it, as for an image (its text is scanned anyway)
+        full = path if os.path.isabs(path) else os.path.join(str(payload.get("cwd") or ""), path)
+        if notebook_has_image(full) and not in_clean_dir(path, str(payload.get("cwd") or ""), cfg,
+                                                         payload.get("session_id")):
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                           "permissionDecisionReason": ask_reason("image")}}
+        return {}
     kind = kind_of_path(path) if isinstance(path, str) else None
     if not kind or in_clean_dir(path, str(payload.get("cwd") or ""), cfg, payload.get("session_id")):
         return {}
@@ -403,7 +514,8 @@ def _withheld(tool: str, response: dict, path: str, text: str) -> dict:
 
 def post_read(payload: dict, cfg: dict, codex: bool) -> tuple | None:
     """PostToolUse: None for any result that is no image or PDF (the normal redaction runs on it); ("pass",) for
-    one that goes to the model as it is, unscanned; ("replace", response, note) for one this hook replaces. The
+    one that goes to the model as it is, unscanned (a Bash image: its stdout only); ("hold",) for a notebook whose
+    image data passes while its cells are scanned; ("replace", response, note) for one this hook replaces. The
     replacement is always a text Read (or a text Bash result); the normal redaction then runs on it."""
     tool = payload.get("tool_name") or ""
     response = payload.get("tool_response")
@@ -417,9 +529,11 @@ def post_read(payload: dict, cfg: dict, codex: bool) -> tuple | None:
     clean = tool == "Read" and in_clean_dir(path, str(payload.get("cwd") or ""), cfg, payload.get("session_id"))
     how = mode(cfg, kind)
     if tool == "Read" and response.get("type") == "notebook":
-        # its cells are text and are scanned as always; only ask and block take the images out
-        if how == "allow" or clean:
-            return None
+        # its cells are text and are scanned as always, its image data is held out of the scan; ask (without the
+        # PreToolUse ask: Codex, or a file that changed) and block take the images out
+        asked = how == "ask" and not codex and path.lower().endswith(".ipynb")
+        if how == "allow" or clean or asked:
+            return ("hold",)
         why = _block_why(cfg) if how != "ask" else ("ask-codex" if codex else "ask-unseen")
         n = _notebook_images(response)
         text = notebook_text(response, f"maisecrets: an image output was withheld (setting read_image {how})")

@@ -1299,7 +1299,12 @@ folder that points out of it does not count. A file counts only if it was in
 the folder before the session began and has no second name (hard link): a
 file that arrives during the session, also one that the AI copies, moves or
 links there, waits for the next session. maisecrets refuses `/`, your home
-folder and a folder that holds the folder the session works in.
+folder and a folder that holds the folder the session works in. The start of
+the session is a note that maisecrets writes at the session start, never
+later; without the note nothing in the folder is clean. A client that the AI
+starts inside its own session (`claude -p` from its shell) trusts no clean
+folder. `clean_dirs` works on macOS and Linux; on Windows no file in it counts
+as clean, because there a moved file keeps its creation time.
 
 A Bash command whose output starts with `data:image/…;base64,` sends an image
 to the model too (Claude Code shows it as one and marks it `isImage`);
@@ -1307,8 +1312,13 @@ to the model too (Claude Code shows it as one and marks it `isImage`);
 error output of the same command is redacted as usual. `ask` cannot ask
 after the command ran, so it withholds the output, like `block`.
 
-A notebook (`.ipynb`) whose output cells hold an image: with `ask` or `block`
-the AI gets the cells as text and each image as a note that it was withheld.
+A notebook (`.ipynb`) whose output cells hold an image: with `ask` Claude
+Code asks you first, and with `block` the AI gets the cells as text and each
+image as a note that it was withheld. The cells are always redacted; the image
+data is not scanned. Claude Code itself drops the outputs of a notebook when
+they are large (measured on 2.1.296: an image of about 8 KB or more): the AI
+then reads only a note to run `cat <notebook> | jq '.cells[0].outputs'` in
+Bash, and that output is text, which maisecrets redacts like any output.
 
 **Not covered:** an image you paste into the prompt (Ctrl+V or drag of an
 image into Claude Code) reaches the model without passing any hook; the
@@ -1360,9 +1370,13 @@ a to-do.
   it are masked. On Codex the PDF and image settings act on nothing measured.
 - **A clean folder trusts the files that were there when the session
   began.** A file you put there yourself during the session waits for the
-  next one. The start of a session is the first time maisecrets saw it (the
-  client sends no start time); a person who edits the files of the
-  maisecrets folder can change it.
+  next one. The start of a session is a note that maisecrets writes at the
+  session start (the client sends no start time). The AI's tools may not
+  touch the maisecrets folder, but that guard reads the command text: a
+  command that hides the path (built from pieces, `find … -exec`) can still
+  move the note and make a copied file count as clean. A client started
+  under another program name (an npm install runs as `node`) is not seen as
+  nested. Windows: no file counts as clean.
 - **A transformed value can pass.** For a value this session resolved, the
   output is checked as a substring in plain, base64, hex, URL-encoded and
   JSON-escaped form, and a resolving command may not encode it in the first

@@ -454,11 +454,13 @@ class Convert(_Work):
         self.assertEqual(decision(self.pre("PreToolUse_Read_png", file_path=self.png)), "deny")
 
 
+@unittest.skipIf(os.name == "nt", "clean_dirs is for macOS and Linux: st_ctime is the creation time on Windows")
 class CleanDirs(_Work):
     def begin(self) -> None:
         """The session S1 starts now: every file that exists already is older than it."""
         time.sleep(0.02)
-        file_reads.mark_session("S1")
+        with mock.patch.object(file_reads, "nested_client", return_value=False):
+            file_reads.note_session_start({"session_id": "S1", "source": "startup"})
         time.sleep(0.02)
 
     @unittest.skipIf(os.name == "nt", "a symbolic link needs a privilege on Windows")
@@ -469,6 +471,8 @@ class CleanDirs(_Work):
         inside.write_bytes(b"%PDF-1.4\n")
         os.symlink(self.pdf, clean / "link.pdf")                 # a link in the clean folder to a file outside
         os.symlink(clean, self.dir / "clean-link")               # the clean folder through a link
+        (self.dir / "clean2").mkdir()
+        (self.dir / "clean2" / "a.pdf").write_bytes(b"%PDF-1.4\n")   # older than the session, beside the folder
         _reset(read_pdf="block", clean_dirs=[str(clean)])
         self.begin()
         cases = ((str(inside), "pass"), (str(self.dir / "clean-link" / "a.pdf"), "pass"),
@@ -520,15 +524,71 @@ class CleanDirs(_Work):
         _reset(read_pdf="block", clean_dirs=[self.cwd])
         self.assertEqual(decision(self.pre(file_path=self.pdf)), "deny")
 
-    def test_the_first_prompt_notes_the_session_and_a_later_one_keeps_the_time(self):
+    def _note(self) -> str:
+        return os.path.join(str(HOME), "sessions-seen", "S1")
+
+    def test_only_the_session_start_writes_the_note(self):
+        # review round 2: a note deleted by the agent was made again by the next prompt, with a later time
         p = golden("UserPromptSubmit_pasted_image", self.cwd, prompt="hello")
         run_hook("user-prompt", p)
+        self.assertIsNone(file_reads.session_start("S1"), "a prompt writes no note")
+        file_reads.note_session_start({"session_id": "S1", "source": "compact"})
+        self.assertIsNone(file_reads.session_start("S1"), "a compaction writes no note")
+        self.begin()
         first = file_reads.session_start("S1")
         self.assertIsNotNone(first)
         time.sleep(0.02)
-        run_hook("user-prompt", p)
-        self.assertEqual(file_reads.session_start("S1"), first)
+        self.begin()
+        self.assertEqual(file_reads.session_start("S1"), first, "a second start keeps the first time")
         self.assertIsNone(file_reads.session_start("../x"), "a session id is no path")
+
+    def test_a_later_time_on_the_note_does_not_move_the_start(self):
+        self.begin()
+        first = file_reads.session_start("S1")
+        os.utime(self._note(), (time.time() + 10 ** 6, time.time() + 10 ** 6))
+        self.assertLessEqual(file_reads.session_start("S1"), first)
+
+    def test_a_linked_note_or_folder_is_not_followed(self):
+        other = self.dir / "agent"
+        other.mkdir()
+        (other / "S1").write_text(repr(time.time() + 10 ** 6))
+        os.makedirs(os.path.dirname(self._note()), exist_ok=True)
+        os.symlink(other / "S1", self._note())
+        self.assertIsNone(file_reads.session_start("S1"), "a linked note")
+        os.unlink(self._note())
+        os.unlink(other / "S1")
+        os.rmdir(os.path.dirname(self._note()))
+        os.symlink(other, os.path.dirname(self._note()))
+        try:
+            self.begin()
+            self.assertIsNone(file_reads.session_start("S1"), "a linked folder")
+            self.assertEqual(os.listdir(other), [], "nothing written through the link")
+        finally:
+            os.unlink(os.path.dirname(self._note()))
+
+    def test_a_nested_client_trusts_no_clean_folder(self):
+        _reset(read_pdf="block", clean_dirs=[self.cwd])
+        time.sleep(0.02)
+        with mock.patch.object(file_reads, "nested_client", return_value=True):
+            file_reads.note_session_start({"session_id": "S1", "source": "startup"})
+        self.assertIsNone(file_reads.session_start("S1"))
+        self.assertEqual(decision(self.pre(file_path=self.pdf)), "deny")
+
+    def test_a_nested_client_is_seen_in_the_process_chain(self):
+        me, parent = os.getpid(), os.getppid()
+
+        def ps(chain):
+            lines = [f"{pid} {ppid} {name}" for pid, ppid, name in chain]
+            return mock.Mock(stdout="\n".join(lines) + "\n")
+        top = [(me, parent, "python3"), (parent, 50, "bash"), (50, 40, "claude"), (40, 1, "-zsh")]
+        nested = [(me, parent, "python3"), (parent, 50, "bash"), (50, 45, "/usr/local/bin/claude"), (45, 40, "bash"),
+                  (40, 30, "claude"), (30, 1, "login")]
+        with mock.patch.object(subprocess, "run", return_value=ps(top)):
+            self.assertFalse(file_reads.nested_client())
+        with mock.patch.object(subprocess, "run", return_value=ps(nested)):
+            self.assertTrue(file_reads.nested_client())
+        with mock.patch.object(subprocess, "run", side_effect=OSError("no ps")):
+            self.assertTrue(file_reads.nested_client(), "a process list that cannot be read counts as nested")
 
     def test_a_folder_that_holds_the_work_is_refused(self):
         def add(folder):
@@ -616,9 +676,38 @@ class Notebook(_Work):
         self.assertNotIn("iVBOR", json.dumps(answer))
         self.assertNotIn(TOKEN, json.dumps(answer), "the cells are scanned too")
 
-    def test_ask_withholds_too(self):
+    def test_ask_asks_before_a_notebook_with_an_image_and_codex_withholds(self):
         _reset(read_image="ask")
-        self.assertNotIn("iVBOR", json.dumps(self._post()))
+        nb = Path(self.cwd, "plot.ipynb")
+        nb.write_text(json.dumps({"cells": [{"outputs": [{"data": {"image/png": "iVBOR"}}]}]}))
+        pre = golden("PreToolUse_Read_png", self.cwd, file_path=str(nb))
+        self.assertEqual(decision(run_hook("pre-tool", pre)), "ask")
+        self.assertIn("iVBOR", json.dumps(output(self._post())), "after the yes the image goes, the cells are masked")
+        nb.write_text(json.dumps({"cells": [{"outputs": [{"text": "x"}]}]}))
+        self.assertEqual(run_hook("pre-tool", pre), {}, "a notebook without an image is not asked about")
+        p = golden("PostToolUse_Read_notebook", self.cwd, turn_id="t1")
+        self.assertNotIn("iVBOR", json.dumps(run_hook("post-tool", p)), "Codex cannot ask: withheld")
+
+    def test_the_image_data_is_not_scanned(self):
+        # review round 2: under allow the base64 was scanned (300 KB took 7.5 s); a token shape inside it stays as it
+        # is, because it is image data, while the cell is masked
+        p = golden("PostToolUse_Read_notebook", self.cwd)
+        p["tool_response"]["file"]["cells"][0]["source"] = f"key = '{TOKEN}'"
+        img = p["tool_response"]["file"]["cells"][0]["outputs"][0]["image"]
+        img["image_data"] = img["image_data"] + TOKEN
+        out = output(run_hook("post-tool", p))
+        self.assertEqual(out["file"]["cells"][0]["outputs"][0]["image"]["image_data"], img["image_data"])
+        self.assertNotIn(TOKEN, out["file"]["cells"][0]["source"])
+
+    def test_block_keeps_an_error_output_as_text(self):
+        _reset(read_image="block")
+        p = golden("PostToolUse_Read_notebook", self.cwd)
+        p["tool_response"]["file"]["cells"][0]["outputs"].append(
+            {"output_type": "error", "ename": "ZeroDivisionError", "evalue": f"token {TOKEN}",
+             "traceback": ["line one", "line two"]})
+        content = output(run_hook("post-tool", p))["file"]["content"]
+        self.assertIn("ZeroDivisionError: token ⟦SECRET_c", content)
+        self.assertIn("line two", content)
 
     def test_allow_keeps_the_image_and_still_scans_the_cells(self):
         answer = self._post()
