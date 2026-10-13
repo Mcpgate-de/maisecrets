@@ -718,6 +718,8 @@ def _pw_literal_ok(v: str) -> bool:
     fixture word (testpass), no version."""
     if not 4 <= len(v) <= 64 or any(c.isspace() for c in v) or _charset(v) == "digits" or len(set(v)) < 3:
         return False
+    if not any(c.isalnum() for c in v):
+        return False   # signs only: escaped quotes of a JSON text in code (\":\"), not a password
     if _sequential(v.lower()) or _LITERAL_PLACEHOLDER_RE.search(v) or _DOTTED_RE.fullmatch(v) or _names_itself(v):
         return False
     if _CLOSED_TEMPLATE_RE.search(v):
@@ -740,17 +742,56 @@ def _pw_literal_ok(v: str) -> bool:
 _LIT_WRAP = (r"(?:(?:Some|Ok|String::from|str|bytes|SecretString::new|Secret::new|SecretStr|SecretBytes|Optional\.of"
              r"|Box::new|Sensitive|new[ \t]+String)[ \t]*\([ \t]*)?")
 _LIT_LABEL = r"(?<![\w.\-$@])([A-Za-z_$@][\w.\-]{0,60})[\"'\]]?[ \t]*"
+# the quoted forms end at the opening quote: _read_quoted reads the literal to its real closing quote
+_LIT_QUOTED = re.compile(_LIT_LABEL + r"(?:=>|:=|==|=|:|,|\()[ \t]*" + _LIT_WRAP + r"([\"'`])")
 _LIT_FORMS = (
-    (re.compile(_LIT_LABEL + r"(?:=>|:=|==|=|:|,|\()[ \t]*" + _LIT_WRAP + r"([\"'`])([^\"'`\n\\]{4,300})\2"
-                r"(?![ \t]*\+)"), 1, 3),
     (re.compile(r"(?m)" + _LIT_LABEL + r"(?:=|:)[ \t]*([^\s\"'`,;()\[\]{}<>]{4,300})[ \t]*(?:(?:#|//|;).*)?$"), 1, 2),
     (re.compile(r"[?&;]([\w.\-\[\]]{1,60})=([^&\s\"'#<>]{4,400})"), 1, 2),
     (re.compile(r"<([\w:.-]{1,60})(?:\s[^<>]{0,200})?>([^<>\s]{4,400})</"), 1, 2),
 )
-_LIT_SQL_PS = (
-    re.compile(r"(?i)\bidentified[ \t]+(?:with[ \t]+\w+[ \t]+)?by[ \t]*(?:password[ \t]*)?([\"'])([^\"'\n]{4,64})\1"),
-    re.compile(r"(?i)ConvertTo-SecureString[ \t]+(?:-String[ \t]+)?([\"'])([^\"'\n]{4,64})\1"),
-)
+# SQL's IDENTIFIED BY '…' (a doubled quote and MySQL's backslash escape are part of the value) and PowerShell's
+# ConvertTo-SecureString '…' (single quotes: a doubled quote; double quotes: a doubled quote and the backtick escape)
+_LIT_SQL = re.compile(r"(?i)\bidentified[ \t]+(?:with[ \t]+\w+[ \t]+)?by[ \t]*(?:password[ \t]*)?([\"'])")
+_LIT_PS = re.compile(r"(?i)ConvertTo-SecureString[ \t]+(?:-String[ \t]+)?([\"'])")
+_LIT_BOUND = 300   # a literal longer than this, or one that its line ends, is taken to the bound: never a prefix
+_BACKSLASH_ESCAPE_RE = re.compile(r"\\(?:u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))", re.S)
+_ESCAPED_CHAR = {"n": "\n", "t": "\t", "r": "\r", "0": "\0"}
+
+
+def _unquote(raw: str, quote: str, backslash: bool, backtick: bool) -> str:
+    """The value a literal stands for, for the judgement only (the span stays the raw text): `\u00fc` is ü, `\"` is ",
+    a doubled quote is one quote, PowerShell's backtick escapes the next character."""
+    v = raw.replace(quote + quote, quote)
+    if backslash and "\\" in v:
+        v = _BACKSLASH_ESCAPE_RE.sub(lambda m: chr(int(m.group(1) or m.group(2), 16)) if (m.group(1) or m.group(2))
+                                     else _ESCAPED_CHAR.get(m.group(3), m.group(3)), v)
+    if backtick and "`" in v:
+        v = re.sub(r"`(.)", lambda m: _ESCAPED_CHAR.get(m.group(1), m.group(1)), v, flags=re.S)
+    return v
+
+
+def _read_quoted(text: str, i: int, quote: str, backslash: bool = True, backtick: bool = False) -> tuple:
+    """Read a quoted literal whose content starts at `i`: (end of the content, closed). A backslash (C, Python, JSON,
+    JavaScript, MySQL) or a backtick (PowerShell) escapes the next character, and a doubled quote (SQL, PowerShell, YAML
+    single quotes) is one quote of the content, so an escaped quote never ends the value early. Without a closing quote
+    on the line within _LIT_BOUND characters the content runs to the line end or the bound."""
+    n = len(text)
+    stop = min(n, i + _LIT_BOUND)
+    j = i
+    while j < stop:
+        c = text[j]
+        if c == "\n" or c == "\r":
+            return j, False
+        if (backslash and c == "\\") or (backtick and c == "`"):
+            j += 2
+            continue
+        if c == quote:
+            if j + 1 < n and text[j + 1] == quote and j > i:
+                j += 2   # a doubled quote inside the literal; `""` right after the opening quote is an empty literal
+                continue
+            return j, True
+        j += 1
+    return min(j, stop), False
 
 
 # a label that names a secret by its whole tail (`client_secret`, `apiKey`, `x-auth-token`), and a weak label that may
@@ -848,15 +889,37 @@ def _literal_hits(text: str) -> list:
     cache = _INDEX[1]
     if "literal" not in cache:
         hits = []
+        pos = 0
+        while True:
+            m = _LIT_QUOTED.search(text, pos)
+            if m is None:
+                break
+            a = m.end()
+            q = m.group(2)
+            end, closed = _read_quoted(text, a, q, backtick=False)
+            raw = text[a:end]
+            # past the literal; but a literal with a quote inside that is no value may hold labels and values of its
+            # own (a JSON text in a template string): read on inside it then
+            pos = end + 1 if closed else max(end, a)
+            if closed and re.match(r"[ \t]*\+", text[end + 1:end + 40]):
+                continue   # a string that + continues is an expression
+            rid = _judge_literal(m.group(1), _unquote(raw, q, True, False), quoted=True)
+            if rid:
+                hits.append((rid, m.start(), a, end))
+            elif any(c in raw for c in "\"'`"):
+                pos = a
         for n, (rx, gl, gv) in enumerate(_LIT_FORMS):
             for m in rx.finditer(text):
-                rid = _judge_literal(m.group(gl), m.group(gv), quoted=n != 1)
+                rid = _judge_literal(m.group(gl), m.group(gv), quoted=n != 0)
                 if rid:
                     hits.append((rid, m.start(), m.start(gv), m.end(gv)))
-        for rx in _LIT_SQL_PS:
+        for rx, backslash in ((_LIT_SQL, True), (_LIT_PS, False)):
             for m in rx.finditer(text):
-                if _pw_literal_ok(m.group(2)):
-                    hits.append(("label-pw-literal", m.start(), m.start(2), m.end(2)))
+                q = m.group(1)
+                tick = not backslash and q == '"'
+                end, _closed = _read_quoted(text, m.end(), q, backslash=backslash, backtick=tick)
+                if _pw_literal_ok(_unquote(text[m.end():end], q, backslash, tick)):
+                    hits.append(("label-pw-literal", m.start(), m.end(), end))
         hits.sort(key=lambda h: h[2])
         cache["literal"] = hits
     return cache["literal"]

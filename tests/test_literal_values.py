@@ -63,6 +63,28 @@ class PasswordLiteralTests(unittest.TestCase):
                 self.assertTrue(any(k == "label-pw-literal" for k, _ in got), got and [k for k, _ in got])
                 self.assertTrue(any(v in (p4, p6, p10) for _, v in got))
 
+    def test_an_escaped_or_doubled_quote_is_part_of_the_value(self):
+        """The whole literal, never a prefix: SQL and YAML double a quote, PowerShell doubles it or escapes it with a
+        backtick, C-like languages, JSON and MySQL escape it with a backslash."""
+        p = password(10)
+        a, b = p[:5], p[5:]
+        cases = [
+            (f"ALTER USER app IDENTIFIED BY '{a}''{b}';", f"{a}''{b}"),                          # SQL
+            (f"ALTER USER app IDENTIFIED BY '{a}\\'{b}';", f"{a}\\'{b}"),                        # MySQL
+            (f"$s = ConvertTo-SecureString '{a}''{b}' -AsPlainText -Force", f"{a}''{b}"),        # PowerShell ''
+            (f'$s = ConvertTo-SecureString "{a}`"{b}" -AsPlainText -Force', f'{a}`"{b}'),        # PowerShell `"
+            (f'conn.Password("{a}\\"{b}")', f'{a}\\"{b}'),                                     # C#, Java, JavaScript
+            (f'{{"password": "{a}\\"{b}"}}', f'{a}\\"{b}'),                                     # JSON
+            (f"password: '{a}''{b}'", f"{a}''{b}"),                                              # YAML single quotes
+            (f'password: "{a}\\"{b}"', f'{a}\\"{b}'),                                           # YAML double quotes
+            (f"pwd = '{p}", p),                                                                  # no closing quote
+        ]
+        for text, value in cases:
+            with self.subTest(text=text.replace(a, "<a>").replace(b, "<b>")):
+                self.assertIn(("label-pw-literal", value), kinds(text))
+                self.assertFalse([v for _, v in kinds(text) if v in (a, b) or (v != value and v in value)],
+                                 "a part of the value was taken on its own")
+
     def test_a_word_with_a_number_and_a_sign_is_a_password(self):
         """The form people choose: a word, a number and a sign. Undoing leet makes it a word, so the word check alone
         let it through in the forms that only this rule reads."""
@@ -103,6 +125,9 @@ class PasswordLiteralTests(unittest.TestCase):
         k = key(16)
         for text in (f'pw = "{p[:5]}" + "{p[5:]}"', f'PASSWORD = "{p}" + suffix',
                      'for label in ("passwort", "Kennwort", "Schl\u00fcssel", "zugangsdaten"):',
+                     'check(password, "Schl' + chr(92) + 'u00fcssel")',   # an escape in source code is its character
+                     # escaped quotes of a JSON text: signs only
+                     "J(['\"{\\\\\"', PW, '\\\\\":\\\\\"', pw])",
                      f"('SECRET', '{k[:4]}\u00a7{k[4:10]}\u00a7{k[10:]}')", f'client_secret = "{k[:8]}\u00e4{k[8:]}"'):
             with self.subTest(text=text[:10]):
                 self.assertEqual([x for x, _ in kinds(text) if x in ("label-pw-literal", "label-secret-literal")], [])
