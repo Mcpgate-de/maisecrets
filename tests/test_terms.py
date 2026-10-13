@@ -473,5 +473,121 @@ class ScanTreeTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("0 secret-shaped value(s)", r.stdout)
 
+
+class MarkedFileTests(unittest.TestCase):
+    """terms.marked.json: missing is empty, damaged fails closed and is never overwritten, expired names leave the
+    disk (codex review of block 2, HIGH 4 and MEDIUM 6)."""
+
+    def setUp(self):
+        self.addCleanup(self._clean)
+        self._clean()
+
+    def _clean(self):
+        for path in (terms.MARKED, terms.PERSONAL, terms.CACHE_FILE):
+            if path.exists():
+                path.unlink()
+        terms.reset()
+
+    def test_a_missing_file_is_no_marked_name(self):
+        self.assertEqual(terms._marked(), [])
+
+    def test_a_damaged_file_fails_closed_and_stays_as_it_is(self):
+        for raw in ('{"terms": [{"text": "Zbigniew Testowski", "expires": 9', "[]", '{"terms": "x"}',
+                    '{"terms": [{"expires": 1}]}'):
+            with self.subTest(raw=raw):
+                terms.MARKED.write_text(raw, encoding="utf-8")
+                terms.reset()
+                with self.assertRaises(TermsError) as cm:
+                    terms.matcher()
+                self.assertIn("damaged", str(cm.exception))
+                self.assertNotIn("testowsk", str(cm.exception).lower())
+                with self.assertRaises(TermsError):
+                    terms.take_markers("see {{Anna Przykladowa}}", 3600)
+                self.assertEqual(terms.MARKED.read_text(encoding="utf-8"), raw, "never overwritten")
+                self.assertIn("damaged", terms.load(strict=False).error)
+
+    def test_an_expired_name_is_deleted_from_the_disk(self):
+        terms.MARKED.write_text(json.dumps({"terms": [{"text": "Zbigniew Testowski", "expires": time.time() - 1},
+                                                      {"text": "Anna Przykladowa", "expires": time.time() + 600}]}),
+                                encoding="utf-8")
+        self.assertEqual([e.variants[0].text for e in terms._marked()], ["Anna Przykladowa"])
+        home = "".join(p.read_bytes().decode("utf-8", "replace") for p in Path(terms.HOME).rglob("*") if p.is_file())
+        self.assertNotIn("testowsk", home.lower(), "the clear text of an expired mark is gone from every file")
+        self.assertIn("Przykladowa", terms.MARKED.read_text(encoding="utf-8"))
+
+
+_RACE_CHILD = r"""
+import sys, time
+sys.path.insert(0, sys.argv[1])
+from maisecrets import terms, vault
+real = vault.atomic_write
+def slow(*a, **k):
+    time.sleep(0.15)          # a wide window between the read and the write: without the lock an update is lost
+    return real(*a, **k)
+vault.atomic_write = slow
+while time.time() < float(sys.argv[2]):
+    time.sleep(0.005)
+verb, arg = sys.argv[3], sys.argv[4]
+if verb == "add":
+    terms.add_typed(arg)
+elif verb == "remove":
+    terms.term_remove_typed(arg)
+else:
+    terms.take_markers("see {{" + arg + "}}", 3600)
+"""
+
+
+class RaceTests(unittest.TestCase):
+    """Hooks at the same time: every add, removal and mark holds (codex review of block 2, HIGH 3)."""
+    NAMES = ("Anna Przykladowa", "Jan Testowski", "Ewa Beispiel", "Ola Nowakowa", "Piotr Wzorowy")
+
+    def setUp(self):
+        self.addCleanup(self._clean)
+        self._clean()
+
+    def _clean(self):
+        for path in (terms.MARKED, terms.PERSONAL, terms.CACHE_FILE):
+            if path.exists():
+                path.unlink()
+        terms.reset()
+
+    def race(self, jobs):
+        import subprocess
+        start = str(time.time() + 1.0)
+        procs = [subprocess.Popen([sys.executable, "-c", _RACE_CHILD, str(ROOT), start, verb, arg],
+                                  env=dict(os.environ)) for verb, arg in jobs]
+        for proc in procs:
+            self.assertEqual(proc.wait(timeout=60), 0)
+        terms.reset()
+
+    def own(self):
+        return [v.text for e in terms.parse(terms.PERSONAL.read_text(encoding="utf-8"))[0] for v in e.variants]
+
+    def marked(self):
+        return sorted(x["text"] for x in json.loads(terms.MARKED.read_text(encoding="utf-8"))["terms"])
+
+    def test_add_and_add(self):
+        self.race([("add", n) for n in self.NAMES])
+        ents = terms.parse(terms.PERSONAL.read_text(encoding="utf-8"))[0]
+        self.assertEqual(sorted(e.variants[0].text for e in ents), sorted(self.NAMES))
+        self.assertEqual(len({e.label for e in ents}), len(self.NAMES), "no label twice")
+
+    def test_add_and_remove(self):
+        terms.add_typed("Zbigniew Wzorek")
+        self.race([("remove", "Zbigniew Wzorek")] + [("add", n) for n in self.NAMES[:3]])
+        self.assertNotIn("Zbigniew Wzorek", self.own())
+        for n in self.NAMES[:3]:
+            self.assertIn(n, self.own())
+
+    def test_marker_and_marker(self):
+        self.race([("mark", n) for n in self.NAMES])
+        self.assertEqual(self.marked(), sorted(self.NAMES))
+
+    def test_marker_and_remove(self):
+        terms.take_markers("see {{Zbigniew Wzorek}}", 3600)
+        self.race([("remove", "Zbigniew Wzorek")] + [("mark", n) for n in self.NAMES[:3]])
+        self.assertEqual(self.marked(), sorted(self.NAMES[:3]))
+
+
 if __name__ == "__main__":
     unittest.main()
