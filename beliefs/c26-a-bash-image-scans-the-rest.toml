@@ -1,0 +1,10 @@
+# c26-a-bash-image-scans-the-rest: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-bash-image-scans-the-rest"
+control = "C26"
+statement = "A Bash result that the client marks isImage skips the scan with its stdout only: a token in its stderr is masked."
+runner = ["tests/test_file_reads.py::BashDataUri::test_an_image_passes_but_its_stderr_is_scanned"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        if payload.get(\"tool_name\") != \"Bash\" or not isinstance(response, dict):\n            return {}\n"
+replace = "        if True:\n            return {}\n"

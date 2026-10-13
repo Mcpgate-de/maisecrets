@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 32 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 109 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 111 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1257,37 +1257,63 @@ Send one setting as your own prompt, for example:
 maisecrets: set read_pdf convert          (the same, and the form for Codex)
 ```
 
-Then drag a PDF into the session or ask the AI to read one. With `convert`,
-the program `pdftotext` extracts the text on your computer, the normal
-redaction masks it, and the model gets that text in place of the PDF, with
-placeholders of the form `⟦SECRET_cN⟧`. The PDF itself never reaches the
+Then ask the AI to read a PDF (measured with the Claude Code CLI). With
+`convert`, the program `pdftotext` extracts the text on your computer, the
+normal redaction masks it, and the model gets that text in place of the PDF,
+with placeholders of the form `⟦SECRET_cN⟧`. The PDF itself never reaches the
 model and does not stay in the session transcript. A page range (`pages`)
-works. `convert` needs `pdftotext`: macOS `brew install poppler`, Debian or
-Ubuntu `sudo apt install poppler-utils`. Without it, maisecrets refuses every
-PDF and says so; it never lets the PDF through. A PDF that pdftotext cannot
-read in 6 seconds, or that is damaged, is refused too. Text after 256K
-characters is cut, and the AI is told to read a smaller page range. A scanned
+works; Claude Code then also writes the pages as JPG files into a folder of
+its own on your disk, and maisecrets does not clean those. `convert` needs
+`pdftotext`: macOS `brew install poppler`, Debian or Ubuntu
+`sudo apt install poppler-utils`. Without it, maisecrets refuses every PDF and
+says so; it never lets the PDF through. A PDF that pdftotext cannot read in 6
+seconds, or that is damaged, is refused too. Text after 32K characters is cut,
+and the AI is told to read a smaller page range. A scanned
 PDF has no text: maisecrets says so, and the AI gets nothing of it.
 
-Codex cannot ask, so `ask` there refuses the read and the AI tells you the
-prompt that allows it. Until you decide, the first PDF and the first image
-the AI reads bring one sentence about the setting (`"tips": false` silences
-it).
+Until you decide, the first PDF and the first image the AI reads bring one
+sentence about the setting (`"tips": false` silences it). If `config.json`
+cannot be read (bad JSON, a value of the wrong type), both settings count as
+`block` until you fix the file.
+
+**What `block` stops, and what it does not.** The settings act on the Read
+tool of Claude Code: `block` means "the Read tool does not open this PDF or
+image". They do not stop a shell command that reads the file: `pdftotext
+x.pdf -`, `strings x.pdf` or `cat` give the AI text, and maisecrets redacts
+that text like any other command output (a secret with a known form is
+masked, the rest of the text is not). maisecrets is no file cleaner and does
+not refuse such commands.
+
+**Codex.** Codex has no Read tool, and it gives a hook a command's output as
+plain text without an image flag (measured on codex-cli 0.159.2). So on
+Codex these settings change nothing that was measured: its `view_image` tool
+is not measured, and a command output there is scanned as text, like every
+other output. The typed form `maisecrets: set read_pdf …` still works and
+holds for a later Claude Code session.
 
 `clean_dirs` lists folders whose PDFs and images you know are clean (your own
-screenshots, for example). A read there is always allowed:
+screenshots, for example). A read there is allowed:
 `/maisecrets:settings clean_dirs add ~/Pictures/Screenshots`, and `remove` the
 same way. maisecrets resolves links and `..` first, so a link inside a clean
-folder that points out of it does not count.
+folder that points out of it does not count. A file counts only if it was in
+the folder before the session began and has no second name (hard link): a
+file that arrives during the session, also one that the AI copies, moves or
+links there, waits for the next session. maisecrets refuses `/`, your home
+folder and a folder that holds the folder the session works in.
 
 A Bash command whose output starts with `data:image/…;base64,` sends an image
-to the model too (Claude Code shows it as one); `read_image` decides about it.
-`ask` cannot ask after the command ran, so it withholds the output, like
-`block`.
+to the model too (Claude Code shows it as one and marks it `isImage`);
+`read_image` decides about it. Only the image itself skips the scan: the
+error output of the same command is redacted as usual. `ask` cannot ask
+after the command ran, so it withholds the output, like `block`.
+
+A notebook (`.ipynb`) whose output cells hold an image: with `ask` or `block`
+the AI gets the cells as text and each image as a note that it was withheld.
 
 **Not covered:** an image you paste into the prompt (Ctrl+V or drag of an
 image into Claude Code) reaches the model without passing any hook; the
-prompt hook sees only your typed text. maisecrets cannot stop or mask it.
+prompt hook sees only your typed text. maisecrets cannot stop or mask it. An
+image in the result of an MCP tool is not covered either.
 
 ## Known gaps (measured or documented)
 
@@ -1326,6 +1352,17 @@ a to-do.
   hook only the typed text (measured on 2.1.296). An image or a PDF that the
   AI reads is in your hands ("PDFs and images"); maisecrets does not scan or
   clean an image, and does no OCR.
+- **An image in an MCP tool result passes as it is.** `read_image` acts on
+  the Read tool, on a Bash output that Claude Code marks as an image, and on
+  the images of a notebook; not on an MCP result.
+- **`block` stops the Read tool, not a shell read.** `pdftotext x.pdf -` or
+  `strings` give the AI the text of the file; only secrets of a known form in
+  it are masked. On Codex the PDF and image settings act on nothing measured.
+- **A clean folder trusts the files that were there when the session
+  began.** A file you put there yourself during the session waits for the
+  next one. The start of a session is the first time maisecrets saw it (the
+  client sends no start time); a person who edits the files of the
+  maisecrets folder can change it.
 - **A transformed value can pass.** For a value this session resolved, the
   output is checked as a substring in plain, base64, hex, URL-encoded and
   JSON-escaped form, and a resolving command may not encode it in the first

@@ -139,6 +139,7 @@ SCENARIOS = {
         "turns": [{"tool": "Read", "input": {"file_path": "{cwd}/invoice.pdf"}}, {"text": "done"}],
         "expect_requests": 2,
         "expect_not_in_requests": ["JVBERi0"],
+        "expect_not_in_transcript": ["JVBERi0"],      # the PDF bytes do not stay in the session file either
         "expect_in_requests": (["Invoice 2026", "deploy token \u27e6SECRET_c"] if shutil.which("pdftotext")
                                else ["pdftotext"]),
     },
@@ -739,6 +740,9 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             if marker in txt:
                 fails.append(f"transcript {t.parent.name}/{t.name} still holds the secret (…{marker[-6:]})")
                 break
+        for marker in sc.get("expect_not_in_transcript", []):
+            if marker in txt:
+                fails.append(f"transcript {t.parent.name}/{t.name} holds {marker!r}")
     # golden keys
     for pf in sorted(dump.glob("*.json")):
         payload = json.loads(pf.read_text())

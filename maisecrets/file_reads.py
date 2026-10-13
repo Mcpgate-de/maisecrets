@@ -15,11 +15,12 @@ gets the path; PostToolUse gets {type: "image" | "pdf" | "parts", file: {...}}. 
 text Read removes the image or the PDF from the request: a string fails the client's shape check and the original
 is sent, and a PDF-shaped answer with an empty base64 still sends the whole PDF. So every answer here that stands in
 for a PDF or an image is `text_result()`, also a refusal. Folders in the list setting clean_dirs are the person's
-own decision: a read there passes as allow. A Bash result that the client marks isImage (its stdout is a data:image
-URI) reaches the model as an image; it counts as an image read, and only its stdout skips the scan. Only the client's
-own isImage counts: a text that only starts like a data URI is text, and is scanned as text. A notebook Read whose
-outputs hold an image counts as an image read too: ask and block send it as text without the images. A pasted image
-and an image in an MCP result never reach this module (known gaps, README).
+own decision: a file there that was in place before the session passes as allow. A Bash result that the client
+marks isImage (its stdout is a data:image URI) reaches the model as an image; it counts as an image read, and only
+its stdout skips the scan. Only the client's own isImage counts: a text that only starts like a data URI is text,
+and is scanned as text. A notebook Read whose outputs hold an image counts as an image read too: ask and block send
+it as text without the images. A pasted image and an image in an MCP result never reach this module (known gaps,
+README).
 """
 from __future__ import annotations
 
