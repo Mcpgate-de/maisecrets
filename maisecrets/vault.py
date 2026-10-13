@@ -1495,15 +1495,23 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
         # the names marked with {{…}} and the term index (terms.py); terms.txt is the person's list and stays
         # under the terms lock too (order: this lock, then the terms lock; a terms writer never takes this one): a
         # proposal or a mark written at the same time came back after the wipe (codex verification of block 2)
-        with _lock_for(HOME / ".terms.lock"):
-            for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced", "terms.marked.json",
-                         ".terms-cache", "terms.suggested.txt"):
+        def unlink(names: tuple) -> None:
+            for name in names:
                 try:
                     (HOME / name).unlink()
                 except FileNotFoundError:
                     pass
                 except OSError:
                     problems.append(f"{name} not deleted")
+        unlink(("index.json", "audit.log", "events.log", "hooks.log", ".announced"))
+        term_files = ("terms.marked.json", ".terms-cache", "terms.suggested.txt")
+        try:
+            with _lock_for(HOME / ".terms.lock"):
+                unlink(term_files)
+        except LockTimeout:
+            # another maisecrets process held the terms lock: say what is left and how to finish, never success
+            problems.append(f"{', '.join(term_files)} not deleted (another maisecrets process held the terms lock; "
+                            "run the wipe again)")
         dirs = [HOME / "pending", HOME / "run"] + ([Path(run_dir)] if run_dir else [])
         for d in dirs:
             if d.is_dir():
