@@ -167,5 +167,49 @@ class LabelRuleTests(unittest.TestCase):
         self.assertEqual([m.value for m in detect.scan(text) if m.kind == "label-mysql-p"], [pw])
 
 
+class KeywordLabelTailTests(unittest.TestCase):
+    """The detect-secrets keyword rules read `<keyword>\\w*` as the label. On `password=` and a long run of letters with
+    no space, each keyword inside the run (pwd, key) took the rest of the run: 320 KB took 10 s (0.6.15). The tail is
+    bounded at 200 word characters (detect._DS_LABEL_TAIL_BOUNDED)."""
+
+    def rules(self):
+        return [r for r in detect.rules() if r.id.startswith("ds-keyword")]
+
+    def test_a_long_run_of_letters_after_a_label_scans_in_under_a_second(self):
+        run = "".join(_R.choice("bcdfghjkmnpqrstvwxz") for _ in range(320000))
+        self.assertLess(took("password=" + run, [r.id for r in self.rules()]), 1.0)
+
+    def test_every_keyword_rule_is_bounded(self):
+        rules = self.rules()
+        self.assertEqual(len(rules), 7)
+        for r in rules:
+            with self.subTest(r.id):
+                self.assertIn(")" + detect._DS_LABEL_TAIL_BOUNDED, r.regex.pattern)
+
+    def test_fuzz_the_bounded_rules_find_what_the_vendored_ones_find(self):
+        """Inside the bound (label tails of up to 150 word characters) both forms give the same matches."""
+        parts = ["password", "pwd", "api_key", "secret", "db_pass", "Passwd", "token", "_", "x", "Ab9", "value",
+                 "=", "==", "!=", ":", " : ", "=>", " ", "  ", "'", '"', "`", ";", ",", "]", "\t", "\n", "-", "#7"]
+        rng = random.Random(1616)
+        texts = []
+        for _ in range(3000):
+            t = "".join(rng.choice(parts) for _ in range(rng.randint(2, 14)))
+            if rng.random() < 0.3:
+                t = t.replace("_", "_" + "w" * rng.randint(1, 140), 1)
+            texts.append(t)
+        found = 0
+        for r in self.rules():
+            old = re.compile(r.regex.pattern.replace(")" + detect._DS_LABEL_TAIL_BOUNDED, ")\\w*", 1),
+                             r.regex._get().flags)
+            new = r.regex._get()
+            self.assertNotEqual(old.pattern, new.pattern)
+            for t in texts:
+                spans = [[m.span(i) for i in range(new.groups + 1)] for m in new.finditer(t)]
+                want = [[m.span(i) for i in range(old.groups + 1)] for m in old.finditer(t)]
+                self.assertEqual(spans, want, f"{r.id}: {t!r}")
+                found += len(spans)
+        self.assertGreater(found, 400, "the fuzz inputs must hold labels and values, or the comparison proves nothing")
+
+
 if __name__ == "__main__":
     unittest.main()

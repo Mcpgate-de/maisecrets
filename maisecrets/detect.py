@@ -1198,6 +1198,12 @@ _ESCAPABLE_COLON_RULES = ("ds-keyword-colon", "ds-keyword-colon-quotes-required"
 _COLON_THEN_QUOTE = (":\\s*([\\'\"`]?)", ":(\\s*)([\\'\"`])")
 _ESCAPED_QUOTE_SKIP = "(?:\\\\(?=[\"']))?"
 _WHITESPACE_RE = re.compile(r"\s")
+# the label tail of the vendored keyword rules: `\w*` after the keyword. On `password=` and a long run of letters with
+# no space, each keyword inside the run (pwd, key) took the rest of the run and gave it back one character at a time
+# (the rule with a quote and a semicolon tried 50 more characters each time): quadratic, 320 KB took 10 s, also in
+# 0.6.15. The tail is bounded at 200 word characters, as the AWS and curl rules are bounded. A label with a longer
+# word tail is no label. tests/test_detect_rules.py compares both forms on inputs inside the bound
+_DS_LABEL_TAIL_BOUNDED = "\\w{0,200}"
 _CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
 
 
@@ -1224,6 +1230,7 @@ def _load_detect_secrets(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
         # `password : x` in every language; the vendored colon rules allowed none, so
         # `mot de passe : <value>` and `password : <value>` were no hit (2026-09-28)
         regex = regex.replace(_COLON_AFTER_LABEL, _COLON_AFTER_LABEL_SPACED, 1)
+        regex = regex.replace(keywords + "\\w*", keywords + _DS_LABEL_TAIL_BOUNDED, 1)
         if _COLON_AFTER_LABEL_SPACED in regex:
             regex = regex.replace(_COLON_AFTER_LABEL_SPACED, _COLON_AFTER_LABEL_ESCAPED, 1)
             for q in _COLON_THEN_QUOTE:   # the skip goes right before the group of the opening quote
