@@ -284,6 +284,18 @@ class TermHookTests(_Base):
                 if updated is not None:
                     self.assertEqual(updated, tool_input)
 
+    def test_a_private_use_character_in_the_content_stays_as_it_is(self):
+        ref = REF_RE.search(_out(_bash(NAME))).group()
+        tool_input = {"file_path": "/tmp/x.txt", "content": f"Dear {ref}, \ue000 and \ue001 stay"}
+        echo = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": None}}
+
+        def fake(payload):
+            return {"hookSpecificOutput": dict(echo["hookSpecificOutput"], updatedInput=payload["tool_input"])}
+        with mock.patch.object(hooks, "_pre_tool", fake):
+            out = hooks.pre_tool({"hook_event_name": "PreToolUse", "tool_name": "Write", "session_id": "S1",
+                                  "transcript_path": "", **CLAUDE, "tool_input": tool_input, "cwd": "/tmp"})
+        self.assertEqual(out["hookSpecificOutput"]["updatedInput"], tool_input)
+
     def test_the_model_is_told_the_placeholder_is_never_resolved(self):
         out = _bash(NAME)
         self.assertIn("never puts the name back", out["hookSpecificOutput"]["additionalContext"])
@@ -403,7 +415,7 @@ class LeakTests(_Base):
         _prompt("see {{Anna Testowska}}")
         for argv in (("list",), ("status",), ("audit",), ("report",), ("report", "last"), ("terms",), ("rules",)):
             with self.subTest(argv):
-                self.assertNoTerm(self._cli(*argv).replace("testowska", ""), "maisecrets " + " ".join(argv))
+                self.assertNoTerm(self._cli(*argv), "maisecrets " + " ".join(argv))
         self.assertIn("terms: 1 of your own, 0 from 0 team file(s), 1 marked in prompts", self._cli("status"))
         self.assertNoTerm(_home_text(), "a file of the home")
 
