@@ -16,11 +16,14 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+
+from maisecrets import hooks  # noqa: E402
 
 # the scan of the hook replaced by a regex that backtracks for longer than any test runs, and holds the GIL meanwhile
 SLOW_SCAN = (
@@ -34,6 +37,30 @@ SLOW_SCAN = (
 BASH_OUTPUT = {"session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": "t1",
                "tool_input": {"command": "cat notes.txt"},
                "tool_response": {"stdout": "some output", "stderr": "", "interrupted": False, "isImage": False}}
+
+
+class TestWatchdogKnobTests(unittest.TestCase):
+    """The test knob for the watchdog time cannot move the fail-closed answer past the client's timeout."""
+
+    def seconds(self, knob, owned=None) -> float:
+        home = tempfile.mkdtemp(prefix="maisecrets-knob-")
+        self.addCleanup(shutil.rmtree, home, True)
+        env = {"MAISECRETS_HOME": home, "MAISECRETS_TEST_HOME_OWNED": owned if owned is not None else home,
+               "MAISECRETS_TEST_WATCHDOG": knob}
+        with mock.patch.dict(os.environ, env):
+            return hooks._test_watchdog_seconds(7.0)
+
+    def test_a_short_time_in_the_test_home_counts(self):
+        self.assertEqual(self.seconds("1.5"), 1.5)
+
+    def test_a_long_or_odd_time_is_ignored(self):
+        for knob in ("30", "6.5", "0", "-1", "nan", "inf", "soon"):
+            with self.subTest(knob=knob):
+                self.assertEqual(self.seconds(knob), 7.0)
+
+    def test_a_marker_that_names_another_home_is_ignored(self):
+        self.assertEqual(self.seconds("1.5", owned=tempfile.gettempdir()), 7.0)
+        self.assertEqual(self.seconds("1.5", owned=""), 7.0)
 
 
 @unittest.skipIf(os.name == "nt", "Windows has no SIGALRM: the thread watchdog stays alone there")

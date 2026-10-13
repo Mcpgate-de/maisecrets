@@ -3806,6 +3806,25 @@ def _tool_class(payload: dict) -> str:
 WATCHDOG_SECONDS = {"user-prompt": 7.0, "pre-tool": 7.0, "post-tool": 16.0, "post-tool-failure": 16.0}
 
 
+_TEST_WATCHDOG_MAX = 6.0   # below the shortest client timeout (10 s, hooks/hooks.json) with room for the answer
+
+
+def _test_watchdog_seconds(default: float) -> float:
+    """The watchdog time, shortened only for the tests. MAISECRETS_TEST_WATCHDOG counts only when the test marker
+    names the active home (tests/_isolate.py sets both), and only as a finite number above 0 and at most 6 s: an
+    inherited environment cannot move the fail-closed answer past the client's timeout (codex review of 0.6.15)."""
+    raw = os.environ.get("MAISECRETS_TEST_WATCHDOG")
+    owned, home = os.environ.get("MAISECRETS_TEST_HOME_OWNED"), os.environ.get("MAISECRETS_HOME")
+    if not (raw and owned and home) or os.path.realpath(owned) != os.path.realpath(home):
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    import math
+    return value if math.isfinite(value) and 0 < value <= _TEST_WATCHDOG_MAX else default
+
+
 def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict:
     """The answer that keeps the guard up when the hook itself cannot finish: block the prompt,
     deny the tool, withhold the tool output. Never a value, never an exception text (a keychain
@@ -4060,9 +4079,7 @@ def main(argv: list[str]) -> int:
     lock = threading.Lock()
     answered = {"v": False}
     answering = {"v": False}
-    seconds = WATCHDOG_SECONDS[event]
-    if os.environ.get("MAISECRETS_TEST_WATCHDOG") and os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
-        seconds = float(os.environ["MAISECRETS_TEST_WATCHDOG"])   # tests only (tests/_isolate.py sets the second)
+    seconds = _test_watchdog_seconds(WATCHDOG_SECONDS[event])
 
     def answer(obj: dict, how: str) -> bool:
         """Write the one answer of this process; True when this call wrote it. Exactly one JSON object leaves the
