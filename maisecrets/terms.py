@@ -29,7 +29,9 @@ import re
 import stat
 import sys
 import time
+import unicodedata
 import zlib
+from bisect import bisect_left
 from array import array
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,6 +52,8 @@ STORE_PREFIX = "maisecrets-term:"   # the store value of a term entry: the id, n
 MIN_INSIDE = 4        # *x*: a shorter x would mask half of every text
 MIN_AFFIX = 3         # the stem of Kowalsk* or *kowalski
 MIN_TEAM = 3          # a team entry, without its stars
+MIN_TEAM_AFFIX = 5    # the stem of a team `stem*`, `*stem` or `*stem*`: `ret*`, `*ing` masked half of every text
+MAX_COMMON = 3        # a team stem that this many stop-list words share is refused (`*tion*`, `contr*`)
 MAX_INSIDE = 50       # *x* variants in all: each one is a search over the whole text
 MAX_WORDS = 8
 MAX_TEAM_BYTES = 4 * 1024 * 1024   # about 130,000 entries; a build of 100,000 takes 1 to 2.3 s
@@ -58,6 +62,7 @@ TYPES = ("SECRET", "NAME", "EMAIL", "PHONE", "IBAN", "CARD", "IP")
 # a word: letters, digits and the underscore, so Kowalski_report.pdf holds the word kowalski_report, not kowalski
 _WORD_RE = re.compile(r"\w+")
 _SPACE_RE = re.compile(r"\s+")
+_JOINTS = ("-", ".")      # with `_`, the joints of a joined name: jan.kowalski, Jan-Kowalski, jan_kowalski
 
 
 class TermsError(ConfigError):
@@ -81,10 +86,16 @@ class Entity:
     variants: tuple
     line: int
     source: str = "own"     # own | marked | <folder>/<file>
+    ident: str = field(default="", compare=False)    # the id, when the variants are not at hand (Matcher.entity)
 
     @property
     def id(self) -> str:
-        return hashlib.sha256(f"{self.source}\0{self.label}".encode("utf-8")).hexdigest()[:12]
+        """A hash of the source, the label and the variants: a label that a removal freed and an add took again for
+        another name gets another placeholder (gate review of block 2, M3)."""
+        if self.ident:
+            return self.ident
+        forms = "\0".join(sorted(f"{v.mode}:{_lower(v.text)}" for v in self.variants))
+        return hashlib.sha256(f"{self.source}\0{self.label}\0{forms}".encode("utf-8")).hexdigest()[:12]
 
     @property
     def type(self) -> str:
@@ -103,7 +114,7 @@ class Refused:
 def _variant(raw: str, n: int, floor: frozenset | None) -> Variant:
     """One variant; raises TermsError with a reason that names the line only. `floor` is the stop list of a team
     list (None for the person's own list)."""
-    text = raw.strip()
+    text = _norm(raw).strip()
     starts, ends = text.startswith("*"), text.endswith("*") and len(text) > 1
     text = text[1 if starts else 0:len(text) - 1 if ends else len(text)].strip()
     if not text:
@@ -128,9 +139,28 @@ def _variant(raw: str, n: int, floor: frozenset | None) -> Variant:
     if floor is not None:
         if len(text) < MIN_TEAM:
             raise TermsError(f"line {n}: a team entry needs at least {MIN_TEAM} characters", n)
-        if len(words) == 1 and words[0] in floor:
-            raise TermsError(f"line {n}: a common word (rules/term_stoplist.txt) in a team list", n)
+        if all(w in floor for w in words):
+            raise TermsError(f"line {n}: {'a common word' if len(words) == 1 else 'only common words'} "
+                             "(rules/term_stoplist.txt) in a team list", n)
+        stem = words[-1] if mode == STARTS else words[0] if mode == ENDS else _lower(text) if mode == INSIDE else ""
+        if mode != WORD and len(stem) < MIN_TEAM_AFFIX:
+            raise TermsError(f"line {n}: a * in a team list needs a stem of at least {MIN_TEAM_AFFIX} letters", n)
+        if mode != WORD and _common_stem(stem, mode) >= MAX_COMMON:
+            raise TermsError(f"line {n}: a * stem that common words (rules/term_stoplist.txt) share, in a team "
+                             "list", n)
     return Variant(text, mode)
+
+
+def _common_stem(stem: str, mode: str) -> int:
+    """How many words of the stop list the stem of a team entry matches: words that start with it (stem*), end with
+    it (*stem) or hold it (*stem*). A bisect in the sorted list, so a team list of 100,000 entries stays fast."""
+    words, rev = _stop_sorted()
+    if mode == STARTS:
+        return bisect_left(words, stem + "\uffff") - bisect_left(words, stem)
+    if mode == ENDS:
+        r = stem[::-1]
+        return bisect_left(rev, r + "\uffff") - bisect_left(rev, r)
+    return sum(1 for w in words if stem in w)
 
 
 def parse(text: str, source: str = "own", strict: bool = True,
@@ -178,6 +208,45 @@ def _lower(text: str) -> str:
     return text.lower().replace("i\u0307", "i")
 
 
+# the format characters (Unicode Cf) a name can hold without a visible change: soft hyphen, zero-width space and
+# joiners, word joiner, byte order mark, the bidi marks and the tag characters
+_CF = frozenset(chr(c) for r in ((0xAD, 0xAD), (0x600, 0x605), (0x61C, 0x61C), (0x6DD, 0x6DD), (0x70F, 0x70F),
+                                 (0x180E, 0x180E), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x2064),
+                                 (0x2066, 0x206F), (0xFEFF, 0xFEFF), (0xFFF9, 0xFFFB), (0xE0001, 0xE0001),
+                                 (0xE0020, 0xE007F)) for c in range(r[0], r[1] + 1))
+_CF_RE = re.compile("[" + "".join(sorted(_CF)) + "]")
+
+
+def _norm(text: str) -> str:
+    """A variant as the index holds it: NFC, without format characters (`Mu\u0308ller` is `Müller`)."""
+    return unicodedata.normalize("NFC", _CF_RE.sub("", text))
+
+
+def _prepare(text: str) -> tuple:
+    """(text, None, None) when the text is NFC and has no format character (nearly always: a fast check); else (the
+    text in NFC without them, the start and the end in the text of each of its characters). A file name from macOS
+    is NFD, and a soft hyphen in a name hid it from the matcher (gate review of block 2, H2)."""
+    if text.isascii() or (unicodedata.is_normalized("NFC", text) and not _CF_RE.search(text)):
+        return text, None, None
+    starts: list = []
+    ends: list = []
+    parts: list = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] in _CF:
+            i += 1
+            continue
+        j = i + 1
+        while j < n and (unicodedata.combining(text[j]) or text[j] in _CF):
+            j += 1
+        nf = unicodedata.normalize("NFC", "".join(ch for ch in text[i:j] if ch not in _CF))
+        starts += [i] * len(nf)
+        ends += [j] * len(nf)
+        parts.append(nf)
+        i = j
+    return "".join(parts), starts, ends
+
+
 def _shape(text: str) -> tuple:
     """(words, gaps, lead, trail) of a variant: its words lower-cased, the text between them with whitespace as one
     space, and what stands before the first word and after the last."""
@@ -202,7 +271,8 @@ class Matcher:
     def __init__(self, entities=(), data: tuple | None = None):
         if data is None:
             data = _index(list(entities))
-        table, self._blob, ent_offsets, self._ents, self.inside, self._kinds = data
+        table, self._blob, ent_offsets, self._ents, self.inside, self._kinds, pre, suf = data
+        self._pre, self._suf = tuple(pre), tuple(suf)     # the stem lengths of `stem*` and of `*stem`
         self._table = array(_ARRAY)
         self._table.frombytes(table)
         self._ent_offsets = array(_ARRAY)
@@ -222,8 +292,8 @@ class Matcher:
         ent = self._objs.get(ei)
         if ent is None:
             off = self._ent_offsets[ei]
-            label, source, line = self._ents[off:self._ents.index(b"\n", off)].decode("utf-8").split("\x1f")
-            ent = self._objs[ei] = Entity(label, (), int(line), source)
+            label, source, line, ident = self._ents[off:self._ents.index(b"\n", off)].decode("utf-8").split("\x1f")
+            ent = self._objs[ei] = Entity(label, (), int(line), source, ident)
         return ent
 
     def _get(self, key: str):
@@ -253,7 +323,8 @@ class Matcher:
         for j in range(n - 1):
             gap = text[toks[i + j][1]:toks[i + j + 1][0]]
             want = gaps[j]
-            if want == " " and gap.isspace():
+            # a space of the variant: any whitespace run, or the joint of a joined name (jan.kowalski, Jan-Kowalski)
+            if want == " " and (gap.isspace() or gap in _JOINTS):
                 continue
             if _SPACE_RE.sub(" ", gap).lower() != want:
                 return None
@@ -273,22 +344,50 @@ class Matcher:
         return _select(self.hits(text))
 
     def hits(self, text: str) -> list:
-        """Every (start, end, entity) any variant finds, overlapping."""
+        """Every (start, end, entity) any variant finds, overlapping. The text is matched in NFC, without format
+        characters (a soft hyphen, a zero-width space), and each span is mapped back to the text as it is."""
         if not len(self) or not text:
             return []
+        norm, starts, ends = _prepare(text)
+        found = self._hits(norm)
+        if starts is None:
+            return found
+        return [(starts[a], ends[b - 1], ent) for a, b, ent in found]
+
+    def _lookup(self, t: str) -> tuple:
+        """(the n-gram record, the `stem*` candidates, the `*stem` candidates) of one word: one lookup per stem length
+        the index holds, never a walk over a bucket (a team list of 100,000 `abc…*` entries took 16 s for 1000
+        words; gate review of block 2)."""
+        get = self._get
+        pre: list = []
+        suf: list = []
+        for n in self._pre:
+            if n > len(t):
+                break
+            rec = get("p:" + t[:n])
+            if rec:
+                pre += rec[1]
+        for n in self._suf:
+            if n > len(t):
+                break
+            rec = get("s:" + t[-n:])
+            if rec:
+                suf += rec[1]
+        return get("g:" + t), pre, suf
+
+    def _hits(self, text: str) -> list:
         low = text.lower()
         aligned = len(low) == len(text)
         src = low if aligned else text
         toks = [(m.start(), m.end(), m.group() if aligned else _lower(m.group())) for m in _WORD_RE.finditer(src)]
         hits: list = []
-        get, has_pre, has_suf = self._get, "p" in self._kinds, "s" in self._kinds
+        get = self._get
         seen: dict = {}
         count = len(toks)
         for i, (s, e, t) in enumerate(toks):
             found = seen.get(t)
             if found is None:
-                found = seen[t] = (get("g:" + t), get("p:" + t[:MIN_AFFIX]) if has_pre and len(t) >= MIN_AFFIX
-                                   else None, get("s:" + t[-MIN_AFFIX:]) if has_suf and len(t) >= MIN_AFFIX else None)
+                found = seen[t] = self._lookup(t)
             gram, pre, suf = found
             if gram:
                 most, cands = gram
@@ -302,13 +401,13 @@ class Matcher:
                         span = self._fits(text, toks, i, c)
                         if span:
                             hits.append((span[0], span[1], c[0]))
-            for c in pre[1] if pre else ():
+            for c in pre:
                 words, k = c[1], len(c[1]) - 1
                 if t.startswith(c[5]) and i >= k and all(toks[i - k + j][2] == words[j] for j in range(k)):
                     span = self._fits(text, toks, i - k, c)
                     if span:
                         hits.append((span[0], e, c[0]))
-            for c in suf[1] if suf else ():
+            for c in suf:
                 words, k = c[1], len(c[1]) - 1
                 if t.endswith(c[5]) and i + k < count and all(toks[i + 1 + j][2] == words[1 + j] for j in range(k)):
                     span = self._fits(text, toks, i, c)
@@ -321,7 +420,7 @@ class Matcher:
                     hits.append(self._widen(text, at, at + len(needle), ei))
                     at = low.find(needle, at + len(needle))
             else:
-                rx = re.compile(r"\\s+".join(re.escape(w) for w in needle.split()), re.IGNORECASE)
+                rx = re.compile(r"\s+".join(re.escape(w) for w in needle.split()), re.IGNORECASE)
                 hits.extend(self._widen(text, m.start(), m.end(), ei) for m in rx.finditer(text))
         return [(a, b, self.entity(ei)) for a, b, ei in hits]
 
@@ -348,22 +447,30 @@ def _index(entities: list) -> tuple:
     records: dict = {}
     inside: list = []
     ents: list = []
+    pre: set = set()
+    suf: set = set()
     for ei, ent in enumerate(entities):
-        ents.append(f"{ent.label}\x1f{_CTRL_RE.sub('?', ent.source)}\x1f{ent.line}\n")
+        ents.append(f"{ent.label}\x1f{_CTRL_RE.sub('?', ent.source)}\x1f{ent.line}\x1f{ent.id}\n")
         for v in ent.variants:
             words, gaps, lead, trail = _shape(v.text)
             stem = words[-1] if v.mode == STARTS else words[0] if v.mode == ENDS else ""
             cand = "\x1d".join((str(ei), "\x1c".join(words), "\x1c".join(gaps), lead if v.mode != ENDS else "",
                                 trail if v.mode != STARTS else "", stem))
+            if v.mode == WORD and len(words) > 1 and set(gaps) == {" "} and not lead and not trail:
+                # jan_kowalski: one word for the matcher (`_` is no word boundary), so it gets a record of its own
+                records.setdefault("g:" + "_".join(words), [0, []])[1].append(
+                    "\x1d".join((str(ei), "_".join(words), "", "", "", "")))
             if v.mode == WORD:
                 records.setdefault("g:" + " ".join(words), [0, []])[1].append(cand)
                 first = records.setdefault("g:" + words[0], [0, []])
                 first[0] = max(first[0], len(words))
             elif v.mode == STARTS:
-                records.setdefault("p:" + stem[:MIN_AFFIX], [0, []])[1].append(cand)
+                records.setdefault("p:" + stem, [0, []])[1].append(cand)
+                pre.add(len(stem))
             elif v.mode == ENDS:
-                records.setdefault("s:" + stem[-MIN_AFFIX:], [0, []])[1].append(cand)
-            elif len(inside) < MAX_INSIDE:
+                records.setdefault("s:" + stem, [0, []])[1].append(cand)
+                suf.add(len(stem))
+            elif len(inside) < MAX_INSIDE:    # load() refuses the 51st with a message; this is the last guard
                 low = _lower(v.text)
                 inside.append((low, " " in low, ei))
     size = 8
@@ -389,20 +496,24 @@ def _index(entities: list) -> tuple:
         ent_parts.append(b)
         pos += len(b)
     kinds = "".join(sorted({k[0] for k in records}))
-    return table.tobytes(), b"".join(parts), ent_offsets.tobytes(), b"".join(ent_parts), inside, kinds
+    return (table.tobytes(), b"".join(parts), ent_offsets.tobytes(), b"".join(ent_parts), inside, kinds,
+            sorted(pre), sorted(suf))
 
 
 _CTRL_RE = re.compile(r"[\x00-\x1f]")
 
 
 def _select(hits: list) -> list:
-    """Left to right; where two start alike, the longer; no overlap."""
+    """Left to right; hits that overlap become one run over all of them, with the entity of the first (Anna Maria and
+    Maria Kowalski in `Anna Maria Kowalski`: one placeholder over the three words, no part in clear)."""
     hits.sort(key=lambda h: (h[0], -h[1]))
-    out, end = [], -1
+    out: list = []
     for h in hits:
-        if h[0] >= end:
+        if out and h[0] < out[-1][1]:
+            if h[1] > out[-1][1]:
+                out[-1] = (out[-1][0], h[1], out[-1][2])
+        else:
             out.append(h)
-            end = h[1]
     return out
 
 
@@ -453,9 +564,31 @@ def _parse_personal(raw: bytes | None, path: Path | None = None) -> list:
     except UnicodeDecodeError:
         raise TermsError(f"{path}: not UTF-8 text") from None
     try:
-        return parse(text, "own")[0]
+        return _cap_inside(parse(text, "own")[0], 0, None)[0]
     except TermsError as exc:
         raise TermsError(f"{path}: {exc}", exc.line) from None
+
+
+def _cap_inside(ents: list, used: int, refused: list | None) -> tuple[list, int]:
+    """(the entities, the *…* variants in all): at most MAX_INSIDE *…* variants over every list, as each one is a
+    search over the whole text. Past the cap, the person's own list raises (refused is None): its line would be
+    left out without a word. A team list loses the variant and names it in refused."""
+    out = []
+    for e in ents:
+        keep = []
+        for v in e.variants:
+            if v.mode == INSIDE:
+                if used >= MAX_INSIDE:
+                    reason = f"more than {MAX_INSIDE} *…* variants in all the term lists"
+                    if refused is None:
+                        raise TermsError(f"line {e.line}: {reason}", e.line)
+                    refused.append(Refused(e.source, e.line, reason))
+                    continue
+                used += 1
+            keep.append(v)
+        if keep:
+            out.append(Entity(e.label, tuple(keep), e.line, e.source))
+    return out, used
 
 
 def _personal(path: Path | None = None) -> list:
@@ -471,6 +604,13 @@ def stoplist() -> frozenset:
         _STOP.append(frozenset(line.strip() for line in path.read_text(encoding="utf-8").splitlines()
                                if line.strip() and not line.startswith("#")))
     return _STOP[0]
+
+
+def _stop_sorted() -> tuple:
+    if len(_STOP) < 2:
+        words = sorted(stoplist())
+        _STOP.append((words, sorted(w[::-1] for w in words)))
+    return _STOP[1]
 
 
 @dataclass
@@ -515,6 +655,7 @@ def _team_sources(cfg: dict) -> tuple[list, list]:
 
 
 def _parse_team(sources: list, out: Loaded) -> None:
+    used = sum(1 for e in out.entities for v in e.variants if v.mode == INSIDE)
     for source, raw in sources:
         try:
             text = raw.decode("utf-8")
@@ -522,6 +663,7 @@ def _parse_team(sources: list, out: Loaded) -> None:
             out.refused.append(Refused(source, 0, "a file that cannot be read as UTF-8"))
             continue
         ents, refused = parse(text, source, strict=False, floor=stoplist())
+        ents, used = _cap_inside(ents, used, refused)
         out.entities += ents
         out.refused += refused
         out.files.append(TeamFile(source, len(ents), hashlib.sha256(raw).hexdigest()[:12]))
@@ -534,13 +676,13 @@ def _marked(now: float | None = None) -> list:
         items = [x for x in data.get("terms", []) if isinstance(x, dict) and x.get("expires", 0) > now]
     except (OSError, ValueError, AttributeError):
         return []
-    out = []
-    for x in items:
-        text = x.get("text")
-        if isinstance(text, str) and _WORD_RE.search(text):
-            label = "MARKED_" + hashlib.sha256(text.lower().encode("utf-8")).hexdigest()[:8].upper()
-            out.append(Entity(label, (Variant(text, WORD),), 0, "marked"))
-    return out
+    return [_marked_entity(x.get("text")) for x in items
+            if isinstance(x.get("text"), str) and _WORD_RE.search(x.get("text"))]
+
+
+def _marked_entity(text: str) -> Entity:
+    label = "MARKED_" + hashlib.sha256(text.lower().encode("utf-8")).hexdigest()[:8].upper()
+    return Entity(label, (Variant(_norm(text), WORD),), 0, "marked")
 
 
 def load(cfg: dict | None = None, strict: bool = True) -> Loaded:
@@ -568,7 +710,7 @@ def load(cfg: dict | None = None, strict: bool = True) -> Loaded:
 
 _CACHE: list = []    # [Matcher] or [TermsError]
 CACHE_FILE = HOME / ".terms-cache"
-_FORMAT = 1
+_FORMAT = 2
 
 
 def _cache_key(personal: bytes | None, team: list) -> str:
@@ -583,7 +725,7 @@ def _cached(key: str) -> Matcher | None:
     folder (C8) and holds data only: marshal builds no class and runs nothing. Anything unexpected is a miss."""
     try:
         fmt, k, data = marshal.loads(CACHE_FILE.read_bytes())
-        if fmt == _FORMAT and k == key and isinstance(data, tuple) and len(data) == 6:
+        if fmt == _FORMAT and k == key and isinstance(data, tuple) and len(data) == 8:
             return Matcher(data=data)
     except (OSError, ValueError, EOFError, TypeError):
         pass
@@ -808,8 +950,7 @@ def term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, s
         data = json.loads(MARKED.read_text(encoding="utf-8"))
         items = data.get("terms", [])
         left = [x for x in items if not (isinstance(x, dict) and (str(x.get("text", "")).lower() == want or (
-            entity_id and Entity("MARKED_" + hashlib.sha256(str(x.get("text", "")).lower().encode("utf-8"))
-                                 .hexdigest()[:8].upper(), (), 0, "marked").id == entity_id)))]
+            entity_id and _marked_entity(str(x.get("text", ""))).id == entity_id)))]
         if len(left) != len(items):
             atomic_write(MARKED, json.dumps({"terms": left}))
             removed.append("a marked name")

@@ -140,6 +140,15 @@ class TeamFloorTests(unittest.TestCase):
         for r in refused:
             self.assertNotIn("montag", r.reason.lower())
 
+    def test_a_team_affix_needs_a_long_stem_that_common_words_do_not_share(self):
+        text = ("A_1  *ing\nA_2  fil*\nA_3  *tion*\nA_4  ret*\nA_5  con*\nA_6  of the\nA_7  count*\nA_8  *thing\n"
+                "A_9  *ation*\nOK_1  Testowsk*\nOK_2  *sygn-0042*\nOK_3  Acme of the North\n")
+        ents, refused = terms.parse(text, "team/x.terms", strict=False, floor=terms.stoplist())
+        self.assertEqual([e.label for e in ents], ["OK_1", "OK_2", "OK_3"])
+        self.assertEqual([r.line for r in refused], list(range(1, 10)))
+        self.assertIn("only common words", refused[5].reason)
+        self.assertIn("common words (rules/term_stoplist.txt) share", refused[8].reason)
+
     def test_the_personal_list_has_no_floor(self):
         self.assertEqual(len(terms.parse("PERSON_A  report | Al\n")[0][0].variants), 2)
 
@@ -200,7 +209,7 @@ class MatchTests(unittest.TestCase):
         for text in ("Jan Kowalski", "Jan\tKowalski", "Jan\nKowalski", "Jan \r\n  Kowalski"):
             with self.subTest(text=text):
                 self.assertEqual(runs(m, text), [(text, "PERSON_A")])
-        self.assertEqual(runs(m, "JanKowalski Jan-Kowalski"), [])
+        self.assertEqual(runs(m, "JanKowalski"), [])
 
     def test_longest_variant_wins_across_entities(self):
         m = matcher("FIRST_A  Jan\nPERSON_A  Kowalski | Jan Kowalski\n")
@@ -220,6 +229,73 @@ class MatchTests(unittest.TestCase):
 
     def test_no_entities_match_nothing(self):
         self.assertEqual(terms.Matcher([]).find("Jan Kowalski"), [])
+
+
+class GateReviewMatchTests(unittest.TestCase):
+    """The matcher findings of the gate review of block 2."""
+
+    def test_a_spaced_anywhere_variant_matches(self):
+        # r"\\s+" was a backslash and an s: every *…* variant with a space never matched
+        m = matcher("FIRM_A  *acme corp*\n")
+        self.assertEqual(runs(m, "the ACME   Corp deal"), [("ACME   Corp", "FIRM_A")])
+        self.assertEqual(runs(m, "İ: acme\tcorp"), [("acme\tcorp", "FIRM_A")], "a text that lower() makes longer")
+
+    def test_overlapping_entities_become_one_run(self):
+        m = matcher("PERSON_A  Anna Maria\nPERSON_B  Maria Kowalski\n")
+        self.assertEqual(runs(m, "Anna Maria Kowalski"), [("Anna Maria Kowalski", "PERSON_A")])
+        self.assertEqual(runs(m, "Maria Kowalski"), [("Maria Kowalski", "PERSON_B")])
+
+    def test_nfd_text_and_format_characters_match(self):
+        m = matcher("PERSON_A  Müller | Jürgen*\n")
+        nfd = "Mu\u0308ller"
+        for text, want in ((nfd, nfd), ("Ju\u0308rgens_bericht.pdf", "Ju\u0308rgens_bericht"),
+                           ("Mül\u00adler", "Mül\u00adler"), ("M\u200büller", "M\u200büller"),
+                           ("Herr Mu\u0308ller, Jürgen", None)):
+            with self.subTest(text=text):
+                got = runs(m, text)
+                if want is None:
+                    self.assertEqual([t for t, _ in got], ["Mu\u0308ller", "Jürgen"])
+                else:
+                    self.assertEqual(got, [(want, "PERSON_A")])
+        self.assertEqual(runs(matcher("PERSON_A  Mu\u0308ller\n"), "Müller"), [("Müller", "PERSON_A")],
+                         "a list written in NFD matches NFC text")
+
+    def test_joined_forms_of_a_full_name(self):
+        m = matcher("PERSON_A  Jan Kowalski\n")
+        for text in ("jan.kowalski", "Jan-Kowalski", "jan_kowalski"):
+            with self.subTest(text=text):
+                self.assertEqual(runs(m, f"see {text}.pdf"), [(text, "PERSON_A")])
+        self.assertEqual(runs(m, "jan_kowalski_report.pdf"), [], "`_` is no boundary: one word, not the name")
+
+    def test_one_lookup_per_stem_length_not_a_walk_over_a_bucket(self):
+        m = terms.Matcher([Entity(f"C{i}", (Variant(f"abc{i:06d}", terms.STARTS),), i) for i in range(100000)])
+        words = " ".join(f"abc{i:07d}x" for i in range(1000))
+        t = time.perf_counter()
+        self.assertEqual(len(m.find(words)), 1000)
+        self.assertLess(time.perf_counter() - t, 1.0, "16 s before: each word walked 100,000 candidates")
+
+    def test_the_id_holds_the_variants(self):
+        a = terms.parse("NAME_1  Jan Kowalski\n")[0][0]
+        b = terms.parse("NAME_1  Anna Nowak\n")[0][0]
+        self.assertNotEqual(a.id, b.id, "a label freed by a removal gives another name another placeholder")
+        self.assertEqual(terms.Matcher([a]).find("Jan Kowalski")[0][2].id, a.id)
+
+
+class InsideCapTests(unittest.TestCase):
+    LINES = "".join(f"CASE_{chr(65 + i // 26)}{chr(65 + i % 26)}  *zq{i:03d}x*\n" for i in range(51))
+
+    def test_the_51st_anywhere_variant_of_the_own_list_stops_with_its_line(self):
+        with self.assertRaises(TermsError) as cm:
+            terms._parse_personal(self.LINES.encode())
+        self.assertIn("line 51", str(cm.exception))
+        self.assertEqual(len(terms._parse_personal(self.LINES.encode()[:-len(self.LINES.splitlines()[-1]) - 1])), 50)
+
+    def test_a_team_list_names_the_variant_it_leaves_out(self):
+        out = terms.Loaded()
+        terms._parse_team([("team/x.terms", self.LINES.encode())], out)
+        self.assertEqual(len(out.entities), 50)
+        self.assertEqual([(r.line, r.reason) for r in out.refused], [(51, "more than 50 *…* variants in all the term "
+                                                                          "lists")])
 
 
 class MarkerTests(unittest.TestCase):
