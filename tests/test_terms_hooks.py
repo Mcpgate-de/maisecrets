@@ -258,8 +258,10 @@ class GateReviewCommandTests(_Base):
 
     def test_a_claude_add_without_a_source_has_the_floor_of_a_team_list(self):
         out = _prompt("/maisecrets:term add the", source=None)
-        self.assertIn("not added (a common word (rules/term_stoplist.txt) in a prompt without a source", out["reason"])
-        self.assertNotIn("team list", out["reason"])
+        self.assertIn("not added (a common word (rules/term_stoplist.txt); a prompt without a source may not come "
+                      "from you", out["reason"])
+        self.assertIn("needs a stem of at least 5 letters; a prompt", _prompt("/maisecrets:term add Kow*", source=None)[
+            "reason"])
         self.assertFalse(terms.PERSONAL.exists())
 
     def test_a_codex_add_follows_the_rules_of_your_own_list(self):
