@@ -1918,17 +1918,20 @@ def _curl_matches(parts, text: str):
 # breaks around it: a list written one value per line
 _LIST_ITEM_RE = re.compile(r"[ \t]*(?:\r?\n[ \t]*){0,2}([\"'`])([^\"'`\\\n]{1,256})\1"
                            r"[ \t]*(?:\r?\n[ \t]*){0,2}(,|[\]})])")
-_LIST_MAX_CHARS = 1 << 20   # one list is read to its end, up to 1 MB: a long list is never left half masked
 
 
 def _list_matches(rule: Rule, text: str):
     """Each quoted value of the list that starts after a label of label-secret-list and that looks like a key
     (_list_value_ok), as group 2 of a match whose group 0 starts at the label. The values are checked here, before
     the filters of scan(): a list of 10,000 words cost each word the whole chain. The list ends at its closing
-    bracket, at a value that is not a quoted string, or _LIST_MAX_CHARS after its label."""
+    bracket or at a value that is not a quoted string, at any length: a cut at 1 MB left the keys after it in the
+    clear (codex Gate A of 0.6.16). A label inside a list already read is skipped, so each character is read once."""
+    done = -1
     for lab in rule.regex.finditer(text):
-        pos, stop = lab.end(), lab.end() + _LIST_MAX_CHARS
-        while pos < stop:
+        if lab.start() < done:
+            continue
+        pos = lab.end()
+        while True:
             it = _LIST_ITEM_RE.match(text, pos)
             if it is None:
                 break
@@ -1937,6 +1940,7 @@ def _list_matches(rule: Rule, text: str):
             if it.group(3) != ",":
                 break
             pos = it.end()
+        done = pos
 
 
 class _Spanned:

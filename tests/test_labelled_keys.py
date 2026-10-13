@@ -71,6 +71,15 @@ class SecretListTests(unittest.TestCase):
         text = '"api_keys": [' + ", ".join(f'"{k}"' for k in keys) + "]"
         self.assertEqual(hits(text, "label-secret-list"), keys)
 
+    def test_a_list_longer_than_a_megabyte_is_masked_to_its_end(self):
+        # a cut 1 MB after the label left 2,159 of 33,000 keys in the clear (codex Gate A of 0.6.16)
+        keys = [hexkey(f"big-{i}", 32) for i in range(33000)]
+        text = '"api_keys": [' + ", ".join(f'"{k}"' for k in keys) + "]"
+        self.assertGreater(len(text), 1 << 20)
+        got = hits(text, "label-secret-list")
+        self.assertEqual(len(got), len(keys))
+        self.assertEqual(got[-1], keys[-1])
+
     def test_a_list_after_a_label_that_names_no_secret_is_no_hit(self):
         k = hexkey("not-secret", 32)
         for label in ("tokens", "token", "Tokens", "code_tokens", "cache_tokens", "revokedTokens", "payment_tokens",
