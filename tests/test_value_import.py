@@ -322,7 +322,34 @@ class Phrases(Base):
                 self.assertNotIn("plestein", out)
                 self.assertIn(OPEN + "NAME_c", out)
         self.assertEqual(redact("Quilla Examplesteiner"), "Quilla Examplesteiner")
-        self.assertEqual(redact("Quilla Examplestein-Day"), "Quilla Examplestein-Day")
+        # a compound after the name is cut at its hyphen: stricter, the name goes and "-Day" stays
+        self.assertEqual(redact("Quilla Examplestein-Day"), OPEN + "NAME_c1" + CLOSE + "-Day")
+        # round 2: compact JSON and a Markdown link put no space after the name
+        for what, text in {"compact JSON": '{"n":"' + NAME + '","y":1}',
+                           "Markdown link": "[" + NAME + "](mailto:x@example.com)"}.items():
+            with self.subTest(what):
+                self.assertNotIn("plestein", redact(text))
+
+    def test_a_json_emoji_or_lone_surrogate_never_withholds_the_tool_result(self):
+        self.put(NAME, "Ren" + chr(0xE9) + "e M" + chr(0xFC) + "llerstein")
+        bs = chr(92)
+        pair = bs + "ud83d" + bs + "ude00"
+        lone = bs + "ud800"
+        escaped = "Ren" + bs + "u00e9e M" + bs + "u00fcllerstein"
+        for what, text in {"emoji + name": '{"t": "' + pair + ' hi", "n": "' + NAME + '"}',
+                           "emoji + escaped name": '{"t": "' + pair + '", "n": "' + escaped + '"}',
+                           "lone surrogate + escaped name": '{"t": "' + lone + ' x", "n": "' + escaped + '"}',
+                           "a lone surrogate character": chr(0xD800) + " " + NAME}.items():
+            with self.subTest(what):
+                out = hooks.post_tool({"session_id": "S1", "tool_name": "Bash", "tool_input": {"command": "cat x"},
+                                       "tool_response": {"stdout": text, "stderr": ""}})
+                body = out["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+                self.assertNotIn("plestein", body)
+                self.assertNotIn("llerstein", body)
+                if pair in text:
+                    self.assertIn(pair, body, "the emoji escape stays as it was")
+        plain, _segs = hooks._unescape(pair + " " + lone + " x")
+        self.assertEqual(plain, chr(0x1F600) + " " + lone + " x", "a pair is one character, a lone one stays text")
 
     # Fable H2: a common first word repeated costs no fingerprint per occurrence
     def test_a_repeated_head_word_costs_a_bounded_number_of_fingerprints(self):
@@ -546,16 +573,28 @@ class ReviewFixes(Base):
         self.assertEqual({why for _n, why in refused}, {"holds text of maisecrets itself (a placeholder bracket, "
                                                          "maisecrets or import:)"})
 
-    def test_a_stored_value_in_the_command_of_a_control_prompt_blocks_nothing(self):
-        # a value stored by another path (a tool result) that is the command or the import name of a control prompt
-        Vault().put_many([("/maisecrets:send", "SECRET", "manual"), ("import:helper.jsonl", "SECRET", "manual"),
-                          ("maisecrets: set", "SECRET", "manual"), (SHAPELESS, "SECRET", "manual")])
+    def test_an_agent_import_of_control_text_leaves_the_controls_working(self):
+        f = self.file(lines(*({"value": t} for t in ("/maisecrets:forget", "/maisecrets:send", "maisecrets: set",
+                                                     "import:helper.jsonl"))), "helper.jsonl")
+        self.assertEqual(value_import.import_file(f).stored, 0)
         for client in (CLAUDE, CODEX):
             for prompt in ("/maisecrets:send", "/maisecrets:forget import:helper.jsonl"):
                 with self.subTest(prompt=prompt, client=client):
                     self.assertFalse(self.blocked_for_a_value(prompt, client))
-            with self.subTest(rest="a stored value after the command is still taken out", client=client):
-                self.assertTrue(self.blocked_for_a_value(f"/maisecrets:forget {SHAPELESS}", client))
+
+    def test_a_stored_value_in_any_control_form_is_still_taken_out(self):
+        # round 2: a skip of the command part of a control prompt let a stored value through in these forms
+        pw, pwh = "Zq7PwSynthValue9x", "Zq7Pw-Synth-Value9x"
+        Vault().put_many([(pw, "SECRET", "put"), (pwh, "SECRET", "put"), (NAME, "NAME", "manual")])
+        forms = [f"/maisecrets:send\nmy password is {pw}", f"/maisecrets:forget import:people\nalso {pw}",
+                 f"maisecrets: {pw} is the key", f"maisecrets:\n{pw}\nthat is the key", f"MAISECRETS: {pw}",
+                 f"/maisecrets:{pw}", f"/maisecrets:{pwh} please", f"/maisecrets:list import:people,{pw}",
+                 f"/maisecrets:list import:{pw}", f"maisecrets: {NAME} wrote the report",
+                 f"maisecrets: {pwh}\nother: 1", f"   maisecrets:{pw}"]
+        for client in (CLAUDE, CODEX):
+            for prompt in forms:
+                with self.subTest(prompt=prompt.replace(pw, "PW").replace(pwh, "PWH"), client=client):
+                    self.assertTrue(self.blocked_for_a_value(prompt, client))
 
     # Fable H1: a listed file is checked before a byte is read
     @unittest.skipUnless(hasattr(os, "mkfifo"), "no FIFO on this system")
@@ -637,16 +676,30 @@ class ReviewFixes(Base):
     # Fable H2 / Opus M1: a re-import renews past max_ttl, and before the values expire
     def test_a_reimport_renews_the_lifetime_past_the_first_max_ttl(self):
         f = self.file(lines({"value": NAME, "type": "NAME"}))
-        value_import.import_file(f)
+        value_import.import_file(f, origin="file")
         v = Vault()
         with v._exclusive():
             meta = v._index["entries"]["NAME_c1"]
             meta["expires"] = meta["max_expires"] = time.time() + 100      # day 30 of the first import
-        value_import.import_file(f)
+        value_import.import_file(f, origin="file")
         meta = Vault()._index["entries"]["NAME_c1"]
         month = load_config()["max_ttl_seconds"]
         self.assertGreater(meta["max_expires"] - time.time(), month - 60)
         self.assertGreater(meta["expires"] - time.time(), month - 60)
+        self.assertLessEqual(meta["max_expires"] - time.time(), month, "never past the person's max_ttl_seconds")
+
+    def test_only_a_value_file_renews_and_never_past_a_shorter_max_ttl(self):
+        f = self.file(lines({"value": NAME, "type": "NAME"}))
+        value_import.import_file(f, origin="file")
+        v = Vault()
+        with v._exclusive():
+            meta = v._index["entries"]["NAME_c1"]
+            meta["expires"] = meta["max_expires"] = time.time() + 100
+        value_import.import_file(f)                                    # an agent's run import of the same file
+        self.assertLess(Vault()._index["entries"]["NAME_c1"]["max_expires"] - time.time(), 101)
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "max_ttl_seconds": 7200}))
+        value_import.import_file(f, origin="file")
+        self.assertLessEqual(Vault()._index["entries"]["NAME_c1"]["max_expires"] - time.time(), 7200)
 
     def test_a_value_file_is_imported_again_when_a_value_expires_soon_or_one_is_gone(self):
         f = self.file(lines({"value": NAME, "type": "NAME"}, {"value": LONG_NAME, "type": "NAME"}))
@@ -663,13 +716,37 @@ class ReviewFixes(Base):
                            "expiring within two days: imported again, which renews it")
 
     # Opus M1: the imports an agent runs cannot take the room of the person's value files
+    def test_a_run_import_finds_no_room_when_the_value_files_filled_the_cap(self):
+        with mock.patch.object(value_import, "MAX_IMPORTED", 10):
+            f = self.file(lines(*synth_names(10)), "team.jsonl")
+            value_import.session_import({**load_config(), "value_files": [str(f)]})
+            run = value_import.import_file(self.file(lines(*synth_names(14)[10:]), "agent.jsonl"))
+        self.assertEqual(run.stored, 0)
+        self.assertIn("import:team.jsonl holds the most of them", value_import.summary(run))
+
+    def test_a_value_known_from_elsewhere_or_a_short_lifetime_does_not_import_at_every_start(self):
+        rows = synth_names(5)
+        Vault().put(rows[0]["value"], "NAME", "put")
+        f = self.file(lines(*rows))
+        cfg = {**load_config(), "value_files": [str(f)]}
+        value_import.session_import(cfg)
+        self.assertIsNone(value_import.session_import(cfg), "a value from a /maisecrets:put is no missing value")
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "max_ttl_seconds": 86400}))
+        cfg = {**load_config(), "value_files": [str(f)]}
+        f.write_text(lines(*synth_names(6)))          # changed: imported, and its values now live one day
+        value_import.session_import(cfg)
+        events = (HOME / "events.log").read_text().count("ValueImport")
+        value_import.session_import(cfg)
+        self.assertEqual((HOME / "events.log").read_text().count("ValueImport"), events,
+                         "a lifetime of one day: no import at the next start")
+
     def test_run_imports_leave_room_for_the_value_files(self):
         with mock.patch.object(value_import, "MAX_IMPORTED", 10):          # an import that is no file: 6 of 10
             run = value_import.import_file(self.file(lines(*synth_names(10)[:8]), "agent.jsonl"))
             f = self.file(lines(*synth_names(14)[10:]), "team.jsonl")
             value_import.session_import({**load_config(), "value_files": [str(f)]})
         self.assertEqual(run.stored, 6)
-        self.assertIn("of an import that is no value file", value_import.summary(run))
+        self.assertIn("the limit of imports that are no value file", value_import.summary(run))
         self.assertEqual(value_import.counts_by_source(Vault())["team.jsonl"], {"NAME": 4})
 
     # Opus M2: a value two imports list stays when one of them is removed
@@ -678,10 +755,11 @@ class ReviewFixes(Base):
         value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "b.jsonl"))
         self.assertEqual(value_import.counts_by_source(Vault()), {"a.jsonl": {"NAME": 1}, "b.jsonl": {"NAME": 1}})
         rc, out, _ = self.run_cli("forget", "import:a.jsonl")
-        self.assertIn("import:a.jsonl: 0 value(s) deleted", out)
-        self.assertIn("1 value(s) stay masked: another import lists them too.", out)
+        self.assertIn("import:a.jsonl: no value deleted. 1 value(s) stay masked because another import lists them "
+                      "too: import:b.jsonl (1)", out)
+        self.assertNotIn("no longer masks", out)
         self.assertNotIn("Examplestein", redact(f"by {NAME}"))
-        self.assertEqual(value_import.remove(Vault(), "b.jsonl"), (1, 0, 0))
+        self.assertEqual(value_import.remove(Vault(), "b.jsonl"), (1, 0, {}))
         self.assertEqual(redact(f"by {NAME}"), f"by {NAME}")
 
     # Opus M3: removing an import writes the index once per batch, not once per value
@@ -695,7 +773,7 @@ class ReviewFixes(Base):
             return real(self)
         with mock.patch.object(Vault, "_save_index", count):
             result = value_import.remove(Vault(), "names.jsonl")
-        self.assertEqual(result, (450, 0, 0))
+        self.assertEqual(result, (450, 0, {}))
         self.assertLessEqual(len(writes), 2 * (450 // value_import.FORGET_BATCH + 2))
 
     def test_remove_counts_only_values_deleted_now(self):
@@ -705,7 +783,7 @@ class ReviewFixes(Base):
         with v._exclusive():
             v._index["entries"]["NAME_c1"]["expires"] = time.time() - 1
         Vault().expire(limit=None)
-        self.assertEqual(value_import.remove(Vault(), "names.jsonl"), (1, 0, 0))
+        self.assertEqual(value_import.remove(Vault(), "names.jsonl"), (1, 0, {}))
 
     # LOWs of the review
     def test_a_locked_vault_gives_a_message_not_a_traceback(self):
@@ -713,7 +791,7 @@ class ReviewFixes(Base):
         with mock.patch.object(value_import, "import_file", side_effect=vault.LockTimeout("the vault lock is busy")):
             rc, out, err = self.run_cli("values", "import", str(f))
         self.assertEqual(rc, 1)
-        self.assertIn("maisecrets values import: the vault lock is busy", err)
+        self.assertIn("maisecrets: the import failed: the vault lock is busy", err)
 
     def test_the_printed_command_is_the_launcher_and_runs_as_printed(self):
         rc, _out, err = self.run_cli("values", "bogus")
@@ -721,6 +799,11 @@ class ReviewFixes(Base):
         launcher = str(ROOT / "hooks" / ("run.cmd" if os.name == "nt" else "run.sh"))
         self.assertIn(f"usage: {launcher} values [import FILE | remove NAME]", err)
         self.assertNotIn("maisecrets values import FILE", err)
+        spaced = "/tmp/Jan Example/plugin/maisecrets/value_import.py"
+        if os.name != "nt":
+            with mock.patch.object(value_import, "__file__", spaced):
+                self.assertEqual(value_import.command("import FILE"),
+                                 "'/tmp/Jan Example/plugin/hooks/run.sh' values import FILE")
         if os.name == "nt":
             return
         f = self.file(lines({"value": NAME, "type": "NAME"}))

@@ -57,7 +57,7 @@ def _import_lines(v) -> list[str]:
     rows = value_import.sources(v)
     if not rows:
         return []
-    out = ["Imported values (maisecrets values import, value_files):"]
+    out = ["Imported values (values import, value_files):"]
     for r in rows:
         total = sum(r["counts"].values())
         what = f"{total} value(s) ({value_import.type_text(r['counts'])})" if total else "0 values (expired)"
@@ -123,15 +123,19 @@ def _forget_import(v, name: str) -> int:
         print(f"import:{name}: not found (/maisecrets:list names each import)")
         return 1
     deleted, refused, kept = value_import.remove(v, name)
+    others = ", ".join(f"import:{n} ({c})" for n, c in sorted(kept.items()))
     if refused:
         print(f"import:{name}: {deleted} value(s) deleted; the store refused {refused}, which stay. Try again later.")
         return 1
     listed = _in_value_files(v, name)
     again = (" The file is still in value_files, so the next session start imports it again; "
              f"/maisecrets:settings value_files remove {listed} stops that." if listed else "")
-    stay = (f" {kept} value(s) stay masked: another import lists them too." if kept else "")
-    print(f"import:{name}: {deleted} value(s) deleted. maisecrets no longer masks them, and their placeholders no "
-          f"longer resolve.{stay}{again}")
+    # a value another import lists stays: say which import, and do not call it unmasked (round-2 review)
+    gone = (f"{deleted} value(s) deleted; maisecrets no longer masks them, and their placeholders no longer resolve."
+            if deleted else "no value deleted.")
+    stay = (f" {sum(kept.values())} value(s) stay masked because another import lists them too: {others}; "
+            "/maisecrets:forget import:NAME removes that one." if kept else "")
+    print(f"import:{name}: {gone}{stay}{again}")
     return 0
 
 
@@ -159,7 +163,7 @@ def cmd_values(args: list[str]) -> int:
         except (ValueError, RuntimeError) as exc:
             # RuntimeError: the vault lock timed out or the index is damaged (LockTimeout, CodedError); a traceback
             # told the person nothing (review of block 3, LOW)
-            print(f"maisecrets values import: {exc}", file=sys.stderr)
+            print(f"maisecrets: the import failed: {exc}", file=sys.stderr)
             return 1
         print(value_import.summary(result))
         days = int(load_config().get("max_ttl_seconds", 30 * 86400)) // 86400
@@ -170,7 +174,7 @@ def cmd_values(args: list[str]) -> int:
         try:
             return _forget_import(Vault(), args[1].removeprefix("import:"))
         except RuntimeError as exc:
-            print(f"maisecrets values remove: {exc}", file=sys.stderr)
+            print(f"maisecrets: the removal failed: {exc}", file=sys.stderr)
             return 1
     print(f"usage: {value_import.command('[import FILE | remove NAME]')}\n"
           "  FILE holds one JSON object per line: {\"value\": \"...\", \"type\": \"NAME\"}\n"

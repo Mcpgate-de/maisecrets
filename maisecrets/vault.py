@@ -505,7 +505,9 @@ def fingerprint(value: str, key: bytes) -> str:
     import hmac
     # hmac.digest is the one-shot C path: the same tag as hmac.new(...).hexdigest(), a third of the time. The
     # phrase search of the hooks computes one per word of a tool result
-    return hmac.digest(key, value.encode(), "sha256").hex()[:16]
+    # surrogatepass: a lone surrogate (from a JSON escape in a tool result) is hashed, never an UnicodeEncodeError that
+    # withholds the whole result
+    return hmac.digest(key, value.encode("utf-8", "surrogatepass"), "sha256").hex()[:16]
 
 
 MAX_PHRASE_WORDS = 6     # a stored value of 2 to 6 words is found as a phrase (hooks._phrase_spans); more: the line
@@ -539,7 +541,7 @@ class Entry:
     sessions: list = field(default_factory=list)  # sessions allowed to resolve the entry (see Vault.get)
     # a word that only a label rule found (letters only): replaced where it was found, never hunted in other texts
     weak: bool = False
-    # where an imported value came from (`maisecrets values import`, value_files): the import's name, else ""
+    # where an imported value came from (`values import` of the launcher, value_files): the import's name, else ""
     source: str = ""
     # the other imports that list the same value: removing one import keeps a value another one still lists
     also: list = field(default_factory=list)
@@ -1142,7 +1144,7 @@ class Vault:
 
     @_mutating
     def put_many(self, items: list[tuple[str, str, str]], session: str | None = None, cap: int | None = None,
-                 source: str = "", ttl: int | None = None) -> list["Entry | None"]:
+                 source: str = "", ttl: int | None = None, renew: bool = False) -> list["Entry | None"]:
         """Store many values in one lock, one sweep and one index save; a tool result with
         hundreds of addresses called put() per value and rewrote the growing index each time
         (measured: 1000 e-mails 8.7 s, above the watchdog; review, 2026-09-26). Above
@@ -1162,13 +1164,14 @@ class Vault:
                 if session and session not in e.sessions:
                     e.sessions.append(session)
                 if source and e.source:
-                    # an import that lists an imported value again re-affirms it: it lives max_ttl from now, past the
-                    # end the first import set (review of block 3: a value file renewed nothing after 30 days)
                     if source != e.source and source not in e.also:
                         e.also.append(source)
-                    now = time.time()
-                    e.max_expires = max(e.max_expires, now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)))
-                    e.expires = max(e.expires, min(now + int(ttl or 0), e.max_expires))
+                    if renew:
+                        # a file of value_files that lists an imported value again re-affirms it: it lives
+                        # max_ttl_seconds from now, never longer (review of block 3; an agent's import renews nothing)
+                        now = time.time()
+                        e.max_expires = now + int(self.cfg.get("max_ttl_seconds", 30 * 86400))
+                        e.expires = min(now + int(ttl or 0), e.max_expires)
                 self._touch(e, save=False)
                 dirty = True
                 out.append(e)

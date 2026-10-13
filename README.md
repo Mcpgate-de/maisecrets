@@ -1270,9 +1270,14 @@ any white space or a line break between its words, behind `=` or `:`, in
 quotes or brackets, in Markdown (`**Name**`, `*Name*`, `_Name_`), in an HTML
 cell (`<td>Name</td>`) or with a tag between its words, in „…“ and «…»,
 with a possessive (`Name's`, `Name’s`), in decomposed Unicode (NFD), with a
-soft hyphen or a zero-width character in it, and as a JSON `\u` escape. The
-match is otherwise exact: `QUILLA EXAMPLESTEIN` is not `Quilla
-Examplestein`, and `Quilla Examplesteiner` is no match.
+soft hyphen or a zero-width character in it, as a JSON `\u` escape, and in
+compact JSON (`"n":"Name","y":1`) or a Markdown link (`[Name](mailto:…)`).
+In a compound the name is cut at the hyphen: `Name-Report` keeps `-Report`.
+The match is otherwise exact: `QUILLA EXAMPLESTEIN` is not `Quilla
+Examplestein`, and `Quilla Examplesteiner` is no match. Not found: a part of
+the name alone (`Quilla`, `Examplestein`), the words in another order
+(`Examplestein, Quilla`), and punctuation between the words
+(`Quilla, Examplestein`).
 
 A tool writes the file in a few lines, for example from a CSV export:
 
@@ -1286,9 +1291,11 @@ with open("people.csv", newline="") as src, open("names.jsonl", "w") as out:
 
 **Import at every session start.** Add the file to the setting `value_files`
 with your own prompt, and maisecrets imports it again at session start when
-it changed, once a day, when one of its values expires within two days and
-when one of its values is gone. Each import renews its values for
-`max_ttl_seconds`:
+it changed, once a day, when one of its values expires within two days (or
+half of `max_ttl_seconds`, when that is shorter) and when one of its values is
+gone. Each of these imports renews the values of the file: they live
+`max_ttl_seconds` from then, never longer. An import the AI runs renews
+nothing:
 
 ```
 /maisecrets:settings value_files add ~/exports/names.jsonl
@@ -1299,20 +1306,23 @@ maisecrets: set value_files add ~/exports/names.jsonl     (the same, and the for
 counts per type, when it ran and when its values expire.
 `/maisecrets:forget import:names.jsonl` deletes every value of that import.
 An imported value lives `max_ttl_seconds` (30 days unless you set less); a use
-does not cut it to the lifetime of its type.
+does not cut it to the lifetime of its type. When another import lists the
+same value, the value stays masked, and the answer names that import.
 
-**Limits.** An import only adds: it never deletes, retypes or shortens a value
-the vault holds. So the AI may run it too. It can only make detection
+**Limits.** An import only adds: it never deletes or retypes a value the vault
+holds. So the AI may run it too. It can only make detection
 stricter. To keep a large or crafted file from slowing every hook, an import
 reads at most 1 MB and 2000 values, and only a regular file (a pipe or a
 device is refused before a byte is read). The vault holds at most 5000
-imported values; a full vault refuses the next import and drops nothing. An
-import that is not in `value_files` (one the AI ran) fills at most 3000 of
-them, so the rest stays for your files. A value has 8 to 512 characters on one
+imported values; a full vault refuses the next import, drops nothing and
+names the import that holds the most. Imports that are not in `value_files`
+(one the AI ran) fill at most 3000 of them together, so at least 2000 stay
+for your files; your files may fill all 5000. A value has 8 to 512 characters on one
 line. These are refused: a single word of lower-case letters, a `SECRET`
 without an upper-case letter, a digit or a symbol (ordinary text), and a value
 that holds `maisecrets`, `import:` or a placeholder bracket (so no import can
-block your own `/maisecrets:` prompts). Each import writes a line to
+block your own `/maisecrets:` prompts; a stored value in such a prompt is still
+taken out). Each import writes a line to
 `events.log`, and the next session start names an import that is new. A value
 you delete from the file stays masked until it expires or you remove the
 import; a value that two imports list stays until you remove both. Each

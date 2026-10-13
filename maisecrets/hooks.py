@@ -712,19 +712,11 @@ def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str 
         # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
         # from 8 characters; a shorter one would block ordinary words in a prompt.
         resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]
-        # the command of a maisecrets control prompt and the import it names are the person's controls: a stored
-        # value there (an agent can import one) must not block /maisecrets:forget or /maisecrets:send (Opus H1)
-        pieces = []
-        for i, part in enumerate(_CONTROL_PARTS_RE.split(rewritten) if _CONTROL_HEAD_RE.match(rewritten)
-                                 else [rewritten]):
-            pieces.append(part if i % 2 else _exact_redact(part, vault, session, stored, entries, resolved, values))
-        rewritten = "".join(pieces)
+        # the whole prompt, a control prompt too: a skip of the command part let a stored value through in ten forms
+        # (`maisecrets: VALUE`, `/maisecrets:VALUE`, a YAML line; round-2 review of block 3). An import refuses
+        # control text (value_import._CONTROL_TEXT), so no import can block the person's controls
+        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values)
     return rewritten, entries, values, stored
-
-
-_CONTROL_HEAD_RE = re.compile(r"\s*(?:/maisecrets:[\w-]+|maisecrets:\s*\w+)", re.I)
-# split keeps the control parts at the odd places: the command, and an import:NAME argument
-_CONTROL_PARTS_RE = re.compile(r"(\A\s*(?:/maisecrets:[\w-]+|maisecrets:\s*\w+)|(?<!\S)import:\S+)", re.I)
 
 
 def _run_sh() -> str:
@@ -3223,7 +3215,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
 _WORD_RE = re.compile(r"<[^<>\n]{0,200}>|([^\s<>]+)")
 _ASCII_EDGE = "".join(chr(c) for c in range(33, 127) if not chr(c).isalnum())
 # a JSON \u escape: the phrase pass runs over the unescaped text too ("J\u00f6rg Example" is the stored name)
-_U_ESCAPE_RE = re.compile(r"\\u([0-9a-fA-F]{4})")
+_U_ESCAPE_RE = re.compile(r"\\u([dD][89abAB][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})|\\u([0-9a-fA-F]{4})")
 _INVISIBLE = dict.fromkeys(map(ord, "\u00ad\u200b\u200c\u200d\u2060\ufeff"))
 
 
@@ -3264,13 +3256,22 @@ def _starts(word: str) -> list[int]:
     return [a for a in dict.fromkeys(out) if a < len(word)]
 
 
+_INNER_CUTS = 2          # cuts inside a last word: compact JSON and Markdown links put no space after a name
+
+
 def _ends(word: str) -> list[int]:
-    """Where a phrase may end in its last word: at the end, before closing punctuation or markup, or before a
-    possessive 's (Name's, Name\u2019s)."""
+    """Where a phrase may end in its last word: at the end, before closing punctuation or markup, or at one of the
+    first _INNER_CUTS places where punctuation follows a letter or digit: a possessive (Name's, Name\u2019s), compact
+    JSON (`Name","y":1}`), a Markdown link (`Name](mailto:x)`), a compound (`Name-Report`)."""
     out = [len(word), _rstrip_edge(word)]
     j = out[1]
-    if j >= 3 and word[j - 1] in "sS" and word[j - 2] in "'\u2019":
-        out.append(_rstrip_edge(word[:j - 2]))
+    cuts = 0                 # a possessive 's is one of them: the apostrophe follows a letter
+    for i in range(1, j):
+        if _edge(word[i]) and word[i - 1].isalnum():
+            out.append(i)
+            cuts += 1
+            if cuts == _INNER_CUTS:
+                break
     return [b for b in dict.fromkeys(out) if b > 0]
 
 
@@ -3366,17 +3367,25 @@ def _phrase_pass(text: str, vault: Vault, heads: dict, tags: dict) -> list[tuple
 
 def _unescape(text: str) -> tuple[str, list[tuple[int, int, int]]]:
     """The text with each JSON \\u escape replaced by its character, and the segments (plain start, text start, width
-    of one character in the text) that map a plain offset back."""
+    of one character in the text) that map a plain offset back. A surrogate pair (an emoji) becomes one character; a
+    lone surrogate stays escape text: as a character it could not be encoded, and the whole tool result was withheld
+    (round-2 review of block 3)."""
     parts: list[str] = []
     segs: list[tuple[int, int, int]] = []
     d = o = 0
     for m in _U_ESCAPE_RE.finditer(text):
+        if m.group(3) is not None:
+            cp = int(m.group(3), 16)
+            if 0xD800 <= cp <= 0xDFFF:
+                continue
+        else:
+            cp = 0x10000 + ((int(m.group(1), 16) - 0xD800) << 10) + (int(m.group(2), 16) - 0xDC00)
         if m.start() > o:
             segs.append((d, o, 1))
             parts.append(text[o:m.start()])
             d += m.start() - o
-        segs.append((d, m.start(), 6))
-        parts.append(chr(int(m.group(1), 16)))
+        segs.append((d, m.start(), m.end() - m.start()))
+        parts.append(chr(cp))
         d += 1
         o = m.end()
     if not parts:
