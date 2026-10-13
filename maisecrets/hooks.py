@@ -3361,9 +3361,16 @@ def post_tool(payload: dict) -> dict:
     # It passes as it is, or a text Read takes its place, which the redaction below then masks
     from . import file_reads
     swap = file_reads.post_read(payload, cfg, client_of(payload) == "codex")
+    held = None
     if swap and swap[0] == "pass":
-        return {}
-    if swap:
+        if payload.get("tool_name") != "Bash" or not isinstance(response, dict):
+            return {}
+        # a Bash image: only its stdout is the image. stderr and every other field are scanned as always (a pass
+        # of the whole result let a token in stderr through, review of block 4)
+        held = response.get("stdout")
+        response = {k: ("" if k == "stdout" else v) for k, v in response.items()}
+        swap = None
+    elif swap:
         response = swap[1]
     session = payload.get("session_id")
     vault: Vault | None = None
@@ -3438,6 +3445,8 @@ def post_tool(payload: dict) -> dict:
         return node
 
     new_response = walk(response)
+    if held is not None and isinstance(new_response, dict):
+        new_response["stdout"] = held
     if swap and not hit["n"] and not hidden["n"]:
         if client_of(payload) == "codex":
             return {"decision": "block", "reason": f"[maisecrets: {swap[2]}]\n\n{file_reads.as_text(new_response)}"}
@@ -3779,6 +3788,12 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
             "Do NOT run it again to see the output; tell the user to check the result in their terminal.")
     if codex:
         return {"decision": "block", "reason": reason + tail}
+    response = payload.get("tool_response")
+    if payload.get("tool_name") == "Bash" and isinstance(response, dict) and response.get("isImage") is True:
+        # an image of a Bash result: a string fails open here too; the client's Bash shape with isImage off removes
+        # the image (measured live, review of block 4)
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": {
+            **response, "stdout": f"[{reason}{tail}]", "stderr": "", "isImage": False}}}
     if payload.get("tool_name") == "Read":
         # a string fails the shape check of Read and the client sends the original, a PDF or an image too (measured,
         # harness/probe_file_reads.py): only a text Read withholds it

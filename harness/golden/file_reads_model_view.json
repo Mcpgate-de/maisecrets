@@ -199,5 +199,32 @@
     }
    ]
   }
+ ],
+ "read_notebook": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": [
+    {
+     "text": "<cell id=\"cell-0\">plot()</cell id=\"cell-0\">\n\n<Figure>",
+     "type": "text"
+    },
+    {
+     "type": "image",
+     "source": {
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==",
+      "media_type": "image/png",
+      "type": "base64"
+     }
+    }
+   ]
+  }
+ ],
+ "nb_replace_text": [
+  {
+   "tool_use_id": "{tool_use_id}",
+   "type": "tool_result",
+   "content": "1\tPROBE-REPLACED-TEXT: withheld"
+  }
  ]
 }

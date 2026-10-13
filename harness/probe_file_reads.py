@@ -58,6 +58,16 @@ def pdf_lines(*lines: str, size: int = 12) -> bytes:
     return out
 
 
+def notebook() -> dict:
+    """A notebook with one code cell whose output is the 2x2 PNG and a text."""
+    import base64
+    return {"cells": [{"cell_type": "code", "execution_count": 1, "metadata": {}, "source": ["plot()"],
+                       "outputs": [{"output_type": "display_data", "metadata": {},
+                                    "data": {"image/png": base64.b64encode(png_2x2()).decode(),
+                                             "text/plain": ["<Figure>"]}}]}],
+            "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
+
+
 CONTROL = r'''
 import json, os, sys
 p = json.load(sys.stdin)
@@ -125,6 +135,10 @@ PROBES = {
                          "turns": [{"tool": "Read", "input": {"file_path": "{cwd}/hello.pdf"}}, {"text": "done"}]},
     "pdf_replace_obj": {"control": "replace_pdf_obj",
                         "turns": [{"tool": "Read", "input": {"file_path": "{cwd}/hello.pdf"}}, {"text": "done"}]},
+    # a notebook with an image output: Read gives {type: "notebook"}; does the text shape take its image out too?
+    "read_notebook": {"turns": [{"tool": "Read", "input": {"file_path": "{cwd}/plot.ipynb"}}, {"text": "done"}]},
+    "nb_replace_text": {"control": "replace_text",
+                        "turns": [{"tool": "Read", "input": {"file_path": "{cwd}/plot.ipynb"}}, {"text": "done"}]},
     # a pasted image as the SDK sends it: an image block in a stream-json user message
     "paste_stream_json": {"stream_image": True, "turns": [{"text": "seen"}]},
     "paste_stream_json_block": {"stream_image": True, "control": "block_prompt", "turns": [{"text": "seen"}]},
@@ -139,6 +153,7 @@ def run(name: str, sc: dict, base: Path) -> None:
         d.mkdir(parents=True)
     (cwd / "tiny.png").write_bytes(png_2x2())
     (cwd / "hello.pdf").write_bytes(pdf_hello())
+    (cwd / "plot.ipynb").write_text(json.dumps(notebook()))
     (work / "dump_hook.py").write_text(DUMP)
     (work / "control_hook.py").write_text(CONTROL)
     py = sys.executable

@@ -327,6 +327,15 @@ def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
     for key in ("read_pdf", "read_image"):
         if parsed.get(key) in ("ask", "block", "convert"):
             cfg[key] = parsed[key]                 # each stops more than the default allow; clean_dirs only loosens
+        elif key in parsed and not isinstance(parsed[key], str):
+            _read_fallback(cfg)                    # ["block"] said block in a wrong form: it must not become allow
+
+
+def _read_fallback(cfg: dict) -> None:
+    """A config.json that cannot be read may say read_pdf or read_image block: both count as block until it is fixed,
+    the same rule as rehydration (review of block 4: bad JSON turned a block into allow)."""
+    cfg["read_pdf"] = cfg["read_image"] = "block"
+    cfg["read_fallback"] = True
 
 
 def load_config() -> dict:
@@ -355,6 +364,7 @@ def load_config() -> dict:
         _note_user_config(exc)
         cfg["rehydration"] = "block"
         cfg["rehydration_fallback"] = True
+        _read_fallback(cfg)
     except ValueError:
         # the user file is advisory: a typo must not lock the user out of the client (review,
         # 2026-09-26). The defaults are the strict values, so the fallback loosens nothing; the
@@ -365,6 +375,7 @@ def load_config() -> dict:
         # the file may have set block: an ignored file loosens nothing, so nothing is rehydrated until it is fixed
         cfg["rehydration"] = "block"
         cfg["rehydration_fallback"] = True
+        _read_fallback(cfg)
     except ConfigError as exc:
         cfg["config_warning"] = f"{exc}; the file was ignored"
         _note_user_config(None, "shape")
@@ -376,6 +387,7 @@ def load_config() -> dict:
             # JSON that is no object cannot be read either (it may wrap a block): the same as invalid JSON
             cfg["rehydration"] = "block"
             cfg["rehydration_fallback"] = True
+            _read_fallback(cfg)
         user = {}
     unknown = sorted(k for k in user if k not in _CONFIG_TYPES)
     if unknown:

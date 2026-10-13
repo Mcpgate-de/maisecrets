@@ -370,18 +370,21 @@ class Convert(_Work):
                 self.assertIn(why, out["file"]["content"])
 
     def test_an_exception_during_the_extraction_kills_the_child_and_fails_closed(self):
-        # a watchdog that raises in the main thread while pdftotext runs (block 1's SIGALRM)
+        # any exception in the main thread while pdftotext runs. This tree's watchdog is a thread and cannot raise
+        # here; the finally block must still end the child for a watchdog that could
         _reset(read_pdf="convert")
         self.stub("/bin/sleep 30")
-        real = subprocess.Popen.communicate
         children = []
+        real_stop = file_reads._stop
 
-        def interrupted(child, *a, **k):
+        def stop(child):
             children.append(child)
-            raise RuntimeError("the watchdog")
-        with mock.patch.object(subprocess.Popen, "communicate", interrupted):
+            real_stop(child)
+
+        def interrupted(thread, seconds):
+            raise RuntimeError("an exception in the main thread")
+        with mock.patch.object(file_reads, "_wait", interrupted), mock.patch.object(file_reads, "_stop", stop):
             out = output(self.post())
-        self.assertIsNot(real, None)
         self.assertEqual(out["type"], "text")
         self.assertIn("withheld", out["file"]["content"])
         self.assertIsNotNone(children[0].poll(), "the child ended with the hook")
@@ -392,6 +395,27 @@ class Convert(_Work):
         content = output(self.post())["file"]["content"]
         self.assertLess(len(content), file_reads.MAX_TEXT_CHARS + 300)
         self.assertIn("the text stops here", content)
+
+    def test_the_worst_text_at_the_cap_is_redacted_inside_the_budget(self):
+        # review of block 4: 256K of AWS key shapes held the hook 97 s, past the client's 20 s, and it failed open.
+        # The cap is the bound; the budget here leaves room for the extraction (6 s) under the 16 s watchdog
+        import random
+        rnd = random.Random(7)
+        abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        text = " ".join("AKIA" + "".join(rnd.choice(abc) for _ in range(16))
+                        for _ in range(file_reads.MAX_TEXT_CHARS // 21 + 1))[:file_reads.MAX_TEXT_CHARS]
+        from maisecrets import detect
+        t0 = time.monotonic()
+        detect.scan(text)
+        self.assertLess(time.monotonic() - t0, 8.0)
+
+    def test_a_pdf_larger_than_the_cap_is_refused_before_pdftotext(self):
+        _reset(read_pdf="convert")
+        self.stub()
+        with mock.patch.object(file_reads, "MAX_PDF_BYTES", 10):
+            out = output(self.post())
+        self.assertIn("larger than", out["file"]["content"])
+        self.assertFalse(self.calls.exists(), "pdftotext did not run")
 
     def test_a_pdf_without_text_says_so(self):
         _reset(read_pdf="convert")
@@ -451,7 +475,71 @@ class BashDataUri(_Work):
         p = golden("PostToolUse_Bash_base64", self.cwd)
         self.assertIsNone(file_reads.post_read(p, {**load_config(), "read_image": "block"}, False))
         p["tool_response"]["stdout"] = "  data:image/png;base64,iVBOR"
-        self.assertEqual(file_reads.kind_of_response("Bash", p["tool_response"]), "image")
+        self.assertIsNone(file_reads.kind_of_response("Bash", p["tool_response"]),
+                          "only the client's isImage makes an image, never the text")
+
+    def test_a_data_uri_prefix_without_is_image_is_scanned(self):
+        # review of block 4: a stdout that starts like a data URI let the whole Bash result pass unscanned
+        p = golden("PostToolUse_Bash_datauri", self.cwd)
+        p["tool_response"].update(isImage=False, stdout=f"data:image/png;base64,x\nDB_TOKEN={TOKEN}\n")
+        answer = run_hook("post-tool", p)
+        self.assertNotIn(TOKEN, json.dumps(answer))
+        self.assertRegex(output(answer)["stdout"], r"DB_TOKEN=⟦SECRET_c\d+⟧")
+
+    def test_an_image_passes_but_its_stderr_is_scanned(self):
+        p = golden("PostToolUse_Bash_datauri", self.cwd)
+        image = p["tool_response"]["stdout"]
+        p["tool_response"]["stderr"] = f"curl: Authorization: Bearer {TOKEN}\n"
+        answer = run_hook("post-tool", p)
+        out = output(answer)
+        self.assertNotIn(TOKEN, json.dumps(answer))
+        self.assertRegex(out["stderr"], r"Bearer ⟦SECRET_c\d+⟧")
+        self.assertEqual((out["stdout"], out["isImage"]), (image, True), "the image itself goes on unchanged")
+
+    def test_the_fail_closed_answer_of_a_bash_image_is_its_text_shape(self):
+        p = golden("PostToolUse_Bash_datauri", self.cwd)
+        out = output(hooks._fail_closed("post-tool", p, "took longer than 16s."))
+        self.assertIsInstance(out, dict, "a string fails open: the image is sent")
+        self.assertIs(out["isImage"], False)
+        self.assertEqual(out["stderr"], "")
+        self.assertIn("withheld", out["stdout"])
+        self.assertNotIn("base64,", json.dumps(out))
+
+
+class Notebook(_Work):
+    """A notebook Read with an image output (harness/golden/PostToolUse_Read_notebook.json): its text is scanned as
+    always; ask and block send it as text, without the image."""
+
+    def _post(self, **cell_text):
+        p = golden("PostToolUse_Read_notebook", self.cwd)
+        p["tool_response"]["file"]["cells"][0]["source"] = f"key = '{TOKEN}'"
+        return run_hook("post-tool", p)
+
+    def test_block_sends_the_text_without_the_image(self):
+        _reset(read_image="block")
+        answer = self._post()
+        out = output(answer)
+        self.assertEqual(out["type"], "text")
+        self.assertEqual(tuple(out["file"]), file_reads.TEXT_KEYS)
+        content = out["file"]["content"]
+        self.assertIn("<Figure>", content)
+        self.assertIn("image output was withheld (setting read_image block)", content)
+        self.assertNotIn("iVBOR", json.dumps(answer))
+        self.assertNotIn(TOKEN, json.dumps(answer), "the cells are scanned too")
+
+    def test_ask_withholds_too(self):
+        _reset(read_image="ask")
+        self.assertNotIn("iVBOR", json.dumps(self._post()))
+
+    def test_allow_keeps_the_image_and_still_scans_the_cells(self):
+        answer = self._post()
+        self.assertNotIn(TOKEN, json.dumps(answer))
+        self.assertIn("iVBOR", json.dumps(output(answer)))
+
+    def test_a_notebook_without_an_image_is_no_image_read(self):
+        p = golden("PostToolUse_Read_notebook", self.cwd)
+        del p["tool_response"]["file"]["cells"][0]["outputs"][0]["image"]
+        self.assertIsNone(file_reads.kind_of_response("Read", p["tool_response"]))
 
 
 # ------------------------------------------------------- typed settings --
@@ -505,6 +593,22 @@ class TypedSettings(_Work):
         cfg = load_config()
         self.assertEqual(cfg["read_pdf"], "block")
         self.assertEqual(cfg["clean_dirs"], [], "a clean folder only loosens: it is not kept")
+
+    def test_a_config_that_cannot_be_read_blocks_both(self):
+        # review of block 4: bad JSON or a wrong type dropped a block the person had set
+        cases = {"bad JSON": '{"backend": "jsonfile", "allow_plaintext_store": true, "read_pdf": "block",}',
+                 "a list value": json.dumps({**TEST_CONFIG, "read_pdf": ["block"]}),
+                 "no object": json.dumps([{"read_pdf": "block"}])}
+        for name, text in cases.items():
+            with self.subTest(name):
+                CONFIG.write_text(text)
+                cfg = load_config()
+                self.assertEqual((cfg["read_pdf"], cfg["read_image"]), ("block", "block"))
+                pre = self.pre(file_path=self.pdf)
+                self.assertEqual(decision(pre), "deny")
+                self.assertIn("config.json cannot be read", pre["hookSpecificOutput"]["permissionDecisionReason"])
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "read_pdf": "allow", "tips": "x"}))
+        self.assertEqual(load_config()["read_pdf"], "allow", "a valid allow next to another bad key stays allow")
 
     def test_the_card_names_the_modes(self):
         text = settings.render()
