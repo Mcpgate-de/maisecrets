@@ -1358,7 +1358,8 @@ a surname comes in two or more endings, it proposes the stem
 a terminal: a tool call gets the count.
 
 **Cost.** maisecrets keeps an index of the lists in `~/.maisecrets/.terms-cache`.
-With 100,000 entries a hook loads it in about 5 ms and scans 10 KB in 2 to 4 ms.
+With 100,000 entries a new hook process loads it in about 30 ms and scans
+10 KB in 3 to 10 ms (measured on Python 3.9 and 3.14).
 After you change a list, maisecrets builds the index again at the next
 session start, or right after `/maisecrets:term add` or `remove`, so a tool
 hook only loads it. Measured for 100,000 two-word entries (3.8 MB): 1.4 s on
