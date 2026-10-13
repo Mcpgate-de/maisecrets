@@ -328,6 +328,41 @@ class AskAndBlock(_Work):
         post["tool_response"]["file"]["base64"] = base64.b64encode(pdf_bytes("another file")).decode()
         self.assertEqual(output(run_hook("post-tool", post))["type"], "text")
 
+    def test_the_note_is_keyed_by_the_file_whose_bytes_it_holds(self):
+        # codex verification of block 4: the key came from a stat and the checksum from a second open; a stat that
+        # saw the asked file A and an open that read B stored B's checksum under A's name, so B passed
+        _reset(read_pdf="ask")
+        asked = Path(self.cwd, "asked.pdf")
+        asked.write_bytes(pdf_bytes("the file the person allowed"))
+        Path(self.pdf).write_bytes(pdf_bytes("another file"))            # B sits under the name during the read
+        real_stat = os.stat
+
+        def stat_sees_a(path, *a, **k):
+            return real_stat(asked if os.fspath(path) == self.pdf else path, *a, **k)
+        pre = golden("PreToolUse_Read_pdf_pages", self.cwd, file_path=self.pdf)
+        with mock.patch.object(os, "stat", stat_sees_a):
+            self.assertEqual(decision(run_hook("pre-tool", pre)), "ask")
+        b_bytes = Path(self.pdf).read_bytes()
+        os.replace(asked, self.pdf)                                         # A is back before the PostToolUse
+        post = golden("PostToolUse_Read_pdf", self.cwd)
+        post["tool_response"]["file"]["base64"] = base64.b64encode(b_bytes).decode()
+        self.assertEqual(output(run_hook("post-tool", post))["type"], "text")
+
+    def test_a_file_that_changes_while_it_is_hashed_gets_no_note(self):
+        _reset(read_pdf="ask")
+        real_fstat = os.fstat
+        calls = []
+
+        def changed(fd):
+            st = real_fstat(fd)
+            calls.append(fd)
+            if len(calls) % 2 == 0:                                         # the second look at the same file
+                return os.stat_result(st[:8] + (st.st_mtime + 1, st.st_ctime))
+            return st
+        with mock.patch.object(os, "fstat", changed):
+            self.assertIsNone(file_reads.file_digest(self.pdf))
+        self.assertIsNotNone(file_reads.file_digest(self.pdf), "an unchanged file gets one")
+
     def test_a_reencoded_image_is_bound_by_its_size_and_the_file(self):
         _reset(read_image="ask")
         size = os.path.getsize(self.png)

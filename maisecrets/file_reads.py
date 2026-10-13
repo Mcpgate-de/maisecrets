@@ -307,22 +307,34 @@ def _full(payload: dict, path: str) -> str:
 
 
 def file_digest(full: str):
-    """(sha256, size) of the file, or None when it cannot be read or is larger than BIND_MAX_BYTES."""
+    """{"sha", "size", "dev", "ino"} of the file, all from ONE open descriptor: the identity that keys a note and the
+    checksum in it belong to the same file (codex verification of block 4: a stat and a second open could see two
+    files). The resolved path is opened without following a link, and the file must not change while it is read
+    (fstat before and after: device, inode, size, mtime). None: unreadable, changed, or larger than BIND_MAX_BYTES."""
     import hashlib
+    import stat
     try:
-        with open(full, "rb") as f:
-            size = os.fstat(f.fileno()).st_size
-            if size > BIND_MAX_BYTES:
+        fd = os.open(os.path.realpath(full), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return None
+    try:
+        with os.fdopen(fd, "rb") as f:
+            before = os.fstat(f.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_size > BIND_MAX_BYTES:
                 return None
             h = hashlib.sha256()
             for chunk in iter(lambda: f.read(1 << 20), b""):
                 h.update(chunk)
-        return h.hexdigest(), size
+            after = os.fstat(f.fileno())
+        same = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) == \
+            (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        return {"sha": h.hexdigest(), "size": before.st_size, "dev": before.st_dev, "ino": before.st_ino} \
+            if same else None
     except OSError:
         return None
 
 
-def _ask_path(payload: dict, kind: str, path: str, tag: str = "ask"):
+def _ask_path(payload: dict, kind: str, path: str, tag: str = "ask", ident=None):
     """The one-use note of this call (C26): `ask` when the PreToolUse asked the person, `clean` when it found the
     file in a clean folder. Keyed by session, tool use, kind, file, and the file's device and inode."""
     from .vault import HOME
@@ -333,11 +345,13 @@ def _ask_path(payload: dict, kind: str, path: str, tag: str = "ask"):
         return None
     import hashlib
     full = _full(payload, path)
-    try:
-        st = os.stat(full)
-    except OSError:
-        return None
-    key = hashlib.sha256("\0".join((tag, session, tid, kind, _real(full), str(st.st_dev), str(st.st_ino)))
+    if ident is None:
+        try:
+            st = os.stat(full)
+        except OSError:
+            return None
+        ident = (st.st_dev, st.st_ino)
+    key = hashlib.sha256("\0".join((tag, session, tid, kind, _real(full), str(ident[0]), str(ident[1])))
                          .encode()).hexdigest()[:40]
     return os.path.join(str(HOME), "asked", key)
 
@@ -345,9 +359,9 @@ def _ask_path(payload: dict, kind: str, path: str, tag: str = "ask"):
 def note_ask(payload: dict, kind: str, path: str, tag: str = "ask") -> bool:
     """Write the note with the file's sha256 and size. False: no note (too large, unreadable): nothing can pass."""
     import json
-    target = _ask_path(payload, kind, path, tag)
-    digest = file_digest(_full(payload, path)) if target else None
-    if not digest:
+    digest = file_digest(_full(payload, path)) if path else None
+    target = _ask_path(payload, kind, path, tag, (digest["dev"], digest["ino"])) if digest else None
+    if not target:
         return False
     try:
         os.makedirs(os.path.dirname(target), mode=0o700, exist_ok=True)
@@ -355,7 +369,7 @@ def note_ask(payload: dict, kind: str, path: str, tag: str = "ask") -> bool:
             return False
         fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
         with os.fdopen(fd, "w") as f:
-            f.write(json.dumps({"sha": digest[0], "size": digest[1]}))
+            f.write(json.dumps({"sha": digest["sha"], "size": digest["size"]}))
         return True
     except OSError:
         return False
@@ -404,7 +418,7 @@ def same_bytes(note, response: dict, full: str) -> bool:
     if kind in ("image", "parts") and file.get("originalSize") != note.get("size"):
         return False
     now = file_digest(full)
-    return bool(now) and now[0] == note["sha"]
+    return bool(now) and now["sha"] == note["sha"]
 
 
 def prune_sessions() -> None:
