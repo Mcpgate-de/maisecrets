@@ -195,7 +195,51 @@ def nested_client() -> bool:
     return clients >= 2
 
 
-def note_session_start(payload: dict) -> None:
+def _root_key(d: str) -> str:
+    return os.path.normpath(os.path.expanduser(d.strip()))
+
+
+def root_identity(d: str):
+    """(st_dev, st_ino) of a clean root, or None for a root that is or lies under a link (refused at add) or is gone."""
+    import stat
+    key = _root_key(d)
+    try:
+        if not os.path.isabs(key) or os.path.realpath(key) != key:
+            return None
+        st = os.lstat(key)
+        return [st.st_dev, st.st_ino] if stat.S_ISDIR(st.st_mode) else None
+    except OSError:
+        return None
+
+
+def _roots_now(cfg: dict) -> dict:
+    out = {}
+    for d in cfg.get("clean_dirs") or []:
+        if isinstance(d, str) and d.strip():
+            ident = root_identity(d)
+            if ident:
+                out[_root_key(d)] = ident
+    return out
+
+
+def _write_note(path: str, data: dict) -> None:
+    """Write the note in place of the old one: a new file (never through a link), then a rename over the old name."""
+    import json
+    tmp = f"{path}.{os.getpid()}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(data))
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def note_session_start(payload: dict, cfg: dict | None = None) -> None:
     """SessionStart: note when this session began, the anchor of clean_dirs (C26). Only here: a prompt or a tool call
     never writes the note, so a note that the agent deletes is not made again with a later time (nothing is clean
     then). Not at a compaction, which the agent can bring about with a long output. A nested client gets a note that
@@ -211,11 +255,35 @@ def note_session_start(payload: dict) -> None:
         os.makedirs(folder, mode=0o700, exist_ok=True)
         if os.path.islink(folder) or os.path.lexists(path):
             return
+        import json
         import time
-        text = NESTED if nested_client() else repr(time.time())
+        if nested_client():
+            text = NESTED
+        else:
+            if cfg is None:
+                from .vault import load_config
+                cfg = load_config()
+            # each clean root as it is now: a root that is later swapped for another folder is not clean
+            text = json.dumps({"t": time.time(), "roots": _roots_now(cfg)})
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
         with os.fdopen(fd, "w") as f:
             f.write(text)
+    except OSError:
+        pass
+
+
+def note_clean_root(session, folder: str) -> None:
+    """A clean root the person adds with a typed prompt during the session: its identity now goes into the note."""
+    data = _read_note(session)
+    path = _seen_path(session)
+    if not data or not path:
+        return
+    ident = root_identity(folder)
+    if not ident:
+        return
+    data["roots"][_root_key(folder)] = ident
+    try:
+        _write_note(path, data)
     except OSError:
         pass
 
@@ -288,10 +356,11 @@ def prune_sessions() -> None:
         pass
 
 
-def session_start(session) -> float | None:
-    """When this session began, or None (no note, a link, a nested client: nothing is clean). The earliest of the
-    time written in the note, its mtime and its inode change time: a touch or utime moves the two times of the file,
-    never the text in it, and a rewrite of the text moves the change time to now."""
+def _read_note(session):
+    """{"t": start, "roots": {root: [dev, ino]}} with t the earliest of the time in the note, its mtime and its inode
+    change time (a touch or utime moves the two times of the file, never the text in it; a rewrite moves the change
+    time to now). None: no note, a link, a nested client: nothing is clean."""
+    import json
     import stat
     path = _seen_path(session)
     if not path:
@@ -304,12 +373,19 @@ def session_start(session) -> float | None:
             return None
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         with os.fdopen(fd) as f:
-            text = f.read(64).strip()
+            text = f.read(65536).strip()
         if text == NESTED:
             return None
-        return min(float(text), st.st_mtime, st.st_ctime)
-    except (OSError, ValueError):
+        data = json.loads(text)
+        roots = data.get("roots") if isinstance(data.get("roots"), dict) else {}
+        return {"t": min(float(data["t"]), st.st_mtime, st.st_ctime), "roots": roots}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return None
+
+
+def session_start(session) -> float | None:
+    data = _read_note(session)
+    return data["t"] if data else None
 
 
 def in_clean_dir(path: str, cwd: str, cfg: dict, session=None) -> bool:
@@ -327,18 +403,34 @@ def in_clean_dir(path: str, cwd: str, cfg: dict, session=None) -> bool:
     full = path if os.path.isabs(os.path.expanduser(path)) else os.path.join(cwd or os.getcwd(), path)
     try:
         real = _real(os.path.expanduser(full))
-        inside = False
+        inside = None
         for d in dirs:
             d = os.path.expanduser(d.strip())
             if not os.path.isabs(d):
                 continue
             base = _real(d)
             if real != base and os.path.commonpath([real, base]) == base:
-                inside = True
+                inside = (d, base)
                 break
         if not inside:
             return False
-        started = session_start(session)
+        note = _read_note(session)
+        if not note:
+            return False
+        # the root is still the folder the session started with (or the person added): a folder moved or linked in
+        # under its name is another one (codex review of block 4)
+        ident = root_identity(inside[0])
+        if not ident or note["roots"].get(_root_key(inside[0])) != ident:
+            return False
+        started = note["t"]
+        # every folder between the root and the file was there before the session: a renamed or moved folder has a
+        # new change time, and its old files would pass on their own
+        sub = os.path.dirname(os.path.realpath(os.path.expanduser(full)))
+        root = os.path.realpath(inside[0])
+        while sub != root and os.path.commonpath([sub, root]) == root:
+            if os.lstat(sub).st_ctime >= started:
+                return False
+            sub = os.path.dirname(sub)
         st = os.stat(os.path.realpath(os.path.expanduser(full)))
         return started is not None and st.st_nlink == 1 and st.st_ctime < started
     except (OSError, ValueError):

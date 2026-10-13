@@ -629,6 +629,53 @@ class CleanDirs(_Work):
         with mock.patch.object(subprocess, "run", side_effect=OSError("no ps")):
             self.assertTrue(file_reads.nested_client(), "a process list that cannot be read counts as nested")
 
+    def _old_tree(self, name: str) -> Path:
+        tree = self.dir / name
+        (tree / "sub").mkdir(parents=True)
+        (tree / "old.pdf").write_bytes(b"%PDF-1.4\n")
+        (tree / "sub" / "old.pdf").write_bytes(b"%PDF-1.4\n")
+        return tree
+
+    def test_a_folder_swapped_in_under_the_name_of_the_root_is_not_clean(self):
+        # codex review of block 4: the root was resolved again at each read; an old tree moved under its name passed
+        clean = self._old_tree("clean")
+        other = self._old_tree("other")                           # older than the session, never approved
+        _reset(read_pdf="block", clean_dirs=[str(clean)])
+        self.begin()
+        self.assertEqual(self.pre(file_path=str(clean / "old.pdf")), {}, "the approved root")
+        os.rename(clean, self.dir / "clean.away")
+        os.rename(other, clean)
+        self.assertEqual(decision(self.pre(file_path=str(clean / "old.pdf"))), "deny")
+
+    @unittest.skipIf(os.name == "nt", "a symbolic link needs a privilege on Windows")
+    def test_a_root_that_is_a_link_is_never_clean_and_cannot_be_added(self):
+        real = self._old_tree("real")
+        os.symlink(real, self.dir / "link")
+        _reset(read_pdf="block", clean_dirs=[str(self.dir / "link")])    # a hand-edited file
+        self.begin()
+        self.assertEqual(decision(self.pre(file_path=str(self.dir / "link" / "old.pdf"))), "deny")
+        p = golden("UserPromptSubmit_pasted_image", self.cwd,
+                   prompt=f"/maisecrets:settings clean_dirs add {self.dir / 'link'}")
+        self.assertIn("is a link", said(run_hook("user-prompt", p)))
+
+    def test_an_old_folder_moved_into_the_root_is_not_clean(self):
+        clean = self._old_tree("clean")
+        moved = self._old_tree("moved")
+        _reset(read_pdf="block", clean_dirs=[str(clean)])
+        self.begin()
+        self.assertEqual(self.pre(file_path=str(clean / "sub" / "old.pdf")), {}, "a subfolder that was there")
+        os.rename(moved, clean / "moved")
+        self.assertEqual(decision(self.pre(file_path=str(clean / "moved" / "old.pdf"))), "deny")
+
+    def test_a_root_the_person_adds_in_the_session_counts_at_once(self):
+        clean = self._old_tree("scans")
+        _reset(read_pdf="block")
+        self.begin()
+        p = golden("UserPromptSubmit_pasted_image", self.cwd, prompt=f"/maisecrets:settings clean_dirs add {clean}")
+        run_hook("user-prompt", p)
+        self.assertEqual(load_config()["clean_dirs"], [str(clean)])
+        self.assertEqual(self.pre(file_path=str(clean / "old.pdf")), {})
+
     def test_a_folder_that_holds_the_work_is_refused(self):
         def add(folder):
             p = golden("UserPromptSubmit_pasted_image", self.cwd,

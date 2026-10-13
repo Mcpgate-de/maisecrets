@@ -846,6 +846,10 @@ def user_prompt(payload: dict) -> dict:
         changed, reason = settings_mod.apply_typed(*change, cwd=str(payload.get("cwd") or "")) if typed else (False, (
             "maisecrets: a settings change counts only when you type it as your prompt; this one came from the "
             f"client ({payload.get('source')}), so nothing was changed."))
+        if changed and change[0] == "clean_dirs" and change[1].startswith("add:"):
+            from . import file_reads
+            from .user_rules import expand
+            file_reads.note_clean_root(session, str(expand(change[1][4:])))   # this session trusts it from now
         if changed and client_of(payload) != "codex" and prompt.lstrip().lower().startswith("/maisecrets:settings"):
             # a success is no refusal: the slash command runs on and shows the new state (a block read as an
             # error, "operation blocked by hook"). The prompt carries no value; the change is already written

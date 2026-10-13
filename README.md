@@ -1265,8 +1265,13 @@ model and does not stay in the session transcript. A page range (`pages`)
 works; Claude Code then also writes the pages as JPG files into a folder of
 its own on your disk, and maisecrets does not clean those. `convert` needs
 `pdftotext`: macOS `brew install poppler`, Debian or Ubuntu
-`sudo apt install poppler-utils`. Without it, maisecrets refuses every PDF and
-says so; it never lets the PDF through. A PDF that pdftotext cannot read in 6
+`sudo apt install poppler-utils`. maisecrets runs it only from the fixed
+install folders (`/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`,
+`/usr/bin`), never from the PATH, and not when others can change the program
+or its folder: a program the AI puts on the PATH must not run inside the
+hook. On Windows there is no such folder, so `convert` refuses there. Without
+pdftotext, maisecrets refuses every PDF and says so; it never lets the PDF
+through. A PDF that pdftotext cannot read in 6
 seconds, or that is damaged, is refused too. Text after 32K characters is cut,
 and the AI is told to read a smaller page range. A scanned
 PDF has no text: maisecrets says so, and the AI gets nothing of it.
@@ -1299,12 +1304,19 @@ folder that points out of it does not count. A file counts only if it was in
 the folder before the session began and has no second name (hard link): a
 file that arrives during the session, also one that the AI copies, moves or
 links there, waits for the next session. maisecrets refuses `/`, your home
-folder and a folder that holds the folder the session works in. The start of
+folder, a folder that holds the folder the session works in, and a folder
+that is a link or lies under one (add the real folder). The folder itself is
+noted with the session: another folder moved or linked in under its name does
+not count, and neither does a subfolder moved in during the session. The start of
 the session is a note that maisecrets writes at the session start, never
 later; without the note nothing in the folder is clean. A client that the AI
 starts inside its own session (`claude -p` from its shell) trusts no clean
 folder. `clean_dirs` works on macOS and Linux; on Windows no file in it counts
 as clean, because there a moved file keeps its creation time.
+
+With `ask`, a file goes to the AI only after you said yes to that very read: a
+file that was not asked about (it was in a clean folder a moment before, or a
+notebook got an image after the question) is withheld.
 
 A Bash command whose output starts with `data:image/…;base64,` sends an image
 to the model too (Claude Code shows it as one and marks it `isImage`);

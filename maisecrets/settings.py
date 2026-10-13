@@ -265,6 +265,9 @@ def _too_wide(folder, cwd: str) -> str:
     home = os.path.realpath(os.path.expanduser("~"))
     if real == os.path.dirname(real) or real == home:
         return "it is / or your home folder; choose the folder that holds only the clean files"
+    if real != os.path.normpath(os.path.abspath(str(folder))):
+        # a link can be pointed at another folder later; the real folder is what the person checked
+        return f"it is a link or lies under one; add the real folder {real}"
     if cwd:
         work = os.path.realpath(cwd)
         try:
