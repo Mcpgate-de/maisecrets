@@ -45,6 +45,13 @@ def cmd_path(p) -> str:
     return f'"{text}"' if " " in text else text
 
 
+def _pdftotext():
+    """The pdftotext that maisecrets would run: fixed install folders only, never the PATH."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from maisecrets.file_reads import pdftotext
+    return pdftotext()
+
+
 SCENARIOS = {
     # a plugin update moves the folder of an open session (anthropics/claude-code#97847). The hooks
     # should refuse; Claude Code 2.1.283 runs none of them and the tool runs unguarded (measured
@@ -140,7 +147,7 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_not_in_requests": ["JVBERi0"],
         "expect_not_in_transcript": ["JVBERi0"],      # the PDF bytes do not stay in the session file either
-        "expect_in_requests": (["Invoice 2026", "deploy token \u27e6SECRET_c"] if shutil.which("pdftotext")
+        "expect_in_requests": (["Invoice 2026", "deploy token \u27e6SECRET_c"] if _pdftotext()
                                else ["pdftotext"]),
     },
     # the index is damaged: the prompt hook fails closed and blocks, and the prompt as typed still leaves the

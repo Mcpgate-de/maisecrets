@@ -139,7 +139,7 @@ class _Work(unittest.TestCase):
         p = mock.patch.dict(os.environ, {"PATH": str(self.bin)})
         p.start()
         self.addCleanup(p.stop)
-        p2 = mock.patch.object(file_reads, "_EXTRA_DIRS", ())
+        p2 = mock.patch.object(file_reads, "_EXTRA_DIRS", (str(self.bin),))      # the fixed folder of the tests
         p2.start()
         self.addCleanup(p2.stop)
         self.addCleanup(shutil.rmtree, self.dir, True)
@@ -352,11 +352,36 @@ class Convert(_Work):
 
     def test_a_short_path_of_a_desktop_client_still_finds_pdftotext(self):
         self.stub()
-        with mock.patch.dict(os.environ, {"PATH": "/nonexistent"}), \
-                mock.patch.object(file_reads, "_EXTRA_DIRS", (str(self.bin),)):
-            self.assertEqual(file_reads.pdftotext(), str(self.bin / "pdftotext"))
         with mock.patch.dict(os.environ, {"PATH": "/nonexistent"}):
+            self.assertEqual(file_reads.pdftotext(), str(self.bin / "pdftotext"))
+
+    def test_a_pdftotext_on_the_path_only_is_never_run(self):
+        # codex review of block 4: with no fixed copy, a PATH folder that the agent can write to won
+        _reset(read_pdf="convert")
+        work_bin = Path(self.cwd, "bin")
+        work_bin.mkdir()
+        tool = work_bin / "pdftotext"
+        ran = Path(self.dir, "ran")
+        tool.write_text(f"#!/bin/sh\ntouch '{ran}'\necho text\n")
+        tool.chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": str(work_bin)}):
             self.assertIsNone(file_reads.pdftotext())
+            self.assertEqual(decision(self.pre()), "deny")
+            self.assertIn("pdftotext", output(self.post())["file"]["content"])
+        self.assertFalse(ran.exists(), "the program on the PATH did not run")
+
+    def test_an_unsafe_place_or_the_working_folder_is_refused(self):
+        self.stub()
+        self.assertEqual(file_reads.pdftotext(self.cwd), str(self.bin / "pdftotext"))
+        os.chmod(self.bin, 0o777)
+        try:
+            self.assertIsNone(file_reads.pdftotext(), "a folder that others can write to")
+        finally:
+            os.chmod(self.bin, 0o755)
+        (self.bin / "pdftotext").chmod(0o757)
+        self.assertIsNone(file_reads.pdftotext(), "a program that others can write to")
+        (self.bin / "pdftotext").chmod(0o755)
+        self.assertIsNone(file_reads.pdftotext(str(self.dir)), "a program in the working folder")
 
     def test_a_failing_or_slow_pdftotext_withholds(self):
         _reset(read_pdf="convert")
@@ -425,17 +450,6 @@ class Convert(_Work):
         content = output(self.post())["file"]["content"]
         self.assertLess(time.monotonic() - t0, file_reads.EXTRACT_SECONDS, "it stops at the cap, not at the timeout")
         self.assertIn("the text stops here", content)
-
-    def test_the_fixed_folders_come_before_the_path(self):
-        fixed = self.dir / "fixed"
-        fixed.mkdir()
-        for folder in (fixed, self.bin):
-            tool = folder / "pdftotext"
-            tool.write_text("#!/bin/sh\n")
-            tool.chmod(0o755)
-        with mock.patch.object(file_reads, "_EXTRA_DIRS", (str(fixed),)):
-            self.assertEqual(file_reads.pdftotext(), str(fixed / "pdftotext"),
-                             "a folder on the PATH that the agent can write to does not win")
 
     def test_the_module_loads_without_subprocess(self):
         # it loads on every PostToolUse: subprocess and shutil cost about 30 ms and load only for a conversion
@@ -785,8 +799,10 @@ class TypedSettings(_Work):
                 pre = self.pre(file_path=self.pdf)
                 self.assertEqual(decision(pre), "deny")
                 self.assertIn("config.json cannot be read", pre["hookSpecificOutput"]["permissionDecisionReason"])
-        CONFIG.write_text(json.dumps({**TEST_CONFIG, "read_pdf": "allow", "tips": "x"}))
-        self.assertEqual(load_config()["read_pdf"], "allow", "a valid allow next to another bad key stays allow")
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "tips": "x"}))
+        cfg = load_config()
+        self.assertEqual((cfg["read_pdf"], cfg["read_image"]), ("block", "block"),
+                         "codex review of block 4: any wrong type in the file ignores it, so both block")
 
     def test_the_card_names_the_modes(self):
         text = settings.render()
@@ -832,10 +848,6 @@ class EndToEnd(_Work):
         self.assertRegex(out["file"]["content"], r"deploy token ⟦SECRET_c\d+⟧")
         self.assertNotIn(TOKEN, json.dumps(answer))
         self.assertNotIn(post["tool_response"]["file"]["base64"][:40], json.dumps(answer))
-
-    def test_with_a_stub_pdftotext(self):
-        self.stub()
-        self._run(str(self.bin))
 
     @unittest.skipUnless(REAL_PDFTOTEXT, "pdftotext is not installed")
     def test_with_the_real_pdftotext(self):

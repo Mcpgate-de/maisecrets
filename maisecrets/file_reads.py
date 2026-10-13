@@ -299,21 +299,48 @@ def text_result(file_path: str, content: str) -> dict:
                                      "totalLines": lines}}
 
 
-def pdftotext() -> str | None:
-    """The fixed folders of the package managers first, then the PATH: a folder early on the PATH that the agent
-    can write to must not put its own pdftotext in front of the real one."""
+def _safe_place(path: str) -> bool:
+    """Nobody but its owner can change the file or its folder. Others may not write; a group may write only where the
+    owner is root or this user (Homebrew's bin folder is akruse:admin and group-writable: the agent runs as that
+    owner anyway, so the group adds no way in)."""
+    import stat
+    uid = os.getuid() if hasattr(os, "getuid") else -1
+    for f in (path, os.path.dirname(path)):
+        st = os.stat(f)
+        if st.st_mode & stat.S_IWOTH:
+            return False
+        if st.st_mode & stat.S_IWGRP and st.st_uid not in (0, uid):
+            return False
+    return True
+
+
+def pdftotext(cwd: str = "") -> str | None:
+    """pdftotext from the fixed install folders only (Homebrew, MacPorts, /usr/local/bin, /usr/bin), never from the
+    PATH: a folder on the PATH that the agent can write to would get its own program run by the hook (codex review of
+    block 4). The link and its target must be safe places (_safe_place) and not lie in the working folder."""
     for d in _EXTRA_DIRS:
         p = os.path.join(d, "pdftotext")
-        if os.path.isfile(p) and os.access(p, os.X_OK):
-            return p
-    import shutil       # here, not at the top: this module loads on every PostToolUse
-    return shutil.which("pdftotext")
+        try:
+            if not (os.path.isfile(p) and os.access(p, os.X_OK)):
+                continue
+            real = os.path.realpath(p)
+            if not (_safe_place(p) and _safe_place(real)):
+                continue
+            if cwd:
+                work = os.path.realpath(cwd)
+                if any(os.path.commonpath([x, work]) == work for x in (os.path.realpath(d), real)):
+                    continue
+        except (OSError, ValueError):
+            continue
+        return p
+    return None
 
 
 def missing_tool_text(codex: bool) -> str:
     change = "maisecrets: set read_pdf" if codex else "/maisecrets:settings read_pdf"
     return (f"maisecrets: the setting read_pdf is convert, and convert needs the program pdftotext, which is not "
-            f"installed (not on the PATH). Nothing of the PDF reached you. Tell the user to install it ({INSTALL}) "
+            f"installed in a fixed install folder ({', '.join(_EXTRA_DIRS) or 'none on this system'}; the PATH is "
+            f"not used). Nothing of the PDF reached you. Tell the user to install it ({INSTALL}) "
             f"and to read the PDF again, or to choose another mode with {change} allow, ask or block.")
 
 
@@ -352,9 +379,9 @@ def _stop(child) -> None:
     child.wait()
 
 
-def extract(path: str, pages=None) -> tuple[str | None, str]:
+def extract(path: str, pages=None, cwd: str = "") -> tuple[str | None, str]:
     """(text, "") or (None, why). Every failure is a refusal: nothing of the PDF passes when the text is missing."""
-    tool = pdftotext()
+    tool = pdftotext(cwd)
     if not tool:
         return None, "missing"
     rng = page_range(pages)
@@ -497,7 +524,7 @@ def pre_read(payload: dict, cfg: dict, codex: bool) -> dict:
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                        "permissionDecisionReason": ask_reason(kind)}}
     # convert: refuse now what the PostToolUse would refuse anyway, before the client renders the file
-    if not pdftotext():
+    if not pdftotext(str(payload.get("cwd") or "")):
         return _deny(refusal(kind, "missing", codex))
     rng = page_range(tool_input.get("pages"))
     if isinstance(rng, str):
@@ -553,7 +580,7 @@ def post_read(payload: dict, cfg: dict, codex: bool) -> tuple | None:
                 f"maisecrets withheld this {noun} from the AI ({key} ask).")
     if how == "convert" and tool == "Read":
         full = path if os.path.isabs(path) else os.path.join(str(payload.get("cwd") or ""), path)
-        text, why = extract(full, tool_input.get("pages"))
+        text, why = extract(full, tool_input.get("pages"), str(payload.get("cwd") or ""))
         if text is None:
             return ("replace", _withheld(tool, response, path, refusal(kind, why, codex)),
                     f"maisecrets withheld this PDF from the AI: it could not be converted to text ({why}).")

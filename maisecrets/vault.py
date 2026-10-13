@@ -381,6 +381,8 @@ def load_config() -> dict:
         _note_user_config(None, "shape")
         if isinstance(user, dict):
             _keep_the_stricter(cfg, user)
+            # an ignored file may have said block for a PDF or an image: both block until it is fixed (README)
+            _read_fallback(cfg)
             # the file still says what the person decided: no hint asks about a key they wrote (settings.py)
             cfg["user_keys_ignored"] = sorted(k for k in user if k in _CONFIG_TYPES)
         else:
