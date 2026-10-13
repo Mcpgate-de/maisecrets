@@ -463,6 +463,39 @@ class LongestSpanTests(_Base):
                 self.assertWhole(path.read_text(encoding="utf-8"), token, head, tail, "the transcript")
 
 
+class ShapedTermTests(_Base):
+    """A listed term that a built-in rule finds too keeps the rule's type, but it is a term: the store keeps the
+    entity id, and the placeholder is never resolved (codex review of block 2, HIGH 2)."""
+    EMAIL = "zbigniew.testowski" + "@" + "example.com"
+    PHONE = "+49 30 " + "98765432"
+    CASE = "glpat-" + "Testowski0123456789x"
+
+    def setUp(self):
+        super().setUp()
+        _write_terms(f"EMAIL_ZT  {self.EMAIL}\nPHONE_ZT  {self.PHONE}\nCASE_ZT  {self.CASE}\n")
+
+    def test_the_store_keeps_the_entity_and_the_placeholder_stays(self):
+        out = _out(_bash(f"mail {self.EMAIL}, call {self.PHONE}, case {self.CASE}."))
+        for value in (self.EMAIL, self.PHONE, self.CASE):
+            self.assertNotIn(value, out)
+        refs = re.findall(re.escape(OPEN) + r"[A-Z]+_c\d+(?::[^" + CLOSE + r"]*)?" + re.escape(CLOSE), out)
+        self.assertEqual(len(refs), 3, out)
+        store = Path(HOME, "vault.json").read_text(encoding="utf-8")
+        index = json.loads(Path(HOME, "index.json").read_text(encoding="utf-8"))["entries"]
+        for value in (self.EMAIL, self.PHONE, self.CASE, "testowski"):
+            self.assertNotIn(value, store, "the store keeps the entity id, never the term")
+        self.assertTrue(all(terms.is_term_kind(m["kind"]) for m in index.values()), index)
+        self.assertIn("SECRET_c", out, "the rule keeps its type")
+        for ref in refs:
+            with self.subTest(ref=ref):
+                tool_input = {"command": f"echo {ref} > note.txt"}
+                answer = hooks.pre_tool({"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "S1",
+                                         "transcript_path": "", **CLAUDE, "tool_input": tool_input, "cwd": "/tmp"})
+                updated = answer.get("hookSpecificOutput", {}).get("updatedInput")
+                self.assertIn(updated, (None, tool_input), "a term placeholder is never resolved")
+                self.assertNotIn("testowski", json.dumps(answer).lower())
+
+
 class MarkerHookTests(_Base):
     def test_a_marked_name_is_masked_in_its_prompt_and_in_later_output(self):
         out = _prompt(f"draft a letter to {{{{{NAME}}}}}; {NAME} asked for it")

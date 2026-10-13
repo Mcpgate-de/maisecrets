@@ -1447,10 +1447,40 @@ def scan(text: str, enabled: set[str] | None = None, rule_list: list[Rule] | Non
             take(Match(rule.id, rule.type, secret, start, end))
     for matcher in (extra_matchers if rule_list is None else ()):
         for m in sorted(matcher(text), key=lambda x: x.start):
-            if (enabled is None or m.kind in enabled) and m.end > m.start and not overlaps(m.start, m.end):
+            if not ((enabled is None or m.kind in enabled) and m.end > m.start):
+                continue
+            if not overlaps(m.start, m.end):
                 take(m)
+            elif m.kind.startswith("term:"):
+                _claim(m, text, found, taken_starts, taken_ends)
     found.sort(key=lambda x: x.start)
     return found
+
+
+def _claim(m: Match, text: str, found: list, starts: list, ends: list) -> None:
+    """A listed term (maisecrets/terms.py) that a rule found too, as an email address or a token-shaped case number:
+    the rule keeps its type, the span grows to cover both, and the kind is the term's. So the store keeps the entity
+    id, never the term, and the placeholder is never resolved (C26). Without this the rule's kind won, the store kept
+    the term, and its placeholder was resolved into commands and files (codex review of block 2)."""
+    hit = [f for f in found if f.start < m.end and m.start < f.end]
+    if not hit:
+        return                   # an allowed value holds the span: the person allowed exactly that text
+    a, b = min([m.start] + [f.start for f in hit]), max([m.end] + [f.end for f in hit])
+    for f in hit:
+        found.remove(f)
+        i = starts.index(f.start)
+        del starts[i], ends[i]
+    if any(x < b and a < y for x, y in zip(starts, ends)):
+        found.extend(hit)        # the union would reach another taken span: leave the rules' hits as they were
+        for f in hit:
+            i = bisect.bisect_left(starts, f.start)
+            starts.insert(i, f.start)
+            ends.insert(i, f.end)
+        return
+    i = bisect.bisect_left(starts, a)
+    starts.insert(i, a)
+    ends.insert(i, b)
+    found.append(Match(m.kind, hit[0].type, text[a:b], a, b))
 
 
 def contains_secret(text: str) -> bool:

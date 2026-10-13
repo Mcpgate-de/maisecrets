@@ -292,11 +292,14 @@ class ExtraMatchers(Base):
         self.assertEqual(detect.extra_matchers, [detect._term_matches], "the terms (block 2) only")
         with mock.patch.object(detect, "extra_matchers", [names]):
             found = detect.scan(text)
-            self.assertEqual([(m.kind, m.value) for m in found], [("term:person", "Ada Lovelace"), ("email", address)])
+            # a term that a rule took keeps the rule's span and type, and becomes the term (block 2: the store keeps
+            # the entity id, and the placeholder is never resolved)
+            self.assertEqual([(m.kind, m.type, m.value) for m in found],
+                             [("term:person", "NAME", "Ada Lovelace"), ("term:person", "EMAIL", address)])
             self.assertEqual(detect.scan(text, enabled={"email"})[0].kind, "email", "enabled holds for them too")
             ALLOW.write_text("Ada Lovelace\n", encoding="utf-8")
             detect.reset_rules()
-            self.assertEqual([m.kind for m in detect.scan(text)], ["email"], "the allow list holds for them too")
+            self.assertEqual([m.value for m in detect.scan(text)], [address], "the allow list holds for them too")
 
 
 class Quarantine(Base):
