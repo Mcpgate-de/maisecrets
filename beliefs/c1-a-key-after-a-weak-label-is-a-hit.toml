@@ -6,5 +6,5 @@ runner = ["tests/test_literal_values.py::SecretLiteralTests::test_a_key_after_a_
 
 [proof]
 file = "maisecrets/detect.py"
-find = '''    if (quoted and _WEAK_TAIL_RE.search(full)'''
-replace = '''    if (False and quoted and _WEAK_TAIL_RE.search(full)'''
+find = '''    if (quoted and weak and'''
+replace = '''    if (False and quoted and weak and'''

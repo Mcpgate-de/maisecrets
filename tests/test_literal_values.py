@@ -135,7 +135,8 @@ class SecretLiteralTests(unittest.TestCase):
                 break
         texts = [f'public_key = "{k16}"', f'cache_key = "{k16}"', f'primary_key = "{k16}"', f'nonce = "{hex32}"',
                  f'key = "{hex32}"', f"<key>{hex32}</key>", f"<nonce>{hex32}</nonce>",
-                 f"<X-Amz-Credential>{k16}</X-Amz-Credential>", 'session = "user-session-cookie"', '<clientSecret>${CLIENT_SECRET}</clientSecret>',
+                 f"<X-Amz-Credential>{k16}</X-Amz-Credential>", 'session = "user-session-cookie"',
+                 '<clientSecret>${CLIENT_SECRET}</clientSecret>',
                  '<AccessToken>{{ access_token }}</AccessToken>', 'hmac = "HMAC-SHA256-SIGNATURE"', f"session: {k16}",
                  'x-amz-signature: "' + k16 + '"']
         for text in texts:

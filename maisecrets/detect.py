@@ -786,26 +786,42 @@ def _key_literal_ok(v: str, lo: int, hi: int, words: float, entropy: float) -> b
     return _norm_entropy(v) >= entropy and _ds_value_ok(v, 4) and _wordlike(_deleet(v)) < words
 
 
+_LABEL_CLASS: dict = {}
+
+
+def _label_class(label: str) -> tuple:
+    """(password label, secret label, weak label, OTP label, last word) of a label, computed once per label: a list of
+    70,000 words reads each word as the label of the next one."""
+    got = _LABEL_CLASS.get(label)
+    if got is None:
+        toks = _norm_label(label)
+        full = "_".join(toks)
+        before = toks[:-1]
+        # an AWS signature or the key id in a SigV4 scope is no secret value of its own
+        amz = full.startswith("x_amz") or bool(toks and toks[-1] in ("credential", "signature"))
+        named = bool(full) and not amz
+        other = any(t in _LABEL_NEG_WORDS or t in _WEAK_NEG_WORDS for t in before)
+        secret = named and bool(_SECRET_TAIL_RE.search(full)) and not other
+        weak = named and bool(_WEAK_TAIL_RE.search(full)) and not other
+        otp = named and bool(set(toks) & _OTP_WORDS)
+        got = (_pw_label(toks), secret, weak, otp, toks[-1] if toks else "")
+        if len(_LABEL_CLASS) > 50000:
+            _LABEL_CLASS.clear()
+        _LABEL_CLASS[label] = got
+    return got
+
+
 def _judge_literal(label: str, v: str, quoted: bool = True) -> str:
     """The rule a label and its literal value fall under, or ""."""
-    toks = _norm_label(label)
-    if _pw_label(toks) and _pw_literal_ok(v):
+    pw, secret, weak, otp, last = _label_class(label)
+    if pw and _pw_literal_ok(v):
         return "label-pw-literal"
-    full = "_".join(toks)
-    # an AWS signature or the key id in a SigV4 scope is no secret value of its own
-    amz = full.startswith("x_amz") or (toks and toks[-1] in ("credential", "signature"))
-    if not full or amz:
-        return ""
-    before = toks[:-1]
-    if (_SECRET_TAIL_RE.search(full) and not any(t in _LABEL_NEG_WORDS or t in _WEAK_NEG_WORDS for t in before)
-            and _key_literal_ok(v, 8, 200, 0.3, 0.8)):
+    if secret and _key_literal_ok(v, 8, 200, 0.3, 0.8):
         return "label-secret-literal"
-    if (quoted and _WEAK_TAIL_RE.search(full)
-            and not any(t in _LABEL_NEG_WORDS or t in _WEAK_NEG_WORDS for t in before)
-            and _key_literal_ok(v, 12, 300, 0.2, 0.85) and not (len(v) == 64 and _charset(v) == "hex")
-            and not (toks[-1] == "key" and _charset(v) == "hex")):
+    if (quoted and weak and _key_literal_ok(v, 12, 300, 0.2, 0.85) and not (len(v) == 64 and _charset(v) == "hex")
+            and not (last == "key" and _charset(v) == "hex")):
         return "label-weak-key"
-    if set(toks) & _OTP_WORDS and _OTP_SEED_RE.fullmatch(v) and _wordlike(v) < 0.3:
+    if otp and _OTP_SEED_RE.fullmatch(v) and _wordlike(v) < 0.3:
         return "label-otp-seed"
     return ""
 
@@ -1221,6 +1237,7 @@ def _load_prefixes() -> list[Rule]:
 
 
 def _load_literal(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
+    _LABEL_CLASS.clear()   # the password label words depend on the languages
     _PW_LAST_ON[0] = _PW_LAST.union(*(_PW_LAST_OF.get(lang, ()) for lang in languages))
     return [Rule(id=d["id"], type="SECRET", regex=_Lazy(r"(?!)()"), secret_group=1, keywords=d["keywords"])
             for d in LITERAL_RULES]
