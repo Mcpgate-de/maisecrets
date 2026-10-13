@@ -438,5 +438,36 @@ class TeamFileTests(unittest.TestCase):
         self.assertNotIn("testowsk", first.lower())
 
 
+    def test_session_start_builds_the_index_so_a_tool_hook_only_loads_it(self):
+        self.addCleanup(lambda: terms.STATE_FILE.unlink() if terms.STATE_FILE.exists() else None)
+        self.addCleanup(lambda: terms.CACHE_FILE.unlink() if terms.CACHE_FILE.exists() else None)
+        (self.dir / "clients.terms").write_text("CLIENT_A  Zbigniew Testowski\n", encoding="utf-8")
+        if terms.CACHE_FILE.exists():
+            terms.CACHE_FILE.unlink()
+        from unittest import mock
+        with mock.patch("maisecrets.user_rules._config", return_value=self.cfg):
+            terms.session_note()
+            self.assertTrue(terms.CACHE_FILE.exists(), "the session start (30 s) builds the index")
+            terms.reset()
+            with mock.patch.object(terms, "Matcher", wraps=terms.Matcher) as built:
+                terms.matcher()
+                self.assertTrue(all(c.kwargs.get("data") for c in built.call_args_list), "a tool hook loads it")
+
+
+class ScanTreeTests(unittest.TestCase):
+    def test_the_tree_check_never_reads_the_developers_term_list(self):
+        import subprocess
+        tree = Path(tempfile.mkdtemp(prefix="scan-tree-"))
+        self.addCleanup(shutil.rmtree, tree, True)
+        (tree / "notes.txt").write_text("Zbigniew Testowski wrote this\n", encoding="utf-8")
+        # a SECRET label: the tree check counts it, and it must not see the list at all
+        terms.PERSONAL.write_text("SECRET_A  Zbigniew Testowski\n", encoding="utf-8")
+        os.chmod(terms.PERSONAL, 0o600)
+        self.addCleanup(terms.PERSONAL.unlink)
+        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "scan_tree.py"), str(tree)], capture_output=True,
+                           text=True, timeout=120, env=dict(os.environ))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("0 secret-shaped value(s)", r.stdout)
+
 if __name__ == "__main__":
     unittest.main()

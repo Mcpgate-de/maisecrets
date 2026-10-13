@@ -1738,8 +1738,11 @@ a terminal: a tool call gets the count.
 
 **Cost.** maisecrets keeps an index of the lists in `~/.maisecrets/.terms-cache`.
 With 100,000 entries a hook loads it in about 5 ms and scans 10 KB in 2 to 4 ms.
-After you change a list, the first hook builds the index again: about 1 to
-2.5 s for 100,000 entries.
+After you change a list, maisecrets builds the index again at the next
+session start, or right after `/maisecrets:term add` or `remove`, so a tool
+hook only loads it. Measured for 100,000 two-word entries (3.8 MB): 1.4 s on
+Python 3.14, 2.2 s on Python 3.9. If a team list changes while a session
+runs, the next hook builds the index.
 
 ## Known gaps (measured or documented)
 
