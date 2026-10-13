@@ -429,7 +429,9 @@ _LABEL_NOT_A_VALUE_RE = re.compile(
 
 
 def _label_value_ok(v: str) -> bool:
-    return not _LABEL_NOT_A_VALUE_RE.fullmatch(v.strip().rstrip(".,;:!?)"))
+    # the whole value, its last character too: `2024-10-13!` is a password, no date (codex, verification of 0.6.15).
+    # The prose rule ends its value before the punctuation of the sentence, so it needs no strip here
+    return not _LABEL_NOT_A_VALUE_RE.fullmatch(v.strip())
 
 
 def _word_value_ok(v: str, min_len: int = 8, prose_punct: bool = False) -> bool:

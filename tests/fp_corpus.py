@@ -749,4 +749,8 @@ HIT = [
     ('round2 fable 77', "cur§l -u adm§in:§Xk9§q2v§R7t§L -H 'X-A§PI-§Key§: Qm3§Nv5§Bq8§ZtX§k9q§2vR§7tL' htt§ps:§//e§xam§ple§.co§m/a", [('SECRET', 'adm§in:§Xk9§q2v§R7t§L'), ('SECRET', 'Qm3§Nv5§Bq8§ZtX§k9q§2vR§7tL')]),
     ('round2 fable 78', "cur§l -H 'Aut§hor§iza§tio§n: Bea§rer Qm3§Nv5§Bq8§ZtX§k9q§2vR§7tL' -H 'X-A§PI-§Key§: Xk9§q2v§R7t§LQm§3Nv§5Bq§8Zt' htt§ps:§//x", [('SECRET', 'Qm3§Nv5§Bq8§ZtX§k9q§2vR§7tL'), ('SECRET', 'Xk9§q2v§R7t§LQm§3Nv§5Bq§8Zt')]),
     ('round2 fable 79', 'cur§l -u adm§in:§Xk9§q2v§R7t§L\nhtt§ps:§//e§xam§ple§.co§m/a', [('SECRET', 'adm§in:§Xk9§q2v§R7t§L')]),
+    # verification of 0.6.15 (codex): a password that only starts like a date, a file or a placeholder
+    ('rel auth date bang', 'red§is> AUT§H 20§24-§10-§13!', [('SECRET', '20§24-§10-§13!')]),
+    ('rel flag at date', 'mya§pp --p§ass§wor§d @20§24-§10-§13', [('SECRET', '@20§24-§10-§13')]),
+    ('rel escaped change me', '"{\\"pas§swo§rd\\":\\"CHA§NGE§_ME§_20§24!x\\"}"', [('SECRET', 'CHA§NGE§_ME§_20§24!x')]),
 ]

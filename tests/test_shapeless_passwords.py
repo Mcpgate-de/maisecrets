@@ -234,6 +234,13 @@ class NoPasswordAfterTheNewLabelsTests(unittest.TestCase):
             with self.subTest(text=text[:24]):
                 self.assertEqual(found(text), [("SECRET", pw)])
 
+    def test_a_password_that_only_starts_like_a_date_or_a_placeholder_stays_a_hit(self):
+        # the whole value is compared, its last character too (codex, verification of 0.6.15)
+        for pw in (J(["2024-10", "-13!"]), J(["@2024", "-10-13"]), J(["CHANGE", "_ME_2024!x"])):
+            for text in (f"redis> AUTH {pw}", f"myapp {PW_FLAG} {pw}", J(['"{\\"', PW, '\\":\\"', pw, '\\"}"'])):
+                with self.subTest(text=text[:20], value=pw[:5]):
+                    self.assertEqual(found(text), [("SECRET", pw)])
+
     def test_a_date_after_a_plain_json_label_is_as_in_0_6_14(self):
         # the shared ds path is not changed: it took this value in 0.6.14 too
         stamp = J(["2024-10-01", "T12:00:00Z"])
