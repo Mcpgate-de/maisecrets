@@ -3151,6 +3151,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
     live = vault.live_fingerprints()
     if not live:
         return out
+    found: list[str] = []          # admitted together at the end: one index write, not one per hit
     seen: set[str] = set()
     tokens = list(_TOKEN_SPLIT_RE.split(out))
     # a value with spaces or quotes survives no tokenizer; the rest of a KEY=value line does
@@ -3170,7 +3171,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
             key = live.get(vault.fingerprint(cand))
             if key is None:
                 continue
-            vault.admit(key, session)
+            found.append(key)
             from .vault import Entry
             e = Entry.from_meta(vault._index["entries"][key])
             # a URL-decoded or JSON-unescaped candidate is not in the text; its encoded form is
@@ -3181,6 +3182,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
             entries.append(e)
             if values is not None and raw not in values:
                 values.append(raw)
+    vault.admit_many(found, session)
     return out
 
 
