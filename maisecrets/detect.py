@@ -35,6 +35,7 @@ slightly different rules is how a redaction leaks.
 from __future__ import annotations
 
 import bisect
+import itertools
 import hashlib
 import ipaddress
 import json
@@ -1334,7 +1335,7 @@ _WHITESPACE_RE = re.compile(r"\s")
 # with the vendored regex on runs of 0 to 5000 characters
 class _KeywordTail:
     r"""A vendored keyword regex `(<alternatives>)\w*<tail>` matched without backtracking into the word run."""
-    __slots__ = ("pattern", "flags", "_prefix", "_alts", "_any", "_tail", "_heads", "_cross")
+    __slots__ = ("pattern", "flags", "_prefix", "_alts", "_any", "_tail", "_heads", "_cross", "_rx")
 
     def __init__(self, pattern: str, keywords_prefix: str, alts: list, flags: int) -> None:
         self.pattern, self.flags, self._prefix, self._alts = pattern, flags, keywords_prefix, alts
@@ -1345,6 +1346,7 @@ class _KeywordTail:
         if self._any is not None:
             return
         tail = self.pattern[len(self._prefix) + len("\\w*"):]
+        self._rx = re.compile(self.pattern, self.flags)
         self._any = re.compile(self._prefix, self.flags)
         groups = self._any.groups
         # one head per alternative, in the regex's order; the others never match but keep their group numbers
@@ -1358,12 +1360,13 @@ class _KeywordTail:
 
     def finditer(self, text: str):
         self._compile()
-        runs_s: list = []
-        runs_e: list = []
-        for r in _WORD_RUN_ANY_RE.finditer(text):
-            runs_s.append(r.start())
-            runs_e.append(r.end())
+        if _LONG_WORD_RUN_RE.search(text) is None:
+            # no word run of 200 characters: the vendored regex backtracks at most that far per keyword, and its C
+            # loop is faster than this one on ordinary lines
+            yield from self._rx.finditer(text)
+            return
         tails: dict = {}
+        word = _WORD_RUN_ANY_RE
         pos, n = 0, len(text)
         while pos <= n:
             m = self._any.search(text, pos)
@@ -1371,13 +1374,14 @@ class _KeywordTail:
                 return
             p = m.start()
             hit = None
-            for head in self._heads:
-                h = head.match(text, p)
+            e = -1
+            # the first alternative that matches at p is the one the regex tries first: the search found it already
+            for h in itertools.chain((m,), (head.match(text, p) for head in self._heads)):
                 if h is None:
                     continue
                 q = h.end()
-                i = bisect.bisect_right(runs_s, q) - 1
-                e = runs_e[i] if i >= 0 and runs_e[i] > q else q
+                w = word.match(text, q)
+                e = w.end() if w is not None else q     # \w* takes the whole run after the keyword
                 if e not in tails:
                     tails[e] = self._tail.match(text, e)
                 t = tails[e]
@@ -1386,13 +1390,12 @@ class _KeywordTail:
                     break
             if hit is None:
                 pos = p + 1
-                i = bisect.bisect_right(runs_s, p) - 1
-                if i >= 0 and runs_e[i] > p and tails.get(runs_e[i], 1) is None:
-                    # the run's tail failed: a keyword later in the run that stays in it fails too. Only an
-                    # alternative that leaves the run can start a match before its end
-                    end = runs_e[i]
-                    c = self._cross.search(text, pos) if self._cross is not None else None
-                    pos = c.start() if c is not None and c.start() < end else end
+                run = word.match(text, p)
+                if run is not None and run.end() == e and e > pos:
+                    # p starts a word run whose rest failed: a keyword later in the run that stays in it fails too.
+                    # Only an alternative that leaves the run can start a match before its end
+                    c = self._cross.search(text, pos, e + 256) if self._cross is not None else None
+                    pos = c.start() if c is not None and c.start() < e else e
                 continue
             yield hit
             pos = hit.end() if hit.end() > p else p + 1
@@ -1433,6 +1436,7 @@ class _HeadTail:
 
 
 _WORD_RUN_ANY_RE = re.compile(r"\w+")
+_LONG_WORD_RUN_RE = re.compile(r"\w{200}")
 _LOOKAROUND_RE = re.compile(r"\(\?<?[=!][^()]*\)")
 _CROSS_CHARS_RE = re.compile(r"[ .\[-]|\\[sWdbBSD]")   # a space, a dot, a class, a hyphen or a non-word escape
 _CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
