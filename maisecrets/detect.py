@@ -756,6 +756,11 @@ _WEAK_NEG_WORDS = frozenset({
     "sync", "lexer", "tokenizer", "parser", "cancellation", "captcha", "recaptcha"})
 
 
+# a TOTP or HOTP seed: base32 of 10 to 40 bytes after a one-time-password label (otpauth://… carries it as secret=)
+_OTP_WORDS = frozenset({"totp", "hotp", "otp", "mfa", "2fa", "otpauth", "authenticator"})
+_OTP_SEED_RE = re.compile(r"[A-Z2-7]{16,64}={0,6}")
+
+
 def _alphabet_size(v: str) -> int:
     if v.isdigit():
         return 10
@@ -800,6 +805,8 @@ def _judge_literal(label: str, v: str, quoted: bool = True) -> str:
             and _key_literal_ok(v, 12, 300, 0.2, 0.85) and not (len(v) == 64 and _charset(v) == "hex")
             and not (toks[-1] == "key" and _charset(v) == "hex")):
         return "label-weak-key"
+    if set(toks) & _OTP_WORDS and _OTP_SEED_RE.fullmatch(v) and _wordlike(v) < 0.3:
+        return "label-otp-seed"
     return ""
 
 
@@ -853,6 +860,7 @@ def _literal_matches(rule_id: str, text: str):
 LITERAL_RULES = (
     {"id": "label-pw-literal", "keywords": ("pass", "pw", "pwd", "kennwort", "psw", "identified", "securestring")},
     {"id": "label-secret-literal", "keywords": ("secret", "token", "key", "bearer", "credential")},
+    {"id": "label-otp-seed", "keywords": ("otp", "mfa", "2fa", "authenticator")},
     {"id": "label-weak-key", "keywords": ("key", "auth", "salt", "seed", "otp", "cred", "cookie", "session", "hmac",
                                           "psk")},
 )

@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 109 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 110 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1179,6 +1179,10 @@ Four sources, one scanner (`maisecrets/detect.py`):
   idea). A label that names something else stays text: `public_key`, `cache_key`,
   `primary_key`, `object_key`, `idempotency_key`, `csrf_token`, a hex value after `key` and any value after
   `nonce`, `x-amz-signature` or `x-amz-credential`.
+- A TOTP or HOTP seed after a one-time-password label (0.6.16, `label-otp-seed`): 16 to 64
+  base32 capitals after a label with `totp`, `hotp`, `otp`, `mfa`, `2fa` or `authenticator`
+  (`TOTP_SEED=…`, `otp_seed: …`). A code of digits, a word, a constant name and a mask stay
+  text.
 - Four token formats with a public prefix that the vendored rulesets lack (0.6.16): an NTLMSSP
   message in base64 (`Authorization: NTLM TlRMTVNTUA…`), a NATS nkey seed (`SU…`, 58
   characters of base32), a PASERK secret, local or wrapped key (`k4.local.…`, `k4.secret.…`)

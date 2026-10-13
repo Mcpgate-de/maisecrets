@@ -138,6 +138,29 @@ class SecretLiteralTests(unittest.TestCase):
                 self.assertEqual([k for k, _ in kinds(text) if k in ("label-secret-literal", "label-weak-key")], [])
 
 
+class OtpSeedTests(unittest.TestCase):
+    """A TOTP or HOTP seed (base32) after a one-time-password label: label-otp-seed."""
+
+    def seed(self, n: int = 32) -> str:
+        while True:
+            v = "".join(RNG.choice(string.ascii_uppercase + "234567") for _ in range(n))
+            if detect._wordlike(v) < 0.3:
+                return v
+
+    def test_a_base32_seed_after_an_otp_label_is_a_hit(self):
+        s16, s32 = self.seed(16), self.seed(32)
+        for text, value in ((f"TOTP_SEED={s32}", s32), (f"otp_seed: {s16}", s16), (f"totp: {s32}", s32),
+                            (f"MFA_DEVICE_SEED={s16}", s16)):
+            with self.subTest(form=text.split(value)[0]):
+                self.assertIn(("label-otp-seed", value), kinds(text))
+
+    def test_a_code_a_word_or_a_name_after_an_otp_label_stays_text(self):
+        for text in ("otp: 123456", "MFA_METHOD=AUTHENTICATORAPP", "totp_issuer=EXAMPLECORPORATION",
+                     "mfa_type: SOFTWARE_TOKEN_MFA", "otp_seed=abcdefghijklmnop", "2fa: XXXXXXXXXXXXXXXXXXXX"):
+            with self.subTest(text=text):
+                self.assertEqual([k for k, _ in kinds(text) if k == "label-otp-seed"], [])
+
+
 def b64(raw: bytes, url: bool = False) -> str:
     return (base64.urlsafe_b64encode(raw).decode().rstrip("=") if url else base64.b64encode(raw).decode())
 
