@@ -73,7 +73,7 @@ def _home_text() -> str:
     design), as text."""
     parts = []
     for p in Path(HOME).rglob("*"):
-        if p.is_file() and p.name not in ("terms.txt", "terms.marked.json", ".terms-cache"):
+        if p.is_file() and p.name not in ("terms.txt", "terms.marked.json", ".terms-cache", "terms.suggested.txt"):
             parts.append(f"--- {p.name}\n" + p.read_bytes().decode("utf-8", errors="replace"))
     return "\n".join(parts)
 
@@ -552,9 +552,10 @@ class LeakTests(_Base):
         self.assertIn("terms: 1 of your own, 0 from 0 team file(s), 1 marked in prompts", self._cli("status"))
         self.assertNoTerm(_home_text(), "a file of the home")
 
-    def test_suggest_prints_names_only_to_a_terminal(self):
+    def test_suggest_never_prints_a_name_and_writes_a_private_proposal(self):
         tmp = Path(tempfile.mkdtemp(prefix="suggest-"))
         self.addCleanup(shutil.rmtree, tmp, True)
+        self.addCleanup(lambda: terms.SUGGESTED.unlink() if terms.SUGGESTED.exists() else None)
         doc = tmp / "letter.txt"
         doc.write_text(f"Sehr geehrter Herr {NAME},\nPan Testowskiego i Testowskiej.\nName: Anna Kowalska\n",
                        encoding="utf-8")
@@ -562,14 +563,18 @@ class LeakTests(_Base):
         self.assertIn("candidate(s)", piped)
         self.assertNoTerm(piped, "suggest into a pipe")
         buf = io.StringIO()
-        buf.isatty = lambda: True          # a terminal
+        buf.isatty = lambda: True          # a terminal, or a pseudo-terminal an agent opened: the same
         with contextlib.redirect_stdout(buf):
             cli.main(["terms", "suggest", str(doc)])
-        shown = buf.getvalue()
+        self.assertNoTerm(buf.getvalue(), "suggest into a terminal")
+        self.assertNotIn("Kowalska", buf.getvalue())
+        self.assertIn(str(terms.SUGGESTED), buf.getvalue())
+        shown = terms.SUGGESTED.read_text(encoding="utf-8")
+        if os.name != "nt":
+            self.assertEqual(os.stat(terms.SUGGESTED).st_mode & 0o777, 0o600)
         self.assertIn(f"{NAME} | Testowski*", shown, "Testowski, Testowskiego, Testowskiej: one stem")
         self.assertNotIn("Pan ", shown, "a salutation is no part of a name")
         self.assertIn("Anna Kowalska", shown)
-        self.assertIn("Nothing was written", shown)
         self.assertFalse(terms.PERSONAL.exists())
 
 

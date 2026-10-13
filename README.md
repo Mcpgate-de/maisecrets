@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 115 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 116 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1334,14 +1334,20 @@ EMAIL_BOSS   boss at work
 **A team list.** Put a `*.terms` file in a folder of `rule_dirs` (Rules of
 your own). The AI can write a shared checkout, so a team list has a floor: an
 entry of fewer than 3 characters, an entry of only words of
-`maisecrets/rules/term_stoplist.txt` (the closed word classes of English and
-German, and the common words of a developer session), a `*` with a stem of
+`maisecrets/rules/term_stoplist.txt` (1,134 words: the 521 words of the closed
+word classes of English and German, and the words that 8 or more files of
+this repository use, as the common words of a developer session; a small
+list on purpose, not a dictionary), a `*` with a stem of
 fewer than 5 letters (`ret*`, `*ing`), and a stem that 3 or more words of
 that list share (`*ation*`), are left out. A line
 that fails is left out with its reason; the rest of the file loads, and a bad
 team file never stops a hook. The session start says when a team list
 changed. `/maisecrets:rules` and `maisecrets terms` show the counts, the
-files and each line left out, never a term. A file can be up to 4 MB.
+files and each line left out, never a term. All the team lists together
+can be up to 4 MB and 150,000 entries. A variant that an earlier entry holds
+(your own list first) is left out, and at most 16 team variants share one
+stem or first word: a list cannot make each word of a text walk thousands
+of entries.
 
 **Not in a PDF or an image.** The matcher reads text. A name inside a PDF, an
 image or another binary file that a tool reads reaches the model as it is.
@@ -1357,8 +1363,11 @@ plugin folder: `bash hooks/run.sh terms suggest FILE`) proposes lines for
 `terms.txt` from a text or CSV file: names after a salutation, after
 `Name:`, in a name column of a CSV file, and pairs of capitalised words. If
 a surname comes in two or more endings, it proposes the stem
-(`Kowalski | Kowalski*`). It writes nothing, and it shows the names only in
-a terminal: a tool call gets the count.
+(`Kowalski | Kowalski*`). It never prints a name, not in a terminal either:
+an AI can open a pseudo-terminal and read it. It writes the proposal to
+`terms.suggested.txt` in the maisecrets folder (mode `0600`; the AI cannot
+read that folder) and prints the count and the path. Open the file yourself,
+and copy the lines you want into `terms.txt`. Nothing is added to your terms.
 
 **Cost.** maisecrets keeps an index of the lists in `~/.maisecrets/.terms-cache`.
 With 100,000 entries a new hook process loads it in about 30 ms and scans
