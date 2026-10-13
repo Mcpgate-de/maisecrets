@@ -59,7 +59,7 @@ MAX_REGEX = 300
 MIN_LITERAL = 4
 TYPES = ("SECRET", "NAME", "EMAIL", "PHONE", "IBAN", "CARD", "IP")
 TARGETS = ("secret", "match", "line")
-CHECK_VERSION = 3                    # a new check makes every cached verdict old
+CHECK_VERSION = 4                    # a new check makes every cached verdict old
 PROBE_LIMIT_MS = 50.0                # a rule slower than this on the test texts is quarantined
 PROBE_DEADLINE = 1.0                 # seconds; the test child is ended when one rule takes longer
 PROBE_BUDGET = 2.0                   # seconds of tests per hook call; the rest are tested in the next call
@@ -438,6 +438,15 @@ def _fills(rx: str) -> tuple:
                 for fill in ((_one(chars) if chars is not _ANY_CHAR else ""), _example(body)):
                     if fill and fill not in out:
                         out.append(fill)
+            # two repeats of one sequence whose sets overlap: a run of a character both take (Opus review, round 3:
+            # `[ac-y]{1,99}[bc-y]{1,99}…` took neither the a of one nor the b of the other for long)
+            sets = [_chars(list(av[2])) for op, av in seq if op in _REPEATS]
+            for i in range(len(sets)):
+                for j in range(i + 1, len(sets)):
+                    both = sets[j] if sets[i] is _ANY_CHAR else sets[i] if sets[j] is _ANY_CHAR else sets[i] & sets[j]
+                    fill = _one(both) if both is not _ANY_CHAR and both else ""
+                    if fill and fill not in out:
+                        out.insert(0, fill)
     except Exception:  # noqa: BLE001 - the fixed runs still run
         return ()
     return tuple(out[:8])

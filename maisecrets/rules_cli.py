@@ -99,31 +99,36 @@ def _check_folder(shown: str, folder: Path, samples: Path | None, taken: set, ne
         print(f"  {_NO_FILES}")
         bad += need_rules
     timed = user_rules.probe([sources[r.id] for r in rules if r.id in sources])
-    # a rule that a scan of the hooks found too slow stays out until it changes, or until this check passes it
-    # (Fable review, round 2: the check printed ok for a rule the hooks left out)
+    # A rule that a real scan found too slow stays out until the rule changes: this check reruns only the test texts,
+    # which the rule passed before, so it cannot clear that verdict (Opus review, round 3). It shows it, with the way
+    # out. A verdict of the test texts alone is the check's own, and a pass now replaces it.
     state = user_rules._read_state()
     slow = state.get("slow") if isinstance(state.get("slow"), dict) else {}
-    cleared = 0
+    tested = state.get("tested") if isinstance(state.get("tested"), dict) else {}
+    renewed = 0
     fast = []
     for rule in rules:
         key = sources[rule.id].hash if rule.id in sources else ""
         ms = timed.get(key, "untested")
-        was = key in slow
-        if ms == "untested":
-            print(f"  ok      {rule.id}  (not timed)" + ("; the hooks leave it out (slow in a scan)" if was else ""))
+        if key in slow:
+            print(f"  slow    {rule.id}  the hooks leave it out: a real scan found it slow; change the rule to have "
+                  "it checked again")
+            bad += 1
+        elif ms == "untested":
+            print(f"  ok      {rule.id}  (not timed)")
             fast.append(rule)
         elif ms is None or ms > user_rules.PROBE_LIMIT_MS:
             print(f"  slow    {rule.id}  {user_rules._slow_reason(ms)}")
             bad += 1
         else:
-            print(f"  ok      {rule.id}  {ms:.1f} ms"
-                  + ("; the hooks left it out (slow in a scan), and read it again from now on" if was else ""))
+            print(f"  ok      {rule.id}  {ms:.1f} ms")
             fast.append(rule)
-            if was:
-                del slow[key]
-                cleared += 1
-    if cleared:
-        state["slow"] = slow
+            old = tested.get(key, 0.0)
+            if key in tested and (old is None or old > user_rules.PROBE_LIMIT_MS):
+                tested[key] = ms               # the test texts were slow once (a busy machine); now they pass
+                renewed += 1
+    if renewed:
+        state["tested"] = tested
         user_rules._write_state(state)
     for q in quarantined:
         if q.kept:
