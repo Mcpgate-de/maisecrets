@@ -3043,9 +3043,16 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
     return {}
 
 
-# a placeholder of a term (terms.py) is never resolved (mask only): it is hidden from the resolvers under these two
-# private-use characters, and put back in the answer as it was written
-_HIDE = ("\ue000", "\ue001")
+# a placeholder of a term (terms.py) is never resolved (mask only): it is hidden from the resolvers under two
+# private-use characters that the tool input does not hold, and put back in the answer as it was written
+
+
+def _hide_pair(tool_input) -> tuple:
+    """Two private-use characters that no string of the tool input holds: a fixed pair turned a real U+E000 in the
+    content of a Write into the bracket of a placeholder (gate review of block 2)."""
+    used = set(json.dumps(tool_input, ensure_ascii=False))
+    free = (chr(c) for c in range(0xE000, 0xF900) if chr(c) not in used)
+    return next(free), next(free)
 
 
 def _term_keys() -> set:
@@ -3063,6 +3070,7 @@ def pre_tool(payload: dict) -> dict:
     call runs with the placeholder; maisecrets never puts the name back in v1."""
     tool_input = payload.get("tool_input")
     keys: list = []
+    pair: list = []
 
     def hide(s: str) -> str:
         refs = find_refs(s)
@@ -3072,14 +3080,16 @@ def pre_tool(payload: dict) -> dict:
             keys.append(_term_keys())
         for key, a, b in sorted(refs, key=lambda r: r[1], reverse=True):
             if key in keys[0]:
-                s = s[:a] + _HIDE[0] + s[a + 1:b - 1] + _HIDE[1] + s[b:]
+                if not pair:
+                    pair.extend(_hide_pair(tool_input))
+                s = s[:a] + pair[0] + s[a + 1:b - 1] + pair[1] + s[b:]
         return s
     hidden = _walk_strings(tool_input, hide) if isinstance(tool_input, dict) else tool_input
     if hidden == tool_input:
         return _pre_tool(payload)
     out = _pre_tool(dict(payload, tool_input=hidden))
     from .placeholder import CLOSE, OPEN
-    return _walk_strings(out, lambda s: s.replace(_HIDE[0], OPEN).replace(_HIDE[1], CLOSE))
+    return _walk_strings(out, lambda s: s.replace(pair[0], OPEN).replace(pair[1], CLOSE)) if pair else out
 
 
 def _pre_tool(payload: dict) -> dict:
