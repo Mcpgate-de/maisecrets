@@ -721,6 +721,8 @@ def _pw_literal_ok(v: str) -> bool:
         return False
     if _CLOSED_TEMPLATE_RE.search(v):
         return False   # a template of a format string: f'pwd = "{pw}"', "password: {password}"
+    if _VERSION_RE.fullmatch(v):
+        return False   # a version: v1.2.3-rc1 (undoing leet makes it letters)
     return _wordlike(_deleet(v)) < 0.3
 
 

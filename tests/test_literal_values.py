@@ -67,7 +67,7 @@ class PasswordLiteralTests(unittest.TestCase):
         """No value or one that says what it is: a word, a word in leet, a fixture, a mask, a template, a reference."""
         for value in ("hunter", "Sunshine", "P4ssw0rd", "testpass", "changeme", "********", "abcdef", "123456789",
                       "secret123", "mypassword", "${DB_PASSWORD}", "{{ db_password }}", "%(password)s",
-                      "settings.DB_PASSWORD", "<your-password>", "xxxxxxxx", "dragonfly"):
+                      "settings.DB_PASSWORD", "<your-password>", "xxxxxxxx", "dragonfly", "v1.2.3-rc1"):
             for form in ('db_password = "{}"', "<password>{}</password>", "PASSWORD={}", "?pwd={}&x=1"):
                 text = form.format(value)
                 with self.subTest(text=text):
