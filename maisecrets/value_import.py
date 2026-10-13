@@ -1,10 +1,10 @@
-"""Values from your own tools: `maisecrets values import FILE` and the setting `value_files` (README "Values from your
-own tools", C26).
+"""Values from your own tools: `values import FILE` through the plugin's launcher (`command()`) and the setting
+`value_files` (README "Values from your own tools", C26).
 
 A tool the person runs (an export of the team's names, a password manager's list, a script) writes JSON lines:
 
     {"value": "Jan Example", "type": "NAME"}
-    {"value": "a value without a shape"}            # type SECRET when it is missing
+    {"value": "A value without a shape"}            # type SECRET when it is missing
 
 Each value goes into the vault with its type, so the exact match of the hooks (C2) masks it in every tool result and
 every prompt from then on; a value of 2 to 6 words is found as a phrase. Nothing is printed but counts and line
@@ -13,20 +13,24 @@ numbers: a refused line is named by its number and the reason, never by its text
 An import only adds. It never deletes a value, never changes a stored one and never shortens a lifetime, so the agent
 may run it: it can only make detection stricter. What could still hurt is volume and shape, and the caps hold that:
 
-- at most MAX_FILE_BYTES per file and MAX_VALUES_PER_FILE values per import, at most MAX_IMPORTED imported values in
-  the vault at once; past a cap the import stops and says so. The vault evicts nothing to make room: a full vault
-  refuses the import, never the person's values. The index grows by about 450 bytes per value, and each hook reads it
-  (measured in tests/test_value_import.py, the timing note in the README).
+- only a regular file, checked on the open descriptor before a byte is read, of at most MAX_FILE_BYTES, and at most
+  MAX_VALUES_PER_FILE values per import; at most MAX_IMPORTED imported values in the vault at once, of which an import
+  that no value file names fills at most RUN_SHARE of them. Past a cap the import stops and says so; the vault
+  evicts nothing to make room. The index grows by about 450 bytes per value, and each hook reads it: with 6000
+  imported names, Vault() and the exact match of a 40-line text took 15 to 35 ms (fastest of 20 calls in one
+  process, Python 3.9 and 3.14, 2026-10-13; up to 90 ms at a load average of 35).
 - a value of 8 to MAX_VALUE_LEN characters on one line: shorter values are not hunted in other texts anyway (the
-  8-character floor of hooks._EXACT_MIN_LEN), and a single word of lower-case letters is an ordinary word, which an
-  agent could import to mask every text that uses it.
+  8-character floor of hooks._EXACT_MIN_LEN). Refused as ordinary text, which an agent could import to mask what the
+  person writes: a single word of lower-case letters, and a SECRET without an upper-case letter, a digit or a symbol.
+  Refused as text of maisecrets itself: a placeholder bracket, "maisecrets", "import:" (the person's controls).
 - the import writes BATCH values per hold of the vault lock: a hook in another session waits for one batch, never for
   the whole file (a keychain write takes tens of milliseconds, and a hook waits at most 6 s for the lock).
+- each import writes one events.log line, and the next session start names an import that is new (imports_note).
 
 Imported values live max_ttl_seconds (30 days unless the person set less): an import is the person's list, not a
-value from one tool result. A file of `value_files` is imported again at session start when its content changed or a
-day passed, which renews its values. The person sees each import with its counts in /maisecrets:list and removes one
-with `/maisecrets:forget import:NAME`.
+value from one tool result, and an import that lists a stored imported value again renews it. A file of
+`value_files` is imported again at session start when it is due (_due). The person sees each import with its counts
+in /maisecrets:list and removes one with `/maisecrets:forget import:NAME`; a value another import lists stays.
 """
 from __future__ import annotations
 
@@ -48,7 +52,7 @@ MAX_IMPORTED = 5000
 MAX_VALUE_LEN = 512
 MIN_VALUE_LEN = 8          # hooks._EXACT_MIN_LEN: a shorter stored value is never hunted in another text
 BATCH = 25
-MAX_IMPORTED_BY_RUN = 3000  # of MAX_IMPORTED: the imports that no value file names (an agent's) hold at most this many
+RUN_SHARE = 0.6            # of MAX_IMPORTED: the imports that no value file names (an agent's) hold at most this share
 EXPIRE_PER_IMPORT = 200     # expired values one import deletes; a keychain delete costs about 10 ms
 FORGET_BATCH = 200          # values one hold of the lock forgets when an import is removed
 REIMPORT_AFTER = 86400     # a value file is imported again after a day, which renews its values
@@ -221,6 +225,13 @@ def _imported(vault, origin: str) -> int:
     return n
 
 
+def command(rest: str) -> str:
+    """The line a person types in a terminal for `values REST`: the plugin's launcher by its absolute path, as other
+    printed commands give it (hooks._run_sh). No `maisecrets` command is on the PATH (review of block 3, LOW)."""
+    name = "run.cmd" if os.name == "nt" else "run.sh"
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", name) + " values " + rest
+
+
 def type_text(counts: dict[str, int]) -> str:
     return ", ".join(f"{t} {counts[t]}" for t in TYPES if counts.get(t))
 
@@ -282,7 +293,7 @@ def import_file(path: str | Path, vault=None, deadline: float | None = None, raw
     vault.expire(limit=EXPIRE_PER_IMPORT)
     # a run import (an agent's) may fill RUN_SHARE of the cap; the rest stays for the person's value files, so an agent
     # cannot fill the vault and have the person's names refused (review of block 3, Opus M1)
-    cap = MAX_IMPORTED if origin == "file" else MAX_IMPORTED_BY_RUN
+    cap = MAX_IMPORTED if origin == "file" else int(MAX_IMPORTED * RUN_SHARE)
     room = cap - _imported(vault, origin)
     for i in range(0, len(items), BATCH):
         if deadline is not None and time.time() > deadline:
@@ -344,14 +355,16 @@ def summary(result: Result) -> str:
     return ", ".join(parts) + "."
 
 
-def remove(vault, name: str) -> tuple[int, int]:
-    """Forget every value of one import: (deleted, refused by the store). A value another import lists too stays and
-    loses only this name (review of block 3, Opus M2). The values are deleted FORGET_BATCH per hold of the lock and
-    index write (Opus M3: one write per value took 58.8 s for 2,000). The state keeps no record of the import."""
+def remove(vault, name: str) -> tuple[int, int, int]:
+    """Forget every value of one import: (deleted, refused by the store, kept). A value another import lists too stays
+    (kept) and loses only this name (review of block 3, Opus M2). The values are deleted FORGET_BATCH per hold of the
+    lock and index write (Opus M3: one write per value took 58.8 s for 2,000). The state then forgets the import."""
+    kept = 0
     with vault._exclusive():
         for meta in vault._index["entries"].values():
             names = _names(meta)
             if name in names and len(names) > 1:
+                kept += not meta.get("purged")
                 rest = [n for n in names if n != name]
                 meta["source"], meta["also"] = rest[0], rest[1:]
         keys = [k for k, m in vault._index["entries"].items() if m.get("source") == name and not m.get("also")]
@@ -365,7 +378,7 @@ def remove(vault, name: str) -> tuple[int, int]:
         state = _load_state()
         if state.get("sources", {}).pop(name, None) is not None:
             _save_state(state)
-    return deleted, refused
+    return deleted, refused, kept
 
 
 # ------------------------------------------------------------ session start --

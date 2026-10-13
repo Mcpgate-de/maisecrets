@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -180,8 +181,7 @@ class Caps(Base):
     def test_a_full_vault_refuses_the_import_and_drops_nothing_it_holds(self):
         mine = Vault().put(SHAPELESS, "SECRET", "manual")
         values = synth_names(12)
-        with mock.patch.object(value_import, "MAX_IMPORTED", 10), \
-                mock.patch.object(value_import, "MAX_IMPORTED_BY_RUN", 10):
+        with mock.patch.object(value_import, "MAX_IMPORTED", 10), mock.patch.object(value_import, "RUN_SHARE", 1):
             first = value_import.import_file(self.file(lines(*values[:8]), "a.jsonl"))
             second = value_import.import_file(self.file(lines(*values[8:]), "b.jsonl"))
             third = value_import.import_file(self.file(lines(*values[10:]), "c.jsonl"))
@@ -302,6 +302,54 @@ class Phrases(Base):
         for text in ("quilla examplestein", "Quilla B. Examplestein", "Quilla Examplesteiner"):
             self.assertEqual(redact(text), text)
 
+    # Opus H3, Fable M3: markup, quotes of any script, a possessive, NFD, invisible characters and JSON escapes
+    def test_a_stored_name_is_found_in_markup_quotes_and_encodings(self):
+        umlaut = "Qu" + chr(0xEF) + "lla Examplestein"          # a name with a letter outside ASCII
+        self.put(NAME, umlaut)
+        nfd = unicodedata.normalize("NFD", umlaut)
+        self.assertNotEqual(nfd, umlaut)
+        cases = {
+            "bold": f"**{NAME}**", "italic": f"*{NAME}*", "underscore": f"_{NAME}_",
+            "table cell": f"<td>{NAME}</td>", "tag between": "Quilla <b>Examplestein</b>",
+            "German quotes": chr(0x201E) + NAME + chr(0x201C), "guillemets": chr(0xAB) + NAME + chr(0xBB),
+            "possessive": f"{NAME}'s report", "typographic possessive": NAME + chr(0x2019) + "s report",
+            "NFD": f"by {nfd}.", "soft hyphen": "Quil" + chr(0xAD) + "la Exam" + chr(0xAD) + "plestein",
+            "zero width": "Quilla" + chr(0x200B) + " Examplestein", "JSON escape": json.dumps({"n": umlaut}),
+        }
+        for what, text in cases.items():
+            with self.subTest(what):
+                out = redact(text)
+                self.assertNotIn("plestein", out)
+                self.assertIn(OPEN + "NAME_c", out)
+        self.assertEqual(redact("Quilla Examplesteiner"), "Quilla Examplesteiner")
+        self.assertEqual(redact("Quilla Examplestein-Day"), "Quilla Examplestein-Day")
+
+    # Fable H2: a common first word repeated costs no fingerprint per occurrence
+    def test_a_repeated_head_word_costs_a_bounded_number_of_fingerprints(self):
+        self.put("the alpha", "the alpha beta", "the alpha beta gamma", "the alpha beta gamma delta",
+                 "the alpha beta gamma delta eps", type_="SECRET")
+        calls = []
+        real = Vault.fingerprint
+
+        def count(self, value):
+            calls.append(value)
+            return real(self, value)
+        v = Vault()
+        edges = []
+        real_starts = hooks._starts
+
+        def starts(word):
+            edges.append(word)
+            return real_starts(word)
+        for text in ("the " * 10_000, "the alpha " * 10_000, "the, " * 10_000):
+            calls.clear()
+            edges.clear()
+            with mock.patch.object(Vault, "fingerprint", count), mock.patch.object(hooks, "_starts", starts):
+                hooks._phrase_spans(text, v)
+            with self.subTest(text=text[:10]):
+                self.assertLessEqual(len(calls), 12, "a fingerprint per distinct candidate, not per occurrence")
+                self.assertLessEqual(len(edges), 4, "the edge work once per distinct word pair")
+
     def test_a_value_of_seven_words_is_not_a_phrase_and_still_matches_as_a_line(self):
         seven = "one two three four five six seven-" + "Zq7Zq7"
         self.put(seven, type_="SECRET")
@@ -315,7 +363,7 @@ class Phrases(Base):
             self.assertNotIn(word, raw)
         meta = json.loads(raw)["entries"]["NAME_c1"]
         self.assertEqual(meta["words"], 2)
-        self.assertEqual(meta["head"], Vault().fingerprint("Quilla"))
+        self.assertEqual(meta["head"], Vault().fingerprint(NAME))
 
     def test_the_hits_of_one_text_write_the_index_once_and_a_known_session_not_at_all(self):
         self.put(NAME, LONG_NAME)
@@ -395,7 +443,8 @@ class SingleTokensUnchanged(Base):
         with mock.patch.object(Vault, "fingerprint", count):
             spans = hooks._phrase_spans(text, v)
         self.assertEqual(len(spans), 1)
-        distinct = len(set(text.split()))
+        words = text.split()
+        distinct = len(set(zip(words, words[1:])))
         self.assertLessEqual(len(calls), distinct + 2 * vault.MAX_PHRASE_WORDS)
 
 
@@ -552,9 +601,18 @@ class ReviewFixes(Base):
                 self.st_mode, self.st_size = st.st_mode, 10
         with open(f, "ab") as fh:
             fh.write(b"#" * (value_import.MAX_FILE_BYTES + 10))
-        with mock.patch.object(value_import.os, "fstat", lambda fd: Small(real(fd))):
+        read: list[int] = []
+        real_read = os.read
+
+        def spy(fd, n):
+            data = real_read(fd, n)
+            read.append(len(data))
+            return data
+        with mock.patch.object(value_import.os, "fstat", lambda fd: Small(real(fd))), \
+                mock.patch.object(value_import.os, "read", spy):
             with self.assertRaisesRegex(ValueError, "over the limit"):
                 value_import.read_capped(f)
+        self.assertEqual(sum(read), value_import.MAX_FILE_BYTES + 1, "the read stops one byte past the cap")
 
     # Fable M2: an agent cannot mask ordinary text silently
     def test_a_secret_of_lower_case_words_is_refused(self):
@@ -606,8 +664,7 @@ class ReviewFixes(Base):
 
     # Opus M1: the imports an agent runs cannot take the room of the person's value files
     def test_run_imports_leave_room_for_the_value_files(self):
-        with mock.patch.object(value_import, "MAX_IMPORTED", 10), \
-                mock.patch.object(value_import, "MAX_IMPORTED_BY_RUN", 6):
+        with mock.patch.object(value_import, "MAX_IMPORTED", 10):          # an import that is no file: 6 of 10
             run = value_import.import_file(self.file(lines(*synth_names(10)[:8]), "agent.jsonl"))
             f = self.file(lines(*synth_names(14)[10:]), "team.jsonl")
             value_import.session_import({**load_config(), "value_files": [str(f)]})
@@ -620,9 +677,11 @@ class ReviewFixes(Base):
         value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "a.jsonl"))
         value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "b.jsonl"))
         self.assertEqual(value_import.counts_by_source(Vault()), {"a.jsonl": {"NAME": 1}, "b.jsonl": {"NAME": 1}})
-        self.assertEqual(value_import.remove(Vault(), "a.jsonl"), (0, 0))
+        rc, out, _ = self.run_cli("forget", "import:a.jsonl")
+        self.assertIn("import:a.jsonl: 0 value(s) deleted", out)
+        self.assertIn("1 value(s) stay masked: another import lists them too.", out)
         self.assertNotIn("Examplestein", redact(f"by {NAME}"))
-        self.assertEqual(value_import.remove(Vault(), "b.jsonl"), (1, 0))
+        self.assertEqual(value_import.remove(Vault(), "b.jsonl"), (1, 0, 0))
         self.assertEqual(redact(f"by {NAME}"), f"by {NAME}")
 
     # Opus M3: removing an import writes the index once per batch, not once per value
@@ -635,8 +694,8 @@ class ReviewFixes(Base):
             writes.append(1)
             return real(self)
         with mock.patch.object(Vault, "_save_index", count):
-            deleted, refused = value_import.remove(Vault(), "names.jsonl")
-        self.assertEqual((deleted, refused), (450, 0))
+            result = value_import.remove(Vault(), "names.jsonl")
+        self.assertEqual(result, (450, 0, 0))
         self.assertLessEqual(len(writes), 2 * (450 // value_import.FORGET_BATCH + 2))
 
     def test_remove_counts_only_values_deleted_now(self):
@@ -646,7 +705,40 @@ class ReviewFixes(Base):
         with v._exclusive():
             v._index["entries"]["NAME_c1"]["expires"] = time.time() - 1
         Vault().expire(limit=None)
-        self.assertEqual(value_import.remove(Vault(), "names.jsonl"), (1, 0))
+        self.assertEqual(value_import.remove(Vault(), "names.jsonl"), (1, 0, 0))
+
+    # LOWs of the review
+    def test_a_locked_vault_gives_a_message_not_a_traceback(self):
+        f = self.file(lines({"value": NAME, "type": "NAME"}))
+        with mock.patch.object(value_import, "import_file", side_effect=vault.LockTimeout("the vault lock is busy")):
+            rc, out, err = self.run_cli("values", "import", str(f))
+        self.assertEqual(rc, 1)
+        self.assertIn("maisecrets values import: the vault lock is busy", err)
+
+    def test_the_printed_command_is_the_launcher_and_runs_as_printed(self):
+        rc, _out, err = self.run_cli("values", "bogus")
+        self.assertEqual(rc, 2)
+        launcher = str(ROOT / "hooks" / ("run.cmd" if os.name == "nt" else "run.sh"))
+        self.assertIn(f"usage: {launcher} values [import FILE | remove NAME]", err)
+        self.assertNotIn("maisecrets values import FILE", err)
+        if os.name == "nt":
+            return
+        f = self.file(lines({"value": NAME, "type": "NAME"}))
+        r = subprocess.run([launcher, "values", "import", str(f)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("imported 1 value(s) from names.jsonl (NAME 1).", r.stdout)
+
+    def test_the_session_start_bounds_the_expire_work(self):
+        v = Vault()
+        v.put_many([(f"Synth{i:05d} Persona", "NAME", "manual") for i in range(520)], cap=10_000)
+        with v._exclusive():
+            for meta in v._index["entries"].values():
+                meta["expires"] = time.time() - 1
+        r = subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "session-start"],
+                           input=json.dumps({"session_id": "S1"}), capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        purged = sum(1 for m in Vault()._index["entries"].values() if m.get("purged"))
+        self.assertEqual(purged, 500, "at most 500 deletes per start; the rest go with later hook calls")
 
 
 class EndToEnd(Base):

@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 109 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 111 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1254,7 +1254,7 @@ already have write them as JSON lines, one value per line:
 `NAME`, `EMAIL`, `PHONE`, `IBAN`, `CARD` and `IP`. Then import the file:
 
 ```
-maisecrets values import ~/exports/names.jsonl     (in the plugin folder: bash hooks/run.sh values import FILE)
+PLUGIN/hooks/run.sh values import ~/exports/names.jsonl     (PLUGIN: the plugin folder; run.cmd on Windows)
 ```
 
 ```
@@ -1263,10 +1263,16 @@ characters); line 9 not JSON; line 17 an ordinary word (lower-case letters only)
 ```
 
 From then on maisecrets masks each value in every tool result and every
-prompt, as it masks a value it stored itself. A value of 2 to 6 words is
-found as a phrase, also with quotes, punctuation or a line break between its
-words. The match is exact: `QUILLA EXAMPLESTEIN` is not `Quilla
-Examplestein`. The command prints counts and line numbers, never a value.
+prompt, as it masks a value it stored itself. The command prints counts and
+line numbers, never a value. A value of 2 to 6 words is found as a phrase.
+The tests (`tests/test_value_import.py`, class `Phrases`) show it found with
+any white space or a line break between its words, behind `=` or `:`, in
+quotes or brackets, in Markdown (`**Name**`, `*Name*`, `_Name_`), in an HTML
+cell (`<td>Name</td>`) or with a tag between its words, in „…“ and «…»,
+with a possessive (`Name's`, `Name’s`), in decomposed Unicode (NFD), with a
+soft hyphen or a zero-width character in it, and as a JSON `\u` escape. The
+match is otherwise exact: `QUILLA EXAMPLESTEIN` is not `Quilla
+Examplestein`, and `Quilla Examplesteiner` is no match.
 
 A tool writes the file in a few lines, for example from a CSV export:
 
@@ -1280,7 +1286,9 @@ with open("people.csv", newline="") as src, open("names.jsonl", "w") as out:
 
 **Import at every session start.** Add the file to the setting `value_files`
 with your own prompt, and maisecrets imports it again at session start when
-it changed, and once a day to keep its values alive:
+it changed, once a day, when one of its values expires within two days and
+when one of its values is gone. Each import renews its values for
+`max_ttl_seconds`:
 
 ```
 /maisecrets:settings value_files add ~/exports/names.jsonl
@@ -1296,13 +1304,23 @@ does not cut it to the lifetime of its type.
 **Limits.** An import only adds: it never deletes, retypes or shortens a value
 the vault holds. So the AI may run it too. It can only make detection
 stricter. To keep a large or crafted file from slowing every hook, an import
-reads at most 1 MB and 2000 values. The vault holds at most 5000 imported
-values; a full vault refuses the next import and drops nothing. A value has 8
-to 512 characters on one line, and a single word of lower-case letters is
-refused as an ordinary word. A value you delete from the file stays masked
-until it expires or you remove the import. Each imported value adds about
-450 bytes to the index that each hook reads: with 6000 stored values a hook
-takes 20 to 35 ms more (measured on Python 3.9 and 3.14).
+reads at most 1 MB and 2000 values, and only a regular file (a pipe or a
+device is refused before a byte is read). The vault holds at most 5000
+imported values; a full vault refuses the next import and drops nothing. An
+import that is not in `value_files` (one the AI ran) fills at most 3000 of
+them, so the rest stays for your files. A value has 8 to 512 characters on one
+line. These are refused: a single word of lower-case letters, a `SECRET`
+without an upper-case letter, a digit or a symbol (ordinary text), and a value
+that holds `maisecrets`, `import:` or a placeholder bracket (so no import can
+block your own `/maisecrets:` prompts). Each import writes a line to
+`events.log`, and the next session start names an import that is new. A value
+you delete from the file stays masked until it expires or you remove the
+import; a value that two imports list stays until you remove both. Each
+imported value adds about 450 bytes to the index that each hook reads. With
+6000 imported names, reading the index and the exact match of a text of 40
+lines took 15 to 35 ms in one process (the fastest of 20 calls, Python 3.9
+and 3.14, measured 2026-10-13), and up to 90 ms while the computer was under
+heavy load.
 
 ## Known gaps (measured or documented)
 

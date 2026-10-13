@@ -515,7 +515,8 @@ def phrase_words(value: str) -> list[str] | None:
     """The words of a value that the hooks find as a phrase: 2 to MAX_PHRASE_WORDS words with one space between
     them. A value with a tab or two spaces in it is matched as before, as a whole token or line."""
     words = value.split()
-    if 2 <= len(words) <= MAX_PHRASE_WORDS and " ".join(words) == value:
+    # < and > split the words of a text (a tag is a separator: hooks._phrase_spans), so a value with them is no phrase
+    if 2 <= len(words) <= MAX_PHRASE_WORDS and " ".join(words) == value and "<" not in value and ">" not in value:
         return words
     return None
 
@@ -542,8 +543,8 @@ class Entry:
     source: str = ""
     # the other imports that list the same value: removing one import keeps a value another one still lists
     also: list = field(default_factory=list)
-    # a value of 2 to 6 words: the word count and the keyed fingerprint of its first word, so the hooks find it as a
-    # phrase and look further only after a word whose fingerprint is a head (hooks._phrase_spans)
+    # a value of 2 to 6 words: the word count and the keyed fingerprint of its first two words, so the hooks find it
+    # as a phrase and look further only after a word pair whose fingerprint is a head (hooks._phrase_spans)
     words: int = 0
     head: str = ""
     # no purged_at field: from_meta drops it, so the proof below can remove the filter and
@@ -1126,7 +1127,8 @@ class Vault:
                   source=source)
         words = phrase_words(value)
         if words:
-            e.words, e.head = len(words), self.fingerprint(words[0])
+            # the head is the first two words: a common first word ("the") would start a look at every occurrence
+            e.words, e.head = len(words), self.fingerprint(" ".join(words[:2]))
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
         self.backend.put(
             key, value,

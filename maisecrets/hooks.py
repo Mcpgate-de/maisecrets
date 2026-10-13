@@ -18,6 +18,7 @@ import json
 import os
 import platform
 import re
+import unicodedata
 import subprocess
 import time
 import sys
@@ -3218,60 +3219,138 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
     return out
 
 
-_WORD_RE = re.compile(r"\S+")
-_PHRASE_OPEN = "\"'`([{<"
-_PHRASE_CLOSE = ".,;:!?\"'`)]}>"
+# a word is a run without white space and without < or >; an HTML or XML tag between two words is a separator
+_WORD_RE = re.compile(r"<[^<>\n]{0,200}>|([^\s<>]+)")
+_ASCII_EDGE = "".join(chr(c) for c in range(33, 127) if not chr(c).isalnum())
+# a JSON \u escape: the phrase pass runs over the unescaped text too ("J\u00f6rg Example" is the stored name)
+_U_ESCAPE_RE = re.compile(r"\\u([0-9a-fA-F]{4})")
+_INVISIBLE = dict.fromkeys(map(ord, "\u00ad\u200b\u200c\u200d\u2060\ufeff"))
+
+
+def _edge(ch: str) -> bool:
+    """Punctuation, a symbol or an invisible format character: what markup and quotes of any script put around a
+    word (**, _, guillemets, a soft hyphen)."""
+    return ch in _ASCII_EDGE if ch < "\x80" else unicodedata.category(ch)[0] in "PSC"
+
+
+def _lstrip_edge(word: str) -> int:
+    i = 0
+    while i < len(word) and _edge(word[i]):
+        i += 1
+    return i
+
+
+def _rstrip_edge(word: str) -> int:
+    j = len(word)
+    while j > 0 and _edge(word[j - 1]):
+        j -= 1
+    return j
+
+
+def _norm(piece: str) -> str:
+    """The form a word is compared in: NFC, no soft hyphen or zero-width character. An ASCII word is itself."""
+    if piece.isascii():
+        return piece
+    return unicodedata.normalize("NFC", piece.translate(_INVISIBLE))
+
+
+def _starts(word: str) -> list[int]:
+    """Where a phrase may start in its first word: at the word, behind an opening quote, bracket or markup, or behind
+    `=` or `:` (owner=Jan)."""
+    out = [0, _lstrip_edge(word)]
+    cut = max(word.rfind("="), word.rfind(":"))
+    if cut >= 0:
+        out.append(cut + 1 + _lstrip_edge(word[cut + 1:]))
+    return [a for a in dict.fromkeys(out) if a < len(word)]
+
+
+def _ends(word: str) -> list[int]:
+    """Where a phrase may end in its last word: at the end, before closing punctuation or markup, or before a
+    possessive 's (Name's, Name\u2019s)."""
+    out = [len(word), _rstrip_edge(word)]
+    j = out[1]
+    if j >= 3 and word[j - 1] in "sS" and word[j - 2] in "'\u2019":
+        out.append(_rstrip_edge(word[:j - 2]))
+    return [b for b in dict.fromkeys(out) if b > 0]
 
 
 def _phrase_spans(text: str, vault: Vault) -> list[tuple[int, int, str]]:
     """(start, end, key) of each stored value of 2 to 6 words in ``text``, longest first, left to right, no overlap.
 
-    The text is read as words (runs without white space). Only a word whose keyed fingerprint is the first word of a
-    stored phrase (`Entry.head`) starts a look at the next words, so a vault without phrases costs nothing, and a
-    phrase costs one fingerprint per distinct word plus one per head found. The first word may carry an opening quote
-    or bracket or sit behind `=` or `:`; the last may carry closing punctuation. White space between the words can be
-    any (a name broken over a line is the same name). No value is read from the store."""
+    The text is read as words (runs without white space, < or >; a tag between two words is a separator). A word pair
+    whose keyed fingerprint is the head of a stored phrase (`Entry.head`, its first two words) starts a look at the
+    next words, so a vault without phrases costs nothing, and the pass costs one fingerprint per distinct word pair
+    plus one per distinct candidate phrase: a common first word repeated costs nothing more (review of block 3, Fable
+    H2). The first word may carry opening punctuation, markup or quotes of any script, or sit behind `=` or `:`; the
+    last may carry closing ones or a possessive 's. Words are compared in NFC without soft hyphens or zero-width
+    characters, and a text with JSON \\u escapes is read unescaped too (Opus H3). No value is read from the store."""
     heads = vault.phrase_heads()
     if not heads:
         return []
-    live = vault.live_fingerprints()
-    words = [(m.start(), m.end()) for m in _WORD_RE.finditer(text)]
     tags: dict[str, str] = {}
+    out = _phrase_pass(text, vault, heads, tags)
+    if "\\u" in text:
+        plain, segs = _unescape(text)
+        if segs:
+            taken = [(s, e) for s, e, _k in out]
+            for s, e, key in _phrase_pass(plain, vault, heads, tags):
+                s, e = _orig_at(segs, s), _orig_at(segs, e)
+                if not any(s < b and a < e for a, b in taken):
+                    out.append((s, e, key))
+                    taken.append((s, e))
+            out.sort()
+    return out
+
+
+def _phrase_pass(text: str, vault: Vault, heads: dict, tags: dict) -> list[tuple[int, int, str]]:
+    live = vault.live_fingerprints()
 
     def tag(piece: str) -> str:
         if piece not in tags:
             tags[piece] = vault.fingerprint(piece)
         return tags[piece]
 
+    words = [(m.start(1), m.end(1)) for m in _WORD_RE.finditer(text) if m.group(1)]
+    # per distinct pair of words: the heads it starts (start in the first word, end in the second, head, counts).
+    # Cached, so a word pair repeated costs one dict lookup, not the edge work again
+    pairs: dict[tuple[str, str], list] = {}
+
+    def heads_of(w0: str, w1: str) -> list:
+        got = pairs.get((w0, w1))
+        if got is None:
+            got = []
+            ends1 = _ends(w1)
+            for a in _starts(w0):
+                first = _norm(w0[a:])
+                for b in ends1:          # the whole second word first (a middle word), then its shorter ends
+                    head = tag(first + " " + _norm(w1[:b]))
+                    if head in heads:
+                        got.append((a, first, b, head, heads[head]))
+            pairs[(w0, w1)] = got
+        return got
+
     out: list[tuple[int, int, str]] = []
     i = 0
-    while i < len(words):
-        start, end = words[i]
-        word = text[start:end]
-        firsts = {word: start}
-        bare = word.lstrip(_PHRASE_OPEN)
-        firsts.setdefault(bare, end - len(bare))
-        cut = max(word.rfind("="), word.rfind(":"))
-        if cut >= 0:
-            after = word[cut + 1:].lstrip(_PHRASE_OPEN)
-            firsts.setdefault(after, end - len(after))
+    while i + 1 < len(words):
         found = None
-        for first, first_at in firsts.items():
-            if not first:
-                continue
-            counts = heads.get(tag(first))
-            for n in counts or ():
-                if i + n > len(words):
+        w1 = text[words[i + 1][0]:words[i + 1][1]]
+        for a, first, b, head, counts in heads_of(text[words[i][0]:words[i][1]], w1):
+            for n in counts:
+                if i + n > len(words) or (n > 2 and b != len(w1)):
                     continue
-                middle = [text[a:b] for a, b in words[i + 1:i + n - 1]]
-                last_start, last_end = words[i + n - 1]
-                last = text[last_start:last_end]
-                for tail in dict.fromkeys((last, last.rstrip(_PHRASE_CLOSE))):
-                    if not tail:
-                        continue
-                    key = live.get(vault.fingerprint(" ".join([first] + middle + [tail])))
+                if n == 2:
+                    key = live.get(head)         # the head of a phrase of two words is the phrase
                     if key is not None:
-                        found = (first_at, last_start + len(tail), key, n)
+                        found = (words[i][0] + a, words[i + 1][0] + b, key, 2)
+                        break
+                    continue
+                middle = [_norm(text[s:e]) for s, e in words[i + 1:i + n - 1]]
+                ls, le = words[i + n - 1]
+                last = text[ls:le]
+                for e in _ends(last):
+                    key = live.get(tag(" ".join([first] + middle + [_norm(last[:e])])))
+                    if key is not None:
+                        found = (words[i][0] + a, ls + e, key, n)
                         break
                 if found:
                     break
@@ -3283,6 +3362,35 @@ def _phrase_spans(text: str, vault: Vault) -> list[tuple[int, int, str]]:
         else:
             i += 1
     return out
+
+
+def _unescape(text: str) -> tuple[str, list[tuple[int, int, int]]]:
+    """The text with each JSON \\u escape replaced by its character, and the segments (plain start, text start, width
+    of one character in the text) that map a plain offset back."""
+    parts: list[str] = []
+    segs: list[tuple[int, int, int]] = []
+    d = o = 0
+    for m in _U_ESCAPE_RE.finditer(text):
+        if m.start() > o:
+            segs.append((d, o, 1))
+            parts.append(text[o:m.start()])
+            d += m.start() - o
+        segs.append((d, m.start(), 6))
+        parts.append(chr(int(m.group(1), 16)))
+        d += 1
+        o = m.end()
+    if not parts:
+        return text, []
+    segs.append((d, o, 1))
+    parts.append(text[o:])
+    return "".join(parts), segs
+
+
+def _orig_at(segs: list[tuple[int, int, int]], pos: int) -> int:
+    import bisect
+    i = bisect.bisect_right([s[0] for s in segs], pos) - 1
+    d, o, w = segs[i]
+    return o + (pos - d) * w
 
 
 def _raw_form(token: str, cand: str) -> str:

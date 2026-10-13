@@ -122,15 +122,16 @@ def _forget_import(v, name: str) -> int:
     if name not in known:
         print(f"import:{name}: not found (/maisecrets:list names each import)")
         return 1
-    deleted, refused = value_import.remove(v, name)
+    deleted, refused, kept = value_import.remove(v, name)
     if refused:
         print(f"import:{name}: {deleted} value(s) deleted; the store refused {refused}, which stay. Try again later.")
         return 1
     listed = _in_value_files(v, name)
     again = (" The file is still in value_files, so the next session start imports it again; "
              f"/maisecrets:settings value_files remove {listed} stops that." if listed else "")
+    stay = (f" {kept} value(s) stay masked: another import lists them too." if kept else "")
     print(f"import:{name}: {deleted} value(s) deleted. maisecrets no longer masks them, and their placeholders no "
-          f"longer resolve.{again}")
+          f"longer resolve.{stay}{again}")
     return 0
 
 
@@ -149,12 +150,15 @@ def cmd_values(args: list[str]) -> int:
     from . import value_import
     if not args or args[0] in ("list", "show"):
         lines = _import_lines(Vault())
-        print("\n".join(lines) if lines else "No values are imported. maisecrets values import FILE adds them.")
+        print("\n".join(lines) if lines else
+              f"No values are imported. {value_import.command('import FILE')} adds them.")
         return 0
     if args[0] == "import" and len(args) == 2:
         try:
             result = value_import.import_file(args[1])
-        except ValueError as exc:
+        except (ValueError, RuntimeError) as exc:
+            # RuntimeError: the vault lock timed out or the index is damaged (LockTimeout, CodedError); a traceback
+            # told the person nothing (review of block 3, LOW)
             print(f"maisecrets values import: {exc}", file=sys.stderr)
             return 1
         print(value_import.summary(result))
@@ -163,8 +167,12 @@ def cmd_values(args: list[str]) -> int:
               f"/maisecrets:list shows the import; /maisecrets:forget import:{result.source} removes it.")
         return 1 if result.refused or result.stopped else 0
     if args[0] == "remove" and len(args) == 2:
-        return _forget_import(Vault(), args[1].removeprefix("import:"))
-    print("usage: maisecrets values [import FILE | remove NAME]\n"
+        try:
+            return _forget_import(Vault(), args[1].removeprefix("import:"))
+        except RuntimeError as exc:
+            print(f"maisecrets values remove: {exc}", file=sys.stderr)
+            return 1
+    print(f"usage: {value_import.command('[import FILE | remove NAME]')}\n"
           "  FILE holds one JSON object per line: {\"value\": \"...\", \"type\": \"NAME\"}\n"
           f"  (type optional, SECRET when missing; one of {', '.join(value_import.TYPES)})", file=sys.stderr)
     return 2

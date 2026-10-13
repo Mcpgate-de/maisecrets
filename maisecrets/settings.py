@@ -163,8 +163,9 @@ def _card(key: str, cfg: dict) -> list[str]:
         if not cfg.get("ssh_consent"):
             lines.append("    It matters only while SSH consent is on.")
     elif key == "value_files":
-        lines.append("    Add: /maisecrets:settings value_files add FILE   (a full path or ~/…; "
-                     "maisecrets values import FILE imports one now)")
+        from .value_import import command
+        lines.append("    Add: /maisecrets:settings value_files add FILE   (a full path or ~/…)")
+        lines.append(f"    Import one now, in a terminal: {command('import FILE')}")
         if value:
             lines.append(f"    Remove: /maisecrets:settings value_files remove {value[0]}")
     elif key == "rule_dirs":

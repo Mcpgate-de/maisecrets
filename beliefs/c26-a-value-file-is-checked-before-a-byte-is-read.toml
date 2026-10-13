@@ -1,0 +1,10 @@
+# c26-a-value-file-is-checked-before-a-byte-is-read: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-value-file-is-checked-before-a-byte-is-read"
+control = "C26"
+statement = "A file of value_files or of an import is opened without blocking and checked on the open descriptor (a regular file, at most 1 MB) before a byte is read, so a pipe or a large file cannot hold or fill a session start."
+runner = ["tests/test_value_import.py::ReviewFixes::test_a_large_file_is_refused_before_a_byte_is_read"]
+
+[proof]
+file = "maisecrets/value_import.py"
+find = "        if info.st_size > MAX_FILE_BYTES:"
+replace = "        if False:"

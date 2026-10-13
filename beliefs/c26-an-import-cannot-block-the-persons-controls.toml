@@ -1,0 +1,10 @@
+# c26-an-import-cannot-block-the-persons-controls: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-import-cannot-block-the-persons-controls"
+control = "C26"
+statement = "An import refuses a value with a placeholder bracket, the plugin's name or import:, so an agent's import cannot block the person's own control prompts or make the person's placeholder resolve to the agent's value."
+runner = ["tests/test_value_import.py::ReviewFixes::test_an_import_refuses_text_of_maisecrets_itself"]
+
+[proof]
+file = "maisecrets/value_import.py"
+find = "    if any(t in folded for t in _CONTROL_TEXT):"
+replace = "    if False:"
