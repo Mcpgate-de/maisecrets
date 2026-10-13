@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 107 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 109 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1170,6 +1170,15 @@ Four sources, one scanner (`maisecrets/detect.py`):
   `<password>Sommer2024!</password>` and `passphrase: correct-horse-battery-staple` stay text,
   as this rule cannot tell such a value from a word or a reference. Word-likeness and the label
   word classes follow Dan Szymkowiak's backlog ideas.
+- A key after a label that names a secret, in a form the keyword rules do not read (0.6.16):
+  `<clientSecret>…</clientSecret>`, `<AccessToken>…</AccessToken>`, a short value
+  (`label-secret-literal`, 8 characters and more); and a quoted key of 12 characters and more
+  after a weak label (`hmac`, `session`, `cookie`, `psk`, `salt`, `seed`, `otp`, `key`,
+  `appKey("…")`, `<key>…</key>`; `label-weak-key`). The value must have few word letters and a
+  high entropy for its alphabet (a charset-normalised entropy, after Dan Szymkowiak's backlog
+  idea). A label that names something else stays text: `public_key`, `cache_key`,
+  `primary_key`, `object_key`, `idempotency_key`, `csrf_token`, a hex value after `key` and any value after
+  `nonce`, `x-amz-signature` or `x-amz-credential`.
 - Four token formats with a public prefix that the vendored rulesets lack (0.6.16): an NTLMSSP
   message in base64 (`Authorization: NTLM TlRMTVNTUA…`), a NATS nkey seed (`SU…`, 58
   characters of base32), a PASERK secret, local or wrapped key (`k4.local.…`, `k4.secret.…`)

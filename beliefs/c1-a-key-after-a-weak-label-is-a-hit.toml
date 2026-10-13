@@ -1,0 +1,10 @@
+# c1-a-key-after-a-weak-label-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-key-after-a-weak-label-is-a-hit"
+control = "C1"
+statement = "A quoted key of 12 characters and more with few word letters and a high normalised entropy after a weak label (hmac, session, cookie, psk, key in a call or an XML element) is a secret hit; public_key, cache_key, primary_key, a nonce and a hex value after key stay text."
+runner = ["tests/test_literal_values.py::SecretLiteralTests::test_a_key_after_a_secret_label_is_a_hit"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''    if (quoted and _WEAK_TAIL_RE.search(full)'''
+replace = '''    if (False and quoted and _WEAK_TAIL_RE.search(full)'''

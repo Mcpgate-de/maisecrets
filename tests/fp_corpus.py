@@ -818,6 +818,17 @@ NO_HIT = [
     ('pw16 password hint', 'pa§sswordHint = "Ihr Lieblingsort"'),
     ('pw16 pass by', "two_pa§ss = 'Lw2Pq'"),
     ('pw16 fstring template', 'line = f\'mysql_p§wd = "{p4}"\''),
+    ('key16 public key json', '"publicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEq8Rz3vXk1yTnM2bP5wLd9QaJ0hUc7FsG"'),
+    ('key16 react key', '<li key={item.id}>{item.name}</li>'),
+    ('key16 cache key', 'cache_key = "user:4711:profile:v3"'),
+    ('key16 session storage', 'const s§ession = sessionStorage.getItem("s§ession")'),
+    ('key16 cookie header', 'cookie: "theme=dark; path=/; SameSite=Lax"'),
+    ('key16 gensalt', 'salt = bcrypt.gensalt(rounds=12)'),
+    ('key16 seed int', 'seed = 42'),
+    ('key16 s3 object key', 'object_key = "uploads/2026/10/report-final.pdf"'),
+    ('key16 idempotency key', 'idempotency_key = "order-4711-retry-2"'),
+    ('key16 ssh host key', 'host_key = "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"'),
+    ('key16 secret ref k8s', '<clientSecret>${KEYCLOAK_CLIENT_S§ECRET}</clientSecret>'),
     ('pw16 format template', 'tmpl = "PA§SSWORD: \'{pw_value}\'"'),
 ]
 

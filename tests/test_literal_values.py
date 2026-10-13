@@ -1,5 +1,5 @@
-"""A label and a literal value that no older rule took (a password that is no word after a password label), and four
-token formats with a public prefix (NTLMSSP, NATS nkey seed, PASERK, PASETO).
+"""A label and a literal value that no older rule took (a password that is no word after a password label, a key
+after a secret label), and four token formats with a public prefix (NTLMSSP, NATS nkey seed, PASERK, PASETO).
 
 Run: python3 -m unittest tests.test_literal_values -v
 Every value is built at run time from a seeded random source, so no literal sits in the tree and the tree scan stays
@@ -99,6 +99,43 @@ class PasswordLiteralTests(unittest.TestCase):
         self.assertIn("Copyright 2000-2026 by Kevin Atkinson", lic)
         self.assertIn(version, lic)
         self.assertIn("words_en.txt", (ROOT / "NOTICE").read_text(encoding="utf-8"))
+
+
+def key(n: int = 16) -> str:
+    """A key: letters of both cases and digits, no word, high entropy."""
+    while True:
+        v = password(n)
+        if detect._norm_entropy(v) >= 0.9 and detect._wordlike(detect._deleet(v)) < 0.15:
+            return v
+
+
+class SecretLiteralTests(unittest.TestCase):
+    """A key after a label that names a secret (label-secret-literal) or may name one (label-weak-key), in forms the
+    keyword rules did not read: an XML element, a call, a session, cookie, HMAC or PSK label."""
+
+    def test_a_key_after_a_secret_label_is_a_hit(self):
+        k12, k16 = key(12), key(16)
+        for rule, text, value in (("label-secret-literal", f"<clientSecret>{k12}</clientSecret>", k12),
+                                  ("label-secret-literal", f"<AccessToken>{k16}</AccessToken>", k16),
+                                  ("label-weak-key", f'hmac = "{k16}"', k16),
+                                  ("label-weak-key", f'session = "{k16}"', k16),
+                                  ("label-weak-key", f'cookie: "{k16}"', k16),
+                                  ("label-weak-key", f'"psk": "{k16}"', k16),
+                                  ("label-weak-key", f'appKey("{k16}")', k16),
+                                  ("label-weak-key", f"<key>{k16}</key>", k16)):
+            with self.subTest(rule=rule, form=text.split(value)[0]):
+                self.assertIn((rule, value), kinds(text))
+
+    def test_a_word_a_public_part_or_a_nonce_stays_text(self):
+        k16 = key(16)
+        hex32 = "".join(RNG.choice("0123456789abcdef") for _ in range(32))
+        texts = [f'public_key = "{k16}"', f'cache_key = "{k16}"', f'primary_key = "{k16}"', f'nonce = "{hex32}"',
+                 f'key = "{hex32}"', 'session = "user-session-cookie"', '<clientSecret>${CLIENT_SECRET}</clientSecret>',
+                 '<AccessToken>{{ access_token }}</AccessToken>', 'hmac = "HMAC-SHA256-SIGNATURE"', f"session: {k16}",
+                 'x-amz-signature: "' + k16 + '"']
+        for text in texts:
+            with self.subTest(text=text.split(" ")[0]):
+                self.assertEqual([k for k, _ in kinds(text) if k in ("label-secret-literal", "label-weak-key")], [])
 
 
 def b64(raw: bytes, url: bool = False) -> str:

@@ -740,11 +740,66 @@ _LIT_SQL_PS = (
 )
 
 
-def _judge_literal(label: str, v: str) -> str:
+# a label that names a secret by its whole tail (`client_secret`, `apiKey`, `x-auth-token`), and a weak label that may
+# name one (`key`, `hmac`, `session`, `cookie`). A word before the tail can make it name something else: password_hint,
+# public_key, cache_key, primary_key, csrf_token, next_page_token
+_SECRET_TAIL_RE = re.compile(r"(?:^|_)(?:secret|token|apikey|api_key|access_key|secret_key|private_key|client_secret"
+                             r"|auth_token|access_token|refresh_token|session_token|bearer|credentials?|app_secret"
+                             r"|consumer_secret|signing_key|encryption_key|master_key|auth_key)$")
+_WEAK_TAIL_RE = re.compile(r"(?:^|_)(?:key|auth|salt|seed|otp|totp|cred|cookie|session|hmac|psk)$")
+_WEAK_NEG_WORDS = frozenset({
+    "public", "pub", "primary", "foreign", "sort", "partition", "cache", "idempotency", "row", "map", "lookup",
+    "cursor", "object", "s3", "dedup", "dedupe", "routing", "shard", "group", "sequence", "index", "composite",
+    "unique", "natural", "surrogate", "react", "list", "item", "translation", "i18n", "locale", "storage", "redis",
+    "memcache", "query", "license", "licence", "product", "registry", "gpg", "pgp", "ssh", "host", "known",
+    "fingerprint", "csrf", "xsrf", "anti", "forgery", "verification", "page", "next", "continuation", "pagination",
+    "sync", "lexer", "tokenizer", "parser", "cancellation", "captcha", "recaptcha"})
+
+
+def _alphabet_size(v: str) -> int:
+    if v.isdigit():
+        return 10
+    if re.fullmatch(r"[0-9a-f]+|[0-9A-F]+", v):
+        return 16
+    size = 26 * (any(c.islower() for c in v) + any(c.isupper() for c in v)) + 10 * any(c.isdigit() for c in v)
+    if any(not c.isalnum() for c in v):
+        size += 2 if re.fullmatch(r"[A-Za-z0-9+/=_-]+", v) else 32
+    return max(size, 2)
+
+
+def _norm_entropy(v: str) -> float:
+    """Shannon entropy over the most the value's alphabet and length allow (0 to 1): a charset-normalised entropy
+    after Dan Szymkowiak's backlog idea (TASK-11.21)."""
+    return shannon_entropy(v) / math.log2(max(2, min(_alphabet_size(v), len(v))))
+
+
+def _key_literal_ok(v: str, lo: int, hi: int, words: float, entropy: float) -> bool:
+    """A key after a secret or a weak label: no space, no placeholder, few word letters, a high normalised entropy,
+    and detect-secrets' filters (templates, references, sequences)."""
+    if not lo <= len(v) <= hi or any(c.isspace() for c in v) or _LITERAL_PLACEHOLDER_RE.search(v):
+        return False
+    return _norm_entropy(v) >= entropy and _ds_value_ok(v, 4) and _wordlike(_deleet(v)) < words
+
+
+def _judge_literal(label: str, v: str, quoted: bool = True) -> str:
     """The rule a label and its literal value fall under, or ""."""
     toks = _norm_label(label)
     if _pw_label(toks) and _pw_literal_ok(v):
         return "label-pw-literal"
+    full = "_".join(toks)
+    # an AWS signature or the key id in a SigV4 scope is no secret value of its own
+    amz = full.startswith("x_amz") or (toks and toks[-1] in ("credential", "signature"))
+    if not full or amz:
+        return ""
+    before = toks[:-1]
+    if (_SECRET_TAIL_RE.search(full) and not any(t in _LABEL_NEG_WORDS or t in _WEAK_NEG_WORDS for t in before)
+            and _key_literal_ok(v, 8, 200, 0.3, 0.8)):
+        return "label-secret-literal"
+    if (quoted and _WEAK_TAIL_RE.search(full)
+            and not any(t in _LABEL_NEG_WORDS or t in _WEAK_NEG_WORDS for t in before)
+            and _key_literal_ok(v, 12, 300, 0.2, 0.85) and not (len(v) == 64 and _charset(v) == "hex")
+            and not (toks[-1] == "key" and _charset(v) == "hex")):
+        return "label-weak-key"
     return ""
 
 
@@ -755,9 +810,9 @@ def _literal_hits(text: str) -> list:
     cache = _INDEX[1]
     if "literal" not in cache:
         hits = []
-        for rx, gl, gv in _LIT_FORMS:
+        for n, (rx, gl, gv) in enumerate(_LIT_FORMS):
             for m in rx.finditer(text):
-                rid = _judge_literal(m.group(gl), m.group(gv))
+                rid = _judge_literal(m.group(gl), m.group(gv), quoted=n != 1)
                 if rid:
                     hits.append((rid, m.start(), m.start(gv), m.end(gv)))
         for rx in _LIT_SQL_PS:
@@ -797,6 +852,9 @@ def _literal_matches(rule_id: str, text: str):
 # took. The keywords skip a text without the label words
 LITERAL_RULES = (
     {"id": "label-pw-literal", "keywords": ("pass", "pw", "pwd", "kennwort", "psw", "identified", "securestring")},
+    {"id": "label-secret-literal", "keywords": ("secret", "token", "key", "bearer", "credential")},
+    {"id": "label-weak-key", "keywords": ("key", "auth", "salt", "seed", "otp", "cred", "cookie", "session", "hmac",
+                                          "psk")},
 )
 _LITERAL_IDS = frozenset(d["id"] for d in LITERAL_RULES)
 
