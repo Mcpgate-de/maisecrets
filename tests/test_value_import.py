@@ -123,8 +123,8 @@ class Contract(Base):
 
     def test_a_name_with_two_spaces_is_the_same_name_and_a_secret_keeps_its_spaces(self):
         items, _r, _d = value_import.parse(lines({"value": "Quilla  Examplestein ", "type": "NAME"},
-                                                 {"value": "pass  phrase  synth"}))
-        self.assertEqual([v for v, _t, _n in items], [NAME, "pass  phrase  synth"])
+                                                 {"value": "Pass  phrase  synth"}))
+        self.assertEqual([v for v, _t, _n in items], [NAME, "Pass  phrase  synth"])
 
 
 class ImportCommand(Base):
@@ -180,7 +180,8 @@ class Caps(Base):
     def test_a_full_vault_refuses_the_import_and_drops_nothing_it_holds(self):
         mine = Vault().put(SHAPELESS, "SECRET", "manual")
         values = synth_names(12)
-        with mock.patch.object(value_import, "MAX_IMPORTED", 10):
+        with mock.patch.object(value_import, "MAX_IMPORTED", 10), \
+                mock.patch.object(value_import, "MAX_IMPORTED_BY_RUN", 10):
             first = value_import.import_file(self.file(lines(*values[:8]), "a.jsonl"))
             second = value_import.import_file(self.file(lines(*values[8:]), "b.jsonl"))
             third = value_import.import_file(self.file(lines(*values[10:]), "c.jsonl"))
@@ -475,6 +476,177 @@ class SessionStartImport(Base):
     def test_a_missing_file_is_named_and_stops_nothing(self):
         cfg = {**load_config(), "value_files": [str(self.tmp / "gone.jsonl")]}
         self.assertIn("gone.jsonl: cannot be read", value_import.session_import(cfg))
+
+
+class ReviewFixes(Base):
+    """The findings of the block 3 review (Gate A Fable, Gate B Opus): each test names its finding."""
+
+    def blocked_for_a_value(self, prompt: str, client: dict) -> bool:
+        hooks._live_cache.clear()
+        with mock.patch.object(hooks, "_clipboard", return_value=False):   # never the real clipboard tool
+            r = hooks.user_prompt({"prompt": prompt, "session_id": "S2", "source": "user", **client})
+        return r.get("decision") == "block" and "maisecrets: a settings" not in r.get("reason", "") and (
+            OPEN in r.get("reason", "") or "placeholder" in r.get("reason", ""))
+
+    # Opus H1: an import cannot lock the person out of the controls
+    def test_an_import_refuses_text_of_maisecrets_itself(self):
+        texts = ["/maisecrets:forget", "/maisecrets:send", "maisecrets: set", "import:helper.jsonl",
+                 "Use " + ref("SECRET_c1") + " now", "x" + OPEN + "SECRET_c2", "MAISECRETS-Synth-Value"]
+        items, refused, _d = value_import.parse(lines(*({"value": t} for t in texts)))
+        self.assertEqual(items, [])
+        self.assertEqual({why for _n, why in refused}, {"holds text of maisecrets itself (a placeholder bracket, "
+                                                         "maisecrets or import:)"})
+
+    def test_a_stored_value_in_the_command_of_a_control_prompt_blocks_nothing(self):
+        # a value stored by another path (a tool result) that is the command or the import name of a control prompt
+        Vault().put_many([("/maisecrets:send", "SECRET", "manual"), ("import:helper.jsonl", "SECRET", "manual"),
+                          ("maisecrets: set", "SECRET", "manual"), (SHAPELESS, "SECRET", "manual")])
+        for client in (CLAUDE, CODEX):
+            for prompt in ("/maisecrets:send", "/maisecrets:forget import:helper.jsonl"):
+                with self.subTest(prompt=prompt, client=client):
+                    self.assertFalse(self.blocked_for_a_value(prompt, client))
+            with self.subTest(rest="a stored value after the command is still taken out", client=client):
+                self.assertTrue(self.blocked_for_a_value(f"/maisecrets:forget {SHAPELESS}", client))
+
+    # Fable H1: a listed file is checked before a byte is read
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "no FIFO on this system")
+    def test_a_fifo_in_value_files_does_not_hang_the_session_start(self):
+        fifo = self.tmp / "names.jsonl"
+        os.mkfifo(fifo)
+        cfg = {**load_config(), "value_files": [str(fifo)]}
+        import threading
+        out: list = []
+        t = threading.Thread(target=lambda: out.append(value_import.session_import(cfg)), daemon=True)
+        t.start()
+        t.join(5)
+        self.assertFalse(t.is_alive(), "the session start waited for a writer of the FIFO")
+        self.assertIn("names.jsonl: not a file", out[0])
+        with self.assertRaisesRegex(ValueError, "not a file"):
+            value_import.import_file(fifo)
+
+    def test_a_large_file_is_refused_before_a_byte_is_read(self):
+        big = self.tmp / "big.jsonl"
+        with open(big, "wb") as f:
+            f.truncate(400 * 1024 * 1024)          # sparse: no disk, but a read would take 400 MB of memory
+        read: list[int] = []
+        real = os.read
+
+        def spy(fd, n):
+            data = real(fd, n)
+            read.append(len(data))
+            return data
+        cfg = {**load_config(), "value_files": [str(big)]}
+        with mock.patch.object(value_import.os, "read", spy):
+            note = value_import.session_import(cfg)
+            with self.assertRaisesRegex(ValueError, "over the limit"):
+                value_import.import_file(big)
+        self.assertIn("over the limit", note)
+        self.assertEqual(sum(read), 0)
+
+    def test_a_file_that_grows_past_the_cap_is_read_to_the_cap_plus_one_byte(self):
+        f = self.file(lines(*synth_names(3)))
+        real = os.fstat
+
+        class Small:
+            def __init__(self, st):
+                self.st_mode, self.st_size = st.st_mode, 10
+        with open(f, "ab") as fh:
+            fh.write(b"#" * (value_import.MAX_FILE_BYTES + 10))
+        with mock.patch.object(value_import.os, "fstat", lambda fd: Small(real(fd))):
+            with self.assertRaisesRegex(ValueError, "over the limit"):
+                value_import.read_capped(f)
+
+    # Fable M2: an agent cannot mask ordinary text silently
+    def test_a_secret_of_lower_case_words_is_refused(self):
+        items, refused, _d = value_import.parse(lines({"value": "the meeting is at noon"},
+                                                      {"value": "the meeting is at noon", "type": "NAME"},
+                                                      {"value": "pass-phrase synth"}, {"value": "Pass phrase synth"}))
+        self.assertEqual([v for v, _t, _n in items], ["the meeting is at noon", "pass-phrase synth",
+                                                       "Pass phrase synth"])
+        self.assertEqual(refused, [(1, "ordinary text (a SECRET needs an upper-case letter, a digit or a symbol)")])
+
+    def test_each_import_writes_one_events_line_and_the_next_start_names_a_new_import_once(self):
+        self.run_cli("values", "import", str(self.file(lines({"value": NAME, "type": "NAME"}), "agent.jsonl")))
+        events = [json.loads(x) for x in (HOME / "events.log").read_text().splitlines()]
+        self.assertEqual([(e["hook"], e["client"], e["hits"][0]["key"]) for e in events],
+                         [("ValueImport", "run", "import:agent.jsonl")])
+        self.assertNotIn("Examplestein", (HOME / "events.log").read_text())
+        note = value_import.session_import(load_config())
+        self.assertIn("import:agent.jsonl (NAME 1)", note)
+        self.assertNotIn("Examplestein", note)
+        self.assertIsNone(value_import.session_import(load_config()), "said once")
+
+    # Fable H2 / Opus M1: a re-import renews past max_ttl, and before the values expire
+    def test_a_reimport_renews_the_lifetime_past_the_first_max_ttl(self):
+        f = self.file(lines({"value": NAME, "type": "NAME"}))
+        value_import.import_file(f)
+        v = Vault()
+        with v._exclusive():
+            meta = v._index["entries"]["NAME_c1"]
+            meta["expires"] = meta["max_expires"] = time.time() + 100      # day 30 of the first import
+        value_import.import_file(f)
+        meta = Vault()._index["entries"]["NAME_c1"]
+        month = load_config()["max_ttl_seconds"]
+        self.assertGreater(meta["max_expires"] - time.time(), month - 60)
+        self.assertGreater(meta["expires"] - time.time(), month - 60)
+
+    def test_a_value_file_is_imported_again_when_a_value_expires_soon_or_one_is_gone(self):
+        f = self.file(lines({"value": NAME, "type": "NAME"}, {"value": LONG_NAME, "type": "NAME"}))
+        cfg = {**load_config(), "value_files": [str(f)]}
+        value_import.session_import(cfg)
+        self.assertIsNone(value_import.session_import(cfg))
+        Vault().forget("NAME_c2")
+        self.assertIn("imported 1 value(s)", value_import.session_import(cfg), "a value is gone: imported again")
+        v = Vault()
+        with v._exclusive():
+            v._index["entries"]["NAME_c1"]["expires"] = time.time() + 3600
+        value_import.session_import(cfg)
+        self.assertGreater(Vault()._index["entries"]["NAME_c1"]["expires"] - time.time(), 86400 * 2,
+                           "expiring within two days: imported again, which renews it")
+
+    # Opus M1: the imports an agent runs cannot take the room of the person's value files
+    def test_run_imports_leave_room_for_the_value_files(self):
+        with mock.patch.object(value_import, "MAX_IMPORTED", 10), \
+                mock.patch.object(value_import, "MAX_IMPORTED_BY_RUN", 6):
+            run = value_import.import_file(self.file(lines(*synth_names(10)[:8]), "agent.jsonl"))
+            f = self.file(lines(*synth_names(14)[10:]), "team.jsonl")
+            value_import.session_import({**load_config(), "value_files": [str(f)]})
+        self.assertEqual(run.stored, 6)
+        self.assertIn("of an import that is no value file", value_import.summary(run))
+        self.assertEqual(value_import.counts_by_source(Vault())["team.jsonl"], {"NAME": 4})
+
+    # Opus M2: a value two imports list stays when one of them is removed
+    def test_a_value_in_two_imports_stays_until_both_are_removed(self):
+        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "a.jsonl"))
+        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "b.jsonl"))
+        self.assertEqual(value_import.counts_by_source(Vault()), {"a.jsonl": {"NAME": 1}, "b.jsonl": {"NAME": 1}})
+        self.assertEqual(value_import.remove(Vault(), "a.jsonl"), (0, 0))
+        self.assertNotIn("Examplestein", redact(f"by {NAME}"))
+        self.assertEqual(value_import.remove(Vault(), "b.jsonl"), (1, 0))
+        self.assertEqual(redact(f"by {NAME}"), f"by {NAME}")
+
+    # Opus M3: removing an import writes the index once per batch, not once per value
+    def test_removing_an_import_writes_the_index_once_per_batch(self):
+        value_import.import_file(self.file(lines(*synth_names(450))))
+        writes = []
+        real = Vault._save_index
+
+        def count(self):
+            writes.append(1)
+            return real(self)
+        with mock.patch.object(Vault, "_save_index", count):
+            deleted, refused = value_import.remove(Vault(), "names.jsonl")
+        self.assertEqual((deleted, refused), (450, 0))
+        self.assertLessEqual(len(writes), 2 * (450 // value_import.FORGET_BATCH + 2))
+
+    def test_remove_counts_only_values_deleted_now(self):
+        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}, {"value": LONG_NAME,
+                                                                                    "type": "NAME"})))
+        v = Vault()
+        with v._exclusive():
+            v._index["entries"]["NAME_c1"]["expires"] = time.time() - 1
+        Vault().expire(limit=None)
+        self.assertEqual(value_import.remove(Vault(), "names.jsonl"), (1, 0))
 
 
 class EndToEnd(Base):

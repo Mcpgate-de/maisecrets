@@ -711,8 +711,19 @@ def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str 
         # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
         # from 8 characters; a shorter one would block ordinary words in a prompt.
         resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]
-        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values)
+        # the command of a maisecrets control prompt and the import it names are the person's controls: a stored
+        # value there (an agent can import one) must not block /maisecrets:forget or /maisecrets:send (Opus H1)
+        pieces = []
+        for i, part in enumerate(_CONTROL_PARTS_RE.split(rewritten) if _CONTROL_HEAD_RE.match(rewritten)
+                                 else [rewritten]):
+            pieces.append(part if i % 2 else _exact_redact(part, vault, session, stored, entries, resolved, values))
+        rewritten = "".join(pieces)
     return rewritten, entries, values, stored
+
+
+_CONTROL_HEAD_RE = re.compile(r"\s*(?:/maisecrets:[\w-]+|maisecrets:\s*\w+)", re.I)
+# split keeps the control parts at the odd places: the command, and an import:NAME argument
+_CONTROL_PARTS_RE = re.compile(r"(\A\s*(?:/maisecrets:[\w-]+|maisecrets:\s*\w+)|(?<!\S)import:\S+)", re.I)
 
 
 def _run_sh() -> str:

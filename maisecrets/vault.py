@@ -540,6 +540,8 @@ class Entry:
     weak: bool = False
     # where an imported value came from (`maisecrets values import`, value_files): the import's name, else ""
     source: str = ""
+    # the other imports that list the same value: removing one import keeps a value another one still lists
+    also: list = field(default_factory=list)
     # a value of 2 to 6 words: the word count and the keyed fingerprint of its first word, so the hooks find it as a
     # phrase and look further only after a word whose fingerprint is a head (hooks._phrase_spans)
     words: int = 0
@@ -1157,6 +1159,14 @@ class Vault:
                 e = Entry.from_meta(self._index["entries"][existing])
                 if session and session not in e.sessions:
                     e.sessions.append(session)
+                if source and e.source:
+                    # an import that lists an imported value again re-affirms it: it lives max_ttl from now, past the
+                    # end the first import set (review of block 3: a value file renewed nothing after 30 days)
+                    if source != e.source and source not in e.also:
+                        e.also.append(source)
+                    now = time.time()
+                    e.max_expires = max(e.max_expires, now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)))
+                    e.expires = max(e.expires, min(now + int(ttl or 0), e.max_expires))
                 self._touch(e, save=False)
                 dirty = True
                 out.append(e)
@@ -1414,6 +1424,38 @@ class Vault:
         # where a forgotten secret went is the person's to delete too; a record that could not be written is said
         self.destinations_kept = not destinations.forget([key])
         return "ok"
+
+    @_mutating
+    def forget_many(self, keys: list[str]) -> dict[str, str]:
+        """forget() for many keys in one hold of the lock and one index write: key -> "ok" | "metadata" | "unknown" |
+        "store".
+        Removing an import of 2,000 values called forget() per value and took 58.8 s (review of block 3, Opus M3)."""
+        out: dict[str, str] = {}
+        gone: list[str] = []
+        for key in keys:
+            meta = self._index["entries"].get(key)
+            if meta is None:
+                out[key] = "unknown"
+                continue
+            if not meta.get("purged"):
+                try:
+                    self.backend.delete(key)
+                except RuntimeError:
+                    out[key] = "store"
+                    continue
+            fp = meta.get("fingerprint")
+            del self._index["entries"][key]
+            if fp and self._index["by_fingerprint"].get(fp) == key:
+                del self._index["by_fingerprint"][fp]
+            # an entry the sweep purged had no value left: its metadata goes, but no value was deleted now
+            out[key] = "metadata" if meta.get("purged") else "ok"
+            gone.append(key)
+        if gone:
+            self._drop_derived()
+            self._save_index()
+            from . import destinations
+            self.destinations_kept = not destinations.forget(gone)
+        return out
 
     @_mutating
     def expire(self, limit: int | None = 25) -> int:
