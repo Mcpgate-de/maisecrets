@@ -76,14 +76,15 @@ class PasswordLiteralTests(unittest.TestCase):
     def test_a_label_that_names_something_else_is_no_hit(self):
         v = password(10)
         for label in ("password_hint", "passwordPolicy", "password_regex", "new_password_title", "password_field",
-                      "password_hash", "bypass", "compass", "two_pass", "PASSWORD_MIN_LENGTH", "skip_pw"):
-            text = f'{label} = "{v}"'
-            with self.subTest(label=label):
-                self.assertEqual([k for k, _ in kinds(text) if k == "label-pw-literal"], [])
+                      "password_hash", "bypass", "compass", "two_pass", "PASSWORD_MIN_LENGTH", "skip_pw",
+                      "hashed_password", "encrypted_password", "show_password", "input_password"):
+            for text in (f'{label} = "{v}"', f"<{label}>{v}</{label}>"):   # the XML form no keyword rule reads
+                with self.subTest(text=text.replace(v, "<v>")):
+                    self.assertEqual([k for k, _ in kinds(text) if k == "label-pw-literal"], [])
 
     def test_the_word_list_is_read_only_after_a_password_label(self):
         detect._WORDS.clear()
-        detect.scan("def handler(event):\n    return {'status': 200, 'body': event['id']}\n" * 50)
+        detect.scan("def handler(event):\n    return {'status': 'active', 'region': 'eu-west-1'}\n" * 50)
         self.assertEqual(detect._WORDS, [], "text without a password label read the word list")
         detect.scan(f'password = "{password(10)}"')
         self.assertEqual(len(detect._WORDS), 1)
@@ -128,9 +129,13 @@ class SecretLiteralTests(unittest.TestCase):
 
     def test_a_word_a_public_part_or_a_nonce_stays_text(self):
         k16 = key(16)
-        hex32 = "".join(RNG.choice("0123456789abcdef") for _ in range(32))
+        while True:   # a hex value no word letters cover, so only its label decides
+            hex32 = "".join(RNG.choice("0123456789abcdef") for _ in range(32))
+            if detect._wordlike(hex32) < 0.1 and detect._norm_entropy(hex32) >= 0.9:
+                break
         texts = [f'public_key = "{k16}"', f'cache_key = "{k16}"', f'primary_key = "{k16}"', f'nonce = "{hex32}"',
-                 f'key = "{hex32}"', 'session = "user-session-cookie"', '<clientSecret>${CLIENT_SECRET}</clientSecret>',
+                 f'key = "{hex32}"', f"<key>{hex32}</key>", f"<nonce>{hex32}</nonce>",
+                 f"<X-Amz-Credential>{k16}</X-Amz-Credential>", 'session = "user-session-cookie"', '<clientSecret>${CLIENT_SECRET}</clientSecret>',
                  '<AccessToken>{{ access_token }}</AccessToken>', 'hmac = "HMAC-SHA256-SIGNATURE"', f"session: {k16}",
                  'x-amz-signature: "' + k16 + '"']
         for text in texts:
