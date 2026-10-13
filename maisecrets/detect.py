@@ -487,6 +487,57 @@ def _prose_value_ok(v: str) -> bool:
             and any(c.isdigit() for c in v) and any(c.isalpha() for c in v))
 
 
+_DIGEST_PREFIX_RE = re.compile(r"(?i)(?:sha\d*|md5|blake\w*|h1)[-:]")
+# words and numbers run together: ProdDbPassword2024Rotated, Authentication123, SECRET_NAME_2024. A word has two
+# letters at least; a random key has a lone letter (a capital before a digit, a small letter between digits) in it
+_WORDS_RUN_RE = re.compile(r"(?:[A-Z][a-z]+|[a-z]{2,}|[A-Z]{2,}(?![a-z])|\d+|[_.-])+")
+
+
+def _keylike(v: str) -> bool:
+    """A capital, a small letter and a digit, and not words run together."""
+    return (any(c.isupper() for c in v) and any(c.islower() for c in v) and any(c.isdigit() for c in v)
+            and not _WORDS_RUN_RE.fullmatch(v))
+
+
+# values in a list of secrets that are no key: a password hash, a name with a scheme (arn:aws:…, urn:…)
+# ($2b$…, $argon2id$…), an Ethereum address (0x and 40 hex), an id with a type prefix (pm_…, sess_…, cus_…). Hex
+# alone and base58 stay values here: every label of label-secret-list names secrets (a commit, an ObjectId or a
+# Solana mint sits in a list of tokens or ids, which the rule does not read; a base58 check lost 12 % of random keys)
+_LIST_NOT_A_KEY_RE = re.compile(r"\$[\w-]+\$.*|[a-z][\w+.-]*:.*|0x[0-9a-fA-F]+|[a-z]{2,6}_[A-Za-z0-9_-]+")
+# a path has a segment of small letters between slashes (base64 has a slash too, but rarely a word between two)
+_PATH_SEGMENT_RE = re.compile(r"(?:^|/)[a-z][a-z_.-]{2,}/")
+# a word part: two small letters or more after an optional capital, or three capitals or more; it counts as a word
+# when it has a vowel (and three letters, unless all small)
+_WORD_PART_RE = re.compile(r"[A-Z]?[a-z]{2,}|[A-Z]{3,}")
+_VOWEL_RE = re.compile(r"[aeiouyAEIOUY]")
+
+
+def _word_shaped(v: str) -> bool:
+    """Words make up 60 % of the value or more: TokenizerPiece2024X, iPhone15ProMax, convertToUTF8String. Measured on
+    random keys of 16 to 64 characters (base64): 2.6 % are word-shaped by this test."""
+    words = (w for w in _WORD_PART_RE.findall(v) if _VOWEL_RE.search(w) and (len(w) >= 3 or w.islower()))
+    return sum(len(w) for w in words) >= 0.6 * len(v)
+
+
+def _list_value_ok(v: str) -> bool:
+    """A value in a list after a secret label (label-secret-list): hex of 16 or more with a letter and a digit, or 16
+    or more characters that _keylike takes and that are not word-shaped. A path, a password hash, a name with a
+    scheme, an address, a typed id, a digest with its algorithm and a filler are no key. Cheap
+    checks first: this runs on each value of a list before the filters of scan()."""
+    v = v.strip()
+    if len(v) < 16 or " " in v or _LIST_NOT_A_KEY_RE.fullmatch(v) or _DIGEST_PREFIX_RE.match(v):
+        return False
+    if _PATH_SEGMENT_RE.search(v):   # projects/p/secrets/db, secret/data/app, /run/secrets/x
+        return False
+    if shannon_entropy(v) < 2.5:
+        return False
+    if re.fullmatch(r"[0-9a-fA-F]+", v):
+        ok = any(c.isdigit() for c in v) and any(c.isalpha() for c in v)
+    else:
+        ok = _keylike(v) and not _word_shaped(v)
+    return ok and _ds_value_ok(v, min_len=16)
+
+
 VALIDATORS = {
     "ds_value": _ds_value_ok,
     "word_value": _word_value_ok,
@@ -614,6 +665,17 @@ OWN_RULES: list[dict] = [
     {"id": "label-prose-password", "type": "SECRET", "secret_group": 1, "validator": "prose_value",
      "regex": r"(?i)(?<![\w-])(?:password|passwd|passphrase)[ \t]+(?:is|was)[ \t]*:?[ \t]+"
               r"[\"'„“]?([^\s\"'“”]{0,255}[^\s\"'“”.,;:!?)])[\"'“”]?(?=[.,;:!?)]*(?:[\s\"'<\\]|$))"},
+    # each quoted value of a list after a label that names secrets: `"api_keys": ["<v1>", "<v2>"]`,
+    # `passwords = ['<v1>']`, Go `Secrets: []string{"<v1>"}`. The label rules took no value that starts with a
+    # bracket, so a whole list of keys stayed in the clear. Only a label that names secrets and nothing else: a bare
+    # `tokens` is the output of a tokenizer, and code_tokens, cache_tokens or revokedTokens name no secret (Gate B of
+    # 0.6.16: 30 false alarms in developer text). The regex finds the label and the opening bracket; _list_matches
+    # reads the values and keeps only those that look like a key (_list_value_ok). No tuple: the Elasticsearch client
+    # takes api_key=("<id>", "<key>"), and the id is public
+    {"id": "label-secret-list", "type": "SECRET", "secret_group": 2,
+     "regex": r"(?i)(?<![\w$.-])[\"']?(passwords?|passwd|secrets?|api[_-]?(?:keys?|tokens?|secrets?)"
+              r"|(?:access|auth|refresh|bearer)[_-]?tokens?|client[_-]?secrets?|private[_-]?keys?|secret[_-]?keys?"
+              r"|credentials)[\"']?[ \t]*(?::=|=>|[:=])[ \t]*(\[\][\w.]*[ \t]*\{|[\w.]*\[\][ \t]*\{|\[)"},
 ]
 
 
@@ -1185,6 +1247,9 @@ def _matches(rule: Rule, text: str):
     if curl is not None:
         yield from _curl_matches(curl, text)
         return
+    if rule.id == "label-secret-list":
+        yield from _list_matches(rule, text)
+        return
     kw = _WINDOWED.get(rule.id)
     if kw is not None and len(text) > 4096:
         yield from _windowed(rule, kw, text)
@@ -1270,6 +1335,31 @@ def _curl_matches(parts, text: str):
             breaks += run % 2                    # two line feeds in a row are one `[\r\n]{1,2}`
         if breaks <= 5:
             yield _Spanned(t, starts[i], text)
+
+
+# one quoted value of a list and what follows it: a comma (the next value) or the closing bracket. Up to two line
+# breaks around it: a list written one value per line
+_LIST_ITEM_RE = re.compile(r"[ \t]*(?:\r?\n[ \t]*){0,2}([\"'`])([^\"'`\\\n]{1,256})\1"
+                           r"[ \t]*(?:\r?\n[ \t]*){0,2}(,|[\]})])")
+_LIST_MAX_CHARS = 1 << 20   # one list is read to its end, up to 1 MB: a long list is never left half masked
+
+
+def _list_matches(rule: Rule, text: str):
+    """Each quoted value of the list that starts after a label of label-secret-list and that looks like a key
+    (_list_value_ok), as group 2 of a match whose group 0 starts at the label. The values are checked here, before
+    the filters of scan(): a list of 10,000 words cost each word the whole chain. The list ends at its closing
+    bracket, at a value that is not a quoted string, or _LIST_MAX_CHARS after its label."""
+    for lab in rule.regex.finditer(text):
+        pos, stop = lab.end(), lab.end() + _LIST_MAX_CHARS
+        while pos < stop:
+            it = _LIST_ITEM_RE.match(text, pos)
+            if it is None:
+                break
+            if _list_value_ok(it.group(2)):
+                yield _Spanned(it, lab.start(), text)
+            if it.group(3) != ",":
+                break
+            pos = it.end()
 
 
 class _Spanned:
