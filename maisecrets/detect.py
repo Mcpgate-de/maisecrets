@@ -354,19 +354,6 @@ def _short_word(v: str) -> bool:
     return len(words) <= 3 or any(x in _IDENT_WORDS for x in words)
 
 
-_RUN_RE = re.compile(r"[a-z]+|[0-9]+")
-
-
-def _ascending_runs(low: str) -> bool:
-    """abc123def456, abcd1234: two or more runs of letters and digits, each counting up by one and at least three
-    long. Documentation writes them as an example password; an AWS SDK model repeats one 39 times, and Samsung CredData
-    marks those rows as no credential (2026-10-12)."""
-    runs = _RUN_RE.findall(low)
-    if len(runs) < 2 or "".join(runs) != low:
-        return False
-    return all(len(r) >= 3 and all(ord(r[i + 1]) - ord(r[i]) == 1 for i in range(len(r) - 1)) for r in runs)
-
-
 def _ds_value_ok(v: str, min_len: int = 8) -> bool:
     """Port of detect-secrets' heuristic filters for keyword hits."""
     v = v.strip()
@@ -422,8 +409,6 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
     if len(set(low)) <= 1:
         return False
     if all(ord(low[i + 1]) - ord(low[i]) == 1 for i in range(len(low) - 1)):
-        return False
-    if _ascending_runs(low):
         return False
     if low.startswith(("\u27e6", "<")) and "_c" in low:
         return False

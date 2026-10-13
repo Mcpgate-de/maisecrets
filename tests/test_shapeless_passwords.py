@@ -175,15 +175,13 @@ class EscapedJsonTests(unittest.TestCase):
             with self.subTest(text=text.replace(h, "<h>")):
                 self.assertEqual(found(text), [])
 
-    def test_an_example_of_ascending_runs_is_no_hit_and_a_value_beside_it_is(self):
-        # documentation writes runs that count up as an example password (an AWS SDK model, 39 rows in CredData)
-        example = J(["abc", "123", "xyz", "789"])
-        other = J(["abc", "132", "xyz", "789"])
-        self.assertEqual(found(f'{{\\"username\\":\\"bob\\",\\"{PW}\\":\\"{example}\\"}}'), [])
-        self.assertEqual(found(f"{PW}: {J(['abcd', '1234'])}"), [])
-        self.assertEqual(found(f'{{\\"{PW}\\":\\"{other}\\"}}'), [("SECRET", other)])
-        short_runs = J(["ab", "12", "cd", "34", "ef"])   # runs of two are no pattern a reader takes for filler
-        self.assertEqual(found(f"{PW}: {short_runs}"), [("SECRET", short_runs)])
+    def test_runs_that_count_up_after_a_label_stay_a_hit(self):
+        # 0.6.14 found these after a password label; a filter for an AWS documentation example (abc+123+xyz+789)
+        # dropped them in a candidate of 0.6.15 and was taken out (codex review of the release): detection only grows
+        for v in (J(["abcd", "1234"]), J(["abc", "123", "xyz", "789"]), J(["ab", "12", "cd", "34", "ef"])):
+            with self.subTest(shape=re.sub(r"[0-9]", "9", re.sub(r"[a-z]", "a", v))):
+                self.assertEqual(found(f"{PW}: {v}"), [("SECRET", v)])
+                self.assertEqual(found(f'{{\\"{PW}\\":\\"{v}\\"}}'), [("SECRET", v)])
 
     def test_an_unquoted_value_reads_the_same_escaped_and_plain(self):
         # an escaped null was a hit and a plain one was not: the comma before the escaped quote stayed in the value
