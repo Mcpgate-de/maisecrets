@@ -100,32 +100,25 @@ def _destination_lines(rec: dict, shown_before: float) -> list[str]:
 
 
 IMPORT_REMOVAL_ONLY_BY_PROMPT = ("removing an import takes your own prompt: /maisecrets:forget import:NAME (in Codex: "
-                                 "maisecrets: forget import:NAME), or this command in your own terminal. An import "
-                                 "removed makes detection weaker, so the AI cannot do it (C26).")
+                                 "maisecrets: forget import:NAME). An import removed makes detection weaker, so no "
+                                 "command removes one, only your typed prompt (C26).")
 
 
-def _person_at_a_terminal() -> bool:
-    """The person runs this in their own terminal: stdin and stdout are a terminal. An agent's Bash call has none."""
-    try:
-        return sys.stdin.isatty() and sys.stdout.isatty()
-    except (AttributeError, ValueError):
-        return False
-
-
-def cmd_forget(args: list[str], person: bool = False) -> int:
-    """``person``: the prompt hook runs this for a prompt the person typed (hooks.user_prompt); only then, or in the
-    person's own terminal, does an `import:NAME` argument remove an import."""
+def cmd_forget(args: list[str], person: bool = False, deadline: float | None = None) -> int:
+    """``person``: the prompt hook runs this for a prompt the person typed (hooks.user_prompt); only then does an
+    `import:NAME` argument remove an import. A command never does: a terminal check trusted `script`, which gives any
+    command a terminal (verification of block 3). ``deadline`` ends a long removal; the rest follows the next prompt."""
     if not args:
         print("usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets:list shows them)", file=sys.stderr)
         return 2
     v, rc = Vault(), 0
     for raw in args:
         if raw.startswith("import:"):
-            if not (person or _person_at_a_terminal()):
+            if not person:
                 print(f"{raw}: not removed; {IMPORT_REMOVAL_ONLY_BY_PROMPT}")
                 rc = max(rc, 1)
                 continue
-            rc = max(rc, _forget_import(v, raw[len("import:"):]))
+            rc = max(rc, _forget_import(v, raw[len("import:"):], deadline))
             continue
         key = raw.strip("⟦⟧").split(":", 1)[0]
         status = v.forget(key)
@@ -142,16 +135,19 @@ def cmd_forget(args: list[str], person: bool = False) -> int:
     return rc
 
 
-def _forget_import(v, name: str) -> int:
+def _forget_import(v, name: str, deadline: float | None = None) -> int:
     from . import value_import
     known = {r["name"] for r in value_import.sources(v)}
     if name not in known:
         print(f"import:{name}: not found (/maisecrets:list names each import)")
         return 1
-    deleted, refused, kept = value_import.remove(v, name)
+    deleted, refused, kept, left = value_import.remove(v, name, deadline)
     others = ", ".join(f"import:{n} ({c})" for n, c in sorted(kept.items()))
     if refused:
         print(f"import:{name}: {deleted} value(s) deleted; the store refused {refused}, which stay. Try again later.")
+        return 1
+    if left:
+        print(f"import:{name}: {deleted} value(s) deleted, {left} left; send the same prompt again to finish.")
         return 1
     listed = _in_value_files(v, name)
     # the path is not printed: its file name can be one of its values (value_import.source_name)
@@ -198,14 +194,8 @@ def cmd_values(args: list[str]) -> int:
               f"/maisecrets:list shows the import; /maisecrets:forget import:{result.source} removes it.")
         return 1 if result.refused or result.stopped else 0
     if args[0] == "remove" and len(args) == 2:
-        if not _person_at_a_terminal():
-            print(f"maisecrets: {IMPORT_REMOVAL_ONLY_BY_PROMPT}", file=sys.stderr)
-            return 1
-        try:
-            return _forget_import(Vault(), args[1].removeprefix("import:"))
-        except RuntimeError as exc:
-            print(f"maisecrets: the removal failed: {exc}", file=sys.stderr)
-            return 1
+        print(f"maisecrets: {IMPORT_REMOVAL_ONLY_BY_PROMPT}", file=sys.stderr)
+        return 1
     print(f"usage: {value_import.command('[import FILE | remove NAME]')}\n"
           "  FILE holds one JSON object per line: {\"value\": \"...\", \"type\": \"NAME\"}\n"
           f"  (type optional, SECRET when missing; one of {', '.join(value_import.TYPES)})", file=sys.stderr)

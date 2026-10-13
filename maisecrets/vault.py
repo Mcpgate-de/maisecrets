@@ -1623,7 +1623,7 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
             problems.append("destinations.json not deleted")
         from . import incidents
         incidents.clear(HOME)              # the incident record, its aside, lock and temp files, the markers
-        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced"):
+        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced", ".values-state"):
             try:
                 (HOME / name).unlink()
             except FileNotFoundError:

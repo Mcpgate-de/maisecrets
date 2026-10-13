@@ -85,9 +85,12 @@ class Base(unittest.TestCase):
         """The id of the import of a file in self.tmp (value_import.source_name)."""
         return value_import.source_name(self.tmp / name)
 
-    def as_person(self):
-        """The CLI as the person runs it in their own terminal (cli._person_at_a_terminal)."""
-        return mock.patch.object(cli, "_person_at_a_terminal", return_value=True)
+    def forget_as_person(self, *args: str) -> tuple[int, str]:
+        """The removal as the prompt hook runs it for the person's typed prompt (cli.cmd_forget person=True)."""
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(out):
+            rc = cli.cmd_forget(list(args), person=True)
+        return rc, out.getvalue()
 
     def file(self, text: str, name: str = "names.jsonl") -> Path:
         p = self.tmp / name
@@ -254,25 +257,23 @@ class SeeAndRemove(Base):
         self.assertIn("SECRET_c1", out, "the person's own value keeps its row")
         self.assertNotIn("NAME_c1", out, "an import is one line, not a row per value")
         rc, out, _ = self.run_cli("forget", f"import:{self.iid()}")
-        self.assertEqual(rc, 1, "not at the person's terminal: refused")
+        self.assertEqual(rc, 1, "a command removes no import")
         self.assertIn("removing an import takes your own prompt", out)
-        with self.as_person():
-            rc, out, _ = self.run_cli("forget", f"import:{self.iid()}")
+        rc, out = self.forget_as_person(f"import:{self.iid()}")
         self.assertEqual(rc, 0)
         self.assertIn(f"import:{self.iid()}: 2 value(s) deleted", out)
         self.assertEqual([e.key for e in Vault().list()], ["SECRET_c1"])
         self.assertEqual(redact(f"hello {NAME}"), f"hello {NAME}")
-        with self.as_person():
-            rc, out, _ = self.run_cli("forget", f"import:{self.iid()}")
+        rc, out = self.forget_as_person(f"import:{self.iid()}")
         self.assertEqual(rc, 1)
         self.assertIn("not found", out)
 
-    def test_values_remove_is_the_same_as_forget_import(self):
+    def test_values_remove_only_names_the_prompt(self):
         value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"})))
-        with self.as_person():
-            rc, out, _ = self.run_cli("values", "remove", f"import:{self.iid()}")
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(Vault().list(), [])
+        rc, _out, err = self.run_cli("values", "remove", f"import:{self.iid()}")
+        self.assertEqual(rc, 1)
+        self.assertIn("/maisecrets:forget import:NAME", err)
+        self.assertEqual(len(Vault().list()), 1)
 
     def test_two_files_of_one_name_are_two_imports(self):
         a, b = self.tmp / "a", self.tmp / "b"
@@ -774,13 +775,12 @@ class ReviewFixes(Base):
         value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "a.jsonl"), origin="file")
         value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "b.jsonl"), origin="file")
         self.assertEqual(value_import.counts_by_source(Vault()), {a: {"NAME": 1}, b: {"NAME": 1}})
-        with self.as_person():
-            rc, out, _ = self.run_cli("forget", f"import:{a}")
+        rc, out = self.forget_as_person(f"import:{a}")
         self.assertIn(f"import:{a}: no value deleted. 1 value(s) stay masked because another import lists them "
                       f"too: import:{b} (1)", out)
         self.assertNotIn("no longer masks", out)
         self.assertNotIn("Examplestein", redact(f"by {NAME}"))
-        self.assertEqual(value_import.remove(Vault(), b), (1, 0, {}))
+        self.assertEqual(value_import.remove(Vault(), b), (1, 0, {}, 0))
         self.assertEqual(redact(f"by {NAME}"), f"by {NAME}")
 
     # Opus M3: removing an import writes the index once per batch, not once per value
@@ -794,7 +794,7 @@ class ReviewFixes(Base):
             return real(self)
         with mock.patch.object(Vault, "_save_index", count):
             result = value_import.remove(Vault(), self.iid())
-        self.assertEqual(result, (450, 0, {}))
+        self.assertEqual(result, (450, 0, {}, 0))
         self.assertLessEqual(len(writes), 2 * (450 // value_import.FORGET_BATCH + 2))
 
     def test_remove_counts_only_values_deleted_now(self):
@@ -804,7 +804,7 @@ class ReviewFixes(Base):
         with v._exclusive():
             v._index["entries"]["NAME_c1"]["expires"] = time.time() - 1
         Vault().expire(limit=None)
-        self.assertEqual(value_import.remove(Vault(), self.iid()), (1, 0, {}))
+        self.assertEqual(value_import.remove(Vault(), self.iid()), (1, 0, {}, 0))
 
     # LOWs of the review
     def test_a_locked_vault_gives_a_message_not_a_traceback(self):
@@ -988,6 +988,65 @@ class Round3(Base):
         self.assertEqual(Vault().expire(limit=500, deadline=time.time() - 1), 0)
 
 
+class Round4(Base):
+    """The verification of block 3 at a989775."""
+
+    def test_no_command_removes_an_import_even_with_a_terminal(self):
+        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"})))
+        tty = mock.patch.object(sys.stdin, "isatty", return_value=True)
+        with tty, mock.patch.object(sys.stdout, "isatty", return_value=True, create=True):
+            rc, out, err = self.run_cli("forget", f"import:{self.iid()}")
+            rc2, _o, err2 = self.run_cli("values", "remove", f"import:{self.iid()}")
+        self.assertEqual((rc, rc2), (1, 1))
+        self.assertIn("removing an import takes your own prompt", out + err2)
+        self.assertNotIn("Examplestein", redact(f"by {NAME}"), "`script` gives a terminal; nothing was removed")
+
+    def test_the_guard_refuses_maisecrets_calls_and_lets_ordinary_commands_run(self):
+        run = '"/x/hooks/run.sh"'
+        refused = (f"bash {run} forget import:fabcdef01", f"bash {run} values remove import:fabcdef01",
+                   "python3 -m maisecrets.cli forget import:fabcdef01",
+                   "claude -p '/maisecrets:forget import:fabcdef01'")
+        allowed = ('git commit -m "do not forget the import: it matters"', "grep -n forget README.md | grep import:",
+                   "ls  # values remove later", "echo values remove")
+        for command in refused:
+            with self.subTest(refused=command):
+                out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": command}, "session_id": "S1",
+                                      **CLAUDE})
+                self.assertIn("removes an import", out["hookSpecificOutput"]["permissionDecisionReason"])
+        for command in allowed:
+            with self.subTest(allowed=command):
+                out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": command}, "session_id": "S1",
+                                      **CLAUDE})
+                self.assertNotIn("removes an import", json.dumps(out))
+
+    def test_wipe_takes_the_import_state(self):
+        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"})))
+        self.assertTrue(value_import.STATE_FILE.exists())
+        vault.wipe_everything(load_config())
+        self.assertFalse(value_import.STATE_FILE.exists())
+
+    def test_a_run_import_reserves_its_place_under_the_state_lock_before_it_works(self):
+        seen = []
+        real = value_import.parse
+
+        def spy(text):
+            seen.append(json.loads(value_import.STATE_FILE.read_text())["sources"].get(self.iid(), {}))
+            return real(text)
+        with mock.patch.object(value_import, "parse", spy):
+            value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"})))
+        self.assertTrue(seen[0].get("reserved"), "the place is taken before the work")
+        self.assertNotIn("reserved", json.loads(value_import.STATE_FILE.read_text())["sources"][self.iid()])
+
+    def test_a_long_removal_stops_at_its_deadline_and_says_how_many_are_left(self):
+        value_import.import_file(self.file(lines(*synth_names(450))))
+        self.assertEqual(value_import.remove(Vault(), self.iid(), deadline=time.time() - 1), (0, 0, {}, 450))
+        self.assertIn(self.iid(), json.loads(value_import.STATE_FILE.read_text())["sources"])
+        with mock.patch.object(value_import, "remove", return_value=(200, 0, {}, 250)):
+            rc, out = self.forget_as_person(f"import:{self.iid()}")
+        self.assertIn("200 value(s) deleted, 250 left; send the same prompt again to finish", out)
+        self.assertEqual(value_import.remove(Vault(), self.iid()), (450, 0, {}, 0))
+
+
 class EndToEnd(Base):
     """Through the real entry points with the temp home: the launcher imports, the hooks mask."""
 
@@ -1035,8 +1094,7 @@ class EndToEnd(Base):
         out = self.hook("post-tool", {"session_id": "S1", "tool_name": "Bash", "tool_input": {"command": "cat x"},
                                       "tool_response": {"stdout": f"{NAME} wrote", "stderr": ""}})
         self.assertEqual(out["hookSpecificOutput"]["updatedToolOutput"]["stdout"], f"{ref('NAME_c1')} wrote")
-        with self.as_person():
-            rc, said, _ = self.run_cli("forget", f"import:{self.iid()}")
+        rc, said = self.forget_as_person(f"import:{self.iid()}")
         self.assertIn("still in value_files, so the next session start imports it again; /maisecrets:settings "
                       "value_files shows the entry to remove", said)
         self.assertNotIn(str(f), said, "no path: its file name can be one of its values")

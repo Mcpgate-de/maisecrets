@@ -331,12 +331,20 @@ def import_file(path: str | Path, vault=None, deadline: float | None = None, raw
     vault = vault or Vault()
     result = Result(source=source_name(path, vault=vault))
     if origin != "file":
-        runs = [n for n, rec in _load_state().get("sources", {}).items() if rec.get("origin") != "file"]
-        if result.source not in runs and len(runs) >= MAX_RUN_IMPORTS:
-            # each import is a record the hooks and the list read: an agent that imports from many paths grew the
-            # state without a bound (codex review of block 3)
-            raise ValueError(f"maisecrets holds {MAX_RUN_IMPORTS} imports that are no value file, the limit; "
-                             "/maisecrets:list names them, and your prompt /maisecrets:forget import:NAME removes one")
+        # each import is a record the hooks and the list read: an agent that imports from many paths grew the state
+        # without a bound (codex review of block 3). Counted and reserved under the state lock, so two imports at once
+        # cannot both take the last place
+        with _state_lock():
+            state = _load_state()
+            srcs = state.setdefault("sources", {})
+            runs = [n for n, rec in srcs.items() if rec.get("origin") != "file"]
+            if result.source not in runs and len(runs) >= MAX_RUN_IMPORTS:
+                raise ValueError(f"maisecrets holds {MAX_RUN_IMPORTS} imports that are no value file, the limit; "
+                                 "/maisecrets:list names them, and your prompt /maisecrets:forget import:NAME removes "
+                                 "one")
+            if result.source not in srcs:
+                srcs[result.source] = {"origin": "run", "at": time.time(), "count": 0, "reserved": True}
+                _save_state(state)
     items, result.refused, result.duplicates = parse(text)
     if len(items) > MAX_VALUES_PER_FILE:
         result.stopped = (f"line {items[MAX_VALUES_PER_FILE][2]} and later not read: at most "
@@ -377,9 +385,11 @@ def import_file(path: str | Path, vault=None, deadline: float | None = None, raw
 
     def record(state: dict) -> None:
         srcs = state.setdefault("sources", {})
-        if origin != "file" and not count and result.source not in srcs:
-            return                       # an import that holds no value leaves no record (codex review of block 3)
+        if origin != "file" and not count and srcs.get(result.source, {}).get("reserved", True):
+            srcs.pop(result.source, None)  # an import that holds no value leaves no record (codex review of block 3)
+            return
         rec = srcs.setdefault(result.source, {})
+        rec.pop("reserved", None)
         rec.update({"path": real, "at": time.time(), "count": count,
                     "origin": "file" if origin == "file" or rec.get("origin") == "file" else "run"})
         if not result.pending:
@@ -419,8 +429,9 @@ def summary(result: Result) -> str:
     return ", ".join(parts) + "."
 
 
-def remove(vault, name: str) -> tuple[int, int, dict]:
-    """Forget every value of one import: (deleted, refused by the store, kept: other import -> values it keeps). A value
+def remove(vault, name: str, deadline: float | None = None) -> tuple[int, int, dict, int]:
+    """Forget every value of one import: (deleted, refused by the store, kept: other import -> values it keeps, left
+    when ``deadline`` came first: a keychain delete costs about 10 ms, and the prompt hook has 7 s). A value
     another import lists too stays and loses only this name (review of block 3, Opus M2). The values are deleted
     FORGET_BATCH per hold of the lock and index write (Opus M3: one write per value took 58.8 s for 2,000). The state
     then forgets the import."""
@@ -437,14 +448,17 @@ def remove(vault, name: str) -> tuple[int, int, dict]:
                 meta["source"], meta["also"] = rest[0], rest[1:]
         keys = [k for k, m in vault._index["entries"].items() if m.get("source") == name and not m.get("also")]
         vault._drop_derived()
-    deleted = refused = 0
+    deleted = refused = left = 0
     for i in range(0, len(keys), FORGET_BATCH):
+        if deadline is not None and time.time() > deadline:
+            left = len(keys) - i
+            break
         for status in vault.forget_many(keys[i:i + FORGET_BATCH]).values():
             deleted += status == "ok"
             refused += status == "store"
-    if not refused:
+    if not refused and not left:
         _update_state(lambda state: state.get("sources", {}).pop(name, None))
-    return deleted, refused, kept
+    return deleted, refused, kept, left
 
 
 # ------------------------------------------------------------ session start --

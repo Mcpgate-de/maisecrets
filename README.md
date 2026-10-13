@@ -1309,8 +1309,9 @@ id, its counts per type, when it ran, when its values expire, and which entry
 of `value_files` it is. Your prompt `/maisecrets:forget import:f3a9c01d2`
 (in Codex: `maisecrets: forget import:f3a9c01d2`) deletes every value of that
 import. Only you remove an import: it makes detection weaker, so a tool call
-that tries it is refused, and the command line removes one only in your own
-terminal.
+that tries it is refused, and no command removes one: only your typed
+prompt does. A removal of many values stops after a few seconds and says how
+many are left; send the same prompt again to finish.
 An imported value lives `max_ttl_seconds` (30 days unless you set less); a use
 does not cut it to the lifetime of its type. When another import lists the
 same value, the value stays masked, and the answer names that import.

@@ -858,7 +858,7 @@ def user_prompt(payload: dict) -> dict:
             return {"decision": "block", "reason": reason}
         return {"decision": "block", "reason": reason,
                 "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
-    # the removal of an import the person typed (C26): the only way an import is removed but the person's own terminal.
+    # the removal of an import the person typed (C26): the only way an import is removed.
     # It weakens detection, so a tool call that carries it is refused (_pre_bash); blocked, so it does not reach the
     # model, and the answer is the result
     removal = _IMPORT_REMOVAL_PROMPT_RE.match(prompt) if isinstance(prompt, str) else None
@@ -871,7 +871,8 @@ def user_prompt(payload: dict) -> dict:
             from . import cli
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-                cli.cmd_forget(removal.group(1).split(), person=True)
+                # a deadline under the 7 s watchdog: a long removal says how many are left
+                cli.cmd_forget(removal.group(1).split(), person=True, deadline=time.time() + 4.5)
             reason = "maisecrets: " + buf.getvalue().strip()
         else:
             reason = ("maisecrets: the removal of an import counts only when you type it as your prompt; this one came "
@@ -2064,11 +2065,16 @@ def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
 # /maisecrets:forget with an import (and its Codex form): the person's prompt that removes an import
 _IMPORT_REMOVAL_PROMPT_RE = re.compile(r"\A\s*(?:/maisecrets:forget|maisecrets:[ \t]*forget)\s+(\S.*?)\s*\Z",
                                        re.I | re.S)
-# the same removal in a tool call: the CLI forms and the prompt forms; text matching, a backstop to the terminal check
-# of the CLI (cli._person_at_a_terminal)
+# the same removal in a tool call: a call of the maisecrets launcher or CLI with `forget … import:` or `values remove`,
+# a nested client that would type the prompt, or the removal functions by name. No command removes an import (the CLI
+# refuses), so this only answers early with the prompt to send; the functions by name are the text guard of the C22
+# class (C26): a name built at run time is not seen
 _FORGET_ARG_RE = re.compile(r"import:\S+|\u27e6?[A-Z]+_c\d+(?::[^\s\u27e7]*)?\u27e7?")
-_IMPORT_REMOVAL_IN_A_COMMAND_RE = re.compile(r"\bforget\b[\s\S]*?(?<![\w-])import:|\bvalues[\s\"']+remove\b"
-                                             r"|\b(?:_forget_import|value_import\.remove|forget_many)\b", re.I)
+_IMPORT_REMOVAL_IN_A_COMMAND_RE = re.compile(
+    r"(?:run\.sh|run\.cmd|dispatch\.py|maisecrets[./\\]cli\b|-m\s+maisecrets)[\"']?\s+[\"']?"
+    r"(?:forget\b[\s\S]*?(?<![\w-])import:|values[\s\"']+remove\b)"
+    r"|(?:/maisecrets:forget|maisecrets:[ \t]*forget)\s[^\n]*import:"
+    r"|\b(?:_forget_import|value_import\.remove|forget_many)\b", re.I)
 _IMPORT_REMOVAL_IN_A_COMMAND = ("maisecrets: this command removes an import of values, which makes detection weaker; "
                                 "only the person removes one, as their own prompt (/maisecrets:forget import:NAME, in "
                                 "Codex: maisecrets: forget import:NAME). The command did not run. Tell the user the "

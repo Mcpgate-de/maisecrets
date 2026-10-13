@@ -1,7 +1,7 @@
 # c26-only-the-person-removes-an-import: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c26-only-the-person-removes-an-import"
 control = "C26"
-statement = "A Bash or PowerShell call that removes an import of values is refused, and the command line removes one only at the person's terminal, so the agent cannot make detection weaker; the person's typed prompt removes it."
+statement = "No command removes an import of values, and a Bash or PowerShell call of the maisecrets launcher that tries it is refused with the prompt to send, so the agent cannot make detection weaker; only the person's typed prompt removes one."
 runner = ["tests/test_value_import.py::Round3::test_a_tool_call_that_removes_an_import_is_refused"]
 
 [proof]
