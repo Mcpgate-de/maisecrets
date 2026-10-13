@@ -1,5 +1,6 @@
-"""Passwords with no shape where no `=` or `:` stands between label and value. A public benchmark (Cloakroom
-holdout v7, 2026-10-12) leaked ten such passwords: .netrc, CLI flags, `mysql -p`, Redis AUTH and prose.
+"""Passwords with no shape where no `=` or `:` stands between label and value, and keyword labels in a JSON object
+inside a string. A public benchmark (Cloakroom holdout v7, 2026-10-12) leaked ten such passwords: .netrc, CLI flags,
+`mysql -p`, Redis AUTH and prose. Samsung CredData, line by line, held 62 credentials behind `\\"password\\":\\"`.
 
 Run: python3 -m unittest tests.test_shapeless_passwords -v
 Every value is built at run time from parts, so no literal sits in the tree and the tree scan stays clean.
@@ -149,6 +150,43 @@ class ProseTests(unittest.TestCase):
                      f"the {PW} is Read-Only", f'"doc": "the {PW} is v2\\n@param"'):
             with self.subTest(text=text):
                 self.assertEqual(found(text), [])
+
+
+class EscapedJsonTests(unittest.TestCase):
+    def test_a_value_behind_escaped_quotes_is_a_hit_without_its_backslash(self):
+        pw = password(14)
+        tok = J(RNG.choice(string.ascii_letters + string.digits) for _ in range(24))
+        for text, value in ((f'{{\\"username\\":\\"bob\\",\\"{PW}\\":\\"{pw}\\"}}', pw),
+                            (f'body: "{{\\"access_token\\":\\"{tok}\\",\\"token_type\\":\\"Bearer\\"}}"', tok),
+                            (f'"{{\\"secret\\": \\"{pw}\\"}}"', pw)):
+            with self.subTest(text=text.replace(value, "<v>")):
+                self.assertEqual(found(text), [("SECRET", value)])
+
+    def test_a_derived_label_behind_escaped_quotes_is_no_hit(self):
+        h = J(RNG.choice("0123456789abcdef") for _ in range(16))
+        for text in (f'{{\\"hashed_token\\":\\"{h}\\"}}', f'{{\\"token_last_eight\\":\\"{h[:8]}\\"}}',
+                     f'{{\\"{PW}_hash\\":\\"{h}\\"}}', '{\\"token_type\\":\\"Bearer\\"}'):
+            with self.subTest(text=text.replace(h, "<h>")):
+                self.assertEqual(found(text), [])
+
+    def test_an_example_of_ascending_runs_is_no_hit_and_a_value_beside_it_is(self):
+        # documentation writes runs that count up as an example password (an AWS SDK model, 39 rows in CredData)
+        example = J(["abc", "123", "xyz", "789"])
+        other = J(["abc", "132", "xyz", "789"])
+        self.assertEqual(found(f'{{\\"username\\":\\"bob\\",\\"{PW}\\":\\"{example}\\"}}'), [])
+        self.assertEqual(found(f"{PW}: {J(['abcd', '1234'])}"), [])
+        self.assertEqual(found(f'{{\\"{PW}\\":\\"{other}\\"}}'), [("SECRET", other)])
+        short_runs = J(["ab", "12", "cd", "34", "ef"])   # runs of two are no pattern a reader takes for filler
+        self.assertEqual(found(f"{PW}: {short_runs}"), [("SECRET", short_runs)])
+
+    def test_a_uuid_behind_an_escaped_secret_label_is_a_hit(self):
+        # the label filters read the escaped label too: a UUID after a token label is a token (_SECRET_LABEL_RE)
+        u = "-".join(J(RNG.choice("0123456789abcdef") for _ in range(n)) for n in (8, 4, 4, 4, 12))
+        self.assertEqual(found(f'{{\\"api_token\\":\\"{u}\\"}}'), [("SECRET", u)])
+
+    def test_a_number_behind_an_escaped_measure_label_is_no_hit(self):
+        # _LABEL_TAIL_RE reads the escaped label: a duration after it is no secret (_MEASURE_LABEL_RE)
+        self.assertEqual(found('{\\"refresh_token_ttl\\":\\"15552000\\"}'), [])
 
 
 if __name__ == "__main__":

@@ -354,6 +354,19 @@ def _short_word(v: str) -> bool:
     return len(words) <= 3 or any(x in _IDENT_WORDS for x in words)
 
 
+_RUN_RE = re.compile(r"[a-z]+|[0-9]+")
+
+
+def _ascending_runs(low: str) -> bool:
+    """abc123def456, abcd1234: two or more runs of letters and digits, each counting up by one and at least three
+    long. Documentation writes them as an example password; an AWS SDK model repeats one 39 times, and Samsung CredData
+    marks those rows as no credential (2026-10-12)."""
+    runs = _RUN_RE.findall(low)
+    if len(runs) < 2 or "".join(runs) != low:
+        return False
+    return all(len(r) >= 3 and all(ord(r[i + 1]) - ord(r[i]) == 1 for i in range(len(r) - 1)) for r in runs)
+
+
 def _ds_value_ok(v: str, min_len: int = 8) -> bool:
     """Port of detect-secrets' heuristic filters for keyword hits."""
     v = v.strip()
@@ -409,6 +422,8 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
     if len(set(low)) <= 1:
         return False
     if all(ord(low[i + 1]) - ord(low[i]) == 1 for i in range(len(low) - 1)):
+        return False
+    if _ascending_runs(low):
         return False
     if low.startswith(("\u27e6", "<")) and "_c" in low:
         return False
@@ -680,6 +695,13 @@ _DS_QUOTE_GROUP = {"ds-keyword-colon": 3, "ds-keyword-equal-signs": 4}
 # no-break or narrow no-break spaces before the colon
 _COLON_AFTER_LABEL = "([]\\'\"]{0,2})?:"
 _COLON_AFTER_LABEL_SPACED = "([]\\'\"]{0,2})?[ \\t\u00a0\u202f]{0,3}:"
+# and with a backslash before each quote: a JSON object inside a string, as a log line, an HTTP body in a test or a
+# tool output shows it (`{\"password\":\"<value>\"}`). The label's quotes were no closer, so no value was read
+# (Samsung CredData, line by line: 62 such credentials missed, 2026-10-12). The backslash before the value's opening
+# quote is skipped only before a quote; the one before its closing quote is cut in scan()
+_COLON_AFTER_LABEL_ESCAPED = "((?:\\\\?[]'\"]){0,2})?[ \\t\u00a0\u202f]{0,3}:"
+_COLON_THEN_QUOTE = (":\\s*([\\'\"`]?)", ":(\\s*)([\\'\"`])")
+_ESCAPED_QUOTE_SKIP = "(?:\\\\(?=[\"']))?"
 _WHITESPACE_RE = re.compile(r"\s")
 _CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
 
@@ -707,6 +729,11 @@ def _load_detect_secrets(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
         # `password : x` in every language; the vendored colon rules allowed none, so
         # `mot de passe : <value>` and `password : <value>` were no hit (2026-09-28)
         regex = regex.replace(_COLON_AFTER_LABEL, _COLON_AFTER_LABEL_SPACED, 1)
+        if _COLON_AFTER_LABEL_SPACED in regex:
+            regex = regex.replace(_COLON_AFTER_LABEL_SPACED, _COLON_AFTER_LABEL_ESCAPED, 1)
+            for q in _COLON_THEN_QUOTE:   # the skip goes right before the group of the opening quote
+                at = q.rindex("([")
+                regex = regex.replace(q, q[:at] + _ESCAPED_QUOTE_SKIP + q[at:], 1)
         out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(regex, flags),
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
                         secret_group=int(r["group"]), validator="ds_value",
@@ -1008,7 +1035,7 @@ _LABEL_WINDOW = 200   # characters before a value in which its label is looked f
 def _before_value(text: str, start: int) -> str:
     """The text of the value's line before it, at most _LABEL_WINDOW characters."""
     return text[max(_line_start(text, start), start - _LABEL_WINDOW):start]
-_LABEL_TAIL_RE = re.compile(r"([A-Za-z_][\w.]*)[\"']?\s*(?::=|=|:)\s*[\"'`]?$")
+_LABEL_TAIL_RE = re.compile(r"([A-Za-z_][\w.]*)\\?[\"']?\s*(?::=|=|:)\s*\\?[\"'`]?$")   # \" in JSON in a string
 _OPERATOR_AFTER_RE = re.compile(r"[ \t]+[|&^*+][ \t]+[A-Za-z_(]")
 _SELF_ATTR_RE = re.compile(r"(?:^|[\s,(])(?:self|this|cls)\.\w+$")
 
@@ -1175,14 +1202,14 @@ _MEASURE_LABEL_RE = re.compile(r"(?i)(?<![a-z])(?:ttl|timeout|expir\w*|lifetime|
                                r"|generation)(?![a-z])")
 # a label that names a secret: a UUID after it is one (Postmark server token, Scaleway secret key, a uuid4 API key)
 _SECRET_LABEL_RE = re.compile(r"(?i)(?:token|secret[_-]?key|secret|secret[_-]?value|api[_-]?key|apikey|access[_-]?key"
-                              r"|auth[_-]?key|\w+[_-]key|password|passwd|pwd|passphrase)[\"']?\s*(?::=|=>|[:=])\s*[\"'`]?$")
+                              r"|auth[_-]?key|\w+[_-]key|password|passwd|pwd|passphrase)\\?[\"']?\s*(?::=|=>|[:=])\s*\\?[\"'`]?$")
 _ELISION_RE = re.compile(r"(?:\.\.\.|\u2026)$")
 # a label that names a derived thing: secret_id, password_hash, token_type, hashed_secret. Anchored at the value: in
 # `secret_name: x, password: <value>` the password stays a hit
 _DERIVED_LABEL_RE = re.compile(
     r"(?i)(?:(?:secret|password|passwd|pwd|token|key)[_-]?(?:id|name|hash|hashed|len|length|path|file|arn|ref|url|uri"
-    r"|version|type|policy|rules?)|hashed_(?:secret|password)|(?:secret|password|token|key)Id"
-    r"|(?:secret|password|token)Name)[\"']?\s*(?::=|=>|[:=])\s*[\"'`]?$")
+    r"|version|type|policy|rules?|last(?:_\w+)?)|hashed_(?:secret|password|token)|(?:secret|password|token|key)Id"
+    r"|(?:secret|password|token)Name)\\?[\"']?\s*(?::=|=>|[:=])\s*\\?[\"'`]?$")
 
 
 def _label_before(text: str, start: int) -> str:
@@ -1300,6 +1327,9 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if end <= start:
                 continue
             secret = m.group(g)
+            if (secret.endswith("\\") and text[start - 2:start - 1] == "\\" and text[end:end + 1] in "\"'"
+                    and rule.id.startswith("ds-keyword")):
+                secret, end = secret[:-1], end - 1   # {\"password\":\"<value>\"}: the backslash escapes the quote
             if rule.quote_group and not m.group(rule.quote_group):
                 cut = _WHITESPACE_RE.search(secret)
                 if cut:
