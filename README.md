@@ -1310,7 +1310,8 @@ of `value_files` it is. Your prompt `/maisecrets:forget import:f3a9c01d2`
 (in Codex: `maisecrets: forget import:f3a9c01d2`) deletes every value of that
 import. Only you remove an import: it makes detection weaker, so a tool call
 that tries it is refused, and no command removes one: only your typed
-prompt does. A removal of many values stops after a few seconds and says how
+prompt does (Python that the AI writes can still call the functions, as for
+the settings: a name built at run time is not seen). A removal of many values stops after a few seconds and says how
 many are left; send the same prompt again to finish.
 An imported value lives `max_ttl_seconds` (30 days unless you set less); a use
 does not cut it to the lifetime of its type. When another import lists the

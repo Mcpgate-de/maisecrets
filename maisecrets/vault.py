@@ -510,7 +510,6 @@ def fingerprint(value: str, key: bytes) -> str:
     return hmac.digest(key, value.encode("utf-8", "surrogatepass"), "sha256").hex()[:16]
 
 
-MAX_SOURCES = 8          # names of imports one stored value keeps (value_import.py)
 MAX_PHRASE_WORDS = 6     # a stored value of 2 to 6 words is found as a phrase (hooks._phrase_spans); more: the line
 
 
@@ -1171,9 +1170,10 @@ class Vault:
                 if session and session not in e.sessions:
                     e.sessions.append(session)
                 if source and e.source and link:
-                    # a value keeps at most MAX_SOURCES names of imports: many paths with one value grew the index
-                    # without a bound (codex review of block 3)
-                    if source != e.source and source not in e.also and len(e.also) < MAX_SOURCES - 1:
+                    # only a value file links (value_import: an agent's import links nothing), so the names are the
+                    # person's files and none is dropped: a cap dropped the ninth file, and removing the other eight
+                    # unmasked a value that file still lists (codex verification of block 3)
+                    if source != e.source and source not in e.also:
                         e.also.append(source)
                     if renew:
                         # a file of value_files that lists an imported value again re-affirms it: it lives
@@ -1440,13 +1440,16 @@ class Vault:
         return "ok"
 
     @_mutating
-    def forget_many(self, keys: list[str]) -> dict[str, str]:
+    def forget_many(self, keys: list[str], deadline: float | None = None) -> dict[str, str]:
         """forget() for many keys in one hold of the lock and one index write: key -> "ok" | "metadata" | "unknown" |
-        "store".
+        "store" | "later" (not tried: ``deadline``, a time.time(), came first; checked before each delete).
         Removing an import of 2,000 values called forget() per value and took 58.8 s (review of block 3, Opus M3)."""
         out: dict[str, str] = {}
         gone: list[str] = []
         for key in keys:
+            if deadline is not None and time.time() > deadline:
+                out[key] = "later"
+                continue
             meta = self._index["entries"].get(key)
             if meta is None:
                 out[key] = "unknown"

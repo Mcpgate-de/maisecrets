@@ -104,10 +104,21 @@ IMPORT_REMOVAL_ONLY_BY_PROMPT = ("removing an import takes your own prompt: /mai
                                  "command removes one, only your typed prompt (C26).")
 
 
-def cmd_forget(args: list[str], person: bool = False, deadline: float | None = None) -> int:
-    """``person``: the prompt hook runs this for a prompt the person typed (hooks.user_prompt); only then does an
-    `import:NAME` argument remove an import. A command never does: a terminal check trusted `script`, which gives any
-    command a terminal (verification of block 3). ``deadline`` ends a long removal; the rest follows the next prompt."""
+def cmd_forget(args: list[str]) -> int:
+    """`forget KEY ...` of a command. It removes no import and no imported value: that makes detection weaker, so only
+    the person's typed prompt does it (forget_typed_by_the_person, called by hooks.user_prompt; C26)."""
+    return _forget(args, False, None)
+
+
+def forget_typed_by_the_person(args: list[str], deadline: float | None = None) -> int:
+    """The forget of a prompt the person typed: only hooks.user_prompt calls it, after it checked the prompt's source.
+    A tool call that names this function is refused (hooks._IMPORT_REMOVAL_IN_A_COMMAND_RE); Python an agent writes can
+    still call it by a name built at run time, the text-guard limit of C22 that C26 names. ``deadline`` ends a long
+    removal; the rest follows the next prompt."""
+    return _forget(args, True, deadline)
+
+
+def _forget(args: list[str], person: bool, deadline: float | None) -> int:
     if not args:
         print("usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets:list shows them)", file=sys.stderr)
         return 2
@@ -121,6 +132,12 @@ def cmd_forget(args: list[str], person: bool = False, deadline: float | None = N
             rc = max(rc, _forget_import(v, raw[len("import:"):], deadline))
             continue
         key = raw.strip("⟦⟧").split(":", 1)[0]
+        meta = v._index["entries"].get(key) or {}
+        if meta.get("source") and not person:
+            # an imported value forgotten key by key is an import removed in parts (codex verification of block 3)
+            print(f"{key}: not deleted; it belongs to import:{meta['source']}. {IMPORT_REMOVAL_ONLY_BY_PROMPT}")
+            rc = max(rc, 1)
+            continue
         status = v.forget(key)
         if getattr(v, "destinations_kept", False):
             print(f"{key}: its destination record could not be deleted now; /maisecrets:forget {key} again later.")

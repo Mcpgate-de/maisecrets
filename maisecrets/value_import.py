@@ -58,7 +58,8 @@ RUN_SHARE = 0.6            # of MAX_IMPORTED: the imports that no value file nam
 EXPIRE_PER_IMPORT = 200     # expired values one import deletes; a keychain delete costs about 10 ms
 FORGET_BATCH = 200          # values one hold of the lock forgets when an import is removed
 REIMPORT_AFTER = 86400     # a value file is imported again after a day, which renews its values
-SESSION_BUDGET = 8.0       # seconds from the start of a session start to the end of its value_files work
+SESSION_BUDGET = 8.0       # seconds from the start of a session start to the end of its value_files work; checked
+                           # before each file, batch and delete: one read or delete that blocks is not cancelled
 MAX_FILES_PER_START = 20   # value files one session start reads; the rest follow at the next start
 MAX_RUN_IMPORTS = 50       # imports that no value file names, each with a state record; past it an import is refused
 STATE_FILE = HOME / ".values-state"
@@ -345,6 +346,23 @@ def import_file(path: str | Path, vault=None, deadline: float | None = None, raw
             if result.source not in srcs:
                 srcs[result.source] = {"origin": "run", "at": time.time(), "count": 0, "reserved": True}
                 _save_state(state)
+    try:
+        return _import_items(path, raw, text, vault, result, origin, deadline)
+    except BaseException:
+        # a failed import gives its place back: a reservation left behind took one of MAX_RUN_IMPORTS for good
+        # (codex verification of block 3)
+        def release(state: dict) -> None:
+            if state.get("sources", {}).get(result.source, {}).get("reserved"):
+                state["sources"].pop(result.source, None)
+        try:
+            _update_state(release)
+        except Exception:     # noqa: BLE001 - the first error is the one to report
+            pass
+        raise
+
+
+def _import_items(path: Path, raw: bytes, text: str, vault, result: "Result", origin: str,
+                  deadline: float | None) -> "Result":
     items, result.refused, result.duplicates = parse(text)
     if len(items) > MAX_VALUES_PER_FILE:
         result.stopped = (f"line {items[MAX_VALUES_PER_FILE][2]} and later not read: at most "
@@ -450,12 +468,12 @@ def remove(vault, name: str, deadline: float | None = None) -> tuple[int, int, d
         vault._drop_derived()
     deleted = refused = left = 0
     for i in range(0, len(keys), FORGET_BATCH):
-        if deadline is not None and time.time() > deadline:
-            left = len(keys) - i
-            break
-        for status in vault.forget_many(keys[i:i + FORGET_BATCH]).values():
+        # the deadline is checked before every delete, not once per batch: 200 keychain deletes of 100 ms each ran
+        # 20 s past it (codex verification of block 3). One delete that hangs is not cancelled
+        for status in vault.forget_many(keys[i:i + FORGET_BATCH], deadline=deadline).values():
             deleted += status == "ok"
             refused += status == "store"
+            left += status == "later"
     if not refused and not left:
         _update_state(lambda state: state.get("sources", {}).pop(name, None))
     return deleted, refused, kept, left

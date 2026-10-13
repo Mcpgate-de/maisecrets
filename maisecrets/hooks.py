@@ -872,7 +872,7 @@ def user_prompt(payload: dict) -> dict:
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
                 # a deadline under the 7 s watchdog: a long removal says how many are left
-                cli.cmd_forget(removal.group(1).split(), person=True, deadline=time.time() + 4.5)
+                cli.forget_typed_by_the_person(removal.group(1).split(), deadline=time.time() + 4.5)
             reason = "maisecrets: " + buf.getvalue().strip()
         else:
             reason = ("maisecrets: the removal of an import counts only when you type it as your prompt; this one came "
@@ -2074,7 +2074,8 @@ _IMPORT_REMOVAL_IN_A_COMMAND_RE = re.compile(
     r"(?:run\.sh|run\.cmd|dispatch\.py|maisecrets[./\\]cli\b|-m\s+maisecrets)[\"']?\s+[\"']?"
     r"(?:forget\b[\s\S]*?(?<![\w-])import:|values[\s\"']+remove\b)"
     r"|(?:/maisecrets:forget|maisecrets:[ \t]*forget)\s[^\n]*import:"
-    r"|\b(?:_forget_import|value_import\.remove|forget_many)\b", re.I)
+    r"|\b(?:_forget_import|_forget|forget_typed_by_the_person|value_import\.remove|forget_many)\b"
+    r"|\bperson\s*=\s*True\b", re.I)
 _IMPORT_REMOVAL_IN_A_COMMAND = ("maisecrets: this command removes an import of values, which makes detection weaker; "
                                 "only the person removes one, as their own prompt (/maisecrets:forget import:NAME, in "
                                 "Codex: maisecrets: forget import:NAME). The command did not run. Tell the user the "

@@ -86,10 +86,10 @@ class Base(unittest.TestCase):
         return value_import.source_name(self.tmp / name)
 
     def forget_as_person(self, *args: str) -> tuple[int, str]:
-        """The removal as the prompt hook runs it for the person's typed prompt (cli.cmd_forget person=True)."""
+        """The removal as the prompt hook runs it for the person's typed prompt (cli.forget_typed_by_the_person)."""
         out = io.StringIO()
         with redirect_stdout(out), redirect_stderr(out):
-            rc = cli.cmd_forget(list(args), person=True)
+            rc = cli.forget_typed_by_the_person(list(args))
         return rc, out.getvalue()
 
     def file(self, text: str, name: str = "names.jsonl") -> Path:
@@ -922,11 +922,15 @@ class Round3(Base):
         self.assertEqual(Vault().status(last[0], "S1"), "expired")
 
     # HIGH 4: bounds on sources, records and concurrent imports
-    def test_one_value_from_many_paths_keeps_a_bounded_list_of_sources(self):
-        for i in range(vault.MAX_SOURCES + 5):
+    def test_a_value_that_any_value_file_lists_stays_until_the_last_is_removed(self):
+        ids = []
+        for i in range(10):
             value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), f"p{i}.jsonl"), origin="file")
-        meta = Vault()._index["entries"]["NAME_c1"]
-        self.assertEqual(len(meta["also"]), vault.MAX_SOURCES - 1)
+            ids.append(self.iid(f"p{i}.jsonl"))
+        for iid in ids[:-1]:
+            value_import.remove(Vault(), iid)
+        self.assertNotIn("Examplestein", redact(f"by {NAME}"), "the tenth file still lists it")
+        self.assertEqual(value_import.counts_by_source(Vault()), {ids[-1]: {"NAME": 1}})
 
     def test_an_agents_import_of_known_values_links_nothing_and_leaves_no_record(self):
         value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "team.jsonl"), origin="file")
@@ -1045,6 +1049,46 @@ class Round4(Base):
             rc, out = self.forget_as_person(f"import:{self.iid()}")
         self.assertIn("200 value(s) deleted, 250 left; send the same prompt again to finish", out)
         self.assertEqual(value_import.remove(Vault(), self.iid()), (450, 0, {}, 0))
+
+
+class Round5(Base):
+    """The codex verification of block 3 at 2594c00."""
+
+    def test_the_typed_removal_by_name_and_an_imported_key_are_refused_to_a_command(self):
+        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"})))
+        for command in ("python3 -c 'from maisecrets import cli; cli.forget_typed_by_the_person([\"import:fab01\"])'",
+                        "python3 -c 'from maisecrets import cli; cli._forget([\"import:fabcdef01\"], True, None)'",
+                        "python3 -c 'import maisecrets.cli as c; c.cmd_forget(x, person=True)'"):
+            with self.subTest(command=command):
+                out = hooks.pre_tool({"tool_name": "Bash", "tool_input": {"command": command}, "session_id": "S1",
+                                      **CLAUDE})
+                self.assertIn("removes an import", out["hookSpecificOutput"]["permissionDecisionReason"])
+        rc, out, _ = self.run_cli("forget", "NAME_c1")
+        self.assertEqual(rc, 1)
+        self.assertIn(f"NAME_c1: not deleted; it belongs to import:{self.iid()}", out)
+        self.assertNotIn("Examplestein", redact(f"by {NAME}"))
+
+    def test_a_failed_import_gives_its_reserved_place_back(self):
+        f = self.file(lines({"value": NAME, "type": "NAME"}))
+        with mock.patch.object(Vault, "expire", side_effect=vault.LockTimeout("busy")):
+            with self.assertRaises(vault.LockTimeout):
+                value_import.import_file(f)
+        self.assertNotIn(self.iid(), json.loads(value_import.STATE_FILE.read_text()).get("sources", {}))
+
+    def test_a_removal_checks_its_deadline_before_every_delete(self):
+        value_import.import_file(self.file(lines(*synth_names(20))))
+        v = Vault()
+        real = v.backend.delete
+
+        def slow(key):
+            time.sleep(0.05)
+            return real(key)
+        with mock.patch.object(v.backend, "delete", slow):
+            deleted, refused, _kept, left = value_import.remove(v, self.iid(), deadline=time.time() + 0.12)
+        self.assertGreaterEqual(deleted, 1)
+        self.assertLess(deleted, 6, "the batch stopped at the deadline, not at its end")
+        self.assertEqual(deleted + left, 20)
+        self.assertEqual(value_import.remove(Vault(), self.iid())[0], 20 - deleted)
 
 
 class EndToEnd(Base):
