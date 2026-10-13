@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## [0.6.15] - 2026-10-13
+
+### Fixes
+
+- one unusual betterleaks filter string can no longer switch off the whole ruleset (5237ca8)
+- no helper tool can hold the session open, and an image output is checked to its last byte (8917315)
+- a second curl -u or --user in the same command is redacted too (b6cee56)
+- a tool result with stored values is redacted faster (d52521e)
+- reading an image or a PDF is fast, and the shape check no longer damages the file (28b8137)
+- on macOS and Linux a slow check now blocks the output instead of letting it through (f2c7b8e)
+- a long line of AWS key ids or curl commands no longer stalls the check (1fa4fbc)
+- finds passwords and tokens in a JSON object inside a string, such as {\"password\":\"…\"} (d159fb7)
+- finds more passwords in commands and text: --password, mysql -p, Redis AUTH, .netrc and "my password is …" (32a729c)
+- text with umlauts is judged by the betterleaks filters as betterleaks does (b95e8b4)
+
+### Other
+
+- Merge branch 'fix/0.6.15-detector-and-hook-time' into 'main' (85d7ca4)
+- Merge branch 'refactor/the-kept-rules-are-maisecrets-own-rules' into 'main' (2d0b7d6)
+
 ## [0.6.14] - 2026-10-12
 
 ### Fixes
