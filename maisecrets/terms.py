@@ -56,7 +56,7 @@ MIN_TEAM_AFFIX = 5    # the stem of a team `stem*`, `*stem` or `*stem*`: `ret*`,
 MAX_COMMON = 3        # a team stem that this many stop-list words share is refused (`*tion*`, `contr*`)
 MAX_INSIDE = 50       # *x* variants in all: each one is a search over the whole text
 MAX_WORDS = 8
-MAX_TEAM_BYTES = 4 * 1024 * 1024   # about 130,000 entries; a build of 100,000 takes 1 to 2.3 s
+MAX_TEAM_BYTES = 4 * 1024 * 1024   # about 100,000 entries; a build takes 1.4 s (3.14) to 2.2 s (3.9)
 LABEL_RE = re.compile(r"[A-Z][A-Z0-9_]{0,31}")
 TYPES = ("SECRET", "NAME", "EMAIL", "PHONE", "IBAN", "CARD", "IP")
 # a word: letters, digits and the underscore, so Kowalski_report.pdf holds the word kowalski_report, not kowalski
@@ -783,6 +783,18 @@ def reset() -> None:
     _CACHE.clear()
 
 
+def prebuild() -> None:
+    """Build the index now and cache it: at session start (30 s) and after a typed add or remove, so a tool hook
+    (10 s) only loads it. A first build of a 4 MB team list inside a tool hook ran into the watchdog, and every
+    next hook built it again (gate review of block 2). A bad terms.txt is said by the caller, and stops the next
+    hook."""
+    reset()
+    try:
+        matcher()
+    except TermsError:
+        pass
+
+
 def matches(text: str) -> list:
     """The detect.extra_matchers entry: a Match of kind term:<id> per run."""
     from .detect import Match
@@ -906,7 +918,7 @@ def add_typed(words: str) -> tuple[bool, str, list]:
     except OSError as exc:
         return False, f"maisecrets: {_shown_path()} cannot be written ({type(exc).__name__}); nothing was changed.", \
             [words]
-    reset()
+    prebuild()
     line = new.count("\n")
     note = ""
     common = [v for v in wanted if v in stoplist()]
@@ -956,7 +968,7 @@ def term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, s
             removed.append("a marked name")
     except (OSError, ValueError, AttributeError):
         pass
-    reset()
+    prebuild()
     if not removed:
         return False, ("maisecrets: this term is not on your own list, and it is no name you marked; nothing was "
                        "changed. A team list is changed in its folder. This prompt was not sent to the model."), \
@@ -969,6 +981,7 @@ def term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, s
 def session_note() -> str | None:
     """At session start: when the team lists changed since the last start, one sentence with the count and the
     entries left out. Unchanged, it says nothing again. A bad terms.txt is said at every start."""
+    prebuild()
     loaded = load(strict=False)
     digest = hashlib.sha256(json.dumps([[f.source, f.digest] for f in loaded.files]
                                        + [[r.source, r.line, r.reason] for r in loaded.refused]).encode()).hexdigest()

@@ -11,12 +11,21 @@ the rule, never the value.
 """
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+# the built-in rules only, in a temp home: the developer's own terms.txt, rule folders and allow list are no part of
+# the tree check, and the scan must never read them (gate review of block 2, L5)
+_HOME = tempfile.mkdtemp(prefix="scan-tree-home-")
+atexit.register(shutil.rmtree, _HOME, True)
+Path(_HOME, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}', encoding="utf-8")
+os.environ["MAISECRETS_HOME"] = _HOME
 from maisecrets import detect  # noqa: E402
 
 SKIP = {".git", ".claude", "__pycache__", "dist", "node_modules"}
