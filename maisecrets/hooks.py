@@ -772,10 +772,13 @@ def rewrite_prompt(payload: dict) -> dict:
     if _blocking_mention(prompt, cwd if isinstance(cwd, str) else "", cfg) or (
             not cwd and cfg.get("block_at_mentions", True) and AT_MENTION_RE.search(prompt)):
         return {}
-    try:
-        prompt, _marked = terms.take_markers(prompt, _name_ttl(cfg))   # {{Jan Kowalski}}: the person typed it
-    except OSError:
-        return {}           # the hook answers it, and blocks when it cannot record the name either
+    # {{Jan Kowalski}}: only from a prompt the person typed (the mod sends the origin); an `sdk` prompt can come from
+    # a program a tool started, and the hook leaves its marker as text too
+    if payload.get("origin") in ("composer", "bridge"):
+        try:
+            prompt, _marked = terms.take_markers(prompt, _name_ttl(cfg))
+        except OSError:
+            return {}           # the hook answers it, and blocks when it cannot record the name either
     matches = _prompt_hits(prompt)
     if not matches and not _has_live(cfg):
         return {}
@@ -817,6 +820,10 @@ def _term_command(payload: dict, cmd: tuple, typed: bool, cfg: dict) -> dict:
     carries the name. Only the person's typed prompt changes the list (as a setting, C22); the name is masked in the
     transcript, and the answer names a label and a line, never the name."""
     verb, words = cmd
+    # the name in every form the transcript can hold it: the whole prompt as typed (two spaces, a tab, a line break,
+    # a name under 4 characters that the scrub skips alone), the words, and the variants (gate review, M2)
+    raw = payload.get("prompt") if isinstance(payload.get("prompt"), str) else ""
+    extra = [raw, raw.strip()] + [w for w in re.findall(r"[^\s|*]+", words or "") if len(w) >= 4]
     scrub: list = [words] if words else []
     if verb == "usage":
         reason = terms.USAGE
@@ -837,6 +844,7 @@ def _term_command(payload: dict, cmd: tuple, typed: bool, cfg: dict) -> dict:
                 meta = {}
             entity = meta.get("kind", "")[5:] if terms.is_term_kind(meta.get("kind")) else None
         _ok, reason, scrub = terms.term_remove_typed(words, entity)
+    scrub = list(dict.fromkeys(scrub + [x for x in extra if x]))
     if cfg.get("scrub_transcript", True) and scrub:
         path = payload.get("transcript_path", "")
         _scrub_transcript(path, scrub, [])
@@ -919,7 +927,8 @@ def user_prompt(payload: dict) -> dict:
     # Blocked in every case: the prompt carries the name
     term_cmd = terms.parse_command(prompt)
     if term_cmd:
-        return _term_command(payload, term_cmd, typed, cfg)
+        # a subagent's prompt is no prompt of the person (as for the marker below)
+        return _term_command(payload, term_cmd, typed and not payload.get("agent_id"), cfg)
     if typed and not payload.get("agent_id"):
         # {{Jan Kowalski}} in a prompt the person typed: the name is masked from now on (terms.take_markers)
         try:

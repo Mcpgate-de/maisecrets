@@ -186,6 +186,66 @@ class TypedCommandTests(_Base):
                                                "cwd": ""}), {})
 
 
+class GateReviewCommandTests(_Base):
+    """The typed command findings of the gate review of block 2."""
+
+    def test_a_full_name_also_adds_the_surname_with_any_ending(self):
+        out = _prompt("/maisecrets:term add Jan Testowski")
+        self.assertIn("Also added: the last word with any ending", out["reason"])
+        self.assertIn("The first name alone stays visible", out["reason"])
+        self.assertNotIn("testowsk", out["reason"].lower())
+        self.assertIn("Jan Testowski | Testowski*", terms.PERSONAL.read_text(encoding="utf-8"))
+        for text in ("Herr Testowski", "Testowskis Bericht", "Testowski, Jan", "J. Testowski", "jan_testowski.pdf",
+                     "Jan-Testowski", "jan.testowski"):
+            with self.subTest(text=text):
+                self.assertNotIn("testowsk", _out(_bash(text)).lower())
+        self.assertEqual(_bash("Jan alone"), {}, "the first name alone stays visible, as the answer says")
+
+    def test_no_surname_for_a_short_or_common_last_word_or_one_word(self):
+        _prompt("/maisecrets:term add Anna Li")
+        _prompt("/maisecrets:term add Testowski")
+        self.assertNotIn("*", terms.PERSONAL.read_text(encoding="utf-8").split("README, section Terms.")[1])
+
+    def test_near_misses_of_the_command_are_blocked_with_the_usage(self):
+        for typed in (f"maisecrets: terms add {NAME}", f"/maisecrets:terms add {NAME}", f"maisecrets term add {NAME}",
+                      f"/maisecrets:terms remove {NAME}"):
+            with self.subTest(typed=typed):
+                out = _prompt(typed)
+                self.assertEqual(out["decision"], "block")
+                self.assertIn("/maisecrets:term add NAME", out["reason"])
+                self.assertNoTerm(json.dumps(out), "the answer")
+        self.assertFalse(terms.PERSONAL.exists(), "a near miss changes nothing")
+        self.assertIsNone(terms.parse_command("maisecrets terms are a feature"))
+
+    def test_every_form_of_the_name_is_scrubbed_from_the_transcript(self):
+        for typed in ("/maisecrets:term add Zbigniew  Testowski", "/maisecrets:term add Zbigniew\tTestowski",
+                      "/maisecrets:term add Zbigniew\nTestowski", "/maisecrets:term add Li Wu"):
+            with self.subTest(typed=typed):
+                _clean()
+                tmp = Path(tempfile.mkdtemp(prefix="transcript-"))
+                self.addCleanup(shutil.rmtree, tmp, True)
+                path = tmp / "session.jsonl"
+                path.write_text(json.dumps({"type": "user", "message": {"content": typed}}) + "\n", encoding="utf-8")
+                with mock.patch.object(hooks, "_scrub_transcript_later", lambda *a, **k: None):
+                    hooks.user_prompt({"hook_event_name": "UserPromptSubmit", "prompt": typed, "session_id": "S1",
+                                       "source": "user", "transcript_path": str(path), **CLAUDE})
+                left = path.read_text(encoding="utf-8").lower()
+                for piece in ("zbigniew", "testowsk", "li wu"):
+                    self.assertNotIn(piece, left)
+
+    def test_a_subagent_prompt_changes_no_term(self):
+        hooks._live_cache.clear()
+        out = hooks.user_prompt({"hook_event_name": "UserPromptSubmit", "prompt": f"/maisecrets:term add {NAME}",
+                                 "session_id": "S1", "source": "user", "agent_id": "a1", "transcript_path": "",
+                                 **CLAUDE})
+        self.assertIn("nothing was changed", out["reason"])
+        self.assertFalse(terms.PERSONAL.exists())
+
+    def test_the_removal_names_the_variant_count(self):
+        _prompt(f"/maisecrets:term add {NAME}")
+        self.assertIn("removed NAME_1 (2 variants)", _prompt(f"/maisecrets:term remove {NAME}")["reason"])
+
+
 class TermHookTests(_Base):
     def setUp(self):
         super().setUp()
@@ -303,8 +363,22 @@ class MarkerHookTests(_Base):
         self.assertFalse(terms.PERSONAL.exists(), "a mark is not permanent: only term add writes terms.txt")
 
     def test_the_mod_takes_the_marker_out(self):
-        mod = hooks.rewrite_prompt({"prompt": f"letter to {{{{{NAME}}}}}", "session_id": "S1", "cwd": ""})
+        mod = hooks.rewrite_prompt({"prompt": f"letter to {{{{{NAME}}}}}", "session_id": "S1", "cwd": "",
+                                    "origin": "composer"})
         self.assertRegex(mod["text"], r"\Aletter to " + REF_RE.pattern + r"\Z")
+
+    def test_the_mod_takes_a_marker_only_from_the_composer(self):
+        for origin in ("sdk", None):
+            with self.subTest(origin=origin):
+                payload = {"prompt": f"letter to {{{{{NAME}}}}}", "session_id": "S1", "cwd": ""}
+                if origin:
+                    payload["origin"] = origin
+                self.assertEqual(hooks.rewrite_prompt(payload), {})
+                self.assertFalse(terms.MARKED.exists(), "a prompt a program sent marks no name")
+
+    def test_one_letter_or_one_common_word_stays_text(self):
+        self.assertEqual(terms.markers("see {{A}} and {{The}} and {{Montag}}"), [])
+        self.assertEqual([n for _a, _b, n in terms.markers("see {{Testowski}}")], ["Testowski"])
 
     def test_a_marker_from_the_client_or_a_template_stays_text(self):
         self.assertEqual(_prompt(f"letter to {{{{{NAME}}}}}", source="scheduled"), {})
