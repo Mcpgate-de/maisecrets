@@ -239,5 +239,36 @@ class TokenFormatTests(unittest.TestCase):
                                                                       "paserk-secret-key", "paseto-token")], [])
 
 
+class AwsSessionTokenTests(unittest.TestCase):
+    """The STS session token in X-Amz-Security-Token (a presigned URL, a header) is a secret; the other X-Amz-
+    parameters stay text (label-aws-session-token)."""
+
+    def token(self) -> str:
+        return "IQoJb3JpZ2luX2Vj" + b64(rnd(600))
+
+    def test_the_session_token_of_a_presigned_url_and_a_header_is_a_hit(self):
+        tok = self.token()
+        enc = tok.replace("/", "%2F").replace("+", "%2B").replace("=", "%3D")
+        sig = "".join(RNG.choice("0123456789abcdef") for _ in range(64))
+        url = ("https://bucket.s3.eu-central-1.amazonaws.com/report.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256"
+               "&X-Amz-Date=20261013T120000Z&X-Amz-Expires=900&X-Amz-Security-Token=" + enc
+               + "&X-Amz-SignedHeaders=host&X-Amz-Signature=" + sig)
+        got = kinds(url)
+        self.assertIn(("label-aws-session-token", enc), got)
+        self.assertNotIn(sig, [v for _, v in got], "the signature stays text")
+        for text in (f"X-Amz-Security-Token: {tok}", f'headers = {{"x-amz-security-token": "{tok}"}}'):
+            with self.subTest(form=text[:22]):
+                self.assertIn(("label-aws-session-token", tok), kinds(text))
+
+    def test_a_reference_prose_and_the_other_parameters_stay_text(self):
+        k = key(16)
+        for text in ("X-Amz-Security-Token: ${AWS_SESSION_TOKEN}",
+                     "the X-Amz-Security-Token parameter carries the session token",
+                     f"<X-Amz-Signature>{k}</X-Amz-Signature>", f"<X-Amz-Credential>{k}</X-Amz-Credential>"):
+            with self.subTest(text=text[:24]):
+                self.assertEqual([x for x, _ in kinds(text) if x in ("label-aws-session-token", "label-secret-literal",
+                                                                      "label-weak-key")], [])
+
+
 if __name__ == "__main__":
     unittest.main()

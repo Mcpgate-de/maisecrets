@@ -811,7 +811,9 @@ def _label_class(label: str) -> tuple:
         full = "_".join(toks)
         before = toks[:-1]
         # an AWS signature or the key id in a SigV4 scope is no secret value of its own
-        amz = full.startswith("x_amz") or bool(toks and toks[-1] in ("credential", "signature"))
+        # (the session token, x-amz-security-token, is a secret: the rule label-aws-session-token takes it)
+        amz = (full.startswith("x_amz") and full != "x_amz_security_token") or bool(
+            toks and toks[-1] in ("credential", "signature"))
         named = bool(full) and not amz
         other = any(t in _LABEL_NEG_WORDS or t in _WEAK_NEG_WORDS for t in before)
         secret = named and bool(_SECRET_TAIL_RE.search(full)) and not other
@@ -1049,6 +1051,13 @@ OWN_RULES: list[dict] = [
               r"[A-Za-z0-9_.\-]{20,}"},
     {"id": "paseto-token", "type": "SECRET",
      "regex": r"(?<![\w.])v[1-4]\.(?:local|public)\.[A-Za-z0-9_-]{30,}(?:\.[A-Za-z0-9_-]+)?"},
+    # the STS session token of temporary AWS credentials: a presigned URL carries it as the query parameter
+    # X-Amz-Security-Token (percent-encoded), a request as the header of that name. The other X-Amz- parameters (the
+    # key id in X-Amz-Credential, X-Amz-Signature, X-Amz-Date) stay text; the session token grants access until it
+    # expires. 100 to 4096 characters: real tokens have several hundred
+    {"id": "label-aws-session-token", "type": "SECRET", "secret_group": 1,
+     "regex": r"(?i)(?<![\w-])x-amz-security-token(?:[\"']?[ \t]*[:=][ \t]*[\"']?)([A-Za-z0-9%+/=_-]{100,4096})"
+              r"(?![A-Za-z0-9%+/=_-])"},
     # Elasticsearch's API key in an Authorization header: `Authorization: ApiKey <base64 of id:key>`, as a header
     # line, in curl -H, or as the key of a header object (`authorization: 'ApiKey <value>'`). Only after the header
     # name: prose names the scheme ("send ApiKey followed by …", Gate B of 0.6.16)
