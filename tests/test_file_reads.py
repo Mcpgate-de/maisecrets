@@ -590,7 +590,7 @@ class CleanDirs(_Work):
     def test_a_linked_note_or_folder_is_not_followed(self):
         other = self.dir / "agent"
         other.mkdir()
-        (other / "S1").write_text(repr(time.time() + 10 ** 6))
+        (other / "S1").write_text(json.dumps({"t": time.time() - 10 ** 6, "roots": {}}))   # a valid note, elsewhere
         os.makedirs(os.path.dirname(self._note()), exist_ok=True)
         os.symlink(other / "S1", self._note())
         self.assertIsNone(file_reads.session_start("S1"), "a linked note")

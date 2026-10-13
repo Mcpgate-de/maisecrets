@@ -327,8 +327,6 @@ def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
     for key in ("read_pdf", "read_image"):
         if parsed.get(key) in ("ask", "block", "convert"):
             cfg[key] = parsed[key]                 # each stops more than the default allow; clean_dirs only loosens
-        elif key in parsed and not isinstance(parsed[key], str):
-            _read_fallback(cfg)                    # ["block"] said block in a wrong form: it must not become allow
 
 
 def _read_fallback(cfg: dict) -> None:
