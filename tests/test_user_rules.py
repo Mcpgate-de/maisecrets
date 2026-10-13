@@ -704,6 +704,58 @@ class Backtracking(Base):
         self.assertEqual(q.rule, "user:tok")
         self.assertIn("slow: one scan took", q.reason)
 
+    def test_a_fast_rule_survives_a_watchdog_answer_and_a_slow_one_is_named_with_its_time(self):
+        import time
+        write_rules(OWN, [{"id": "tok", "regex": r"tkx_[A-Za-z0-9]{24}"}])
+        detect.reset_rules()
+        (rule,) = user_rules.load().rules
+        detect._RUNNING[0] = (rule, time.perf_counter() - 0.003, 0.5)       # it ran 3 ms when the watchdog fired
+        self.addCleanup(detect._RUNNING.__setitem__, 0, None)
+        hooks._quarantine_running_rule()
+        self.assertEqual(user_rules._read_state().get("slow", {}), {}, "the time went to other work")
+        detect._RUNNING[0] = (rule, time.perf_counter() - 1.2, 0.5)
+        hooks._quarantine_running_rule()
+        detect.reset_rules()
+        (q,) = user_rules.load().quarantined
+        self.assertRegex(q.reason, r"slow: one scan took 1[0-9]{3} ms")
+
+    def test_the_timing_runs_the_characters_of_the_rule_s_own_repeats(self):
+        rx = r"tkr_" + r"[b-y]{1,99}" * 5 + "Z"      # passes the static checks; slow only on a run of b..y
+        self.assertIsNone(user_rules.check_regex(rx)[0])
+        write_rules(OWN, [{"id": "rows", "regex": rx}])
+        with mock.patch.object(user_rules, "PROBE_DEADLINE", 0.5):
+            detect.reset_rules()
+            (q,) = user_rules.load().quarantined
+        self.assertEqual(q.rule, "user:rows")
+        self.assertIn("slow: a test text took more than 500 ms", q.reason)
+
+    @unittest.skipIf(os.name == "nt", "a shell script as the interpreter")
+    def test_the_test_child_start_counts_against_the_budget(self):
+        import time
+        slow_python = self.tmp / "slow-python"
+        slow_python.write_text(f'#!/bin/sh\nsleep 4\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+        os.chmod(slow_python, 0o755)
+        src = user_rules._Source("h1", "f", "x.json", r"tkx_[a-z]{9}", ("tkx_",), ())
+        started = time.monotonic()
+        with mock.patch.object(user_rules.sys, "executable", str(slow_python)):
+            self.assertEqual(user_rules.probe([src], budget=0.3), {})
+        self.assertLess(time.monotonic() - started, 3)
+
+    def test_check_reads_a_rule_again_that_a_scan_left_out(self):
+        write_rules(OWN, [{"id": "tok", "regex": r"tkx_[A-Za-z0-9]{24}"}])
+        detect.reset_rules()
+        user_rules.load()
+        (rule,) = detect.rules()[-1:]
+        user_rules.note_slow(rule, 900.0)
+        detect.reset_rules()
+        self.assertEqual(user_rules.load().rules, [], "left out")
+        rc, out, _ = RulesCommand.run_cli(self, "check", str(OWN))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("ok      user:tok", out)
+        self.assertIn("the hooks left it out (slow in a scan), and read it again from now on", out)
+        detect.reset_rules()
+        self.assertEqual([r.id for r in user_rules.load().rules], ["user:tok"])
+
     @unittest.skipIf(os.name == "nt", "Windows has no SIGALRM: the thread watchdog stays alone there (README)")
     def test_a_hook_process_answers_fail_closed_inside_a_slow_regex_and_leaves_the_rule_out(self):
         import subprocess

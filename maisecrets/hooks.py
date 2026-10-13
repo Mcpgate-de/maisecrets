@@ -4066,13 +4066,18 @@ def _disarm_alarm(before) -> None:
 
 
 def _quarantine_running_rule() -> None:
-    """The watchdog answered while a rule of your own ran: that rule is left out from the next call on
-    (maisecrets/user_rules.py). Never raises."""
+    """The watchdog answered while a rule of your own ran, and that rule itself ran longer than its budget: it is left
+    out from the next call on (maisecrets/user_rules.py). A rule that ran only for a moment stays: the time went to the
+    work before it, and an agent could else take out one correct rule per call with a large output (Fable review,
+    round 2). Never raises."""
     try:
-        rule = detect.running_user_rule()
-        if rule is not None:
-            from . import user_rules
-            user_rules.note_slow(rule, None)
+        running = detect.running_user_rule()
+        if running is not None:
+            rule, started, budget = running
+            took = time.perf_counter() - started
+            if took > budget:
+                from . import user_rules
+                user_rules.note_slow(rule, took * 1000)
     except Exception:  # noqa: BLE001 - the answer is out; this only spares the next call
         pass
 
@@ -4129,12 +4134,11 @@ def main(argv: list[str]) -> int:
             _run_log(event, payload, how, decision, ms)
         return True
 
-    fired = {"v": False}
+    fired = threading.Lock()
 
     def on_timeout() -> None:
-        if fired["v"]:
-            return                                   # the other watchdog runs it already
-        fired["v"] = True
+        if not fired.acquire(blocking=False):
+            return                                   # the other watchdog runs it already, to its end
         if answer(_fail_closed(event, payload, f"took longer than {seconds:.0f}s."), "watchdog"):
             def last() -> None:
                 _heartbeat(event, payload, done=True)
