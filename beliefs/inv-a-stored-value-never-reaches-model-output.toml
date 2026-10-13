@@ -2,7 +2,7 @@
 belief = "inv-a-stored-value-never-reaches-model-output"
 kind = "invariant"
 control = "I1"
-statement = "A stored value never reaches a hook output the model or the person reads, within the ends of C1 and C2 (docs/THREAT-MODEL.md): no tool result in any shape or client, a resolved value in any encoding and another session's value as a hex or base64 token, no deny, ask or block reason, no fail-closed answer, no prompt that goes on to the model, no session-start message. The only exception is updatedInput of a resolving PreToolUse answer."
+statement = "A stored value never reaches a hook output the model or the person reads, within the ends of C1 and C2 (docs/THREAT-MODEL.md; an image or a PDF is matched only as exact base64-aligned bytes, no OCR by design): no tool result in any shape or client, a resolved value in any encoding and another session's value as a hex or base64 token, no deny, ask or block reason, no fail-closed answer, no prompt that goes on to the model, no session-start message. The only exception is updatedInput of a resolving PreToolUse answer."
 runner = [
   "tests/test_invariant_model_output.py::PostToolOutputTests::test_a_resolved_value_is_gone_in_every_encoding_shape_and_client",
   "tests/test_invariant_model_output.py::PostToolOutputTests::test_a_live_value_is_gone_in_every_token_position_shape_and_client",

@@ -1192,14 +1192,19 @@ a to-do.
   block, deny, or withheld output), and a hook that crashes answers the same
   way; Claude Code ignores exit 2 from `PostToolUse`, so the raw output would
   otherwise reach the model. Codex runs the tool anyway when a hook fails, so
-  there the watchdog is the only net. A tool result with more than 100 new
+  there the watchdog is the only net. On Windows the watchdog can come too
+  late: Python has no SIGALRM there, and a detector regex that runs long
+  holds the interpreter until it ends, so a hook past the client's timeout
+  fails open. A tool result with more than 100 new
   values is masked without storing the rest.
 - **Tool output above 50K characters** is spilled to a file by Claude Code
   and is not rewritten.
 - **An image or a PDF that Claude reads** goes to the model as a picture or a
   document, not as text. maisecrets does not look for shapes in it: a secret
   in the text of a PDF or in a screenshot reaches the model. Only the exact
-  match of your stored values checks its base64 form. The same holds for a
+  match of your stored values checks its base64 form, and it finds a value
+  only where the file holds its bytes uncompressed at an offset that is a
+  multiple of 3 (no OCR, no decompression, by design). The same holds for a
   Bash output that Claude Code sends as an image.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt
   hook blocks them when the path exists; ask Claude to read the file instead.
