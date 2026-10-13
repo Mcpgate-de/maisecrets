@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 106 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 107 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1170,6 +1170,11 @@ Four sources, one scanner (`maisecrets/detect.py`):
   `<password>Sommer2024!</password>` and `passphrase: correct-horse-battery-staple` stay text,
   as this rule cannot tell such a value from a word or a reference. Word-likeness and the label
   word classes follow Dan Szymkowiak's backlog ideas.
+- Four token formats with a public prefix that the vendored rulesets lack (0.6.16): an NTLMSSP
+  message in base64 (`Authorization: NTLM TlRMTVNTUA…`), a NATS nkey seed (`SU…`, 58
+  characters of base32), a PASERK secret, local or wrapped key (`k4.local.…`, `k4.secret.…`)
+  and a PASETO token (`v4.local.…`, `v4.public.…`). A public nkey and a PASERK public key or
+  key id stay text.
 - Prefixes newer than the vendored rulesets live in
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
   (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last

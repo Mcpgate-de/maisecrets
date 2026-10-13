@@ -63,7 +63,8 @@ def main() -> int:
     (dst / "LICENSE-scowl").write_text(
         f"maisecrets/rules/words_en.txt is a word list created from SCOWL: the base words of 4 to 8 letters of\n"
         f"the en_US Hunspell dictionary (SCOWL size 60), release {TAG},\n{SOURCE}\n"
-        f"(sha256 {SHA256}).\nThe English dictionaries come directly from SCOWL and are under the same copyright terms\n"
+        f"(sha256 {SHA256}).\n"
+        f"The English dictionaries come directly from SCOWL and are under the same copyright terms\n"
         f"as SCOWL. The text below is the copyright notice, the permission notice and the sources paragraph\n"
         f"of that dictionary's README_en_US.txt.\n\n"
         + lic, encoding="utf-8")

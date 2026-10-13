@@ -662,6 +662,7 @@ _LITERAL_PLACEHOLDER_RE = re.compile(
     r"changeme|change_me|redacted|replace|insert|enter[_-]|todo|fixme|foobar|lorem|secret_here|here$|^test|test$|"
     r"^fake|^mock|^none$|^null$|^true$|^false$|^undefined$|^password$|^secret$|^token$|^string$|^empty$|^default$")
 _DOTTED_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+")
+_CLOSED_TEMPLATE_RE = re.compile(r"\{[A-Za-z_][\w.]*(?:\[[^\]{}]*\])?\}")   # {pw}, {cfg.pw}, {row['pw']}; not a lone {
 _CAMEL_SPLIT_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
 
@@ -716,7 +717,7 @@ def _pw_literal_ok(v: str) -> bool:
         return False
     if _sequential(v.lower()) or _LITERAL_PLACEHOLDER_RE.search(v) or _DOTTED_RE.fullmatch(v) or _names_itself(v):
         return False
-    if _PART_TEMPLATE_RE.search(v):
+    if _CLOSED_TEMPLATE_RE.search(v):
         return False   # a template of a format string: f'pwd = "{pw}"', "password: {password}"
     return _wordlike(_deleet(v)) < 0.3
 
@@ -939,6 +940,20 @@ OWN_RULES: list[dict] = [
      "regex": r"(?i)(?<![\w$.-])[\"']?(passwords?|passwd|secrets?|api[_-]?(?:keys?|tokens?|secrets?)"
               r"|(?:access|auth|refresh|bearer)[_-]?tokens?|client[_-]?secrets?|private[_-]?keys?|secret[_-]?keys?"
               r"|credentials)[\"']?[ \t]*(?::=|=>|[:=])[ \t]*(\[\][\w.]*[ \t]*\{|[\w.]*\[\][ \t]*\{|\[)"},
+    # four token formats with a public prefix and no rule in the vendored sets (0.6.16). An NTLMSSP message in base64
+    # (`Authorization: NTLM TlRMTVNTUA…`: the response of its third message is derived from the password hash); a
+    # NATS nkey seed (S, the key type, 56 base32 characters; the public key starts with N, U, A … and stays text);
+    # a PASERK secret, local or wrapped key (k1. to k4.; k4.public., k4.lid. and the other ids stay text); a PASETO
+    # token (v1. to v4., local or public: a bearer token as a JWT is one)
+    {"id": "ntlmssp-message", "type": "SECRET",
+     "regex": r"(?<![A-Za-z0-9+/])TlRMTVNTUA[A-Za-z0-9+/]{30,}={0,2}"},
+    {"id": "nats-nkey-seed", "type": "SECRET",
+     "regex": r"(?<![A-Za-z0-9])S[UNOACXP][A-Z2-7]{56}(?![A-Za-z0-9])"},
+    {"id": "paserk-secret-key", "type": "SECRET",
+     "regex": r"(?<![\w.])k[1-4]\.(?:local|secret|local-wrap|secret-wrap|local-pw|secret-pw|seal)\."
+              r"[A-Za-z0-9_.\-]{20,}"},
+    {"id": "paseto-token", "type": "SECRET",
+     "regex": r"(?<![\w.])v[1-4]\.(?:local|public)\.[A-Za-z0-9_-]{30,}(?:\.[A-Za-z0-9_-]+)?"},
     # Elasticsearch's API key in an Authorization header: `Authorization: ApiKey <base64 of id:key>`, as a header
     # line, in curl -H, or as the key of a header object (`authorization: 'ApiKey <value>'`). Only after the header
     # name: prose names the scheme ("send ApiKey followed by …", Gate B of 0.6.16)

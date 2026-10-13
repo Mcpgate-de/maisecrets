@@ -1,0 +1,10 @@
+# c1-a-token-with-a-public-prefix-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-token-with-a-public-prefix-is-a-hit"
+control = "C1"
+statement = "An NTLMSSP message in base64, a NATS nkey seed, a PASERK secret, local or wrapped key and a PASETO token are secret hits by their own rules; a public nkey, a PASERK public key or key id and the bare prefix stay text."
+runner = ["tests/test_literal_values.py::TokenFormatTests::test_each_format_is_a_hit_by_its_rule"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''"regex": r"(?<![A-Za-z0-9+/])TlRMTVNTUA'''
+replace = '''"regex": r"(?!)(?<![A-Za-z0-9+/])TlRMTVNTUA'''

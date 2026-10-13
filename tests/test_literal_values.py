@@ -1,4 +1,5 @@
-"""A label and a literal value that no older rule took: a password that is no word after a password label.
+"""A label and a literal value that no older rule took (a password that is no word after a password label), and four
+token formats with a public prefix (NTLMSSP, NATS nkey seed, PASERK, PASETO).
 
 Run: python3 -m unittest tests.test_literal_values -v
 Every value is built at run time from a seeded random source, so no literal sits in the tree and the tree scan stays
@@ -7,6 +8,7 @@ references) is in tests/fp_corpus.py NO_HIT.
 """
 from __future__ import annotations
 
+import base64
 import os
 import random
 import string
@@ -97,6 +99,53 @@ class PasswordLiteralTests(unittest.TestCase):
         self.assertIn("Copyright 2000-2026 by Kevin Atkinson", lic)
         self.assertIn(version, lic)
         self.assertIn("words_en.txt", (ROOT / "NOTICE").read_text(encoding="utf-8"))
+
+
+def b64(raw: bytes, url: bool = False) -> str:
+    return (base64.urlsafe_b64encode(raw).decode().rstrip("=") if url else base64.b64encode(raw).decode())
+
+
+def rnd(n: int) -> bytes:
+    return bytes(RNG.randrange(256) for _ in range(n))
+
+
+B32 = string.ascii_uppercase + "234567"
+
+
+class TokenFormatTests(unittest.TestCase):
+    """Four token formats with a public prefix: an NTLMSSP message, a NATS nkey seed, a PASERK secret key, a PASETO
+    token."""
+
+    def cases(self):
+        ntlm = b64(b"NTLMSSP\x00\x03\x00\x00\x00" + rnd(60))
+        seed = "SU" + "".join(RNG.choice(B32) for _ in range(56))
+        paserk = "k4.local." + b64(rnd(32), url=True)
+        paseto = "v4.local." + b64(rnd(64), url=True)
+        return [("ntlmssp-message", f"Authorization: NTLM {ntlm}", ntlm),
+                ("ntlmssp-message", f"WWW-Authenticate: Negotiate {ntlm}", ntlm),
+                ("nats-nkey-seed", f"seed: {seed}", seed),
+                ("nats-nkey-seed", f"nkeys.FromSeed([]byte(\"{seed}\"))", seed),
+                ("paserk-secret-key", f"PASERK={paserk}", paserk),
+                ("paserk-secret-key", f"k = '{paserk}'", paserk),
+                ("paseto-token", f"headers = {{\"X-Session\": \"{paseto}\"}}", paseto),
+                ("paseto-token", f"token = {paseto}", paseto)]
+
+    def test_each_format_is_a_hit_by_its_rule(self):
+        for rule, text, value in self.cases():
+            with self.subTest(rule=rule, form=text.split(value)[0]):
+                self.assertIn((rule, value), kinds(text))
+
+    def test_public_parts_and_short_lookalikes_stay_text(self):
+        pub = "U" + "".join(RNG.choice(B32) for _ in range(55))
+        for text in (f"nkey public: {pub}",                                   # a public nkey: U, N, A …
+                     "k4.public." + b64(rnd(32), url=True),                     # a PASERK public key
+                     "k4.lid." + b64(rnd(33), url=True),                        # a PASERK key id
+                     "v4.local.short",                                          # no token
+                     "TlRMTVNTUA",                                              # the prefix alone, in prose
+                     "the field SUPERCALIFRAGILISTICEXPIALIDOCIOUS is long"):
+            with self.subTest(text=text[:12]):
+                self.assertEqual([k for k, _ in kinds(text) if k in ("ntlmssp-message", "nats-nkey-seed",
+                                                                      "paserk-secret-key", "paseto-token")], [])
 
 
 if __name__ == "__main__":
