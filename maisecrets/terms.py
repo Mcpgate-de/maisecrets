@@ -740,7 +740,14 @@ def _lock():
 
 
 def _expiry_ok(value) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    """A finite number, not a bool. An integer too large for a float (10**400) is invalid too: math.isfinite raised
+    OverflowError on it (codex verification of block 2)."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def _marked_items() -> list:

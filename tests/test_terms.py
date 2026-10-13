@@ -538,7 +538,8 @@ class MarkedFileTests(unittest.TestCase):
                     '{"terms": [{"text": "Zbigniew Testowski", "expires": true}]}',
                     '{"terms": [{"text": "Zbigniew Testowski", "expires": NaN}]}',
                     '{"terms": [{"text": "Zbigniew Testowski", "expires": Infinity}]}',
-                    '{"terms": [{"text": "Zbigniew Testowski", "expires": "9999999999"}]}'):
+                    '{"terms": [{"text": "Zbigniew Testowski", "expires": "9999999999"}]}',
+                    '{"terms": [{"text": "Zbigniew Testowski", "expires": 1' + "0" * 400 + '}]}'):
             with self.subTest(raw=raw):
                 terms.MARKED.write_text(raw, encoding="utf-8")
                 terms.reset()
@@ -611,6 +612,39 @@ class WipeTests(unittest.TestCase):
         vault_mod.wipe_everything(load_config())
         self.assertEqual(child.wait(timeout=60), 0)
         self.assertFalse(terms.SUGGESTED.exists(), "the wipe waited for the proposal and deleted it")
+
+
+_HOLD_LOCK = r"""
+import sys, time
+sys.path.insert(0, sys.argv[1])
+from maisecrets import terms
+with terms._lock():
+    print("held", flush=True)
+    time.sleep(3)
+"""
+
+
+class WipeLockTests(unittest.TestCase):
+    def test_a_wipe_that_cannot_take_the_terms_lock_says_what_is_left(self):
+        import contextlib
+        import io
+        import subprocess
+        from unittest import mock
+        from maisecrets import cli, vault as vault_mod
+        terms.MARKED.write_text(json.dumps({"terms": [{"text": "Zbigniew Testowski", "expires": time.time() + 600}]}),
+                                encoding="utf-8")
+        self.addCleanup(lambda: terms.MARKED.unlink() if terms.MARKED.exists() else None)
+        child = subprocess.Popen([sys.executable, "-c", _HOLD_LOCK, str(ROOT)], stdout=subprocess.PIPE, text=True,
+                                 env=dict(os.environ))
+        self.addCleanup(child.wait)
+        self.assertEqual(child.stdout.readline().strip(), "held")
+        out = io.StringIO()
+        with mock.patch.object(vault_mod._Lock, "LOCK_DEADLINE", 0.3), contextlib.redirect_stdout(out):
+            rc = cli.main(["wipe", "--yes"])
+        self.assertEqual(rc, 1, out.getvalue())
+        self.assertIn("NOT complete: terms.marked.json, .terms-cache, terms.suggested.txt not deleted", out.getvalue())
+        self.assertIn("run the wipe again", out.getvalue())
+        self.assertTrue(terms.MARKED.exists(), "left, and the wipe says so")
 
 
 class RaceTests(unittest.TestCase):
