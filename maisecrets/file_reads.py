@@ -220,9 +220,62 @@ def note_session_start(payload: dict) -> None:
         pass
 
 
+def _ask_path(payload: dict, kind: str, path: str):
+    """The one-use note that the PreToolUse of this call asked the person (C26): session, tool use, kind, file."""
+    from .vault import HOME
+    session, tid = payload.get("session_id"), payload.get("tool_use_id")
+    if not isinstance(session, str) or not _SESSION_RE.fullmatch(session) or not isinstance(tid, str) or not tid:
+        return None
+    if not path:
+        return None
+    import hashlib
+    full = path if os.path.isabs(path) else os.path.join(str(payload.get("cwd") or ""), path)
+    key = hashlib.sha256("\0".join((session, tid, kind, _real(full))).encode()).hexdigest()[:40]
+    return os.path.join(str(HOME), "asked", key)
+
+
+def note_ask(payload: dict, kind: str, path: str) -> None:
+    target = _ask_path(payload, kind, path)
+    if not target:
+        return
+    try:
+        os.makedirs(os.path.dirname(target), mode=0o700, exist_ok=True)
+        if os.path.islink(os.path.dirname(target)):
+            return
+        os.close(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600))
+    except OSError:
+        pass
+
+
+def take_ask(payload: dict, kind: str, path: str) -> bool:
+    """True once, when the PreToolUse of this very call asked: the note is removed as it is read. Without it the
+    file is withheld, also when it became clean or got an image between the two hooks (codex review of block 4)."""
+    import stat
+    target = _ask_path(payload, kind, path)
+    if not target:
+        return False
+    try:
+        if os.path.islink(os.path.dirname(target)) or not stat.S_ISREG(os.lstat(target).st_mode):
+            return False
+        os.unlink(target)
+        return True
+    except OSError:
+        return False
+
+
 def prune_sessions() -> None:
     """SessionStart: the notes of sessions older than SEEN_DAYS go."""
     import time
+    from .vault import HOME
+    asked = os.path.join(str(HOME), "asked")       # asks the person answered with no: a day is enough
+    try:
+        if not os.path.islink(asked):
+            for name in os.listdir(asked):
+                f = os.path.join(asked, name)
+                if os.lstat(f).st_mtime < time.time() - 86400:
+                    os.unlink(f)
+    except OSError:
+        pass
     folder = os.path.dirname(_seen_path("x"))
     try:
         if os.path.islink(folder):
@@ -507,6 +560,7 @@ def pre_read(payload: dict, cfg: dict, codex: bool) -> dict:
         full = path if os.path.isabs(path) else os.path.join(str(payload.get("cwd") or ""), path)
         if notebook_has_image(full) and not in_clean_dir(path, str(payload.get("cwd") or ""), cfg,
                                                          payload.get("session_id")):
+            note_ask(payload, "image", path)
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                            "permissionDecisionReason": ask_reason("image")}}
         return {}
@@ -521,6 +575,7 @@ def pre_read(payload: dict, cfg: dict, codex: bool) -> dict:
     if how == "ask":
         if codex:
             return _deny(refusal(kind, "ask-codex", codex))
+        note_ask(payload, kind, path)
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                        "permissionDecisionReason": ask_reason(kind)}}
     # convert: refuse now what the PostToolUse would refuse anyway, before the client renders the file
@@ -551,6 +606,7 @@ def post_read(payload: dict, cfg: dict, codex: bool) -> tuple | None:
         return None
     tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     path = tool_input.get("file_path") if isinstance(tool_input.get("file_path"), str) else ""
+    asked_path = path              # the name the PreToolUse saw, the key of its ask note
     if not path and isinstance(response.get("file"), dict):
         path = str(response["file"].get("filePath") or "")
     clean = tool == "Read" and in_clean_dir(path, str(payload.get("cwd") or ""), cfg, payload.get("session_id"))
@@ -558,7 +614,7 @@ def post_read(payload: dict, cfg: dict, codex: bool) -> tuple | None:
     if tool == "Read" and response.get("type") == "notebook":
         # its cells are text and are scanned as always, its image data is held out of the scan; ask (without the
         # PreToolUse ask: Codex, or a file that changed) and block take the images out
-        asked = how == "ask" and not codex and path.lower().endswith(".ipynb")
+        asked = how == "ask" and not codex and take_ask(payload, "image", asked_path)
         if how == "allow" or clean or asked:
             return ("hold",)
         why = _block_why(cfg) if how != "ask" else ("ask-codex" if codex else "ask-unseen")
@@ -573,8 +629,8 @@ def post_read(payload: dict, cfg: dict, codex: bool) -> tuple | None:
     if how == "allow":
         return ("pass",)
     if how == "ask":
-        if tool == "Read" and not codex and kind_of_path(path) == kind:
-            return ("pass",)          # the PreToolUse asked, and the person said yes
+        if tool == "Read" and not codex and take_ask(payload, kind, asked_path):
+            return ("pass",)          # the PreToolUse of this call asked, and the person said yes
         why = "ask-codex" if codex else "ask-unseen"
         return ("replace", _withheld(tool, response, path, refusal(kind, why, codex)),
                 f"maisecrets withheld this {noun} from the AI ({key} ask).")

@@ -290,9 +290,34 @@ class AskAndBlock(_Work):
 
     def test_after_a_yes_the_file_passes_and_without_an_ask_it_is_withheld(self):
         _reset(read_pdf="ask")
-        self.assertEqual(self.post(), {}, "the person said yes to the ask")
+        pre = golden("PreToolUse_Read_pdf_pages", self.cwd, file_path=self.pdf)
+        self.assertEqual(decision(run_hook("pre-tool", pre)), "ask")
+        self.assertEqual(self.post(), {}, "the person said yes to the ask of this call")
+        self.assertEqual(output(self.post())["type"], "text", "the note of the ask is used once")
         out = output(self.post(file_path=os.path.join(self.cwd, "report")))
         self.assertEqual(out["type"], "text", "no ask came for a name without .pdf")
+
+    def test_without_the_ask_of_this_call_a_pdf_is_withheld(self):
+        # codex review of block 4: the extension alone passed; a file clean at the PreToolUse and not clean at the
+        # PostToolUse (or another call's ask) went to the model without a dialog
+        _reset(read_pdf="ask")
+        self.assertEqual(output(self.post())["type"], "text", "no PreToolUse asked")
+        pre = golden("PreToolUse_Read_pdf_pages", self.cwd, file_path=self.pdf)
+        run_hook("pre-tool", pre)
+        other = golden("PostToolUse_Read_pdf", self.cwd)
+        other["tool_use_id"] = "another-call"
+        self.assertEqual(output(run_hook("post-tool", other))["type"], "text", "the ask of another call")
+
+    @unittest.skipIf(os.name == "nt", "clean_dirs is for macOS and Linux")
+    def test_clean_at_the_pre_tool_and_not_clean_at_the_post_tool_is_withheld(self):
+        _reset(read_pdf="ask", clean_dirs=[self.cwd])
+        time.sleep(0.02)
+        with mock.patch.object(file_reads, "nested_client", return_value=False):
+            file_reads.note_session_start({"session_id": "S1", "source": "startup"})
+        pre = golden("PreToolUse_Read_pdf_pages", self.cwd, file_path=self.pdf)
+        self.assertEqual(run_hook("pre-tool", pre), {}, "clean: no ask")
+        shutil.rmtree(Path(HOME, "sessions-seen"))                   # no longer clean
+        self.assertEqual(output(self.post())["type"], "text")
 
     def test_an_unknown_mode_blocks(self):
         _reset(read_pdf="convrt")
@@ -699,6 +724,7 @@ class Notebook(_Work):
         self.assertIn("iVBOR", json.dumps(output(self._post())), "after the yes the image goes, the cells are masked")
         nb.write_text(json.dumps({"cells": [{"outputs": [{"text": "x"}]}]}))
         self.assertEqual(run_hook("pre-tool", pre), {}, "a notebook without an image is not asked about")
+        self.assertNotIn("iVBOR", json.dumps(self._post()), "it got an image after the PreToolUse: withheld")
         p = golden("PostToolUse_Read_notebook", self.cwd, turn_id="t1")
         self.assertNotIn("iVBOR", json.dumps(run_hook("post-tool", p)), "Codex cannot ask: withheld")
 
