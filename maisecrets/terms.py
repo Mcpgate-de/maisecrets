@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import marshal
+import math
 import os
 import re
 import stat
@@ -738,6 +739,10 @@ def _lock():
     return _lock_for(HOME / ".terms.lock")
 
 
+def _expiry_ok(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
 def _marked_items() -> list:
     """Every record of terms.marked.json, expired ones too. No file: none. A file that cannot be read or parsed
     raises TermsError, so the hooks fail closed: an empty list would let every marked name through (codex review of
@@ -751,8 +756,10 @@ def _marked_items() -> list:
     try:
         data = json.loads(raw)
         items = data["terms"]
+        # each record needs its text and a finite number as its expiry: a record without one was taken for expired
+        # and purged, so damage erased a marked name instead of stopping the hooks (codex verification of block 2)
         if not isinstance(items, list) or not all(isinstance(x, dict) and isinstance(x.get("text"), str)
-                                                  and isinstance(x.get("expires", 0), (int, float)) for x in items):
+                                                  and _expiry_ok(x.get("expires")) for x in items):
             raise ValueError
     except (ValueError, KeyError, TypeError):
         raise TermsError(f"{MARKED}: damaged, so the names marked with {{{{…}}}} cannot be masked. maisecrets does "

@@ -1595,14 +1595,17 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
         from . import incidents
         incidents.clear(HOME)              # the incident record, its aside, lock and temp files, the markers
         # the names marked with {{…}} and the term index (terms.py); terms.txt is the person's list and stays
-        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced", "terms.marked.json",
-                     ".terms-cache", "terms.suggested.txt"):
-            try:
-                (HOME / name).unlink()
-            except FileNotFoundError:
-                pass
-            except OSError:
-                problems.append(f"{name} not deleted")
+        # under the terms lock too (order: this lock, then the terms lock; a terms writer never takes this one): a
+        # proposal or a mark written at the same time came back after the wipe (codex verification of block 2)
+        with _lock_for(HOME / ".terms.lock"):
+            for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced", "terms.marked.json",
+                         ".terms-cache", "terms.suggested.txt"):
+                try:
+                    (HOME / name).unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    problems.append(f"{name} not deleted")
         dirs = [HOME / "pending", HOME / "run"] + ([Path(run_dir)] if run_dir else [])
         for d in dirs:
             if d.is_dir():

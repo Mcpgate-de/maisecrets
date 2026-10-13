@@ -515,7 +515,7 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
         # locks stay with their files
         # sessions-seen holds no value, only when each session began: a wipe that removed it would let the next
         # prompt note a later start, and a file copied into a clean folder before then would pass (C28)
-        kept = {".lock", ".destinations.lock", ".incidents.lock", "config.json", "pending", "vault.json",
+        kept = {".lock", ".destinations.lock", ".incidents.lock", ".terms.lock", "config.json", "pending", "vault.json",
                 "sessions-seen"}
         expect(set(after.files) <= kept, f"wipe left {after.files}")
         return p

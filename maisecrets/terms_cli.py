@@ -1,8 +1,9 @@
 """`maisecrets terms`: the term lists (maisecrets/terms.py) and `terms suggest FILE`.
 
 `terms` prints counts, labels, files and line numbers, never a term: the output goes to the model when the agent runs
-it. `terms suggest` prints names, so it prints them only to a terminal (a tool call reads a pipe, not a terminal), and
-it writes nothing: the person copies the lines they want.
+it. `terms suggest` prints no name, not in a terminal either (an agent can open a pseudo-terminal): it overwrites the
+private proposal terms.suggested.txt in the maisecrets folder (mode 0600, under the terms lock) and prints the count
+and the path. The person copies the lines they want; nothing is added to the terms.
 """
 from __future__ import annotations
 
@@ -15,7 +16,8 @@ from pathlib import Path
 from . import terms
 
 USAGE = ("maisecrets terms                   your term lists: counts, files, lines left out; never a term\n"
-         "maisecrets terms suggest FILE      propose terms from a text or CSV file (terminal only; writes nothing)\n"
+         "maisecrets terms suggest FILE      propose terms from a text or CSV file into the private file\n"
+         "                                   terms.suggested.txt (overwritten; no name is printed)\n"
          "Add a term: type /maisecrets:term add Jan Kowalski as your prompt, or mark it once as {{Jan Kowalski}}.")
 
 
@@ -150,7 +152,8 @@ def suggest(args: list[str]) -> int:
             + "".join(f"NAME_S{n}  {line}\n" for n, line in enumerate(lines, 1)))
     from .vault import atomic_write
     try:
-        atomic_write(terms.SUGGESTED, body, mode=0o600)
+        with terms._lock():       # a wipe takes the same lock: the proposal never comes back after it
+            atomic_write(terms.SUGGESTED, body, mode=0o600)
     except OSError as exc:
         print(f"maisecrets terms suggest: cannot write the proposal ({type(exc).__name__}). Nothing was written.")
         return 1
