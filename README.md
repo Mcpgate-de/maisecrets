@@ -1549,12 +1549,10 @@ a to-do.
   reference from an earlier run is foreign there.
 - **A reference in a prompt is admitted as typed by a human**, also when the
   prompt was built from an issue body or a log in a headless run.
-- **A slow regex on Windows can outrun the hook's time limit.** A regex
-  search holds Python while it runs. On macOS and Linux a timer signal
-  (SIGALRM) still stops it, and the hook blocks before the client's timeout;
-  Windows has no such signal, and the client then ends the hook and lets the
-  action through. The checks of "Rules of your own" keep a backtracking rule
-  out, and a rule that is slow in one scan is left out from the next one on.
+- **A slow rule of your own on Windows can outrun the hook's time limit**
+  (see "A hook that exceeds the client's timeout fails open" above). The
+  checks of "Rules of your own" keep a backtracking rule out, and a rule that
+  is slow in one scan is left out from the next one on.
 - **Claude Code on Windows without Git Bash** offers a `PowerShell` tool in
   place of Bash. maisecrets checks it like Bash for the store, in any case
   and with either slash, and refuses a placeholder in it with the reason:
