@@ -81,6 +81,10 @@ class Base(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="values-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
+    def listed(self, *names: str, **cfg) -> None:
+        """Make files in self.tmp the person's value_files (only those link and renew: value_import._listed)."""
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "value_files": [str(self.tmp / n) for n in names], **cfg}))
+
     def iid(self, name: str = "names.jsonl") -> str:
         """The id of the import of a file in self.tmp (value_import.source_name)."""
         return value_import.source_name(self.tmp / name)
@@ -696,6 +700,7 @@ class ReviewFixes(Base):
     # Fable H2 / Opus M1: a re-import renews past max_ttl, and before the values expire
     def test_a_reimport_renews_the_lifetime_past_the_first_max_ttl(self):
         f = self.file(lines({"value": NAME, "type": "NAME"}))
+        self.listed("names.jsonl")
         value_import.import_file(f, origin="file")
         v = Vault()
         with v._exclusive():
@@ -710,6 +715,7 @@ class ReviewFixes(Base):
 
     def test_only_a_value_file_renews_and_never_past_a_shorter_max_ttl(self):
         f = self.file(lines({"value": NAME, "type": "NAME"}))
+        self.listed("names.jsonl")
         value_import.import_file(f, origin="file")
         v = Vault()
         with v._exclusive():
@@ -717,9 +723,11 @@ class ReviewFixes(Base):
             meta["expires"] = meta["max_expires"] = time.time() + 100
         value_import.import_file(f)                                    # an agent's run import of the same file
         self.assertLess(Vault()._index["entries"]["NAME_c1"]["max_expires"] - time.time(), 101)
-        CONFIG.write_text(json.dumps({**TEST_CONFIG, "max_ttl_seconds": 7200}))
+        self.listed("names.jsonl", max_ttl_seconds=7200)
         value_import.import_file(f, origin="file")
-        self.assertLessEqual(Vault()._index["entries"]["NAME_c1"]["max_expires"] - time.time(), 7200)
+        left = Vault()._index["entries"]["NAME_c1"]["max_expires"] - time.time()
+        self.assertGreater(left, 7000, "renewed by the value file")
+        self.assertLessEqual(left, 7200, "never past the person's max_ttl_seconds")
 
     def test_a_value_file_is_imported_again_when_a_value_expires_soon_or_one_is_gone(self):
         f = self.file(lines({"value": NAME, "type": "NAME"}, {"value": LONG_NAME, "type": "NAME"}))
@@ -772,6 +780,7 @@ class ReviewFixes(Base):
     # Opus M2: a value two imports list stays when one of them is removed
     def test_a_value_in_two_imports_stays_until_both_are_removed(self):
         a, b = self.iid("a.jsonl"), self.iid("b.jsonl")
+        self.listed("a.jsonl", "b.jsonl")
         value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "a.jsonl"), origin="file")
         value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "b.jsonl"), origin="file")
         self.assertEqual(value_import.counts_by_source(Vault()), {a: {"NAME": 1}, b: {"NAME": 1}})
@@ -924,6 +933,7 @@ class Round3(Base):
     # HIGH 4: bounds on sources, records and concurrent imports
     def test_a_value_that_any_value_file_lists_stays_until_the_last_is_removed(self):
         ids = []
+        self.listed(*(f"p{i}.jsonl" for i in range(10)))
         for i in range(10):
             value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), f"p{i}.jsonl"), origin="file")
             ids.append(self.iid(f"p{i}.jsonl"))
@@ -933,6 +943,7 @@ class Round3(Base):
         self.assertEqual(value_import.counts_by_source(Vault()), {ids[-1]: {"NAME": 1}})
 
     def test_an_agents_import_of_known_values_links_nothing_and_leaves_no_record(self):
+        self.listed("team.jsonl")
         value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "team.jsonl"), origin="file")
         for i in range(5):
             value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), f"copy{i}.jsonl"))
@@ -1089,6 +1100,79 @@ class Round5(Base):
         self.assertLess(deleted, 6, "the batch stopped at the deadline, not at its end")
         self.assertEqual(deleted + left, 20)
         self.assertEqual(value_import.remove(Vault(), self.iid())[0], 20 - deleted)
+
+
+class Round6(Base):
+    """The last codex round on block 3 at 55647df."""
+
+    def test_an_import_that_calls_itself_a_value_file_is_none_unless_the_person_listed_it(self):
+        self.listed("team.jsonl")
+        value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), "team.jsonl"), origin="file")
+        for i in range(5):
+            value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"}), f"fake{i}.jsonl"),
+                                     origin="file")
+        self.assertEqual(Vault()._index["entries"]["NAME_c1"]["also"], [], "no name of a file the person did not list")
+        state = json.loads(value_import.STATE_FILE.read_text())["sources"]
+        self.assertEqual({n: r["origin"] for n, r in state.items()}, {self.iid("team.jsonl"): "file"})
+
+    def test_a_reservation_is_released_only_by_its_owner(self):
+        f = self.file(lines({"value": NAME, "type": "NAME"}))
+        _clean_state = json.dumps({"sources": {self.iid(): {"origin": "run", "at": time.time(), "count": 0,
+                                                            "reserved": "other-owner"}}})
+        value_import.STATE_FILE.write_text(_clean_state)
+        with self.assertRaisesRegex(ValueError, "an import of this file runs already"):
+            value_import.import_file(f)
+        rec = json.loads(value_import.STATE_FILE.read_text())["sources"][self.iid()]
+        self.assertEqual(rec["reserved"], "other-owner", "a failure here does not release another's reservation")
+        # this import found a finished record (no reservation of its own); meanwhile another import reserved the
+        # place again; this one fails and must leave that reservation alone
+        value_import.STATE_FILE.write_text(json.dumps({"sources": {self.iid(): {"origin": "run", "at": 1.0,
+                                                                                "count": 1}}}))
+
+        def other_reserves_then_fail(text):
+            value_import.STATE_FILE.write_text(json.dumps({"sources": {self.iid(): {
+                "origin": "run", "at": 2.0, "count": 0, "reserved": "other-owner"}}}))
+            raise ValueError("broken")
+        with mock.patch.object(value_import, "parse", other_reserves_then_fail):
+            with self.assertRaisesRegex(ValueError, "broken"):
+                value_import.import_file(f)
+        rec = json.loads(value_import.STATE_FILE.read_text())["sources"][self.iid()]
+        self.assertEqual(rec["reserved"], "other-owner")
+
+    def test_two_processes_on_one_file_leave_one_finished_record(self):
+        code = ("import sys, time; sys.path.insert(0, sys.argv[1]); from maisecrets import value_import as v\n"
+                "if sys.argv[3] == 'slow':\n"
+                "    real = v.parse\n"
+                "    def slow(t):\n"
+                "        time.sleep(1.0); return real(t)\n"
+                "    v.parse = slow\n"
+                "try:\n"
+                "    v.import_file(sys.argv[2]); print('ok')\n"
+                "except ValueError as e:\n"
+                "    print('refused', e)")
+        f = self.file(lines({"value": NAME, "type": "NAME"}))
+        procs = []
+        for mode in ("slow", "fast"):
+            procs.append(subprocess.Popen([sys.executable, "-c", code, str(ROOT), str(f), mode],
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True))
+            time.sleep(0.4)
+        outs = [p.communicate(timeout=60)[0].strip() for p in procs]
+        self.assertEqual(outs[0], "ok")
+        self.assertIn("an import of this file runs already", outs[1])
+        rec = json.loads(value_import.STATE_FILE.read_text())["sources"][self.iid()]
+        self.assertNotIn("reserved", rec)
+        self.assertEqual(rec["count"], 1)
+
+    def test_the_state_keeps_a_bounded_number_of_records(self):
+        stale = {f"f{i:08x}": {"origin": "run", "at": float(i), "count": 0} for i in range(40)}
+        value_import.STATE_FILE.write_text(json.dumps({"sources": stale}))
+        with mock.patch.object(value_import, "MAX_STATE_RECORDS", 10), \
+                mock.patch.object(value_import, "MAX_RUN_IMPORTS", 100):
+            value_import.import_file(self.file(lines({"value": NAME, "type": "NAME"})))
+        srcs = json.loads(value_import.STATE_FILE.read_text())["sources"]
+        self.assertEqual(len(srcs), 10)
+        self.assertIn(self.iid(), srcs)
+        self.assertNotIn("f00000000", srcs, "the oldest record without a value went first")
 
 
 class EndToEnd(Base):

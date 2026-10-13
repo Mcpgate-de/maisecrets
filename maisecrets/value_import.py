@@ -62,6 +62,7 @@ SESSION_BUDGET = 8.0       # seconds from the start of a session start to the en
                            # before each file, batch and delete: one read or delete that blocks is not cancelled
 MAX_FILES_PER_START = 20   # value files one session start reads; the rest follow at the next start
 MAX_RUN_IMPORTS = 50       # imports that no value file names, each with a state record; past it an import is refused
+MAX_STATE_RECORDS = 300    # records of the state; past it the oldest without a live value are dropped
 STATE_FILE = HOME / ".values-state"
 KIND = "import"
 _PLAIN_WORD = re.compile(r"[a-zß-ÿ]+")
@@ -331,6 +332,11 @@ def import_file(path: str | Path, vault=None, deadline: float | None = None, raw
         raise ValueError("not UTF-8 text") from None
     vault = vault or Vault()
     result = Result(source=source_name(path, vault=vault))
+    if origin == "file" and not _listed(path, vault.cfg):
+        # "file" is a caller's word: only a file of the person's value_files links values and renews them, so the names
+        # a value keeps are bounded by the files the person configured (codex verification of block 3)
+        origin = "run"
+    token = ""
     if origin != "file":
         # each import is a record the hooks and the list read: an agent that imports from many paths grew the state
         # without a bound (codex review of block 3). Counted and reserved under the state lock, so two imports at once
@@ -343,16 +349,22 @@ def import_file(path: str | Path, vault=None, deadline: float | None = None, raw
                 raise ValueError(f"maisecrets holds {MAX_RUN_IMPORTS} imports that are no value file, the limit; "
                                  "/maisecrets:list names them, and your prompt /maisecrets:forget import:NAME removes "
                                  "one")
+            if srcs.get(result.source, {}).get("reserved"):
+                # another import of this file holds the reservation: its owner finishes or releases it
+                raise ValueError("an import of this file runs already; try again when it ended")
             if result.source not in srcs:
-                srcs[result.source] = {"origin": "run", "at": time.time(), "count": 0, "reserved": True}
+                # the reservation is owned: a token only this call knows, so a failure elsewhere cannot release it
+                # and let a 51st import in (codex verification of block 3)
+                import secrets
+                token = secrets.token_hex(8)
+                srcs[result.source] = {"origin": "run", "at": time.time(), "count": 0, "reserved": token}
                 _save_state(state)
     try:
-        return _import_items(path, raw, text, vault, result, origin, deadline)
+        return _import_items(path, raw, text, vault, result, origin, deadline, token)
     except BaseException:
-        # a failed import gives its place back: a reservation left behind took one of MAX_RUN_IMPORTS for good
-        # (codex verification of block 3)
+        # a failed import gives its own place back: a reservation left behind took one of MAX_RUN_IMPORTS for good
         def release(state: dict) -> None:
-            if state.get("sources", {}).get(result.source, {}).get("reserved"):
+            if token and state.get("sources", {}).get(result.source, {}).get("reserved") == token:
                 state["sources"].pop(result.source, None)
         try:
             _update_state(release)
@@ -361,8 +373,21 @@ def import_file(path: str | Path, vault=None, deadline: float | None = None, raw
         raise
 
 
+def _listed(path: Path, cfg: dict) -> bool:
+    """The file is one of the person's value_files."""
+    real = path.resolve()
+    for entry in cfg.get("value_files") or []:
+        if isinstance(entry, str) and entry.strip():
+            try:
+                if Path(os.path.expanduser(entry.strip())).resolve() == real:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
 def _import_items(path: Path, raw: bytes, text: str, vault, result: "Result", origin: str,
-                  deadline: float | None) -> "Result":
+                  deadline: float | None, token: str = "") -> "Result":
     items, result.refused, result.duplicates = parse(text)
     if len(items) > MAX_VALUES_PER_FILE:
         result.stopped = (f"line {items[MAX_VALUES_PER_FILE][2]} and later not read: at most "
@@ -403,8 +428,13 @@ def _import_items(path: Path, raw: bytes, text: str, vault, result: "Result", or
 
     def record(state: dict) -> None:
         srcs = state.setdefault("sources", {})
-        if origin != "file" and not count and srcs.get(result.source, {}).get("reserved", True):
-            srcs.pop(result.source, None)  # an import that holds no value leaves no record (codex review of block 3)
+        rec = srcs.get(result.source)
+        mine = bool(token) and rec is not None and rec.get("reserved") == token
+        if rec is not None and rec.get("reserved") and not mine:
+            return                       # another import's reservation: only its owner finishes it
+        if origin != "file" and not count:
+            if mine:
+                srcs.pop(result.source, None)  # an import that holds no value leaves no record (codex review)
             return
         rec = srcs.setdefault(result.source, {})
         rec.pop("reserved", None)
@@ -412,6 +442,12 @@ def _import_items(path: Path, raw: bytes, text: str, vault, result: "Result", or
                     "origin": "file" if origin == "file" or rec.get("origin") == "file" else "run"})
         if not result.pending:
             rec["hash"] = hashlib.sha256(raw).hexdigest()[:16]
+        if len(srcs) > MAX_STATE_RECORDS:
+            # the oldest records without a live value and without a reservation go first
+            idle = sorted((r.get("at", 0), n) for n, r in srcs.items()
+                          if not r.get("count") and not r.get("reserved") and n != result.source)
+            for _at, n in idle[:len(srcs) - MAX_STATE_RECORDS]:
+                srcs.pop(n, None)
     _update_state(record)
     _log(result, origin)
     return result

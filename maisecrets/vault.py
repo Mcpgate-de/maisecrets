@@ -1170,8 +1170,9 @@ class Vault:
                 if session and session not in e.sessions:
                     e.sessions.append(session)
                 if source and e.source and link:
-                    # only a value file links (value_import: an agent's import links nothing), so the names are the
-                    # person's files and none is dropped: a cap dropped the ninth file, and removing the other eight
+                    # only a file of the person's value_files links (value_import._listed; an agent's import links
+                    # nothing), so a value keeps at most one run import's name (its first source) and one name per
+                    # configured file, and none is dropped: a cap dropped the ninth file, and removing the other eight
                     # unmasked a value that file still lists (codex verification of block 3)
                     if source != e.source and source not in e.also:
                         e.also.append(source)
