@@ -1204,8 +1204,12 @@ def _curl_parts(rule: Rule):
         flags = "(?i)" if p.startswith("(?i)") else ""
         body = p[len(flags):]
         head = next((h for h in _CURL_HEADS if body.startswith(h)), None)
-        _CURL_PARTS[rule.id] = None if head is None else (re.compile(flags + r"\bcurl\b"),
-                                                          re.compile(flags + body[len(head):]))
+        tail = body[len(head):] if head else ""
+        if tail.endswith(r"(?:\s|\Z)"):
+            # the space after a credential was part of the match, so finditer skipped a credential that started
+            # right after it: `-u a:x --user b:y` lost b:y (Gate B of 0.6.15); a lookahead keeps it
+            tail = tail[:-len(r"(?:\s|\Z)")] + r"(?=\s|\Z)"
+        _CURL_PARTS[rule.id] = None if head is None else (re.compile(flags + r"\bcurl\b"), re.compile(flags + tail))
     return _CURL_PARTS[rule.id]
 
 

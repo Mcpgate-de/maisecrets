@@ -31,6 +31,12 @@ AWS = "aws-secret-after-access-key"
 CURL = ("curl-auth-header", "curl-auth-user")
 
 
+def secret_span(m, ngroups: int) -> tuple:
+    """The span of the first group that matched: the credential scan() takes when secret_group is 0."""
+    g = next((i for i in range(1, ngroups + 1) if m.group(i)), 0)
+    return m.start(g), m.end(g)
+
+
 def rnd(n: int, alphabet: str = AN) -> str:
     return "".join(_R.choice(alphabet) for _ in range(n))
 
@@ -109,10 +115,36 @@ class CurlRuleTests(unittest.TestCase):
             for rid, rule in rules.items():
                 with self.subTest(rule=rid, text=text[:30]):
                     rx = re.compile(rule.regex.pattern)
-                    want = [(m.start(), m.end(), m.groups()) for m in rx.finditer(text)]
-                    got = [(m.start(), m.end(), tuple(m.group(i) for i in range(1, rx.groups + 1)))
+                    want = [(m.start(), secret_span(m, rx.groups), m.groups()) for m in rx.finditer(text)]
+                    got = [(m.start(), secret_span(m, rx.groups), tuple(m.group(i) for i in range(1, rx.groups + 1)))
                            for m in detect._matches(rule, text)]
                     self.assertEqual(got, want)
+
+    def test_a_second_credential_right_after_the_first_is_found(self):
+        # the trailing space of the first -u was part of its match, and finditer went on after it (Gate B of 0.6.15)
+        a, b = "admin" + ":" + rnd(14), "bob" + ":" + rnd(14)
+        text = f"curl -u {a} --user {b} https://example.com/a"
+        self.assertEqual([m.value for m in detect.scan(text) if m.kind == "curl-auth-user"], [a, b])
+
+    def test_fuzz_the_linear_path_finds_every_credential_the_regex_finds(self):
+        # every secret span the betterleaks regex finds is found by the linear path (it may find more: each -u)
+        r = random.Random(1)
+        tok = rnd(30)
+        pieces = ["curl", "CURL", f" -H 'X-API-Key: {tok}'", f' -H "Authorization: Basic {tok}"', f" -u admin:{tok}",
+                  " --user bob" + ":" + tok + " \\\n", "\n", "\n\n", "\r\n", " -X POST", " https://x", " echo",
+                  " -d @f",
+                  " && ", "curl -s", " -H 'Accept: */*'", "\r"]
+        rules = [x for x in detect.rules() if x.id in CURL]
+        misses = []
+        for _ in range(3000):
+            text = "".join(r.choice(pieces) for _ in range(r.randint(2, 14)))
+            for rule in rules:
+                rx = re.compile(rule.regex.pattern)
+                want = {secret_span(m, rx.groups) for m in rx.finditer(text)}
+                got = {secret_span(m, rx.groups) for m in detect._curl_matches(detect._curl_parts(rule), text)}
+                if not want <= got:
+                    misses.append((rule.id, len(text)))
+        self.assertEqual(misses[:5], [])
 
     def test_a_line_of_many_curl_words_scans_in_under_a_second(self):
         # released code: 32K characters of "curl " took 16.6 s for the two curl rules and the AWS rule
