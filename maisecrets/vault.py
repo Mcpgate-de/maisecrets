@@ -1596,7 +1596,7 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
         incidents.clear(HOME)              # the incident record, its aside, lock and temp files, the markers
         # the names marked with {{…}} and the term index (terms.py); terms.txt is the person's list and stays
         for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced", "terms.marked.json",
-                     ".terms-cache"):
+                     ".terms-cache", "terms.suggested.txt"):
             try:
                 (HOME / name).unlink()
             except FileNotFoundError:

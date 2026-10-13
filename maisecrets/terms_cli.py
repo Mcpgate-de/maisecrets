@@ -9,7 +9,6 @@ from __future__ import annotations
 import csv
 import io
 import re
-import sys
 from collections import Counter
 from pathlib import Path
 
@@ -144,15 +143,20 @@ def suggest(args: list[str]) -> int:
             continue
         stem = inflections(name, words)
         lines.append(" | ".join([name] + ([stem] if stem else [])))
-    if not sys.stdout.isatty():
-        # the agent reads a pipe: the names would reach the model
-        print(f"maisecrets terms suggest: {len(lines)} candidate(s) in {path.name}. The names are shown only in a "
-              "terminal: ask the person to run this command there. Nothing was written.")
-        return 0
-    print(f"# {len(lines)} candidate(s) from {path.name}. Nothing was written. Copy the lines you want into "
-          f"{terms._shown_path()} (one name per line; Kowalsk* = any ending), or type /maisecrets:term add NAME.")
-    for n, line in enumerate(lines, 1):
-        print(f"NAME_S{n}  {line}")
+    # never on the screen: an agent can run this in a pseudo-terminal and read what a terminal shows (codex review of
+    # block 2). The proposal goes into the maisecrets folder (C8: the agent cannot read it), mode 0600
+    body = (f"# {len(lines)} candidate(s) from {path.name}. Nothing was added. Copy the lines you want into "
+            f"{terms._shown_path()} (one name per line; Kowalsk* = any ending), or type /maisecrets:term add NAME.\n"
+            + "".join(f"NAME_S{n}  {line}\n" for n, line in enumerate(lines, 1)))
+    from .vault import atomic_write
+    try:
+        atomic_write(terms.SUGGESTED, body, mode=0o600)
+    except OSError as exc:
+        print(f"maisecrets terms suggest: cannot write the proposal ({type(exc).__name__}). Nothing was written.")
+        return 1
+    print(f"maisecrets terms suggest: {len(lines)} candidate(s) in {path.name}. The proposal is in "
+          f"{terms._shown_suggested()}; open it yourself in an editor or a terminal (the AI cannot read that "
+          "folder). Nothing was added to your terms.")
     return 0
 
 

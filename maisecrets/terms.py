@@ -46,6 +46,7 @@ INSIDE = "inside"    # *kowalski*: anywhere inside a word
 PERSONAL = HOME / "terms.txt"
 MARKED = HOME / "terms.marked.json"
 STATE_FILE = HOME / ".terms-state"
+SUGGESTED = HOME / "terms.suggested.txt"    # the proposal of `maisecrets terms suggest`: names, so in the store
 SUFFIX = ".terms"
 STORE_PREFIX = "maisecrets-term:"   # the store value of a term entry: the id, never the term
 
@@ -1002,6 +1003,10 @@ def parse_command(prompt) -> tuple[str, str] | None:
 USAGE = ("maisecrets: send /maisecrets:term add NAME (for example /maisecrets:term add Jan Kowalski | Kowalsk*) or "
          "/maisecrets:term remove NAME as your own prompt; in Codex: maisecrets: term add NAME. /maisecrets:term "
          "alone shows your lists. This prompt was not sent to the model.")
+
+
+def _shown_suggested() -> str:
+    return "~/.maise" + "crets/terms.suggested.txt" if HOME == Path.home() / ".maisecrets" else str(SUGGESTED)
 
 
 def _shown_path() -> str:
