@@ -713,8 +713,9 @@ def _sequential(low: str) -> bool:
 
 
 def _pw_literal_ok(v: str) -> bool:
-    """A password value: 4 to 64 characters, no word after undoing leet, not digits only, 3 distinct characters or
-    more, no run such as abcd, no placeholder, no space, no dotted reference, no fixture word (testpass)."""
+    """A password value: 4 to 64 characters, no word after undoing leet (or a word with a number and a sign), not
+    digits only, 3 distinct characters or more, no run such as abcd, no placeholder, no space, no dotted reference, no
+    fixture word (testpass), no version."""
     if not 4 <= len(v) <= 64 or any(c.isspace() for c in v) or _charset(v) == "digits" or len(set(v)) < 3:
         return False
     if _sequential(v.lower()) or _LITERAL_PLACEHOLDER_RE.search(v) or _DOTTED_RE.fullmatch(v) or _names_itself(v):
@@ -723,7 +724,14 @@ def _pw_literal_ok(v: str) -> bool:
         return False   # a template of a format string: f'pwd = "{pw}"', "password: {password}"
     if _VERSION_RE.fullmatch(v):
         return False   # a version: v1.2.3-rc1 (undoing leet makes it letters)
-    return _wordlike(_deleet(v)) < 0.3
+    if _wordlike(_deleet(v)) < 0.3:
+        return True
+    # a password made of a word, a number and a sign: Sommer2024!, Herbst2025#, Welcome1! (the form people choose).
+    # A word with a number alone (Winter2023, postgres15) stays text here; the keyword rules judge it. So does a name
+    # joined by _ - . (ABC_123_DEF) and a reference with : / or \ (b64:!!notbase64, vault:db/pw1!)
+    return (len(v) >= 8 and any(c.isalpha() for c in v) and any(c.isdigit() for c in v)
+            and any(not c.isalnum() and c not in "_-." for c in v) and not any(c in ":/\\" for c in v)
+            and _ds_value_ok(v))
 
 
 # the forms of label and literal value. A label, then = => := == : , or ( and a quoted value (also inside a wrapper

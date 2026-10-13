@@ -63,6 +63,20 @@ class PasswordLiteralTests(unittest.TestCase):
                 self.assertTrue(any(k == "label-pw-literal" for k, _ in got), got and [k for k, _ in got])
                 self.assertTrue(any(v in (p4, p6, p10) for _, v in got))
 
+    def test_a_word_with_a_number_and_a_sign_is_a_password(self):
+        """The form people choose: a word, a number and a sign. Undoing leet makes it a word, so the word check alone
+        let it through in the forms that only this rule reads."""
+        for value in ("Sommer2024!", "Herbst2025#", "Welcome1!", "Dragon#77x"):
+            for form in ("<password>{}</password>", "ALTER USER app IDENTIFIED BY '{}';",
+                         "$s = ConvertTo-SecureString '{}' -AsPlainText -Force"):
+                text = form.format(value)
+                with self.subTest(text=text):
+                    self.assertIn(("label-pw-literal", value), kinds(text))
+        # no sign, a fixture, a reference, a name joined by _, a scheme
+        for value in ("Winter2023", "postgres15", "P@ssw0rd!", "${DB_PASS}!1", "ABC_123_DEF", "b64:!!notbase64"):
+            with self.subTest(value=value):
+                self.assertEqual([k for k, _ in kinds(f"<password>{value}</password>") if k == "label-pw-literal"], [])
+
     def test_a_word_or_a_reference_after_a_password_label_is_no_hit(self):
         """No value or one that says what it is: a word, a word in leet, a fixture, a mask, a template, a reference."""
         for value in ("hunter", "Sunshine", "P4ssw0rd", "testpass", "changeme", "********", "abcdef", "123456789",

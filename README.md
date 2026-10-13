@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 110 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 111 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1165,10 +1165,11 @@ Four sources, one scanner (`maisecrets/detect.py`):
   value must be no word after undoing leet (`P4ssw0rd` is a word), no fixture (`testpass`),
   no mask, template or reference (`${DB_PASSWORD}`, `{{ … }}`, `settings.DB_PASSWORD`). The
   words come from `maisecrets/rules/words_en.txt`, about 21,000 English words of 4 to 8
-  letters from SCOWL (see `NOTICE`), read only when a password label is in the text. A
-  password made of words is left to the keyword rules: they take `password: Sommer2024!`, but
-  `<password>Sommer2024!</password>` and `passphrase: correct-horse-battery-staple` stay text,
-  as this rule cannot tell such a value from a word or a reference. Word-likeness and the label
+  letters from SCOWL (see `NOTICE`), read only when a password label is in the text. A word
+  with a number and a sign (`Sommer2024!`, `Welcome1!`) is a password too; a word with a number
+  alone (`Winter2023`) is left to the keyword rules. A passphrase of words
+  (`passphrase: correct-horse-battery-staple`) stays text: the rule cannot tell it from a
+  reference such as a Kubernetes secret name. Word-likeness and the label
   word classes follow Dan Szymkowiak's backlog ideas.
 - A key after a label that names a secret, in a form the keyword rules do not read (0.6.16):
   `<clientSecret>…</clientSecret>`, `<AccessToken>…</AccessToken>`, a short value
