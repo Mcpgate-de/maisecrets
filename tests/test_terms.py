@@ -458,6 +458,36 @@ class TeamFileTests(unittest.TestCase):
             self.assertEqual([e.label for _s, _e, e in terms.matcher().find("Dear Zbigniew Testowski")], ["CLIENT_A"])
 
 
+    def test_a_list_of_one_stem_many_times_stays_within_the_scan_bound(self):
+        # 100,000 copies of one stem, and 100,000 two-word variants on that stem: every word of the text matched the
+        # whole bucket (codex review of block 2, HIGH 5)
+        same = "".join(f"S{i:06d}  Testowsk*\n" for i in range(100_000))
+        pairs = "".join(f"P{i:06d}  Wort{i:06d} Testowsk*\n" for i in range(100_000))
+        out = terms.Loaded()
+        terms._parse_team([("team/same.terms", same.encode()), ("team/pairs.terms", pairs.encode())], out)
+        self.assertEqual(len(out.entities), 1 + terms.MAX_BUCKET - 1)
+        reasons = {r.reason for r in out.refused}
+        self.assertEqual(reasons, {"a variant that an earlier entry holds",
+                                   f"more than {terms.MAX_BUCKET} variants that share a stem or a first word"})
+        m = terms.Matcher(out.entities)
+        text = " ".join(f"Testowski{i % 97}" for i in range(1000))[:10240]
+        m.find(text)
+        t = time.perf_counter()
+        found = m.find(text)
+        took = time.perf_counter() - t
+        self.assertEqual(len(found), len(text.split()))
+        self.assertLess(took, 0.05, f"10 KB took {took * 1000:.0f} ms (README: 3 to 10 ms)")
+
+    def test_all_the_team_lists_together_have_one_size_cap(self):
+        from unittest import mock
+        (self.dir / "a.terms").write_bytes(b"A_1  Testowski\n" + b"# x\n" * (terms.MAX_TEAM_BYTES // 5))
+        (self.dir / "b.terms").write_bytes(b"B_1  Przykladowa\n" + b"# x\n" * (terms.MAX_TEAM_BYTES // 5))
+        with mock.patch("maisecrets.user_rules._config", return_value=self.cfg):
+            loaded = terms.load(self.cfg)
+        self.assertEqual([e.label for e in loaded.entities], ["A_1"])
+        self.assertIn("the team lists together are larger than 4 MB", [r.reason for r in loaded.refused])
+
+
 class ScanTreeTests(unittest.TestCase):
     def test_the_tree_check_never_reads_the_developers_term_list(self):
         import subprocess

@@ -56,6 +56,8 @@ MIN_TEAM_AFFIX = 5    # the stem of a team `stem*`, `*stem` or `*stem*`: `ret*`,
 MAX_COMMON = 3        # a team stem that this many stop-list words share is refused (`*tion*`, `contr*`)
 MAX_INSIDE = 50       # *x* variants in all: each one is a search over the whole text
 MAX_WORDS = 8
+MAX_BUCKET = 16       # team variants that share one index record (a stem, or the words of a whole-word variant)
+MAX_TEAM_ENTITIES = 150_000
 MAX_TEAM_BYTES = 4 * 1024 * 1024   # about 100,000 entries; a build takes 1.4 s (3.14) to 2.2 s (3.9)
 LABEL_RE = re.compile(r"[A-Z][A-Z0-9_]{0,31}")
 TYPES = ("SECRET", "NAME", "EMAIL", "PHONE", "IBAN", "CARD", "IP")
@@ -654,8 +656,14 @@ def _team_sources(cfg: dict) -> tuple[list, list]:
         for name in names:
             source = f"{shown.rstrip('/')}/{name}"
             try:
-                if (path / name).stat().st_size > MAX_TEAM_BYTES:
+                size = (path / name).stat().st_size
+                if size > MAX_TEAM_BYTES:
                     refused.append(Refused(source, 0, f"a file larger than {MAX_TEAM_BYTES >> 20} MB"))
+                    continue
+                if size + sum(len(raw) for _s, raw in found) > MAX_TEAM_BYTES:
+                    # the cap holds for all the team lists together: each file alone was no bound on the build
+                    refused.append(Refused(source, 0, f"the team lists together are larger than "
+                                                      f"{MAX_TEAM_BYTES >> 20} MB"))
                     continue
                 found.append((source, (path / name).read_bytes()))
             except OSError:
@@ -663,8 +671,50 @@ def _team_sources(cfg: dict) -> tuple[list, list]:
     return found, refused
 
 
+def _key(v: Variant) -> str:
+    """The index record a variant lands in (as in _index): its words, or the stem of `stem*` and `*stem`."""
+    words = _WORD_RE.findall(_lower(v.text))
+    if v.mode == STARTS:
+        return "p:" + words[-1]
+    if v.mode == ENDS:
+        return "s:" + words[0]
+    return ("g:" if v.mode == WORD else "i:") + " ".join(words)
+
+
+def _bound(ents: list, seen: set, buckets: dict, refused: list, team: int) -> list:
+    """A team list's entities within the bounds of a scan (codex review of block 2, HIGH 5): a variant that an
+    earlier entry (the person's list first) holds is left out, so 100,000 copies of `abcde*` are one; at most
+    MAX_BUCKET variants share one record (a word matching that record walks them all); at most MAX_TEAM_ENTITIES
+    entries in all the team lists. Each one left out is named in refused."""
+    out = []
+    for e in ents:
+        if team >= MAX_TEAM_ENTITIES:
+            refused.append(Refused(e.source, e.line, f"more than {MAX_TEAM_ENTITIES} entries in all the team lists"))
+            continue
+        keep = []
+        for v in e.variants:
+            form = (v.mode, _lower(v.text))
+            key = _key(v)
+            if form in seen:
+                refused.append(Refused(e.source, e.line, "a variant that an earlier entry holds"))
+            elif buckets.get(key, 0) >= MAX_BUCKET:
+                refused.append(Refused(e.source, e.line, f"more than {MAX_BUCKET} variants that share a stem or a "
+                                                         "first word"))
+            else:
+                seen.add(form)
+                buckets[key] = buckets.get(key, 0) + 1
+                keep.append(v)
+        if keep:
+            out.append(Entity(e.label, tuple(keep), e.line, e.source))
+            team += 1
+    return out
+
+
 def _parse_team(sources: list, out: Loaded) -> None:
     used = sum(1 for e in out.entities for v in e.variants if v.mode == INSIDE)
+    own = len(out.entities)
+    seen = {(v.mode, _lower(v.text)) for e in out.entities for v in e.variants}
+    buckets: dict = {}
     for source, raw in sources:
         try:
             text = raw.decode("utf-8")
@@ -673,6 +723,7 @@ def _parse_team(sources: list, out: Loaded) -> None:
             continue
         ents, refused = parse(text, source, strict=False, floor=stoplist())
         ents, used = _cap_inside(ents, used, refused)
+        ents = _bound(ents, seen, buckets, refused, len(out.entities) - own)
         out.entities += ents
         out.refused += refused
         out.files.append(TeamFile(source, len(ents), hashlib.sha256(raw).hexdigest()[:12]))
