@@ -1207,12 +1207,117 @@ _ESCAPABLE_COLON_RULES = ("ds-keyword-colon", "ds-keyword-colon-quotes-required"
 _COLON_THEN_QUOTE = (":\\s*([\\'\"`]?)", ":(\\s*)([\\'\"`])")
 _ESCAPED_QUOTE_SKIP = "(?:\\\\(?=[\"']))?"
 _WHITESPACE_RE = re.compile(r"\s")
-# the label tail of the vendored keyword rules: `\w*` after the keyword. On `password=` and a long run of letters with
-# no space, each keyword inside the run (pwd, key) took the rest of the run and gave it back one character at a time
-# (the rule with a quote and a semicolon tried 50 more characters each time): quadratic, 320 KB took 10 s, also in
-# 0.6.15. The tail is bounded at 200 word characters, as the AWS and curl rules are bounded. A label with a longer
-# word tail is no label. tests/test_detect_rules.py compares both forms on inputs inside the bound
-_DS_LABEL_TAIL_BOUNDED = "\\w{0,200}"
+# the label tail of the vendored keyword rules: `<keyword>\w*` and then a separator. On `password=` and a long run of
+# letters with no space, each keyword inside the run (pwd, key) took the rest of the run and gave it back one character
+# at a time (the rule with a quote and a semicolon tried 50 more characters each time): quadratic, 320 KB took 10 s,
+# also in 0.6.15. What follows `\w*` in these rules never starts with a word character (a quote, ], a space, a colon,
+# =, or `[^\s]{0,50}?` that a shorter run can only reach less far with), so the regex matches only where `\w*` takes
+# the whole run. _KeywordTail finds each keyword, jumps to the end of its word run with an index of the runs, and runs
+# the rest of the regex once per run end: the same matches, in linear time. tests/test_scan_bounds.py compares it
+# with the vendored regex on runs of 0 to 5000 characters
+class _KeywordTail:
+    r"""A vendored keyword regex `(<alternatives>)\w*<tail>` matched without backtracking into the word run."""
+    __slots__ = ("pattern", "flags", "_prefix", "_alts", "_any", "_tail", "_heads", "_cross")
+
+    def __init__(self, pattern: str, keywords_prefix: str, alts: list, flags: int) -> None:
+        self.pattern, self.flags, self._prefix, self._alts = pattern, flags, keywords_prefix, alts
+        self._any = self._tail = None
+        self._heads: list = []
+
+    def _compile(self) -> None:
+        if self._any is not None:
+            return
+        tail = self.pattern[len(self._prefix) + len("\\w*"):]
+        self._any = re.compile(self._prefix, self.flags)
+        groups = self._any.groups
+        # one head per alternative, in the regex's order; the others never match but keep their group numbers
+        self._heads = [re.compile("(?<!mai)(" + "|".join(a if j == i else "(?!)" + a for j, a in enumerate(self._alts))
+                                  + ")", self.flags) for i in range(len(self._alts))]
+        self._tail = re.compile("()" * groups + tail, self.flags)   # empty groups keep the numbers of backreferences
+        # the alternatives that can match a character outside a word (mot de passe): only they can start inside a
+        # word run and end past it. Every other one ends inside the run, at the run's end once \w* has run
+        cross = [a for a in self._alts if _CROSS_CHARS_RE.search(_LOOKAROUND_RE.sub("", a))]
+        self._cross = re.compile("(?<!mai)(?:" + "|".join(cross) + ")", self.flags) if cross else None
+
+    def finditer(self, text: str):
+        self._compile()
+        runs_s: list = []
+        runs_e: list = []
+        for r in _WORD_RUN_ANY_RE.finditer(text):
+            runs_s.append(r.start())
+            runs_e.append(r.end())
+        tails: dict = {}
+        pos, n = 0, len(text)
+        while pos <= n:
+            m = self._any.search(text, pos)
+            if m is None:
+                return
+            p = m.start()
+            hit = None
+            for head in self._heads:
+                h = head.match(text, p)
+                if h is None:
+                    continue
+                q = h.end()
+                i = bisect.bisect_right(runs_s, q) - 1
+                e = runs_e[i] if i >= 0 and runs_e[i] > q else q
+                if e not in tails:
+                    tails[e] = self._tail.match(text, e)
+                t = tails[e]
+                if t is not None:
+                    hit = _HeadTail(text, h, t)
+                    break
+            if hit is None:
+                pos = p + 1
+                i = bisect.bisect_right(runs_s, p) - 1
+                if i >= 0 and runs_e[i] > p and tails.get(runs_e[i], 1) is None:
+                    # the run's tail failed: a keyword later in the run that stays in it fails too. Only an
+                    # alternative that leaves the run can start a match before its end
+                    end = runs_e[i]
+                    c = self._cross.search(text, pos) if self._cross is not None else None
+                    pos = c.start() if c is not None and c.start() < end else end
+                continue
+            yield hit
+            pos = hit.end() if hit.end() > p else p + 1
+
+    def search(self, text: str):
+        return next(self.finditer(text), None)
+
+    @property
+    def groups(self) -> int:
+        self._compile()
+        return self._tail.groups
+
+
+class _HeadTail:
+    """A match of _KeywordTail: the groups of the keyword from the head, the rest from the tail."""
+    __slots__ = ("_text", "_h", "_t", "_n")
+
+    def __init__(self, text: str, h, t) -> None:
+        self._text, self._h, self._t, self._n = text, h, t, h.re.groups
+
+    def group(self, i: int = 0):
+        if i == 0:
+            return self._text[self._h.start():self._t.end()]
+        return self._h.group(i) if i <= self._n else self._t.group(i)
+
+    def start(self, i: int = 0) -> int:
+        if i == 0:
+            return self._h.start()
+        return self._h.start(i) if i <= self._n else self._t.start(i)
+
+    def end(self, i: int = 0) -> int:
+        if i == 0:
+            return self._t.end()
+        return self._h.end(i) if i <= self._n else self._t.end(i)
+
+    def span(self, i: int = 0) -> tuple:
+        return self.start(i), self.end(i)
+
+
+_WORD_RUN_ANY_RE = re.compile(r"\w+")
+_LOOKAROUND_RE = re.compile(r"\(\?<?[=!][^()]*\)")
+_CROSS_CHARS_RE = re.compile(r"[ .\[-]|\\[sWdbBSD]")   # a space, a dot, a class, a hyphen or a non-word escape
 _CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
 
 
@@ -1239,13 +1344,17 @@ def _load_detect_secrets(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
         # `password : x` in every language; the vendored colon rules allowed none, so
         # `mot de passe : <value>` and `password : <value>` were no hit (2026-09-28)
         regex = regex.replace(_COLON_AFTER_LABEL, _COLON_AFTER_LABEL_SPACED, 1)
-        regex = regex.replace(keywords + "\\w*", keywords + _DS_LABEL_TAIL_BOUNDED, 1)
+
         if _COLON_AFTER_LABEL_SPACED in regex:
             regex = regex.replace(_COLON_AFTER_LABEL_SPACED, _COLON_AFTER_LABEL_ESCAPED, 1)
             for q in _COLON_THEN_QUOTE:   # the skip goes right before the group of the opening quote
                 at = q.rindex("([")
                 regex = regex.replace(q, q[:at] + _ESCAPED_QUOTE_SKIP + q[at:], 1)
-        out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(regex, flags),
+        if regex.startswith(keywords + "\\w*") and len(regex) > len(keywords) + 3:
+            rx = _KeywordTail(regex, keywords, list(data["denylist"]) + [lab.regex for lab in labels], flags)
+        else:
+            rx = _Lazy(regex, flags)
+        out.append(Rule(id=r["id"], type="SECRET", regex=rx,
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
                         secret_group=int(r["group"]), validator="ds_value",
                         quote_group=_DS_QUOTE_GROUP.get(r["id"], 0)))

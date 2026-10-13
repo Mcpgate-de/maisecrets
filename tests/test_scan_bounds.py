@@ -169,46 +169,58 @@ class LabelRuleTests(unittest.TestCase):
 
 class KeywordLabelTailTests(unittest.TestCase):
     """The detect-secrets keyword rules read `<keyword>\\w*` as the label. On `password=` and a long run of letters with
-    no space, each keyword inside the run (pwd, key) took the rest of the run: 320 KB took 10 s (0.6.15). The tail is
-    bounded at 200 word characters (detect._DS_LABEL_TAIL_BOUNDED)."""
+    no space, each keyword inside the run (pwd, key) took the rest of the run: 320 KB took 10 s (0.6.15). They now run
+    as detect._KeywordTail: the same matches as the vendored regex, in linear time."""
 
-    def rules(self):
-        return [r for r in detect.rules() if r.id.startswith("ds-keyword")]
+    def rules(self, languages=("en",)):
+        return [r for r in detect._load_detect_secrets(languages) if r.id.startswith("ds-keyword")]
 
     def test_a_long_run_of_letters_after_a_label_scans_in_under_a_second(self):
         run = "".join(_R.choice("bcdfghjkmnpqrstvwxz") for _ in range(320000))
-        self.assertLess(took("password=" + run, [r.id for r in self.rules()]), 1.0)
+        self.assertLess(took("password=" + run, [r.id for r in detect.rules() if r.id.startswith("ds-keyword")]), 1.0)
+        self.assertLess(took("password=" + "pwd" * 100000, [r.id for r in detect.rules()
+                                                              if r.id.startswith("ds-keyword")]), 1.0)
 
-    def test_every_keyword_rule_is_bounded(self):
-        rules = self.rules()
-        self.assertEqual(len(rules), 7)
-        for r in rules:
-            with self.subTest(r.id):
-                self.assertIn(")" + detect._DS_LABEL_TAIL_BOUNDED, r.regex.pattern)
+    def test_six_keyword_rules_take_the_linear_path(self):
+        linear = [r.id for r in self.rules() if isinstance(r.regex, detect._KeywordTail)]
+        self.assertEqual(len(linear), 6, linear)   # the seventh starts with the value, its \\w* ends the regex
 
-    def test_fuzz_the_bounded_rules_find_what_the_vendored_ones_find(self):
-        """Inside the bound (label tails of up to 150 word characters) both forms give the same matches."""
+    def fuzz_texts(self, rng):
         parts = ["password", "pwd", "api_key", "secret", "db_pass", "Passwd", "token", "_", "x", "Ab9", "value",
-                 "=", "==", "!=", ":", " : ", "=>", " ", "  ", "'", '"', "`", ";", ",", "]", "\t", "\n", "-", "#7"]
-        rng = random.Random(1616)
+                 "=", "==", "!=", ":", " : ", "=>", " ", "  ", "'", '"', "`", ";", ",", "]", "\\", "\t", "\n", "-",
+                 "#7", "Kennwort", "mot de passe", "\u00e4"]
         texts = []
-        for _ in range(3000):
+        for k in range(1200):
             t = "".join(rng.choice(parts) for _ in range(rng.randint(2, 14)))
-            if rng.random() < 0.3:
-                t = t.replace("_", "_" + "w" * rng.randint(1, 140), 1)
+            if k % 3 == 0:   # a word tail of 0 to 5000 characters, the old bound 199 to 201 included
+                n = rng.choice((0, 1, 50, 199, 200, 201, 202, 250, 251, 1000, 2500, 5000, rng.randint(0, 5000)))
+                t = t.replace("_", "_" + "w" * n, 1) if "_" in t else "password" + "w" * n + t
             texts.append(t)
+        return texts
+
+    def test_fuzz_the_linear_rules_find_what_the_vendored_ones_find(self):
+        """On word tails of 0 to 5000 characters, also with German and French labels on, both give the same matches,
+        group by group."""
+        rng = random.Random(1616)
+        texts = self.fuzz_texts(rng)
         found = 0
-        for r in self.rules():
-            old = re.compile(r.regex.pattern.replace(")" + detect._DS_LABEL_TAIL_BOUNDED, ")\\w*", 1),
-                             r.regex._get().flags)
-            new = r.regex._get()
-            self.assertNotEqual(old.pattern, new.pattern)
-            for t in texts:
-                spans = [[m.span(i) for i in range(new.groups + 1)] for m in new.finditer(t)]
-                want = [[m.span(i) for i in range(old.groups + 1)] for m in old.finditer(t)]
-                self.assertEqual(spans, want, f"{r.id}: {t!r}")
-                found += len(spans)
+        for langs in (("en",), ("en", "de", "fr")):
+            for r in self.rules(langs):
+                if not isinstance(r.regex, detect._KeywordTail):
+                    continue
+                old = re.compile(r.regex.pattern, r.regex.flags)
+                for t in texts:
+                    spans = [[m.span(i) for i in range(old.groups + 1)] for m in r.regex.finditer(t)]
+                    want = [[m.span(i) for i in range(old.groups + 1)] for m in old.finditer(t)]
+                    self.assertEqual(spans, want, f"{r.id} {langs}: {t[:80]!r} ({len(t)} chars)")
+                    found += len(spans)
         self.assertGreater(found, 400, "the fuzz inputs must hold labels and values, or the comparison proves nothing")
+
+    def test_a_label_with_a_tail_of_201_and_more_characters_is_still_a_label(self):
+        v = rnd(12) + "#7"
+        for n in (199, 200, 201, 5000):
+            with self.subTest(n=n):
+                self.assertIn(v, [m.value for m in detect.scan("password" + "x" * n + " = " + v)])
 
 
 if __name__ == "__main__":
