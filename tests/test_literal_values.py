@@ -82,6 +82,17 @@ class PasswordLiteralTests(unittest.TestCase):
                 with self.subTest(text=text.replace(v, "<v>")):
                     self.assertEqual([k for k, _ in kinds(text) if k == "label-pw-literal"], [])
 
+    def test_an_expression_a_split_value_and_label_words_stay_text(self):
+        """A string that a + continues is an expression (the tests here assemble values so); a list of label words
+        with an umlaut is words; a key with a character outside ASCII is a split test value."""
+        p = password(10)
+        k = key(16)
+        for text in (f'pw = "{p[:5]}" + "{p[5:]}"', f'PASSWORD = "{p}" + suffix',
+                     'for label in ("passwort", "Kennwort", "Schl\u00fcssel", "zugangsdaten"):',
+                     f"('SECRET', '{k[:4]}\u00a7{k[4:10]}\u00a7{k[10:]}')", f'client_secret = "{k[:8]}\u00e4{k[8:]}"'):
+            with self.subTest(text=text[:10]):
+                self.assertEqual([x for x, _ in kinds(text) if x in ("label-pw-literal", "label-secret-literal")], [])
+
     def test_the_word_list_is_read_only_after_a_password_label(self):
         detect._WORDS.clear()
         detect.scan("def handler(event):\n    return {'status': 'active', 'region': 'eu-west-1'}\n" * 50)

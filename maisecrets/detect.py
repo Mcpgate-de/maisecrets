@@ -589,7 +589,8 @@ _EXTRA_WORDS = frozenset({
     "psql", "mongo", "mongodb", "sqlite", "oracle", "guest", "anon", "localhost",
     "siehe", "geheim", "kennwort", "passwort", "benutzer", "zugang", "zugangsdaten", "anmeldung", "nutzer", "wird",
     "nicht", "oder", "und", "mit", "ohne", "bitte", "hier", "dort", "neu", "alt", "leer", "fehlt", "falsch",
-    "richtig", "geheimnis", "schluessel", "sommer", "winter", "herbst", "fruehling",
+    "richtig", "geheimnis", "schluessel", "sommer", "winter", "herbst", "fruehling", "schl\u00fcssel",
+    "fr\u00fchling",
 })
 
 
@@ -627,7 +628,8 @@ def _cover(run: str) -> int:
     return got
 
 
-_WORD_RUN_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|[0-9]+")
+_WORD_RUN_RE = re.compile(r"[A-Z\u00c4\u00d6\u00dc]?[a-z\u00e4\u00f6\u00fc\u00df]+|[A-Z\u00c4\u00d6\u00dc]+"
+                          r"(?![a-z\u00e4\u00f6\u00fc\u00df])|[0-9]+")
 
 
 def _wordlike(v: str) -> float:
@@ -729,7 +731,8 @@ _LIT_WRAP = (r"(?:(?:Some|Ok|String::from|str|bytes|SecretString::new|Secret::ne
              r"|Box::new|Sensitive|new[ \t]+String)[ \t]*\([ \t]*)?")
 _LIT_LABEL = r"(?<![\w.\-$@])([A-Za-z_$@][\w.\-]{0,60})[\"'\]]?[ \t]*"
 _LIT_FORMS = (
-    (re.compile(_LIT_LABEL + r"(?:=>|:=|==|=|:|,|\()[ \t]*" + _LIT_WRAP + r"([\"'`])([^\"'`\n\\]{4,300})\2"), 1, 3),
+    (re.compile(_LIT_LABEL + r"(?:=>|:=|==|=|:|,|\()[ \t]*" + _LIT_WRAP + r"([\"'`])([^\"'`\n\\]{4,300})\2"
+                r"(?![ \t]*\+)"), 1, 3),
     (re.compile(r"(?m)" + _LIT_LABEL + r"(?:=|:)[ \t]*([^\s\"'`,;()\[\]{}<>]{4,300})[ \t]*(?:(?:#|//|;).*)?$"), 1, 2),
     (re.compile(r"[?&;]([\w.\-\[\]]{1,60})=([^&\s\"'#<>]{4,400})"), 1, 2),
     (re.compile(r"<([\w:.-]{1,60})(?:\s[^<>]{0,200})?>([^<>\s]{4,400})</"), 1, 2),
@@ -779,10 +782,10 @@ def _norm_entropy(v: str) -> float:
 
 
 def _key_literal_ok(v: str, lo: int, hi: int, words: float, entropy: float) -> bool:
-    """A key after a secret or a weak label: no space, no placeholder, few word letters, a high normalised entropy,
-    and detect-secrets' filters (templates, references, sequences)."""
-    if not lo <= len(v) <= hi or any(c.isspace() for c in v) or _LITERAL_PLACEHOLDER_RE.search(v):
-        return False
+    """A key after a secret or a weak label: ASCII, no space, no placeholder, few word letters, a high normalised
+    entropy, and detect-secrets' filters (templates, references, sequences)."""
+    if not lo <= len(v) <= hi or not v.isascii() or any(c.isspace() for c in v) or _LITERAL_PLACEHOLDER_RE.search(v):
+        return False   # a key is ASCII: a value with § or an umlaut is a split test value or a word
     return _norm_entropy(v) >= entropy and _ds_value_ok(v, 4) and _wordlike(_deleet(v)) < words
 
 

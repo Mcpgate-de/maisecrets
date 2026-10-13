@@ -829,6 +829,8 @@ NO_HIT = [
     ('key16 idempotency key', 'idempotency_key = "order-4711-retry-2"'),
     ('key16 ssh host key', 'host_key = "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"'),
     ('key16 secret ref k8s', '<clientSecret>${KEYCLOAK_CLIENT_S§ECRET}</clientSecret>'),
+    ('pw16 concatenated expression', 'pa§ssword = "Kq9z" + os.environ["PW_SUFFIX"]'),
+    ('pw16 german label words', 'for label in ("pa§sswort", "Kenn§wort", "Schlüssel", "zugangsdaten"):'),
     ('pw16 format template', 'tmpl = "PA§SSWORD: \'{pw_value}\'"'),
 ]
 

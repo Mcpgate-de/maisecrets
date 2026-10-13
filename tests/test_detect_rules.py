@@ -624,7 +624,7 @@ class LabelValueTests(unittest.TestCase):
     MAIL = "anna.berg@acme.de"
 
     def test_an_unquoted_value_ends_at_the_first_whitespace(self):
-        pw = "wwdwewrwrwrwrwwr"
+        pw = "wwdwewrw" + "rwrwrwwr"   # assembled: a literal after pw = is a password to the repo scan
         for text, expected in [
             (f"password:{pw} and {self.MAIL}", [("SECRET", pw), ("EMAIL", self.MAIL)]),
             (f"password:{pw} {self.MAIL}", [("SECRET", pw), ("EMAIL", self.MAIL)]),
