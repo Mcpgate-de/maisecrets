@@ -783,6 +783,26 @@ def reset() -> None:
     _CACHE.clear()
 
 
+def _cache_loaded(loaded: Loaded) -> None:
+    """At session start: cache the index of what load() just parsed, so the start parses the lists once (gate review
+    of block 2, L4). The entities are those of _build: the person's list, then the team lists; the marked names are
+    last and never cached."""
+    if loaded.error:
+        return
+    from .user_rules import _config
+    try:
+        raw = _read_personal()
+    except TermsError:
+        return
+    team, _refused = _team_sources(_config())
+    if raw is None and not team:
+        return
+    key = _cache_key(raw, team)
+    if _cached(key) is None:
+        _store(key, Matcher(loaded.entities[:len(loaded.entities) - loaded.marked]))
+    reset()
+
+
 def prebuild() -> None:
     """Build the index now and cache it: at session start (30 s) and after a typed add or remove, so a tool hook
     (10 s) only loads it. A first build of a 4 MB team list inside a tool hook ran into the watchdog, and every
@@ -1012,8 +1032,8 @@ def term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, s
 def session_note() -> str | None:
     """At session start: when the team lists changed since the last start, one sentence with the count and the
     entries left out. Unchanged, it says nothing again. A bad terms.txt is said at every start."""
-    prebuild()
     loaded = load(strict=False)
+    _cache_loaded(loaded)
     digest = hashlib.sha256(json.dumps([[f.source, f.digest] for f in loaded.files]
                                        + [[r.source, r.line, r.reason] for r in loaded.refused]).encode()).hexdigest()
     try:

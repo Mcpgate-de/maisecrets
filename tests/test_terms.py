@@ -452,6 +452,7 @@ class TeamFileTests(unittest.TestCase):
             with mock.patch.object(terms, "Matcher", wraps=terms.Matcher) as built:
                 terms.matcher()
                 self.assertTrue(all(c.kwargs.get("data") for c in built.call_args_list), "a tool hook loads it")
+            self.assertEqual([e.label for _s, _e, e in terms.matcher().find("Dear Zbigniew Testowski")], ["CLIENT_A"])
 
 
 class ScanTreeTests(unittest.TestCase):
