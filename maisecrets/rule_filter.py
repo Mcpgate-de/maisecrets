@@ -167,7 +167,12 @@ class _Parser:
             return ("lit", val[1:-1])
         if kind == "str":
             self.take()
-            return ("lit", json.loads(val))      # Expr escapes as JSON; unicode_escape broke non-ASCII text
+            try:
+                return ("lit", json.loads(val))  # Expr escapes as JSON; unicode_escape broke non-ASCII text
+            except ValueError:
+                # an escape JSON does not know (\x41, \'): the text between the quotes as written. One odd filter
+                # string must not raise for the whole ruleset, which would leave every rule out (Gate A of 0.6.15)
+                return ("lit", val[1:-1])
         if val == "(":
             self.take()
             node = self.or_()
