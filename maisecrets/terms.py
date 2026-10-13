@@ -928,7 +928,8 @@ def add_typed(words: str, floor: bool = False) -> tuple[bool, str, list]:
     except TermsError as exc:
         reason = str(exc).split(": ", 1)[1]
         if floor:
-            reason = reason.replace("in a team list", "in a prompt without a source, which may not come from you")
+            reason = (reason.replace(" in a team list", "") + "; a prompt without a source may not come from you, so "
+                      "the rules of a team list hold")
         return False, (f"maisecrets: the term was not added ({reason}). "
                        "This prompt was not sent to the model."), [words]
     try:
