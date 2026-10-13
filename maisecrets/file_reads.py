@@ -39,6 +39,9 @@ TEXT_KEYS = ("filePath", "content", "numLines", "startLine", "totalLines")
 # 97 s at 256K (one rule grows with the square of the text); prose takes 0.5 s at 32K
 EXTRACT_SECONDS = 6.0
 MAX_PDF_BYTES = 100 * 1024 * 1024
+# a file read under ask, or from a clean folder, is bound by its sha256 to the bytes the client returns: 10 MB costs
+# 6-10 ms to hash and 23-32 ms to decode and hash (3.9 and 3.14). A larger file is never clean, and ask refuses it
+BIND_MAX_BYTES = 64 * 1024 * 1024
 MAX_TEXT_CHARS = 32 * 1024
 # a client started from the desktop has a short PATH; these hold pdftotext from Homebrew, MacPorts and Linux packages
 _EXTRA_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin")
@@ -299,9 +302,29 @@ def note_clean_root(session, folder: str) -> None:
         pass
 
 
-def _ask_path(payload: dict, kind: str, path: str):
-    """The one-use note that the PreToolUse of this call asked the person (C26): session, tool use, kind, file, and
-    the file's device and inode, so a file swapped in under the same name between the two hooks is another file."""
+def _full(payload: dict, path: str) -> str:
+    return path if os.path.isabs(path) else os.path.join(str(payload.get("cwd") or ""), path)
+
+
+def file_digest(full: str):
+    """(sha256, size) of the file, or None when it cannot be read or is larger than BIND_MAX_BYTES."""
+    import hashlib
+    try:
+        with open(full, "rb") as f:
+            size = os.fstat(f.fileno()).st_size
+            if size > BIND_MAX_BYTES:
+                return None
+            h = hashlib.sha256()
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest(), size
+    except OSError:
+        return None
+
+
+def _ask_path(payload: dict, kind: str, path: str, tag: str = "ask"):
+    """The one-use note of this call (C26): `ask` when the PreToolUse asked the person, `clean` when it found the
+    file in a clean folder. Keyed by session, tool use, kind, file, and the file's device and inode."""
     from .vault import HOME
     session, tid = payload.get("session_id"), payload.get("tool_use_id")
     if not isinstance(session, str) or not _SESSION_RE.fullmatch(session) or not isinstance(tid, str) or not tid:
@@ -309,43 +332,79 @@ def _ask_path(payload: dict, kind: str, path: str):
     if not path:
         return None
     import hashlib
-    full = path if os.path.isabs(path) else os.path.join(str(payload.get("cwd") or ""), path)
+    full = _full(payload, path)
     try:
         st = os.stat(full)
     except OSError:
         return None
-    key = hashlib.sha256("\0".join((session, tid, kind, _real(full), str(st.st_dev), str(st.st_ino)))
+    key = hashlib.sha256("\0".join((tag, session, tid, kind, _real(full), str(st.st_dev), str(st.st_ino)))
                          .encode()).hexdigest()[:40]
     return os.path.join(str(HOME), "asked", key)
 
 
-def note_ask(payload: dict, kind: str, path: str) -> None:
-    target = _ask_path(payload, kind, path)
-    if not target:
-        return
+def note_ask(payload: dict, kind: str, path: str, tag: str = "ask") -> bool:
+    """Write the note with the file's sha256 and size. False: no note (too large, unreadable): nothing can pass."""
+    import json
+    target = _ask_path(payload, kind, path, tag)
+    digest = file_digest(_full(payload, path)) if target else None
+    if not digest:
+        return False
     try:
         os.makedirs(os.path.dirname(target), mode=0o700, exist_ok=True)
         if os.path.islink(os.path.dirname(target)):
-            return
-        os.close(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600))
-    except OSError:
-        pass
-
-
-def take_ask(payload: dict, kind: str, path: str) -> bool:
-    """True once, when the PreToolUse of this very call asked: the note is removed as it is read. Without it the
-    file is withheld, also when it became clean or got an image between the two hooks (codex review of block 4)."""
-    import stat
-    target = _ask_path(payload, kind, path)
-    if not target:
-        return False
-    try:
-        if os.path.islink(os.path.dirname(target)) or not stat.S_ISREG(os.lstat(target).st_mode):
             return False
-        os.unlink(target)
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps({"sha": digest[0], "size": digest[1]}))
         return True
     except OSError:
         return False
+
+
+def take_ask(payload: dict, kind: str, path: str, tag: str = "ask"):
+    """The note of this very call, once: it is removed as it is read. None without it."""
+    import json
+    import stat
+    target = _ask_path(payload, kind, path, tag)
+    if not target:
+        return None
+    try:
+        if os.path.islink(os.path.dirname(target)) or not stat.S_ISREG(os.lstat(target).st_mode):
+            return None
+        fd = os.open(target, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd) as f:
+            note = json.loads(f.read(4096))
+        os.unlink(target)
+        return note if isinstance(note, dict) and isinstance(note.get("sha"), str) else None
+    except (OSError, ValueError):
+        return None
+
+
+def same_bytes(note, response: dict, full: str) -> bool:
+    """The client returned the very file the PreToolUse checked (codex review of block 4: a file or a root swapped in
+    and back between the two hooks passed). A PDF and an image the client did not re-encode carry the file itself
+    as base64: its sha256 must match. A re-encoded image, PDF pages (images) and a notebook carry no copy: their
+    originalSize and the file as it is now must match, which narrows the window but does not close it (C26)."""
+    import base64
+    import binascii
+    import hashlib
+    if not note:
+        return False
+    kind = response.get("type")
+    file = response.get("file") if isinstance(response.get("file"), dict) else {}
+    data = file.get("base64")
+    if kind in ("pdf", "image") and isinstance(data, str):
+        try:
+            if hashlib.sha256(base64.b64decode(data)).hexdigest() == note["sha"]:
+                return True
+        except (ValueError, binascii.Error):
+            return False
+        if kind == "pdf":
+            return False
+    if kind in ("image", "parts") and file.get("originalSize") != note.get("size"):
+        return False
+    now = file_digest(full)
+    return bool(now) and now[0] == note["sha"]
 
 
 def prune_sessions() -> None:
@@ -461,45 +520,91 @@ def text_result(file_path: str, content: str) -> dict:
                                      "totalLines": lines}}
 
 
-def _safe_place(path: str) -> bool:
-    """Nobody but its owner can change the file or its folder. Others may not write; a group may write only where the
-    owner is root or this user (Homebrew's bin folder is akruse:admin and group-writable: the agent runs as that
-    owner anyway, so the group adds no way in)."""
+def _group_has_other_writer(gid: int) -> bool:
+    """A member of this group other than root and this user (the group list and the users whose own group it is)."""
+    try:
+        import grp
+        import pwd
+        me = pwd.getpwuid(os.getuid()).pw_name
+        names = set(grp.getgrgid(gid).gr_mem) | {u.pw_name for u in pwd.getpwall() if u.pw_gid == gid}
+    except (ImportError, KeyError, OSError):
+        return True
+    return not names <= {"root", me}
+
+
+def _no_other_writer(path: str) -> bool:
+    """Every component from / to the path is owned by root or this user, and nobody else can write it: no write for
+    others, and group write only for a group of root and this user. A folder with the sticky bit (/tmp) may be
+    writable by all: only an entry's owner can rename it, and that owner is checked at the next component."""
     import stat
-    uid = os.getuid() if hasattr(os, "getuid") else -1
-    for f in (path, os.path.dirname(path)):
-        st = os.stat(f)
-        if st.st_mode & stat.S_IWOTH:
+    if not hasattr(os, "getuid"):
+        return False
+    uid = os.getuid()
+    parts = os.path.abspath(path).split(os.sep)
+    current = os.sep
+    for i, part in enumerate([""] + parts[1:]):
+        current = os.path.join(current, part) if part else current
+        try:
+            st = os.lstat(current)
+        except OSError:
             return False
-        if st.st_mode & stat.S_IWGRP and st.st_uid not in (0, uid):
+        if st.st_uid not in (0, uid):
+            return False
+        sticky = stat.S_ISDIR(st.st_mode) and st.st_mode & stat.S_ISVTX
+        if st.st_mode & stat.S_IWOTH and not sticky:
+            return False
+        if st.st_mode & stat.S_IWGRP and not sticky and not stat.S_ISLNK(st.st_mode) \
+                and _group_has_other_writer(st.st_gid):
             return False
     return True
+
+
+def trusted_tool(link: str, cwd: str = "") -> str | None:
+    """The program a fixed-folder entry leads to, when both the entry and its target pass _no_other_writer and
+    neither lies in the working folder; None otherwise."""
+    try:
+        if not (os.path.isfile(link) and os.access(link, os.X_OK)):
+            return None
+        real = os.path.realpath(link)
+        if not (_no_other_writer(link) and _no_other_writer(real)):
+            return None
+        if cwd:
+            work = os.path.realpath(cwd)
+            if any(os.path.commonpath([x, work]) == work for x in (os.path.realpath(os.path.dirname(link)), real)):
+                return None
+    except (OSError, ValueError):
+        return None
+    return real
 
 
 def pdftotext(cwd: str = "") -> str | None:
     """pdftotext from the fixed install folders only (Homebrew, MacPorts, /usr/local/bin, /usr/bin), never from the
     PATH: a folder on the PATH that the agent can write to would get its own program run by the hook (codex review of
-    block 4). The link and its target must be safe places (_safe_place) and not lie in the working folder."""
+    block 4). The resolved program is returned, and extract() checks it again right before it starts it."""
     for d in _EXTRA_DIRS:
-        p = os.path.join(d, "pdftotext")
-        try:
-            if not (os.path.isfile(p) and os.access(p, os.X_OK)):
-                continue
-            real = os.path.realpath(p)
-            if not (_safe_place(p) and _safe_place(real)):
-                continue
-            if cwd:
-                work = os.path.realpath(cwd)
-                if any(os.path.commonpath([x, work]) == work for x in (os.path.realpath(d), real)):
-                    continue
-        except (OSError, ValueError):
-            continue
-        return p
+        real = trusted_tool(os.path.join(d, "pdftotext"), cwd)
+        if real:
+            return real
+    return None
+
+
+def untrusted_tool() -> str | None:
+    """A pdftotext in a fixed folder that maisecrets does not run (another account can change it or a folder above)."""
+    for d in _EXTRA_DIRS:
+        link = os.path.join(d, "pdftotext")
+        if os.path.isfile(link) and not trusted_tool(link):
+            return link
     return None
 
 
 def missing_tool_text(codex: bool) -> str:
     change = "maisecrets: set read_pdf" if codex else "/maisecrets:settings read_pdf"
+    found = untrusted_tool()
+    if found:
+        return (f"maisecrets: the setting read_pdf is convert, and maisecrets does not run the pdftotext in "
+                f"{os.path.dirname(found)}: another account on this computer can change it or a folder above it. "
+                "Nothing of the PDF reached you. Tell the user; they can install pdftotext where only they and "
+                f"root can write, or choose another mode with {change} allow, ask or block.")
     return (f"maisecrets: the setting read_pdf is convert, and convert needs the program pdftotext, which is not "
             f"installed in a fixed install folder ({', '.join(_EXTRA_DIRS) or 'none on this system'}; the PATH is "
             f"not used). Nothing of the PDF reached you. Tell the user to install it ({INSTALL}) "
@@ -555,6 +660,10 @@ def extract(path: str, pages=None, cwd: str = "") -> tuple[str | None, str]:
         return None, "the file cannot be read"
     if size > MAX_PDF_BYTES:
         return None, f"the file is larger than {MAX_PDF_BYTES // (1024 * 1024)} MB"
+    # once more right before the start: a change since the lookup is refused (the moment between this check and
+    # the start remains: there is no portable way to start a checked file without its name)
+    if not _no_other_writer(tool):
+        return None, "pdftotext changed after it was checked"
     args = [tool, "-q", "-enc", "UTF-8"]
     if rng:
         args += ["-f", str(rng[0]), "-l", str(rng[1])]
@@ -638,6 +747,10 @@ def refusal(kind: str, why: str, codex: bool) -> str:
                 "them to read it themselves, or to change the setting.")
     if why == "missing":
         return missing_tool_text(codex)
+    if why == "too-large":
+        return (f"maisecrets: this {noun} was not read; the setting {key} is ask, and the file is larger than "
+                f"{BIND_MAX_BYTES // (1024 * 1024)} MB or cannot be read, so maisecrets cannot check that you would "
+                f"get the very file the user allowed. Tell the user; they can choose allow with {change} allow.")
     return (f"maisecrets: this PDF was not converted to text ({why}), so nothing of it reached you. Do not try "
             f"to read it another way. Tell the user; they can choose another mode with {change}.")
 
@@ -664,19 +777,23 @@ def pre_read(payload: dict, cfg: dict, codex: bool) -> dict:
     them). {} lets the read run."""
     tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     path = tool_input.get("file_path")
-    if isinstance(path, str) and path.lower().endswith(".ipynb") and not codex and mode(cfg, "image") == "ask":
-        # a notebook with an image output: ask before it, as for an image (its text is scanned anyway)
-        full = path if os.path.isabs(path) else os.path.join(str(payload.get("cwd") or ""), path)
-        if notebook_has_image(full) and not in_clean_dir(path, str(payload.get("cwd") or ""), cfg,
-                                                         payload.get("session_id")):
-            note_ask(payload, "image", path)
-            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                           "permissionDecisionReason": ask_reason("image")}}
+    notebook = isinstance(path, str) and path.lower().endswith(".ipynb")
+    kind = "image" if notebook else (kind_of_path(path) if isinstance(path, str) else None)
+    if not kind:
         return {}
-    kind = kind_of_path(path) if isinstance(path, str) else None
-    if not kind or in_clean_dir(path, str(payload.get("cwd") or ""), cfg, payload.get("session_id")):
+    # a file in a clean folder passes, bound to its bytes: the PostToolUse checks that the client read this file
+    if in_clean_dir(path, str(payload.get("cwd") or ""), cfg, payload.get("session_id")) \
+            and note_ask(payload, kind, path, "clean"):
         return {}
     how = mode(cfg, kind)
+    if notebook:
+        # a notebook with an image output: ask before it, as for an image (its text is scanned anyway)
+        if how != "ask" or codex or not notebook_has_image(_full(payload, path)):
+            return {}
+        if not note_ask(payload, kind, path):
+            return _deny(refusal(kind, "too-large", codex))
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                       "permissionDecisionReason": ask_reason("image")}}
     if how == "allow":
         return {}
     if how == "block":
@@ -684,7 +801,9 @@ def pre_read(payload: dict, cfg: dict, codex: bool) -> dict:
     if how == "ask":
         if codex:
             return _deny(refusal(kind, "ask-codex", codex))
-        note_ask(payload, kind, path)
+        if not note_ask(payload, kind, path):
+            # no note, no pass: asking for a file that is then withheld helps no one
+            return _deny(refusal(kind, "too-large", codex))
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                        "permissionDecisionReason": ask_reason(kind)}}
     # convert: refuse now what the PostToolUse would refuse anyway, before the client renders the file
@@ -718,12 +837,14 @@ def post_read(payload: dict, cfg: dict, codex: bool) -> tuple | None:
     asked_path = path              # the name the PreToolUse saw, the key of its ask note
     if not path and isinstance(response.get("file"), dict):
         path = str(response["file"].get("filePath") or "")
-    clean = tool == "Read" and in_clean_dir(path, str(payload.get("cwd") or ""), cfg, payload.get("session_id"))
+    full = _full(payload, path)
+    clean = (tool == "Read" and in_clean_dir(path, str(payload.get("cwd") or ""), cfg, payload.get("session_id"))
+             and same_bytes(take_ask(payload, kind, asked_path, "clean"), response, full))
     how = mode(cfg, kind)
     if tool == "Read" and response.get("type") == "notebook":
         # its cells are text and are scanned as always, its image data is held out of the scan; ask (without the
         # PreToolUse ask: Codex, or a file that changed) and block take the images out
-        asked = how == "ask" and not codex and take_ask(payload, "image", asked_path)
+        asked = how == "ask" and not codex and same_bytes(take_ask(payload, "image", asked_path), response, full)
         if how == "allow" or clean or asked:
             return ("hold",)
         why = _block_why(cfg) if how != "ask" else ("ask-codex" if codex else "ask-unseen")
@@ -738,7 +859,7 @@ def post_read(payload: dict, cfg: dict, codex: bool) -> tuple | None:
     if how == "allow":
         return ("pass",)
     if how == "ask":
-        if tool == "Read" and not codex and take_ask(payload, kind, asked_path):
+        if tool == "Read" and not codex and same_bytes(take_ask(payload, kind, asked_path), response, full):
             return ("pass",)          # the PreToolUse of this call asked, and the person said yes
         why = "ask-codex" if codex else "ask-unseen"
         return ("replace", _withheld(tool, response, path, refusal(kind, why, codex)),

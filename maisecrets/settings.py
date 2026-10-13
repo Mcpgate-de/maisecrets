@@ -184,6 +184,11 @@ def _card(key: str, cfg: dict) -> list[str]:
         lines.append("    Add: /maisecrets:settings clean_dirs add DIR   (a full path or ~/…)")
         if value:
             lines.append(f"    Remove: /maisecrets:settings clean_dirs remove {value[0]}")
+        from .file_reads import link_roots
+        for d in link_roots(cfg):
+            # named here, in the person's own view; the session start gives only a count
+            lines.append(f"    {d} is a link or lies under one, so nothing in it counts as clean. Remove it and "
+                         f"add the real folder: {os.path.realpath(os.path.expanduser(d))}")
     elif key in ("read_pdf", "read_image"):
         suggest = "convert" if key == "read_pdf" else "ask"
         lines.append(f"    Change: /maisecrets:settings {key} {suggest if value != suggest else 'allow'}")

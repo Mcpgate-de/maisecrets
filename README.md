@@ -1267,10 +1267,15 @@ its own on your disk, and maisecrets does not clean those. `convert` needs
 `pdftotext`: macOS `brew install poppler`, Debian or Ubuntu
 `sudo apt install poppler-utils`. maisecrets runs it only from the fixed
 install folders (`/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`,
-`/usr/bin`), never from the PATH, and not when others can change the program
-or its folder: a program the AI puts on the PATH must not run inside the
-hook. The Homebrew folder belongs to you, and the AI runs as you: it could
-still replace the pdftotext there, and maisecrets cannot tell. On Windows there is no such folder, so `convert` refuses there. Without
+`/usr/bin`), never from the PATH: a program the AI puts on the PATH must not
+run inside the hook. Every folder from `/` down to the program must belong to
+root or to you, and no other account may be able to write it. Homebrew makes
+its folder writable for the group `admin`: if that group has another member
+on your computer, maisecrets does not run that pdftotext and says why; install
+it where only you and root can write. The Homebrew folder belongs to you, and
+the AI runs as you: it could still replace the pdftotext there, and
+maisecrets cannot tell. On Windows there is no such folder, so `convert`
+refuses there. Without
 pdftotext, maisecrets refuses every PDF and says so; it never lets the PDF
 through. A PDF that pdftotext cannot read in 6
 seconds, or that is damaged, is refused too. Text after 32K characters is cut,
@@ -1317,7 +1322,13 @@ as clean, because there a moved file keeps its creation time.
 
 With `ask`, a file goes to the AI only after you said yes to that very read: a
 file that was not asked about (it was in a clean folder a moment before, or a
-notebook got an image after the question) is withheld.
+notebook got an image after the question) is withheld. maisecrets also keeps a
+checksum of the file you allowed (and of a file in a clean folder) and checks
+that the AI gets those very bytes. A file above 64 MB cannot be checked: it is
+never clean, and with `ask` maisecrets refuses it before it asks you. For a
+large image that Claude Code shrinks, a page range of a PDF and a notebook,
+the client sends no copy of the file itself; maisecrets then checks the size
+and the file as it is after the read, which leaves a short window.
 
 A Bash command whose output starts with `data:image/…;base64,` sends an image
 to the model too (Claude Code shows it as one and marks it `isImage`);

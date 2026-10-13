@@ -36,7 +36,7 @@ TEST_CONFIG = {"backend": "jsonfile", "allow_plaintext_store": True}
 CONFIG = Path(HOME, "config.json")
 HINTS = Path(HOME, "hints.json")
 TOKEN = "glpat-" + "Rk4tW9xQ2mZ7vB3nL8pY"          # a token shape, built at run time (scan_tree)
-REAL_PDFTOTEXT = shutil.which("pdftotext")
+REAL_PDFTOTEXT = file_reads.pdftotext()       # the one maisecrets would run: fixed folders, no other writer
 
 
 def tearDownModule():  # noqa: N802 - unittest hook
@@ -93,6 +93,13 @@ def golden(name: str, cwd: str, **swap) -> dict:
                 and "filePath" in p["tool_response"]["file"]:
             p["tool_response"]["file"]["filePath"] = fp
     p.update(swap)
+    # the client sends the file itself as base64 (measured: a PDF and a small image byte for byte); the goldens keep
+    # a shortened copy, so a read of a file that exists gets its real bytes
+    resp = p.get("tool_response")
+    fpath = (p.get("tool_input") or {}).get("file_path")
+    if isinstance(resp, dict) and isinstance(resp.get("file"), dict) and "base64" in resp["file"] \
+            and isinstance(fpath, str) and os.path.isfile(fpath):
+        resp["file"]["base64"] = base64.b64encode(Path(fpath).read_bytes()).decode()
     return p
 
 
@@ -308,6 +315,53 @@ class AskAndBlock(_Work):
         other["tool_use_id"] = "another-call"
         self.assertEqual(output(run_hook("post-tool", other))["type"], "text", "the ask of another call")
 
+    def _asked(self, name="PreToolUse_Read_pdf_pages", path=None):
+        pre = golden(name, self.cwd, file_path=path or self.pdf)
+        self.assertEqual(decision(run_hook("pre-tool", pre)), "ask")
+
+    def test_bytes_swapped_in_and_back_during_the_read_are_withheld(self):
+        # codex verification of block 4: a file swapped in for the read and restored before the PostToolUse passed;
+        # the client's own copy of the bytes must be the file that was asked about
+        _reset(read_pdf="ask")
+        self._asked()
+        post = golden("PostToolUse_Read_pdf", self.cwd)
+        post["tool_response"]["file"]["base64"] = base64.b64encode(pdf_bytes("another file")).decode()
+        self.assertEqual(output(run_hook("post-tool", post))["type"], "text")
+
+    def test_a_reencoded_image_is_bound_by_its_size_and_the_file(self):
+        _reset(read_image="ask")
+        size = os.path.getsize(self.png)
+
+        def post(**file):
+            p = golden("PostToolUse_Read_png", self.cwd, file_path=self.png)
+            p["tool_response"]["file"].update(base64=base64.b64encode(b"re-encoded by the client").decode(), **file)
+            return run_hook("post-tool", p)
+        self._asked("PreToolUse_Read_png", self.png)
+        self.assertEqual(post(originalSize=size), {}, "a smaller copy of the asked file")
+        self._asked("PreToolUse_Read_png", self.png)
+        self.assertEqual(output(post(originalSize=size + 1))["type"], "text", "another size")
+        self._asked("PreToolUse_Read_png", self.png)
+        Path(self.png).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x01" * 16)          # same size, other bytes
+        self.assertEqual(output(post(originalSize=size))["type"], "text", "the file changed")
+
+    def test_a_page_read_is_bound_by_the_file(self):
+        _reset(read_pdf="ask")
+        self._asked()
+        post = golden("PostToolUse_Read_pdf_pages", self.cwd)
+        post["tool_response"]["file"]["originalSize"] = os.path.getsize(self.pdf)
+        self.assertEqual(run_hook("post-tool", post), {})
+        self._asked()
+        data = Path(self.pdf).read_bytes()
+        Path(self.pdf).write_bytes(data.replace(b"Invoice 2026", b"Invoice 2027"))     # same size, other bytes
+        self.assertEqual(output(run_hook("post-tool", post))["type"], "text")
+
+    def test_a_file_above_the_cap_is_not_asked_about(self):
+        _reset(read_pdf="ask")
+        with mock.patch.object(file_reads, "BIND_MAX_BYTES", 10):
+            out = self.pre()
+        self.assertEqual(decision(out), "deny")
+        self.assertIn("larger than", out["hookSpecificOutput"]["permissionDecisionReason"])
+
     def test_a_file_swapped_in_under_the_same_name_after_the_ask_is_withheld(self):
         # verification of block 4: the ask note named the path only; another file under the same name passed
         _reset(read_pdf="ask")
@@ -388,7 +442,56 @@ class Convert(_Work):
     def test_a_short_path_of_a_desktop_client_still_finds_pdftotext(self):
         self.stub()
         with mock.patch.dict(os.environ, {"PATH": "/nonexistent"}):
-            self.assertEqual(file_reads.pdftotext(), str(self.bin / "pdftotext"))
+            self.assertEqual(file_reads.pdftotext(), os.path.realpath(self.bin / "pdftotext"))
+
+    def test_a_writable_folder_above_the_program_is_refused(self):
+        # codex verification of block 4: only the program and its own folder were checked; a writer of a folder
+        # above could rename the checked folder away and put another in its place
+        self.stub()
+        os.chmod(self.dir, 0o777)
+        try:
+            self.assertIsNone(file_reads.pdftotext(), "others can write a folder above the program")
+        finally:
+            os.chmod(self.dir, 0o700)
+        os.chmod(self.dir, 0o770)
+        try:
+            with mock.patch.object(file_reads, "_group_has_other_writer", return_value=True):
+                self.assertIsNone(file_reads.pdftotext(), "a group with another member can write it")
+            with mock.patch.object(file_reads, "_group_has_other_writer", return_value=False):
+                self.assertIsNotNone(file_reads.pdftotext(), "a group of root and this user only")
+        finally:
+            os.chmod(self.dir, 0o700)
+        os.chmod(self.dir, 0o1777)
+        try:
+            self.assertIsNotNone(file_reads.pdftotext(), "a sticky folder like /tmp: entries keep their owner")
+        finally:
+            os.chmod(self.dir, 0o700)
+
+    def test_an_untrusted_pdftotext_is_named_not_called_missing(self):
+        _reset(read_pdf="convert")
+        self.stub()
+        with mock.patch.object(file_reads, "_group_has_other_writer", return_value=True):
+            os.chmod(self.bin, 0o775)
+            try:
+                content = output(self.post())["file"]["content"]
+            finally:
+                os.chmod(self.bin, 0o755)
+        self.assertIn("another account on this computer can change it", content)
+        self.assertNotIn("not installed", content)
+
+    def test_a_program_changed_after_the_lookup_is_not_started(self):
+        _reset(read_pdf="convert")
+        self.stub()
+        real = file_reads._no_other_writer
+        calls = []
+
+        def second_check_fails(path):
+            calls.append(path)
+            return real(path) and len(calls) < 3          # the lookup checks link and target; the start checks again
+        with mock.patch.object(file_reads, "_no_other_writer", second_check_fails):
+            out = output(self.post())
+        self.assertIn("changed after it was checked", out["file"]["content"])
+        self.assertFalse(self.calls.exists(), "the stub did not run")
 
     def test_a_pdftotext_on_the_path_only_is_never_run(self):
         # codex review of block 4: with no fixed copy, a PATH folder that the agent can write to won
@@ -407,7 +510,7 @@ class Convert(_Work):
 
     def test_an_unsafe_place_or_the_working_folder_is_refused(self):
         self.stub()
-        self.assertEqual(file_reads.pdftotext(self.cwd), str(self.bin / "pdftotext"))
+        self.assertEqual(file_reads.pdftotext(self.cwd), os.path.realpath(self.bin / "pdftotext"))
         os.chmod(self.bin, 0o777)
         try:
             self.assertIsNone(file_reads.pdftotext(), "a folder that others can write to")
@@ -536,6 +639,19 @@ class CleanDirs(_Work):
                 else:
                     self.assertEqual(decision(pre), "deny")
                     self.assertEqual(output(post)["type"], "text")
+
+    def test_a_clean_file_must_be_the_bytes_the_client_read(self):
+        _reset(read_pdf="block", clean_dirs=[self.cwd])
+        self.begin()
+        self.assertEqual(self.pre(file_path=self.pdf), {})
+        post = golden("PostToolUse_Read_pdf", self.cwd)
+        post["tool_response"]["file"]["base64"] = base64.b64encode(pdf_bytes("from another folder")).decode()
+        self.assertEqual(output(run_hook("post-tool", post))["type"], "text", "a root swapped in and back")
+        self.assertEqual(self.pre(file_path=self.pdf), {})
+        self.assertEqual(self.post(), {}, "the same bytes pass")
+        self.assertEqual(output(self.post())["type"], "text", "the note of the clean read is used once")
+        with mock.patch.object(file_reads, "BIND_MAX_BYTES", 10):
+            self.assertEqual(decision(self.pre(file_path=self.pdf)), "deny", "above the cap a file is never clean")
 
     def test_a_relative_path_resolves_from_the_cwd(self):
         _reset(read_pdf="block", clean_dirs=[self.cwd])
@@ -698,8 +814,12 @@ class CleanDirs(_Work):
         path = f"{os.path.dirname(sys.executable)}{os.pathsep}/usr/bin{os.pathsep}/bin"
         out = _launcher("session-start", {"session_id": "S2", "source": "startup", "cwd": self.cwd,
                                           "hook_event_name": "SessionStart"}, home, path)
-        self.assertIn("is a link or lies under one", out.get("systemMessage", ""))
-        self.assertIn(f"clean_dirs add {real}", out["systemMessage"])
+        self.assertIn("1 clean folder(s) are a link or lie under one", out.get("systemMessage", ""))
+        self.assertNotIn(str(self.dir), out["systemMessage"], "no local path in the text the model can read")
+        with mock.patch.object(settings, "load_config", return_value={**load_config(),
+                                                                       "clean_dirs": [str(self.dir / "link")]}):
+            card = settings.render(only="clean_dirs")
+        self.assertIn(f"add the real folder: {real}", card, "the person's own settings view names it")
 
     def test_a_folder_that_holds_the_work_is_refused(self):
         def add(folder):
@@ -947,12 +1067,12 @@ class EndToEnd(_Work):
         self.assertNotIn(TOKEN, json.dumps(answer))
         self.assertNotIn(post["tool_response"]["file"]["base64"][:40], json.dumps(answer))
 
-    @unittest.skipUnless(REAL_PDFTOTEXT, "pdftotext is not installed")
+    @unittest.skipUnless(REAL_PDFTOTEXT, "no pdftotext that maisecrets trusts (fixed folder, no other writer)")
     def test_with_the_real_pdftotext(self):
         self._run(os.path.dirname(REAL_PDFTOTEXT))
 
 
-@unittest.skipUnless(REAL_PDFTOTEXT, "pdftotext is not installed")
+@unittest.skipUnless(REAL_PDFTOTEXT, "no pdftotext that maisecrets trusts (fixed folder, no other writer)")
 class RealPdftotext(unittest.TestCase):
     def test_pages_and_text_of_a_synthetic_pdf(self):
         d = Path(tempfile.mkdtemp(dir=_isolate.TMP))

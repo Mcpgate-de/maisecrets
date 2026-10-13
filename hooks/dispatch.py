@@ -172,10 +172,11 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         file_reads.note_session_start(payload, cfg)    # the anchor of a clean folder: only here, never later (C26)
         _links = file_reads.link_roots(cfg)
         if _links:
-            _clean_note = (f"maisecrets: the clean folder {_links[0]} is a link or lies under one, so nothing in it "
-                           "counts as clean. Add the real folder: /maisecrets:settings clean_dirs add "
-                           f"{os.path.realpath(os.path.expanduser(_links[0]))}"
-                           + (f" ({len(_links) - 1} more such folder(s))." if len(_links) > 1 else "."))
+            # a count only: this text can reach the model, and a folder name can say who or what it is about. The
+            # person's own settings card names the folders (codex verification of block 4)
+            _clean_note = (f"maisecrets: {len(_links)} clean folder(s) are a link or lie under one, so nothing in "
+                           "them counts as clean. /maisecrets:settings clean_dirs shows which, and the real folder "
+                           "to add.")
         file_reads.prune_sessions()
     except Exception:  # noqa: BLE001 - the note never stops a session start; without it no folder is clean
         pass
