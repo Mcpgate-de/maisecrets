@@ -12,6 +12,7 @@ Events:
 """
 from __future__ import annotations
 
+import dataclasses
 import functools
 import html
 import json
@@ -702,26 +703,65 @@ def _prompt_hits(prompt: str) -> list:
     return [m for m in detect.scan(prompt) if not detect.is_fixture(m, prompt)]
 
 
+def _exact_spans(text: str, vault, session: str | None, resolved: list | None) -> list:
+    """The spans of `text` that the exact redaction replaces (stored and resolved values), longest first, no
+    overlap. A dry run: its count, entries and values are thrown away."""
+    found: list = []
+    _exact_redact(text, vault, session, {"n": 0}, [], resolved, found)
+    spans: list = []
+    for raw in sorted(set(found), key=len, reverse=True):
+        at = text.find(raw) if raw else -1
+        while at >= 0:
+            end = at + len(raw)
+            if not any(a < end and at < b for a, b in spans):
+                spans.append((at, end))
+            at = text.find(raw, at + 1)
+    return spans
+
+
+def _longest_wins(text: str, matches: list, vault, session: str | None, resolved: list | None) -> list:
+    """The detector hits after the rule that the longest span wins against a stored or resolved value (C2, C26). A hit
+    inside a stored value is dropped: the exact redaction takes the value whole (a listed name inside a stored
+    password split it, and the rest stayed in clear). A hit that holds a stored value, or that overlaps one, takes
+    the whole union: a resolved value inside a ghp_ token cut the shape, and the rest of the token went out."""
+    if not matches or vault is None:
+        return matches
+    spans = _exact_spans(text, vault, session, resolved)
+    if not spans:
+        return matches
+    out: list = []
+    for m in matches:
+        cover = [(a, b) for a, b in spans if a < m.end and m.start < b]
+        if any(a <= m.start and m.end <= b for a, b in cover):
+            continue
+        a = min([m.start] + [x[0] for x in cover])
+        b = max([m.end] + [x[1] for x in cover])
+        if out and a < out[-1].end:          # two hits that a value joins become one
+            last = out.pop()
+            a, b = min(a, last.start), max(b, last.end)
+            m = last
+        out.append(m if (a, b) == (m.start, m.end) else dataclasses.replace(m, value=text[a:b], start=a, end=b))
+    return out
+
+
 def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str | None) -> tuple:
-    """(rewritten, entries, values, stored): the prompt with a placeholder for each detected value and
-    for each value the store already holds; the hook and the mod share it, so both take out the same."""
+    """(rewritten, entries, values, stored, matches): the prompt with a placeholder for each detected value and
+    for each value the store already holds; the hook and the mod share it, so both take out the same. `matches` are
+    the detector hits as taken out, after the longest-span rule."""
     stored = {"n": 0}
-    known: list = []
-    values: list = []
-    text = prompt
+    resolved = None
     if vault is not None and _has_live(cfg):
         # a value the store already holds has a known shape: its fingerprint. Without this a stored
         # password typed again, or a value without a detector shape next to a detected one, went to
         # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
         # from 8 characters; a shorter one would block ordinary words in a prompt.
-        # Before the detector: a listed term inside a stored value split it, and the rest stayed in clear (C26)
         resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]
-        text = _exact_redact(prompt, vault, session, stored, known, resolved, values)
-        if text != prompt:
-            matches = _prompt_hits(text)
-    rewritten, entries = _replace(text, matches, vault, session) if matches else (text, [])
-    values = [m.value for m in matches] + [v for v in values if v not in {m.value for m in matches}]
-    return rewritten, entries + known, values, stored
+        matches = _longest_wins(prompt, matches, vault, session, resolved)    # the longest span wins (C2, C26)
+    rewritten, entries = _replace(prompt, matches, vault, session) if matches else (prompt, [])
+    values = [m.value for m in matches]
+    if resolved is not None:
+        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values)
+    return rewritten, entries, values, stored, matches
 
 
 def _run_sh() -> str:
@@ -788,7 +828,7 @@ def rewrite_prompt(payload: dict) -> dict:
     if _mention_prefix_exists(prompt, cwd if isinstance(cwd, str) else "", cfg):
         return {}
     vault = Vault(cfg)
-    rewritten, entries, values, stored = _take_values_out(prompt, matches, cfg, vault, session)
+    rewritten, entries, values, stored, matches = _take_values_out(prompt, matches, cfg, vault, session)
     if not matches and not stored["n"]:
         return {}
     if _blocking_mention(rewritten, cwd if isinstance(cwd, str) else "", cfg):
@@ -972,7 +1012,7 @@ def user_prompt(payload: dict) -> dict:
         vault = Vault(cfg)
         for key, _s, _e in typed:
             vault.admit(key, session)
-    rewritten, entries, values, stored = _take_values_out(prompt, matches, cfg, vault, session)
+    rewritten, entries, values, stored, matches = _take_values_out(prompt, matches, cfg, vault, session)
     if not matches and not stored["n"]:
         if typed:
             # the model has never seen the bracket syntax; without this it asks the user for the
@@ -3509,23 +3549,21 @@ def post_tool(payload: dict) -> dict:
             s, gone, runs = strip_hidden(s)
             hidden["n"] += gone
             hidden_runs.extend(runs)
-        if _has_live(cfg):
-            if vault is None:
-                vault = Vault(cfg)
-                resolved = _resolved_values(vault, session)
-            # the stored values first: a listed term inside a stored value split it, and the rest stayed in clear
-            s = _exact_redact(s, vault, session, hit, entries, resolved, values)
         matches = [m for m in detect.scan(s) if not detect.is_fixture(m, s, path)]
-        if not matches:
+        if not matches and not _has_live(cfg):
             return s
         if vault is None:
             vault = Vault(cfg)
             resolved = _resolved_values(vault, session)
-        out, ents = _replace(s, matches, vault, session)
-        hit["n"] += len(matches)
-        values.extend(m.value for m in matches)
-        entries.extend(ents)
-        return out
+        out = s
+        if matches and _has_live(cfg):
+            matches = _longest_wins(s, matches, vault, session, resolved)    # the longest span wins (C2, C26)
+        if matches:
+            out, ents = _replace(s, matches, vault, session)
+            hit["n"] += len(matches)
+            values.extend(m.value for m in matches)
+            entries.extend(ents)
+        return _exact_redact(out, vault, session, hit, entries, resolved, values)
 
     # a result with many objects repeats its keys: each key text is redacted once, and what it removed is counted
     # for every place it stands (codex review, 2026-10-06)
@@ -3768,15 +3806,14 @@ def post_tool_failure(payload: dict) -> dict:
     hit = {"n": 0}
     entries: list = []
     values: list[str] = []
-    # the stored values first: a listed term inside a stored value split it (C26)
-    out = _exact_redact(error, vault, session, hit, entries, _resolved_values(vault, session), values)
-    if out != error:
-        matches = [m for m in detect.scan(out) if not detect.is_fixture(m, out, "")]
+    resolved = _resolved_values(vault, session)
+    matches = _longest_wins(error, matches, vault, session, resolved)     # the longest span wins (C2, C26)
+    out = error
     if matches:
-        out, ents = _replace(out, matches, vault, session)
-        entries += ents
+        out, entries = _replace(error, matches, vault, session)
         hit["n"] += len(matches)
         values.extend(m.value for m in matches)
+    _exact_redact(out, vault, session, hit, entries, resolved, values)
     if not hit["n"]:
         return {}
     refs = list(dict.fromkeys(e.ref for e in entries if getattr(e, "ref", None)))

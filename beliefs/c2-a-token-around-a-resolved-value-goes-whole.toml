@@ -1,0 +1,10 @@
+# c2-a-token-around-a-resolved-value-goes-whole: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-a-token-around-a-resolved-value-goes-whole"
+control = "C2"
+statement = "A detector-shaped token that holds a stored or resolved value is taken out whole: the longest span wins, and no part of the token stays in clear."
+runner = ["tests/test_terms_hooks.py::LongestSpanTests::test_a_tool_result_takes_the_whole_token"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        a = min([m.start] + [x[0] for x in cover])\n"
+replace = "        if cover:\n            continue\n        a = min([m.start] + [x[0] for x in cover])\n"

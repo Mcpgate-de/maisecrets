@@ -356,6 +356,7 @@ class StoredValueTests(_Base):
         self.assertRegex(sent, r"\Atry " + self.secret.pattern + r" again\Z")
         mod = hooks.rewrite_prompt({"prompt": f"try {self.VALUE} again", "session_id": "S1", "cwd": ""})
         self.assertRegex(mod["text"], r"\Atry " + self.secret.pattern + r" again\Z")
+        self.assertEqual(mod["count"], 1, "the notice counts the value once, not the name inside it too")
 
     def test_a_failed_call_cleans_the_stored_value_whole_from_the_transcript(self):
         tmp = Path(tempfile.mkdtemp(prefix="transcript-"))
@@ -368,6 +369,60 @@ class StoredValueTests(_Base):
                                            "tool_input": {"command": "x"}, "error": f"bad: {self.VALUE}"})
         self.assertNotIn(self.REST, json.dumps(out).lower())
         self.assertNotIn(self.REST, path.read_text(encoding="utf-8").lower(), "the transcript keeps the rest")
+
+
+class LongestSpanTests(_Base):
+    """A value this session resolved inside a longer token the detector knows (C2): the whole token is taken out,
+    never the value alone with the rest of the token in clear (gate review of block 2, round 2, HIGH-1)."""
+    TOKENS = (("ghp_" + "Ab12", "Qx7Lm2" + "Wv9Tk4", "Cd34Ef56Gh78" + "Ij90Kl12"),
+              ("AKIA", "QWERTYUI" + "OPAS", "DFGH"))
+
+    def setUp(self):
+        super().setUp()
+        self.secret = re.compile(re.escape(OPEN) + r"SECRET_c\d+" + re.escape(CLOSE))
+        self.cases = []
+        for head, value, tail in self.TOKENS:
+            self.assertEqual(_prompt(f"password: {value}")["decision"], "block")
+            ref = self.secret.search(hooks.take_pending("S1")).group()
+            hooks.pre_tool({"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "S1",
+                            "transcript_path": "", **CLAUDE, "tool_input": {"command": f"echo {ref}"}, "cwd": "/tmp"})
+            self.cases.append((head + value + tail, head, tail))
+        self.assertGreaterEqual(len(hooks._resolved_values(hooks.Vault(hooks.load_config()), "S1")), 2,
+                                "both values are resolved in S1")
+
+    def assertWhole(self, text, token, head, tail, where):  # noqa: N802 - unittest style
+        self.assertNotIn(tail.lower(), text.lower(), f"{where}: the rest of the token is in clear")
+        self.assertNotIn(head.lower(), text.lower(), f"{where}: the start of the token is in clear")
+
+    def test_a_tool_result_takes_the_whole_token(self):
+        for token, head, tail in self.cases:
+            with self.subTest(token=head):
+                out = _out(_bash(f"token {token} end"))
+                self.assertWhole(out, token, head, tail, "the tool result")
+                self.assertRegex(out, r"\Atoken " + self.secret.pattern + r" end\Z")
+
+    def test_the_prompt_and_the_mod_take_the_whole_token(self):
+        for token, head, tail in self.cases:
+            with self.subTest(token=head):
+                self.assertEqual(_prompt(f"the new token is {token} ok")["decision"], "block")
+                self.assertWhole(hooks.take_pending("S1"), token, head, tail, "/maisecrets:send")
+                mod = hooks.rewrite_prompt({"prompt": f"the new token is {token} ok", "session_id": "S1", "cwd": ""})
+                self.assertWhole(mod["text"], token, head, tail, "the mod")
+                self.assertEqual(mod["count"], 1, "the notice counts the token once")
+
+    def test_a_failed_call_records_the_whole_token(self):
+        for token, head, tail in self.cases:
+            with self.subTest(token=head):
+                tmp = Path(tempfile.mkdtemp(prefix="transcript-"))
+                self.addCleanup(shutil.rmtree, tmp, True)
+                path = tmp / "session.jsonl"
+                record = json.dumps({"type": "tool_result", "content": f"bad: {token}"}) + "\n"
+                path.write_text(record, encoding="utf-8")
+                with mock.patch.object(hooks, "_scrub_transcript_later", lambda *a, **k: None):
+                    hooks.post_tool_failure({"hook_event_name": "PostToolUseFailure", "tool_name": "Bash",
+                                             "session_id": "S1", "transcript_path": str(path), **CLAUDE,
+                                             "tool_input": {"command": "x"}, "error": f"bad: {token}"})
+                self.assertWhole(path.read_text(encoding="utf-8"), token, head, tail, "the transcript")
 
 
 class MarkerHookTests(_Base):

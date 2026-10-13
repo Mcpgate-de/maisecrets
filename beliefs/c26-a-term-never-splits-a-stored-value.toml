@@ -1,10 +1,10 @@
 # c26-a-term-never-splits-a-stored-value: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c26-a-term-never-splits-a-stored-value"
 control = "C26"
-statement = "A stored value is taken out whole before the term matcher runs: a listed name inside a stored password never leaves the rest of it in clear."
+statement = "A detector hit inside a stored value is dropped, and the exact redaction takes the value whole: a listed name inside a stored password never leaves the rest of it in clear."
 runner = ["tests/test_terms_hooks.py::StoredValueTests::test_a_tool_result_masks_the_stored_value_whole"]
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "            s = _exact_redact(s, vault, session, hit, entries, resolved, values)\n        matches = [m for m in detect.scan(s) if not detect.is_fixture(m, s, path)]\n"
-replace = "            pass\n        matches = [m for m in detect.scan(s) if not detect.is_fixture(m, s, path)]\n        if matches and vault is not None:\n            s, ents = _replace(s, matches, vault, session)\n            entries.extend(ents)\n            s = _exact_redact(s, vault, session, hit, entries, resolved, values)\n            matches = []\n"
+find = "        if any(a <= m.start and m.end <= b for a, b in cover):\n            continue\n"
+replace = ""
