@@ -141,6 +141,13 @@ class TypedCommandTests(_Base):
         self.assertIn("removed NAME_1", gone["reason"])
         self.assertEqual(_bash(f"Pan {NAME}"), {})
 
+    def test_remove_by_a_placeholder_of_an_older_version(self):
+        _prompt(f"/maisecrets:term add {NAME}")
+        old = terms._old_id(terms.parse(terms.PERSONAL.read_text(encoding="utf-8"))[0][0])
+        ok, reason, _scrub = terms.term_remove_typed("unrelated text", old)
+        self.assertTrue(ok, reason)
+        self.assertIn("removed NAME_1", reason)
+
     def test_codex_form(self):
         out = _prompt(f"maisecrets: term add {NAME}", source=None, client=CODEX)
         self.assertEqual(set(out), {"decision", "reason"})
@@ -191,15 +198,23 @@ class GateReviewCommandTests(_Base):
 
     def test_a_full_name_also_adds_the_surname_with_any_ending(self):
         out = _prompt("/maisecrets:term add Jan Testowski")
-        self.assertIn("Also added: the last word with any ending", out["reason"])
+        self.assertIn("Also added: 2 variant(s)", out["reason"])
+        self.assertIn("/maisecrets:term shows them", out["reason"])
         self.assertIn("The first name alone stays visible", out["reason"])
         self.assertNotIn("testowsk", out["reason"].lower())
-        self.assertIn("Jan Testowski | Testowski*", terms.PERSONAL.read_text(encoding="utf-8"))
+        self.assertIn("Jan Testowski | Testowski | Testowskis\n", terms.PERSONAL.read_text(encoding="utf-8"))
         for text in ("Herr Testowski", "Testowskis Bericht", "Testowski, Jan", "J. Testowski", "jan_testowski.pdf",
                      "Jan-Testowski", "jan.testowski"):
             with self.subTest(text=text):
                 self.assertNotIn("testowsk", _out(_bash(text)).lower())
         self.assertEqual(_bash("Jan alone"), {}, "the first name alone stays visible, as the answer says")
+
+    def test_the_surname_is_a_whole_word_never_a_stem(self):
+        # 243 of 290 common surnames are the start of an ordinary word: Koch*, Lang*, Wolf*, Cook* (round 2)
+        _prompt("/maisecrets:term add Anna Koch")
+        self.assertIn("Anna Koch | Koch | Kochs\n", terms.PERSONAL.read_text(encoding="utf-8"))
+        self.assertEqual(_bash("Kochen und Kochbuch"), {})
+        self.assertNotIn("Koch", _out(_bash("Herr Koch, Kochs Akte")))
 
     def test_no_surname_for_a_short_or_common_last_word_or_one_word(self):
         _prompt("/maisecrets:term add Anna Li")
@@ -241,16 +256,22 @@ class GateReviewCommandTests(_Base):
         self.assertIn("nothing was changed", out["reason"])
         self.assertFalse(terms.PERSONAL.exists())
 
-    def test_an_add_without_a_source_has_the_floor_of_a_team_list(self):
-        out = _prompt("maisecrets: term add the", source=None, client=CODEX)
-        self.assertIn("not added (a common word", out["reason"])
+    def test_a_claude_add_without_a_source_has_the_floor_of_a_team_list(self):
+        out = _prompt("/maisecrets:term add the", source=None)
+        self.assertIn("not added (a common word (rules/term_stoplist.txt) in a prompt without a source", out["reason"])
+        self.assertNotIn("team list", out["reason"])
         self.assertFalse(terms.PERSONAL.exists())
+
+    def test_a_codex_add_follows_the_rules_of_your_own_list(self):
+        # Codex never sends a source (round 2): its adds are the person's, as in Claude Code
+        self.assertIn("is a common word", _prompt("maisecrets: term add Jan", source=None, client=CODEX)["reason"])
+        self.assertTrue(terms.PERSONAL.exists())
         added = _prompt(f"maisecrets: term add {NAME}", source=None, client=CODEX)
         self.assertIn("is on your list now", added["reason"])
 
     def test_the_removal_names_the_variant_count(self):
         _prompt(f"/maisecrets:term add {NAME}")
-        self.assertIn("removed NAME_1 (2 variants)", _prompt(f"/maisecrets:term remove {NAME}")["reason"])
+        self.assertIn("removed NAME_1 (3 variants)", _prompt(f"/maisecrets:term remove {NAME}")["reason"])
 
 
 class TermHookTests(_Base):
@@ -302,6 +323,21 @@ class TermHookTests(_Base):
             out = hooks.pre_tool({"hook_event_name": "PreToolUse", "tool_name": "Write", "session_id": "S1",
                                   "transcript_path": "", **CLAUDE, "tool_input": tool_input, "cwd": "/tmp"})
         self.assertEqual(out["hookSpecificOutput"]["updatedInput"], tool_input)
+
+    def test_every_private_use_character_in_the_content_falls_back_or_denies(self):
+        ref = REF_RE.search(_out(_bash(NAME))).group()
+        bmp = "".join(chr(c) for c in range(0xE000, 0xF900))
+        planes = bmp + "".join(chr(c) for r in ((0xF0000, 0xFFFFE), (0x100000, 0x10FFFE)) for c in range(*r))
+
+        def call(content):
+            return hooks.pre_tool({"hook_event_name": "PreToolUse", "tool_name": "Write", "session_id": "S1",
+                                   "transcript_path": "", **CLAUDE, "cwd": "/tmp",
+                                   "tool_input": {"file_path": "/tmp/x.txt", "content": f"Dear {ref} {content}"}})
+        self.assertNotEqual(call(bmp).get("hookSpecificOutput", {}).get("permissionDecision"), "deny",
+                            "plane 15 takes over")
+        out = call(planes)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("every private-use character", out["hookSpecificOutput"]["permissionDecisionReason"])
 
     def test_the_model_is_told_the_placeholder_is_never_resolved(self):
         out = _bash(NAME)

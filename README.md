@@ -1669,9 +1669,12 @@ prompt to the model. From the next tool result on, `Jan Kowalski` becomes a
 placeholder such as `⟦NAME_c3⟧`.
 
 When you add a name of two or more words, maisecrets also adds the last word
-with any ending (`Kowalski*`), if it has 4 letters or more and is not a common
-word. So `Herr Kowalski`, `Kowalskis Bericht`, `Kowalski, Jan` and
-`J. Kowalski` are masked too. The joined forms `jan.kowalski`,
+alone and its genitive (`Kowalski | Kowalskis`), if it has 4 letters or more
+and is not a common word. So `Herr Kowalski`, `Kowalskis Bericht`,
+`Kowalski, Jan` and `J. Kowalski` are masked too. It adds them as whole words,
+never as a stem with `*`: `Koch*` would mask `Kochen`, `Lang*` would mask
+`language`. Type a stem yourself when you want one (`Kowalsk*`). A surname that
+is also a word (`Jobs`, `Wolf`) is masked where it stands alone as that word. The joined forms `jan.kowalski`,
 `Jan-Kowalski` and `jan_kowalski` (also in `jan_kowalski.pdf`) are masked as
 one word. The first name alone stays visible: `Jan` is a common word, and
 masking it would hide every other Jan. To mask it anyway, add it as a term

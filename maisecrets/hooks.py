@@ -880,8 +880,10 @@ def _term_command(payload: dict, cmd: tuple, typed: bool, cfg: dict) -> dict:
         reason = ("maisecrets: a change of your terms counts only when you type it as your prompt; this one came from "
                   f"the client ({payload.get('source')}), so nothing was changed.")
     elif verb == "add":
-        # without a source the client cannot say who wrote the prompt: the floor of a team list holds (gate review)
-        _ok, reason, scrub = terms.add_typed(words, floor="source" not in payload)
+        # Claude Code sends a source with every prompt; one without it may not come from the person, so the floor of
+        # a team list holds. Codex never sends a source: its adds follow the person's rules (gate review, round 2)
+        floor = client_of(payload) == "claude" and "source" not in payload
+        _ok, reason, scrub = terms.add_typed(words, floor=floor)
     else:
         entity = None
         refs = find_refs(words)
@@ -3101,12 +3103,19 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
 # private-use characters that the tool input does not hold, and put back in the answer as it was written
 
 
-def _hide_pair(tool_input) -> tuple:
+class _NoPair(Exception):
+    """No private-use pair is free in the tool input."""
+
+
+def _hide_pair(tool_input) -> tuple | None:
     """Two private-use characters that no string of the tool input holds: a fixed pair turned a real U+E000 in the
     content of a Write into the bracket of a placeholder (gate review of block 2)."""
     used = set(json.dumps(tool_input, ensure_ascii=False))
-    free = (chr(c) for c in range(0xE000, 0xF900) if chr(c) not in used)
-    return next(free), next(free)
+    # the private-use area of the first plane, then planes 15 and 16; None when the input holds every one of them
+    gen = (chr(c) for r in ((0xE000, 0xF900), (0xF0000, 0xFFFFE), (0x100000, 0x10FFFE)) for c in range(*r)
+           if chr(c) not in used)
+    free = (next(gen, None), next(gen, None))
+    return None if free[1] is None else free
 
 
 def _term_keys() -> set:
@@ -3135,10 +3144,18 @@ def pre_tool(payload: dict) -> dict:
         for key, a, b in sorted(refs, key=lambda r: r[1], reverse=True):
             if key in keys[0]:
                 if not pair:
-                    pair.extend(_hide_pair(tool_input))
+                    free = _hide_pair(tool_input)
+                    if free is None:
+                        raise _NoPair
+                    pair.extend(free)
                 s = s[:a] + pair[0] + s[a + 1:b - 1] + pair[1] + s[b:]
         return s
-    hidden = _walk_strings(tool_input, hide) if isinstance(tool_input, dict) else tool_input
+    try:
+        hidden = _walk_strings(tool_input, hide) if isinstance(tool_input, dict) else tool_input
+    except _NoPair:
+        return _deny("maisecrets: this tool call holds every private-use character, so a name placeholder in it "
+                     "cannot be kept apart from the values. Nothing ran; write the content without that run of "
+                     "characters.")
     if hidden == tool_input:
         return _pre_tool(payload)
     out = _pre_tool(dict(payload, tool_input=hidden))
