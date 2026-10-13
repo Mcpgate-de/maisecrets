@@ -1169,17 +1169,18 @@ Four sources, one scanner (`maisecrets/detect.py`):
   with a number and a sign (`Sommer2024!`, `Welcome1!`) is a password too; a word with a number
   alone (`Winter2023`) is left to the keyword rules. A passphrase of words
   (`passphrase: correct-horse-battery-staple`) stays text: the rule cannot tell it from a
-  reference such as a Kubernetes secret name. Word-likeness and the label
-  word classes follow Dan Szymkowiak's backlog ideas.
+  reference such as a Kubernetes secret name. A string that `+` continues, a version and a
+  format template (`{pw}`) stay text too. Word-likeness and the label word classes follow Dan
+  Szymkowiak's backlog ideas.
 - A key after a label that names a secret, in a form the keyword rules do not read (0.6.16):
   `<clientSecret>…</clientSecret>`, `<AccessToken>…</AccessToken>`, a short value
   (`label-secret-literal`, 8 characters and more); and a quoted key of 12 characters and more
   after a weak label (`hmac`, `session`, `cookie`, `psk`, `salt`, `seed`, `otp`, `key`,
   `appKey("…")`, `<key>…</key>`; `label-weak-key`). The value must have few word letters and a
   high entropy for its alphabet (a charset-normalised entropy, after Dan Szymkowiak's backlog
-  idea). A label that names something else stays text: `public_key`, `cache_key`,
-  `primary_key`, `object_key`, `idempotency_key`, `csrf_token`, a hex value after `key` and any value after
-  `nonce`, `x-amz-signature` or `x-amz-credential`.
+  idea). A key is ASCII. A label that names something else stays text: `public_key`,
+  `cache_key`, `primary_key`, `object_key`, `idempotency_key`, `csrf_token`, a hex value after
+  `key` and any value after `nonce`, `x-amz-signature` or `x-amz-credential`.
 - A TOTP or HOTP seed after a one-time-password label (0.6.16, `label-otp-seed`): 16 to 64
   base32 capitals after a label with `totp`, `hotp`, `otp`, `mfa`, `2fa` or `authenticator`
   (`TOTP_SEED=…`, `otp_seed: …`). A code of digits, a word, a constant name and a mask stay
