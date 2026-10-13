@@ -241,6 +241,13 @@ class GateReviewCommandTests(_Base):
         self.assertIn("nothing was changed", out["reason"])
         self.assertFalse(terms.PERSONAL.exists())
 
+    def test_an_add_without_a_source_has_the_floor_of_a_team_list(self):
+        out = _prompt("maisecrets: term add the", source=None, client=CODEX)
+        self.assertIn("not added (a common word", out["reason"])
+        self.assertFalse(terms.PERSONAL.exists())
+        added = _prompt(f"maisecrets: term add {NAME}", source=None, client=CODEX)
+        self.assertIn("is on your list now", added["reason"])
+
     def test_the_removal_names_the_variant_count(self):
         _prompt(f"/maisecrets:term add {NAME}")
         self.assertIn("removed NAME_1 (2 variants)", _prompt(f"/maisecrets:term remove {NAME}")["reason"])

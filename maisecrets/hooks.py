@@ -836,7 +836,8 @@ def _term_command(payload: dict, cmd: tuple, typed: bool, cfg: dict) -> dict:
         reason = ("maisecrets: a change of your terms counts only when you type it as your prompt; this one came from "
                   f"the client ({payload.get('source')}), so nothing was changed.")
     elif verb == "add":
-        _ok, reason, scrub = terms.add_typed(words)
+        # without a source the client cannot say who wrote the prompt: the floor of a team list holds (gate review)
+        _ok, reason, scrub = terms.add_typed(words, floor="source" not in payload)
     else:
         entity = None
         refs = find_refs(words)

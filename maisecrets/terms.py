@@ -889,12 +889,13 @@ def _shown_path() -> str:
     return "~/.maisecrets/terms.txt" if HOME == Path.home() / ".maisecrets" else str(PERSONAL)
 
 
-def add_typed(words: str) -> tuple[bool, str, list]:
+def add_typed(words: str, floor: bool = False) -> tuple[bool, str, list]:
     """Add one entity to terms.txt. (changed, message, texts to scrub from the transcript). The message names a
-    label and a line, never the term."""
+    label and a line, never the term. `floor`: the prompt has no source (Codex, an older client), so it may not come
+    from the person, and the entry gets the floor of a team list."""
     try:
         for v in words.split("|"):
-            _variant(v, 1, None)
+            _variant(v, 1, stoplist() if floor else None)
     except TermsError as exc:
         return False, (f"maisecrets: the term was not added ({str(exc).split(': ', 1)[1]}). "
                        "This prompt was not sent to the model."), [words]
