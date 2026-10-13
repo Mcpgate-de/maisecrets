@@ -1165,7 +1165,15 @@ Four sources, one scanner (`maisecrets/detect.py`):
   value must be no word after undoing leet (`P4ssw0rd` is a word), no fixture (`testpass`),
   no mask, template or reference (`${DB_PASSWORD}`, `{{ … }}`, `settings.DB_PASSWORD`). The
   words come from `maisecrets/rules/words_en.txt`, about 21,000 English words of 4 to 8
-  letters from SCOWL (see `NOTICE`), read only when a password label is in the text. A word
+  letters from SCOWL (see `NOTICE`), read only when a password label is in the text. A miss in
+  an English list is no evidence alone: the value needs a letter and a digit or a sign beside
+  it, or (letters only) few vowels or a mix of cases that no word boundary explains, so a word
+  of another language (`senhaAtual`) stays text. So do a number, a ratio, a time, a duration
+  and a section (`95.2%`, `118/124`, `12:30`, `~30d`, `§3.2`), a dotted abbreviation and a word
+  with a number (`Seite#3`). After the weak label `pass` (a boarding pass, a test pass) the
+  value needs 8 characters of three classes. A comparison (`==`, `!=`), a label that is the tail
+  of a path or a flag value, and an unquoted label before a comma (`f(password, "…")`) are no
+  label and value. A word
   with a number and a sign (`Sommer2024!`, `Welcome1!`) is a password too; a word with a number
   alone (`Winter2023`) is left to the keyword rules. A passphrase of words
   (`passphrase: correct-horse-battery-staple`) stays text: the rule cannot tell it from a

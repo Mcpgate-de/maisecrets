@@ -181,6 +181,13 @@ class KeywordLabelTailTests(unittest.TestCase):
         self.assertLess(took("password=" + "pwd" * 100000, [r.id for r in detect.rules()
                                                               if r.id.startswith("ds-keyword")]), 1.0)
 
+    def test_a_megabyte_of_label_chains_scans_in_linear_time(self):
+        # `pw=pw=…` started a label at each `pw` and each value ran 300 characters to fail at the line end: 1 MB took
+        # 5.5 s (Gate B of 0.6.16, 0.6.15: 1.1 s). A label never starts after `=` now
+        lit = [d["id"] for d in detect.LITERAL_RULES]
+        self.assertLess(took("pw=" * 340000, lit), 1.0)
+        self.assertLess(took("password: " * 100000, lit), 1.0)
+
     def test_six_keyword_rules_take_the_linear_path(self):
         linear = [r.id for r in self.rules() if isinstance(r.regex, detect._KeywordTail)]
         self.assertEqual(len(linear), 6, linear)   # the seventh starts with the value, its \\w* ends the regex

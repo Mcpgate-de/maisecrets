@@ -63,6 +63,38 @@ class PasswordLiteralTests(unittest.TestCase):
                 self.assertTrue(any(k == "label-pw-literal" for k, _ in got), got and [k for k, _ in got])
                 self.assertTrue(any(v in (p4, p6, p10) for _, v in got))
 
+    def test_a_measure_or_a_word_of_another_language_after_a_password_label_stays_text(self):
+        """A value that no English word covers is no password without evidence of chance (codex and Opus Gate A/B of
+        0.6.16): a number, a ratio, a time, a duration, a section, an abbreviation, a word with a number, a word of
+        another language, and a comparison in code."""
+        for text in ("pass: 95.2%", "pass: 118/124", "PASS: 41/41", "unit tests pass: 312/312", "Season pass: 2025/26",
+                     "Boarding pass: 14C/27", "pw: 8-64", "Passwort: \u00a73.2", "password: ~30d", "password: 12:30",
+                     "password: 24h/7d", "Passwort: Seite#3", "Passwort: s.o.", 'password = "senhaAtual"',
+                     'wachtwoord: "geheimpje"', '<password>wachtwoord</password>',
+                     '<password>contrasenaNueva</password>',
+                     'if pw == "Xk9qTz2wLm":', 'if (pw != "Xk9qTz2wLm")'):
+            with self.subTest(text=text):
+                self.assertEqual([k for k, _ in kinds(text) if k == "label-pw-literal"], [])
+
+    def test_a_password_needs_evidence_and_more_of_it_after_pass(self):
+        p = password(10, "!#%")
+        for text, value in (("<password>xkcdq" + "wrtzp</password>", "xkcdqwrtzp"),         # few vowels
+                            (f"<password>{p}</password>", p), (f"<pass>{p}</pass>", p),
+                            (f'("password", "{p}")', p)):                              # a quoted label before a comma
+            with self.subTest(text=text.replace(p, "<p>")):
+                self.assertIn(("label-pw-literal", value), kinds(text))
+        for text in ("<pass>xkcdqwrtzp</pass>", "Boarding pass: Kq9zT2", f'check(password, "{p}")',
+                     'args: ["--password-file=/etc/app/pw", "--token-ttl=15m"]'):
+            with self.subTest(text=text.replace(p, "<p>")):
+                self.assertEqual([k for k, _ in kinds(text) if k == "label-pw-literal"], [])
+
+    def test_an_unquoted_value_with_a_semicolon_is_taken_whole(self):
+        p = password(10)
+        for text, value in ((f"pw = {p[:5]};{p[5:]}", f"{p[:5]};{p[5:]}"), (f"pw = {p};", p),
+                            (f"pwd={p} ; the old one", p)):
+            with self.subTest(text=text.replace(p, "<p>")):
+                self.assertIn(value, [v for _, v in kinds(text)])   # whole, by this rule or a keyword rule
+
     def test_an_escaped_or_doubled_quote_is_part_of_the_value(self):
         """The whole literal, never a prefix: SQL and YAML double a quote, PowerShell doubles it or escapes it with a
         backtick, C-like languages, JSON and MySQL escape it with a backslash."""
@@ -103,7 +135,8 @@ class PasswordLiteralTests(unittest.TestCase):
         """No value or one that says what it is: a word, a word in leet, a fixture, a mask, a template, a reference."""
         for value in ("hunter", "Sunshine", "P4ssw0rd", "testpass", "changeme", "********", "abcdef", "123456789",
                       "secret123", "mypassword", "${DB_PASSWORD}", "{{ db_password }}", "%(password)s",
-                      "settings.DB_PASSWORD", "<your-password>", "xxxxxxxx", "dragonfly", "v1.2.3-rc1"):
+                      "settings.DB_PASSWORD", "<your-password>", "xxxxxxxx", "dragonfly", "v1.2.3-rc1",
+                      "dragon42", "Sunshine7"):
             for form in ('db_password = "{}"', "<password>{}</password>", "PASSWORD={}", "?pwd={}&x=1"):
                 text = form.format(value)
                 with self.subTest(text=text):
@@ -125,7 +158,7 @@ class PasswordLiteralTests(unittest.TestCase):
         k = key(16)
         for text in (f'pw = "{p[:5]}" + "{p[5:]}"', f'PASSWORD = "{p}" + suffix',
                      'for label in ("passwort", "Kennwort", "Schl\u00fcssel", "zugangsdaten"):',
-                     'check(password, "Schl' + chr(92) + 'u00fcssel")',   # an escape in source code is its character
+                     'check("password", "Schl' + chr(92) + 'u00fcssel")',   # an escape in source code is its character
                      # escaped quotes of a JSON text: signs only
                      "J(['\"{\\\\\"', PW, '\\\\\":\\\\\"', pw])",
                      f"('SECRET', '{k[:4]}\u00a7{k[4:10]}\u00a7{k[10:]}')", f'client_secret = "{k[:8]}\u00e4{k[8:]}"'):
@@ -138,6 +171,28 @@ class PasswordLiteralTests(unittest.TestCase):
         self.assertEqual(detect._WORDS, [], "text without a password label read the word list")
         detect.scan(f'password = "{password(10)}"')
         self.assertEqual(len(detect._WORDS), 1)
+
+    def test_a_broken_word_list_never_crashes_and_takes_no_word(self):
+        """Missing, not UTF-8, not words: no exception, and a value of letters only is no password then; a value with
+        a digit still is (codex Gate A of 0.6.16)."""
+        import tempfile
+        from unittest import mock
+        d = Path(tempfile.mkdtemp(prefix="wordlist-"))
+        (d / "binary.txt").write_bytes(b"\xff\xfe\x00 not utf-8 \xc3\x28")
+        (d / "few.txt").write_text("alpha\nbeta\n", encoding="utf-8")
+        (d / "junk.txt").write_text("\n".join(["word"] * 1000 + ["1234", "<html>"] * 100), encoding="utf-8")
+        p = password(10)
+        letters = "".join(c for c in "xkcdqwrtzpbv")
+        try:
+            for name in ("missing.txt", "binary.txt", "few.txt", "junk.txt"):
+                with self.subTest(name=name), mock.patch.object(detect, "_WORDS_FILE", str(d / name)):
+                    detect._WORDS.clear()
+                    self.assertEqual([k for k, _ in kinds(f"<password>{letters}</password>")], [])
+                    self.assertFalse(detect._WORDS_OK[0])
+                    self.assertIn(("label-pw-literal", p), kinds(f"<password>{p}</password>"))
+        finally:
+            detect._WORDS.clear()
+            detect._WORDS_OK[:] = [True]
 
     def test_the_word_list_is_the_one_its_license_names(self):
         rules = ROOT / "maisecrets" / "rules"

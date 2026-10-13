@@ -595,15 +595,26 @@ _EXTRA_WORDS = frozenset({
 
 
 def _word_set() -> frozenset:
-    """The word list, read on the first password label (about 3 ms). A missing file makes every value a non-word:
-    stricter, never silent."""
+    """The word list, read on the first password label (about 3 ms). A file that is missing, unreadable, not UTF-8 or
+    not a list of words (fewer than 1,000 entries of small ASCII letters, or more than 1 % other lines) counts as no
+    list: _WORDS_OK turns false, and the password rule then takes no value of letters only (_pw_literal_ok)."""
     if not _WORDS:
+        words: set = set()
+        ok = True
         try:
-            words = set((RULES_DIR / _WORDS_FILE).read_text(encoding="utf-8").split())
-        except OSError:
+            entries = (RULES_DIR / _WORDS_FILE).read_text(encoding="utf-8").split()
+            words = {w for w in entries if w.isascii() and w.isalpha() and w.islower() and len(w) <= 20}
+            ok = len(words) >= 1000 and len(entries) - len(words) <= len(entries) // 100
+        except (OSError, UnicodeError, ValueError):
+            ok = False
+        if not ok:
             words = set()
+        _WORDS_OK[:] = [ok]
         _WORDS.append(frozenset(words | _EXTRA_WORDS))
     return _WORDS[0]
+
+
+_WORDS_OK: list = [True]
 
 
 _COVER_CACHE: dict = {}
@@ -712,14 +723,48 @@ def _sequential(low: str) -> bool:
                              or all(ord(low[i]) - ord(low[i + 1]) == 1 for i in range(len(low) - 1)))
 
 
+# what a value after a password label is when it is no password: a number, a ratio, a percentage, a range, a time, a
+# duration or a size with its unit (95.2%, 118/124, 8-64, 12:30, ~30d, 24h/7d, 14C/27, 2025/26), a section (§3.2), a
+# dotted abbreviation (s.o., z.B.), and a word with a number (Seite#3, Gate-12)
+_MEASURE_VALUE_RE = re.compile(r"[~<>=+\u00a7#-]?\d+(?:[.,:/-]\d+)*(?:[a-z]{1,3}|[A-Z]{1,2})?"
+                               r"(?:[/ -]\d+(?:[.,:]\d+)*(?:[a-z]{1,3}|[A-Z]{1,2})?)*%?")
+_ABBREVIATION_RE = re.compile(r"(?:[A-Za-z\u00c0-\u024f]{1,4}\.)+[A-Za-z\u00c0-\u024f]{0,4}")
+_WORD_NUMBER_RE = re.compile(r"[A-Za-z\u00c0-\u024f]{2,}[#_. :/-]\d{1,4}|\d{1,4}[#_. :/-][A-Za-z\u00c0-\u024f]{2,}")
+
+
+def _random_evidence(v: str) -> bool:
+    """A value that no word covers is a password only with evidence of chance (codex and Opus Gate A/B of 0.6.16): a
+    letter, and a digit or a sign beside it, or (letters only) few vowels or a mix of cases that no word boundary
+    explains. A word of another language (senhaAtual, wachtwoord) and a measure (95.2%, 12:30, ~30d) stay text."""
+    if not any(c.isalpha() for c in v):
+        return False
+    if _MEASURE_VALUE_RE.fullmatch(v) or _ABBREVIATION_RE.fullmatch(v) or _WORD_NUMBER_RE.fullmatch(v):
+        return False
+    if any(c.isdigit() for c in v) or any(not c.isalnum() for c in v):
+        return True
+    # letters only: few vowels (the words of every Latin-script language have a quarter or more: wachtwoord, senha,
+    # Kennwort), or a mix of cases that no word boundary explains
+    if len(v) >= 6 and sum(c in "aeiouyAEIOUY" for c in v) < 0.25 * len(v):
+        return True
+    upper = sum(c.isupper() for c in v)
+    parts = _WORD_RUN_RE.findall(v)
+    return upper >= 2 and len(v) - upper >= 2 and len(parts) >= 3 and len(v) <= 3 * len(parts)
+
+
+def _pw_strong_evidence(v: str) -> bool:
+    """After the weak label `pass` (a boarding pass, a test pass, a season pass): 8 characters and more of three of
+    the four classes (small, capital, digit, sign)."""
+    classes = (any(c.islower() for c in v) + any(c.isupper() for c in v) + any(c.isdigit() for c in v)
+               + any(not c.isalnum() for c in v))
+    return len(v) >= 8 and classes >= 3
+
+
 def _pw_literal_ok(v: str) -> bool:
     """A password value: 4 to 64 characters, no word after undoing leet (or a word with a number and a sign), not
     digits only, 3 distinct characters or more, no run such as abcd, no placeholder, no space, no dotted reference, no
     fixture word (testpass), no version."""
     if not 4 <= len(v) <= 64 or any(c.isspace() for c in v) or _charset(v) == "digits" or len(set(v)) < 3:
         return False
-    if not any(c.isalnum() for c in v):
-        return False   # signs only: escaped quotes of a JSON text in code (\":\"), not a password
     if _sequential(v.lower()) or _LITERAL_PLACEHOLDER_RE.search(v) or _DOTTED_RE.fullmatch(v) or _names_itself(v):
         return False
     if _CLOSED_TEMPLATE_RE.search(v):
@@ -727,7 +772,9 @@ def _pw_literal_ok(v: str) -> bool:
     if _VERSION_RE.fullmatch(v):
         return False   # a version: v1.2.3-rc1 (undoing leet makes it letters)
     if _wordlike(_deleet(v)) < 0.3:
-        return True
+        if not _WORDS_OK[0] and v.isalpha():
+            return False   # without a word list, a value of letters only may be any word
+        return _random_evidence(v)
     # a password made of a word, a number and a sign: Sommer2024!, Herbst2025#, Welcome1! (the form people choose).
     # A word with a number alone (Winter2023, postgres15) stays text here; the keyword rules judge it. So does a name
     # joined by _ - . (ABC_123_DEF) and a reference with : / or \ (b64:!!notbase64, vault:db/pw1!)
@@ -741,11 +788,14 @@ def _pw_literal_ok(v: str) -> bool:
 # XML element; SQL's IDENTIFIED BY '…' and PowerShell's ConvertTo-SecureString '…'
 _LIT_WRAP = (r"(?:(?:Some|Ok|String::from|str|bytes|SecretString::new|Secret::new|SecretStr|SecretBytes|Optional\.of"
              r"|Box::new|Sensitive|new[ \t]+String)[ \t]*\([ \t]*)?")
-_LIT_LABEL = r"(?<![\w.\-$@])([A-Za-z_$@][\w.\-]{0,60})[\"'\]]?[ \t]*"
+# a label starts after no word character, no path or flag part and no `=`: `--password-file=/etc/app/pw` holds no
+# label pw, and `pw=pw=pw=…` (1 MB took 5.5 s) starts one label only
+_LIT_LABEL = r"(?<![\w.\-$@/\\=])([A-Za-z_$@][\w.\-]{0,60})[\"'\]]?[ \t]*"
 # the quoted forms end at the opening quote: _read_quoted reads the literal to its real closing quote
-_LIT_QUOTED = re.compile(_LIT_LABEL + r"(?:=>|:=|==|=|:|,|\()[ \t]*" + _LIT_WRAP + r"([\"'`])")
+_LIT_QUOTED = re.compile(_LIT_LABEL + r"(?<![=!<>])(?:=>|:=|=(?!=)|:|,|\()[ \t]*" + _LIT_WRAP + r"([\"'`])")
 _LIT_FORMS = (
-    (re.compile(r"(?m)" + _LIT_LABEL + r"(?:=|:)[ \t]*([^\s\"'`,;()\[\]{}<>]{4,300})[ \t]*(?:(?:#|//|;).*)?$"), 1, 2),
+    (re.compile(r"(?m)" + _LIT_LABEL + r"(?:=|:)[ \t]*([^\s\"'`,()\[\]{}<>]{3,299}[^\s\"'`,;()\[\]{}<>]);?"
+                r"(?:[ \t]+(?:#|//|;).*|[ \t]*(?:#|//).*)?[ \t]*$"), 1, 2),
     (re.compile(r"[?&;]([\w.\-\[\]]{1,60})=([^&\s\"'#<>]{4,400})"), 1, 2),
     (re.compile(r"<([\w:.-]{1,60})(?:\s[^<>]{0,200})?>([^<>\s]{4,400})</"), 1, 2),
 )
@@ -870,7 +920,7 @@ def _label_class(label: str) -> tuple:
 def _judge_literal(label: str, v: str, quoted: bool = True) -> str:
     """The rule a label and its literal value fall under, or ""."""
     pw, secret, weak, otp, last = _label_class(label)
-    if pw and _pw_literal_ok(v):
+    if pw and _pw_literal_ok(v) and (last.rstrip("0123456789") != "pass" or _pw_strong_evidence(v)):
         return "label-pw-literal"
     if secret and _key_literal_ok(v, 8, 200, 0.3, 0.8):
         return "label-secret-literal"
@@ -896,18 +946,21 @@ def _literal_hits(text: str) -> list:
                 break
             a = m.end()
             q = m.group(2)
+            lq = text[m.start(1) - 1:m.start(1)]
+            if "," in text[m.end(1):m.start(2)] and not (lq in ("'", '"') and text[m.end(1):m.end(1) + 1] == lq):
+                pos = m.start(2)   # f(password, "…"): the next argument; ("password", "…") is a pair of label and value
+                continue
             end, closed = _read_quoted(text, a, q, backtick=False)
             raw = text[a:end]
-            # past the literal; but a literal with a quote inside that is no value may hold labels and values of its
-            # own (a JSON text in a template string): read on inside it then
+            # past a literal that is a value
             pos = end + 1 if closed else max(end, a)
             if closed and re.match(r"[ \t]*\+", text[end + 1:end + 40]):
                 continue   # a string that + continues is an expression
             rid = _judge_literal(m.group(1), _unquote(raw, q, True, False), quoted=True)
             if rid:
                 hits.append((rid, m.start(), a, end))
-            elif any(c in raw for c in "\"'`"):
-                pos = a
+            else:
+                pos = a   # a literal that is no value may be a label itself: f("password", "…"), or hold a JSON text
         for n, (rx, gl, gv) in enumerate(_LIT_FORMS):
             for m in rx.finditer(text):
                 rid = _judge_literal(m.group(gl), m.group(gv), quoted=n != 0)
