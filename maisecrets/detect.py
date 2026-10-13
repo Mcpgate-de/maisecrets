@@ -528,9 +528,12 @@ OWN_RULES: list[dict] = [
     {"id": "url-password-no-user", "type": "SECRET", "secret_group": 1, "validator": "ds_value",
      "regex": r"://:([^:/?#\[\]@!$&'()*+,;=\s]+)@"},
     # the secret half of an AWS key pair has no prefix of its own; the console, a CSV export
-    # and a chat paste show it within a few lines after the AKIA… id (field report, 2026-09-26)
+    # and a chat paste show it within a few lines after the AKIA… id (field report, 2026-09-26). Each line part is
+    # bounded at 400 characters: unbounded, each id scanned the rest of its line, and a line of ids took O(n^2)
+    # (32K: 2.3 s, 256K: 97 s, past the client's timeout). The longest field form, the console's credentials CSV
+    # row (user, password, id, secret, console link), puts about 150 characters around the secret.
     {"id": "aws-secret-after-access-key", "type": "SECRET", "secret_group": 1,
-     "regex": r"(?<![A-Z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Z0-9])(?:[^\n]*\n){0,4}?[^\n]*?"
+     "regex": r"(?<![A-Z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Z0-9])(?:[^\n]{0,400}\n){0,4}?[^\n]{0,400}?"
               r"(?<![A-Za-z0-9/+=])([A-Za-z0-9/+]{40})(?![A-Za-z0-9/+=])"},
     # a password with no shape where no `=` or `:` stands between label and value (public benchmark holdout v7,
     # 2026-10-12: all ten leaked passwords had one of these five forms). They are label rules (LABEL_RULES): the
@@ -1127,6 +1130,10 @@ def _matches(rule: Rule, text: str):
     A label that ends its line (``passwort:`` and the value on the next line, as a console
     or a chat renders it) is scanned together with the next non-empty line; only a hit whose
     value starts in that next line is taken from the pair (field report, 2026-09-26)."""
+    curl = _curl_parts(rule)
+    if curl is not None:
+        yield from _curl_matches(curl, text)
+        return
     kw = _WINDOWED.get(rule.id)
     if kw is not None and len(text) > 4096:
         yield from _windowed(rule, kw, text)
@@ -1156,6 +1163,75 @@ def _matches(rule: Rule, text: str):
                     if m.start(g) > len(line):
                         yield _Shifted(m, pos)
         pos += len(line) + 1
+
+
+# betterleaks' two curl rules start with `\bcurl\b` and then `.*` (or `.*?`) over up to 5 more lines before the -H or
+# -u part. RE2 runs that in linear time; Python's `re` scans the rest of the line again from each `curl`, and a line
+# with many of them took O(n^2) (32K characters: 10 s, past the hook's time limit). Here the -H/-u part (the tail)
+# is found on its own, and the nearest `curl` before it must stand within the same line breaks as the regex allows.
+_CURL_HEADS = (r"\bcurl\b(?:.*?|.*?(?:[\r\n]{1,2}.*?){1,5})", r"\bcurl\b(?:.*|.*(?:[\r\n]{1,2}.*){1,5})")
+_CURL_PARTS: dict = {}
+
+
+def _curl_parts(rule: Rule):
+    """(curl regex, tail regex) of a curl rule whose regex starts with a known head; None for any other rule, and
+    for a curl rule whose regex a sync changed (it then runs as it is: correct, only slower)."""
+    if not rule.id.startswith("curl-"):
+        return None
+    if rule.id not in _CURL_PARTS:
+        p = rule.regex.pattern
+        flags = "(?i)" if p.startswith("(?i)") else ""
+        body = p[len(flags):]
+        head = next((h for h in _CURL_HEADS if body.startswith(h)), None)
+        _CURL_PARTS[rule.id] = None if head is None else (re.compile(flags + r"\bcurl\b"),
+                                                          re.compile(flags + body[len(head):]))
+    return _CURL_PARTS[rule.id]
+
+
+def _curl_matches(parts, text: str):
+    """The matches of a curl rule in linear time. A match takes each -H/-u part whose nearest `curl` before it is
+    at most 5 line breaks away (`[\\r\\n]{1,2}` is one break, so a blank line counts once); its group 0 starts at
+    that `curl`. The regex took only the first (-H, lazy) or the last (-u, greedy) part after one `curl`; this
+    takes each one."""
+    head, tail = parts
+    starts: list[int] = []
+    ends: list[int] = []
+    for c in head.finditer(text):
+        starts.append(c.start())
+        ends.append(c.end())
+    if not starts:
+        return
+    nl = _newlines(text)
+    for t in tail.finditer(text):
+        i = bisect.bisect_right(ends, t.start()) - 1
+        if i < 0:
+            continue
+        lo, hi = bisect.bisect_left(nl, ends[i]), bisect.bisect_left(nl, t.start())
+        if hi - lo > 10:
+            continue
+        breaks = run = 0
+        for j in range(lo, hi):
+            run = run + 1 if j > lo and nl[j] == nl[j - 1] + 1 else 1
+            breaks += run % 2                    # two line feeds in a row are one `[\r\n]{1,2}`
+        if breaks <= 5:
+            yield _Spanned(t, starts[i], text)
+
+
+class _Spanned:
+    """A tail match whose group 0 starts earlier, at its `curl`."""
+    __slots__ = ("_m", "_start", "_text")
+
+    def __init__(self, m: re.Match, start: int, text: str) -> None:
+        self._m, self._start, self._text = m, start, text
+
+    def group(self, i: int = 0):
+        return self._text[self._start:self._m.end()] if i == 0 else self._m.group(i)
+
+    def start(self, i: int = 0) -> int:
+        return self._start if i == 0 else self._m.start(i)
+
+    def end(self, i: int = 0) -> int:
+        return self._m.end(i)
 
 
 class _Shifted:
