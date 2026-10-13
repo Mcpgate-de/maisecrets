@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 import string
 import sys
 import unittest
@@ -178,6 +179,15 @@ class EscapedJsonTests(unittest.TestCase):
         self.assertEqual(found(f'{{\\"{PW}\\":\\"{other}\\"}}'), [("SECRET", other)])
         short_runs = J(["ab", "12", "cd", "34", "ef"])   # runs of two are no pattern a reader takes for filler
         self.assertEqual(found(f"{PW}: {short_runs}"), [("SECRET", short_runs)])
+
+    def test_an_unquoted_value_reads_the_same_escaped_and_plain(self):
+        # an escaped null was a hit and a plain one was not: the comma before the escaped quote stayed in the value
+        # (Gate B of 0.6.15)
+        for v in ("null", "true", "1234567", J(["abc", "defg"]), J(["X9", "k2", "mQ7"])):
+            plain = f'{{"{PW}":{v},"remember":true}}'
+            escaped = '"' + plain.replace('"', '\\"') + '"'
+            with self.subTest(shape=re.sub(r"[A-Za-z]", "a", re.sub(r"[0-9]", "9", v))):
+                self.assertEqual(found(escaped), found(plain))
 
     def test_a_uuid_behind_an_escaped_secret_label_is_a_hit(self):
         # the label filters read the escaped label too: a UUID after a token label is a token (_SECRET_LABEL_RE)
