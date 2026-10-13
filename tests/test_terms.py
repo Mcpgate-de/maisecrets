@@ -532,7 +532,13 @@ class MarkedFileTests(unittest.TestCase):
 
     def test_a_damaged_file_fails_closed_and_stays_as_it_is(self):
         for raw in ('{"terms": [{"text": "Zbigniew Testowski", "expires": 9', "[]", '{"terms": "x"}',
-                    '{"terms": [{"expires": 1}]}'):
+                    '{"terms": [{"expires": 1}]}',
+                    # a record without a finite number as its expiry was taken for expired and erased
+                    '{"terms": [{"text": "Zbigniew Testowski"}]}',
+                    '{"terms": [{"text": "Zbigniew Testowski", "expires": true}]}',
+                    '{"terms": [{"text": "Zbigniew Testowski", "expires": NaN}]}',
+                    '{"terms": [{"text": "Zbigniew Testowski", "expires": Infinity}]}',
+                    '{"terms": [{"text": "Zbigniew Testowski", "expires": "9999999999"}]}'):
             with self.subTest(raw=raw):
                 terms.MARKED.write_text(raw, encoding="utf-8")
                 terms.reset()
@@ -574,6 +580,37 @@ elif verb == "remove":
 else:
     terms.take_markers("see {{" + arg + "}}", 3600)
 """
+
+
+_SLOW_SUGGEST = r"""
+import sys, time
+sys.path.insert(0, sys.argv[1])
+from maisecrets import cli, vault
+real = vault.atomic_write
+def slow(*a, **k):
+    time.sleep(1.0)           # the proposal is written while a wipe runs
+    return real(*a, **k)
+vault.atomic_write = slow
+cli.main(["terms", "suggest", sys.argv[2]])
+"""
+
+
+class WipeTests(unittest.TestCase):
+    def test_a_proposal_written_during_a_wipe_does_not_come_back(self):
+        import subprocess
+        from maisecrets import vault as vault_mod
+        from maisecrets.vault import load_config
+        tmp = Path(tempfile.mkdtemp(prefix="suggest-wipe-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.addCleanup(lambda: terms.SUGGESTED.unlink() if terms.SUGGESTED.exists() else None)
+        doc = tmp / "letter.txt"
+        doc.write_text("Sehr geehrter Herr Zbigniew Testowski,\n", encoding="utf-8")
+        child = subprocess.Popen([sys.executable, "-c", _SLOW_SUGGEST, str(ROOT), str(doc)],
+                                 stdout=subprocess.DEVNULL, env=dict(os.environ))
+        time.sleep(0.5)               # the child holds the terms lock and sleeps before its write
+        vault_mod.wipe_everything(load_config())
+        self.assertEqual(child.wait(timeout=60), 0)
+        self.assertFalse(terms.SUGGESTED.exists(), "the wipe waited for the proposal and deleted it")
 
 
 class RaceTests(unittest.TestCase):
