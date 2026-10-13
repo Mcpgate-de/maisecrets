@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 104 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 105 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1151,10 +1151,12 @@ Four sources, one scanner (`maisecrets/detect.py`):
   ['…']`, Go `Secrets: []string{"…"}`), to the end of the list; a value there must look like
   a key, so a name, a word-shaped identifier, a path, a password hash, a typed id (`pm_…`),
   an address (`0x…`) or a digest stays text, and a list after `tokens`, `code_tokens` or
-  `keys` is not read (tokenizer output, cache keys). A hex value after any other name stays
-  text: a nonce, a checksum, an etag, a commit id and a key that a hex literal decodes into
-  (`key = unhexlify('…')`, mostly published test vectors) are left out, as developer text is
-  full of them (`tests/fp_corpus.py`).
+  `keys` is not read (tokenizer output, cache keys); the value of an Elasticsearch
+  `Authorization: ApiKey …` header (a header line, `curl -H`, a header object) that decodes
+  from base64 to `id:key`; the scheme in prose stays text. A hex value after any other name
+  stays text: a nonce, a checksum, an etag, a commit id and a key that a hex literal decodes
+  into (`key = unhexlify('…')`, mostly published test vectors) are left out, as developer
+  text is full of them (`tests/fp_corpus.py`).
 - Prefixes newer than the vendored rulesets live in
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
   (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last

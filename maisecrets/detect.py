@@ -538,8 +538,32 @@ def _list_value_ok(v: str) -> bool:
     return ok and _ds_value_ok(v, min_len=16)
 
 
+def _apikey_value_ok(v: str) -> bool:
+    """The value after `Authorization: ApiKey`: base64 or base64url (Elasticsearch, Kibana) that decodes to `id:key`,
+    both parts not empty and printable. Docs write `ApiKey <base64-encoded id:key>`, `ApiKey ${ES_API_KEY}` and
+    `ApiKey YOUR_ENCODED_API_KEY`, which decode to nothing of that form."""
+    import base64
+    import binascii
+    raw = v.strip()
+    padded = raw + "=" * (-len(raw) % 4)
+    for alt in (None, b"-_"):
+        try:
+            dec = base64.b64decode(padded, altchars=alt, validate=True)
+        except (binascii.Error, ValueError):
+            continue
+        try:
+            txt = dec.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        ident, sep, key = txt.partition(":")
+        if sep and ident and key and txt.isprintable() and " " not in txt:
+            return True
+    return False
+
+
 VALIDATORS = {
     "ds_value": _ds_value_ok,
+    "apikey_value": _apikey_value_ok,
     "word_value": _word_value_ok,
     "flag_value": lambda v: _word_value_ok(v, prose_punct=True),
     "glued_value": lambda v: _word_value_ok(v, min_len=6),
@@ -676,6 +700,12 @@ OWN_RULES: list[dict] = [
      "regex": r"(?i)(?<![\w$.-])[\"']?(passwords?|passwd|secrets?|api[_-]?(?:keys?|tokens?|secrets?)"
               r"|(?:access|auth|refresh|bearer)[_-]?tokens?|client[_-]?secrets?|private[_-]?keys?|secret[_-]?keys?"
               r"|credentials)[\"']?[ \t]*(?::=|=>|[:=])[ \t]*(\[\][\w.]*[ \t]*\{|[\w.]*\[\][ \t]*\{|\[)"},
+    # Elasticsearch's API key in an Authorization header: `Authorization: ApiKey <base64 of id:key>`, as a header
+    # line, in curl -H, or as the key of a header object (`authorization: 'ApiKey <value>'`). Only after the header
+    # name: prose names the scheme ("send ApiKey followed by …", Gate B of 0.6.16)
+    {"id": "auth-scheme-apikey", "type": "SECRET", "secret_group": 1, "validator": "apikey_value",
+     "regex": r"(?i:authorization)[\"']?\]?[ \t]*[:=][ \t]*[\"'`]?ApiKey[ \t]+([A-Za-z0-9+/_-]{8,1024}={0,2})"
+              r"(?![\w+/=-])"},
 ]
 
 

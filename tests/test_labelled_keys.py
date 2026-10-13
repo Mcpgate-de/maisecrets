@@ -1,9 +1,10 @@
-"""Keys that a label names but no label rule took: each key in a list after a label that names secrets.
+"""Keys that a label names but no label rule took: each key in a list after a label that names secrets, and an
+Elasticsearch API key in an `Authorization: ApiKey` header.
 
 Run: python3 -m unittest tests.test_labelled_keys -v
 Every value is built at run time from a hash or a seeded random source, so no literal sits in the tree and the tree
 scan stays clean. The false alarms these rules must not raise in developer text (tokenizer output, lockfiles, ids,
-paths, crypto test vectors) are in tests/fp_corpus.py NO_HIT.
+paths, crypto test vectors, prose about the ApiKey scheme) are in tests/fp_corpus.py NO_HIT.
 """
 from __future__ import annotations
 
@@ -38,6 +39,11 @@ def b64key(seed: str, n: int = 32) -> str:
         if any(c.isupper() for c in k) and any(c.islower() for c in k) and any(c.isdigit() for c in k):
             return k
         seed += "+"
+
+
+def es_key(ident: str, secret: str) -> str:
+    """An Elasticsearch API key as the header carries it: base64 of id:key."""
+    return base64.b64encode(f"{ident}:{secret}".encode()).decode()
 
 
 def hits(text: str, kind: str) -> list[str]:
@@ -98,6 +104,38 @@ class SecretListTests(unittest.TestCase):
     def test_a_key_after_a_word_in_the_list_is_still_a_hit(self):
         a = hexkey("after-word", 32)
         self.assertEqual(hits(f'"passwords": ["Bearer", "{a}"]', "label-secret-list"), [a])
+
+
+class ApiKeySchemeTests(unittest.TestCase):
+    def test_an_elasticsearch_api_key_header_is_a_hit(self):
+        k = es_key(b64key("es-id", 20), b64key("es-key", 22))
+        for text in (f"Authorization: ApiKey {k}",
+                     f"curl -H 'Authorization: ApiKey {k}' https://localhost:9200/_search",
+                     f"headers: {{ authorization: 'ApiKey {k}' }}",
+                     f'headers = {{"Authorization": "ApiKey {k}"}}',
+                     f'req.headers["Authorization"] = "ApiKey {k}"'):
+            with self.subTest(text=text[:24]):
+                self.assertEqual(hits(text, "auth-scheme-apikey"), [k])
+
+    def test_a_key_without_a_digit_is_a_hit_too(self):
+        k = base64.b64encode(b"a:" + b"a" * 20).decode()
+        self.assertEqual(hits(f"Authorization: ApiKey {k}", "auth-scheme-apikey"), [k])
+
+    def test_a_value_that_is_no_id_and_key_is_no_hit(self):
+        for v in (base64.b64encode(hashlib.sha256(b"no-colon").digest()[:9]).decode(),
+                  "aB3dE5fG7hJ9", "YOUR_ENCODED_API_KEY", base64.b64encode(b":only-a-key").decode()):
+            with self.subTest(v=v[:8]):
+                self.assertEqual(values(f"Authorization: ApiKey {v}"), [])
+
+    def test_the_scheme_outside_a_header_is_no_hit(self):
+        k = es_key(b64key("prose-id", 20), b64key("prose-key", 22))
+        for text in (f"API docs example: ApiKey {k}",
+                     f"We migrated from ApiKey {k} to OAuth.",
+                     "ApiKey OAuth2Migration is rotated monthly by the platform team.",
+                     "Set the header to Authorization: ApiKey <base64-encoded id:key>.",
+                     "Authorization: ApiKey ${ES_API_KEY}"):
+            with self.subTest(text=text[:30]):
+                self.assertEqual(values(text), [])
 
 
 if __name__ == "__main__":
