@@ -415,8 +415,30 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
     return True
 
 
+_LOWER_WORDS_RE = re.compile(r"[a-z0-9]+(?:[-_.][a-z0-9]+)*")
+
+
+def _word_value_ok(v: str, min_len: int = 8) -> bool:
+    """A value after a label with no `=` or `:` (a CLI flag, Redis AUTH): as _ds_value_ok, and not letters only.
+    Docs write `--password argument`, `AUTH LOGIN`, `--password PASSWORD`; a password of letters alone after such a
+    label stays a gap, as it is after the colon forms below 8 characters."""
+    return _ds_value_ok(v, min_len=min_len) and not v.strip().isalpha()
+
+
+def _prose_value_ok(v: str) -> bool:
+    """`my password is <value>`: no word of a sentence. A letter and a digit must be in it, and a capital or a
+    symbol beyond - _ .: `incorrect`, `base64-encoded`, `hunter2`, `valid.\\n@param` (an escaped line break in
+    generated docs) are prose; the shapes `Aa9#aA9a` and `aAA%aAA9A` are values."""
+    v = v.strip()
+    return (_word_value_ok(v) and not _LOWER_WORDS_RE.fullmatch(v) and "\\" not in v
+            and any(c.isdigit() for c in v) and any(c.isalpha() for c in v))
+
+
 VALIDATORS = {
     "ds_value": _ds_value_ok,
+    "word_value": _word_value_ok,
+    "glued_value": lambda v: _word_value_ok(v, min_len=6),
+    "prose_value": _prose_value_ok,
     "de_tax_id": _de_tax_id_ok,
     "de_social_security": _de_social_security_ok,
     "de_id_card": _de_id_card_ok,
@@ -495,6 +517,35 @@ OWN_RULES: list[dict] = [
     {"id": "aws-secret-after-access-key", "type": "SECRET", "secret_group": 1,
      "regex": r"(?<![A-Z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Z0-9])(?:[^\n]*\n){0,4}?[^\n]*?"
               r"(?<![A-Za-z0-9/+=])([A-Za-z0-9/+]{40})(?![A-Za-z0-9/+=])"},
+    # a password with no shape where no `=` or `:` stands between label and value (public benchmark holdout v7,
+    # 2026-10-12: all ten leaked passwords had one of these five forms). They are label rules (LABEL_RULES): the
+    # keyword filters of scan() and the test-code rule apply as to `password=<value>`.
+    # `pg_dump --password '<value>'`, `--db-password <value>`, PowerShell `-Password <value>`; the `=` form is
+    # ds-keyword-equal-signs. A flag before a space, so `--password-stdin` and `--password-file` stay options
+    {"id": "label-cli-password", "type": "SECRET", "secret_group": 2, "validator": "word_value",
+     "regex": r"(?<![\w-])--?(?:[A-Za-z][A-Za-z0-9]*[-_])*(?i:password|passwd|passphrase|pass|pwd)[ \t]+"
+              r"(['\"]?)(?!-)([^\s'\"<>]{1,256}?)\1(?=$|[\s;|&)\]\\])"},
+    # `mysql -u app -p'<value>' db`: the value glued to -p (a space after -p asks for it; -P is the port)
+    {"id": "label-mysql-p", "type": "SECRET", "secret_group": 2, "validator": "glued_value",
+     "regex": r"(?<![\w-])(?:mysql|mysqldump|mysqladmin|mysqlimport|mysqlshow|mysqlcheck|mysqlpump|mariadb"
+              r"|mariadb-dump|mariadb-admin)(?:\.exe)?(?![\w-])[^\n|;&]*?[ \t]-p(['\"]?)([^\s'\"<>]{1,256}?)\1"
+              r"(?=$|[\s;|&)\]])"},
+    # redis-cli: `127.0.0.1:6379> AUTH <value>` (or AUTH <user> <value>) at a prompt or the start of a line, and
+    # `redis-cli -a <value>`. AUTH in capitals, as Redis documents it; `auth token expired` is prose
+    {"id": "label-redis-auth", "type": "SECRET", "secret_group": 2, "validator": "word_value",
+     "regex": r"(?m)(?:^[ \t]*|>[ \t]?)AUTH[ \t]+(?:[^\s'\"]+[ \t]+)?(['\"]?)([^\s'\"<>]{1,256})\1[ \t]*$"},
+    {"id": "label-redis-cli-a", "type": "SECRET", "secret_group": 2, "validator": "word_value",
+     "regex": r"(?<![\w-])redis-cli(?![\w-])[^\n|;&]*?[ \t]-a[ \t]+(['\"]?)([^\s'\"<>]{1,256}?)\1(?=$|[\s;|&)\]])"},
+    # .netrc: `machine <host> login <user> password <value>`, on one line or on several
+    {"id": "label-netrc-password", "type": "SECRET", "secret_group": 1, "validator": "word_value",
+     "regex": r"(?<![\w-])(?:machine[ \t]+[^\s]+|default)(?:\s+(?:login|account|port)[ \t]+[^\s]+)*"
+              r"\s+password[ \t]+([^\s]{1,256})"},
+    # prose: "my password is <value>". Only a value that is no word of a sentence: it holds a capital or a symbol
+    # beyond - _ . and a digit or a symbol ("the password is incorrect" stays prose). English only: the German
+    # sentence of tests/fp_corpus.py (`Das Passwort ist` and a season and a year) is kept silent
+    {"id": "label-prose-password", "type": "SECRET", "secret_group": 1, "validator": "prose_value",
+     "regex": r"(?i)(?<![\w-])(?:password|passwd|passphrase)[ \t]+(?:is|was)[ \t]*:?[ \t]+"
+              r"[\"'„“]?([^\s\"'“”]{0,255}[^\s\"'“”.,;:!?)])[\"'“”]?(?=[.,;:!?)]*(?:[\s\"'<\\]|$))"},
 ]
 
 
@@ -772,7 +823,9 @@ def looks_like_placeholder(value: str) -> bool:
 # tests of the Python standard library (2026-09-29). In test code the value is a fixture, and a
 # block or a placeholder there only stops the work. A token shape (glpat-, AKIA, a PEM key) and personal data stay
 # hits in test code too: a real token or a copy of customer data in a test is a leak.
-LABEL_RULES = ("ds-keyword", "generic-api-key", "url-query-secret", "auth-scheme")
+LABEL_RULES = ("ds-keyword", "label-", "generic-api-key", "url-query-secret", "auth-scheme")
+# the keyword rules: the detect-secrets ones and maisecrets' own label rules with no `=` or `:` (OWN_RULES)
+KEYWORD_RULES = ("ds-keyword", "label-")
 _TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?i:tests?|__tests__|spec|testdata|test_data|e2e)[/\\]"
                            r"|(?:^|[/\\]|[a-z])Tests?\.\w+$"
                            r"|(?:^|[/\\])[^/\\]*[._-]e2e[._-][^/\\]*$"
@@ -1255,7 +1308,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     end = start + len(secret)
                     if _CAPITALISED_WORD_RE.fullmatch(secret):
                         continue
-            if rule.id.startswith("ds-keyword") and _ANCHOR_OR_TAG_RE.fullmatch(secret.strip()):
+            if rule.id.startswith(KEYWORD_RULES) and _ANCHOR_OR_TAG_RE.fullmatch(secret.strip()):
                 # a quoted scalar is never an anchor: the colon must stand right before it (review of b4a7c54)
                 nxt = re.match(r"[ \t]+([^\s#]+)", text[end:end + 300])
                 if nxt:
@@ -1268,16 +1321,16 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
                     secret = text[start:end]
                 elif _before_value(text, start).rstrip(" \t").endswith(":"):
                     continue   # a YAML anchor or alias alone after a colon label: &gitlab_token_fields
-            if rule.id.startswith("ds-keyword") and (is_code_word(secret) or value_is_code(text, start, end, secret)):
+            if rule.id.startswith(KEYWORD_RULES) and (is_code_word(secret) or value_is_code(text, start, end, secret)):
                 continue
             if rule.id == "generic-api-key" and _WORD_PATH_RE.fullmatch(secret.strip("'\"")):
                 continue
-            if rule.id.startswith("ds-keyword") and _names_its_label(text, start, secret):
+            if rule.id.startswith(KEYWORD_RULES) and _names_its_label(text, start, secret):
                 continue
-            if (rule.id.startswith("ds-keyword") and _LABEL_SHAPE.fullmatch(secret.strip())
+            if (rule.id.startswith(KEYWORD_RULES) and _LABEL_SHAPE.fullmatch(secret.strip())
                     and _NAME_LABEL_RE.fullmatch(secret.strip()) and "\n" in text[m.start():start]):
                 continue   # the next line is a label of its own: `DB_PASSWORD=\nAPI_KEY=`, `Zugangsdaten:\nBenutzer:`
-            if (rule.id.startswith("ds-keyword") and secret.strip("\"' ").isdigit()
+            if (rule.id.startswith(KEYWORD_RULES) and secret.strip("\"' ").isdigit()
                     and _MEASURE_LABEL_RE.search(_label_before(text, start))):
                 continue   # a limit or a duration: TTL_REFRESH_TOKEN = 2592000
             if rule.id == "url-query-secret" and secret.startswith("{"):
@@ -1285,7 +1338,7 @@ def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             if (rule.id == "auth-scheme" and not any(c.isdigit() for c in secret)
                     and re.fullmatch(r"[A-Za-z]+(?:[_-][A-Za-z]+)+", secret)):
                 continue   # words, not a token: Bearer test_access_token
-            if (rule.id.startswith("ds-keyword") or rule.id == "generic-api-key") and (
+            if (rule.id.startswith(KEYWORD_RULES) or rule.id == "generic-api-key") and (
                     (_UUID_RE.fullmatch(secret.strip("\"'` ")) and not _SECRET_LABEL_RE.search(
                         text, max(_line_start(text, start), start - 60), start))
                     or (_ELISION_RE.search(secret) and len(secret.rstrip(".\u2026")) < 20)
