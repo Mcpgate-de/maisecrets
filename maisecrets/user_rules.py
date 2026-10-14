@@ -55,6 +55,7 @@ ALLOW_FILE = HOME / "allow.txt"
 STATE_FILE = HOME / ".rules-state"
 ID_PREFIX = "user:"                  # every user rule id gets it: no user id can take the name of a built-in rule
 MAX_RULES_PER_FOLDER = 500
+MAX_LOOKED = 2000                    # rules and lines a folder may hold, refused ones included
 MAX_ENTRIES = 2000                   # entries looked at per folder: many files cannot stall a hook
 MAX_FILES = 200                      # rule files read per folder
 MAX_FILE_BYTES = 64 * 1024
@@ -63,7 +64,7 @@ MAX_REGEX = 300
 MIN_LITERAL = 4
 TYPES = ("SECRET", "NAME", "EMAIL", "PHONE", "IBAN", "CARD", "IP")
 TARGETS = ("secret", "match", "line")
-CHECK_VERSION = 5                    # a new check makes every cached verdict old
+CHECK_VERSION = 6                    # a new check makes every cached verdict old
 PROBE_LIMIT_MS = 50.0                # a rule slower than this on the test texts is quarantined
 PROBE_DEADLINE = 1.0                 # seconds; the test child is ended when one rule takes longer
 PROBE_BUDGET = 2.0                   # seconds of tests per hook call; the rest are tested in the next call
@@ -456,6 +457,41 @@ def _fills(rx: str) -> tuple:
     return tuple(out[:8])
 
 
+def _all_literals(items, out: list) -> list:
+    """Each run of 2+ plain characters anywhere in the pattern: in a group, a branch or a repeat body."""
+    run = ""
+    for op, av in items:
+        if op == _sre.LITERAL:
+            run += chr(av)
+            continue
+        if len(run) >= 2:
+            out.append(run)
+        run = ""
+        if op == _sre.SUBPATTERN:
+            _all_literals(av[-1], out)
+        elif op == _sre.BRANCH:
+            for alt in av[1]:
+                _all_literals(alt, out)
+        elif op in _REPEATS:
+            _all_literals(av[2], out)
+    if len(run) >= 2:
+        out.append(run)
+    return out
+
+
+def _test_literals(rx: str, keywords: tuple) -> tuple:
+    """The starts the timed test puts before its runs: the needed literal, the first keyword, and the longest runs of
+    each branch (an alternative `abcd[a-z]{0,99}…|safe…` hid its slow start from a test of `safe` alone; Gate A
+    round 2 of block 1). At most 4."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            more = sorted(_all_literals(list(_sre.parse(rx)), []), key=len, reverse=True)
+    except Exception:  # noqa: BLE001 - only a hint for the test texts
+        more = []
+    return tuple(dict.fromkeys(x for x in (_regex_literal(rx),) + tuple(keywords[:1]) + tuple(more) if x))[:4]
+
+
 def _regex_literal(rx: str) -> str:
     try:
         with warnings.catch_warnings():
@@ -747,8 +783,8 @@ def _prefix_rules(text: str, kept, refuse, cache: dict) -> None:
 
 
 class _Full(BaseException):
-    """The folder holds its limit of rules: no later rule is checked (a BaseException, so the per-rule `except
-    Exception` of the readers lets it through)."""
+    """The folder holds its limit of rules, or of rules looked at: no later rule is checked (a BaseException, so the
+    per-rule `except Exception` of the readers lets it through)."""
 
 
 def _shown_name(name: str) -> str:
@@ -812,17 +848,28 @@ def load_folder(path: Path, shown: str, taken: set | None = None, cache: dict | 
         names = names[:MAX_FILES]
     full = False
     size = 0
+    looked = [0]
+
+    def look() -> None:
+        """One more rule looked at. Past MAX_LOOKED the folder is read no further: refused and duplicate rules cost a
+        check each too (Gate A round 2 of block 1)."""
+        looked[0] += 1
+        if looked[0] > MAX_LOOKED:
+            raise _Full
     mine: set = set()     # the ids of this folder
     for name in names:
         file = _shown_name(name)
 
         def refuse(place: str, reason: str, file: str = file) -> None:
+            if place:
+                look()
             quarantined.append(Quarantined(shown, file, place, reason))
 
         def dropped(rid: str, text: str, file: str = file) -> None:
             quarantined.append(Quarantined(shown, file, ID_PREFIX + rid, text, kept=True))
 
         def kept(rid: str, rule, place: str, key: str, pattern: str, allows: tuple, file: str = file) -> None:
+            look()
             if rid in mine:
                 refuse(place, "an id that an earlier rule has")
                 return
@@ -840,7 +887,7 @@ def load_folder(path: Path, shown: str, taken: set | None = None, cache: dict | 
             taken.add(rid)
             rules.append(rule)
             if sources is not None:
-                lits = tuple(dict.fromkeys(x for x in (_regex_literal(pattern),) + rule.keywords[:1] if x))
+                lits = _test_literals(pattern, rule.keywords)
                 sources[rule.id] = _Source(key, shown, file, pattern, lits, allows, _fills(pattern))
         try:
             digest.update(os.fsencode(name) + b"\0")
@@ -849,14 +896,14 @@ def load_folder(path: Path, shown: str, taken: set | None = None, cache: dict | 
             except OSError:
                 refuse("", "a file that cannot be read")
                 continue
-            if len(raw) > MAX_FILE_BYTES:
-                refuse("", f"a file larger than {MAX_FILE_BYTES // 1024} KB")
-                continue
-            size += len(raw)
+            size += len(raw)          # an oversized file was read too, to its limit: it counts (Gate A round 2)
             if size > MAX_FOLDER_BYTES:
                 quarantined.append(Quarantined(shown, "", "", f"more than {MAX_FOLDER_BYTES // 1024} KB of rule files; "
                                                               f"{file} and the files after it are not read"))
                 break
+            if len(raw) > MAX_FILE_BYTES:
+                refuse("", f"a file larger than {MAX_FILE_BYTES // 1024} KB")
+                continue
             digest.update(raw)
             try:
                 text = raw.decode("utf-8")
@@ -879,8 +926,9 @@ def load_folder(path: Path, shown: str, taken: set | None = None, cache: dict | 
             refuse("", "a file that cannot be read")
     if full:
         # the rest is not even checked: rules past the limit cost a check at each load (Gate B of block 1)
-        quarantined.append(Quarantined(shown, "", "", f"rules past the limit of {MAX_RULES_PER_FOLDER} per folder; "
-                                                      "the rest of the folder is not read"))
+        quarantined.append(Quarantined(shown, "", "", f"rules past the limit of {MAX_RULES_PER_FOLDER} per folder "
+                                                      f"(or of {MAX_LOOKED} looked at); the rest of the folder is "
+                                                      "not read"))
     return rules, quarantined, digest.hexdigest()[:12]
 
 

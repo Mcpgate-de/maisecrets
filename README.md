@@ -1435,18 +1435,19 @@ A folder holds two kinds of file, and maisecrets reads nothing else from it
 A hook reads these files in every call, so each rule passes checks when it is
 loaded: a keyword or a literal of at least 4 characters, at most 300
 characters of regex, at most 500 rules, 200 files and 1 MB per folder (the
-first 2000 entries of a folder are looked at), 64 KB per file, and an id that
-no earlier rule of the same folder has. A rule whose id a rule of an earlier
-folder has runs as `<id>#2`, so one folder cannot take a rule of another
-folder out by its id; `rule: user:<id>` in the allow list switches both off.
-The regex must not backtrack: no repeat inside a repeat (`(a+)+`), no repeat
-of something that can be empty (`(a?){25}`), no branches that start alike
-inside a repeat (`(a|aa)+`), no two repeats in a row that take the same
-characters (`.*.*`, `\w+\d+`), no backreference, and no quantifier of variable
-length at the start (`\w+…`, `x?[a-z]+…`). Then maisecrets times each new rule
-once on test texts that make a backtracking regex slow, also on runs of the
-characters its own repeats take and on its literal repeated before long runs;
-a rule slower than 50 ms is left out. A new rule runs only after this timed
+first 2000 entries and 2000 rules of a folder are looked at, refused ones
+included), 64 KB per file, and an id that no earlier rule of the same folder
+has. A rule whose id a rule of an earlier folder has runs as `<id>#2`, so one
+folder cannot take a rule of another folder out by its id; `rule: user:<id>`
+in the allow list switches both off. The regex must not backtrack: no repeat
+inside a repeat (`(a+)+`), no repeat of something that can be empty
+(`(a?){25}`), no branches that start alike inside a repeat (`(a|aa)+`), no two
+repeats in a row that take the same characters (`.*.*`, `\w+\d+`), no
+backreference, and no quantifier of variable length at the start (`\w+…`,
+`x?[a-z]+…`). Then maisecrets times each new rule once on test texts that make
+a backtracking regex slow, also on runs of the characters its own repeats take
+and on its literals, those of each branch too, repeated before long runs; a
+rule slower than 50 ms is left out. A new rule runs only after this timed
 test: when a hook call has no time left for the test, the rule waits for the
 next call. A rule that is still slow in a real scan (more than half a second
 inside its regex in one hook call) is left out from the next call on. When a

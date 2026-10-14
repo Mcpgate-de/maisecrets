@@ -150,7 +150,8 @@ class RuleFolders(Base):
         loaded = user_rules.load({"rule_dirs": [str(team)]})
         self.assertEqual(len(loaded.rules), user_rules.MAX_RULES_PER_FOLDER + 1)
         reasons = [q.reason for q in loaded.quarantined]
-        self.assertIn("rules past the limit of 500 per folder; the rest of the folder is not read", reasons)
+        self.assertIn("rules past the limit of 500 per folder (or of 2000 looked at); the rest of the folder is not "
+                      "read", reasons)
         self.assertIn("an id that a rule of an earlier folder has; this rule runs as user:r0#2", reasons)
         self.assertEqual(loaded.rules[-1].id, "user:r0#2", "r0 of the second folder")
 
@@ -395,9 +396,45 @@ class GateBOfBlock1(Base):
                 mock.patch.object(user_rules, "check_regex", counted):
             rules, quarantined, _ = user_rules.load_folder(team, "team")
         self.assertEqual(len(rules), 3)
-        self.assertLessEqual(len(calls), 4, "a rule past the limit is not checked")
-        self.assertIn("rules past the limit of 3 per folder; the rest of the folder is not read",
+        self.assertLessEqual(len(calls), 4, "only the first rule past the limit is checked")
+        self.assertIn("rules past the limit of 3 per folder (or of 2000 looked at); the rest of the folder is not read",
                       [q.reason for q in quarantined])
+
+    def test_refused_and_duplicate_rules_count_toward_the_rules_looked_at(self):
+        team = self.tmp / "team"
+        team.mkdir()
+        lines = [f"r0  tail{i:04d}_[a-z]{{20}}" for i in range(30)] + ["bad id!  x"] * 30
+        (team / "dup.prefixes").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        calls = []
+        real = user_rules.check_regex
+
+        def counted(*a, **kw):
+            calls.append(1)
+            return real(*a, **kw)
+        with mock.patch.object(user_rules, "MAX_LOOKED", 10), mock.patch.object(user_rules, "check_regex", counted):
+            rules, quarantined, _ = user_rules.load_folder(team, "team")
+        self.assertEqual([r.id for r in rules], ["user:r0"])
+        self.assertLessEqual(len(calls), 11, "a duplicate past the limit is not checked")
+        self.assertIn("the rest of the folder is not read", quarantined[-1].reason)
+
+    def test_an_oversized_file_counts_toward_the_bytes_of_the_folder(self):
+        team = self.tmp / "team"
+        team.mkdir()
+        for i in range(3):
+            (team / f"big{i}.json").write_text("x" * (user_rules.MAX_FILE_BYTES + 10), encoding="utf-8")
+        write_rules(team, [{"id": "late", "regex": r"tkx_[A-Za-z0-9]{24}"}], "z.json")
+        with mock.patch.object(user_rules, "MAX_FOLDER_BYTES", 2 * user_rules.MAX_FILE_BYTES + 100):
+            rules, quarantined, _ = user_rules.load_folder(team, "team")
+        self.assertEqual(rules, [])
+        self.assertIn("big2.json and the files after it are not read", quarantined[-1].reason)
+
+    def test_a_slow_branch_is_timed_with_its_own_literal(self):
+        rx = "(?:abcd" + "[a-z]{0,99}" * 3 + "Q|safeprefix[A-Z]{8})"
+        self.assertIn("abcd", user_rules._test_literals(rx, ("safeprefix",)))
+        write_rules(OWN, [{"id": "poly", "regex": rx, "keywords": ["safeprefix"]}])
+        loaded = user_rules.load({})
+        self.assertEqual(loaded.rules, [])
+        self.assertTrue(loaded.quarantined[0].reason.startswith("slow"), loaded.quarantined)
 
     def test_a_folder_reads_at_most_its_byte_limit(self):
         team = self.tmp / "team"
@@ -501,6 +538,19 @@ class RulesCommand(Base):
         with redirect_stdout(out), redirect_stderr(err), mock.patch("sys.stdin", stdin_file):
             rc = cli.main(["rules", *args])
         return rc, out.getvalue(), err.getvalue()
+
+    def test_check_fails_a_rule_the_started_test_child_gave_no_answer_for(self):
+        team = self.tmp / "team"
+        write_rules(team, [{"id": "tok", "regex": r"tkx_[A-Za-z0-9]{24}", "keywords": ["tkx_"]}])
+
+        def silent(sources, budget=None, limit_ms=None, info=None):
+            if info is not None:
+                info["child"] = True
+            return {}
+        with mock.patch.object(user_rules, "probe", silent):
+            rc, out, _ = self.run_cli("check", str(team))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("the timed test gave no answer for it", out)
 
     def test_init_writes_a_folder_that_its_own_check_passes(self):
         top = self.tmp / "team-rules"

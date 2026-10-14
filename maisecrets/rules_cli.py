@@ -98,7 +98,8 @@ def _check_folder(shown: str, folder: Path, samples: Path | None, taken: set, ne
     if not user_rules._rule_files(folder):
         print(f"  {_NO_FILES}")
         bad += need_rules
-    timed = user_rules.probe([sources[r.id] for r in rules if r.id in sources])
+    info: dict = {}
+    timed = user_rules.probe([sources[r.id] for r in rules if r.id in sources], info=info)
     # A rule that a real scan found too slow stays out until the rule changes: this check reruns only the test texts,
     # which the rule passed before, so it cannot clear that verdict (Opus review, round 3). It shows it, with the way
     # out. A verdict of the test texts alone is the check's own, and a pass now replaces it.
@@ -113,6 +114,10 @@ def _check_folder(shown: str, folder: Path, samples: Path | None, taken: set, ne
         if key in slow:
             print(f"  slow    {rule.id}  the hooks leave it out: a real scan found it slow; change the rule to have "
                   "it checked again")
+            bad += 1
+        elif ms == "untested" and info.get("child"):
+            # the child started and gave no answer for it: the hook leaves such a rule out (Gate A round 2)
+            print(f"  slow    {rule.id}  the timed test gave no answer for it; the hooks leave it out until it has one")
             bad += 1
         elif ms == "untested":
             print(f"  ok      {rule.id}  (not timed)")
