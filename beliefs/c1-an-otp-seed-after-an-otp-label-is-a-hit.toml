@@ -1,0 +1,10 @@
+# c1-an-otp-seed-after-an-otp-label-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-an-otp-seed-after-an-otp-label-is-a-hit"
+control = "C1"
+statement = "16 to 64 base32 capitals that are no word after a label with totp, hotp, otp, mfa, 2fa or authenticator are a secret hit; a code of digits, a word, a constant name and a mask stay text."
+runner = ["tests/test_literal_values.py::OtpSeedTests::test_a_base32_seed_after_an_otp_label_is_a_hit"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''    if otp and _OTP_SEED_RE.fullmatch(v)'''
+replace = '''    if False and otp and _OTP_SEED_RE.fullmatch(v)'''

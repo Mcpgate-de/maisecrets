@@ -23,5 +23,12 @@ BasicAuthDetector patterns), Copyright Yelp, Inc., Apache License 2.0 (see
 maisecrets/rules/LICENSE-detect-secrets). Its heuristic filters for keyword
 hits are ported in maisecrets/detect.py.
 
+This product includes a word list created from SCOWL (maisecrets/rules/words_en.txt: the base
+words of 4 to 8 letters of the en_US Hunspell dictionary, SCOWL size 60, release rel-2026.02.25,
+https://github.com/en-wl/wordlist/releases/tag/rel-2026.02.25), Copyright 2000-2026 by Kevin
+Atkinson, under the SCOWL license (a permissive license; see maisecrets/rules/LICENSE-scowl).
+scripts/sync_words.py rebuilds it from the pinned release asset and records the version in
+maisecrets/rules/SCOWL_VERSION. The password rule uses it to tell a word from a password.
+
 The remaining rules in maisecrets/detect.py (OWN_RULES) and the display rules
 in maisecrets/pii_display.py are written for this project.

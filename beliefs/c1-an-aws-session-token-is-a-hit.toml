@@ -1,0 +1,10 @@
+# c1-an-aws-session-token-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-an-aws-session-token-is-a-hit"
+control = "C1"
+statement = "The value of X-Amz-Security-Token (100 to 4096 characters, in a presigned URL or a header) is a secret hit; the signature, the key id in X-Amz-Credential, a reference and prose stay text."
+runner = ["tests/test_literal_values.py::AwsSessionTokenTests::test_the_session_token_of_a_presigned_url_and_a_header_is_a_hit"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''"regex": r"(?i)(?<![\w-])x-amz-security-token'''
+replace = '''"regex": r"(?!)(?i)(?<![\w-])x-amz-security-token'''

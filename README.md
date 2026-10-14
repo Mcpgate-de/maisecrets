@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 103 proofs: each control's test, and each path of the five invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 112 proofs: each control's test, and each path of the five invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1146,6 +1146,75 @@ Four sources, one scanner (`maisecrets/detect.py`):
   the `-a` of redis-cli count only within 400 characters after the command word, for the same
   reason), and full-length GitLab
   runner and deploy tokens.
+- Keys that a label names in a form the label rules do not read (0.6.16): each key in a list
+  after a label that names secrets and nothing else (`"api_keys": ["…", "…"]`, `passwords =
+  ['…']`, Go `Secrets: []string{"…"}`), to the end of the list; a value there must look like
+  a key, so a name, a word-shaped identifier, a path, a password hash, a typed id (`pm_…`),
+  an address (`0x…`) or a digest stays text, and a list after `tokens`, `code_tokens` or
+  `keys` is not read (tokenizer output, cache keys); the value of an Elasticsearch
+  `Authorization: ApiKey …` header (a header line, `curl -H`, a header object) that decodes
+  from base64 to `id:key`; the scheme in prose stays text. A hex value after any other name
+  stays text: a nonce, a checksum, an etag, a commit id and a key that a hex literal decodes
+  into (`key = unhexlify('…')`, mostly published test vectors) are left out, as developer
+  text is full of them (`tests/fp_corpus.py`).
+- A password label and a literal value that is no word (0.6.16, `label-pw-literal`):
+  `db_password = "…"`, `<password>…</password>`, `IDENTIFIED BY '…'`,
+  `ConvertTo-SecureString '…'`, a value of 4 to 7 characters. The label comes from a frozen
+  list of password words (`password`, `passwd`, `pwd`, `passphrase`, `kennwort`, …) and a list
+  of words that make it name something else (`password_hint`, `passwordPolicy`, `bypass`). The
+  value must be no word after undoing leet (`P4ssw0rd` is a word), no fixture (`testpass`),
+  no mask, template or reference (`${DB_PASSWORD}`, `{{ … }}`, `settings.DB_PASSWORD`). The
+  words come from `maisecrets/rules/words_en.txt`, about 21,000 English words of 4 to 8
+  letters from SCOWL (see `NOTICE`), read only when a password label is in the text. A miss in
+  an English list is no evidence alone: the value needs a letter and a digit or a sign beside
+  it (`_`, `-` and `.` join the words of a name and count as no sign), or (letters only) a
+  mix of cases that no word boundary explains, letters of two scripts with case, or a
+  lowercase run of 9 letters and more with fewer than 15 % vowels. So a word of another
+  language (`senhaAtual`, `senha_atual`, `Pflicht`), a developer abbreviation (`ctxPtr`), a
+  word in another script or with accents (a translated UI string), a path or a reference
+  (`/run/secrets/db`, `./secrets/pw.txt`, `C:\keys\db.pw`, `vault:secret/db#pw`) and a
+  value that is a whole regular expression after a secret label stay text. So do a
+  number, a ratio, a time, a duration and a section (`95.2%`, `118/124`, `12:30`, `~30d`,
+  `P90D`, `§3.2`), a dotted abbreviation and a word with a number (`Seite#3`). After the weak label `pass` (a boarding pass, a test pass) the
+  value needs 8 characters of three classes. A comparison (`==`, `!=`), a label that is the tail
+  of a path or a flag value, and an unquoted label before a comma (`f(password, "…")`) are no
+  label and value. A word
+  with a number and a sign (`Sommer2024!`, `Welcome1!`) is a password too; a word with a number
+  alone (`Winter2023`) is left to the keyword rules. A passphrase of words
+  (`passphrase: correct-horse-battery-staple`) stays text: the rule cannot tell it from a
+  reference such as a Kubernetes secret name. A string that `+` continues, a version and a
+  format template (`{pw}`) stay text too. Word-likeness and the label word classes follow Dan
+  Szymkowiak's backlog ideas.
+- A key after a label that names a secret, in a form the keyword rules do not read (0.6.16):
+  `<clientSecret>…</clientSecret>`, `<AccessToken>…</AccessToken>`, a short value
+  (`label-secret-literal`, 8 characters and more); and a quoted key of 12 characters and more
+  after a weak label (`hmac`, `session`, `cookie`, `psk`, `salt`, `seed`, `otp`, `key`,
+  `appKey("…")`, `<key>…</key>`; `label-weak-key`). The value must have few word letters and a
+  high entropy for its alphabet (a charset-normalised entropy, after Dan Szymkowiak's backlog
+  idea). A key is ASCII. A label that names something else stays text: `public_key`,
+  `cache_key`, `primary_key`, `object_key`, `idempotency_key`, `csrf_token`, a hex value after
+  `key` and any value after `nonce`, `x-amz-signature` or `x-amz-credential` (but not after
+  `x-amz-security-token`).
+- A TOTP or HOTP seed after a one-time-password label (0.6.16, `label-otp-seed`): 16 to 64
+  base32 capitals after a label with `totp`, `hotp`, `otp`, `mfa`, `2fa` or `authenticator`
+  (`TOTP_SEED=…`, `otp_seed: …`). A code of digits, a word, a constant name and a mask stay
+  text.
+- The STS session token of temporary AWS credentials (0.6.16, `label-aws-session-token`): the
+  value of `X-Amz-Security-Token` in a presigned URL (percent-encoded) or a header, 100 to 4096
+  characters. The other `X-Amz-` parameters stay text: the key id in `X-Amz-Credential`, the
+  signature, the date.
+- Four token formats with a public prefix that the vendored rulesets lack (0.6.16): the third
+  NTLMSSP message in base64 (`Authorization: NTLM TlRMTVNTUAAD…`; the negotiate and challenge
+  messages carry no password-derived response and stay text), a NATS nkey seed (`SU…`, 58
+  characters of base32), a PASERK secret, local or wrapped key (`k4.local.…`, `k4.secret.…`)
+  and a PASETO token (`v4.local.…`, `v4.public.…`). A public nkey and a PASERK public key or
+  key id stay text. A PASERK key ends at its last base64url character, never on a period of the
+  sentence around it.
+- Order: the rules that read a label and a literal value (`label-pw-literal`,
+  `label-secret-literal`, `label-weak-key`, `label-otp-seed`) run after every other rule and
+  take only a span no other rule took. The list rule, the four token formats, the
+  Elasticsearch `ApiKey` rule and the AWS session token rule are own secret rules: they take
+  their spans in the secret stage, before detect-secrets and betterleaks.
 - Prefixes newer than the vendored rulesets live in
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
   (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last

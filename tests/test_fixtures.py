@@ -27,7 +27,7 @@ import _hygiene  # noqa: E402
 from _hygiene import CLAUDE  # noqa: E402
 
 _TMP = _isolate.HOME
-PW = "Qx7vR2mK9pLw"                                   # a password shape after a label
+PW = "Qx7vR2mK" + "9pLw"                              # a password shape after a label, built at run time
 TOKEN = "glpat-" + "Q7w8E9r0T1y2U3i4O5p6"             # a token shape, built at run time
 TEST = (f"import pytest\n\n\ndef test_login(client):\n    pass§word = '{PW}'\n"
         "    assert client.login('bob', pass§word)\n")

@@ -35,6 +35,7 @@ slightly different rules is how a redaction leaks.
 from __future__ import annotations
 
 import bisect
+import itertools
 import hashlib
 import ipaddress
 import json
@@ -487,8 +488,591 @@ def _prose_value_ok(v: str) -> bool:
             and any(c.isdigit() for c in v) and any(c.isalpha() for c in v))
 
 
+_DIGEST_PREFIX_RE = re.compile(r"(?i)(?:sha\d*|md5|blake\w*|h1)[-:]")
+# words and numbers run together: ProdDbPassword2024Rotated, Authentication123, SECRET_NAME_2024. A word has two
+# letters at least; a random key has a lone letter (a capital before a digit, a small letter between digits) in it
+_WORDS_RUN_RE = re.compile(r"(?:[A-Z][a-z]+|[a-z]{2,}|[A-Z]{2,}(?![a-z])|\d+|[_.-])+")
+
+
+def _keylike(v: str) -> bool:
+    """A capital, a small letter and a digit, and not words run together."""
+    return (any(c.isupper() for c in v) and any(c.islower() for c in v) and any(c.isdigit() for c in v)
+            and not _WORDS_RUN_RE.fullmatch(v))
+
+
+# values in a list of secrets that are no key: a password hash, a name with a scheme (arn:aws:…, urn:…)
+# ($2b$…, $argon2id$…), an Ethereum address (0x and 40 hex), an id with a type prefix (pm_…, sess_…, cus_…). Hex
+# alone and base58 stay values here: every label of label-secret-list names secrets (a commit, an ObjectId or a
+# Solana mint sits in a list of tokens or ids, which the rule does not read; a base58 check lost 12 % of random keys)
+_LIST_NOT_A_KEY_RE = re.compile(r"\$[\w-]+\$.*|[a-z][\w+.-]*:.*|0x[0-9a-fA-F]+|[a-z]{2,6}_[A-Za-z0-9_-]+")
+# a path has a segment of small letters between slashes (base64 has a slash too, but rarely a word between two)
+_PATH_SEGMENT_RE = re.compile(r"(?:^|/)[a-z][a-z_.-]{2,}/")
+# a word part: two small letters or more after an optional capital, or three capitals or more; it counts as a word
+# when it has a vowel (and three letters, unless all small)
+_WORD_PART_RE = re.compile(r"[A-Z]?[a-z]{2,}|[A-Z]{3,}")
+_VOWEL_RE = re.compile(r"[aeiouyAEIOUY]")
+
+
+def _word_shaped(v: str) -> bool:
+    """Words make up 60 % of the value or more: TokenizerPiece2024X, iPhone15ProMax, convertToUTF8String. Measured on
+    random keys of 16 to 64 characters (base64): 2.6 % are word-shaped by this test."""
+    words = (w for w in _WORD_PART_RE.findall(v) if _VOWEL_RE.search(w) and (len(w) >= 3 or w.islower()))
+    return sum(len(w) for w in words) >= 0.6 * len(v)
+
+
+def _list_value_ok(v: str) -> bool:
+    """A value in a list after a secret label (label-secret-list): hex of 16 or more with a letter and a digit, or 16
+    or more characters that _keylike takes and that are not word-shaped. A path, a password hash, a name with a
+    scheme, an address, a typed id, a digest with its algorithm and a filler are no key. Cheap
+    checks first: this runs on each value of a list before the filters of scan()."""
+    v = v.strip()
+    if len(v) < 16 or " " in v or _LIST_NOT_A_KEY_RE.fullmatch(v) or _DIGEST_PREFIX_RE.match(v):
+        return False
+    if _PATH_SEGMENT_RE.search(v):   # projects/p/secrets/db, secret/data/app, /run/secrets/x
+        return False
+    if shannon_entropy(v) < 2.5:
+        return False
+    if re.fullmatch(r"[0-9a-fA-F]+", v):
+        ok = any(c.isdigit() for c in v) and any(c.isalpha() for c in v)
+    else:
+        ok = _keylike(v) and not _word_shaped(v)
+    return ok and _ds_value_ok(v, min_len=16)
+
+
+def _apikey_value_ok(v: str) -> bool:
+    """The value after `Authorization: ApiKey`: base64 or base64url (Elasticsearch, Kibana) that decodes to `id:key`,
+    both parts not empty and printable. Docs write `ApiKey <base64-encoded id:key>`, `ApiKey ${ES_API_KEY}` and
+    `ApiKey YOUR_ENCODED_API_KEY`, which decode to nothing of that form."""
+    import base64
+    import binascii
+    raw = v.strip()
+    padded = raw + "=" * (-len(raw) % 4)
+    for alt in (None, b"-_"):
+        try:
+            dec = base64.b64decode(padded, altchars=alt, validate=True)
+        except (binascii.Error, ValueError):
+            continue
+        try:
+            txt = dec.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        ident, sep, key = txt.partition(":")
+        if sep and ident and key and txt.isprintable() and " " not in txt:
+            return True
+    return False
+
+
+# ------------------------------------------------------- label and literal value --
+# A password label and a literal value that is no word: `db_password = "<value>"`, `<password><value></password>`,
+# `?pwd=<value>`, `IDENTIFIED BY '<value>'`, `ConvertTo-SecureString '<value>'`. The label is read from a frozen list
+# of label words; the value must be no word of English or of developer text after undoing leet (P4ssw0rd is a word),
+# which keeps `password = "changeme"`, `password: hunter`, `password = os.environ[...]` and `password: ${DB_PASS}`
+# text. Word-likeness and the label word classes follow Dan Szymkowiak's backlog ideas (TASK-11.22, TASK-11.23).
+# Measured on CredData without repository 2ba83c6a (split by repository: discovery half, validation half).
+_WORDS_FILE = "words_en.txt"   # SCOWL en_US 60, 4 to 8 letters (rules/LICENSE-scowl, scripts/sync_words.py)
+_WORDS: list = []
+# words that the English list lacks: short words, code identifiers, algorithm names, German words of developer prose
+_EXTRA_WORDS = frozenset({
+    "api", "key", "id", "db", "url", "uri", "app", "dev", "prod", "test", "user", "pass", "pwd", "sql", "web",
+    "admin", "root", "my", "new", "old", "the", "and", "for", "get", "set", "put", "add", "max", "min", "log",
+    "tmp", "env", "var", "val", "str", "int", "num", "src", "dst", "cfg", "conf", "auth", "oauth", "jwt", "aws",
+    "gcp", "ssh", "rsa", "pem", "http", "https", "www", "com", "org", "net", "io", "js", "py", "go", "is", "on",
+    "of", "to", "in", "at", "by", "no", "ok", "yes", "let", "me", "foo", "bar", "baz", "abc", "xyz", "qwerty", "pw",
+    "secret", "token", "hello", "world", "demo", "mock", "fake", "dummy", "sample", "example", "default",
+    "kwargs", "args", "argv", "self", "this", "opts", "params", "nil", "none", "null", "undefined",
+    "md5", "sha1", "sha2", "sha3", "sha224", "sha256", "sha384", "sha512", "pbkdf2", "bcrypt", "scrypt", "argon2",
+    "argon2i", "argon2d", "argon2id", "aes", "aes128", "aes192", "aes256", "gcm", "cbc", "ctr", "hmac", "des",
+    "blake2b", "blake2s", "blake3", "sha", "crypt", "ntlm", "ntlmv2", "chacha20", "poly1305", "ecdsa", "ed25519",
+    "x25519", "pkcs1", "pkcs5", "pkcs8", "pkcs12", "oaep", "pss", "utf8", "utf16", "latin1", "ascii", "base64",
+    "base32", "hex", "wpa", "wpa2", "psk", "tls", "ssl", "totp", "hotp", "jwe", "jws", "oauth2", "varchar",
+    "bigint", "secretstr", "securestring", "bool", "float", "char", "byte", "bytes", "uuid", "json",
+    "yaml", "html", "xml", "csv", "ldap", "smtp", "imap", "ftp", "sftp", "redis", "mysql", "postgres",
+    "psql", "mongo", "mongodb", "sqlite", "oracle", "guest", "anon", "localhost",
+    "siehe", "geheim", "kennwort", "passwort", "benutzer", "zugang", "zugangsdaten", "anmeldung", "nutzer", "wird",
+    "nicht", "oder", "und", "mit", "ohne", "bitte", "hier", "dort", "neu", "alt", "leer", "fehlt", "falsch",
+    "richtig", "geheimnis", "schluessel", "sommer", "winter", "herbst", "fruehling", "schl\u00fcssel",
+    "fr\u00fchling",
+})
+
+
+def _word_set() -> frozenset:
+    """The word list, read on the first password label (about 3 ms). A file that is missing, unreadable, not UTF-8 or
+    not a list of words (fewer than 1,000 entries of small ASCII letters, or more than 1 % other lines) counts as no
+    list: _WORDS_OK turns false, and the password rule then takes no value of letters only (_pw_literal_ok)."""
+    if not _WORDS:
+        words: set = set()
+        ok = True
+        try:
+            entries = (RULES_DIR / _WORDS_FILE).read_text(encoding="utf-8").split()
+            words = {w for w in entries if w.isascii() and w.isalpha() and w.islower() and len(w) <= 20}
+            ok = len(words) >= 1000 and len(entries) - len(words) <= len(entries) // 100
+        except (OSError, UnicodeError, ValueError):
+            ok = False
+        if not ok:
+            words = set()
+        _WORDS_OK[:] = [ok]
+        _WORDS.append(frozenset(words | _EXTRA_WORDS))
+    return _WORDS[0]
+
+
+_WORDS_OK: list = [True]
+
+
+_COVER_CACHE: dict = {}
+
+
+def _cover(run: str) -> int:
+    """The most letters of `run` that words of the list cover (dynamic programming over words of 2 to 20 letters)."""
+    got = _COVER_CACHE.get(run)
+    if got is None:
+        words = _word_set()
+        n = len(run)
+        best = [0] * (n + 1)
+        for i in range(1, n + 1):
+            best[i] = best[i - 1]
+            for j in range(max(0, i - 20), i - 1):
+                if run[j:i] in words:
+                    best[i] = max(best[i], best[j] + (i - j))
+        got = best[n]
+        if len(_COVER_CACHE) > 20000:
+            _COVER_CACHE.clear()
+        _COVER_CACHE[run] = got
+    return got
+
+
+_WORD_RUN_RE = re.compile(r"[A-Z\u00c4\u00d6\u00dc]?[a-z\u00e4\u00f6\u00fc\u00df]+|[A-Z\u00c4\u00d6\u00dc]+"
+                          r"(?![a-z\u00e4\u00f6\u00fc\u00df])|[0-9]+")
+
+
+def _wordlike(v: str) -> float:
+    """The share of the letters of `v` that words cover, after an identifier split (0 to 1)."""
+    letters = sum(c.isalpha() for c in v)
+    if not letters:
+        return 0.0
+    words = _word_set()
+    covered = 0
+    for part in _WORD_RUN_RE.findall(v):
+        if part.isalpha():
+            low = part.lower()
+            covered += len(low) if low in words else _cover(low)
+    return covered / letters
+
+
+def _charset(v: str) -> str:
+    if v.isdigit() and v.isascii():
+        return "digits"
+    if re.fullmatch(r"[0-9a-f]+|[0-9A-F]+", v):
+        return "hex"
+    if re.fullmatch(r"[A-Za-z]+", v):
+        return "alpha"
+    if re.fullmatch(r"[A-Za-z0-9]+", v):
+        return "alnum"
+    return "other"
+
+
+# a value that says it is no value: a mask, a template, a reference, a word of a form
+_LITERAL_PLACEHOLDER_RE = re.compile(
+    r"(?i)x{3,}|\*{3,}|\.{3}|<[^>]*>|\{\{|\}\}|\$\{|%\(|%s|\$[A-Za-z_]|your[_-]?|example|sample|dummy|placeholder|"
+    r"changeme|change_me|redacted|replace|insert|enter[_-]|todo|fixme|foobar|lorem|secret_here|here$|^test|test$|"
+    r"^fake|^mock|^none$|^null$|^true$|^false$|^undefined$|^password$|^secret$|^token$|^string$|^empty$|^default$")
+_DOTTED_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+")
+_CLOSED_TEMPLATE_RE = re.compile(r"\{[A-Za-z_][\w.]*(?:\[[^\]{}]*\])?\}")   # {pw}, {cfg.pw}, {row['pw']}; not a lone {
+_CAMEL_SPLIT_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def _norm_label(name: str) -> list:
+    """`dbPassword`, `DB_PASSWORD`, `db.password`, `db-password`, `db:Password` -> ["db", "password"]."""
+    name = _CAMEL_SPLIT_RE.sub("_", name.lstrip("$@-"))
+    return [t for t in re.split(r"[._:\-]+", name.lower()) if t]
+
+
+# the last word of a password label, and the words before it that make the label name something else
+_PW_LAST = frozenset({"password", "passwd", "passphrase", "passwort", "pwd", "userpwd", "pass", "pw", "passcode",
+                      "passw", "pword", "pswd", "psw"})
+# the label words of a language that is on (regions.py): Kennwort is a label only with German on, as for the keyword
+# rules; passwort counts always, as the English `pass` label allows letters after it
+_PW_LAST_OF = {"de": frozenset({"kennwort"})}
+_PW_LAST_ON: list = [_PW_LAST]
+_PASS_NEG_PREV = frozenset({"two", "one", "single", "multi", "first", "second", "third", "by", "no", "skip", "sur",
+                            "over", "under", "compass", "render", "shader", "high", "low", "band", "all", "each",
+                            "next", "last", "test", "tests"})
+_LABEL_NEG_WORDS = frozenset({
+    "hint", "label", "title", "text", "message", "msg", "error", "err", "prompt", "placeholder", "field", "policy",
+    "length", "len", "min", "max", "required", "confirm", "confirmation", "reset", "forgot", "invalid", "incorrect",
+    "wrong", "strength", "rule", "rules", "regex", "pattern", "hash", "hashed", "salt", "file", "path", "env", "var",
+    "type", "mode", "enabled", "expire", "expires", "expiry", "changed", "change", "validation", "valid", "show",
+    "hide", "toggle", "visible", "icon", "button", "btn", "no", "without", "skip", "ask", "input", "form", "dialog",
+    "tooltip", "description", "desc", "help", "name", "id", "count", "cmd", "command", "url", "uri", "key", "column",
+    "col", "header", "param", "arg", "option", "opt", "flag", "set", "get", "update", "lbl", "str", "string", "i18n",
+    "translation", "not", "missing", "empty", "format", "fmt", "encoder", "encoded", "encrypted", "digest",
+    "algorithm", "manager", "provider", "store", "storage", "service", "handler", "callback", "validator", "widget"})
+
+
+def _pw_label(toks: list) -> bool:
+    if not toks:
+        return False
+    last = toks[-1].rstrip("0123456789") or toks[-1]
+    if last not in _PW_LAST_ON[0]:
+        return False
+    if last in ("pass", "pw") and len(toks) > 1 and toks[-2] in _PASS_NEG_PREV:
+        return False
+    return not any(t in _LABEL_NEG_WORDS for t in toks[:-1])
+
+
+def _sequential(low: str) -> bool:
+    return len(low) > 2 and (all(ord(low[i + 1]) - ord(low[i]) == 1 for i in range(len(low) - 1))
+                             or all(ord(low[i]) - ord(low[i + 1]) == 1 for i in range(len(low) - 1)))
+
+
+# what a value after a password label is when it is no password: a number, a ratio, a percentage, a range, a time, a
+# duration or a size with its unit (95.2%, 118/124, 8-64, 12:30, ~30d, 24h/7d, 14C/27, 2025/26), a section (§3.2), a
+# dotted abbreviation (s.o., z.B.), and a word with a number (Seite#3, Gate-12)
+_MEASURE_VALUE_RE = re.compile(r"[~<>=+\u00a7#-]?\d+(?:[.,:/-]\d+)*(?:[a-z]{1,3}|[A-Z]{1,2})?"
+                               r"(?:[/ -]\d+(?:[.,:]\d+)*(?:[a-z]{1,3}|[A-Z]{1,2})?)*%?")
+_ABBREVIATION_RE = re.compile(r"(?:[A-Za-z\u00c0-\u024f]{1,4}\.)+[A-Za-z\u00c0-\u024f]{0,4}")
+# a path or a reference after a password label names where the password lives: /run/secrets/db, ../x/y, ~/.pw,
+# C:\keys\db.pw, \\server\share, file:///etc/pw, vault:secret/db#pw, env:DB_PASSWORD
+_PATH_REFERENCE_RE = re.compile(r"(?:[/~]|\.{1,2}[/\\]|[A-Za-z]:[/\\]|\\\\)\S*"
+                                r"|[A-Za-z][A-Za-z0-9+.-]{2,15}:(?://|[A-Za-z_$])\S*")
+_ISO_DURATION_RE = re.compile(r"P(?:\d+[YMWD])*(?:T(?:\d+[HMS])+)?")   # P90D, PT15M
+_WORD_NUMBER_RE = re.compile(r"[A-Za-z\u00c0-\u024f]{2,}[#_. :/-]\d{1,4}|\d{1,4}[#_. :/-][A-Za-z\u00c0-\u024f]{2,}")
+
+
+def _random_evidence(v: str) -> bool:
+    """A value that no word covers is a password only with evidence of chance (codex and Opus Gate A/B of 0.6.16): a
+    letter, and a digit or a sign beside it, or (letters only) few vowels or a mix of cases that no word boundary
+    explains. A word of another language (senhaAtual, wachtwoord) and a measure (95.2%, 12:30, ~30d) stay text."""
+    if not any(c.isalpha() for c in v):
+        return False
+    if (_MEASURE_VALUE_RE.fullmatch(v) or _ABBREVIATION_RE.fullmatch(v) or _WORD_NUMBER_RE.fullmatch(v)
+            or _ISO_DURATION_RE.fullmatch(v)):
+        return False
+    if any(c.isdigit() for c in v) or any(_is_sign(c) and c not in "_-." for c in v):
+        return True   # a digit, or a sign that no identifier uses (_ - . join the words of a name: senha_atual)
+    parts = [part for part in re.split(r"[_.-]+", v) if part]
+    if not v.isascii():
+        # another script or accents: a word (a UI string) unless scripts mix or the cases change at random
+        return _scripts_mix(v) or any(_case_flips(part) >= 2 for part in parts)
+    # ASCII letters joined at most by _ - .: one part with a mix of cases that no word boundary explains
+    return any(_random_letters(part) for part in parts)
+
+
+def _is_sign(c: str) -> bool:
+    """Punctuation or a symbol. A combining vowel sign of Devanagari or Thai is part of a word, not a sign."""
+    import unicodedata
+    return unicodedata.category(c)[0] in "PS"
+
+
+def _case_flips(v: str) -> int:
+    """How often a small letter is followed by a capital: once in a camelCase name, often in a random value."""
+    return sum(1 for x, y in zip(v, v[1:]) if x.islower() and y.isupper())
+
+
+def _scripts_mix(v: str) -> bool:
+    """Letters of two scripts with case in one value (Latin and Cyrillic, Greek and Latin): no word is written so.
+    Scripts without case mix in ordinary words (Japanese kanji and kana) and do not count."""
+    import unicodedata
+    scripts = {unicodedata.name(c, "?").split(" ")[0].split("-")[0]
+               for c in v if c.isalpha() and c.upper() != c.lower()}
+    return len(scripts) > 1
+
+
+def _random_letters(v: str) -> bool:
+    """ASCII letters that no word explains: capitals inside short runs (xKqTzLmP)."""
+    # a long run of letters with few vowels (a keyboard run, xkcdqwrtzp), counted per word of a camelCase or snake_case
+    # name: ctxPtr, grpcSrv and the words of other languages (Pflicht, Svensk) are short or have more vowels
+    if len(v) >= 9 and sum(c in "aeiouyAEIOUY" for c in v) < 0.15 * len(v) and v.isalpha() and v[1:].islower():
+        return True
+    upper = sum(c.isupper() for c in v)
+    parts = _WORD_RUN_RE.findall(v)
+    return upper >= 2 and len(v) - upper >= 2 and len(parts) >= 3 and len(v) <= 3 * len(parts)
+
+
+def _pw_strong_evidence(v: str) -> bool:
+    """After the weak label `pass` (a boarding pass, a test pass, a season pass): 8 characters and more of three of
+    the four classes (small, capital, digit, sign)."""
+    classes = (any(c.islower() for c in v) + any(c.isupper() for c in v) + any(c.isdigit() for c in v)
+               + any(not c.isalnum() for c in v))
+    return len(v) >= 8 and classes >= 3
+
+
+def _pw_literal_ok(v: str) -> bool:
+    """A password value: 4 to 64 characters, no word after undoing leet (or a word with a number and a sign), not
+    digits only, 3 distinct characters or more, no run such as abcd, no placeholder, no space, no dotted reference, no
+    fixture word (testpass), no version."""
+    if not 4 <= len(v) <= 64 or any(c.isspace() for c in v) or _charset(v) == "digits" or len(set(v)) < 3:
+        return False
+    if _sequential(v.lower()) or _LITERAL_PLACEHOLDER_RE.search(v) or _DOTTED_RE.fullmatch(v) or _names_itself(v):
+        return False
+    if _CLOSED_TEMPLATE_RE.search(v) or _looks_like_regex(v):
+        return False   # a template of a format string or a pattern: f'pwd = "{pw}"', "password: {password}"
+    if _VERSION_RE.fullmatch(v):
+        return False   # a version: v1.2.3-rc1 (undoing leet makes it letters)
+    if _PATH_REFERENCE_RE.fullmatch(v):
+        return False   # a path or a reference: /run/secrets/db, ./secrets/pw.txt, C:\\keys\\db.pw, vault:…, file:///…
+    if _wordlike(_deleet(v)) < 0.3:
+        if not _WORDS_OK[0] and v.isalpha():
+            return False   # without a word list, a value of letters only may be any word
+        return _random_evidence(v)
+    # a password made of a word, a number and a sign: Sommer2024!, Herbst2025#, Welcome1! (the form people choose).
+    # A word with a number alone (Winter2023, postgres15) stays text here; the keyword rules judge it. So does a name
+    # joined by _ - . (ABC_123_DEF) and a reference with : / or \ (b64:!!notbase64, vault:db/pw1!)
+    return (len(v) >= 8 and any(c.isalpha() for c in v) and any(c.isdigit() for c in v)
+            and any(not c.isalnum() and c not in "_-." for c in v) and not any(c in ":/\\" for c in v)
+            and _ds_value_ok(v))
+
+
+# the forms of label and literal value. A label, then = => := == : , or ( and a quoted value (also inside a wrapper
+# such as SecretStr("…")); a label, then = or : and an unquoted value to the end of the line; a query parameter; an
+# XML element; SQL's IDENTIFIED BY '…' and PowerShell's ConvertTo-SecureString '…'
+_LIT_WRAP = (r"(?:(?:Some|Ok|String::from|str|bytes|SecretString::new|Secret::new|SecretStr|SecretBytes|Optional\.of"
+             r"|Box::new|Sensitive|new[ \t]+String)[ \t]*\([ \t]*)?")
+# a label starts after no word character, no path or flag part and no `=`: `--password-file=/etc/app/pw` holds no
+# label pw, and `pw=pw=pw=…` (1 MB took 5.5 s) starts one label only
+_LIT_LABEL = r"(?<![\w.\-$@/\\=])([A-Za-z_$@][\w.\-]{0,60})[\"'\]]?[ \t]*"
+# the quoted forms end at the opening quote: _read_quoted reads the literal to its real closing quote
+_LIT_QUOTED = re.compile(_LIT_LABEL + r"(?<![=!<>])(?:=>|:=|=(?!=)|:|,|\()[ \t]*" + _LIT_WRAP + r"([\"'`])")
+_LIT_FORMS = (
+    (re.compile(r"(?m)" + _LIT_LABEL + r"(?:=|:)[ \t]*([^\s\"'`,()\[\]{}<>]{3,299}[^\s\"'`,;()\[\]{}<>]);?"
+                r"(?:[ \t]+(?:#|//|;).*|[ \t]*(?:#|//).*)?[ \t]*$"), 1, 2),
+    (re.compile(r"[?&;]([\w.\-\[\]]{1,60})=([^&\s\"'#<>]{4,400})"), 1, 2),
+    (re.compile(r"<([\w:.-]{1,60})(?:\s[^<>]{0,200})?>([^<>\s]{4,400})</"), 1, 2),
+)
+# SQL's IDENTIFIED BY '…' (a doubled quote and MySQL's backslash escape are part of the value) and PowerShell's
+# ConvertTo-SecureString '…' (single quotes: a doubled quote; double quotes: a doubled quote and the backtick escape)
+_LIT_SQL = re.compile(r"(?i)\bidentified[ \t]+(?:with[ \t]+\w+[ \t]+)?by[ \t]*(?:password[ \t]*)?([\"'])")
+_LIT_PS = re.compile(r"(?i)ConvertTo-SecureString[ \t]+(?:-String[ \t]+)?([\"'])")
+_LIT_BOUND = 300   # a literal longer than this, or one that its line ends, is taken to the bound: never a prefix
+_BACKSLASH_ESCAPE_RE = re.compile(r"\\(?:u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))", re.S)
+_ESCAPED_CHAR = {"n": "\n", "t": "\t", "r": "\r", "0": "\0"}
+
+
+def _unquote(raw: str, quote: str, backslash: bool, backtick: bool) -> str:
+    """The value a literal stands for, for the judgement only (the span stays the raw text): `\u00fc` is ü, `\"` is ",
+    a doubled quote is one quote, PowerShell's backtick escapes the next character."""
+    v = raw.replace(quote + quote, quote)
+    if backslash and "\\" in v:
+        v = _BACKSLASH_ESCAPE_RE.sub(lambda m: chr(int(m.group(1) or m.group(2), 16)) if (m.group(1) or m.group(2))
+                                     else _ESCAPED_CHAR.get(m.group(3), m.group(3)), v)
+    if backtick and "`" in v:
+        v = re.sub(r"`(.)", lambda m: _ESCAPED_CHAR.get(m.group(1), m.group(1)), v, flags=re.S)
+    return v
+
+
+def _read_quoted(text: str, i: int, quote: str, backslash: bool = True, backtick: bool = False) -> tuple:
+    """Read a quoted literal whose content starts at `i`: (end of the content, closed). A backslash (C, Python, JSON,
+    JavaScript, MySQL) or a backtick (PowerShell) escapes the next character, and a doubled quote (SQL, PowerShell, YAML
+    single quotes) is one quote of the content, so an escaped quote never ends the value early. Without a closing quote
+    on the line within _LIT_BOUND characters the content runs to the line end or the bound."""
+    n = len(text)
+    stop = min(n, i + _LIT_BOUND)
+    j = i
+    while j < stop:
+        c = text[j]
+        if c == "\n" or c == "\r":
+            return j, False
+        if (backslash and c == "\\") or (backtick and c == "`"):
+            j += 2
+            continue
+        if c == quote:
+            if j + 1 < n and text[j + 1] == quote:
+                j += 2   # a doubled quote is one quote of the value, also as its first character
+                continue
+            return j, True
+        j += 1
+    return min(j, stop), False
+
+
+# a label that names a secret by its whole tail (`client_secret`, `apiKey`, `x-auth-token`), and a weak label that may
+# name one (`key`, `hmac`, `session`, `cookie`). A word before the tail can make it name something else: password_hint,
+# public_key, cache_key, primary_key, csrf_token, next_page_token
+_SECRET_TAIL_RE = re.compile(r"(?:^|_)(?:secret|token|apikey|api_key|access_key|secret_key|private_key|client_secret"
+                             r"|auth_token|access_token|refresh_token|session_token|bearer|credentials?|app_secret"
+                             r"|consumer_secret|signing_key|encryption_key|master_key|auth_key)$")
+_WEAK_TAIL_RE = re.compile(r"(?:^|_)(?:key|auth|salt|seed|otp|totp|cred|cookie|session|hmac|psk)$")
+_WEAK_NEG_WORDS = frozenset({
+    "public", "pub", "primary", "foreign", "sort", "partition", "cache", "idempotency", "row", "map", "lookup",
+    "cursor", "object", "s3", "dedup", "dedupe", "routing", "shard", "group", "sequence", "index", "composite",
+    "unique", "natural", "surrogate", "react", "list", "item", "translation", "i18n", "locale", "storage", "redis",
+    "memcache", "query", "license", "licence", "product", "registry", "gpg", "pgp", "ssh", "host", "known",
+    "fingerprint", "csrf", "xsrf", "anti", "forgery", "verification", "page", "next", "continuation", "pagination",
+    "sync", "lexer", "tokenizer", "parser", "cancellation", "captcha", "recaptcha"})
+
+
+# a TOTP or HOTP seed: base32 of 10 to 40 bytes after a one-time-password label (otpauth://… carries it as secret=)
+_OTP_WORDS = frozenset({"totp", "hotp", "otp", "mfa", "2fa", "otpauth", "authenticator"})
+_OTP_SEED_RE = re.compile(r"[A-Z2-7]{16,64}={0,6}")
+
+
+def _alphabet_size(v: str) -> int:
+    if v.isdigit():
+        return 10
+    if re.fullmatch(r"[0-9a-f]+|[0-9A-F]+", v):
+        return 16
+    size = 26 * (any(c.islower() for c in v) + any(c.isupper() for c in v)) + 10 * any(c.isdigit() for c in v)
+    if any(not c.isalnum() for c in v):
+        size += 2 if re.fullmatch(r"[A-Za-z0-9+/=_-]+", v) else 32
+    return max(size, 2)
+
+
+def _norm_entropy(v: str) -> float:
+    """Shannon entropy over the most the value's alphabet and length allow (0 to 1): a charset-normalised entropy
+    after Dan Szymkowiak's backlog idea (TASK-11.21)."""
+    return shannon_entropy(v) / math.log2(max(2, min(_alphabet_size(v), len(v))))
+
+
+# a value that is a pattern, not a key: a character class with a quantifier, a counted repeat, an escape class, a group
+# (`token: '[A-Za-z0-9_-]{20,}'`, `secret: '[a-f0-9]{64}'`, `^\d{6}$`; Opus verification of 0.6.16)
+_REGEX_LIKE_RE = re.compile(r"\[[^\]]{1,60}\](?:[*+?]|\{\d+(?:,\d*)?\})|\{\d+(?:,\d*)?\}|\\[dwsDWSbB]"
+                            r"|\(\?[:=!<]|\.[*+]")
+
+
+def _looks_like_regex(v: str) -> bool:
+    """The whole value is a pattern: it starts with ^ [ ( or \\ , ends with $ ] ) } or a quantifier, and holds a
+    pattern part. A password with \\d or .* inside it is no pattern (codex, final round of 0.6.16)."""
+    return (len(v) >= 3 and v[0] in "^[(\\" and (v[-1] in "$])}*+?" or v[-2:] in ("\\b", "\\B"))
+            and _REGEX_LIKE_RE.search(v) is not None)
+
+
+def _key_literal_ok(v: str, lo: int, hi: int, words: float, entropy: float) -> bool:
+    """A key after a secret or a weak label: ASCII, no space, no placeholder, few word letters, a high normalised
+    entropy, and detect-secrets' filters (templates, references, sequences)."""
+    if _looks_like_regex(v):
+        return False
+    if not lo <= len(v) <= hi or not v.isascii() or any(c.isspace() for c in v) or _LITERAL_PLACEHOLDER_RE.search(v):
+        return False   # a key is ASCII: a value with § or an umlaut is a split test value or a word
+    return _norm_entropy(v) >= entropy and _ds_value_ok(v, 4) and _wordlike(_deleet(v)) < words
+
+
+_LABEL_CLASS: dict = {}
+
+
+def _label_class(label: str) -> tuple:
+    """(password label, secret label, weak label, OTP label, last word) of a label, computed once per label: a list of
+    70,000 words reads each word as the label of the next one."""
+    got = _LABEL_CLASS.get(label)
+    if got is None:
+        toks = _norm_label(label)
+        full = "_".join(toks)
+        before = toks[:-1]
+        # an AWS signature or the key id in a SigV4 scope is no secret value of its own
+        # (the session token, x-amz-security-token, is a secret: the rule label-aws-session-token takes it)
+        amz = (full.startswith("x_amz") and full != "x_amz_security_token") or bool(
+            toks and toks[-1] in ("credential", "signature"))
+        named = bool(full) and not amz
+        other = any(t in _LABEL_NEG_WORDS or t in _WEAK_NEG_WORDS for t in before)
+        secret = named and bool(_SECRET_TAIL_RE.search(full)) and not other
+        weak = named and bool(_WEAK_TAIL_RE.search(full)) and not other
+        otp = named and bool(set(toks) & _OTP_WORDS)
+        got = (_pw_label(toks), secret, weak, otp, toks[-1] if toks else "")
+        if len(_LABEL_CLASS) > 50000:
+            _LABEL_CLASS.clear()
+        _LABEL_CLASS[label] = got
+    return got
+
+
+def _judge_literal(label: str, v: str, quoted: bool = True) -> str:
+    """The rule a label and its literal value fall under, or ""."""
+    pw, secret, weak, otp, last = _label_class(label)
+    if pw and _pw_literal_ok(v) and (last.rstrip("0123456789") != "pass" or _pw_strong_evidence(v)):
+        return "label-pw-literal"
+    if secret and _key_literal_ok(v, 8, 200, 0.3, 0.8):
+        return "label-secret-literal"
+    if (quoted and weak and _key_literal_ok(v, 12, 300, 0.2, 0.85) and not (len(v) == 64 and _charset(v) == "hex")
+            and not (last == "key" and _charset(v) == "hex")):
+        return "label-weak-key"
+    if otp and _OTP_SEED_RE.fullmatch(v) and _wordlike(v) < 0.3:
+        return "label-otp-seed"
+    return ""
+
+
+def _literal_hits(text: str) -> list:
+    """(rule id, start of the label, start and end of the value) of each label and literal value of `text`, computed
+    once per text for all the rules that read them."""
+    _newlines(text)
+    cache = _INDEX[1]
+    if "literal" not in cache:
+        hits = []
+        pos = 0
+        while True:
+            m = _LIT_QUOTED.search(text, pos)
+            if m is None:
+                break
+            a = m.end()
+            q = m.group(2)
+            lq = text[m.start(1) - 1:m.start(1)]
+            if "," in text[m.end(1):m.start(2)] and not (lq in ("'", '"') and text[m.end(1):m.end(1) + 1] == lq):
+                pos = m.start(2)   # f(password, "…"): the next argument; ("password", "…") is a pair of label and value
+                continue
+            # PowerShell escapes with a backtick in double quotes, after a $ label only: $pw = "…`"…"
+            tick = q == '"' and m.group(1).startswith("$")
+            end, closed = _read_quoted(text, a, q, backtick=tick)
+            raw = text[a:end]
+            # past a literal that is a value
+            pos = end + 1 if closed else max(end, a)
+            if closed and re.match(r"[ \t]*\+", text[end + 1:end + 40]):
+                continue   # a string that + continues is an expression
+            rid = _judge_literal(m.group(1), _unquote(raw, q, True, tick), quoted=True)
+            if rid:
+                hits.append((rid, m.start(), a, end))
+            else:
+                pos = a   # a literal that is no value may be a label itself: f("password", "…"), or hold a JSON text
+        for n, (rx, gl, gv) in enumerate(_LIT_FORMS):
+            for m in rx.finditer(text):
+                rid = _judge_literal(m.group(gl), m.group(gv), quoted=n != 0)
+                if rid:
+                    hits.append((rid, m.start(), m.start(gv), m.end(gv)))
+        for rx, backslash in ((_LIT_SQL, True), (_LIT_PS, False)):
+            for m in rx.finditer(text):
+                q = m.group(1)
+                tick = not backslash and q == '"'
+                end, _closed = _read_quoted(text, m.end(), q, backslash=backslash, backtick=tick)
+                if _pw_literal_ok(_unquote(text[m.end():end], q, backslash, tick)):
+                    hits.append(("label-pw-literal", m.start(), m.end(), end))
+        hits.sort(key=lambda h: h[2])
+        cache["literal"] = hits
+    return cache["literal"]
+
+
+class _Literal:
+    """A match of a label and literal rule: group 0 runs from the label to the end of the value, group 1 is the
+    value."""
+    __slots__ = ("_text", "_a", "_s", "_e")
+
+    def __init__(self, text: str, a: int, s: int, e: int) -> None:
+        self._text, self._a, self._s, self._e = text, a, s, e
+
+    def group(self, i: int = 0):
+        return self._text[self._a if i == 0 else self._s:self._e]
+
+    def start(self, i: int = 0) -> int:
+        return self._a if i == 0 else self._s
+
+    def end(self, i: int = 0) -> int:
+        return self._e
+
+
+def _literal_matches(rule_id: str, text: str):
+    for rid, a, s, e in _literal_hits(text):
+        if rid == rule_id:
+            yield _Literal(text, a, s, e)
+
+
+# the rules that read labels and literal values; they run after every other rule and take only a span no other rule
+# took. The keywords skip a text without the label words
+LITERAL_RULES = (
+    {"id": "label-pw-literal", "keywords": ("pass", "pw", "pwd", "kennwort", "psw", "identified", "securestring")},
+    {"id": "label-secret-literal", "keywords": ("secret", "token", "key", "bearer", "credential")},
+    {"id": "label-otp-seed", "keywords": ("otp", "mfa", "2fa", "authenticator")},
+    {"id": "label-weak-key", "keywords": ("key", "auth", "salt", "seed", "otp", "cred", "cookie", "session", "hmac",
+                                          "psk")},
+)
+_LITERAL_IDS = frozenset(d["id"] for d in LITERAL_RULES)
+
+
 VALIDATORS = {
     "ds_value": _ds_value_ok,
+    "apikey_value": _apikey_value_ok,
     "word_value": _word_value_ok,
     "flag_value": lambda v: _word_value_ok(v, prose_punct=True),
     "glued_value": lambda v: _word_value_ok(v, min_len=6),
@@ -614,6 +1198,45 @@ OWN_RULES: list[dict] = [
     {"id": "label-prose-password", "type": "SECRET", "secret_group": 1, "validator": "prose_value",
      "regex": r"(?i)(?<![\w-])(?:password|passwd|passphrase)[ \t]+(?:is|was)[ \t]*:?[ \t]+"
               r"[\"'„“]?([^\s\"'“”]{0,255}[^\s\"'“”.,;:!?)])[\"'“”]?(?=[.,;:!?)]*(?:[\s\"'<\\]|$))"},
+    # each quoted value of a list after a label that names secrets: `"api_keys": ["<v1>", "<v2>"]`,
+    # `passwords = ['<v1>']`, Go `Secrets: []string{"<v1>"}`. The label rules took no value that starts with a
+    # bracket, so a whole list of keys stayed in the clear. Only a label that names secrets and nothing else: a bare
+    # `tokens` is the output of a tokenizer, and code_tokens, cache_tokens or revokedTokens name no secret (Gate B of
+    # 0.6.16: 30 false alarms in developer text). The regex finds the label and the opening bracket; _list_matches
+    # reads the values and keeps only those that look like a key (_list_value_ok). No tuple: the Elasticsearch client
+    # takes api_key=("<id>", "<key>"), and the id is public
+    {"id": "label-secret-list", "type": "SECRET", "secret_group": 2,
+     "regex": r"(?i)(?<![\w$.-])[\"']?(passwords?|passwd|secrets?|api[_-]?(?:keys?|tokens?|secrets?)"
+              r"|(?:access|auth|refresh|bearer)[_-]?tokens?|client[_-]?secrets?|private[_-]?keys?|secret[_-]?keys?"
+              r"|credentials)[\"']?[ \t]*(?::=|=>|[:=])[ \t]*(\[\][\w.]*[ \t]*\{|[\w.]*\[\][ \t]*\{|\[)"},
+    # four token formats with a public prefix and no rule in the vendored sets (0.6.16). The third NTLMSSP message in
+    # base64 (`Authorization: NTLM TlRMTVNTUAAD…`: its response is derived from the password hash; the negotiate and
+    # challenge messages carry none); a
+    # NATS nkey seed (S, the key type, 56 base32 characters; the public key starts with N, U, A … and stays text);
+    # a PASERK secret, local or wrapped key (k1. to k4.; k4.public., k4.lid. and the other ids stay text); a PASETO
+    # token (v1. to v4., local or public: a bearer token as a JWT is one)
+    {"id": "ntlmssp-message", "type": "SECRET",
+     "regex": r"(?<![A-Za-z0-9+/])TlRMTVNTUAAD[A-Za-z0-9+/]{30,}={0,2}"},
+    {"id": "nats-nkey-seed", "type": "SECRET",
+     "regex": r"(?<![A-Za-z0-9])S[UNOACXP][A-Z2-7]{56}(?![A-Za-z0-9])"},
+    {"id": "paserk-secret-key", "type": "SECRET",
+     "regex": r"(?<![\w.])k[1-4]\.(?:local|secret|local-wrap|secret-wrap|local-pw|secret-pw|seal)\."
+              r"(?:[A-Za-z0-9_-]+\.){0,3}[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])"},   # dot-separated parts, no end dot
+    {"id": "paseto-token", "type": "SECRET",
+     "regex": r"(?<![\w.])v[1-4]\.(?:local|public)\.[A-Za-z0-9_-]{30,}(?:\.[A-Za-z0-9_-]+)?"},
+    # the STS session token of temporary AWS credentials: a presigned URL carries it as the query parameter
+    # X-Amz-Security-Token (percent-encoded), a request as the header of that name. The other X-Amz- parameters (the
+    # key id in X-Amz-Credential, X-Amz-Signature, X-Amz-Date) stay text; the session token grants access until it
+    # expires. 100 to 4096 characters: real tokens have several hundred
+    {"id": "label-aws-session-token", "type": "SECRET", "secret_group": 1,
+     "regex": r"(?i)(?<![\w-])x-amz-security-token(?:[\"']?[ \t]*[:=][ \t]*[\"']?)([A-Za-z0-9%+/=_-]{100,4096})"
+              r"(?![A-Za-z0-9%+/=_-])"},
+    # Elasticsearch's API key in an Authorization header: `Authorization: ApiKey <base64 of id:key>`, as a header
+    # line, in curl -H, or as the key of a header object (`authorization: 'ApiKey <value>'`). Only after the header
+    # name: prose names the scheme ("send ApiKey followed by …", Gate B of 0.6.16)
+    {"id": "auth-scheme-apikey", "type": "SECRET", "secret_group": 1, "validator": "apikey_value",
+     "regex": r"(?i:authorization)[\"']?\]?[ \t]*[:=][ \t]*[\"'`]?ApiKey[ \t]+([A-Za-z0-9+/_-]{8,1024}={0,2})"
+              r"(?![\w+/=-])"},
 ]
 
 
@@ -757,6 +1380,132 @@ _ESCAPABLE_COLON_RULES = ("ds-keyword-colon", "ds-keyword-colon-quotes-required"
 _COLON_THEN_QUOTE = (":\\s*([\\'\"`]?)", ":(\\s*)([\\'\"`])")
 _ESCAPED_QUOTE_SKIP = "(?:\\\\(?=[\"']))?"
 _WHITESPACE_RE = re.compile(r"\s")
+# the label tail of the vendored keyword rules: `<keyword>\w*` and then a separator. On `password=` and a long run of
+# letters with no space, each keyword inside the run (pwd, key) took the rest of the run and gave it back one character
+# at a time (the rule with a quote and a semicolon tried 50 more characters each time): quadratic, 320 KB took 10 s,
+# also in 0.6.15. What follows `\w*` in these rules never starts with a word character (a quote, ], a space, a colon,
+# =, or `[^\s]{0,50}?` that a shorter run can only reach less far with), so the regex matches only where `\w*` takes
+# the whole run. _KeywordTail finds each keyword, jumps to the end of its word run with an index of the runs, and runs
+# the rest of the regex once per run end: the same matches, in linear time. tests/test_scan_bounds.py compares it
+# with the vendored regex on runs of 0 to 5000 characters
+class _KeywordTail:
+    r"""A vendored keyword regex `(<alternatives>)\w*<tail>` matched without backtracking into the word run."""
+    __slots__ = ("pattern", "flags", "_prefix", "_alts", "_any", "_tail", "_heads", "_cross", "_rx")
+
+    def __init__(self, pattern: str, keywords_prefix: str, alts: list, flags: int) -> None:
+        self.pattern, self.flags, self._prefix, self._alts = pattern, flags, keywords_prefix, alts
+        self._any = self._tail = None
+        self._heads: list = []
+
+    def _compile(self) -> None:
+        if self._any is not None:
+            return
+        tail = self.pattern[len(self._prefix) + len("\\w*"):]
+        self._rx = re.compile(self.pattern, self.flags)
+        self._any = re.compile(self._prefix, self.flags)
+        groups = self._any.groups
+        # one head per alternative, in the regex's order; the others never match but keep their group numbers
+        self._heads = [re.compile("(?<!mai)(" + "|".join(a if j == i else "(?!)" + a for j, a in enumerate(self._alts))
+                                  + ")", self.flags) for i in range(len(self._alts))]
+        self._tail = re.compile("()" * groups + tail, self.flags)   # empty groups keep the numbers of backreferences
+        # the alternatives that can match a character outside a word (mot de passe): only they can start inside a
+        # word run and end past it. Every other one ends inside the run, at the run's end once \w* has run
+        cross = [a for a in self._alts if _CROSS_CHARS_RE.search(_LOOKAROUND_RE.sub("", a))]
+        self._cross = re.compile("(?<!mai)(?:" + "|".join(cross) + ")", self.flags) if cross else None
+
+    def finditer(self, text: str):
+        self._compile()
+        if _LONG_WORD_RUN_RE.search(text) is None:
+            # no word run of 200 characters: the vendored regex backtracks at most that far per keyword, and its C
+            # loop is faster than this one on ordinary lines
+            yield from self._rx.finditer(text)
+            return
+        tails: dict = {}
+        word = _WORD_RUN_ANY_RE
+        pos, n = 0, len(text)
+        while pos <= n:
+            m = self._any.search(text, pos)
+            if m is None:
+                return
+            p = m.start()
+            w = word.match(text, m.end())
+            if w is None or w.end() - m.end() < 200:
+                # a short word run after the keyword: the vendored regex at p backtracks at most that far, and it is
+                # the same regex. Only a keyword before a long run takes the loop below (codex verification of 0.6.16:
+                # one long word made the whole text slow)
+                r = self._rx.match(text, p)
+                if r is not None:
+                    yield r
+                    pos = r.end() if r.end() > p else p + 1
+                else:
+                    pos = p + 1
+                continue
+            hit = None
+            e = -1
+            # the first alternative that matches at p is the one the regex tries first: the search found it already
+            for h in itertools.chain((m,), (head.match(text, p) for head in self._heads)):
+                if h is None:
+                    continue
+                q = h.end()
+                w = word.match(text, q)
+                e = w.end() if w is not None else q     # \w* takes the whole run after the keyword
+                if e not in tails:
+                    tails[e] = self._tail.match(text, e)
+                t = tails[e]
+                if t is not None:
+                    hit = _HeadTail(text, h, t)
+                    break
+            if hit is None:
+                pos = p + 1
+                run = word.match(text, p)
+                if run is not None and run.end() == e and e > pos:
+                    # p starts a word run whose rest failed: a keyword later in the run that stays in it fails too.
+                    # Only an alternative that leaves the run can start a match before its end
+                    c = self._cross.search(text, pos, e + 256) if self._cross is not None else None
+                    pos = c.start() if c is not None and c.start() < e else e
+                continue
+            yield hit
+            pos = hit.end() if hit.end() > p else p + 1
+
+    def search(self, text: str):
+        return next(self.finditer(text), None)
+
+    @property
+    def groups(self) -> int:
+        self._compile()
+        return self._tail.groups
+
+
+class _HeadTail:
+    """A match of _KeywordTail: the groups of the keyword from the head, the rest from the tail."""
+    __slots__ = ("_text", "_h", "_t", "_n")
+
+    def __init__(self, text: str, h, t) -> None:
+        self._text, self._h, self._t, self._n = text, h, t, h.re.groups
+
+    def group(self, i: int = 0):
+        if i == 0:
+            return self._text[self._h.start():self._t.end()]
+        return self._h.group(i) if i <= self._n else self._t.group(i)
+
+    def start(self, i: int = 0) -> int:
+        if i == 0:
+            return self._h.start()
+        return self._h.start(i) if i <= self._n else self._t.start(i)
+
+    def end(self, i: int = 0) -> int:
+        if i == 0:
+            return self._t.end()
+        return self._h.end(i) if i <= self._n else self._t.end(i)
+
+    def span(self, i: int = 0) -> tuple:
+        return self.start(i), self.end(i)
+
+
+_WORD_RUN_ANY_RE = re.compile(r"\w+")
+_LONG_WORD_RUN_RE = re.compile(r"\w{200}")
+_LOOKAROUND_RE = re.compile(r"\(\?<?[=!][^()]*\)")
+_CROSS_CHARS_RE = re.compile(r"[ .\[-]|\\[sWdbBSD]")   # a space, a dot, a class, a hyphen or a non-word escape
 _CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
 
 
@@ -783,12 +1532,17 @@ def _load_detect_secrets(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
         # `password : x` in every language; the vendored colon rules allowed none, so
         # `mot de passe : <value>` and `password : <value>` were no hit (2026-09-28)
         regex = regex.replace(_COLON_AFTER_LABEL, _COLON_AFTER_LABEL_SPACED, 1)
+
         if _COLON_AFTER_LABEL_SPACED in regex:
             regex = regex.replace(_COLON_AFTER_LABEL_SPACED, _COLON_AFTER_LABEL_ESCAPED, 1)
             for q in _COLON_THEN_QUOTE:   # the skip goes right before the group of the opening quote
                 at = q.rindex("([")
                 regex = regex.replace(q, q[:at] + _ESCAPED_QUOTE_SKIP + q[at:], 1)
-        out.append(Rule(id=r["id"], type="SECRET", regex=_Lazy(regex, flags),
+        if regex.startswith(keywords + "\\w*") and len(regex) > len(keywords) + 3:
+            rx = _KeywordTail(regex, keywords, list(data["denylist"]) + [lab.regex for lab in labels], flags)
+        else:
+            rx = _Lazy(regex, flags)
+        out.append(Rule(id=r["id"], type="SECRET", regex=rx,
                         keywords=() if r["id"] == "ds-basic-auth" else kws,
                         secret_group=int(r["group"]), validator="ds_value",
                         quote_group=_DS_QUOTE_GROUP.get(r["id"], 0)))
@@ -806,6 +1560,13 @@ def _load_prefixes() -> list[Rule]:
         rule_id, regex = line.split(None, 1)
         out.append(Rule(id=rule_id, type="SECRET", regex=_Lazy(regex.strip())))
     return out
+
+
+def _load_literal(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
+    _LABEL_CLASS.clear()   # the password label words depend on the languages
+    _PW_LAST_ON[0] = _PW_LAST.union(*(_PW_LAST_OF.get(lang, ()) for lang in languages))
+    return [Rule(id=d["id"], type="SECRET", regex=_Lazy(r"(?!)()"), secret_group=1, keywords=d["keywords"])
+            for d in LITERAL_RULES]
 
 
 def _load_own() -> list[Rule]:
@@ -827,7 +1588,7 @@ def rules() -> list[Rule]:
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
         _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
-                  + _load_presidio(active.regions) + pii)
+                  + _load_presidio(active.regions) + pii + _load_literal(active.languages))
     return _RULES
 
 
@@ -1185,6 +1946,12 @@ def _matches(rule: Rule, text: str):
     if curl is not None:
         yield from _curl_matches(curl, text)
         return
+    if rule.id == "label-secret-list":
+        yield from _list_matches(rule, text)
+        return
+    if rule.id in _LITERAL_IDS:
+        yield from _literal_matches(rule.id, text)
+        return
     kw = _WINDOWED.get(rule.id)
     if kw is not None and len(text) > 4096:
         yield from _windowed(rule, kw, text)
@@ -1270,6 +2037,35 @@ def _curl_matches(parts, text: str):
             breaks += run % 2                    # two line feeds in a row are one `[\r\n]{1,2}`
         if breaks <= 5:
             yield _Spanned(t, starts[i], text)
+
+
+# one quoted value of a list and what follows it: a comma (the next value) or the closing bracket. Up to two line
+# breaks around it: a list written one value per line
+_LIST_ITEM_RE = re.compile(r"[ \t]*(?:\r?\n[ \t]*){0,2}([\"'`])([^\"'`\\\n]{1,256})\1"
+                           r"[ \t]*(?:\r?\n[ \t]*){0,2}(,|[\]})])")
+
+
+def _list_matches(rule: Rule, text: str):
+    """Each quoted value of the list that starts after a label of label-secret-list and that looks like a key
+    (_list_value_ok), as group 2 of a match whose group 0 starts at the label. The values are checked here, before
+    the filters of scan(): a list of 10,000 words cost each word the whole chain. The list ends at its closing
+    bracket or at a value that is not a quoted string, at any length: a cut at 1 MB left the keys after it in the
+    clear (codex Gate A of 0.6.16). A label inside a list already read is skipped, so each character is read once."""
+    done = -1
+    for lab in rule.regex.finditer(text):
+        if lab.start() < done:
+            continue
+        pos = lab.end()
+        while True:
+            it = _LIST_ITEM_RE.match(text, pos)
+            if it is None:
+                break
+            if _list_value_ok(it.group(2)):
+                yield _Spanned(it, lab.start(), text)
+            if it.group(3) != ",":
+                break
+            pos = it.end()
+        done = pos
 
 
 class _Spanned:
