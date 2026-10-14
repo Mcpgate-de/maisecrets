@@ -1454,6 +1454,29 @@ OWN_RULES: list[dict] = [
 ]
 
 
+# Fallbacks that run after the vendored rules (0.6.20): forms of a token whose vendored rule fixes one length or one
+# form, so the standard form keeps its vendored rule id. Found in a measurement on real session transcripts (values
+# not kept): GitLab's pipeline trigger token and CI job token in their newer forms (routable, or a JWT after glcbt-;
+# the vendored rules take glptt- and 40 hex digits, glcbt- with a partition prefix), OpenAI project keys of other
+# lengths around T3BlbkFJ (the base64 of "OpenAI"; the vendored rule takes 20, 58 or 74 characters on each side) and
+# Anthropic API keys of other lengths (the vendored rule takes exactly 93 characters before AA). Each also takes a
+# token before a full stop, which the vendored terminators refuse
+FALLBACK_RULES: list[dict] = [
+    {"id": "gitlab-pipeline-trigger-token-any", "type": "SECRET",
+     "regex": r"glptt-(?:(?<![A-Za-z0-9_-]glptt-)|(?<=\\[nrt]glptt-))[0-9A-Za-z_-]{20,400}"
+              r"(?:\.[0-9a-z]{2}\.[0-9a-z]{9})?(?![0-9A-Za-z_-])"},
+    {"id": "gitlab-ci-job-token-any", "type": "SECRET",
+     "regex": r"glcbt-(?:(?<![A-Za-z0-9_-]glcbt-)|(?<=\\[nrt]glcbt-))[0-9A-Za-z_-]{20,2048}"
+              r"(?:\.[0-9A-Za-z_-]{2,2048}){0,2}(?![0-9A-Za-z_-])(?!\.[0-9A-Za-z_-])"},
+    {"id": "openai-api-key-any", "type": "SECRET",
+     "regex": r"sk-(?:(?<![A-Za-z0-9_-]sk-)|(?<=\\[nrt]sk-))"
+              r"(?:proj|svcacct|admin)-[A-Za-z0-9_-]{8,400}?T3BlbkFJ[A-Za-z0-9_-]{8,400}(?![A-Za-z0-9_-])"},
+    {"id": "anthropic-api-key-any", "type": "SECRET",
+     "regex": r"sk-ant-(?:(?<![A-Za-z0-9_-]sk-ant-)|(?<=\\[nrt]sk-ant-))(?:api03|admin01)-[A-Za-z0-9_-]{60,140}AA"
+              r"(?![A-Za-z0-9_-])"},
+]
+
+
 # ------------------------------------------------------------- rule loading --
 # betterleaks rules left out: a filter that is a program (let bindings; rule_filter.Unsupported) would run without
 # it, and maisecrets' own label rules cover these shapes (ds-keyword, url-query-secret, the email rule)
@@ -1929,6 +1952,7 @@ def rules() -> list[Rule]:
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
         _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
+                  + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]
                   + _load_regional(active.regions) + _load_presidio(active.regions) + pii
                   + _load_literal(active.languages))
     return _RULES

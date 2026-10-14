@@ -449,9 +449,41 @@ class SessionFormTests(unittest.TestCase):
         for n in (20, 60, 120, 159):
             self.whole(gitlab_routable(r, payload_bytes=n))
 
+    def test_gitlab_trigger_and_job_tokens_are_found_in_their_newer_forms(self):
+        r = random.Random(51)
+        self.whole(J(["gl", "ptt-"]) + rd(r, 40, HEXL), "gitlab-ptt")
+        self.whole(gitlab_routable(r, J(["gl", "ptt-"])))
+        self.whole(J(["gl", "cbt-"]) + rd(r, 2, AN) + "_" + rd(r, 20, B64U))
+        self.whole(J(["gl", "cbt-"]) + rd(r, 24, B64U), "gitlab-ci-job-token-any")
+        self.whole(gitlab_routable(r, J(["gl", "cbt-"])))
+        self.whole(J(["gl", "cbt-", "eyJ"]) + rd(r, 30, B64U) + ".eyJ" + rd(r, 120, B64U) + "." + rd(r, 43, B64U))
+        for miss in (J(["gl", "ptt-"]) + rd(r, 12, AN), J(["gl", "cbt-"]) + rd(r, 12, AN)):
+            self.assertEqual(found(f"see {miss} there"), [])
+
+    def test_openai_project_keys_of_every_length_are_found(self):
+        r = random.Random(52)
+        mid = J(["T3Blbk", "FJ"])
+        self.whole(J(["sk-", "proj-"]) + rd(r, 74, B64U) + mid + rd(r, 74, B64U), "openai-api-key")
+        for a, b in ((80, 84), (100, 60), (60, 100), (120, 40), (30, 30)):
+            self.whole(J(["sk-", r.choice(["proj", "svcacct", "admin"]), "-"]) + rd(r, a, B64U) + mid + rd(r, b, B64U))
+        no_marker = J(["sk-", "proj-"]) + rd(r, 150, AN)
+        self.assertNotIn("openai-api-key-any", [k for k, _t, _v in found(f"see {no_marker} there")])
+
+    def test_anthropic_api_keys_of_other_lengths_are_found(self):
+        r = random.Random(53)
+        self.whole(J(["sk-ant-", "api03-"]) + rd(r, 93, B64U) + "AA", "anthropic-api-key")
+        for n in (80, 90, 95, 106, 120):
+            self.whole(J(["sk-ant-", r.choice(["api03", "admin01"]), "-"]) + rd(r, n, B64U) + "AA")
+        short = J(["sk-ant-", "api03-"]) + rd(r, 30, AN) + "AA"
+        self.assertNotIn("anthropic-api-key-any", [k for k, _t, _v in found(f"see {short} there")])
+
     def test_a_long_run_of_near_misses_takes_linear_time(self):
         r = random.Random(54)
-        for near in ((J(["gl", "pat-"]) + rd(r, 390, B64U) + ".01. ") * 300,):
+        mid = J(["T3Blbk", "FJ"])
+        for near in ((J(["sk-", "proj-"]) + rd(r, 390, B64U) + " ") * 300,
+                     (J(["sk-", "proj-"]) + rd(r, 200, B64U) + mid + rd(r, 500, B64U) + " ") * 100,
+                     (J(["sk-ant-", "api03-"]) + rd(r, 139, B64U) + " ") * 500,
+                     (J(["gl", "pat-"]) + rd(r, 390, B64U) + ".01. ") * 300):
             t0 = time.perf_counter()
             found(near, "tool")
             with self.subTest(n=len(near)):
