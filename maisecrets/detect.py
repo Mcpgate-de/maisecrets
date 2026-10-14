@@ -730,6 +730,10 @@ def _sequential(low: str) -> bool:
 _MEASURE_VALUE_RE = re.compile(r"[~<>=+\u00a7#-]?\d+(?:[.,:/-]\d+)*(?:[a-z]{1,3}|[A-Z]{1,2})?"
                                r"(?:[/ -]\d+(?:[.,:]\d+)*(?:[a-z]{1,3}|[A-Z]{1,2})?)*%?")
 _ABBREVIATION_RE = re.compile(r"(?:[A-Za-z\u00c0-\u024f]{1,4}\.)+[A-Za-z\u00c0-\u024f]{0,4}")
+# a path or a reference after a password label names where the password lives: /run/secrets/db, ../x/y, ~/.pw,
+# C:\keys\db.pw, \\server\share, file:///etc/pw, vault:secret/db#pw, env:DB_PASSWORD
+_PATH_REFERENCE_RE = re.compile(r"(?:[/~]|\.{1,2}[/\\]|[A-Za-z]:[/\\]|\\\\)\S*"
+                                r"|[A-Za-z][A-Za-z0-9+.-]{2,15}:(?://|[A-Za-z_$])\S*")
 _ISO_DURATION_RE = re.compile(r"P(?:\d+[YMWD])*(?:T(?:\d+[HMS])+)?")   # P90D, PT15M
 _WORD_NUMBER_RE = re.compile(r"[A-Za-z\u00c0-\u024f]{2,}[#_. :/-]\d{1,4}|\d{1,4}[#_. :/-][A-Za-z\u00c0-\u024f]{2,}")
 
@@ -745,11 +749,12 @@ def _random_evidence(v: str) -> bool:
         return False
     if any(c.isdigit() for c in v) or any(_is_sign(c) and c not in "_-." for c in v):
         return True   # a digit, or a sign that no identifier uses (_ - . join the words of a name: senha_atual)
+    parts = [part for part in re.split(r"[_.-]+", v) if part]
     if not v.isascii():
-        return False  # letters of another script or with accents, joined at most by _ - .: words (a UI string)
-    # ASCII letters joined at most by _ - .: one part with few vowels (the words of every Latin-script language have a
-    # quarter or more), or with a mix of cases that no word boundary explains
-    return any(_random_letters(part) for part in re.split(r"[_.-]+", v) if part)
+        # another script or accents: a word (a UI string) unless scripts mix or the cases change at random
+        return _scripts_mix(v) or any(_case_flips(part) >= 2 for part in parts)
+    # ASCII letters joined at most by _ - .: one part with a mix of cases that no word boundary explains
+    return any(_random_letters(part) for part in parts)
 
 
 def _is_sign(c: str) -> bool:
@@ -758,9 +763,25 @@ def _is_sign(c: str) -> bool:
     return unicodedata.category(c)[0] in "PS"
 
 
+def _case_flips(v: str) -> int:
+    """How often a small letter is followed by a capital: once in a camelCase name, often in a random value."""
+    return sum(1 for x, y in zip(v, v[1:]) if x.islower() and y.isupper())
+
+
+def _scripts_mix(v: str) -> bool:
+    """Letters of two scripts with case in one value (Latin and Cyrillic, Greek and Latin): no word is written so.
+    Scripts without case mix in ordinary words (Japanese kanji and kana) and do not count."""
+    import unicodedata
+    scripts = {unicodedata.name(c, "?").split(" ")[0].split("-")[0]
+               for c in v if c.isalpha() and c.upper() != c.lower()}
+    return len(scripts) > 1
+
+
 def _random_letters(v: str) -> bool:
-    """ASCII letters that no word explains: fewer than a quarter vowels, or capitals inside short runs (xKqTzLmP)."""
-    if len(v) >= 6 and sum(c in "aeiouyAEIOUY" for c in v) < 0.25 * len(v):
+    """ASCII letters that no word explains: capitals inside short runs (xKqTzLmP)."""
+    # a long run of letters with few vowels (a keyboard run, xkcdqwrtzp), counted per word of a camelCase or snake_case
+    # name: ctxPtr, grpcSrv and the words of other languages (Pflicht, Svensk) are short or have more vowels
+    if len(v) >= 9 and sum(c in "aeiouyAEIOUY" for c in v) < 0.15 * len(v) and v.isalpha() and v[1:].islower():
         return True
     upper = sum(c.isupper() for c in v)
     parts = _WORD_RUN_RE.findall(v)
@@ -783,10 +804,12 @@ def _pw_literal_ok(v: str) -> bool:
         return False
     if _sequential(v.lower()) or _LITERAL_PLACEHOLDER_RE.search(v) or _DOTTED_RE.fullmatch(v) or _names_itself(v):
         return False
-    if _CLOSED_TEMPLATE_RE.search(v) or _REGEX_LIKE_RE.search(v):
+    if _CLOSED_TEMPLATE_RE.search(v) or _looks_like_regex(v):
         return False   # a template of a format string or a pattern: f'pwd = "{pw}"', "password: {password}"
     if _VERSION_RE.fullmatch(v):
         return False   # a version: v1.2.3-rc1 (undoing leet makes it letters)
+    if _PATH_REFERENCE_RE.fullmatch(v):
+        return False   # a path or a reference: /run/secrets/db, ./secrets/pw.txt, C:\\keys\\db.pw, vault:…, file:///…
     if _wordlike(_deleet(v)) < 0.3:
         if not _WORDS_OK[0] and v.isalpha():
             return False   # without a word list, a value of letters only may be any word
@@ -904,10 +927,17 @@ _REGEX_LIKE_RE = re.compile(r"\[[^\]]{1,60}\](?:[*+?]|\{\d+(?:,\d*)?\})|\{\d+(?:
                             r"|\(\?[:=!<]|\.[*+]")
 
 
+def _looks_like_regex(v: str) -> bool:
+    """The whole value is a pattern: it starts with ^ [ ( or \\ , ends with $ ] ) } or a quantifier, and holds a
+    pattern part. A password with \\d or .* inside it is no pattern (codex, final round of 0.6.16)."""
+    return (len(v) >= 3 and v[0] in "^[(\\" and (v[-1] in "$])}*+?" or v[-2:] in ("\\b", "\\B"))
+            and _REGEX_LIKE_RE.search(v) is not None)
+
+
 def _key_literal_ok(v: str, lo: int, hi: int, words: float, entropy: float) -> bool:
     """A key after a secret or a weak label: ASCII, no space, no placeholder, few word letters, a high normalised
     entropy, and detect-secrets' filters (templates, references, sequences)."""
-    if _REGEX_LIKE_RE.search(v):
+    if _looks_like_regex(v):
         return False
     if not lo <= len(v) <= hi or not v.isascii() or any(c.isspace() for c in v) or _LITERAL_PLACEHOLDER_RE.search(v):
         return False   # a key is ASCII: a value with § or an umlaut is a split test value or a word
@@ -974,7 +1004,8 @@ def _literal_hits(text: str) -> list:
             if "," in text[m.end(1):m.start(2)] and not (lq in ("'", '"') and text[m.end(1):m.end(1) + 1] == lq):
                 pos = m.start(2)   # f(password, "…"): the next argument; ("password", "…") is a pair of label and value
                 continue
-            tick = q == '"'   # PowerShell escapes with a backtick in double quotes: $pw = "…`"…"
+            # PowerShell escapes with a backtick in double quotes, after a $ label only: $pw = "…`"…"
+            tick = q == '"' and m.group(1).startswith("$")
             end, closed = _read_quoted(text, a, q, backtick=tick)
             raw = text[a:end]
             # past a literal that is a value

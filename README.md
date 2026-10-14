@@ -1167,10 +1167,13 @@ Four sources, one scanner (`maisecrets/detect.py`):
   words come from `maisecrets/rules/words_en.txt`, about 21,000 English words of 4 to 8
   letters from SCOWL (see `NOTICE`), read only when a password label is in the text. A miss in
   an English list is no evidence alone: the value needs a letter and a digit or a sign beside
-  it (`_`, `-` and `.` join the words of a name and count as no sign), or (ASCII letters only)
-  one part with few vowels or with a mix of cases that no word boundary explains. So a word of
-  another language (`senhaAtual`, `senha_atual`), a word in another script or with accents
-  (a translated UI string) and a regular expression after a secret label stay text. So do a
+  it (`_`, `-` and `.` join the words of a name and count as no sign), or (letters only) a
+  mix of cases that no word boundary explains, letters of two scripts with case, or a
+  lowercase run of 9 letters and more with fewer than 15 % vowels. So a word of another
+  language (`senhaAtual`, `senha_atual`, `Pflicht`), a developer abbreviation (`ctxPtr`), a
+  word in another script or with accents (a translated UI string), a path or a reference
+  (`/run/secrets/db`, `./secrets/pw.txt`, `C:\keys\db.pw`, `vault:secret/db#pw`) and a
+  value that is a whole regular expression after a secret label stay text. So do a
   number, a ratio, a time, a duration and a section (`95.2%`, `118/124`, `12:30`, `~30d`,
   `P90D`, `§3.2`), a dotted abbreviation and a word with a number (`Seite#3`). After the weak label `pass` (a boarding pass, a test pass) the
   value needs 8 characters of three classes. A comparison (`==`, `!=`), a label that is the tail
