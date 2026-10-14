@@ -114,12 +114,14 @@ def _clipboard_read() -> str:
         return ""
 
 
-def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str | None) -> tuple[str, list]:
+def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str | None,
+             tool: bool = False) -> tuple[str, list]:
     """Replace every match with its reference, right to left so offsets hold. Keys are minted in
     text order, in one vault transaction; above the per-result cap a value is masked as
-    ⟦TYPE⟧ without a key (it is not stored and cannot be resolved)."""
+    ⟦TYPE⟧ without a key (it is not stored and cannot be resolved). tool: the text is a tool result
+    or a file, where a word after a label is stored weak (vault.is_weak)."""
     ordered = sorted(matches, key=lambda x: x.start)
-    entries = vault.put_many([(m.value, m.type, m.kind) for m in ordered], session=session)
+    entries = vault.put_many([(m.value, m.type, m.kind) for m in ordered], session=session, tool=tool)
     out = text
     for m, e in sorted(zip(ordered, entries), key=lambda me: me[0].start, reverse=True):
         out = out[: m.start] + (e.ref if e is not None else f"⟦{m.type}⟧") + out[m.end:]
@@ -3447,7 +3449,7 @@ def post_tool(payload: dict) -> dict:
             resolved = _resolved_values(vault, session)
         out = s
         if matches:
-            out, ents = _replace(s, matches, vault, session)
+            out, ents = _replace(s, matches, vault, session, tool=True)
             hit["n"] += len(matches)
             values.extend(m.value for m in matches)
             entries.extend(ents)
@@ -3707,7 +3709,7 @@ def post_tool_failure(payload: dict) -> dict:
     values: list[str] = []
     out = error
     if matches:
-        out, entries = _replace(error, matches, vault, session)
+        out, entries = _replace(error, matches, vault, session, tool=True)
         hit["n"] += len(matches)
         values.extend(m.value for m in matches)
     _exact_redact(out, vault, session, hit, entries, _resolved_values(vault, session), values)

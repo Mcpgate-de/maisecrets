@@ -38,9 +38,12 @@ class ToolChannelTests(unittest.TestCase):
             with self.subTest(v=v):
                 self.assertEqual(self.kinds(f'password = Some("{v}"),', "tool"), [])
 
-    def test_a_value_only_the_tool_channel_takes_is_stored_weak_and_never_hunted(self):
+    def test_a_word_only_the_tool_channel_takes_is_stored_weak_and_a_random_value_is_not(self):
         from maisecrets.vault import is_weak
-        self.assertTrue(is_weak("label-pw-literal", "qwmzpl"), "hunting it would block a prompt with the word")
+        self.assertTrue(is_weak("label-pw-literal", "senha_atual", tool=True), "hunting it would block a prompt")
+        self.assertTrue(is_weak("ds-keyword-colon", "Wartungs" + "fenster", tool=True), "a word in a tool result")
+        self.assertFalse(is_weak("ds-keyword-colon", "Wartungs" + "fenster"), "a word the person typed stays hunted")
+        self.assertFalse(is_weak("label-pw-literal", "qwmzpl", tool=True), "random letters are a secret everywhere")
         self.assertFalse(is_weak("label-pw-literal", "kwfrzmplt"), "the prompt rule takes it too: it stays hunted")
         self.assertFalse(is_weak("ds-keyword-colon", "qwmzpl"), "another rule found it: it stays hunted")
 

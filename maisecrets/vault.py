@@ -544,13 +544,15 @@ DEFAULT_WORDS = frozenset({
     "geheim", "kennwort"})
 
 
-def is_weak(kind: str, value: str) -> bool:
-    """A value that only a label rule found and that is a known default word (DEFAULT_WORDS): replaced where it was
-    found, never hunted in other texts."""
-    from .detect import LABEL_RULES, tool_only_password
-    if str(kind) == "label-pw-literal" and tool_only_password(value):
-        return True   # a word of another language in a tool result: hunting it would block a prompt that uses the word
-    return str(kind).startswith(LABEL_RULES) and value.strip().lower() in DEFAULT_WORDS
+def is_weak(kind: str, value: str, tool: bool = False) -> bool:
+    """A value that only a label rule found and that is a known default word (DEFAULT_WORDS), or a word of some language
+    (detect.word_value) that a tool result or a file held: replaced where it was found, never hunted in other texts.
+    A word the person gave in a prompt stays hunted: a chosen word is a password there (Sommerwiese, review
+    2026-09-29); after a label in a file or a command output it is mostly text (field report on 0.6.16)."""
+    from .detect import LABEL_RULES, word_value
+    if not str(kind).startswith(LABEL_RULES):
+        return False
+    return value.strip().lower() in DEFAULT_WORDS or (tool and word_value(value.strip()))
 
 
 # ---------------------------------------------------------------- backends --
@@ -1056,7 +1058,8 @@ class Vault:
         self._save_index()
         return e
 
-    def _put_new(self, value: str, type_: str, kind: str, session: str | None, ttl: int | None) -> "Entry":
+    def _put_new(self, value: str, type_: str, kind: str, session: str | None, ttl: int | None,
+                 tool: bool = False) -> "Entry":
         fp = self.fingerprint(value)
         n = self._index["counters"].get(type_, 0) + 1
         self._index["counters"][type_] = n
@@ -1066,7 +1069,8 @@ class Vault:
         e = Entry(key=key, type=type_, kind=kind, fingerprint=fp,
                   display=display_for(type_, value), created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
-                  session=session, uses=0, sessions=[session] if session else [], weak=is_weak(kind, value))
+                  session=session, uses=0, sessions=[session] if session else [],
+                  weak=is_weak(kind, value, tool))
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
         self.backend.put(
             key, value,
@@ -1079,7 +1083,8 @@ class Vault:
         return e
 
     @_mutating
-    def put_many(self, items: list[tuple[str, str, str]], session: str | None = None) -> list["Entry | None"]:
+    def put_many(self, items: list[tuple[str, str, str]], session: str | None = None,
+                 tool: bool = False) -> list["Entry | None"]:
         """Store many values in one lock, one sweep and one index save; a tool result with
         hundreds of addresses called put() per value and rewrote the growing index each time
         (measured: 1000 e-mails 8.7 s, above the watchdog; review, 2026-09-26). Above
@@ -1104,7 +1109,7 @@ class Vault:
             if new >= cap:
                 out.append(None)
                 continue
-            out.append(self._put_new(value, type_, kind, session, None))
+            out.append(self._put_new(value, type_, kind, session, None, tool))
             new += 1
             dirty = True
             if new % 10 == 0:

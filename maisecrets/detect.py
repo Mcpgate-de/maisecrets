@@ -739,7 +739,7 @@ _ISO_DURATION_RE = re.compile(r"P(?:\d+[YMWD])*(?:T(?:\d+[HMS])+)?")   # P90D, P
 _WORD_NUMBER_RE = re.compile(r"[A-Za-z\u00c0-\u024f]{2,}[#_. :/-]\d{1,4}|\d{1,4}[#_. :/-][A-Za-z\u00c0-\u024f]{2,}")
 
 
-def _random_evidence(v: str) -> bool:
+def _random_evidence(v: str, tool: bool = False) -> bool:
     """A value that no word covers is a password only with evidence of chance (codex and Opus Gate A/B of 0.6.16): a
     letter, and a digit or a sign beside it, or (letters only) few vowels or a mix of cases that no word boundary
     explains. A word of another language (senhaAtual, wachtwoord) and a measure (95.2%, 12:30, ~30d) stay text."""
@@ -754,22 +754,10 @@ def _random_evidence(v: str) -> bool:
     if not v.isascii():
         # another script or accents: a word (a UI string) unless scripts mix or the cases change at random
         return _scripts_mix(v) or any(_case_flips(part) >= 2 for part in parts)
+    if tool:
+        return True   # a tool result or a file: ASCII letters that no word covers are a password there
     # ASCII letters joined at most by _ - .: one part with a mix of cases that no word boundary explains
     return any(_random_letters(part) for part in parts)
-
-
-def _tool_evidence(v: str) -> bool:
-    """_random_evidence without its last test: ASCII letters that no word covers are a password in a tool result."""
-    if not any(c.isalpha() for c in v):
-        return False
-    if (_MEASURE_VALUE_RE.fullmatch(v) or _ABBREVIATION_RE.fullmatch(v) or _WORD_NUMBER_RE.fullmatch(v)
-            or _ISO_DURATION_RE.fullmatch(v)):
-        return False
-    if any(c.isdigit() for c in v) or any(_is_sign(c) and c not in "_-." for c in v):
-        return True
-    if not v.isascii():
-        return _scripts_mix(v) or any(_case_flips(part) >= 2 for part in re.split(r"[_.-]+", v) if part)
-    return True
 
 
 def _is_sign(c: str) -> bool:
@@ -829,7 +817,7 @@ def _pw_literal_ok(v: str) -> bool:
         if not _WORDS_OK[0] and v.isalpha():
             return False   # without a word list, a value of letters only may be any word
         if _CHANNEL[0] == "tool":
-            return _tool_evidence(v)   # a tool result or a file: a false hit masks a value there, it blocks no prompt
+            return _random_evidence(v, tool=True)   # a false hit in a tool result masks a value, it blocks no prompt
         return _random_evidence(v)
     # a password made of a word, a number and a sign: Sommer2024!, Herbst2025#, Welcome1! (the form people choose).
     # A word with a number alone (Winter2023, postgres15) stays text here; the keyword rules judge it. So does a name
@@ -988,18 +976,36 @@ def _label_class(label: str) -> tuple:
     return got
 
 
-def tool_only_password(value: str) -> bool:
-    """Whether only the tool channel takes this password value (letters that no word covers, without evidence of
-    chance). The store keeps such a value weak: replaced where it was found, never hunted in a later text or prompt."""
-    outer = _CHANNEL[0]
-    try:
-        _CHANNEL[0] = "prompt"
-        if _pw_literal_ok(value):
-            return False
-        _CHANNEL[0] = "tool"
-        return _pw_literal_ok(value)
-    finally:
-        _CHANNEL[0] = outer
+_COMMON_PAIRS: list = []
+
+
+def _common_pairs() -> frozenset:
+    """The letter pairs that occur 20 times or more in the word list (about 370 of 676). Empty without a word list."""
+    if not _COMMON_PAIRS:
+        count: dict = {}
+        if _word_set() and _WORDS_OK[0]:
+            for w in _WORDS[0]:
+                for i in range(len(w) - 1):
+                    count[w[i:i + 2]] = count.get(w[i:i + 2], 0) + 1
+        _COMMON_PAIRS.append(frozenset(p for p, n in count.items() if n >= 20))
+    return _COMMON_PAIRS[0]
+
+
+def word_value(value: str) -> bool:
+    """Whether a value reads as a word of some language: letters only (parts joined by _ - .), no evidence of chance,
+    and in ASCII at most one rare letter pair in ten. Wartungsfenster, senha_atual and Пароль are words; xqzvbnmq,
+    Kx7QpZr9 and qwmzpl are not. The store keeps a word from a label rule weak: replaced where it was found, never
+    hunted in a later text or prompt, where it would block a prompt that uses the word (field report, 2026-10-14)."""
+    parts = [p for p in re.split(r"[_.-]+", value) if p]
+    if not parts or not all(p.isalpha() for p in parts) or _random_evidence(value):
+        return False
+    if not value.isascii():
+        return True   # another script or accents, and no mix of scripts or cases (_random_evidence)
+    common = _common_pairs()
+    if not common:
+        return False   # no word list: hunt the value, as 0.6.16 did
+    pairs = [p[i:i + 2] for p in (x.lower() for x in parts) for i in range(len(p) - 1)]
+    return sum(q not in common for q in pairs) <= 0.1 * len(pairs)
 
 
 def _judge_literal(label: str, v: str, quoted: bool = True) -> str:
@@ -2270,7 +2276,7 @@ def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt") ->
     try:
         return _scan(text, enabled)
     finally:
-        _CHANNEL[0] = outer   # a nested scan (line 1740) keeps the channel of the outer one
+        _CHANNEL[0] = outer   # the channel of an outer scan comes back after a nested one (is_fixture)
 
 
 def _scan(text: str, enabled: set[str] | None = None) -> list[Match]:
