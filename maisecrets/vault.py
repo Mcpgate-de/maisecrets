@@ -555,12 +555,12 @@ def is_weak(kind: str, value: str) -> bool:
 
 
 def is_quiet(kind: str, value: str, tool: bool) -> bool:
-    """A word of some language (detect.word_value) that a label rule took in a tool result or a file: hunted in later
+    """A word of some language (detect.reads_as_word) that a label rule took in a tool result or a file: hunted in later
     tool results as before, never in a typed prompt. A word the person gives in a prompt stays hunted everywhere: a
     chosen word is a password there (review, 2026-09-29). A random value that reads like a word (about 3 in 100 of
     8 small letters) is then not looked for in a prompt that types it bare; it is still masked in every tool result."""
-    from .detect import LABEL_RULES, word_value
-    return tool and str(kind).startswith(LABEL_RULES) and word_value(value.strip())
+    from .detect import LABEL_RULES, reads_as_word
+    return tool and str(kind).startswith(LABEL_RULES) and reads_as_word(value.strip())
 
 
 # ---------------------------------------------------------------- backends --
@@ -1047,6 +1047,33 @@ class Vault:
             weak = is_weak(self._index["entries"][key]["kind"], value)
             self._index["entries"][key]["weak"] = weak
             n += weak
+        return n
+
+    @_mutating
+    def mark_quiet_entries(self) -> int:
+        """Once per store: mark quiet the words a version before 0.6.17 stored from a label rule (see Entry.quiet). Such
+        a version could not tell a tool result from a prompt, and each hit renewed the entry, so a word from a file
+        blocked prompts for up to max_ttl_seconds (field report on 0.6.16). The origin is unknown here: a word the
+        person typed then is quiet too, and a prompt that gives it again after a label clears the mark. Reads the
+        value of each such entry once; a store that refuses a read is asked again at the next start. Returns the
+        count marked quiet."""
+        if self._index.get("quiet_pass"):
+            return 0
+        from .detect import LABEL_RULES, reads_as_word
+        todo = [k for k, m in self._index["entries"].items() if not m.get("purged") and not m.get("weak")
+                and not m.get("quiet") and str(m.get("kind", "")).startswith(LABEL_RULES)]
+        n = 0
+        for key in todo:
+            try:
+                value = self.backend.get(key)
+            except RuntimeError as exc:
+                from . import incidents
+                incidents.note("store.mark-weak", exc)    # the same start pass class (docs/DIAGNOSTICS.md)
+                return n            # no pass mark: the next start reads the rest
+            if value and reads_as_word(value.strip()):
+                self._index["entries"][key]["quiet"] = True
+                n += 1
+        self._index["quiet_pass"] = 1
         return n
 
     # api -------------------------------------------------------------------

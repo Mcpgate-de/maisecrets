@@ -8,6 +8,7 @@ runner = [
   "tests/test_tool_channel.py::ToolChannelTests::test_the_channel_of_one_scan_does_not_reach_the_next_scan_of_the_same_text",
   "tests/test_tool_channel.py::ToolChannelTests::test_a_typed_prompt_with_letters_after_a_password_label_is_not_blocked",
   "tests/test_tool_channel.py::ToolChannelTests::test_post_tool_masks_the_value_in_a_read_result",
+  "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_tool_result_after_a_failed_command_takes_the_tool_rule_too",
 ]
 
 [[proof]]
@@ -33,3 +34,9 @@ path = "the tool hook scans with the prompt rule"
 file = "maisecrets/hooks.py"
 find = "        matches = [m for m in detect.scan(s, channel=\"tool\") if not detect.is_fixture(m, s, path)]"
 replace = "        matches = [m for m in detect.scan(s) if not detect.is_fixture(m, s, path)]"
+
+[[proof]]
+path = "the failed-command hook scans with the prompt rule"
+file = "maisecrets/hooks.py"
+find = "    matches = [m for m in detect.scan(error, channel=\"tool\") if not detect.is_fixture(m, error, \"\")]"
+replace = "    matches = [m for m in detect.scan(error) if not detect.is_fixture(m, error, \"\")]"

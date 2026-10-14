@@ -579,6 +579,9 @@ _EXTRA_WORDS = frozenset({
     "gcp", "ssh", "rsa", "pem", "http", "https", "www", "com", "org", "net", "io", "js", "py", "go", "is", "on",
     "of", "to", "in", "at", "by", "no", "ok", "yes", "let", "me", "foo", "bar", "baz", "abc", "xyz", "qwerty", "pw",
     "secret", "token", "hello", "world", "demo", "mock", "fake", "dummy", "sample", "example", "default",
+    # "password" in other languages: the value of a locale key (`"password": "Senha"`), not a password (Opus Gate B)
+    "senha", "heslo", "geslo", "lozinka", "sifre", "haslo", "parola", "parool", "salasana", "jelszo", "losenord",
+    "passord", "adgangskode", "wachtwoord", "kennwort", "passwort", "contrasena", "motdepasse", "sifra", "parole",
     "kwargs", "args", "argv", "self", "this", "opts", "params", "nil", "none", "null", "undefined",
     "md5", "sha1", "sha2", "sha3", "sha224", "sha256", "sha384", "sha512", "pbkdf2", "bcrypt", "scrypt", "argon2",
     "argon2i", "argon2d", "argon2id", "aes", "aes128", "aes192", "aes256", "gcm", "cbc", "ctr", "hmac", "des",
@@ -991,7 +994,7 @@ def _common_pairs() -> frozenset:
     return _COMMON_PAIRS[0]
 
 
-def word_value(value: str) -> bool:
+def reads_as_word(value: str) -> bool:
     """Whether a value reads as a word of some language: letters only (parts joined by _ - .), no evidence of chance,
     and in ASCII at most one rare letter pair in ten. Wartungsfenster, senha_atual and Пароль are words; xqzvbnmq,
     Kx7QpZr9 and qwmzpl are not. The store keeps a word from a label rule weak: replaced where it was found, never

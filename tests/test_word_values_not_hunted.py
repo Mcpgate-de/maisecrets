@@ -26,7 +26,7 @@ from _hygiene import CLAUDE  # noqa: E402
 
 CFG = '{"backend": "jsonfile", "allow_plaintext_store": true}'
 WORD = "Wartungs" + "fenster"          # German: maintenance window
-FOREIGN = "senha" + "_atual"           # Portuguese: current password, a UI key only the tool channel takes
+FOREIGN = "Lieblings" + "farbe"       # German: favourite colour, an answer field only the tool channel takes
 RANDOM = "xqzv" + "bnmq"               # random small letters (Codex review, 2026-09-29): a secret wherever it shows up
 RANDOM_TOOL = "pozk" + "emva"          # random small letters only the tool channel takes; 8 letters, because a later
 #                                        text of another session hunts a value of 8 characters and more (0.6.16 too)
@@ -79,6 +79,30 @@ class WordValuesNotHuntedTests(unittest.TestCase):
         self.assertTrue(self.blocked(f"password: {WORD}", "s2"), "the label rule takes it in the prompt")
         self.assertTrue(self.blocked(f"Das {WORD} ist morgen.", "s3"), "from now on it is the person's password")
 
+    def test_the_first_start_quiets_a_word_an_older_version_stored_and_keeps_a_random_value(self):
+        self.assertTrue(self.blocked(f"password: {WORD}", "s1"))
+        self.assertTrue(self.blocked(f"DB_PASSWORD={RANDOM}", "s1"))
+        index = Path(self.home, "index.json")
+        idx = json.loads(index.read_text())
+        for meta in idx["entries"].values():
+            meta.pop("quiet", None)                          # as 0.6.16 wrote them
+        idx.pop("quiet_pass", None)
+        index.write_text(json.dumps(idx))
+        self.assertTrue(self.blocked(f"Das {WORD} ist morgen.", "s2"), "before the start: hunted as in 0.6.16")
+        start = self.hook("session-start", {"session_id": "s3", **CLAUDE})
+        self.assertIn("1 stored word(s) no longer block a prompt", start.get("systemMessage", ""))
+        self.assertFalse(self.blocked(f"Das {WORD} ist morgen.", "s4"))
+        self.assertTrue(self.blocked(f"the value is {RANDOM}", "s4"), "a random value is still hunted in prompts")
+        self.assertNotIn("no longer block", self.hook("session-start", {"session_id": "s5", **CLAUDE})
+                         .get("systemMessage", ""), "the pass runs once per store")
+
+    def test_a_tool_result_after_a_failed_command_takes_the_tool_rule_too(self):
+        out = self.hook("post-tool-failure", {"tool_name": "Bash", "session_id": "s1", **CLAUDE,
+                                              "tool_input": {"command": "x"},
+                                              "error": f'error: password = Some("{RANDOM_TOOL}"), rejected'})
+        self.assertIn("systemMessage", out, out)
+        self.assertTrue(self.blocked(f"the value is {RANDOM_TOOL}", "s2"), "stored from the failed output, hunted")
+
     def test_a_random_value_that_reads_like_a_word_is_still_masked_in_a_later_tool_result(self):
         value = "ppsm" + "ohsyeeub"     # random small letters of common letter pairs (Codex review, 2026-10-14)
         self.assertNotIn(value, self.bash(f"DB_PASSWORD={value}\n", "s1"))
@@ -86,7 +110,7 @@ class WordValuesNotHuntedTests(unittest.TestCase):
 
     def test_a_word_only_the_tool_channel_takes_is_not_hunted_either(self):
         self.assertNotIn(FOREIGN, self.bash(f'password = Some("{FOREIGN}"),\n', "s1"))
-        self.assertFalse(self.blocked(f"rename the key {FOREIGN} in the UI file", "s2"))
+        self.assertFalse(self.blocked(f"rename the field {FOREIGN} in the form", "s2"))
 
     def test_a_random_value_after_a_label_is_still_hunted_in_a_later_prompt(self):
         self.assertNotIn(RANDOM, self.bash(f"DB_PASSWORD={RANDOM}\n", "s1"))

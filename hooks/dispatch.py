@@ -160,6 +160,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         v.expire(limit=None)
         quieted = v.quiet_code_words()
         v.mark_weak_entries()
+        quiet_words = v.mark_quiet_entries()
     except RuntimeError as exc:
         # a damaged index: the message names `maisecrets repair`; a traceback here gave the
         # client no JSON and the person no hint
@@ -204,6 +205,10 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
                                 f" {len(quieted)} stored word(s) are program code, not secrets "
                                 f"({', '.join(quieted)}): maisecrets no longer redacts them in other texts. "
                                 "/maisecrets:forget deletes them.")
+    if quiet_words:
+        out["systemMessage"] = (out.get("systemMessage", "") +
+                                f" {quiet_words} stored word(s) no longer block a prompt; they stay masked in tool "
+                                "results. /maisecrets:list shows them.")
     if cfg.get("config_warning"):
         out["systemMessage"] = out.get("systemMessage", "") + f" Warning: {cfg['config_warning']}."
     # /ms is offered once, not installed: writing ~/.claude/commands without a question was a

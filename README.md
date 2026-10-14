@@ -1192,9 +1192,10 @@ Four sources, one scanner (`maisecrets/detect.py`):
   and words in another script or with accents stay text in both. The secret-hygiene skill scans
   files, commits and tool results the same way.
 - A word that a label rule takes in a tool result or a file blocks no later prompt (0.6.17): a
-  value of letters only, with no evidence of chance and at most one rare letter pair in ten
-  (pairs counted in the word list). maisecrets still masks it in every later tool result, but
-  does not look for it in a typed prompt. A random value (`xqzvbnmq`) is looked for in prompts
+  value of letters only, with no evidence of chance and, in ASCII, at most one rare letter pair in
+  ten (pairs counted in the word list). maisecrets still masks it in every later tool result, but
+  does not look for it in a typed prompt. The first session start of 0.6.17 marks the words that
+  an older version stored the same way, once; it cannot tell where they came from. A random value (`xqzvbnmq`) is looked for in prompts
   too, and so is a word the person gives in a prompt, also when a tool result held it first.
   Limit: a random value of small letters that reads like a word (about 3 in 100 of 8 letters,
   1 in 200 of 12) is not looked for in a prompt that has it without a label.

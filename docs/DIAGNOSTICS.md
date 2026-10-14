@@ -136,7 +136,7 @@ site fails. `scrub.write` is a string of code in the child and is checked by its
 | `store.lock` | 220 (`LockTimeout` after `LOCK_DEADLINE`) | fail-closed |
 | `store.timeout-keychain`, `store.timeout-openssl`, `store.timeout-locker` | 598; `_run_store` gets a closed backend id instead of display text. A store timeout longer than the watchdog shows up as `hook.<event>.watchdog` | fail-closed |
 | `store.decrypt` | the swallowed decrypt failure at 789 (the value is then "not available") | best-effort |
-| `store.mark-weak` | 997 | best-effort |
+| `store.mark-weak` | 997, and the same read in `mark_quiet_entries` (0.6.17) | best-effort |
 | `store.expire` | the `except` at 1327 (also a keychain delete that fails there, 679) | best-effort |
 | `config.policy-invalid` | a policy that does not read, parse or type-check (402, 404, 407, and `_check_types` 257/261/264 through the policy call at 408), and the jsonfile rule at 434, at the hook's `config-error` answer | fail-closed |
 | `config.user-ignored` | the `except ConfigError` at 342 (it catches 323 and `_check_types` for the user file) | best-effort |

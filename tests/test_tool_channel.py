@@ -34,7 +34,7 @@ class ToolChannelTests(unittest.TestCase):
         self.assertEqual(self.kinds(LETTERS, "tool"), ["label-pw-literal"])
 
     def test_measures_durations_and_words_of_other_scripts_stay_text_in_a_tool_result(self):
-        for v in ("95.5%", "12:30", "250W", "P90D", "Пароль"):
+        for v in ("95.5%", "12:30", "250W", "P90D", "Пароль", "Senha", "Heslo", "Lozinka"):   # a locale value too
             with self.subTest(v=v):
                 self.assertEqual(self.kinds(f'password = Some("{v}"),', "tool"), [])
 
