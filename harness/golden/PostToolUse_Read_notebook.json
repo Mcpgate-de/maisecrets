@@ -1,0 +1,42 @@
+{
+ "session_id": "{session_id}",
+ "transcript_path": "{transcript_path}",
+ "cwd": "{cwd}",
+ "prompt_id": "{prompt_id}",
+ "permission_mode": "default",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PostToolUse",
+ "tool_name": "Read",
+ "tool_input": {
+  "file_path": "{cwd}/plot.ipynb"
+ },
+ "tool_response": {
+  "type": "notebook",
+  "file": {
+   "filePath": "{cwd}/plot.ipynb",
+   "cells": [
+    {
+     "cellType": "code",
+     "source": "plot()",
+     "execution_count": 1,
+     "cell_id": "cell-0",
+     "language": "python",
+     "outputs": [
+      {
+       "output_type": "display_data",
+       "text": "<Figure>",
+       "image": {
+        "image_data": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==",
+        "media_type": "image/png"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "tool_use_id": "{tool_use_id}",
+ "duration_ms": 0
+}

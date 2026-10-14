@@ -60,6 +60,9 @@ DEFAULT_CONFIG = {
     "ssh_host_groups": {},           # {"group": ["host", …]}: one ssh consent covers the whole group
     "ssh_autonomous_hosts": [],      # hosts (or group names) where the AI writes over ssh without asking, always
     "rule_dirs": [],                 # folders of detection rules of your own (user_rules.py); a typed prompt adds one
+    "read_pdf": "allow",             # allow | ask | block | convert: a PDF that the AI reads (file_reads.py, C28)
+    "read_image": "allow",           # allow | ask | block: an image that the AI reads
+    "clean_dirs": [],                # folders whose PDFs and images pass as allow; a typed prompt adds one
     "secret_destinations": "observe",  # observe: note where each stored secret is sent (destinations.py); off
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
@@ -91,6 +94,7 @@ _CONFIG_TYPES = {
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
     "ssh_consent": bool, "ssh_host_groups": dict, "ssh_autonomous_hosts": list, "secret_destinations": str,
     "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool, "rule_dirs": list,
+    "read_pdf": str, "read_image": str, "clean_dirs": list,
 }
 
 
@@ -321,6 +325,16 @@ def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
     if isinstance(parsed.get("rule_dirs"), list):
         # more rules only make detection stricter: they run after every built-in rule, so none takes a span first
         cfg["rule_dirs"] = parsed["rule_dirs"]
+    for key in ("read_pdf", "read_image"):
+        if parsed.get(key) in ("ask", "block", "convert"):
+            cfg[key] = parsed[key]                 # each stops more than the default allow; clean_dirs only loosens
+
+
+def _read_fallback(cfg: dict) -> None:
+    """A config.json that cannot be read may say read_pdf or read_image block: both count as block until it is fixed,
+    the same rule as rehydration (review of block 4: bad JSON turned a block into allow)."""
+    cfg["read_pdf"] = cfg["read_image"] = "block"
+    cfg["read_fallback"] = True
 
 
 def load_config() -> dict:
@@ -349,6 +363,7 @@ def load_config() -> dict:
         _note_user_config(exc)
         cfg["rehydration"] = "block"
         cfg["rehydration_fallback"] = True
+        _read_fallback(cfg)
     except ValueError:
         # the user file is advisory: a typo must not lock the user out of the client (review,
         # 2026-09-26). The defaults are the strict values, so the fallback loosens nothing; the
@@ -359,17 +374,21 @@ def load_config() -> dict:
         # the file may have set block: an ignored file loosens nothing, so nothing is rehydrated until it is fixed
         cfg["rehydration"] = "block"
         cfg["rehydration_fallback"] = True
+        _read_fallback(cfg)
     except ConfigError as exc:
         cfg["config_warning"] = f"{exc}; the file was ignored"
         _note_user_config(None, "shape")
         if isinstance(user, dict):
             _keep_the_stricter(cfg, user)
+            # an ignored file may have said block for a PDF or an image: both block until it is fixed (README)
+            _read_fallback(cfg)
             # the file still says what the person decided: no hint asks about a key they wrote (settings.py)
             cfg["user_keys_ignored"] = sorted(k for k in user if k in _CONFIG_TYPES)
         else:
             # JSON that is no object cannot be read either (it may wrap a block): the same as invalid JSON
             cfg["rehydration"] = "block"
             cfg["rehydration_fallback"] = True
+            _read_fallback(cfg)
         user = {}
     unknown = sorted(k for k in user if k not in _CONFIG_TYPES)
     if unknown:

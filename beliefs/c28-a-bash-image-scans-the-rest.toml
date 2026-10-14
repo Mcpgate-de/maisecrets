@@ -1,0 +1,10 @@
+# c28-a-bash-image-scans-the-rest: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-a-bash-image-scans-the-rest"
+control = "C28"
+statement = "A Bash result that the client marks isImage skips the shape scan with its stdout only (the base64 gets the exact match): a token in its stderr is masked."
+runner = ["tests/test_file_reads.py::BashDataUri::test_an_image_passes_but_its_stderr_is_scanned"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if swap and swap[0] == \"pass\":\n        swap = None\n"
+replace = "    if swap and swap[0] == \"pass\":\n        return {}\n"
