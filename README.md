@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 128 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 135 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -584,7 +584,9 @@ one-line tip that appears once a day at session start.
 
 `regions`: country codes, for example `["de", "us"]`. Each country adds its
 Presidio rules for personal data, such as a German tax ID or a US social
-security number. The entry `auto` is the country of your system setting (on
+security number. `ch` and `at` add maisecrets' own rules for Switzerland (AHV
+number, company UID) and Austria (social insurance number, UID), for which
+Presidio has none. The entry `auto` is the country of your system setting (on
 macOS and Windows the system setting, not `LANG`). The default is `["auto"]`.
 An empty list keeps the generic rules only. The old key `pii_regions` still
 works.
@@ -1163,13 +1165,30 @@ Four sources, one scanner (`maisecrets/detect.py`):
   gives Steuer-ID,
   Sozialversicherungsnummer, Personalausweis, Reisepass, USt-ID,
   Krankenversicherung, PLZ, Kfz, LANR, BSNR). Checksums for
-  the German types are ported and checked against Presidio
+  the German types, PESEL, the Spanish DNI and NIE, the NHS number, the ABA
+  routing number and the codice fiscale are ported and checked against Presidio
   (`scripts/check_validators_against_presidio.py`). A digit-only shape such as
   a Steuer-ID is reported only with a context word nearby, even when the
   checksum passes. A USt-ID written `DE` and nine digits also needs a word
   such as `USt-IdNr` or `VAT` nearby: alone, that shape is often a FIX tag or
   an XML id. A Handelsregister number is not reported: it names a company, is
-  public and is no personal data.
+  public and is no personal data. Own rules (`REGIONAL_RULES` in
+  `maisecrets/detect.py`) add what Presidio lacks: the Personalausweis and
+  Reisepass number in the 9 characters the card prints (Presidio read the 9th
+  as a check digit, which only the machine-readable zone carries), the
+  Steuer-ID and the Rentenversicherungsnummer with the spaces of their printed
+  form, and the Swiss and Austrian numbers. The Steuer-ID check follows the
+  repeat rule of its issuer (exactly one digit twice or three times, never three
+  in a row; ITZBund, "KONZEPT Steueridentifikationsnummer", version 2.3, 2016).
+- **Crypto wallet secrets**: a BIP39 seed phrase (12 to 24 words of the
+  English list, `maisecrets/rules/bip39_english.txt`, MIT, whose checksum
+  holds), a Bitcoin private key in Wallet Import Format and a BIP32 extended
+  private key (`xprv`, `yprv`, `zprv`, `tprv`, …) are secrets by their checksum,
+  with no label. A phrase of 12 words (a checksum of 4 bits) needs a word such
+  as seed, wallet, recovery or password near it; 15 to 24 words stand alone.
+  Addresses, extended public keys, the BIP39 reference vectors and a run of
+  more than 48 list words (a word list) stay text. Not found yet: a phrase in
+  a numbered list, a JSON array, or capitalised.
 - **detect-secrets** (Yelp, Apache-2.0, version in `DETECT_SECRETS_VERSION`,
   refresh with `scripts/sync_detect_secrets.py vX.Y.Z`): credentials
   recognised by position (`password = …`, `api_key: "…"`, `user:pass@host`),
@@ -1277,8 +1296,17 @@ Four sources, one scanner (`maisecrets/detect.py`):
   their spans in the secret stage, before detect-secrets and betterleaks.
 - Prefixes newer than the vendored rulesets live in
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
-  (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last
-  two found bare in real prompts on 2026-09-26.
+  (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_`, the last two
+  found bare in real prompts on 2026-09-26, and since 0.6.19 Google OAuth
+  access tokens (`ya29.`), Tailscale keys, Discord webhook URLs, Salesforce
+  refresh tokens, Cloudflare `cfk_` and `cfat_`, HubSpot private app tokens,
+  New Relic `NRAK-`, `NRII-`, `NRRA-`, `NRAA-`, `NRIQ-` and `px-api-`, Claude
+  Code OAuth tokens (`sk-ant-oat01-`, `sk-ant-ort01-`), Flutterwave, Doppler,
+  Square `sq0csp-`, Contentful, Mapbox `sk.`, Kong Konnect, SonarQube Cloud
+  `sqco_`, Adafruit IO and TestPyPI tokens. A Telegram bot token, a Mailchimp key and a Discord bot
+  token (its first part must decode to a user id) have no fixed prefix and are
+  own rules. A client id such as Salesforce `3MVG9` or Square `sq0idp-` is
+  public and stays text.
 - A secret shape with a fixed length (betterleaks: `glpat-[\w-]{20}`) is
   extended to the end of the token characters, so a longer token does not
   leave its tail in the clear (found with a 24-char token, 2026-09-26).

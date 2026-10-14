@@ -46,6 +46,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import checksums
+
 RULES_DIR = Path(__file__).resolve().parent / "rules"
 
 
@@ -183,11 +185,19 @@ def _public_ip(ip: str) -> bool:
 
 
 def _de_tax_id_ok(v: str) -> bool:
-    """Steuer-ID, ISO 7064 Mod 11,10 (BZSt), plus the digit-frequency rule."""
+    """Steuer-ID (IdNr, § 139b AO): eleven digits, the first never 0. In the first ten, exactly one digit occurs twice
+    or three times and every other digit once at most; a digit that occurs three times never stands at three places
+    in a row. The eleventh is the check digit, ISO 7064 MOD 11,10. Source: ITZBund, "KONZEPT Steueridentifikationsnummer
+    (IdNr) nach § 139b AO", version 2.3 of 2016-03-01, section 1, and ELSTER, "Prüfung der Steuer- und
+    Steueridentifikationsnummer", 2026-09-02, section 2.2. Presidio's "no digit more than three times" passed 8.7 % of
+    random numbers; this rule passes 0.4 % (0.6.19)."""
     if len(v) != 11 or not v.isdigit() or v[0] == "0":
         return False
     digits = [int(d) for d in v]
-    if max(Counter(digits[:10]).values()) > 3:
+    repeated = [(d, n) for d, n in Counter(digits[:10]).items() if n > 1]
+    if len(repeated) != 1 or repeated[0][1] not in (2, 3):
+        return False
+    if repeated[0][1] == 3 and any(digits[i] == digits[i + 1] == digits[i + 2] for i in range(8)):
         return False
     product = 10
     for i in range(10):
@@ -213,32 +223,6 @@ def _de_social_security_ok(v: str) -> bool:
         prod = int(ch) * w
         total += prod // 10 + prod % 10
     return total % 10 == int(v[11])
-
-
-def _icao_check(v: str, forbidden: str = "") -> bool:
-    """ICAO Doc 9303 check digit (weights 7,3,1) over 8 characters, digit at position 9."""
-    v = v.upper().strip()
-    if len(v) != 9 or not v[-1].isdigit():
-        return False
-    if any(c in forbidden for c in v[:-1]):
-        return False
-    total = 0
-    for i, c in enumerate(v[:-1]):
-        if c.isdigit():
-            val = int(c)
-        elif "A" <= c <= "Z":
-            val = ord(c) - ord("A") + 10
-        else:
-            return False
-        total += val * (7, 3, 1)[i % 3]
-    return total % 10 == int(v[-1])
-
-
-def _de_id_card_ok(v: str) -> bool:
-    v = v.upper().strip()
-    if len(v) == 9 and v[0] == "T" and v[1:].isdigit():
-        return True   # legacy pre-2010 number, no check digit
-    return _icao_check(v)
 
 
 def _de_health_insurance_ok(v: str) -> bool:
@@ -1144,8 +1128,7 @@ VALIDATORS = {
     "prose_value": _prose_value_ok,
     "de_tax_id": _de_tax_id_ok,
     "de_social_security": _de_social_security_ok,
-    "de_id_card": _de_id_card_ok,
-    "de_passport": lambda v: _icao_check(v, forbidden="ABDEIOQSU"),
+    "de_social_security_spaced": lambda v: _de_social_security_ok(v.replace("\u00a0", " ")),
     "de_health_insurance": _de_health_insurance_ok,
     "de_lanr": _de_lanr_ok,
     "de_bsnr": lambda v: len(v.strip()) == 9 and v.strip().isdigit() and v.strip() != "000000000",
@@ -1159,6 +1142,23 @@ VALIDATORS = {
     # name%40firma.de in a URL query, a form body or an access log: the same address, percent-encoded
     "person_email_encoded": lambda v: VALIDATORS["person_email"](v.replace("%40", "@")),
     "us_ssn": _us_ssn_ok,
+    # checksums.py: ports of Presidio validators that were missing, the German document number, Switzerland, Austria
+    # and the crypto wallet secrets
+    "de_document": checksums.de_document_ok,
+    "de_tax_id_spaced": lambda v: _de_tax_id_ok(re.sub(r"[ \u00a0]", "", v)),
+    "pl_pesel": checksums.pl_pesel_ok,
+    "es_nif": checksums.es_nif_ok,
+    "es_nie": checksums.es_nie_ok,
+    "uk_nhs": checksums.uk_nhs_ok,
+    "us_aba": checksums.us_aba_ok,
+    "it_fiscal_code": checksums.it_fiscal_code_ok,
+    "ch_ahv": checksums.ch_ahv_ok,
+    "ch_uid": checksums.ch_uid_ok,
+    "at_uid": checksums.at_uid_ok,
+    "at_social_security": checksums.at_social_security_ok,
+    "wif": checksums.wif_ok,
+    "xprv": checksums.xprv_ok,
+    "discord_bot_token": checksums.discord_bot_token_ok,
 }
 
 
@@ -1303,6 +1303,35 @@ OWN_RULES: list[dict] = [
     # Elasticsearch's API key in an Authorization header: `Authorization: ApiKey <base64 of id:key>`, as a header
     # line, in curl -H, or as the key of a header object (`authorization: 'ApiKey <value>'`). Only after the header
     # name: prose names the scheme ("send ApiKey followed by …", Gate B of 0.6.16)
+    # crypto wallet secrets (0.6.19): each is found by its checksum and needs no label. A Bitcoin private key in Wallet
+    # Import Format (Base58Check, version 0x80: 51 characters from 5, or 52 from K or L for a compressed key; on testnet
+    # 0xEF, from 9 or c), and a BIP32 extended private key (xprv, and the yprv, zprv, Yprv, Zprv, tprv, uprv, vprv,
+    # Uprv, Vprv of SLIP-0132). The public forms (an address, an xpub) are no secret and stay text
+    {"id": "crypto-wif-private-key", "type": "SECRET", "validator": "wif",
+     "regex": r"(?<![1-9A-HJ-NP-Za-km-z])(?:[59][1-9A-HJ-NP-Za-km-z]{50}|[KLc][1-9A-HJ-NP-Za-km-z]{51})"
+              r"(?![1-9A-HJ-NP-Za-km-z])"},
+    {"id": "crypto-extended-private-key", "type": "SECRET", "validator": "xprv",
+     "regex": r"(?<![1-9A-HJ-NP-Za-km-z])[xyztuvYZUV]prv[1-9A-HJ-NP-Za-km-z]{100,108}"
+              r"(?![1-9A-HJ-NP-Za-km-z])"},
+    # three token formats with no literal prefix, so not in rules/prefixes.txt (0.6.19). A Telegram bot token: the
+    # bot's id, a colon and 34 or 35 characters starting with A (the Bot API documentation's example has 34), alone
+    # or in the API URL .../bot<token>/sendMessage (Gate B of 0.6.19). A Mailchimp API key: 32 hex digits and the
+    # data centre (-us1 …). A Discord bot token: three base64url parts, the first the bot's user id in base64, which
+    # the validator decodes: a random three-part value is not a run of 17 to 20 digits there
+    {"id": "telegram-bot-token", "type": "SECRET",
+     "regex": r"(?:(?<=/bot)|(?<![0-9A-Za-z_:-]))[0-9]{5,16}:A[0-9A-Za-z_-]{33,34}"
+              r"(?![0-9A-Za-z_-])"},
+    {"id": "mailchimp-api-key", "type": "SECRET",
+     "regex": r"(?<![0-9A-Za-z])[0-9a-f]{32}-us[0-9]{1,2}(?![0-9A-Za-z])"},
+    {"id": "discord-bot-token", "type": "SECRET", "validator": "discord_bot_token",
+     "regex": r"(?<![0-9A-Za-z_.-])[MNO][0-9A-Za-z_-]{23,27}\.[0-9A-Za-z_-]{6}\.[0-9A-Za-z_-]{27,38}"
+              r"(?![0-9A-Za-z_.-])"},
+    # a BIP39 seed phrase: 12 to 24 words of the English list whose checksum holds (checksums.bip39_spans; the regex is
+    # never run). Twelve words carry a checksum of 4 bits, so one list of ordinary words in 16 passes ("client connect
+    # system process input output error return result update file edit", Gate A of 0.6.19): a phrase of 12 needs a word
+    # such as seed, mnemonic or wallet in the 200 characters before it or on its line; 15 and more (5 to 8 bits) stand
+    # alone
+    {"id": "crypto-seed-phrase", "type": "SECRET", "regex": r"(?!)"},
     {"id": "auth-scheme-apikey", "type": "SECRET", "secret_group": 1, "validator": "apikey_value",
      "regex": r"(?i:authorization)[\"']?\]?[ \t]*[:=][ \t]*[\"'`]?ApiKey[ \t]+([A-Za-z0-9+/_-]{8,1024}={0,2})"
               r"(?![\w+/=-])"},
@@ -1381,19 +1410,29 @@ def _combine_drops(*drops):
 # entity -> placeholder type (short, stable); anything else keeps its entity name
 ENTITY_TYPE = {"EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "CREDIT_CARD": "CARD",
                "IP_ADDRESS": "IP", "PHONE_NUMBER": "PHONE"}
-# covered by OWN_RULES with bounded regexes and validators, or not PII worth a placeholder
+# covered by OWN_RULES with bounded regexes and validators, or not PII worth a placeholder. The German ID card and
+# passport are REGIONAL_RULES: Presidio reads the 9th character as an ICAO check digit over the first 8, but the card
+# prints the 9-character number without its check digit (it stands in the machine-readable zone only), so 37 of 40
+# real-shaped numbers and the number of the official specimen card were missed (survey of other detectors, 0.6.19).
 # de-handelsregister: a company's register number, public in the Handelsregister and no personal data
-PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "crypto", "de-handelsregister"}
+PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "de-id-card", "de-passport",
+                 "crypto", "de-handelsregister"}
 # validator id per presidio recognizer id; a recognizer with a validator we did not port
 # keeps its pattern score and is treated as weak (context required)
 PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
                       "de-tax-id": "de_tax_id", "de-social-security": "de_social_security",
-                      "de-id-card": "de_id_card", "de-passport": "de_passport",
                       "de-health-insurance": "de_health_insurance", "de-lanr": "de_lanr",
-                      "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id", "us-ssn": "us_ssn"}
-# shapes that are plain digit runs: even with a valid checksum, ask for a context word
+                      "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id", "us-ssn": "us_ssn",
+                      # 0.6.19: with the context word alone a value with a wrong check digit was a hit
+                      "pl-pesel": "pl_pesel", "es-nif": "es_nif", "es-nie": "es_nie", "nhs": "uk_nhs",
+                      "aba-routing": "us_aba", "it-fiscal-code": "it_fiscal_code"}
+# shapes that are plain digit runs: even with a valid checksum, ask for a context word. The validators ported in
+# 0.6.19 keep the context word they needed before: a check digit alone passes one value in 10 to 26
 PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "de-plz", "de-kfz",
-                           "de-fuehrerschein", "nhs", "aba-routing", "medical-license"}
+                           "de-fuehrerschein", "nhs", "aba-routing", "medical-license", "pl-pesel", "es-nif",
+                           "es-nie", "it-fiscal-code"}
+# a Presidio pattern with no boundary: PESEL's eleven digits matched inside a longer digit run
+PRESIDIO_DIGIT_BOUNDED = {"pl-pesel"}
 # single patterns that need a context word although their recognizer does not: DE and nine digits that pass the
 # checksum are also FIX tags and XML identifiers; a real VAT ID stands next to USt-IdNr or VAT. The spaced form
 # (de-vat-id#1) has a low score and needs its word already
@@ -1410,6 +1449,73 @@ PRESIDIO_EXTRA_CONTEXT = {
 # switch is the REGION, derived from the recognizer id; "generic" is always on.
 REGION_OF_ID = {"nhs": "uk", "aba-routing": "us", "medical-license": "us"}
 DEFAULT_PII_REGIONS = ("generic",)   # without a config: the rules of no country
+
+# country rules of our own (0.6.19): forms Presidio has no pattern for, and Switzerland and Austria, which it has no
+# rules for. The design follows a fork of this project (Apache-2.0, see NOTICE). Each rule names its region; a rule
+# with require_context needs one of its context words within 80 characters before or 40 after the value.
+_DE_TAX_ID_CONTEXT = ("steueridentifikationsnummer", "steuer-id", "steuerid", "steuerliche identifikationsnummer",
+                      "steuerliche identifikation", "persönliche identifikationsnummer", "steuer identifikation",
+                      "idnr", "steuer-idnr", "identifikationsnummer", "bzst")
+_DE_ID_CARD_CONTEXT = ("personalausweis", "ausweis", "personalausweisnummer", "ausweisnummer", "ausweis-nr",
+                       "ausweisnr", "personalausweisnr", "dokumentennummer", "ausweisdokument", "npa",
+                       "neuer personalausweis", "bundespersonalausweis", "identity card", "id card", "id-card",
+                       "national id", "mrz")
+_DE_PASSPORT_CONTEXT = ("reisepass", "passnummer", "reisepassnummer", "reisepass-nr", "pass-nr", "passnr",
+                        "reisepassnr", "dokumentennummer", "passport", "passport number", "mrz")
+_CH_AHV_CONTEXT = ("ahv", "avs", "ahv-nr", "ahv-nummer", "ahvn13", "avs-nr", "sozialversicherungsnummer",
+                   "sozialversicherung", "versichertennummer", "sv-nummer", "numéro avs", "numero avs", "n° avs",
+                   "no avs", "assurance sociale", "assicurazione sociale")
+_AT_SV_CONTEXT = ("sozialversicherungsnummer", "versicherungsnummer", "sv-nummer", "sv-nr", "svnr", "vsnr",
+                  "e-card", "sozialversicherung")
+_VAT_CONTEXT = ("uid", "uid-nr", "uid-nummer", "ust-id", "ust-idnr", "ustid", "umsatzsteuer",
+                "umsatzsteuer-identifikationsnummer", "mwst", "mwst-nr", "tva", "iva", "vat", "vat id", "vat number",
+                "unternehmens-identifikationsnummer")
+_DOC = "CFGHJKLMNPRTVWXYZ"
+REGIONAL_RULES: list = [
+    # the German ID card and passport: 9 characters as printed on the card, or 10 with the ICAO check digit as in the
+    # machine-readable zone. BSI TR-03123-2 v1.8.2, 3.2.1, and the BMI sheet "Die Dokumentennummer in deutschen
+    # Ausweisen und Pässen" (2023-11-01): the consonants C F G H J K L M N P R T V W X Y Z and the digits (0 only before
+    # 2021-11), the first a letter since 2023-11 (the specimens of 2010, 2019 and 2021 start with one too)
+    {"id": "de-id-card", "region": "de", "type": "DE_ID_CARD", "validator": "de_document",
+     "context": _DE_ID_CARD_CONTEXT, "require_context": True,
+     "regex": rf"(?<![A-Za-z0-9])[{_DOC}][{_DOC}0-9]{{8}}[0-9]?(?![A-Za-z0-9])"},
+    {"id": "de-passport", "region": "de", "type": "DE_PASSPORT", "validator": "de_document",
+     "context": _DE_PASSPORT_CONTEXT, "require_context": True,
+     "regex": rf"(?<![A-Za-z0-9])[{_DOC}][{_DOC}0-9]{{8}}[0-9]?(?![A-Za-z0-9])"},
+    # the Steuer-ID as the tax office prints it, 2-3-3-3 digits; the 11 digits in one run are Presidio's de-tax-id
+    {"id": "de-tax-id-spaced", "region": "de", "type": "DE_TAX_ID", "validator": "de_tax_id_spaced",
+     "context": _DE_TAX_ID_CONTEXT, "require_context": True,
+     "regex": r"(?<![\d.,/-])(?<!\d[ \u00a0])[1-9][0-9][ \u00a0][0-9]{3}[ \u00a0][0-9]{3}[ \u00a0][0-9]{3}"
+              r"(?![0-9]|[ \u00a0][0-9])"},
+    # the Rentenversicherungsnummer as the SV-Ausweis prints it: 2, 6 (birth date), 1 letter, 3, with spaces; the run
+    # without spaces is Presidio's de-social-security, which needs no context word in the same date-checked form
+    {"id": "de-social-security-spaced", "region": "de", "type": "DE_SOCIAL_SECURITY",
+     "validator": "de_social_security_spaced",
+     "regex": r"(?<![\w.,/-])[0-9]{2}[ \u00a0](?:0[1-9]|[12][0-9]|3[01]|5[1-9]|[67][0-9]|8[01])(?:0[1-9]|1[0-2])"
+              r"[0-9]{2}[ \u00a0][A-Z][ \u00a0][0-9]{3}(?![\w])"},
+    # Switzerland: the AHV/AVS number with its dots stands alone; the 13 digits without them need a context word
+    {"id": "ch-ahv", "region": "ch", "type": "CH_AHV", "validator": "ch_ahv", "context": _CH_AHV_CONTEXT,
+     "regex": r"(?<![\d.])756\.[0-9]{4}\.[0-9]{4}\.[0-9]{2}(?![0-9]|\.[0-9])"},
+    {"id": "ch-ahv-digits", "region": "ch", "type": "CH_AHV", "validator": "ch_ahv", "context": _CH_AHV_CONTEXT,
+     "require_context": True, "regex": r"(?<![\d.])756[0-9]{10}(?![0-9]|\.[0-9])"},
+    # a company number is public in its register: like the German VAT ID, only next to a word that names it
+    {"id": "ch-uid", "region": "ch", "type": "CH_UID", "validator": "ch_uid", "context": _VAT_CONTEXT,
+     "require_context": True,
+     "regex": r"(?<![\w-])CHE[- ]?[0-9]{3}\.?[0-9]{3}\.?[0-9]{3}(?:[ ]?(?:MWST|TVA|IVA))?(?![\w]|[.,][0-9])"},
+    # Austria
+    {"id": "at-uid", "region": "at", "type": "AT_UID", "validator": "at_uid", "context": _VAT_CONTEXT,
+     "require_context": True, "regex": r"(?<![\w-])ATU[ ]?[0-9]{8}(?![\w])"},
+    {"id": "at-social-security", "region": "at", "type": "AT_SOCIAL_SECURITY", "validator": "at_social_security",
+     "context": _AT_SV_CONTEXT, "require_context": True,
+     "regex": r"(?<![\d.,/-])[1-9][0-9]{3}[ \u00a0]?(?:0[1-9]|[12][0-9]|3[01])(?:0[1-9]|1[0-2])[0-9]{2}(?![0-9])"},
+]
+
+
+def _load_regional(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]:
+    return [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"]), validator=d["validator"],
+                 context=tuple(d.get("context", ())), require_context=d.get("require_context", False),
+                 whole_match=True)
+            for d in REGIONAL_RULES if d["region"] in regions]
 
 
 def presidio_region(rec_id: str) -> str:
@@ -1431,7 +1537,9 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
             rule_id = rec["id"] if len(rec["patterns"]) == 1 else f"{rec['id']}#{i}"
             out.append(Rule(
                 id=rule_id,
-                type=ENTITY_TYPE.get(rec["entity"], rec["entity"]), regex=_Lazy(_re2_to_python(pat["regex"])),
+                type=ENTITY_TYPE.get(rec["entity"], rec["entity"]),
+                regex=_Lazy(rf"(?<!\d)(?:{_re2_to_python(pat['regex'])})(?!\d)" if rec["id"] in PRESIDIO_DIGIT_BOUNDED
+                            else _re2_to_python(pat["regex"])),
                 validator=validator, score=float(pat["score"]),
                 context=tuple(c.lower() for c in rec.get("context", [])) + PRESIDIO_EXTRA_CONTEXT.get(rec["id"], ()),
                 require_context=weak or rule_id in PRESIDIO_PATTERN_CONTEXT,
@@ -1671,7 +1779,8 @@ def rules() -> list[Rule]:
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
         _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
-                  + _load_presidio(active.regions) + pii + _load_literal(active.languages))
+                  + _load_regional(active.regions) + _load_presidio(active.regions) + pii
+                  + _load_literal(active.languages))
     return _RULES
 
 
@@ -2019,6 +2128,15 @@ def _windowed(rule: Rule, kw: re.Pattern, text: str):
             yield _Shifted(m, a)
 
 
+_EMPTY_RE = re.compile("")
+_WORD_RE_ANY = re.compile(r"[a-z]+")   # the words of a seed phrase, whatever stands between them
+# the words that make 12 list words a seed phrase: the phrase's own names, and the labels of a secret (a phrase after
+# "Password:" or "private key:" was text, Gate B of 0.6.19)
+_SEED_CONTEXT_RE = re.compile(r"(?i)(?<![a-z])(?:seed|mnemonic|bip-?39|recovery|wallet|metamask|ledger|trezor|phrase"
+                              r"|backup|secret|passphrase|password|passwort|kennwort|words|wörter|private|keys?"
+                              r"|token|wiederherstellung)(?![a-z])")   # a whole word: not tokenization, keyboard
+
+
 def _matches(rule: Rule, text: str):
     """detect-secrets keyword rules are line rules: run them per line, keep absolute offsets.
 
@@ -2034,6 +2152,14 @@ def _matches(rule: Rule, text: str):
         return
     if rule.id in _LITERAL_IDS:
         yield from _literal_matches(rule.id, text)
+        return
+    if rule.id == "crypto-seed-phrase":
+        for a, b, words in checksums.bip39_spans(text):
+            # the context word stands outside the phrase: seed, phrase and wallet are words of the list
+            if words < 15 and not (_SEED_CONTEXT_RE.search(text, max(0, min(a - 200, _line_start(text, a))), a)
+                                   or _SEED_CONTEXT_RE.search(text, b, max(b, _line_end(text, b)))):
+                continue
+            yield _Spanned(_EMPTY_RE.match(text, b), a, text)
         return
     kw = _WINDOWED.get(rule.id)
     if kw is not None and len(text) > 4096:
@@ -2640,10 +2766,13 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> li
                     ok = False   # a validator that cannot parse the value has not validated it
                 if not ok:
                     continue
-            if rule.type == "SECRET" and looks_like_placeholder(secret):
+            if rule.type == "SECRET" and rule.id != "crypto-seed-phrase" and looks_like_placeholder(secret):
+                # the checksum of a seed phrase is its proof; "example" and "sample" are words of the list
                 continue
             labelled = rule.type == "SECRET" and rule.id.startswith(LABEL_RULES)
-            if is_public_test_value(secret, rule.type) and not labelled:
+            # a seed phrase is compared in one form: its words with one space between them
+            as_published = " ".join(_WORD_RE_ANY.findall(secret)) if rule.id == "crypto-seed-phrase" else secret
+            if is_public_test_value(as_published, rule.type) and not labelled:
                 # a documented test card, key or number that a shape rule found. A published key that a label assigns
                 # (PROD_PASSWORD=<the Stripe docs key>) is used as a credential and stays a hit: being public does not
                 # make the same bytes no secret there (review of 0.6.12). The label rules run first, so no later rule

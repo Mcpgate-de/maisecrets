@@ -1,0 +1,10 @@
+# c1-a-printed-steuer-id-or-rv-number-is-found: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-printed-steuer-id-or-rv-number-is-found"
+control = "C1"
+statement = "With region de, a Steuer-ID in its printed form with spaces (2-3-3-3) after its label is a hit, and its twin with a wrong check digit is not."
+runner = ["tests/test_rules_from_other_detectors.py::SteuerIdTests::test_the_printed_form_with_spaces_is_found_after_its_label"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''     "regex": r"(?<![\d.,/-])(?<!\d[ \u00a0])[1-9][0-9][ \u00a0]'''
+replace = '''     "regex": r"(?!)(?<![\d.,/-])(?<!\d[ \u00a0])[1-9][0-9][ \u00a0]'''

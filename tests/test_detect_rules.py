@@ -28,7 +28,7 @@ import _isolate  # noqa: E402  first: a temp vault home, never the real one
 Path(_isolate.HOME).mkdir(parents=True, exist_ok=True)
 Path(_isolate.HOME, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
-from maisecrets import detect, hooks  # noqa: E402
+from maisecrets import checksums, detect, hooks  # noqa: E402
 
 AN = string.ascii_letters + string.digits
 HEX = "0123456789abcdef"
@@ -153,8 +153,9 @@ class RuleLoaderTests(unittest.TestCase):
         self.assertEqual(rules["credit-card"].type, "CARD")
         self.assertTrue(rules["de-tax-id"].require_context)            # a plain digit run
         self.assertTrue(rules["de-fuehrerschein"].score < 1.0)
-        self.assertIn("de-id-card#0", rules)                           # several patterns: numbered ids
-        self.assertIn("de-id-card#1", rules)
+        self.assertIn("de-social-security#0", rules)                   # several patterns: numbered ids
+        self.assertIn("de-social-security#1", rules)
+        self.assertNotIn("de-id-card#0", rules)                        # REGIONAL_RULES: no check digit printed
         self.assertTrue(all(r.whole_match for r in rules.values()))
         self.assertTrue(all(c == c.lower() for r in rules.values() for c in r.context))
 
@@ -279,22 +280,24 @@ class ValidatorTests(unittest.TestCase):
             with self.subTest(invalid=invalid):
                 self.assertFalse(any(detect._de_social_security_ok(f"{invalid}39J00{c}") for c in range(10)))
 
-    def test_icao_check_digit_and_the_legacy_id_card(self):
-        self.assertTrue(detect._icao_check("L898902C3"))          # ICAO Doc 9303 specimen number
-        self.assertTrue(detect._icao_check("l898902c3"))
-        for bad in ("L898902C4", "L898902C", "L898902CX", "L8989-2C3"):
-            with self.subTest(bad=bad):
-                self.assertFalse(detect._icao_check(bad))
-        self.assertTrue(detect._de_id_card_ok("T22000129"))       # before 2010: no check digit
-        self.assertTrue(detect._de_id_card_ok("L898902C3"))
-        self.assertFalse(detect._de_id_card_ok("T2200012"))
-        self.assertTrue(detect.VALIDATORS["de_passport"]("L898902C3"))
-        # a passport number never holds A, B, D, E, I, O, Q, S or U, even with a valid check digit
+    def test_icao_check_digit_and_the_german_document_number(self):
+        # ICAO Doc 9303 Part 3 4.9: weights 7 3 1, A to Z count 10 to 35, < counts 0
+        icao = checksums.icao_check_digit
+        self.assertEqual(icao("".join(["L898", "902C"])), 3)        # the ICAO specimen passport number
+        self.assertEqual(icao("".join(["L898", "902C<<"])), 3)
+        with self.assertRaises(ValueError):
+            icao("L898-902C")
+        ok = checksums.de_document_ok
+        body = "".join(["L898", "902C3"])
+        self.assertTrue(ok(body))                                   # 9 characters as printed: no check digit
+        self.assertTrue(ok(body.lower()))
+        self.assertTrue(ok(body + str(icao(body))))                 # 10 as in the machine-readable zone
+        self.assertFalse(ok(body + str((icao(body) + 1) % 10)))
+        self.assertFalse(ok(body[:-1]))
+        # BSI TR-03123-2 3.2.1: never A, B, D, E, I, O, Q, S or U
         for letter in "ABDEIOQSU":
-            body = "L8989" + letter + "2C"
-            full = next(body + str(c) for c in range(10) if detect._icao_check(body + str(c)))
             with self.subTest(letter=letter):
-                self.assertFalse(detect.VALIDATORS["de_passport"](full))
+                self.assertFalse(ok("L8989" + letter + "2C3"))
 
     def test_german_health_insurance_number(self):
         self.assertTrue(detect._de_health_insurance_ok("A123456780"))
@@ -423,7 +426,7 @@ class ContextWordTests(unittest.TestCase):
 
     def test_german_identifiers_with_their_context(self):
         for text, kind, value in [("Rentenversicherungsnummer 65170839J003", "de-social-security#0", "65170839J003"),
-                                  ("Personalausweis L898902C3", "de-id-card#0", "L898902C3"),
+                                  ("Personalausweis L898902C3", "de-id-card", "L898902C3"),
                                   ("Reisepass L898902C3", "de-passport", "L898902C3"),
                                   ("Krankenversichertennummer A123456780", "de-health-insurance", "A123456780"),
                                   ("LANR 123456601", "de-lanr", "123456601"),

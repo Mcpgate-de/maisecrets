@@ -41,7 +41,7 @@ def _pii_texts() -> list[str]:
     r.shuffle(digits)
     if digits[0] == "0":
         digits[0], digits[1] = digits[1], digits[0]
-    tid = "".join(digits)
+    tid = "".join(digits[:9]) + digits[1]   # exactly one digit twice: the issuer's rule (detect._de_tax_id_ok)
     return [
         "Kontakt: anna.berg@firma-xyz.de", "Kontakt: jürgen.müller@firma-xyz.de",
         "ruf an: +49 170 " + str(r.randint(1000000, 9999999)),
