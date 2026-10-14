@@ -1,0 +1,12 @@
+# c1-a-decoded-value-takes-the-whole-run: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-decoded-value-takes-the-whole-run"
+control = "C1"
+statement = "A value found in the decoded text of a base64 or hex run redacts the whole encoded run, so no part of the encoding reaches the model."
+runner = ["tests/test_tool_channel_normaliser.py::DisguiseTests::test_a_value_in_a_base64_run_takes_the_whole_run"]
+
+[proof]
+file = "maisecrets/normalise.py"
+find = '''        starts.extend([a] * len(new))
+        ends.extend([b] * len(new))'''
+replace = '''        starts.extend(range(a, a + len(new)))
+        ends.extend(range(a + 1, a + 1 + len(new)))'''

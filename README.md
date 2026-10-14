@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 114 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 128 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -714,6 +714,40 @@ rule keeps still holds something: one of three states (VS15, VS16, none) after a
 symbol, up to four bits after a character that is not ASCII, and up to one byte after a CJK
 ideograph, where the rule keeps the ideographic selectors that Chinese and Japanese text use.
 
+## Disguised values in tool results
+
+A value can also hide from the shape rules behind what a terminal or a renderer does not show. In a
+tool result or a file (not in a typed prompt), the detector also scans a cleaned copy: without ANSI
+colour codes, without zero-width and direction characters (U+00AD, U+200B to U+200F, U+202A to
+U+202E, U+2060 to U+2064, U+2066 to U+2069, U+FEFF), with HTML entities and fullwidth letters
+written out, and with each base64 or hex run decoded that holds text (gzip inside base64 is opened,
+a run inside the text is decoded once more). A hit in the copy redacts the original span, the hidden
+characters with it; a value in a decoded run takes the whole run, as in a Kubernetes Secret or a
+docker `auth` field. The copy is only scanned around the lines that changed. Bounds: a text over 1
+MB is not cleaned, a run over 16,384 characters (an image) is not decoded, and at most 64 runs,
+64 KB of decoded bytes and 20 ms of decoding per text. A text whose every line changes (a log in
+colour) is scanned twice, which about doubles its time. The typed prompt is scanned as it is, so a block there needs the
+value in the clear.
+
+## Password exports in tool results
+
+A password export holds bare passwords in a column, and no shape or label rule finds a bare password
+in a cell. In a tool result or a file, maisecrets masks every cell of the password, TOTP and secret
+columns of a CSV or TSV table (comma, semicolon or tab) whose header row also names an entry column
+(`url`, `username`, `login`, `name`, `title`, ...) and holds plain column names at the start of its line (a function
+signature, SQL or a sentence is no header: a name of several words counts only quoted,
+and with two columns only names without a space such as `user_name,password`): the exports of Chrome, Edge, Firefox, Safari,
+Bitwarden, 1Password, KeePass(XC) and LastPass have such a header. A table with a password column
+and no entry column counts when the file read (or grepped) is named like an export (`passwords.csv`, `bitwarden_export.csv`,
+`1PasswordExport.csv`, a LastPass or KeePass export). The table ends at an empty line or at a row of
+another width. A column `password_hash` or a flag such as `has_password` is no secret column. A typed
+prompt is scanned as before. Limits, chosen
+against false hits on code and documents: a header name of several words counts only in quotes (an
+unquoted `Login Name` in a TSV is no header); a two-column table without an export file name keeps a
+cell with a space (a passphrase there reaches the model); a test table with a `password` column next
+to a `name` column is masked like an export. The secret-hygiene skill scans a file over 200 KB in
+parts, and a part without the header row is not recognised as an export.
+
 ## Reporting a wrong detection
 
 Every block and every redaction leaves an event in `~/.maisecrets/events.log`
@@ -1128,11 +1162,14 @@ Four sources, one scanner (`maisecrets/detect.py`):
   `regions` selects them (default: the country of the system setting; `de`
   gives Steuer-ID,
   Sozialversicherungsnummer, Personalausweis, Reisepass, USt-ID,
-  Krankenversicherung, PLZ, Kfz, LANR, BSNR, Handelsregister). Checksums for
+  Krankenversicherung, PLZ, Kfz, LANR, BSNR). Checksums for
   the German types are ported and checked against Presidio
   (`scripts/check_validators_against_presidio.py`). A digit-only shape such as
   a Steuer-ID is reported only with a context word nearby, even when the
-  checksum passes.
+  checksum passes. A USt-ID written `DE` and nine digits also needs a word
+  such as `USt-IdNr` or `VAT` nearby: alone, that shape is often a FIX tag or
+  an XML id. A Handelsregister number is not reported: it names a company, is
+  public and is no personal data.
 - **detect-secrets** (Yelp, Apache-2.0, version in `DETECT_SECRETS_VERSION`,
   refresh with `scripts/sync_detect_secrets.py vX.Y.Z`): credentials
   recognised by position (`password = …`, `api_key: "…"`, `user:pass@host`),
@@ -1251,8 +1288,10 @@ Four sources, one scanner (`maisecrets/detect.py`):
   out: nearly every candidate was the next `.env` line, not the rest of a key.
 
 IBAN, credit card and IP come from Presidio's regexes with our validators
-(mod-97, Luhn, public-range check). A card number without a word like
-"card" or "Kreditkarte" nearby is not reported: Presidio scores the bare
+(mod-97, Luhn, public-range check). An IBAN may have spaces or hyphens
+between its groups; an IBAN in lower case also needs the length of its
+country. A card number without a word like "card", "Karte", "Kreditkarte",
+"carte", "carta" or "tarjeta" nearby is not reported: Presidio scores the bare
 shape low, and a 16-digit number passes Luhn one time in ten.
 
 Measure what the rules would catch on your own recordings, values never

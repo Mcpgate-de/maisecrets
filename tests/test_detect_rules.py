@@ -188,7 +188,7 @@ class RuleLoaderTests(unittest.TestCase):
         self.assertLess(pos["iban"], pos["email"])
         n = len(detect.LITERAL_RULES)   # the label and literal rules run last: they take only what no rule took
         self.assertEqual(ids[-n:], [d["id"] for d in detect.LITERAL_RULES])
-        self.assertEqual(ids[-n - 3:-n], ["email", "email-percent-encoded", "phone"])
+        self.assertEqual(ids[-n - 4:-n], ["email", "iban-lowercase", "email-percent-encoded", "phone"])
         self.assertIs(detect.rules(), detect.rules())
 
     def test_a_broken_config_falls_back_to_the_default_regions(self):
@@ -227,7 +227,8 @@ class ValidatorTests(unittest.TestCase):
             good = iban_complete(r.choice(["DE", "GB", "FR", "NL"]), bban)
             with self.subTest(good=good):
                 self.assertTrue(detect._iban_ok(good))
-                self.assertTrue(detect._iban_ok(good.lower()))
+                # lower case holds only with the country's length: a lower-case hex digest passes mod 97 too
+                self.assertEqual(detect._iban_ok(good.lower()), detect.IBAN_LENGTH[good[:2]] == len(good))
                 spaced = " ".join(good[i:i + 4] for i in range(0, len(good), 4))
                 self.assertTrue(detect._iban_ok(spaced))
                 self.assertFalse(detect._iban_ok(good[:2] + f"{(int(good[2:4]) + 1) % 100:02d}" + good[4:]))

@@ -32,3 +32,9 @@ maisecrets/rules/SCOWL_VERSION. The password rule uses it to tell a word from a 
 
 The remaining rules in maisecrets/detect.py (OWN_RULES) and the display rules
 in maisecrets/pii_display.py are written for this project.
+
+Parts of the detection are adapted from a public fork of maisecrets on GitHub (Apache License
+2.0; the commits that took them name it): the card words of other
+languages, the IBAN forms with hyphens and in lower case, the context rule for a bare German VAT ID,
+and the normaliser of maisecrets/normalise.py (changed: five of its stages, one module, scanned
+only around the changed lines and in the tool channel only).

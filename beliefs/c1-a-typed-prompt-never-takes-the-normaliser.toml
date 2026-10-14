@@ -1,0 +1,10 @@
+# c1-a-typed-prompt-never-takes-the-normaliser: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-typed-prompt-never-takes-the-normaliser"
+control = "C1"
+statement = "A typed prompt is scanned as it is: the normaliser (ANSI, zero-width, entity, fullwidth, base64 and hex) runs only in the tool channel, so a prompt keeps the decisions of 0.6.17."
+runner = ["tests/test_tool_channel_normaliser.py::DisguiseTests::test_each_disguise_hides_a_token_from_the_raw_scan_but_not_from_the_tool_channel"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''    if _CHANNEL[0] == "tool" and not _copy:'''
+replace = '''    if not _copy:'''

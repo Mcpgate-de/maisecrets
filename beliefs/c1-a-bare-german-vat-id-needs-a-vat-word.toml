@@ -1,0 +1,10 @@
+# c1-a-bare-german-vat-id-needs-a-vat-word: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-bare-german-vat-id-needs-a-vat-word"
+control = "C1"
+statement = "DE and nine digits that pass the VAT checksum are a DE_VAT_ID hit only next to a VAT word (USt-IdNr, VAT, Rechnung, ...); alone they are a FIX tag or an XML id and stay text."
+runner = ["tests/test_bank_and_company_numbers.py::GermanCompanyNumberTests::test_a_bare_vat_id_without_a_vat_word_stays_text"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''PRESIDIO_PATTERN_CONTEXT = {"de-vat-id#0"}'''
+replace = '''PRESIDIO_PATTERN_CONTEXT = set()'''

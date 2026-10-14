@@ -1,0 +1,10 @@
+# c1-a-lower-case-iban-needs-its-countrys-length: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-lower-case-iban-needs-its-countrys-length"
+control = "C1"
+statement = "A run in lower case that passes the IBAN checksum is an IBAN only with its country's length: a lower-case hex digest or id of another length stays text."
+runner = ["tests/test_bank_and_company_numbers.py::IbanFormTests::test_a_lower_case_iban_needs_its_countrys_length"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''    if raw != raw.upper() and IBAN_LENGTH.get(s[:2]) != len(s):'''
+replace = '''    if False:'''
