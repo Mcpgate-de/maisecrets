@@ -1,0 +1,10 @@
+# c28-pdftotext-gets-no-loader-variables: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-pdftotext-gets-no-loader-variables"
+control = "C28"
+statement = "pdftotext starts without LD_* and DYLD_* variables, so the hook's environment cannot load another library into it."
+runner = ["tests/test_file_reads.py::TheConverterIsBounded::test_the_child_gets_no_loader_variables"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "env=_child_env(), "
+replace = "env=None, "
