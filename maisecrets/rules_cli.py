@@ -129,8 +129,10 @@ def _check_folder(shown: str, folder: Path, samples: Path | None, taken: set, ne
             print(f"  ok      {rule.id}  {ms:.1f} ms")
             fast.append(rule)
             old = tested.get(key, 0.0)
-            if key in tested and (old is None or old > user_rules.PROBE_LIMIT_MS):
-                tested[key] = ms               # the test texts were slow once (a busy machine); now they pass
+            if key not in tested or old is None or old > user_rules.PROBE_LIMIT_MS:
+                # a new rule, or test texts that were slow once (a busy machine): the hooks need not time it again,
+                # so a folder of many rules runs at the next call, not over several (Gate B round 2)
+                tested[key] = ms
                 renewed += 1
     if renewed:
         state["tested"] = tested

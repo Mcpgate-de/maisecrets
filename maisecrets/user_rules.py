@@ -521,13 +521,17 @@ def texts(lits, fills):
             yield (lit + (fill * (200 // len(fill) + 1))[:200]) * 60
 
 def once(rx, allows, lits, fills):
-    t = time.perf_counter()
-    for text in texts(lits, fills):
-        for _ in rx.finditer(text):
-            pass
-        for a in allows:
-            a.search(text)
-    return time.perf_counter() - t
+    # the slowest start: four starts must not sum a correct rule past the limit (Gate B round 2 of block 1)
+    worst = 0.0
+    for lit in lits:
+        t = time.perf_counter()
+        for text in texts((lit,), fills):
+            for _ in rx.finditer(text):
+                pass
+            for a in allows:
+                a.search(text)
+        worst = max(worst, time.perf_counter() - t)
+    return worst
 
 for key, pattern, lits, allows, fills in spec["rules"]:
     rx = re.compile(pattern)
@@ -871,7 +875,7 @@ def load_folder(path: Path, shown: str, taken: set | None = None, cache: dict | 
         def kept(rid: str, rule, place: str, key: str, pattern: str, allows: tuple, file: str = file) -> None:
             look()
             if rid in mine:
-                refuse(place, "an id that an earlier rule has")
+                quarantined.append(Quarantined(shown, file, place, "an id that an earlier rule has"))
                 return
             if len(rules) >= MAX_RULES_PER_FOLDER:
                 raise _Full

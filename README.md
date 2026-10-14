@@ -1447,15 +1447,17 @@ backreference, and no quantifier of variable length at the start (`\w+…`,
 `x?[a-z]+…`). Then maisecrets times each new rule once on test texts that make
 a backtracking regex slow, also on runs of the characters its own repeats take
 and on its literals, those of each branch too, repeated before long runs; a
-rule slower than 50 ms is left out. A new rule runs only after this timed
-test: when a hook call has no time left for the test, the rule waits for the
-next call. A rule that is still slow in a real scan (more than half a second
-inside its regex in one hook call) is left out from the next call on. When a
-hook runs out of time, the rule of your own with the most regex time is left
-out, if that time is more than half of the call. Each verdict is kept by a
-hash of the rule in `~/.maisecrets/.rules-state`, so a hook pays for the
-checks once. A changed rule is checked again; a rule that a real scan found
-slow stays out until you change it, and `maisecrets rules check DIR` shows it.
+rule slower than 50 ms on the texts of one start is left out. A new rule runs
+only after this timed test: when a hook call has no time left for the test,
+the rule waits for the next call, and `maisecrets rules check` times every
+rule at once and keeps the result for the hooks. A rule that is still slow in
+a real scan (more than half a second inside its regex in one hook call) is
+left out from the next call on. When a hook runs out of time, the rule of your
+own with the most regex time is left out, if that time is more than half of
+the call. Each verdict is kept by a hash of the rule in
+`~/.maisecrets/.rules-state`, so a hook pays for the checks once. A changed
+rule is checked again; a rule that a real scan found slow stays out until you
+change it, and `maisecrets rules check DIR` shows it.
 
 A rule that fails a check is left out, with its reason; the rest of the file
 still loads. A refused rule is named by its place (`rule 3`, `line 7`), never

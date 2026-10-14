@@ -326,6 +326,29 @@ class Quarantine(Base):
         self.assertIn("no detection recorded yet", out.getvalue(), "a quarantine is no false alarm to report")
 
 
+class BothChannels(Base):
+    """A rule of your own is a detection rule: it runs in the prompt channel and in the tool channel (0.6.17), also
+    on the cleaned copy of a tool result (0.6.18), and after every built-in rule in both."""
+
+    def test_a_rule_of_your_own_finds_its_token_in_a_prompt_and_in_a_tool_result(self):
+        write_rules(OWN, [{"id": "team-token", "regex": r"tkx_[A-Za-z0-9]{24}", "keywords": ["tkx_"]}])
+        detect.reset_rules()
+        text = f"deploy with {token()} and {ADDRESS}"
+        for channel in ("prompt", "tool"):
+            with self.subTest(channel):
+                self.assertEqual([m.kind for m in detect.scan(text, channel=channel)], ["user:team-token", "email"])
+
+    def test_the_tool_channel_finds_it_behind_a_colour_code(self):
+        write_rules(OWN, [{"id": "team-token", "regex": r"tkx_[A-Za-z0-9]{24}", "keywords": ["tkx_"]}])
+        detect.reset_rules()
+        t = token()
+        text = "deploy with " + t[:6] + "\x1b[0m" + t[6:]
+        self.assertEqual([m.kind for m in detect.scan(text)], [], "the prompt channel reads the raw text")
+        (m,) = detect.scan(text, channel="tool")
+        self.assertEqual(m.kind, "user:team-token")
+        self.assertEqual(text[m.start:m.end].replace("\x1b[0m", ""), t, "the whole token, colour code included")
+
+
 class GateAOfBlock1(Base):
     """Findings of Gate A (codex) on the rebased branch of block 1."""
 
@@ -416,6 +439,16 @@ class GateBOfBlock1(Base):
         self.assertEqual([r.id for r in rules], ["user:r0"])
         self.assertLessEqual(len(calls), 11, "a duplicate past the limit is not checked")
         self.assertIn("the rest of the folder is not read", quarantined[-1].reason)
+
+    def test_a_duplicate_id_counts_once_toward_the_rules_looked_at(self):
+        team = self.tmp / "team"
+        team.mkdir()
+        lines = "".join(f"r0  tail{i:04d}_[a-z]{{20}}\n" for i in range(9))
+        (team / "dup.prefixes").write_text(lines, encoding="utf-8")
+        with mock.patch.object(user_rules, "MAX_LOOKED", 9):
+            rules, quarantined, _ = user_rules.load_folder(team, "team")
+        self.assertEqual(len(rules), 1)
+        self.assertEqual([q.reason for q in quarantined], ["an id that an earlier rule has"] * 8, "nine looked at")
 
     def test_an_oversized_file_counts_toward_the_bytes_of_the_folder(self):
         team = self.tmp / "team"
@@ -551,6 +584,15 @@ class RulesCommand(Base):
             rc, out, _ = self.run_cli("check", str(team))
         self.assertEqual(rc, 1, out)
         self.assertIn("the timed test gave no answer for it", out)
+
+    def test_a_check_keeps_its_timings_so_the_next_hook_call_runs_the_rules(self):
+        team = self.tmp / "team"
+        write_rules(team, [{"id": f"r{i}", "regex": f"tk{i:03d}_[A-Za-z0-9]{{24}}", "keywords": [f"tk{i:03d}_"]}
+                           for i in range(5)])
+        rc, out, _ = self.run_cli("check", str(team))
+        self.assertEqual(rc, 0, out)
+        loaded = user_rules.load({"rule_dirs": [str(team)]}, budget=0)
+        self.assertEqual(len(loaded.rules), 5, "no time for a test in this call, and none is needed")
 
     def test_init_writes_a_folder_that_its_own_check_passes(self):
         top = self.tmp / "team-rules"
