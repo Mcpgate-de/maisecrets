@@ -107,6 +107,33 @@ class HomeUserTests(unittest.TestCase):
             self.assertEqual(values("/home/tkellermann/src/app.py"), [])
 
 
+class AddressTests(unittest.TestCase):
+    def test_a_street_address_of_each_region(self):
+        for text, v, region in (
+                ("ship to 1618 Wexford Lane, Raleigh, NC 27601 now", "1618 Wexford Lane, Raleigh, NC 27601", ("us",)),
+                ("Lieferadresse: Musterweg 7, 12345 Musterstadt", "Musterweg 7, 12345 Musterstadt", ("de",)),
+                ("adresse : 14 rue des Lilas, 75011 Paris", "14 rue des Lilas, 75011 Paris", ("fr",)),
+                ("Morada: Rua das Flores, 12, 4050-262 Porto", "Rua das Flores, 12, 4050-262 Porto", ("pt",))):
+            with self.subTest(text=text):
+                self.assertEqual(values(text, region=region), [("street-address", v)])
+                self.assertEqual(values(text, region=("generic",)), [])   # the form runs in its region only
+
+    def test_a_documentation_address_keeps_the_postcode_hit_of_its_region_rule(self):
+        hits = [m.kind for m in scan("Adresse: Examplestraße 12, 10115 Berlin", region=("de",))]
+        self.assertEqual(hits, [k for k in hits if k not in personal.RULE_IDS])
+        self.assertTrue(hits)
+
+    def test_a_company_or_a_landmark_address_stays_text(self):
+        for text in ("Impressum: Muster GmbH, Hauptstraße 1, 10115 Berlin",
+                     "Acme Corp Niederlassung München\nLeopoldstraße 250, 80807 München",
+                     "The Empire State Building, 350 Fifth Avenue, New York, NY 10118",
+                     "Our office: 1600 Amphitheatre Parkway, Mountain View, CA 94043",
+                     "1 Shared Drive, quota 10240", "Filtering 2, 10000 Rows", "Scoring 4, 1200 Punkte",
+                     "Access Via Bastion, 2 hops, port 30022", "3 place holders, 65536 Bytes"):
+            with self.subTest(text=text):
+                self.assertEqual(values(text), [])
+
+
 class PhoneTests(unittest.TestCase):
     def test_a_number_with_one_digit_groups_in_both_channels(self):
         text = "call me on +1 4 1 5 223 3344"
