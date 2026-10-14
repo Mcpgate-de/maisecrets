@@ -1204,6 +1204,9 @@ class TheConverterIsBounded(_Work):
             content = output(self.post())["file"]["content"]
         self.assertIn("long enough", content)
         self.assertNotIn("/nowhere", content)
+        # SIP strips DYLD_* when /bin/sh starts on macOS, so the stub alone cannot see that half (round 2)
+        with mock.patch.dict(os.environ, loader):
+            self.assertFalse([k for k in file_reads._child_env() if k.startswith(("LD_", "DYLD_"))])
 
     # ------------------------------------------------------------------- scans --
     def test_a_scan_with_page_numbers_only_counts_as_scanned(self):
@@ -1278,6 +1281,28 @@ class TheConverterIsBounded(_Work):
         subprocess.run(["/bin/chmod", "+a", "everyone allow add_file", str(d)], check=True)
         self.assertFalse(file_reads._no_other_writer(str(d)))
         subprocess.run(["/bin/chmod", "-N", str(d)], check=True)
+        # the flags of inheritance share the allow field: allow,file_inherit,directory_inherit and, on a file made
+        # inside, allow,inherited (both reviews of round 2)
+        subprocess.run(["/bin/chmod", "+a", "everyone allow add_file,file_inherit,directory_inherit", str(d)],
+                       check=True)
+        (d / "inside").write_text("x")
+        self.assertFalse(file_reads._no_other_writer(str(d)))
+        self.assertTrue(file_reads._acl_lets_in(str(d / "inside")), "allow,inherited:write on a file made inside")
+        sub = d / "sub"
+        sub.mkdir()
+        self.assertTrue(file_reads._acl_lets_in(str(sub)), "allow,inherited on the folder made inside")
+        subprocess.run(["/bin/chmod", "-RN", str(d)], check=True)
+
+    def test_the_text_of_a_macos_acl_is_read_with_its_flags(self):
+        # the shapes acl_to_text gave on macOS (round 2): the flags of inheritance share the allow field
+        uuid = "ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C"
+        for entry, grants in ((f"group:{uuid}:everyone:12:deny:delete", False),
+                              (f"group:{uuid}:everyone:12:allow:read", False),
+                              (f"group:{uuid}:everyone:12:allow:add_file", True),
+                              (f"group:{uuid}:everyone:12:allow,file_inherit,directory_inherit:write", True),
+                              (f"group:{uuid}:everyone:12:allow,inherited:write", True)):
+            with self.subTest(entry):
+                self.assertEqual(file_reads.acl_text_grants_write(f"!#acl 1\n{entry}\n"), grants)
 
     def test_a_posix_acl_on_linux_refuses(self):
         import errno
@@ -1361,7 +1386,8 @@ class TheConverterIsBounded(_Work):
     # -------------------------------------------------------------- libraries --
     def test_a_script_loads_its_interpreter(self):
         self.stub()
-        self.assertEqual(file_reads.libraries(str(self.bin / "pdftotext")), ["/bin/sh"])
+        libs = file_reads.libraries(str(self.bin / "pdftotext"))
+        self.assertEqual(libs[0], "/bin/sh", "the interpreter, then its own libraries")
 
     def test_a_library_that_another_account_can_write_refuses_the_program(self):
         _reset(read_pdf="convert")
@@ -1389,13 +1415,16 @@ class TheConverterIsBounded(_Work):
         (app / "bin").mkdir(parents=True)
         (app / "lib").mkdir()
         exe = app / "bin" / "tool"
-        exe.write_bytes(macho(("rpath", "@loader_path/../lib"), ("dylib", "@rpath/liba.dylib"),
-                              ("dylib", "/usr/lib/libSystem.B.dylib")))
+        (app / "early").mkdir()
+        exe.write_bytes(macho(("rpath", "@loader_path/../early"), ("rpath", "@loader_path/../lib"),
+                              ("dylib", "@rpath/liba.dylib"), ("dylib", "/usr/lib/libSystem.B.dylib")))
         (app / "lib" / "liba.dylib").write_bytes(macho(("dylib", "@loader_path/libb.dylib")))
         (app / "lib" / "libb.dylib").write_bytes(macho())
         found = file_reads._macho_libraries(str(exe))
+        # the rpath folder searched first is checked too: a library planted there later would win (round 2)
         self.assertEqual([os.path.realpath(x) for x in found or ()],
-                         [os.path.realpath(app / "lib" / n) for n in ("liba.dylib", "libb.dylib")])
+                         [os.path.realpath(app / "early")]
+                         + [os.path.realpath(app / "lib" / n) for n in ("liba.dylib", "libb.dylib")])
         (app / "lib" / "libb.dylib").unlink()
         self.assertIsNone(file_reads._macho_libraries(str(exe)), "a library that is not there")
         exe.write_bytes(b"\0" * 64)
