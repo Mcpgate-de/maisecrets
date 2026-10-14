@@ -14,6 +14,8 @@ the Bitcoin Improvement Proposals 39 and 32 and the Base58Check encoding.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import re
 import string
@@ -229,6 +231,16 @@ def xprv_ok(s: str) -> bool:
     p = b58check_decode(s)
     return (p is not None and len(p) == 78 and p[:4] in _XPRV_VERSIONS and p[45] == 0
             and _private_key_ok(p[46:78]))
+
+
+def discord_bot_token_ok(v: str) -> bool:
+    """A Discord bot token's first part is the bot's user id (a snowflake of 17 to 20 digits) in base64."""
+    head = v.split(".", 1)[0]
+    try:
+        raw = base64.urlsafe_b64decode(head + "=" * (-len(head) % 4))
+    except (ValueError, binascii.Error):
+        return False
+    return 17 <= len(raw) <= 20 and raw.isdigit() and raw[:1] != b"0"
 
 
 _BIP39: list = []

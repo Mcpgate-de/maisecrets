@@ -6,3 +6,29 @@ gitlab-runner-token          glrt-[0-9A-Za-z_.-]{20,}
 gitlab-deploy-token-any      gldt-[0-9A-Za-z_-]{20,}
 webhook-signing-secret       whsec_[A-Za-z0-9+/=_-]{24,}
 cloudflare-user-api-token    cfut_[A-Za-z0-9_-]{30,}
+# 0.6.19, from a survey of other detectors. Each format is a fact from the vendor's documentation where it has one
+# (Tailscale key prefixes, Cloudflare token formats, Doppler token formats, Square OAuth, Mapbox sk/pk, SonarQube
+# Cloud sqco_, the PyPI token and the warehouse source); the rest are formats other detectors know (trufflehog,
+# detect-secrets), each regex written here. A client id (Salesforce 3MVG9, Square sq0idp) is public and has no line.
+google-oauth-access-token    ya29\.[0-9A-Za-z_-]{30,2048}
+tailscale-key                tskey-(?:api|auth|client|scim|webhook)-[0-9A-Za-z]{4,40}-[0-9A-Za-z]{16,64}
+discord-webhook-url          https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/(?:v[0-9]{1,2}/)?webhooks/[0-9]{17,20}/[0-9A-Za-z_-]{60,80}
+salesforce-refresh-token     5(?i:aep861)[0-9A-Za-z._=]{80,400}
+cloudflare-api-token         (?:cfk|cfat)_[0-9A-Za-z]{40,64}
+hubspot-private-app-token    pat-(?:na|eu|ap)[0-9]-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
+new-relic-user-key           NRAK-[0-9A-Z]{27}
+new-relic-insert-key         NRII-[0-9A-Za-z_-]{32}
+new-relic-rest-api-key       NRRA-[0-9a-fA-F]{42}
+new-relic-admin-key          NRAA-[0-9a-fA-F]{27}
+new-relic-query-key          NRIQ-[0-9A-Za-z_-]{32}
+new-relic-pixie-api-key      px-api-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
+anthropic-oauth-token        sk-ant-o(?:at|rt)01-[0-9A-Za-z_-]{40,}
+flutterwave-secret-key       FLWSECK(?:_TEST)?-[0-9A-Za-z]{20,40}-X
+doppler-token                dp\.(?:ct|pt|sa|said|scim|audit|st)\.(?:[a-z0-9_-]{2,35}\.)?[0-9A-Za-z]{40,44}
+square-oauth-secret          (?:sandbox-)?sq0csp-[0-9A-Za-z_-]{43}
+contentful-personal-token    CFPAT-[0-9A-Za-z_-]{43}
+mapbox-secret-token          sk\.eyJ[0-9A-Za-z_-]{20,}\.[0-9A-Za-z_-]{20,}
+kong-konnect-token           (?:kpat|spat)_[0-9A-Za-z]{40,60}
+sonarcloud-org-token         sqco_[0-9A-Za-z]{40,64}
+adafruit-io-key              (?<![0-9A-Za-z_])aio_(?=[A-Za-z]*[0-9])[0-9A-Za-z]{28}
+pypi-test-upload-token       pypi-AgENdGVzdC5weXBpLm9yZw[0-9A-Za-z_-]{50,1000}

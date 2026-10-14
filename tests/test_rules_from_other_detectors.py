@@ -9,6 +9,7 @@ value that is a hit and a twin with a wrong check character that is not.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 import random
@@ -454,6 +455,131 @@ class PortedCheckDigitTests(unittest.TestCase):
         self.assertEqual(found(f"PESEL {v}0", region=("pl",)), [])
 
 
+# ---------------------------------------------------------------- tokens --
+AN = string.ascii_letters + D
+HEXL = "0123456789abcdef"
+B64U = AN + "_-"
+
+
+def _uuid(r):
+    return "-".join(rd(r, n, HEXL) for n in (8, 4, 4, 4, 12))
+
+
+def discord_bot(r):
+    head = base64.urlsafe_b64encode(str(r.randint(10 ** 17, 10 ** 19 - 1)).encode()).decode().rstrip("=")
+    return J([head, ".", rd(r, 6, B64U), ".", rd(r, 27, B64U)])
+
+
+# rule id -> (a token, a look-alike that is not one). Every part after the prefix is random
+TOKENS = {
+    "google-oauth-access-token": lambda r: (J(["ya", "29."]) + rd(r, 120, B64U), J(["ya", "29."]) + rd(r, 12, AN)),
+    "tailscale-key": lambda r: (J(["tskey", "-auth-"]) + rd(r, 12, AN) + "-" + rd(r, 33, AN),
+                                J(["tskey", "-auth-"]) + rd(r, 12, AN)),
+    "discord-webhook-url": lambda r: (J(["https://discord.com/api/web", "hooks/"]) + rd(r, 19) + "/" + rd(r, 68, B64U),
+                                      J(["https://discord.com/api/web", "hooks/"]) + rd(r, 19)),
+    "salesforce-refresh-token": lambda r: (J(["5Aep", "861"]) + rd(r, 80, AN), J(["5Aep", "861"]) + rd(r, 20, AN)),
+    "cloudflare-api-token": lambda r: (J(["cf", "k_"]) + rd(r, 48, AN), J(["cf", "k_"]) + rd(r, 20, AN)),
+    "hubspot-private-app-token": lambda r: (J(["pat", "-na1-"]) + _uuid(r), J(["pat", "-na1-"]) + rd(r, 8, HEXL)),
+    "new-relic-user-key": lambda r: (J(["NR", "AK-"]) + rd(r, 27, U + D), J(["NR", "AK-"]) + rd(r, 10, U + D)),
+    "new-relic-insert-key": lambda r: (J(["NR", "II-"]) + rd(r, 32, AN), J(["NR", "II-"]) + rd(r, 12, AN)),
+    "new-relic-rest-api-key": lambda r: (J(["NR", "RA-"]) + rd(r, 42, HEXL), J(["NR", "RA-"]) + rd(r, 20, HEXL)),
+    "new-relic-admin-key": lambda r: (J(["NR", "AA-"]) + rd(r, 27, HEXL), J(["NR", "AA-"]) + rd(r, 12, HEXL)),
+    "new-relic-query-key": lambda r: (J(["NR", "IQ-"]) + rd(r, 32, AN), J(["NR", "IQ-"]) + rd(r, 12, AN)),
+    "new-relic-pixie-api-key": lambda r: (J(["px", "-api-"]) + _uuid(r), J(["px", "-api-"]) + rd(r, 8, HEXL)),
+    "anthropic-oauth-token": lambda r: (J(["sk-ant", "-o", r.choice(["at", "rt"]), "01-"]) + rd(r, 95, B64U),
+                                        J(["sk-ant", "-oat01-"]) + rd(r, 20, AN)),
+    "flutterwave-secret-key": lambda r: (J(["FLW", "SECK-"]) + rd(r, 32, HEXL) + "-X",
+                                         J(["FLW", "SECK-"]) + rd(r, 8, HEXL)),
+    "doppler-token": lambda r: (J(["dp", ".", r.choice(["st.prd", "sa", "ct", "scim", "audit"]), "."]) + rd(r, 43, AN),
+                                J(["dp", ".st."]) + rd(r, 10, AN)),
+    "square-oauth-secret": lambda r: (J(["sq0", "csp-"]) + rd(r, 43, B64U), J(["sq0", "csp-"]) + rd(r, 12, AN)),
+    "contentful-personal-token": lambda r: (J(["CF", "PAT-"]) + rd(r, 43, B64U), J(["CF", "PAT-"]) + rd(r, 12, AN)),
+    "mapbox-secret-token": lambda r: (J(["sk", ".eyJ"]) + rd(r, 60, B64U) + "." + rd(r, 22, B64U),
+                                      J(["pk", ".eyJ"]) + rd(r, 60, B64U) + "." + rd(r, 22, B64U)),
+    "kong-konnect-token": lambda r: (J(["kp", "at_"]) + rd(r, 49, AN), J(["kp", "at_"]) + rd(r, 12, AN)),
+    "sonarcloud-org-token": lambda r: (J(["sq", "co_"]) + rd(r, 59, AN), J(["sq", "co_"]) + rd(r, 12, AN)),
+    "adafruit-io-key": lambda r: (J(["ai", "o_"]) + rd(r, 28, AN), J(["ai", "o_"]) + rd(r, 12, AN)),
+    "pypi-test-upload-token": lambda r: (J(["pypi-AgENdGVz", "dC5weXBpLm9yZw"]) + rd(r, 150, B64U),
+                                         J(["pypi-AgENdGVz", "dC5weXBpLm9yZw"]) + rd(r, 20, AN)),
+    "telegram-bot-token": lambda r: (rd(r, 1, D[1:]) + rd(r, 8) + ":A" + rd(r, 34, B64U),
+                                     rd(r, 9) + ":" + rd(r, 12, AN)),
+    "mailchimp-api-key": lambda r: (rd(r, 32, HEXL) + "-us" + str(r.randint(1, 21)), rd(r, 32, HEXL) + "-eu1"),
+    "discord-bot-token": lambda r: (discord_bot(r), J([rd(r, 26, AN), ".", rd(r, 6, AN), ".", rd(r, 27, AN)])),
+}
+
+
+class TokenFormatTests(unittest.TestCase):
+    def test_each_token_is_found_whole_by_its_rule_and_a_look_alike_is_not(self):
+        for rule_id, gen in TOKENS.items():
+            r = random.Random(rule_id)
+            for _ in range(20):
+                tok, miss = gen(r)
+                for text in (tok, f"export TOKEN_VALUE={tok}\n", f"here it is: {tok} thanks"):
+                    with self.subTest(rule=rule_id, text=text):
+                        self.assertIn((rule_id, "SECRET", tok), found(text))
+                with self.subTest(rule=rule_id, miss=miss):
+                    self.assertNotIn(rule_id, [k for k, _t, _v in found(f"see {miss} there")])
+
+    def test_every_rule_has_a_token(self):
+        new = {line.split()[0] for line in (detect.RULES_DIR / "prefixes.txt").read_text().splitlines()
+               if line.strip() and not line.startswith("#")} - {"gitlab-runner-token", "gitlab-deploy-token-any",
+                                                                 "webhook-signing-secret", "cloudflare-user-api-token"}
+        self.assertEqual(new | {"telegram-bot-token", "mailchimp-api-key", "discord-bot-token"}, set(TOKENS))
+
+    def test_each_prefix_rule_starts_its_matches_with_a_literal_of_four_characters(self):
+        # a literal that every match holds lets the regex engine skip a text without it
+        try:
+            from re import _parser as sre_parse
+        except ImportError:   # Python before 3.11
+            import sre_parse
+        for line in (detect.RULES_DIR / "prefixes.txt").read_text().splitlines():
+            if not line.strip() or line.startswith("#"):
+                continue
+            rule_id, rx = line.split(None, 1)
+            run = best = 0
+            for op, av in sre_parse.parse(rx):
+                if op is sre_parse.LITERAL:
+                    run += 1
+                    continue
+                if op is sre_parse.BRANCH:
+                    alts = av[1]                    # (?:a|b): each alternative a run of literals
+                    if all(all(o is sre_parse.LITERAL for o, _ in alt) for alt in alts):
+                        run += min(len(alt) for alt in alts)
+                        continue
+                if op is sre_parse.SUBPATTERN and all(o is sre_parse.LITERAL for o, _ in av[-1]):
+                    run += len(av[-1])              # (?i:aep861)
+                    continue
+                best, run = max(best, run), 0
+            with self.subTest(rule=rule_id):
+                self.assertGreaterEqual(max(best, run), 4)
+
+    def test_a_long_run_of_near_misses_takes_linear_time(self):
+        r = random.Random(16)
+        for rule_id, gen in TOKENS.items():
+            tok, _ = gen(r)
+            near = (tok[:-2] + "  ") * 1000            # each copy one short of a match
+            t0 = time.perf_counter()
+            found(near)
+            with self.subTest(rule=rule_id):
+                self.assertLess(time.perf_counter() - t0, 3.0)
+
+    def test_a_telegram_token_of_the_documented_short_form_is_found(self):
+        r = random.Random(18)
+        tok = rd(r, 6) + ":A" + rd(r, 33, B64U)        # the Bot API example: a 6-digit id, 34 characters
+        self.assertIn(("telegram-bot-token", "SECRET", tok), found(f"bot {tok}"))
+        url = J(["https://api.tele", "gram.org/bot", tok, "/sendMessage"])     # Gate B of 0.6.19
+        self.assertIn(("telegram-bot-token", "SECRET", tok), found(f"curl {url}"))
+
+    def test_an_identifier_after_aio_is_no_key(self):
+        self.assertEqual(found("from x import " + J(["ai", "o_ConnectionPoolManagerFactory"])), [])
+
+    def test_a_discord_bot_token_needs_a_user_id_in_its_first_part(self):
+        r = random.Random(17)
+        for _ in range(40):
+            tok = discord_bot(r)
+            self.assertTrue(checksums.discord_bot_token_ok(tok))
+            fake = J(["M", rd(r, 25, AN), ".", rd(r, 6, AN), ".", rd(r, 27, AN)])
+            self.assertFalse(checksums.discord_bot_token_ok(fake))
 
 
 if __name__ == "__main__":

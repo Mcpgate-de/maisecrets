@@ -1,0 +1,10 @@
+# c1-a-vendor-token-without-a-label-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-vendor-token-without-a-label-is-a-hit"
+control = "C1"
+statement = "A Google OAuth access token, a Claude Code OAuth token, a Tailscale key, a Discord webhook URL or bot token, a Telegram bot token, a Mailchimp key and the other formats of rules/prefixes.txt added in 0.6.19 are secret hits with no label; a look-alike that is too short or has the public prefix stays text."
+runner = ["tests/test_rules_from_other_detectors.py::TokenFormatTests::test_each_token_is_found_whole_by_its_rule_and_a_look_alike_is_not"]
+
+[proof]
+file = "maisecrets/rules/prefixes.txt"
+find = '''google-oauth-access-token    ya29'''
+replace = '''google-oauth-access-token    (?!)ya29'''

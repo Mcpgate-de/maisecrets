@@ -1158,6 +1158,7 @@ VALIDATORS = {
     "at_social_security": checksums.at_social_security_ok,
     "wif": checksums.wif_ok,
     "xprv": checksums.xprv_ok,
+    "discord_bot_token": checksums.discord_bot_token_ok,
 }
 
 
@@ -1312,6 +1313,19 @@ OWN_RULES: list[dict] = [
     {"id": "crypto-extended-private-key", "type": "SECRET", "validator": "xprv",
      "regex": r"(?<![1-9A-HJ-NP-Za-km-z])[xyztuvYZUV]prv[1-9A-HJ-NP-Za-km-z]{100,108}"
               r"(?![1-9A-HJ-NP-Za-km-z])"},
+    # three token formats with no literal prefix, so not in rules/prefixes.txt (0.6.19). A Telegram bot token: the
+    # bot's id, a colon and 34 or 35 characters starting with A (the Bot API documentation's example has 34), alone
+    # or in the API URL .../bot<token>/sendMessage (Gate B of 0.6.19). A Mailchimp API key: 32 hex digits and the
+    # data centre (-us1 …). A Discord bot token: three base64url parts, the first the bot's user id in base64, which
+    # the validator decodes: a random three-part value is not a run of 17 to 20 digits there
+    {"id": "telegram-bot-token", "type": "SECRET",
+     "regex": r"(?:(?<=/bot)|(?<![0-9A-Za-z_:-]))[0-9]{5,16}:A[0-9A-Za-z_-]{33,34}"
+              r"(?![0-9A-Za-z_-])"},
+    {"id": "mailchimp-api-key", "type": "SECRET",
+     "regex": r"(?<![0-9A-Za-z])[0-9a-f]{32}-us[0-9]{1,2}(?![0-9A-Za-z])"},
+    {"id": "discord-bot-token", "type": "SECRET", "validator": "discord_bot_token",
+     "regex": r"(?<![0-9A-Za-z_.-])[MNO][0-9A-Za-z_-]{23,27}\.[0-9A-Za-z_-]{6}\.[0-9A-Za-z_-]{27,38}"
+              r"(?![0-9A-Za-z_.-])"},
     # a BIP39 seed phrase: 12 to 24 words of the English list whose checksum holds (checksums.bip39_spans; the regex is
     # never run). Twelve words carry a checksum of 4 bits, so one list of ordinary words in 16 passes ("client connect
     # system process input output error return result update file edit", Gate A of 0.6.19): a phrase of 12 needs a word

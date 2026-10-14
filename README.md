@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 128 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 135 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1296,8 +1296,17 @@ Four sources, one scanner (`maisecrets/detect.py`):
   their spans in the secret stage, before detect-secrets and betterleaks.
 - Prefixes newer than the vendored rulesets live in
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
-  (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last
-  two found bare in real prompts on 2026-09-26.
+  (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_`, the last two
+  found bare in real prompts on 2026-09-26, and since 0.6.19 Google OAuth
+  access tokens (`ya29.`), Tailscale keys, Discord webhook URLs, Salesforce
+  refresh tokens, Cloudflare `cfk_` and `cfat_`, HubSpot private app tokens,
+  New Relic `NRAK-`, `NRII-`, `NRRA-`, `NRAA-`, `NRIQ-` and `px-api-`, Claude
+  Code OAuth tokens (`sk-ant-oat01-`, `sk-ant-ort01-`), Flutterwave, Doppler,
+  Square `sq0csp-`, Contentful, Mapbox `sk.`, Kong Konnect, SonarQube Cloud
+  `sqco_`, Adafruit IO and TestPyPI tokens. A Telegram bot token, a Mailchimp key and a Discord bot
+  token (its first part must decode to a user id) have no fixed prefix and are
+  own rules. A client id such as Salesforce `3MVG9` or Square `sq0idp-` is
+  public and stays text.
 - A secret shape with a fixed length (betterleaks: `glpat-[\w-]{20}`) is
   extended to the end of the token characters, so a longer token does not
   leave its tail in the clear (found with a 24-char token, 2026-09-26).

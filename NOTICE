@@ -43,4 +43,6 @@ languages, the IBAN forms with hyphens and in lower case, the context rule for a
 the normaliser of maisecrets/normalise.py (changed: five of its stages, one module, scanned
 only around the changed lines and in the tool channel only), the design of the country rules
 (REGIONAL_RULES in maisecrets/detect.py) and the checksums of the AHV number, the Swiss UID and the
-codice fiscale in maisecrets/checksums.py.
+codice fiscale in maisecrets/checksums.py. The formats of the Telegram bot token, the Discord bot
+token and the Mailchimp API key follow Yelp detect-secrets (Apache License 2.0, see
+maisecrets/rules/LICENSE-detect-secrets); the regular expressions are written here.
