@@ -1974,6 +1974,9 @@ def _load_own() -> list[Rule]:
 
 
 _RULES: list[Rule] | None = None
+# prefixes with a relaxed tail (0.6.21): they run after the vendored rules, so a key of the full vendored form keeps
+# its vendored rule id and only a shorter one falls to these
+_LATE_RULES = frozenset({"openai-anthropic-key-relaxed", "slack-token-relaxed"})
 
 
 def rules() -> list[Rule]:
@@ -1982,14 +1985,27 @@ def rules() -> list[Rule]:
     global _RULES
     if _RULES is None:
         own = _load_own()
-        secrets = [r for r in own if r.type == "SECRET"]
+        late = [r for r in own if r.id in _LATE_RULES]
+        secrets = [r for r in own if r.type == "SECRET" and r.id not in _LATE_RULES]
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
         _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
-                  + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]
+                  + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES] + late
                   + _load_regional(active.regions) + _load_presidio(active.regions) + pii
                   + _load_literal(active.languages))
+        _REGIONS[:] = [_RULES, active.regions]
     return _RULES
+
+
+_REGIONS: list = [None, ()]   # the rule list and the regions it was loaded for (rules())
+
+
+def _pii_regions_cached() -> tuple:
+    """The regions of the loaded rules. A test that swaps detect._RULES back gets the regions of that list."""
+    current = rules()
+    if _REGIONS[0] is not current:
+        _REGIONS[:] = [current, active_regions().regions]
+    return _REGIONS[1]
 
 
 def active_regions():
@@ -3034,10 +3050,44 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> li
             i = bisect.bisect_left(taken_starts, start)
             taken_starts.insert(i, start)
             taken_ends.insert(i, end)
+    _personal_hits(text, enabled, found, taken_starts, taken_ends, overlaps)
     if _CHANNEL[0] == "tool" and not _copy:
         _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends)
     found.sort(key=lambda x: x.start)
     return found
+
+
+def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: list, overlaps) -> None:
+    """Personal data after a label or in a fixed form (maisecrets/personal.py), after every other rule: a span that
+    another rule took stays its own, and a placeholder or a documentation value is no hit."""
+    try:
+        from . import personal
+    except ImportError:   # a copy of detect.py without its sibling modules
+        return
+    for start, end, kind, typ in sorted(personal.hits(text, _CHANNEL[0], _pii_regions_cached())):
+        if enabled is not None and kind not in enabled:
+            continue
+        value = text[start:end]
+        low = value.lower()
+        if "\u27e6" in value or "\u27e7" in value or "example" in low or low in personal.PLACEHOLDER_NAMES \
+                or looks_like_placeholder(value) or is_public_test_value(value, typ):
+            continue
+        if overlaps(start, end):
+            # an address takes the postcode that a region rule found inside it (de-plz): the whole address is the
+            # value. Any other hit keeps its span
+            lo, hi = bisect.bisect_left(taken_starts, start), bisect.bisect_left(taken_starts, end)
+            inside = [f for f in found if start <= f.start and f.end <= end and f.type not in SECRET_TYPES]
+            if typ != personal.ADDRESS or not inside or hi - lo != len(inside) or (
+                    lo > 0 and taken_ends[lo - 1] > start):
+                continue
+            for f in inside:
+                found.remove(f)
+                i = bisect.bisect_left(taken_starts, f.start)
+                del taken_starts[i], taken_ends[i]
+        found.append(Match(kind, typ, value, start, end))
+        i = bisect.bisect_left(taken_starts, start)
+        taken_starts.insert(i, start)
+        taken_ends.insert(i, end)
 
 
 _WINDOW_BEFORE = 2048  # context a rule may read before a value: a label 200, a context word 80, an AWS key id up to
