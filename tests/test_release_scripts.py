@@ -163,6 +163,15 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn("v0.0.1", notes)
         self.assertTrue(notes.endswith(")\n"))
 
+    def test_a_merge_commit_subject_is_no_release_note(self):
+        commits = [("a" * 40, "Merge branch 'feat/x' into 'main'", "feat: x\n\nSee merge request !61"),
+                   ("b" * 40, "Merge remote-tracking branch 'origin/main'", ""),
+                   ("c" * 40, "fix: a fix", ""), ("d" * 40, "odd subject", "")]
+        notes = self.r.render_notes("0.9.0", commits)
+        self.assertNotIn("Merge", notes)
+        self.assertIn("- a fix (ccccccc)", notes)
+        self.assertIn("- odd subject (ddddddd)", notes)   # a subject without a type still shows
+
     def test_a_breaking_change_of_a_silent_type_is_listed_under_breaking(self):
         """`refactor!:` bumps the break level, so the release exists because of it; before the fix
         the notes skipped every docs/ci/test/chore/build/style/refactor commit, breaking or not,
