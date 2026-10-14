@@ -142,6 +142,32 @@ class PasswordLiteralTests(unittest.TestCase):
                 self.assertIn(("label-pw-literal", f'{a}`"{b}'), kinds(text))
                 self.assertNotIn(a, [v for _, v in kinds(text)])
 
+    def test_an_identifier_a_ui_string_a_pattern_or_a_duration_stays_text(self):
+        """A name joined by _ - . (snake_case, kebab-case, dotted), a word of another script or with accents, a regular
+        expression after a secret label, an ISO 8601 duration (codex and Opus verification of 0.6.16)."""
+        texts = ['password = "senha_atual"', 'password = "nueva-contrasena"', 'password = "clave.nueva"',
+                 'password = "mot_de_passe_oublie"', 'password: "contrase' + chr(0xF1) + 'a_nueva"',
+                 '"password": "Jelsz' + chr(0xF3) + '"',
+                 '{"password": "\u041f\u0430\u0440\u043e\u043b\u044c"}',                          # Russian
+                 '"password": "\u039a\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2"',                      # Greek
+                 '"password": "\u041b\u043e\u0437\u0438\u043d\u043a\u0430"',                      # Serbian
+                 '{"password": "\u092a\u093e\u0938\u0935\u0930\u094d\u0921"}',                    # Hindi
+                 '{"password": "\u0e23\u0e2b\u0e31\u0e2a\u0e1c\u0e48\u0e32\u0e19"}',             # Thai
+                 '{"password": "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631"}',  # Arabic
+                 '{"password": "\u05e1\u05d9\u05e1\u05de\u05d4"}',                                  # Hebrew
+                 '{"password": "\u5bc6\u7801"}', '{"password": "\u30d1\u30b9\u30ef\u30fc\u30c9"}',  # CJK
+                 '{"password": "\ube44\ubc00\ubc88\ud638"}',                                         # Korean
+                 "token: '[A-Za-z0-9_-]{20,}'", "secret: '[a-f0-9]{64}'", "api_key: '^" + chr(92) + "d{6}$'",
+                 "password: P90D", "password: PT15M"]
+        for text in texts:
+            with self.subTest(text=text):
+                self.assertEqual([k for k, _ in kinds(text) if k.startswith("label-")], [])
+        p = password(10)
+        for text, value in ((f'password = "{p[:5]}_{p[5:]}"', f"{p[:5]}_{p[5:]}"),       # random parts stay passwords
+                            ('password = "xkcdq' + 'wrtzp_nb"', "xkcdqwrtzp_nb")):
+            with self.subTest(text=text.replace(p[:5], "<a>")):
+                self.assertIn(value, [v for _, v in kinds(text)])   # whole, by this rule or a keyword rule
+
     def test_a_word_with_a_number_and_a_sign_is_a_password(self):
         """The form people choose: a word, a number and a sign. Undoing leet makes it a word, so the word check alone
         let it through in the forms that only this rule reads."""

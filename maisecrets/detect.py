@@ -730,6 +730,7 @@ def _sequential(low: str) -> bool:
 _MEASURE_VALUE_RE = re.compile(r"[~<>=+\u00a7#-]?\d+(?:[.,:/-]\d+)*(?:[a-z]{1,3}|[A-Z]{1,2})?"
                                r"(?:[/ -]\d+(?:[.,:]\d+)*(?:[a-z]{1,3}|[A-Z]{1,2})?)*%?")
 _ABBREVIATION_RE = re.compile(r"(?:[A-Za-z\u00c0-\u024f]{1,4}\.)+[A-Za-z\u00c0-\u024f]{0,4}")
+_ISO_DURATION_RE = re.compile(r"P(?:\d+[YMWD])*(?:T(?:\d+[HMS])+)?")   # P90D, PT15M
 _WORD_NUMBER_RE = re.compile(r"[A-Za-z\u00c0-\u024f]{2,}[#_. :/-]\d{1,4}|\d{1,4}[#_. :/-][A-Za-z\u00c0-\u024f]{2,}")
 
 
@@ -739,12 +740,26 @@ def _random_evidence(v: str) -> bool:
     explains. A word of another language (senhaAtual, wachtwoord) and a measure (95.2%, 12:30, ~30d) stay text."""
     if not any(c.isalpha() for c in v):
         return False
-    if _MEASURE_VALUE_RE.fullmatch(v) or _ABBREVIATION_RE.fullmatch(v) or _WORD_NUMBER_RE.fullmatch(v):
+    if (_MEASURE_VALUE_RE.fullmatch(v) or _ABBREVIATION_RE.fullmatch(v) or _WORD_NUMBER_RE.fullmatch(v)
+            or _ISO_DURATION_RE.fullmatch(v)):
         return False
-    if any(c.isdigit() for c in v) or any(not c.isalnum() for c in v):
-        return True
-    # letters only: few vowels (the words of every Latin-script language have a quarter or more: wachtwoord, senha,
-    # Kennwort), or a mix of cases that no word boundary explains
+    if any(c.isdigit() for c in v) or any(_is_sign(c) and c not in "_-." for c in v):
+        return True   # a digit, or a sign that no identifier uses (_ - . join the words of a name: senha_atual)
+    if not v.isascii():
+        return False  # letters of another script or with accents, joined at most by _ - .: words (a UI string)
+    # ASCII letters joined at most by _ - .: one part with few vowels (the words of every Latin-script language have a
+    # quarter or more), or with a mix of cases that no word boundary explains
+    return any(_random_letters(part) for part in re.split(r"[_.-]+", v) if part)
+
+
+def _is_sign(c: str) -> bool:
+    """Punctuation or a symbol. A combining vowel sign of Devanagari or Thai is part of a word, not a sign."""
+    import unicodedata
+    return unicodedata.category(c)[0] in "PS"
+
+
+def _random_letters(v: str) -> bool:
+    """ASCII letters that no word explains: fewer than a quarter vowels, or capitals inside short runs (xKqTzLmP)."""
     if len(v) >= 6 and sum(c in "aeiouyAEIOUY" for c in v) < 0.25 * len(v):
         return True
     upper = sum(c.isupper() for c in v)
@@ -768,8 +783,8 @@ def _pw_literal_ok(v: str) -> bool:
         return False
     if _sequential(v.lower()) or _LITERAL_PLACEHOLDER_RE.search(v) or _DOTTED_RE.fullmatch(v) or _names_itself(v):
         return False
-    if _CLOSED_TEMPLATE_RE.search(v):
-        return False   # a template of a format string: f'pwd = "{pw}"', "password: {password}"
+    if _CLOSED_TEMPLATE_RE.search(v) or _REGEX_LIKE_RE.search(v):
+        return False   # a template of a format string or a pattern: f'pwd = "{pw}"', "password: {password}"
     if _VERSION_RE.fullmatch(v):
         return False   # a version: v1.2.3-rc1 (undoing leet makes it letters)
     if _wordlike(_deleet(v)) < 0.3:
@@ -883,9 +898,17 @@ def _norm_entropy(v: str) -> float:
     return shannon_entropy(v) / math.log2(max(2, min(_alphabet_size(v), len(v))))
 
 
+# a value that is a pattern, not a key: a character class with a quantifier, a counted repeat, an escape class, a group
+# (`token: '[A-Za-z0-9_-]{20,}'`, `secret: '[a-f0-9]{64}'`, `^\d{6}$`; Opus verification of 0.6.16)
+_REGEX_LIKE_RE = re.compile(r"\[[^\]]{1,60}\](?:[*+?]|\{\d+(?:,\d*)?\})|\{\d+(?:,\d*)?\}|\\[dwsDWSbB]"
+                            r"|\(\?[:=!<]|\.[*+]")
+
+
 def _key_literal_ok(v: str, lo: int, hi: int, words: float, entropy: float) -> bool:
     """A key after a secret or a weak label: ASCII, no space, no placeholder, few word letters, a high normalised
     entropy, and detect-secrets' filters (templates, references, sequences)."""
+    if _REGEX_LIKE_RE.search(v):
+        return False
     if not lo <= len(v) <= hi or not v.isascii() or any(c.isspace() for c in v) or _LITERAL_PLACEHOLDER_RE.search(v):
         return False   # a key is ASCII: a value with § or an umlaut is a split test value or a word
     return _norm_entropy(v) >= entropy and _ds_value_ok(v, 4) and _wordlike(_deleet(v)) < words
