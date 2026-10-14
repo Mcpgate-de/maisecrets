@@ -240,6 +240,26 @@ class CorpusTests(unittest.TestCase):
         self.assertGreaterEqual(len(fp_corpus_pii.POSITIVE), 40)
 
 
+class OpenAiAnthropicKeyTests(unittest.TestCase):
+    def test_a_short_openai_and_anthropic_key(self):
+        for tok, kind in ((J(["sk-", "proj-", "Ab3dEf6hIj9kLm2nOp5qRs8t"]), "openai-anthropic-key-relaxed"),
+                          (J(["sk-", "ant-", "ap" + "i03", "-", "Zx8cVb7nMq6w", "Er5tYu4iOp3a"]), "openai-anthropic-key-relaxed")):
+            with self.subTest(kind=kind):
+                hits = [(m.kind, m.value) for m in scan("key " + tok, "prompt")]
+                self.assertEqual(len(hits), 1)
+                self.assertEqual(hits[0][1], tok)
+
+    def test_a_word_after_the_prefix_is_no_key(self):
+        for text in ("rename sk-admin-sidebar-navigation-item", "the sk-proj-overview-header-container-large class"):
+            with self.subTest(text=text):
+                self.assertEqual(scan(text, "prompt"), [])
+
+    def test_a_stripe_dash_test_key_is_no_openai_key(self):
+        self.assertEqual([m for m in scan(J(["sk-", "test-", "Ab3dEf6hIj9kLm2nOp5qRs8t"]), "prompt")
+                          if m.kind == "openai-anthropic-key-relaxed"], [])
+
+
+
 
 if __name__ == "__main__":
     unittest.main()

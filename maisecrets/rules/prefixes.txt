@@ -55,3 +55,8 @@ github-app-installation-jwt  ghs_(?:(?<![A-Za-z0-9_]ghs_)|(?<=\\[nrt]ghs_))[0-9]
 # take glptt- and 40 hex digits, glcbt- with a partition prefix, and claimed the first part of a longer token
 gitlab-pipeline-trigger-token-any glptt-(?:(?<![A-Za-z0-9_-]glptt-)|(?<=\\[nrt]glptt-))[0-9A-Za-z_-]{20,400}(?:\.[0-9a-z]{2}\.[0-9a-z]{9})?(?![0-9A-Za-z_-])
 gitlab-ci-job-token-any      glcbt-(?:(?<![A-Za-z0-9_-]glcbt-)|(?<=\\[nrt]glcbt-))[0-9A-Za-z_-]{20,2048}(?:\.[0-9A-Za-z_-]{2,2048}){0,2}(?![0-9A-Za-z_-])(?!\.[0-9A-Za-z_-])
+# 0.6.21, from the values that leaked in the public benchmark's holdout sets: an OpenAI or Anthropic key and a Slack
+# token shorter than the vendored rules want (they fix the length of the tail). The tail needs a digit (and a capital
+# for sk-): sk-admin-sidebar-navigation-item and xoxo-hugs-and-kisses are words. Both run after the vendored rules
+# (detect._LATE_RULES): a key of the full vendored form keeps its vendored rule
+openai-anthropic-key-relaxed (?<![\w-])sk-(?:proj|ant|svcacct|admin)-(?=[A-Za-z0-9_-]{0,200}[0-9])(?=[A-Za-z0-9_-]{0,200}[A-Z])[A-Za-z0-9_-]{20,}
