@@ -584,7 +584,9 @@ one-line tip that appears once a day at session start.
 
 `regions`: country codes, for example `["de", "us"]`. Each country adds its
 Presidio rules for personal data, such as a German tax ID or a US social
-security number. The entry `auto` is the country of your system setting (on
+security number. `ch` and `at` add maisecrets' own rules for Switzerland (AHV
+number, company UID) and Austria (social insurance number, UID), for which
+Presidio has none. The entry `auto` is the country of your system setting (on
 macOS and Windows the system setting, not `LANG`). The default is `["auto"]`.
 An empty list keeps the generic rules only. The old key `pii_regions` still
 works.
@@ -1173,11 +1175,11 @@ Four sources, one scanner (`maisecrets/detect.py`):
   public and is no personal data. Own rules (`REGIONAL_RULES` in
   `maisecrets/detect.py`) add what Presidio lacks: the Personalausweis and
   Reisepass number in the 9 characters the card prints (Presidio read the 9th
-  as a check digit, which only the machine-readable zone carries), and the
+  as a check digit, which only the machine-readable zone carries), the
   Steuer-ID and the Rentenversicherungsnummer with the spaces of their printed
-  form. The Steuer-ID check follows the repeat rule of its issuer (exactly one
-  digit twice or three times, never three in a row; ITZBund, "KONZEPT
-  Steueridentifikationsnummer", version 2.3, 2016).
+  form, and the Swiss and Austrian numbers. The Steuer-ID check follows the
+  repeat rule of its issuer (exactly one digit twice or three times, never three
+  in a row; ITZBund, "KONZEPT Steueridentifikationsnummer", version 2.3, 2016).
 - **detect-secrets** (Yelp, Apache-2.0, version in `DETECT_SECRETS_VERSION`,
   refresh with `scripts/sync_detect_secrets.py vX.Y.Z`): credentials
   recognised by position (`password = …`, `api_key: "…"`, `user:pass@host`),

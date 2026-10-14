@@ -1142,7 +1142,8 @@ VALIDATORS = {
     # name%40firma.de in a URL query, a form body or an access log: the same address, percent-encoded
     "person_email_encoded": lambda v: VALIDATORS["person_email"](v.replace("%40", "@")),
     "us_ssn": _us_ssn_ok,
-    # checksums.py: ports of Presidio validators that were missing and the German document number
+    # checksums.py: ports of Presidio validators that were missing, the German document number, Switzerland and
+    # Austria
     "de_document": checksums.de_document_ok,
     "de_tax_id_spaced": lambda v: _de_tax_id_ok(re.sub(r"[ \u00a0]", "", v)),
     "pl_pesel": checksums.pl_pesel_ok,
@@ -1151,6 +1152,10 @@ VALIDATORS = {
     "uk_nhs": checksums.uk_nhs_ok,
     "us_aba": checksums.us_aba_ok,
     "it_fiscal_code": checksums.it_fiscal_code_ok,
+    "ch_ahv": checksums.ch_ahv_ok,
+    "ch_uid": checksums.ch_uid_ok,
+    "at_uid": checksums.at_uid_ok,
+    "at_social_security": checksums.at_social_security_ok,
 }
 
 
@@ -1413,8 +1418,8 @@ PRESIDIO_EXTRA_CONTEXT = {
 REGION_OF_ID = {"nhs": "uk", "aba-routing": "us", "medical-license": "us"}
 DEFAULT_PII_REGIONS = ("generic",)   # without a config: the rules of no country
 
-# country rules of our own (0.6.19): forms Presidio has no pattern for. The design follows a fork of this project
-# (Apache-2.0, see NOTICE). Each rule names its region; a rule
+# country rules of our own (0.6.19): forms Presidio has no pattern for, and Switzerland and Austria, which it has no
+# rules for. The design follows a fork of this project (Apache-2.0, see NOTICE). Each rule names its region; a rule
 # with require_context needs one of its context words within 80 characters before or 40 after the value.
 _DE_TAX_ID_CONTEXT = ("steueridentifikationsnummer", "steuer-id", "steuerid", "steuerliche identifikationsnummer",
                       "steuerliche identifikation", "persönliche identifikationsnummer", "steuer identifikation",
@@ -1425,6 +1430,14 @@ _DE_ID_CARD_CONTEXT = ("personalausweis", "ausweis", "personalausweisnummer", "a
                        "national id", "mrz")
 _DE_PASSPORT_CONTEXT = ("reisepass", "passnummer", "reisepassnummer", "reisepass-nr", "pass-nr", "passnr",
                         "reisepassnr", "dokumentennummer", "passport", "passport number", "mrz")
+_CH_AHV_CONTEXT = ("ahv", "avs", "ahv-nr", "ahv-nummer", "ahvn13", "avs-nr", "sozialversicherungsnummer",
+                   "sozialversicherung", "versichertennummer", "sv-nummer", "numéro avs", "numero avs", "n° avs",
+                   "no avs", "assurance sociale", "assicurazione sociale")
+_AT_SV_CONTEXT = ("sozialversicherungsnummer", "versicherungsnummer", "sv-nummer", "sv-nr", "svnr", "vsnr",
+                  "e-card", "sozialversicherung")
+_VAT_CONTEXT = ("uid", "uid-nr", "uid-nummer", "ust-id", "ust-idnr", "ustid", "umsatzsteuer",
+                "umsatzsteuer-identifikationsnummer", "mwst", "mwst-nr", "tva", "iva", "vat", "vat id", "vat number",
+                "unternehmens-identifikationsnummer")
 _DOC = "CFGHJKLMNPRTVWXYZ"
 REGIONAL_RULES: list = [
     # the German ID card and passport: 9 characters as printed on the card, or 10 with the ICAO check digit as in the
@@ -1448,6 +1461,21 @@ REGIONAL_RULES: list = [
      "validator": "de_social_security_spaced",
      "regex": r"(?<![\w.,/-])[0-9]{2}[ \u00a0](?:0[1-9]|[12][0-9]|3[01]|5[1-9]|[67][0-9]|8[01])(?:0[1-9]|1[0-2])"
               r"[0-9]{2}[ \u00a0][A-Z][ \u00a0][0-9]{3}(?![\w])"},
+    # Switzerland: the AHV/AVS number with its dots stands alone; the 13 digits without them need a context word
+    {"id": "ch-ahv", "region": "ch", "type": "CH_AHV", "validator": "ch_ahv", "context": _CH_AHV_CONTEXT,
+     "regex": r"(?<![\d.])756\.[0-9]{4}\.[0-9]{4}\.[0-9]{2}(?![0-9]|\.[0-9])"},
+    {"id": "ch-ahv-digits", "region": "ch", "type": "CH_AHV", "validator": "ch_ahv", "context": _CH_AHV_CONTEXT,
+     "require_context": True, "regex": r"(?<![\d.])756[0-9]{10}(?![0-9]|\.[0-9])"},
+    # a company number is public in its register: like the German VAT ID, only next to a word that names it
+    {"id": "ch-uid", "region": "ch", "type": "CH_UID", "validator": "ch_uid", "context": _VAT_CONTEXT,
+     "require_context": True,
+     "regex": r"(?<![\w-])CHE[- ]?[0-9]{3}\.?[0-9]{3}\.?[0-9]{3}(?:[ ]?(?:MWST|TVA|IVA))?(?![\w]|[.,][0-9])"},
+    # Austria
+    {"id": "at-uid", "region": "at", "type": "AT_UID", "validator": "at_uid", "context": _VAT_CONTEXT,
+     "require_context": True, "regex": r"(?<![\w-])ATU[ ]?[0-9]{8}(?![\w])"},
+    {"id": "at-social-security", "region": "at", "type": "AT_SOCIAL_SECURITY", "validator": "at_social_security",
+     "context": _AT_SV_CONTEXT, "require_context": True,
+     "regex": r"(?<![\d.,/-])[1-9][0-9]{3}[ \u00a0]?(?:0[1-9]|[12][0-9]|3[01])(?:0[1-9]|1[0-2])[0-9]{2}(?![0-9])"},
 ]
 
 

@@ -25,6 +25,17 @@ def _digits(v: str) -> str:
     return re.sub(r"\D", "", v)
 
 
+def _luhn_sum(digits: str) -> int:
+    """The Luhn sum of a digit string whose last digit is not doubled (a complete number)."""
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        d = int(ch)
+        if i % 2:
+            d = d * 2 - 9 if d > 4 else d * 2
+        total += d
+    return total % 10
+
+
 # ------------------------------------------------------------------ Germany --
 # ICAO Doc 9303 Part 3, 4.9: a digit counts its value, A to Z count 10 to 35, the filler < counts 0; weights 7, 3, 1
 def icao_check_digit(s: str) -> int:
@@ -120,3 +131,45 @@ def it_fiscal_code_ok(v: str) -> bool:
         return False
     total = sum(_IT_ODD[c] if i % 2 == 0 else (int(c) if c.isdigit() else ord(c) - 65) for i, c in enumerate(v[:15]))
     return chr(65 + total % 26) == v[15]
+
+
+# -------------------------------------------------------------- Switzerland --
+def ch_ahv_ok(v: str) -> bool:
+    """AHV/AVS number (AHVN13): 756 and ten digits, the last an EAN-13 check digit (weights 1 and 3 from the left)."""
+    d = _digits(v)
+    if len(d) != 13 or not d.startswith("756"):
+        return False
+    total = sum(int(c) * (3 if i % 2 else 1) for i, c in enumerate(d[:12]))
+    return (10 - total % 10) % 10 == int(d[12])
+
+
+def ch_uid_ok(v: str) -> bool:
+    """Swiss company UID (eCH-0097): CHE, eight digits and a mod-11 check digit, weights 5 4 3 2 7 6 5 4. A check of 10
+    is never issued."""
+    m = re.match(r"\s*CHE[-\s]?(\d{3})\.?(\d{3})\.?(\d{3})", v.upper())
+    if not m:
+        return False
+    d = "".join(m.groups())
+    check = 11 - sum(int(c) * w for c, w in zip(d[:8], (5, 4, 3, 2, 7, 6, 5, 4))) % 11
+    return check != 10 and check % 11 == int(d[8])
+
+
+# ------------------------------------------------------------------ Austria --
+def at_uid_ok(v: str) -> bool:
+    """Austrian VAT number: ATU and eight digits, the last (6 - Luhn sum of the seven before it) mod 10."""
+    m = re.fullmatch(r"ATU(\d{8})", re.sub(r"[\s.-]", "", v.upper()))
+    if not m:
+        return False
+    d = m.group(1)
+    return (6 - _luhn_sum(d[:7])) % 10 == int(d[7])
+
+
+def at_social_security_ok(v: str) -> bool:
+    """Austrian social insurance number (VSNR): a serial of three digits, a check digit, and the birth date DDMMYY. The
+    check digit is the sum of the other nine digits, weighted 3 7 9 . 5 8 4 2 1 6, mod 11; a sum of 10 is never
+    issued."""
+    d = re.sub(r"\s", "", v)
+    if len(d) != 10 or not d.isdigit() or d[0] == "0":
+        return False
+    total = sum(int(c) * w for c, w in zip(d, (3, 7, 9, 0, 5, 8, 4, 2, 1, 6))) % 11
+    return total != 10 and total == int(d[3])

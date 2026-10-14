@@ -195,6 +195,53 @@ class RentenversicherungsnummerTests(unittest.TestCase):
                 self.assertEqual(found(bad), [])
 
 
+# ----------------------------------------------------- Switzerland, Austria --
+class SwissAndAustrianNumberTests(unittest.TestCase):
+    def test_an_ahv_number_with_dots_stands_alone_and_without_them_needs_its_label(self):
+        r = random.Random(12)
+        for _ in range(40):
+            v = complete("756" + rd(r, 9), checksums.ch_ahv_ok)
+            dotted = f"{v[:3]}.{v[3:7]}.{v[7:11]}.{v[11:]}"
+            bad = twin(dotted, checksums.ch_ahv_ok)
+            with self.subTest(v=dotted):
+                self.assertEqual(types_of(dotted, dotted, region=("ch",)), ["CH_AHV"])
+                self.assertEqual(types_of(f"AHV-Nr. {v}", v, region=("ch",)), ["CH_AHV"])
+                self.assertEqual(found(v, region=("ch",)), [])
+                self.assertEqual(found(bad, region=("ch",)), [])
+                self.assertEqual(found(dotted, region=("de",)), [])      # region ch only
+
+    def test_a_swiss_and_an_austrian_company_number_need_a_vat_word(self):
+        r = random.Random(13)
+        for _ in range(40):
+            uid = next(u for u in ("CHE" + rd(r, 8) + c for _ in range(50) for c in D) if checksums.ch_uid_ok(u))
+            uid_f = f"CHE-{uid[3:6]}.{uid[6:9]}.{uid[9:]}"
+            atu = complete("ATU" + rd(r, 7), checksums.at_uid_ok)
+            with self.subTest(uid=uid_f, atu=atu):
+                self.assertEqual(types_of(f"UID: {uid_f} MWST", uid_f, region=("ch",)), ["CH_UID"])
+                self.assertEqual(found(uid_f, region=("ch",)), [])
+                self.assertEqual(found(f"UID: {twin(uid_f, checksums.ch_uid_ok)}", region=("ch",)), [])
+                self.assertEqual(types_of(f"UID-Nummer {atu}", atu, region=("at",)), ["AT_UID"])
+                self.assertEqual(found(atu, region=("at",)), [])
+                self.assertEqual(found(f"UID-Nummer {twin(atu, checksums.at_uid_ok)}", region=("at",)), [])
+
+    def test_an_austrian_social_insurance_number_needs_its_label_and_its_check_digit(self):
+        r = random.Random(14)
+        n = 0
+        while n < 40:
+            serial, date = rd(r, 1, D[1:]) + rd(r, 2), f"{r.randint(1, 28):02d}{r.randint(1, 12):02d}{rd(r, 2)}"
+            good = [serial + c + date for c in D if checksums.at_social_security_ok(serial + c + date)]
+            if not good:
+                continue
+            n += 1
+            v = good[0]
+            bad = twin(v, checksums.at_social_security_ok, pos=3)
+            with self.subTest(v=v):
+                self.assertEqual(types_of(f"Sozialversicherungsnummer: {v}", v, region=("at",)),
+                                 ["AT_SOCIAL_SECURITY"])
+                self.assertEqual(found(f"Sozialversicherungsnummer: {bad}", region=("at",)), [])
+                self.assertEqual(found(v, region=("at",)), [])
+
+
 # ------------------------------------------------ ported Presidio checks --
 def pesel(r):
     return complete(rd(r, 2) + r.choice("02468") + rd(r, 1, D[1:]) + f"{r.randint(1, 28):02d}" + rd(r, 4),

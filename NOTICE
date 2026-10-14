@@ -38,5 +38,5 @@ Parts of the detection are adapted from a public fork of maisecrets on GitHub (A
 languages, the IBAN forms with hyphens and in lower case, the context rule for a bare German VAT ID,
 the normaliser of maisecrets/normalise.py (changed: five of its stages, one module, scanned
 only around the changed lines and in the tool channel only), the design of the country rules
-(REGIONAL_RULES in maisecrets/detect.py) and the checksum of the codice fiscale in
-maisecrets/checksums.py.
+(REGIONAL_RULES in maisecrets/detect.py) and the checksums of the AHV number, the Swiss UID and the
+codice fiscale in maisecrets/checksums.py.
