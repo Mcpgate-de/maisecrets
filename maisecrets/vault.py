@@ -1057,8 +1057,9 @@ class Vault:
         An entry without the `quiet` key is one to judge: 0.6.17 writes the key on every entry, and an older process
         that touches an entry drops it, so the entry is judged again (Gate A round 2). The values are read outside
         the vault lock, in one batch where the store has one, for at most `budget` seconds: a slow store never holds
-        the lock for another session's prompt (Gate B round 2). A value the store does not return keeps the entry
-        unjudged for the next start. Returns the count marked quiet."""
+        the lock for another session's prompt (Gate B round 2); no new read starts after `budget`, but one read can
+        take its store's own timeout. A value the store does not return keeps the entry unjudged for the next
+        start. Returns the count marked quiet."""
         from .detect import LABEL_RULES, reads_as_word
         with self._exclusive():
             todo = [k for k, m in self._index["entries"].items() if "quiet" not in m and not m.get("purged")
@@ -1102,8 +1103,8 @@ class Vault:
             e = Entry.from_meta(self._index["entries"][existing])
             if session and session not in e.sessions:
                 e.sessions.append(session)
-            e.quiet = e.quiet and is_quiet(kind, value, False)   # a value given outside a tool result: hunted again
-            self._touch(e)
+            e.quiet = False             # a value given outside a tool result: hunted in prompts again
+            self._touch(e, judged=True)
             return e
         e = self._put_new(value, type_, kind, session, ttl)
         self._save_index()
@@ -1153,9 +1154,15 @@ class Vault:
                 e = Entry.from_meta(self._index["entries"][existing])
                 if session and session not in e.sessions:
                     e.sessions.append(session)
-                # a value the person gives in a prompt is hunted in prompts again; a tool result never quiets one
-                e.quiet = e.quiet and is_quiet(kind, value, tool)
-                self._touch(e, save=False)
+                meta = self._index["entries"][existing]
+                if not tool:
+                    e.quiet = False     # a value the person gives in a prompt is hunted in prompts again
+                elif "quiet" not in meta:
+                    # unjudged (stored by an older version): judge it now by the rule that stored it. The rule of
+                    # this hit (a URL password rule) says nothing about the word (Gate A round 3)
+                    e.quiet = is_quiet(str(meta.get("kind", "")), value, True)
+                # else: a tool result keeps the mark as it is
+                self._touch(e, save=False, judged=not tool or "quiet" in meta or e.quiet)
                 dirty = True
                 out.append(e)
                 continue
@@ -1371,13 +1378,16 @@ class Vault:
         return "ok"
 
     @_mutating
-    def _touch(self, e: Entry, save: bool = True) -> None:
+    def _touch(self, e: Entry, save: bool = True, judged: bool = False) -> None:
         now = time.time()
         e.last_used = now
         e.uses += 1
         if self.cfg.get("renew_on_use", True):
             e.expires = min(now + self._ttl_for(e.type), e.max_expires)
-        self._index["entries"][e.key] = asdict(e)
+        record = asdict(e)
+        if not judged and "quiet" not in self._index["entries"].get(e.key, {}) and not e.quiet:
+            del record["quiet"]     # not judged yet: mark_quiet_entries judges it at the next start (Gate B round 3)
+        self._index["entries"][e.key] = record
         if save:
             self._save_index()
 

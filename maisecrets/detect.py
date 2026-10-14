@@ -811,8 +811,8 @@ def _pw_literal_ok(v: str) -> bool:
     fixture word (testpass), no version."""
     if not 4 <= len(v) <= 64 or any(c.isspace() for c in v) or _charset(v) == "digits" or len(set(v)) < 3:
         return False
-    if v.lower() in _PW_TRANSLATIONS:
-        return False   # the word for password in another language: a locale value
+    if v.lower() in _PW_TRANSLATIONS and v in (v.lower(), v.capitalize(), v.upper()):
+        return False   # the word for password in another language: a locale value (SeNhA stays a hit, as in 0.6.16)
     if _sequential(v.lower()) or _LITERAL_PLACEHOLDER_RE.search(v) or _DOTTED_RE.fullmatch(v) or _names_itself(v):
         return False
     if _CLOSED_TEMPLATE_RE.search(v) or _looks_like_regex(v):
@@ -1002,8 +1002,9 @@ def _common_pairs() -> frozenset:
 def reads_as_word(value: str) -> bool:
     """Whether a value reads as a word of some language: letters only (parts joined by _ - .), no evidence of chance,
     and in ASCII at most one rare letter pair in ten. Wartungsfenster, senha_atual and Пароль are words; xqzvbnmq,
-    Kx7QpZr9 and qwmzpl are not. The store keeps a word from a label rule weak: replaced where it was found, never
-    hunted in a later text or prompt, where it would block a prompt that uses the word (field report, 2026-10-14)."""
+    Kx7QpZr9 and qwmzpl are not. The store keeps a word that a label rule took in a tool result quiet (vault.is_quiet):
+    masked in later tool results, never looked for in a typed prompt, where it would block every prompt that uses
+    the word (field report, 2026-10-14)."""
     parts = [p for p in re.split(r"[_.-]+", value) if p]
     if not parts or not all(p.isalpha() for p in parts) or _random_evidence(value):
         return False

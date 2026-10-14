@@ -12,6 +12,8 @@ runner = [
   "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_the_first_start_quiets_a_word_an_older_version_stored_and_keeps_a_random_value",
   "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_quiet_word_this_session_used_in_a_command_blocks_no_later_prompt",
   "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_an_older_process_that_drops_the_mark_has_the_entry_judged_again",
+  "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_later_tool_result_with_another_rule_keeps_the_word_quiet",
+  "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_an_unjudged_entry_that_a_resolve_touches_is_still_judged_at_the_next_start",
 ]
 
 [[proof]]
@@ -35,8 +37,8 @@ replace = "    return str(kind).startswith(LABEL_RULES) and reads_as_word(value.
 [[proof]]
 path = "a word first seen in a tool result stays quiet when the person gives it as a password"
 file = "maisecrets/vault.py"
-find = "                e.quiet = e.quiet and is_quiet(kind, value, tool)"
-replace = "                e.quiet = e.quiet"
+find = "                    e.quiet = False     # a value the person gives in a prompt is hunted in prompts again"
+replace = "                    pass"
 
 [[proof]]
 path = "a quiet value is not hunted in tool results either"
@@ -63,7 +65,13 @@ find = "        resolved = [(v, r) for v, r in _resolved_values(vault, session, 
 replace = "        resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]"
 
 [[proof]]
-path = "an entry an older process touched after the first start stays hunted in prompts"
+path = "a resolve before the start writes an unjudged entry as judged and hunted"
 file = "maisecrets/vault.py"
-find = "            todo = [k for k, m in self._index[\"entries\"].items() if \"quiet\" not in m and not m.get(\"purged\")"
-replace = "            todo = [k for k, m in self._index[\"entries\"].items() if \"quiet\" not in m and not m.get(\"purged\") and not self._index.get(\"quiet_seen\", self._index.__setitem__(\"quiet_seen\", 1))"
+find = "        if not judged and \"quiet\" not in self._index[\"entries\"].get(e.key, {}) and not e.quiet:"
+replace = "        if False:"
+
+[[proof]]
+path = "a later tool result of another rule takes the quiet mark away"
+file = "maisecrets/vault.py"
+find = "                # else: a tool result keeps the mark as it is"
+replace = "                else:\n                    e.quiet = is_quiet(kind, value, True)"

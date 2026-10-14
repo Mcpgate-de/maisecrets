@@ -50,7 +50,8 @@ class ToolChannelTests(unittest.TestCase):
 
     def test_the_word_for_password_with_a_number_is_a_hit_in_both_channels_as_in_0616(self):
         # the translations are exact values, not words: Senha123 stays what 0.6.16 took (Gate B round 2)
-        for text in ("CREATE USER app IDENTIFIED BY 'Senha" + "123';", "pw: haslo" + "123", "<pw>parola" + "2024</pw>"):
+        for text in ("CREATE USER app IDENTIFIED BY 'Senha" + "123';", "pw: haslo" + "123", "<pw>parola" + "2024</pw>",
+                     'password = "SeN' + 'hA"'):    # a mixed case no locale writes
             for channel in ("prompt", "tool"):
                 with self.subTest(text=text, channel=channel):
                     self.assertEqual(self.kinds(text, channel), ["label-pw-literal"])

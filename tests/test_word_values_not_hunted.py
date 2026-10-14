@@ -86,7 +86,6 @@ class WordValuesNotHuntedTests(unittest.TestCase):
         idx = json.loads(index.read_text())
         for meta in idx["entries"].values():
             meta.pop("quiet", None)                          # as 0.6.16 wrote them
-        idx.pop("quiet_pass", None)
         index.write_text(json.dumps(idx))
         self.assertTrue(self.blocked(f"Das {WORD} ist morgen.", "s2"), "before the start: hunted as in 0.6.16")
         start = self.hook("session-start", {"session_id": "s3", **CLAUDE})
@@ -113,6 +112,26 @@ class WordValuesNotHuntedTests(unittest.TestCase):
         for meta in idx["entries"].values():
             meta.pop("quiet", None)                          # a 0.6.16 process touched it after 0.6.17 marked it
         index.write_text(json.dumps(idx))
+        self.assertIn("1 stored word(s)", self.hook("session-start", {"session_id": "s2", **CLAUDE})
+                      .get("systemMessage", ""))
+        self.assertFalse(self.blocked(f"Das {WORD} ist morgen.", "s3"))
+
+    def test_a_later_tool_result_with_another_rule_keeps_the_word_quiet(self):
+        self.bash(f"password: {WORD}\n", "s1")
+        self.assertNotIn(WORD, self.bash(f"clone https://deploy:{WORD}@git.example.com/app.git\n", "s2"))
+        self.assertFalse(self.blocked(f"Das {WORD} ist morgen.", "s3"), "a URL password rule does not unquiet it")
+
+    def test_an_unjudged_entry_that_a_resolve_touches_is_still_judged_at_the_next_start(self):
+        import re
+        out = self.bash(f"password: {WORD}\n", "s1")
+        ref = re.search(r"\u27e6SECRET_c\d+\u27e7", out).group(0)
+        index = Path(self.home, "index.json")
+        idx = json.loads(index.read_text())
+        for meta in idx["entries"].values():
+            meta.pop("quiet", None)                          # stored by an older version
+        index.write_text(json.dumps(idx))
+        self.hook("pre-tool", {"tool_name": "Bash", "session_id": "s1", **CLAUDE,
+                               "tool_input": {"command": f"echo {ref} > /dev/null"}})   # 0.6.17 touches it
         self.assertIn("1 stored word(s)", self.hook("session-start", {"session_id": "s2", **CLAUDE})
                       .get("systemMessage", ""))
         self.assertFalse(self.blocked(f"Das {WORD} ist morgen.", "s3"))
