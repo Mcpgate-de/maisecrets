@@ -77,6 +77,20 @@ class IdNumberTests(unittest.TestCase):
                 self.assertEqual(values(text), [])
 
 
+class UrlUserTests(unittest.TestCase):
+    def test_the_user_of_a_url(self):
+        self.assertEqual(values("postgres://lbrueckner:pw4@db.internal:5432/app"),
+                         [("user-in-url", "lbrueckner")])
+
+    def test_service_accounts_templates_and_key_ids_stay_text(self):
+        for text in ("postgres://postgres:postgres@localhost/db", J(["https://__to", "ken__:x@upload.pypi.org/legacy/"]),
+                     "ftp://anonymous:anonymous@ftp.example.org/pub/", "redis://${REDIS_USER}:${REDIS_PASS}@cache:6379",
+                     "https://app4k29x1m8:x@api.example.net/", "amqp://rabbitmq:x@mq:5672/",
+                     "https://gitlab-ci-token:x@gitlab.example.net/g/p.git", "postgres://app_user:x@db/app"):
+            with self.subTest(text=text):
+                self.assertEqual(values(text), [])
+
+
 class PhoneTests(unittest.TestCase):
     def test_a_number_with_one_digit_groups_in_both_channels(self):
         text = "call me on +1 4 1 5 223 3344"
