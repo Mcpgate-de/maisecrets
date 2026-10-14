@@ -76,6 +76,16 @@ class NameTests(unittest.TestCase):
 
 
 
+class NameBeforeAddressTests(unittest.TestCase):
+    def test_a_name_before_an_address_but_not_before_a_bot(self):
+        self.assertEqual(values("Reported by Tobias Kellermann <tobias.kellermann@example.org>"),
+                         [("name-before-email", "Tobias Kellermann")])
+        self.assertEqual(values("Author: GitHub Actions <noreply@github.com>"), [])
+        self.assertEqual(values("Co-authored-by: Renovate Bot <bot@renovateapp.com>"), [])
+        self.assertEqual(values("Heroku Status <status-page@heroku.example>"), [])
+        self.assertEqual(values("Embark Studios <opensource@embark.example>"), [])
+
+
 class BirthDateTests(unittest.TestCase):
     def test_a_date_after_a_birth_label(self):
         for text, v in (("DOB: 1987-04-12", "1987-04-12"), ("Geburtsdatum: 03.11.1979", "03.11.1979"),

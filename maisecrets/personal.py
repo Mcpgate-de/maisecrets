@@ -352,7 +352,7 @@ _BIRTH_WORDS = ("dob", "d.o.b", "birth", "bday", "geb", "n\u00e9", "ne le", "nee
                 "nac\u00ed", "nascimento", "nascita", "nato")
 _ID_WORDS = ("mrn", "member", "passport", "licen", "dl", "sin", "tfn", "nir", "tax", "insurance", "account",
              "patient", "id on file")
-RULE_IDS = ("phone-one-digit-groups", "phone-us-national", "birth-date-after-label", "id-number-after-label", "user-in-url", "user-in-home-path", "street-address", "name-after-label")
+RULE_IDS = ("phone-one-digit-groups", "phone-us-national", "birth-date-after-label", "id-number-after-label", "user-in-url", "user-in-home-path", "street-address", "name-after-label", "name-before-email")
 # the rules a typed prompt also takes: a fix of the phone rule that both channels have
 PROMPT_RULES = frozenset({"phone-one-digit-groups", "phone-us-national"})
 _US_PHONE_REGIONS = frozenset({"us", "ca"})
