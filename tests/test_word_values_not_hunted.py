@@ -1,4 +1,5 @@
-"""A word that a label rule took is replaced where it was found and never hunted later; a random value still is.
+"""A word that a label rule took in a tool result blocks no later prompt; a random value and a word the person gives
+in a prompt are still hunted everywhere, and every hunted value is still masked in a later tool result.
 
 `password: Wartungsfenster` in a tool result stored the German word, and the store then hunted it: every later tool
 result of every session showed a placeholder for the word, and a typed prompt about the maintenance window was
@@ -62,15 +63,26 @@ class WordValuesNotHuntedTests(unittest.TestCase):
                                       "tool_input": {"command": "x"},
                                       "tool_response": {"stdout": stdout, "stderr": "", "interrupted": False,
                                                         "isImage": False}})
-        return json.dumps(out, ensure_ascii=False)
+        # no answer means the result goes to the model as it was: return that text, so assertNotIn can fail
+        return json.dumps(out, ensure_ascii=False) if out else stdout
 
     def blocked(self, prompt: str, session: str) -> bool:
         return self.hook("user-prompt", {"prompt": prompt, "session_id": session, **CLAUDE}).get("decision") == "block"
 
-    def test_a_word_after_a_password_label_is_masked_there_and_nowhere_later(self):
+    def test_a_word_after_a_password_label_in_a_tool_result_blocks_no_later_prompt(self):
         self.assertNotIn(WORD, self.bash(f"password: {WORD}\n", "s1"), "the result that held the label is redacted")
         self.assertFalse(self.blocked(f"Das {WORD} ist morgen ab 22 Uhr.", "s2"), "a prompt with the word is text")
-        self.assertNotIn("⟦", self.bash(f"{WORD}: Montag 22 Uhr\n", "s3"), "a later result keeps the word")
+        self.assertNotIn(WORD, self.bash(f"{WORD}: Montag 22 Uhr\n", "s3"), "a later tool result still masks it")
+
+    def test_a_word_the_person_then_gives_after_a_label_is_hunted_in_prompts_again(self):
+        self.bash(f"password: {WORD}\n", "s1")
+        self.assertTrue(self.blocked(f"password: {WORD}", "s2"), "the label rule takes it in the prompt")
+        self.assertTrue(self.blocked(f"Das {WORD} ist morgen.", "s3"), "from now on it is the person's password")
+
+    def test_a_random_value_that_reads_like_a_word_is_still_masked_in_a_later_tool_result(self):
+        value = "ppsm" + "ohsyeeub"     # random small letters of common letter pairs (Codex review, 2026-10-14)
+        self.assertNotIn(value, self.bash(f"DB_PASSWORD={value}\n", "s1"))
+        self.assertNotIn(value, self.bash(f"echo {value}\n", "s2"), "hunted in every later tool result")
 
     def test_a_word_only_the_tool_channel_takes_is_not_hunted_either(self):
         self.assertNotIn(FOREIGN, self.bash(f'password = Some("{FOREIGN}"),\n', "s1"))

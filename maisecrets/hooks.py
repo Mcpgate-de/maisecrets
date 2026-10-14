@@ -629,7 +629,7 @@ def agent_report(payload: dict, prompt: str) -> bool:
     rest = _report_rest(payload, prompt)
     if rest is None:
         return False
-    if _has_live(load_config()) and _inserted_values(rest, Vault(load_config())):
+    if _has_live(load_config()) and _inserted_values(rest, Vault(load_config()), prompt=True):
         return False
     return True
 
@@ -715,7 +715,7 @@ def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str 
         # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
         # from 8 characters; a shorter one would block ordinary words in a prompt.
         resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]
-        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values)
+        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values, prompt=True)
     return rewritten, entries, values, stored
 
 
@@ -3103,10 +3103,11 @@ def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]
     return out
 
 
-def _inserted_values(text: str, vault: Vault) -> list[tuple[str, str]]:
+def _inserted_values(text: str, vault: Vault, prompt: bool = False) -> list[tuple[str, str]]:
     """(value, reference) for every live vault value that appears in ``text``, found by keyed
-    fingerprint of the tokens, so no value is read from the store."""
-    live = vault.live_fingerprints()
+    fingerprint of the tokens, so no value is read from the store. prompt: the text is a typed prompt
+    (Vault.live_fingerprints)."""
+    live = vault.live_fingerprints(prompt)
     if not live:
         return []
     out: list[tuple[str, str]] = []
@@ -3124,7 +3125,8 @@ def _inserted_values(text: str, vault: Vault) -> list[tuple[str, str]]:
 
 
 def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entries: list,
-                  resolved: list[tuple[str, str]] | None = None, values: list[str] | None = None) -> str:
+                  resolved: list[tuple[str, str]] | None = None, values: list[str] | None = None,
+                  prompt: bool = False) -> str:
     """Values without a known shape (a password stored with `put`, a value from a prior
     prompt) come back from a command in plaintext unless they are matched exactly. The
     match is by keyed fingerprint of each token, so no value is read from the store; the
@@ -3153,7 +3155,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
                 hit["n"] += n
                 if values is not None and form not in values:
                     values.append(form)
-    live = vault.live_fingerprints()
+    live = vault.live_fingerprints(prompt)   # a typed prompt does not hunt a quiet entry (Entry.quiet)
     if not live:
         return out
     found: list[str] = []          # admitted together at the end: one index write, not one per hit

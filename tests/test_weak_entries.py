@@ -69,7 +69,9 @@ class WeakEntryTests(unittest.TestCase):
         out = self.bash("DB_PASS" + f"WORD={RANDOM}\n")
         self.assertNotIn(RANDOM, json.dumps(out))
         self.assertEqual([m["weak"] for m in json.loads(INDEX.read_text())["entries"].values()], [False])
-        self.assertNotIn(RANDOM, json.dumps(self.bash(f"export X={RANDOM}\n")))
+        later = self.bash(f"export X={RANDOM}\n")
+        self.assertTrue(later, "an empty answer passes the result on unchanged")   # else assertNotIn holds vacuously
+        self.assertNotIn(RANDOM, json.dumps(later))
         self.assertEqual(self.prompt(f"the value is {RANDOM}").get("decision"), "block")
 
     def test_the_placeholder_of_a_word_still_resolves_and_the_mark_survives_a_use(self):

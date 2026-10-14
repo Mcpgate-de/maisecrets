@@ -6,5 +6,5 @@ runner = ["tests/test_weak_entries.py::WeakEntryTests::test_a_word_is_replaced_w
 
 [proof]
 file = "maisecrets/vault.py"
-find = "                if not m.get(\"purged\") and not m.get(\"weak\")}\n"
-replace = "                if not m.get(\"purged\")}\n"
+find = "                if not m.get(\"purged\") and not m.get(\"weak\") and not (prompt and m.get(\"quiet\"))}\n"
+replace = "                if not m.get(\"purged\") and not (prompt and m.get(\"quiet\"))}\n"

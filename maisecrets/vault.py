@@ -510,6 +510,9 @@ class Entry:
     sessions: list = field(default_factory=list)  # sessions allowed to resolve the entry (see Vault.get)
     # a word that only a label rule found (letters only): replaced where it was found, never hunted in other texts
     weak: bool = False
+    # a word that a label rule took in a tool result or a file: hunted in later tool results, never in a typed prompt,
+    # where it would block every prompt that uses the word (field report on 0.6.16)
+    quiet: bool = False
     # no purged_at field: from_meta drops it, so the proof below can remove the filter and
     # the owning test sees the TypeError of the field report again
 
@@ -544,15 +547,20 @@ DEFAULT_WORDS = frozenset({
     "geheim", "kennwort"})
 
 
-def is_weak(kind: str, value: str, tool: bool = False) -> bool:
-    """A value that only a label rule found and that is a known default word (DEFAULT_WORDS), or a word of some language
-    (detect.word_value) that a tool result or a file held: replaced where it was found, never hunted in other texts.
-    A word the person gave in a prompt stays hunted: a chosen word is a password there (Sommerwiese, review
-    2026-09-29); after a label in a file or a command output it is mostly text (field report on 0.6.16)."""
+def is_weak(kind: str, value: str) -> bool:
+    """A value that only a label rule found and that is a known default word (DEFAULT_WORDS): replaced where it was
+    found, never hunted in other texts."""
+    from .detect import LABEL_RULES
+    return str(kind).startswith(LABEL_RULES) and value.strip().lower() in DEFAULT_WORDS
+
+
+def is_quiet(kind: str, value: str, tool: bool) -> bool:
+    """A word of some language (detect.word_value) that a label rule took in a tool result or a file: hunted in later
+    tool results as before, never in a typed prompt. A word the person gives in a prompt stays hunted everywhere: a
+    chosen word is a password there (review, 2026-09-29). A random value that reads like a word (about 3 in 100 of
+    8 small letters) is then not looked for in a prompt that types it bare; it is still masked in every tool result."""
     from .detect import LABEL_RULES, word_value
-    if not str(kind).startswith(LABEL_RULES):
-        return False
-    return value.strip().lower() in DEFAULT_WORDS or (tool and word_value(value.strip()))
+    return tool and str(kind).startswith(LABEL_RULES) and word_value(value.strip())
 
 
 # ---------------------------------------------------------------- backends --
@@ -1010,12 +1018,13 @@ class Vault:
     def fingerprint(self, value: str) -> str:
         return fingerprint(value, self.fp_key())
 
-    def live_fingerprints(self) -> dict[str, str]:
+    def live_fingerprints(self, prompt: bool = False) -> dict[str, str]:
         """fingerprint -> key for every entry whose value is still stored and may be hunted in any text. A weak entry
         is not: `DB_PASSWORD=postgres` stored `postgres`, and every later text with the word was redacted and every
-        prompt with it blocked, in every session, for a day (review, 2026-09-29)."""
+        prompt with it blocked, in every session, for a day (review, 2026-09-29). In a typed prompt (prompt=True) a
+        quiet entry is not hunted either (Entry.quiet)."""
         return {m["fingerprint"]: k for k, m in self._index["entries"].items()
-                if not m.get("purged") and not m.get("weak")}
+                if not m.get("purged") and not m.get("weak") and not (prompt and m.get("quiet"))}
 
     @_mutating
     def mark_weak_entries(self) -> int:
@@ -1052,6 +1061,7 @@ class Vault:
             e = Entry.from_meta(self._index["entries"][existing])
             if session and session not in e.sessions:
                 e.sessions.append(session)
+            e.quiet = e.quiet and is_quiet(kind, value, False)   # a value given outside a tool result: hunted again
             self._touch(e)
             return e
         e = self._put_new(value, type_, kind, session, ttl)
@@ -1070,7 +1080,7 @@ class Vault:
                   display=display_for(type_, value), created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
                   session=session, uses=0, sessions=[session] if session else [],
-                  weak=is_weak(kind, value, tool))
+                  weak=is_weak(kind, value), quiet=is_quiet(kind, value, tool))
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
         self.backend.put(
             key, value,
@@ -1102,6 +1112,8 @@ class Vault:
                 e = Entry.from_meta(self._index["entries"][existing])
                 if session and session not in e.sessions:
                     e.sessions.append(session)
+                # a value the person gives in a prompt is hunted in prompts again; a tool result never quiets one
+                e.quiet = e.quiet and is_quiet(kind, value, tool)
                 self._touch(e, save=False)
                 dirty = True
                 out.append(e)

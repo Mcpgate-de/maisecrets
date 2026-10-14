@@ -38,14 +38,14 @@ class ToolChannelTests(unittest.TestCase):
             with self.subTest(v=v):
                 self.assertEqual(self.kinds(f'password = Some("{v}"),', "tool"), [])
 
-    def test_a_word_only_the_tool_channel_takes_is_stored_weak_and_a_random_value_is_not(self):
-        from maisecrets.vault import is_weak
-        self.assertTrue(is_weak("label-pw-literal", "senha_atual", tool=True), "hunting it would block a prompt")
-        self.assertTrue(is_weak("ds-keyword-colon", "Wartungs" + "fenster", tool=True), "a word in a tool result")
-        self.assertFalse(is_weak("ds-keyword-colon", "Wartungs" + "fenster"), "a word the person typed stays hunted")
-        self.assertFalse(is_weak("label-pw-literal", "qwmzpl", tool=True), "random letters are a secret everywhere")
-        self.assertFalse(is_weak("label-pw-literal", "kwfrzmplt"), "the prompt rule takes it too: it stays hunted")
-        self.assertFalse(is_weak("ds-keyword-colon", "qwmzpl"), "another rule found it: it stays hunted")
+    def test_a_word_only_the_tool_channel_takes_is_stored_quiet_and_a_random_value_is_not(self):
+        from maisecrets.vault import is_quiet, is_weak
+        self.assertTrue(is_quiet("label-pw-literal", "senha_atual", True), "hunting it would block a prompt")
+        self.assertTrue(is_quiet("ds-keyword-colon", "Wartungs" + "fenster", True), "a word in a tool result")
+        self.assertFalse(is_quiet("ds-keyword-colon", "Wartungs" + "fenster", False), "a word in a prompt is hunted")
+        self.assertFalse(is_quiet("label-pw-literal", "qwmzpl", True), "random letters are a secret everywhere")
+        self.assertFalse(is_quiet("gitlab-pat", "senha_atual", True), "a shape rule found it: it stays hunted")
+        self.assertFalse(is_weak("label-pw-literal", "senha_atual"), "weak stays the default words of 0.6.16")
 
     def test_a_typed_prompt_with_letters_after_a_password_label_is_not_blocked(self):
         _hygiene.patch(self, hooks, "_clipboard", lambda text: True)
