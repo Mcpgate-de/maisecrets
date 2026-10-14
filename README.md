@@ -1207,6 +1207,11 @@ Four sources, one scanner (`maisecrets/detect.py`):
   and a PASETO token (`v4.local.…`, `v4.public.…`). A public nkey and a PASERK public key or
   key id stay text. A PASERK key ends at its last base64url character, never on a period of the
   sentence around it.
+- Order: the rules that read a label and a literal value (`label-pw-literal`,
+  `label-secret-literal`, `label-weak-key`, `label-otp-seed`) run after every other rule and
+  take only a span no other rule took. The list rule, the four token formats, the
+  Elasticsearch `ApiKey` rule and the AWS session token rule are own secret rules: they take
+  their spans in the secret stage, before detect-secrets and betterleaks.
 - Prefixes newer than the vendored rulesets live in
   `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
   (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last
