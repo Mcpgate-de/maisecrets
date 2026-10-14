@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## [0.6.16] - 2026-10-14
+
+### Fixes
+
+- the STS session token in X-Amz-Security-Token is redacted, also in a presigned URL (f3670a7)
+- a password label before a long run of letters scans in linear time, 320 KB in 0.7 s instead of 10 s (721306e)
+- a TOTP or HOTP seed after an otp, mfa or 2fa label is redacted (a46e38e)
+- a key after a secret label is redacted in XML elements, calls and short values, also after hmac, session, cookie and psk (3da6b7a)
+- the NTLM authenticate message, NATS nkey seeds, PASERK secret keys and PASETO tokens are redacted (9f2045d)
+- a password after a password label is redacted when it looks random, also in XML, SQL and PowerShell; words, paths, references and measures stay text (74b851d)
+- an Elasticsearch API key in an Authorization: ApiKey header is redacted (140c52c)
+- each key in a list after a secret label is redacted, such as "api_keys": ["…", "…"] (ea4d655)
+
+### Other
+
+- Merge branch 'fix/more-labelled-keys-and-url-credentials' into 'main' (fe741d3)
+
 ## [0.6.15] - 2026-10-13
 
 ### Fixes
