@@ -95,5 +95,33 @@ class CardWordTests(unittest.TestCase):
         self.assertEqual(both(f"Kartoffel {GROUPED}"), [], "a whole word only: Kartoffel is no Karte")
 
 
+class IbanFormTests(unittest.TestCase):
+    def test_an_iban_with_hyphens_between_its_groups_is_found(self):
+        hyphened = "-".join(IBAN_GROUPS)
+        self.assertEqual(both(f"IBAN {hyphened}"), [("IBAN", hyphened)])
+        self.assertEqual(both(f"Konto: {hyphened}."), [("IBAN", hyphened)])
+
+    def test_a_hyphen_does_not_rescue_a_wrong_checksum(self):
+        broken = IBAN[:2] + f"{(int(IBAN[2:4]) + 1) % 100:02d}" + IBAN[4:]
+        groups = "-".join(broken[i:i + 4] for i in range(0, len(broken), 4))
+        self.assertEqual(both(f"IBAN {groups}"), [])
+
+    def test_an_iban_in_lower_case_is_found_plain_and_in_groups(self):
+        for value in (IBAN.lower(), " ".join(IBAN_GROUPS).lower(), "-".join(IBAN_GROUPS).lower()):
+            with self.subTest(value=value):
+                self.assertEqual(both(f"iban {value} bitte"), [("IBAN", value)])
+
+    def test_a_lower_case_iban_needs_its_countrys_length(self):
+        # mod 97 passes, but DE has 22 characters: a lower-case run of another length is a digest or an id
+        short = iban_complete("DE", "".join(RNG.choice(string.digits) for _ in range(16))).lower()
+        self.assertTrue(detect._iban_ok(short.upper()))
+        self.assertFalse(detect._iban_ok(short))
+        self.assertEqual(both(f"id {short}"), [])
+
+    def test_a_hex_digest_in_lower_case_stays_text(self):
+        digest = "".join(RNG.choice("0123456789abcdef") for _ in range(64))
+        self.assertEqual(both(f"sha256 de12{digest[:18]} and {digest}"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

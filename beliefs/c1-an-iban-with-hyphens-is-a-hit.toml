@@ -1,0 +1,10 @@
+# c1-an-iban-with-hyphens-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-an-iban-with-hyphens-is-a-hit"
+control = "C1"
+statement = "An IBAN with hyphens between its groups is an IBAN hit when its checksum passes, as one with spaces is."
+runner = ["tests/test_bank_and_company_numbers.py::IbanFormTests::test_an_iban_with_hyphens_between_its_groups_is_found"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''    s = raw.replace(" ", "").replace("-", "").upper()'''
+replace = '''    s = raw.replace(" ", "").upper()'''
