@@ -166,6 +166,20 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         print(json.dumps({"systemMessage": f"maisecrets: {exc}."}))
         _marker("hook.session-start")
         sys.exit(0)
+    _clean_note = None
+    try:
+        from maisecrets import file_reads  # noqa: E402
+        file_reads.note_session_start(payload, cfg)    # the anchor of a clean folder: only here, never later (C28)
+        _links = file_reads.link_roots(cfg)
+        if _links:
+            # a count only: this text can reach the model, and a folder name can say who or what it is about. The
+            # person's own settings card names the folders (codex verification of block 4)
+            _clean_note = (f"maisecrets: {len(_links)} clean folder(s) are a link or lie under one, so nothing in "
+                           "them counts as clean. /maisecrets:settings clean_dirs shows which, and the real folder "
+                           "to add.")
+        file_reads.prune_sessions()
+    except Exception:  # noqa: BLE001 - the note never stops a session start; without it no folder is clean
+        pass
     # a blocked prompt older than 15 minutes is never sent; the file goes too (retention)
     pending = HOME / "pending"
     if pending.is_dir():
@@ -223,6 +237,8 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         out["systemMessage"] = (out.get("systemMessage", "") + " " + loosened).strip()
     if broken:
         out["systemMessage"] = out.get("systemMessage", "") + " " + broken
+    if _clean_note:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + _clean_note
     # a rule of your own that fails a check is left out; the person hears it once, when the set changes
     try:
         from maisecrets.user_rules import session_note  # noqa: E402

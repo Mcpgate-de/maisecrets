@@ -1,0 +1,9 @@
+{
+ "session_id": "{session_id}",
+ "transcript_path": "{transcript_path}",
+ "cwd": "{cwd}",
+ "prompt_id": "{prompt_id}",
+ "permission_mode": "default",
+ "hook_event_name": "UserPromptSubmit",
+ "prompt": "what is in this image?"
+}
