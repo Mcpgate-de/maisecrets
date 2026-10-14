@@ -14,6 +14,7 @@ the Bitcoin Improvement Proposals 39 and 32 and the Base58Check encoding.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import string
 from pathlib import Path
@@ -173,3 +174,135 @@ def at_social_security_ok(v: str) -> bool:
         return False
     total = sum(int(c) * w for c, w in zip(d, (3, 7, 9, 0, 5, 8, 4, 2, 1, 6))) % 11
     return total != 10 and total == int(d[3])
+
+
+# ------------------------------------------------------------------- crypto --
+B58_ALPHABET = string.digits[1:] + "".join(c for c in string.ascii_uppercase if c not in "IO") + "".join(
+    c for c in string.ascii_lowercase if c != "l")
+_B58_INDEX = {c: i for i, c in enumerate(B58_ALPHABET)}
+
+
+def b58check_decode(s: str) -> bytes | None:
+    """The payload of a Base58Check string, or None when a character is not Base58 or the checksum (the first four
+    bytes of SHA-256 twice) does not hold."""
+    n = 0
+    for c in s:
+        i = _B58_INDEX.get(c)
+        if i is None:
+            return None
+        n = n * 58 + i
+    raw = n.to_bytes((n.bit_length() + 7) // 8, "big")
+    raw = b"\0" * (len(s) - len(s.lstrip("1"))) + raw
+    if len(raw) < 5:
+        return None
+    payload, check = raw[:-4], raw[-4:]
+    if hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4] != check:
+        return None
+    return payload
+
+
+_SECP256K1_N = int("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16)
+
+
+def _private_key_ok(k: bytes) -> bool:
+    return len(k) == 32 and 0 < int.from_bytes(k, "big") < _SECP256K1_N
+
+
+def wif_ok(s: str) -> bool:
+    """A Bitcoin private key in Wallet Import Format: Base58Check of 0x80 (0xEF on testnet), the 32-byte key, and 0x01
+    for a key whose public key is compressed."""
+    p = b58check_decode(s)
+    if p is None or p[:1] not in (b"\x80", b"\xef"):
+        return False
+    if len(p) == 34:
+        return p[33] == 1 and _private_key_ok(p[1:33])
+    return len(p) == 33 and _private_key_ok(p[1:])
+
+
+# BIP32 extended private keys and the variants of SLIP-0132: xprv, yprv, zprv, Yprv, Zprv on mainnet, tprv, uprv, vprv,
+# Uprv, Vprv on testnet. The key data is 0x00 and the 32-byte private key
+_XPRV_VERSIONS = frozenset(bytes.fromhex(h) for h in ("0488ADE4", "049D7878", "04B2430C", "0295B005", "02AA7A99",
+                                                       "04358394", "044A4E28", "045F18BC", "024285B5", "02575048"))
+
+
+def xprv_ok(s: str) -> bool:
+    p = b58check_decode(s)
+    return (p is not None and len(p) == 78 and p[:4] in _XPRV_VERSIONS and p[45] == 0
+            and _private_key_ok(p[46:78]))
+
+
+_BIP39: list = []
+
+
+def bip39_words() -> dict:
+    """The English BIP39 word list (rules/bip39_english.txt): word -> index."""
+    if not _BIP39:
+        words = (RULES_DIR / "bip39_english.txt").read_text(encoding="utf-8").split()
+        _BIP39.append({w: i for i, w in enumerate(words)})
+    return _BIP39[0]
+
+
+def _bip39_bits_ok(bits: str) -> bool:
+    """The checksum of a phrase given as its 11-bit indexes in one bit string."""
+    cs = len(bits) // 33
+    entropy = int(bits[:-cs], 2).to_bytes((len(bits) - cs) // 8, "big")
+    return f"{hashlib.sha256(entropy).digest()[0]:08b}"[:cs] == bits[-cs:]
+
+
+def bip39_ok(words: list) -> bool:
+    """12, 15, 18, 21 or 24 words of the list whose last bits (one per 3 words) are the first bits of SHA-256 of the
+    rest: a random choice of 12 words passes once in 16, of 24 words once in 256."""
+    index = bip39_words()
+    if len(words) not in (12, 15, 18, 21, 24):
+        return False
+    try:
+        return _bip39_bits_ok("".join(f"{index[w]:011b}" for w in words))
+    except KeyError:
+        return False
+
+
+# a run of 12 or more lowercase words of 3 to 8 letters, one space, one line break or a comma between two of them
+_WORD_RUN_RE = re.compile(r"(?<![A-Za-z0-9_'-])[a-z]{3,8}(?:(?:,?[ \t]{1,3}|[ \t]*\r?\n[ \t]*)[a-z]{3,8}){11,}"
+                          r"(?![A-Za-z0-9_'-])")
+_WORD_RE = re.compile(r"[a-z]+")
+# a run of list words much longer than a phrase is a word list (the BIP39 list itself, a dictionary), not a phrase:
+# with dozens of windows one passes by chance, and the list file was masked whole (Gate B of 0.6.19)
+BIP39_MAX_RUN = 48
+
+
+def bip39_spans(text: str) -> list:
+    """(start, end, words) of each seed phrase in the text, words the length of its longest valid window. Within each
+    run of 12 to BIP39_MAX_RUN words of the list, every window of 12, 15, 18, 21 or 24 words whose checksum holds is a
+    phrase, and the span runs from the first such window to the end of the last: a word of the list next to the phrase
+    ("seed phrase: ...") can start a window that passes by chance (one in 16 for 12 words), and taking only that window
+    left the phrase's last word in the clear."""
+    out = []
+    index = None
+    for run in _WORD_RUN_RE.finditer(text):
+        if index is None:
+            index = bip39_words()
+        words = list(_WORD_RE.finditer(run.group()))
+        i = 0
+        while i + 12 <= len(words):
+            if words[i].group() not in index:
+                i += 1
+                continue
+            j = i
+            while j < len(words) and words[j].group() in index:
+                j += 1                     # words[i:j] are all on the list
+            if j - i > BIP39_MAX_RUN:
+                i = j + 1
+                continue
+            bits = "".join(f"{index[w.group()]:011b}" for w in words[i:j])
+            first = last = None
+            longest = 0
+            for a in range(i, j - 11):
+                for n in (12, 15, 18, 21, 24):
+                    if a + n <= j and _bip39_bits_ok(bits[(a - i) * 11:(a - i + n) * 11]):
+                        first = a if first is None else first
+                        last = max(last or 0, a + n)
+                        longest = max(longest, n)
+            if first is not None:
+                out.append((run.start() + words[first].start(), run.start() + words[last - 1].end(), longest))
+            i = j + 1
+    return out

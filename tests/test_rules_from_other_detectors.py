@@ -9,10 +9,12 @@ value that is a hit and a twin with a wrong check character that is not.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import random
 import string
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -193,6 +195,144 @@ class RentenversicherungsnummerTests(unittest.TestCase):
                 nbsp = spaced.replace(" ", "\u00a0")                        # Gate A of 0.6.19
                 self.assertEqual(types_of(nbsp, nbsp), ["DE_SOCIAL_SECURITY"])
                 self.assertEqual(found(bad), [])
+
+
+# ------------------------------------------------------------------ crypto --
+B58 = checksums.B58_ALPHABET
+
+
+def b58check(payload: bytes) -> str:
+    raw = payload + hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
+    n = int.from_bytes(raw, "big")
+    out = ""
+    while n:
+        n, rem = divmod(n, 58)
+        out = B58[rem] + out
+    return "1" * (len(raw) - len(raw.lstrip(b"\0"))) + out
+
+
+def wif(r: random.Random, compressed: bool, version: bytes = b"\x80") -> str:
+    return b58check(version + bytes(r.getrandbits(8) for _ in range(32)) + (b"\x01" if compressed else b""))
+
+
+def xprv(r: random.Random, version: str = "0488ADE4") -> str:
+    """BIP32: version, depth, parent fingerprint and child number (9 bytes), chain code, 0x00 and the private key."""
+    return b58check(bytes.fromhex(version) + bytes(r.getrandbits(8) for _ in range(9 + 32)) + b"\x00"
+                    + bytes(r.getrandbits(8) for _ in range(32)))
+
+
+def seed_phrase(r: random.Random, n: int) -> str:
+    words = list(checksums.bip39_words())
+    ent = bytes(r.getrandbits(8) for _ in range(n * 11 * 32 // 33 // 8))
+    bits = J(f"{x:08b}" for x in ent) + f"{hashlib.sha256(ent).digest()[0]:08b}"[:n // 3]
+    return " ".join(words[int(bits[i:i + 11], 2)] for i in range(0, len(bits), 11))
+
+
+class CryptoSecretTests(unittest.TestCase):
+    def test_the_word_list_is_the_bip39_english_list(self):
+        raw = (detect.RULES_DIR / "bip39_english.txt").read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+                         "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda")
+
+    def test_a_wif_key_is_a_secret_and_a_changed_character_is_not(self):
+        r = random.Random(7)
+        for i in range(40):
+            v = wif(r, compressed=bool(i % 2))
+            bad = twin(v, checksums.wif_ok, pos=-2, alphabet=B58)
+            with self.subTest(v=v):
+                self.assertEqual(types_of(v, v), ["SECRET"])
+                self.assertEqual(types_of(f"key: {v}\n", v, channel="tool"), ["SECRET"])
+                self.assertEqual(found(f"here {bad} there"), [])
+            test_key = wif(r, compressed=bool(i % 2), version=b"\xef")       # testnet (Gate A of 0.6.19)
+            # Base58Check holds, the key does not: zero, the curve order or more, a compression flag other than 1
+            for payload in (b"\x80" + bytes(32), b"\x80" + b"\xff" * 32 + b"\x01",
+                            b"\x80" + bytes(r.getrandbits(8) for _ in range(32)) + b"\x02"):
+                self.assertFalse(checksums.wif_ok(b58check(payload)))
+            self.assertEqual(types_of(test_key, test_key), ["SECRET"])
+
+    def test_an_extended_private_key_is_a_secret_and_an_extended_public_key_is_not(self):
+        r = random.Random(8)
+        for version in ("0488ADE4", "049D7878", "04B2430C", "0295B005", "02AA7A99", "04358394", "024285B5"):
+            v = xprv(r, version)
+            pub = b58check(bytes.fromhex("0488B21E") + bytes(r.getrandbits(8) for _ in range(9 + 32)) + b"\x02"
+                           + bytes(r.getrandbits(8) for _ in range(32)))
+            with self.subTest(version=version):
+                self.assertEqual(types_of(f"wallet {v}", v), ["SECRET"])
+                self.assertEqual(found(f"wallet {twin(v, checksums.xprv_ok, pos=-3, alphabet=B58)}"), [])
+                self.assertEqual(found(f"wallet {pub}"), [])
+                self.assertFalse(checksums.xprv_ok(pub))                  # its version is a public key's
+                no_key = b58check(bytes.fromhex(version) + bytes(r.getrandbits(8) for _ in range(9 + 32)) + b"\x03"
+                                  + bytes(r.getrandbits(8) for _ in range(32)))
+                self.assertFalse(checksums.xprv_ok(no_key))               # key data must start with 0x00
+                pub_version = b58check(bytes.fromhex("0488B21E") + bytes(r.getrandbits(8) for _ in range(9 + 32))
+                                       + b"\x00" + bytes(r.getrandbits(8) for _ in range(32)))
+                self.assertFalse(checksums.xprv_ok(pub_version))          # the version of an xpub
+
+    def test_a_seed_phrase_is_found_whole_and_one_with_a_wrong_checksum_is_not(self):
+        r = random.Random(9)
+        words = list(checksums.bip39_words())
+        misses = 0
+        for i in range(60):
+            n = (12, 24)[i % 2]
+            v = seed_phrase(r, n)
+            for text in (f"My seed phrase: {v}\nkeep it safe", f"wallet backup\n{v}\n", f"{v}  # recovery"):
+                with self.subTest(text=text):
+                    self.assertEqual(types_of(text, v), ["SECRET"])
+            with self.subTest(bare=v):
+                # 24 words (8 checksum bits) stand alone; 12 (4 bits) need a word such as seed or wallet
+                self.assertEqual(types_of(v, v), ["SECRET"] if n == 24 else [])
+            if n == 12:
+                # the last word carries the checksum: another word there fails 15 times in 16
+                bad = v.rsplit(" ", 1)[0] + " " + words[(words.index(v.rsplit(" ", 1)[1]) + 1) % 2048]
+                misses += not found("seed: " + bad)
+        self.assertGreaterEqual(misses, 24)
+
+    def test_a_list_of_words_is_no_seed_phrase(self):
+        r = random.Random(10)
+        words = list(checksums.bip39_words())
+        prose = ("This function reads the config file, then it opens a socket and sends the first batch of "
+                 "records to the server; when the queue is empty it waits for more input from the user.")
+        self.assertEqual(found(prose), [])
+        # Gate A of 0.6.19: twelve ordinary list words whose checksum holds by chance, also after a word that only
+        # starts like a seed word
+        twelve = " ".join(["client connect system process input output", "error return result update file edit"])
+        self.assertEqual(found(twelve), [])
+        self.assertEqual(found("tokenization " + twelve), [])
+        self.assertEqual(found("keyboard: " + twelve), [])
+        eleven = " ".join(r.choice(words) for _ in range(11))
+        self.assertEqual(found(eleven), [])
+        self.assertEqual(found(seed_phrase(r, 12).title()), [])   # capitalised words are no phrase
+
+    def test_a_phrase_after_a_secret_label_needs_no_seed_word(self):
+        v = seed_phrase(random.Random(19), 12)
+        for label in ("Password: ", "Passwort: ", "private key: ", "my 12 words: ", "token: "):
+            with self.subTest(label=label):
+                self.assertEqual(types_of(label + v, v), ["SECRET"])
+
+    def test_the_word_list_itself_and_the_reference_vectors_are_no_phrase(self):
+        listing = (detect.RULES_DIR / "bip39_english.txt").read_text()
+        self.assertEqual([h for h in found(listing, channel="tool") if h[0] == "crypto-seed-phrase"], [])
+        vector = " ".join(["aban" + "don"] * 11 + ["about"])      # BIP39 reference test vector
+        self.assertEqual(found("seed: " + vector), [])
+        self.assertEqual(found("seed:\n" + vector.replace(" ", "\n")), [])   # one word per line (Gate A, round 2)
+        other = " ".join(["ozone drill grab", "fiber curtain grace", "pudding thank cruise", "elder eight picnic"])
+        self.assertEqual(found("seed: " + other), [])                # each of the 24 English vectors
+        entries = [ln for ln in (detect.RULES_DIR / "public_test_values.txt").read_text().splitlines()
+                   if "BIP39 reference vector" in ln]
+        self.assertEqual(len(entries), 48)                           # 24 mnemonics and their 24 xprv
+        # 12 consecutive words of the list in one run, no seed word: the checksum alone does not make a phrase
+        words = list(checksums.bip39_words())
+        r = random.Random(20)
+        hits = sum(bool(found(" ".join(r.choice(words) for _ in range(12)))) for _ in range(200))
+        self.assertEqual(hits, 0)
+
+    def test_a_long_run_of_words_takes_linear_time(self):
+        words = list(checksums.bip39_words())
+        r = random.Random(11)
+        text = " ".join(r.choice(words) for _ in range(20000))
+        t0 = time.perf_counter()
+        detect.scan(text)
+        self.assertLess(time.perf_counter() - t0, 5.0)
 
 
 # ----------------------------------------------------- Switzerland, Austria --

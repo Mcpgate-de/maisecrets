@@ -1180,6 +1180,15 @@ Four sources, one scanner (`maisecrets/detect.py`):
   form, and the Swiss and Austrian numbers. The Steuer-ID check follows the
   repeat rule of its issuer (exactly one digit twice or three times, never three
   in a row; ITZBund, "KONZEPT Steueridentifikationsnummer", version 2.3, 2016).
+- **Crypto wallet secrets**: a BIP39 seed phrase (12 to 24 words of the
+  English list, `maisecrets/rules/bip39_english.txt`, MIT, whose checksum
+  holds), a Bitcoin private key in Wallet Import Format and a BIP32 extended
+  private key (`xprv`, `yprv`, `zprv`, `tprv`, …) are secrets by their checksum,
+  with no label. A phrase of 12 words (a checksum of 4 bits) needs a word such
+  as seed, wallet, recovery or password near it; 15 to 24 words stand alone.
+  Addresses, extended public keys, the BIP39 reference vectors and a run of
+  more than 48 list words (a word list) stay text. Not found yet: a phrase in
+  a numbered list, a JSON array, or capitalised.
 - **detect-secrets** (Yelp, Apache-2.0, version in `DETECT_SECRETS_VERSION`,
   refresh with `scripts/sync_detect_secrets.py vX.Y.Z`): credentials
   recognised by position (`password = …`, `api_key: "…"`, `user:pass@host`),

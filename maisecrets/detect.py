@@ -1142,8 +1142,8 @@ VALIDATORS = {
     # name%40firma.de in a URL query, a form body or an access log: the same address, percent-encoded
     "person_email_encoded": lambda v: VALIDATORS["person_email"](v.replace("%40", "@")),
     "us_ssn": _us_ssn_ok,
-    # checksums.py: ports of Presidio validators that were missing, the German document number, Switzerland and
-    # Austria
+    # checksums.py: ports of Presidio validators that were missing, the German document number, Switzerland, Austria
+    # and the crypto wallet secrets
     "de_document": checksums.de_document_ok,
     "de_tax_id_spaced": lambda v: _de_tax_id_ok(re.sub(r"[ \u00a0]", "", v)),
     "pl_pesel": checksums.pl_pesel_ok,
@@ -1156,6 +1156,8 @@ VALIDATORS = {
     "ch_uid": checksums.ch_uid_ok,
     "at_uid": checksums.at_uid_ok,
     "at_social_security": checksums.at_social_security_ok,
+    "wif": checksums.wif_ok,
+    "xprv": checksums.xprv_ok,
 }
 
 
@@ -1300,6 +1302,22 @@ OWN_RULES: list[dict] = [
     # Elasticsearch's API key in an Authorization header: `Authorization: ApiKey <base64 of id:key>`, as a header
     # line, in curl -H, or as the key of a header object (`authorization: 'ApiKey <value>'`). Only after the header
     # name: prose names the scheme ("send ApiKey followed by …", Gate B of 0.6.16)
+    # crypto wallet secrets (0.6.19): each is found by its checksum and needs no label. A Bitcoin private key in Wallet
+    # Import Format (Base58Check, version 0x80: 51 characters from 5, or 52 from K or L for a compressed key; on testnet
+    # 0xEF, from 9 or c), and a BIP32 extended private key (xprv, and the yprv, zprv, Yprv, Zprv, tprv, uprv, vprv,
+    # Uprv, Vprv of SLIP-0132). The public forms (an address, an xpub) are no secret and stay text
+    {"id": "crypto-wif-private-key", "type": "SECRET", "validator": "wif",
+     "regex": r"(?<![1-9A-HJ-NP-Za-km-z])(?:[59][1-9A-HJ-NP-Za-km-z]{50}|[KLc][1-9A-HJ-NP-Za-km-z]{51})"
+              r"(?![1-9A-HJ-NP-Za-km-z])"},
+    {"id": "crypto-extended-private-key", "type": "SECRET", "validator": "xprv",
+     "regex": r"(?<![1-9A-HJ-NP-Za-km-z])[xyztuvYZUV]prv[1-9A-HJ-NP-Za-km-z]{100,108}"
+              r"(?![1-9A-HJ-NP-Za-km-z])"},
+    # a BIP39 seed phrase: 12 to 24 words of the English list whose checksum holds (checksums.bip39_spans; the regex is
+    # never run). Twelve words carry a checksum of 4 bits, so one list of ordinary words in 16 passes ("client connect
+    # system process input output error return result update file edit", Gate A of 0.6.19): a phrase of 12 needs a word
+    # such as seed, mnemonic or wallet in the 200 characters before it or on its line; 15 and more (5 to 8 bits) stand
+    # alone
+    {"id": "crypto-seed-phrase", "type": "SECRET", "regex": r"(?!)"},
     {"id": "auth-scheme-apikey", "type": "SECRET", "secret_group": 1, "validator": "apikey_value",
      "regex": r"(?i:authorization)[\"']?\]?[ \t]*[:=][ \t]*[\"'`]?ApiKey[ \t]+([A-Za-z0-9+/_-]{8,1024}={0,2})"
               r"(?![\w+/=-])"},
@@ -2096,6 +2114,15 @@ def _windowed(rule: Rule, kw: re.Pattern, text: str):
             yield _Shifted(m, a)
 
 
+_EMPTY_RE = re.compile("")
+_WORD_RE_ANY = re.compile(r"[a-z]+")   # the words of a seed phrase, whatever stands between them
+# the words that make 12 list words a seed phrase: the phrase's own names, and the labels of a secret (a phrase after
+# "Password:" or "private key:" was text, Gate B of 0.6.19)
+_SEED_CONTEXT_RE = re.compile(r"(?i)(?<![a-z])(?:seed|mnemonic|bip-?39|recovery|wallet|metamask|ledger|trezor|phrase"
+                              r"|backup|secret|passphrase|password|passwort|kennwort|words|wörter|private|keys?"
+                              r"|token|wiederherstellung)(?![a-z])")   # a whole word: not tokenization, keyboard
+
+
 def _matches(rule: Rule, text: str):
     """detect-secrets keyword rules are line rules: run them per line, keep absolute offsets.
 
@@ -2111,6 +2138,14 @@ def _matches(rule: Rule, text: str):
         return
     if rule.id in _LITERAL_IDS:
         yield from _literal_matches(rule.id, text)
+        return
+    if rule.id == "crypto-seed-phrase":
+        for a, b, words in checksums.bip39_spans(text):
+            # the context word stands outside the phrase: seed, phrase and wallet are words of the list
+            if words < 15 and not (_SEED_CONTEXT_RE.search(text, max(0, min(a - 200, _line_start(text, a))), a)
+                                   or _SEED_CONTEXT_RE.search(text, b, max(b, _line_end(text, b)))):
+                continue
+            yield _Spanned(_EMPTY_RE.match(text, b), a, text)
         return
     kw = _WINDOWED.get(rule.id)
     if kw is not None and len(text) > 4096:
@@ -2717,10 +2752,13 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> li
                     ok = False   # a validator that cannot parse the value has not validated it
                 if not ok:
                     continue
-            if rule.type == "SECRET" and looks_like_placeholder(secret):
+            if rule.type == "SECRET" and rule.id != "crypto-seed-phrase" and looks_like_placeholder(secret):
+                # the checksum of a seed phrase is its proof; "example" and "sample" are words of the list
                 continue
             labelled = rule.type == "SECRET" and rule.id.startswith(LABEL_RULES)
-            if is_public_test_value(secret, rule.type) and not labelled:
+            # a seed phrase is compared in one form: its words with one space between them
+            as_published = " ".join(_WORD_RE_ANY.findall(secret)) if rule.id == "crypto-seed-phrase" else secret
+            if is_public_test_value(as_published, rule.type) and not labelled:
                 # a documented test card, key or number that a shape rule found. A published key that a label assigns
                 # (PROD_PASSWORD=<the Stripe docs key>) is used as a credential and stays a hit: being public does not
                 # make the same bytes no secret there (review of 0.6.12). The label rules run first, so no later rule
