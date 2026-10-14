@@ -139,7 +139,7 @@ class RuleFolders(Base):
                 self.assertIsNone(why)
                 self.assertTrue(prefilter and all(len(k) >= 4 for k in prefilter), prefilter)
 
-    def test_a_folder_holds_at_most_500_rules_and_an_id_names_one_rule(self):
+    def test_a_folder_holds_at_most_500_rules_and_an_id_of_an_earlier_folder_runs_under_its_own_name(self):
         many = [{"id": f"r{i}", "regex": f"tk{i:03d}_[A-Za-z0-9]{{24}}"}
                 for i in range(user_rules.MAX_RULES_PER_FOLDER + 7)]
         (OWN).mkdir(parents=True)
@@ -148,10 +148,11 @@ class RuleFolders(Base):
         team = self.tmp / "team"
         write_rules(team, [{"id": "r0", "regex": r"tkx_[A-Za-z0-9]{24}"}])
         loaded = user_rules.load({"rule_dirs": [str(team)]})
-        self.assertEqual(len(loaded.rules), user_rules.MAX_RULES_PER_FOLDER)
+        self.assertEqual(len(loaded.rules), user_rules.MAX_RULES_PER_FOLDER + 1)
         reasons = [q.reason for q in loaded.quarantined]
-        self.assertIn("7 rule(s) past the limit of 500 per folder", reasons)
-        self.assertIn("an id that an earlier rule has", reasons, "r0 of the second folder")
+        self.assertIn("rules past the limit of 500 per folder; the rest of the folder is not read", reasons)
+        self.assertIn("an id that a rule of an earlier folder has; this rule runs as user:r0#2", reasons)
+        self.assertEqual(loaded.rules[-1].id, "user:r0#2", "r0 of the second folder")
 
     def test_a_folder_inside_the_maisecrets_home_or_a_relative_one_is_not_read(self):
         for shown, why in ((str(HOME), "inside the maisecrets folder"), ("relative/rules", "not an absolute path")):
@@ -183,8 +184,9 @@ class RuleFolders(Base):
             cfg = load_config()
             self.assertNotIn("rule_dirs", cfg["policy_keys"], "the person keeps their own folders")
             loaded = user_rules.load(cfg)
-            self.assertEqual([(f.source, f.rules) for f in loaded.folders], [("policy", 1), ("own", 0), ("setting", 0)])
-            self.assertEqual(loaded.rules[0].type, "NAME", "on one id the administrator's rule stays")
+            self.assertEqual([(f.source, f.rules) for f in loaded.folders], [("policy", 1), ("own", 0), ("setting", 1)])
+            self.assertEqual(loaded.rules[0].type, "NAME", "on one id the administrator's rule stays first")
+            self.assertEqual([r.id for r in loaded.rules], ["user:tok", "user:tok#2"])
             self.assertEqual(user_rules.allow_list(cfg)[1], frozenset({"url-query-secret"}))
             self.assertIn(str(admin), settings.render(show_all=True, only="rule_dirs"))
             for broken in ({"rule_dirs": "not a list"}, {"rule_dirs": [1]}, {"allow": "rule: email"}):
@@ -321,6 +323,101 @@ class Quarantine(Base):
         with redirect_stdout(io.StringIO()) as out:
             cli.cmd_report(["last"])
         self.assertIn("no detection recorded yet", out.getvalue(), "a quarantine is no false alarm to report")
+
+
+class GateAOfBlock1(Base):
+    """Findings of Gate A (codex) on the rebased branch of block 1."""
+
+    def test_a_folder_the_agent_writes_cannot_take_out_a_rule_of_a_later_folder_by_its_id(self):
+        decoy, kept = self.tmp / "checkout-a", self.tmp / "checkout-b"
+        write_rules(decoy, [{"id": "acme-prod", "regex": r"never_[A-Z]{20}", "keywords": ["never_"]}])
+        write_rules(kept, [{"id": "acme-prod", "regex": r"tkx_[A-Za-z0-9]{24}", "keywords": ["tkx_"]}])
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "rule_dirs": [str(decoy), str(kept)]}))
+        detect.reset_rules()
+        self.assertEqual(kinds(f"deploy with {token()}"), ["user:acme-prod#2"])
+        ALLOW.write_text("rule: user:acme-prod\n", encoding="utf-8")
+        detect.reset_rules()
+        self.assertEqual(kinds(f"deploy with {token()}"), [], "the allow list switches the id and its #n off together")
+
+    def test_a_rule_the_budget_left_untested_waits_for_its_timed_test(self):
+        write_rules(OWN, [{"id": "team-token", "regex": r"tkx_[A-Za-z0-9]{24}", "keywords": ["tkx_"]}])
+
+        def no_time(sources, budget=None, limit_ms=None, info=None):
+            if info is not None:
+                info["budget"] = True
+            return {}
+        with mock.patch.object(user_rules, "probe", no_time):
+            self.assertEqual(user_rules.load({}).rules, [], "untested: not in this scan")
+        self.assertEqual([r.id for r in user_rules.load({}).rules], ["user:team-token"], "tested at the next load")
+
+    def test_where_no_test_child_starts_the_static_checks_alone_stand(self):
+        write_rules(OWN, [{"id": "team-token", "regex": r"tkx_[A-Za-z0-9]{24}", "keywords": ["tkx_"]}])
+        with mock.patch.object(user_rules.sys, "executable", ""):
+            self.assertEqual([r.id for r in user_rules.load({}).rules], ["user:team-token"])
+
+    def test_a_folder_of_many_files_is_read_only_to_its_limits(self):
+        team = self.tmp / "team"
+        for i in range(12):
+            write_rules(team, [{"id": f"r{i}", "regex": f"tk{i:03d}_[A-Za-z0-9]{{24}}"}], f"f{i:02d}.json")
+        with mock.patch.object(user_rules, "MAX_FILES", 4):
+            loaded = user_rules.load({"rule_dirs": [str(team)]})
+        self.assertEqual([r.id for r in loaded.rules], [f"user:r{i}" for i in range(4)])
+        self.assertIn("8 rule file(s) past the limit of 4 per folder", [q.reason for q in loaded.quarantined])
+        with mock.patch.object(user_rules, "MAX_ENTRIES", 5):
+            loaded = user_rules.load({"rule_dirs": [str(team)]})
+            self.assertEqual(len(user_rules._rule_files(team)), 5)
+        self.assertEqual(len(loaded.rules), 5)
+        self.assertIn("a folder of more than 5 entries; the rest is not read", [q.reason for q in loaded.quarantined])
+
+
+class GateBOfBlock1(Base):
+    """Findings of Gate B (Opus) on the rebased branch of block 1."""
+
+    def test_bounded_repeats_in_a_row_are_found_slow_by_the_timed_test(self):
+        rx = "abcd" + "[a-z]{0,99}" * 3 + "Q"
+        self.assertIsNone(user_rules.check_regex(rx)[0], "the static checks let it through")
+        write_rules(OWN, [{"id": "poly", "regex": rx}])
+        loaded = user_rules.load({})
+        self.assertEqual(loaded.rules, [])
+        (q,) = loaded.quarantined
+        self.assertTrue(q.reason.startswith("slow"), q.reason)
+
+    def test_a_full_folder_checks_no_further_rule(self):
+        team = self.tmp / "team"
+        write_rules(team, [{"id": f"r{i}", "regex": f"tk{i:03d}_[A-Za-z0-9]{{24}}"} for i in range(50)])
+        calls = []
+        real = user_rules.check_regex
+
+        def counted(*a, **kw):
+            calls.append(1)
+            return real(*a, **kw)
+        with mock.patch.object(user_rules, "MAX_RULES_PER_FOLDER", 3), \
+                mock.patch.object(user_rules, "check_regex", counted):
+            rules, quarantined, _ = user_rules.load_folder(team, "team")
+        self.assertEqual(len(rules), 3)
+        self.assertLessEqual(len(calls), 4, "a rule past the limit is not checked")
+        self.assertIn("rules past the limit of 3 per folder; the rest of the folder is not read",
+                      [q.reason for q in quarantined])
+
+    def test_a_folder_reads_at_most_its_byte_limit(self):
+        team = self.tmp / "team"
+        for i in range(4):
+            write_rules(team, [{"id": f"r{i}", "regex": f"tk{i:03d}_[A-Za-z0-9]{{24}}"}], f"f{i}.json")
+        size = (team / "f0.json").stat().st_size
+        with mock.patch.object(user_rules, "MAX_FOLDER_BYTES", 2 * size + 1):
+            rules, quarantined, _ = user_rules.load_folder(team, "team")
+        self.assertEqual([r.id for r in rules], ["user:r0", "user:r1"])
+        self.assertIn("f2.json and the files after it are not read", quarantined[-1].reason)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "a FIFO is POSIX")
+    def test_a_fifo_in_place_of_a_rule_file_does_not_hold_the_read(self):
+        fifo = self.tmp / "swapped.json"
+        os.mkfifo(fifo)
+        with self.assertRaises(IsADirectoryError):
+            user_rules._read(fifo)
+
+    def test_a_file_name_is_printed_without_control_characters(self):
+        self.assertEqual(user_rules._shown_name("ok\x1b[2J.prefixes"), "ok?[2J.prefixes")
 
 
 class SessionStartLine(Base):
@@ -574,6 +671,7 @@ class Robust(Base):
         write_rules(OWN, [{"id": "mine", "regex": r"tkx_[A-Za-z0-9]{24}"}])
         team = self.tmp / "team"
         team.mkdir()
+        self.assertIn("user:mine", [r.id for r in user_rules.load({}).rules], "tested once; budget=0 tests no more")
         for i in range(300):
             data = value()
             text = json.dumps(data) if rnd.random() < 0.9 else json.dumps(data)[:-1]

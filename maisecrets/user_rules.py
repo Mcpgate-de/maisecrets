@@ -30,6 +30,7 @@ checkout, and an agent may only make detection stricter.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -54,12 +55,15 @@ ALLOW_FILE = HOME / "allow.txt"
 STATE_FILE = HOME / ".rules-state"
 ID_PREFIX = "user:"                  # every user rule id gets it: no user id can take the name of a built-in rule
 MAX_RULES_PER_FOLDER = 500
+MAX_ENTRIES = 2000                   # entries looked at per folder: many files cannot stall a hook
+MAX_FILES = 200                      # rule files read per folder
 MAX_FILE_BYTES = 64 * 1024
+MAX_FOLDER_BYTES = 1024 * 1024       # bytes read per folder
 MAX_REGEX = 300
 MIN_LITERAL = 4
 TYPES = ("SECRET", "NAME", "EMAIL", "PHONE", "IBAN", "CARD", "IP")
 TARGETS = ("secret", "match", "line")
-CHECK_VERSION = 4                    # a new check makes every cached verdict old
+CHECK_VERSION = 5                    # a new check makes every cached verdict old
 PROBE_LIMIT_MS = 50.0                # a rule slower than this on the test texts is quarantined
 PROBE_DEADLINE = 1.0                 # seconds; the test child is ended when one rule takes longer
 PROBE_BUDGET = 2.0                   # seconds of tests per hook call; the rest are tested in the next call
@@ -475,6 +479,10 @@ def texts(lits, fills):
                 yield lit + (fill * (n // len(fill) + 1))[:n] + "!"
         yield (lit + " ") * (65536 // (len(lit) + 1))
         yield "a" * 65536 + lit
+        # the literal again and again, each time before a long run: bounded repeats in a row
+        # (`abcd[a-z]{0,99}[a-z]{0,99}[a-z]{0,99}Q`) cost a power of 99 at each start (Gate B of block 1)
+        for fill in ("a", " ") + tuple(fills):
+            yield (lit + (fill * (200 // len(fill) + 1))[:200]) * 60
 
 def once(rx, allows, lits, fills):
     t = time.perf_counter()
@@ -495,7 +503,7 @@ for key, pattern, lits, allows, fills in spec["rules"]:
 """
 
 
-def probe(sources: list, budget: float | None = None, limit_ms: float | None = None) -> dict:
+def probe(sources: list, budget: float | None = None, limit_ms: float | None = None, info: dict | None = None) -> dict:
     """{hash: ms, or None for a rule ended at PROBE_DEADLINE} of the rules tested before `budget` seconds ran out.
     The tests run in a child process: a regex that backtracks holds the interpreter and cannot be stopped from
     inside, but a child can be ended. A rule not tested (the budget, no child) is not in the answer."""
@@ -508,12 +516,16 @@ def probe(sources: list, budget: float | None = None, limit_ms: float | None = N
     end = None if budget is None else time.monotonic() + budget
     while todo and sys.executable:
         if end is not None and time.monotonic() >= end:
+            if info is not None:
+                info["budget"] = True
             break
         try:
             child = subprocess.Popen([sys.executable, "-I", "-S", "-c", _PROBE_CHILD], stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         except (OSError, ValueError):
             break
+        if info is not None:
+            info["child"] = True
         lines: queue.Queue = queue.Queue()
 
         def read(out=child.stdout, lines=lines) -> None:
@@ -734,14 +746,22 @@ def _prefix_rules(text: str, kept, refuse, cache: dict) -> None:
             refuse(place, "a line that cannot be read")
 
 
+class _Full(BaseException):
+    """The folder holds its limit of rules: no later rule is checked (a BaseException, so the per-rule `except
+    Exception` of the readers lets it through)."""
+
+
 def _shown_name(name: str) -> str:
-    """A file name as text that can be printed: an undecodable byte becomes a replacement character."""
-    return os.fsencode(name).decode("utf-8", "replace")
+    """A file name as text that can be printed: an undecodable byte becomes a replacement character, a control
+    character a `?` (an agent names the files of a folder it can write; Gate B of block 1)."""
+    return "".join(c if c.isprintable() else "?" for c in os.fsencode(name).decode("utf-8", "replace"))
 
 
 def _read(path: Path) -> bytes:
     """The bytes of a regular file, never through a symbolic link, at most MAX_FILE_BYTES + 1."""
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    # O_NONBLOCK: a FIFO put in place of the file after the listing does not hold the open (Gate B of block 1)
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+                 | getattr(os, "O_NONBLOCK", 0))
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise IsADirectoryError(str(path))
@@ -759,8 +779,10 @@ def _read(path: Path) -> bytes:
 
 def load_folder(path: Path, shown: str, taken: set | None = None, cache: dict | None = None,
                 sources: dict | None = None) -> tuple[list, list, str]:
-    """(rules, quarantined, digest) of one folder. `taken` holds the ids of earlier folders: a second rule with the
-    same id is quarantined, so an id names one rule (the allow list switches rules off by id). `cache` holds the
+    """(rules, quarantined, digest) of one folder. `taken` holds the ids of earlier folders. A second rule with an id
+    of the same folder is quarantined. A rule whose id an earlier folder has runs as `<id>#2` (#3, ...): an agent that
+    can write one folder must not take out the rule of another folder by its id (Gate A of block 1). The allow list
+    switches `<id>` and every `<id>#n` off together (switched_off). `cache` holds the
     verdicts of the checks by rule hash; `sources` gets the _Source of each loaded rule by its id."""
     taken = set() if taken is None else taken
     cache = {} if cache is None else cache
@@ -768,8 +790,14 @@ def load_folder(path: Path, shown: str, taken: set | None = None, cache: dict | 
     quarantined: list = []
     digest = hashlib.sha256()
     names = []
+    seen = 0
     with os.scandir(path) as entries:
         for entry in entries:
+            seen += 1
+            if seen > MAX_ENTRIES:
+                quarantined.append(Quarantined(shown, "", "", f"a folder of more than {MAX_ENTRIES} entries; "
+                                                              "the rest is not read"))
+                break
             if not entry.name.endswith((".json", ".prefixes")):
                 continue
             if entry.is_symlink():
@@ -778,7 +806,13 @@ def load_folder(path: Path, shown: str, taken: set | None = None, cache: dict | 
             elif entry.is_file(follow_symlinks=False):
                 names.append(entry.name)
     names.sort()
-    over = 0
+    if len(names) > MAX_FILES:
+        quarantined.append(Quarantined(shown, "", "", f"{len(names) - MAX_FILES} rule file(s) past the limit of "
+                                                      f"{MAX_FILES} per folder"))
+        names = names[:MAX_FILES]
+    full = False
+    size = 0
+    mine: set = set()     # the ids of this folder
     for name in names:
         file = _shown_name(name)
 
@@ -789,17 +823,25 @@ def load_folder(path: Path, shown: str, taken: set | None = None, cache: dict | 
             quarantined.append(Quarantined(shown, file, ID_PREFIX + rid, text, kept=True))
 
         def kept(rid: str, rule, place: str, key: str, pattern: str, allows: tuple, file: str = file) -> None:
-            nonlocal over
-            if rid in taken:
+            if rid in mine:
                 refuse(place, "an id that an earlier rule has")
-            elif len(rules) >= MAX_RULES_PER_FOLDER:
-                over += 1
-            else:
-                taken.add(rid)
-                rules.append(rule)
-                if sources is not None:
-                    lits = tuple(dict.fromkeys(x for x in (_regex_literal(pattern),) + rule.keywords[:1] if x))
-                    sources[rule.id] = _Source(key, shown, file, pattern, lits, allows, _fills(pattern))
+                return
+            if len(rules) >= MAX_RULES_PER_FOLDER:
+                raise _Full
+            mine.add(rid)
+            if rid in taken:
+                n = 2
+                while f"{rid}#{n}" in taken:
+                    n += 1
+                quarantined.append(Quarantined(shown, file, ID_PREFIX + rid, f"an id that a rule of an earlier folder "
+                                               f"has; this rule runs as {ID_PREFIX}{rid}#{n}", kept=True))
+                rid = f"{rid}#{n}"
+                rule = dataclasses.replace(rule, id=ID_PREFIX + rid)
+            taken.add(rid)
+            rules.append(rule)
+            if sources is not None:
+                lits = tuple(dict.fromkeys(x for x in (_regex_literal(pattern),) + rule.keywords[:1] if x))
+                sources[rule.id] = _Source(key, shown, file, pattern, lits, allows, _fills(pattern))
         try:
             digest.update(os.fsencode(name) + b"\0")
             try:
@@ -810,6 +852,11 @@ def load_folder(path: Path, shown: str, taken: set | None = None, cache: dict | 
             if len(raw) > MAX_FILE_BYTES:
                 refuse("", f"a file larger than {MAX_FILE_BYTES // 1024} KB")
                 continue
+            size += len(raw)
+            if size > MAX_FOLDER_BYTES:
+                quarantined.append(Quarantined(shown, "", "", f"more than {MAX_FOLDER_BYTES // 1024} KB of rule files; "
+                                                              f"{file} and the files after it are not read"))
+                break
             digest.update(raw)
             try:
                 text = raw.decode("utf-8")
@@ -825,11 +872,15 @@ def load_folder(path: Path, shown: str, taken: set | None = None, cache: dict | 
                 _json_rules(data, kept, refuse, dropped, cache)
             else:
                 _prefix_rules(text, kept, refuse, cache)
+        except _Full:
+            full = True
+            break
         except Exception:  # noqa: BLE001 - one broken file never costs the other files
             refuse("", "a file that cannot be read")
-    if over:
-        quarantined.append(Quarantined(shown, "", "", f"{over} rule(s) past the limit of {MAX_RULES_PER_FOLDER} "
-                                                      "per folder"))
+    if full:
+        # the rest is not even checked: rules past the limit cost a check at each load (Gate B of block 1)
+        quarantined.append(Quarantined(shown, "", "", f"rules past the limit of {MAX_RULES_PER_FOLDER} per folder; "
+                                                      "the rest of the folder is not read"))
     return rules, quarantined, digest.hexdigest()[:12]
 
 
@@ -917,9 +968,16 @@ def _one_folder(out: Loaded, shown: str, path: Path, source: str, taken: set, ca
 
 
 def _rule_files(path: Path):
+    """The rule files of a folder, from its first MAX_ENTRIES entries (as load_folder reads it)."""
     try:
         with os.scandir(path) as entries:
-            return [e.name for e in entries if e.name.endswith((".json", ".prefixes"))]
+            out = []
+            for n, e in enumerate(entries):
+                if n >= MAX_ENTRIES:
+                    break
+                if e.name.endswith((".json", ".prefixes")):
+                    out.append(e.name)
+            return out
     except OSError:
         return []
 
@@ -946,8 +1004,15 @@ def _test_new_rules(out: Loaded, sources: dict, tested: dict, slow: dict, budget
             continue
         keep.append(rule)
     if new:
-        got = probe(new, budget)
+        info: dict = {}
+        got = probe(new, budget, info=info)
         tested.update(got)
+        if info.get("child") or info.get("budget"):
+            # a rule the budget left untested waits for the next call: before its timed test, a backtracking rule
+            # that passed the static checks could hold this call (Gate A of block 1). Where no test child can start,
+            # the static checks alone stand, as before.
+            untested = {s.hash for s in new if s.hash not in got}
+            keep = [r for r in keep if r.id not in sources or sources[r.id].hash not in untested]
         bad = {h for h, ms in got.items() if ms is None or ms > PROBE_LIMIT_MS}
         if bad:
             gone = {rid for rid, s in sources.items() if s.hash in bad}
