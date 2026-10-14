@@ -1,0 +1,10 @@
+# c28-an-inherited-acl-entry-on-macos-refuses: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-an-inherited-acl-entry-on-macos-refuses"
+control = "C28"
+statement = "On macOS an ACL allow entry with a write right refuses also when the flags of inheritance share its allow field (allow,file_inherit or allow,inherited)."
+runner = ["tests/test_file_reads.py::TheConverterIsBounded::test_the_text_of_a_macos_acl_is_read_with_its_flags"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "and \"allow\" in fields[-2].split(\",\") and"
+replace = "and fields[-2] == \"allow\" and"

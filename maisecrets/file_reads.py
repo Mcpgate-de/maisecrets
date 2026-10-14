@@ -610,14 +610,7 @@ def _acl_lets_in(path: str) -> bool:
                 lib.acl_free(acl)
         except (OSError, AttributeError, ValueError):
             return True
-        if body is None:
-            return True
-        for line in body.splitlines()[1:]:
-            fields = line.split(":")
-            # group:<uuid>:<name>:<id>:allow|deny:<rights>, the rights comma separated
-            if len(fields) >= 6 and fields[-2] == "allow" and set(fields[-1].split(",")) & _ACL_WRITES:
-                return True
-        return False
+        return body is None or acl_text_grants_write(body)
     if sys.platform.startswith("linux"):
         try:
             os.getxattr(path, "system.posix_acl_access", follow_symlinks=False)
@@ -630,8 +623,19 @@ def _acl_lets_in(path: str) -> bool:
     return False
 
 
+def acl_text_grants_write(body: str) -> bool:
+    """The text of a macOS ACL (acl_to_text) has an allow entry with a write right."""
+    for line in body.splitlines()[1:]:
+        fields = line.split(":")
+        # group:<uuid>:<name>:<id>:allow|deny[,flags]:<rights>; the flags of inheritance share the field
+        # (allow,file_inherit,directory_inherit or allow,inherited, measured by both reviews of round 2)
+        if len(fields) >= 6 and "allow" in fields[-2].split(",") and set(fields[-1].split(",")) & _ACL_WRITES:
+            return True
+    return False
+
+
 _ACL_WRITES = frozenset({"write", "append", "add_file", "add_subdirectory", "delete", "delete_child", "writeattr",
-                         "writeextattr", "writesecurity", "chown", "file_inherit", "directory_inherit"})
+                         "writeextattr", "writesecurity", "chown"})
 
 
 def _no_other_writer(path: str) -> bool:
@@ -762,10 +766,12 @@ def _macho_libraries(tool: str):
             if name.startswith(("/usr/lib/", "/System/")) and not os.path.lexists(name):
                 continue
             if name.startswith("@rpath/"):
-                found = [os.path.join(r, name[7:]) for r in rpaths if os.path.isfile(os.path.join(r, name[7:]))]
-                if not found:
+                hit = next((i for i, r in enumerate(rpaths) if os.path.isfile(os.path.join(r, name[7:]))), None)
+                if hit is None:
                     return None
-                name = found[0]
+                # dyld takes the first folder that holds the name: a folder searched before it must stay closed too
+                out.extend(r for r in rpaths[:hit] if os.path.isdir(r))
+                name = os.path.join(rpaths[hit], name[7:])
             name = name.replace("@loader_path", here).replace("@executable_path", exe_dir)
             if not (os.path.isabs(name) and os.path.isfile(name)):
                 return None
@@ -779,7 +785,7 @@ def _elf_libraries(tool: str):
     fails. ldd runs the program's loader, never its code; the program passed the check before."""
     import subprocess
     ldd = next((p for p in ("/usr/bin/ldd", "/bin/ldd") if os.path.isfile(p)), None)
-    if not ldd or not _no_other_writer(ldd):
+    if not ldd or not (_no_other_writer(ldd) and _no_other_writer(os.path.realpath(ldd))):
         return None
     try:
         r = subprocess.run([ldd, tool], capture_output=True, text=True, timeout=3, stdin=subprocess.DEVNULL,
@@ -802,7 +808,7 @@ def _elf_libraries(tool: str):
     return out
 
 
-def libraries(tool: str):
+def libraries(tool: str, _depth: int = 0):
     """The code the program loads besides itself: its libraries, or the interpreter of a script. None when that
     cannot be told; a program whose libraries cannot be told is not run."""
     import sys
@@ -816,7 +822,10 @@ def libraries(tool: str):
         # `#!/usr/bin/env x` lets the PATH choose the program: no fixed interpreter, no run
         if not words or not words[0].startswith(b"/") or os.path.basename(words[0]) == b"env":
             return None
-        return [os.fsdecode(words[0])]
+        interpreter = os.fsdecode(words[0])
+        # the interpreter's own libraries too; an interpreter that is a script again is not followed
+        own = libraries(os.path.realpath(interpreter), 1) if _depth == 0 else None
+        return None if own is None else [interpreter] + own
     if sys.platform == "darwin":
         return _macho_libraries(tool)
     if head.startswith(b"\x7fELF"):
@@ -966,8 +975,8 @@ def _cut(text: str) -> str:
     """The text up to MAX_TEXT_CHARS, ended at a line and never inside a key block: a value cut in two is no longer
     the shape a rule finds (a PEM key needs its END line), and its first part would reach the model (review)."""
     cut = text[:MAX_TEXT_CHARS]
-    if len(text) > MAX_TEXT_CHARS:
-        cut = cut[:cut.rfind("\n") + 1]
+    # the text was cut by the character cap or by the byte cap of the reader: either way its last line is a part
+    cut = cut[:cut.rfind("\n") + 1]
     begin = cut.rfind("-----BEGIN")
     if begin != -1 and "-----END" not in cut[begin:]:
         cut = cut[:begin]
