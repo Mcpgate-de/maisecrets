@@ -241,7 +241,32 @@ def parse_prompt(prompt) -> tuple[str, str] | None:
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
 
-def apply_typed(key: str, word: str) -> tuple[bool, str]:
+# The direction of each setting a prompt changes. A change loosens a protection when it gives the AI or a value more
+# room: a protective switch turned away from its protective value, a policy that asks or refuses less, a higher cap,
+# a new autonomous host. A key in NEUTRAL changes no protection (a test holds that every key is in one of them).
+PROTECTIVE_BOOL = {"ssh_consent": True, "block_at_mentions": True, "scrub_transcript": True,
+                   "strip_hidden_characters": True, "guard": True, "resolve_in_files": False,
+                   "ssh_via_sandbox": False, "renew_on_use": False, "pass_agent_reports": False}
+STRICTER_LAST = {"rehydration": ("automatic", "confirm", "block"), "ssh_approval": ("per-session", "per-command"),
+                 "secret_destinations": ("off", "observe")}
+NEUTRAL = ("tips", "shortcut", "rewrite_prompts")
+
+
+def loosens(key: str, before, after) -> bool:
+    """The change of key from before to after (both the values in effect) loosens a protection."""
+    if key in PROTECTIVE_BOOL:
+        return before == PROTECTIVE_BOOL[key] and after != PROTECTIVE_BOOL[key]
+    if key in STRICTER_LAST:
+        order = STRICTER_LAST[key]
+        return before in order and after in order and order.index(after) < order.index(before)
+    if key in _INT_KEYS:
+        return isinstance(before, int) and isinstance(after, int) and after > before
+    if key == "ssh_autonomous_hosts":
+        return bool(set(after or []) - set(before or []))
+    return False
+
+
+def apply_typed(key: str, word: str, route: str = "typed prompt") -> tuple[bool, str]:
     """Write one change the person typed into config.json, keep every other key, and say what happened: (changed,
     text). Only the prompt hook calls this, for a prompt whose source is the person (TYPED_SOURCES). It is the
     only writer, under one name that a tool call is refused for (IN_A_COMMAND_RE)."""
@@ -308,6 +333,9 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
     except (OSError, LockTimeout) as exc:
         return False, f"maisecrets: {CONFIG} cannot be written ({type(exc).__name__}); nothing was changed."
     after = load_config()
+    if loosens(key, cfg.get(key), after.get(key)):
+        from . import events
+        events.record_weakening("setting", key, route)      # the next session start names it to the person
     return True, f"maisecrets: {TITLE.get(key, key)} is {_shown(after.get(key))} ({state(key, after)})."
 
 

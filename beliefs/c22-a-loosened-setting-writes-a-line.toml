@@ -1,0 +1,10 @@
+# c22-a-loosened-setting-writes-a-line: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-a-loosened-setting-writes-a-line"
+control = "C22"
+statement = "A typed settings change that loosens a protection writes one events.log line with the time, the setting and the route, never the value; a stricter or neutral change writes none."
+runner = ["tests/test_weakenings.py::SettingsThatLoosen::test_a_looser_setting_writes_one_line_with_its_route_and_no_value"]
+
+[proof]
+file = "maisecrets/settings.py"
+find = "        events.record_weakening(\"setting\", key, route)"
+replace = "        pass"

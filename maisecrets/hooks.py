@@ -847,8 +847,9 @@ def user_prompt(payload: dict) -> dict:
     # report pass, so a report never changes one; blocked, so the prompt does not reach the model
     change = settings_mod.parse_prompt(prompt)
     if change:
-        changed, reason = settings_mod.apply_typed(*change) if typed else (False,
-                                                                          settings_mod.not_typed_reason(payload))
+        route = "slash command" if prompt.lstrip().lower().startswith("/maisecrets:settings") else "typed prompt"
+        changed, reason = settings_mod.apply_typed(*change, route=route) if typed else (
+            False, settings_mod.not_typed_reason(payload))
         if changed and client_of(payload) != "codex" and prompt.lstrip().lower().startswith("/maisecrets:settings"):
             # a success is no refusal: the slash command runs on and shows the new state (a block read as an
             # error, "operation blocked by hook"). The prompt carries no value; the change is already written

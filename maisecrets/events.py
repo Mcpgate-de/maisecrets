@@ -1,11 +1,13 @@
 """Detection events for bug reports: what was found (kind, type, length), where (hook,
 client), under which version. Never a value, never a display. ``maisecrets report`` turns
-the last event into a prefilled GitHub issue URL."""
+the last event into a prefilled GitHub issue URL. The same file holds one line per protection
+that was loosened, which the next session start names to the person."""
 from __future__ import annotations
 
 import json
 import os
 import platform
+import re
 import sys
 import time
 import urllib.parse
@@ -38,42 +40,125 @@ def record(hook: str, client: str, entries: list, outcome: str = "") -> None:
             "hits": [{"key": e.key, "type": e.type, "kind": e.kind} for e in entries],
             **({"outcome": outcome} if outcome else {}),
         })
-        old: list[str] = []
-        if EVENTS.exists():
-            old = EVENTS.read_text(encoding="utf-8").splitlines()
-        lines = old + [line]
-
-        def removal_only(text: str) -> bool:
-            try:
-                obj = json.loads(text)
-            except ValueError:
-                return False
-            hits = obj.get("hits") if isinstance(obj, dict) else None
-            # a line of another shape is kept and never breaks the record (Opus review, 2026-10-06)
-            return (isinstance(hits, list) and bool(hits)
-                    and all(isinstance(h, dict) and h.get("type") == "HIDDEN" for h in hits))
-        # removals of invisible characters go first, the new one too, so they never push a detection out
-        while len(lines) > KEEP:
-            del lines[next((i for i, x in enumerate(lines) if removal_only(x)), 0)]
-        fd = os.open(EVENTS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
+        _append(line)
     except OSError:
         pass
 
 
-def load(n: int = 20) -> list[dict]:
+def _parsed(text: str) -> dict:
     try:
-        lines = EVENTS.read_text(encoding="utf-8").splitlines()[-n:]
+        obj = json.loads(text)
+    except ValueError:
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def _append(line: str) -> None:
+    old: list[str] = []
+    if EVENTS.exists():
+        old = EVENTS.read_text(encoding="utf-8").splitlines()
+    lines = old + [line]
+
+    def removal_only(text: str) -> bool:
+        hits = _parsed(text).get("hits")
+        # a line of another shape is kept and never breaks the record (Opus review, 2026-10-06)
+        return (isinstance(hits, list) and bool(hits)
+                and all(isinstance(h, dict) and h.get("type") == "HIDDEN" for h in hits))
+    # removals of invisible characters go first, the new one too, so they never push a detection out; a loosened
+    # protection goes last, so the next session start can still name it
+    while len(lines) > KEEP:
+        drop = next((i for i, x in enumerate(lines) if removal_only(x)), None)
+        if drop is None:
+            drop = next((i for i, x in enumerate(lines) if "weakened" not in _parsed(x)), 0)
+        del lines[drop]
+    fd = os.open(EVENTS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def load(n: int = 20) -> list[dict]:
+    """The last n detection events; a line about a loosened protection is not one."""
+    try:
+        lines = EVENTS.read_text(encoding="utf-8").splitlines()
     except OSError:
         return []
     out = []
     for ln in lines:
         try:
-            out.append(json.loads(ln))
+            obj = json.loads(ln)
         except ValueError:
             continue
-    return out
+        if isinstance(obj, dict) and "weakened" not in obj:
+            out.append(obj)
+    return out[-n:] if n > 0 else []
+
+
+# ------------------------------------------------------------ weakenings --
+# Each action that loosens a protection writes one line: a setting changed in the looser direction, a value
+# forgotten. A wipe deletes events.log with the rest (offboarding). The line names the time, the kind, the key or
+# setting (never a value) and the route that asked for it. The next session start names them to the person in one
+# sentence and marks them as shown. Any
+# process of the user can change the file too (docs/THREAT-MODEL.md, C22): it makes an ordinary agent's action
+# visible, it does not stop one that evades.
+ROUTES = ("typed prompt", "slash command", "cli")
+_SHOWN = HOME / ".weakenings-shown"
+_NAME_RE = re.compile(r"[^A-Za-z0-9_.:@-]")
+
+
+def record_weakening(kind: str, name: str, route: str) -> None:
+    """One events.log line for an action that loosened a protection. Never raises: the action is done already."""
+    try:
+        HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            old = [_parsed(x) for x in EVENTS.read_text(encoding="utf-8").splitlines()]
+        except FileNotFoundError:
+            old = []
+        last = max((e["t"] for e in old if "weakened" in e and isinstance(e.get("t"), int)), default=0)
+        _append(json.dumps({
+            # a number that only grows: two lines in one clock tick must not share it, or the mark of the first
+            # hides the second
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()), "t": max(time.time_ns(), last + 1),
+            "weakened": kind, "name": _NAME_RE.sub("", str(name))[:64],
+            "route": route if route in ROUTES else "other", "version": plugin_version(),
+        }))
+    except OSError:
+        pass
+
+
+def _label(e: dict) -> str:
+    kind, name = e.get("weakened"), e.get("name", "?")
+    if kind == "setting":
+        return f"setting {name}"
+    if kind == "forget":
+        return f"forget {name}"
+    return f"{kind} {name}"
+
+
+def weakenings_since_last_start() -> str | None:
+    """One sentence for the person that lists the protections loosened since the last session start, or None.
+    The lines it names are marked as shown; a mark that cannot be written names them again next time."""
+    try:
+        shown = int(_SHOWN.read_text(encoding="utf-8").strip() or 0)
+    except (OSError, ValueError):
+        shown = 0
+    try:
+        lines = EVENTS.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    new = [e for e in map(_parsed, lines) if e.get("weakened") and isinstance(e.get("t"), int) and e["t"] > shown]
+    if not new:
+        return None
+    try:
+        atomic = _SHOWN.with_name(_SHOWN.name + ".tmp")
+        atomic.write_text(repr(max(e["t"] for e in new)) + "\n", encoding="utf-8")
+        os.replace(atomic, _SHOWN)
+    except OSError:
+        pass
+    named = ", ".join(f"{_label(e)} ({e.get('route', 'other')})" for e in new[:5])
+    more = f", and {len(new) - 5} more in {EVENTS.name}" if len(new) > 5 else ""
+    was = "protection was" if len(new) == 1 else "protections were"
+    return (f"maisecrets: since the last session start, {len(new)} {was} loosened: {named}{more}. If you did not "
+            "do this, check /maisecrets:settings and /maisecrets:list.")
 
 
 def issue_url(event: dict, note: str = "") -> str:
