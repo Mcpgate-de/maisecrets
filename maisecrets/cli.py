@@ -313,8 +313,9 @@ def cmd_settings(args: list[str]) -> int:
     from . import settings
     rest = [a for a in args if a != "--all"]
     # KEY, KEY VALUE, or for the host list KEY add|remove HOST (field report on 0.6.6: the list's own form exited 1)
-    list_form = (len(rest) >= 3 and rest[0].lower() in ("ssh_autonomous_hosts", "rule_dirs")
-                 and rest[1].lower() in ("add", "remove") and (len(rest) == 3 or rest[0].lower() == "rule_dirs"))
+    folder = rest[0].lower() in ("rule_dirs", "clean_dirs") if rest else False     # a folder can hold spaces
+    list_form = (len(rest) >= 3 and (folder or rest[0].lower() == "ssh_autonomous_hosts")
+                 and rest[1].lower() in ("add", "remove") and (len(rest) == 3 or folder))
     if rest and (len(rest) <= 2 or list_form) and rest[0].lower() in settings.TITLE:
         # after a typed change the prompt hook already wrote it: show the card with the new state
         print(settings.render(only=rest[0].lower()))

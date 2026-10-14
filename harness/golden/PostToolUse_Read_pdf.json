@@ -1,0 +1,25 @@
+{
+ "session_id": "{session_id}",
+ "transcript_path": "{transcript_path}",
+ "cwd": "{cwd}",
+ "prompt_id": "{prompt_id}",
+ "permission_mode": "default",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PostToolUse",
+ "tool_name": "Read",
+ "tool_input": {
+  "file_path": "{cwd}/hello.pdf"
+ },
+ "tool_response": {
+  "type": "pdf",
+  "file": {
+   "filePath": "{cwd}/hello.pdf",
+   "base64": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0...",
+   "originalSize": 580
+  }
+ },
+ "tool_use_id": "{tool_use_id}",
+ "duration_ms": 0
+}
