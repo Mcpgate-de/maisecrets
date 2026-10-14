@@ -46,6 +46,21 @@ def values(text: str, channel: str = "tool", region: tuple = ALL_REGIONS) -> lis
     return [(m.kind, m.value) for m in scan(text, channel, region) if m.kind in personal.RULE_IDS]
 
 
+class BirthDateTests(unittest.TestCase):
+    def test_a_date_after_a_birth_label(self):
+        for text, v in (("DOB: 1987-04-12", "1987-04-12"), ("Geburtsdatum: 03.11.1979", "03.11.1979"),
+                        ("née le 4 mars 1985", "4 mars 1985"), ("fecha de nacimiento: 12/05/1990", "12/05/1990")):
+            with self.subTest(text=text):
+                self.assertEqual(values(text), [("birth-date-after-label", v)])
+
+    def test_other_dates_and_the_word_born_stay_text(self):
+        for text in ("created: 2024-03-11", "released: 12.03.2024", "born 23 June 1912 in London",
+                     "DOB 01/01/1970 is the placeholder for unknown records"):
+            with self.subTest(text=text):
+                self.assertEqual(values(text), [])
+
+
+
 class PhoneTests(unittest.TestCase):
     def test_a_number_with_one_digit_groups_in_both_channels(self):
         text = "call me on +1 4 1 5 223 3344"
