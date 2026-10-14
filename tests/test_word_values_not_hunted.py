@@ -79,22 +79,6 @@ class WordValuesNotHuntedTests(unittest.TestCase):
         self.assertTrue(self.blocked(f"password: {WORD}", "s2"), "the label rule takes it in the prompt")
         self.assertTrue(self.blocked(f"Das {WORD} ist morgen.", "s3"), "from now on it is the person's password")
 
-    def test_the_first_start_quiets_a_word_an_older_version_stored_and_keeps_a_random_value(self):
-        self.assertTrue(self.blocked(f"password: {WORD}", "s1"))
-        self.assertTrue(self.blocked(f"DB_PASSWORD={RANDOM}", "s1"))
-        index = Path(self.home, "index.json")
-        idx = json.loads(index.read_text())
-        for meta in idx["entries"].values():
-            meta.pop("quiet", None)                          # as 0.6.16 wrote them
-        index.write_text(json.dumps(idx))
-        self.assertTrue(self.blocked(f"Das {WORD} ist morgen.", "s2"), "before the start: hunted as in 0.6.16")
-        start = self.hook("session-start", {"session_id": "s3", **CLAUDE})
-        self.assertIn("1 stored word(s) no longer block a prompt", start.get("systemMessage", ""))
-        self.assertFalse(self.blocked(f"Das {WORD} ist morgen.", "s4"))
-        self.assertTrue(self.blocked(f"the value is {RANDOM}", "s4"), "a random value is still hunted in prompts")
-        self.assertNotIn("no longer block", self.hook("session-start", {"session_id": "s5", **CLAUDE})
-                         .get("systemMessage", ""), "the pass runs once per store")
-
     def test_a_quiet_word_this_session_used_in_a_command_blocks_no_later_prompt(self):
         import re
         out = self.bash(f"password: {WORD}\n", "s1")
@@ -104,37 +88,32 @@ class WordValuesNotHuntedTests(unittest.TestCase):
         self.assertFalse(self.blocked(f"Das {WORD} ist morgen.", "s1"), "a resolved quiet word is text in a prompt")
         self.assertNotIn(WORD, self.bash(f"note: {WORD} Montag\n", "s1"), "and still masked in a tool result")
 
-    def test_an_older_process_that_drops_the_mark_has_the_entry_judged_again(self):
-        self.bash(f"password: {WORD}\n", "s1")
-        self.hook("session-start", {"session_id": "s1", **CLAUDE})     # 0.6.17 started once and judged the store
-        index = Path(self.home, "index.json")
-        idx = json.loads(index.read_text())
-        for meta in idx["entries"].values():
-            meta.pop("quiet", None)                          # a 0.6.16 process touched it after 0.6.17 marked it
-        index.write_text(json.dumps(idx))
-        self.assertIn("1 stored word(s)", self.hook("session-start", {"session_id": "s2", **CLAUDE})
-                      .get("systemMessage", ""))
-        self.assertFalse(self.blocked(f"Das {WORD} ist morgen.", "s3"))
-
     def test_a_later_tool_result_with_another_rule_keeps_the_word_quiet(self):
         self.bash(f"password: {WORD}\n", "s1")
         self.assertNotIn(WORD, self.bash(f"clone https://deploy:{WORD}@git.example.com/app.git\n", "s2"))
         self.assertFalse(self.blocked(f"Das {WORD} ist morgen.", "s3"), "a URL password rule does not unquiet it")
 
-    def test_an_unjudged_entry_that_a_resolve_touches_is_still_judged_at_the_next_start(self):
-        import re
-        out = self.bash(f"password: {WORD}\n", "s1")
-        ref = re.search(r"\u27e6SECRET_c\d+\u27e7", out).group(0)
+    def drop_marks(self) -> None:
+        """Rewrite the index as 0.6.16 does: it does not know the quiet field and writes each record without it."""
         index = Path(self.home, "index.json")
         idx = json.loads(index.read_text())
         for meta in idx["entries"].values():
-            meta.pop("quiet", None)                          # stored by an older version
+            meta.pop("quiet", None)
         index.write_text(json.dumps(idx))
-        self.hook("pre-tool", {"tool_name": "Bash", "session_id": "s1", **CLAUDE,
-                               "tool_input": {"command": f"echo {ref} > /dev/null"}})   # 0.6.17 touches it
-        self.assertIn("1 stored word(s)", self.hook("session-start", {"session_id": "s2", **CLAUDE})
-                      .get("systemMessage", ""))
-        self.assertFalse(self.blocked(f"Das {WORD} ist morgen.", "s3"))
+
+    def test_a_word_the_person_typed_stays_hunted_when_an_older_process_drops_its_mark(self):
+        self.assertTrue(self.blocked(f"password: {WORD}", "s1"), "the person gives the word as a password")
+        self.drop_marks()
+        self.hook("session-start", {"session_id": "s2", **CLAUDE})
+        self.assertNotIn(WORD, self.bash(f"password: {WORD}\n", "s2"), "a tool result with the same word")
+        self.assertTrue(self.blocked(f"Das {WORD} ist morgen.", "s3"), "its origin is unknown: it stays hunted")
+
+    def test_a_quiet_mark_an_older_process_drops_falls_back_to_hunted(self):
+        self.bash(f"password: {WORD}\n", "s1")
+        self.assertFalse(self.blocked(f"Das {WORD} ist morgen.", "s2"), "quiet while the mark stands")
+        self.drop_marks()
+        self.assertNotIn(WORD, self.bash(f"password: {WORD}\n", "s3"))
+        self.assertTrue(self.blocked(f"Das {WORD} ist morgen.", "s4"), "no mark, no inference: hunted as in 0.6.16")
 
     def test_a_tool_result_after_a_failed_command_takes_the_tool_rule_too(self):
         out = self.hook("post-tool-failure", {"tool_name": "Bash", "session_id": "s1", **CLAUDE,
@@ -147,6 +126,9 @@ class WordValuesNotHuntedTests(unittest.TestCase):
         value = "ppsm" + "ohsyeeub"     # random small letters of common letter pairs (Codex review, 2026-10-14)
         self.assertNotIn(value, self.bash(f"DB_PASSWORD={value}\n", "s1"))
         self.assertNotIn(value, self.bash(f"echo {value}\n", "s2"), "hunted in every later tool result")
+        # the named trade (README, limits): a bare re-typing in a prompt is not looked for. Adjudicated in the final
+        # review of 0.6.17: a word from a file must not block prompts, and this value reads like a word
+        self.assertFalse(self.blocked(f"the value is {value}", "s3"))
 
     def test_a_word_only_the_tool_channel_takes_is_not_hunted_either(self):
         self.assertNotIn(FOREIGN, self.bash(f'password = Some("{FOREIGN}"),\n', "s1"))

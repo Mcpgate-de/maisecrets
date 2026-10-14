@@ -2,18 +2,17 @@
 belief = "c2-a-word-in-a-tool-result-is-not-hunted-a-random-value-is"
 kind = "invariant"
 control = "C2"
-statement = "A word that a label rule takes in a tool result or a file blocks no later typed prompt (field report on 0.6.16), also a word an older version stored, after the first start; it is still masked in every later tool result. A random value after a label stays hunted in prompts too, and so does a word the person gives in a prompt, also when a tool result held it first."
+statement = "A word that a label rule takes in a tool result or a file, and that is stored new from there, blocks no later typed prompt (field report on 0.6.16); it is still masked in every later tool result. A random value after a label stays hunted in prompts too, and so does a word the person gives in a prompt, also when a tool result held it first. An entry whose origin is unknown (no quiet mark, as an older version writes it) stays hunted: no mark is inferred."
 runner = [
   "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_word_after_a_password_label_in_a_tool_result_blocks_no_later_prompt",
   "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_random_value_after_a_label_is_still_hunted_in_a_later_prompt",
   "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_word_the_person_then_gives_after_a_label_is_hunted_in_prompts_again",
   "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_random_value_that_reads_like_a_word_is_still_masked_in_a_later_tool_result",
-  "tests/test_leak_direction.py::WeakWordTests::test_a_chosen_word_stays_hunted_and_a_common_word_does_not",
-  "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_the_first_start_quiets_a_word_an_older_version_stored_and_keeps_a_random_value",
   "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_quiet_word_this_session_used_in_a_command_blocks_no_later_prompt",
-  "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_an_older_process_that_drops_the_mark_has_the_entry_judged_again",
   "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_later_tool_result_with_another_rule_keeps_the_word_quiet",
-  "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_an_unjudged_entry_that_a_resolve_touches_is_still_judged_at_the_next_start",
+  "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_word_the_person_typed_stays_hunted_when_an_older_process_drops_its_mark",
+  "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_quiet_mark_an_older_process_drops_falls_back_to_hunted",
+  "tests/test_leak_direction.py::WeakWordTests::test_a_chosen_word_stays_hunted_and_a_common_word_does_not",
 ]
 
 [[proof]]
@@ -47,31 +46,19 @@ find = "                if not m.get(\"purged\") and not m.get(\"weak\") and not
 replace = "                if not m.get(\"purged\") and not m.get(\"weak\") and not m.get(\"quiet\")}"
 
 [[proof]]
-path = "the start leaves a word an older version stored hunted in prompts"
-file = "maisecrets/vault.py"
-find = "                meta[\"quiet\"] = bool(value) and reads_as_word(value.strip())"
-replace = "                meta[\"quiet\"] = False"
-
-[[proof]]
-path = "the start quiets a random value too"
-file = "maisecrets/vault.py"
-find = "                meta[\"quiet\"] = bool(value) and reads_as_word(value.strip())"
-replace = "                meta[\"quiet\"] = bool(value)"
-
-[[proof]]
 path = "a quiet word this session used in a command blocks a later prompt"
 file = "maisecrets/hooks.py"
 find = "        resolved = [(v, r) for v, r in _resolved_values(vault, session, prompt=True) if len(v) >= _EXACT_MIN_LEN]"
 replace = "        resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]"
 
 [[proof]]
-path = "a resolve before the start writes an unjudged entry as judged and hunted"
+path = "a later tool result infers the quiet mark of an existing entry from the rule of this hit"
 file = "maisecrets/vault.py"
-find = "        if not judged and \"quiet\" not in self._index[\"entries\"].get(e.key, {}) and not e.quiet:"
-replace = "        if False:"
+find = "                # and only a new entry from a tool result is known to come from one (final codex review of 0.6.17)"
+replace = "                e.quiet = e.quiet or bool(tool and is_quiet(kind, value, True))"
 
 [[proof]]
-path = "a later tool result of another rule takes the quiet mark away"
+path = "an entry without a mark is judged from the rule that stored it"
 file = "maisecrets/vault.py"
-find = "                # else: a tool result keeps the mark as it is"
-replace = "                else:\n                    e.quiet = is_quiet(kind, value, True)"
+find = "                # and only a new entry from a tool result is known to come from one (final codex review of 0.6.17)"
+replace = "                e.quiet = e.quiet or bool(tool and \"quiet\" not in self._index[\"entries\"][existing] and is_quiet(str(self._index[\"entries\"][existing].get(\"kind\", \"\")), value, True))"

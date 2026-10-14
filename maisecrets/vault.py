@@ -511,7 +511,7 @@ class Entry:
     # a word that only a label rule found (letters only): replaced where it was found, never hunted in other texts
     weak: bool = False
     # a word that a label rule took in a tool result or a file: hunted in later tool results, never in a typed prompt,
-    # where it would block every prompt that uses the word (field report on 0.6.16)
+    # where it would block every prompt that uses the word (field report on 0.6.16). Only a new entry gets it
     quiet: bool = False
     # no purged_at field: from_meta drops it, so the proof below can remove the filter and
     # the owning test sees the TypeError of the field report again
@@ -1049,48 +1049,6 @@ class Vault:
             n += weak
         return n
 
-    def mark_quiet_entries(self, budget: float = 2.0) -> int:
-        """Mark quiet the words a version before 0.6.17 stored from a label rule (see Entry.quiet), at each session
-        start. Such a version could not tell a tool result from a prompt, and each hit renewed the entry, so a word
-        from a file blocked prompts for up to max_ttl_seconds (field report on 0.6.16). The origin is unknown here: a
-        word the person typed then is quiet too, and a prompt that gives it again after a label clears the mark.
-        An entry without the `quiet` key is one to judge: 0.6.17 writes the key on every entry, and an older process
-        that touches an entry drops it, so the entry is judged again (Gate A round 2). The values are read outside
-        the vault lock, in one batch where the store has one, for at most `budget` seconds: a slow store never holds
-        the lock for another session's prompt (Gate B round 2); no new read starts after `budget`, but one read can
-        take its store's own timeout. A value the store does not return keeps the entry unjudged for the next
-        start. Returns the count marked quiet."""
-        from .detect import LABEL_RULES, reads_as_word
-        with self._exclusive():
-            todo = [k for k, m in self._index["entries"].items() if "quiet" not in m and not m.get("purged")
-                    and not m.get("weak") and str(m.get("kind", "")).startswith(LABEL_RULES)]
-        if not todo:
-            return 0
-        found: dict = {}
-        deadline = time.monotonic() + budget
-        try:
-            if hasattr(self.backend, "get_many"):
-                found = self.backend.get_many(todo)
-            else:
-                for key in todo:
-                    if time.monotonic() > deadline:
-                        break       # the rest at the next start
-                    value = self.backend.get(key)
-                    if value is not None:
-                        found[key] = value
-        except RuntimeError as exc:
-            from . import incidents
-            incidents.note("store.mark-weak", exc)    # the same start pass class (docs/DIAGNOSTICS.md)
-        n = 0
-        with self._exclusive():
-            for key, value in found.items():
-                meta = self._index["entries"].get(key)
-                if not meta or "quiet" in meta or meta.get("purged"):
-                    continue        # judged or changed by another process meanwhile
-                meta["quiet"] = bool(value) and reads_as_word(value.strip())
-                n += meta["quiet"]
-        return n
-
     # api -------------------------------------------------------------------
     @_mutating
     def put(self, value: str, type_: str, kind: str, session: str | None = None,
@@ -1104,7 +1062,7 @@ class Vault:
             if session and session not in e.sessions:
                 e.sessions.append(session)
             e.quiet = False             # a value given outside a tool result: hunted in prompts again
-            self._touch(e, judged=True)
+            self._touch(e)
             return e
         e = self._put_new(value, type_, kind, session, ttl)
         self._save_index()
@@ -1154,15 +1112,12 @@ class Vault:
                 e = Entry.from_meta(self._index["entries"][existing])
                 if session and session not in e.sessions:
                     e.sessions.append(session)
-                meta = self._index["entries"][existing]
                 if not tool:
                     e.quiet = False     # a value the person gives in a prompt is hunted in prompts again
-                elif "quiet" not in meta:
-                    # unjudged (stored by an older version): judge it now by the rule that stored it. The rule of
-                    # this hit (a URL password rule) says nothing about the word (Gate A round 3)
-                    e.quiet = is_quiet(str(meta.get("kind", "")), value, True)
-                # else: a tool result keeps the mark as it is
-                self._touch(e, save=False, judged=not tool or "quiet" in meta or e.quiet)
+                # a tool result keeps the mark of an existing entry. An entry without one (stored by an older version,
+                # or a mark an older process dropped) reads as quiet=False and stays hunted: its origin is unknown,
+                # and only a new entry from a tool result is known to come from one (final codex review of 0.6.17)
+                self._touch(e, save=False)
                 dirty = True
                 out.append(e)
                 continue
@@ -1378,16 +1333,13 @@ class Vault:
         return "ok"
 
     @_mutating
-    def _touch(self, e: Entry, save: bool = True, judged: bool = False) -> None:
+    def _touch(self, e: Entry, save: bool = True) -> None:
         now = time.time()
         e.last_used = now
         e.uses += 1
         if self.cfg.get("renew_on_use", True):
             e.expires = min(now + self._ttl_for(e.type), e.max_expires)
-        record = asdict(e)
-        if not judged and "quiet" not in self._index["entries"].get(e.key, {}) and not e.quiet:
-            del record["quiet"]     # not judged yet: mark_quiet_entries judges it at the next start (Gate B round 3)
-        self._index["entries"][e.key] = record
+        self._index["entries"][e.key] = asdict(e)
         if save:
             self._save_index()
 

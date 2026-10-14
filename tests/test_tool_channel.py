@@ -5,7 +5,6 @@ import json
 import os
 import sys
 import unittest
-from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -62,21 +61,6 @@ class ToolChannelTests(unittest.TestCase):
         e = Vault().put_many([(word, "SECRET", "ds-keyword-colon")], session="s1", tool=True)[0]
         self.assertTrue(e.quiet)
         self.assertFalse(Vault().put(word, "SECRET", "ds-keyword-colon", session="s2").quiet)
-        Vault().forget(e.key)
-
-    def test_a_store_that_does_not_return_a_value_leaves_the_entry_for_the_next_start(self):
-        from maisecrets.vault import INDEX, Vault
-        word = "Sicherheits" + "frage"
-        e = Vault().put(word, "SECRET", "ds-keyword-colon", session="s1")
-        idx = json.loads(INDEX.read_text())
-        idx["entries"][e.key].pop("quiet")
-        INDEX.write_text(json.dumps(idx))
-        v = Vault()
-        with mock.patch.object(type(v.backend), "get", lambda self, key: None):
-            self.assertEqual(v.mark_quiet_entries(), 0)
-        self.assertNotIn("quiet", json.loads(INDEX.read_text())["entries"][e.key], "judged at the next start")
-        self.assertEqual(Vault().mark_quiet_entries(), 1)
-        self.assertTrue(json.loads(INDEX.read_text())["entries"][e.key]["quiet"])
         Vault().forget(e.key)
 
     def test_a_typed_prompt_with_letters_after_a_password_label_is_not_blocked(self):

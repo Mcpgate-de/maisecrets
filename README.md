@@ -1193,15 +1193,17 @@ Four sources, one scanner (`maisecrets/detect.py`):
   files, commits and tool results the same way.
 - A word that a label rule takes in a tool result or a file blocks no later prompt (0.6.17): a
   value of letters only, with no evidence of chance and, in ASCII, at most one rare letter pair in
-  ten (pairs counted in the word list). maisecrets still masks it in every later tool result, but
-  does not look for it in a typed prompt, also when this session used its placeholder in a command.
-  A random value (`xqzvbnmq`) is looked for in prompts too, and so is a word the person gives in a
-  prompt after a label, also when a tool result held it first. Each session start judges the words
-  that an older version stored after a label the same way; it cannot tell where they came from.
-  Limits, both a trade for no blocked prompt: a password that is a word (or a random value of small
-  letters that reads like one: about 3 in 100 of 8 letters, 1 in 200 of 12) and that a file or an
-  older version held is not looked for in a prompt that has it without a label. It is still masked
-  in every tool result.
+  ten (pairs counted in the word list). maisecrets stores it with a quiet mark: it still masks the
+  word in every later tool result, but does not look for it in a typed prompt, also when this
+  session used its placeholder in a command. A random value (`xqzvbnmq`) is looked for in prompts
+  too, and so is a word the person gives in a prompt after a label, also when a tool result held
+  it first. Only a value stored new from a tool result gets the mark; a value stored before 0.6.17
+  has no mark and stays looked for. So a word that 0.6.16 stored from a file (field report) blocks
+  prompts until it expires or `/maisecrets:forget` deletes it.
+  Limit, a trade for no blocked prompt: a password that is a word, or a random value of small
+  letters that reads like one (about 3 in 100 of 8 letters, 1 in 200 of 12), and that a file or a
+  tool result held first, is not looked for in a later prompt that has it without a label. It is
+  still masked in every tool result.
 - A key after a label that names a secret, in a form the keyword rules do not read (0.6.16):
   `<clientSecret>…</clientSecret>`, `<AccessToken>…</AccessToken>`, a short value
   (`label-secret-literal`, 8 characters and more); and a quoted key of 12 characters and more
