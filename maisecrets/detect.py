@@ -1373,6 +1373,18 @@ class _KeywordTail:
             if m is None:
                 return
             p = m.start()
+            w = word.match(text, m.end())
+            if w is None or w.end() - m.end() < 200:
+                # a short word run after the keyword: the vendored regex at p backtracks at most that far, and it is
+                # the same regex. Only a keyword before a long run takes the loop below (codex verification of 0.6.16:
+                # one long word made the whole text slow)
+                r = self._rx.match(text, p)
+                if r is not None:
+                    yield r
+                    pos = r.end() if r.end() > p else p + 1
+                else:
+                    pos = p + 1
+                continue
             hit = None
             e = -1
             # the first alternative that matches at p is the one the regex tries first: the search found it already

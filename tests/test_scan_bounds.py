@@ -188,6 +188,25 @@ class KeywordLabelTailTests(unittest.TestCase):
         self.assertLess(took("pw=" * 340000, lit), 1.0)
         self.assertLess(took("password: " * 100000, lit), 1.0)
 
+    def test_one_long_word_does_not_slow_the_rest_of_the_text(self):
+        # codex verification of 0.6.16: one unrelated word of 200 characters sent a whole 270 KB text of password
+        # records through the slow loop (4.7 s against 0.7 s)
+        rec = ["password: ${DB_PASSWORD}", "mot de passe : voir le coffre", 'api_key = os.environ["API_KEY"]',
+               "secret: please rotate", "db_pass = config.get('db')"]
+        plain = "\n".join(rec[i % len(rec)] for i in range(4000))
+        mixed = plain + "\n" + "x" * 200
+
+        def run(t):
+            best = 9e9
+            for _ in range(2):
+                started = time.perf_counter()
+                for r in self.rules(("en", "fr")):
+                    list(r.regex.finditer(t))
+                best = min(best, time.perf_counter() - started)
+            return best
+
+        self.assertLess(run(mixed), 2.0 * run(plain) + 0.05)
+
     def test_six_keyword_rules_take_the_linear_path(self):
         linear = [r.id for r in self.rules() if isinstance(r.regex, detect._KeywordTail)]
         self.assertEqual(len(linear), 6, linear)   # the seventh starts with the value, its \\w* ends the regex
