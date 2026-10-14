@@ -1169,7 +1169,10 @@ Four sources, one scanner (`maisecrets/detect.py`):
   checksum passes. A USt-ID written `DE` and nine digits also needs a word
   such as `USt-IdNr` or `VAT` nearby: alone, that shape is often a FIX tag or
   an XML id. A Handelsregister number is not reported: it names a company, is
-  public and is no personal data.
+  public and is no personal data. Own rules (`REGIONAL_RULES` in
+  `maisecrets/detect.py`) add what Presidio lacks: the Personalausweis and
+  Reisepass number in the 9 characters the card prints (Presidio read the 9th
+  as a check digit, which only the machine-readable zone carries).
 - **detect-secrets** (Yelp, Apache-2.0, version in `DETECT_SECRETS_VERSION`,
   refresh with `scripts/sync_detect_secrets.py vX.Y.Z`): credentials
   recognised by position (`password = …`, `api_key: "…"`, `user:pass@host`),

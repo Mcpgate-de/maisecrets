@@ -46,6 +46,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import checksums
+
 RULES_DIR = Path(__file__).resolve().parent / "rules"
 
 
@@ -213,32 +215,6 @@ def _de_social_security_ok(v: str) -> bool:
         prod = int(ch) * w
         total += prod // 10 + prod % 10
     return total % 10 == int(v[11])
-
-
-def _icao_check(v: str, forbidden: str = "") -> bool:
-    """ICAO Doc 9303 check digit (weights 7,3,1) over 8 characters, digit at position 9."""
-    v = v.upper().strip()
-    if len(v) != 9 or not v[-1].isdigit():
-        return False
-    if any(c in forbidden for c in v[:-1]):
-        return False
-    total = 0
-    for i, c in enumerate(v[:-1]):
-        if c.isdigit():
-            val = int(c)
-        elif "A" <= c <= "Z":
-            val = ord(c) - ord("A") + 10
-        else:
-            return False
-        total += val * (7, 3, 1)[i % 3]
-    return total % 10 == int(v[-1])
-
-
-def _de_id_card_ok(v: str) -> bool:
-    v = v.upper().strip()
-    if len(v) == 9 and v[0] == "T" and v[1:].isdigit():
-        return True   # legacy pre-2010 number, no check digit
-    return _icao_check(v)
 
 
 def _de_health_insurance_ok(v: str) -> bool:
@@ -1144,8 +1120,6 @@ VALIDATORS = {
     "prose_value": _prose_value_ok,
     "de_tax_id": _de_tax_id_ok,
     "de_social_security": _de_social_security_ok,
-    "de_id_card": _de_id_card_ok,
-    "de_passport": lambda v: _icao_check(v, forbidden="ABDEIOQSU"),
     "de_health_insurance": _de_health_insurance_ok,
     "de_lanr": _de_lanr_ok,
     "de_bsnr": lambda v: len(v.strip()) == 9 and v.strip().isdigit() and v.strip() != "000000000",
@@ -1159,6 +1133,8 @@ VALIDATORS = {
     # name%40firma.de in a URL query, a form body or an access log: the same address, percent-encoded
     "person_email_encoded": lambda v: VALIDATORS["person_email"](v.replace("%40", "@")),
     "us_ssn": _us_ssn_ok,
+    # checksums.py: the German document number
+    "de_document": checksums.de_document_ok,
 }
 
 
@@ -1381,14 +1357,17 @@ def _combine_drops(*drops):
 # entity -> placeholder type (short, stable); anything else keeps its entity name
 ENTITY_TYPE = {"EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "CREDIT_CARD": "CARD",
                "IP_ADDRESS": "IP", "PHONE_NUMBER": "PHONE"}
-# covered by OWN_RULES with bounded regexes and validators, or not PII worth a placeholder
+# covered by OWN_RULES with bounded regexes and validators, or not PII worth a placeholder. The German ID card and
+# passport are REGIONAL_RULES: Presidio reads the 9th character as an ICAO check digit over the first 8, but the card
+# prints the 9-character number without its check digit (it stands in the machine-readable zone only), so 37 of 40
+# real-shaped numbers and the number of the official specimen card were missed (survey of other detectors, 0.6.19).
 # de-handelsregister: a company's register number, public in the Handelsregister and no personal data
-PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "crypto", "de-handelsregister"}
+PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "de-id-card", "de-passport",
+                 "crypto", "de-handelsregister"}
 # validator id per presidio recognizer id; a recognizer with a validator we did not port
 # keeps its pattern score and is treated as weak (context required)
 PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
                       "de-tax-id": "de_tax_id", "de-social-security": "de_social_security",
-                      "de-id-card": "de_id_card", "de-passport": "de_passport",
                       "de-health-insurance": "de_health_insurance", "de-lanr": "de_lanr",
                       "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id", "us-ssn": "us_ssn"}
 # shapes that are plain digit runs: even with a valid checksum, ask for a context word
@@ -1410,6 +1389,36 @@ PRESIDIO_EXTRA_CONTEXT = {
 # switch is the REGION, derived from the recognizer id; "generic" is always on.
 REGION_OF_ID = {"nhs": "uk", "aba-routing": "us", "medical-license": "us"}
 DEFAULT_PII_REGIONS = ("generic",)   # without a config: the rules of no country
+
+# country rules of our own (0.6.19): forms Presidio has no pattern for. The design follows a fork of this project
+# (Apache-2.0, see NOTICE). Each rule names its region; a rule
+# with require_context needs one of its context words within 80 characters before or 40 after the value.
+_DE_ID_CARD_CONTEXT = ("personalausweis", "ausweis", "personalausweisnummer", "ausweisnummer", "ausweis-nr",
+                       "ausweisnr", "personalausweisnr", "dokumentennummer", "ausweisdokument", "npa",
+                       "neuer personalausweis", "bundespersonalausweis", "identity card", "id card", "id-card",
+                       "national id", "mrz")
+_DE_PASSPORT_CONTEXT = ("reisepass", "passnummer", "reisepassnummer", "reisepass-nr", "pass-nr", "passnr",
+                        "reisepassnr", "dokumentennummer", "passport", "passport number", "mrz")
+_DOC = "CFGHJKLMNPRTVWXYZ"
+REGIONAL_RULES: list = [
+    # the German ID card and passport: 9 characters as printed on the card, or 10 with the ICAO check digit as in the
+    # machine-readable zone. BSI TR-03123-2 v1.8.2, 3.2.1, and the BMI sheet "Die Dokumentennummer in deutschen
+    # Ausweisen und Pässen" (2023-11-01): the consonants C F G H J K L M N P R T V W X Y Z and the digits (0 only before
+    # 2021-11), the first a letter since 2023-11 (the specimens of 2010, 2019 and 2021 start with one too)
+    {"id": "de-id-card", "region": "de", "type": "DE_ID_CARD", "validator": "de_document",
+     "context": _DE_ID_CARD_CONTEXT, "require_context": True,
+     "regex": rf"(?<![A-Za-z0-9])[{_DOC}][{_DOC}0-9]{{8}}[0-9]?(?![A-Za-z0-9])"},
+    {"id": "de-passport", "region": "de", "type": "DE_PASSPORT", "validator": "de_document",
+     "context": _DE_PASSPORT_CONTEXT, "require_context": True,
+     "regex": rf"(?<![A-Za-z0-9])[{_DOC}][{_DOC}0-9]{{8}}[0-9]?(?![A-Za-z0-9])"},
+]
+
+
+def _load_regional(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]:
+    return [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"]), validator=d["validator"],
+                 context=tuple(d.get("context", ())), require_context=d.get("require_context", False),
+                 whole_match=True)
+            for d in REGIONAL_RULES if d["region"] in regions]
 
 
 def presidio_region(rec_id: str) -> str:
@@ -1671,7 +1680,8 @@ def rules() -> list[Rule]:
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
         _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
-                  + _load_presidio(active.regions) + pii + _load_literal(active.languages))
+                  + _load_regional(active.regions) + _load_presidio(active.regions) + pii
+                  + _load_literal(active.languages))
     return _RULES
 
 

@@ -13,8 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from maisecrets import detect  # noqa: E402
 from presidio_analyzer.predefined_recognizers import (  # noqa: E402
-    DeBsnrRecognizer, DeHealthInsuranceRecognizer, DeIdCardRecognizer, DeLanrRecognizer,
-    DePassportRecognizer, DeSocialSecurityRecognizer, DeTaxIdRecognizer, DeVatIdRecognizer,
+    DeBsnrRecognizer, DeHealthInsuranceRecognizer, DeLanrRecognizer, DeSocialSecurityRecognizer,
+    DeTaxIdRecognizer, DeVatIdRecognizer,
 )
 
 random.seed(int(sys.argv[1]) if len(sys.argv) > 1 else 7)
@@ -29,8 +29,6 @@ GENS = {
     "de_tax_id": (DeTaxIdRecognizer(), lambda: rnd(D, 11)),
     "de_social_security": (DeSocialSecurityRecognizer(), lambda: rnd(D, 2) + f"{random.randint(0, 40):02d}"
                            + f"{random.randint(0, 13):02d}" + rnd(D, 2) + rnd(L, 1) + rnd(D, 3)),
-    "de_id_card": (DeIdCardRecognizer(), lambda: rnd(L + D, 9)),
-    "de_passport": (DePassportRecognizer(), lambda: rnd("CFGHJKLMNPRTVWXYZ" + D, 9)),
     "de_health_insurance": (DeHealthInsuranceRecognizer(), lambda: rnd(L, 1) + rnd(D, 9)),
     "de_lanr": (DeLanrRecognizer(), lambda: rnd(D, 9)),
     "de_bsnr": (DeBsnrRecognizer(), lambda: rnd(D, 9)),

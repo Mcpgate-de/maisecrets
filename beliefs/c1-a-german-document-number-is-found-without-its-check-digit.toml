@@ -1,0 +1,10 @@
+# c1-a-german-document-number-is-found-without-its-check-digit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-german-document-number-is-found-without-its-check-digit"
+control = "C1"
+statement = "With region de, a German ID card or passport number after its label is a hit in the 9 characters the card prints (the 9th may be a letter) and in the 10 of the machine-readable zone when the ICAO check digit holds; a wrong check digit, a vowel, a first digit or no label stays text."
+runner = ["tests/test_rules_from_other_detectors.py::GermanDocumentNumberTests::test_a_number_whose_ninth_character_is_a_letter_is_found_after_its_label"]
+
+[proof]
+file = "maisecrets/checksums.py"
+find = '''    if len(v) not in (9, 10) or any('''
+replace = '''    if len(v) not in (10,) or any('''
