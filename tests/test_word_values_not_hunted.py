@@ -115,6 +115,12 @@ class WordValuesNotHuntedTests(unittest.TestCase):
         self.assertNotIn(WORD, self.bash(f"password: {WORD}\n", "s3"))
         self.assertTrue(self.blocked(f"Das {WORD} ist morgen.", "s4"), "no mark, no inference: hunted as in 0.6.16")
 
+    def test_a_default_word_from_a_tool_result_stays_weak_as_in_0616(self):
+        self.assertNotIn("database", self.bash("DB_PASS" + "WORD=database\n", "s1"), "masked where it was found")
+        self.assertEqual(self.bash("connected to database app\n", "s2"), "connected to database app\n",
+                         "weak wins over quiet: not hunted in a later tool result either (final codex review, LOW)")
+        self.assertFalse(self.blocked("create the database first", "s3"))
+
     def test_a_tool_result_after_a_failed_command_takes_the_tool_rule_too(self):
         out = self.hook("post-tool-failure", {"tool_name": "Bash", "session_id": "s1", **CLAUDE,
                                               "tool_input": {"command": "x"},

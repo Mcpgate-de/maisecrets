@@ -555,10 +555,11 @@ def is_weak(kind: str, value: str) -> bool:
 
 
 def is_quiet(kind: str, value: str, tool: bool) -> bool:
-    """A word of some language (detect.reads_as_word) that a label rule took in a tool result or a file: hunted in later
-    tool results as before, never in a typed prompt. A word the person gives in a prompt stays hunted everywhere: a
-    chosen word is a password there (review, 2026-09-29). A random value that reads like a word (about 3 in 100 of
-    8 small letters) is then not looked for in a prompt that types it bare; it is still masked in every tool result."""
+    """A word of some language (detect.reads_as_word) that a label rule took in a tool result or a file: hunted in
+    later tool results as before (a weak default word is not hunted at all, as in 0.6.16), never in a typed prompt.
+    A word the person gives in a prompt stays hunted everywhere: a chosen word is a password there (review,
+    2026-09-29). A random value that reads like a word (about 3 in 100 of 8 small letters) is then not looked for in
+    a prompt that types it bare; it is still masked in every tool result. Only a new entry gets the mark."""
     from .detect import LABEL_RULES, reads_as_word
     return tool and str(kind).startswith(LABEL_RULES) and reads_as_word(value.strip())
 

@@ -1194,7 +1194,8 @@ Four sources, one scanner (`maisecrets/detect.py`):
 - A word that a label rule takes in a tool result or a file blocks no later prompt (0.6.17): a
   value of letters only, with no evidence of chance and, in ASCII, at most one rare letter pair in
   ten (pairs counted in the word list). maisecrets stores it with a quiet mark: it still masks the
-  word in every later tool result, but does not look for it in a typed prompt, also when this
+  word in every later tool result (a default word such as `postgres` only where it was found, as
+  in 0.6.16), but does not look for it in a typed prompt, also when this
   session used its placeholder in a command. A random value (`xqzvbnmq`) is looked for in prompts
   too, and so is a word the person gives in a prompt after a label, also when a tool result held
   it first. Only a value stored new from a tool result gets the mark; a value stored before 0.6.17
