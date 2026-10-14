@@ -1,0 +1,10 @@
+# c28-the-watchdog-ends-pdftotext: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-the-watchdog-ends-pdftotext"
+control = "C28"
+statement = "When the watchdog of a hook fires, it ends a running pdftotext before os._exit: the child has its own session and would run on without a memory watch."
+runner = ["tests/test_file_reads.py::TheConverterIsBounded::test_the_watchdog_can_end_a_running_pdftotext"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "                reader.kill_running()\n"
+replace = "                pass\n"

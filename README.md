@@ -1527,28 +1527,57 @@ maisecrets: set read_pdf convert          (the same, and the form for Codex)
 
 Then ask the AI to read a PDF (measured with the Claude Code CLI). With
 `convert`, the program `pdftotext` extracts the text on your computer, the
-normal redaction masks it, and the model gets that text in place of the PDF,
-with placeholders of the form `⟦SECRET_cN⟧`. The PDF itself never reaches the
-model and does not stay in the session transcript. A page range (`pages`)
-works; Claude Code then also writes the pages as JPG files into a folder of
-its own on your disk, and maisecrets does not clean those. `convert` needs
-`pdftotext`: macOS `brew install poppler`, Debian or Ubuntu
-`sudo apt install poppler-utils`. maisecrets runs it only from the fixed
-install folders (`/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`,
-`/usr/bin`), never from the PATH: a program the AI puts on the PATH must not
-run inside the hook. Every folder from `/` down to the program must belong to
-root or to you, and no other account may be able to write it. Homebrew makes
-its folder writable for the group `admin`: if that group has another member
-on your computer, maisecrets does not run that pdftotext and says why; install
-it where only you and root can write. The Homebrew folder belongs to you, and
-the AI runs as you: it could still replace the pdftotext there, and
-maisecrets cannot tell. On Windows there is no such folder, so `convert`
-refuses there. Without
-pdftotext, maisecrets refuses every PDF and says so; it never lets the PDF
-through. A PDF that pdftotext cannot read in 6
-seconds, or that is damaged, is refused too. Text after 32K characters is cut,
-and the AI is told to read a smaller page range. A scanned
-PDF has no text: maisecrets says so, and the AI gets nothing of it.
+normal redaction masks it (as a tool result, so also a password after a
+label and a value in a disguise), and the model gets that text in place of
+the PDF, with placeholders of the form `⟦SECRET_cN⟧`. The PDF itself never
+reaches the model and does not stay in the session transcript. A page range
+(`pages`) works; Claude Code then also writes the pages as JPG files into a
+folder of its own on your disk, and maisecrets does not clean those.
+`convert` needs `pdftotext`: macOS `brew install poppler`, Debian or Ubuntu
+`sudo apt install poppler-utils`.
+
+maisecrets runs `pdftotext` only from the fixed install folders
+(`/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`, `/usr/bin`), never
+from the PATH: a program the AI puts on the PATH must not run inside the
+hook. Every folder from `/` down to the program, and down to each library
+the program loads, must belong to root or to you. No other account may be
+able to write it (also not through an access control list), except a group
+whose members can become root anyway:
+`admin` and `wheel` on macOS, `sudo` on Debian, `sudo` and `admin` on
+Ubuntu, `wheel` on Fedora and its relatives (the default sudoers of each,
+measured 2026-10-14). So a second admin account on a Mac no longer stops
+`convert`. maisecrets reads the libraries itself (33 for Homebrew's
+pdftotext of poppler 26.10.0; `ldd` on Linux), and it does not run a program
+whose libraries it cannot name. It starts pdftotext without `LD_*` and
+`DYLD_*` variables. The Homebrew folder belongs to you, and the AI runs as
+you: it could still replace the pdftotext there or a library, and maisecrets
+cannot tell. maisecrets keeps values out of the model and the transcript; it
+does not contain an agent that works against it on purpose. On Windows there
+is no such folder, so `convert` refuses there. Without pdftotext, maisecrets
+refuses every PDF and says so; it never lets the PDF through.
+
+A PDF that pdftotext cannot read in 6 seconds, that makes pdftotext use more
+than 512 MB of memory, or that is damaged, is refused. A crafted PDF of a few
+MB can make pdftotext take 1.5 GB in 2.4 seconds: maisecrets watches the
+memory of pdftotext every 50 ms while it waits and stops it there (macOS does not
+enforce a memory limit on a process, measured; on Linux the kernel limits
+it to 1 GB as well). Text after 32K characters is cut, and the AI is told to
+read a smaller page range. A scanned PDF has no text, or only page numbers
+or a header line: below 25 characters of text per page, maisecrets says that
+the PDF looks scanned, and the AI gets nothing of it.
+
+**Measured on 2026-10-14** (Claude Code 2.1.300, poppler 26.10.0, a corpus
+of 24 generated PDFs with 168 planted values): pdftotext found 151 of the
+values, pypdf 136. pypdf failed on text written one character at a time and
+on form fields, has no time limit (one page took 14 s on Python 3.14, 47 s on
+3.9) and needs `typing_extensions` on 3.9, so maisecrets keeps pdftotext; a
+bundled pypdf stays an option for Windows later. pdftotext missed a page
+rotated by 90 degrees (that page counts as scanned) and two values whose
+label stood in the table cell beside them. How a PDF reaches the model: "read x.pdf" and a pasted path go
+through the Read tool, and the hooks see the file; `@x.pdf` gives the model
+only the name and the size, and the model then calls Read itself. No route
+that was measured passes around the hooks. The interactive terminal UI was
+not measured.
 
 Until you decide, the first PDF and the first image the AI reads bring one
 sentence about the setting (`"tips": false` silences it). If `config.json`

@@ -448,9 +448,9 @@ class Convert(_Work):
 
     def test_a_text_without_a_hit_still_replaces_the_pdf(self):
         _reset(read_pdf="convert")
-        self.stub("printf 'just words\\n'")
+        self.stub("printf 'just words, and some more words on the page\\n'")
         out = output(self.post())
-        self.assertEqual(out["file"]["content"], "just words\n")
+        self.assertEqual(out["file"]["content"], "just words, and some more words on the page\n")
 
     def test_pages_go_to_pdftotext(self):
         _reset(read_pdf="convert")
@@ -528,9 +528,12 @@ class Convert(_Work):
         real = file_reads._no_other_writer
         calls = []
 
+        tool = str(self.bin / "pdftotext")
+
         def second_check_fails(path):
             calls.append(path)
-            return real(path) and len(calls) < 3          # the lookup checks link and target; the start checks again
+            # the lookup checks link and target (one file here); the start checks the program again
+            return real(path) and calls.count(tool) < 3
         with mock.patch.object(file_reads, "_no_other_writer", second_check_fails):
             out = output(self.post())
         self.assertIn("changed after it was checked", out["file"]["content"])
@@ -1115,16 +1118,314 @@ class EndToEnd(_Work):
         self._run(os.path.dirname(REAL_PDFTOTEXT))
 
 
+def bomb_pdf(mib: int) -> bytes:
+    """A one-page PDF whose content stream inflates to `mib` MiB of text operators, all at one place on the page: a
+    few KB on disk. pdftotext took 4 MiB of them to 234 MB, 16 MiB past 900 MB (poppler 26.10.0, 2026-10-14)."""
+    import zlib
+    line = b"BT /F1 12 Tf 50 700 Td (AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA) Tj ET\n"
+    block = line * (1 << 14)
+    co = zlib.compressobj(9)
+    data = b"".join(co.compress(block) for _ in range((mib << 20) // len(block))) + co.flush()
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> "
+            b"/Contents 4 0 R >>",
+            b"<< /Length %d /Filter /FlateDecode >>\nstream\n" % len(data) + data + b"\nendstream",
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    out = b"%PDF-1.4\n"
+    offs = []
+    for i, o in enumerate(objs, 1):
+        offs.append(len(out))
+        out += b"%d 0 obj\n" % i + o + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offs)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+    return out
+
+
+def macho(*commands) -> bytes:
+    """A 64-bit Mach-O header with these load commands: ("dylib", name) or ("rpath", path)."""
+    import struct
+    body = b""
+    for kind, text in commands:
+        raw = text.encode() + b"\0"
+        raw += b"\0" * (-len(raw) % 8)
+        if kind == "dylib":
+            body += struct.pack("<IIIIII", 0xC, 24 + len(raw), 24, 2, 0x10000, 0x10000) + raw
+        else:
+            body += struct.pack("<III", 0x8000001C, 12 + len(raw) + 4, 16) + b"\0" * 4 + raw
+    return struct.pack("<IiiIIIII", 0xFEEDFACF, 0x0100000C, 0, 2, len(commands), len(body), 0, 0) + body
+
+
+class TheConverterIsBounded(_Work):
+    """Review of 2026-10-14: memory, scans, the trust of the admin group and of the libraries pdftotext loads."""
+
+    # ------------------------------------------------------------------ memory --
+    def test_a_child_that_takes_too_much_memory_is_stopped_and_the_pdf_withheld(self):
+        _reset(read_pdf="convert")
+        self.stub(f"exec '{sys.executable}' -c \"b = b'x' * (200 << 20); import time; time.sleep(5)\"")
+        with mock.patch.object(file_reads, "MAX_RSS_BYTES", 64 << 20):
+            t0 = time.monotonic()
+            content = output(self.post())["file"]["content"]
+        self.assertIn("more than 64 MB of memory", content)
+        self.assertLess(time.monotonic() - t0, 4.0, "stopped at the limit, not at the timeout")
+
+    def test_a_child_whose_memory_cannot_be_read_is_stopped(self):
+        _reset(read_pdf="convert")
+        self.stub("/bin/sleep 5")
+        with mock.patch.object(file_reads, "_rss", return_value=None):
+            content = output(self.post())["file"]["content"]
+        self.assertIn("cannot watch the memory", content)
+
+    def test_a_child_ended_by_a_signal_is_refused(self):
+        _reset(read_pdf="convert")
+        self.stub("printf 'words enough to count as a page of text, more than 25\\n'; kill -SEGV $$")
+        content = output(self.post())["file"]["content"]
+        self.assertIn("signal", content)
+        self.assertNotIn("words enough", content)
+
+    @unittest.skipUnless(REAL_PDFTOTEXT, "no pdftotext that maisecrets trusts (fixed folder, no other writer)")
+    def test_a_bomb_pdf_stops_the_real_pdftotext_at_the_limit(self):
+        # 4 MiB of text operators, 15 KB on disk: unbounded, pdftotext peaks at about 234 MB and then prints text
+        bomb = self.dir / "bomb.pdf"
+        bomb.write_bytes(bomb_pdf(4))
+        with mock.patch.object(file_reads, "_EXTRA_DIRS", (os.path.dirname(REAL_PDFTOTEXT),)), \
+                mock.patch.object(file_reads, "MAX_RSS_BYTES", 48 << 20):
+            text, why = file_reads.extract(str(bomb))
+        self.assertIsNone(text)
+        self.assertIn("more than 48 MB of memory", why)
+
+    def test_the_child_gets_no_loader_variables(self):
+        _reset(read_pdf="convert")
+        self.stub("/usr/bin/env | /usr/bin/grep -E '^(LD_|DYLD_)' ; "
+                  "printf 'and a line of text that is long enough for one page\\n'")
+        loader = {"LD_PRELOAD": "/nowhere/x.so", "DYLD_INSERT_LIBRARIES": "/nowhere/x.dylib"}
+        with mock.patch.dict(os.environ, loader):
+            content = output(self.post())["file"]["content"]
+        self.assertIn("long enough", content)
+        self.assertNotIn("/nowhere", content)
+
+    # ------------------------------------------------------------------- scans --
+    def test_a_scan_with_page_numbers_only_counts_as_scanned(self):
+        _reset(read_pdf="convert")
+        self.stub("printf '1\\n\\f2\\n\\f3\\n\\f'")
+        content = output(self.post())["file"]["content"]
+        self.assertIn("looks scanned", content)
+        self.assertIn("3 page(s)", content)
+        self.assertNotIn("2\n", content.replace("3 page", ""), "nothing of the scan")
+
+    def test_a_short_text_on_each_page_still_passes(self):
+        _reset(read_pdf="convert")
+        line = "Seite mit dreissig Zeichen Text."
+        self.stub(f"printf '{line}\\n\\f{line}\\n\\f'")
+        content = output(self.post())["file"]["content"]
+        self.assertNotIn("looks scanned", content)
+        self.assertEqual(content.count(line), 2)
+
+    def test_the_text_is_scanned_as_tool_channel_text(self):
+        _reset(read_pdf="convert")
+        self.stub()
+        from maisecrets import detect
+        real = detect.scan
+        channels = []
+
+        def scan(text, *a, **kw):
+            if "Invoice 2026" in text:
+                channels.append(kw.get("channel"))
+            return real(text, *a, **kw)
+        with mock.patch.object(hooks.detect, "scan", scan):
+            output(self.post())
+        self.assertEqual(channels, ["tool"])
+
+    # ------------------------------------------------- the admin group (Option B) --
+    @unittest.skipIf(os.name == "nt", "groups are for macOS and Linux")
+    def test_an_admin_group_writes_as_root_does(self):
+        import types
+        other = types.SimpleNamespace(gr_name="admin", gr_mem=["root", "someone-else"])
+        with mock.patch("grp.getgrgid", return_value=other), \
+                mock.patch.object(file_reads, "admin_groups", return_value=frozenset({"admin", "wheel"})):
+            self.assertFalse(file_reads._group_has_other_writer(80))
+            other.gr_name = "staff"
+            self.assertTrue(file_reads._group_has_other_writer(80), "any other group with another member")
+
+    @unittest.skipIf(os.name == "nt", "groups are for macOS and Linux")
+    def test_a_group_whose_members_are_not_listed_is_another_writer(self):
+        # macOS everyone (12) and localaccounts (61) list no member and hold every account (Opus review)
+        import types
+        hidden = types.SimpleNamespace(gr_name="everyone", gr_mem=[])
+        with mock.patch("grp.getgrgid", return_value=hidden):
+            self.assertTrue(file_reads._group_has_other_writer(12))
+
+    @unittest.skipIf(os.name == "nt", "links and modes are for macOS and Linux")
+    def test_a_link_counts_by_its_owner_not_its_mode_bits(self):
+        # Linux shows every link as 0777: /bin and /lib of a merged /usr are links (both reviews of block 4)
+        self.stub()
+        link = self.dir / "linkbin"
+        os.symlink(self.bin, link)
+        if hasattr(os, "lchmod"):
+            os.lchmod(link, 0o777)
+        if not os.lstat(link).st_mode & 0o002:
+            self.skipTest("this system gives a link no write bit to test with")
+        self.assertTrue(file_reads._no_other_writer(str(link / "pdftotext")))
+
+    @unittest.skipUnless(sys.platform == "darwin", "chmod +a is macOS")
+    def test_an_acl_that_lets_another_account_write_refuses(self):
+        d = self.dir / "acl"
+        d.mkdir()
+        self.assertTrue(file_reads._no_other_writer(str(d)))
+        subprocess.run(["/bin/chmod", "+a", "everyone deny delete", str(d)], check=True)
+        self.assertTrue(file_reads._no_other_writer(str(d)), "a deny entry takes nothing away from the owner")
+        subprocess.run(["/bin/chmod", "+a", "everyone allow add_file", str(d)], check=True)
+        self.assertFalse(file_reads._no_other_writer(str(d)))
+        subprocess.run(["/bin/chmod", "-N", str(d)], check=True)
+
+    def test_a_posix_acl_on_linux_refuses(self):
+        import errno
+        with mock.patch.object(sys, "platform", "linux"):
+            with mock.patch.object(os, "getxattr", return_value=b"\x02\x00", create=True):
+                self.assertTrue(file_reads._acl_lets_in("/x"))
+            with mock.patch.object(os, "getxattr", side_effect=OSError(errno.ENODATA, "no"), create=True):
+                self.assertFalse(file_reads._acl_lets_in("/x"))
+            with mock.patch.object(os, "getxattr", side_effect=OSError(errno.EACCES, "no"), create=True):
+                self.assertTrue(file_reads._acl_lets_in("/x"), "a list that cannot be read counts")
+
+    def test_a_script_whose_interpreter_the_path_chooses_is_not_run(self):
+        tool = self.bin / "pdftotext"
+        tool.write_text("#!/usr/bin/env sh\necho hi\n")
+        tool.chmod(0o755)
+        self.assertIsNone(file_reads.libraries(str(tool)))
+        self.assertIsNone(file_reads.pdftotext())
+
+    @unittest.skipIf(os.name == "nt", "process groups are for macOS and Linux")
+    def test_the_watchdog_can_end_a_running_pdftotext(self):
+        # os._exit of the watchdog skips the finally of extract(), and the child has its own session (both reviews)
+        child = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)
+        file_reads._RUNNING.add(child.pid)
+        try:
+            file_reads.kill_running()
+            self.assertIsNotNone(child.wait(timeout=5))
+        finally:
+            file_reads._RUNNING.discard(child.pid)
+        _reset(read_pdf="convert")
+        self.stub("/bin/sleep 5")
+        seen = []
+        real_wait = file_reads._wait
+
+        def wait(thread, seconds):
+            seen.append(set(file_reads._RUNNING))
+            raise RuntimeError("stop")
+        with mock.patch.object(file_reads, "_wait", wait):
+            output(self.post())
+        self.assertTrue(seen and seen[0], "extract() names its child while it runs")
+        self.assertEqual(file_reads._RUNNING, set(), "and forgets it after")
+        self.assertIs(real_wait, file_reads._wait)
+        from maisecrets import hooks as hooks_mod
+        self.assertIn("reader.kill_running()", Path(hooks_mod.__file__).read_text())
+
+    def test_a_cut_text_ends_at_a_line_and_never_inside_a_key(self):
+        head = "word " * (file_reads.MAX_TEXT_CHARS // 5 - 40) + "\n"
+        label = "PRIVATE" + " KEY-----\n"          # built at run time (scan_tree)
+        key = "-----BEGIN " + label + "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo0NTY3\n" * 10 + "-----END " + label
+        cut = file_reads._cut(head + key)
+        self.assertNotIn("BEGIN", cut)
+        self.assertNotIn("QUJD", cut)
+        long_line = "a" * (file_reads.MAX_TEXT_CHARS - 10) + "\nsecond line that goes past the cap\n"
+        self.assertTrue(file_reads._cut(long_line).endswith("\n"))
+        self.assertNotIn("second", file_reads._cut(long_line))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "ldd")
+    def test_the_libraries_of_a_root_program_on_linux_are_trusted(self):
+        # the merged /usr links failed every check before (both reviews): this is the check convert runs
+        tool = os.path.realpath(sys.executable)
+        if file_reads.libraries(tool) is None:
+            self.skipTest("this python is no dynamic ELF program, or ldd is missing")
+        if not file_reads._no_other_writer(tool):
+            self.skipTest("this python is not installed where only root and this user can write")
+        self.assertTrue(file_reads._trusted_libraries(tool))
+
+    def test_the_admin_groups_of_each_system(self):
+        cases = (("darwin", None, {"admin", "wheel"}),
+                 ("linux", 'ID=ubuntu\nID_LIKE=debian\n', {"sudo", "admin"}),
+                 ("linux", 'ID=debian\n', {"sudo"}),
+                 ("linux", 'ID=fedora\n', {"wheel"}),
+                 ("linux", 'ID="rocky"\nID_LIKE="rhel centos fedora"\n', {"wheel"}),
+                 ("linux", 'ID=alpine\n', set()),
+                 ("linux", 'ID="opensuse-tumbleweed"\nID_LIKE="opensuse suse"\n', set()),
+                 ("win32", None, set()))
+        for platform, release, want in cases:
+            with self.subTest(platform=platform, release=release):
+                opener = mock.mock_open(read_data=release or "")
+                with mock.patch.object(sys, "platform", platform), mock.patch("builtins.open", opener):
+                    self.assertEqual(file_reads.admin_groups(), frozenset(want))
+
+    # -------------------------------------------------------------- libraries --
+    def test_a_script_loads_its_interpreter(self):
+        self.stub()
+        self.assertEqual(file_reads.libraries(str(self.bin / "pdftotext")), ["/bin/sh"])
+
+    def test_a_library_that_another_account_can_write_refuses_the_program(self):
+        _reset(read_pdf="convert")
+        self.stub()
+        libdir = self.dir / "lib"
+        libdir.mkdir()
+        lib = libdir / "libpoppler.dylib"
+        lib.write_bytes(b"\0")
+        with mock.patch.object(file_reads, "libraries", return_value=[str(lib)]):
+            self.assertIsNotNone(file_reads.pdftotext())
+            os.chmod(libdir, 0o777)
+            try:
+                self.assertIsNone(file_reads.pdftotext(), "others can write the folder of a library")
+                content = output(self.post())["file"]["content"]
+            finally:
+                os.chmod(libdir, 0o755)
+            self.assertIsNone(file_reads.pdftotext(str(libdir)), "a library in the working folder")
+        self.assertIn("a library it loads", content)
+        self.assertFalse(self.calls.exists(), "pdftotext did not run")
+        with mock.patch.object(file_reads, "libraries", return_value=None):
+            self.assertIsNone(file_reads.pdftotext(), "libraries that cannot be told")
+
+    def test_the_mach_o_libraries_are_found_through_rpath_and_each_library(self):
+        app = self.dir / "app"
+        (app / "bin").mkdir(parents=True)
+        (app / "lib").mkdir()
+        exe = app / "bin" / "tool"
+        exe.write_bytes(macho(("rpath", "@loader_path/../lib"), ("dylib", "@rpath/liba.dylib"),
+                              ("dylib", "/usr/lib/libSystem.B.dylib")))
+        (app / "lib" / "liba.dylib").write_bytes(macho(("dylib", "@loader_path/libb.dylib")))
+        (app / "lib" / "libb.dylib").write_bytes(macho())
+        found = file_reads._macho_libraries(str(exe))
+        self.assertEqual([os.path.realpath(x) for x in found or ()],
+                         [os.path.realpath(app / "lib" / n) for n in ("liba.dylib", "libb.dylib")])
+        (app / "lib" / "libb.dylib").unlink()
+        self.assertIsNone(file_reads._macho_libraries(str(exe)), "a library that is not there")
+        exe.write_bytes(b"\0" * 64)
+        self.assertIsNone(file_reads._macho_libraries(str(exe)), "no Mach-O")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "ldd")
+    def test_ldd_names_the_libraries_of_an_elf_program(self):
+        libs = file_reads.libraries(os.path.realpath(sys.executable))
+        if libs is None:
+            self.skipTest("this python is no dynamic ELF program, or ldd is missing")
+        self.assertTrue(any("libc" in os.path.basename(x) or "ld-" in os.path.basename(x) for x in libs), libs)
+
+    @unittest.skipUnless(sys.platform == "darwin" and REAL_PDFTOTEXT, "no pdftotext that maisecrets trusts on macOS")
+    def test_the_real_pdftotext_and_its_libraries_are_checked(self):
+        libs = file_reads.libraries(REAL_PDFTOTEXT)
+        self.assertIsNotNone(libs)
+        if REAL_PDFTOTEXT.startswith("/opt/homebrew/"):
+            self.assertTrue(any("libpoppler" in x for x in libs), libs)
+
+
 @unittest.skipUnless(REAL_PDFTOTEXT, "no pdftotext that maisecrets trusts (fixed folder, no other writer)")
 class RealPdftotext(unittest.TestCase):
     def test_pages_and_text_of_a_synthetic_pdf(self):
         d = Path(tempfile.mkdtemp(dir=_isolate.TMP))
         f = d / "a.pdf"
-        f.write_bytes(pdf_bytes("first line", "second line"))
+        f.write_bytes(pdf_bytes("first line of the page", "second line of the page"))
         text, why = file_reads.extract(str(f), "1")
         self.assertEqual(why, "")
-        self.assertIn("first line", text)
-        self.assertIn("second line", text)
+        self.assertIn("first line of the page", text)
+        self.assertIn("second line of the page", text)
         self.assertEqual(file_reads.extract(str(d / "missing.pdf"))[0], None)
         (d / "bad.pdf").write_bytes(b"not a pdf")
         text, why = file_reads.extract(str(d / "bad.pdf"))

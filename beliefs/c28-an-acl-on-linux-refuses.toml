@@ -1,0 +1,10 @@
+# c28-an-acl-on-linux-refuses: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-an-acl-on-linux-refuses"
+control = "C28"
+statement = "A POSIX access control list on a folder or file on the way to pdftotext refuses it: a named entry can grant a write that the mode bits do not show."
+runner = ["tests/test_file_reads.py::TheConverterIsBounded::test_a_posix_acl_on_linux_refuses"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "            os.getxattr(path, \"system.posix_acl_access\", follow_symlinks=False)\n            return True\n"
+replace = "            os.getxattr(path, \"system.posix_acl_access\", follow_symlinks=False)\n            return False\n"
