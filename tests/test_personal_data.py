@@ -61,6 +61,22 @@ class BirthDateTests(unittest.TestCase):
 
 
 
+class IdNumberTests(unittest.TestCase):
+    def test_an_id_number_after_an_id_label(self):
+        for text, v in (("MRN: 00482913", "00482913"), ("passport no: K4829173", "K4829173"),
+                        ("DL: D4812736", "D4812736"), ("tax id: 912-48-3017", "912-48-3017")):
+            with self.subTest(text=text):
+                # a passport or a tax id of a region rule is masked by that rule, which comes first
+                self.assertTrue(masked(text, v))
+
+    def test_a_specimen_a_snowflake_and_a_count_stay_text(self):
+        for text in ("Specimen passport X0000000 (ICAO 9303 example)", "member id: 123456789012345678",
+                     "account number of retries: 3", "x = sin(12345)", "<dl>12345</dl>",
+                     "HPE ProLiant DL360 Gen10 Plus", "WHERE member_id = 20231115 LIMIT 10"):
+            with self.subTest(text=text):
+                self.assertEqual(values(text), [])
+
+
 class PhoneTests(unittest.TestCase):
     def test_a_number_with_one_digit_groups_in_both_channels(self):
         text = "call me on +1 4 1 5 223 3344"
