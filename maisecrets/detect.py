@@ -988,6 +988,20 @@ def _label_class(label: str) -> tuple:
     return got
 
 
+def tool_only_password(value: str) -> bool:
+    """Whether only the tool channel takes this password value (letters that no word covers, without evidence of
+    chance). The store keeps such a value weak: replaced where it was found, never hunted in a later text or prompt."""
+    outer = _CHANNEL[0]
+    try:
+        _CHANNEL[0] = "prompt"
+        if _pw_literal_ok(value):
+            return False
+        _CHANNEL[0] = "tool"
+        return _pw_literal_ok(value)
+    finally:
+        _CHANNEL[0] = outer
+
+
 def _judge_literal(label: str, v: str, quoted: bool = True) -> str:
     """The rule a label and its literal value fall under, or ""."""
     pw, secret, weak, otp, last = _label_class(label)
@@ -1008,7 +1022,7 @@ def _literal_hits(text: str) -> list:
     once per text for all the rules that read them."""
     _newlines(text)
     cache = _INDEX[1]
-    if "literal" not in cache:
+    if ("literal", _CHANNEL[0]) not in cache:
         hits = []
         pos = 0
         while True:
@@ -1047,8 +1061,8 @@ def _literal_hits(text: str) -> list:
                 if _pw_literal_ok(_unquote(text[m.end():end], q, backslash, tick)):
                     hits.append(("label-pw-literal", m.start(), m.end(), end))
         hits.sort(key=lambda h: h[2])
-        cache["literal"] = hits
-    return cache["literal"]
+        cache["literal", _CHANNEL[0]] = hits   # the tool channel takes more values
+    return cache["literal", _CHANNEL[0]]
 
 
 class _Literal:

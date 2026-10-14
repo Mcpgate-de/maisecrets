@@ -547,7 +547,9 @@ DEFAULT_WORDS = frozenset({
 def is_weak(kind: str, value: str) -> bool:
     """A value that only a label rule found and that is a known default word (DEFAULT_WORDS): replaced where it was
     found, never hunted in other texts."""
-    from .detect import LABEL_RULES
+    from .detect import LABEL_RULES, tool_only_password
+    if str(kind) == "label-pw-literal" and tool_only_password(value):
+        return True   # a word of another language in a tool result: hunting it would block a prompt that uses the word
     return str(kind).startswith(LABEL_RULES) and value.strip().lower() in DEFAULT_WORDS
 
 
