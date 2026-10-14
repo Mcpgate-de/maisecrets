@@ -52,7 +52,9 @@ class WordValuesNotHuntedTests(unittest.TestCase):
             Path(self.bin, name).chmod(0o700)
 
     def hook(self, event: str, payload: dict) -> dict:
-        env = {**os.environ, "MAISECRETS_HOME": str(self.home), "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+        # Windows finds clip.exe in System32 before PATH: MS_TEST_CLIP sends it to the fake of tests/_platform_fakes.py
+        env = {**os.environ, "MAISECRETS_HOME": str(self.home), "MS_TEST_CLIP": str(Path(self.home, "clip")),
+               "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
         r = subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), event], input=json.dumps(payload),
                            capture_output=True, text=True, env=env, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
