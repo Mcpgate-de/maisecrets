@@ -57,3 +57,66 @@ def de_document_ok(v: str) -> bool:
     if len(v) == 10:
         return v[9].isdigit() and icao_check_digit(v[:9]) == int(v[9])
     return True
+
+
+# ---------------------------------------------------------------- Presidio --
+def pl_pesel_ok(v: str) -> bool:
+    """PESEL: weights 1 3 7 9 1 3 7 9 1 3, the check digit is (10 - sum mod 10) mod 10."""
+    if len(v) != 11 or not v.isdigit():
+        return False
+    total = sum(int(d) * w for d, w in zip(v[:10], (1, 3, 7, 9, 1, 3, 7, 9, 1, 3)))
+    return (10 - total % 10) % 10 == int(v[10])
+
+
+_NIF_LETTERS = "TRWAGMYFPDXBNJZSQVHLCKE"
+
+
+def es_nif_ok(v: str) -> bool:
+    """Spanish DNI/NIF: the letter is _NIF_LETTERS[number mod 23] (Presidio removes - and spaces first)."""
+    v = re.sub(r"[- ]", "", v.strip()).upper()
+    digits = _digits(v)
+    return bool(digits) and v[-1:] == _NIF_LETTERS[int(digits) % 23]
+
+
+def es_nie_ok(v: str) -> bool:
+    """Spanish NIE: X, Y or Z (read as 0, 1, 2), the digits, and the NIF letter of that whole number."""
+    v = re.sub(r"[- ]", "", v.strip()).upper()
+    if not 8 <= len(v) <= 9 or v[:1] not in ("X", "Y", "Z") or not v[1:-1].isdigit():
+        return False
+    return v[-1] == _NIF_LETTERS[int(str("XYZ".index(v[0])) + v[1:-1]) % 23]
+
+
+def uk_nhs_ok(v: str) -> bool:
+    """NHS number: the ten digits weighted 10 down to 1 sum to a multiple of 11."""
+    d = re.sub(r"[- ]", "", v.strip())
+    if len(d) != 10 or not d.isdigit() or len(set(d)) == 1:
+        return False                    # 000 000 0000 passes the sum and is a placeholder
+    return sum(int(c) * w for c, w in zip(d, range(10, 0, -1))) % 11 == 0
+
+
+def us_aba_ok(v: str) -> bool:
+    """ABA routing number: weights 3 7 1, the sum is a multiple of 10, and the first two digits a Federal Reserve
+    routing symbol (00 to 12, 21 to 32, 61 to 72, 80). 000000000 passes the sum and is a placeholder."""
+    d = re.sub(r"[- ]", "", v.strip())
+    if len(d) != 9 or not d.isdigit() or len(set(d)) == 1:
+        return False
+    head = int(d[:2])
+    if not (head <= 12 or 21 <= head <= 32 or 61 <= head <= 72 or head == 80):
+        return False
+    return sum(int(c) * w for c, w in zip(d, (3, 7, 1) * 3)) % 10 == 0
+
+
+# codice fiscale: the value of a character at an odd place (1st, 3rd, ...); at an even place a digit counts its value
+# and a letter its place in the alphabet from 0
+_IT_ODD = dict(zip(string.digits + string.ascii_uppercase,
+                   (1, 0, 5, 7, 9, 13, 15, 17, 19, 21, 1, 0, 5, 7, 9, 13, 15, 17, 19, 21, 2, 4, 18, 20, 11, 3, 6, 8,
+                    12, 14, 16, 10, 22, 25, 24, 23)))
+
+
+def it_fiscal_code_ok(v: str) -> bool:
+    """Italian codice fiscale: the 16th character is the check letter of the first 15."""
+    v = v.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9]{15}[A-Z]", v):
+        return False
+    total = sum(_IT_ODD[c] if i % 2 == 0 else (int(c) if c.isdigit() else ord(c) - 65) for i, c in enumerate(v[:15]))
+    return chr(65 + total % 26) == v[15]

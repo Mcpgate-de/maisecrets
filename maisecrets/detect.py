@@ -1142,9 +1142,15 @@ VALIDATORS = {
     # name%40firma.de in a URL query, a form body or an access log: the same address, percent-encoded
     "person_email_encoded": lambda v: VALIDATORS["person_email"](v.replace("%40", "@")),
     "us_ssn": _us_ssn_ok,
-    # checksums.py: the German document number
+    # checksums.py: ports of Presidio validators that were missing and the German document number
     "de_document": checksums.de_document_ok,
     "de_tax_id_spaced": lambda v: _de_tax_id_ok(re.sub(r"[ \u00a0]", "", v)),
+    "pl_pesel": checksums.pl_pesel_ok,
+    "es_nif": checksums.es_nif_ok,
+    "es_nie": checksums.es_nie_ok,
+    "uk_nhs": checksums.uk_nhs_ok,
+    "us_aba": checksums.us_aba_ok,
+    "it_fiscal_code": checksums.it_fiscal_code_ok,
 }
 
 
@@ -1379,10 +1385,17 @@ PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "de-id-
 PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
                       "de-tax-id": "de_tax_id", "de-social-security": "de_social_security",
                       "de-health-insurance": "de_health_insurance", "de-lanr": "de_lanr",
-                      "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id", "us-ssn": "us_ssn"}
-# shapes that are plain digit runs: even with a valid checksum, ask for a context word
+                      "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id", "us-ssn": "us_ssn",
+                      # 0.6.19: with the context word alone a value with a wrong check digit was a hit
+                      "pl-pesel": "pl_pesel", "es-nif": "es_nif", "es-nie": "es_nie", "nhs": "uk_nhs",
+                      "aba-routing": "us_aba", "it-fiscal-code": "it_fiscal_code"}
+# shapes that are plain digit runs: even with a valid checksum, ask for a context word. The validators ported in
+# 0.6.19 keep the context word they needed before: a check digit alone passes one value in 10 to 26
 PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "de-plz", "de-kfz",
-                           "de-fuehrerschein", "nhs", "aba-routing", "medical-license"}
+                           "de-fuehrerschein", "nhs", "aba-routing", "medical-license", "pl-pesel", "es-nif",
+                           "es-nie", "it-fiscal-code"}
+# a Presidio pattern with no boundary: PESEL's eleven digits matched inside a longer digit run
+PRESIDIO_DIGIT_BOUNDED = {"pl-pesel"}
 # single patterns that need a context word although their recognizer does not: DE and nine digits that pass the
 # checksum are also FIX tags and XML identifiers; a real VAT ID stands next to USt-IdNr or VAT. The spaced form
 # (de-vat-id#1) has a low score and needs its word already
@@ -1464,7 +1477,9 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
             rule_id = rec["id"] if len(rec["patterns"]) == 1 else f"{rec['id']}#{i}"
             out.append(Rule(
                 id=rule_id,
-                type=ENTITY_TYPE.get(rec["entity"], rec["entity"]), regex=_Lazy(_re2_to_python(pat["regex"])),
+                type=ENTITY_TYPE.get(rec["entity"], rec["entity"]),
+                regex=_Lazy(rf"(?<!\d)(?:{_re2_to_python(pat['regex'])})(?!\d)" if rec["id"] in PRESIDIO_DIGIT_BOUNDED
+                            else _re2_to_python(pat["regex"])),
                 validator=validator, score=float(pat["score"]),
                 context=tuple(c.lower() for c in rec.get("context", [])) + PRESIDIO_EXTRA_CONTEXT.get(rec["id"], ()),
                 require_context=weak or rule_id in PRESIDIO_PATTERN_CONTEXT,

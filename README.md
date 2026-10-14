@@ -1163,7 +1163,8 @@ Four sources, one scanner (`maisecrets/detect.py`):
   gives Steuer-ID,
   Sozialversicherungsnummer, Personalausweis, Reisepass, USt-ID,
   Krankenversicherung, PLZ, Kfz, LANR, BSNR). Checksums for
-  the German types are ported and checked against Presidio
+  the German types, PESEL, the Spanish DNI and NIE, the NHS number, the ABA
+  routing number and the codice fiscale are ported and checked against Presidio
   (`scripts/check_validators_against_presidio.py`). A digit-only shape such as
   a Steuer-ID is reported only with a context word nearby, even when the
   checksum passes. A USt-ID written `DE` and nine digits also needs a word

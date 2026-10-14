@@ -1,0 +1,10 @@
+# c1-a-ported-check-digit-rejects-a-twin: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-ported-check-digit-rejects-a-twin"
+control = "C1"
+statement = "A PESEL, Spanish DNI or NIE, NHS number, ABA routing number or codice fiscale after its label is a hit only when its check digit holds; before 0.6.19 the label alone made a twin with a wrong check digit a hit."
+runner = ["tests/test_rules_from_other_detectors.py::PortedCheckDigitTests::test_a_valid_value_after_its_label_is_a_hit_and_its_twin_is_not"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''                      "pl-pesel": "pl_pesel", "es-nif": "es_nif",'''
+replace = '''                      "es-nif": "es_nif",'''

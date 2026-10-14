@@ -37,5 +37,6 @@ Parts of the detection are adapted from a public fork of maisecrets on GitHub (A
 2.0; the commits that took them name it): the card words of other
 languages, the IBAN forms with hyphens and in lower case, the context rule for a bare German VAT ID,
 the normaliser of maisecrets/normalise.py (changed: five of its stages, one module, scanned
-only around the changed lines and in the tool channel only) and the design of the country rules
-(REGIONAL_RULES in maisecrets/detect.py).
+only around the changed lines and in the tool channel only), the design of the country rules
+(REGIONAL_RULES in maisecrets/detect.py) and the checksum of the codice fiscale in
+maisecrets/checksums.py.

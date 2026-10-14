@@ -195,6 +195,78 @@ class RentenversicherungsnummerTests(unittest.TestCase):
                 self.assertEqual(found(bad), [])
 
 
+# ------------------------------------------------ ported Presidio checks --
+def pesel(r):
+    return complete(rd(r, 2) + r.choice("02468") + rd(r, 1, D[1:]) + f"{r.randint(1, 28):02d}" + rd(r, 4),
+                    checksums.pl_pesel_ok)
+
+
+def nif(r):
+    n = rd(r, 8)
+    return n + "TRWAGMYFPDXBNJZSQVHLCKE"[int(n) % 23]
+
+
+def nie(r):
+    p, n = r.choice("XYZ"), rd(r, 7)
+    return p + n + "TRWAGMYFPDXBNJZSQVHLCKE"[int(str("XYZ".index(p)) + n) % 23]
+
+
+def nhs(r):
+    while True:
+        try:
+            v = complete(rd(r, 9), checksums.uk_nhs_ok)
+            return f"{v[:3]} {v[3:6]} {v[6:]}"
+        except AssertionError:
+            continue
+
+
+def aba(r):
+    head = r.choice([f"{x:02d}" for x in (*range(0, 13), *range(21, 33))])   # a Federal Reserve routing symbol
+    return complete(head + rd(r, 6), checksums.us_aba_ok)
+
+
+def fiscal(r):
+    cons = "BCDFGHJKLMNPQRSTVWXYZ"
+    body = (rd(r, 3, cons) + rd(r, 3, cons) + rd(r, 2) + r.choice("ABCDEHLMPRST") + f"{r.randint(1, 28):02d}"
+            + r.choice("ABCDEFGHILM") + rd(r, 3))
+    return complete(body, checksums.it_fiscal_code_ok, U)
+
+
+PORTED = [  # (name, region, generator, validator, label, twin alphabet)
+    ("PESEL", "pl", pesel, checksums.pl_pesel_ok, "PESEL", D),
+    ("DNI", "es", nif, checksums.es_nif_ok, "DNI", U),
+    ("NIE", "es", nie, checksums.es_nie_ok, "NIE", U),
+    ("NHS", "uk", nhs, checksums.uk_nhs_ok, "NHS number", D),
+    ("ABA", "us", aba, checksums.us_aba_ok, "ABA routing number", D),
+    ("codice fiscale", "it", fiscal, checksums.it_fiscal_code_ok, "codice fiscale", U),
+]
+
+
+class PortedCheckDigitTests(unittest.TestCase):
+    def test_a_valid_value_after_its_label_is_a_hit_and_its_twin_is_not(self):
+        for name, region, gen, ok, label, alpha in PORTED:
+            r = random.Random(name)
+            for _ in range(30):
+                v = gen(r)
+                bad = twin(v, ok, alphabet=alpha)
+                with self.subTest(name=name, v=v):
+                    self.assertTrue(found(f"{label}: {v}", region=(region,)))
+                    self.assertEqual(found(f"{label}: {bad}", region=(region,)), [])
+                    self.assertEqual(found(v, region=(region,)), [])          # still needs its label
+
+    def test_a_number_of_one_repeated_digit_is_a_placeholder(self):
+        self.assertEqual(found("NHS number: 000 000 0000", region=("uk",)), [])
+        self.assertEqual(found("ABA routing number: 000000000", region=("us",)), [])
+        body = "41" + "1" * 6
+        sum_ok = next(body + c for c in D if sum(int(x) * w for x, w in zip(body + c, (3, 7, 1) * 3)) % 10 == 0)
+        self.assertFalse(checksums.us_aba_ok(sum_ok))                      # 41 is no routing symbol
+
+    def test_a_pesel_inside_a_longer_digit_run_is_no_hit(self):
+        v = pesel(random.Random(15))
+        self.assertEqual(found(f"PESEL 9{v}", region=("pl",)), [])
+        self.assertEqual(found(f"PESEL {v}0", region=("pl",)), [])
+
+
 
 
 if __name__ == "__main__":
