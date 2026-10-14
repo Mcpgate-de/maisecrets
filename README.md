@@ -11,6 +11,11 @@ decide, as before; in Codex maisecrets answers `allow`, and Codex's sandbox and
 its approval of MCP tools still apply. maisecrets itself sends no
 prompt, value or telemetry to a server.
 
+**What it is for:** maisecrets keeps values out of the model and out of the
+session transcript. It guards against an agent that does not try to evade it.
+It does not contain an agent that deliberately runs code with your rights to
+switch it off ([threat model](docs/THREAT-MODEL.md), C22).
+
 ```bash
 claude plugin marketplace add Mcpgate-de/maisecrets
 claude plugin install maisecrets@maisecrets     # then start a new session
@@ -501,12 +506,29 @@ The prompt hook writes `config.json`. After the slash command it lets the
 command run on, which shows the new card; the sentence form is stopped and
 does not reach the model. maisecrets changes a setting for nothing else: not
 for a prompt the client injected (a scheduled task, a loop wakeup, an SDK
-prompt), not for a subagent's report, and a Bash or PowerShell command that
-carries the change (a nested `codex exec` or `claude -p` that would type it)
-is refused. The AI can tell you about a setting and the prompt to send. A
-setting from a machine policy cannot be changed here. The limit: a program
-that runs as you can write the file itself, and maisecrets sees a command only
-as text (C22 in the threat model).
+prompt), not for a prompt of a client that a program started (`claude -p`
+and the Agent SDKs: its hook sees `CLAUDE_CODE_ENTRYPOINT=sdk-…`), not for a
+subagent's report, and a Bash or PowerShell command that carries the change
+(a nested `codex exec` or `claude -p` that would type it) is refused. The AI
+can tell you about a setting and the prompt to send. A setting from a machine
+policy cannot be changed here. The limit: a program that runs as you can
+write the file itself, and maisecrets sees a command only as text (C22 in the
+threat model).
+
+**You see each loosened protection.** A change that loosens a protection (a
+setting in the looser direction, such as `rehydration automatic`, a higher
+cap or a new autonomous host) and each `/maisecrets:forget` write one line
+in `~/.maisecrets/events.log`: the time, the kind, the key or setting (never
+a value) and the route (typed prompt, slash command, cli). The next session
+start shows you one sentence that lists them, once:
+
+```
+maisecrets: since the last session start, 2 protections were loosened: setting rehydration (typed prompt),
+forget SECRET_c3 (cli). If you did not do this, check /maisecrets:settings and /maisecrets:list.
+```
+
+A program that runs as you can also change that file; the line makes an
+ordinary agent's action visible, it does not stop one that evades.
 
 **Hints.** maisecrets stays quiet until a case comes up that one of these
 settings is about. Then the AI gets one sentence about it, and mentions it
