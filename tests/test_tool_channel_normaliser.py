@@ -108,8 +108,9 @@ class DisguiseTests(unittest.TestCase):
         # an AWS secret may follow its key id four lines of up to 400 characters later (Gate A, round 3)
         key_id = "AK" + "IA" + "".join(RNG.choice(string.ascii_uppercase + "234567") for _ in range(16))
         secret = "".join(RNG.choice(string.ascii_letters + string.digits + "/+") for _ in range(40))
-        plain = key_id + "\n" + "x" * 300 + "\n" + secret + "\n"
-        disguised = key_id + "\n" + "x" * 300 + "\n" + secret[:20] + ZW + secret[20:] + "\n"
+        gap = ("x" * 380 + "\n") * 3   # longer than the old 512 characters of context, within the rule's reach
+        plain = key_id + "\n" + gap + secret + "\n"
+        disguised = key_id + "\n" + gap + secret[:20] + ZW + secret[20:] + "\n"
         want = [k for k, _ in spans(plain)]
         self.assertEqual(len(want), 2, want)
         self.assertEqual([k for k, _ in spans(disguised)], want)
