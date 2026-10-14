@@ -276,7 +276,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 114 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 128 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -709,7 +709,12 @@ blunter: in the rollout, the three flags and ideographic variants lose their sel
 carry an instruction, and the audit log records the count, never the text.
 `"strip_hidden_characters": false` turns it off.
 
-### Disguised values in tool results
+This is not a detector of prompt injection. It takes away one way to hide one. A selector that the
+rule keeps still holds something: one of three states (VS15, VS16, none) after any letter or
+symbol, up to four bits after a character that is not ASCII, and up to one byte after a CJK
+ideograph, where the rule keeps the ideographic selectors that Chinese and Japanese text use.
+
+## Disguised values in tool results
 
 A value can also hide from the shape rules behind what a terminal or a renderer does not show. In a
 tool result or a file (not in a typed prompt), the detector also scans a cleaned copy: without ANSI
@@ -724,10 +729,20 @@ MB is not cleaned, a run over 16,384 characters (an image) is not decoded, and a
 colour) is scanned twice, which about doubles its time. The typed prompt is scanned as it is, so a block there needs the
 value in the clear.
 
-This is not a detector of prompt injection. It takes away one way to hide one. A selector that the
-rule keeps still holds something: one of three states (VS15, VS16, none) after any letter or
-symbol, up to four bits after a character that is not ASCII, and up to one byte after a CJK
-ideograph, where the rule keeps the ideographic selectors that Chinese and Japanese text use.
+## Password exports in tool results
+
+A password export holds bare passwords in a column, and no shape or label rule finds a bare password
+in a cell. In a tool result or a file, maisecrets masks every cell of the password, TOTP and secret
+columns of a CSV or TSV table (comma, semicolon or tab) whose header row also names an entry column
+(`url`, `username`, `login`, `name`, `title`, ...) and holds plain column names at the start of its line (a function
+signature, SQL or a sentence is no header: a name of several words counts only quoted,
+and with two columns only names without a space such as `user_name,password`): the exports of Chrome, Edge, Firefox, Safari,
+Bitwarden, 1Password, KeePass(XC) and LastPass have such a header. A table with a password column
+and no entry column counts when the file read (or grepped) is named like an export (`passwords.csv`, `bitwarden_export.csv`,
+`1PasswordExport.csv`, a LastPass or KeePass export). The table ends at an empty line or at a row of
+another width. A column `password_hash` or a flag such as `has_password` is no secret column. A typed
+prompt is scanned as before. Limit: the secret-hygiene skill scans a file over 200 KB in parts, and
+a part without the header row is not recognised as an export.
 
 ## Reporting a wrong detection
 

@@ -2315,14 +2315,194 @@ def _command_start(text: str, pos: int) -> int:
     return cut + 1 if cut >= a else a
 
 
-def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt") -> list[Match]:
+def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt", path: str = "") -> list[Match]:
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins. channel "tool" (a tool
-    result or a file) takes a password after a password label without evidence of chance."""
+    result or a file) takes a password after a password label without evidence of chance, and the cells of a
+    password export (path: the file the text came from, if any)."""
     outer, _CHANNEL[0] = _CHANNEL[0], channel if channel == "tool" else "prompt"
+    outer_path, _PATH[0] = _PATH[0], path or ""
     try:
         return _scan(text, enabled)
     finally:
         _CHANNEL[0] = outer   # the channel of an outer scan comes back after a nested one (is_fixture)
+        _PATH[0] = outer_path
+
+
+_PATH: list = [""]
+# a label rule (LABEL_RULES): its header labels the cell, so a word in it is stored quiet and a fixture in test code
+# is dropped, as after `password:`
+EXPORT_RULE = "label-password-export"
+# the file names of password exports: a browser's (Chrome, Edge, Firefox, Safari), Bitwarden, 1Password, LastPass,
+# KeePass and KeePassXC, Dashlane, and any table whose name says passwords
+_EXPORT_NAME_RE = re.compile(r"(?i)(?:passw|kennw|logins?\b|bitwarden|1password|lastpass|keepass|dashlane|enpass"
+                             r"|nordpass|roboform)[^/\\]*\.(?:csv|tsv|txt)$")
+# a header names what its cells hold by its words (camelCase, _ - . and spaces split them): the last word, or the
+# last two together. A flag (is_secret, has_password) holds no value; `token` alone is often an NLP column
+_HEADER_WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
+_EXPORT_SECRET_WORDS = frozenset({"password", "passwd", "pwd", "passphrase", "passwort", "kennwort", "secret", "totp",
+                                  "hotp", "otp", "otpauth"})
+_EXPORT_SECRET_PAIRS = frozenset({"apikey", "secretkey", "privatekey", "accesstoken", "otpauth", "otpsecret",
+                                  "mfasecret"})
+_EXPORT_ID_WORDS = frozenset({"username", "user", "login", "loginname", "email", "mail", "url", "uri", "website",
+                              "site", "web", "origin", "hostname", "host", "title", "name", "account", "benutzer",
+                              "benutzername"})
+_EXPORT_DELIMITERS = (",", ";", "\t")
+
+
+def _header_words(cell: str) -> list:
+    return [w.lower() for w in _HEADER_WORD_RE.findall(cell.strip().strip("\"'"))]
+
+
+def _export_column(cell: str) -> str:
+    """SECRET for a header whose cells are passwords, TOTP seeds or keys; ID for one that names an entry or its
+    login; "" for any other."""
+    w = _header_words(cell)
+    if not w or w[0] in ("is", "has"):
+        return ""
+    if w[-1] in _EXPORT_SECRET_WORDS or "".join(w[-2:]) in _EXPORT_SECRET_PAIRS:
+        return "SECRET"
+    if w[-1] in _EXPORT_ID_WORDS or "".join(w[-2:]) in _EXPORT_ID_WORDS:
+        return "ID"
+    return ""
+
+
+_CELL_MAX = 8192   # a quote that no quote closes within this many characters opens no cell: the cell ends its line
+
+
+def _csv_cells(text: str, pos: int, delim: str):
+    """The cells of the CSV row that starts at pos, as (start, end) of each cell's content (its quotes excluded), and
+    the start of the next row. A quoted cell may hold the delimiter, a doubled quote and a line break."""
+    cells = []
+    n = len(text)
+    i = pos
+    while True:
+        q = -1
+        if i < n and text[i] == '"':
+            j = i + 1
+            limit = min(n, i + _CELL_MAX)
+            while True:
+                q = text.find('"', j, limit)
+                if q < 0 or not text.startswith('""', q):
+                    break
+                j = q + 2
+            if q >= 0 and q + 1 < n and text[q + 1] not in delim + "\r\n":
+                q = -1   # no cell ends so: the quote opened no cell, and the cell ends its line
+        if q >= 0:
+            cells.append((i + 1, q))
+            i = q + 1
+        else:
+            j = i
+            while j < n and text[j] not in delim + "\r\n":
+                j += 1
+            cells.append((i, j))
+            i = j
+        if i < n and text[i] == delim:
+            i += 1
+            continue
+        if i < n and text[i] == "\r":
+            i += 1
+        if i < n and text[i] == "\n":
+            i += 1
+        return cells, i
+
+
+_PLACEHOLDER_IN_CELL_RE = re.compile("\u27e6[A-Z][A-Z_]*_c\\d+(?::[^\u27e7\n]*)?\u27e7")
+# what a cell of a schema, a form or a masked export holds instead of a password
+_NOT_A_CELL_VALUE = frozenset({"true", "false", "null", "none", "nil", "undefined", "string", "str", "text", "int",
+                               "integer", "bool", "boolean", "varchar", "yes", "no", "n/a", "na", "-", "--", "*",
+                               "required", "optional", "hidden", "redacted", "masked", "empty", "password", "passwort",
+                               "secret", "totp", "otp"})
+
+
+def _outside_placeholders(text: str, a: int, b: int) -> list:
+    """The parts of text[a:b] outside complete maisecrets placeholders, each trimmed: a placeholder is no value."""
+    parts, pos = [], a
+    for m in _PLACEHOLDER_IN_CELL_RE.finditer(text, a, b):
+        parts.append((pos, m.start()))
+        pos = m.end()
+    parts.append((pos, b))
+    out = []
+    for pa, pb in parts:
+        while pa < pb and text[pa] in " \t":
+            pa += 1
+        while pb > pa and text[pb - 1] in " \t":
+            pb -= 1
+        if pb > pa:
+            out.append((pa, pb))
+    return out
+
+
+def _not_a_cell_value(v: str) -> bool:
+    low = v.strip().lower()
+    return low in _NOT_A_CELL_VALUE or (len(set(low)) == 1 and low[0] in "*\u2022x#.")
+
+
+# a header row starts at the start of its line (code is indented) and each cell is a column name: up to four words,
+# no brackets, operators or colons (a signature `def login(user, password):`, a call, a list line ending in a comma)
+_HEADER_LINE_RE = re.compile(r"[\"'\w]")
+_HEADER_CELL_RE = re.compile(r"[ \t]*\"?[A-Za-z][\w.#/-]*(?: [\w.#/-]+){0,3}\"?[ \t]*")
+_NAME_RE = re.compile(r"\"?[A-Za-z][\w.-]*\"?")
+_EXPORT_HINT_RE = re.compile(r"pass|pwd|kennw|totp|otp|secret|apikey|api_key|private_?key|access_?token")
+
+
+def _export_hits(text: str, low: str) -> list:
+    """The values in the password, TOTP and secret columns of a password export: a table whose header row names a
+    secret column and an entry column (url, username, name, title, ...), or a secret column alone when the file name
+    is an export's (passwords.csv, bitwarden_export.csv, ...). No rule finds a bare password in a cell: an export read
+    whole put every password in front of the model."""
+    if not _EXPORT_HINT_RE.search(low):
+        return []
+    by_name = bool(_PATH[0]) and _EXPORT_NAME_RE.search(_PATH[0]) is not None
+    out = []
+    pos = 0
+    n = len(text)
+    while pos < n:
+        end = text.find("\n", pos)
+        end = n if end < 0 else end
+        line = text[pos:end].lower()   # not low: a lowered text can be longer than the original (Turkish I)
+        header = None
+        if _EXPORT_HINT_RE.search(line) and _HEADER_LINE_RE.match(line):
+            best = None
+            for delim in _EXPORT_DELIMITERS:
+                if delim not in line:
+                    continue
+                cells, nxt = _csv_cells(text, pos, delim)
+                if len(cells) < 2 or not all(_HEADER_CELL_RE.fullmatch(text[a:b]) and (
+                        text[a - 1:a] == '"' or " " not in text[a:b].strip()) for a, b in cells):
+                    continue   # each cell a column name, of several words only when quoted: code, SQL, prose and
+                    # a test table are no header
+                if len(cells) == 2 and not by_name and not all(_NAME_RE.fullmatch(text[a:b]) for a, b in cells):
+                    continue   # two columns: names without a space (user_name,password), never `user, password`
+                kinds = [_export_column(text[a:b]) for a, b in cells]
+                if "SECRET" in kinds and ("ID" in kinds or by_name) and (best is None or len(cells) > len(best[1])):
+                    best = (delim, cells, kinds, nxt)
+            header = best
+        if header is None:
+            pos = end + 1
+            continue
+        delim, cells, kinds, pos = header
+        secret_cols = [i for i, k in enumerate(kinds) if k == "SECRET"]
+        width = len(cells)
+        weak = width == 2 and not by_name
+        while pos < n:
+            if text.startswith(("\n", "\r\n"), pos):
+                break   # an empty line ends the table
+            row, nxt = _csv_cells(text, pos, delim)
+            if len(row) != width:
+                break   # no longer a row of this table: an export's rows all have the header's width
+            for i in secret_cols:
+                if i < len(row):
+                    a, b = row[i]
+                    while a < b and text[a] in " \t":
+                        a += 1
+                    while b > a and text[b - 1] in " \t":
+                        b -= 1
+                    if b <= a or _not_a_cell_value(text[a:b]) or (weak and _WHITESPACE_RE.search(text, a, b)):
+                        continue   # a two-column table is a weaker sign: a cell with a space there is prose
+                    for pa, pb in _outside_placeholders(text, a, b):
+                        out.append(Match(EXPORT_RULE, "SECRET", text[pa:pb], pa, pb))
+            pos = nxt
+    return out
 
 
 def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> list[Match]:
@@ -2339,6 +2519,12 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> li
         neighbours by start can; a scan over all of them was quadratic in the hits (review of b4a7c54)."""
         i = bisect.bisect_left(taken_starts, a)
         return (i > 0 and taken_ends[i - 1] > a) or (i < len(taken_starts) and taken_starts[i] < b)
+    if _CHANNEL[0] == "tool" and not _copy and (enabled is None or EXPORT_RULE in enabled):
+        # first: a cell of a password export is a value as a whole, and no other rule claims a part of it
+        for m in _export_hits(text, low):
+            found.append(m)
+            taken_starts.append(m.start)
+            taken_ends.append(m.end)
     for rule in rules():
         if enabled is not None and rule.id not in enabled:
             continue
@@ -2558,7 +2744,11 @@ def _scan_cleaned_copy(text: str, enabled, found: list, taken_starts: list, take
     if norm.text is text:
         return
     by_start = {f.start: f for f in found}   # the taken spans never overlap, so a start names one
-    for m in _changed_windows_scan(text, norm, enabled):
+    copy_hits = _changed_windows_scan(text, norm, enabled)
+    if enabled is None or EXPORT_RULE in enabled:
+        # a header in colour or in entities: the table is read whole in the copy, not only around changed lines
+        copy_hits = _export_hits(norm.text, _lower(norm.text)) + copy_hits
+    for m in copy_hits:
         start, end = norm.span(m.start, m.end)
         lo = bisect.bisect_left(taken_starts, start)
         if lo > 0 and taken_ends[lo - 1] > start:

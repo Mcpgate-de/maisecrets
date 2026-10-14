@@ -6,5 +6,5 @@ runner = ["tests/test_fixtures.py::HookTests::test_a_read_of_a_test_file_keeps_i
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "        matches = [m for m in detect.scan(s, channel=\"tool\") if not detect.is_fixture(m, s, path)]\n"
-replace = "        matches = [m for m in detect.scan(s, channel=\"tool\") if not detect.is_fixture(m, s)]\n"
+find = "        matches = [m for m in detect.scan(s, channel=\"tool\", path=scan_path) if not detect.is_fixture(m, s, path)]\n"
+replace = "        matches = [m for m in detect.scan(s, channel=\"tool\", path=scan_path) if not detect.is_fixture(m, s)]\n"
