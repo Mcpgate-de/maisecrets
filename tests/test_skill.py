@@ -310,6 +310,50 @@ class NeverALineOrAHashTests(unittest.TestCase):
                 self.assertEqual([p for p in parts if p.lower() in low], [], text[-600:])
 
 
+class SkillChannelTests(unittest.TestCase):
+    """The skill scripts read files, commits and tool results as the tool hook reads them, and a typed prompt as the
+    prompt hook does: letters after a password label count in a file, not in a prompt (0.6.17)."""
+    FILE_PW = "pozk" + "emva"     # random small letters: only the tool channel takes them
+    PROMPT_PW = "vurk" + "apzo"
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="maisecrets-skill-channel-"))
+        self.addCleanup(shutil.rmtree, self.dir, True)
+
+    def test_a_file_scan_and_a_redacted_copy_take_letters_after_a_password_label(self):
+        (self.dir / "db.rs").write_text(f'let password = Some("{self.FILE_PW}");\n', encoding="utf-8")
+        r = _run(SCRIPTS / "scan_secrets.py", str(self.dir), cwd=self.dir)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("db.rs:1", r.stdout)
+        self.assertNotIn(self.FILE_PW, r.stdout + r.stderr)
+        r = _run(SCRIPTS / "redact_copy.py", "db.rs", cwd=self.dir)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn(self.FILE_PW, (self.dir / "db.redacted.rs").read_text(encoding="utf-8"))
+
+    def test_the_audit_takes_them_in_a_tool_result_and_not_in_a_prompt(self):
+        claude = self.dir / "claude"
+        proj = claude / "projects" / "-Users-x-repo"
+        proj.mkdir(parents=True)
+        rows = [{"type": "user", "timestamp": "2026-10-14T10:00:00Z",
+                 "message": {"content": f'password = Some("{self.PROMPT_PW}"),'}},
+                {"type": "user", "timestamp": "2026-10-14T10:01:00Z",
+                 "message": {"content": [{"type": "tool_result", "content": f'password = Some("{self.FILE_PW}"),'}]}}]
+        session = proj / "abcdef12-0001.jsonl"
+        session.write_text("\n".join(json.dumps(x) for x in rows) + "\n", encoding="utf-8")
+        old = time.time() - 3600
+        os.utime(session, (old, old))
+        env = dict(_clean_env(), PYTHONUTF8="1", CLAUDE_CONFIG_DIR=str(claude), CODEX_HOME=str(self.dir / "codex"))
+        r = subprocess.run([sys.executable, str(SCRIPTS / "audit_transcripts.py")], capture_output=True, text=True,
+                           encoding="utf-8", env=env, timeout=120)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("Reached the AI provider: 1 distinct value(s).", r.stdout)
+        row = next(line for line in r.stdout.splitlines() if line.startswith("  S1"))
+        self.assertIn("tool result", row)
+        self.assertNotIn("prompt", row)
+        for v in (self.FILE_PW, self.PROMPT_PW):
+            self.assertNotIn(v, r.stdout + r.stderr)
+
+
 class RedactSameValueTests(unittest.TestCase):
     def test_an_iban_with_and_without_spaces_gets_one_tag(self):
         work = Path(tempfile.mkdtemp(prefix="maisecrets-redact-"))

@@ -38,7 +38,7 @@ def redact(detect, text: str, secrets_only: bool) -> tuple[str, Counter]:
     tags: dict[str, str] = {}
     per_type: Counter = Counter()
     out, last = [], 0
-    for m in sorted(detect.scan(text), key=lambda m: m.start):
+    for m in sorted(detect.scan(text, channel="tool"), key=lambda m: m.start):   # a file, as the Read hook
         keep = secrets_only and m.type != "SECRET"
         if keep:
             continue
