@@ -1,0 +1,10 @@
+# c1-a-card-number-after-a-card-word-in-another-language-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-card-number-after-a-card-word-in-another-language-is-a-hit"
+control = "C1"
+statement = "A card number that passes Luhn next to Karte, Kreditkarte, carte, carta, tarjeta or a like card word of a label language is a CARD hit; a number that fails Luhn and a number without a card word stay text."
+runner = ["tests/test_bank_and_company_numbers.py::CardWordTests::test_a_card_word_in_another_language_counts"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''+ PRESIDIO_EXTRA_CONTEXT.get(rec["id"], ()),'''
+replace = '''+ (),'''

@@ -1372,6 +1372,13 @@ PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
 # shapes that are plain digit runs: even with a valid checksum, ask for a context word
 PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "de-plz", "de-kfz",
                            "de-handelsregister", "de-fuehrerschein", "nhs", "aba-routing", "medical-license"}
+# card words the vendored recognizer lacks: its words are English, so a card number after "Karte" in a German bank
+# statement reached the model. The number must still pass Luhn. A short word that means something else in a
+# neighbour language (kort: short in Danish and Dutch) stays out
+PRESIDIO_EXTRA_CONTEXT = {
+    "credit-card": ("karte", "kreditkarte", "kartennummer", "kartennr", "debitkarte", "bankkarte", "ec-karte",
+                    "girocard", "carte", "cartes", "carta", "tarjeta", "creditcard", "kaart", "cart\u00e3o", "karta"),
+}
 # Presidio tags every US/UK/IN/AU/… recognizer as language "en", so language is the wrong
 # switch: an Indian PAN rule produced 290 false positives in one German transcript. The
 # switch is the REGION, derived from the recognizer id; "generic" is always on.
@@ -1399,7 +1406,8 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
                 id=f"{rec['id']}" if len(rec["patterns"]) == 1 else f"{rec['id']}#{i}",
                 type=ENTITY_TYPE.get(rec["entity"], rec["entity"]), regex=_Lazy(_re2_to_python(pat["regex"])),
                 validator=validator, score=float(pat["score"]),
-                context=tuple(c.lower() for c in rec.get("context", [])), require_context=weak,
+                context=tuple(c.lower() for c in rec.get("context", [])) + PRESIDIO_EXTRA_CONTEXT.get(rec["id"], ()),
+                require_context=weak,
                 whole_match=True,
             ))
     return out
