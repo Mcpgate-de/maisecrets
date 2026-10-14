@@ -1116,9 +1116,12 @@ Four sources, one scanner (`maisecrets/detect.py`):
   token after a product name, a legacy Vault token, Twilio `SK`, Codecov). They
   run after betterleaks and only fill its gaps; a test drops each one that a
   later betterleaks finds itself. gitleaks itself is no longer vendored.
-  Measured on Samsung CredData (15,753 labelled credentials) against the
-  gitleaks rules of 0.6.12: the same precision (76.5 %) and recall (60.6 %),
-  with a few more hits.
+  Samsung CredData, line by line, without the test-vector repository, regions
+  `de`: v0.6.17 has precision 0.929, recall 0.578 and F1 0.713 on tool results
+  and files. On typed prompts it has 0.924, 0.527 and 0.671. With regions `us`,
+  the US bank-account rule adds 546 false alarms (F1 0.690 and 0.649).
+  `docs/BENCHMARKS.md` has the method, each release, a comparison with other
+  tools and the commands to repeat it.
 - **Presidio** pattern recognizers, vendored as data under `maisecrets/rules/`
   (MIT, version in `PRESIDIO_VERSION`, refresh with `scripts/sync_presidio.py`):
   country-specific PII with scores and context words. The config key
