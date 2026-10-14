@@ -91,6 +91,22 @@ class UrlUserTests(unittest.TestCase):
                 self.assertEqual(values(text), [])
 
 
+class HomeUserTests(unittest.TestCase):
+    def test_the_user_of_a_home_path(self):
+        self.assertEqual(values("Traceback: /home/tkellermann/src/app.py"),
+                         [("user-in-home-path", "tkellermann")])
+        self.assertEqual(values("C:\\Users\\nwhitfield\\Desktop\\notes.txt"), [("user-in-home-path", "nwhitfield")])
+
+    def test_service_accounts_templates_and_the_own_home_stay_text(self):
+        for text in ("/home/runner/work/app/app", "/Users/Shared/data", "C:\\Users\\Public\\Documents\\x",
+                     "/home/appuser/app/main.py", "/home/nonroot/.cache", "/home/seluser/Downloads/x",
+                     "/home/user1/x", "/home/airflow/dags/x.py"):
+            with self.subTest(text=text):
+                self.assertEqual(values(text), [])
+        with mock.patch.object(personal.getpass, "getuser", return_value="tkellermann"):
+            self.assertEqual(values("/home/tkellermann/src/app.py"), [])
+
+
 class PhoneTests(unittest.TestCase):
     def test_a_number_with_one_digit_groups_in_both_channels(self):
         text = "call me on +1 4 1 5 223 3344"
