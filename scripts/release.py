@@ -105,6 +105,8 @@ def classify(subject: str, body: str) -> tuple[str, str, bool]:
 
 
 _REVERT_RE = re.compile(r'^Revert "(?P<inner>.+)"$')
+# git's own subject of a merge commit says nothing a user needs; the merged commits carry the notes
+_MERGE_RE = re.compile(r"^Merge (branch|remote-tracking branch|pull request|tag) ")
 _BREAKING_FOOTER_RE = re.compile(r"^BREAKING[ -]CHANGE: ", re.M)
 
 
@@ -164,7 +166,7 @@ def plan() -> tuple[str, str, list[tuple[str, str, str]]] | None:
 def render_notes(version: str, commits: list[tuple[str, str, str]]) -> str:
     groups: dict[str, list[str]] = {}
     for sha, subject, body in commits:
-        if subject.startswith("chore(release):"):
+        if subject.startswith("chore(release):") or _MERGE_RE.match(subject):
             continue
         typ, text, breaking = classify(subject, body)
         if typ in TYPES_NONE and not breaking:   # `refactor!:` is the reason for its release
