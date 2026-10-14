@@ -185,11 +185,19 @@ def _public_ip(ip: str) -> bool:
 
 
 def _de_tax_id_ok(v: str) -> bool:
-    """Steuer-ID, ISO 7064 Mod 11,10 (BZSt), plus the digit-frequency rule."""
+    """Steuer-ID (IdNr, § 139b AO): eleven digits, the first never 0. In the first ten, exactly one digit occurs twice
+    or three times and every other digit once at most; a digit that occurs three times never stands at three places
+    in a row. The eleventh is the check digit, ISO 7064 MOD 11,10. Source: ITZBund, "KONZEPT Steueridentifikationsnummer
+    (IdNr) nach § 139b AO", version 2.3 of 2016-03-01, section 1, and ELSTER, "Prüfung der Steuer- und
+    Steueridentifikationsnummer", 2026-09-02, section 2.2. Presidio's "no digit more than three times" passed 8.7 % of
+    random numbers; this rule passes 0.4 % (0.6.19)."""
     if len(v) != 11 or not v.isdigit() or v[0] == "0":
         return False
     digits = [int(d) for d in v]
-    if max(Counter(digits[:10]).values()) > 3:
+    repeated = [(d, n) for d, n in Counter(digits[:10]).items() if n > 1]
+    if len(repeated) != 1 or repeated[0][1] not in (2, 3):
+        return False
+    if repeated[0][1] == 3 and any(digits[i] == digits[i + 1] == digits[i + 2] for i in range(8)):
         return False
     product = 10
     for i in range(10):
@@ -1120,6 +1128,7 @@ VALIDATORS = {
     "prose_value": _prose_value_ok,
     "de_tax_id": _de_tax_id_ok,
     "de_social_security": _de_social_security_ok,
+    "de_social_security_spaced": lambda v: _de_social_security_ok(v.replace("\u00a0", " ")),
     "de_health_insurance": _de_health_insurance_ok,
     "de_lanr": _de_lanr_ok,
     "de_bsnr": lambda v: len(v.strip()) == 9 and v.strip().isdigit() and v.strip() != "000000000",
@@ -1135,6 +1144,7 @@ VALIDATORS = {
     "us_ssn": _us_ssn_ok,
     # checksums.py: the German document number
     "de_document": checksums.de_document_ok,
+    "de_tax_id_spaced": lambda v: _de_tax_id_ok(re.sub(r"[ \u00a0]", "", v)),
 }
 
 
@@ -1393,6 +1403,9 @@ DEFAULT_PII_REGIONS = ("generic",)   # without a config: the rules of no country
 # country rules of our own (0.6.19): forms Presidio has no pattern for. The design follows a fork of this project
 # (Apache-2.0, see NOTICE). Each rule names its region; a rule
 # with require_context needs one of its context words within 80 characters before or 40 after the value.
+_DE_TAX_ID_CONTEXT = ("steueridentifikationsnummer", "steuer-id", "steuerid", "steuerliche identifikationsnummer",
+                      "steuerliche identifikation", "persönliche identifikationsnummer", "steuer identifikation",
+                      "idnr", "steuer-idnr", "identifikationsnummer", "bzst")
 _DE_ID_CARD_CONTEXT = ("personalausweis", "ausweis", "personalausweisnummer", "ausweisnummer", "ausweis-nr",
                        "ausweisnr", "personalausweisnr", "dokumentennummer", "ausweisdokument", "npa",
                        "neuer personalausweis", "bundespersonalausweis", "identity card", "id card", "id-card",
@@ -1411,6 +1424,17 @@ REGIONAL_RULES: list = [
     {"id": "de-passport", "region": "de", "type": "DE_PASSPORT", "validator": "de_document",
      "context": _DE_PASSPORT_CONTEXT, "require_context": True,
      "regex": rf"(?<![A-Za-z0-9])[{_DOC}][{_DOC}0-9]{{8}}[0-9]?(?![A-Za-z0-9])"},
+    # the Steuer-ID as the tax office prints it, 2-3-3-3 digits; the 11 digits in one run are Presidio's de-tax-id
+    {"id": "de-tax-id-spaced", "region": "de", "type": "DE_TAX_ID", "validator": "de_tax_id_spaced",
+     "context": _DE_TAX_ID_CONTEXT, "require_context": True,
+     "regex": r"(?<![\d.,/-])(?<!\d[ \u00a0])[1-9][0-9][ \u00a0][0-9]{3}[ \u00a0][0-9]{3}[ \u00a0][0-9]{3}"
+              r"(?![0-9]|[ \u00a0][0-9])"},
+    # the Rentenversicherungsnummer as the SV-Ausweis prints it: 2, 6 (birth date), 1 letter, 3, with spaces; the run
+    # without spaces is Presidio's de-social-security, which needs no context word in the same date-checked form
+    {"id": "de-social-security-spaced", "region": "de", "type": "DE_SOCIAL_SECURITY",
+     "validator": "de_social_security_spaced",
+     "regex": r"(?<![\w.,/-])[0-9]{2}[ \u00a0](?:0[1-9]|[12][0-9]|3[01]|5[1-9]|[67][0-9]|8[01])(?:0[1-9]|1[0-2])"
+              r"[0-9]{2}[ \u00a0][A-Z][ \u00a0][0-9]{3}(?![\w])"},
 ]
 
 

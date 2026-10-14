@@ -130,6 +130,71 @@ class GermanDocumentNumberTests(unittest.TestCase):
         self.assertEqual(found(f"pass {v} to the builder"), [])
 
 
+def tax_id(r: random.Random) -> str:
+    while True:
+        body = rd(r, 1, D[1:]) + rd(r, 9)
+        try:
+            return complete(body, detect._de_tax_id_ok)
+        except AssertionError:
+            continue
+
+
+class SteuerIdTests(unittest.TestCase):
+    def test_exactly_one_digit_twice_or_three_times_and_never_three_in_a_row(self):
+        ok = detect._de_tax_id_ok
+        # ITZBund, KONZEPT IdNr 2.3, section 1, and the example of both sources: 9 at places 3, 5 and 6
+        self.assertTrue(ok(J(["6592", "9970", "489"])))
+        bodies = {"two digits twice": "1123345678", "one digit three times in a row": "1112345678",
+                  "one digit four times": "1121314156", "no digit twice": "1234567890"}
+        for why, body in bodies.items():
+            with self.subTest(why=why):
+                self.assertFalse(any(ok(body + c) for c in D))
+        self.assertTrue(any(ok("1213456780" + c) for c in D))     # one digit twice
+        self.assertTrue(any(ok("1121345678" + c) for c in D))     # three times, two of them adjacent
+
+    def test_a_random_number_passes_rarely(self):
+        r = random.Random(4)
+        n = 20000
+        passed = sum(detect._de_tax_id_ok(rd(r, 1, D[1:]) + rd(r, 10)) for _ in range(n))
+        self.assertLess(passed / n, 0.01)
+
+    def test_the_printed_form_with_spaces_is_found_after_its_label(self):
+        r = random.Random(5)
+        for _ in range(40):
+            v = tax_id(r)
+            spaced = f"{v[:2]} {v[2:5]} {v[5:8]} {v[8:]}"
+            bad = twin(spaced, lambda s: detect._de_tax_id_ok(s.replace(" ", "")))
+            with self.subTest(v=spaced):
+                self.assertEqual(types_of(f"Steuer-ID: {spaced}", spaced), ["DE_TAX_ID"])
+                self.assertEqual(found(f"Steuer-ID: {bad}"), [])
+                self.assertEqual(found(spaced), [])
+                self.assertEqual(found(f"Steuer-ID: {spaced} 12"), [])      # a longer run of groups
+
+
+def rv_number(r: random.Random) -> str:
+    while True:
+        body = rd(r, 2) + f"{r.randint(1, 28):02d}{r.randint(1, 12):02d}{r.randint(0, 99):02d}" + r.choice(U) + rd(r, 2)
+        try:
+            return complete(body, detect._de_social_security_ok)
+        except AssertionError:
+            continue
+
+
+class RentenversicherungsnummerTests(unittest.TestCase):
+    def test_the_printed_form_with_spaces_is_found(self):
+        r = random.Random(6)
+        for _ in range(40):
+            v = rv_number(r)
+            spaced = f"{v[:2]} {v[2:8]} {v[8]} {v[9:]}"
+            bad = twin(spaced, detect._de_social_security_ok)
+            with self.subTest(v=spaced):
+                self.assertEqual(types_of(f"Rentenversicherungsnummer {spaced}", spaced), ["DE_SOCIAL_SECURITY"])
+                self.assertEqual(types_of(spaced, spaced), ["DE_SOCIAL_SECURITY"])
+                nbsp = spaced.replace(" ", "\u00a0")                        # Gate A of 0.6.19
+                self.assertEqual(types_of(nbsp, nbsp), ["DE_SOCIAL_SECURITY"])
+                self.assertEqual(found(bad), [])
+
+
 
 
 if __name__ == "__main__":

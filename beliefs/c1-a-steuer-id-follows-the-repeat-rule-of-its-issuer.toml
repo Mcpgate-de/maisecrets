@@ -1,0 +1,10 @@
+# c1-a-steuer-id-follows-the-repeat-rule-of-its-issuer: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-steuer-id-follows-the-repeat-rule-of-its-issuer"
+control = "C1"
+statement = "A Steuer-ID is valid only when exactly one of its first ten digits occurs twice or three times, never three times in a row, as the ITZBund concept (version 2.3, 2016) and ELSTER say; Presidio's looser rule passed 8.7 % of random numbers."
+runner = ["tests/test_rules_from_other_detectors.py::SteuerIdTests::test_exactly_one_digit_twice_or_three_times_and_never_three_in_a_row"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''    if repeated[0][1] == 3 and any('''
+replace = '''    if False and any('''

@@ -1172,7 +1172,11 @@ Four sources, one scanner (`maisecrets/detect.py`):
   public and is no personal data. Own rules (`REGIONAL_RULES` in
   `maisecrets/detect.py`) add what Presidio lacks: the Personalausweis and
   Reisepass number in the 9 characters the card prints (Presidio read the 9th
-  as a check digit, which only the machine-readable zone carries).
+  as a check digit, which only the machine-readable zone carries), and the
+  Steuer-ID and the Rentenversicherungsnummer with the spaces of their printed
+  form. The Steuer-ID check follows the repeat rule of its issuer (exactly one
+  digit twice or three times, never three in a row; ITZBund, "KONZEPT
+  Steueridentifikationsnummer", version 2.3, 2016).
 - **detect-secrets** (Yelp, Apache-2.0, version in `DETECT_SECRETS_VERSION`,
   refresh with `scripts/sync_detect_secrets.py vX.Y.Z`): credentials
   recognised by position (`password = …`, `api_key: "…"`, `user:pass@host`),

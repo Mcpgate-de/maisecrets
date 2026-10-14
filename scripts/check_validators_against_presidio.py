@@ -4,6 +4,9 @@
 Needs a Python with presidio-analyzer (see scripts/sync_presidio.py). Generates
 random candidates per shape and compares "presidio keeps the hit" (True or
 None) with our validator's verdict. Run after every sync_presidio.py.
+
+The Steuer-ID validator is stricter than Presidio's on purpose (it follows the primary source,
+detect._de_tax_id_ok); for it only a number we accept and Presidio rejects counts.
 """
 import random
 import string
@@ -34,12 +37,14 @@ GENS = {
     "de_bsnr": (DeBsnrRecognizer(), lambda: rnd(D, 9)),
     "de_vat_id": (DeVatIdRecognizer(), lambda: "DE" + rnd(D, 9)),
 }
+STRICTER = {"de_tax_id"}
 bad = 0
 for name, (rec, gen) in GENS.items():
     disagree = 0
     for _ in range(4000):
         v = gen()
-        if (rec.validate_result(v) is not False) != detect.VALIDATORS[name](v):
+        theirs, ours = rec.validate_result(v) is not False, detect.VALIDATORS[name](v)
+        if (ours and not theirs) if name in STRICTER else theirs != ours:
             disagree += 1
     print(f"{name:<22} disagree {disagree}/4000")
     bad += disagree
