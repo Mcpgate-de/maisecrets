@@ -194,6 +194,52 @@ class PhoneTests(unittest.TestCase):
                 self.assertEqual(values(text), [])
 
 
+class CsvTests(unittest.TestCase):
+    def test_the_cells_of_personal_columns(self):
+        text = "name,email,dob\nLena Brückner,lena@example.org,1980-01-02\n"
+        self.assertEqual(values(text), [("csv-personal-column", "Lena Brückner"),
+                                        ("csv-personal-column", "1980-01-02")])
+
+    def test_a_product_list_and_a_desk_list_stay_text(self):
+        for text in ("name,price,qty\nWidget Pro,9.99,3\n", "name,phone\nFront Desk,ext. 100\nIT Helpdesk,ext. 200\n",
+                     "id,name,address,dob,phone\n", "x,sin,cos\n0.5,0.479,0.877\n"):
+            with self.subTest(text=text):
+                self.assertEqual(values(text), [])
+
+
+class ChannelTests(unittest.TestCase):
+    def test_a_typed_prompt_takes_only_the_phone_rules(self):
+        text = "patient: Dorian K. Ashby, DOB: 1987-04-12, MRN: 00482913, /home/tkellermann/x"
+        self.assertEqual(values(text, "prompt"), [])
+        self.assertEqual(len(values(text, "tool")), 4)
+
+    def test_another_rule_keeps_its_span(self):
+        # the e-mail rule takes the address; the name rule takes only the name before it
+        kinds = [m.kind for m in scan("Tobias Kellermann <tobias.kellermann@mail.test-firma.de>")]
+        self.assertIn("name-before-email", kinds)
+        self.assertIn("email", kinds)
+
+
+class CorpusTests(unittest.TestCase):
+    def test_the_personal_data_corpus_has_no_false_hit_in_either_channel(self):
+        for ch in ("tool", "prompt"):
+            wrong = [(i, values(t, ch)) for i, t in fp_corpus_pii.PII_NO_HIT if values(t, ch)]
+            self.assertEqual(wrong, [], f"{ch}: {len(wrong)} of {len(fp_corpus_pii.PII_NO_HIT)} texts")
+
+    def test_every_positive_value_is_masked_in_a_tool_result(self):
+        missed = []
+        for i, text, vals in fp_corpus_pii.POSITIVE:
+            out = text
+            for m in sorted(scan(text), key=lambda m: -m.start):
+                out = out[:m.start] + "\u2022" + out[m.end:]
+            missed += [i for v in vals if v in out]
+        self.assertEqual(missed, [])
+
+    def test_the_corpus_is_large_enough(self):
+        self.assertGreaterEqual(len(fp_corpus_pii.PII_NO_HIT), 300)
+        self.assertGreaterEqual(len(fp_corpus_pii.POSITIVE), 40)
+
+
 
 if __name__ == "__main__":
     unittest.main()
