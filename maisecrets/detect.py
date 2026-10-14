@@ -2956,8 +2956,13 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> li
                 # the tail would stay in the clear (4 chars of a 24-char token, 2026-09-26): the
                 # value runs to the end of the token characters
                 end2 = end
-                while end2 < len(text) and end2 - end < 128 and _TOKEN_CHAR_RE.match(text[end2]):
+                gitlab = _GITLAB_PREFIX_RE.match(secret)
+                while end2 < len(text) and end2 - end < (400 if gitlab else 128) and _TOKEN_CHAR_RE.match(text[end2]):
                     end2 += 1
+                if gitlab and end2 - end > 128 and not _ROUTABLE_TAIL_RE.match(text, end2):
+                    # the payload of a routable GitLab token runs up to 235 characters before its ".01.<id>" tail
+                    # (routable_token.rb), past the 128; a run without that tail keeps the bound (0.6.20)
+                    end2 = end + 128
                 if end2 > end and _TOKEN_CHAR_RE.match(secret[-1]) and not overlaps(end, end2):
                     end = end2
                     secret = text[start:end]

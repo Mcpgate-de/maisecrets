@@ -408,5 +408,55 @@ class BetterleaksPatchTests(unittest.TestCase):
         self.assertIn(("wakatime-api-key.2", "SECRET", tok), found(f"use {tok} here\n"))
 
 
+# ------------------------------------------------------- forms of a session measurement --
+def gitlab_routable(r: random.Random, prefix: str = "glpat-", payload_bytes: int = 40) -> str:
+    """GitLab's routable token (lib/authn/token_field/generator/routable_token.rb): base64url of 16 random bytes, the
+    routing payload and its size; ".01."; the payload length (2 base36) and CRC32 (7 base36)."""
+    import zlib
+    raw = bytes(r.randrange(256) for _ in range(16 + payload_bytes))
+    payload = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    def b36(n: int, w: int) -> str:
+        out = ""
+        while n:
+            n, d = divmod(n, 36)
+            out = (D + L)[d] + out
+        return out.rjust(w, "0")
+    body = J([prefix, payload, ".01.", b36(len(payload), 2)])
+    return body + b36(zlib.crc32(body.encode()) & 0xffffffff, 7)
+
+
+class SessionFormTests(unittest.TestCase):
+    """Forms that real session transcripts held and 0.6.17 missed or masked in part (the values were not kept; these
+    are built from the vendors' formats)."""
+
+    FORMS = ("{t}", "use {t} now", "export TOKEN={t}\n", '{{"k": "{t}"}}', "key {t}.", 'TOKEN="{t}"\n')
+
+    def whole(self, tok: str, kind: str | None = None):
+        for form in self.FORMS:
+            text = form.format(t=tok)
+            for channel in ("prompt", "tool"):
+                with self.subTest(form=form[:8], channel=channel, n=len(tok)):
+                    hits = [(k, v) for k, _t, v in found(text, channel) if tok in v or v in tok]
+                    self.assertTrue(any(v == tok for _k, v in hits), hits and [(k, len(v)) for k, v in hits])
+                    if kind and form == "{t}":   # a label rule or, before a full stop, the fallback may take it
+                        self.assertIn((kind, tok), hits)
+
+    def test_a_routable_gitlab_token_with_a_long_payload_is_one_hit(self):
+        """The payload runs up to 235 characters (a routing payload of 159 bytes); the token characters stopped
+        128 after the vendored shape, and the rest with the ".01.<id>" tail stayed in the clear."""
+        r = random.Random(50)
+        for n in (20, 60, 120, 159):
+            self.whole(gitlab_routable(r, payload_bytes=n))
+
+    def test_a_long_run_of_near_misses_takes_linear_time(self):
+        r = random.Random(54)
+        for near in ((J(["gl", "pat-"]) + rd(r, 390, B64U) + ".01. ") * 300,):
+            t0 = time.perf_counter()
+            found(near, "tool")
+            with self.subTest(n=len(near)):
+                self.assertLess(time.perf_counter() - t0, 3.0)
+
+
 if __name__ == "__main__":
     unittest.main()
