@@ -43,6 +43,16 @@ MAX_PDF_BYTES = 100 * 1024 * 1024
 # 6-10 ms to hash and 23-32 ms to decode and hash (3.9 and 3.14). A larger file is never clean, and ask refuses it
 BIND_MAX_BYTES = 64 * 1024 * 1024
 MAX_TEXT_CHARS = 32 * 1024
+# a crafted PDF of 3.6 MB took pdftotext to 1.5 GB in 2.4 s and on (poppler 26.10.0, 2026-10-14); one of 15 KB, to
+# 234 MB. The largest normal PDF measured (858 pages) peaked at 27 MB. macOS does not enforce RLIMIT_AS or RLIMIT_DATA
+# (a limit below the address space it gives every process is refused, one above it changes nothing: measured), so
+# the hook reads the child's resident size while it waits and stops it above this. Linux enforces RLIMIT_AS as well
+MAX_RSS_BYTES = 512 * 1024 * 1024
+MAX_AS_BYTES = 1024 * 1024 * 1024
+POLL_SECONDS = 0.05
+# 25 characters that are not white space per page, on average: below that a PDF is a scan with page numbers or a
+# header line at most (the rule of the ai-gateway's document review). A scan of 3 pages with only page numbers had 45
+MIN_CHARS_PER_PAGE = 25
 # a client started from the desktop has a short PATH; these hold pdftotext from Homebrew, MacPorts and Linux packages
 _EXTRA_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin")
 INSTALL = ("macOS: brew install poppler; Debian or Ubuntu: sudo apt install poppler-utils; Fedora: sudo dnf install "
@@ -534,22 +544,101 @@ def text_result(file_path: str, content: str) -> dict:
                                      "totalLines": lines}}
 
 
+def admin_groups() -> frozenset:
+    """Groups whose members can become root anyway, so their write is no other account's write (maintainer's
+    decision, Option B). Measured in the default sudoers and polkit rules (2026-10-14): macOS `%admin ALL = (ALL) ALL`,
+    and wheel is gid 0, the group of root; Debian `%sudo`; Ubuntu `%sudo` and `%admin`; Fedora `%wheel`. Alpine and
+    openSUSE name no group by default, so there none counts; a system not in this list keeps the strict rule."""
+    import sys
+    if sys.platform == "darwin":
+        return frozenset({"admin", "wheel"})
+    if not sys.platform.startswith("linux"):
+        return frozenset()
+    ids = set()
+    try:
+        with open("/etc/os-release", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                key, _, value = line.strip().partition("=")
+                if key in ("ID", "ID_LIKE"):
+                    ids.update(value.strip().strip("\"'").split())
+    except OSError:
+        return frozenset()
+    groups = set()
+    if ids & {"debian", "ubuntu"}:
+        groups.add("sudo")
+    if "ubuntu" in ids:
+        groups.add("admin")
+    if ids & {"fedora", "rhel", "centos"}:
+        groups.add("wheel")
+    return frozenset(groups)
+
+
 def _group_has_other_writer(gid: int) -> bool:
-    """A member of this group other than root and this user (the group list and the users whose own group it is)."""
+    """Whether a group write lets another account in: True for every group but one whose members can become root
+    (admin_groups). A member list cannot tell: macOS groups like everyone (12) and localaccounts (61) list no
+    member and hold every account, and directory services add members the list does not show (review of block 4)."""
     try:
         import grp
-        import pwd
-        me = pwd.getpwuid(os.getuid()).pw_name
-        names = set(grp.getgrgid(gid).gr_mem) | {u.pw_name for u in pwd.getpwall() if u.pw_gid == gid}
+        return grp.getgrgid(gid).gr_name not in admin_groups()
     except (ImportError, KeyError, OSError):
         return True
-    return not names <= {"root", me}
+
+
+def _acl_lets_in(path: str) -> bool:
+    """An access control list on the path that can grant a write beside the mode bits: on macOS an allow entry with
+    a write right (`chmod +a`), on Linux any POSIX ACL (a named entry hides behind the group mask). Fail closed: a
+    list that cannot be read counts as one."""
+    import sys
+    if sys.platform == "darwin":
+        try:
+            import ctypes
+            lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+            lib.acl_get_link_np.restype = ctypes.c_void_p
+            lib.acl_get_link_np.argtypes = [ctypes.c_char_p, ctypes.c_int]
+            lib.acl_to_text.restype = ctypes.c_void_p
+            lib.acl_to_text.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            lib.acl_free.argtypes = [ctypes.c_void_p]
+            acl = lib.acl_get_link_np(os.fsencode(path), 0x100)          # ACL_TYPE_EXTENDED
+            if not acl:
+                return ctypes.get_errno() != 2                          # ENOENT: no list
+            text = lib.acl_to_text(acl, None)
+            try:
+                body = ctypes.string_at(text).decode("utf-8", "replace") if text else None
+            finally:
+                if text:
+                    lib.acl_free(text)
+                lib.acl_free(acl)
+        except (OSError, AttributeError, ValueError):
+            return True
+        if body is None:
+            return True
+        for line in body.splitlines()[1:]:
+            fields = line.split(":")
+            # group:<uuid>:<name>:<id>:allow|deny:<rights>, the rights comma separated
+            if len(fields) >= 6 and fields[-2] == "allow" and set(fields[-1].split(",")) & _ACL_WRITES:
+                return True
+        return False
+    if sys.platform.startswith("linux"):
+        try:
+            os.getxattr(path, "system.posix_acl_access", follow_symlinks=False)
+            return True
+        except OSError as exc:
+            import errno
+            return exc.errno not in (errno.ENODATA, errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", errno.ENOTSUP))
+        except AttributeError:
+            return False
+    return False
+
+
+_ACL_WRITES = frozenset({"write", "append", "add_file", "add_subdirectory", "delete", "delete_child", "writeattr",
+                         "writeextattr", "writesecurity", "chown", "file_inherit", "directory_inherit"})
 
 
 def _no_other_writer(path: str) -> bool:
     """Every component from / to the path is owned by root or this user, and nobody else can write it: no write for
-    others, and group write only for a group of root and this user. A folder with the sticky bit (/tmp) may be
-    writable by all: only an entry's owner can rename it, and that owner is checked at the next component."""
+    others, group write only for an admin group (admin_groups), and no access control list that grants a write. A
+    folder with the sticky bit (/tmp) may be writable by all: only an entry's owner can rename it, and that owner is
+    checked at the next component."""
     import stat
     if not hasattr(os, "getuid"):
         return False
@@ -564,13 +653,26 @@ def _no_other_writer(path: str) -> bool:
             return False
         if st.st_uid not in (0, uid):
             return False
+        if stat.S_ISLNK(st.st_mode):
+            # Linux shows every link as 0777, and nobody can write a link: its owner is checked here, its folder
+            # one step up and its target by the caller's realpath walk
+            continue
         sticky = stat.S_ISDIR(st.st_mode) and st.st_mode & stat.S_ISVTX
         if st.st_mode & stat.S_IWOTH and not sticky:
             return False
-        if st.st_mode & stat.S_IWGRP and not sticky and not stat.S_ISLNK(st.st_mode) \
-                and _group_has_other_writer(st.st_gid):
+        if st.st_mode & stat.S_IWGRP and not sticky and _group_has_other_writer(st.st_gid):
+            return False
+        if _acl_lets_in(current):
             return False
     return True
+
+
+def _outside(paths, cwd: str) -> bool:
+    """None of the paths lies in the working folder."""
+    if not cwd:
+        return True
+    work = os.path.realpath(cwd)
+    return not any(os.path.commonpath([os.path.realpath(x), work]) == work for x in paths)
 
 
 def trusted_tool(link: str, cwd: str = "") -> str | None:
@@ -582,32 +684,178 @@ def trusted_tool(link: str, cwd: str = "") -> str | None:
         real = os.path.realpath(link)
         if not (_no_other_writer(link) and _no_other_writer(real)):
             return None
-        if cwd:
-            work = os.path.realpath(cwd)
-            if any(os.path.commonpath([x, work]) == work for x in (os.path.realpath(os.path.dirname(link)), real)):
-                return None
+        if not _outside((os.path.dirname(link), real), cwd):
+            return None
     except (OSError, ValueError):
         return None
     return real
 
 
+# ---------------------------------------------------------- the libraries --
+# Homebrew's pdftotext loads 33 libraries from /opt/homebrew (poppler 26.10.0, measured with otool -L): a writable
+# library runs code in the hook as surely as a writable program. Each one passes the same check as the program
+_MACHO_LOAD = (0xC, 0x20, 0x80000018, 0x8000001F, 0x80000023)   # LOAD, LAZY_LOAD, LOAD_WEAK, REEXPORT, LOAD_UPWARD
+_MACHO_RPATH = 0x8000001C
+_HEAD_BYTES = 256 * 1024
+_MAX_LIBRARIES = 400
+
+
+def _macho_commands(path: str):
+    """(libraries, rpaths) that the load commands of a Mach-O file name, for this machine's slice of a universal
+    file; None for a file that is no Mach-O or cannot be read whole."""
+    import platform
+    import struct
+    try:
+        with open(path, "rb") as f:
+            data = f.read(_HEAD_BYTES)
+            magic = struct.unpack(">I", data[:4])[0]
+            if magic in (0xCAFEBABE, 0xCAFEBABF):
+                want = {"arm64": 0x0100000C, "x86_64": 0x01000007}.get(platform.machine())
+                wide = magic == 0xCAFEBABF
+                step = 32 if wide else 20
+                for i in range(min(struct.unpack(">I", data[4:8])[0], 16)):
+                    rec = data[8 + i * step:8 + (i + 1) * step]
+                    off = struct.unpack(">Q", rec[8:16])[0] if wide else struct.unpack(">I", rec[8:12])[0]
+                    if struct.unpack(">I", rec[:4])[0] == want:
+                        f.seek(off)
+                        data = f.read(_HEAD_BYTES)
+                        break
+                else:
+                    return None
+        if data[:4] != b"\xcf\xfa\xed\xfe":
+            return None
+        ncmds, size = struct.unpack("<II", data[16:24])
+        if 32 + size > len(data):
+            return None
+        pos, libs, rpaths = 32, [], []
+        for _ in range(ncmds):
+            cmd, cmdsize = struct.unpack("<II", data[pos:pos + 8])
+            if cmdsize < 12 or pos + cmdsize > 32 + size:
+                return None
+            if cmd in _MACHO_LOAD or cmd == _MACHO_RPATH:
+                off = struct.unpack("<I", data[pos + 8:pos + 12])[0]
+                name = data[pos + off:pos + cmdsize].split(b"\0", 1)[0].decode("utf-8")
+                (rpaths if cmd == _MACHO_RPATH else libs).append(name)
+            pos += cmdsize
+    except (OSError, ValueError, struct.error, UnicodeDecodeError):
+        return None
+    return libs, rpaths
+
+
+def _macho_libraries(tool: str):
+    """Every library a Mach-O program loads, also through the libraries it loads (no otool: without the developer
+    tools it is a stub that asks to install them). A library under /usr/lib or /System that is not on disk lives
+    in the system's shared cache, under SIP. None when a name cannot be resolved."""
+    exe_dir = os.path.dirname(tool)
+    seen, out, todo = set(), [], [(tool, ())]
+    while todo:
+        path, above = todo.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        parsed = _macho_commands(path)
+        if parsed is None or len(seen) > _MAX_LIBRARIES:
+            return None
+        here = os.path.dirname(path)
+        rpaths = tuple(r.replace("@loader_path", here).replace("@executable_path", exe_dir) for r in parsed[1]) + above
+        for name in parsed[0]:
+            if name.startswith(("/usr/lib/", "/System/")) and not os.path.lexists(name):
+                continue
+            if name.startswith("@rpath/"):
+                found = [os.path.join(r, name[7:]) for r in rpaths if os.path.isfile(os.path.join(r, name[7:]))]
+                if not found:
+                    return None
+                name = found[0]
+            name = name.replace("@loader_path", here).replace("@executable_path", exe_dir)
+            if not (os.path.isabs(name) and os.path.isfile(name)):
+                return None
+            out.append(name)
+            todo.append((os.path.realpath(name), rpaths))
+    return out
+
+
+def _elf_libraries(tool: str):
+    """The libraries ldd names for an ELF program, the loader too; None when ldd is not a trusted root program or
+    fails. ldd runs the program's loader, never its code; the program passed the check before."""
+    import subprocess
+    ldd = next((p for p in ("/usr/bin/ldd", "/bin/ldd") if os.path.isfile(p)), None)
+    if not ldd or not _no_other_writer(ldd):
+        return None
+    try:
+        r = subprocess.run([ldd, tool], capture_output=True, text=True, timeout=3, stdin=subprocess.DEVNULL,
+                           env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"})
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    out = []
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if "=>" in line:
+            target = line.split("=>", 1)[1].strip().split(" (", 1)[0].strip()
+            if target == "not found":
+                return None
+            if target.startswith("/"):
+                out.append(target)
+        elif line.startswith("/"):
+            out.append(line.split(" (", 1)[0])
+    return out
+
+
+def libraries(tool: str):
+    """The code the program loads besides itself: its libraries, or the interpreter of a script. None when that
+    cannot be told; a program whose libraries cannot be told is not run."""
+    import sys
+    try:
+        with open(tool, "rb") as f:
+            head = f.read(256)
+    except OSError:
+        return None
+    if head.startswith(b"#!"):
+        words = head[2:].split(b"\n", 1)[0].split()
+        # `#!/usr/bin/env x` lets the PATH choose the program: no fixed interpreter, no run
+        if not words or not words[0].startswith(b"/") or os.path.basename(words[0]) == b"env":
+            return None
+        return [os.fsdecode(words[0])]
+    if sys.platform == "darwin":
+        return _macho_libraries(tool)
+    if head.startswith(b"\x7fELF"):
+        return _elf_libraries(tool)
+    return None
+
+
+def _trusted_libraries(tool: str, cwd: str = "") -> bool:
+    libs = libraries(tool)
+    if libs is None:
+        return False
+    try:
+        return all(_no_other_writer(lib) and _no_other_writer(os.path.realpath(lib)) for lib in libs) \
+            and _outside(libs, cwd)
+    except (OSError, ValueError):
+        return False
+
+
 def pdftotext(cwd: str = "") -> str | None:
     """pdftotext from the fixed install folders only (Homebrew, MacPorts, /usr/local/bin, /usr/bin), never from the
     PATH: a folder on the PATH that the agent can write to would get its own program run by the hook (codex review of
-    block 4). The resolved program is returned, and extract() checks it again right before it starts it."""
+    block 4). The program and every library it loads must have no other writer. The resolved program is returned,
+    and extract() checks it again right before it starts it."""
     for d in _EXTRA_DIRS:
         real = trusted_tool(os.path.join(d, "pdftotext"), cwd)
-        if real:
+        if real and _trusted_libraries(real, cwd):
             return real
     return None
 
 
 def untrusted_tool() -> str | None:
-    """A pdftotext in a fixed folder that maisecrets does not run (another account can change it or a folder above)."""
+    """A pdftotext in a fixed folder that maisecrets does not run (another account can change it, a folder above it
+    or a library it loads)."""
     for d in _EXTRA_DIRS:
         link = os.path.join(d, "pdftotext")
-        if os.path.isfile(link) and not trusted_tool(link):
-            return link
+        if os.path.isfile(link):
+            real = trusted_tool(link)
+            if not (real and _trusted_libraries(real)):
+                return link
     return None
 
 
@@ -616,9 +864,10 @@ def missing_tool_text(codex: bool) -> str:
     found = untrusted_tool()
     if found:
         return (f"maisecrets: the setting read_pdf is convert, and maisecrets does not run the pdftotext in "
-                f"{os.path.dirname(found)}: another account on this computer can change it or a folder above it. "
-                "Nothing of the PDF reached you. Tell the user; they can install pdftotext where only they and "
-                f"root can write, or choose another mode with {change} allow, ask or block.")
+                f"{os.path.dirname(found)}: another account on this computer can change it, a folder above it or a "
+                "library it loads. Nothing of the PDF reached you. Tell the user; they can install pdftotext where "
+                f"only they, root and the admin group can write, or choose another mode with {change} allow, ask "
+                "or block.")
     return (f"maisecrets: the setting read_pdf is convert, and convert needs the program pdftotext, which is not "
             f"installed in a fixed install folder ({', '.join(_EXTRA_DIRS) or 'none on this system'}; the PATH is "
             f"not used). Nothing of the PDF reached you. Tell the user to install it ({INSTALL}) "
@@ -645,6 +894,59 @@ def _wait(thread, seconds: float) -> None:
     thread.join(seconds)
 
 
+def _rss(pid: int):
+    """The resident memory of a running process in bytes, or None when it cannot be read."""
+    import sys
+    if sys.platform == "darwin":
+        try:
+            import ctypes
+            lib = ctypes.CDLL("/usr/lib/libproc.dylib")
+            info = (ctypes.c_uint64 * 32)()
+            # rusage_info_v0: a 16-byte uuid, then u64 fields; ri_resident_size is the 7th, ri_phys_footprint the 8th
+            if lib.proc_pid_rusage(ctypes.c_int(pid), ctypes.c_int(0), ctypes.byref(info)) != 0:
+                return None
+            return max(info[8], info[9])
+        except (OSError, AttributeError, ValueError):
+            return None
+    try:
+        with open(f"/proc/{pid}/statm") as f:
+            return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _limit_memory(pid: int) -> None:
+    """Linux: the kernel refuses the child more address space than MAX_AS_BYTES (set after the start: a preexec_fn
+    is not safe beside the hook's watchdog thread; the watch of the resident size covers the first moment)."""
+    try:
+        import resource
+        resource.prlimit(pid, resource.RLIMIT_AS, (MAX_AS_BYTES, MAX_AS_BYTES))
+    except (ImportError, AttributeError, OSError, ValueError):
+        pass
+
+
+_RUNNING: set = set()
+
+
+def kill_running() -> None:
+    """End every pdftotext this hook started. The watchdog calls it before os._exit, which skips the finally of
+    extract(): the child runs in its own session, so the client's kill of the hook does not reach it (review)."""
+    for pid in list(_RUNNING):
+        try:
+            if os.name == "nt":
+                os.kill(pid, 9)
+            else:
+                import signal
+                os.killpg(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def _child_env() -> dict:
+    """The environment of pdftotext without the variables that make the loader take other libraries."""
+    return {k: v for k, v in os.environ.items() if not k.startswith(("DYLD_", "LD_"))}
+
+
 def _stop(child) -> None:
     """End pdftotext and its process group, if it still runs."""
     if child.poll() is not None:
@@ -658,6 +960,18 @@ def _stop(child) -> None:
     except OSError:
         child.kill()
     child.wait()
+
+
+def _cut(text: str) -> str:
+    """The text up to MAX_TEXT_CHARS, ended at a line and never inside a key block: a value cut in two is no longer
+    the shape a rule finds (a PEM key needs its END line), and its first part would reach the model (review)."""
+    cut = text[:MAX_TEXT_CHARS]
+    if len(text) > MAX_TEXT_CHARS:
+        cut = cut[:cut.rfind("\n") + 1]
+    begin = cut.rfind("-----BEGIN")
+    if begin != -1 and "-----END" not in cut[begin:]:
+        cut = cut[:begin]
+    return cut
 
 
 def extract(path: str, pages=None, cwd: str = "") -> tuple[str | None, str]:
@@ -687,9 +1001,11 @@ def extract(path: str, pages=None, cwd: str = "") -> tuple[str | None, str]:
     try:
         # its own process group: a stop ends pdftotext and anything it started, so nobody holds the pipe open
         child = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                 **({} if os.name == "nt" else {"start_new_session": True}))
+                                 env=_child_env(), **({} if os.name == "nt" else {"start_new_session": True}))
     except OSError as exc:
         return None, f"pdftotext did not start ({type(exc).__name__})"
+    _RUNNING.add(child.pid)
+    _limit_memory(child.pid)
     cap = MAX_TEXT_CHARS * 4          # UTF-8 bytes: at most 4 for one character
     buf = bytearray()
 
@@ -705,9 +1021,21 @@ def extract(path: str, pages=None, cwd: str = "") -> tuple[str | None, str]:
             return
     reader = threading.Thread(target=pump, daemon=True)
     full = False
+    import time
     try:
         reader.start()
-        _wait(reader, EXTRACT_SECONDS)
+        deadline = time.monotonic() + EXTRACT_SECONDS
+        while reader.is_alive() and time.monotonic() < deadline:
+            # a PDF can be built to make pdftotext take all memory: its resident size is read between the waits,
+            # and a child the hook cannot measure is stopped too (fail closed)
+            _wait(reader, POLL_SECONDS)
+            if child.poll() is None:
+                rss = _rss(child.pid)
+                if rss is None or rss > MAX_RSS_BYTES:
+                    if child.poll() is None:
+                        return None, (f"pdftotext needed more than {MAX_RSS_BYTES // (1024 * 1024)} MB of memory, so "
+                                      "maisecrets stopped it; the PDF may be built to use up memory"
+                                      if rss is not None else "maisecrets cannot watch the memory of pdftotext")
         if reader.is_alive():
             return None, f"pdftotext took longer than {EXTRACT_SECONDS:g} s"
         full = len(buf) >= cap
@@ -720,20 +1048,30 @@ def extract(path: str, pages=None, cwd: str = "") -> tuple[str | None, str]:
         # any way out, also an exception that a watchdog could raise here: the child ends with the hook. The
         # exception goes on to the fail-closed answer, which withholds the file
         _stop(child)
+        _RUNNING.discard(child.pid)
         reader.join(0.5)
         try:
             child.stdout.close()
         except OSError:
             pass
+    if not full and child.returncode is not None and child.returncode < 0:
+        # a signal: on Linux an allocation over RLIMIT_AS ends pdftotext this way
+        return None, (f"pdftotext stopped with signal {-child.returncode}; the PDF may be built to use up memory, or "
+                      "it is damaged")
     if not full and child.returncode != 0:
         return None, f"pdftotext failed (exit {child.returncode}); the file may be damaged or protected by a password"
-    text = bytes(buf).decode("utf-8", errors="replace").replace("\f", "\n")
+    text = bytes(buf).decode("utf-8", errors="replace")
+    # pdftotext ends each page with a form feed; a text that reached the cap is no scan
+    pages = max(text.count("\f"), 1)
+    scanned = not full and len(re.sub(r"\s+", "", text)) < MIN_CHARS_PER_PAGE * pages
+    text = text.replace("\f", "\n")
     if full or len(text) > MAX_TEXT_CHARS:
-        text = (text[:MAX_TEXT_CHARS] + f"\n[maisecrets: the text stops here, after {MAX_TEXT_CHARS} characters. "
+        text = (_cut(text) + f"\n[maisecrets: the text stops here, after {MAX_TEXT_CHARS} characters. "
                 "Read the PDF again with `pages` set to a smaller range to see the rest.]")
-    if not text.strip():
-        text = ("[maisecrets: pdftotext found no text in this PDF (a scan or an image). maisecrets does no OCR, so "
-                "nothing of it reached you.]")
+    if scanned:
+        # fail closed: a page number or a header line of a scan is no reason to send anything of it
+        text = (f"[maisecrets: this PDF looks scanned: pdftotext found less than {MIN_CHARS_PER_PAGE} characters "
+                f"of text per page ({pages} page(s)). maisecrets does no OCR, so the AI gets nothing of it.]")
     return text, ""
 
 

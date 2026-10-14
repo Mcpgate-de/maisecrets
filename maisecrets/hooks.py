@@ -4196,6 +4196,13 @@ def main(argv: list[str]) -> int:
             t = threading.Thread(target=last, daemon=True)
             t.start()
             t.join(1.5)
+        # a pdftotext of read_pdf convert runs in its own session: os._exit skips the finally that ends it
+        reader = sys.modules.get("maisecrets.file_reads")
+        if reader is not None:
+            try:
+                reader.kill_running()
+            except Exception:  # noqa: BLE001 - the exit below must come
+                pass
         # always, also after a lost race: a hook that answered must still end before the client's timeout, which
         # lets the action through (measured, review round 5)
         os._exit(0)
