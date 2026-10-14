@@ -114,12 +114,14 @@ def _clipboard_read() -> str:
         return ""
 
 
-def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str | None) -> tuple[str, list]:
+def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str | None,
+             tool: bool = False) -> tuple[str, list]:
     """Replace every match with its reference, right to left so offsets hold. Keys are minted in
     text order, in one vault transaction; above the per-result cap a value is masked as
-    ⟦TYPE⟧ without a key (it is not stored and cannot be resolved)."""
+    ⟦TYPE⟧ without a key (it is not stored and cannot be resolved). tool: the text is a tool result
+    or a file, where a word after a label is stored weak (vault.is_weak)."""
     ordered = sorted(matches, key=lambda x: x.start)
-    entries = vault.put_many([(m.value, m.type, m.kind) for m in ordered], session=session)
+    entries = vault.put_many([(m.value, m.type, m.kind) for m in ordered], session=session, tool=tool)
     out = text
     for m, e in sorted(zip(ordered, entries), key=lambda me: me[0].start, reverse=True):
         out = out[: m.start] + (e.ref if e is not None else f"⟦{m.type}⟧") + out[m.end:]
@@ -627,7 +629,7 @@ def agent_report(payload: dict, prompt: str) -> bool:
     rest = _report_rest(payload, prompt)
     if rest is None:
         return False
-    if _has_live(load_config()) and _inserted_values(rest, Vault(load_config())):
+    if _has_live(load_config()) and _inserted_values(rest, Vault(load_config()), prompt=True):
         return False
     return True
 
@@ -712,8 +714,8 @@ def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str 
         # password typed again, or a value without a detector shape next to a detected one, went to
         # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
         # from 8 characters; a shorter one would block ordinary words in a prompt.
-        resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]
-        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values)
+        resolved = [(v, r) for v, r in _resolved_values(vault, session, prompt=True) if len(v) >= _EXACT_MIN_LEN]
+        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values, prompt=True)
     return rewritten, entries, values, stored
 
 
@@ -3079,7 +3081,7 @@ def _derived_forms(value: str) -> list[str]:
     return [f for f in dict.fromkeys(forms) if len(f) >= _EXACT_MIN_LEN]
 
 
-def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]:
+def _resolved_values(vault: Vault, session: str | None, prompt: bool = False) -> list[tuple[str, str]]:
     """(value, reference) for every key this session resolved in the last hour: a value the hook
     itself inserted into a command or an MCP argument is expected back in the output, in any
     position and any encoding, so it is matched as a substring and not by whole token."""
@@ -3087,9 +3089,11 @@ def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]
     keys = [r["key"] for r in vault._index.get("resolves", []) if r.get("session") == session and r["ts"] > now - 3600]
     out: list[tuple[str, str]] = []
     from .vault import Entry
-    # a weak entry is not hunted as a substring either (Vault.live_fingerprints)
+    # a weak entry is not hunted as a substring either, and in a typed prompt (prompt) a quiet one is not
+    # (Vault.live_fingerprints): an agent that used the placeholder of a word made the word block the prompt (Gate A)
     live = [k for k in dict.fromkeys(keys) if vault._index["entries"].get(k)
-            and not vault._index["entries"][k].get("purged") and not vault._index["entries"][k].get("weak")]
+            and not vault._index["entries"][k].get("purged") and not vault._index["entries"][k].get("weak")
+            and not (prompt and vault._index["entries"][k].get("quiet"))]
     if hasattr(vault.backend, "get_many"):
         found = vault.backend.get_many(live)
     else:
@@ -3101,10 +3105,11 @@ def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]
     return out
 
 
-def _inserted_values(text: str, vault: Vault) -> list[tuple[str, str]]:
+def _inserted_values(text: str, vault: Vault, prompt: bool = False) -> list[tuple[str, str]]:
     """(value, reference) for every live vault value that appears in ``text``, found by keyed
-    fingerprint of the tokens, so no value is read from the store."""
-    live = vault.live_fingerprints()
+    fingerprint of the tokens, so no value is read from the store. prompt: the text is a typed prompt
+    (Vault.live_fingerprints)."""
+    live = vault.live_fingerprints(prompt)
     if not live:
         return []
     out: list[tuple[str, str]] = []
@@ -3122,7 +3127,8 @@ def _inserted_values(text: str, vault: Vault) -> list[tuple[str, str]]:
 
 
 def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entries: list,
-                  resolved: list[tuple[str, str]] | None = None, values: list[str] | None = None) -> str:
+                  resolved: list[tuple[str, str]] | None = None, values: list[str] | None = None,
+                  prompt: bool = False) -> str:
     """Values without a known shape (a password stored with `put`, a value from a prior
     prompt) come back from a command in plaintext unless they are matched exactly. The
     match is by keyed fingerprint of each token, so no value is read from the store; the
@@ -3151,7 +3157,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
                 hit["n"] += n
                 if values is not None and form not in values:
                     values.append(form)
-    live = vault.live_fingerprints()
+    live = vault.live_fingerprints(prompt)   # a typed prompt does not hunt a quiet entry (Entry.quiet)
     if not live:
         return out
     found: list[str] = []          # admitted together at the end: one index write, not one per hit
@@ -3439,7 +3445,7 @@ def post_tool(payload: dict) -> dict:
             s, gone, runs = strip_hidden(s)
             hidden["n"] += gone
             hidden_runs.extend(runs)
-        matches = [m for m in detect.scan(s) if not detect.is_fixture(m, s, path)]
+        matches = [m for m in detect.scan(s, channel="tool") if not detect.is_fixture(m, s, path)]
         if not matches and not _has_live(cfg):
             return s
         if vault is None:
@@ -3447,7 +3453,7 @@ def post_tool(payload: dict) -> dict:
             resolved = _resolved_values(vault, session)
         out = s
         if matches:
-            out, ents = _replace(s, matches, vault, session)
+            out, ents = _replace(s, matches, vault, session, tool=True)
             hit["n"] += len(matches)
             values.extend(m.value for m in matches)
             entries.extend(ents)
@@ -3698,7 +3704,7 @@ def post_tool_failure(payload: dict) -> dict:
         return {}
     cfg = load_config()
     session = payload.get("session_id")
-    matches = [m for m in detect.scan(error) if not detect.is_fixture(m, error, "")]
+    matches = [m for m in detect.scan(error, channel="tool") if not detect.is_fixture(m, error, "")]
     if not matches and not _has_live(cfg):
         return {}
     vault = Vault(cfg)
@@ -3707,7 +3713,7 @@ def post_tool_failure(payload: dict) -> dict:
     values: list[str] = []
     out = error
     if matches:
-        out, entries = _replace(error, matches, vault, session)
+        out, entries = _replace(error, matches, vault, session, tool=True)
         hit["n"] += len(matches)
         values.extend(m.value for m in matches)
     _exact_redact(out, vault, session, hit, entries, _resolved_values(vault, session), values)

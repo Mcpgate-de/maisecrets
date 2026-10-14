@@ -115,7 +115,8 @@ def worker_jsonl(job: tuple) -> tuple:
             text, kind, stamp = line, "local record", ""
         if not text:
             continue
-        hits = _detector.scan_text(detect, text, enabled)
+        # a prompt is judged as the prompt hook judges it; a tool result or a record as a tool result
+        hits = _detector.scan_text(detect, text, enabled, "prompt" if kind == "prompt" else "tool")
         if not hits:
             continue
         for m in hits:

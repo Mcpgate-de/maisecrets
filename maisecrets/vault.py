@@ -510,6 +510,9 @@ class Entry:
     sessions: list = field(default_factory=list)  # sessions allowed to resolve the entry (see Vault.get)
     # a word that only a label rule found (letters only): replaced where it was found, never hunted in other texts
     weak: bool = False
+    # a word that a label rule took in a tool result or a file: hunted in later tool results, never in a typed prompt,
+    # where it would block every prompt that uses the word (field report on 0.6.16). Only a new entry gets it
+    quiet: bool = False
     # no purged_at field: from_meta drops it, so the proof below can remove the filter and
     # the owning test sees the TypeError of the field report again
 
@@ -549,6 +552,16 @@ def is_weak(kind: str, value: str) -> bool:
     found, never hunted in other texts."""
     from .detect import LABEL_RULES
     return str(kind).startswith(LABEL_RULES) and value.strip().lower() in DEFAULT_WORDS
+
+
+def is_quiet(kind: str, value: str, tool: bool) -> bool:
+    """A word of some language (detect.reads_as_word) that a label rule took in a tool result or a file: hunted in
+    later tool results as before (a weak default word is not hunted at all, as in 0.6.16), never in a typed prompt.
+    A word the person gives in a prompt stays hunted everywhere: a chosen word is a password there (review,
+    2026-09-29). A random value that reads like a word (about 3 in 100 of 8 small letters) is then not looked for in
+    a prompt that types it bare; it is still masked in every tool result. Only a new entry gets the mark."""
+    from .detect import LABEL_RULES, reads_as_word
+    return tool and str(kind).startswith(LABEL_RULES) and reads_as_word(value.strip())
 
 
 # ---------------------------------------------------------------- backends --
@@ -1006,12 +1019,13 @@ class Vault:
     def fingerprint(self, value: str) -> str:
         return fingerprint(value, self.fp_key())
 
-    def live_fingerprints(self) -> dict[str, str]:
+    def live_fingerprints(self, prompt: bool = False) -> dict[str, str]:
         """fingerprint -> key for every entry whose value is still stored and may be hunted in any text. A weak entry
         is not: `DB_PASSWORD=postgres` stored `postgres`, and every later text with the word was redacted and every
-        prompt with it blocked, in every session, for a day (review, 2026-09-29)."""
+        prompt with it blocked, in every session, for a day (review, 2026-09-29). In a typed prompt (prompt=True) a
+        quiet entry is not hunted either (Entry.quiet)."""
         return {m["fingerprint"]: k for k, m in self._index["entries"].items()
-                if not m.get("purged") and not m.get("weak")}
+                if not m.get("purged") and not m.get("weak") and not (prompt and m.get("quiet"))}
 
     @_mutating
     def mark_weak_entries(self) -> int:
@@ -1048,13 +1062,15 @@ class Vault:
             e = Entry.from_meta(self._index["entries"][existing])
             if session and session not in e.sessions:
                 e.sessions.append(session)
+            e.quiet = False             # a value given outside a tool result: hunted in prompts again
             self._touch(e)
             return e
         e = self._put_new(value, type_, kind, session, ttl)
         self._save_index()
         return e
 
-    def _put_new(self, value: str, type_: str, kind: str, session: str | None, ttl: int | None) -> "Entry":
+    def _put_new(self, value: str, type_: str, kind: str, session: str | None, ttl: int | None,
+                 tool: bool = False) -> "Entry":
         fp = self.fingerprint(value)
         n = self._index["counters"].get(type_, 0) + 1
         self._index["counters"][type_] = n
@@ -1064,7 +1080,8 @@ class Vault:
         e = Entry(key=key, type=type_, kind=kind, fingerprint=fp,
                   display=display_for(type_, value), created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
-                  session=session, uses=0, sessions=[session] if session else [], weak=is_weak(kind, value))
+                  session=session, uses=0, sessions=[session] if session else [],
+                  weak=is_weak(kind, value), quiet=is_quiet(kind, value, tool))
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
         self.backend.put(
             key, value,
@@ -1077,7 +1094,8 @@ class Vault:
         return e
 
     @_mutating
-    def put_many(self, items: list[tuple[str, str, str]], session: str | None = None) -> list["Entry | None"]:
+    def put_many(self, items: list[tuple[str, str, str]], session: str | None = None,
+                 tool: bool = False) -> list["Entry | None"]:
         """Store many values in one lock, one sweep and one index save; a tool result with
         hundreds of addresses called put() per value and rewrote the growing index each time
         (measured: 1000 e-mails 8.7 s, above the watchdog; review, 2026-09-26). Above
@@ -1095,6 +1113,11 @@ class Vault:
                 e = Entry.from_meta(self._index["entries"][existing])
                 if session and session not in e.sessions:
                     e.sessions.append(session)
+                if not tool:
+                    e.quiet = False     # a value the person gives in a prompt is hunted in prompts again
+                # a tool result keeps the mark of an existing entry. An entry without one (stored by an older version,
+                # or a mark an older process dropped) reads as quiet=False and stays hunted: its origin is unknown,
+                # and only a new entry from a tool result is known to come from one (final codex review of 0.6.17)
                 self._touch(e, save=False)
                 dirty = True
                 out.append(e)
@@ -1102,7 +1125,7 @@ class Vault:
             if new >= cap:
                 out.append(None)
                 continue
-            out.append(self._put_new(value, type_, kind, session, None))
+            out.append(self._put_new(value, type_, kind, session, None, tool))
             new += 1
             dirty = True
             if new % 10 == 0:
