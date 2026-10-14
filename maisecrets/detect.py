@@ -616,6 +616,7 @@ def _word_set() -> frozenset:
 
 
 _WORDS_OK: list = [True]
+_CHANNEL: list = ["prompt"]
 
 
 _COVER_CACHE: dict = {}
@@ -757,6 +758,20 @@ def _random_evidence(v: str) -> bool:
     return any(_random_letters(part) for part in parts)
 
 
+def _tool_evidence(v: str) -> bool:
+    """_random_evidence without its last test: ASCII letters that no word covers are a password in a tool result."""
+    if not any(c.isalpha() for c in v):
+        return False
+    if (_MEASURE_VALUE_RE.fullmatch(v) or _ABBREVIATION_RE.fullmatch(v) or _WORD_NUMBER_RE.fullmatch(v)
+            or _ISO_DURATION_RE.fullmatch(v)):
+        return False
+    if any(c.isdigit() for c in v) or any(_is_sign(c) and c not in "_-." for c in v):
+        return True
+    if not v.isascii():
+        return _scripts_mix(v) or any(_case_flips(part) >= 2 for part in re.split(r"[_.-]+", v) if part)
+    return True
+
+
 def _is_sign(c: str) -> bool:
     """Punctuation or a symbol. A combining vowel sign of Devanagari or Thai is part of a word, not a sign."""
     import unicodedata
@@ -813,6 +828,8 @@ def _pw_literal_ok(v: str) -> bool:
     if _wordlike(_deleet(v)) < 0.3:
         if not _WORDS_OK[0] and v.isalpha():
             return False   # without a word list, a value of letters only may be any word
+        if _CHANNEL[0] == "tool":
+            return _tool_evidence(v)   # a tool result or a file: a false hit masks a value there, it blocks no prompt
         return _random_evidence(v)
     # a password made of a word, a number and a sign: Sommer2024!, Herbst2025#, Welcome1! (the form people choose).
     # A word with a number alone (Winter2023, postgres15) stays text here; the keyword rules judge it. So does a name
@@ -2232,8 +2249,17 @@ def _command_start(text: str, pos: int) -> int:
     return cut + 1 if cut >= a else a
 
 
-def scan(text: str, enabled: set[str] | None = None) -> list[Match]:
-    """Return non-overlapping matches, leftmost first; the first rule to claim a span wins."""
+def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt") -> list[Match]:
+    """Return non-overlapping matches, leftmost first; the first rule to claim a span wins. channel "tool" (a tool
+    result or a file) takes a password after a password label without evidence of chance."""
+    outer, _CHANNEL[0] = _CHANNEL[0], channel if channel == "tool" else "prompt"
+    try:
+        return _scan(text, enabled)
+    finally:
+        _CHANNEL[0] = outer   # a nested scan (line 1740) keeps the channel of the outer one
+
+
+def _scan(text: str, enabled: set[str] | None = None) -> list[Match]:
     if not text:
         return []
     low = _lower(text)

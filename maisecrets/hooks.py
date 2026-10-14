@@ -3439,7 +3439,7 @@ def post_tool(payload: dict) -> dict:
             s, gone, runs = strip_hidden(s)
             hidden["n"] += gone
             hidden_runs.extend(runs)
-        matches = [m for m in detect.scan(s) if not detect.is_fixture(m, s, path)]
+        matches = [m for m in detect.scan(s, channel="tool") if not detect.is_fixture(m, s, path)]
         if not matches and not _has_live(cfg):
             return s
         if vault is None:
@@ -3698,7 +3698,7 @@ def post_tool_failure(payload: dict) -> dict:
         return {}
     cfg = load_config()
     session = payload.get("session_id")
-    matches = [m for m in detect.scan(error) if not detect.is_fixture(m, error, "")]
+    matches = [m for m in detect.scan(error, channel="tool") if not detect.is_fixture(m, error, "")]
     if not matches and not _has_live(cfg):
         return {}
     vault = Vault(cfg)
