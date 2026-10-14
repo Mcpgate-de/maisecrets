@@ -60,3 +60,4 @@ gitlab-ci-job-token-any      glcbt-(?:(?<![A-Za-z0-9_-]glcbt-)|(?<=\\[nrt]glcbt-
 # for sk-): sk-admin-sidebar-navigation-item and xoxo-hugs-and-kisses are words. Both run after the vendored rules
 # (detect._LATE_RULES): a key of the full vendored form keeps its vendored rule
 openai-anthropic-key-relaxed (?<![\w-])sk-(?:proj|ant|svcacct|admin)-(?=[A-Za-z0-9_-]{0,200}[0-9])(?=[A-Za-z0-9_-]{0,200}[A-Z])[A-Za-z0-9_-]{20,}
+slack-token-relaxed          (?<![\w-])xox[abpr]-(?=[A-Za-z0-9-]{0,200}[0-9])[A-Za-z0-9-]{20,}

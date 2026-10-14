@@ -260,6 +260,13 @@ class OpenAiAnthropicKeyTests(unittest.TestCase):
 
 
 
+class SlackTokenTests(unittest.TestCase):
+    def test_a_short_slack_token(self):
+        tok = J(["xox", "b-", "48213-", "Qw7eRt6yUi5oPa4sDf3gHj"])
+        self.assertEqual([(m.kind, m.value) for m in scan("key " + tok, "prompt")], [("slack-token-relaxed", tok)])
+        self.assertEqual(scan("xoxo-hugs-and-kisses-to-everyone!", "prompt"), [])
+
+
 
 if __name__ == "__main__":
     unittest.main()
