@@ -20,8 +20,8 @@ from maisecrets import detect  # noqa: E402
 import fp_corpus  # noqa: E402
 
 
-def found(text: str) -> list[tuple[str, str]]:
-    return [(m.type, m.value) for m in detect.scan(text.replace("§", ""))]
+def found(text: str, channel: str = "prompt") -> list[tuple[str, str]]:
+    return [(m.type, m.value) for m in detect.scan(text.replace("§", ""), channel=channel)]
 
 
 class CorpusTests(unittest.TestCase):
@@ -33,6 +33,14 @@ class CorpusTests(unittest.TestCase):
         for name, text, expected in fp_corpus.HIT:
             with self.subTest(name=name):
                 self.assertEqual(found(text), [(t, v.replace("§", "")) for t, v in expected])
+
+    def test_both_hold_in_a_tool_result_too(self):
+        # the tool channel takes more passwords (0.6.17); docs/BENCHMARKS.md states the result for both channels
+        wrong = [name for name, text in fp_corpus.NO_HIT if found(text, "tool")]
+        self.assertEqual(wrong, [], f"{len(wrong)} snippets of normal work are hits in a tool result")
+        for name, text, expected in fp_corpus.HIT:
+            with self.subTest(name=name):
+                self.assertEqual(found(text, "tool"), [(t, v.replace("§", "")) for t, v in expected])
 
     def test_the_corpus_is_large_enough_to_mean_something(self):
         self.assertGreaterEqual(len(fp_corpus.NO_HIT), 590)
