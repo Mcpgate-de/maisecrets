@@ -2325,7 +2325,8 @@ def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt") ->
         _CHANNEL[0] = outer   # the channel of an outer scan comes back after a nested one (is_fixture)
 
 
-def _scan(text: str, enabled: set[str] | None = None) -> list[Match]:
+def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> list[Match]:
+    """_copy: the text is the normaliser's cleaned copy of a tool result, which is not cleaned again."""
     if not text:
         return []
     low = _lower(text)
@@ -2502,8 +2503,81 @@ def _scan(text: str, enabled: set[str] | None = None) -> list[Match]:
             i = bisect.bisect_left(taken_starts, start)
             taken_starts.insert(i, start)
             taken_ends.insert(i, end)
+    if _CHANNEL[0] == "tool" and not _copy:
+        _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends)
     found.sort(key=lambda x: x.start)
     return found
+
+
+_WINDOW_BEFORE = 2048  # context a rule may read before a value: a label 200, a context word 80, an AWS key id up to
+_WINDOW_AFTER = 512    # four lines of 400 before its secret (aws-secret-after-access-key); after it: a context word 40
+
+
+def _changed_windows_scan(text: str, norm, enabled) -> list:
+    """The hits of the cleaned copy, scanned only around its changed lines: each changed line with the whole lines
+    that hold the _WINDOW_BEFORE characters before it and the _WINDOW_AFTER characters after it, windows that touch
+    merged. A line the stages left alone holds the hits the raw scan already has, and a rescan of the whole text
+    doubled the time of a 70 KB tool result with one coloured line or one JWT."""
+    copy, starts, ends = norm.text, norm.starts, norm.ends
+    windows: list = []
+    a = 0
+    n = len(copy)
+    while a <= n:
+        b = copy.find("\n", a)
+        b = n if b < 0 else b
+        # the original range of this line, from after the previous line break to this one: deleted characters at
+        # its edges and a line that only deleted characters held count as a change (Gate A, round 2)
+        oa = ends[a - 1] if a > 0 else 0
+        ob = starts[b] if b < n else len(text)
+        if ob - oa != b - a or text[oa:ob] != copy[a:b]:
+            wa = copy.rfind("\n", 0, max(0, a - _WINDOW_BEFORE)) + 1 if a > _WINDOW_BEFORE else 0
+            wb = copy.find("\n", min(n, b + _WINDOW_AFTER))
+            wb = n if wb < 0 else wb
+            if windows and wa <= windows[-1][1] + 1:
+                windows[-1][1] = max(windows[-1][1], wb)
+            else:
+                windows.append([wa, wb])
+        a = b + 1
+    out = []
+    for wa, wb in windows:
+        for m in _scan(copy[wa:wb], enabled, _copy=True):
+            out.append(Match(m.kind, m.type, m.value, m.start + wa, m.end + wa))
+    return out
+
+
+def _scan_cleaned_copy(text: str, enabled, found: list, taken_starts: list, taken_ends: list) -> None:
+    """The tool channel also scans a copy of the text without terminal and encoding disguises (ANSI codes, zero-width
+    characters, HTML entities, fullwidth letters, base64 and hex runs: maisecrets/normalise.py). A hit of the copy
+    redacts its original range, hidden characters included. The raw text's own hits came first and keep their spans,
+    except a part of a value that the copy sees whole: the whole replaces the part, or the rest reaches the model."""
+    try:
+        from .normalise import normalise
+    except ImportError:   # a copy of detect.py without its sibling modules: the raw scan alone
+        return
+    norm = normalise(text)
+    if norm.text is text:
+        return
+    by_start = {f.start: f for f in found}   # the taken spans never overlap, so a start names one
+    for m in _changed_windows_scan(text, norm, enabled):
+        start, end = norm.span(m.start, m.end)
+        lo = bisect.bisect_left(taken_starts, start)
+        if lo > 0 and taken_ends[lo - 1] > start:
+            lo -= 1
+        inside = [by_start[a] for a in taken_starts[lo:bisect.bisect_left(taken_starts, end)]]
+        if inside:
+            if not all(start <= f.start and f.end <= end for f in inside) or \
+                    all((f.start, f.end) == (start, end) for f in inside):
+                continue
+            for f in inside:
+                found.remove(f)
+                del by_start[f.start]
+                i = bisect.bisect_left(taken_starts, f.start)
+                del taken_starts[i], taken_ends[i]
+        found.append(Match(m.kind, m.type, text[start:end], start, end))
+        by_start[start] = found[-1]
+        i = bisect.bisect_left(taken_starts, start)
+        taken_starts.insert(i, start)
+        taken_ends.insert(i, end)
 
 
 def contains_secret(text: str) -> bool:

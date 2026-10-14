@@ -1,7 +1,7 @@
 """Card numbers after a card word in another language, IBANs with hyphens or in lower case, and two German numbers that
 are no personal data on their own: a bare VAT ID without a VAT word and a company register number.
 
-Adapted from the fork danszymkowiak/maisecrets (Apache-2.0).
+Adapted from a public fork of maisecrets (Apache-2.0, see NOTICE).
 
 Run: python3 -m unittest tests.test_bank_and_company_numbers -v
 Every value is built at run time from parts, so no literal sits in the tree and the tree scan stays clean.

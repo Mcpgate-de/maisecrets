@@ -1,0 +1,10 @@
+# c2-an-entity-that-writes-a-hidden-character-is-cleaned-too: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c2-an-entity-that-writes-a-hidden-character-is-cleaned-too"
+control = "C2"
+statement = "The normaliser writes HTML entities out before it removes ANSI codes and zero-width characters, so a token split by &#8203; or &shy; in a tool result is still a hit."
+runner = ["tests/test_tool_channel_normaliser.py::DisguiseTests::test_each_disguise_hides_a_token_from_the_raw_scan_but_not_from_the_tool_channel"]
+
+[proof]
+file = "maisecrets/normalise.py"
+find = '''STAGES = ("entity", "ansi", "invisible", "fullwidth", "decode")'''
+replace = '''STAGES = ("ansi", "invisible", "entity", "fullwidth", "decode")'''

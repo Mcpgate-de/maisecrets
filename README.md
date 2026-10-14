@@ -709,6 +709,21 @@ blunter: in the rollout, the three flags and ideographic variants lose their sel
 carry an instruction, and the audit log records the count, never the text.
 `"strip_hidden_characters": false` turns it off.
 
+### Disguised values in tool results
+
+A value can also hide from the shape rules behind what a terminal or a renderer does not show. In a
+tool result or a file (not in a typed prompt), the detector also scans a cleaned copy: without ANSI
+colour codes, without zero-width and direction characters (U+00AD, U+200B to U+200F, U+202A to
+U+202E, U+2060 to U+2064, U+2066 to U+2069, U+FEFF), with HTML entities and fullwidth letters
+written out, and with each base64 or hex run decoded that holds text (gzip inside base64 is opened,
+a run inside the text is decoded once more). A hit in the copy redacts the original span, the hidden
+characters with it; a value in a decoded run takes the whole run, as in a Kubernetes Secret or a
+docker `auth` field. The copy is only scanned around the lines that changed. Bounds: a text over 1
+MB is not cleaned, a run over 16,384 characters (an image) is not decoded, and at most 64 runs,
+64 KB of decoded bytes and 20 ms of decoding per text. A text whose every line changes (a log in
+colour) is scanned twice, which about doubles its time. The typed prompt is scanned as it is, so a block there needs the
+value in the clear.
+
 This is not a detector of prompt injection. It takes away one way to hide one. A selector that the
 rule keeps still holds something: one of three states (VS15, VS16, none) after any letter or
 symbol, up to four bits after a character that is not ASCII, and up to one byte after a CJK

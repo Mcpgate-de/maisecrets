@@ -1,0 +1,10 @@
+# c1-the-tool-channel-looks-through-terminal-and-encoding-disguises: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-the-tool-channel-looks-through-terminal-and-encoding-disguises"
+control = "C1"
+statement = "In a tool result or a file, a value split by a zero-width character or an ANSI code, written in HTML entities or fullwidth letters, or encoded in a base64 or hex run of text is a hit; the original span, hidden characters or the whole run included, is redacted."
+runner = ["tests/test_tool_channel_normaliser.py::DisguiseTests::test_each_disguise_hides_a_token_from_the_raw_scan_but_not_from_the_tool_channel"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''    if _CHANNEL[0] == "tool" and not _copy:'''
+replace = '''    if False:'''
