@@ -1049,31 +1049,45 @@ class Vault:
             n += weak
         return n
 
-    @_mutating
-    def mark_quiet_entries(self) -> int:
-        """Once per store: mark quiet the words a version before 0.6.17 stored from a label rule (see Entry.quiet). Such
-        a version could not tell a tool result from a prompt, and each hit renewed the entry, so a word from a file
-        blocked prompts for up to max_ttl_seconds (field report on 0.6.16). The origin is unknown here: a word the
-        person typed then is quiet too, and a prompt that gives it again after a label clears the mark. Reads the
-        value of each such entry once; a store that refuses a read is asked again at the next start. Returns the
-        count marked quiet."""
-        if self._index.get("quiet_pass"):
-            return 0
+    def mark_quiet_entries(self, budget: float = 2.0) -> int:
+        """Mark quiet the words a version before 0.6.17 stored from a label rule (see Entry.quiet), at each session
+        start. Such a version could not tell a tool result from a prompt, and each hit renewed the entry, so a word
+        from a file blocked prompts for up to max_ttl_seconds (field report on 0.6.16). The origin is unknown here: a
+        word the person typed then is quiet too, and a prompt that gives it again after a label clears the mark.
+        An entry without the `quiet` key is one to judge: 0.6.17 writes the key on every entry, and an older process
+        that touches an entry drops it, so the entry is judged again (Gate A round 2). The values are read outside
+        the vault lock, in one batch where the store has one, for at most `budget` seconds: a slow store never holds
+        the lock for another session's prompt (Gate B round 2). A value the store does not return keeps the entry
+        unjudged for the next start. Returns the count marked quiet."""
         from .detect import LABEL_RULES, reads_as_word
-        todo = [k for k, m in self._index["entries"].items() if not m.get("purged") and not m.get("weak")
-                and not m.get("quiet") and str(m.get("kind", "")).startswith(LABEL_RULES)]
+        with self._exclusive():
+            todo = [k for k, m in self._index["entries"].items() if "quiet" not in m and not m.get("purged")
+                    and not m.get("weak") and str(m.get("kind", "")).startswith(LABEL_RULES)]
+        if not todo:
+            return 0
+        found: dict = {}
+        deadline = time.monotonic() + budget
+        try:
+            if hasattr(self.backend, "get_many"):
+                found = self.backend.get_many(todo)
+            else:
+                for key in todo:
+                    if time.monotonic() > deadline:
+                        break       # the rest at the next start
+                    value = self.backend.get(key)
+                    if value is not None:
+                        found[key] = value
+        except RuntimeError as exc:
+            from . import incidents
+            incidents.note("store.mark-weak", exc)    # the same start pass class (docs/DIAGNOSTICS.md)
         n = 0
-        for key in todo:
-            try:
-                value = self.backend.get(key)
-            except RuntimeError as exc:
-                from . import incidents
-                incidents.note("store.mark-weak", exc)    # the same start pass class (docs/DIAGNOSTICS.md)
-                return n            # no pass mark: the next start reads the rest
-            if value and reads_as_word(value.strip()):
-                self._index["entries"][key]["quiet"] = True
-                n += 1
-        self._index["quiet_pass"] = 1
+        with self._exclusive():
+            for key, value in found.items():
+                meta = self._index["entries"].get(key)
+                if not meta or "quiet" in meta or meta.get("purged"):
+                    continue        # judged or changed by another process meanwhile
+                meta["quiet"] = bool(value) and reads_as_word(value.strip())
+                n += meta["quiet"]
         return n
 
     # api -------------------------------------------------------------------

@@ -714,7 +714,7 @@ def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str 
         # password typed again, or a value without a detector shape next to a detected one, went to
         # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
         # from 8 characters; a shorter one would block ordinary words in a prompt.
-        resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]
+        resolved = [(v, r) for v, r in _resolved_values(vault, session, prompt=True) if len(v) >= _EXACT_MIN_LEN]
         rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values, prompt=True)
     return rewritten, entries, values, stored
 
@@ -3081,7 +3081,7 @@ def _derived_forms(value: str) -> list[str]:
     return [f for f in dict.fromkeys(forms) if len(f) >= _EXACT_MIN_LEN]
 
 
-def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]:
+def _resolved_values(vault: Vault, session: str | None, prompt: bool = False) -> list[tuple[str, str]]:
     """(value, reference) for every key this session resolved in the last hour: a value the hook
     itself inserted into a command or an MCP argument is expected back in the output, in any
     position and any encoding, so it is matched as a substring and not by whole token."""
@@ -3089,9 +3089,11 @@ def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]
     keys = [r["key"] for r in vault._index.get("resolves", []) if r.get("session") == session and r["ts"] > now - 3600]
     out: list[tuple[str, str]] = []
     from .vault import Entry
-    # a weak entry is not hunted as a substring either (Vault.live_fingerprints)
+    # a weak entry is not hunted as a substring either, and in a typed prompt (prompt) a quiet one is not
+    # (Vault.live_fingerprints): an agent that used the placeholder of a word made the word block the prompt (Gate A)
     live = [k for k in dict.fromkeys(keys) if vault._index["entries"].get(k)
-            and not vault._index["entries"][k].get("purged") and not vault._index["entries"][k].get("weak")]
+            and not vault._index["entries"][k].get("purged") and not vault._index["entries"][k].get("weak")
+            and not (prompt and vault._index["entries"][k].get("quiet"))]
     if hasattr(vault.backend, "get_many"):
         found = vault.backend.get_many(live)
     else:

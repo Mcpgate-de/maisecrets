@@ -208,7 +208,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     if quiet_words:
         out["systemMessage"] = (out.get("systemMessage", "") +
                                 f" {quiet_words} stored word(s) no longer block a prompt; they stay masked in tool "
-                                "results. /maisecrets:list shows them.")
+                                "results. /maisecrets:forget deletes one by its key.")
     if cfg.get("config_warning"):
         out["systemMessage"] = out.get("systemMessage", "") + f" Warning: {cfg['config_warning']}."
     # /ms is offered once, not installed: writing ~/.claude/commands without a question was a

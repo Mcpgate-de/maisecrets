@@ -96,6 +96,27 @@ class WordValuesNotHuntedTests(unittest.TestCase):
         self.assertNotIn("no longer block", self.hook("session-start", {"session_id": "s5", **CLAUDE})
                          .get("systemMessage", ""), "the pass runs once per store")
 
+    def test_a_quiet_word_this_session_used_in_a_command_blocks_no_later_prompt(self):
+        import re
+        out = self.bash(f"password: {WORD}\n", "s1")
+        ref = re.search(r"⟦SECRET_c\d+⟧", out).group(0)
+        self.hook("pre-tool", {"tool_name": "Bash", "session_id": "s1", **CLAUDE,
+                               "tool_input": {"command": f"echo {ref} > /dev/null"}})
+        self.assertFalse(self.blocked(f"Das {WORD} ist morgen.", "s1"), "a resolved quiet word is text in a prompt")
+        self.assertNotIn(WORD, self.bash(f"note: {WORD} Montag\n", "s1"), "and still masked in a tool result")
+
+    def test_an_older_process_that_drops_the_mark_has_the_entry_judged_again(self):
+        self.bash(f"password: {WORD}\n", "s1")
+        self.hook("session-start", {"session_id": "s1", **CLAUDE})     # 0.6.17 started once and judged the store
+        index = Path(self.home, "index.json")
+        idx = json.loads(index.read_text())
+        for meta in idx["entries"].values():
+            meta.pop("quiet", None)                          # a 0.6.16 process touched it after 0.6.17 marked it
+        index.write_text(json.dumps(idx))
+        self.assertIn("1 stored word(s)", self.hook("session-start", {"session_id": "s2", **CLAUDE})
+                      .get("systemMessage", ""))
+        self.assertFalse(self.blocked(f"Das {WORD} ist morgen.", "s3"))
+
     def test_a_tool_result_after_a_failed_command_takes_the_tool_rule_too(self):
         out = self.hook("post-tool-failure", {"tool_name": "Bash", "session_id": "s1", **CLAUDE,
                                               "tool_input": {"command": "x"},

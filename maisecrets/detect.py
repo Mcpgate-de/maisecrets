@@ -572,6 +572,12 @@ def _apikey_value_ok(v: str) -> bool:
 _WORDS_FILE = "words_en.txt"   # SCOWL en_US 60, 4 to 8 letters (rules/LICENSE-scowl, scripts/sync_words.py)
 _WORDS: list = []
 # words that the English list lacks: short words, code identifiers, algorithm names, German words of developer prose
+# "password" in other languages: the whole value of a locale key (`"password": "Senha"`) is a label text, not a
+# password (Opus Gate B of 0.6.17). An exact value only: as words they made Senha123 a word with a number, and 0.6.16
+# took it (Gate B round 2)
+_PW_TRANSLATIONS = frozenset({
+    "senha", "heslo", "geslo", "lozinka", "sifre", "haslo", "parola", "parool", "salasana", "jelszo", "losenord",
+    "passord", "adgangskode", "wachtwoord", "kennwort", "passwort", "contrasena", "motdepasse", "sifra", "parole"})
 _EXTRA_WORDS = frozenset({
     "api", "key", "id", "db", "url", "uri", "app", "dev", "prod", "test", "user", "pass", "pwd", "sql", "web",
     "admin", "root", "my", "new", "old", "the", "and", "for", "get", "set", "put", "add", "max", "min", "log",
@@ -579,9 +585,6 @@ _EXTRA_WORDS = frozenset({
     "gcp", "ssh", "rsa", "pem", "http", "https", "www", "com", "org", "net", "io", "js", "py", "go", "is", "on",
     "of", "to", "in", "at", "by", "no", "ok", "yes", "let", "me", "foo", "bar", "baz", "abc", "xyz", "qwerty", "pw",
     "secret", "token", "hello", "world", "demo", "mock", "fake", "dummy", "sample", "example", "default",
-    # "password" in other languages: the value of a locale key (`"password": "Senha"`), not a password (Opus Gate B)
-    "senha", "heslo", "geslo", "lozinka", "sifre", "haslo", "parola", "parool", "salasana", "jelszo", "losenord",
-    "passord", "adgangskode", "wachtwoord", "kennwort", "passwort", "contrasena", "motdepasse", "sifra", "parole",
     "kwargs", "args", "argv", "self", "this", "opts", "params", "nil", "none", "null", "undefined",
     "md5", "sha1", "sha2", "sha3", "sha224", "sha256", "sha384", "sha512", "pbkdf2", "bcrypt", "scrypt", "argon2",
     "argon2i", "argon2d", "argon2id", "aes", "aes128", "aes192", "aes256", "gcm", "cbc", "ctr", "hmac", "des",
@@ -808,6 +811,8 @@ def _pw_literal_ok(v: str) -> bool:
     fixture word (testpass), no version."""
     if not 4 <= len(v) <= 64 or any(c.isspace() for c in v) or _charset(v) == "digits" or len(set(v)) < 3:
         return False
+    if v.lower() in _PW_TRANSLATIONS:
+        return False   # the word for password in another language: a locale value
     if _sequential(v.lower()) or _LITERAL_PLACEHOLDER_RE.search(v) or _DOTTED_RE.fullmatch(v) or _names_itself(v):
         return False
     if _CLOSED_TEMPLATE_RE.search(v) or _looks_like_regex(v):
@@ -1008,6 +1013,8 @@ def reads_as_word(value: str) -> bool:
     if not common:
         return False   # no word list: hunt the value, as 0.6.16 did
     pairs = [p[i:i + 2] for p in (x.lower() for x in parts) for i in range(len(p) - 1)]
+    if not pairs:
+        return False   # single letters: no evidence of a word
     return sum(q not in common for q in pairs) <= 0.1 * len(pairs)
 
 
