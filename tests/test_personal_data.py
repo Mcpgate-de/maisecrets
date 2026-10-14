@@ -46,6 +46,36 @@ def values(text: str, channel: str = "tool", region: tuple = ALL_REGIONS) -> lis
     return [(m.kind, m.value) for m in scan(text, channel, region) if m.kind in personal.RULE_IDS]
 
 
+class NameTests(unittest.TestCase):
+    def test_a_name_after_a_person_label_is_masked(self):
+        for text, name in (("patient: Dorian K. Ashby", "Dorian K. Ashby"),
+                           ("tenant: Tobias Kellermann\nunit: 4B", "Tobias Kellermann"),
+                           ('{"full_name": "Lena Brückner"}', "Lena Brückner"),
+                           ("Ansprechpartner: Jonas Wendler", "Jonas Wendler"),
+                           ("FN:Nora Whitfield", "Nora Whitfield")):
+            with self.subTest(text=text):
+                self.assertEqual(values(text), [("name-after-label", name)])
+
+    def test_a_product_or_a_team_after_a_weak_label_stays_text(self):
+        for text in ("app.kubernetes.io/name: Customer Portal", "  - name: Streaming Guild", "owner: Platform Team",
+                     "Display name: Adobe Acrobat Reader", "name: Redis Cache", "Name: Wörterbuch Englisch",
+                     "SELECT id FROM products WHERE name = 'Redis Cache'", "      - name: Run Pytest",
+                     "Requested by: Product Owner", "oncall: Primary Rotation", "Kunde: Stadtwerke Nord",
+                     "Ansprechpartner: Vertrieb Nord", "owner: Mgmt Vpc", "Approved by: Change Advisory Board"):
+            with self.subTest(text=text):
+                self.assertEqual(values(text), [])
+
+    def test_a_closing_quote_is_no_part_of_the_name(self):
+        self.assertEqual(values("tenant: 'Jonas Wendler'"), [("name-after-label", "Jonas Wendler")])
+
+    def test_a_name_without_a_label_stays_text(self):
+        self.assertEqual(values("Lena Brückner and Tobias Kellermann fixed the build."), [])
+
+    def test_a_documentation_name_is_no_person(self):
+        self.assertEqual(values("patient: Erika Mustermann"), [])
+
+
+
 class BirthDateTests(unittest.TestCase):
     def test_a_date_after_a_birth_label(self):
         for text, v in (("DOB: 1987-04-12", "1987-04-12"), ("Geburtsdatum: 03.11.1979", "03.11.1979"),
