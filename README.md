@@ -1128,11 +1128,14 @@ Four sources, one scanner (`maisecrets/detect.py`):
   `regions` selects them (default: the country of the system setting; `de`
   gives Steuer-ID,
   Sozialversicherungsnummer, Personalausweis, Reisepass, USt-ID,
-  Krankenversicherung, PLZ, Kfz, LANR, BSNR, Handelsregister). Checksums for
+  Krankenversicherung, PLZ, Kfz, LANR, BSNR). Checksums for
   the German types are ported and checked against Presidio
   (`scripts/check_validators_against_presidio.py`). A digit-only shape such as
   a Steuer-ID is reported only with a context word nearby, even when the
-  checksum passes.
+  checksum passes. A USt-ID written `DE` and nine digits also needs a word
+  such as `USt-IdNr` or `VAT` nearby: alone, that shape is often a FIX tag or
+  an XML id. A Handelsregister number is not reported: it names a company, is
+  public and is no personal data.
 - **detect-secrets** (Yelp, Apache-2.0, version in `DETECT_SECRETS_VERSION`,
   refresh with `scripts/sync_detect_secrets.py vX.Y.Z`): credentials
   recognised by position (`password = …`, `api_key: "…"`, `user:pass@host`),
@@ -1251,8 +1254,10 @@ Four sources, one scanner (`maisecrets/detect.py`):
   out: nearly every candidate was the next `.env` line, not the rest of a key.
 
 IBAN, credit card and IP come from Presidio's regexes with our validators
-(mod-97, Luhn, public-range check). A card number without a word like
-"card" or "Kreditkarte" nearby is not reported: Presidio scores the bare
+(mod-97, Luhn, public-range check). An IBAN may have spaces or hyphens
+between its groups; an IBAN in lower case also needs the length of its
+country. A card number without a word like "card", "Karte", "Kreditkarte",
+"carte", "carta" or "tarjeta" nearby is not reported: Presidio scores the bare
 shape low, and a 16-digit number passes Luhn one time in ten.
 
 Measure what the rules would catch on your own recordings, values never

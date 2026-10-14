@@ -123,5 +123,23 @@ class IbanFormTests(unittest.TestCase):
         self.assertEqual(both(f"sha256 de12{digest[:18]} and {digest}"), [])
 
 
+class GermanCompanyNumberTests(unittest.TestCase):
+    def test_a_bare_vat_id_without_a_vat_word_stays_text(self):
+        for text in (f"PartyID {VAT}", f"<49={VAT}>", f"id: {VAT}"):
+            with self.subTest(text=text):
+                self.assertEqual(both(text), [])
+
+    def test_a_vat_id_next_to_its_word_is_still_found(self):
+        for text in (f"USt-IdNr. {VAT}", f"VAT {VAT}", f"Rechnung, USt-ID: {VAT}"):
+            with self.subTest(text=text):
+                self.assertEqual(both(text), [("DE_VAT_ID", VAT)])
+
+    def test_a_company_register_number_is_no_personal_data(self):
+        number = "HR" + "B" + " " + "".join(RNG.choice(string.digits) for _ in range(5))
+        for text in (f"Amtsgericht Hamburg {number}", f"Handelsregister: {number}, GmbH"):
+            with self.subTest(text=text):
+                self.assertEqual(both(text), [])
+
+
 if __name__ == "__main__":
     unittest.main()

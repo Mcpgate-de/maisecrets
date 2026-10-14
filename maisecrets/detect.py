@@ -1382,7 +1382,8 @@ def _combine_drops(*drops):
 ENTITY_TYPE = {"EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "CREDIT_CARD": "CARD",
                "IP_ADDRESS": "IP", "PHONE_NUMBER": "PHONE"}
 # covered by OWN_RULES with bounded regexes and validators, or not PII worth a placeholder
-PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "crypto"}
+# de-handelsregister: a company's register number, public in the Handelsregister and no personal data
+PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "crypto", "de-handelsregister"}
 # validator id per presidio recognizer id; a recognizer with a validator we did not port
 # keeps its pattern score and is treated as weak (context required)
 PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
@@ -1392,7 +1393,11 @@ PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
                       "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id", "us-ssn": "us_ssn"}
 # shapes that are plain digit runs: even with a valid checksum, ask for a context word
 PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "de-plz", "de-kfz",
-                           "de-handelsregister", "de-fuehrerschein", "nhs", "aba-routing", "medical-license"}
+                           "de-fuehrerschein", "nhs", "aba-routing", "medical-license"}
+# single patterns that need a context word although their recognizer does not: DE and nine digits that pass the
+# checksum are also FIX tags and XML identifiers; a real VAT ID stands next to USt-IdNr or VAT. The spaced form
+# (de-vat-id#1) has a low score and needs its word already
+PRESIDIO_PATTERN_CONTEXT = {"de-vat-id#0"}
 # card words the vendored recognizer lacks: its words are English, so a card number after "Karte" in a German bank
 # statement reached the model. The number must still pass Luhn. A short word that means something else in a
 # neighbour language (kort: short in Danish and Dutch) stays out
@@ -1423,12 +1428,13 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
         validator = PRESIDIO_VALIDATOR.get(rec["id"])
         weak = rec["id"] in PRESIDIO_ALWAYS_CONTEXT or (rec["validator"] and validator is None)
         for i, pat in enumerate(rec["patterns"]):
+            rule_id = rec["id"] if len(rec["patterns"]) == 1 else f"{rec['id']}#{i}"
             out.append(Rule(
-                id=f"{rec['id']}" if len(rec["patterns"]) == 1 else f"{rec['id']}#{i}",
+                id=rule_id,
                 type=ENTITY_TYPE.get(rec["entity"], rec["entity"]), regex=_Lazy(_re2_to_python(pat["regex"])),
                 validator=validator, score=float(pat["score"]),
                 context=tuple(c.lower() for c in rec.get("context", [])) + PRESIDIO_EXTRA_CONTEXT.get(rec["id"], ()),
-                require_context=weak,
+                require_context=weak or rule_id in PRESIDIO_PATTERN_CONTEXT,
                 whole_match=True,
             ))
     return out
