@@ -741,8 +741,12 @@ Bitwarden, 1Password, KeePass(XC) and LastPass have such a header. A table with 
 and no entry column counts when the file read (or grepped) is named like an export (`passwords.csv`, `bitwarden_export.csv`,
 `1PasswordExport.csv`, a LastPass or KeePass export). The table ends at an empty line or at a row of
 another width. A column `password_hash` or a flag such as `has_password` is no secret column. A typed
-prompt is scanned as before. Limit: the secret-hygiene skill scans a file over 200 KB in parts, and
-a part without the header row is not recognised as an export.
+prompt is scanned as before. Limits, chosen
+against false hits on code and documents: a header name of several words counts only in quotes (an
+unquoted `Login Name` in a TSV is no header); a two-column table without an export file name keeps a
+cell with a space (a passphrase there reaches the model); a test table with a `password` column next
+to a `name` column is masked like an export. The secret-hygiene skill scans a file over 200 KB in
+parts, and a part without the header row is not recognised as an export.
 
 ## Reporting a wrong detection
 
