@@ -1082,3 +1082,45 @@ def session_note() -> str | None:
         outcome="quarantined: " + "; ".join(sorted({q.reason for q in left_out}))[:300])
     return (f"{len(left_out)} rule(s) of your own were left out because they fail a check; "
             "/maisecrets:rules says which and why.")
+
+
+_WHY = {"missing": "is missing", "refused: the folder cannot be read": "cannot be read",
+        "refused: not an absolute path": "is not an absolute path",
+        "refused: inside the maisecrets folder": "is inside the maisecrets folder",
+        "refused: the path cannot be resolved": "cannot be resolved"}
+
+
+def _shown(text: str) -> str:
+    """A folder name for a message: printable characters only, at most 120 of them."""
+    text = "".join(c if c.isprintable() else "?" for c in text)
+    return text if len(text) <= 120 else text[:117] + "..."
+
+
+def active_phrase(loaded: Loaded | None = None) -> str:
+    """The part of the session start line that names the active rules of your own: ", with 12 rules of your own from
+    2 folders", or "" when no rule of your own runs (the line then stays as it was)."""
+    loaded = load() if loaded is None else loaded
+    n = len(loaded.rules)
+    if not n:
+        return ""
+    names = {_SOURCES[r.id].folder for r in loaded.rules if r.id in _SOURCES}
+    m = len(names) or sum(1 for f in loaded.folders if f.state == "ok" and f.rules) or 1
+    return (f", with {n} rule{'s' if n != 1 else ''} of your own from {m} folder{'s' if m != 1 else ''}")
+
+
+def broken_folders_note(loaded: Loaded | None = None) -> str | None:
+    """One sentence that names each folder of `rule_dirs` (the setting or the machine policy) that is missing or
+    cannot be read, or None. It comes at every session start while the folder is missing: that is a broken setup, and
+    without it only `maisecrets rules check` said so. The person's own rules.d may be absent."""
+    loaded = load() if loaded is None else loaded
+    bad = [f for f in loaded.folders if f.source in ("setting", "policy") and f.state != "ok"]
+    if not bad:
+        return None
+    where = {"setting": "setting", "policy": "machine policy"}
+    if len(bad) == 1:
+        f = bad[0]
+        why = _WHY.get(f.state, "cannot be read")
+        return (f"Warning: the rule folder {_shown(f.shown)} ({where[f.source]}) {why}, "
+                "so its rules of your own do not run.")
+    parts = "; ".join(f"{_shown(f.shown)} ({where[f.source]}, {_WHY.get(f.state, 'cannot be read')})" for f in bad)
+    return f"Warning: {len(bad)} rule folders do not load, so their rules of your own do not run: {parts}."

@@ -323,6 +323,80 @@ class Quarantine(Base):
         self.assertIn("no detection recorded yet", out.getvalue(), "a quarantine is no false alarm to report")
 
 
+class SessionStartLine(Base):
+    """The start line names the active rules of your own; a folder of rule_dirs that does not load gets a warning."""
+
+    def test_without_rules_of_your_own_the_start_line_has_nothing_to_add(self):
+        detect.reset_rules()
+        self.assertEqual(user_rules.active_phrase(), "")
+        self.assertIsNone(user_rules.broken_folders_note(), "a missing rules.d of your own is no broken setup")
+
+    def test_the_start_line_counts_the_active_rules_and_their_folders(self):
+        team = self.tmp / "team"
+        write_rules(OWN, [{"id": "one", "regex": r"tkx_[A-Za-z0-9]{24}", "keywords": ["tkx_"]},
+                          {"id": "two", "regex": r"tky_[A-Za-z0-9]{24}", "keywords": ["tky_"]}])
+        write_rules(team, [{"id": "three", "regex": r"tkz_[A-Za-z0-9]{24}", "keywords": ["tkz_"]},
+                           {"id": "nested", "regex": r"tkq_(?:[a-z]+)+"}])
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "rule_dirs": [str(team)]}))
+        detect.reset_rules()
+        self.assertEqual(user_rules.active_phrase(), ", with 3 rules of your own from 2 folders",
+                         "a quarantined rule is no active rule")
+        shutil.rmtree(OWN)
+        detect.reset_rules()
+        self.assertEqual(user_rules.active_phrase(), ", with 1 rule of your own from 1 folder")
+
+    def test_a_missing_folder_of_the_setting_is_named_at_every_start(self):
+        gone = self.tmp / "gone"
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "rule_dirs": [str(gone)]}))
+        for _ in range(2):
+            detect.reset_rules()
+            self.assertEqual(user_rules.broken_folders_note(), f"Warning: the rule folder {gone} (setting) is missing, "
+                                                               "so its rules of your own do not run.")
+        self.assertEqual(user_rules.active_phrase(), "")
+
+    def test_a_missing_folder_of_the_policy_and_an_unreadable_one_are_named_in_one_sentence(self):
+        gone, locked = self.tmp / "gone", self.tmp / "locked"
+        write_rules(locked, [{"id": "tok", "regex": r"tkx_[A-Za-z0-9]{24}"}])
+        policy = self.tmp / "policy.json"
+        policy.write_text(json.dumps({"rule_dirs": [str(gone)]}))
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "rule_dirs": [str(locked)]}))
+        with mock.patch.dict(vault.POLICY_PATHS, {platform.system(): policy}), \
+                mock.patch.object(user_rules, "load_folder", side_effect=self._refuse_locked(locked)):
+            detect.reset_rules()
+            note = user_rules.broken_folders_note()
+        self.assertEqual(note, f"Warning: 2 rule folders do not load, so their rules of your own do not run: "
+                               f"{gone} (machine policy, is missing); {locked} (setting, cannot be read).")
+        self.assertEqual(note.count(". "), 0, "one sentence")
+
+    def test_a_folder_name_with_a_control_character_is_shown_without_it(self):
+        CONFIG.write_text(json.dumps({**TEST_CONFIG, "rule_dirs": [str(self.tmp / "a\nb")]}))
+        detect.reset_rules()
+        note = user_rules.broken_folders_note()
+        self.assertIn("a?b (setting) is missing", note)
+
+    def test_the_readme_section_opens_with_the_recipe_for_administrators(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        start = readme.index("\n## Rules of your own\n")
+        recipe = readme[start:readme.index("You can add detection rules", start)]
+        self.assertIn("**For administrators.**", recipe)
+        flat = " ".join(recipe.split())
+        steps = ["`maisecrets rules init DIR`", "in a repository", "on each machine",
+                 "`rule_dirs` in the machine policy", "run `maisecrets rules check`"]
+        self.assertEqual([s for s in steps if s in flat], steps)
+        self.assertEqual(sorted(steps, key=flat.index), steps, "the steps in this order")
+        self.assertIn("maisecrets reads local folders only", flat)
+
+    @staticmethod
+    def _refuse_locked(locked: Path):
+        real = user_rules.load_folder
+
+        def load_folder(path, *a, **kw):
+            if path == locked:
+                raise PermissionError("a folder this user cannot read")   # chmod 000 means nothing to root in CI
+            return real(path, *a, **kw)
+        return load_folder
+
+
 class RulesCommand(Base):
     def run_cli(self, *args: str, stdin: str = "") -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()

@@ -1381,6 +1381,25 @@ printed: `scripts/replay_sessions.py --claude --codex`.
 
 ## Rules of your own
 
+**For administrators.** To give each machine of a team the same rules:
+
+1. Run `maisecrets rules init DIR` (in the plugin folder: `bash hooks/run.sh
+   rules init DIR`). It makes a team folder with `rules/`, `samples.txt`, a
+   README and CI files for GitHub and GitLab.
+2. Keep the folder in a repository of the company. Its CI runs `maisecrets
+   rules check` on each change.
+3. Put the folder on each machine. A git checkout that a scheduled job updates
+   is one way.
+4. Add the local path to `rule_dirs` in the machine policy ("Settings you can
+   enforce"). A user cannot remove a folder of the policy.
+5. On a machine, run `maisecrets rules check` to see that each folder loads.
+
+maisecrets reads local folders only. It does not fetch or update a folder: how
+the files get to each machine is the company's choice. When a folder of
+`rule_dirs` is missing or cannot be read, each session start says so in one
+sentence. When rules of your own run, the start line counts them: `maisecrets
+0.6.N is on, with 12 rules of your own from 2 folders.`
+
 You can add detection rules for the tokens of your own services, and you can
 let single values through. maisecrets reads the rules from three places:
 
