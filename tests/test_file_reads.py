@@ -757,7 +757,9 @@ class CleanDirs(_Work):
         self.begin()
         first = file_reads.session_start("S1")
         os.utime(self._note(), (time.time() + 10 ** 6, time.time() + 10 ** 6))
-        self.assertLessEqual(file_reads.session_start("S1"), first)
+        # Linux stamps the note with a coarse clock that can lag time.time() by a few ms: the first start can be that
+        # stamp, the later one the time in the note (CI, python:3.12-slim). The point is the 10**6 s, not the ms
+        self.assertLess(file_reads.session_start("S1"), first + 0.05)
 
     def test_a_linked_note_or_folder_is_not_followed(self):
         other = self.dir / "agent"
