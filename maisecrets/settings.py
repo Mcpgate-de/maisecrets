@@ -9,6 +9,7 @@ default. A hint goes to the model once, when the case it is about first happens.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -101,9 +102,38 @@ IN_A_COMMAND_RE = re.compile(r"(?:/maisecrets:settings|maisecrets:\s*set)\s+[a-z
 # who wrote the prompt (Claude Code 2.1.292 UserPromptSubmit `source`): only the person at the composer. A scheduled
 # task, a loop wakeup, a system or poll prompt can carry text the model chose (CronCreate, ScheduleWakeup), and an
 # `sdk` prompt can come from a program a tool started (codex review round 2), so none of them changes anything. A
-# client without the field is taken as the person
+# prompt without the field is taken as the person, unless a program started the client (NESTED_ENTRYPOINTS)
 TYPED_SOURCES = (None, "user")
+# A prompt without `source` is not the person's when a program started the client through the Agent SDK: `claude -p`
+# runs its hooks with CLAUDE_CODE_ENTRYPOINT=sdk-cli, the SDKs with sdk-ts or sdk-py. The client sets it itself:
+# `env -u` and a `cli` set before the start do not change it (measured on Claude Code 2.1.300). The terminal client
+# sends no `source` either and has `cli`; the desktop app sets claude-desktop (read from its bundle). Codex sets
+# nothing, so a Codex hook sees the entry point of the program that started Codex: none from a terminal
+NESTED_ENTRYPOINTS = ("sdk-",)
 _LOCK = HOME / ".settings.lock"
+
+
+def nested_program(payload: dict) -> str | None:
+    """The entry point when this prompt, with no `source`, came from a client that a program started; else None."""
+    entry = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "")
+    return entry if payload.get("source") is None and entry.startswith(NESTED_ENTRYPOINTS) else None
+
+
+def typed_by_the_person(payload: dict) -> bool:
+    """The prompt counts as typed by the person: a `source` the person has, and no program started the client."""
+    return payload.get("source") in TYPED_SOURCES and nested_program(payload) is None
+
+
+def not_typed_reason(payload: dict) -> str:
+    """One sentence for a settings change that did not count, and what the person can do."""
+    entry = nested_program(payload)
+    if entry:
+        shown = re.sub(r"[^a-z0-9-]", "", entry.lower())[:20]     # a variable is no text for the model
+        return ("maisecrets: a settings change counts only when you type it as your prompt; this one came from a "
+                f"client that a program started (entry point {shown}, as `claude -p` has), so nothing was changed. "
+                "Type it in your own Claude Code or Codex session.")
+    return ("maisecrets: a settings change counts only when you type it as your prompt; this one came from the "
+            f"client ({payload.get('source')}), so nothing was changed.")
 
 
 def state(key: str, cfg: dict) -> str:

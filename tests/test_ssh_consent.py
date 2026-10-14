@@ -643,6 +643,10 @@ class ConsentFlowTests(unittest.TestCase):
                 with self.subTest(extra):
                     hooks.user_prompt({"prompt": "maisecrets: allow ssh db1", "session_id": "S1", **CLAUDE, **extra})
                     self.assertFalse(consent_store.covered("S1", None, ["db1"]))
+            with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}):
+                # `claude -p` sends no source; its entry point names the program that started it
+                hooks.user_prompt({"prompt": "maisecrets: allow ssh db1", "session_id": "S1", **CLAUDE})
+                self.assertFalse(consent_store.covered("S1", None, ["db1"]))
             out = hooks.user_prompt({"prompt": "maisecrets: allow ssh db1", "session_id": "S1", **CODEX})
             self.assertIn("needs the code", out["reason"], "Codex sends no source: only the code proves the person")
             self.assertFalse(consent_store.covered("S1", None, ["db1"]))

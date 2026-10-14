@@ -1,0 +1,10 @@
+# c22-a-nested-client-changes-no-setting: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-a-nested-client-changes-no-setting"
+control = "C22"
+statement = "A prompt without a `source` from a client that a program started (CLAUDE_CODE_ENTRYPOINT sdk-*, as `claude -p` has) changes no setting and opens no ssh window; the terminal client, the desktop app and Codex still change one."
+runner = ["tests/test_settings.py::Change::test_a_prompt_from_a_client_a_program_started_changes_nothing"]
+
+[proof]
+file = "maisecrets/settings.py"
+find = "    return entry if payload.get(\"source\") is None and entry.startswith(NESTED_ENTRYPOINTS) else None\n"
+replace = "    return None\n"

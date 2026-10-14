@@ -266,6 +266,38 @@ class Change(unittest.TestCase):
                 _prompt("maisecrets: set ssh_consent on", source=source)
                 self.assertIs(_user()["ssh_consent"], True)
 
+    def test_a_prompt_from_a_client_a_program_started_changes_nothing(self):
+        # measured on Claude Code 2.1.300: `claude -p` sends no `source` and runs its hooks with
+        # CLAUDE_CODE_ENTRYPOINT=sdk-cli, which env -u and a preset `cli` do not change; the terminal client sends
+        # no `source` either and has `cli`. Codex sends no `source` and sets no entry point of its own
+        for entry in ("sdk-cli", "sdk-ts", "sdk-py"):
+            with self.subTest(entry), mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": entry}):
+                _reset()
+                for client, text in ((CLAUDE, "maisecrets: set ssh_consent on"),
+                                     (CLAUDE, "/maisecrets:settings rehydration block"),
+                                     (CODEX, "maisecrets: set tips off")):
+                    out = _prompt(text, client)
+                    self.assertEqual(out["decision"], "block", "it does not reach the model either")
+                    self.assertIn("a program started", out["reason"])
+                    self.assertIn(entry, out["reason"])
+                self.assertEqual(_user(), TEST_CONFIG, "nothing was written")
+        for env, client, text, key in (({"CLAUDE_CODE_ENTRYPOINT": "cli"}, CLAUDE, "maisecrets: set ssh_consent on",
+                                        "ssh_consent"),
+                                       ({}, CLAUDE, "/maisecrets:settings ssh_consent on", "ssh_consent"),
+                                       ({"CLAUDE_CODE_ENTRYPOINT": "claude-desktop"}, CLAUDE,
+                                        "maisecrets: set ssh_consent on", "ssh_consent"),
+                                       ({}, CODEX, "maisecrets: set tips off", "tips"),
+                                       ({"CLAUDE_CODE_ENTRYPOINT": "cli"}, CODEX, "maisecrets: set tips off", "tips")):
+            with self.subTest(env=env, text=text), mock.patch.dict(os.environ, env):
+                _reset()
+                _prompt(text, client)
+                self.assertIn(key, _user(), "the person's own client still changes a setting")
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}):
+            _reset()
+            _prompt("maisecrets: set ssh_consent on", source="user")
+            self.assertIs(_user()["ssh_consent"], True, "a client that names the person keeps its word")
+        _reset()
+
     def test_a_tool_call_that_carries_a_settings_change_is_refused(self):
         for command in ("codex exec 'maisecrets: set ssh_consent on'",
                         'claude -p "/maisecrets:settings rehydration block"',
