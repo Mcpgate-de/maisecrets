@@ -217,6 +217,49 @@ class Base64PemTests(unittest.TestCase):
         self.assertFalse(detect.VALIDATORS["base64_pem"](key[:20] + "%%%%" + key[24:]))
 
 
+# ------------------------------------------------------- betterleaks patches --
+class BetterleaksPatchTests(unittest.TestCase):
+    def test_each_patch_applies_to_the_vendored_rule_it_names(self):
+        """After a re-sync that changes one of these rules, this goes red: check the correction against the new rule
+        and drop it if upstream fixed the gap."""
+        import json
+        cfg = json.loads((detect.RULES_DIR / "betterleaks.json").read_text(encoding="utf-8"))
+        vendored = {r["id"]: r for r in cfg["rules"]}
+        loaded = {r.id: r for r in detect._load_betterleaks()}
+        for rule_id, patch in detect.BETTERLEAKS_PATCHES.items():
+            with self.subTest(rule=rule_id):
+                self.assertIn(rule_id, vendored)
+                self.assertIn(rule_id, loaded)
+                for kw in patch.get("add_keywords", ()):
+                    self.assertNotIn(kw, vendored[rule_id].get("keywords") or [])
+                    self.assertIn(kw, loaded[rule_id].keywords)
+                if "regex" in patch:
+                    self.assertEqual(vendored[rule_id]["regex"], patch["expect"])
+                    self.assertEqual(loaded[rule_id].regex.pattern, detect._re2_to_python(patch["regex"]))
+
+    def test_a_bare_token_without_the_providers_name_is_found(self):
+        b58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+        r = random.Random(40)
+        for _ in range(20):
+            cases = {
+                "resend-api-key.1": J(["r", "e_"]) + rd(r, 8, b58) + "_" + rd(r, 24, b58),
+                "ionic-personal-access-token": J(["io", "n_"]) + rd(r, 42, AN),
+                "airtable-personnal-access-token": J(["pa", "t"]) + rd(r, 14, AN) + "." + rd(r, 64, HEXL),
+                "wakatime-api-key.2": J(["wak", "a_"]) + r.choice([_uuid(r), rd(r, 40, L + D)]),
+            }
+            for rule_id, tok in cases.items():
+                for text in (tok, f"here it is: {tok} thanks\n", f"echo '{tok}' | tool\n"):
+                    with self.subTest(rule=rule_id, text=text[:12]):
+                        self.assertIn(rule_id, kinds_over(text, tok, "tool"))
+
+    def test_a_posix_class_of_re2_becomes_a_python_class(self):
+        self.assertEqual(detect._re2_to_python(r"\b(pat[[:alnum:]]{14})"), r"\b(pat[A-Za-z0-9]{14})")
+        self.assertEqual(detect._re2_to_python(r"[[:xdigit:]_-]"), r"[0-9A-Fa-f_-]")
+
+    def test_a_waka_key_is_masked_whole(self):
+        r = random.Random(41)
+        tok = J(["wak", "a_"]) + _uuid(r)
+        self.assertIn(("wakatime-api-key.2", "SECRET", tok), found(f"use {tok} here\n"))
 
 
 if __name__ == "__main__":

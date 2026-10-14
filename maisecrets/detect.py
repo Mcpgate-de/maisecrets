@@ -109,8 +109,13 @@ def _re2_to_python(rx: str) -> str:
     if "(?i)" in rx:
         rx = rx.replace("(?i)", "")
         flags = "(?i)"
+    for posix, chars in _POSIX_CLASSES.items():   # [[:alnum:]]: Python reads it as a set of the letters ":alnum"
+        rx = rx.replace(posix, chars)
     return flags + rx.replace(r"\z", r"\Z")
 
+
+_POSIX_CLASSES = {"[:alnum:]": "A-Za-z0-9", "[:alpha:]": "A-Za-z", "[:digit:]": "0-9", "[:xdigit:]": "0-9A-Fa-f",
+                  "[:upper:]": "A-Z", "[:lower:]": "a-z", "[:word:]": "0-9A-Za-z_"}
 
 
 def shannon_entropy(s: str) -> float:
@@ -1423,6 +1428,37 @@ OWN_RULES: list[dict] = [
 # it, and maisecrets' own label rules cover these shapes (ds-keyword, url-query-secret, the email rule)
 BETTERLEAKS_SKIP_UNSUPPORTED = True
 
+# Corrections to vendored betterleaks rules. scripts/sync_betterleaks.py overwrites rules/betterleaks.json, so they
+# live here and apply when the rules load. Each names the upstream regex it expects ("expect"); after a re-sync that
+# changes that regex, tests/test_rules_from_the_catalogs.py goes red, and the correction is checked against the new
+# rule (and dropped if upstream fixed it). Found by a coverage measurement against other catalogs (0.6.20):
+# - three keyword lists named only the provider, so a bare token without the provider's name was never searched;
+#   the token's own prefix is now a keyword too (the regex is unchanged). The Airtable regex also used the RE2 class
+#   [[:alnum:]], which Python read as a set of six characters; _re2_to_python now translates the POSIX classes
+# - WakaTime's waka_ key is waka_ and a UUID (Kingfisher's rule and examples); the regex took no hyphen
+BETTERLEAKS_PATCHES = {
+    "resend-api-key.1": {"add_keywords": ("re_",)},
+    "ionic-personal-access-token": {"add_keywords": ("ion_",)},
+    "airtable-personnal-access-token": {"add_keywords": ("pat",)},
+    "wakatime-api-key.2": {
+        "expect": r"""(?i)\b(waka_[a-z0-9]{36,64})(?:\\?['"\x60]|[\s;]|\\[nr]|$)""",
+        "regex": r"""(?i)\b(waka_(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-z0-9]{36,64}))"""
+                 r"""(?:\\?['"\x60]|[\s;]|\\[nr]|$)"""},
+}
+
+
+def _patched(r: dict) -> dict:
+    """The rule with its BETTERLEAKS_PATCHES entry applied. A regex correction applies only to the regex it expects."""
+    patch = BETTERLEAKS_PATCHES.get(r.get("id"))
+    if not patch:
+        return r
+    r = dict(r)
+    if patch.get("add_keywords"):
+        r["keywords"] = list(r.get("keywords") or []) + [k for k in patch["add_keywords"]
+                                                        if k not in (r.get("keywords") or [])]
+    if patch.get("regex") and r.get("regex") == patch["expect"]:
+        r["regex"] = patch["regex"]
+    return r
 
 
 def _load_own_secret_rules() -> list[Rule]:
@@ -1465,6 +1501,7 @@ def _load_betterleaks() -> list[Rule]:
         for r in cfg.get("rules", []):
             if "regex" not in r or r.get("skipReport"):
                 continue
+            r = _patched(r)
             own = None
             if r.get("filter"):
                 try:
