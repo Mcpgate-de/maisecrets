@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## [0.6.17] - 2026-10-14
+
+### Fixes
+
+- the word for "password" in another language stays text as a locale value in a tool result (af47b7e)
+- the secret-hygiene scan reads files, commits and tool results as the tool hook does (0dbca9b)
+- a word after a label in a tool result or a file no longer blocks later prompts; later tool results still mask it (945de68)
+- a password of letters after a password label is redacted in tool results and files; a typed prompt keeps the rule of 0.6.16 (e0ee60c)
+
+### Other
+
+- Merge branch 'test/the-word-hunt-tests-use-the-fake-clipboard' into 'main' (3ea7c7b)
+- Merge branch 'fix/tool-results-take-more-passwords' into 'main' (575827a)
+
 ## [0.6.16] - 2026-10-14
 
 ### Fixes
