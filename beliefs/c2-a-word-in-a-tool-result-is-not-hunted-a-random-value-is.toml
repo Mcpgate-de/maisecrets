@@ -1,0 +1,28 @@
+# c2-a-word-in-a-tool-result-is-not-hunted-a-random-value-is: an invariant belief. One goal, two directions; each mutation removes one and must turn at least one owning test red, and each owning test must be red under at least one mutation.
+belief = "c2-a-word-in-a-tool-result-is-not-hunted-a-random-value-is"
+kind = "invariant"
+control = "C2"
+statement = "A word that a label rule takes in a tool result or a file is masked there and never hunted: no later prompt is blocked and no later tool result is changed for it (field report on 0.6.16). A random value after a label stays hunted, and so does a word the person gives in a prompt."
+runner = [
+  "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_word_after_a_password_label_is_masked_there_and_nowhere_later",
+  "tests/test_word_values_not_hunted.py::WordValuesNotHuntedTests::test_a_random_value_after_a_label_is_still_hunted_in_a_later_prompt",
+  "tests/test_leak_direction.py::WeakWordTests::test_a_chosen_word_stays_hunted_and_a_common_word_does_not",
+]
+
+[[proof]]
+path = "the tool hook stores a word as a value to hunt, as 0.6.16 did"
+file = "maisecrets/hooks.py"
+find = "            out, ents = _replace(s, matches, vault, session, tool=True)"
+replace = "            out, ents = _replace(s, matches, vault, session)"
+
+[[proof]]
+path = "every value of letters counts as a word, a random one too"
+file = "maisecrets/detect.py"
+find = "    return sum(q not in common for q in pairs) <= 0.1 * len(pairs)"
+replace = "    return True"
+
+[[proof]]
+path = "a word the person gives in a prompt is weak too"
+file = "maisecrets/vault.py"
+find = "    return value.strip().lower() in DEFAULT_WORDS or (tool and word_value(value.strip()))"
+replace = "    return value.strip().lower() in DEFAULT_WORDS or word_value(value.strip())"

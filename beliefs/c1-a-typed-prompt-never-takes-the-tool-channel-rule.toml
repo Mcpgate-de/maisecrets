@@ -1,0 +1,35 @@
+# c1-a-typed-prompt-never-takes-the-tool-channel-rule: an invariant belief. One goal, two directions; each mutation removes one and must turn at least one owning test red, and each owning test must be red under at least one mutation.
+belief = "c1-a-typed-prompt-never-takes-the-tool-channel-rule"
+kind = "invariant"
+control = "C1"
+statement = "A password of letters after a password label is a hit in a tool result or a file (the tool channel) and never in a typed prompt: the prompt hook scans with the prompt rule of 0.6.16, the tool hook with the tool rule, and the per-text cache of one channel never answers the other."
+runner = [
+  "tests/test_tool_channel.py::ToolChannelTests::test_letters_after_a_password_label_are_a_hit_in_a_tool_result_only",
+  "tests/test_tool_channel.py::ToolChannelTests::test_the_channel_of_one_scan_does_not_reach_the_next_scan_of_the_same_text",
+  "tests/test_tool_channel.py::ToolChannelTests::test_a_typed_prompt_with_letters_after_a_password_label_is_not_blocked",
+  "tests/test_tool_channel.py::ToolChannelTests::test_post_tool_masks_the_value_in_a_read_result",
+]
+
+[[proof]]
+path = "every scan takes the tool rule, a typed prompt too"
+file = "maisecrets/detect.py"
+find = "    outer, _CHANNEL[0] = _CHANNEL[0], channel if channel == \"tool\" else \"prompt\""
+replace = "    outer, _CHANNEL[0] = _CHANNEL[0], \"tool\""
+
+[[proof]]
+path = "the prompt hook scans with the tool rule"
+file = "maisecrets/hooks.py"
+find = "    return [m for m in detect.scan(prompt) if not detect.is_fixture(m, prompt)]"
+replace = "    return [m for m in detect.scan(prompt, channel=\"tool\") if not detect.is_fixture(m, prompt)]"
+
+[[proof]]
+path = "the cache of a tool scan answers a later prompt scan of the same text"
+file = "maisecrets/detect.py"
+find = "    return cache[\"literal\", _CHANNEL[0]]"
+replace = "    return cache.get((\"literal\", \"tool\")) or cache[\"literal\", _CHANNEL[0]]"
+
+[[proof]]
+path = "the tool hook scans with the prompt rule"
+file = "maisecrets/hooks.py"
+find = "        matches = [m for m in detect.scan(s, channel=\"tool\") if not detect.is_fixture(m, s, path)]"
+replace = "        matches = [m for m in detect.scan(s) if not detect.is_fixture(m, s, path)]"

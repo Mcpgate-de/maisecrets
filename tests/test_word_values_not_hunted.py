@@ -44,7 +44,7 @@ class WordValuesNotHuntedTests(unittest.TestCase):
         _hygiene.watch_children(self)
         self.home = Path(tempfile.mkdtemp(prefix="word-hunt-", dir=_isolate.HOME))
         Path(self.home, "config.json").write_text(CFG)
-        self.bin = Path(self.home, "bin")   # a blocked prompt copies its rewrite: a stand-in clipboard, never the real one
+        self.bin = Path(self.home, "bin")   # a blocked prompt copies its rewrite: a stand-in clipboard
         self.bin.mkdir()
         for name in ("pbcopy", "xclip", "clip"):
             Path(self.bin, name).write_text("#!/bin/sh\ncat > /dev/null\n")

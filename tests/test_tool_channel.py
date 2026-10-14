@@ -47,6 +47,12 @@ class ToolChannelTests(unittest.TestCase):
         self.assertFalse(is_weak("label-pw-literal", "kwfrzmplt"), "the prompt rule takes it too: it stays hunted")
         self.assertFalse(is_weak("ds-keyword-colon", "qwmzpl"), "another rule found it: it stays hunted")
 
+    def test_a_typed_prompt_with_letters_after_a_password_label_is_not_blocked(self):
+        _hygiene.patch(self, hooks, "_clipboard", lambda text: True)
+        hooks._live_cache.clear()
+        out = hooks.user_prompt({"prompt": f"why does {LETTERS} not compile?", "session_id": "s7", **CLAUDE})
+        self.assertNotEqual(out.get("decision"), "block", "a typed prompt keeps the prompt rule of 0.6.16")
+
     def test_post_tool_masks_the_value_in_a_read_result(self):
         _hygiene.patch(self, hooks, "_scrub_transcript_later", lambda *a, **kw: None)
         out = hooks.post_tool({"tool_name": "Read", "session_id": "s1", **CLAUDE,
