@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## [0.6.18] - 2026-10-14
+
+### Features
+
+- a password export in a tool result or a file is read without its passwords (589688b)
+- tool results and files are also scanned without terminal and encoding disguises (56506c1)
+- an IBAN written with hyphens or in lower case is found (28993c1)
+- a card number next to "Karte", "carte", "carta" or "tarjeta" is found, not only next to "card" (8f256a8)
+
+### Fixes
+
+- a German VAT ID without a VAT word and a company register number are no longer masked (c6184b4)
+
+### Other
+
+- Merge branch 'feat/rules-from-the-fork' into 'main' (b0b681d)
+- Merge branch 'docs/benchmarks-anyone-can-repeat' into 'main' (456c96b)
+
 ## [0.6.17] - 2026-10-14
 
 ### Fixes
