@@ -112,6 +112,7 @@ def _re2_to_python(rx: str) -> str:
     return flags + rx.replace(r"\z", r"\Z")
 
 
+
 def shannon_entropy(s: str) -> float:
     if not s:
         return 0.0
@@ -248,6 +249,76 @@ def _de_lanr_ok(v: str) -> bool:
 def _de_vat_id_ok(v: str) -> bool:
     n = re.sub(r"[\s.\-]", "", v.upper())
     return len(n) == 11 and n.startswith("DE") and n[2:].isdigit()
+
+
+# the decoded head of a PEM private key: the header, optional armour or encryption headers (PGP's Version:, the
+# Proc-Type: and DEK-Info: of a legacy encrypted key), then base64 body characters (as many as the head holds, up to
+# 16). A byte order mark may stand before the header
+_B64_PEM_PRIVATE_RE = re.compile(rb"(?:\xef\xbb\xbf)?-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----\r?\n"
+                                 rb"(?:[A-Za-z][A-Za-z0-9-]{0,30}: [^\r\n]{0,200}\r?\n)*(?:\r?\n)?"
+                                 rb"(?:[A-Za-z0-9+/]{16}|[A-Za-z0-9+/]{1,15}\Z)")
+# a further line of a wrapped base64 value: after a line break, or after an escaped one (\n in a JSON string)
+_B64_LINE_RE = re.compile(r"(?:\r?\n|(?:\\r)?\\n)([ \t]*)([A-Za-z0-9+/]+={0,2})(?=[ \t]*(?:\r?\n|$)|[\"',;]|\\[rn])")
+_B64_PEM_STARTS = ("LS0tLS1CRUdJTi", "77u/LS0tLS1CRUdJTi")
+
+
+def _b64_needles(raw: bytes) -> tuple:
+    """The base64 text of `raw` at each of the three byte alignments, cut to the characters that `raw` alone decides."""
+    import base64
+    out = []
+    for k in range(3):
+        enc = base64.b64encode(b"\0" * k + raw + b"\0\0").decode()
+        out.append(enc[-(-8 * k // 6):8 * (k + len(raw)) // 6])
+    return tuple(out)
+
+
+_PRIVATE_KEY_NEEDLES = _b64_needles(b"PRIVATE KEY-----")   # a key later in a bundle (certificate, chain, key)
+
+
+def _base64_wrapped_end(text: str, start: int, end: int) -> int:
+    """The end of a base64 value that `base64` or openssl wrapped at a fixed width. text[start:end] is its first
+    line; each further line holds base64 alone and has the width of the first, the last may be shorter. A line of
+    another width, a line that starts a new value, or any other text ends the value. A first line longer than 120
+    characters is no wrapped line (the tools wrap at 64 or 76), and one that ends in padding is the whole value."""
+    width = end - start
+    if width > 120 or text[end - 1] == "=":
+        return end
+    while True:
+        m = _B64_LINE_RE.match(text, end)
+        if not m or len(m.group(2)) > width or m.group(2).startswith(_B64_PEM_STARTS):
+            return end
+        end = m.end(2)
+        if len(m.group(2)) < width or m.group(2).endswith("="):
+            return end
+
+
+def _base64_pem_ok(v: str) -> bool:
+    """A base64 value whose decoded start is the header of a PEM private key and its first body characters (a
+    Kubernetes Secret's tls.key or ssh-privatekey), or a bundle that holds one later. Only the first 400 characters
+    are decoded: the value can be megabytes long."""
+    import base64
+    flat = "".join(v.replace("\\r", "").replace("\\n", "").split())
+    head = flat[:400]
+    try:
+        raw = base64.b64decode(head[:len(head) // 4 * 4], validate=True)
+    except ValueError:
+        return False
+    if _B64_PEM_PRIVATE_RE.match(raw):
+        return True
+    if not raw.startswith(b"-----BEGIN "):
+        return False
+    for needle in _PRIVATE_KEY_NEEDLES:   # a bundle: decode around each "PRIVATE KEY-----" (the footer has one too)
+        i, seen = flat.find(needle), 0
+        while i >= 0 and seen < 50:
+            a = max(0, i // 4 * 4 - 80)
+            window = flat[a:a + 200]
+            try:
+                if _B64_PEM_PRIVATE_RE.search(base64.b64decode(window[:len(window) // 4 * 4], validate=True)):
+                    return True
+            except ValueError:
+                pass
+            i, seen = flat.find(needle, i + 1), seen + 1
+    return False
 
 
 def _us_ssn_ok(v: str) -> bool:
@@ -1159,6 +1230,7 @@ VALIDATORS = {
     "wif": checksums.wif_ok,
     "xprv": checksums.xprv_ok,
     "discord_bot_token": checksums.discord_bot_token_ok,
+    "base64_pem": _base64_pem_ok,
 }
 
 
@@ -1335,6 +1407,14 @@ OWN_RULES: list[dict] = [
     {"id": "auth-scheme-apikey", "type": "SECRET", "secret_group": 1, "validator": "apikey_value",
      "regex": r"(?i:authorization)[\"']?\]?[ \t]*[:=][ \t]*[\"'`]?ApiKey[ \t]+([A-Za-z0-9+/_-]{8,1024}={0,2})"
               r"(?![\w+/=-])"},
+    # a PEM private key in base64: the tls.key or ssh-privatekey of a Kubernetes Secret, a CI variable, a Helm value.
+    # The run starts with the base64 of "-----BEGIN"; the validator decodes its first 400 characters and keeps it only
+    # if the header names a PRIVATE KEY and base64 body follows, or if a bundle holds one later (a certificate alone
+    # stays text). The whole value is the secret, also when `base64` or openssl wrapped it at a fixed width, with
+    # real or escaped line breaks (_base64_wrapped_end).
+    # In 0.6.19 no rule found it, also not after a label (a catalog survey, 2026-10-14)
+    {"id": "private-key-base64", "type": "SECRET", "validator": "base64_pem",
+     "regex": r"(?<![A-Za-z0-9+/])(?:77u/)?LS0tLS1CRUdJTi[A-Za-z0-9+/]{16,}={0,2}"},
 ]
 
 
@@ -1342,6 +1422,7 @@ OWN_RULES: list[dict] = [
 # betterleaks rules left out: a filter that is a program (let bindings; rule_filter.Unsupported) would run without
 # it, and maisecrets' own label rules cover these shapes (ds-keyword, url-query-secret, the email rule)
 BETTERLEAKS_SKIP_UNSUPPORTED = True
+
 
 
 def _load_own_secret_rules() -> list[Rule]:
@@ -2671,6 +2752,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> li
             if end <= start:
                 continue
             secret = m.group(g)
+            if rule.id == "private-key-base64":
+                end = _base64_wrapped_end(text, start, end)   # the further lines of a wrapped value
+                secret = text[start:end]
             if (rule.id in _ESCAPABLE_COLON_RULES and "\\" in (m.group(2) or "")
                     and text[start - 2:start] not in ('\\"', "\\'")):
                 # the label's quote is escaped: JSON inside a string, whose values are escaped strings. A value without

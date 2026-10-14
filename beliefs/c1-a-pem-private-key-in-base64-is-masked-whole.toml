@@ -1,0 +1,10 @@
+# c1-a-pem-private-key-in-base64-is-masked-whole: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-pem-private-key-in-base64-is-masked-whole"
+control = "C1"
+statement = "A PEM private key in base64 (the tls.key or ssh-privatekey of a Kubernetes Secret) is one secret hit over the whole value, also wrapped or inside a certificate bundle; a certificate or a public key in base64 stays text."
+runner = ["tests/test_rules_from_the_catalogs.py::Base64PemTests::test_a_private_key_in_a_kubernetes_secret_is_masked_whole"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''"regex": r"(?<![A-Za-z0-9+/])(?:77u/)?LS0tLS1CRUdJTi'''
+replace = '''"regex": r"(?!)(?<![A-Za-z0-9+/])(?:77u/)?LS0tLS1CRUdJTi'''
