@@ -74,6 +74,149 @@ def _intercom(r: random.Random) -> str:
     return base64.b64encode(raw[:45]).decode()
 
 
+# rule id -> (a token, a look-alike that is not one). Every part after the prefix is random
+TOKENS = {
+    "google-oauth-client-secret": lambda r: (J(["GOC", "SPX-"]) + rd(r, 28, B64U), J(["GOC", "SPX-"]) + rd(r, 12, AN)),
+    "sonarqube-token": lambda r: (J(["sq", "u_"]) + rd(r, 40, HEXL), J(["sq", "u_"]) + rd(r, 30, HEXL)),
+    "dynatrace-platform-token": lambda r: (J(["dt0", "s", rd(r, 2), "."]) + rd(r, 8, U + D) + "." + rd(r, 64, U + D),
+                                           J(["dt0", "s16."]) + rd(r, 8, U + D) + "." + rd(r, 20, U + D)),
+    "postman-collection-token": lambda r: (J(["PM", "AT-"]) + rd(r, 26, U + D), J(["PM", "AT-"]) + rd(r, 12, U + D)),
+    "shopify-partner-api-token": lambda r: (J(["prt", "api_"]) + rd(r, 32, HEXL), J(["prt", "api_"]) + rd(r, 12, HEXL)),
+    "aiven-service-password": lambda r: (J(["AV", "NS_"]) + rd(r, r.randint(15, 100), B64U),
+                                         J(["AV", "NS_"]) + rd(r, 10, AN)),
+    "planetscale-app-secret": lambda r: (J(["pscale_app", "_secret_"]) + rd(r, 43, B64U),
+                                         J(["pscale_app", "_secret_"]) + rd(r, 12, AN)),
+    "intercom-access-token": lambda r: (_intercom(r), J(["dG9r", "O"]) + rd(r, 20, AN)),
+    "netlify-personal-token": lambda r: (J(["nf", "p_"]) + rd(r, r.randint(40, 48), AN),
+                                         J(["nf", "p_"]) + rd(r, 20, AN)),
+    "teamcity-access-token": lambda r: (J(["eyJ0eXAiOiAi", "VENWMiJ9."]) + rd(r, 36, B64U) + "." + rd(r, 48, B64U),
+                                        J(["eyJ0eXAiOiAi", "VENWMiJ9."]) + rd(r, 20, B64U)),
+    "dependency-track-api-key": lambda r: (J(["od", "t_"]) + rd_mixed(r, 32, AN) + "Z",
+                                           J(["od", "t_"]) + rd(r, 12, AN)),
+    "tavily-api-key": lambda r: (J(["tv", "ly-", r.choice(["", "dev-"])]) + rd(r, 32, AN),
+                                 J(["tv", "ly-"]) + rd(r, 12, AN)),
+    "jina-api-key": lambda r: (J(["ji", "na_"]) + rd(r, 60, AN), J(["ji", "na_"]) + rd(r, 20, AN)),
+    "aws-appsync-api-key": lambda r: (J(["da", "2-"]) + rd_mixed(r, 26, L + D), J(["da", "2-"]) + rd(r, 26, L)),
+    "stackhawk-api-key": lambda r: (J(["haw", "k."]) + rd(r, 20, B64U) + "." + rd(r, 20, B64U),
+                                    J(["haw", "k."]) + rd(r, 12, B64U)),
+    "heroku-api-key-uuid": lambda r: (J(["HR", "KU-"]) + _uuid(r), J(["HR", "KU-"]) + rd(r, 8, HEXL)),
+    "github-app-installation-jwt": lambda r: (J(["gh", "s_", rd(r, 1, D[1:]), rd(r, 6), "_"]) + _jwt(r),
+                                              J(["gh", "s_", rd(r, 6), "_"]) + rd(r, 30, AN)),
+    "crates-io-api-token": lambda r: (J(["ci", "o"]) + rd_mixed(r, 32, AN),
+                                      J(["ci", "o"]) + rd(r, 32, string.ascii_letters)),
+    "nuget-api-key": lambda r: (J(["oy", "2"]) + rd_mixed(r, 43, L + D), J(["oy", "2"]) + rd(r, 43, L)),
+    "dropbox-short-lived-token": lambda r: (J(["s", "l.", r.choice(["", "u."])])
+                                            + rd(r, r.randint(130, 1300), B64U),
+                                            J(["s", "l."]) + rd(r, 60, B64U)),
+    "firecrawl-api-key": lambda r: (J(["f", "c-"]) + rd(r, 32, HEXL), J(["f", "c-"]) + rd(r, 31, HEXL)),
+    "elevenlabs-api-key-bare": lambda r: (J(["s", "k_"]) + rd(r, 48, HEXL), J(["s", "k_"]) + rd(r, 47, HEXL)),
+}
+
+PREFIX_IDS_BEFORE = {"gitlab-runner-token", "gitlab-deploy-token-any", "webhook-signing-secret",
+                     "cloudflare-user-api-token"}
+OWN_SHORT_PREFIX_IDS = {"crates-io-api-token", "nuget-api-key", "dropbox-short-lived-token", "firecrawl-api-key",
+                        "elevenlabs-api-key-bare", "aiven-service-password"}
+
+
+class TokenFormatTests(unittest.TestCase):
+    def test_each_token_is_found_whole_by_its_rule_and_a_look_alike_is_not(self):
+        for rule_id, gen in TOKENS.items():
+            r = random.Random(rule_id)
+            for _ in range(20):
+                tok, miss = gen(r)
+                for text in (tok, f"export TOKEN_VALUE={tok}\n", f"here it is: {tok} thanks", f'"{tok}"'):
+                    for channel in ("prompt", "tool"):
+                        with self.subTest(rule=rule_id, text=text[:30], channel=channel):
+                            self.assertIn((rule_id, "SECRET", tok), found(text, channel))
+                with self.subTest(rule=rule_id, miss=miss):
+                    self.assertNotIn(rule_id, [k for k, _t, _v in found(f"see {miss} there")])
+
+    def test_a_token_after_an_escaped_line_break_or_before_a_full_stop_is_found(self):
+        """Gate B of 0.6.20: JSON text in a tool result has \\n before a token; a sentence ends with a full stop."""
+        for rule_id, gen in TOKENS.items():
+            tok, _ = gen(random.Random(rule_id + "escaped"))
+            for text in ('{"content": "API_URL=https://x\\n' + tok + '\\n"}', "line\\t" + tok,
+                         f"My token is {tok}.", f"({tok}), next"):
+                for channel in ("prompt", "tool"):
+                    with self.subTest(rule=rule_id, text=text[:12], channel=channel):
+                        self.assertIn((rule_id, "SECRET", tok), found(text, channel))
+
+    def test_a_sonarqube_analysis_token_needs_the_word_sonar(self):
+        r = random.Random(23)
+        for p in ("sqa_", "sqp_"):
+            tok = J([p[:2], p[2:]]) + rd(r, 40, HEXL)
+            for text in (f"SONAR_TOKEN={tok}", f"sonar.token: {tok}", f"run the SonarQube scan with {tok}"):
+                with self.subTest(text=text[:12]):
+                    self.assertIn(("sonarqube-analysis-token", "SECRET", tok), found(text, "tool"))
+            for text in (f"docker pull app:{tok}", f"git checkout -b {tok}"):
+                with self.subTest(text=text[:12]):
+                    self.assertNotIn("sonarqube-analysis-token", [k for k, _t, _v in found(text, "tool")])
+
+    def test_every_loaded_regex_has_no_posix_class_left(self):
+        """Python reads [[:space:]] as a set of characters; _re2_to_python translates the classes it knows."""
+        for rule in detect.rules():
+            with self.subTest(rule=rule.id):
+                self.assertNotIn("[:", rule.regex.pattern.replace("[:=]", "").replace("[:,", ""))
+
+    def test_a_token_inside_a_longer_word_is_no_hit(self):
+        """The short prefixes: fc-, sl., sk_, cio, oy2, da2- glued to a word before them are part of that word."""
+        for rule_id, gen in TOKENS.items():
+            tok, _ = gen(random.Random(rule_id + "glued"))
+            for before in ("x", "9"):
+                with self.subTest(rule=rule_id, before=before):
+                    self.assertNotIn(rule_id, [k for k, _t, _v in found(f"see {before}{tok} there")])
+
+    def test_every_new_rule_has_a_token(self):
+        new = {line.split()[0] for line in (detect.RULES_DIR / "prefixes.txt").read_text().splitlines()
+               if line.strip() and not line.startswith("#")}
+        own = {d["id"] for d in detect.OWN_RULES}
+        self.assertTrue(set(TOKENS) - OWN_SHORT_PREFIX_IDS <= new)
+        self.assertTrue(OWN_SHORT_PREFIX_IDS <= own)
+
+    def test_each_rule_starts_with_its_literal(self):
+        """The regex starts with the literal prefix (the boundary is a lookbehind after it), so the regex engine
+        skips a text without the prefix."""
+        rx = {r.id: r.regex.pattern for r in detect.rules()}
+        for rule_id in TOKENS:
+            with self.subTest(rule=rule_id):
+                self.assertRegex(rx[rule_id], r"^(?:\(\?:)?[A-Za-z0-9]")
+
+    def test_a_long_run_of_near_misses_takes_linear_time(self):
+        r = random.Random(20)
+        for rule_id, gen in TOKENS.items():
+            tok, _ = gen(r)
+            near = (tok[:-2] + "  ") * 500             # each copy one short of a match
+            t0 = time.perf_counter()
+            found(near)
+            with self.subTest(rule=rule_id):
+                self.assertLess(time.perf_counter() - t0, 3.0)
+
+    def test_an_identifier_or_a_digest_after_a_prefix_is_no_hit(self):
+        """codex Gate A of 0.6.20: names of words after AVNS_, cio or oy2, and a hex digest after nfp_ or odt_."""
+        r = random.Random(22)
+        cio = J(["ci", "o", "ServiceConfigurationManagerFactory"])[:34] + "1"     # cio and 32 characters
+        oy2 = J(["oy", "2", "configurationmanagerservicefactoryprovider"])[:45] + "1"
+        self.assertEqual((len(cio), len(oy2)), (35, 46))
+        for text in (J(["AV", "NS_Configuration01"]), J(["AV", "NS_DatabaseConnectionPool"]), cio, oy2,
+                     "/static/js/" + J(["f", "c-"]) + rd(r, 32, HEXL) + ".js",
+                     "." + J(["f", "c-"]) + rd(r, 32, HEXL) + "{",
+                     J(["od", "t_"]) + rd(r, 40, L), J(["od", "t_"]) + rd_mixed(r, 32, AN) + ".odt",
+                     J(["ji", "na_"]) + rd(r, 60, string.ascii_letters),
+                     J(["s", "l."]) + rd(r, 140, string.ascii_letters),
+                     J(["nf", "p_"]) + rd(r, 40, HEXL), J(["od", "t_"]) + rd(r, 32, HEXL),
+                     J(["od", "t_"]) + rd(r, 64, HEXL)):
+            with self.subTest(text=text[:8]):
+                self.assertEqual(found(f"see {text} there"), [])
+
+    def test_stripe_and_other_sk_keys_stay_with_their_own_rules(self):
+        r = random.Random(21)
+        stripe = J(["sk", "_live_"]) + rd(r, 48, HEXL)
+        self.assertNotIn("elevenlabs-api-key-bare", kinds_over(f"key {stripe}", stripe))
+        for word in ("sl.no", "fc-dark", "da2-config", J(["ci", "oServiceConfigurationManagerFactoryXYZ"])):
+            with self.subTest(word=word):
+                self.assertEqual(found(f"see {word} there"), [])
+
+
 # ------------------------------------------------------------ base64 PEM key --
 def pem(r: random.Random, kind: str = "RSA PRIVATE KEY", body_bytes: int = 1190) -> bytes:
     body = base64.b64encode(bytes(r.randrange(256) for _ in range(body_bytes))).decode()

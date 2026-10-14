@@ -1236,6 +1236,8 @@ VALIDATORS = {
     "xprv": checksums.xprv_ok,
     "discord_bot_token": checksums.discord_bot_token_ok,
     "base64_pem": _base64_pem_ok,
+    # a token of a short public prefix (cio, oy2, AVNS_) whose body reads as words is an identifier
+    "token_not_words": lambda v: _wordlike(v[3:]) < 0.5,
 }
 
 
@@ -1420,6 +1422,35 @@ OWN_RULES: list[dict] = [
     # In 0.6.19 no rule found it, also not after a label (a catalog survey, 2026-10-14)
     {"id": "private-key-base64", "type": "SECRET", "validator": "base64_pem",
      "regex": r"(?<![A-Za-z0-9+/])(?:77u/)?LS0tLS1CRUdJTi[A-Za-z0-9+/]{16,}={0,2}"},
+    # token formats whose literal prefix is shorter than four characters, so not in rules/prefixes.txt (0.6.20). The
+    # character after the prefix is checked by a lookbehind written after the prefix, so the regex still starts with
+    # its literal and the engine skips a text without it. Sources: crates.io and NuGet from Nosey Parker (Apache-2.0),
+    # Dropbox, Firecrawl and ElevenLabs from Kingfisher (Apache-2.0); each regex is written here. A crates.io or NuGet
+    # key needs one digit, and its body must not read as words: an identifier such as cioServiceConfiguration… is no
+    # key. ElevenLabs: exactly 48 hex digits after sk_ (Stripe's sk_live_ and sk_test_ have an underscore there).
+    # Firecrawl and ElevenLabs keys are hex by design, so a digest after fc- or sk_ is taken too (no hit in the
+    # developer texts or in CredData's code files, 0.6.20)
+    {"id": "crates-io-api-token", "type": "SECRET", "validator": "token_not_words",
+     "regex": r"cio(?:(?<![A-Za-z0-9_]cio)|(?<=\\[nrt]cio))(?=[A-Za-z]{0,31}[0-9])[A-Za-z0-9]{32}(?![A-Za-z0-9_])"},
+    {"id": "nuget-api-key", "type": "SECRET", "validator": "token_not_words",
+     "regex": r"oy2(?:(?<![A-Za-z0-9_]oy2)|(?<=\\[nrt]oy2))(?=[a-z]{0,42}[0-9])[a-z0-9]{43}(?![A-Za-z0-9_])"},
+    {"id": "dropbox-short-lived-token", "type": "SECRET",
+     "regex": r"sl\.(?:(?<![A-Za-z0-9_.-]sl\.)|(?<=\\[nrt]sl\.))"
+              r"(?:u\.)?(?=[A-Za-z_-]{0,2047}[0-9])[A-Za-z0-9_-]{130,2048}(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9_-])"},
+    {"id": "firecrawl-api-key", "type": "SECRET",
+     "regex": r"fc-(?:(?<![A-Za-z0-9_-]fc-)|(?<=\\[nrt]fc-))[a-f0-9]{32}(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9]|\{)"},
+    {"id": "elevenlabs-api-key-bare", "type": "SECRET",
+     "regex": r"sk_(?:(?<![A-Za-z0-9_]sk_)|(?<=\\[nrt]sk_))[0-9a-f]{48}(?![A-Za-z0-9_])(?!\.[A-Za-z0-9]|\{)"},
+    # an Aiven service password (GitLab's rule, MIT): AVNS_ and 15 to 123 characters. A name of words after the prefix
+    # (AVNS_Configuration01) is no password (codex Gate A of 0.6.20)
+    {"id": "aiven-service-password", "type": "SECRET", "validator": "token_not_words",
+     "regex": r"AVNS_(?:(?<![A-Za-z0-9_]AVNS_)|(?<=\\[nrt]AVNS_))[0-9A-Za-z_-]{15,123}(?![0-9A-Za-z_-])"},
+    # SonarQube's analysis tokens (GitLab's rules, MIT): sqa_ (global) and sqp_ (project) and 40 hex digits, the shape
+    # of a git commit id after a word such as "sqa" (software quality assurance), so only with "sonar" near it (Gate B
+    # of 0.6.20). The user token squ_ stands alone (rules/prefixes.txt)
+    {"id": "sonarqube-analysis-token", "type": "SECRET", "context": ("sonar", "sonarqube", "sonarcloud"),
+     "require_context": True,
+     "regex": r"sq[ap]_(?:(?<![A-Za-z0-9_]sq[ap]_)|(?<=\\[nrt]sq[ap]_))[0-9a-f]{40}(?![A-Za-z0-9_])"},
 ]
 
 
@@ -1880,7 +1911,8 @@ def _load_literal(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
 
 def _load_own() -> list[Rule]:
     return [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"]),
-                 secret_group=d.get("secret_group", 0), validator=d.get("validator"))
+                 secret_group=d.get("secret_group", 0), validator=d.get("validator"),
+                 context=tuple(d.get("context", ())), require_context=d.get("require_context", False))
             for d in OWN_RULES] + _load_prefixes()
 
 

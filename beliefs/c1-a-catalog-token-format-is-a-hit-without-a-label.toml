@@ -1,0 +1,10 @@
+# c1-a-catalog-token-format-is-a-hit-without-a-label: the test owns the rules; this file names them and the mutation that must turn it red.
+belief = "c1-a-catalog-token-format-is-a-hit-without-a-label"
+control = "C1"
+statement = "A token of the 23 rules added in 0.6.20 (Google OAuth client secret, SonarQube, Dynatrace, NuGet, crates.io, Dropbox, the GitHub App installation JWT and the others) is a secret hit by its own rule without a label; a short look-alike or a prefix glued to a word stays text."
+runner = ["tests/test_rules_from_the_catalogs.py::TokenFormatTests::test_each_token_is_found_whole_by_its_rule_and_a_look_alike_is_not"]
+
+[proof]
+file = "maisecrets/rules/prefixes.txt"
+find = '''google-oauth-client-secret   GOCSPX-'''
+replace = '''google-oauth-client-secret   (?!)GOCSPX-'''
