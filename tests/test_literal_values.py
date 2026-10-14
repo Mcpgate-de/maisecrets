@@ -117,6 +117,31 @@ class PasswordLiteralTests(unittest.TestCase):
                 self.assertFalse([v for _, v in kinds(text) if v in (a, b) or (v != value and v in value)],
                                  "a part of the value was taken on its own")
 
+    def test_a_doubled_quote_first_middle_or_last_is_part_of_the_value(self):
+        """codex verification of 0.6.16: a doubled delimiter as the first character of the value left it unmasked."""
+        p = password(10)
+        a, b = p[:5], p[5:]
+        cases = []
+        for inner in (f"''{p}", f"{a}''{b}", f"{p}''"):
+            cases += [(f"ALTER USER app IDENTIFIED BY '{inner}';", inner),                         # SQL
+                      (f"$s = ConvertTo-SecureString '{inner}' -AsPlainText -Force", inner),       # PowerShell
+                      (f"pw: '{inner}'", inner)]                                                  # YAML
+        for text, value in cases:
+            with self.subTest(text=text.replace(a, "<a>").replace(b, "<b>")):
+                self.assertIn(("label-pw-literal", value), kinds(text))
+        for text in ("password: ''", "ALTER USER app IDENTIFIED BY '';", 'pw = ""'):   # an empty literal
+            with self.subTest(text=text):
+                self.assertEqual([k for k, _ in kinds(text) if k == "label-pw-literal"], [])
+
+    def test_a_powershell_backtick_escape_is_part_of_the_value_in_any_form(self):
+        """Opus verification of 0.6.16: `$pw = "a`"b"` masked only `a`."""
+        p = password(10)
+        a, b = p[:5], p[5:]
+        for text in (f'$pw = "{a}`"{b}"', f'$cred.Password = "{a}`"{b}"'):
+            with self.subTest(text=text.replace(a, "<a>").replace(b, "<b>")):
+                self.assertIn(("label-pw-literal", f'{a}`"{b}'), kinds(text))
+                self.assertNotIn(a, [v for _, v in kinds(text)])
+
     def test_a_word_with_a_number_and_a_sign_is_a_password(self):
         """The form people choose: a word, a number and a sign. Undoing leet makes it a word, so the word check alone
         let it through in the forms that only this rule reads."""

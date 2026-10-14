@@ -837,8 +837,8 @@ def _read_quoted(text: str, i: int, quote: str, backslash: bool = True, backtick
             j += 2
             continue
         if c == quote:
-            if j + 1 < n and text[j + 1] == quote and j > i:
-                j += 2   # a doubled quote inside the literal; `""` right after the opening quote is an empty literal
+            if j + 1 < n and text[j + 1] == quote:
+                j += 2   # a doubled quote is one quote of the value, also as its first character
                 continue
             return j, True
         j += 1
@@ -951,13 +951,14 @@ def _literal_hits(text: str) -> list:
             if "," in text[m.end(1):m.start(2)] and not (lq in ("'", '"') and text[m.end(1):m.end(1) + 1] == lq):
                 pos = m.start(2)   # f(password, "…"): the next argument; ("password", "…") is a pair of label and value
                 continue
-            end, closed = _read_quoted(text, a, q, backtick=False)
+            tick = q == '"'   # PowerShell escapes with a backtick in double quotes: $pw = "…`"…"
+            end, closed = _read_quoted(text, a, q, backtick=tick)
             raw = text[a:end]
             # past a literal that is a value
             pos = end + 1 if closed else max(end, a)
             if closed and re.match(r"[ \t]*\+", text[end + 1:end + 40]):
                 continue   # a string that + continues is an expression
-            rid = _judge_literal(m.group(1), _unquote(raw, q, True, False), quoted=True)
+            rid = _judge_literal(m.group(1), _unquote(raw, q, True, tick), quoted=True)
             if rid:
                 hits.append((rid, m.start(), a, end))
             else:
