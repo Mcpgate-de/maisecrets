@@ -3457,6 +3457,8 @@ def post_tool(payload: dict) -> dict:
     path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")   # a test file keeps its fixtures
     # the file whose name can name a password export: a Read's, or the path of a Grep or of another client's read
     scan_path = path or str(tool_input.get("path") or "")
+    if swap:
+        path = ""        # text that stands in for a PDF or an image is no test code: no hit of it is a fixture
     strip = cfg.get("strip_hidden_characters", True)
     hidden = {"n": 0}
     hidden_runs: list[str] = []
