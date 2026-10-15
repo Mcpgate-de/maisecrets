@@ -28,23 +28,20 @@ def _main_moved(sha: str) -> bool:
         return False
 
 
-def main(argv: list[str]) -> int:
-    sha = argv[1]
-    repo = "Mcpgate-de/maisecrets"
-    timeout_min = 20.0
-    for i, a in enumerate(argv):
-        if a == "--repo":
-            repo = argv[i + 1]
-        if a == "--timeout-min":
-            timeout_min = float(argv[i + 1])
+def wait(sha: str, repo: str, timeout_min: float, superseded=None, poll: float = 30,
+         superseded_note: str = "superseded") -> tuple[int, list]:
+    """Poll the check runs of one commit until all are done. Return (rc, the newest run per name).
+
+    rc 0: every check run concluded with success (or skipped), or `superseded()` said the SHA no
+    longer matters. rc 1: a check run failed, or the timeout. The release job and the merge request
+    job (scripts/github_matrix.py) share this loop.
+    """
     url = f"https://api.github.com/repos/{repo}/commits/{sha}/check-runs"
     deadline = time.time() + timeout_min * 60
     while time.time() < deadline:
-        # the mirror pushes the branch tip; when main moved on, this SHA was never the tip on
-        # GitHub, no check runs will ever appear, and the newer pipeline gates its own SHA
-        if _main_moved(sha):
-            print("main moved on; this SHA is superseded and the newer pipeline releases")
-            return 0
+        if superseded is not None and superseded(sha):
+            print(superseded_note)
+            return 0, []
         try:
             # unauthenticated on purpose: no credential is read from the machine (the plugin
             # directory's scan treats that as a finding), and 60 requests per hour cover a wait
@@ -64,7 +61,7 @@ def main(argv: list[str]) -> int:
         runs = data.get("check_runs", [])
         if not runs:
             print("no check runs yet for this commit; waiting")
-            time.sleep(30)
+            time.sleep(poll)
             continue
         # one commit can have two runs of a check: a second push of the same commit starts a new run, and the
         # workflow's concurrency rule cancels the first. The newest run per name decides; a cancelled run that a
@@ -79,14 +76,31 @@ def main(argv: list[str]) -> int:
                   if c["status"] == "completed" and c["conclusion"] not in ("success", "skipped")]
         if failed:
             print("GitHub Actions failed for", sha[:7], ":", ", ".join(failed))
-            return 1
+            return 1, runs
         if not pending:
             print("GitHub Actions green for", sha[:7], ":", ", ".join(c["name"] for c in runs))
-            return 0
+            return 0, runs
         print("waiting for", ", ".join(pending))
-        time.sleep(30)
+        time.sleep(poll)
     print("timeout waiting for GitHub Actions on", sha[:7])
-    return 1
+    return 1, []
+
+
+def main(argv: list[str]) -> int:
+    sha = argv[1]
+    repo = "Mcpgate-de/maisecrets"
+    timeout_min = 20.0
+    for i, a in enumerate(argv):
+        if a == "--repo":
+            repo = argv[i + 1]
+        if a == "--timeout-min":
+            timeout_min = float(argv[i + 1])
+    # the mirror pushes the branch tip; when main moved on, this SHA was never the tip on
+    # GitHub, no check runs will ever appear, and the newer pipeline gates its own SHA.
+    # Looked up at call time, so a test can replace _main_moved.
+    rc, _runs = wait(sha, repo, timeout_min, superseded=lambda s: _main_moved(s),
+                     superseded_note="main moved on; this SHA is superseded and the newer pipeline releases")
+    return rc
 
 
 if __name__ == "__main__":

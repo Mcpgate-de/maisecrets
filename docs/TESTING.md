@@ -6,7 +6,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 
 | suite | command | where it runs |
 |---|---|---|
-| unit tests | `python3 -m unittest discover -s tests` | pre-push hook, GitLab `unit` (Linux, 3.12 and 3.9), GitHub on Windows and macOS |
+| unit tests | `python3 -m unittest discover -s tests` | pre-push hook, GitLab `unit` (Linux, 3.12 and 3.9), GitHub on Windows and macOS (merge request: GitLab `windows_macos`; release: `ci`) |
 | beliefs | `python3 scripts/replay_can_fail.py` (one worker per CPU, each in a copy of the tree; `--jobs 1` for serial) | pre-push hook, GitLab `beliefs_can_fail_replay` |
 | stated numbers | `python3 scripts/derived_counts.py` | pre-push hook, GitLab `manifests` |
 | repository scan | `python3 scripts/scan_tree.py` | GitLab `no_secrets_in_tree` |
@@ -18,8 +18,12 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | false alarms in a real tree | `python3 scripts/measure_false_alarms.py <dir> [--samples]` | by hand after a detector change: the hits a Read would act on, per rule, with the shape of each value and never the value; the regression corpus of normal work is `tests/fp_corpus.py` (`tests/test_fp_corpus.py`), a night of autonomous work is `tests/test_night_run.py` |
 | Windows end to end | `GITLAB_COM_TOKEN=… python3 scripts/windows_e2e.py [--rev REV]` | by hand before a release that touches the hooks, the launchers or the harness: GitLab-hosted Windows runners of a separate project, in three shapes (PowerShell 7, Windows PowerShell 5.1, Git Bash). Each job runs `harness/windows/shell_probe.py` (which shell runs a hook, and the `hooks.json` command in each shell) and `harness/run.py` with the shell tool the client offers (`MAISECRETS_HARNESS_SHELL_TOOL`) |
 
-1493 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
-the tested commit of a release (branch `ci`) and on a push to main without a release.
+1511 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
+Windows and macOS in three places. In a merge request, the GitLab job `windows_macos` pushes the commit
+that `main` would get to the CI repository `Mcpgate-de/maisecrets-ci` and fails with the names of the
+failing tests. On `main`, it runs on the tested commit of a release (branch `ci`), unless a green run
+on the same git tree exists (the release then reuses it), and on a push to main without a release.
+`scripts/github_matrix.py` has the details.
 
 ## What makes a test count
 

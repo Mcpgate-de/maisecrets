@@ -39,7 +39,30 @@ and OpenAI plugin directories.
   (Windows, macOS; Linux runs on GitLab) is green for the tested SHA on the public mirror
   (`scripts/wait_for_github_checks.py`, public API, no token). Windows was
   red across four releases on 2026-09-26 because nothing waited for it.
-- Matrix before a merge: push the commit to the GitHub branch `ci-check` (pushed over each time; the rulesets
+- Matrix in a merge request: the job `windows_macos` runs in every merge request pipeline, beside the
+  Linux tests (`scripts/github_matrix.py mr`). It merges the MR head into the current target branch (the
+  head alone on a conflict), pushes that commit to the branch `ci-mr/<iid>-<sha12>` of the public CI
+  repository `Mcpgate-de/maisecrets-ci`, waits for `.github/workflows/ci.yml` there and prints each
+  failing test with the exception line. The workflow writes the failures as annotations
+  (`github_matrix.py unit`), because the public API serves annotations without a token and the job log
+  needs one. Each commit gets a new branch name, so no push needs force. The job deletes the older
+  branches of the same MR and every `ci-mr/*` branch older than 14 days, so the branch of a merged MR
+  goes with the first MR pipeline after 14 days. The label `no-public-ci` keeps an MR off GitHub (a
+  fix that must stay private until its release). Every change runs the job: the tests read nearly every
+  file of the tree, the docs included.
+- Why a separate CI repository: an MR branch is no protected ref, so the key of this job is no
+  protected variable. `MAISECRETS_GITHUB_MR_CI_KEY` (file variable, environment `mr-ci`, not
+  protected) is a write deploy key of `Mcpgate-de/maisecrets-ci` alone. A leak writes that repository
+  only. The mirror's key can push `main` and the tags of the install source, and stays protected. The
+  workflow token is read-only in both repositories (`permissions: contents: read`).
+- Release reuse: before the mirror job pushes a release candidate to `ci`, it looks for a green push run
+  of the matrix whose commit has exactly the git tree of the candidate (`github_matrix.py reuse`, in
+  the CI repository and in the mirror). A run counts only when every job ran and passed; a
+  `pull_request` run tested GitHub's merge commit, another tree, and never counts. With a match, the
+  mirror job does not push, and the release job logs the reused run (`MATRIX_REUSED_RUN`) instead of
+  waiting. The tree matches when the MR was up to date with `main` at its last pipeline and nothing
+  else merged before it. No match, or no answer from GitHub, is the wait as before.
+- Matrix by hand: push the commit to the GitHub branch `ci-check` (pushed over each time; the rulesets
   protect only `main`, `release` and the tags `v*`). `.github/workflows/ci.yml` runs on it. No draft pull request
   and no new branch name: GitHub keeps listing a deleted pull-request branch.
 - Vendored rulesets: Renovate keeps `maisecrets/rules/` current (`renovate.json`). The job `renovate`
@@ -144,7 +167,9 @@ and OpenAI plugin directories.
   `github.com/Mcpgate-de/maisecrets`, public, the marketplace for everyone,
   written only by the CI `mirror` job (`origin/main` and tags, deploy key,
   host keys pinned in `.ci-known-hosts-github`). Nobody pushes to GitHub by
-  hand. A second private GitHub mirror for the organisation sync existed for
+  hand. `github.com/Mcpgate-de/maisecrets-ci`, public, holds only the `ci-mr/*` branches of the merge
+  request job and is no install source.
+  A second private GitHub mirror for the organisation sync existed for
   two hours on 2026-09-26 and was removed once the GitLab source worked.
 - GitLab stays under the personal namespace on purpose: a project inside a
   gitlab.com group on the Free tier cannot mint project access tokens, and
