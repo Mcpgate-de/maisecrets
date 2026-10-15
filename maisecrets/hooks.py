@@ -849,8 +849,12 @@ def user_prompt(payload: dict) -> dict:
     change = settings_mod.parse_prompt(prompt)
     if change:
         route = "slash command" if prompt.lstrip().lower().startswith("/maisecrets:settings") else "typed prompt"
-        changed, reason = settings_mod.apply_typed(*change, route=route) if typed else (
-            False, settings_mod.not_typed_reason(payload))
+        changed, reason = settings_mod.apply_typed(*change, route=route, cwd=str(payload.get("cwd") or "")) if typed \
+            else (False, settings_mod.not_typed_reason(payload))
+        if changed and change[0] == "clean_dirs" and change[1].startswith("add:"):
+            from . import file_reads
+            from .user_rules import expand
+            file_reads.note_clean_root(session, str(expand(change[1][4:])))   # this session trusts it from now
         if changed and client_of(payload) != "codex" and prompt.lstrip().lower().startswith("/maisecrets:settings"):
             # a success is no refusal: the slash command runs on and shows the new state (a block read as an
             # error, "operation blocked by hook"). The prompt carries no value; the change is already written
@@ -2975,6 +2979,9 @@ def pre_tool(payload: dict) -> dict:
         refused = _store_path_refusal(tool, tool_input, str(payload.get("cwd") or ""))
         if refused:
             return refused
+        if tool == "Read":
+            from . import file_reads      # a PDF or an image: the person's read_pdf / read_image (C28)
+            return file_reads.pre_read(payload, cfg, client_of(payload) == "codex")
         if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS:
             return {}
     if tool in _FILE_TOOLS or tool == "apply_patch":
@@ -3426,6 +3433,19 @@ def post_tool(payload: dict) -> dict:
     response = payload.get("tool_response")
     if response is None:
         return {}
+    # an image or a PDF (C28): it passes as it is, or a text Read takes its place, which the redaction below then
+    # masks. A file that passes goes through the walk below: its base64 gets the exact match only (_binary_paths),
+    # every other field is scanned
+    from . import file_reads
+    swap = file_reads.post_read(payload, cfg, client_of(payload) == "codex")
+    images: list = []
+    if swap and swap[0] == "pass":
+        swap = None
+    elif swap and swap[0] == "hold":
+        response, images = file_reads.hold_images(response)
+        swap = None
+    elif swap:
+        response = swap[1]
     session = payload.get("session_id")
     vault: Vault | None = None
     hit = {"n": 0}
@@ -3437,6 +3457,7 @@ def post_tool(payload: dict) -> dict:
     path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")   # a test file keeps its fixtures
     # the file whose name can name a password export: a Read's, or the path of a Grep or of another client's read
     scan_path = path or str(tool_input.get("path") or "")
+    # text that stands in for a PDF or an image is no test code: no hit of it is a fixture, by path or by content
     strip = cfg.get("strip_hidden_characters", True)
     hidden = {"n": 0}
     hidden_runs: list[str] = []
@@ -3448,7 +3469,8 @@ def post_tool(payload: dict) -> dict:
             s, gone, runs = strip_hidden(s)
             hidden["n"] += gone
             hidden_runs.extend(runs)
-        matches = [m for m in detect.scan(s, channel="tool", path=scan_path) if not detect.is_fixture(m, s, path)]
+        matches = [m for m in detect.scan(s, channel="tool", path=scan_path)
+                   if swap or not detect.is_fixture(m, s, path)]
         if not matches and not _has_live(cfg):
             return s
         if vault is None:
@@ -3516,6 +3538,13 @@ def post_tool(payload: dict) -> dict:
         return node
 
     new_response = walk(response)
+    if images:
+        file_reads.put_back_images(new_response, images)
+    if swap and not hit["n"] and not hidden["n"]:
+        if client_of(payload) == "codex":
+            return {"decision": "block", "reason": f"[maisecrets: {swap[2]}]\n\n{file_reads.as_text(new_response)}"}
+        return {"systemMessage": swap[2],
+                "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": new_response}}
     if not hit["n"] and not hidden["n"]:
         return {}
     from . import events
@@ -3561,6 +3590,8 @@ def post_tool(payload: dict) -> dict:
         # (item_completed / CommandExecution), so that file is scrubbed too, with every matched
         # form, not only the detector values (review, 2026-09-26).
         text = new_response if isinstance(new_response, str) else json.dumps(new_response, ensure_ascii=False)
+        if swap:
+            text = file_reads.as_text(new_response)
         if cfg.get("scrub_transcript", True):
             path = payload.get("transcript_path", "")
             _scrub_transcript(path, values, refs)
@@ -3575,7 +3606,8 @@ def post_tool(payload: dict) -> dict:
         # the person sees what was replaced, not only the model (UX review, 2026-09-27)
         "systemMessage": f"maisecrets replaced {hit['n']} value(s) in this {tool} "
                          f"result before the AI saw it: {shown}."
-                         + (f" It also removed {hidden['n']} invisible character(s)." if hidden["n"] else ""),
+                         + (f" It also removed {hidden['n']} invisible character(s)." if hidden["n"] else "")
+                         + (f" {swap[2]}" if swap else ""),
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
             "updatedToolOutput": new_response,
@@ -3656,10 +3688,17 @@ def _ssh_hint(payload: dict) -> str | None:
     return settings.HINTS["ssh_consent"]["codex" if client_of(payload) == "codex" else "claude"]
 
 
+def _file_read_hint(payload: dict) -> str | None:
+    from . import file_reads
+    if not file_reads.kind_of_response(payload.get("tool_name") or "", payload.get("tool_response")):
+        return None          # most calls: no config read
+    return file_reads.hint(payload, load_config(), client_of(payload) == "codex")
+
+
 def _with_hint(payload: dict, result: dict) -> dict:
     """Add a hint to the answer of a PostToolUse without changing what the answer does."""
     # both, when both are due: with `or` the destination hint of this call waited for an unrelated later one (codex)
-    hint = "\n\n".join(h for h in (_ssh_hint(payload), _destination_hint(payload)) if h)
+    hint = "\n\n".join(h for h in (_ssh_hint(payload), _destination_hint(payload), _file_read_hint(payload)) if h)
     if not hint:
         return result
     result = dict(result)
@@ -3861,6 +3900,19 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
             "Do NOT run it again to see the output; tell the user to check the result in their terminal.")
     if codex:
         return {"decision": "block", "reason": reason + tail}
+    response = payload.get("tool_response")
+    if payload.get("tool_name") == "Bash" and isinstance(response, dict) and response.get("isImage") is True:
+        # an image of a Bash result: a string fails open here too; the client's Bash shape with isImage off removes
+        # the image (measured live, review of block 4)
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": {
+            **response, "stdout": f"[{reason}{tail}]", "stderr": "", "isImage": False}}}
+    if payload.get("tool_name") == "Read":
+        # a string fails the shape check of Read and the client sends the original, a PDF or an image too (measured,
+        # harness/probe_file_reads.py): only a text Read withholds it
+        from .file_reads import text_result
+        path = (payload.get("tool_input") or {}).get("file_path") if isinstance(payload.get("tool_input"), dict) else ""
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                       "updatedToolOutput": text_result(str(path or ""), f"[{reason}{tail}]")}}
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": f"[{reason}{tail}]"}}
 
 
@@ -4146,6 +4198,13 @@ def main(argv: list[str]) -> int:
             t = threading.Thread(target=last, daemon=True)
             t.start()
             t.join(1.5)
+        # a pdftotext of read_pdf convert runs in its own session: os._exit skips the finally that ends it
+        reader = sys.modules.get("maisecrets.file_reads")
+        if reader is not None:
+            try:
+                reader.kill_running()
+            except Exception:  # noqa: BLE001 - the exit below must come
+                pass
         # always, also after a lost race: a hook that answered must still end before the client's timeout, which
         # lets the action through (measured, review round 5)
         os._exit(0)

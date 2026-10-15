@@ -22,7 +22,12 @@ ALLOWED = ("MAISECRETS_NATIVE_BACKEND_TEST", "MAISECRETS_NATIVE_CLIPBOARD_TEST",
            "cmd.exe runs on Windows only",
            # a home the hook cannot search (test_guard): CI runs as root, which ignores the mode bits. The unit
            # test beside it raises the same PermissionError on every OS; the GitHub macOS runner runs this one
-           "root and Windows ignore the mode bits")
+           "root and Windows ignore the mode bits",
+           # read_pdf convert with the real pdftotext (tests/test_file_reads.py); the CI images have no poppler. The
+           # same path runs with a stub pdftotext in a trusted test folder on every runner
+           "no pdftotext that maisecrets trusts",
+           # an access control list made with chmod +a (tests/test_file_reads.py); the Linux branch has its own test
+           "chmod +a is macOS")
 
 
 def main(path: str, *extra: str) -> int:

@@ -1,0 +1,10 @@
+# c28-an-admin-group-counts-as-root: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-an-admin-group-counts-as-root"
+control = "C28"
+statement = "A folder that the admin group (macOS admin or wheel; Linux by the distribution's sudoers) can write counts as safe; any other group with another member does not."
+runner = ["tests/test_file_reads.py::TheConverterIsBounded::test_the_admin_groups_of_each_system"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "        return frozenset({\"admin\", \"wheel\"})\n"
+replace = "        return frozenset()\n"

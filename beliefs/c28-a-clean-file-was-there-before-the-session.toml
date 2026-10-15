@@ -1,0 +1,10 @@
+# c28-a-clean-file-was-there-before-the-session: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-a-clean-file-was-there-before-the-session"
+control = "C28"
+statement = "A file that is copied, moved or hard-linked into a clean folder during the session is not clean: it needs one name and a change time older than the session."
+runner = ["tests/test_file_reads.py::CleanDirs::test_a_file_the_agent_puts_there_in_the_session_is_not_clean"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "        return started is not None and st.st_nlink == 1 and st.st_ctime < started\n"
+replace = "        return True\n"

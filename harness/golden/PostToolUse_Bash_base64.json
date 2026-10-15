@@ -1,0 +1,24 @@
+{
+ "session_id": "{session_id}",
+ "transcript_path": "{transcript_path}",
+ "cwd": "{cwd}",
+ "prompt_id": "{prompt_id}",
+ "permission_mode": "default",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PostToolUse",
+ "tool_name": "Bash",
+ "tool_input": {
+  "command": "base64 < tiny.png"
+ },
+ "tool_response": {
+  "stdout": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD9...",
+  "stderr": "",
+  "interrupted": false,
+  "isImage": false,
+  "noOutputExpected": false
+ },
+ "tool_use_id": "{tool_use_id}",
+ "duration_ms": 0
+}

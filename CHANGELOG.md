@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## [0.6.23] - 2026-10-15
+
+### Features
+
+- decide what happens when the AI reads a PDF or an image, and send a PDF as masked text only (d599b5d)
+
+### Fixes
+
+- no hit in a converted PDF counts as a test fixture, also by its content, and a dangling rpath link counts twice (f13f774)
+- a converted PDF under a tests folder keeps its labelled passwords masked (5a979a7)
+- a missing rpath folder counts by the folder above it, and a converted PDF of one endless line says so (31c32aa)
+- an inherited ACL entry on macOS and an rpath folder searched first also stop read_pdf convert (4569e77)
+- read_pdf convert stops a PDF that eats memory, refuses a scan with page numbers, and runs a Homebrew pdftotext on a Mac with two admins (1d20371)
+
 ## [0.6.22] - 2026-10-15
 
 ### Features
