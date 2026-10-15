@@ -752,9 +752,9 @@ a run inside the text is decoded once more). A hit in the copy redacts the origi
 characters with it; a value in a decoded run takes the whole run, as in a Kubernetes Secret or a
 docker `auth` field. The copy is only scanned around the lines that changed. Bounds: a text over 1
 MB is not cleaned, a run over 16,384 characters (an image) is not decoded, and at most 64 runs,
-64 KB of decoded bytes and 20 ms of decoding per text. A text whose every line changes (a log in
-colour) is scanned twice, which about doubles its time. The typed prompt is scanned as it is, so a block there needs the
-value in the clear.
+64 KB of decoded bytes per text. The bounds count work, not time, so a busy machine decodes the
+same. A text whose every line changes (a log in colour) is scanned twice, which about doubles its
+time. The typed prompt is scanned as it is, so a block there needs the value in the clear.
 
 ## Password exports in tool results
 
