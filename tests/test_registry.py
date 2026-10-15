@@ -115,6 +115,12 @@ class RegistryTests(unittest.TestCase):
                 self.assertEqual(s.form == "keyword", s.id.startswith(detect.KEYWORD_RULES))
 
     def test_a_presidio_or_regional_rule_names_its_region(self):
+        active = detect.active_regions().regions
+        for spec, rule in self.specs:
+            self.assertEqual(spec.region, rule.region)          # the loader set it once; the spec reads the rule
+            self.assertIn(rule.region, active)
+            if spec.source == "presidio":
+                self.assertEqual(rule.region, detect.presidio_region(rule.id.split("#", 1)[0]))
         regions = {s.region for s, _ in self.specs if s.source in ("regional", "presidio")}
         self.assertIn("de", regions)          # the test locale is de_DE: the German rules are on
         self.assertTrue(all(s.region == "generic" for s, _ in self.specs

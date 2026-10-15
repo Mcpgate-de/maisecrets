@@ -37,6 +37,10 @@ BANDS = {
 }
 SOURCES = tuple(BANDS)
 PHASES = {"export": 0, "rules": 1, "personal": 2, "user": 3, "extra": 4}
+# the channels a source runs in. Every rule of the rule list runs in both; the literal rules judge a value by the
+# channel (detect._pw_literal_ok: a tool result takes a password without evidence of chance), which is a rule of
+# their own, not a channel switch
+CHANNEL = {source: "both" for source in BANDS}
 VENDORED = frozenset({"detect-secrets", "betterleaks", "presidio"})   # synced from upstream by scripts/sync_*.py
 OWN_SPECIAL = {"fallback": "fallback", "user": "user"}
 

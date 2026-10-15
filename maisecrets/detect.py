@@ -106,6 +106,7 @@ class Rule:
     form: str = ""                     # keyword | label | shape (registry.form_of); set by rules()
     matcher: str = ""                  # regex | lines | windowed | curl | list | literal | seed (registry.matcher_of)
     filters: frozenset = frozenset()   # the named checks after a hit (registry.filters_of); set by rules()
+    region: str = "generic"            # the country of a regional or Presidio rule, set by its loader
 
 
 # ----------------------------------------------------------------- helpers --
@@ -1760,7 +1761,7 @@ REGIONAL_RULES: list = [
 def _load_regional(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]:
     return [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"]), validator=d["validator"],
                  context=tuple(d.get("context", ())), require_context=d.get("require_context", False),
-                 whole_match=True)
+                 whole_match=True, region=d["region"])
             for d in REGIONAL_RULES if d["region"] in regions]
 
 
@@ -1775,7 +1776,8 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
     data = json.loads((RULES_DIR / "presidio.json").read_text(encoding="utf-8"))
     out: list[Rule] = []
     for rec in data["recognizers"]:
-        if rec["id"] in PRESIDIO_SKIP or presidio_region(rec["id"]) not in regions:
+        region = presidio_region(rec["id"])     # once, here: the rule carries it from now on
+        if rec["id"] in PRESIDIO_SKIP or region not in regions:
             continue
         validator = PRESIDIO_VALIDATOR.get(rec["id"])
         weak = rec["id"] in PRESIDIO_ALWAYS_CONTEXT or (rec["validator"] and validator is None)
@@ -1789,7 +1791,7 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
                 validator=validator, score=float(pat["score"]),
                 context=tuple(c.lower() for c in rec.get("context", [])) + PRESIDIO_EXTRA_CONTEXT.get(rec["id"], ()),
                 require_context=weak or rule_id in PRESIDIO_PATTERN_CONTEXT,
-                whole_match=True,
+                whole_match=True, region=region,
             ))
     return out
 
@@ -2046,9 +2048,6 @@ def _rule_sources(active) -> list:
     ]
 
 
-_REGIONAL_REGION = {d["id"]: d["region"] for d in REGIONAL_RULES}
-
-
 def _ranked(active) -> list:
     """(priority, rule) of every rule, sorted by priority = (phase, band, seq) (maisecrets/registry.py)."""
     from .registry import BANDS, PHASES, filters_of, form_of, key_of, matcher_of
@@ -2080,13 +2079,7 @@ def rule_specs(active=None) -> list:
     out = []
     for (_, band, seq), r in _ranked(active):    # the same rules, marked the same way, as rules() takes them
         source = source_of[band]
-        if source == "regional":
-            region = _REGIONAL_REGION[r.id]
-        elif source == "presidio":
-            region = presidio_region(r.id.split("#", 1)[0])
-        else:
-            region = "generic"
-        out.append((registry.make(source, r.id, r.type, seq, region=region,
+        out.append((registry.make(source, r.id, r.type, seq, region=r.region, channel=registry.CHANNEL[source],
                                   language=languages if source in ("detect-secrets", "literal") else "",
                                   upstream=upstream.get((source, r.id.split("#", 1)[0])),
                                   patches=_patches_of(source, r.id, patches)), r))
