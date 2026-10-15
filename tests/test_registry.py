@@ -116,6 +116,15 @@ class RegistryTests(unittest.TestCase):
         self.assertGreater(registry.PHASES["user"], registry.PHASES["personal"])
         self.assertTrue(all(r.phase == registry.PHASES["rules"] for r in detect.rules()))
 
+    def test_a_scan_does_not_load_the_spec_data_model(self):
+        # three frozen dataclasses cost about 3 ms at import, and each hook call is a new process
+        import subprocess
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); from maisecrets import detect; "
+                "detect.scan('see the wiki page'); detect.scan('see the wiki page', channel='tool'); "
+                "print('maisecrets.rulespec' in sys.modules)")
+        r = subprocess.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, timeout=60)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "False"), r.stderr)
+
     def test_every_source_has_its_band_and_the_bands_keep_the_measured_order(self):
         self.assertEqual({s.source for s, _ in self.specs}, set(registry.SOURCES) - {"user"})
         bands = [registry.BANDS[x] for x in registry.SOURCES]

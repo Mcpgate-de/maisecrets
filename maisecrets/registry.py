@@ -13,12 +13,14 @@ Here each rule gets a RuleSpec with an explicit rank, `priority = (phase, band, 
 The rule id (`Match.kind`) stays what it was: the vault index and the event log store it. Three ids are loaded twice
 (mailchimp-api-key, new-relic-insert-key, flutterwave-secret-key), so each spec also gets a unique `key`
 (`<source>:<id>`). Standard library only; Python 3.9.
+
+This module is what a hook reads: the bands, the phases and the functions that mark a rule. The spec itself, the patch
+records and the upstream digests are in maisecrets/rulespec.py, which loads only when a spec is asked for
+(`maisecrets rules list`, the tests, the measurement scripts): three frozen dataclasses cost about 3 ms at import, and
+a hook pays every millisecond. Their names are still read here (registry.RuleSpec, registry.make, ...).
 """
 from __future__ import annotations
 
-import hashlib
-import json
-from dataclasses import dataclass, field
 
 # the bands of the rule list, in scan order. The order between them was measured, not chosen (2026-10-15, every
 # CredData line with the sources moved): a label rule before a shape rule, detect-secrets before generic-api-key, the
@@ -56,122 +58,6 @@ LABEL_PREFIXES = ("ds-keyword", "label-", "generic-api-key", "url-query-secret",
 KEYWORD_PREFIXES = ("ds-keyword", "label-")
 
 
-@dataclass(frozen=True)
-class Upstream:
-    source: str          # betterleaks | detect-secrets | presidio
-    version: str         # rules/<SOURCE>_VERSION
-    upstream_id: str     # the id of the rule upstream (a Presidio recognizer for each of its patterns)
-    sha256: str          # of the upstream rule as canonical JSON: a re-sync that changes it shows in `rules list`
-    license: str         # the licence file in rules/
-
-
-@dataclass(frozen=True)
-class Patch:
-    rule_key: str        # the spec it changes; "detect-secrets:*" for every rule of that source
-    field: str           # regex | keywords | validator | context | context_rule | region | load
-    op: str              # replace | add | set | wrap | skip
-    value: str           # what the patch puts there, short
-    reason: str          # why, in one line
-    upstream_sha256: str = ""   # the upstream rule the patch was written against; "" when it applies to a source
-
-
-@dataclass(frozen=True)
-class RuleSpec:
-    key: str             # unique: "<source>:<id>"
-    id: str              # Match.kind as before; stored data in the vault index
-    source: str          # one of SOURCES
-    origin: str          # vendored | patched | own | fallback | user
-    priority: tuple      # (phase, band, seq)
-    channel: str         # prompt | tool | both
-    region: str          # "generic" or a country code
-    type: str            # the placeholder type: SECRET, EMAIL, IBAN, DE_ID_CARD, ...
-    rule_class: str      # what it finds: "provider:github", "label:keyword", "pii:email", ...
-    form: str            # keyword | label | shape
-    matcher: str = "regex"   # matcher_of
-    filters: frozenset = frozenset()   # filters_of
-    language: str = ""   # the label languages of a label source ("en,de"), else ""
-    upstream: Upstream | None = None
-    patches: tuple = field(default=())
-
-
-# The upstream state each correction of a vendored betterleaks rule (detect.BETTERLEAKS_PATCHES) was written
-# against: canonical_sha256 of the rule in rules/betterleaks.json, kept in rules/patched_upstream.txt (a digest in
-# the tree outside rules/ reads as a secret to the tree scan). After a sync that changes one of these rules,
-# tests/test_registry.py goes red: check the correction against the new rule, then update the digest or drop it.
-UPSTREAM_FILE = "patched_upstream.txt"
-
-
-def patched_upstream(rules_dir) -> dict:
-    """{"<source>:<id>": sha256} from rules/patched_upstream.txt."""
-    out = {}
-    for line in (rules_dir / UPSTREAM_FILE).read_text(encoding="utf-8").splitlines():
-        fields = line.split("#", 1)[0].split()
-        if len(fields) == 2:
-            out[fields[1]] = fields[0]
-    return out
-
-
-_BETTERLEAKS_REASONS = {
-    "add_keywords": "the keyword list named only the provider; the token's own prefix is a keyword too (0.6.20)",
-    "regex": "the key is waka_ and a UUID; the upstream regex took no hyphen (0.6.20)",
-}
-# What detect._load_detect_secrets changes in each vendored detect-secrets rule. The loader applies them; these records
-# say what and why, for `maisecrets rules list`
-DETECT_SECRETS_PATCHES = (
-    Patch("detect-secrets:*", "regex", "replace", "denylist + the label words of the active languages",
-          "the labels detect-secrets lacks (pass:, token:, passwort:) and the product's own name (mai-secrets)"),
-    Patch("detect-secrets:*", "regex", "replace", "a value may start with ! # $ % & * + - @ ^ ~ ? .",
-          "a value had to start with a word character, so $+4j... was never a value (2026-09-27)"),
-    Patch("detect-secrets:*", "regex", "replace", "up to three spaces before the colon",
-          "`mot de passe : x` and `password : x` (2026-09-28)"),
-    Patch("detect-secrets:*", "regex", "replace", "an escaped quote around the label and before the value",
-          "JSON inside a string, as a log line shows it (CredData, 2026-10-12)"),
-    Patch("detect-secrets:*", "regex", "replace", "_KeywordTail: the same matches in linear time",
-          "a long word run after a keyword was quadratic (0.6.15)"),
-    Patch("detect-secrets:*", "validator", "set", "ds_value", "detect-secrets' own value check, ported"),
-    Patch("detect-secrets:ds-basic-auth", "keywords", "set", "none", "a URL with user and password has no label"),
-)
-
-
-def betterleaks_patches(table: dict, upstream: dict) -> dict:
-    """{rule id: (Patch, ...)} from detect.BETTERLEAKS_PATCHES; upstream is patched_upstream()."""
-    out = {}
-    for rule_id, patch in table.items():
-        recs = []
-        if patch.get("add_keywords"):
-            recs.append(Patch("betterleaks:" + rule_id, "keywords", "add", " ".join(patch["add_keywords"]),
-                              _BETTERLEAKS_REASONS["add_keywords"], upstream.get("betterleaks:" + rule_id, "")))
-        if patch.get("regex"):
-            recs.append(Patch("betterleaks:" + rule_id, "regex", "replace", patch["regex"],
-                              _BETTERLEAKS_REASONS["regex"], upstream.get("betterleaks:" + rule_id, "")))
-        out[rule_id] = tuple(recs)
-    return out
-
-
-def presidio_patches(detect) -> dict:
-    """{recognizer id or pattern id: (Patch, ...)} from the six Presidio tables of detect.py, which the loader
-    applies."""
-    out: dict = {}
-
-    def add(rid, *a):
-        out.setdefault(rid, []).append(Patch("presidio:" + rid, *a))
-    for rid in sorted(detect.PRESIDIO_SKIP):
-        add(rid, "load", "skip", "", "an own rule covers it, or it is no personal data worth a placeholder")
-    for rid, v in sorted(detect.PRESIDIO_VALIDATOR.items()):
-        add(rid, "validator", "set", v, "a check digit Presidio does not run here")
-    for rid in sorted(detect.PRESIDIO_ALWAYS_CONTEXT):
-        add(rid, "context_rule", "set", "required", "a plain digit run: a check digit alone passes 1 in 10 to 26")
-    for rid in sorted(detect.PRESIDIO_DIGIT_BOUNDED):
-        add(rid, "regex", "wrap", "(?<!\\d)...(?!\\d)", "the pattern matched inside a longer digit run")
-    for rid in sorted(detect.PRESIDIO_PATTERN_CONTEXT):
-        add(rid, "context_rule", "set", "required", "the same digits are also FIX tags and XML identifiers")
-    for rid, words in sorted(detect.PRESIDIO_EXTRA_CONTEXT.items()):
-        add(rid, "context", "add", " ".join(words), "the vendored context words are English only")
-    for rid, region in sorted(detect.REGION_OF_ID.items()):
-        add(rid, "region", "set", region, "the id names no country")
-    return {k: tuple(v) for k, v in out.items()}
-
-
 def form_of(rule_id: str) -> str:
     """keyword, label or shape, by the id: the kind of a stored hit has no spec, so this stays readable from the id."""
     if rule_id.startswith(KEYWORD_PREFIXES):
@@ -206,11 +92,14 @@ FILTERS = {
 }
 # the filters of every rule whose id starts so: a value that ends in a backslash before its quote
 PREFIX_FILTERS = (("ds-keyword", ("escaped-value-quote",)),)
+_NO_FILTERS: frozenset = frozenset()
 
 
 def filters_of(rule_id: str) -> frozenset:
     """The named checks of a rule: FILTERS, PREFIX_FILTERS, and `derived-label` for every keyword rule (a UUID, an
     elided value, or a label that names a derived thing such as secret_id is no value)."""
+    if rule_id not in FILTERS and not rule_id.startswith(KEYWORD_PREFIXES):
+        return _NO_FILTERS    # most rules: no filter (a keyword prefix covers PREFIX_FILTERS and derived-label)
     out = set(FILTERS.get(rule_id, ()))
     for prefix, names in PREFIX_FILTERS:
         if rule_id.startswith(prefix):
@@ -240,11 +129,6 @@ def matcher_of(rule_id: str, source: str = "") -> str:
     return "regex"
 
 
-def canonical_sha256(rule: dict) -> str:
-    return hashlib.sha256(json.dumps(rule, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-                          .encode("utf-8")).hexdigest()
-
-
 def _provider(rule_id: str) -> str:
     head = rule_id.split("#", 1)[0].split(".", 1)[0]
     return head.split("-", 1)[0]
@@ -268,18 +152,7 @@ def rule_class(source: str, rule_id: str, type_: str) -> str:
     return "provider:" + _provider(rule_id)
 
 
-def pass_specs(export_rule: str, export_type: str, personal_rules: tuple, prompt_rules: frozenset,
-               personal_types: dict) -> list:
-    """The specs of the passes outside the rule list: the password export (tool channel only) and the personal-data
-    rules (tool channel; the ones in personal.PROMPT_RULES in both)."""
-    out = [make("export", export_rule, export_type, 0, channel="tool")]
-    for seq, rid in enumerate(personal_rules):
-        out.append(make("personal", rid, personal_types.get(rid, "PERSON"), seq,
-                        channel="both" if rid in prompt_rules else "tool"))
-    return out
-
-
-def coarse_class(spec: RuleSpec) -> str:
+def coarse_class(spec) -> str:
     """A class of a few dozen members: the source for a token rule, the class for label and PII rules."""
     if spec.rule_class.startswith("provider:"):
         return "token:" + spec.source
@@ -293,16 +166,13 @@ def key_of(source: str, rule_id: str) -> str:
     return rule_id if source == "user" else source + ":" + rule_id
 
 
-def make(source: str, rule_id: str, type_: str, seq: int, *, region: str = "generic", channel: str = "both",
-         language: str = "", upstream: Upstream | None = None, patches: tuple = ()) -> RuleSpec:
-    origin = "vendored" if source in VENDORED else OWN_SPECIAL.get(source, "own")
-    if source in PASSES:
-        origin = "own"
-    if origin == "vendored" and patches:
-        origin = "patched"
-    phase = PHASES["user"] if source == "user" else PASSES.get(source, PHASES["rules"])
-    return RuleSpec(key=key_of(source, rule_id), id=rule_id, source=source, origin=origin,
-                    priority=(phase, BANDS.get(source, 0), seq), channel=channel, region=region, type=type_,
-                    rule_class=rule_class(source, rule_id, type_), form=form_of(rule_id),
-                    matcher=matcher_of(rule_id, source), filters=filters_of(rule_id), language=language,
-                    upstream=upstream, patches=tuple(patches))
+_LAZY = {"Upstream", "Patch", "RuleSpec", "UPSTREAM_FILE", "patched_upstream", "DETECT_SECRETS_PATCHES",
+         "betterleaks_patches", "presidio_patches", "canonical_sha256", "pass_specs", "make"}
+
+
+def __getattr__(name: str):
+    """registry.RuleSpec, registry.make, ...: from maisecrets/rulespec.py, imported at the first use (PEP 562)."""
+    if name in _LAZY:
+        from . import rulespec
+        return getattr(rulespec, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
