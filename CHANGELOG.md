@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## [0.6.20] - 2026-10-15
+
+### Features
+
+- OpenAI and Anthropic keys of every length, GitLab trigger and CI job tokens in their newer forms are found without a label (18f35f1)
+- 23 more token formats are found without a label (Google OAuth client secret, SonarQube, Dynatrace, NuGet, crates.io, Dropbox, GitHub App JWT, …) (7194cc0)
+- a PEM private key in base64 is found and masked whole (Kubernetes Secret tls.key, ssh-privatekey) (c47bb41)
+
+### Fixes
+
+- a certificate bundle with a legacy encrypted private key in base64 is found (50742db)
+- a base64 PEM key needs a key body, ends at its END line, and GitLab job tokens are taken whole (436069a)
+- a routable GitLab token with a long routing payload is masked whole, not only its first part (98b4f30)
+- Resend, Ionic, Airtable and WakaTime tokens are found without the provider's name beside them (768989d)
+
 ## [0.6.19] - 2026-10-15
 
 ### Features
