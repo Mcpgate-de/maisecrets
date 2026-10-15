@@ -206,10 +206,10 @@ class TokenFormatTests(unittest.TestCase):
         for rule_id, gen in TOKENS.items():
             tok, _ = gen(r)
             near = (tok[:-2] + "  ") * 200             # each copy one short of a match
-            t0 = time.perf_counter()
+            t0 = time.process_time()
             found(near)
             with self.subTest(rule=rule_id):
-                self.assertLess(time.perf_counter() - t0, 3.0)
+                self.assertLess(time.process_time() - t0, 3.0)
 
     def test_an_identifier_or_a_digest_after_a_prefix_is_no_hit(self):
         """codex Gate A of 0.6.20: names of words after AVNS_, cio or oy2, and a hex digest after nfp_ or odt_."""
@@ -377,9 +377,9 @@ class Base64PemTests(unittest.TestCase):
         times = []
         for n in (500, 2000):
             text = "\n".join(head[:20] + rd(r, 56, AN) for _ in range(n)) + "\n"
-            t0 = time.perf_counter()
+            t0 = time.process_time()
             detect.scan(text, enabled={"private-key-base64"}, channel="tool")
-            times.append(time.perf_counter() - t0)
+            times.append(time.process_time() - t0)
         self.assertLess(times[1], 8 * times[0] + 0.05)
 
     def test_the_forms_a_value_takes(self):
@@ -394,10 +394,10 @@ class Base64PemTests(unittest.TestCase):
         r = random.Random(34)
         cert, key = b64_pem(r, "CERTIFICATE"), b64_pem(r)
         for docs, n in ((k8s_secret(cert, cert) * 400, 0), (k8s_secret(key, cert) * 400, 400)):   # 1.8 MB each
-            t0 = time.perf_counter()
+            t0 = time.process_time()
             hits = detect.scan(docs, enabled={"private-key-base64"}, channel="tool")
             with self.subTest(keys=n):
-                self.assertLess(time.perf_counter() - t0, 1.0)
+                self.assertLess(time.process_time() - t0, 1.0)
                 self.assertEqual(len(hits), n)
 
     def test_the_validator_decodes_only_the_head(self):
@@ -516,10 +516,10 @@ class SessionFormTests(unittest.TestCase):
                      (J(["sk-", "proj-"]) + rd(r, 200, B64U) + mid + rd(r, 500, B64U) + " ") * 100,
                      (J(["sk-ant-", "api03-"]) + rd(r, 139, B64U) + " ") * 500,
                      (J(["gl", "pat-"]) + rd(r, 390, B64U) + ".01. ") * 300):
-            t0 = time.perf_counter()
+            t0 = time.process_time()
             found(near, "tool")
             with self.subTest(n=len(near)):
-                self.assertLess(time.perf_counter() - t0, 3.0)
+                self.assertLess(time.process_time() - t0, 3.0)
 
 
 if __name__ == "__main__":

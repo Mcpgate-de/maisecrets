@@ -332,9 +332,9 @@ class CryptoSecretTests(unittest.TestCase):
         words = list(checksums.bip39_words())
         r = random.Random(11)
         text = " ".join(r.choice(words) for _ in range(20000))
-        t0 = time.perf_counter()
+        t0 = time.process_time()
         detect.scan(text)
-        self.assertLess(time.perf_counter() - t0, 5.0)
+        self.assertLess(time.process_time() - t0, 5.0)
 
 
 # ----------------------------------------------------- Switzerland, Austria --
@@ -560,10 +560,10 @@ class TokenFormatTests(unittest.TestCase):
         for rule_id, gen in TOKENS.items():
             tok, _ = gen(r)
             near = (tok[:-2] + "  ") * 1000            # each copy one short of a match
-            t0 = time.perf_counter()
+            t0 = time.process_time()
             found(near)
             with self.subTest(rule=rule_id):
-                self.assertLess(time.perf_counter() - t0, 3.0)
+                self.assertLess(time.process_time() - t0, 3.0)
 
     def test_a_telegram_token_of_the_documented_short_form_is_found(self):
         r = random.Random(18)

@@ -140,10 +140,10 @@ class Round4Tests(unittest.TestCase):
 class SpeedTests(unittest.TestCase):
     def test_one_long_word_and_long_runs_stay_fast(self):
         rec = "password: ${DB_PASSWORD}\nmot de passe : voir le coffre\n"
-        started = time.perf_counter()
+        started = time.process_time()
         detect.scan(rec * 2000 + "x" * 300)
         detect.scan("password=" + "".join(RNG.choice("bcdfghjkmnpqrstvwxz") for _ in range(320000)))
-        self.assertLess(time.perf_counter() - started, 3.0)
+        self.assertLess(time.process_time() - started, 3.0)
 
 
 if __name__ == "__main__":
