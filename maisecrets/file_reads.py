@@ -746,6 +746,15 @@ def _macho_commands(path: str):
     return libs, rpaths
 
 
+def _nearest_folder(path: str) -> str:
+    """The folder itself, or for one that does not exist the nearest folder above it that does: whoever can write
+    that one can make the missing folder and put a library in it (round 3)."""
+    path = os.path.abspath(path)
+    while not os.path.isdir(path) and os.path.dirname(path) != path:
+        path = os.path.dirname(path)
+    return path
+
+
 def _macho_libraries(tool: str):
     """Every library a Mach-O program loads, also through the libraries it loads (no otool: without the developer
     tools it is a stub that asks to install them). A library under /usr/lib or /System that is not on disk lives
@@ -770,7 +779,7 @@ def _macho_libraries(tool: str):
                 if hit is None:
                     return None
                 # dyld takes the first folder that holds the name: a folder searched before it must stay closed too
-                out.extend(r for r in rpaths[:hit] if os.path.isdir(r))
+                out.extend(_nearest_folder(r) for r in rpaths[:hit])
                 name = os.path.join(rpaths[hit], name[7:])
             name = name.replace("@loader_path", here).replace("@executable_path", exe_dir)
             if not (os.path.isabs(name) and os.path.isfile(name)):
@@ -1075,8 +1084,11 @@ def extract(path: str, pages=None, cwd: str = "") -> tuple[str | None, str]:
     scanned = not full and len(re.sub(r"\s+", "", text)) < MIN_CHARS_PER_PAGE * pages
     text = text.replace("\f", "\n")
     if full or len(text) > MAX_TEXT_CHARS:
-        text = (_cut(text) + f"\n[maisecrets: the text stops here, after {MAX_TEXT_CHARS} characters. "
-                "Read the PDF again with `pages` set to a smaller range to see the rest.]")
+        cut = _cut(text)
+        text = (cut + f"\n[maisecrets: the text stops here, after {MAX_TEXT_CHARS} characters. "
+                "Read the PDF again with `pages` set to a smaller range to see the rest.]") if cut.strip() else (
+            f"[maisecrets: the first {MAX_TEXT_CHARS} characters of this text are one line, or end inside a key "
+            "block, so nothing of it reached you; a smaller page range does not help when one line is that long.]")
     if scanned:
         # fail closed: a page number or a header line of a scan is no reason to send anything of it
         text = (f"[maisecrets: this PDF looks scanned: pdftotext found less than {MIN_CHARS_PER_PAGE} characters "

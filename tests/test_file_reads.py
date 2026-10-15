@@ -1359,6 +1359,11 @@ class TheConverterIsBounded(_Work):
         long_line = "a" * (file_reads.MAX_TEXT_CHARS - 10) + "\nsecond line that goes past the cap\n"
         self.assertTrue(file_reads._cut(long_line).endswith("\n"))
         self.assertNotIn("second", file_reads._cut(long_line))
+        _reset(read_pdf="convert")
+        self.stub("/usr/bin/head -c 200000 /dev/zero | /usr/bin/tr '\\\\0' 'a'")
+        content = output(self.post())["file"]["content"]
+        self.assertIn("are one line", content)
+        self.assertNotIn("aaaa", content)
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "ldd")
     def test_the_libraries_of_a_root_program_on_linux_are_trusted(self):
@@ -1427,6 +1432,11 @@ class TheConverterIsBounded(_Work):
         self.assertEqual([os.path.realpath(x) for x in found or ()],
                          [os.path.realpath(app / "early")]
                          + [os.path.realpath(app / "lib" / n) for n in ("liba.dylib", "libb.dylib")])
+        # a missing rpath folder counts by the nearest folder above it: whoever writes there can make it (round 3)
+        exe2 = app / "bin" / "tool2"
+        exe2.write_bytes(macho(("rpath", "@loader_path/../missing/deeper"), ("rpath", "@loader_path/../lib"),
+                               ("dylib", "@rpath/libb.dylib")))
+        self.assertEqual(os.path.realpath(file_reads._macho_libraries(str(exe2))[0]), os.path.realpath(app))
         (app / "lib" / "libb.dylib").unlink()
         self.assertIsNone(file_reads._macho_libraries(str(exe)), "a library that is not there")
         exe.write_bytes(b"\0" * 64)
