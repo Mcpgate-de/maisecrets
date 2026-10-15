@@ -6,7 +6,7 @@ limits are in their own section. "Repeat this measurement" has the commands.
 | Snapshot | |
 |---|---|
 | Date | 2026-10-14 |
-| maisecrets | v0.6.17 (tag `v0.6.17`); earlier releases from their tags |
+| maisecrets | v0.6.17 (tag `v0.6.17`); earlier releases from their tags; the CredData rows of 0.6.18 to 0.6.21 and the holdout section: 2026-10-15 |
 | Data | Samsung CredData, commit `0b1940e171725ad8937311120b191602608a4801` (2026-09-29) |
 | Machine | Apple M5, 10 cores, macOS 27.0 |
 | Python | 3.14.8 (CredData runs); 3.14.8 and 3.9.6 (timing) |
@@ -15,7 +15,8 @@ limits are in their own section. "Repeat this measurement" has the commands.
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
-`--locale de_DE`. Source: `scripts/measure_creddata.py`, 2026-10-14. A release before 0.6.17 has one channel.
+`--locale de_DE`. Source: `scripts/measure_creddata.py`, 2026-10-14; 0.6.18 to 0.6.21 on 2026-10-15, each from a worktree
+of its tag (0.6.21: the merge request branch). A release before 0.6.17 has one channel.
 
 | Release | Channel | TP | FN | FP | P | R | F1 | F1, `--regions us` |
 |---|---|---|---|---|---|---|---|---|
@@ -24,9 +25,17 @@ CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credent
 | 0.6.16 | one | 5,328 | 4,778 | 441 | 0.924 | 0.527 | 0.671 | 0.649 |
 | 0.6.17 | prompt | 5,328 | 4,778 | 441 | 0.924 | 0.527 | 0.671 | 0.649 |
 | 0.6.17 | tool | 5,838 | 4,268 | 443 | 0.929 | 0.578 | 0.713 | 0.690 |
+| 0.6.18 | prompt | 5,328 | 4,778 | 441 | 0.924 | 0.527 | 0.671 | 0.649 |
+| 0.6.18 | tool | 5,854 | 4,252 | 445 | 0.929 | 0.579 | 0.714 | 0.691 |
+| 0.6.19 | prompt | 5,328 | 4,778 | 441 | 0.924 | 0.527 | 0.671 | 0.649 |
+| 0.6.19 | tool | 5,854 | 4,252 | 445 | 0.929 | 0.579 | 0.714 | 0.691 |
+| 0.6.20 | prompt | 5,337 | 4,769 | 441 | 0.924 | 0.528 | 0.672 | 0.650 |
+| 0.6.20 | tool | 5,854 | 4,252 | 445 | 0.929 | 0.579 | 0.714 | 0.691 |
+| 0.6.21 | prompt | 5,345 | 4,761 | 441 | 0.924 | 0.529 | 0.673 | 0.650 |
+| 0.6.21 | tool | 5,862 | 4,244 | 446 | 0.929 | 0.580 | 0.714 | 0.691 |
 
 This table uses all 29,893 rows (14,471 credentials, 15,422 non-secrets). Source: `scripts/measure_creddata.py
---exclude-repo ""`, 2026-10-14.
+--exclude-repo ""`, 2026-10-14; 0.6.18 to 0.6.21 on 2026-10-15.
 
 | Release | Channel | P | R | F1 | P, R, F1 with `--regions us` |
 |---|---|---|---|---|---|
@@ -35,6 +44,14 @@ This table uses all 29,893 rows (14,471 credentials, 15,422 non-secrets). Source
 | 0.6.16 | one | 0.954 | 0.648 | 0.772 | 0.904, 0.648, 0.755 |
 | 0.6.17 | prompt | 0.954 | 0.648 | 0.772 | 0.904, 0.648, 0.755 |
 | 0.6.17 | tool | 0.956 | 0.683 | 0.797 | 0.908, 0.683, 0.780 |
+| 0.6.18 | prompt | 0.954 | 0.648 | 0.772 | 0.904, 0.648, 0.755 |
+| 0.6.18 | tool | 0.956 | 0.684 | 0.798 | 0.908, 0.684, 0.781 |
+| 0.6.19 | prompt | 0.954 | 0.648 | 0.772 | 0.904, 0.648, 0.755 |
+| 0.6.19 | tool | 0.956 | 0.684 | 0.798 | 0.908, 0.684, 0.781 |
+| 0.6.20 | prompt | 0.954 | 0.649 | 0.772 | 0.904, 0.649, 0.755 |
+| 0.6.20 | tool | 0.956 | 0.684 | 0.798 | 0.908, 0.684, 0.781 |
+| 0.6.21 | prompt | 0.954 | 0.649 | 0.773 | 0.904, 0.649, 0.756 |
+| 0.6.21 | tool | 0.956 | 0.685 | 0.798 | 0.908, 0.685, 0.781 |
 
 ## CredData, split by repository
 
@@ -79,7 +96,8 @@ The built-in examples of six other secret catalogs, scanned by maisecrets. Per r
 examples, each in two forms: the secret alone ("bare") and after `token = ` ("after a label"). A rule counts as
 found when the hits of one channel cover the whole secret of one of its examples. "0.6.19" is the tag `v0.6.19`;
 "0.6.20" is the branch of that release. Source: `scripts/measure_catalog_coverage.py`, 2026-10-15; its docstring has
-the method.
+the method. The tables show which forms maisecrets misses, not a ranking between tools: the other tools also verify a
+key with its provider, pair a key with its id and use provider logic, and maisecrets uses labels and shapes only.
 
 | Catalog | Commit | Rules | Rules with examples | 0.6.19 bare | 0.6.20 bare | 0.6.19 after a label | 0.6.20 after a label |
 |---|---|---|---|---|---|---|---|
@@ -107,41 +125,53 @@ differ by up to 7 %). Source: `scripts/measure_scan_time.py --maisecrets <v0.6.1
 ## Cloakroom holdout sets, 2026-10-15
 
 Cloakroom's holdout sets v2 to v7 (`bench/holdout_v*.jsonl` at commit `cc3c88d76a`, 2026-10-14): 1,652 planted values
-in 1,437 samples and 215 clean samples. A value counts as leaked when it still appears after every match is masked.
-Tool channel (`detect.scan(text, channel="tool")`), `--locale de_DE`. Source: a script outside this repository that
-reads the sets and calls `detect.scan`, 2026-10-15. 0.6.20 is tag `v0.6.20`; 0.6.21 is the release of these rules.
+in 470 samples, and 215 clean samples (200 in v2 to v6, 15 in v7). A value counts as leaked when it still appears
+after every match is masked. Tool channel (`detect.scan(text, channel="tool")`), `--locale de_DE`. Source: a script
+outside this repository that reads the sets and calls `detect.scan`, 2026-10-15. 0.6.20 is tag `v0.6.20`; 0.6.21 is
+the release of these rules.
 
-The rules of 0.6.21 come from the values that 0.6.18 leaked. Each sample falls into half D or half C by the first 8 hex
-digits of sha256 of `<set>/<id>` (even: D). The rules were written from the leaks of half D; half C was only counted.
-Cloakroom tuned its own engine on v2 to v5 after their first run; v6 was never tuned on (their `bench/RESULTS.md`).
+Each sample falls into half D or half C by the first 8 hex digits of sha256 of `<set>/<id>` (even: D). The rules of
+0.6.21 were written from the values of half D that 0.6.18 leaked; half C was counted. Half C is the number to read.
+Regions `us`, `uk`, `in`:
 
-Regions `us`, `uk`, `in` (as on Cloakroom's machine):
-
-| Set | Values | Leaked, 0.6.20 | Leaked, 0.6.21 | Clean samples | False alarms, 0.6.20 | False alarms, 0.6.21 |
+| Set | Values, D | Leaked D, 0.6.20 → 0.6.21 | Values, C | Leaked C, 0.6.20 → 0.6.21 | Clean samples | False alarms, 0.6.20 → 0.6.21 |
 |---|---|---|---|---|---|---|
-| holdout v2 | 219 | 82 | 57 | 40 | 1 | 1 |
-| holdout v3 | 320 | 136 | 79 | 40 | 1 | 1 |
-| holdout v4 | 328 | 176 | 115 | 40 | 2 | 2 |
-| holdout v5 | 394 | 201 | 135 | 40 | 2 | 2 |
-| holdout v6 | 314 | 163 | 110 | 40 | 0 | 0 |
-| holdout v7 | 77 | 3 | 0 | 15 | 1 | 1 |
-| half D (rules written here) | 822 | 380 | 237 | 107 | 4 | 4 |
-| half C (counted only) | 830 | 381 | 259 | 108 | 3 | 3 |
-| all | 1,652 | 761 | 496 | 215 | 7 | 7 |
+| v2 | 92 | 36 → 24 | 127 | 46 → 33 | 40 | 1 → 1 |
+| v3 | 208 | 88 → 49 | 112 | 48 → 30 | 40 | 1 → 1 |
+| v4 | 154 | 86 → 55 | 174 | 90 → 60 | 40 | 2 → 2 |
+| v5 | 178 | 85 → 58 | 216 | 116 → 77 | 40 | 2 → 2 |
+| v6 | 157 | 83 → 51 | 157 | 80 → 59 | 40 | 0 → 0 |
+| v7 | 33 | 2 → 0 | 44 | 1 → 0 | 15 | 1 → 1 |
+| v2 to v6 | 789 | 378 → 237 | 786 | 380 → 259 | 200 | 6 → 6 |
+| v2 to v7 | 822 | 380 → 237 | 830 | 381 → 259 | 215 | 7 → 7 |
 
 Regions `de`:
 
-| Set | Values | Leaked, 0.6.20 | Leaked, 0.6.21 | Clean samples | False alarms, 0.6.20 | False alarms, 0.6.21 |
+| Set | Values, D | Leaked D, 0.6.20 → 0.6.21 | Values, C | Leaked C, 0.6.20 → 0.6.21 | Clean samples | False alarms, 0.6.20 → 0.6.21 |
 |---|---|---|---|---|---|---|
-| holdout v2 | 219 | 94 | 69 | 40 | 0 | 0 |
-| holdout v3 | 320 | 148 | 94 | 40 | 0 | 0 |
-| holdout v4 | 328 | 181 | 121 | 40 | 0 | 0 |
-| holdout v5 | 394 | 209 | 146 | 40 | 0 | 0 |
-| holdout v6 | 314 | 181 | 136 | 40 | 0 | 0 |
-| holdout v7 | 77 | 3 | 0 | 15 | 1 | 1 |
-| half D (rules written here) | 822 | 412 | 276 | 107 | 0 | 0 |
-| half C (counted only) | 830 | 404 | 290 | 108 | 1 | 1 |
-| all | 1,652 | 816 | 566 | 215 | 1 | 1 |
+| v2 | 92 | 41 → 30 | 127 | 53 → 39 | 40 | 0 → 0 |
+| v3 | 208 | 97 → 58 | 112 | 51 → 36 | 40 | 0 → 0 |
+| v4 | 154 | 89 → 59 | 174 | 92 → 62 | 40 | 0 → 0 |
+| v5 | 178 | 89 → 62 | 216 | 120 → 84 | 40 | 0 → 0 |
+| v6 | 157 | 94 → 67 | 157 | 87 → 69 | 40 | 0 → 0 |
+| v7 | 33 | 2 → 0 | 44 | 1 → 0 | 15 | 1 → 1 |
+| v2 to v6 | 789 | 410 → 276 | 786 | 403 → 290 | 200 | 0 → 0 |
+| v2 to v7 | 822 | 412 → 276 | 830 | 404 → 290 | 215 | 1 → 1 |
+
+By class of the planted value (the shape of the value, sorted by the analysis script; for example a name is two to
+five capitalised words without a digit), regions `us`, `uk`, `in`:
+
+| Class | Values | Leaked 0.6.20, D / C | Leaked 0.6.21, D / C |
+|---|---|---|---|
+| names | 324 | 167 / 154 | 103 / 107 |
+| user names | 146 | 66 / 79 | 57 / 68 |
+| addresses | 26 | 15 / 11 | 14 / 11 |
+| birth dates | 72 | 37 / 35 | 9 / 14 |
+| ID numbers | 114 | 18 / 18 | 10 / 8 |
+| phone numbers | 207 | 12 / 18 | 0 / 6 |
+| tokens and passwords | 334 | 31 / 31 | 24 / 24 |
+| e-mail addresses | 286 | 0 / 3 | 0 / 3 |
+| other | 143 | 34 / 32 | 20 / 18 |
 
 Each new rule alone on 0.6.20: values it closes, half D / half C, and new hits on the sets of ordinary text. "PII
 corpus" is `tests/fp_corpus_pii.py` (367 developer texts in the shape of personal data that are none, ten regions);
@@ -169,38 +199,50 @@ The rules of 0.6.20 already hit 8 of the 367 texts of the PII corpus (4 by `phon
 0.6.21 masks 46. Two review rounds (codex gpt-5.6-sol and Opus) wrote about 360 more developer snippets; after the
 fixes, 12 of 182 and 0 of 98 still give a hit of a new rule, most of them a person's name or path.
 
-Left out after measuring (holdout analysis of 2026-10-14): an AWS key id with any capital and digit (CredData +105
-credentials, +48 false alarms), a user name after a user label, a password or a token word in prose, and a Twilio
-Account SID without its name.
+Left out after measuring, each alone on 0.6.20 (the closed values are both halves; prompts are the prompt
+channel, the rest the tool channel):
 
-CredData, line method, without `2ba83c6a`, `--locale de_DE`. Source: `scripts/measure_creddata.py`, 2026-10-15.
+| Rule | Closed, us uk in | New false alarms, v2 to v6 | New hits, PII corpus | New hits, developer texts | Newly blocked prompts |
+|---|---|---|---|---|---|
+| a user name after a user label (`user:`, `login:`, `requested by`) | 55 | 3 | 4 | 68 | 28 |
+| a password after a password word in prose | 5 | 0 | 0 | 80 | 53 |
+| a random token after a token word in prose | 11 | 0 | 0 | 17 | 5 |
 
-| Release | Channel | Regions | TP | FP | P | R | F1 |
-|---|---|---|---|---|---|---|---|
-| 0.6.20 | tool | de | 5,854 | 445 | 0.929 | 0.579 | 0.714 |
-| 0.6.21 | tool | de | 5,862 | 446 | 0.929 | 0.580 | 0.714 |
-| 0.6.20 | tool | us | 5,854 | 991 | 0.855 | 0.579 | 0.691 |
-| 0.6.21 | tool | us | 5,862 | 992 | 0.855 | 0.580 | 0.691 |
-| 0.6.20 | prompt | de | 5,337 | 441 | 0.924 | 0.528 | 0.672 |
-| 0.6.21 | prompt | de | 5,345 | 441 | 0.924 | 0.529 | 0.673 |
-| 0.6.20 | prompt | us | 5,337 | 987 | 0.844 | 0.528 | 0.650 |
-| 0.6.21 | prompt | us | 5,345 | 987 | 0.844 | 0.529 | 0.650 |
+An AWS key id with any capital and digit was left out on CredData (+105 credentials, +48 false alarms, precision
+−0.006, holdout analysis of 2026-10-14); a Twilio Account SID without its name was left out as an id of other uses.
 
-The 8 new true positives come from `twilio-account-sid-labelled`. The one new false alarm in the tool channel is a
-Windows home path in a JSON fixture whose user part is a person's user name; CredData labels the line as no password,
-and `user-in-home-path` masks the user name as personal data. Precision in the tool channel with region `de` goes from
-0.92935 to 0.92930.
+The values 0.6.21 still leaks (regions `us`, `uk`, `in`), by class and by reason. A name or an address without a
+label or a postcode needs a model; a user name or a date with no label is ambiguous without context; "left out" are
+the values that one of the three rules above would close; the rest is a remaining gap:
 
-Time per scan, tool channel, Python 3.14.8, `scripts/measure_scan_time.py`, two rounds per release, interleaved, load
-average 4.3 to 5.6 (above the bar of 4 of "Timing"), 2026-10-15:
+| Class | needs a model (no label, no postcode) | ambiguous without context | left out for its false hits | remaining gap |
+|---|---|---|---|---|
+| names | 210 | 0 | 0 | 0 |
+| user names | 0 | 79 | 46 | 0 |
+| addresses | 25 | 0 | 0 | 0 |
+| birth dates | 0 | 23 | 0 | 0 |
+| ID numbers | 0 | 0 | 0 | 18 |
+| phone numbers | 0 | 0 | 0 | 6 |
+| tokens and passwords | 0 | 0 | 11 | 37 |
+| e-mail addresses | 0 | 0 | 0 | 3 |
+| other | 0 | 0 | 0 | 38 |
+| all | 235 | 102 | 57 | 102 |
 
-| Input | 0.6.20 | 0.6.21 |
-|---|---|---|
-| import + first scan | 53–58 ms | 65–70 ms |
-| typed prompt, 1 KB | 2.2–2.4 ms | 2.6 ms |
-| Python code, 70 KB | 140–153 ms | 174–175 ms |
-| log, 70 KB | 99–105 ms | 116–118 ms |
-| configuration, 70 KB | 222–227 ms | 236–239 ms |
+The rules of 0.6.20 already hit 8 of the 367 texts of the PII corpus (4 by `phone`, one each by `de-vat-id`, `email`,
+`us-bank` and `de-plz`); 0.6.21 adds none. The 44 true hits of the corpus (46 values): 0.6.20 masks 8, 0.6.21 masks
+46. Two review rounds (codex gpt-5.6-sol and Opus) wrote about 360 more developer snippets; after the fixes, 12 of 182
+and 0 of 98 still give a hit of a new rule, most of them a person's name or path. CredData and the time per scan of
+0.6.21 are in the release tables above.
+
+Limits of this measurement:
+
+- This is a result on Cloakroom's benchmark, not on an unseen holdout. The analysis of 2026-10-14 sorted all 765
+  values that 0.6.18 leaked by class, in both halves, so the classes of half C were seen; the rule texts came from the
+  values of half D. The false alarms of both halves were read and the rules changed after them.
+- Two rule families come from Cloakroom's code: a name before an e-mail address and the columns of a CSV header
+  (Apache-2.0, credited in the commits and in "Credit"); the code here is written anew.
+- Cloakroom tuned its own engine on v2 to v5 after their first run; v6 is its set that was never tuned on (their
+  `bench/RESULTS.md`).
 
 ## Comparison with other tools
 
