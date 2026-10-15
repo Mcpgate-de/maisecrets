@@ -1,0 +1,11 @@
+# c1-a-token-of-a-newer-length-is-a-hit: the test owns the fallback rules; this file names them and the mutation that must turn it red.
+belief = "c1-a-token-of-a-newer-length-is-a-hit"
+control = "C1"
+statement = "An OpenAI key, an Anthropic API key, a GitLab trigger token or a GitLab CI job token of a length or form the vendored rule does not fix is a secret hit by a fallback rule that runs after the vendored ones."
+runner = ["tests/test_rules_from_the_catalogs.py::SessionFormTests::test_openai_project_keys_of_every_length_are_found"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''                  + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]
+'''
+replace = ""
