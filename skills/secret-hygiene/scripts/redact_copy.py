@@ -23,7 +23,7 @@ import _detector  # noqa: E402
 NOT_REPLACED = ("names, postal addresses, birth dates, phone numbers without a country code, and "
                 "passwords written in a normal sentence")
 LABELS = {"SECRET": "secret", "EMAIL": "e-mail address", "IBAN": "IBAN", "PHONE": "phone number",
-          "CARD": "card number", "IP": "IP address"}
+          "CARD": "card number", "IP": "IP address", "NAME": "name"}
 
 
 def _same(mtype: str, value: str) -> str:

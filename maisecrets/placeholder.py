@@ -47,7 +47,7 @@ def find_refs(text: str) -> list[tuple[str, int, int]]:
 
 
 ENTITY_OF_TYPE = {"EMAIL": "email", "PHONE": "phone", "CARD": "credit_card", "IBAN": "iban",
-                  "IP": "ip_address", "IPV6": "ip_address_v6"}
+                  "IP": "ip_address", "IPV6": "ip_address_v6", "NAME": "person"}
 _FREEMAIL: frozenset[str] | None = None
 
 

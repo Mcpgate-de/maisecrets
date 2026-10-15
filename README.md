@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 144 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 147 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -346,6 +346,9 @@ cannot tell what the policy says. A key it does not know is ignored with a
 warning; a key that starts with `_` or `$` is a comment or a schema link. A key
 that looks like a misspelled `rehydration`, `resolve_in_files` or
 `ssh_via_sandbox` blocks rehydration until it is fixed.
+Two keys add to what the user has instead of replacing it: `rule_dirs`, rule
+folders that every user reads and cannot remove, and `allow`, lines of the
+allow list (both lists of strings; see "Rules of your own").
 `/maisecrets:status` names the keys that come from the policy. The plaintext
 `jsonfile` store is refused unless the policy or the user sets
 `allow_plaintext_store`.
@@ -1376,6 +1379,134 @@ shape low, and a 16-digit number passes Luhn one time in ten.
 Measure what the rules would catch on your own recordings, values never
 printed: `scripts/replay_sessions.py --claude --codex`.
 
+## Rules of your own
+
+**For administrators.** To give each machine of a team the same rules:
+
+1. Run `maisecrets rules init DIR` (in the plugin folder: `bash hooks/run.sh
+   rules init DIR`). It makes a team folder with `rules/`, `samples.txt`, a
+   README and CI files for GitHub and GitLab.
+2. Keep the folder in a repository of the company. Its CI runs `maisecrets
+   rules check` on each change.
+3. Put the folder on each machine. A git checkout that a scheduled job updates
+   is one way.
+4. Add the local path to `rule_dirs` in the machine policy ("Settings you can
+   enforce"). A user cannot remove a folder of the policy.
+5. On a machine, run `maisecrets rules check` to see that each folder loads.
+
+maisecrets reads local folders only. It does not fetch or update a folder: how
+the files get to each machine is the company's choice. When a folder of
+`rule_dirs` is missing or cannot be read, each session start says so in one
+sentence. When rules of your own run, the start line counts them: `maisecrets
+0.6.N is on, with 12 rules of your own from 2 folders.`
+
+You can add detection rules for the tokens of your own services, and you can
+let single values through. maisecrets reads the rules from three places:
+
+- `~/.maisecrets/rules.d`, your own folder. The AI cannot write there.
+- each folder of the setting `rule_dirs`, for example a checkout of your
+  team's rule repository. Type the change as your own prompt:
+
+  ```
+  /maisecrets:settings rule_dirs add ~/src/team-rules
+  maisecrets: set rule_dirs add ~/src/team-rules     (the same, and the form for Codex)
+  ```
+
+  `remove` takes a folder off the list. Like every setting, only your typed
+  prompt changes it (C22). When the folder has a subfolder `rules/`, as a
+  team repository from `maisecrets rules init` has, maisecrets reads that
+  subfolder; else it reads the folder itself. A folder with no rule file
+  gets a note when you add it and in `/maisecrets:rules`.
+- each folder of `rule_dirs` in the machine policy. You cannot remove those.
+
+A folder holds two kinds of file, and maisecrets reads nothing else from it
+(no symbolic link, no git metadata):
+
+- `*.json` in the gitleaks form: `{"rules": [{"id": …, "regex": …,
+  "keywords": […], "entropy": …, "secretGroup": …, "allowlists": [{"regexes":
+  […], "regexTarget": "secret|match|line", "stopwords": […]}]}]}`. An optional
+  `"type"` (`SECRET`, the default, or `NAME`, `EMAIL`, `PHONE`, `IBAN`, `CARD`,
+  `IP`) sets the placeholder type. An allowlist with `"condition": "AND"`
+  and more than one part is dropped (the stricter side), and
+  `/maisecrets:rules` says so.
+- `*.prefixes`, one rule per line, `id  regex`, as in
+  `maisecrets/rules/prefixes.txt`. The whole match is the secret.
+
+A hook reads these files in every call, so each rule passes checks when it is
+loaded: a keyword or a literal of at least 4 characters, at most 300
+characters of regex, at most 500 rules, 200 files and 1 MB per folder (the
+first 2000 entries and 2000 rules of a folder are looked at, refused ones
+included), 64 KB per file, and an id that no earlier rule of the same folder
+has. A rule whose id a rule of an earlier folder has runs as `<id>#2`, so one
+folder cannot take a rule of another folder out by its id; `rule: user:<id>`
+in the allow list switches both off. The regex must not backtrack: no repeat
+inside a repeat (`(a+)+`), no repeat of something that can be empty
+(`(a?){25}`), no branches that start alike inside a repeat (`(a|aa)+`), no two
+repeats in a row that take the same characters (`.*.*`, `\w+\d+`), no
+backreference, and no quantifier of variable length at the start (`\w+…`,
+`x?[a-z]+…`). Then maisecrets times each new rule once on test texts that make
+a backtracking regex slow, also on runs of the characters its own repeats take
+and on its literals, those of each branch too, repeated before long runs; a
+rule slower than 50 ms on the texts of one start is left out. A new rule runs
+only after this timed test: when a hook call has no time left for the test,
+the rule waits for the next call, and `maisecrets rules check` times every
+rule at once and keeps the result for the hooks. A rule that is still slow in
+a real scan (more than half a second inside its regex in one hook call) is
+left out from the next call on. When a hook runs out of time, the rule of your
+own with the most regex time is left out, if that time is more than half of
+the call. Each verdict is kept by a hash of the rule in
+`~/.maisecrets/.rules-state`, so a hook pays for the checks once. A changed
+rule is checked again; a rule that a real scan found slow stays out until you
+change it, and `maisecrets rules check DIR` shows it.
+
+A rule that fails a check is left out, with its reason; the rest of the file
+still loads. A refused rule is named by its place (`rule 3`, `line 7`), never
+by its text: a refused line can be a pasted value. A broken file or folder
+never stops a hook and never costs the rules of another folder. The session
+start names a new failure once, and `/maisecrets:rules` shows each folder,
+its rule count, a hash of its files, and each rule that was left out. Your
+rules run after every built-in rule, the personal-data rules too, so a rule
+of your own never cuts a part out of an e-mail address or an IBAN; a hit
+carries the id with `user:` in front (`user:acme-token`).
+
+`maisecrets rules` (in the plugin folder: `bash hooks/run.sh rules …`) does
+the rest:
+
+```
+maisecrets rules check [DIR]        each rule: ok with its time, slow, or refused with the reason; exit 1 on a problem
+maisecrets rules test [text]        what the rules find in the text or stdin: type, rule, place, length
+maisecrets rules init DIR           a team folder: README.md, rules/, samples.txt, CI for GitHub and GitLab
+maisecrets rules import FILE.toml   a gitleaks or betterleaks config in the JSON form (Python 3.11+)
+```
+
+`rules check` also reads `samples.txt`: a line `hit <rule-id> <text>` must be
+found by that rule, a line `miss <text>` by no rule of the folder. A failure
+names the line, never its text. Without a folder, `rules check` checks every
+folder the hooks read, and a missing folder of the setting or the policy is a
+failure too. The CI files of `rules init` take maisecrets from its newest
+release, so CI runs the checks that the hooks of your team run; for a fixed
+version, write `--branch v0.6.N` there. `rules import` leaves out a rule with a
+filter it cannot read and a rule that fails a check, and says which.
+
+**The allow list.** `~/.maisecrets/allow.txt` lists what is not a hit, one
+entry per line, `#` for a comment:
+
+```
+# my own address in every git log
+name@my-company.example
+rule: phone
+```
+
+A line is one exact value: the value with nothing before or after it is not
+reported, a longer value that contains it still is. An allowed domain does
+not let through the e-mail address that ends in it. `rule: <id>` switches a
+rule off (`rule: user:acme-token`, or a built-in id from
+`maisecrets scan`). An entry is never a pattern. An administrator puts the
+same lines in `allow` of the machine policy. A folder of `rule_dirs` carries
+no allow list: the AI can write a shared checkout, and the AI may only make
+detection stricter. A value that is already stored stays redacted by its
+exact match; `/maisecrets:forget` deletes it.
+
 ## Known gaps (measured or documented)
 
 What the plugin does not protect. Each item is a limit of the mechanism, not
@@ -1437,13 +1568,18 @@ a to-do.
 - **Every e-mail address, phone number with a country code and public IP
   counts**, also your own and your colleagues'. `git log`, `dig` and `ip addr`
   come back with placeholders. Set `"regions": []` to drop the country
-  identifiers; there is no allow-list for single values yet.
+  identifiers, and list your own values in `~/.maisecrets/allow.txt` (see
+  "Rules of your own").
 - **Placeholders resolve in Bash, MCP tool arguments and the file tools.** In
   WebFetch or a subagent prompt they stay text. A subagent shares its parent's session; a
   headless run (`codex exec`, `claude -p`) is a session of its own, so a
   reference from an earlier run is foreign there.
 - **A reference in a prompt is admitted as typed by a human**, also when the
   prompt was built from an issue body or a log in a headless run.
+- **A slow rule of your own on Windows can outrun the hook's time limit**
+  (see "A hook that exceeds the client's timeout fails open" above). The
+  checks of "Rules of your own" keep a backtracking rule out, and a rule that
+  is slow in one scan is left out from the next one on.
 - **Claude Code on Windows without Git Bash** offers a `PowerShell` tool in
   place of Bash. maisecrets checks it like Bash for the store, in any case
   and with either slash, and refuses a placeholder in it with the reason:

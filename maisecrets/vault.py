@@ -59,6 +59,7 @@ DEFAULT_CONFIG = {
     "ssh_consent": False,            # every ssh-family command: a read runs, a write asks once per host (#8)
     "ssh_host_groups": {},           # {"group": ["host", …]}: one ssh consent covers the whole group
     "ssh_autonomous_hosts": [],      # hosts (or group names) where the AI writes over ssh without asking, always
+    "rule_dirs": [],                 # folders of detection rules of your own (user_rules.py); a typed prompt adds one
     "secret_destinations": "observe",  # observe: note where each stored secret is sent (destinations.py); off
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
@@ -89,7 +90,7 @@ _CONFIG_TYPES = {
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
     "ssh_consent": bool, "ssh_host_groups": dict, "ssh_autonomous_hosts": list, "secret_destinations": str,
-    "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool,
+    "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool, "rule_dirs": list,
 }
 
 
@@ -317,6 +318,9 @@ def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
             cfg[key] = False
     if parsed.get("ssh_consent") is True:
         cfg["ssh_consent"] = True
+    if isinstance(parsed.get("rule_dirs"), list):
+        # more rules only make detection stricter: they run after every built-in rule, so none takes a span first
+        cfg["rule_dirs"] = parsed["rule_dirs"]
 
 
 def load_config() -> dict:
@@ -423,6 +427,13 @@ def load_config() -> dict:
             # valid JSON of another shape was skipped silently: no policy applied at all
             raise ConfigError(f"{policy_path} must hold one JSON object")
         _check_types(policy, policy_path.name)
+        # the policy's rule folders and allow list add to the person's own (maisecrets/user_rules.py): they are no
+        # setting the person changes, so they stay out of policy_keys and the person keeps their own rule_dirs
+        for key in ("rule_dirs", "allow"):
+            extra = policy.pop(key, [])
+            if not isinstance(extra, list) or not all(isinstance(x, str) for x in extra):
+                raise ConfigError(f"{policy_path.name}: {key} must be a list of strings")
+            cfg["policy_" + key] = extra
         import difflib
         unknown_policy = sorted(k for k in policy if k not in _CONFIG_TYPES and not k.startswith(("_", "$")))
         policy = {k: v for k, v in policy.items() if k in _CONFIG_TYPES}

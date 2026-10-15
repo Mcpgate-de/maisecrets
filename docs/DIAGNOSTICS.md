@@ -300,7 +300,9 @@ on_timeout():
 - A regex search holds the GIL, so the timer thread cannot run while one backtracks. Where the platform has
   SIGALRM, `main()` also arms a timer in the main thread 0.25 s before the thread watchdog (`_arm_alarm`); its
   handler runs `on_timeout()` inside the search. Both share `on_timeout()` and `answer()`, so one answer leaves
-  the process; the handler does nothing while an answer is in writing. Measured on 0.6.14 with a real PostToolUse
+  the process; the handler does nothing while an answer is in writing. A non-blocking lock lets only the first of
+  the two run `on_timeout()`, so the second cannot end the process before the first finishes its work. That work
+  also leaves out the rule of your own that held the hook (`_quarantine_running_rule`, C25). Measured on 0.6.14 with a real PostToolUse
   process and a 256K line of AWS key ids: no answer within 25 s (3.14) and 23.3 s (3.9), past the client's 20 s;
   with the alarm, the fail-closed answer after 15.9 s on both. Windows has no SIGALRM: there the thread watchdog
   stays alone (`tests/test_hook_time.py`).

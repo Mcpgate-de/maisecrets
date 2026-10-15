@@ -339,6 +339,9 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     "pending": [([], "", _ALL0)],
     # it reads the transcripts of the sandbox's own CLAUDE_CONFIG_DIR, never the store: every state answers alike
     "consent-report": [(["ssh", "--json"], "", _ALL0), (["ssh", "--last", "7d"], "", _ALL0), ([], "", _ALL2)],
+    # the rule folders are read without the store, and a config that does not load means no extra folder: every
+    # state answers alike (tests/test_user_rules.py)
+    "rules": [([], "", _ALL0), (["check"], "", _ALL0), (["nonsense"], "", _ALL2)],
 }
 
 _BASES: dict[str, Sandbox] = {}
@@ -980,6 +983,25 @@ class SessionStartTests(unittest.TestCase):
                 self.assertEqual(msg, f"maisecrets {VERSION} is on. {pool[2]}")
         self.assertNotEqual(tips.TIPS[2], tips.TIPS_CODEX[2], "the case above must tell the pools apart")
 
+    def test_the_start_line_names_the_rules_of_your_own_and_warns_of_a_missing_rule_folder(self):
+        sb = self.sandbox()
+        gone = str(sb.root / "team-rules")
+        (sb.home / "config.json").write_text(json.dumps({**ENC, "rule_dirs": [gone]}), encoding="utf-8")
+        (sb.home / ".announced").write_text("EncryptedFileBackend\n")
+        (sb.home / ".shortcut").write_text("offered\n")
+        (sb.home / "rules.d").mkdir()
+        (sb.home / "rules.d" / "own.json").write_text(json.dumps({"rules": [
+            {"id": "one", "regex": r"tkx_[A-Za-z0-9]{24}", "keywords": ["tkx_"]},
+            {"id": "two", "regex": r"tky_[A-Za-z0-9]{24}", "keywords": ["tky_"]}]}), encoding="utf-8")
+        warning = f"Warning: the rule folder {gone} (setting) is missing, so its rules of your own do not run."
+        first = _start(self, sb, CLAUDECODE="1")["systemMessage"]
+        line = f"maisecrets {VERSION} is on, with 2 rules of your own from 1 folder."
+        self.assertTrue(first.startswith(line + " "), first)
+        self.assertTrue(first.endswith(" " + warning), first)
+        again = _start(self, sb, CLAUDECODE="1")["systemMessage"]
+        self.assertEqual(again, f"{line} {warning}",
+                         "the warning comes at every start while the folder is missing")
+
     def test_codex_is_told_from_claude_code_by_transcript_then_claudecode_then_codex_vars(self):
         cases = [
             # (name, transcript path under the sandbox root or None, env, codex?)
@@ -1523,6 +1545,15 @@ class TipsTests(unittest.TestCase):
         self.assertEqual(self.tips.tip_of_the_day(codex=True), self.tips.TIPS_CODEX[2])
         for tip in self.tips.TIPS_CODEX:
             self.assertNotIn("/maisecrets:", tip)
+
+    def test_each_pool_has_a_tip_about_rules_of_your_own_with_a_step_that_works_in_its_client(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for pool, step in ((self.tips.TIPS, "/maisecrets:rules"),
+                           (self.tips.TIPS_CODEX, "maisecrets: set rule_dirs add")):
+            (tip,) = [t for t in pool if "rules for the tokens of your own services" in t]
+            self.assertIn(step, tip)
+            self.assertIn('README "Rules of your own"', tip)
+        self.assertIn("\n## Rules of your own\n", readme, "the tip names a README section that exists")
 
     def test_the_rotation_wraps_and_a_damaged_state_starts_at_the_first_tip(self):
         (self.dir / ".tip").write_text(f"2000-01-01 {len(self.tips.TIPS) - 1}\n")

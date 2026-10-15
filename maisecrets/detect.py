@@ -41,6 +41,7 @@ import ipaddress
 import json
 import math
 import re
+import time
 import warnings
 from collections import Counter
 from dataclasses import dataclass
@@ -2008,11 +2009,36 @@ def _load_own() -> list[Rule]:
 
 
 _RULES: list[Rule] | None = None
+_ALLOW: list = []   # (exact values, rule ids) of the allow list, read once per process
+
+
+def _user_rules() -> list[Rule]:
+    """The rules of the person's folders (maisecrets/user_rules.py). A rule that fails a check is quarantined there;
+    anything else that fails leaves them out, never the built-in rules."""
+    try:
+        from . import user_rules
+        return list(user_rules.load().rules)
+    except Exception:  # noqa: BLE001 - rules of your own are an addition; they never stop a hook
+        return []
+
+
+def allow_list() -> tuple[frozenset, frozenset]:
+    if not _ALLOW:
+        try:
+            from . import user_rules
+            _ALLOW.append(user_rules.allow_list())
+        except Exception:  # noqa: BLE001 - an allow list that cannot be read allows nothing
+            _ALLOW.append((frozenset(), frozenset()))
+    return _ALLOW[0]
 
 
 def rules() -> list[Rule]:
     """Own secret rules first (longer shapes win the span), then betterleaks and the own rules of
-    own_secret_rules.json, then PII."""
+    own_secret_rules.json, the fallback and regional rules, then PII, then the literal rules, then the rules of your
+    own. A scan runs the personal-data step (_personal_hits) before the rules of your own (_in_scan_order). A user rule
+    never takes a span before a built-in rule: a NAME rule that took a part of an e-mail address left the rest of it in
+    the clear (Opus review of block 1). A user rule runs in both channels. A rule id on the allow list is switched
+    off."""
     global _RULES
     if _RULES is None:
         own = _load_own()
@@ -2022,7 +2048,11 @@ def rules() -> list[Rule]:
         _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
                   + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]
                   + _load_regional(active.regions) + _load_presidio(active.regions) + pii
-                  + _load_literal(active.languages))
+                  + _load_literal(active.languages) + _user_rules())
+        off = allow_list()[1]
+        if off:
+            from .user_rules import switched_off
+            _RULES = [r for r in _RULES if not switched_off(r.id, off)]
         _REGIONS[:] = [_RULES, active.regions]
     return _RULES
 
@@ -2036,6 +2066,89 @@ def _pii_regions_cached() -> tuple:
     if _REGIONS[0] is not current:
         _REGIONS[:] = [current, active_regions().regions]
     return _REGIONS[1]
+
+
+def reset_rules() -> None:
+    """Read every rule and the allow list again at the next scan (tests, and a CLI run after a change)."""
+    global _RULES
+    _RULES = None
+    _ALLOW.clear()
+    _SHAPE_IDS.clear()
+    for times in (_REGEX_TIME, _REGEX_CHARS, _REGEX_RULE):
+        times.clear()
+    from . import user_rules
+    user_rules.reset()
+
+
+# Matchers of other kinds than a regex rule (a list of names, a value import): each is a callable text -> list[Match],
+# run in scan() after the rules. A span a rule took stays taken, and the allow list holds for them too.
+extra_matchers: list = []
+
+# The time each rule of your own spent inside its regex in this process (seconds), and the characters it ran over.
+# Only the regex counts, around each step of its finditer: the work on each hit is no time of the rule (Opus review,
+# round 3: a correct rule with 170k hits was taken out by the wall time of its loop). The sum runs over every scan of
+# the process, so a slow text split over many strings of one tool result adds up (same review).
+_REGEX_TIME: dict = {}
+_REGEX_CHARS: dict = {}
+_REGEX_RULE: dict = {}
+# (rule, perf_counter at the start of the step) while a step of a rule of your own runs, else None
+_RUNNING: list = [None]
+# A rule of your own may spend this long in its regex in one process (seconds, plus USER_RULE_BUDGET_PER_MB for each
+# MB of text it ran over); a rule that spends more is left out from then on (maisecrets/user_rules.py, note_slow)
+USER_RULE_BUDGET = 0.5
+USER_RULE_BUDGET_PER_MB = 0.1
+
+
+def slowest_user_rule():
+    """(rule, seconds) of the rule of your own with the most time inside its regex in this process, the step that
+    runs now included; None when no rule of your own ran."""
+    best = None
+    running = _RUNNING[0]
+    now = time.perf_counter()
+    times = dict(_REGEX_TIME)
+    rules_by_id = dict(_REGEX_RULE)
+    if running is not None:
+        rule, since = running
+        times[rule.id] = times.get(rule.id, 0.0) + (now - since)
+        rules_by_id[rule.id] = rule
+    for rid, took in times.items():
+        if best is None or took > best[1]:
+            best = (rules_by_id[rid], took)
+    return best
+
+
+def _timed(rule: Rule, found, chars: int):
+    """The matches of a rule of your own; the time inside its regex adds to the rule's sum for the process. Over the
+    budget, the rule is left out of this process and, by the state file, of the next ones."""
+    _REGEX_RULE[rule.id] = rule
+    _REGEX_CHARS[rule.id] = _REGEX_CHARS.get(rule.id, 0) + chars
+    try:
+        while True:
+            t = time.perf_counter()
+            _RUNNING[0] = (rule, t)
+            try:
+                m = next(found)
+            except StopIteration:
+                break
+            finally:
+                _RUNNING[0] = None
+                _REGEX_TIME[rule.id] = _REGEX_TIME.get(rule.id, 0.0) + (time.perf_counter() - t)
+            yield m
+    finally:
+        took = _REGEX_TIME.get(rule.id, 0.0)
+        if took > USER_RULE_BUDGET + USER_RULE_BUDGET_PER_MB * _REGEX_CHARS[rule.id] / 1e6:
+            _too_slow(rule, took)
+
+
+def _too_slow(rule: Rule, spent: float) -> None:
+    global _RULES
+    if _RULES is not None:
+        _RULES = [r for r in _RULES if r is not rule]
+    try:
+        from . import user_rules
+        user_rules.note_slow(rule, spent * 1000)
+    except Exception:  # noqa: BLE001 - the rule is out of this process either way
+        pass
 
 
 def active_regions():
@@ -2695,14 +2808,16 @@ def _command_start(text: str, pos: int) -> int:
     return cut + 1 if cut >= a else a
 
 
-def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt", path: str = "") -> list[Match]:
+def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt", path: str = "",
+         rule_list: list[Rule] | None = None) -> list[Match]:
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins. channel "tool" (a tool
     result or a file) takes a password after a password label without evidence of chance, and the cells of a
-    password export (path: the file the text came from, if any)."""
+    password export (path: the file the text came from, if any). `rule_list` scans with those rules alone, without
+    the allow list and the extra matchers (`maisecrets rules check`)."""
     outer, _CHANNEL[0] = _CHANNEL[0], channel if channel == "tool" else "prompt"
     outer_path, _PATH[0] = _PATH[0], path or ""
     try:
-        return _scan(text, enabled)
+        return _scan(text, enabled, rule_list=rule_list)
     finally:
         _CHANNEL[0] = outer   # the channel of an outer scan comes back after a nested one (is_fixture)
         _PATH[0] = outer_path
@@ -2885,7 +3000,8 @@ def _export_hits(text: str, low: str) -> list:
     return out
 
 
-def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> list[Match]:
+def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
+          rule_list: list[Rule] | None = None) -> list[Match]:
     """_copy: the text is the normaliser's cleaned copy of a tool result, which is not cleaned again."""
     if not text:
         return []
@@ -2893,19 +3009,43 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> li
     found: list[Match] = []
     taken_starts: list[int] = []
     taken_ends: list[int] = []
+    allowed = allow_list()[0] if rule_list is None else frozenset()
+    allowed_spans: list[tuple[int, int]] = []
 
     def overlaps(a: int, b: int) -> bool:
         """Whether [a, b) overlaps a span already taken. The spans never overlap each other, so only the two
         neighbours by start can; a scan over all of them was quadratic in the hits (review of b4a7c54)."""
         i = bisect.bisect_left(taken_starts, a)
         return (i > 0 and taken_ends[i - 1] > a) or (i < len(taken_starts) and taken_starts[i] < b)
+
+    def take(m: Match, own: bool = False) -> None:
+        """Take the span and report it, unless the allow list names the value exactly. An allowed value takes no span:
+        a later rule whose hit is longer still reports it (an allowed domain let the whole e-mail address through;
+        Opus review of block 1). A later hit inside an allowed value of a built-in rule is a part of that value and
+        is not reported; an allowed hit of a rule of your own (`own`) reserves nothing."""
+        if m.value in allowed:
+            if not own:
+                allowed_spans.append((m.start, m.end))
+            return
+        if any(a <= m.start and m.end <= b for a, b in allowed_spans):
+            return
+        i = bisect.bisect_left(taken_starts, m.start)
+        taken_starts.insert(i, m.start)
+        taken_ends.insert(i, m.end)
+        found.append(m)
     if _CHANNEL[0] == "tool" and not _copy and (enabled is None or EXPORT_RULE in enabled):
         # first: a cell of a password export is a value as a whole, and no other rule claims a part of it
         for m in _export_hits(text, low):
-            found.append(m)
-            taken_starts.append(m.start)
-            taken_ends.append(m.end)
-    for rule in rules():
+            take(m)
+    for rule in (_in_scan_order(rules()) if rule_list is None else rule_list):
+        if rule is _PERSONAL:
+            # the personal data of 0.6.21 and the cleaned copy of the tool channel run after every built-in rule and
+            # before the rules of your own: a rule of your own never takes a span that a built-in step would have
+            # found (review of the rebase on 0.6.21: a user rule cut an address that the copy saw whole)
+            _personal_hits(text, enabled, found, taken_starts, taken_ends, overlaps)
+            if _CHANNEL[0] == "tool" and not _copy:
+                _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends)
+            continue
         if enabled is not None and rule.id not in enabled:
             continue
         if rule.keywords and not any(k in low for k in rule.keywords):
@@ -2913,7 +3053,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> li
         # a rule that cannot fire without a context word need not run its regex without one
         if rule.context and (rule.require_context or rule.score < 0.5) and not _has_context_word(low, rule.context):
             continue
-        for m in _matches(rule, text):
+        own = rule.id.startswith("user:")
+        hits = _matches(rule, text)
+        for m in (_timed(rule, hits, len(text)) if own and rule_list is None else hits):
             ngroups = rule.regex.groups or 0
             if rule.whole_match:
                 g = 0
@@ -3076,15 +3218,26 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> li
                 if tail and not overlaps(end, tail.end()):
                     end = tail.end()
                     secret = text[start:end]
-            found.append(Match(rule.id, rule.type, secret, start, end))
-            i = bisect.bisect_left(taken_starts, start)
-            taken_starts.insert(i, start)
-            taken_ends.insert(i, end)
-    _personal_hits(text, enabled, found, taken_starts, taken_ends, overlaps)
-    if _CHANNEL[0] == "tool" and not _copy:
-        _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends)
+            take(Match(rule.id, rule.type, secret, start, end), own)
+    for matcher in (extra_matchers if rule_list is None else ()):
+        for m in sorted(matcher(text), key=lambda x: x.start):
+            if (enabled is None or m.kind in enabled) and m.end > m.start and not overlaps(m.start, m.end):
+                take(m, True)
     found.sort(key=lambda x: x.start)
     return found
+
+
+_PERSONAL = object()             # the place of _personal_hits in the scan order
+_ORDER: list = [None, ()]        # a rule list and its scan order
+
+
+def _in_scan_order(every: list) -> tuple:
+    """The rules of a list in scan order: the built-in ones, then the personal-data step and the cleaned copy, then the
+    rules of your own (ids with `user:`). Kept per list, so a scan pays for it once."""
+    if _ORDER[0] is not every:
+        _ORDER[:] = [every, tuple(r for r in every if not r.id.startswith("user:")) + (_PERSONAL,)
+                     + tuple(r for r in every if r.id.startswith("user:"))]
+    return _ORDER[1]
 
 
 def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: list, overlaps) -> None:
@@ -3094,10 +3247,13 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
         from . import personal
     except ImportError:   # a copy of detect.py without its sibling modules
         return
+    allowed, off = allow_list()
     for start, end, kind, typ in sorted(personal.hits(text, _CHANNEL[0], _pii_regions_cached())):
         if enabled is not None and kind not in enabled:
             continue
         value = text[start:end]
+        if value in allowed or (off and kind in off):
+            continue   # the allow list holds for these rules too: an exact value, or `rule: <id>`
         low = value.lower()
         if "\u27e6" in value or "\u27e7" in value or "example" in low or low in personal.PLACEHOLDER_NAMES \
                 or looks_like_placeholder(value) or is_public_test_value(value, typ):
