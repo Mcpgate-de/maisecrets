@@ -347,6 +347,32 @@ class BothChannels(Base):
         detect.reset_rules()
         self.assertEqual([(m.kind, m.start, m.end) for m in detect.scan(text, channel="tool")], before)
 
+    def test_a_rule_of_your_own_never_cuts_an_address_that_the_cleaned_copy_sees_whole(self):
+        text = "user&#64;sample-shop.de wrote: hello"
+        detect.reset_rules()
+        before = [(m.kind, m.start, m.end) for m in detect.scan(text, channel="tool")]
+        self.assertEqual([k for k, _, _ in before], ["email"], "main reads the address through the entity")
+        write_rules(OWN, [{"id": "dom", "regex": r"shop\.de wrote", "keywords": ["shop.de"], "type": "NAME"}])
+        detect.reset_rules()
+        self.assertEqual([(m.kind, m.start, m.end) for m in detect.scan(text, channel="tool")][:1], before)
+
+    def test_the_allow_list_holds_for_the_personal_data_rules(self):
+        name = "Emma " + "Johan" + "sson"
+        text = "customer record\nname: " + name + "\ncity: Oslo"
+        detect.reset_rules()
+        (hit,) = detect.scan(text, channel="tool")
+        for line in (name, "rule: " + hit.kind):
+            with self.subTest(line):
+                ALLOW.write_text(line + "\n", encoding="utf-8")
+                detect.reset_rules()
+                self.assertEqual(detect.scan(text, channel="tool"), [])
+
+    def test_a_rule_folder_taken_off_is_a_loosening_and_another_spelling_is_not(self):
+        home = os.path.expanduser("~")
+        self.assertTrue(settings.loosens("rule_dirs", ["~/team", "/opt/r"], ["/opt/r"]))
+        self.assertFalse(settings.loosens("rule_dirs", ["~/team"], [home + "/team/"]))
+        self.assertFalse(settings.loosens("rule_dirs", ["/opt/r"], ["/opt/r", "/opt/s"]))
+
     def test_the_tool_channel_finds_it_behind_a_colour_code(self):
         write_rules(OWN, [{"id": "team-token", "regex": r"tkx_[A-Za-z0-9]{24}", "keywords": ["tkx_"]}])
         detect.reset_rules()

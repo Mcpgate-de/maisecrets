@@ -280,7 +280,10 @@ def loosens(key: str, before, after) -> bool:
     if key == "ssh_autonomous_hosts":
         return bool(set(after or []) - set(before or []))
     if key == "rule_dirs":
-        return bool(set(before or []) - set(after or []))     # a folder taken off: its rules no longer run
+        def same(dirs) -> set:     # ~/team and /home/me/team/ are one folder
+            return {os.path.normcase(os.path.expanduser(d.strip()).rstrip("/\\")) for d in dirs or []
+                    if isinstance(d, str)}
+        return bool(same(before) - same(after))     # a folder taken off: its rules no longer run
     return False
 
 

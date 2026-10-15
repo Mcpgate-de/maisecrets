@@ -3039,9 +3039,12 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             take(m)
     for rule in (_in_scan_order(rules()) if rule_list is None else rule_list):
         if rule is _PERSONAL:
-            # the personal data of 0.6.21 runs after every built-in rule and before the rules of your own: a rule of
-            # your own never takes a span that a built-in rule would have found
+            # the personal data of 0.6.21 and the cleaned copy of the tool channel run after every built-in rule and
+            # before the rules of your own: a rule of your own never takes a span that a built-in step would have
+            # found (review of the rebase on 0.6.21: a user rule cut an address that the copy saw whole)
             _personal_hits(text, enabled, found, taken_starts, taken_ends, overlaps)
+            if _CHANNEL[0] == "tool" and not _copy:
+                _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends)
             continue
         if enabled is not None and rule.id not in enabled:
             continue
@@ -3216,8 +3219,6 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     end = tail.end()
                     secret = text[start:end]
             take(Match(rule.id, rule.type, secret, start, end), own)
-    if _CHANNEL[0] == "tool" and not _copy:
-        _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends)
     for matcher in (extra_matchers if rule_list is None else ()):
         for m in sorted(matcher(text), key=lambda x: x.start):
             if (enabled is None or m.kind in enabled) and m.end > m.start and not overlaps(m.start, m.end):
@@ -3231,8 +3232,8 @@ _ORDER: list = [None, ()]        # a rule list and its scan order
 
 
 def _in_scan_order(every: list) -> tuple:
-    """The rules of a list in scan order: the built-in ones, then the personal-data step, then the rules of your own
-    (ids with `user:`). Kept per list, so a scan pays for it once."""
+    """The rules of a list in scan order: the built-in ones, then the personal-data step and the cleaned copy, then the
+    rules of your own (ids with `user:`). Kept per list, so a scan pays for it once."""
     if _ORDER[0] is not every:
         _ORDER[:] = [every, tuple(r for r in every if not r.id.startswith("user:")) + (_PERSONAL,)
                      + tuple(r for r in every if r.id.startswith("user:"))]
@@ -3246,10 +3247,13 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
         from . import personal
     except ImportError:   # a copy of detect.py without its sibling modules
         return
+    allowed, off = allow_list()
     for start, end, kind, typ in sorted(personal.hits(text, _CHANNEL[0], _pii_regions_cached())):
         if enabled is not None and kind not in enabled:
             continue
         value = text[start:end]
+        if value in allowed or (off and kind in off):
+            continue   # the allow list holds for these rules too: an exact value, or `rule: <id>`
         low = value.lower()
         if "\u27e6" in value or "\u27e7" in value or "example" in low or low in personal.PLACEHOLDER_NAMES \
                 or looks_like_placeholder(value) or is_public_test_value(value, typ):
