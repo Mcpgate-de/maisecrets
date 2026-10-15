@@ -1,11 +1,12 @@
 #!/bin/bash
-# maisecrets pre-push: the harness runs once per push, over the tip.
+# maisecrets pre-push: the checks of seconds. The minutes run in CI, before any merge.
 #   - refuses tag pushes (CI creates release tags from CHANGELOG.md)
-#   - runs the repository scan, the plugin lint and the derived-counts check (seconds), then
-#     the unit tests and the belief replay (each control's test must go red under its mutation)
-#   - runs the hook harness when `claude` is available (it needs a login;
-#     CI cannot run it, so the push is where it must pass)
-# MAISECRETS_SKIP_HARNESS=1 skips the harness only. Nothing skips the tests.
+#   - runs lint, the repository scan, the plugin lint and the derived-counts check
+# The unit tests (3.12 and 3.9), the belief replay and the hook harness run in the GitLab merge
+# request pipeline (jobs unit, unit_python39, beliefs_can_fail_replay, harness_claude), and a red
+# pipeline blocks the merge. Running them here too doubled every push to 10-15 minutes and, with
+# parallel worktrees, pushed the load past 30 (2026-10-15). To run all of it locally:
+# scripts/check_all.sh
 set -u
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT" || exit 1
@@ -20,17 +21,8 @@ if echo "$*" | grep -q -- "--tags"; then echo "pre-push: --tags refused"; exit 1
 if command -v ruff >/dev/null 2>&1; then
   ruff check --select E,F,W --line-length 120 maisecrets hooks harness tests scripts skills || { echo "pre-push: lint failed"; exit 1; }
 fi
-# the checks of seconds first, the checks of minutes after: GitLab's validate stage runs these
-# too and skips every test job when one is red (a secret-shaped test literal cost a pipeline,
-# 2026-09-28)
+# GitLab's validate stage runs these too and skips every test job when one is red
 python3 scripts/scan_tree.py >/dev/null || { python3 scripts/scan_tree.py | tail -5; echo "pre-push: the repository scan found a secret shape"; exit 1; }
 python3 scripts/lint_plugin.py >/dev/null || { echo "pre-push: plugin lint failed"; exit 1; }
 python3 scripts/derived_counts.py >/dev/null || { python3 scripts/derived_counts.py | grep BAD; echo "pre-push: a number in the docs is stale"; exit 1; }
-python3 -m unittest discover -s tests -q || { echo "pre-push: unit tests failed"; exit 1; }
-python3 scripts/replay_can_fail.py || { echo "pre-push: a control's test did not go red under its mutation"; exit 1; }
-
-if [ "${MAISECRETS_SKIP_HARNESS:-0}" != "1" ] && command -v claude >/dev/null 2>&1; then
-  echo "pre-push: running the hook harness (fake upstream, every scenario)"
-  python3 harness/run.py || { echo "pre-push: harness failed"; exit 1; }
-fi
 exit 0

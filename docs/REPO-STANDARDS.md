@@ -20,12 +20,12 @@ and OpenAI plugin directories.
 ## Git hooks (now)
 
 - `.githooks/pre-commit`: staged diff through our own detector, manifests
-  parse, unit tests. Installed by `scripts/install-hooks.sh`, which pins
+  parse, plugin lint. It runs in seconds; the unit tests run once per push. Installed by `scripts/install-hooks.sh`, which pins
   `core.hooksPath` for this repo because the global `~/.git-hooks` would
   otherwise bypass it.
-- `.githooks/pre-push`: refuses tag pushes, runs unit tests, runs the hook
-  harness when `claude` is on PATH. `MAISECRETS_SKIP_HARNESS=1` skips only the
-  harness. Nothing skips the tests.
+- `.githooks/pre-push`: refuses tag pushes, runs lint, the repository scan, the plugin lint and
+  the derived counts (seconds). The unit tests, the belief replay and the harness run in the merge
+  request pipeline; `scripts/check_all.sh` runs all of them locally.
 
 ## CI on gitlab.com (now)
 
@@ -40,7 +40,8 @@ and OpenAI plugin directories.
   (`scripts/wait_for_github_checks.py`, public API, no token). Windows was
   red across four releases on 2026-09-26 because nothing waited for it.
 - Matrix in a merge request: the job `windows_macos` runs in every merge request pipeline, beside the
-  Linux tests (`scripts/github_matrix.py mr`). It merges the MR head into the current target branch (the
+  Linux tests (`scripts/github_matrix.py mr`). The git hooks run no tests, so these jobs together are
+  the test gate of a merge request: Linux on GitLab, Windows and macOS on GitHub. It merges the MR head into the current target branch (the
   head alone on a conflict), pushes that commit to the branch `ci-mr/<iid>-<sha12>` of the public CI
   repository `Mcpgate-de/maisecrets-ci`, waits for `.github/workflows/ci.yml` there and prints each
   failing test with the exception line. The workflow writes the failures as annotations

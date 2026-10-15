@@ -2,7 +2,10 @@
 # maisecrets pre-commit: fast checks that must hold on every commit.
 #   1. no secret or PII in the staged diff (our own detector, dogfooding)
 #   2. JSON manifests parse
-#   3. lint as the CI job runs it, 4. manifests agree, 5. plugin validator, 6. unit tests
+#   3. lint as the CI job runs it, 4. manifests agree, 5. plugin validator
+# The unit tests run once per push (.githooks/pre-push) and in CI, not on every commit: a full
+# suite per commit cost about 6 minutes each and, with parallel worktrees, drove the load so
+# high that timing tests failed for no code reason (2026-10-15).
 # Install: scripts/install-hooks.sh
 set -u
 ROOT="$(git rev-parse --show-toplevel)"
@@ -32,5 +35,4 @@ done
 python3 scripts/lint_plugin.py || { echo "pre-commit: scripts/lint_plugin.py failed"; exit 1; }
 
 # 3. unit tests
-python3 -m unittest discover -s tests -q || { echo "pre-commit: unit tests failed"; exit 1; }
 exit 0
