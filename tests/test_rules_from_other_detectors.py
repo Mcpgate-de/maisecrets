@@ -231,7 +231,8 @@ def seed_phrase(r: random.Random, n: int) -> str:
 
 class CryptoSecretTests(unittest.TestCase):
     def test_the_word_list_is_the_bip39_english_list(self):
-        raw = (detect.RULES_DIR / "bip39_english.txt").read_bytes()
+        # a Windows checkout writes CRLF line ends (core.autocrlf); the list is the same words either way
+        raw = (detect.RULES_DIR / "bip39_english.txt").read_bytes().replace(b"\r\n", b"\n")
         self.assertEqual(hashlib.sha256(raw).hexdigest(),
                          "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda")
 
