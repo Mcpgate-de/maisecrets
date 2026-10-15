@@ -1,0 +1,10 @@
+# c28-a-library-with-another-writer-refuses-pdftotext: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-a-library-with-another-writer-refuses-pdftotext"
+control = "C28"
+statement = "maisecrets runs pdftotext only when every library it loads (or the interpreter of a script) has no other writer and lies outside the working folder."
+runner = ["tests/test_file_reads.py::TheConverterIsBounded::test_a_library_that_another_account_can_write_refuses_the_program"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "        if real and _trusted_libraries(real, cwd):\n"
+replace = "        if real:\n"

@@ -1,0 +1,10 @@
+# c28-a-link-counts-by-its-owner-not-its-mode: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-a-link-counts-by-its-owner-not-its-mode"
+control = "C28"
+statement = "A symbolic link on the way to pdftotext or a library counts by its owner, not its mode bits: Linux shows every link as 0777, and a merged /usr has /bin and /lib as links."
+runner = ["tests/test_file_reads.py::TheConverterIsBounded::test_a_link_counts_by_its_owner_not_its_mode_bits"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "            # one step up and its target by the caller's realpath walk\n            continue\n"
+replace = "            # one step up and its target by the caller's realpath walk\n            pass\n"

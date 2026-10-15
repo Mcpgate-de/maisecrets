@@ -1,0 +1,10 @@
+# c28-a-scan-with-page-numbers-is-withheld: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-a-scan-with-page-numbers-is-withheld"
+control = "C28"
+statement = "A converted PDF with less than 25 characters of text per page counts as scanned: the AI gets a note and nothing of it, also when the scan has page numbers."
+runner = ["tests/test_file_reads.py::TheConverterIsBounded::test_a_scan_with_page_numbers_only_counts_as_scanned"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "    scanned = not full and len(re.sub(r\"\\s+\", \"\", text)) < MIN_CHARS_PER_PAGE * pages\n"
+replace = "    scanned = not text.strip()\n"

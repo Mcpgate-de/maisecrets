@@ -1,0 +1,34 @@
+{
+ "session_id": "{session_id}",
+ "transcript_path": "{transcript_path}",
+ "cwd": "{cwd}",
+ "prompt_id": "{prompt_id}",
+ "permission_mode": "default",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PostToolUse",
+ "tool_name": "Read",
+ "tool_input": {
+  "file_path": "{cwd}/hello.pdf",
+  "pages": "1"
+ },
+ "tool_response": {
+  "type": "parts",
+  "file": {
+   "filePath": "{cwd}/hello.pdf",
+   "originalSize": 580,
+   "outputDir": "{config}/projects/{project}/{session_id}/tool-results/pdf-{uuid}",
+   "count": 1
+  },
+  "firstPage": 1,
+  "pages": [
+   {
+    "base64": "/9j/4AAQSkZJRgABAQEAZABkAAD/2wBDAAgGBgcG...",
+    "mediaType": "image/jpeg"
+   }
+  ]
+ },
+ "tool_use_id": "{tool_use_id}",
+ "duration_ms": 0
+}

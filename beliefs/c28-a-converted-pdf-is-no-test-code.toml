@@ -1,0 +1,10 @@
+# c28-a-converted-pdf-is-no-test-code: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-a-converted-pdf-is-no-test-code"
+control = "C28"
+statement = "The text that stands in for a converted PDF is no test code: a label hit in it is masked also when the PDF lies under a tests/ or spec/ folder."
+runner = ["tests/test_file_reads.py::TheConverterIsBounded::test_a_pdf_in_a_test_folder_is_no_test_code"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "if swap or not detect.is_fixture("
+replace = "if not detect.is_fixture("

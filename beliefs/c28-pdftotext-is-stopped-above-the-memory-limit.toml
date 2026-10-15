@@ -1,0 +1,10 @@
+# c28-pdftotext-is-stopped-above-the-memory-limit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-pdftotext-is-stopped-above-the-memory-limit"
+control = "C28"
+statement = "pdftotext on a PDF built to use up memory is stopped when its resident size passes MAX_RSS_BYTES (macOS enforces no rlimit), and the PDF is withheld."
+runner = ["tests/test_file_reads.py::TheConverterIsBounded::test_a_child_that_takes_too_much_memory_is_stopped_and_the_pdf_withheld"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "                if rss is None or rss > MAX_RSS_BYTES:\n"
+replace = "                if False:\n"

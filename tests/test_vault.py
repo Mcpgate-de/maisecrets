@@ -160,8 +160,8 @@ class ConfigTests(unittest.TestCase):
                     self.assertIn("ignored", cfg["config_warning"])
                     self.assertNotIn(str(wrong), cfg["config_warning"].replace(key, ""))
                     self.assertTrue(cfg["renew_on_use"], "the fallback is the strict defaults")
-                    if key == "rehydration":
-                        # a rehydration value that is no policy: the fallback is block, never looser
+                    if key in ("rehydration", "read_pdf", "read_image"):
+                        # a value that is no policy or mode: the fallback is block, never looser
                         self.assertEqual(cfg[key], "block")
                     elif key in vault.DEFAULT_CONFIG:
                         self.assertEqual(cfg[key], vault.DEFAULT_CONFIG[key])

@@ -1,0 +1,10 @@
+# c28-group-write-counts-only-for-an-admin-group: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-group-write-counts-only-for-an-admin-group"
+control = "C28"
+statement = "A folder that a group can write is safe only when the group is an admin group: a group whose member list is empty (macOS everyone) still holds other accounts."
+runner = ["tests/test_file_reads.py::TheConverterIsBounded::test_a_group_whose_members_are_not_listed_is_another_writer"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "        return grp.getgrgid(gid).gr_name not in admin_groups()\n"
+replace = "        return False\n"

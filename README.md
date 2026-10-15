@@ -279,9 +279,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 32 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 147 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 164 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -482,7 +482,7 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
 ### Settings you decide
 
 `/maisecrets:settings` shows the settings that are yours to decide, grouped
-(Protection, Using stored values), one card each: the value, its state (`not
+(Protection, Using stored values, PDFs and images), one card each: the value, its state (`not
 decided`, `set by you`, `set by a policy`), what it does, and the command for
 the next step:
 
@@ -1507,6 +1507,145 @@ no allow list: the AI can write a shared checkout, and the AI may only make
 detection stricter. A value that is already stored stays redacted by its
 exact match; `/maisecrets:forget` deletes it.
 
+## PDFs and images
+
+maisecrets cannot look inside an image or a PDF. When the AI reads one, the
+client sends its bytes to the model, and a password or an address in it goes
+along. You decide what happens, per type:
+
+| Setting | `allow` (default) | `ask` | `block` | `convert` |
+|---|---|---|---|---|
+| `read_pdf` | the PDF goes as it is | Claude Code asks you first | refused | only its text goes, masked |
+| `read_image` | the image goes as it is | Claude Code asks you first | refused | (no: maisecrets does no OCR) |
+
+Send one setting as your own prompt, for example:
+
+```
+/maisecrets:settings read_pdf convert
+maisecrets: set read_pdf convert          (the same, and the form for Codex)
+```
+
+Then ask the AI to read a PDF (measured with the Claude Code CLI). With
+`convert`, the program `pdftotext` extracts the text on your computer, the
+normal redaction masks it (as a tool result, so also a password after a
+label and a value in a disguise), and the model gets that text in place of
+the PDF, with placeholders of the form `⟦SECRET_cN⟧`. The PDF itself never
+reaches the model and does not stay in the session transcript. A page range
+(`pages`) works; Claude Code then also writes the pages as JPG files into a
+folder of its own on your disk, and maisecrets does not clean those.
+`convert` needs `pdftotext`: macOS `brew install poppler`, Debian or Ubuntu
+`sudo apt install poppler-utils`.
+
+maisecrets runs `pdftotext` only from the fixed install folders
+(`/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`, `/usr/bin`), never
+from the PATH: a program the AI puts on the PATH must not run inside the
+hook. Every folder from `/` down to the program, and down to each library
+the program loads, must belong to root or to you. No other account may be
+able to write it (also not through an access control list), except a group
+whose members can become root anyway:
+`admin` and `wheel` on macOS, `sudo` on Debian, `sudo` and `admin` on
+Ubuntu, `wheel` on Fedora and its relatives (the default sudoers of each,
+measured 2026-10-14). So a second admin account on a Mac no longer stops
+`convert`. maisecrets reads the libraries itself (33 for Homebrew's
+pdftotext of poppler 26.10.0; `ldd` on Linux), and it does not run a program
+whose libraries it cannot name. It starts pdftotext without `LD_*` and
+`DYLD_*` variables. The Homebrew folder belongs to you, and the AI runs as
+you: it could still replace the pdftotext there or a library, and maisecrets
+cannot tell. maisecrets keeps values out of the model and the transcript; it
+does not contain an agent that works against it on purpose. On Windows there
+is no such folder, so `convert` refuses there. Without pdftotext, maisecrets
+refuses every PDF and says so; it never lets the PDF through.
+
+A PDF that pdftotext cannot read in 6 seconds, that makes pdftotext use more
+than 512 MB of memory, or that is damaged, is refused. A crafted PDF of a few
+MB can make pdftotext take 1.5 GB in 2.4 seconds: maisecrets watches the
+memory of pdftotext every 50 ms while it waits and stops it there (macOS does not
+enforce a memory limit on a process, measured; on Linux the kernel limits
+it to 1 GB as well). Text after 32K characters is cut, and the AI is told to
+read a smaller page range. A scanned PDF has no text, or only page numbers
+or a header line: below 25 characters of text per page, maisecrets says that
+the PDF looks scanned, and the AI gets nothing of it.
+
+**Measured on 2026-10-14** (Claude Code 2.1.300, poppler 26.10.0, a corpus
+of 24 generated PDFs with 168 planted values): pdftotext found 151 of the
+values, pypdf 136. pypdf failed on text written one character at a time and
+on form fields, has no time limit (one page took 14 s on Python 3.14, 47 s on
+3.9) and needs `typing_extensions` on 3.9, so maisecrets keeps pdftotext; a
+bundled pypdf stays an option for Windows later. pdftotext missed a page
+rotated by 90 degrees (that page counts as scanned) and two values whose
+label stood in the table cell beside them. How a PDF reaches the model: "read x.pdf" and a pasted path go
+through the Read tool, and the hooks see the file; `@x.pdf` gives the model
+only the name and the size, and the model then calls Read itself. No route
+that was measured passes around the hooks. The interactive terminal UI was
+not measured.
+
+Until you decide, the first PDF and the first image the AI reads bring one
+sentence about the setting (`"tips": false` silences it). If `config.json`
+cannot be read (bad JSON, a value of the wrong type), both settings count as
+`block` until you fix the file.
+
+**What `block` stops, and what it does not.** The settings act on the Read
+tool of Claude Code: `block` means "the Read tool does not open this PDF or
+image". They do not stop a shell command that reads the file: `pdftotext
+x.pdf -`, `strings x.pdf` or `cat` give the AI text, and maisecrets redacts
+that text like any other command output (a secret with a known form is
+masked, the rest of the text is not). maisecrets is no file cleaner and does
+not refuse such commands.
+
+**Codex.** Codex has no Read tool, and it gives a hook a command's output as
+plain text without an image flag (measured on codex-cli 0.159.2). So on
+Codex these settings change nothing that was measured: its `view_image` tool
+is not measured, and a command output there is scanned as text, like every
+other output. The typed form `maisecrets: set read_pdf …` still works and
+holds for a later Claude Code session.
+
+`clean_dirs` lists folders whose PDFs and images you know are clean (your own
+screenshots, for example). A read there is allowed:
+`/maisecrets:settings clean_dirs add ~/Pictures/Screenshots`, and `remove` the
+same way. maisecrets resolves links and `..` first, so a link inside a clean
+folder that points out of it does not count. A file counts only if it was in
+the folder before the session began and has no second name (hard link): a
+file that arrives during the session, also one that the AI copies, moves or
+links there, waits for the next session. maisecrets refuses `/`, your home
+folder, a folder that holds the folder the session works in, and a folder
+that is a link or lies under one (add the real folder). The folder itself is
+noted with the session: another folder moved or linked in under its name does
+not count, and neither does a subfolder moved in during the session. The start of
+the session is a note that maisecrets writes at the session start, never
+later; without the note nothing in the folder is clean. A client that the AI
+starts inside its own session (`claude -p` from its shell) trusts no clean
+folder. `clean_dirs` works on macOS and Linux; on Windows no file in it counts
+as clean, because there a moved file keeps its creation time.
+
+With `ask`, a file goes to the AI only after you said yes to that very read: a
+file that was not asked about (it was in a clean folder a moment before, or a
+notebook got an image after the question) is withheld. maisecrets also keeps a
+checksum of the file you allowed (and of a file in a clean folder) and checks
+that the AI gets those very bytes. A file above 64 MB cannot be checked: it is
+never clean, and with `ask` maisecrets refuses it before it asks you. For a
+large image that Claude Code shrinks, a page range of a PDF and a notebook,
+the client sends no copy of the file itself; maisecrets then checks the size
+and the file as it is after the read, which leaves a short window.
+
+A Bash command whose output starts with `data:image/…;base64,` sends an image
+to the model too (Claude Code shows it as one and marks it `isImage`);
+`read_image` decides about it. Only the image itself skips the scan: the
+error output of the same command is redacted as usual. `ask` cannot ask
+after the command ran, so it withholds the output, like `block`.
+
+A notebook (`.ipynb`) whose output cells hold an image: with `ask` Claude
+Code asks you first, and with `block` the AI gets the cells as text and each
+image as a note that it was withheld. The cells are always redacted; the image
+data is not scanned. Claude Code itself drops the outputs of a notebook when
+they are large (measured on 2.1.296: an image of about 8 KB or more): the AI
+then reads only a note to run `cat <notebook> | jq '.cells[0].outputs'` in
+Bash, and that output is text, which maisecrets redacts like any output.
+
+**Not covered:** an image you paste into the prompt (Ctrl+V or drag of an
+image into Claude Code) reaches the model without passing any hook; the
+prompt hook sees only your typed text. maisecrets cannot stop or mask it. An
+image in the result of an MCP tool is not covered either.
+
 ## Known gaps (measured or documented)
 
 What the plugin does not protect. Each item is a limit of the mechanism, not
@@ -1553,6 +1692,25 @@ a to-do.
   capitalised words. A name after a name label, before an e-mail address or in a CSV name column is masked
   in a tool result (0.6.21); in a typed prompt no name is detected. A street address without a postcode, or
   in a form of a region that is not active, passes too.
+- **A pasted image is invisible to the hooks.** Claude Code gives the prompt
+  hook only the typed text (measured on 2.1.296). An image or a PDF that the
+  AI reads is in your hands ("PDFs and images"); maisecrets does not scan or
+  clean an image, and does no OCR.
+- **An image in an MCP tool result passes as it is.** `read_image` acts on
+  the Read tool, on a Bash output that Claude Code marks as an image, and on
+  the images of a notebook; not on an MCP result.
+- **`block` stops the Read tool, not a shell read.** `pdftotext x.pdf -` or
+  `strings` give the AI the text of the file; only secrets of a known form in
+  it are masked. On Codex the PDF and image settings act on nothing measured.
+- **A clean folder trusts the files that were there when the session
+  began.** A file you put there yourself during the session waits for the
+  next one. The start of a session is a note that maisecrets writes at the
+  session start (the client sends no start time). The AI's tools may not
+  touch the maisecrets folder, but that guard reads the command text: a
+  command that hides the path (built from pieces, `find … -exec`) can still
+  move the note and make a copied file count as clean. A client started
+  under another program name (an npm install runs as `node`) is not seen as
+  nested. Windows: no file counts as clean.
 - **A transformed value can pass.** For a value this session resolved, the
   output is checked as a substring in plain, base64, hex, URL-encoded and
   JSON-escaped form, and a resolving command may not encode it in the first
