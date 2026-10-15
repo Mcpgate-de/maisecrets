@@ -468,7 +468,8 @@ PRIMER = (
 # --------------------------------------------------------- UserPromptSubmit --
 TYPE_WORDS = {"SECRET": ("secret", "secrets"), "EMAIL": ("e-mail address", "e-mail addresses"),
               "IBAN": ("IBAN", "IBANs"), "CARD": ("card number", "card numbers"),
-              "PHONE": ("phone number", "phone numbers"), "IP": ("IP address", "IP addresses")}
+              "PHONE": ("phone number", "phone numbers"), "IP": ("IP address", "IP addresses"),
+              "NAME": ("name", "names")}
 STORE_NAMES = {"KeychainBackend": "the macOS Keychain", "WindowsVaultBackend": "the Windows Credential Locker",
                "EncryptedFileBackend": "an encrypted file in ~/.maisecrets",
                "JsonFileBackend": "a PLAIN TEXT test file"}
@@ -4064,6 +4065,20 @@ def _disarm_alarm(before) -> None:
         pass
 
 
+def _quarantine_running_rule(elapsed: float) -> None:
+    """The watchdog answered after `elapsed` seconds. The rule of your own with the most time inside its regex is left
+    out from the next call on, when that time is more than half of `elapsed`: then that rule held the hook. Else the
+    time went to other work, and no rule is blamed: an agent could else take out one correct rule per call with a
+    large output (Fable review, round 2; Opus review, round 3). Never raises."""
+    try:
+        slowest = detect.slowest_user_rule()
+        if slowest is not None and slowest[1] > 0.5 * elapsed:
+            from . import user_rules
+            user_rules.note_slow(slowest[0], slowest[1] * 1000)
+    except Exception:  # noqa: BLE001 - the answer is out; this only spares the next call
+        pass
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[1] not in HANDLERS:
         sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|post-tool-failure|session-start\n")
@@ -4084,6 +4099,7 @@ def main(argv: list[str]) -> int:
         return 0
     import threading
     started = time.time()
+    clock = time.perf_counter()
     lock = threading.Lock()
     answered = {"v": False}
     answering = {"v": False}
@@ -4116,15 +4132,15 @@ def main(argv: list[str]) -> int:
             _run_log(event, payload, how, decision, ms)
         return True
 
-    fired = {"v": False}
+    fired = threading.Lock()
 
     def on_timeout() -> None:
-        if fired["v"]:
-            return                                   # the other watchdog runs it already
-        fired["v"] = True
+        if not fired.acquire(blocking=False):
+            return                                   # the other watchdog runs it already, to its end
         if answer(_fail_closed(event, payload, f"took longer than {seconds:.0f}s."), "watchdog"):
             def last() -> None:
                 _heartbeat(event, payload, done=True)
+                _quarantine_running_rule(time.perf_counter() - clock)
                 _scrub_failed_prompt(event, payload)
                 incidents.write_marker(f"hook.{event}.watchdog")
             t = threading.Thread(target=last, daemon=True)

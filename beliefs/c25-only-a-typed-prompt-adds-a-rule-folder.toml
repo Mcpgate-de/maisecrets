@@ -1,0 +1,10 @@
+# c25-only-a-typed-prompt-adds-a-rule-folder: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c25-only-a-typed-prompt-adds-a-rule-folder"
+control = "C25"
+statement = "The list of rule folders changes only when the whole prompt the person typed is the change; the same words followed by more text, inside a longer prompt, from an injected prompt, or in a command change nothing."
+runner = ["tests/test_user_rules.py::RuleDirsSetting::test_only_a_typed_prompt_adds_a_rule_folder"]
+
+[proof]
+file = "maisecrets/settings.py"
+find = "                           r\"\\s*\\Z\", re.I)"
+replace = "                           r\"\", re.I)"

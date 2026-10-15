@@ -1,0 +1,10 @@
+# c25-an-allow-entry-is-one-exact-value: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c25-an-allow-entry-is-one-exact-value"
+control = "C25"
+statement = "An entry of the allow list lets through exactly that value; a longer value that contains it is still a hit, and an entry is never a pattern."
+runner = ["tests/test_user_rules.py::AllowList::test_an_allow_entry_is_one_exact_value"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "        if m.value in allowed:\n"
+replace = "        if any(a in m.value for a in allowed):\n"

@@ -116,7 +116,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "pending":
 
 if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put", "status", "list", "audit", "expire", "config",
                                           "wipe", "repair", "scan", "get", "shortcut", "forget", "guard",
-                                          "settings", "consent-report"):
+                                          "settings", "consent-report", "rules"):
     from maisecrets.cli import main as cli_main  # noqa: E402
     sys.exit(cli_main(sys.argv[1:]))
 
@@ -184,11 +184,18 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
             version = json.load(f).get("version", "?")
     except (OSError, ValueError):
         pass
+    # the start line names the active rules of your own, and a folder of rule_dirs that does not load
+    try:
+        from maisecrets.user_rules import active_phrase, broken_folders_note  # noqa: E402
+        own_rules, broken = active_phrase(), broken_folders_note()
+    except Exception:  # noqa: BLE001 - rules of your own never stop a session start
+        own_rules, broken = "", None
     marker = HOME / ".announced"
     if v.backend.test_mode or not marker.exists():
         from maisecrets.tips import try_it_line  # noqa: E402
         more = "" if codex else " /maisecrets:status shows the details, /maisecrets:list what is stored."
-        out["systemMessage"] = f"maisecrets {version} is on. " + intro_line(v.backend) + more + " " + try_it_line()
+        out["systemMessage"] = (f"maisecrets {version} is on{own_rules}. " + intro_line(v.backend) + more + " "
+                                + try_it_line())
         try:
             marker.write_text(type(v.backend).__name__ + "\n")
         except OSError:
@@ -198,7 +205,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         tip = tip_of_the_day(codex=codex)
         # one short line every session, so a lost hook registration is visible by its absence
         # (operator review, 2026-09-26); the tip rotates, the version does not
-        out["systemMessage"] = f"maisecrets {version} is on." + (f" {tip}" if tip else "")
+        out["systemMessage"] = f"maisecrets {version} is on{own_rules}." + (f" {tip}" if tip else "")
     if quieted:
         out["systemMessage"] = (out.get("systemMessage", "") +
                                 f" {len(quieted)} stored word(s) are program code, not secrets "
@@ -214,6 +221,16 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         loosened = None
     if loosened:
         out["systemMessage"] = (out.get("systemMessage", "") + " " + loosened).strip()
+    if broken:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + broken
+    # a rule of your own that fails a check is left out; the person hears it once, when the set changes
+    try:
+        from maisecrets.user_rules import session_note  # noqa: E402
+        note = session_note()
+    except Exception:  # noqa: BLE001 - rules of your own never stop a session start
+        note = None
+    if note:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + note
     # /ms is offered once, not installed: writing ~/.claude/commands without a question was a
     # change behind the user's back, and Codex cannot use it (UX review, 2026-09-27)
     if not codex and cfg.get("shortcut", True) and not (HOME / ".shortcut").exists():
