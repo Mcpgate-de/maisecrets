@@ -637,7 +637,10 @@ class RulesCommand(Base):
                      ".github/workflows/rules.yml", ".gitlab-ci.yml"):
             self.assertTrue((top / name).is_file(), name)
         readme = (top / "README.md").read_text()
-        self.assertIn("/maisecrets:settings rule_dirs add " + str(top.resolve()), readme)
+        # the README shows the folder as a person types it (`~/…` under the home folder, where the
+        # Windows runner keeps its temp folder); the test takes the same form as the code
+        from maisecrets import rules_cli
+        self.assertIn("/maisecrets:settings rule_dirs add " + rules_cli._home_form(top.resolve()), readme)
         self.assertIn("No names", readme)
         rc, out, _ = self.run_cli("check", str(top))
         self.assertEqual(rc, 0, out)
@@ -902,7 +905,8 @@ class Robust(Base):
         loaded = user_rules.load({})
         reasons = {q.file: q.reason for q in loaded.quarantined}
         self.assertEqual(reasons["latin.prefixes"], "a file that is not UTF-8")
-        if os.geteuid() != 0:          # root reads the file anyway (CI)
+        # root reads the file anyway (CI); Windows has no geteuid, and mode 0 does not stop a read there
+        if os.name != "nt" and os.geteuid() != 0:
             self.assertEqual(reasons["locked.prefixes"], "a file that cannot be read")
 
 
