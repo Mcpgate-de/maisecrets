@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## [0.6.21] - 2026-10-15
+
+### Features
+
+- the next session start names each protection that was loosened (e76fd95)
+- a Twilio Account SID next to its name (TWILIO_ACCOUNT_SID, sid) is found (75adb3b)
+- a Slack token with a shorter tail (xoxb-, xoxp-, xoxa-, …) is found (5c5be4b)
+- an OpenAI or Anthropic key with a shorter tail (sk-proj-, sk-ant-, sk-svcacct-, sk-admin-) is found (bf4e532)
+- the cells of a CSV column for personal data (address, dob, phone, ssn and a name beside them) are masked in a tool result (ecbb533)
+- a name before an e-mail address ("First Last <mail>") is masked in a tool result (ba9f8e4)
+- a name after a name label (patient, tenant, full_name, FN, Ansprechpartner) is masked in a tool result (d62d930)
+- a street address with its postcode is masked in a tool result (US, UK, IN, DE, FR, PT, ES, IT forms by region) (e3adb4a)
+- the user name in a home path of another person (/home/<user>/, C:\Users\<user>\) is masked in a tool result (d3acd12)
+- the user name in user:password@host is masked in a tool result (7a83ec4)
+- an ID number after its label (MRN, passport no, DL, SIN, TFN, NIR, tax id, account number) is masked in a tool result (91aaef0)
+- a date after a birth label (DOB, Geburtsdatum, né le, fecha de nacimiento) is masked in a tool result (3c56393)
+
+### Fixes
+
+- a phone number with one-digit groups (+1 4 1 5 …) and a US number (312) 846-2291 after a phone word are masked (c2be01c)
+
+### Security
+
+- a prompt from a client that a program started changes no setting (0e50f95)
+
 ## [0.6.20] - 2026-10-15
 
 ### Features
