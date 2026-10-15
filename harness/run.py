@@ -228,14 +228,16 @@ SCENARIOS = {
         "expect_blocked": True,
         "expect_output": ["your incident report (shown to you only", "store.lock/lock", "/issues/new?"],
     },
-    # a setting changes only from the person's own prompt (C22): the prompt hook writes the setting the typed slash
-    # command names, and the command runs on to show the new state (a success is no block)
-    "settings_typed_prompt": {
+    # a setting changes only from the person's own prompt (C22). The harness runs `claude -p`, a client a program
+    # started: its hooks get no `source` and CLAUDE_CODE_ENTRYPOINT=sdk-cli, which nothing before the start changes
+    # (measured on 2.1.300), so the prompt is refused and nothing is written. The typed path of the terminal client
+    # (no `source`, entry point `cli`) is measured by hand in a pseudo-terminal; tests/test_settings.py holds both
+    "settings_nested_client_changes_nothing": {
         "prompt": "/maisecrets:settings ssh_consent on",
-        "turns": [{"text": "shown"}],
-        "expect_requests": 1,
-        "expect_in_requests": ["SSH consent is on (set by you)"],
-        "expect_home_json": ("config.json", ["ssh_consent"]),
+        "turns": [{"text": "unreachable"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+        "expect_no_home_json": ("config.json", ["ssh_consent"]),
     },
     # the person has not decided ssh_consent: the first ssh write gives the model the hint, once. `|| true`: a
     # command that fails gets PostToolUseFailure from Claude Code (2.1.292), not PostToolUse, and so no hint

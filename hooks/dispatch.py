@@ -206,6 +206,14 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
                                 "/maisecrets:forget deletes them.")
     if cfg.get("config_warning"):
         out["systemMessage"] = out.get("systemMessage", "") + f" Warning: {cfg['config_warning']}."
+    # each protection loosened since the last start (a setting, a forget), once, to the person (C22)
+    try:
+        from maisecrets.events import weakenings_since_last_start  # noqa: E402
+        loosened = weakenings_since_last_start()
+    except Exception:  # noqa: BLE001 - the session start must not fail on it
+        loosened = None
+    if loosened:
+        out["systemMessage"] = (out.get("systemMessage", "") + " " + loosened).strip()
     # /ms is offered once, not installed: writing ~/.claude/commands without a question was a
     # change behind the user's back, and Codex cannot use it (UX review, 2026-09-27)
     if not codex and cfg.get("shortcut", True) and not (HOME / ".shortcut").exists():

@@ -6,7 +6,7 @@
 
 ### Features
 
-- OpenAI and Anthropic keys of every length, GitLab trigger and CI job tokens in their newer forms are found without a label (18f35f1)
+- OpenAI and Anthropic keys of newer lengths (OpenAI: 8 to 400 characters around `T3BlbkFJ`; Anthropic: 60 to 140 before `AA`), GitLab trigger and CI job tokens in their newer forms are found without a label (18f35f1)
 - 23 more token formats are found without a label (Google OAuth client secret, SonarQube, Dynatrace, NuGet, crates.io, Dropbox, GitHub App JWT, …) (7194cc0)
 - a PEM private key in base64 is found and masked whole (Kubernetes Secret tls.key, ssh-privatekey) (c47bb41)
 

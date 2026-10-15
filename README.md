@@ -11,6 +11,11 @@ decide, as before; in Codex maisecrets answers `allow`, and Codex's sandbox and
 its approval of MCP tools still apply. maisecrets itself sends no
 prompt, value or telemetry to a server.
 
+**What it is for:** maisecrets keeps values out of the model and out of the
+session transcript. It guards against an agent that does not try to evade it.
+It does not contain an agent that deliberately runs code with your rights to
+switch it off ([threat model](docs/THREAT-MODEL.md), C22).
+
 ```bash
 claude plugin marketplace add Mcpgate-de/maisecrets
 claude plugin install maisecrets@maisecrets     # then start a new session
@@ -52,7 +57,7 @@ Everything a hook runs is readable source in this folder. No download, no
 package install, no dependency outside the Python standard library and the
 system tools it names (`security`, PowerShell, `openssl`, a clipboard tool).
 
-What it does not do: detect names, follow a value through an encoding a
+What it does not do: detect a name without a label, follow a value through an encoding a
 command applies, or protect against a process that runs as you. "Known gaps"
 below lists every limit that was measured.
 
@@ -276,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 31 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 140 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 144 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -501,12 +506,29 @@ The prompt hook writes `config.json`. After the slash command it lets the
 command run on, which shows the new card; the sentence form is stopped and
 does not reach the model. maisecrets changes a setting for nothing else: not
 for a prompt the client injected (a scheduled task, a loop wakeup, an SDK
-prompt), not for a subagent's report, and a Bash or PowerShell command that
-carries the change (a nested `codex exec` or `claude -p` that would type it)
-is refused. The AI can tell you about a setting and the prompt to send. A
-setting from a machine policy cannot be changed here. The limit: a program
-that runs as you can write the file itself, and maisecrets sees a command only
-as text (C22 in the threat model).
+prompt), not for a prompt of a client that a program started (`claude -p`
+and the Agent SDKs: its hook sees `CLAUDE_CODE_ENTRYPOINT=sdk-…`), not for a
+subagent's report, and a Bash or PowerShell command that carries the change
+(a nested `codex exec` or `claude -p` that would type it) is refused. The AI
+can tell you about a setting and the prompt to send. A setting from a machine
+policy cannot be changed here. The limit: a program that runs as you can
+write the file itself, and maisecrets sees a command only as text (C22 in the
+threat model).
+
+**You see each loosened protection.** A change that loosens a protection (a
+setting in the looser direction, such as `rehydration automatic`, a higher
+cap or a new autonomous host) and each `/maisecrets:forget` write one line
+in `~/.maisecrets/events.log`: the time, the kind, the key or setting (never
+a value) and the route (typed prompt, slash command, cli). The next session
+start shows you one sentence that lists them, once:
+
+```
+maisecrets: since the last session start, 2 protections were loosened: setting rehydration (typed prompt),
+forget SECRET_c3 (cli). If you did not do this, check /maisecrets:settings and /maisecrets:list.
+```
+
+A program that runs as you can also change that file; the line makes an
+ordinary agent's action visible, it does not stop one that evades.
 
 **Hints.** maisecrets stays quiet until a case comes up that one of these
 settings is about. Then the AI gets one sentence about it, and mentions it
@@ -1315,6 +1337,35 @@ Four sources, one scanner (`maisecrets/detect.py`):
   Joining the next line was measured on five months of session logs and left
   out: nearly every candidate was the next `.env` line, not the rest of a key.
 
+- Personal data after a label or in a fixed form (0.6.21, `maisecrets/personal.py`), in a tool
+  result or a file only: a name after a name label (`patient:`, `tenant:`, `full_name:`, `FN:`,
+  `Ansprechpartner:`; after the weak labels `name`, `owner` and `author` only a value that does not
+  read as English words or nouns, so `name: Customer Portal` stays text), a name before an e-mail
+  address (`First Last <mail>`, not before a bot or a service mailbox), a date after a birth label
+  (`DOB`, `Geburtsdatum`, `né le`, `fecha de nacimiento`; not after `born`), an ID number of five
+  digits and more after an ID label (`MRN`, `passport no`, `DL`, `SIN`, `TFN`, `NIR`, `tax id`,
+  `account number`), the user in `user:password@host` and in another person's home path
+  (`/home/<user>/`, `C:\Users\<user>\`; service accounts and your own user name stay text), a
+  street address with its postcode in the form of an active region (US, UK, IN; DE, AT, CH; FR,
+  BE, LU; PT, BR, ES, IT; an address next to a company, office or landmark word stays text), and
+  the cells of a CSV column for personal data (`address`, `dob`, `phone`, `ssn`, and a name or user
+  column beside one of them; an address or a phone cell only in a row that also names a person). A
+  typed prompt takes none of them: a hit blocks a prompt, and a
+  person who types a name means to send it. Documentation names (`Erika Mustermann`, `John Doe`)
+  stay text. `tests/fp_corpus_pii.py` holds 367 developer texts in these shapes that are no
+  personal data (Kubernetes YAML, package authors that are teams, company addresses, dates that
+  are no birth dates); the rules leave all of them alone.
+- A phone number with one-digit groups after the country code (`+1 4 1 5 …`, 0.6.21): in a tool
+  result, and in a typed prompt after a phone word; a US number in the national form
+  `(312) 846-2291` after a phone word with region `us` or `ca`, in a tool result only (an area code
+  and an exchange start with 2 to 9; the fictional 555 exchange stays text).
+- Three token forms with a tail shorter than the vendored rules want (0.6.21): an OpenAI or
+  Anthropic key (`sk-proj-`, `sk-ant-`, `sk-svcacct-`, `sk-admin-`; the tail needs a digit, a capital
+  and a run of 16 letters and digits, so a CSS class such as `sk-admin-sidebar-item2X` stays text),
+  a Slack token (`xoxb-`, `xoxp-`, `xoxa-`, `xoxr-` with digits and a hyphen first), and a Twilio
+  Account SID (`AC` and 32 hex digits) next to its name; a counted fixture (`AC0123456789abcdef…`)
+  stays text.
+
 IBAN, credit card and IP come from Presidio's regexes with our validators
 (mod-97, Luhn, public-range check). An IBAN may have spaces or hyphens
 between its groups; an IBAN in lower case also needs the length of its
@@ -1367,7 +1418,10 @@ a to-do.
   Bash output that Claude Code sends as an image.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt
   hook blocks them when the path exists; ask Claude to read the file instead.
-- **Names are not detected.** Regex only, by design.
+- **A name without a label is not detected.** Regex only, by design: "Emma Johansson" alone looks like any two
+  capitalised words. A name after a name label, before an e-mail address or in a CSV name column is masked
+  in a tool result (0.6.21); in a typed prompt no name is detected. A street address without a postcode, or
+  in a form of a region that is not active, passes too.
 - **A transformed value can pass.** For a value this session resolved, the
   output is checked as a substring in plain, base64, hex, URL-encoded and
   JSON-escaped form, and a resolving command may not encode it in the first

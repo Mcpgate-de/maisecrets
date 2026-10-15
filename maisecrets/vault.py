@@ -1349,10 +1349,11 @@ class Vault:
         return [Entry.from_meta(m) for m in self._index["entries"].values()]
 
     @_mutating
-    def forget(self, key: str) -> str:
+    def forget(self, key: str, route: str = "cli") -> str:
         """Delete one entry at the user's request: the value from the store and the metadata
         from the index, fingerprint included. "ok", "unknown", or "store" when the store refused
-        (the entry then stays, so nothing looks deleted that is not)."""
+        (the entry then stays, so nothing looks deleted that is not). A deletion writes one
+        events.log line with the route that asked for it; the next session start names it."""
         meta = self._index["entries"].get(key)
         if meta is None:
             from . import destinations
@@ -1368,6 +1369,8 @@ class Vault:
         if fp and self._index["by_fingerprint"].get(fp) == key:
             del self._index["by_fingerprint"][fp]
         self._save_index()
+        from . import events
+        events.record_weakening("forget", key, route)      # the value is gone: a later text with it is not redacted
         from . import destinations
         # where a forgotten secret went is the person's to delete too; a record that could not be written is said
         self.destinations_kept = not destinations.forget([key])

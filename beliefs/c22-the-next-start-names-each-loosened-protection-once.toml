@@ -1,0 +1,10 @@
+# c22-the-next-start-names-each-loosened-protection-once: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c22-the-next-start-names-each-loosened-protection-once"
+control = "C22"
+statement = "The next session start shows the person one sentence that lists every protection loosened since the last start, with its route, and then marks them as shown."
+runner = ["tests/test_weakenings.py::SessionStart::test_the_session_start_hook_shows_the_sentence_to_the_person"]
+
+[proof]
+file = "hooks/dispatch.py"
+find = "        loosened = weakenings_since_last_start()"
+replace = "        loosened = None"

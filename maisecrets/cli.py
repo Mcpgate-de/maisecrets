@@ -69,6 +69,9 @@ def _destination_lines(rec: dict, shown_before: float) -> list[str]:
     return out
 
 
+_ROUTE = {"v": "cli"}
+
+
 def cmd_forget(args: list[str]) -> int:
     if not args:
         print("usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets:list shows them)", file=sys.stderr)
@@ -76,7 +79,7 @@ def cmd_forget(args: list[str]) -> int:
     v, rc = Vault(), 0
     for raw in args:
         key = raw.strip("⟦⟧").split(":", 1)[0]
-        status = v.forget(key)
+        status = v.forget(key, route=_ROUTE["v"])
         if getattr(v, "destinations_kept", False):
             print(f"{key}: its destination record could not be deleted now; /maisecrets:forget {key} again later.")
         if status == "ok":
@@ -818,6 +821,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])
+    # the route of an action that loosens a protection (events.record_weakening): a slash command passes its
+    # arguments on stdin, a command line is the CLI. Any program can do either, so it is a name, not a proof
+    _ROUTE["v"] = "slash command" if "--args-stdin" in argv[1:] else "cli"
     if "--args-stdin" in argv[1:]:
         # a slash command passes its arguments in a quoted heredoc: spliced into the bash line,
         # `$(…)` or a pipe in a report text ran as code (feedback on 0.5.2, 2026-09-28)

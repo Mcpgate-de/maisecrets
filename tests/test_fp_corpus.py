@@ -39,6 +39,7 @@ class CorpusTests(unittest.TestCase):
         wrong = [name for name, text in fp_corpus.NO_HIT if found(text, "tool")]
         self.assertEqual(wrong, [], f"{len(wrong)} snippets of normal work are hits in a tool result")
         for name, text, expected in fp_corpus.HIT:
+            expected = fp_corpus.TOOL_EXPECTED.get(name, expected)
             with self.subTest(name=name):
                 self.assertEqual(found(text, "tool"), [(t, v.replace("§", "")) for t, v in expected])
 

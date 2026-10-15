@@ -1279,3 +1279,9 @@ HIT = [
     ('gb16 esapikey kibana yaml', 'elasticsearch.customHeaders:\n  A§uthorization: "ApiK§ey elI§2Tl§Rtc§jNz§V24§yUT§NoZ§Wx2§a1A§6UH§JlO§GZX§U1B§LZ3§JJT§2I3§WXh§2Mm§M3N§A=="', [('SECRET', 'elI§2Tl§Rtc§jNz§V24§yUT§NoZ§Wx2§a1A§6UH§JlO§GZX§U1B§LZ3§JJT§2I3§WXh§2Mm§M3N§A==')]),
     ('gb16 sql mssql login', "CREATE LOGIN app WITH P§ASSWORD = 'WwP§IuV§D&G§&+Y§hC7§%', CHECK_POLICY = ON;", [('SECRET', 'WwP§IuV§D&G§&+Y§hC7§%')]),
 ]
+
+
+# a tool result reads more than a prompt (0.6.21): there, the street address around a postcode is masked whole
+TOOL_EXPECTED = {
+    'de plz': [('ADDRESS', 'Musterstraße 1, 10§11§5 Berlin')],
+}

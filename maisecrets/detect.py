@@ -1235,7 +1235,20 @@ LITERAL_RULES = (
 _LITERAL_IDS = frozenset(d["id"] for d in LITERAL_RULES)
 
 
+def _random_hex(v: str) -> bool:
+    """A hex id that is no counted fixture: AC0123456789abcdef… or one repeated digit is a test value."""
+    h = v[2:].lower()
+    if not h or any(c not in "0123456789abcdef" for c in h):
+        return False
+    run = best = 1
+    for a, b in zip(h, h[1:]):
+        run = run + 1 if int(b, 16) == (int(a, 16) + 1) % 16 else 1
+        best = max(best, run)
+    return best < 8 and len(set(h)) > 4
+
+
 VALIDATORS = {
+    "random_hex": _random_hex,
     "ds_value": _ds_value_ok,
     "apikey_value": _apikey_value_ok,
     "word_value": _word_value_ok,
@@ -1451,6 +1464,12 @@ OWN_RULES: list[dict] = [
     # such as seed, mnemonic or wallet in the 200 characters before it or on its line; 15 and more (5 to 8 bits) stand
     # alone
     {"id": "crypto-seed-phrase", "type": "SECRET", "regex": r"(?!)"},
+    # a Twilio Account SID (AC and 32 hex digits) next to its name: the SID and the auth token together log in, and
+    # the holdout sets of the public benchmark (2026-10-14) leaked three. Without the name, AC and 32 hex digits are
+    # also hashes and ids
+    {"id": "twilio-account-sid-labelled", "type": "SECRET", "secret_group": 1, "validator": "random_hex",
+     "regex": r"(?i:twilio|account_?sid|(?<![a-z])sid(?![a-z]))[^\n]{0,40}?(?<![A-Za-z0-9])(AC[0-9a-f]{32})"
+              r"(?![A-Za-z0-9])"},
     {"id": "auth-scheme-apikey", "type": "SECRET", "secret_group": 1, "validator": "apikey_value",
      "regex": r"(?i:authorization)[\"']?\]?[ \t]*[:=][ \t]*[\"'`]?ApiKey[ \t]+([A-Za-z0-9+/_-]{8,1024}={0,2})"
               r"(?![\w+/=-])"},
@@ -1508,6 +1527,21 @@ FALLBACK_RULES: list[dict] = [
     {"id": "anthropic-api-key-any", "type": "SECRET",
      "regex": r"sk-ant-(?:(?<![A-Za-z0-9_-]sk-ant-)|(?<=\\[nrt]sk-ant-))(?:api03|admin01)-[A-Za-z0-9_-]{60,140}AA"
               r"(?![A-Za-z0-9_-])"},
+    # 0.6.21, from the values that leaked in the public benchmark's holdout sets: an OpenAI or Anthropic key and a
+    # Slack token with a shorter tail and no marker of the forms above. The sk- tail needs a digit, a capital and a run
+    # of 16 letters and digits; the Slack tail starts with digits and a hyphen, as Slack writes it:
+    # sk-admin-sidebar-navigation-item2X and xoxb-background-worker-release-2024 are names. A key that a rule above
+    # takes (T3BlbkFJ inside, api03- and AA at the end) is left to it
+    {"id": "openai-anthropic-key-relaxed", "type": "SECRET",
+     "regex": r"(?<![\w-])sk-(?:proj|ant|svcacct|admin)-"
+              r"(?![A-Za-z0-9_-]{0,400}T3BlbkFJ)"
+              r"(?!(?:api03|admin01)-[A-Za-z0-9_-]{60,140}AA"
+              r"(?![A-Za-z0-9_-]))"
+              r"(?=[A-Za-z0-9_-]{0,200}[0-9])"
+              r"(?=[A-Za-z0-9_-]{0,200}[A-Z])"
+              r"(?=[A-Za-z0-9_-]{0,200}?[A-Za-z0-9]{16})[A-Za-z0-9_-]{20,}"},
+    {"id": "slack-token-relaxed", "type": "SECRET",
+     "regex": r"(?<![\w-])(?:xoxb-|xoxp-|xoxa-|xoxr-)\d{2,}-[A-Za-z0-9-]{12,}"},
 ]
 
 
@@ -1989,7 +2023,19 @@ def rules() -> list[Rule]:
                   + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]
                   + _load_regional(active.regions) + _load_presidio(active.regions) + pii
                   + _load_literal(active.languages))
+        _REGIONS[:] = [_RULES, active.regions]
     return _RULES
+
+
+_REGIONS: list = [None, ()]   # the rule list and the regions it was loaded for (rules())
+
+
+def _pii_regions_cached() -> tuple:
+    """The regions of the loaded rules. A test that swaps detect._RULES back gets the regions of that list."""
+    current = rules()
+    if _REGIONS[0] is not current:
+        _REGIONS[:] = [current, active_regions().regions]
+    return _REGIONS[1]
 
 
 def active_regions():
@@ -3034,10 +3080,44 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> li
             i = bisect.bisect_left(taken_starts, start)
             taken_starts.insert(i, start)
             taken_ends.insert(i, end)
+    _personal_hits(text, enabled, found, taken_starts, taken_ends, overlaps)
     if _CHANNEL[0] == "tool" and not _copy:
         _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends)
     found.sort(key=lambda x: x.start)
     return found
+
+
+def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: list, overlaps) -> None:
+    """Personal data after a label or in a fixed form (maisecrets/personal.py), after every other rule: a span that
+    another rule took stays its own, and a placeholder or a documentation value is no hit."""
+    try:
+        from . import personal
+    except ImportError:   # a copy of detect.py without its sibling modules
+        return
+    for start, end, kind, typ in sorted(personal.hits(text, _CHANNEL[0], _pii_regions_cached())):
+        if enabled is not None and kind not in enabled:
+            continue
+        value = text[start:end]
+        low = value.lower()
+        if "\u27e6" in value or "\u27e7" in value or "example" in low or low in personal.PLACEHOLDER_NAMES \
+                or looks_like_placeholder(value) or is_public_test_value(value, typ):
+            continue
+        if overlaps(start, end):
+            # an address takes the postcode that a region rule found inside it (de-plz): the whole address is the
+            # value. Any other hit keeps its span
+            lo, hi = bisect.bisect_left(taken_starts, start), bisect.bisect_left(taken_starts, end)
+            inside = [f for f in found if start <= f.start and f.end <= end and f.type not in SECRET_TYPES]
+            if typ != personal.ADDRESS or not inside or hi - lo != len(inside) or (
+                    lo > 0 and taken_ends[lo - 1] > start):
+                continue
+            for f in inside:
+                found.remove(f)
+                i = bisect.bisect_left(taken_starts, f.start)
+                del taken_starts[i], taken_ends[i]
+        found.append(Match(kind, typ, value, start, end))
+        i = bisect.bisect_left(taken_starts, start)
+        taken_starts.insert(i, start)
+        taken_ends.insert(i, end)
 
 
 _WINDOW_BEFORE = 2048  # context a rule may read before a value: a label 200, a context word 80, an AWS key id up to

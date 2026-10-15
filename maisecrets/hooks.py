@@ -832,7 +832,7 @@ def user_prompt(payload: dict) -> dict:
     # report never grants. Blocked, so the sentence and its code never reach the model
     # a prompt the client injected (a scheduled task, a loop wakeup) can carry text the model chose: it grants and
     # sets nothing (C21, C22)
-    typed = payload.get("source") in settings_mod.TYPED_SOURCES
+    typed = settings_mod.typed_by_the_person(payload)
     if typed and session and not payload.get("agent_id") and cfg.get("secret_destinations", "observe") == "observe":
         try:
             from . import destinations
@@ -847,9 +847,9 @@ def user_prompt(payload: dict) -> dict:
     # report pass, so a report never changes one; blocked, so the prompt does not reach the model
     change = settings_mod.parse_prompt(prompt)
     if change:
-        changed, reason = settings_mod.apply_typed(*change) if typed else (False, (
-            "maisecrets: a settings change counts only when you type it as your prompt; this one came from the "
-            f"client ({payload.get('source')}), so nothing was changed."))
+        route = "slash command" if prompt.lstrip().lower().startswith("/maisecrets:settings") else "typed prompt"
+        changed, reason = settings_mod.apply_typed(*change, route=route) if typed else (
+            False, settings_mod.not_typed_reason(payload))
         if changed and client_of(payload) != "codex" and prompt.lstrip().lower().startswith("/maisecrets:settings"):
             # a success is no refusal: the slash command runs on and shows the new state (a block read as an
             # error, "operation blocked by hook"). The prompt carries no value; the change is already written

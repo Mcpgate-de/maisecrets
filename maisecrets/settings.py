@@ -9,6 +9,7 @@ default. A hint goes to the model once, when the case it is about first happens.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -101,9 +102,38 @@ IN_A_COMMAND_RE = re.compile(r"(?:/maisecrets:settings|maisecrets:\s*set)\s+[a-z
 # who wrote the prompt (Claude Code 2.1.292 UserPromptSubmit `source`): only the person at the composer. A scheduled
 # task, a loop wakeup, a system or poll prompt can carry text the model chose (CronCreate, ScheduleWakeup), and an
 # `sdk` prompt can come from a program a tool started (codex review round 2), so none of them changes anything. A
-# client without the field is taken as the person
+# prompt without the field is taken as the person, unless a program started the client (NESTED_ENTRYPOINTS)
 TYPED_SOURCES = (None, "user")
+# A prompt without `source` is not the person's when a program started the client through the Agent SDK: `claude -p`
+# runs its hooks with CLAUDE_CODE_ENTRYPOINT=sdk-cli, the SDKs with sdk-ts or sdk-py. The client sets it itself:
+# `env -u` and a `cli` set before the start do not change it (measured on Claude Code 2.1.300). The terminal client
+# sends no `source` either and has `cli`; the desktop app sets claude-desktop (read from its bundle). Codex sets
+# nothing, so a Codex hook sees the entry point of the program that started Codex: none from a terminal
+NESTED_ENTRYPOINTS = ("sdk-",)
 _LOCK = HOME / ".settings.lock"
+
+
+def nested_program(payload: dict) -> str | None:
+    """The entry point when this prompt, with no `source`, came from a client that a program started; else None."""
+    entry = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "")
+    return entry if payload.get("source") is None and entry.startswith(NESTED_ENTRYPOINTS) else None
+
+
+def typed_by_the_person(payload: dict) -> bool:
+    """The prompt counts as typed by the person: a `source` the person has, and no program started the client."""
+    return payload.get("source") in TYPED_SOURCES and nested_program(payload) is None
+
+
+def not_typed_reason(payload: dict) -> str:
+    """One sentence for a settings change that did not count, and what the person can do."""
+    entry = nested_program(payload)
+    if entry:
+        shown = re.sub(r"[^a-z0-9-]", "", entry.lower())[:20]     # a variable is no text for the model
+        return ("maisecrets: a settings change counts only when you type it as your prompt; this one came from a "
+                f"client that a program started (entry point {shown}, as `claude -p` has), so nothing was changed. "
+                "Type it in your own Claude Code or Codex session.")
+    return ("maisecrets: a settings change counts only when you type it as your prompt; this one came from the "
+            f"client ({payload.get('source')}), so nothing was changed.")
 
 
 def state(key: str, cfg: dict) -> str:
@@ -211,7 +241,32 @@ def parse_prompt(prompt) -> tuple[str, str] | None:
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
 
-def apply_typed(key: str, word: str) -> tuple[bool, str]:
+# The direction of each setting a prompt changes. A change loosens a protection when it gives the AI or a value more
+# room: a protective switch turned away from its protective value, a policy that asks or refuses less, a higher cap,
+# a new autonomous host. A key in NEUTRAL changes no protection (a test holds that every key is in one of them).
+PROTECTIVE_BOOL = {"ssh_consent": True, "block_at_mentions": True, "scrub_transcript": True,
+                   "strip_hidden_characters": True, "guard": True, "resolve_in_files": False,
+                   "ssh_via_sandbox": False, "renew_on_use": False, "pass_agent_reports": False}
+STRICTER_LAST = {"rehydration": ("automatic", "confirm", "block"), "ssh_approval": ("per-session", "per-command"),
+                 "secret_destinations": ("off", "observe")}
+NEUTRAL = ("tips", "shortcut", "rewrite_prompts")
+
+
+def loosens(key: str, before, after) -> bool:
+    """The change of key from before to after (both the values in effect) loosens a protection."""
+    if key in PROTECTIVE_BOOL:
+        return before == PROTECTIVE_BOOL[key] and after != PROTECTIVE_BOOL[key]
+    if key in STRICTER_LAST:
+        order = STRICTER_LAST[key]
+        return before in order and after in order and order.index(after) < order.index(before)
+    if key in _INT_KEYS:
+        return isinstance(before, int) and isinstance(after, int) and after > before
+    if key == "ssh_autonomous_hosts":
+        return bool(set(after or []) - set(before or []))
+    return False
+
+
+def apply_typed(key: str, word: str, route: str = "typed prompt") -> tuple[bool, str]:
     """Write one change the person typed into config.json, keep every other key, and say what happened: (changed,
     text). Only the prompt hook calls this, for a prompt whose source is the person (TYPED_SOURCES). It is the
     only writer, under one name that a tool call is refused for (IN_A_COMMAND_RE)."""
@@ -278,6 +333,9 @@ def apply_typed(key: str, word: str) -> tuple[bool, str]:
     except (OSError, LockTimeout) as exc:
         return False, f"maisecrets: {CONFIG} cannot be written ({type(exc).__name__}); nothing was changed."
     after = load_config()
+    if loosens(key, cfg.get(key), after.get(key)):
+        from . import events
+        events.record_weakening("setting", key, route)      # the next session start names it to the person
     return True, f"maisecrets: {TITLE.get(key, key)} is {_shown(after.get(key))} ({state(key, after)})."
 
 
