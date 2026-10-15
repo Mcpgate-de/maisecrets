@@ -80,7 +80,7 @@ FILTERS = {
     "ds-keyword-colon": ("escaped-label-quote", "constant-name", "time-or-ratio"),
     "ds-keyword-colon-quotes-required": ("escaped-label-quote", "constant-name", "time-or-ratio"),
     "ds-keyword-equal-signs": ("constant-name",),
-    "generic-api-key": ("word-path", "derived-label"),
+    "generic-api-key": ("word-path", "derived-label", "login-challenge"),   # base64 of Password: (SMTP AUTH LOGIN)
     "url-query-secret": ("template-value",),                    # ?token={...}
     "auth-scheme": ("words-not-token",),                        # Bearer and words joined by - or _
     "ds-basic-auth": ("user-equals-password",),

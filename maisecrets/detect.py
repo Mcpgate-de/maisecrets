@@ -34,6 +34,7 @@ slightly different rules is how a redaction leaks.
 """
 from __future__ import annotations
 
+import base64 as _b64
 import bisect
 import itertools
 import hashlib
@@ -131,6 +132,35 @@ def shannon_entropy(s: str) -> float:
         return 0.0
     n = len(s)
     return -sum(c / n * math.log2(c / n) for c in Counter(s).values())
+
+
+# The entropy of a value rises with its alphabet, so one floor of 3.5 judges a hex value and a base64 value alike:
+# generic-api-key gets one floor per alphabet (the smallest of hex, base32, base62, base64, base64url that holds the
+# value, else printable). From a fork (danszymkowiak/maisecrets 795b411, Apache-2.0, floors chosen on its bench);
+# measured on CredData for 0.6.24 (docs/BENCHMARKS.md, "Rule classes"). Hex keeps 3.5: the fork's 3.449 caught only
+# cipher test vectors of the left-out repository and one key, and it took a 32-digit revoked token in developer text
+ENTROPY_BY_ALPHABET = {"hex": 3.5, "base32": 3.584, "base62": 3.322, "base64": 3.252, "base64url": 3.426,
+                       "printable": 3.594}
+# the challenges of SMTP and IMAP AUTH LOGIN, base64 of `Username:` and `Password:`: a mail server prints them after
+# `authentication failed:`, and with the floor of base62 they read as a key (a typed prompt, 0.6.24 measurement)
+_LOGIN_CHALLENGES = frozenset(_b64.b64encode(w).decode() for w in (b"Username:", b"Password:", b"User Name\x00",
+                                                                   b"Password\x00"))
+ENTROPY_BY_ALPHABET_RULES = frozenset({"generic-api-key"})
+_B62 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+_ALPHABETS = (("hex", frozenset("0123456789abcdefABCDEF")), ("base32", frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567=")),
+              ("base62", frozenset(_B62)), ("base64", frozenset(_B62 + "+/=")), ("base64url", frozenset(_B62 + "-_=")))
+
+
+def alphabet_of(value: str) -> str:
+    """The smallest of hex, base32, base62, base64, base64url that holds the value, else printable."""
+    chars = set(value)
+    return next((name for name, alpha in _ALPHABETS if chars <= alpha), "printable")
+
+
+def _entropy_ok(rule: Rule, secret: str) -> bool:
+    if rule.id in ENTROPY_BY_ALPHABET_RULES:
+        return shannon_entropy(secret) >= ENTROPY_BY_ALPHABET[alphabet_of(secret)]
+    return not rule.entropy or shannon_entropy(secret) >= rule.entropy
 
 
 def _luhn_ok(digits: str) -> bool:
@@ -3353,8 +3383,10 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue   # a section number: RFC 6749 4.1.2.1, OIDC Core 3.1.2.1, section 7.1.2.3
             if overlaps(start, end):
                 continue
-            if rule.entropy and shannon_entropy(secret) < rule.entropy:
+            if rule.entropy and not _entropy_ok(rule, secret):
                 continue
+            if "login-challenge" in filters and secret.strip("\"'") in _LOGIN_CHALLENGES:
+                continue   # base64 of Username: or Password: after `authentication failed:`
             if rule.drop is not None and rule.drop({"secret": secret, "match": m.group(0), "path": "",
                                                     "line": text[_line_start(text, start):_line_end(text, end)]}):
                 continue                     # the betterleaks filter of the rule, or the global one

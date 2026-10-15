@@ -131,5 +131,43 @@ class PasswordLabelChecksTests(unittest.TestCase):
                 self.assertTrue(found(text, channel="tool"))
 
 
+
+class GenericKeyFloorTests(unittest.TestCase):
+    def key(self) -> set:
+        return {s.key for s, _ in detect.rule_specs() if s.id == "generic-api-key"}
+
+    def generic(self, value: str) -> list:
+        text = "const apiKey = '" + value + "';"
+        return [m.kind for m in detect.scan(text, channel="tool", enabled=self.key())]
+
+    def test_each_alphabet_has_its_own_floor(self):
+        self.assertEqual(detect.alphabet_of("0a1b2c"), "hex")
+        self.assertEqual(detect.alphabet_of("ABCDEF234567"), "hex")
+        self.assertEqual(detect.alphabet_of("ABCXYZ234567"), "base32")
+        self.assertEqual(detect.alphabet_of("Kq7Lp2"), "base62")
+        self.assertEqual(detect.alphabet_of("Kq7+p2/="), "base64")
+        self.assertEqual(detect.alphabet_of("Kq7-p2_"), "base64url")
+        self.assertEqual(detect.alphabet_of("Kq7!p2"), "printable")
+
+    def test_a_base62_key_under_the_old_floor_is_a_hit(self):
+        v = J(["Kq7Lp2", "Kq7Rt4", "Wq9z"])
+        self.assertTrue(3.322 <= detect.shannon_entropy(v) < 3.5)
+        self.assertEqual(self.generic(v), ["generic-api-key"])
+
+    def test_a_hex_value_keeps_the_floor_of_3_5(self):
+        import hashlib
+        v = hashlib.md5(b"14").hexdigest()
+        self.assertTrue(3.4 < detect.shannon_entropy(v) < 3.5)
+        self.assertEqual(self.generic(v), [])
+
+    def test_the_login_challenge_of_a_mail_server_is_no_key(self):
+        import base64
+        challenge = base64.b64encode(J(["Pass", "word:"]).encode()).decode()
+        text = "535 5.7.8 Error: authentication failed: " + challenge
+        for channel in ("prompt", "tool"):
+            with self.subTest(channel=channel):
+                self.assertEqual(found(text, channel=channel), [])
+
+
 if __name__ == "__main__":
     unittest.main()
