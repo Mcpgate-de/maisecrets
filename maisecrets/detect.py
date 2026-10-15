@@ -2073,6 +2073,10 @@ def rule_specs(active=None) -> list:
     active = active or active_regions()
     languages = ",".join(active.languages)
     source_of = {band: source for source, band in registry.BANDS.items()}
+    upstream = _upstream_rules()
+    patches = {"detect-secrets": registry.DETECT_SECRETS_PATCHES,
+               "betterleaks": registry.betterleaks_patches(BETTERLEAKS_PATCHES, registry.patched_upstream(RULES_DIR)),
+               "presidio": registry.presidio_patches(_this_module())}
     out = []
     for (_, band, seq), r in _ranked(active):    # the same rules, marked the same way, as rules() takes them
         source = source_of[band]
@@ -2083,7 +2087,50 @@ def rule_specs(active=None) -> list:
         else:
             region = "generic"
         out.append((registry.make(source, r.id, r.type, seq, region=region,
-                                  language=languages if source in ("detect-secrets", "literal") else ""), r))
+                                  language=languages if source in ("detect-secrets", "literal") else "",
+                                  upstream=upstream.get((source, r.id.split("#", 1)[0])),
+                                  patches=_patches_of(source, r.id, patches)), r))
+    return out
+
+
+def _patches_of(source: str, rule_id: str, patches: dict) -> tuple:
+    if source == "detect-secrets":
+        return tuple(p for p in patches["detect-secrets"] if p.rule_key in ("detect-secrets:*", "detect-secrets:"
+                                                                              + rule_id))
+    if source == "betterleaks":
+        return patches["betterleaks"].get(rule_id, ())
+    if source == "presidio":
+        return patches["presidio"].get(rule_id.split("#", 1)[0], ()) + (
+            patches["presidio"].get(rule_id, ()) if "#" in rule_id else ())
+    return ()
+
+
+def _this_module():
+    from . import detect
+    return detect
+
+
+def _upstream_rules() -> dict:
+    """{(source, upstream id): registry.Upstream} of the vendored rule files, for rule_specs() only: no hook reads
+    them."""
+    from .registry import Upstream, canonical_sha256
+
+    def version(name: str) -> str:
+        try:
+            return (RULES_DIR / name).read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+    out = {}
+    for source, file, key, ver, lic in (("betterleaks", "betterleaks.json", "rules", "BETTERLEAKS_VERSION",
+                                         "LICENSE-betterleaks"),
+                                        ("detect-secrets", "detect_secrets.json", "rules", "DETECT_SECRETS_VERSION",
+                                         "LICENSE-detect-secrets"),
+                                        ("presidio", "presidio.json", "recognizers", "PRESIDIO_VERSION",
+                                         "LICENSE-presidio")):
+        v = version(ver)
+        for r in json.loads((RULES_DIR / file).read_text(encoding="utf-8"))[key]:
+            if "id" in r:
+                out[(source, r["id"])] = Upstream(source, v, r["id"], canonical_sha256(r), lic)
     return out
 
 

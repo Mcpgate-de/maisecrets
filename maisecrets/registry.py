@@ -58,8 +58,8 @@ class Upstream:
 @dataclass(frozen=True)
 class Patch:
     rule_key: str        # the spec it changes; "detect-secrets:*" for every rule of that source
-    field: str           # regex | keywords | validator | context | ...
-    op: str              # replace | add | set
+    field: str           # regex | keywords | validator | context | context_rule | region | load
+    op: str              # replace | add | set | wrap | skip
     value: str           # what the patch puts there, short
     reason: str          # why, in one line
     upstream_sha256: str = ""   # the upstream rule the patch was written against; "" when it applies to a source
@@ -82,6 +82,84 @@ class RuleSpec:
     language: str = ""   # the label languages of a label source ("en,de"), else ""
     upstream: Upstream | None = None
     patches: tuple = field(default=())
+
+
+# The upstream state each correction of a vendored betterleaks rule (detect.BETTERLEAKS_PATCHES) was written
+# against: canonical_sha256 of the rule in rules/betterleaks.json, kept in rules/patched_upstream.txt (a digest in
+# the tree outside rules/ reads as a secret to the tree scan). After a sync that changes one of these rules,
+# tests/test_registry.py goes red: check the correction against the new rule, then update the digest or drop it.
+UPSTREAM_FILE = "patched_upstream.txt"
+
+
+def patched_upstream(rules_dir) -> dict:
+    """{"<source>:<id>": sha256} from rules/patched_upstream.txt."""
+    out = {}
+    for line in (rules_dir / UPSTREAM_FILE).read_text(encoding="utf-8").splitlines():
+        fields = line.split("#", 1)[0].split()
+        if len(fields) == 2:
+            out[fields[1]] = fields[0]
+    return out
+
+
+_BETTERLEAKS_REASONS = {
+    "add_keywords": "the keyword list named only the provider; the token's own prefix is a keyword too (0.6.20)",
+    "regex": "the key is waka_ and a UUID; the upstream regex took no hyphen (0.6.20)",
+}
+# What detect._load_detect_secrets changes in each vendored detect-secrets rule. The loader applies them; these records
+# say what and why, for `maisecrets rules list`
+DETECT_SECRETS_PATCHES = (
+    Patch("detect-secrets:*", "regex", "replace", "denylist + the label words of the active languages",
+          "the labels detect-secrets lacks (pass:, token:, passwort:) and the product's own name (mai-secrets)"),
+    Patch("detect-secrets:*", "regex", "replace", "a value may start with ! # $ % & * + - @ ^ ~ ? .",
+          "a value had to start with a word character, so $+4j... was never a value (2026-09-27)"),
+    Patch("detect-secrets:*", "regex", "replace", "up to three spaces before the colon",
+          "`mot de passe : x` and `password : x` (2026-09-28)"),
+    Patch("detect-secrets:*", "regex", "replace", "an escaped quote around the label and before the value",
+          "JSON inside a string, as a log line shows it (CredData, 2026-10-12)"),
+    Patch("detect-secrets:*", "regex", "replace", "_KeywordTail: the same matches in linear time",
+          "a long word run after a keyword was quadratic (0.6.15)"),
+    Patch("detect-secrets:*", "validator", "set", "ds_value", "detect-secrets' own value check, ported"),
+    Patch("detect-secrets:ds-basic-auth", "keywords", "set", "none", "a URL with user and password has no label"),
+)
+
+
+def betterleaks_patches(table: dict, upstream: dict) -> dict:
+    """{rule id: (Patch, ...)} from detect.BETTERLEAKS_PATCHES; upstream is patched_upstream()."""
+    out = {}
+    for rule_id, patch in table.items():
+        recs = []
+        if patch.get("add_keywords"):
+            recs.append(Patch("betterleaks:" + rule_id, "keywords", "add", " ".join(patch["add_keywords"]),
+                              _BETTERLEAKS_REASONS["add_keywords"], upstream.get("betterleaks:" + rule_id, "")))
+        if patch.get("regex"):
+            recs.append(Patch("betterleaks:" + rule_id, "regex", "replace", patch["regex"],
+                              _BETTERLEAKS_REASONS["regex"], upstream.get("betterleaks:" + rule_id, "")))
+        out[rule_id] = tuple(recs)
+    return out
+
+
+def presidio_patches(detect) -> dict:
+    """{recognizer id or pattern id: (Patch, ...)} from the six Presidio tables of detect.py, which the loader
+    applies."""
+    out: dict = {}
+
+    def add(rid, *a):
+        out.setdefault(rid, []).append(Patch("presidio:" + rid, *a))
+    for rid in sorted(detect.PRESIDIO_SKIP):
+        add(rid, "load", "skip", "", "an own rule covers it, or it is no personal data worth a placeholder")
+    for rid, v in sorted(detect.PRESIDIO_VALIDATOR.items()):
+        add(rid, "validator", "set", v, "a check digit Presidio does not run here")
+    for rid in sorted(detect.PRESIDIO_ALWAYS_CONTEXT):
+        add(rid, "context_rule", "set", "required", "a plain digit run: a check digit alone passes 1 in 10 to 26")
+    for rid in sorted(detect.PRESIDIO_DIGIT_BOUNDED):
+        add(rid, "regex", "wrap", "(?<!\\d)...(?!\\d)", "the pattern matched inside a longer digit run")
+    for rid in sorted(detect.PRESIDIO_PATTERN_CONTEXT):
+        add(rid, "context_rule", "set", "required", "the same digits are also FIX tags and XML identifiers")
+    for rid, words in sorted(detect.PRESIDIO_EXTRA_CONTEXT.items()):
+        add(rid, "context", "add", " ".join(words), "the vendored context words are English only")
+    for rid, region in sorted(detect.REGION_OF_ID.items()):
+        add(rid, "region", "set", region, "the id names no country")
+    return {k: tuple(v) for k, v in out.items()}
 
 
 def form_of(rule_id: str) -> str:

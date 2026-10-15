@@ -74,6 +74,33 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(rule.filters, registry.filters_of(rule.id))
             self.assertEqual(spec.filters, rule.filters)
 
+    def test_each_correction_of_a_vendored_rule_names_the_upstream_rule_it_was_written_against(self):
+        """After a sync that changes a corrected upstream rule this goes red: check the correction against the new
+        rule, then update rules/patched_upstream.txt or drop the correction."""
+        import json
+        recorded = registry.patched_upstream(detect.RULES_DIR)
+        upstream = {r["id"]: r for r in json.loads((detect.RULES_DIR / "betterleaks.json").read_text("utf-8"))["rules"]}
+        self.assertEqual(set(recorded), {"betterleaks:" + i for i in detect.BETTERLEAKS_PATCHES})
+        for key, digest in recorded.items():
+            with self.subTest(rule=key):
+                self.assertEqual(registry.canonical_sha256(upstream[key.split(":", 1)[1]]), digest)
+        specs = {s.key: s for s, _ in self.specs}
+        for rid in detect.BETTERLEAKS_PATCHES:
+            spec = specs["betterleaks:" + rid]
+            self.assertEqual(spec.origin, "patched")
+            self.assertTrue(spec.patches and all(p.upstream_sha256 == spec.upstream.sha256 for p in spec.patches))
+
+    def test_a_vendored_rule_names_its_upstream_and_a_corrected_one_its_patches(self):
+        for spec, _ in self.specs:
+            with self.subTest(rule=spec.key):
+                vendored = spec.source in registry.VENDORED
+                self.assertEqual(spec.upstream is not None, vendored)
+                self.assertEqual(spec.origin == "patched", vendored and bool(spec.patches))
+        specs = {s.key: s for s, _ in self.specs}
+        self.assertIn(("validator", "set", "de_tax_id"), [(p.field, p.op, p.value)
+                                                          for p in specs["presidio:de-tax-id"].patches])
+        self.assertIn("context_rule", [p.field for p in specs["presidio:de-vat-id#0"].patches])
+
     def test_every_source_has_its_band_and_the_bands_keep_the_measured_order(self):
         self.assertEqual({s.source for s, _ in self.specs}, set(registry.SOURCES) - {"user"})
         bands = [registry.BANDS[x] for x in registry.SOURCES]
