@@ -2022,6 +2022,48 @@ def _user_rules() -> list[Rule]:
         return []
 
 
+def _rule_sources(active) -> list:
+    """(source, rules) of every rule list source, in the order of registry.BANDS."""
+    own = _load_own()
+    n_own = len(OWN_RULES)
+    return [
+        ("own-secret", [r for r in own[:n_own] if r.type == "SECRET"]),
+        ("prefixes", own[n_own:]),
+        ("detect-secrets", _load_detect_secrets(active.languages)),
+        ("betterleaks", _load_betterleaks()),
+        ("own-json", _load_own_secret_rules()),
+        ("fallback", [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]),
+        ("regional", _load_regional(active.regions)),
+        ("presidio", _load_presidio(active.regions)),
+        ("own-pii", [r for r in own[:n_own] if r.type != "SECRET"]),
+        ("literal", _load_literal(active.languages)),
+        ("user", _user_rules()),
+    ]
+
+
+_REGIONAL_REGION = {d["id"]: d["region"] for d in REGIONAL_RULES}
+
+
+def rule_specs(active=None) -> list:
+    """(spec, rule) for each rule of every source, in register order (maisecrets/registry.py). The allow list is not
+    applied here: `maisecrets rules list` shows a switched-off rule too."""
+    from . import registry
+    active = active or active_regions()
+    languages = ",".join(active.languages)
+    out = []
+    for source, rs in _rule_sources(active):
+        for seq, r in enumerate(rs):
+            if source == "regional":
+                region = _REGIONAL_REGION[r.id]
+            elif source == "presidio":
+                region = presidio_region(r.id.split("#", 1)[0])
+            else:
+                region = "generic"
+            out.append((registry.make(source, r.id, r.type, seq, region=region,
+                                      language=languages if source in ("detect-secrets", "literal") else ""), r))
+    return out
+
+
 def allow_list() -> tuple[frozenset, frozenset]:
     if not _ALLOW:
         try:
