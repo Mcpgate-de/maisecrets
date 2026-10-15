@@ -105,6 +105,7 @@ class Rule:
     key: str = ""                      # unique, from maisecrets/registry.py: `<source>:<id>`; set by rules()
     form: str = ""                     # keyword | label | shape (registry.form_of); set by rules()
     matcher: str = ""                  # regex | lines | windowed | curl | list | literal | seed (registry.matcher_of)
+    filters: frozenset = frozenset()   # the named checks after a hit (registry.filters_of); set by rules()
 
 
 # ----------------------------------------------------------------- helpers --
@@ -2050,7 +2051,7 @@ _REGIONAL_REGION = {d["id"]: d["region"] for d in REGIONAL_RULES}
 
 def _ranked(active) -> list:
     """(priority, rule) of every rule, sorted by priority = (phase, band, seq) (maisecrets/registry.py)."""
-    from .registry import BANDS, PHASES, form_of, key_of, matcher_of
+    from .registry import BANDS, PHASES, filters_of, form_of, key_of, matcher_of
     rules_phase, user_phase = PHASES["rules"], PHASES["user"]
     out = []
     for source, rs in _rule_sources(active):
@@ -2059,6 +2060,7 @@ def _ranked(active) -> list:
             object.__setattr__(r, "key", key_of(source, r.id))   # fields of the frozen rule, set once at load
             object.__setattr__(r, "form", form_of(r.id))
             object.__setattr__(r, "matcher", matcher_of(r.id, source))
+            object.__setattr__(r, "filters", filters_of(r.id))
             out.append(((phase, band, seq), r))
     out.sort(key=lambda x: x[0])
     return out
@@ -2070,18 +2072,18 @@ def rule_specs(active=None) -> list:
     from . import registry
     active = active or active_regions()
     languages = ",".join(active.languages)
+    source_of = {band: source for source, band in registry.BANDS.items()}
     out = []
-    for source, rs in _rule_sources(active):
-        for seq, r in enumerate(rs):
-            if source == "regional":
-                region = _REGIONAL_REGION[r.id]
-            elif source == "presidio":
-                region = presidio_region(r.id.split("#", 1)[0])
-            else:
-                region = "generic"
-            out.append((registry.make(source, r.id, r.type, seq, region=region,
-                                      language=languages if source in ("detect-secrets", "literal") else ""), r))
-    out.sort(key=lambda x: x[0].priority)
+    for (_, band, seq), r in _ranked(active):    # the same rules, marked the same way, as rules() takes them
+        source = source_of[band]
+        if source == "regional":
+            region = _REGIONAL_REGION[r.id]
+        elif source == "presidio":
+            region = presidio_region(r.id.split("#", 1)[0])
+        else:
+            region = "generic"
+        out.append((registry.make(source, r.id, r.type, seq, region=region,
+                                  language=languages if source in ("detect-secrets", "literal") else ""), r))
     return out
 
 
@@ -3118,6 +3120,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         own = rule.id.startswith("user:")
         form = rule.form or _registry.form_of(rule.id)    # a rule list a caller built has no form set
         keyword = form == "keyword"
+        filters = rule.filters if rule.key else _registry.filters_of(rule.id)
         hits = _matches(rule, text)
         for m in (_timed(rule, hits, len(text)) if own and rule_list is None else hits):
             ngroups = rule.regex.groups or 0
@@ -3131,18 +3134,18 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if end <= start:
                 continue
             secret = m.group(g)
-            if rule.id == "private-key-base64":
+            if "base64-wrapped-end" in filters:
                 end = _base64_wrapped_end(text, start, end)   # the further lines of a wrapped value
                 secret = text[start:end]
-            if (rule.id in _ESCAPABLE_COLON_RULES and "\\" in (m.group(2) or "")
+            if ("escaped-label-quote" in filters and "\\" in (m.group(2) or "")
                     and text[start - 2:start] not in ('\\"', "\\'")):
                 # the label's quote is escaped: JSON inside a string, whose values are escaped strings. A value without
                 # an escaped quote is code or a literal: `\"access_token\": finding[\"secret\"]` (19 hits in the
                 # vendored rules file, Gate A of 0.6.15), an escaped null (Gate B)
                 continue
-            if secret.endswith("\\") and text[end:end + 1] in ("\"", "'") and rule.id.startswith("ds-keyword"):
+            if secret.endswith("\\") and text[end:end + 1] in ("\"", "'") and "escaped-value-quote" in filters:
                 secret, end = secret[:-1], end - 1   # {\"password\":\"<value>\"}: the backslash escapes the quote
-            if (rule.id in _ESCAPABLE_COLON_RULES and "\\" in (m.group(2) or "")
+            if ("escaped-label-quote" in filters and "\\" in (m.group(2) or "")
                     and not _label_value_ok(secret)):
                 continue   # {\"passwordLastChanged\":\"2024-10-01T12:00:00Z\"}: the new escaped path, no password
             if rule.quote_group and not m.group(rule.quote_group):
@@ -3168,7 +3171,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     continue   # a YAML anchor or alias alone after a colon label: &gitlab_token_fields
             if keyword and (is_code_word(secret) or value_is_code(text, start, end, secret)):
                 continue
-            if rule.id == "generic-api-key" and _WORD_PATH_RE.fullmatch(secret.strip("'\"")):
+            if "word-path" in filters and _WORD_PATH_RE.fullmatch(secret.strip("'\"")):
                 continue
             if keyword and _names_its_label(text, start, secret):
                 continue
@@ -3178,33 +3181,33 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if (keyword and secret.strip("\"' ").isdigit()
                     and _MEASURE_LABEL_RE.search(_label_before(text, start))):
                 continue   # a limit or a duration: TTL_REFRESH_TOKEN = 2592000
-            if rule.id == "url-query-secret" and secret.startswith("{"):
+            if "template-value" in filters and secret.startswith("{"):
                 continue   # a template: ?token={body['transfer_id']}, ?token={SLACK_AUTO_TOKEN}
-            if (rule.id == "auth-scheme" and not any(c.isdigit() for c in secret)
+            if ("words-not-token" in filters and not any(c.isdigit() for c in secret)
                     and re.fullmatch(r"[A-Za-z]+(?:[_-][A-Za-z]+)+", secret)):
                 continue   # words, not a token: Bearer test_access_token
-            if (keyword or rule.id == "generic-api-key") and (
+            if "derived-label" in filters and (
                     (_UUID_RE.fullmatch(secret.strip("\"'` ")) and not _SECRET_LABEL_RE.search(
                         text, max(_line_start(text, start), start - 60), start))
                     or (_ELISION_RE.search(secret) and len(secret.rstrip(".\u2026")) < 20)
                     or _DERIVED_LABEL_RE.search(text, max(_line_start(text, start), start - 60), start)):
                 continue   # a UUID, an elided value (sk-...), or a label that names a derived thing (secret_id)
-            if rule.id in ("ds-basic-auth", "curl-auth-user") and _pass_equals_user(m.group(0), secret):
+            if "user-equals-password" in filters and _pass_equals_user(m.group(0), secret):
                 continue
-            if (rule.id == "aws-access-token" and _SIGV4_CREDENTIAL_RE.search(text, max(0, start - 24), start)
+            if ("sigv4-scope" in filters and _SIGV4_CREDENTIAL_RE.search(text, max(0, start - 24), start)
                     and _SIGV4_SCOPE_RE.match(text, end)):
                 continue   # the key id in a SigV4 credential scope (a presigned URL, an Authorization header)
-            if (rule.id == "label-cli-password" and text[start - 1:start] not in "'\""
+            if ("pg-password-switch" in filters and text[start - 1:start] not in "'\""
                     and _PG_TOOL_RE.search(text, _command_start(text, start), start)):
                 continue   # `psql --password app_db`: a switch that asks for the password, then the database
-            if rule.id == "url-password-no-user" and _url_password_not_a_value(secret):
+            if "url-password-value" in filters and _url_password_not_a_value(secret):
                 continue
-            if rule.id == "hashicorp-tf-password" and not _ds_value_ok(secret.strip("\"'")):
+            if "password-value" in filters and not _ds_value_ok(secret.strip("\"'")):
                 continue
-            if rule.id == "email-percent-encoded" and not _ENCODED_MAIL_CONTEXT_RE.search(
+            if "encoded-mail-context" in filters and not _ENCODED_MAIL_CONTEXT_RE.search(
                     text, max(_line_start(text, start), start - 40), start):
                 continue
-            if rule.id == "phone" and not _phone_ok(text, start, secret):
+            if "phone-shape" in filters and not _phone_ok(text, start, secret):
                 continue
             if rule.type == "IP" and _SECTION_BEFORE_RE.search(text, max(0, start - 24), start):
                 continue   # a section number: RFC 6749 4.1.2.1, OIDC Core 3.1.2.1, section 7.1.2.3
@@ -3229,12 +3232,12 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     ok = False   # a validator that cannot parse the value has not validated it
                 if not ok:
                     continue
-            if rule.type == "SECRET" and rule.id != "crypto-seed-phrase" and looks_like_placeholder(secret):
+            if rule.type == "SECRET" and "seed-phrase" not in filters and looks_like_placeholder(secret):
                 # the checksum of a seed phrase is its proof; "example" and "sample" are words of the list
                 continue
             labelled = rule.type == "SECRET" and form != "shape"
             # a seed phrase is compared in one form: its words with one space between them
-            as_published = " ".join(_WORD_RE_ANY.findall(secret)) if rule.id == "crypto-seed-phrase" else secret
+            as_published = " ".join(_WORD_RE_ANY.findall(secret)) if "seed-phrase" in filters else secret
             if is_public_test_value(as_published, rule.type) and not labelled:
                 # a documented test card, key or number that a shape rule found. A published key that a label assigns
                 # (PROD_PASSWORD=<the Stripe docs key>) is used as a credential and stays a hit: being public does not

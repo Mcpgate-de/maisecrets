@@ -78,6 +78,7 @@ class RuleSpec:
     rule_class: str      # what it finds: "provider:github", "label:keyword", "pii:email", ...
     form: str            # keyword | label | shape
     matcher: str = "regex"   # matcher_of
+    filters: frozenset = frozenset()   # filters_of
     language: str = ""   # the label languages of a label source ("en,de"), else ""
     upstream: Upstream | None = None
     patches: tuple = field(default=())
@@ -95,6 +96,40 @@ def form_of(rule_id: str) -> str:
 def is_label(kind: str) -> bool:
     """Whether a hit of this kind (a rule id, also one read from the vault index) came from a label rule."""
     return str(kind).startswith(LABEL_PREFIXES)
+
+
+# The checks scan() runs on a hit of these rules, by name (detect._scan). Until the registry each was a test of the id.
+FILTERS = {
+    "private-key-base64": ("base64-wrapped-end",),             # the further lines of a wrapped value
+    "ds-keyword-colon": ("escaped-label-quote",),               # JSON inside a string: the value must be escaped too
+    "ds-keyword-colon-quotes-required": ("escaped-label-quote",),
+    "generic-api-key": ("word-path", "derived-label"),
+    "url-query-secret": ("template-value",),                    # ?token={...}
+    "auth-scheme": ("words-not-token",),                        # Bearer and words joined by - or _
+    "ds-basic-auth": ("user-equals-password",),
+    "curl-auth-user": ("user-equals-password",),
+    "aws-access-token": ("sigv4-scope",),                       # the key id of a SigV4 credential scope
+    "label-cli-password": ("pg-password-switch",),              # psql --password <database>
+    "url-password-no-user": ("url-password-value",),
+    "hashicorp-tf-password": ("password-value",),               # detect-secrets' value check
+    "email-percent-encoded": ("encoded-mail-context",),         # name%40host only where an address is expected
+    "phone": ("phone-shape",),
+    "crypto-seed-phrase": ("seed-phrase",),                     # no placeholder check; compared as single-spaced words
+}
+# the filters of every rule whose id starts so: a value that ends in a backslash before its quote
+PREFIX_FILTERS = (("ds-keyword", ("escaped-value-quote",)),)
+
+
+def filters_of(rule_id: str) -> frozenset:
+    """The named checks of a rule: FILTERS, PREFIX_FILTERS, and `derived-label` for every keyword rule (a UUID, an
+    elided value, or a label that names a derived thing such as secret_id is no value)."""
+    out = set(FILTERS.get(rule_id, ()))
+    for prefix, names in PREFIX_FILTERS:
+        if rule_id.startswith(prefix):
+            out.update(names)
+    if form_of(rule_id) == "keyword":
+        out.add("derived-label")
+    return frozenset(out)
 
 
 def matcher_of(rule_id: str, source: str = "") -> str:
@@ -168,5 +203,5 @@ def make(source: str, rule_id: str, type_: str, seq: int, *, region: str = "gene
     return RuleSpec(key=key_of(source, rule_id), id=rule_id, source=source, origin=origin,
                     priority=(phase, BANDS[source], seq), channel=channel, region=region, type=type_,
                     rule_class=rule_class(source, rule_id, type_), form=form_of(rule_id),
-                    matcher=matcher_of(rule_id, source), language=language,
+                    matcher=matcher_of(rule_id, source), filters=filters_of(rule_id), language=language,
                     upstream=upstream, patches=tuple(patches))

@@ -63,6 +63,17 @@ class RegistryTests(unittest.TestCase):
                 self.assertEqual(spec.matcher, registry.matcher_of(rule.id, "literal" if rule.id in literal else ""))
         self.assertEqual(collections.Counter(s.matcher for s, _ in self.specs)["lines"], 7)
 
+    def test_each_named_filter_is_one_that_scan_runs(self):
+        source = (ROOT / "maisecrets" / "detect.py").read_text(encoding="utf-8")
+        names = {n for ns in registry.FILTERS.values() for n in ns} | {n for _, ns in registry.PREFIX_FILTERS
+                                                                     for n in ns} | {"derived-label"}
+        for name in sorted(names):
+            with self.subTest(filter=name):
+                self.assertIn(f'"{name}" in filters', source)
+        for spec, rule in self.specs:
+            self.assertEqual(rule.filters, registry.filters_of(rule.id))
+            self.assertEqual(spec.filters, rule.filters)
+
     def test_every_source_has_its_band_and_the_bands_keep_the_measured_order(self):
         self.assertEqual({s.source for s, _ in self.specs}, set(registry.SOURCES) - {"user"})
         bands = [registry.BANDS[x] for x in registry.SOURCES]
