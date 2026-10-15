@@ -99,5 +99,37 @@ class Mt940Tests(unittest.TestCase):
         self.assertNotIn(self.IBAN, [v for _, v in found(text, ("de",))])
 
 
+
+class PasswordLabelChecksTests(unittest.TestCase):
+    NO_VALUE = [
+        "password = " + J(["PROD", "-DB-", "PASS_7"]),                 # a constant's name with a dash and an underscore
+        "password = " + J(["MY_", "SECRET_", "VALUE_1"]),              # an UPPER_SNAKE name with a counter
+        "secret: " + J(["0", ":default"]),                             # a time or a ratio
+        'secret: "' + J(["12", ":minutes"]) + '"',
+        "the test passed: everything works fine",                     # passed, passes, passing: no label
+        "In the second round the passes: several were skipped",
+        "TOKEN_TTL = " + J(["36", "00"]) + ".",                        # seconds before the full stop of a sentence
+        "| secret: " + J(["rota", "tion"]) + " of keys in the vault |",  # a table cell of prose
+    ]
+    VALUE = [
+        "password = " + J(["Xk9", "_Qz7-", "Lm2"]),
+        "password = " + J(["PRD", "_X7K9", "_QW2Z"]),                  # random capitals stay a value
+        "secret: " + J(["4", ":f9Kq2", "Lm7"]),
+        "db_pass: " + J(["hunter", "2", "!x"]),
+        "secret: " + J(["rota", "tion"]),                             # one word after a label in plain text stays
+    ]
+
+    def test_a_name_a_time_a_word_after_passed_and_a_table_cell_are_no_value(self):
+        for text in self.NO_VALUE:
+            for channel in ("prompt", "tool"):
+                with self.subTest(text=text, channel=channel):
+                    self.assertEqual([k for k, _ in found(text, channel=channel) if k.startswith("ds-keyword")], [])
+
+    def test_a_value_after_the_label_stays_a_hit(self):
+        for text in self.VALUE:
+            with self.subTest(text=text):
+                self.assertTrue(found(text, channel="tool"))
+
+
 if __name__ == "__main__":
     unittest.main()

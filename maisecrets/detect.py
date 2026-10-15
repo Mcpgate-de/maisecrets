@@ -2874,6 +2874,27 @@ def _names_its_label(text: str, start: int, secret: str) -> bool:
 
 
 # lookarounds, not ^: search(text, pos) anchors ^ at the start of the text, never at pos (a file's line 19 passed)
+# Four checks from a fork (danszymkowiak/maisecrets f2c9ee2, 24e0162, 3355cb8; Apache-2.0), measured on CredData
+# again for 0.6.24 against the password-label rules of 0.6.16 and 0.6.17: the name of a constant with a dash and an
+# underscore, a time or a ratio after a colon label, a number of seconds before the full stop of a sentence, and a
+# keyword that opens a sentence in a markdown table cell
+_CONSTANT_NAME_RE = re.compile(r"[A-Z]+(?:-[A-Z]+)+_[A-Z0-9]*|[A-Z]{2,}(?:_[A-Z]{2,})+_\d{1,2}")
+_TIME_OR_RATIO_RE = re.compile(r"\d+:[a-z]+")
+_PROSE_AFTER_RE = re.compile(r" (?:and|or|of|for|with|to|in|the|is|are|und|oder|der|die|das|mit|für|ist|sind)"
+                             r"(?![^\W_])")
+
+
+def _number_of(secret: str) -> str:
+    """The value without its quotes and the full stop of a sentence: `TOKEN_TTL = 3600.`"""
+    v = secret.strip("\"' ")
+    return v[:-1] if v.endswith(".") else v
+
+
+def _in_table_cell(text: str, start: int) -> bool:
+    """The value at `start` sits in a row of a markdown table."""
+    return text[_line_start(text, start):start].lstrip().startswith("|")
+
+
 _MEASURE_LABEL_RE = re.compile(r"(?i)(?<![a-z])(?:ttl|timeout|expir\w*|lifetime|max|min|len|length|size|count|limit"
                                r"|port|age|seconds|minutes|hours|days|retries|interval|ms|budget|refresh|rotation|cost"
                                r"|price|quota|window|delay|offset|threshold|rate|bytes|exp|iat|nbf|at|counter|index"
@@ -3291,9 +3312,16 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if (keyword and _LABEL_SHAPE.fullmatch(secret.strip())
                     and _NAME_LABEL_RE.fullmatch(secret.strip()) and "\n" in text[m.start():start]):
                 continue   # the next line is a label of its own: `DB_PASSWORD=\nAPI_KEY=`, `Zugangsdaten:\nBenutzer:`
-            if (keyword and secret.strip("\"' ").isdigit()
+            if (keyword and _number_of(secret).isdigit()
                     and _MEASURE_LABEL_RE.search(_label_before(text, start))):
-                continue   # a limit or a duration: TTL_REFRESH_TOKEN = 2592000
+                continue   # a limit or a duration: TTL_REFRESH_TOKEN = 2592000, also at the end of a sentence
+            if "constant-name" in filters and _CONSTANT_NAME_RE.fullmatch(secret.strip("\"'`")):
+                continue   # the name of a constant, not its value: PROD-DB-PASS_7
+            if "time-or-ratio" in filters and _TIME_OR_RATIO_RE.fullmatch(secret.strip("\"'`")):
+                continue   # 0:default after `secret:`
+            if (keyword and secret.isalpha() and secret.islower() and _PROSE_AFTER_RE.match(text, end)
+                    and _in_table_cell(text, start)):
+                continue   # | token: counts and ... |: a sentence in a markdown table cell goes on after the word
             if "template-value" in filters and secret.startswith("{"):
                 continue   # a template: ?token={body['transfer_id']}, ?token={SLACK_AUTO_TOKEN}
             if ("words-not-token" in filters and not any(c.isdigit() for c in secret)
