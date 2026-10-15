@@ -20,7 +20,7 @@ and OpenAI plugin directories.
 ## Git hooks (now)
 
 - `.githooks/pre-commit`: staged diff through our own detector, manifests
-  parse, unit tests. Installed by `scripts/install-hooks.sh`, which pins
+  parse, plugin lint. It runs in seconds; the unit tests run once per push. Installed by `scripts/install-hooks.sh`, which pins
   `core.hooksPath` for this repo because the global `~/.git-hooks` would
   otherwise bypass it.
 - `.githooks/pre-push`: refuses tag pushes, runs unit tests, runs the hook
