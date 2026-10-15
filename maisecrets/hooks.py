@@ -3457,8 +3457,7 @@ def post_tool(payload: dict) -> dict:
     path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")   # a test file keeps its fixtures
     # the file whose name can name a password export: a Read's, or the path of a Grep or of another client's read
     scan_path = path or str(tool_input.get("path") or "")
-    if swap:
-        path = ""        # text that stands in for a PDF or an image is no test code: no hit of it is a fixture
+    # text that stands in for a PDF or an image is no test code: no hit of it is a fixture, by path or by content
     strip = cfg.get("strip_hidden_characters", True)
     hidden = {"n": 0}
     hidden_runs: list[str] = []
@@ -3470,7 +3469,8 @@ def post_tool(payload: dict) -> dict:
             s, gone, runs = strip_hidden(s)
             hidden["n"] += gone
             hidden_runs.extend(runs)
-        matches = [m for m in detect.scan(s, channel="tool", path=scan_path) if not detect.is_fixture(m, s, path)]
+        matches = [m for m in detect.scan(s, channel="tool", path=scan_path)
+                   if swap or not detect.is_fixture(m, s, path)]
         if not matches and not _has_live(cfg):
             return s
         if vault is None:

@@ -32,8 +32,8 @@ replace = "    return cache.get((\"literal\", \"tool\")) or cache[\"literal\", _
 [[proof]]
 path = "the tool hook scans with the prompt rule"
 file = "maisecrets/hooks.py"
-find = "        matches = [m for m in detect.scan(s, channel=\"tool\", path=scan_path) if not detect.is_fixture(m, s, path)]"
-replace = "        matches = [m for m in detect.scan(s, path=scan_path) if not detect.is_fixture(m, s, path)]"
+find = "        matches = [m for m in detect.scan(s, channel=\"tool\", path=scan_path)"
+replace = "        matches = [m for m in detect.scan(s, path=scan_path)"
 
 [[proof]]
 path = "the failed-command hook scans with the prompt rule"

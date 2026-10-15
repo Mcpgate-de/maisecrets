@@ -1238,6 +1238,14 @@ class TheConverterIsBounded(_Work):
         self.stub(f"printf 'Vertrag 2026 mit allen Seiten\\nPasswort: {value}\\n\\f'")
         answer = self.post(file_path=str(pdf))
         self.assertNotIn(value, json.dumps(answer))
+        # and not by its content either: a PDF that prints test code (codex, round 5). Another value: the first one
+        # is stored now, and its exact match would mask it anyway
+        _reset(read_pdf="convert")
+        value = "Qw3-nB8x" + "Tz5vRk"
+        self.stub(f"printf 'def test_login(self):\\n    password = \"{value}\"\\n"
+                  "and some more words on this page\\n\\f'")
+        answer = self.post()
+        self.assertNotIn(value, json.dumps(answer))
 
     def test_a_typed_change_of_these_settings_is_weighed_like_the_others(self):
         self.assertTrue(settings.loosens("read_pdf", "convert", "ask"))
@@ -1256,7 +1264,9 @@ class TheConverterIsBounded(_Work):
         link = self.dir / "linked"
         os.symlink(target, link)
         (self.dir / "open").mkdir()
-        self.assertEqual(file_reads._nearest_folder(str(link)), os.path.realpath(self.dir / "open"))
+        self.assertEqual([os.path.realpath(x) for x in file_reads._nearest_folder(str(link))],
+                         [os.path.realpath(self.dir), os.path.realpath(self.dir / "open")],
+                         "the folder of the link's name and the folder it points to")
 
     def test_the_text_is_scanned_as_tool_channel_text(self):
         _reset(read_pdf="convert")
@@ -1468,6 +1478,7 @@ class TheConverterIsBounded(_Work):
         exe2.write_bytes(macho(("rpath", "@loader_path/../missing/deeper"), ("rpath", "@loader_path/../lib"),
                                ("dylib", "@rpath/libb.dylib")))
         self.assertEqual(os.path.realpath(file_reads._macho_libraries(str(exe2))[0]), os.path.realpath(app))
+        self.assertFalse(settings.loosens("clean_dirs", ["/safe/docs"], ["/safe/./docs"]))
         (app / "lib" / "libb.dylib").unlink()
         self.assertIsNone(file_reads._macho_libraries(str(exe)), "a library that is not there")
         exe.write_bytes(b"\0" * 64)
