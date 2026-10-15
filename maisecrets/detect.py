@@ -1357,7 +1357,9 @@ OWN_RULES: list[dict] = [
               r"@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?!" + _NON_CJK_WORD + r"|-)"},
     # an IBAN in lower case, plain or in groups of four; its validator also wants the country's length
     {"id": "iban-lowercase", "type": "IBAN", "validator": "iban",
-     "regex": r"(?<![A-Za-z0-9])[a-z]{2}[0-9]{2}(?:[a-z0-9]{11,30}|(?:[ -][a-z0-9]{4}){2,7}(?:[ -][a-z0-9]{1,3})?)"
+     # also after an MT940 subfield code (?31), as PRESIDIO_LEFT_SUBFIELD
+     "regex": r"(?:(?<![A-Za-z0-9])|(?<=\?[0-9]{2}))[a-z]{2}[0-9]{2}"
+              r"(?:[a-z0-9]{11,30}|(?:[ -][a-z0-9]{4}){2,7}(?:[ -][a-z0-9]{1,3})?)"
               r"(?![A-Za-z0-9])"},
     {"id": "email-percent-encoded", "type": "EMAIL", "validator": "person_email_encoded",
      # the @ as %40 in a query string, a form body, an access log (public benchmark, 2026-10-11: 7 addresses
@@ -1796,6 +1798,20 @@ def presidio_region(rec_id: str) -> str:
     return head if len(head) == 2 and rec_id.count("-") >= 1 else "generic"
 
 
+# an IBAN after a subfield code of an MT940 bank statement export (`:86:...?31DE89...?32NAME`): Presidio's left
+# boundary refuses a digit before the country code, so the counterparty IBAN reached the model. From a fork
+# (danszymkowiak/maisecrets 8c943ee, Apache-2.0); the subfield code is `?` and two digits
+_IBAN_LEFT = "(?<![A-Z0-9])"
+PRESIDIO_LEFT_SUBFIELD = {"iban": "(?:(?<![A-Z0-9])|(?<=\\?[0-9]{2}))"}
+
+
+def _presidio_regex(rec_id: str, regex: str) -> str:
+    left = PRESIDIO_LEFT_SUBFIELD.get(rec_id)
+    if left and regex.startswith(_IBAN_LEFT):
+        return left + regex[len(_IBAN_LEFT):]
+    return regex
+
+
 def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]:
     data = json.loads((RULES_DIR / "presidio.json").read_text(encoding="utf-8"))
     out: list[Rule] = []
@@ -1811,7 +1827,7 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
                 id=rule_id,
                 type=ENTITY_TYPE.get(rec["entity"], rec["entity"]),
                 regex=_Lazy(rf"(?<!\d)(?:{_re2_to_python(pat['regex'])})(?!\d)" if rec["id"] in PRESIDIO_DIGIT_BOUNDED
-                            else _re2_to_python(pat["regex"])),
+                            else _presidio_regex(rec["id"], _re2_to_python(pat["regex"]))),
                 validator=validator, score=float(pat["score"]),
                 context=tuple(c.lower() for c in rec.get("context", [])) + PRESIDIO_EXTRA_CONTEXT.get(rec["id"], ()),
                 require_context=weak or rule_id in PRESIDIO_PATTERN_CONTEXT,

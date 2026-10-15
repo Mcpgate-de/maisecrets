@@ -81,5 +81,23 @@ class PresidioChecksTests(unittest.TestCase):
                 self.assertEqual(hit, want)
 
 
+class Mt940Tests(unittest.TestCase):
+    IBAN = J(["DE89", "3704", "0044", "0532", "0130", "00"])
+
+    def statement(self, iban: str) -> str:
+        return J([":61:2610151015CR1250,00NTRFNONREF\n:86:166?00GUTSCHRIFT?20SVWZ+Miete Oktober",
+                  "?30COBADEFFXXX?31", iban, "?32Mieter Muster"])
+
+    def test_the_counterparty_iban_of_a_bank_statement_export_is_found(self):
+        for iban in (self.IBAN, self.IBAN.lower()):
+            with self.subTest(case=iban[:2]):
+                self.assertIn(iban, [v for _, v in found(self.statement(iban), ("de",))])
+
+    def test_a_digit_run_before_a_country_code_is_still_no_iban(self):
+        # only `?` and two digits open the subfield: a longer digit run before the IBAN letters keeps the boundary
+        text = "ref 1234" + self.IBAN
+        self.assertNotIn(self.IBAN, [v for _, v in found(text, ("de",))])
+
+
 if __name__ == "__main__":
     unittest.main()

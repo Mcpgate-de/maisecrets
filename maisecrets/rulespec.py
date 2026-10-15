@@ -122,6 +122,8 @@ def presidio_patches(detect) -> dict:
         add(rid, "context_rule", "set", "required", "a plain digit run: a check digit alone passes 1 in 10 to 26")
     for rid in sorted(detect.PRESIDIO_DIGIT_BOUNDED):
         add(rid, "regex", "wrap", "(?<!\\d)...(?!\\d)", "the pattern matched inside a longer digit run")
+    for rid in sorted(detect.PRESIDIO_LEFT_SUBFIELD):
+        add(rid, "regex", "replace", "left boundary: also after ?NN", "an MT940 subfield code before the IBAN (0.6.24)")
     for rid in sorted(detect.PRESIDIO_PATTERN_CONTEXT):
         add(rid, "context_rule", "set", "required", "the same digits are also FIX tags and XML identifiers")
     for rid, words in sorted(detect.PRESIDIO_EXTRA_CONTEXT.items()):

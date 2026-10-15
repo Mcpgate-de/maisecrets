@@ -1,0 +1,10 @@
+# c1-an-iban-after-an-mt940-subfield-code-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-an-iban-after-an-mt940-subfield-code-is-a-hit"
+control = "C1"
+statement = "The counterparty IBAN of an MT940 bank statement export, right after its subfield code ?31, is an IBAN hit."
+runner = ["tests/test_rules_from_the_fork_0624.py::Mt940Tests::test_the_counterparty_iban_of_a_bank_statement_export_is_found"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''PRESIDIO_LEFT_SUBFIELD = {"iban": "(?:(?<![A-Z0-9])|(?<=\\?[0-9]{2}))"}'''
+replace = '''PRESIDIO_LEFT_SUBFIELD = {}'''
