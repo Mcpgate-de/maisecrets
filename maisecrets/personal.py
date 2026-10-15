@@ -55,12 +55,12 @@ _ID_RE = re.compile(r"(?i)(?<![a-z])(?:mrn|member[ -]?id|passport(?:[ _-]?(?:no|
                     r"(?:[ _-]?(?:no|number))?|dl[ _-]?(?:no|number|#)|(?-i:DL)(?=\s{0,3}[:#])|sin|tfn|nir|tax[ _-]?id"
                     r"|insurance (?:member )?id"
                     r"|account (?:number|no\.?)|patient[ -]?id|id on file)(?![a-z])[\"']?"
-                    r"(?:\s{0,3}(?:on file|is|number|no\.?|#))?\s{0,3}[:=#(]?\s{0,3}[\"']?"
+                    r"(?:\s{0,3}(?:on file|is|number|no\.?|#))?\s{0,3}[:=#]?\s{0,3}[\"']?"
                     r"((?-i:[A-Z0-9](?:[A-Z0-9]|[ -](?=[A-Z0-9])){4,24}))(?![A-Za-z0-9])")
 
 # ------------------------------------------------------------------------------------- user in a URL or path --
 _URL_USER_RE = re.compile(r"://([^:/?#\s@\[\]]{1,64}):[^@\s/]{1,128}@")
-_HOME_USER_RE = re.compile(r"(?:/home/|/Users/|[A-Za-z]:\\\\?Users\\\\?)([a-z][a-z0-9._-]{1,31})(?=[/\\])")
+_HOME_USER_RE = re.compile(r"(?:/home/|/Users/|[A-Za-z]:\\\\?Users\\\\?)([A-Za-z][A-Za-z0-9._-]{1,31})(?=[/\\])")
 # service accounts and the words of documentation: no person
 SERVICE_USERS = frozenset({
     "root", "runner", "ubuntu", "user", "admin", "shared", "public", "default", "ec2-user", "git", "node", "app",
@@ -83,6 +83,10 @@ SERVICE_USERS = frozenset({
     "dependabot", "renovate", "github-actions", "travis-ci", "drone", "woodpecker", "argocd", "flux", "vault",
     "consul", "nomad", "terraform", "packer", "bitnami", "daemon", "bin", "sys", "sync", "games", "man", "lp",
     "news", "uucp", "proxy", "list", "irc", "gnats", "systemd-network", "messagebus", "sshd", "chrony", "ntp",
+    "oai", "readonly", "read_only", "reader", "writer", "readwrite", "migration", "migrations", "migrator",
+    "replication", "replicator", "repl", "monitor", "monitoring", "metrics", "exporter", "healthcheck", "probe",
+    "owner", "dbo", "dbadmin", "dba", "superuser", "su", "operator", "scheduler", "etl", "analytics", "report",
+    "reporting", "integration", "webhook", "smtp", "imap", "noreply", "no-reply", "relay", "upload", "download",
 })
 # a user name that a tool or an image creates, not a person: appuser, app_user, mambauser, seluser, pwuser, user1
 _SERVICE_USER_RE = re.compile(r"(?i)^(?:.{0,12}[-_]?user\d*|user[-_]?\d+|.{0,20}(?:bot|svc|service|admin|runner|"
@@ -127,7 +131,7 @@ _NOT_A_HOME_RE = re.compile(
     r"(?i)(?<![a-z])(?:hq|headquarters?|head office|office|offices|campus|building|tower|center|centre|museum"
     r"|embassy|botschaft|consulate|station|airport|flughafen|hotel|hospital|klinik|university|universität|school"
     r"|library|stadium|arena|park|mall|store|shop|restaurant|caf[eé]|bank|impressum|anschrift der firma|firmensitz"
-    r"|sitz der gesellschaft|niederlassung|filiale|zweigstelle|branch|gmbh|ag|ug|kg|sas|sa|srl|bv|e\.v\."
+    r"|sitz der gesellschaft|niederlassung|filiale|zweigstelle|branch office|gmbh|ag|ug|kg|sas|sa|srl|bv|e\.v\."
     r"|inc|corp|corporation|llc|ltd|limited|plc|s\.a\.|sarl|s\.r\.l\."
     r"|company|firm|registered|visitor|visit us|our address|unsere adresse|landmark|monument|parliament"
     r"|town hall|rathaus|city hall|cathedral|church|kirche|mairie)(?![a-z])")
@@ -166,23 +170,25 @@ def _city_is_a_word(city: str) -> bool:
     return low in _word_set() or (low.endswith("s") and low[:-1] in _word_set())
 
 
-def _reads_as_words(v: str) -> bool:
+def _reads_as_words(v: str, every: bool = False) -> bool:
     """A value whose words are English words or nouns, not a name: `Customer Portal`, `Run Pytest`, `Product Owner`,
     `Won't Do`, `Mgmt Vpc`. A given name that is also a word (`Mark`, `Rose`) counts as a name."""
     from .detect import _word_set
     words = _word_set()
+    hits = []
     for i, w in enumerate(v.replace("’", "'").split()):
         lw = w.lower().strip(".")
         if "'" in lw and not lw.startswith(("o'", "d'", "l'")):
             return True          # won't, don't: a contraction is prose
         if len(lw) >= 2 and not re.search(r"[aeiouyäöüéèàáíóú]", lw):
             return True          # Mgmt, Vpc: no vowel, an abbreviation
-        if i == 0 and lw in _GIVEN_NAME_WORDS:
+        if len(lw) <= 1 or (i == 0 and lw in _GIVEN_NAME_WORDS):
+            hits.append(False)
             continue
         stem = lw[:-1] if lw.endswith("s") and len(lw) > 4 else lw
-        if lw in _SHORT_EN or (len(lw) >= 3 and (lw in words or stem in words or _NOUN_END_RE.search(lw))):
-            return True
-    return False
+        hits.append(lw in _SHORT_EN or (len(lw) >= 3 and (lw in words or stem in words
+                                                          or bool(_NOUN_END_RE.search(lw)))))
+    return all(hits) if every else any(hits)
 
 
 # given names that are also English words (SCOWL); a value that starts with one may still be a person
@@ -208,8 +214,8 @@ _NOT_A_NAME_WORD = frozenset({
     "controller", "operator", "worker", "manager", "engine", "platform", "studio", "code", "app", "application",
     "suite", "cloud", "api", "sdk", "cli", "ui", "web", "data", "database", "store", "storage", "queue", "stream",
     "network", "labs", "lab", "systems", "solutions", "software", "technologies", "tech", "digital", "media", "games",
-    "university", "universität", "school", "college", "institute", "hospital", "bank", "city", "street", "road",
-    "avenue", "park", "center", "centre", "building", "tower", "station", "airport", "river", "lake", "mountain",
+    "university", "universität", "school", "college", "institute", "hospital", "city", "street", "road",
+    "avenue", "center", "centre", "building", "tower", "station", "airport", "river", "lake", "mountain",
     "north", "south", "east", "west", "new", "san", "los", "las", "saint", "st", "fort", "port", "am", "main",
     "edition", "version", "release", "update", "preview", "beta", "alpha", "stable", "nightly", "pro", "plus",
     "enterprise", "community", "free", "basic", "premium", "standard", "default", "custom", "local", "global",
@@ -356,7 +362,7 @@ RULE_IDS = ("phone-one-digit-groups", "phone-us-national", "birth-date-after-lab
             "user-in-url", "user-in-home-path", "street-address", "name-after-label", "name-before-email",
             "csv-personal-column")
 # the rules a typed prompt also takes: a fix of the phone rule that both channels have
-PROMPT_RULES = frozenset({"phone-one-digit-groups", "phone-us-national"})
+PROMPT_RULES = frozenset({"phone-one-digit-groups"})
 _US_PHONE_REGIONS = frozenset({"us", "ca"})
 
 
@@ -394,7 +400,9 @@ def hits(text: str, channel: str, regions: tuple) -> list:
             d = re.sub(r"\D", "", m.group())
             groups = re.findall(r"\d+", m.group())[1:]
             # a group of two digits or more after the country code: "+1 0 0 1 2 3 4 5" is a row of a matrix
-            if 8 <= len(d) <= 15 and len(set(d)) > 2 and any(len(g) >= 2 for g in groups):
+            # in a typed prompt only after a phone word: "+1 2 3 4 56 7 89" is a row of numbers
+            if 8 <= len(d) <= 15 and len(set(d)) > 2 and any(len(g) >= 2 for g in groups) and (
+                    channel == "tool" or _PHONE_WORD_RE.search(text, max(0, m.start() - 30), m.start())):
                 out.append((m.start(), m.end(), "phone-one-digit-groups", PHONE))
     if "phone-us-national" in want and _US_PHONE_REGIONS.intersection(regions) and "(" in text:
         for m in _US_PHONE_RE.finditer(text):
@@ -437,8 +445,13 @@ def hits(text: str, channel: str, regions: tuple) -> list:
             if not regs.intersection(regions):
                 continue
             for m in rx.finditer(text):
-                prev = text.rfind("\n", 0, max(0, text.rfind("\n", 0, m.start()))) + 1   # this line and the one before
-                if _NOT_A_HOME_RE.search(text, max(prev, m.start() - 160), m.end()) or _GERUND_STREET_RE.search(
+                line = text.rfind("\n", 0, m.start()) + 1
+                prev = text.rfind("\n", 0, max(0, line - 1)) + 1
+                # the line before counts too: a heading (Acme Corp Niederlassung München), a label (Venue: Empire
+                # State Building). "branch" alone is no word here: it is a git branch more often than an office
+                if line:
+                    line = prev
+                if _NOT_A_HOME_RE.search(text, max(line, m.start() - 160), m.end()) or _GERUND_STREET_RE.search(
                         m.group()) or (rx.groups and _city_is_a_word(m.group(1))):
                     continue
                 end = m.end(1) if rx.groups else m.end()
@@ -446,7 +459,10 @@ def hits(text: str, channel: str, regions: tuple) -> list:
     if "name-after-label" in want and (":" in text or "=" in text):
         for m in _NAME_LABEL_RE.finditer(text):
             v = m.group(3).rstrip("'’")   # tenant: 'Jonas Wendler': the closing quote is no part of the name
-            if _name_ok(v) and not _reads_as_words(v):
+            # after a person label (patient, full_name) a surname may be a word (Sarah Park): only a value of words
+            # alone (Product Owner) is no name. After a weak label (name, owner) one word is enough
+            words_only = _reads_as_words(v, every=True) if m.group(1) else _reads_as_words(v)
+            if _name_ok(v) and not words_only:
                 out.append((m.start(3), m.start(3) + len(v), "name-after-label", NAME))
     if "name-before-email" in want and "@" in text:
         for m in _NAME_MAIL_RE.finditer(text):

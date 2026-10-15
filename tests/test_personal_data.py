@@ -65,6 +65,11 @@ class NameTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(values(text), [])
 
+    def test_a_surname_that_is_a_word_after_a_person_label(self):
+        for text, name in (("customer_name: Sarah Park", "Sarah Park"), ("tenant: Michael King", "Michael King")):
+            with self.subTest(text=text):
+                self.assertEqual(values(text), [("name-after-label", name)])
+
     def test_a_closing_quote_is_no_part_of_the_name(self):
         self.assertEqual(values("tenant: 'Jonas Wendler'"), [("name-after-label", "Jonas Wendler")])
 
@@ -112,7 +117,7 @@ class IdNumberTests(unittest.TestCase):
     def test_a_specimen_a_snowflake_and_a_count_stay_text(self):
         for text in ("Specimen passport X0000000 (ICAO 9303 example)", "member id: 123456789012345678",
                      "account number of retries: 3", "x = sin(12345)", "<dl>12345</dl>",
-                     "HPE ProLiant DL360 Gen10 Plus", "WHERE member_id = 20231115 LIMIT 10"):
+                     "HPE ProLiant DL360 Gen10 Plus", "WHERE member_id = 20231115 LIMIT 10", "SELECT SIN(31415);"):
             with self.subTest(text=text):
                 self.assertEqual(values(text), [])
 
@@ -127,7 +132,8 @@ class UrlUserTests(unittest.TestCase):
                      J(["https://__to", "ken__:x@upload.pypi.org/legacy/"]),
                      "ftp://anonymous:anonymous@ftp.example.org/pub/", "redis://${REDIS_USER}:${REDIS_PASS}@cache:6379",
                      "https://app4k29x1m8:x@api.example.net/", "amqp://rabbitmq:x@mq:5672/",
-                     "https://gitlab-ci-token:x@gitlab.example.net/g/p.git", "postgres://app_user:x@db/app"):
+                     "https://gitlab-ci-token:x@gitlab.example.net/g/p.git", "postgres://app_user:x@db/app",
+                     "postgresql://readonly:${DB_PASSWORD}@postgres/app", "https://reader:x@docs.internal/api"):
             with self.subTest(text=text):
                 self.assertEqual(values(text), [])
 
@@ -138,10 +144,14 @@ class HomeUserTests(unittest.TestCase):
                          [("user-in-home-path", "tkellermann")])
         self.assertEqual(values("C:\\Users\\nwhitfield\\Desktop\\notes.txt"), [("user-in-home-path", "nwhitfield")])
 
+    def test_a_user_name_with_capitals(self):
+        self.assertEqual(values("C:\\Users\\SarahMiller\\project\\main.py"), [("user-in-home-path", "SarahMiller")])
+        self.assertEqual(values("/Users/Shared/data"), [])
+
     def test_service_accounts_templates_and_the_own_home_stay_text(self):
         for text in ("/home/runner/work/app/app", "/Users/Shared/data", "C:\\Users\\Public\\Documents\\x",
                      "/home/appuser/app/main.py", "/home/nonroot/.cache", "/home/seluser/Downloads/x",
-                     "/home/user1/x", "/home/airflow/dags/x.py"):
+                     "/home/user1/x", "/home/airflow/dags/x.py", "File /home/oai/share/project/main.py, line 42"):
             with self.subTest(text=text):
                 self.assertEqual(values(text), [])
         with mock.patch.object(personal.getpass, "getuser", return_value="tkellermann"):
@@ -164,6 +174,10 @@ class AddressTests(unittest.TestCase):
         self.assertEqual(hits, [k for k in hits if k not in personal.RULE_IDS])
         self.assertTrue(hits)
 
+    def test_a_field_on_the_line_before_is_no_company(self):
+        text = "branch: main\nAdresse: Lindenstraße 12, 10115 Berlin"
+        self.assertEqual(values(text, region=("de",)), [("street-address", "Lindenstraße 12, 10115 Berlin")])
+
     def test_a_company_or_a_landmark_address_stays_text(self):
         for text in ("Impressum: Muster GmbH, Hauptstraße 1, 10115 Berlin",
                      "Acme Corp Niederlassung München\nLeopoldstraße 250, 80807 München",
@@ -181,6 +195,10 @@ class PhoneTests(unittest.TestCase):
         for ch in ("tool", "prompt"):
             with self.subTest(channel=ch):
                 self.assertEqual(values(text, ch), [("phone-one-digit-groups", "+1 4 1 5 223 3344")])
+
+    def test_a_typed_prompt_needs_a_phone_word_and_takes_no_us_form(self):
+        self.assertEqual(values("Fix the parser for this matrix row: +1 2 3 4 56 7 89", "prompt"), [])
+        self.assertEqual(values("Why does the phone parser reject (212) 867-5309 here?", "prompt", ("us",)), [])
 
     def test_a_us_number_needs_its_label_its_region_and_no_555(self):
         self.assertEqual(values("Tel: (312) 846-2291", region=("us",)), [("phone-us-national", "(312) 846-2291")])
@@ -252,7 +270,8 @@ class OpenAiAnthropicKeyTests(unittest.TestCase):
                 self.assertEqual(hits[0][1], tok)
 
     def test_a_word_after_the_prefix_is_no_key(self):
-        for text in ("rename sk-admin-sidebar-navigation-item", "the sk-proj-overview-header-container-large class"):
+        for text in ("rename sk-admin-sidebar-navigation-item", "the sk-proj-overview-header-container-large class",
+                     "rename sk-admin-sidebar-navigation-item2X", "stack sk-admin-ApiGateway-Stack-2026"):
             with self.subTest(text=text):
                 self.assertEqual(scan(text, "prompt"), [])
 
@@ -266,7 +285,10 @@ class SlackTokenTests(unittest.TestCase):
     def test_a_short_slack_token(self):
         tok = J(["xox", "b-", "48213-", "Qw7eRt6yUi5oPa4sDf3gHj"])
         self.assertEqual([(m.kind, m.value) for m in scan("key " + tok, "prompt")], [("slack-token-relaxed", tok)])
-        self.assertEqual(scan("xoxo-hugs-and-kisses-to-everyone!", "prompt"), [])
+        for text in ("xoxo-hugs-and-kisses-to-everyone!", "Investigate xoxb-background-worker-release-2024",
+                     "xoxb-Team-Notifications-2026-Q4"):
+            with self.subTest(text=text):
+                self.assertEqual(scan(text, "prompt"), [])
 
 
 class TwilioTests(unittest.TestCase):
@@ -275,6 +297,8 @@ class TwilioTests(unittest.TestCase):
         self.assertEqual([m.kind for m in scan("TWILIO_ACCOUNT_SID=" + sid, "prompt")],
                          ["twilio-account-sid-labelled"])
         self.assertEqual([m.kind for m in scan("digest " + sid, "prompt")], [])
+        counted = J(["AC", "0123456789abcdef", "0123456789abcdef"])
+        self.assertEqual(scan("account_sid " + counted, "prompt"), [])
 
 
 if __name__ == "__main__":

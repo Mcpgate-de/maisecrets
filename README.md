@@ -1349,17 +1349,22 @@ Four sources, one scanner (`maisecrets/detect.py`):
   street address with its postcode in the form of an active region (US, UK, IN; DE, AT, CH; FR,
   BE, LU; PT, BR, ES, IT; an address next to a company, office or landmark word stays text), and
   the cells of a CSV column for personal data (`address`, `dob`, `phone`, `ssn`, and a name or user
-  column beside one of them). A typed prompt takes none of them: a hit blocks a prompt, and a
+  column beside one of them; an address or a phone cell only in a row that also names a person). A
+  typed prompt takes none of them: a hit blocks a prompt, and a
   person who types a name means to send it. Documentation names (`Erika Mustermann`, `John Doe`)
   stay text. `tests/fp_corpus_pii.py` holds 367 developer texts in these shapes that are no
   personal data (Kubernetes YAML, package authors that are teams, company addresses, dates that
   are no birth dates); the rules leave all of them alone.
-- A phone number with one-digit groups after the country code (`+1 4 1 5 …`, 0.6.21) in both
-  channels, and a US number in the national form `(312) 846-2291` after a phone word with region
-  `us` or `ca` (the fictional 555 exchange stays text).
+- A phone number with one-digit groups after the country code (`+1 4 1 5 …`, 0.6.21): in a tool
+  result, and in a typed prompt after a phone word; a US number in the national form
+  `(312) 846-2291` after a phone word with region `us` or `ca`, in a tool result only (an area code
+  and an exchange start with 2 to 9; the fictional 555 exchange stays text).
 - Three token forms with a tail shorter than the vendored rules want (0.6.21): an OpenAI or
-  Anthropic key (`sk-proj-`, `sk-ant-`, `sk-svcacct-`, `sk-admin-`), a Slack token (`xoxb-`,
-  `xoxp-`, …), and a Twilio Account SID (`AC` and 32 hex digits) next to its name.
+  Anthropic key (`sk-proj-`, `sk-ant-`, `sk-svcacct-`, `sk-admin-`; the tail needs a digit, a capital
+  and a run of 16 letters and digits, so a CSS class such as `sk-admin-sidebar-item2X` stays text),
+  a Slack token (`xoxb-`, `xoxp-`, `xoxa-`, `xoxr-` with digits and a hyphen first), and a Twilio
+  Account SID (`AC` and 32 hex digits) next to its name; a counted fixture (`AC0123456789abcdef…`)
+  stays text.
 
 IBAN, credit card and IP come from Presidio's regexes with our validators
 (mod-97, Luhn, public-range check). An IBAN may have spaces or hyphens

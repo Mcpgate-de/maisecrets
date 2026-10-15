@@ -56,7 +56,8 @@ def _parsed(text: str) -> dict:
 def _append(line: str) -> None:
     old: list[str] = []
     if EVENTS.exists():
-        old = EVENTS.read_text(encoding="utf-8").splitlines()
+        # a broken byte in the log must not stop the record (Gate B of 0.6.21)
+        old = EVENTS.read_text(encoding="utf-8", errors="replace").splitlines()
     lines = old + [line]
 
     def removal_only(text: str) -> bool:
@@ -79,7 +80,7 @@ def _append(line: str) -> None:
 def load(n: int = 20) -> list[dict]:
     """The last n detection events; a line about a loosened protection is not one."""
     try:
-        lines = EVENTS.read_text(encoding="utf-8").splitlines()
+        lines = EVENTS.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return []
     out = []
@@ -110,7 +111,7 @@ def record_weakening(kind: str, name: str, route: str) -> None:
     try:
         HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
         try:
-            old = [_parsed(x) for x in EVENTS.read_text(encoding="utf-8").splitlines()]
+            old = [_parsed(x) for x in EVENTS.read_text(encoding="utf-8", errors="replace").splitlines()]
         except FileNotFoundError:
             old = []
         last = max((e["t"] for e in old if "weakened" in e and isinstance(e.get("t"), int)), default=0)
@@ -121,7 +122,7 @@ def record_weakening(kind: str, name: str, route: str) -> None:
             "weakened": kind, "name": _NAME_RE.sub("", str(name))[:64],
             "route": route if route in ROUTES else "other", "version": plugin_version(),
         }))
-    except OSError:
+    except (OSError, ValueError):
         pass
 
 
@@ -142,8 +143,8 @@ def weakenings_since_last_start() -> str | None:
     except (OSError, ValueError):
         shown = 0
     try:
-        lines = EVENTS.read_text(encoding="utf-8").splitlines()
-    except OSError:
+        lines = EVENTS.read_text(encoding="utf-8", errors="replace").splitlines()
+    except (OSError, ValueError):
         return None
     new = [e for e in map(_parsed, lines) if e.get("weakened") and isinstance(e.get("t"), int) and e["t"] > shown]
     if not new:

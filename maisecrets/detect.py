@@ -1235,7 +1235,20 @@ LITERAL_RULES = (
 _LITERAL_IDS = frozenset(d["id"] for d in LITERAL_RULES)
 
 
+def _random_hex(v: str) -> bool:
+    """A hex id that is no counted fixture: AC0123456789abcdef… or one repeated digit is a test value."""
+    h = v[2:].lower()
+    if not h or any(c not in "0123456789abcdef" for c in h):
+        return False
+    run = best = 1
+    for a, b in zip(h, h[1:]):
+        run = run + 1 if int(b, 16) == (int(a, 16) + 1) % 16 else 1
+        best = max(best, run)
+    return best < 8 and len(set(h)) > 4
+
+
 VALIDATORS = {
+    "random_hex": _random_hex,
     "ds_value": _ds_value_ok,
     "apikey_value": _apikey_value_ok,
     "word_value": _word_value_ok,
@@ -1454,7 +1467,7 @@ OWN_RULES: list[dict] = [
     # a Twilio Account SID (AC and 32 hex digits) next to its name: the SID and the auth token together log in, and
     # the holdout sets of the public benchmark (2026-10-14) leaked three. Without the name, AC and 32 hex digits are
     # also hashes and ids
-    {"id": "twilio-account-sid-labelled", "type": "SECRET", "secret_group": 1,
+    {"id": "twilio-account-sid-labelled", "type": "SECRET", "secret_group": 1, "validator": "random_hex",
      "regex": r"(?i:twilio|account_?sid|(?<![a-z])sid(?![a-z]))[^\n]{0,40}?(?<![A-Za-z0-9])(AC[0-9a-f]{32})"
               r"(?![A-Za-z0-9])"},
     {"id": "auth-scheme-apikey", "type": "SECRET", "secret_group": 1, "validator": "apikey_value",

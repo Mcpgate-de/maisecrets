@@ -149,6 +149,12 @@ class SessionStart(unittest.TestCase):
         self.assertIn("1 protection was loosened: forget SECRET_c4 (slash command).",
                       events.weakenings_since_last_start())
 
+    def test_a_broken_byte_in_the_log_neither_stops_the_line_nor_the_sentence(self):
+        events.EVENTS.parent.mkdir(parents=True, exist_ok=True)
+        events.EVENTS.write_bytes(b"\xff\n")
+        events.record_weakening("forget", "SECRET_c5", "cli")
+        self.assertIn("1 protection was loosened: forget SECRET_c5 (cli).", events.weakenings_since_last_start())
+
     def test_many_are_counted_and_a_detection_never_pushes_one_out(self):
         for i in range(7):
             events.record_weakening("forget", f"SECRET_c{i}", "cli")
