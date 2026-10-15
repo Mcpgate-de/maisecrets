@@ -35,6 +35,40 @@ CONFIG = HOME / "config.json"
 _DEFAULT_HOME = Path.home() / ".maisecrets"
 SERVICE = "maisecrets" if HOME == _DEFAULT_HOME else "maisecrets@" + hashlib.sha256(str(HOME).encode()).hexdigest()[:8]
 
+
+class WrongHome(RuntimeError):
+    """The vault was imported before a test run chose its own home, and still names the user's own home."""
+
+
+def _within_default_home(path: Path) -> bool:
+    """The user's own home or a path inside it, also through `..` or a symbolic link, and the same directory by
+    device and inode: a bind mount, or another case of the name on a case-insensitive disk (codex Gate A of the
+    registry, rounds 1 and 2). Runs only under a test run's marker."""
+    real, home = path.resolve(), _DEFAULT_HOME.resolve()
+    if real == home or home in real.parents:
+        return True
+    if not home.exists():
+        return False
+    for p in (real, *real.parents):
+        try:
+            if p.exists() and os.path.samefile(p, home):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _check_home() -> None:
+    """A test run owns a temp home (tests/_isolate.py sets MAISECRETS_TEST_HOME_OWNED). HOME is bound at import, so a
+    runner that loaded the vault before the isolation kept the real home, and the resets of the suite deleted the
+    real index, vault file and key (a fork's runner, 2026-10-12). Under that marker the user's own ~/.maisecrets is
+    refused before a read or a write. A second temp home that a test chooses on purpose stays allowed. Without the
+    marker (every real hook) this is one environment lookup."""
+    owned = os.environ.get("MAISECRETS_TEST_HOME_OWNED")
+    if owned and _within_default_home(HOME):
+        raise WrongHome(f"the vault names the user's own {HOME}, but this test run owns {owned}: import "
+                        "tests/_isolate.py before anything that imports maisecrets.vault")
+
 DEFAULT_CONFIG = {
     "backend": "keychain",          # keychain (macOS) | windows-vault | encrypted-file (Linux) | jsonfile (test)
     "report_url": "https://github.com/Mcpgate-de/maisecrets/issues",   # shown in the block notice
@@ -345,6 +379,7 @@ def load_config() -> dict:
     on an older client is worse than a guard without a settings dialog. A wrong type raises
     ConfigError with the key name: a silent AttributeError later locked the user out with no
     hint at the config (review, 2026-09-26)."""
+    _check_home()
     import copy
     import platform as _platform
     cfg = copy.deepcopy(DEFAULT_CONFIG)
@@ -580,8 +615,8 @@ DEFAULT_WORDS = frozenset({
 def is_weak(kind: str, value: str) -> bool:
     """A value that only a label rule found and that is a known default word (DEFAULT_WORDS): replaced where it was
     found, never hunted in other texts."""
-    from .detect import LABEL_RULES
-    return str(kind).startswith(LABEL_RULES) and value.strip().lower() in DEFAULT_WORDS
+    from .registry import is_label
+    return is_label(kind) and value.strip().lower() in DEFAULT_WORDS
 
 
 def is_quiet(kind: str, value: str, tool: bool) -> bool:
@@ -590,8 +625,9 @@ def is_quiet(kind: str, value: str, tool: bool) -> bool:
     A word the person gives in a prompt stays hunted everywhere: a chosen word is a password there (review,
     2026-09-29). A random value that reads like a word (about 3 in 100 of 8 small letters) is then not looked for in
     a prompt that types it bare; it is still masked in every tool result. Only a new entry gets the mark."""
-    from .detect import LABEL_RULES, reads_as_word
-    return tool and str(kind).startswith(LABEL_RULES) and reads_as_word(value.strip())
+    from .detect import reads_as_word
+    from .registry import is_label
+    return tool and is_label(kind) and reads_as_word(value.strip())
 
 
 # ---------------------------------------------------------------- backends --
@@ -946,6 +982,7 @@ class WindowsVaultBackend:
 
 def make_backend(cfg: dict):
     """keychain on macOS; an openssl-encrypted file elsewhere; jsonfile only when asked (test mode)."""
+    _check_home()
     backend = cfg.get("backend", "keychain")
     if backend == "jsonfile":
         return JsonFileBackend()
@@ -1062,9 +1099,9 @@ class Vault:
         """Mark the weak entries a version before 0.5.15 stored without the mark (see Entry.weak). Reads the value of
         each unmarked label-rule entry once; a store that refuses the read leaves the entry unmarked for the next
         start. Returns the count marked weak."""
-        from .detect import LABEL_RULES
+        from .registry import is_label
         todo = [k for k, m in self._index["entries"].items()
-                if "weak" not in m and not m.get("purged") and str(m.get("kind", "")).startswith(LABEL_RULES)]
+                if "weak" not in m and not m.get("purged") and is_label(m.get("kind", ""))]
         n = 0
         for key in todo:
             try:
