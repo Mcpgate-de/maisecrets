@@ -59,6 +59,7 @@ gitlab-ci-job-token-any      glcbt-(?:(?<![A-Za-z0-9_-]glcbt-)|(?<=\\[nrt]glcbt-
 # token shorter than the vendored rules want (they fix the length of the tail). The sk- tail needs a digit, a capital
 # and a run of 16 letters and digits; the Slack tail starts with digits and a hyphen, as Slack writes it:
 # sk-admin-sidebar-navigation-item2X and xoxb-background-worker-release-2024 are names. Both run after the vendored rules
-# (detect._LATE_RULES): a key of the full vendored form keeps its vendored rule
-openai-anthropic-key-relaxed (?<![\w-])sk-(?:proj|ant|svcacct|admin)-(?=[A-Za-z0-9_-]{0,200}[0-9])(?=[A-Za-z0-9_-]{0,200}[A-Z])(?=[A-Za-z0-9_-]{0,200}?[A-Za-z0-9]{16})[A-Za-z0-9_-]{20,}
+# (detect._LATE_RULES): a key of the full vendored form keeps its vendored rule, and a key that a fallback rule of
+# 0.6.20 takes (T3BlbkFJ inside, api03- and AA at the end) is left to it
+openai-anthropic-key-relaxed (?<![\w-])sk-(?:proj|ant|svcacct|admin)-(?![A-Za-z0-9_-]{0,400}T3BlbkFJ)(?!(?:api03|admin01)-[A-Za-z0-9_-]{60,140}AA(?![A-Za-z0-9_-]))(?=[A-Za-z0-9_-]{0,200}[0-9])(?=[A-Za-z0-9_-]{0,200}[A-Z])(?=[A-Za-z0-9_-]{0,200}?[A-Za-z0-9]{16})[A-Za-z0-9_-]{20,}
 slack-token-relaxed          (?<![\w-])(?:xoxb-|xoxp-|xoxa-|xoxr-)\d{2,}-[A-Za-z0-9-]{12,}
