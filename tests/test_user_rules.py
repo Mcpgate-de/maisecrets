@@ -824,6 +824,7 @@ class Robust(Base):
             CONFIG.write_text(json.dumps({**TEST_CONFIG, "rule_dirs": [str(team)]}))
             self.assertEqual(cli.main(["rules"]), 0)
 
+    @unittest.skipIf(os.name == "nt", "a Windows file name is UTF-16: no name holds an undecodable byte")
     def test_a_file_name_that_is_no_utf_8_counts_in_the_hash_and_prints(self):
         # APFS refuses such a name, so the listing is faked here; Linux runs the test above with a real file
         name = os.fsdecode(b"bad\xff.prefixes")
