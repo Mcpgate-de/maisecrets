@@ -57,7 +57,7 @@ Everything a hook runs is readable source in this folder. No download, no
 package install, no dependency outside the Python standard library and the
 system tools it names (`security`, PowerShell, `openssl`, a clipboard tool).
 
-What it does not do: detect names, follow a value through an encoding a
+What it does not do: detect a name without a label, follow a value through an encoding a
 command applies, or protect against a process that runs as you. "Known gaps"
 below lists every limit that was measured.
 
@@ -1337,6 +1337,30 @@ Four sources, one scanner (`maisecrets/detect.py`):
   Joining the next line was measured on five months of session logs and left
   out: nearly every candidate was the next `.env` line, not the rest of a key.
 
+- Personal data after a label or in a fixed form (0.6.21, `maisecrets/personal.py`), in a tool
+  result or a file only: a name after a name label (`patient:`, `tenant:`, `full_name:`, `FN:`,
+  `Ansprechpartner:`; after the weak labels `name`, `owner` and `author` only a value that does not
+  read as English words or nouns, so `name: Customer Portal` stays text), a name before an e-mail
+  address (`First Last <mail>`, not before a bot or a service mailbox), a date after a birth label
+  (`DOB`, `Geburtsdatum`, `né le`, `fecha de nacimiento`; not after `born`), an ID number of five
+  digits and more after an ID label (`MRN`, `passport no`, `DL`, `SIN`, `TFN`, `NIR`, `tax id`,
+  `account number`), the user in `user:password@host` and in another person's home path
+  (`/home/<user>/`, `C:\Users\<user>\`; service accounts and your own user name stay text), a
+  street address with its postcode in the form of an active region (US, UK, IN; DE, AT, CH; FR,
+  BE, LU; PT, BR, ES, IT; an address next to a company, office or landmark word stays text), and
+  the cells of a CSV column for personal data (`address`, `dob`, `phone`, `ssn`, and a name or user
+  column beside one of them). A typed prompt takes none of them: a hit blocks a prompt, and a
+  person who types a name means to send it. Documentation names (`Erika Mustermann`, `John Doe`)
+  stay text. `tests/fp_corpus_pii.py` holds 367 developer texts in these shapes that are no
+  personal data (Kubernetes YAML, package authors that are teams, company addresses, dates that
+  are no birth dates); the rules leave all of them alone.
+- A phone number with one-digit groups after the country code (`+1 4 1 5 …`, 0.6.21) in both
+  channels, and a US number in the national form `(312) 846-2291` after a phone word with region
+  `us` or `ca` (the fictional 555 exchange stays text).
+- Three token forms with a tail shorter than the vendored rules want (0.6.21): an OpenAI or
+  Anthropic key (`sk-proj-`, `sk-ant-`, `sk-svcacct-`, `sk-admin-`), a Slack token (`xoxb-`,
+  `xoxp-`, …), and a Twilio Account SID (`AC` and 32 hex digits) next to its name.
+
 IBAN, credit card and IP come from Presidio's regexes with our validators
 (mod-97, Luhn, public-range check). An IBAN may have spaces or hyphens
 between its groups; an IBAN in lower case also needs the length of its
@@ -1389,7 +1413,10 @@ a to-do.
   Bash output that Claude Code sends as an image.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt
   hook blocks them when the path exists; ask Claude to read the file instead.
-- **Names are not detected.** Regex only, by design.
+- **A name without a label is not detected.** Regex only, by design: "Emma Johansson" alone looks like any two
+  capitalised words. A name after a name label, before an e-mail address or in a CSV name column is masked
+  in a tool result (0.6.21); in a typed prompt no name is detected. A street address without a postcode, or
+  in a form of a region that is not active, passes too.
 - **A transformed value can pass.** For a value this session resolved, the
   output is checked as a substring in plain, base64, hex, URL-encoded and
   JSON-escaped form, and a resolving command may not encode it in the first

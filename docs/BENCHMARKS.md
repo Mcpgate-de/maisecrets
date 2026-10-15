@@ -104,6 +104,102 @@ differ by up to 7 %). Source: `scripts/measure_scan_time.py --maisecrets <v0.6.1
 | log, 70 KB | 80 ms | 80 ms | 96 ms | 94 ms |
 | configuration, 70 KB, 2,092 password labels | 187 ms | 185 ms | 242 ms | 241 ms |
 
+## Cloakroom holdout sets, 2026-10-15
+
+Cloakroom's holdout sets v2 to v7 (`bench/holdout_v*.jsonl` at commit `cc3c88d76a`, 2026-10-14): 1,652 planted values
+in 1,437 samples and 215 clean samples. A value counts as leaked when it still appears after every match is masked.
+Tool channel (`detect.scan(text, channel="tool")`), `--locale de_DE`. Source: a script outside this repository that
+reads the sets and calls `detect.scan`, 2026-10-15. 0.6.18 is tag `v0.6.18`; 0.6.21 is this branch.
+
+The rules of 0.6.21 come from the values that 0.6.18 leaked. Each sample falls into half D or half C by the first 8 hex
+digits of sha256 of `<set>/<id>` (even: D). The rules were written from the leaks of half D; half C was only counted.
+Cloakroom tuned its own engine on v2 to v5 after their first run; v6 was never tuned on (their `bench/RESULTS.md`).
+
+Regions `us`, `uk`, `in` (as on Cloakroom's machine):
+
+| Set | Values | Leaked, 0.6.18 | Leaked, 0.6.21 | Clean samples | False alarms, 0.6.18 | False alarms, 0.6.21 |
+|---|---|---|---|---|---|---|
+| holdout v2 | 219 | 82 | 57 | 40 | 1 | 1 |
+| holdout v3 | 320 | 136 | 82 | 40 | 1 | 1 |
+| holdout v4 | 328 | 176 | 115 | 40 | 2 | 2 |
+| holdout v5 | 394 | 201 | 135 | 40 | 2 | 2 |
+| holdout v6 | 314 | 163 | 110 | 40 | 0 | 0 |
+| holdout v7 | 77 | 3 | 0 | 15 | 1 | 1 |
+| half D (rules written here) | 822 | 380 | 240 | 107 | 4 | 4 |
+| half C (counted only) | 830 | 381 | 259 | 108 | 3 | 3 |
+| all | 1,652 | 761 | 499 | 215 | 7 | 7 |
+
+Regions `de`:
+
+| Set | Values | Leaked, 0.6.18 | Leaked, 0.6.21 | Clean samples | False alarms, 0.6.18 | False alarms, 0.6.21 |
+|---|---|---|---|---|---|---|
+| holdout v2 | 219 | 94 | 69 | 40 | 0 | 0 |
+| holdout v3 | 320 | 148 | 97 | 40 | 0 | 0 |
+| holdout v4 | 328 | 181 | 121 | 40 | 0 | 0 |
+| holdout v5 | 394 | 209 | 146 | 40 | 0 | 0 |
+| holdout v6 | 314 | 182 | 136 | 40 | 0 | 0 |
+| holdout v7 | 77 | 3 | 0 | 15 | 1 | 1 |
+| half D (rules written here) | 822 | 413 | 279 | 107 | 0 | 0 |
+| half C (counted only) | 830 | 404 | 290 | 108 | 1 | 1 |
+| all | 1,652 | 817 | 569 | 215 | 1 | 1 |
+
+Each new rule alone on 0.6.18: values it closes, half D / half C, and new hits on the four sets of ordinary text.
+"PII corpus" is `tests/fp_corpus_pii.py` (367 developer texts in the shape of personal data that are none, tool and
+prompt channel, ten regions); "developer texts" are 2,464 texts in the tool channel (`tests/fp_corpus.py` and the
+review corpora of 0.6.15 and 0.6.16) and "prompts" are 771 typed prompts of the maintainers in the prompt channel.
+
+| Rule | Closed, us uk in: D / C | Closed, de: D / C | New false alarms, holdouts | New hits, PII corpus | New hits, developer texts | Newly blocked prompts |
+|---|---|---|---|---|---|---|
+| `name-after-label` | 39 / 21 | 39 / 21 | 0 | 0 | 0 | 0 |
+| `name-before-email` | 23 / 24 | 23 / 24 | 0 | 0 | 0 | 0 |
+| `birth-date-after-label` | 26 / 21 | 26 / 21 | 0 | 0 | 0 | 0 |
+| `street-address` | 14 / 14 | 4 / 3 | 0 | 0 | 0 | 0 |
+| `id-number-after-label` | 12 / 8 | 15 / 11 | 0 | 0 | 0 | 0 |
+| `csv-personal-column` | 10 / 8 | 15 / 9 | 0 | 0 | 0 | 0 |
+| `user-in-home-path` | 5 / 9 | 5 / 9 | 0 | 0 | 0 | 0 |
+| `user-in-url` | 4 / 2 | 4 / 2 | 0 | 0 | 0 | 0 |
+| `phone-one-digit-groups` | 3 / 10 | 3 / 10 | 0 | 0 | 0 | 0 |
+| `phone-us-national` | 4 / 1 | 0 / 0 | 0 | 0 | 0 | 0 |
+| `twilio-account-sid-labelled` | 3 / 5 | 3 / 5 | 0 | 0 | 0 | 0 |
+| `openai-anthropic-key-relaxed` | 3 / 1 | 3 / 1 | 0 | 0 | 0 | 0 |
+| `slack-token-relaxed` | 1 / 1 | 1 / 1 | 0 | 0 | 0 | 0 |
+
+The rules of 0.6.18 already hit 8 of the 367 texts of the PII corpus (4 by `phone`, one each by `de-vat-id`,
+`email`, `us-bank` and `de-plz`); 0.6.21 adds none. The 44 true hits of the corpus (46 values): 0.6.18 masks 8,
+0.6.21 masks 46.
+
+Left out after measuring (holdout analysis of 2026-10-14): an AWS key id with any capital and digit (CredData +105
+credentials, +48 false alarms), a user name after a user label, a password or a token word in prose, and a Twilio
+Account SID without its name.
+
+CredData, line method, without `2ba83c6a`, `--locale de_DE`. Source: `scripts/measure_creddata.py`, 2026-10-15.
+
+| Release | Channel | Regions | TP | FP | P | R | F1 |
+|---|---|---|---|---|---|---|---|
+| 0.6.18 | tool | de | 5,854 | 445 | 0.929 | 0.579 | 0.714 |
+| 0.6.21 | tool | de | 5,862 | 446 | 0.929 | 0.580 | 0.714 |
+| 0.6.18 | tool | us | 5,854 | 991 | 0.855 | 0.579 | 0.691 |
+| 0.6.21 | tool | us | 5,862 | 992 | 0.855 | 0.580 | 0.691 |
+| 0.6.18 | prompt | de | 5,328 | 441 | 0.924 | 0.527 | 0.671 |
+| 0.6.21 | prompt | de | 5,336 | 441 | 0.924 | 0.528 | 0.672 |
+| 0.6.18 | prompt | us | 5,328 | 987 | 0.844 | 0.527 | 0.649 |
+| 0.6.21 | prompt | us | 5,336 | 987 | 0.844 | 0.528 | 0.650 |
+
+The 8 new true positives come from `twilio-account-sid-labelled`. The one new false alarm in the tool channel is a
+Windows home path in a JSON fixture whose user part is a person's user name; CredData labels the line as no password,
+and `user-in-home-path` masks the user name as personal data.
+
+Time per scan, tool channel, Python 3.14.8, `scripts/measure_scan_time.py`, three rounds per release, interleaved, load
+average 4.2 to 5.0 (above the bar of 4 of "Timing"; rounds differ by up to 30 %), 2026-10-15:
+
+| Input | 0.6.18, range of rounds | 0.6.21, range of rounds |
+|---|---|---|
+| import + first scan | 50–68 ms | 57–65 ms |
+| typed prompt, 1 KB | 2.0–2.9 ms | 2.2–2.5 ms |
+| Python code, 70 KB | 129–167 ms | 153–176 ms |
+| log, 70 KB | 92–135 ms | 114–139 ms |
+| configuration, 70 KB | 206–257 ms | 243–272 ms |
+
 ## Comparison with other tools
 
 "Theirs" is Cloakroom's
@@ -139,7 +235,8 @@ The line method (each labelled line alone, without its file path) and the split 
 repository come from the [Cloakroom](https://github.com/shanjeevrajendran/cloakroom) benchmark
 ([`bench/RESULTS.md`](https://github.com/shanjeevrajendran/cloakroom/blob/cf4360c8bd/bench/RESULTS.md)) and from
 the discussion in [Mcpgate-de/maisecrets#17](https://github.com/Mcpgate-de/maisecrets/issues/17).
-`scripts/measure_creddata.py` follows its `bench/credata.py`.
+`scripts/measure_creddata.py` follows its `bench/credata.py`. The holdout sets v2 to v7 are Cloakroom's. The rule families of 0.6.21 for a name before an
+e-mail address and for the columns of a CSV header follow Cloakroom's rules (Apache-2.0); the code is written anew.
 
 ## Method and limits
 
