@@ -339,9 +339,9 @@ def loosens(key: str, before, after) -> bool:
     if key == "ssh_autonomous_hosts":
         return bool(set(after or []) - set(before or []))
 
-    def same(dirs) -> set:     # ~/team and /home/me/team/ are one folder
-        return {os.path.normcase(os.path.expanduser(d.strip()).rstrip("/\\")) for d in dirs or []
-                if isinstance(d, str)}
+    def same(dirs) -> set:     # ~/team, /home/me/team/ and /home/me/./team are one folder
+        return {os.path.normcase(os.path.normpath(os.path.expanduser(d.strip()))) for d in dirs or []
+                if isinstance(d, str) and d.strip()}
     if key == "clean_dirs":
         return bool(same(after) - same(before))     # a new clean folder: its files pass
     if key == "rule_dirs":
