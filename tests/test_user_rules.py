@@ -812,8 +812,9 @@ class Robust(Base):
         team = self._team([{"id": "ok", "regex": r"tkk_[a-z]{20}"}])
         try:
             fd = os.open(os.path.join(os.fsencode(team), b"bad\xff.json"), os.O_WRONLY | os.O_CREAT, 0o600)
-        except OSError:
-            self.skipTest("this file system refuses a name that is no UTF-8 (APFS)")
+        except (OSError, UnicodeError):
+            # APFS refuses such a name; Windows cannot even pass it (its names are UTF-16, os.open decodes the bytes)
+            self.skipTest("this file system refuses a name that is no UTF-8 (APFS, Windows)")
         os.write(fd, json.dumps({"rules": [{"id": "odd", "regex": r"tko_[a-z]{20}"}]}).encode())
         os.close(fd)
         write_rules(OWN, [{"id": "mine", "regex": r"tkx_[A-Za-z0-9]{24}"}])
