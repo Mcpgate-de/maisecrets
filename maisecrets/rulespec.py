@@ -46,6 +46,7 @@ class RuleSpec:
     matcher: str = "regex"   # matcher_of
     filters: frozenset = frozenset()   # filters_of
     language: str = ""   # the label languages of a label source ("en,de"), else ""
+    needs: str = ""      # a rule of a pass: "label" (a word before the value names it) or "form" (a fixed syntax)
     upstream: Upstream | None = None
     patches: tuple = field(default=())
 
@@ -136,18 +137,19 @@ def canonical_sha256(rule: dict) -> str:
 
 
 def pass_specs(export_rule: str, export_type: str, personal_rules: tuple, prompt_rules: frozenset,
-               personal_types: dict) -> list:
+               personal_types: dict, regions: dict | None = None, needs: dict | None = None) -> list:
     """The specs of the passes outside the rule list: the password export (tool channel only) and the personal-data
-    rules (tool channel; the ones in personal.PROMPT_RULES in both)."""
-    out = [make("export", export_rule, export_type, 0, channel="tool")]
+    rules (tool channel; the ones in personal.PROMPT_RULES in both), each with its region and what it needs."""
+    out = [make("export", export_rule, export_type, 0, channel="tool", needs="form")]
     for seq, rid in enumerate(personal_rules):
         out.append(make("personal", rid, personal_types.get(rid, "PERSON"), seq,
-                        channel="both" if rid in prompt_rules else "tool"))
+                        channel="both" if rid in prompt_rules else "tool",
+                        region=(regions or {}).get(rid, "generic"), needs=(needs or {}).get(rid, "")))
     return out
 
 
 def make(source: str, rule_id: str, type_: str, seq: int, *, region: str = "generic", channel: str = "both",
-         language: str = "", upstream: Upstream | None = None, patches: tuple = ()) -> RuleSpec:
+         language: str = "", upstream: Upstream | None = None, patches: tuple = (), needs: str = "") -> RuleSpec:
     origin = "vendored" if source in VENDORED else OWN_SPECIAL.get(source, "own")
     if source in PASSES:
         origin = "own"
@@ -158,4 +160,4 @@ def make(source: str, rule_id: str, type_: str, seq: int, *, region: str = "gene
                     priority=(phase, BANDS.get(source, 0), seq), channel=channel, region=region, type=type_,
                     rule_class=rule_class(source, rule_id, type_), form=form_of(rule_id),
                     matcher=matcher_of(rule_id, source), filters=filters_of(rule_id), language=language,
-                    upstream=upstream, patches=tuple(patches))
+                    needs=needs, upstream=upstream, patches=tuple(patches))

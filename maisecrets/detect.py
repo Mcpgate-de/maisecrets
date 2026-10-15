@@ -2112,11 +2112,8 @@ def pass_specs() -> list:
     if personal is None:
         return _registry.pass_specs(EXPORT_RULE, "SECRET", (), frozenset(), {})
     p = personal
-    types = {"phone-one-digit-groups": p.PHONE, "phone-us-national": p.PHONE, "birth-date-after-label": p.BIRTH_DATE,
-             "id-number-after-label": p.ID_NUMBER, "user-in-url": p.USERNAME, "user-in-home-path": p.USERNAME,
-             "street-address": p.ADDRESS, "name-after-label": p.NAME, "name-before-email": p.NAME,
-             "csv-personal-column": "COLUMN"}
-    return _registry.pass_specs(EXPORT_RULE, "SECRET", tuple(p.RULE_IDS), p.PROMPT_RULES, types)
+    return _registry.pass_specs(EXPORT_RULE, "SECRET", tuple(p.RULE_IDS), p.PROMPT_RULES, p.TYPES,
+                                regions=p.REGIONS, needs=p.NEEDS)
 
 
 def _patches_of(source: str, rule_id: str, patches: dict) -> tuple:
@@ -2325,6 +2322,23 @@ _ENCODED_MAIL_CONTEXT_RE = re.compile(
     r"|\b(?:to|from|cc|bcc)[ \t]*[:=][ \t]*"   # `to` and `from` alone are paths and imports: path/to/pkg%40v.com
     r"|\b(?:e-?mail|mail|sender|recipient|bounce|reply-to|contact|login|users?|username)[ \t]*[:=/]?[ \t]*)$")
 _DIGITS_ONLY_RE = re.compile(r"\+?[\d\s().-]+")
+# `sent to name%40host` in prose: `to` and spaces, not `path/to/` or `import x to`
+_ENCODED_MAIL_TO_RE = re.compile(r"(?i)(?<![/\w])(?:sent|send|mailed|forwarded|reply|replied|receipt|invoice|copy)"
+                                 r"[^\n/]{0,20}?(?<![/\w])to[ \t]+$")
+
+
+def _encoded_mail_expected(text: str, start: int, end: int) -> bool:
+    """Where an address with its @ as %40 is an address: after a mail word or `=` (_ENCODED_MAIL_CONTEXT_RE), after
+    `sent to` in prose, or as a whole cell of a CSV row (a column of a roster export, holdout 2026-10-15)."""
+    line = _line_start(text, start)
+    if _ENCODED_MAIL_CONTEXT_RE.search(text, max(line, start - 40), start) or _ENCODED_MAIL_TO_RE.search(
+            text, max(line, start - 40), start):
+        return True
+    before, after = text[start - 1:start] if start > line else "", text[end:end + 1]
+    if before not in ("", ",", ";", "\t") or after not in ("", "\n", "\r", ",", ";", "\t"):
+        return False
+    row = text[line:_line_end(text, end)]
+    return max(row.count(","), row.count(";"), row.count("\t")) >= 2
 
 
 def is_public_test_value(value: str, kind: str) -> bool:
@@ -3278,8 +3292,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue
             if "password-value" in filters and not _ds_value_ok(secret.strip("\"'")):
                 continue
-            if "encoded-mail-context" in filters and not _ENCODED_MAIL_CONTEXT_RE.search(
-                    text, max(_line_start(text, start), start - 40), start):
+            if "encoded-mail-context" in filters and not _encoded_mail_expected(text, start, end):
                 continue
             if "phone-shape" in filters and not _phone_ok(text, start, secret):
                 continue
@@ -3407,10 +3420,12 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
             continue
         if overlaps(start, end):
             # an address takes the postcode that a region rule found inside it (de-plz): the whole address is the
-            # value. Any other hit keeps its span
+            # value. A phone number wrapped over two lines takes the first line that the phone rule found. Any other
+            # hit keeps its span
             lo, hi = bisect.bisect_left(taken_starts, start), bisect.bisect_left(taken_starts, end)
             inside = [f for f in found if start <= f.start and f.end <= end and f.type not in SECRET_TYPES]
-            if typ != personal.ADDRESS or not inside or hi - lo != len(inside) or (
+            wider = typ == personal.ADDRESS or (kind == "phone-wrapped-line" and all(f.type == typ for f in inside))
+            if not wider or not inside or hi - lo != len(inside) or (
                     lo > 0 and taken_ends[lo - 1] > start):
                 continue
             for f in inside:

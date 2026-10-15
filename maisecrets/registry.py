@@ -147,6 +147,8 @@ def rule_class(source: str, rule_id: str, type_: str) -> str:
         return "label:" + rule_id.split("#", 1)[0]
     if type_ != "SECRET":
         return "pii:" + type_.lower()
+    if source == "personal":
+        return "form:" + rule_id    # a secret in a fixed form (personal.FORMS): ::add-mask::, SharedAccessKey=
     if source == "fallback":
         return "provider:" + _provider(rule_id)
     return "provider:" + _provider(rule_id)

@@ -102,6 +102,7 @@ class RegistryTests(unittest.TestCase):
         self.assertIn("context_rule", [p.field for p in specs["presidio:de-vat-id#0"].patches])
 
     def test_the_passes_outside_the_rule_list_have_their_phase_and_channel(self):
+        from maisecrets import personal as personal_rules
         passes = detect.pass_specs()
         keys = [s.key for s in passes] + [s.key for s, _ in self.specs]
         self.assertEqual(len(keys), len(set(keys)))
@@ -111,7 +112,10 @@ class RegistryTests(unittest.TestCase):
         self.assertTrue(personal)
         for s in personal:
             self.assertEqual(s.priority[0], registry.PHASES["personal"])
-            self.assertEqual(s.channel, "both" if s.id == "phone-one-digit-groups" else "tool")
+            # the phone fix of 0.6.21 and the secret forms of 0.6.24 (personal.FORMS) run in both channels
+            self.assertEqual(s.channel, "both" if s.id in personal_rules.PROMPT_RULES else "tool")
+        self.assertEqual(sorted(personal_rules.PROMPT_RULES), sorted(
+            ["phone-one-digit-groups"] + [k for k, v in personal_rules.FORMS.items() if v[1] == "both"]))
         # the rules of your own run after the personal-data step: their phase is after it
         self.assertGreater(registry.PHASES["user"], registry.PHASES["personal"])
         self.assertTrue(all(r.phase == registry.PHASES["rules"] for r in detect.rules()))

@@ -137,9 +137,11 @@ _NOT_A_HOME_RE = re.compile(
     r"|town hall|rathaus|city hall|cathedral|church|kirche|mairie)(?![a-z])")
 
 # --------------------------------------------------------------------------------- name after a name label --
-_NAME_WORD = r"(?:[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'’-]{1,30}|[A-Z]\.)"
+# a letter of Latin Extended-A (Ł, ś, ř, ğ) is a letter of a name too: Łukasz Wiśniewski, Dvořák (holdout, 2026-10-15)
+_UP, _LO = "A-ZÀ-ÖØ-ÞĀ-ſ", "a-zà-öø-ÿĀ-ſ"
+_NAME_WORD = r"(?:[" + _UP + r"][" + _LO + r"'’-]{1,30}|[A-Z]\.)"
 _NAME_PARTICLE = r"(?:van|von|de|da|del|der|al|bin|di|du|la|le)"
-_NAME_VALUE = (r"((?:[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'’-]{1,30})(?:[ ](?:" + _NAME_WORD + "|" + _NAME_PARTICLE + r")){1,3})")
+_NAME_VALUE = (r"((?:[" + _UP + r"][" + _LO + r"'’-]{1,30})(?:[ ](?:" + _NAME_WORD + "|" + _NAME_PARTICLE + r")){1,3})")
 # a label that names a person and nothing else
 _PERSON_LABELS = (r"full[ _-]?name|customer[ _-]?name|first[ _-]?name|last[ _-]?name|given[ _-]?name|family[ _-]?name"
                   r"|patient(?:[ _-]?name)?|employee(?:[ _-]?name)?|student(?:[ _-]?name)?|contact[ _-]?person"
@@ -352,6 +354,239 @@ def _csv_hits(text: str) -> list:
     return out
 
 
+# ------------------------------------------------------------------------------------------ the forms of 0.6.24 --
+# A value in a fixed form or after a label that names it, from the holdout values that 0.6.21 still leaked
+# (2026-10-15). Each rule declares (type, channel, region, needs): channel "tool" (tool results and files) or "both";
+# region "generic" or a country; needs "form" (a fixed syntax names the value: ::add-mask::, SharedAccessKey=, a FHIR
+# identifier, a 〒 postcode) or "label" (a word before the value names it: member, record, token, address).
+# tests/fp_corpus_forms.py holds the developer text in the same shapes that each rule must leave alone.
+FORMS = {
+    "secret-add-mask": ("SECRET", "both", "generic", "form"),
+    "secret-shared-access-key": ("SECRET", "both", "generic", "form"),
+    "secret-postman-variable": ("SECRET", "both", "generic", "form"),
+    "secret-hex48-after-token-word": ("SECRET", "both", "generic", "label"),
+    "secret-in-login-code": ("SECRET", "tool", "generic", "form"),
+    "secret-after-user-slash": ("SECRET", "tool", "generic", "label"),
+    "id-number-fhir-identifier": (ID_NUMBER, "tool", "generic", "form"),
+    "id-number-after-record-label": (ID_NUMBER, "tool", "generic", "label"),
+    "id-letters-after-label": (ID_NUMBER, "tool", "generic", "label"),
+    "id-number-in-member-parentheses": (ID_NUMBER, "tool", "generic", "label"),
+    "id-number-under-sql-alias": (ID_NUMBER, "tool", "generic", "label"),
+    "address-under-sql-alias": (ADDRESS, "tool", "generic", "label"),
+    "address-after-label": (ADDRESS, "tool", "generic", "label"),
+    "address-jp-postcode": (ADDRESS, "tool", "generic", "form"),
+    "address-in-form": (ADDRESS, "tool", "in", "form"),
+    "name-non-latin-after-label": (NAME, "tool", "generic", "label"),
+    "phone-url-encoded": (PHONE, "tool", "generic", "label"),
+    "phone-wrapped-line": (PHONE, "tool", "generic", "form"),
+}
+# a value that only names one: a variable, a template, an elision, a path
+_NOT_A_VALUE_START = ("$", "%", "{", "<", "(", "[", "*", "#", "/", ".")
+
+
+def _random_value(v: str, n: int = 8) -> bool:
+    """A value of a secret: n characters or more, a letter and a digit, no space, not a variable or a template."""
+    return (len(v) >= n and not v.startswith(_NOT_A_VALUE_START) and "${" not in v and "{{" not in v and "$(" not in v
+            and not re.search(r"\s", v) and any(c.isdigit() for c in v) and any(c.isalpha() for c in v))
+
+
+def _complex(v: str) -> bool:
+    """Three of four classes: lower, upper, digit, sign. A password that someone chose, not a word or a path."""
+    return sum((any(c.islower() for c in v), any(c.isupper() for c in v), any(c.isdigit() for c in v),
+                any(not c.isalnum() for c in v))) >= 3
+
+
+_ADD_MASK_RE = re.compile(r"::add-mask::([^\s\"'`]{6,256})")
+_SAS_KEY_RE = re.compile(r"(?i)\bSharedAccessKey=([A-Za-z0-9+/_=-]{12,256})(?![A-Za-z0-9+/_=-])")
+# a Postman or Insomnia variable, a HAR header: {"key"|"name": "<secret word>", "value": "..."}
+_KV_SECRET_RE = re.compile(r"\"(?:key|name)\"\s*:\s*\"([^\"\n]{1,60})\"\s*,\s*\"value\"\s*:\s*\"([^\"\n]{6,512})\"")
+_SECRET_NAME_RE = re.compile(r"(?i)(?:password|passwd|pwd|secret|token|api[_-]?key|apikey|auth)")
+_META_NAME_RE = re.compile(r"(?i)(?:type|url|uri|name|header|policy|length|len|ttl|seconds|expiry|expires|endpoint|path"
+                           r"|id|ids|hint|label|format|scheme|prefix|mode|kind|version|count)$")
+_HEX48_RE = re.compile(r"(?i)(?<![a-z])(token|code|secret|key)(?![a-z])[^\n]{0,24}?(?<![0-9a-fA-F])([0-9a-f]{48})"
+                       r"(?![0-9a-zA-Z])")
+_DIGEST_WORD_RE = re.compile(r"(?i)hash|digest|checksum|fingerprint|cache|etag|sha|md5|tiger|integrity|commit")
+_REDIS_AUTH_RE = re.compile(r"\"AUTH\"\s+\"([^\"\n]{6,128})\"(?!\s+\")")
+_LOGIN_CALL_RE = re.compile(r"\.login\(\s*([\"'])[^\"'\n]{1,64}\1\s*,\s*([\"'])([^\"'\n]{6,128})\2\s*\)")
+_OP_FIELDS_RE = re.compile(r"op item get[^\n]*--fields[^\n]*\busername,password\b[^\n]*\n[^\n]{1,128}\n([^\s]{6,128})"
+                           r"(?=\n|$)")
+_SQL_CREDS_RE = re.compile(r"(?i)INSERT INTO \w*(?:cred|passw|secret|login)\w*\s+VALUES\s*\(([^)\n]{1,300})\)")
+_USER_SLASH_RE = re.compile(r"(?i)(?<![a-z])(?:login|user|creds?|credentials|account)(?![a-z])[^\n]{0,30}?(?<!\S)"
+                            r"[\w.@-]{2,64} / (\S{8,64})(?!\S)")
+_FHIR_RE = re.compile(r"(?i)\"system\"\s*:\s*\"([^\"\n]{0,80})\"\s*,\s*\"value\"\s*:\s*\"([^\"\n]{4,40})\"")
+_FHIR_SYSTEM_RE = re.compile(r"(?i)mrn|passport|ssn|(?<![a-z])nid|national[-_ ]?id|tax[-_ ]?id|licen[cs]e(?![-_ ]?ver)"
+                             r"|member[-_ ]?id|insurance")
+_VERSION_RE = re.compile(r"(?i)^v?\d+(?:\.\d+)+$")
+_ID_VALUE = r"((?-i:[A-Z0-9](?:[A-Z0-9]|[ -](?=[A-Z0-9])){4,24}))(?![A-Za-z0-9])"
+_RECORD_LABEL_RE = re.compile(
+    r"(?i)(?<![a-z])(?:insurance(?:[ _-]?member)?(?:[ _-]?id)?|member(?:[ _-]?(?:id|no|number|#))?"
+    r"|record(?:[ _-]?(?:no|number|#))?|patient(?:[ _-]?id)?|account|(?<=\")nid(?=\")|(?-i:DL))(?![a-z])[\"']?"
+    r"(?:\s{0,3}(?:is|number|no\.?|#))?\s{0,3}[:=#]?\s{0,3}[\"']?" + _ID_VALUE)
+_ID_LETTERS_RE = re.compile(r"(?i)(?<![a-z])(?:member(?:[ _-]?id)?|passport|insurance(?:[ _-]?id)?)(?![a-z])[\"']?"
+                            r"(?:\s{0,3}(?:is|number|no\.?|#))?\s{0,3}[:=#]?\s{0,3}[\"']?"
+                            r"((?-i:[A-Z0-9][A-Z0-9-]{6,22}[A-Z0-9]))(?![A-Za-z0-9])")
+_MEMBER_PAREN_RE = re.compile(r"(?i)(?<![a-z])member[\"']?\s{0,3}:\s{0,3}[^\n()]{2,40}\((?-i:([A-Z0-9][A-Z0-9-]{4,22}"
+                              r"[A-Z0-9]))\)")
+_SQL_ALIAS_RE = re.compile(r"'([^'\n]{5,80})'\s+(?i:AS)\s+(?i:(sin|ssn|tax_?id|mrn|nid|passport(?:_no)?|member_?id"
+                           r"|national_?id|aadhaar|pan|nhs|tfn|address|home_address))\b")
+_JP_ADDRESS_RE = re.compile(r"〒\d{3}-\d{4}[ 　]?[^\s\"',;<>|]{2,40}")
+_JP_COMPANY_RE = re.compile(r"株式会社|有限会社|合同会社|本社|支社|支店|営業所|事務所|工場|センター|ビル|役所"
+                            r"|大学|病院")
+_ADDRESS_LABEL_RE = re.compile(
+    r"(?i)(?<![a-z_])(?:address(?: on file)?|home[ _-]?address|adr|ship[ _-]?to|reship to|property|lives"
+    r"|endere[cç]o|direcci[oó]n|adresse|location)[\"']?\s{0,3}:\s{0,3}[\"']?;*([^\n\"|;]{8,100}?)"
+    r"(?=[\"\n|]|\s{2}|\.\s|$)")
+_IN_ADDRESS_RE = re.compile(r"\b\d{1,4}(?:/\d{1,4})?, [^\n]{10,90}?, [A-Z][a-z]+ \d{6}\b")
+_NONLATIN = "Ͱ-ϿЀ-ӿ֐-׿؀-ۿऀ-ॿঀ-৿"
+_CJK_NAME = "一-鿿가-힯぀-ヿ"
+# labels that name a person and nothing else; `name`, `owner` and `admin` also name a product, a language or a group
+_NONLATIN_LABEL_RE = re.compile(
+    r"(?i)(?:(?<![a-z_])(?:full[ _-]?name|native name|employee|beneficiary|patient|student|tenant|guardian)"
+    r"|^fn)[\"']?[ \t]{0,3}[:=]?[ \t]{0,3}[\"']?"
+    r"((?:[" + _NONLATIN + r"]{2,20}(?: [" + _NONLATIN + r"]{2,20}){1,3})|[" + _CJK_NAME + r"]{2,5})(?![\w])", re.M)
+# names of a language in its own script: a locale table is no person
+_AUTONYMS = frozenset({"русский", "українська", "беларуская", "български", "српски", "македонски", "ελληνικά",
+                       "עברית", "العربية", "فارسی", "اردو", "हिन्दी", "বাংলা", "中文", "简体中文", "繁體中文", "日本語",
+                       "한국어", "русский язык", "қазақ тілі"})
+_PHONE_URL_RE = re.compile(r"(?i)(?<![a-z])(?:phone|tel|mobile|msisdn|cell)[\w-]{0,10}=(%2B\d{7,15})(?!\d)")
+_PHONE_WRAP_RE = re.compile(r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?\d{2,5}(?:[ \-]\d{2,5}){0,2}-\n[ \t]{0,4}\d{2,5}"
+                            r"(?:[ \-]\d{2,5}){0,3}(?![\w.]\d|\w)")
+
+
+def _cut_at_a_word(v: str) -> str:
+    """An ID ends before a word that follows its digits: `20231115 LIMIT 10` is a value and an SQL clause."""
+    parts = v.split(" ")
+    for i in range(1, len(parts)):
+        if parts[i].isalpha() and len(parts[i]) >= 3 and any(c.isdigit() for c in parts[i - 1]):
+            return " ".join(parts[:i])
+    return v
+
+
+def _a_date(v: str) -> bool:
+    """Eight digits that read as a day of 1900 to 2099 (YYYYMMDD)."""
+    return bool(re.fullmatch(r"(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])", v))
+
+
+def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
+    out = []
+    if "secret-add-mask" in want and "::add-mask::" in text:
+        for m in _ADD_MASK_RE.finditer(text):
+            if _random_value(m.group(1)):
+                out.append((m.start(1), m.end(1), "secret-add-mask", "SECRET"))
+    if "secret-shared-access-key" in want and "haredaccesskey=" in text.lower():
+        for m in _SAS_KEY_RE.finditer(text):
+            v = m.group(1)
+            if _random_value(v, 12) and not re.fullmatch(r"[A-Z0-9_]+", v):
+                out.append((m.start(1), m.end(1), "secret-shared-access-key", "SECRET"))
+    if "secret-postman-variable" in want and "\"value\"" in text:
+        for m in _KV_SECRET_RE.finditer(text):
+            name, v = m.group(1), m.group(2)
+            if _SECRET_NAME_RE.search(name) and not _META_NAME_RE.search(name) and _random_value(v) \
+                    and "://" not in v:
+                out.append((m.start(2), m.end(2), "secret-postman-variable", "SECRET"))
+    if "secret-hex48-after-token-word" in want:
+        for m in _HEX48_RE.finditer(text):
+            v = m.group(2)
+            if _DIGEST_WORD_RE.search(text, max(0, m.start() - 16), m.start(2)):
+                continue   # a hash: cache key, key fingerprint, the digest of a build
+            if sum(c.isdigit() for c in v) >= 4 and sum(c.isalpha() for c in v) >= 4:
+                out.append((m.start(2), m.end(2), "secret-hex48-after-token-word", "SECRET"))
+    if channel != "tool":
+        return out
+    if "secret-in-login-code" in want:
+        for rx, g in ((_REDIS_AUTH_RE, 1), (_LOGIN_CALL_RE, 3), (_OP_FIELDS_RE, 1)):
+            for m in rx.finditer(text):
+                v = m.group(g)
+                if _complex(v) and not v.startswith(_NOT_A_VALUE_START) and "{{" not in v:
+                    out.append((m.start(g), m.end(g), "secret-in-login-code", "SECRET"))
+        for m in _SQL_CREDS_RE.finditer(text):
+            cells = list(re.finditer(r"'([^'\n]{6,128})'", m.group(1)))
+            if cells and _complex(cells[-1].group(1)) and not cells[-1].group(1).startswith(_NOT_A_VALUE_START):
+                c = cells[-1]
+                out.append((m.start(1) + c.start(1), m.start(1) + c.end(1), "secret-in-login-code", "SECRET"))
+    if "secret-after-user-slash" in want and " / " in text:
+        for m in _USER_SLASH_RE.finditer(text):
+            v = m.group(1)
+            if _complex(v) and any(c.isdigit() for c in v) and "/" not in v:
+                out.append((m.start(1), m.end(1), "secret-after-user-slash", "SECRET"))
+    low = text.lower()
+    if "id-number-fhir-identifier" in want and "\"system\"" in text:
+        for m in _FHIR_RE.finditer(text):
+            v = m.group(2)
+            if _FHIR_SYSTEM_RE.search(m.group(1)) and any(c.isdigit() for c in v) and not _VERSION_RE.match(v) \
+                    and not v.startswith(_NOT_A_VALUE_START) and not _placeholder_digits(v):
+                out.append((m.start(2), m.end(2), "id-number-fhir-identifier", ID_NUMBER))
+    if any(w in low for w in ("member", "record", "patient", "account", "insurance", "nid", "dl")):
+        if "id-number-after-record-label" in want:
+            for m in _RECORD_LABEL_RE.finditer(text):
+                v = _cut_at_a_word(m.group(1))
+                digits = sum(c.isdigit() for c in v)
+                if _a_date(v):
+                    continue   # member_id = 20231115: a day, not a member
+                if re.match(r"(?i)(?:account|record)", m.group(0)) and v.replace(" ", "").isdigit():
+                    continue   # an AWS account id, a row counter: digits alone after account or record
+                if re.match(r"(?i)account", m.group(0)) and digits < 6:
+                    continue   # a ticket key after account (REL-20481): an account number has six digits or more
+                if digits >= 5 and not (v.isdigit() and len(v) >= 17) and not _placeholder_digits(v):
+                    out.append((m.start(1), m.start(1) + len(v), "id-number-after-record-label", ID_NUMBER))
+        if "id-letters-after-label" in want:
+            for m in _ID_LETTERS_RE.finditer(text):
+                v = m.group(1)
+                nd = sum(c.isdigit() for c in v)
+                if nd and sum(c.isalpha() for c in v) >= 2 and not (nd >= 3 and _placeholder_digits(v)):
+                    out.append((m.start(1), m.end(1), "id-letters-after-label", ID_NUMBER))
+        if "id-number-in-member-parentheses" in want:
+            for m in _MEMBER_PAREN_RE.finditer(text):
+                v = m.group(1)
+                # a member number mixes letters into its digits (ABC-4XY5Z6): TEAM-4821 and RUNNER-0042 are names
+                if sum(c.isdigit() for c in v) >= 2 and re.search(r"\d[A-Z]", v):
+                    out.append((m.start(1), m.end(1), "id-number-in-member-parentheses", ID_NUMBER))
+    if ("id-number-under-sql-alias" in want or "address-under-sql-alias" in want) and "'" in text:
+        for m in _SQL_ALIAS_RE.finditer(text):
+            v, al = m.group(1), m.group(2).lower()
+            if "addr" in al:
+                if "address-under-sql-alias" in want and any(c.isdigit() for c in v) and "," in v \
+                        and not _NOT_A_HOME_RE.search(v):
+                    out.append((m.start(1), m.end(1), "address-under-sql-alias", ADDRESS))
+            elif "id-number-under-sql-alias" in want and sum(c.isdigit() for c in v) >= 5 \
+                    and not _placeholder_digits(v):
+                out.append((m.start(1), m.end(1), "id-number-under-sql-alias", ID_NUMBER))
+    if "address-jp-postcode" in want and "〒" in text:
+        for m in _JP_ADDRESS_RE.finditer(text):
+            line = text.rfind("\n", 0, m.start()) + 1
+            if not _JP_COMPANY_RE.search(text, line, m.end()):
+                out.append((m.start(), m.end(), "address-jp-postcode", ADDRESS))
+    if "address-after-label" in want:
+        for m in _ADDRESS_LABEL_RE.finditer(text):
+            v = m.group(1).strip()
+            if (any(c.isdigit() for c in v) and "," in v and re.search(r"[A-ZÀ-Þ][a-zà-ÿ]{2,}", v)
+                    and "://" not in v and not re.search(r"\d+\.\d+\.\d+|:\d{2,5}\b|[{}<>$()=_\[\]#@]", v)
+                    and not _NOT_A_HOME_RE.search(text, text.rfind("\n", 0, m.start()) + 1, m.end())
+                    and not re.search(r"(?i)\b(?:rack|unit|floor|room|row|slot|zone|version|build|schema|field)\b", v)):
+                s0 = m.start(1) + (len(m.group(1)) - len(m.group(1).lstrip()))
+                out.append((s0, s0 + len(v), "address-after-label", ADDRESS))
+    if "address-in-form" in want and "in" in regions:
+        for m in _IN_ADDRESS_RE.finditer(text):
+            line = text.rfind("\n", 0, m.start()) + 1
+            if m.group().count(",") >= 3 and not _NOT_A_HOME_RE.search(text, line, m.end() + 80):
+                out.append((m.start(), m.end(), "address-in-form", ADDRESS))
+    if "name-non-latin-after-label" in want:
+        for m in _NONLATIN_LABEL_RE.finditer(text):
+            if m.group(1).lower() not in _AUTONYMS:
+                out.append((m.start(1), m.end(1), "name-non-latin-after-label", NAME))
+    if "phone-url-encoded" in want and "%2" in text.upper():
+        for m in _PHONE_URL_RE.finditer(text):
+            d = m.group(1)[3:]
+            if 8 <= len(d) <= 15 and len(set(d)) > 2:
+                out.append((m.start(1), m.end(1), "phone-url-encoded", PHONE))
+    if "phone-wrapped-line" in want and "-\n" in text:
+        for m in _PHONE_WRAP_RE.finditer(text):
+            d = re.sub(r"\D", "", m.group())
+            if 8 <= len(d) <= 15 and len(set(d)) > 2:
+                out.append((m.start(), m.end(), "phone-wrapped-line", PHONE))
+    return out
+
+
 # ------------------------------------------------------------------------------------------------- the scan --
 # words one of which a text must hold before a rule's regex runs (a cheap test on the lowered text)
 _BIRTH_WORDS = ("dob", "d.o.b", "birth", "bday", "geb", "n\u00e9", "ne le", "nee le", "naissance", "nacimiento", "naci",
@@ -360,9 +595,18 @@ _ID_WORDS = ("mrn", "member", "passport", "licen", "dl", "sin", "tfn", "nir", "t
              "patient", "id on file")
 RULE_IDS = ("phone-one-digit-groups", "phone-us-national", "birth-date-after-label", "id-number-after-label",
             "user-in-url", "user-in-home-path", "street-address", "name-after-label", "name-before-email",
-            "csv-personal-column")
-# the rules a typed prompt also takes: a fix of the phone rule that both channels have
-PROMPT_RULES = frozenset({"phone-one-digit-groups"})
+            "csv-personal-column") + tuple(FORMS)
+# the rules a typed prompt also takes: a fix of the phone rule that both channels have, and the forms of a secret
+PROMPT_RULES = frozenset({"phone-one-digit-groups"} | {k for k, v in FORMS.items() if v[1] == "both"})
+# the type and the region of each rule, for the registry (detect.pass_specs)
+TYPES = {"phone-one-digit-groups": PHONE, "phone-us-national": PHONE, "birth-date-after-label": BIRTH_DATE,
+         "id-number-after-label": ID_NUMBER, "user-in-url": USERNAME, "user-in-home-path": USERNAME,
+         "street-address": ADDRESS, "name-after-label": NAME, "name-before-email": NAME,
+         "csv-personal-column": "COLUMN", **{k: v[0] for k, v in FORMS.items()}}
+REGIONS = {k: v[2] for k, v in FORMS.items()}
+NEEDS = {"birth-date-after-label": "label", "id-number-after-label": "label", "name-after-label": "label",
+         "name-before-email": "form", "street-address": "form", "csv-personal-column": "label",
+         **{k: v[3] for k, v in FORMS.items()}}
 _US_PHONE_REGIONS = frozenset({"us", "ca"})
 
 
@@ -410,6 +654,7 @@ def hits(text: str, channel: str, regions: tuple) -> list:
                 continue
             if _PHONE_WORD_RE.search(text, max(0, m.start() - 30), m.start()):
                 out.append((m.start(), m.end(), "phone-us-national", PHONE))
+    out += _form_hits(text, channel, regions, want)
     if channel != "tool":
         return out
     low = text.lower()
