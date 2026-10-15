@@ -355,7 +355,7 @@ def _base64_pem_ok(v: str) -> bool:
         i, seen = flat.find(needle), 0
         while i >= 0 and seen < 50:
             a = max(0, i // 4 * 4 - 80)
-            window = flat[a:a + 200]
+            window = flat[a:a + 320]   # room for Proc-Type and DEK-Info before the body (Gate B, round 2)
             try:
                 inner = _B64_PEM_PRIVATE_RE.search(base64.b64decode(window[:len(window) // 4 * 4], validate=True))
                 if inner and _pem_body_ok(inner):

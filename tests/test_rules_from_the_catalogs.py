@@ -321,6 +321,16 @@ class Base64PemTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 self.assertEqual(kinds_over(f"key: {v}\n", v, "prompt"), [])
 
+    def test_a_bundle_with_a_legacy_encrypted_key_is_found(self):
+        """Gate B round 2 of 0.6.20: Proc-Type and DEK-Info after the header did not fit the decoded window."""
+        r = random.Random(42)
+        dashes = "-" * 5
+        body = base64.b64encode(bytes(r.randrange(256) for _ in range(1190))).decode()
+        key = J([dashes, "BEGIN RSA PRIVATE KEY", dashes, "\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,",
+                 rd(r, 32, "0123456789ABCDEF"), "\n\n", body, "\n", dashes, "END RSA PRIVATE KEY", dashes, "\n"])
+        v = base64.b64encode(pem(r, "CERTIFICATE") + key.encode()).decode()
+        self.assertIn(("private-key-base64", "SECRET", v), found(f"tls.pem: {v}\n", "prompt"))
+
     def test_a_bundle_after_a_byte_order_mark_is_found(self):
         r = random.Random(41)
         v = base64.b64encode(b"\xef\xbb\xbf" + pem(r, "CERTIFICATE") + pem(r)).decode()

@@ -77,7 +77,7 @@ repeated outside the maintainers' machines.
 
 The built-in examples of six other secret catalogs, scanned by maisecrets. Per rule with examples, up to 6
 examples, each in two forms: the secret alone ("bare") and after `token = ` ("after a label"). A rule counts as
-found when the hits of one channel cover the whole secret of one of its examples. "0.6.19" is `main` at `7d2621d`;
+found when the hits of one channel cover the whole secret of one of its examples. "0.6.19" is the tag `v0.6.19`;
 "0.6.20" is the branch of that release. Source: `scripts/measure_catalog_coverage.py`, 2026-10-15; its docstring has
 the method.
 
