@@ -8,7 +8,9 @@ on:
     # deleted branch GitHub keeps listing). ci-mr/<iid>-<sha12>: the commit of a GitLab merge request, pushed by
     # its pipeline to the separate CI repository (scripts/github_matrix.py mr); one branch per commit, so each
     # has its own concurrency group and no push needs force
-    branches: [main, ci, ci-check, "ci-mr/**"]
+    # Not main: the mirror pushes main after the merge request ran this matrix (on a merge without a release
+    # nothing waited for that run), and the release commit skips its jobs anyway
+    branches: [ci, ci-check, "ci-mr/**"]
   pull_request:
 # a newer push to the same ref makes the older run worthless: it is cancelled, not finished
 concurrency:

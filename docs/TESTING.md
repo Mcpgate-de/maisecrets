@@ -19,10 +19,11 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | Windows end to end | `GITLAB_COM_TOKEN=… python3 scripts/windows_e2e.py [--rev REV]` | by hand before a release that touches the hooks, the launchers or the harness: GitLab-hosted Windows runners of a separate project, in three shapes (PowerShell 7, Windows PowerShell 5.1, Git Bash). Each job runs `harness/windows/shell_probe.py` (which shell runs a hook, and the `hooks.json` command in each shell) and `harness/run.py` with the shell tool the client offers (`MAISECRETS_HARNESS_SHELL_TOOL`) |
 
 1619 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
-Windows and macOS in three places. In a merge request, the GitLab job `windows_macos` pushes the commit
+Windows and macOS in two places. In a merge request, the GitLab job `windows_macos` pushes the commit
 that `main` would get to the CI repository `Mcpgate-de/maisecrets-ci` and fails with the names of the
 failing tests. On `main`, it runs on the tested commit of a release (branch `ci`), unless a green run
-on the same git tree exists (the release then reuses it), and on a push to main without a release.
+on the same git tree exists (the release then reuses it). A merge without a release runs no matrix on
+`main`: its merge request ran it.
 `scripts/github_matrix.py` has the details.
 
 ## What makes a test count
