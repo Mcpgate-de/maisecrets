@@ -91,6 +91,11 @@ def form_of(rule_id: str) -> str:
     return "shape"
 
 
+def is_label(kind: str) -> bool:
+    """Whether a hit of this kind (a rule id, also one read from the vault index) came from a label rule."""
+    return str(kind).startswith(LABEL_PREFIXES)
+
+
 def canonical_sha256(rule: dict) -> str:
     return hashlib.sha256(json.dumps(rule, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
                           .encode("utf-8")).hexdigest()

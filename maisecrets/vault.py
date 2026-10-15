@@ -597,8 +597,8 @@ DEFAULT_WORDS = frozenset({
 def is_weak(kind: str, value: str) -> bool:
     """A value that only a label rule found and that is a known default word (DEFAULT_WORDS): replaced where it was
     found, never hunted in other texts."""
-    from .detect import LABEL_RULES
-    return str(kind).startswith(LABEL_RULES) and value.strip().lower() in DEFAULT_WORDS
+    from .registry import is_label
+    return is_label(kind) and value.strip().lower() in DEFAULT_WORDS
 
 
 def is_quiet(kind: str, value: str, tool: bool) -> bool:
@@ -607,8 +607,9 @@ def is_quiet(kind: str, value: str, tool: bool) -> bool:
     A word the person gives in a prompt stays hunted everywhere: a chosen word is a password there (review,
     2026-09-29). A random value that reads like a word (about 3 in 100 of 8 small letters) is then not looked for in
     a prompt that types it bare; it is still masked in every tool result. Only a new entry gets the mark."""
-    from .detect import LABEL_RULES, reads_as_word
-    return tool and str(kind).startswith(LABEL_RULES) and reads_as_word(value.strip())
+    from .detect import reads_as_word
+    from .registry import is_label
+    return tool and is_label(kind) and reads_as_word(value.strip())
 
 
 # ---------------------------------------------------------------- backends --
@@ -1080,9 +1081,9 @@ class Vault:
         """Mark the weak entries a version before 0.5.15 stored without the mark (see Entry.weak). Reads the value of
         each unmarked label-rule entry once; a store that refuses the read leaves the entry unmarked for the next
         start. Returns the count marked weak."""
-        from .detect import LABEL_RULES
+        from .registry import is_label
         todo = [k for k, m in self._index["entries"].items()
-                if "weak" not in m and not m.get("purged") and str(m.get("kind", "")).startswith(LABEL_RULES)]
+                if "weak" not in m and not m.get("purged") and is_label(m.get("kind", ""))]
         n = 0
         for key in todo:
             try:

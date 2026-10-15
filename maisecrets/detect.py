@@ -48,6 +48,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import checksums
+from . import registry as _registry
 
 RULES_DIR = Path(__file__).resolve().parent / "rules"
 
@@ -102,6 +103,7 @@ class Rule:
     quote_group: int = 0               # detect-secrets: group of the optional opening quote
     drop: object = None                # betterleaks: the rule's filter and the global one; True drops the finding
     key: str = ""                      # unique, from maisecrets/registry.py: `<source>:<id>`; set by rules()
+    form: str = ""                     # keyword | label | shape (registry.form_of); set by rules()
 
 
 # ----------------------------------------------------------------- helpers --
@@ -2047,13 +2049,14 @@ _REGIONAL_REGION = {d["id"]: d["region"] for d in REGIONAL_RULES}
 
 def _ranked(active) -> list:
     """(priority, rule) of every rule, sorted by priority = (phase, band, seq) (maisecrets/registry.py)."""
-    from .registry import BANDS, PHASES, key_of
+    from .registry import BANDS, PHASES, form_of, key_of
     rules_phase, user_phase = PHASES["rules"], PHASES["user"]
     out = []
     for source, rs in _rule_sources(active):
         phase, band = (user_phase if source == "user" else rules_phase), BANDS[source]
         for seq, r in enumerate(rs):
-            object.__setattr__(r, "key", key_of(source, r.id))   # a field of the frozen rule, set once at load
+            object.__setattr__(r, "key", key_of(source, r.id))   # fields of the frozen rule, set once at load
+            object.__setattr__(r, "form", form_of(r.id))
             out.append(((phase, band, seq), r))
     out.sort(key=lambda x: x[0])
     return out
@@ -2277,9 +2280,11 @@ def looks_like_placeholder(value: str) -> bool:
 # tests of the Python standard library (2026-09-29). In test code the value is a fixture, and a
 # block or a placeholder there only stops the work. A token shape (glpat-, AKIA, a PEM key) and personal data stay
 # hits in test code too: a real token or a copy of customer data in a test is a leak.
-LABEL_RULES = ("ds-keyword", "label-", "generic-api-key", "url-query-secret", "auth-scheme")
-# the keyword rules: the detect-secrets ones and maisecrets' own label rules with no `=` or `:` (OWN_RULES)
-KEYWORD_RULES = ("ds-keyword", "label-")
+# The id prefixes of the label rules and of the keyword rules (the detect-secrets ones and maisecrets' own label rules
+# with no `=` or `:`) live in maisecrets/registry.py; a rule carries its form (Rule.form), a stored kind is read with
+# registry.is_label. The names stay for the scripts and tests that read them.
+LABEL_RULES = _registry.LABEL_PREFIXES
+KEYWORD_RULES = _registry.KEYWORD_PREFIXES
 _TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?i:tests?|__tests__|spec|testdata|test_data|e2e)[/\\]"
                            r"|(?:^|[/\\]|[a-z])Tests?\.\w+$"
                            r"|(?:^|[/\\])[^/\\]*[._-]e2e[._-][^/\\]*$"
@@ -2344,7 +2349,7 @@ def is_fixture(m: "Match", text: str, path: str = "") -> bool:
     """A label-rule hit in test code: not a secret the person typed (see LABEL_RULES). The first rule to claim a
     span wins, and the label rules run before the shape rules: `token = "<a JWT>"` got the kind of a label rule and
     was dropped with the fixtures (review, 2026-09-29). A value that a shape rule finds on its own stays a hit."""
-    if not (m.type == "SECRET" and m.kind.startswith(LABEL_RULES) and in_test_code(text, m.start, path)):
+    if not (m.type == "SECRET" and _registry.is_label(m.kind) and in_test_code(text, m.start, path)):
         return False
     return not scan(m.value, enabled=_shape_rule_ids())
 
@@ -2354,7 +2359,7 @@ _SHAPE_IDS: list = []
 
 def _shape_rule_ids() -> set:
     if not _SHAPE_IDS:
-        _SHAPE_IDS.append({r.id for r in rules() if not r.id.startswith(LABEL_RULES)})
+        _SHAPE_IDS.append({r.id for r in rules() if (r.form or _registry.form_of(r.id)) == "shape"})
     return _SHAPE_IDS[0]
 
 
@@ -3108,6 +3113,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         if rule.context and (rule.require_context or rule.score < 0.5) and not _has_context_word(low, rule.context):
             continue
         own = rule.id.startswith("user:")
+        form = rule.form or _registry.form_of(rule.id)    # a rule list a caller built has no form set
+        keyword = form == "keyword"
         hits = _matches(rule, text)
         for m in (_timed(rule, hits, len(text)) if own and rule_list is None else hits):
             ngroups = rule.regex.groups or 0
@@ -3143,7 +3150,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     end = start + len(secret)
                     if _CAPITALISED_WORD_RE.fullmatch(secret):
                         continue
-            if rule.id.startswith(KEYWORD_RULES) and _ANCHOR_OR_TAG_RE.fullmatch(secret.strip()):
+            if keyword and _ANCHOR_OR_TAG_RE.fullmatch(secret.strip()):
                 # a quoted scalar is never an anchor: the colon must stand right before it (review of b4a7c54)
                 nxt = re.match(r"[ \t]+([^\s#]+)", text[end:end + 300])
                 if nxt:
@@ -3156,16 +3163,16 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     secret = text[start:end]
                 elif _before_value(text, start).rstrip(" \t").endswith(":"):
                     continue   # a YAML anchor or alias alone after a colon label: &gitlab_token_fields
-            if rule.id.startswith(KEYWORD_RULES) and (is_code_word(secret) or value_is_code(text, start, end, secret)):
+            if keyword and (is_code_word(secret) or value_is_code(text, start, end, secret)):
                 continue
             if rule.id == "generic-api-key" and _WORD_PATH_RE.fullmatch(secret.strip("'\"")):
                 continue
-            if rule.id.startswith(KEYWORD_RULES) and _names_its_label(text, start, secret):
+            if keyword and _names_its_label(text, start, secret):
                 continue
-            if (rule.id.startswith(KEYWORD_RULES) and _LABEL_SHAPE.fullmatch(secret.strip())
+            if (keyword and _LABEL_SHAPE.fullmatch(secret.strip())
                     and _NAME_LABEL_RE.fullmatch(secret.strip()) and "\n" in text[m.start():start]):
                 continue   # the next line is a label of its own: `DB_PASSWORD=\nAPI_KEY=`, `Zugangsdaten:\nBenutzer:`
-            if (rule.id.startswith(KEYWORD_RULES) and secret.strip("\"' ").isdigit()
+            if (keyword and secret.strip("\"' ").isdigit()
                     and _MEASURE_LABEL_RE.search(_label_before(text, start))):
                 continue   # a limit or a duration: TTL_REFRESH_TOKEN = 2592000
             if rule.id == "url-query-secret" and secret.startswith("{"):
@@ -3173,7 +3180,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if (rule.id == "auth-scheme" and not any(c.isdigit() for c in secret)
                     and re.fullmatch(r"[A-Za-z]+(?:[_-][A-Za-z]+)+", secret)):
                 continue   # words, not a token: Bearer test_access_token
-            if (rule.id.startswith(KEYWORD_RULES) or rule.id == "generic-api-key") and (
+            if (keyword or rule.id == "generic-api-key") and (
                     (_UUID_RE.fullmatch(secret.strip("\"'` ")) and not _SECRET_LABEL_RE.search(
                         text, max(_line_start(text, start), start - 60), start))
                     or (_ELISION_RE.search(secret) and len(secret.rstrip(".\u2026")) < 20)
@@ -3222,7 +3229,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if rule.type == "SECRET" and rule.id != "crypto-seed-phrase" and looks_like_placeholder(secret):
                 # the checksum of a seed phrase is its proof; "example" and "sample" are words of the list
                 continue
-            labelled = rule.type == "SECRET" and rule.id.startswith(LABEL_RULES)
+            labelled = rule.type == "SECRET" and form != "shape"
             # a seed phrase is compared in one form: its words with one space between them
             as_published = " ".join(_WORD_RE_ANY.findall(secret)) if rule.id == "crypto-seed-phrase" else secret
             if is_public_test_value(as_published, rule.type) and not labelled:
