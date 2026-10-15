@@ -746,13 +746,16 @@ def _macho_commands(path: str):
     return libs, rpaths
 
 
-def _nearest_folder(path: str) -> str:
+def _nearest_folder(path: str) -> list:
     """The folder itself, or for one that does not exist the nearest folder above it that does: whoever can write
-    that one can make the missing folder and put a library in it (round 3)."""
-    path = os.path.realpath(path)          # a dangling link counts by the folder it points to
-    while not os.path.isdir(path) and os.path.dirname(path) != path:
-        path = os.path.dirname(path)
-    return path
+    that one can make the missing folder and put a library in it (round 3). A name that is a dangling link counts
+    twice: by the folder its name lies in, and by the folder it points to."""
+    out = []
+    for p in dict.fromkeys((os.path.abspath(path), os.path.realpath(path))):
+        while not os.path.isdir(p) and os.path.dirname(p) != p:
+            p = os.path.dirname(p)
+        out.append(p)
+    return out
 
 
 def _macho_libraries(tool: str):
@@ -779,7 +782,7 @@ def _macho_libraries(tool: str):
                 if hit is None:
                     return None
                 # dyld takes the first folder that holds the name: a folder searched before it must stay closed too
-                out.extend(_nearest_folder(r) for r in rpaths[:hit])
+                out.extend(f for r in rpaths[:hit] for f in _nearest_folder(r))
                 name = os.path.join(rpaths[hit], name[7:])
             name = name.replace("@loader_path", here).replace("@executable_path", exe_dir)
             if not (os.path.isabs(name) and os.path.isfile(name)):
