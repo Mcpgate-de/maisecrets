@@ -34,6 +34,10 @@ This product includes the English word list of BIP39 (maisecrets/rules/bip39_eng
 unchanged from trezor/python-mnemonic, Copyright (c) 2013-2016 Pavol Rusnak, MIT License (see
 maisecrets/rules/LICENSE-bip39). The seed phrase rule uses it.
 
+The formats of the token rules added in 0.6.20 (maisecrets/rules/prefixes.txt and OWN_RULES in
+maisecrets/detect.py) follow GitLab's secret detection rules (MIT License), Kingfisher and Nosey
+Parker (Apache License 2.0), or the vendor's documentation; the regular expressions are written here.
+
 The remaining rules in maisecrets/detect.py (OWN_RULES, REGIONAL_RULES), maisecrets/checksums.py
 and the display rules in maisecrets/pii_display.py are written for this project.
 

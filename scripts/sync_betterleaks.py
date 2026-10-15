@@ -5,6 +5,11 @@ Usage: scripts/sync_betterleaks.py v1.9.0
 Writes maisecrets/rules/betterleaks.toml, betterleaks.json, LICENSE-betterleaks and BETTERLEAKS_VERSION.
 The rules are consumed as data by maisecrets/detect.py; no betterleaks binary is used. betterleaks is the successor
 of gitleaks by the same maintainers (gitleaks takes security patches only since v8.30.1, Mcpgate-de/maisecrets#18).
+
+The files are written as upstream ships them. maisecrets' corrections to single rules (a keyword the prefilter
+lacks, a regex that rejects a real token) live in BETTERLEAKS_PATCHES in maisecrets/detect.py and apply when the
+rules load, so a sync keeps them. After a sync, run tests/test_rules_from_the_catalogs.py: it fails when a patched
+rule changed upstream. Then check the correction against the new rule and drop it if upstream fixed the gap.
 """
 import json
 import re

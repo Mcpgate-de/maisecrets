@@ -522,7 +522,8 @@ class TokenFormatTests(unittest.TestCase):
                     self.assertNotIn(rule_id, [k for k, _t, _v in found(f"see {miss} there")])
 
     def test_every_rule_has_a_token(self):
-        new = {line.split()[0] for line in (detect.RULES_DIR / "prefixes.txt").read_text().splitlines()
+        text = (detect.RULES_DIR / "prefixes.txt").read_text().split("# 0.6.20,")[0]   # 0.6.20: its own test file
+        new = {line.split()[0] for line in text.splitlines()
                if line.strip() and not line.startswith("#")} - {"gitlab-runner-token", "gitlab-deploy-token-any",
                                                                  "webhook-signing-secret", "cloudflare-user-api-token"}
         self.assertEqual(new | {"telegram-bot-token", "mailchimp-api-key", "discord-bot-token"}, set(TOKENS))

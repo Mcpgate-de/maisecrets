@@ -109,7 +109,13 @@ def _re2_to_python(rx: str) -> str:
     if "(?i)" in rx:
         rx = rx.replace("(?i)", "")
         flags = "(?i)"
+    for posix, chars in _POSIX_CLASSES.items():   # [[:alnum:]]: Python reads it as a set of the letters ":alnum"
+        rx = rx.replace(posix, chars)
     return flags + rx.replace(r"\z", r"\Z")
+
+
+_POSIX_CLASSES = {"[:alnum:]": "A-Za-z0-9", "[:alpha:]": "A-Za-z", "[:digit:]": "0-9", "[:xdigit:]": "0-9A-Fa-f",
+                  "[:upper:]": "A-Z", "[:lower:]": "a-z", "[:word:]": "0-9A-Za-z_"}
 
 
 def shannon_entropy(s: str) -> float:
@@ -248,6 +254,116 @@ def _de_lanr_ok(v: str) -> bool:
 def _de_vat_id_ok(v: str) -> bool:
     n = re.sub(r"[\s.\-]", "", v.upper())
     return len(n) == 11 and n.startswith("DE") and n[2:].isdigit()
+
+
+# the decoded head of a PEM private key: the header, optional armour or encryption headers (PGP's Version:, the
+# Proc-Type: and DEK-Info: of a legacy encrypted key), then base64 body characters (as many as the head holds, up to
+# 16). A byte order mark may stand before the header
+_B64_PEM_PRIVATE_RE = re.compile(rb"(?:\xef\xbb\xbf)?-----BEGIN (?P<kind>[A-Z0-9 ]{0,40})PRIVATE KEY(?: BLOCK)?"
+                                 rb"-----\r?\n"
+                                 rb"(?P<hdrs>(?:[A-Za-z][A-Za-z0-9-]{0,30}: [^\r\n]{0,200}\r?\n)*)(?:\r?\n)?"
+                                 rb"(?P<body>[A-Za-z0-9+/]{16}|[A-Za-z0-9+/]{1,15}\Z)")
+_OPENSSH_MAGIC = b"b3BlbnNzaC1rZXktdjE"   # base64 of "openssh-key-v1"
+
+
+def _pem_body_ok(m) -> bool:
+    """The body starts as a key does: DER (a SEQUENCE: "M"), the OpenSSH magic, a PGP packet (a tag byte of 0x80 or
+    more), or anything after encryption headers (Proc-Type, a PGP armour header). Prose after a banner is no key
+    (codex Gate A of 0.6.20)."""
+    body, kind = m.group("body"), m.group("kind")
+    if m.group("hdrs"):
+        return True
+    if kind.startswith(b"OPENSSH"):
+        return _OPENSSH_MAGIC.startswith(body[:19]) if len(body) < 19 else body.startswith(_OPENSSH_MAGIC[:16])
+    if kind.startswith(b"PGP"):
+        return body[:1] in b"ghijklmnopqrstuvwxyz0123456789+/"
+    return body[:1] == b"M"
+
+
+# a further line of a wrapped base64 value: after a line break, or after an escaped one (\n in a JSON string)
+_B64_LINE_RE = re.compile(r"(?:\r?\n|(?:\\r)?\\n)([ \t]*)([A-Za-z0-9+/]+={0,2})(?=[ \t]*(?:\r?\n|$)|[\"',;]|\\[rn])")
+_B64_PEM_STARTS = ("LS0tLS1CRUdJTi", "77u/LS0tLS1CRUdJTi")
+
+
+def _b64_needles(raw: bytes) -> tuple:
+    """The base64 text of `raw` at each of the three byte alignments, cut to the characters that `raw` alone decides."""
+    import base64
+    out = []
+    for k in range(3):
+        enc = base64.b64encode(b"\0" * k + raw + b"\0\0").decode()
+        out.append(enc[-(-8 * k // 6):8 * (k + len(raw)) // 6])
+    return tuple(out)
+
+
+_PRIVATE_KEY_NEEDLES = _b64_needles(b"PRIVATE KEY-----")   # a key later in a bundle (certificate, chain, key)
+
+
+_PEM_END_RE = re.compile(rb"-----END [A-Z0-9 ]{1,60}-----\r?\n?\Z")
+
+
+def _pem_ended(lines: list) -> bool:
+    """Whether the base64 lines so far (each of a width that is a multiple of 4) decode to the end of a PEM block."""
+    import base64
+    try:
+        return _PEM_END_RE.search(base64.b64decode("".join(lines[-2:]), validate=True)) is not None
+    except ValueError:
+        return False
+
+
+def _base64_wrapped_end(text: str, start: int, end: int) -> int:
+    """The end of a base64 value that `base64` or openssl wrapped at a fixed width. text[start:end] is its first
+    line; each further line holds base64 alone and has the width of the first, the last may be shorter. A line of
+    another width, a line that starts a new value, or any other text ends the value, and so does a full line that
+    decodes to the end of a PEM block (a shorter line after it is the next text: codex Gate A of 0.6.20). A first
+    line longer than 120 characters is no wrapped line (the tools wrap at 64 or 76), and one that ends in padding is
+    the whole value."""
+    width = end - start
+    if width > 120 or text[end - 1] == "=":
+        return end
+    lines = [text[start:end]]   # the last two lines only: a value can be megabytes long
+    while True:
+        m = _B64_LINE_RE.match(text, end)
+        if not m or len(m.group(2)) > width or m.group(2).startswith(_B64_PEM_STARTS):
+            return end
+        if len(m.group(2)) < width and width % 4 == 0 and _pem_ended(lines):
+            return end
+        end = m.end(2)
+        lines = [lines[-1], m.group(2)]
+        if len(m.group(2)) < width or m.group(2).endswith("="):
+            return end
+
+
+def _base64_pem_ok(v: str) -> bool:
+    """A base64 value whose decoded start is the header of a PEM private key and its first body characters (a
+    Kubernetes Secret's tls.key or ssh-privatekey), or a bundle that holds one later. Only the first 400 characters
+    are decoded: the value can be megabytes long."""
+    import base64
+    flat = "".join(v.replace("\\r", "").replace("\\n", "").split())
+    head = flat[:400]
+    try:
+        raw = base64.b64decode(head[:len(head) // 4 * 4], validate=True)
+    except ValueError:
+        return False
+    m = _B64_PEM_PRIVATE_RE.match(raw)
+    if m:
+        return _pem_body_ok(m)
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]   # a byte order mark before a bundle (codex Gate A of 0.6.20)
+    if not raw.startswith(b"-----BEGIN "):
+        return False
+    for needle in _PRIVATE_KEY_NEEDLES:   # a bundle: decode around each "PRIVATE KEY-----" (the footer has one too)
+        i, seen = flat.find(needle), 0
+        while i >= 0 and seen < 50:
+            a = max(0, i // 4 * 4 - 80)
+            window = flat[a:a + 320]   # room for Proc-Type and DEK-Info before the body (Gate B, round 2)
+            try:
+                inner = _B64_PEM_PRIVATE_RE.search(base64.b64decode(window[:len(window) // 4 * 4], validate=True))
+                if inner and _pem_body_ok(inner):
+                    return True
+            except ValueError:
+                pass
+            i, seen = flat.find(needle, i + 1), seen + 1
+    return False
 
 
 def _us_ssn_ok(v: str) -> bool:
@@ -1159,6 +1275,9 @@ VALIDATORS = {
     "wif": checksums.wif_ok,
     "xprv": checksums.xprv_ok,
     "discord_bot_token": checksums.discord_bot_token_ok,
+    "base64_pem": _base64_pem_ok,
+    # a token of a short public prefix (cio, oy2, AVNS_) whose body reads as words is an identifier
+    "token_not_words": lambda v: _wordlike(v[3:]) < 0.5,
 }
 
 
@@ -1335,6 +1454,60 @@ OWN_RULES: list[dict] = [
     {"id": "auth-scheme-apikey", "type": "SECRET", "secret_group": 1, "validator": "apikey_value",
      "regex": r"(?i:authorization)[\"']?\]?[ \t]*[:=][ \t]*[\"'`]?ApiKey[ \t]+([A-Za-z0-9+/_-]{8,1024}={0,2})"
               r"(?![\w+/=-])"},
+    # a PEM private key in base64: the tls.key or ssh-privatekey of a Kubernetes Secret, a CI variable, a Helm value.
+    # The run starts with the base64 of "-----BEGIN"; the validator decodes its first 400 characters and keeps it only
+    # if the header names a PRIVATE KEY and base64 body follows, or if a bundle holds one later (a certificate alone
+    # stays text). The whole value is the secret, also when `base64` or openssl wrapped it at a fixed width, with
+    # real or escaped line breaks (_base64_wrapped_end).
+    # In 0.6.19 no rule found it, also not after a label (a catalog survey, 2026-10-14)
+    {"id": "private-key-base64", "type": "SECRET", "validator": "base64_pem",
+     "regex": r"(?<![A-Za-z0-9+/])(?:77u/)?LS0tLS1CRUdJTi[A-Za-z0-9+/]{16,}={0,2}"},
+    # token formats whose literal prefix is shorter than four characters, so not in rules/prefixes.txt (0.6.20). The
+    # character after the prefix is checked by a lookbehind written after the prefix, so the regex still starts with
+    # its literal and the engine skips a text without it. Sources: crates.io and NuGet from Nosey Parker (Apache-2.0),
+    # Dropbox, Firecrawl and ElevenLabs from Kingfisher (Apache-2.0); each regex is written here. A crates.io or NuGet
+    # key needs one digit, and its body must not read as words: an identifier such as cioServiceConfiguration… is no
+    # key. ElevenLabs: exactly 48 hex digits after sk_ (Stripe's sk_live_ and sk_test_ have an underscore there).
+    # Firecrawl and ElevenLabs keys are hex by design, so a digest after fc- or sk_ is taken too (no hit in the
+    # developer texts or in CredData's code files, 0.6.20)
+    {"id": "crates-io-api-token", "type": "SECRET", "validator": "token_not_words",
+     "regex": r"cio(?:(?<![A-Za-z0-9_]cio)|(?<=\\[nrt]cio))(?=[A-Za-z]{0,31}[0-9])[A-Za-z0-9]{32}(?![A-Za-z0-9_])"},
+    {"id": "nuget-api-key", "type": "SECRET", "validator": "token_not_words",
+     "regex": r"oy2(?:(?<![A-Za-z0-9_]oy2)|(?<=\\[nrt]oy2))(?=[a-z]{0,42}[0-9])[a-z0-9]{43}(?![A-Za-z0-9_])"},
+    {"id": "dropbox-short-lived-token", "type": "SECRET",
+     "regex": r"sl\.(?:(?<![A-Za-z0-9_.-]sl\.)|(?<=\\[nrt]sl\.))"
+              r"(?:u\.)?(?=[A-Za-z_-]{0,2047}[0-9])[A-Za-z0-9_-]{130,2048}(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9_-])"},
+    {"id": "firecrawl-api-key", "type": "SECRET",
+     "regex": r"fc-(?:(?<![A-Za-z0-9_-]fc-)|(?<=\\[nrt]fc-))[a-f0-9]{32}(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9]|\{)"},
+    {"id": "elevenlabs-api-key-bare", "type": "SECRET",
+     "regex": r"sk_(?:(?<![A-Za-z0-9_]sk_)|(?<=\\[nrt]sk_))[0-9a-f]{48}(?![A-Za-z0-9_])(?!\.[A-Za-z0-9]|\{)"},
+    # an Aiven service password (GitLab's rule, MIT): AVNS_ and 15 to 123 characters. A name of words after the prefix
+    # (AVNS_Configuration01) is no password (codex Gate A of 0.6.20)
+    {"id": "aiven-service-password", "type": "SECRET", "validator": "token_not_words",
+     "regex": r"AVNS_(?:(?<![A-Za-z0-9_]AVNS_)|(?<=\\[nrt]AVNS_))[0-9A-Za-z_-]{15,123}(?![0-9A-Za-z_-])"},
+    # SonarQube's analysis tokens (GitLab's rules, MIT): sqa_ (global) and sqp_ (project) and 40 hex digits, the shape
+    # of a git commit id after a word such as "sqa" (software quality assurance), so only with "sonar" near it (Gate B
+    # of 0.6.20). The user token squ_ stands alone (rules/prefixes.txt)
+    {"id": "sonarqube-analysis-token", "type": "SECRET", "context": ("sonar", "sonarqube", "sonarcloud"),
+     "require_context": True,
+     "regex": r"sq[ap]_(?:(?<![A-Za-z0-9_]sq[ap]_)|(?<=\\[nrt]sq[ap]_))[0-9a-f]{40}(?![A-Za-z0-9_])"},
+]
+
+
+# Fallbacks that run after the vendored rules (0.6.20): forms of a key whose vendored rule fixes one length, so the
+# standard form keeps its vendored rule id. Found in a measurement on real session transcripts (values not kept):
+# OpenAI project keys of other lengths around T3BlbkFJ (the base64 of "OpenAI"; the vendored rule takes 20, 58 or 74
+# characters on each side) and Anthropic API keys of other lengths (the vendored rule takes exactly 93 characters
+# before AA). Each also takes a key before a full stop, which the vendored terminators refuse. The vendored rule of
+# such a key matches whole or not at all; GitLab's trigger and job tokens are in rules/prefixes.txt, as the vendored
+# rule there takes the first part of a longer token (codex Gate A)
+FALLBACK_RULES: list[dict] = [
+    {"id": "openai-api-key-any", "type": "SECRET",
+     "regex": r"sk-(?:(?<![A-Za-z0-9_-]sk-)|(?<=\\[nrt]sk-))"
+              r"(?:proj|svcacct|admin)-[A-Za-z0-9_-]{8,400}?T3BlbkFJ[A-Za-z0-9_-]{8,400}(?![A-Za-z0-9_-])"},
+    {"id": "anthropic-api-key-any", "type": "SECRET",
+     "regex": r"sk-ant-(?:(?<![A-Za-z0-9_-]sk-ant-)|(?<=\\[nrt]sk-ant-))(?:api03|admin01)-[A-Za-z0-9_-]{60,140}AA"
+              r"(?![A-Za-z0-9_-])"},
 ]
 
 
@@ -1342,6 +1515,38 @@ OWN_RULES: list[dict] = [
 # betterleaks rules left out: a filter that is a program (let bindings; rule_filter.Unsupported) would run without
 # it, and maisecrets' own label rules cover these shapes (ds-keyword, url-query-secret, the email rule)
 BETTERLEAKS_SKIP_UNSUPPORTED = True
+
+# Corrections to vendored betterleaks rules. scripts/sync_betterleaks.py overwrites rules/betterleaks.json, so they
+# live here and apply when the rules load. Each names the upstream regex it expects ("expect"); after a re-sync that
+# changes that regex, tests/test_rules_from_the_catalogs.py goes red, and the correction is checked against the new
+# rule (and dropped if upstream fixed it). Found by a coverage measurement against other catalogs (0.6.20):
+# - three keyword lists named only the provider, so a bare token without the provider's name was never searched;
+#   the token's own prefix is now a keyword too (the regex is unchanged). The Airtable regex also used the RE2 class
+#   [[:alnum:]], which Python read as a set of six characters; _re2_to_python now translates the POSIX classes
+# - WakaTime's waka_ key is waka_ and a UUID (Kingfisher's rule and examples); the regex took no hyphen
+BETTERLEAKS_PATCHES = {
+    "resend-api-key.1": {"add_keywords": ("re_",)},
+    "ionic-personal-access-token": {"add_keywords": ("ion_",)},
+    "airtable-personnal-access-token": {"add_keywords": ("pat",)},
+    "wakatime-api-key.2": {
+        "expect": r"""(?i)\b(waka_[a-z0-9]{36,64})(?:\\?['"\x60]|[\s;]|\\[nr]|$)""",
+        "regex": r"""(?i)\b(waka_(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-z0-9]{36,64}))"""
+                 r"""(?:\\?['"\x60]|[\s;]|\\[nr]|$)"""},
+}
+
+
+def _patched(r: dict) -> dict:
+    """The rule with its BETTERLEAKS_PATCHES entry applied. A regex correction applies only to the regex it expects."""
+    patch = BETTERLEAKS_PATCHES.get(r.get("id"))
+    if not patch:
+        return r
+    r = dict(r)
+    if patch.get("add_keywords"):
+        r["keywords"] = list(r.get("keywords") or []) + [k for k in patch["add_keywords"]
+                                                        if k not in (r.get("keywords") or [])]
+    if patch.get("regex") and r.get("regex") == patch["expect"]:
+        r["regex"] = patch["regex"]
+    return r
 
 
 def _load_own_secret_rules() -> list[Rule]:
@@ -1384,6 +1589,7 @@ def _load_betterleaks() -> list[Rule]:
         for r in cfg.get("rules", []):
             if "regex" not in r or r.get("skipReport"):
                 continue
+            r = _patched(r)
             own = None
             if r.get("filter"):
                 try:
@@ -1762,7 +1968,8 @@ def _load_literal(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
 
 def _load_own() -> list[Rule]:
     return [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"]),
-                 secret_group=d.get("secret_group", 0), validator=d.get("validator"))
+                 secret_group=d.get("secret_group", 0), validator=d.get("validator"),
+                 context=tuple(d.get("context", ())), require_context=d.get("require_context", False))
             for d in OWN_RULES] + _load_prefixes()
 
 
@@ -1779,6 +1986,7 @@ def rules() -> list[Rule]:
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
         _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
+                  + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]
                   + _load_regional(active.regions) + _load_presidio(active.regions) + pii
                   + _load_literal(active.languages))
     return _RULES
@@ -2671,6 +2879,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> li
             if end <= start:
                 continue
             secret = m.group(g)
+            if rule.id == "private-key-base64":
+                end = _base64_wrapped_end(text, start, end)   # the further lines of a wrapped value
+                secret = text[start:end]
             if (rule.id in _ESCAPABLE_COLON_RULES and "\\" in (m.group(2) or "")
                     and text[start - 2:start] not in ('\\"', "\\'")):
                 # the label's quote is escaped: JSON inside a string, whose values are escaped strings. A value without
@@ -2803,8 +3014,13 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False) -> li
                 # the tail would stay in the clear (4 chars of a 24-char token, 2026-09-26): the
                 # value runs to the end of the token characters
                 end2 = end
-                while end2 < len(text) and end2 - end < 128 and _TOKEN_CHAR_RE.match(text[end2]):
+                gitlab = _GITLAB_PREFIX_RE.match(secret)
+                while end2 < len(text) and end2 - end < (400 if gitlab else 128) and _TOKEN_CHAR_RE.match(text[end2]):
                     end2 += 1
+                if gitlab and end2 - end > 128 and not _ROUTABLE_TAIL_RE.match(text, end2):
+                    # the payload of a routable GitLab token runs up to 235 characters before its ".01.<id>" tail
+                    # (routable_token.rb), past the 128; a run without that tail keeps the bound (0.6.20)
+                    end2 = end + 128
                 if end2 > end and _TOKEN_CHAR_RE.match(secret[-1]) and not overlaps(end, end2):
                     end = end2
                     secret = text[start:end]

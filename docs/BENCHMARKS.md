@@ -73,6 +73,23 @@ Typed prompts from the maintainers' own sessions, through the hook: 0 new blocks
 Source: the 0.6.17 release measurement, 2026-10-14. The prompts are not published, so this number cannot be
 repeated outside the maintainers' machines.
 
+## Coverage against other catalogs
+
+The built-in examples of six other secret catalogs, scanned by maisecrets. Per rule with examples, up to 6
+examples, each in two forms: the secret alone ("bare") and after `token = ` ("after a label"). A rule counts as
+found when the hits of one channel cover the whole secret of one of its examples. "0.6.19" is the tag `v0.6.19`;
+"0.6.20" is the branch of that release. Source: `scripts/measure_catalog_coverage.py`, 2026-10-15; its docstring has
+the method.
+
+| Catalog | Commit | Rules | Rules with examples | 0.6.19 bare | 0.6.20 bare | 0.6.19 after a label | 0.6.20 after a label |
+|---|---|---|---|---|---|---|---|
+| Nosey Parker | `2e6e7f36ce36` | 189 | 189 | 67 (35.4 %) | 78 (41.3 %) | 171 (90.5 %) | 171 (90.5 %) |
+| Kingfisher | `82d050530cde` (v1.113.0) | 1,095 | 1,095 | 211 (19.3 %) | 230 (21.0 %) | 994 (90.8 %) | 994 (90.8 %) |
+| gitleaks | `b58d3f102cf3` | 225 | 158 | 73 (46.2 %) | 74 (46.8 %) | 153 (96.8 %) | 153 (96.8 %) |
+| betterleaks | `c613797a6843` | 467 | 360 | 147 (40.8 %) | 152 (42.2 %) | 346 (96.1 %) | 346 (96.1 %) |
+| trufflehog | `27d8ea2876d9` | 943 | 890 | 61 (6.9 %) | 66 (7.4 %) | 838 (94.2 %) | 838 (94.2 %) |
+| GitLab secret detection rules | `cae5670b0d83` | 217 | 172 | 91 (52.9 %) | 104 (60.5 %) | 161 (93.6 %) | 161 (93.6 %) |
+
 ## Timing
 
 Median time of one scan, 15 runs after one warm-up run; "import + first scan" is the median of 5 new processes,
@@ -198,6 +215,26 @@ credentials still missed: 4268
 
 Options: `--channel prompt`, `--regions us`, `--exclude-repo ""` (all rows), `--out result.json` (counts and
 per-row results with row ids, labels and rule ids; no value).
+
+The catalog coverage needs Python 3.11 or newer (tomllib) and PyYAML. Clone each catalog at its pinned commit into one
+directory, under the names below, and run the script; it reads the catalogs as data and prints counts only:
+
+```bash
+mkdir catalogs && cd catalogs
+for spec in noseyparker=https://github.com/praetorian-inc/noseyparker@2e6e7f36ce36619852532bbe698d8cb7a26d2da7 \
+    kingfisher=https://github.com/mongodb/kingfisher@82d050530cdef9af070b8f9a75701c9c27a948c3 \
+    gitleaks=https://github.com/gitleaks/gitleaks@b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b \
+    betterleaks=https://github.com/betterleaks/betterleaks@c613797a684337a014168063577bb6fa6e3b6296 \
+    trufflehog=https://github.com/trufflesecurity/trufflehog@27d8ea2876d990b274996fc97aff0f8d952d364c \
+    gitlab=https://gitlab.com/gitlab-org/security-products/secret-detection/secret-detection-rules@cae5670b0d83aaea0ff37c085119e82ff394f283
+do
+  name=${spec%%=*}; rest=${spec#*=}
+  git clone -q "${rest%@*}" "$name" && git -C "$name" checkout -q "${rest##*@}"
+done
+cd ..
+python3 maisecrets/scripts/measure_catalog_coverage.py catalogs --maisecrets maisecrets-0.6.20 \
+    --baseline maisecrets-0.6.19
+```
 
 ## Add a new release row
 

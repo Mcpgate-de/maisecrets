@@ -1,0 +1,11 @@
+# c1-a-vendored-rule-finds-its-token-without-the-provider-name: the test owns the corrections; this file names them and the mutation that must turn it red.
+belief = "c1-a-vendored-rule-finds-its-token-without-the-provider-name"
+control = "C1"
+statement = "The corrections of BETTERLEAKS_PATCHES apply when the vendored rules load, so a Resend, Ionic, Airtable or WakaTime token is found without the provider's name beside it, also after a re-sync of the vendored file."
+runner = ["tests/test_rules_from_the_catalogs.py::BetterleaksPatchTests::test_a_bare_token_without_the_providers_name_is_found"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''            r = _patched(r)
+'''
+replace = ""
