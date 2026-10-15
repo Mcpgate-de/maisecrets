@@ -749,7 +749,7 @@ def _macho_commands(path: str):
 def _nearest_folder(path: str) -> str:
     """The folder itself, or for one that does not exist the nearest folder above it that does: whoever can write
     that one can make the missing folder and put a library in it (round 3)."""
-    path = os.path.abspath(path)
+    path = os.path.realpath(path)          # a dangling link counts by the folder it points to
     while not os.path.isdir(path) and os.path.dirname(path) != path:
         path = os.path.dirname(path)
     return path

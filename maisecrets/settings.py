@@ -331,15 +331,20 @@ def loosens(key: str, before, after) -> bool:
         return before == PROTECTIVE_BOOL[key] and after != PROTECTIVE_BOOL[key]
     if key in STRICTER_LAST:
         order = STRICTER_LAST[key]
+        if key in ("read_pdf", "read_image") and before not in order:
+            before = order[-1]       # a value that is no mode works as block (file_reads.mode)
         return before in order and after in order and order.index(after) < order.index(before)
     if key in _INT_KEYS:
         return isinstance(before, int) and isinstance(after, int) and after > before
-    if key in ("ssh_autonomous_hosts", "clean_dirs"):
-        return bool(set(after or []) - set(before or []))    # a new host or a new clean folder
+    if key == "ssh_autonomous_hosts":
+        return bool(set(after or []) - set(before or []))
+
+    def same(dirs) -> set:     # ~/team and /home/me/team/ are one folder
+        return {os.path.normcase(os.path.expanduser(d.strip()).rstrip("/\\")) for d in dirs or []
+                if isinstance(d, str)}
+    if key == "clean_dirs":
+        return bool(same(after) - same(before))     # a new clean folder: its files pass
     if key == "rule_dirs":
-        def same(dirs) -> set:     # ~/team and /home/me/team/ are one folder
-            return {os.path.normcase(os.path.expanduser(d.strip()).rstrip("/\\")) for d in dirs or []
-                    if isinstance(d, str)}
         return bool(same(before) - same(after))     # a folder taken off: its rules no longer run
     return False
 
