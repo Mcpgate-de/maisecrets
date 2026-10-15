@@ -37,6 +37,11 @@ BANDS = {
 }
 SOURCES = tuple(BANDS)
 PHASES = {"export": 0, "rules": 1, "personal": 2, "user": 3, "extra": 4}
+# The passes of a scan outside the rule list, as sources of their own. Each runs where its phase says: the password
+# export before every rule (a cell is a value as a whole), the personal-data rules (maisecrets/personal.py) and the
+# cleaned copy of a tool result after every built-in rule and before the rules of your own, the extra matchers last.
+# The cleaned copy has no rule of its own: it runs every rule again on a cleaned text.
+PASSES = {"export": PHASES["export"], "personal": PHASES["personal"]}
 # the channels a source runs in. Every rule of the rule list runs in both; the literal rules judge a value by the
 # channel (detect._pw_literal_ok: a tool result takes a password without evidence of chance), which is a rule of
 # their own, not a channel switch
@@ -262,6 +267,17 @@ def rule_class(source: str, rule_id: str, type_: str) -> str:
     return "provider:" + _provider(rule_id)
 
 
+def pass_specs(export_rule: str, export_type: str, personal_rules: tuple, prompt_rules: frozenset,
+               personal_types: dict) -> list:
+    """The specs of the passes outside the rule list: the password export (tool channel only) and the personal-data
+    rules (tool channel; the ones in personal.PROMPT_RULES in both)."""
+    out = [make("export", export_rule, export_type, 0, channel="tool")]
+    for seq, rid in enumerate(personal_rules):
+        out.append(make("personal", rid, personal_types.get(rid, "PERSON"), seq,
+                        channel="both" if rid in prompt_rules else "tool"))
+    return out
+
+
 def coarse_class(spec: RuleSpec) -> str:
     """A class of a few dozen members: the source for a token rule, the class for label and PII rules."""
     if spec.rule_class.startswith("provider:"):
@@ -279,11 +295,13 @@ def key_of(source: str, rule_id: str) -> str:
 def make(source: str, rule_id: str, type_: str, seq: int, *, region: str = "generic", channel: str = "both",
          language: str = "", upstream: Upstream | None = None, patches: tuple = ()) -> RuleSpec:
     origin = "vendored" if source in VENDORED else OWN_SPECIAL.get(source, "own")
+    if source in PASSES:
+        origin = "own"
     if origin == "vendored" and patches:
         origin = "patched"
-    phase = PHASES["user"] if source == "user" else PHASES["rules"]
+    phase = PHASES["user"] if source == "user" else PASSES.get(source, PHASES["rules"])
     return RuleSpec(key=key_of(source, rule_id), id=rule_id, source=source, origin=origin,
-                    priority=(phase, BANDS[source], seq), channel=channel, region=region, type=type_,
+                    priority=(phase, BANDS.get(source, 0), seq), channel=channel, region=region, type=type_,
                     rule_class=rule_class(source, rule_id, type_), form=form_of(rule_id),
                     matcher=matcher_of(rule_id, source), filters=filters_of(rule_id), language=language,
                     upstream=upstream, patches=tuple(patches))

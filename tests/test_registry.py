@@ -101,6 +101,21 @@ class RegistryTests(unittest.TestCase):
                                                           for p in specs["presidio:de-tax-id"].patches])
         self.assertIn("context_rule", [p.field for p in specs["presidio:de-vat-id#0"].patches])
 
+    def test_the_passes_outside_the_rule_list_have_their_phase_and_channel(self):
+        passes = detect.pass_specs()
+        keys = [s.key for s in passes] + [s.key for s, _ in self.specs]
+        self.assertEqual(len(keys), len(set(keys)))
+        export = [s for s in passes if s.source == "export"]
+        self.assertEqual([(s.id, s.priority[0], s.channel) for s in export], [(detect.EXPORT_RULE, 0, "tool")])
+        personal = [s for s in passes if s.source == "personal"]
+        self.assertTrue(personal)
+        for s in personal:
+            self.assertEqual(s.priority[0], registry.PHASES["personal"])
+            self.assertEqual(s.channel, "both" if s.id == "phone-one-digit-groups" else "tool")
+        # the rules of your own run after the personal-data step: their phase is after it
+        self.assertGreater(registry.PHASES["user"], registry.PHASES["personal"])
+        self.assertTrue(all(r.phase == registry.PHASES["rules"] for r in detect.rules()))
+
     def test_every_source_has_its_band_and_the_bands_keep_the_measured_order(self):
         self.assertEqual({s.source for s, _ in self.specs}, set(registry.SOURCES) - {"user"})
         bands = [registry.BANDS[x] for x in registry.SOURCES]

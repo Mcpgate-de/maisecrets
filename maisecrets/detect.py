@@ -107,6 +107,7 @@ class Rule:
     matcher: str = ""                  # regex | lines | windowed | curl | list | literal | seed (registry.matcher_of)
     filters: frozenset = frozenset()   # the named checks after a hit (registry.filters_of); set by rules()
     region: str = "generic"            # the country of a regional or Presidio rule, set by its loader
+    phase: int = 0                     # registry.PHASES: 1 the built-in rules, 3 the rules of your own; set by rules()
 
 
 # ----------------------------------------------------------------- helpers --
@@ -2060,6 +2061,7 @@ def _ranked(active) -> list:
             object.__setattr__(r, "form", form_of(r.id))
             object.__setattr__(r, "matcher", matcher_of(r.id, source))
             object.__setattr__(r, "filters", filters_of(r.id))
+            object.__setattr__(r, "phase", phase)
             out.append(((phase, band, seq), r))
     out.sort(key=lambda x: x[0])
     return out
@@ -2084,6 +2086,23 @@ def rule_specs(active=None) -> list:
                                   upstream=upstream.get((source, r.id.split("#", 1)[0])),
                                   patches=_patches_of(source, r.id, patches)), r))
     return out
+
+
+def pass_specs() -> list:
+    """The specs of the passes outside the rule list (registry.pass_specs): the password export and the personal-data
+    rules of maisecrets/personal.py, when this copy of the detector has it."""
+    try:
+        from . import personal
+    except ImportError:
+        personal = None
+    if personal is None:
+        return _registry.pass_specs(EXPORT_RULE, "SECRET", (), frozenset(), {})
+    p = personal
+    types = {"phone-one-digit-groups": p.PHONE, "phone-us-national": p.PHONE, "birth-date-after-label": p.BIRTH_DATE,
+             "id-number-after-label": p.ID_NUMBER, "user-in-url": p.USERNAME, "user-in-home-path": p.USERNAME,
+             "street-address": p.ADDRESS, "name-after-label": p.NAME, "name-before-email": p.NAME,
+             "csv-personal-column": "COLUMN"}
+    return _registry.pass_specs(EXPORT_RULE, "SECRET", tuple(p.RULE_IDS), p.PROMPT_RULES, types)
 
 
 def _patches_of(source: str, rule_id: str, patches: dict) -> tuple:
@@ -3157,7 +3176,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         # a rule that cannot fire without a context word need not run its regex without one
         if rule.context and (rule.require_context or rule.score < 0.5) and not _has_context_word(low, rule.context):
             continue
-        own = rule.id.startswith("user:")
+        own = _runs_after_personal(rule)
         form = rule.form or _registry.form_of(rule.id)    # a rule list a caller built has no form set
         keyword = form == "keyword"
         filters = rule.filters if rule.key else _registry.filters_of(rule.id)
@@ -3338,12 +3357,18 @@ _PERSONAL = object()             # the place of _personal_hits in the scan order
 _ORDER: list = [None, ()]        # a rule list and its scan order
 
 
+def _runs_after_personal(rule: Rule) -> bool:
+    """A rule of your own: its phase (registry.PHASES["user"]) puts it after the personal-data step. A rule list that a
+    caller built has no phase; its rules of your own have the id prefix `user:`."""
+    return rule.phase == _registry.PHASES["user"] if rule.phase else rule.id.startswith("user:")
+
+
 def _in_scan_order(every: list) -> tuple:
     """The rules of a list in scan order: the built-in ones, then the personal-data step and the cleaned copy, then the
     rules of your own (ids with `user:`). Kept per list, so a scan pays for it once."""
     if _ORDER[0] is not every:
-        _ORDER[:] = [every, tuple(r for r in every if not r.id.startswith("user:")) + (_PERSONAL,)
-                     + tuple(r for r in every if r.id.startswith("user:"))]
+        _ORDER[:] = [every, tuple(r for r in every if not _runs_after_personal(r)) + (_PERSONAL,)
+                     + tuple(r for r in every if _runs_after_personal(r))]
     return _ORDER[1]
 
 
