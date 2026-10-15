@@ -19,7 +19,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | detector identity | `python3 scripts/detection_fingerprint.py --out FILE [--creddata DIR]` | by hand before and after a refactor of the rules: the full hit list on fixed inputs, compared with `cmp` (section "A refactor of the rules") |
 | Windows end to end | `GITLAB_COM_TOKEN=… python3 scripts/windows_e2e.py [--rev REV]` | by hand before a release that touches the hooks, the launchers or the harness: GitLab-hosted Windows runners of a separate project, in three shapes (PowerShell 7, Windows PowerShell 5.1, Git Bash). Each job runs `harness/windows/shell_probe.py` (which shell runs a hook, and the `hooks.json` command in each shell) and `harness/run.py` with the shell tool the client offers (`MAISECRETS_HARNESS_SHELL_TOOL`) |
 
-1619 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
+1622 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
 the tested commit of a release (branch `ci`) and on a push to main without a release.
 
 ## What makes a test count

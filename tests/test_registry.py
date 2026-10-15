@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
-from maisecrets import detect, registry  # noqa: E402
+from maisecrets import detect, registry, rules_cli, user_rules  # noqa: E402
 
 
 class RegistryTests(unittest.TestCase):
@@ -140,6 +140,51 @@ class RegistryTests(unittest.TestCase):
         self.assertIn("de", regions)          # the test locale is de_DE: the German rules are on
         self.assertTrue(all(s.region == "generic" for s, _ in self.specs
                             if s.source not in ("regional", "presidio")))
+
+
+class RulesListTests(unittest.TestCase):
+    def run_list(self, *args) -> str:
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(rules_cli.main(["list", *args]), 0)
+        return out.getvalue()
+
+    def tearDown(self):
+        try:
+            user_rules.ALLOW_FILE.unlink()
+        except FileNotFoundError:
+            pass
+        detect.reset_rules()
+
+    def test_the_list_names_every_rule_and_pass_with_its_origin_and_rank_and_never_a_regex(self):
+        rows = __import__("json").loads(self.run_list("--json"))
+        specs = [s for s, _ in detect.rule_specs()] + detect.pass_specs()
+        self.assertEqual([r["key"] for r in rows], [s.key for s in sorted(specs, key=lambda s: s.priority)])
+        by_key = {r["key"]: r for r in rows}
+        self.assertEqual(by_key["presidio:de-tax-id"]["origin"], "patched")
+        self.assertEqual(by_key["export:label-password-export"]["rank"], "0.0.0")
+        self.assertTrue(by_key["betterleaks:wakatime-api-key.2"]["upstream"].startswith("betterleaks v"))
+        text = self.run_list()
+        self.assertTrue(text.startswith("key "))
+        self.assertIn(f"{len(rows)} rules: ", text)
+        for rule in detect.rules():
+            self.assertNotIn(rule.regex.pattern, text)
+
+    def test_a_rule_the_allow_list_switches_off_is_marked(self):
+        user_rules.ALLOW_FILE.write_text("rule: jwt\n", encoding="utf-8")
+        detect.reset_rules()
+        rows = {r["key"]: r for r in __import__("json").loads(self.run_list("--json"))}
+        self.assertTrue(rows["betterleaks:jwt"]["off"])
+        self.assertFalse(rows["betterleaks:github-pat"]["off"])
+        self.assertIn("(off: allow list)", self.run_list())
+
+    def test_an_unknown_argument_is_refused(self):
+        import contextlib
+        import io
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(rules_cli.main(["list", "--yaml"]), 2)
 
 
 if __name__ == "__main__":

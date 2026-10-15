@@ -1473,6 +1473,7 @@ carries the id with `user:` in front (`user:acme-token`).
 the rest:
 
 ```
+maisecrets rules list [--json]      every rule in scan order: key, id, origin, rank, channel, region, class, upstream, patches
 maisecrets rules check [DIR]        each rule: ok with its time, slow, or refused with the reason; exit 1 on a problem
 maisecrets rules test [text]        what the rules find in the text or stdin: type, rule, place, length
 maisecrets rules init DIR           a team folder: README.md, rules/, samples.txt, CI for GitHub and GitLab
