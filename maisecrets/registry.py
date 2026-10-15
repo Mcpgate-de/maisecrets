@@ -128,14 +128,18 @@ def coarse_class(spec: RuleSpec) -> str:
     return spec.rule_class
 
 
+def key_of(source: str, rule_id: str) -> str:
+    """The unique key of a rule: `<source>:<id>`; a rule of your own keeps its id, which has its own prefix `user:`."""
+    return rule_id if source == "user" else source + ":" + rule_id
+
+
 def make(source: str, rule_id: str, type_: str, seq: int, *, region: str = "generic", channel: str = "both",
          language: str = "", upstream: Upstream | None = None, patches: tuple = ()) -> RuleSpec:
     origin = "vendored" if source in VENDORED else OWN_SPECIAL.get(source, "own")
     if origin == "vendored" and patches:
         origin = "patched"
     phase = PHASES["user"] if source == "user" else PHASES["rules"]
-    key = rule_id if source == "user" else f"{source}:{rule_id}"    # a user rule id has its own prefix, `user:`
-    return RuleSpec(key=key, id=rule_id, source=source, origin=origin,
+    return RuleSpec(key=key_of(source, rule_id), id=rule_id, source=source, origin=origin,
                     priority=(phase, BANDS[source], seq), channel=channel, region=region, type=type_,
                     rule_class=rule_class(source, rule_id, type_), form=form_of(rule_id), language=language,
                     upstream=upstream, patches=tuple(patches))

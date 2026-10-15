@@ -39,6 +39,22 @@ class RegistryTests(unittest.TestCase):
         for rid in twice:
             self.assertEqual(len({s.key for s, _ in self.specs if s.id == rid}), 2)
 
+    def test_a_key_enables_one_of_two_rules_with_the_same_id_and_the_id_enables_both(self):
+        import random
+        r = random.Random(5)
+        tok = "".join(r.choice("0123456789abcdef") for _ in range(32)) + "-us" + "7"
+        text = f"key {tok} here"
+        rules = [x for x in detect.rules() if x.id == "mailchimp-api-key"]
+        self.assertEqual(sorted(x.key for x in rules),
+                         ["betterleaks:mailchimp-api-key", "own-secret:mailchimp-api-key"])
+        by_key = {k: detect.scan(text, enabled={k}) for k in (x.key for x in rules)}
+        by_id = detect.scan(text, enabled={"mailchimp-api-key"})
+        self.assertTrue(by_id and by_id[0].kind == "mailchimp-api-key")
+        self.assertIn(by_id, list(by_key.values()))               # the id runs both; the first one takes the span
+        self.assertEqual(detect.scan(text, enabled={"betterleaks:no-such-rule"}), [])
+        for rule in detect.rules():
+            self.assertTrue(rule.key, rule.id)                    # rules() gives every rule its key
+
     def test_every_source_has_its_band_and_the_bands_keep_the_measured_order(self):
         self.assertEqual({s.source for s, _ in self.specs}, set(registry.SOURCES) - {"user"})
         bands = [registry.BANDS[x] for x in registry.SOURCES]

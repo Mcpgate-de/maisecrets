@@ -101,6 +101,7 @@ class Rule:
     whole_match: bool = False          # presidio: the entity is the whole match, never a sub-group
     quote_group: int = 0               # detect-secrets: group of the optional opening quote
     drop: object = None                # betterleaks: the rule's filter and the global one; True drops the finding
+    key: str = ""                      # unique, from maisecrets/registry.py: `<source>:<id>`; set by rules()
 
 
 # ----------------------------------------------------------------- helpers --
@@ -2046,10 +2047,14 @@ _REGIONAL_REGION = {d["id"]: d["region"] for d in REGIONAL_RULES}
 
 def _ranked(active) -> list:
     """(priority, rule) of every rule, sorted by priority = (phase, band, seq) (maisecrets/registry.py)."""
-    from .registry import BANDS, PHASES
+    from .registry import BANDS, PHASES, key_of
     rules_phase, user_phase = PHASES["rules"], PHASES["user"]
-    out = [((user_phase if source == "user" else rules_phase, BANDS[source], seq), r)
-           for source, rs in _rule_sources(active) for seq, r in enumerate(rs)]
+    out = []
+    for source, rs in _rule_sources(active):
+        phase, band = (user_phase if source == "user" else rules_phase), BANDS[source]
+        for seq, r in enumerate(rs):
+            object.__setattr__(r, "key", key_of(source, r.id))   # a field of the frozen rule, set once at load
+            out.append(((phase, band, seq), r))
     out.sort(key=lambda x: x[0])
     return out
 
@@ -2861,7 +2866,8 @@ def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt", pa
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins. channel "tool" (a tool
     result or a file) takes a password after a password label without evidence of chance, and the cells of a
     password export (path: the file the text came from, if any). `rule_list` scans with those rules alone, without
-    the allow list and the extra matchers (`maisecrets rules check`)."""
+    the allow list and the extra matchers (`maisecrets rules check`). `enabled` names rules by id or by key
+    (maisecrets/registry.py): an id that two rules share enables both, a key one of them."""
     outer, _CHANNEL[0] = _CHANNEL[0], channel if channel == "tool" else "prompt"
     outer_path, _PATH[0] = _PATH[0], path or ""
     try:
@@ -3094,7 +3100,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if _CHANNEL[0] == "tool" and not _copy:
                 _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends)
             continue
-        if enabled is not None and rule.id not in enabled:
+        if enabled is not None and rule.id not in enabled and rule.key not in enabled:
             continue
         if rule.keywords and not any(k in low for k in rule.keywords):
             continue
