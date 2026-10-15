@@ -50,3 +50,8 @@ only around the changed lines and in the tool channel only), the design of the c
 codice fiscale in maisecrets/checksums.py. The formats of the Telegram bot token, the Discord bot
 token and the Mailchimp API key follow Yelp detect-secrets (Apache License 2.0, see
 maisecrets/rules/LICENSE-detect-secrets); the regular expressions are written here.
+
+scripts/measure_datasets.py measures detection on public labelled datasets; it ships in no release. Its label
+cleaning (checksums, placeholders, reserved domains, the rule that no cut drops a group of a value, the label
+tables) and its Mendeley sheet reader and text repair are adapted from the bench of the same public fork of
+maisecrets (Apache License 2.0); docs/BENCHMARKS.md names it. The datasets are not part of this repository.
