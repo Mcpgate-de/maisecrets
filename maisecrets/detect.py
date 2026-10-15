@@ -2044,8 +2044,18 @@ def _rule_sources(active) -> list:
 _REGIONAL_REGION = {d["id"]: d["region"] for d in REGIONAL_RULES}
 
 
+def _ranked(active) -> list:
+    """(priority, rule) of every rule, sorted by priority = (phase, band, seq) (maisecrets/registry.py)."""
+    from .registry import BANDS, PHASES
+    rules_phase, user_phase = PHASES["rules"], PHASES["user"]
+    out = [((user_phase if source == "user" else rules_phase, BANDS[source], seq), r)
+           for source, rs in _rule_sources(active) for seq, r in enumerate(rs)]
+    out.sort(key=lambda x: x[0])
+    return out
+
+
 def rule_specs(active=None) -> list:
-    """(spec, rule) for each rule of every source, in register order (maisecrets/registry.py). The allow list is not
+    """(spec, rule) for each rule of every source, sorted by priority (maisecrets/registry.py). The allow list is not
     applied here: `maisecrets rules list` shows a switched-off rule too."""
     from . import registry
     active = active or active_regions()
@@ -2061,6 +2071,7 @@ def rule_specs(active=None) -> list:
                 region = "generic"
             out.append((registry.make(source, r.id, r.type, seq, region=region,
                                       language=languages if source in ("detect-secrets", "literal") else ""), r))
+    out.sort(key=lambda x: x[0].priority)
     return out
 
 
@@ -2075,7 +2086,8 @@ def allow_list() -> tuple[frozenset, frozenset]:
 
 
 def rules() -> list[Rule]:
-    """Own secret rules first (longer shapes win the span), then betterleaks and the own rules of
+    """Every rule, sorted by its rank in maisecrets/registry.py (priority). Own secret rules first (longer shapes win
+    the span), then betterleaks and the own rules of
     own_secret_rules.json, the fallback and regional rules, then PII, then the literal rules, then the rules of your
     own. A scan runs the personal-data step (_personal_hits) before the rules of your own (_in_scan_order). A user rule
     never takes a span before a built-in rule: a NAME rule that took a part of an e-mail address left the rest of it in
@@ -2083,14 +2095,8 @@ def rules() -> list[Rule]:
     off."""
     global _RULES
     if _RULES is None:
-        own = _load_own()
-        secrets = [r for r in own if r.type == "SECRET"]
-        pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
-        _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
-                  + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]
-                  + _load_regional(active.regions) + _load_presidio(active.regions) + pii
-                  + _load_literal(active.languages) + _user_rules())
+        _RULES = [r for _, r in _ranked(active)]
         off = allow_list()[1]
         if off:
             from .user_rules import switched_off
