@@ -231,7 +231,8 @@ class OnlyTheTextShapeLeaves(_Work):
         p = golden("PostToolUse_Read_pdf", self.cwd)
         out = output(hooks._fail_closed("post-tool", p, "took longer than 16s."))
         self.assertEqual(out["type"], "text")
-        self.assertEqual(out["file"]["filePath"], self.pdf)
+        # the golden joins the cwd and the name with "/", also on Windows (GitHub windows-latest)
+        self.assertEqual(os.path.normpath(out["file"]["filePath"]), os.path.normpath(self.pdf))
         self.assertIsInstance(output(hooks._fail_closed("post-tool", {"tool_name": "Bash"}, "x")), str,
                               "other tools keep their answer")
 
@@ -440,7 +441,7 @@ class Convert(_Work):
         out = output(answer)
         self.assertEqual(out["type"], "text")
         self.assertEqual(tuple(out["file"]), file_reads.TEXT_KEYS)
-        self.assertEqual(out["file"]["filePath"], self.pdf)
+        self.assertEqual(os.path.normpath(out["file"]["filePath"]), os.path.normpath(self.pdf))
         self.assertIn("Invoice 2026", out["file"]["content"])
         self.assertNotIn(TOKEN, json.dumps(answer), "the redaction ran on the text")
         self.assertRegex(out["file"]["content"], r"⟦SECRET_c\d+⟧")
