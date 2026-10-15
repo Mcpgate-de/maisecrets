@@ -101,19 +101,34 @@ home, and while a test run owns a home, the vault refuses the user's own home.
 
 A change that only moves the rules (a new data model, a loader rewritten, a filter renamed) must not change a hit.
 `scripts/detection_fingerprint.py` shows that. It scans fixed inputs in both channels (`prompt`, `tool`) and in
-five region sets (`none`, `de`, `us`, `all`, and `de+own`: `de` with rules of your own and an allow list), and it writes one sorted line per input with the full hit list:
-rule id, type, start, end, and the flags `is_fixture` (no path and a test path) and `is_public_test_value`. The
-inputs are CredData (`--creddata`, every unique labelled line), `tests/fp_corpus.py`, `tests/fp_corpus_pii.py`
-when the tree has it, and the token lists of `tests/test_rules_from_the_catalogs.py` and
-`tests/test_rules_from_other_detectors.py`. The first line names the rule count and a digest of the rule ids in
-their order, per region set. The file holds ids and offsets, never a value.
+five region sets (`none`, `de`, `us`, `all`, and `de+own`: `de` with rules of your own and an allow list). It
+writes one sorted line per input with the full hit list: rule id, type, start, end, and the flags `is_fixture` (no
+path and a test path) and `is_public_test_value`. The first line names the rule count and a digest of the rule ids
+in their order, per region set. The file holds ids and offsets, never a value.
+
+The inputs:
+
+- CredData (`--creddata`): every unique labelled line.
+- `tests/fp_corpus.py`, and `tests/fp_corpus_pii.py` when the tree has it.
+- The token lists of `tests/test_rules_from_the_catalogs.py` and `tests/test_rules_from_other_detectors.py`.
+- Probes: one or more texts for each matcher and each named filter of `maisecrets/registry.py`, and a password
+  export with its file name.
+- The recorded scans of the detector tests: the script runs those test modules with `detect.scan` wrapped, and
+  replays each call with its path and its `enabled` set (`--no-recorded` leaves them out, `--record FILE` and
+  `--recorded FILE` keep one recording for several runs).
+
+A mutation run on the registry (2026-10-15) switched off each named filter, each matcher and each band in turn. The
+fingerprint without CredData changed for every one of them except the `enabled`-by-key check, which only a unit test
+calls, and four changes that give the same hits by design: the window of `generic-api-key` on a long text, the
+label rules added to the shape rules of `is_fixture` (none of them finds a bare value), and the fallbacks for a rule
+that `rules()` did not mark.
 
 1. Before the change, write the reference: `python3 scripts/detection_fingerprint.py --creddata <CredData> --out ref.jsonl`.
 2. After each step, write the file again to `new.jsonl` with the same arguments.
 3. Run `cmp ref.jsonl new.jsonl`. If the files differ, the step changed the detector. `diff` names the corpus, the
    input, the channel and the region set of each changed hit list.
 
-With CredData and 6 workers a run takes about 4 minutes on an M-series laptop; without it, a few seconds.
+With CredData and 6 workers a run takes about 4 minutes on an M-series laptop, the recording included.
 `tests/test_detection_fingerprint.py` checks that two runs give the same bytes and that a moved hit changes them.
 
 ## Coverage
