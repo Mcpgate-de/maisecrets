@@ -18,10 +18,11 @@ jobs:
     # commit earlier, and the GitLab release job waits for this matrix on that commit
     if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
     strategy:
-      # one red platform stops the other: the release gate needs both green, so the rest of a red
-      # run only costs minutes. Linux runs on GitLab (unit on 3.12 and 3.9, the harness, the native
-      # file store), so GitHub keeps the two platforms GitLab does not have.
-      fail-fast: true
+      # both platforms run to the end: a red run must name every failure at once. With fail-fast the
+      # 0.6.22 release needed three rounds of about 45 minutes for three Windows-only test failures.
+      # Linux runs on GitLab (unit on 3.12 and 3.9, the harness, the native file store), so GitHub
+      # keeps the two platforms GitLab does not have.
+      fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -55,7 +56,7 @@ jobs:
       # after the launcher checks (seconds), and stop at the first failure: a red run needs one
       # traceback, not the other 130 seconds
       - name: unit tests
-        run: python -m unittest discover -s tests -v -f
+        run: python -m unittest discover -s tests -v
       - name: platform clipboard (a placeholder and non-ASCII text round-trip)
         if: runner.os != 'Linux'
         env:
