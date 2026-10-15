@@ -719,6 +719,11 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     delivered = False
     # a payload the hook did not finish writing is unchecked, so it may hold a leak: name it, never skip it
     partial = sorted(p.name for p in dump.glob("*.json.tmp"))
+    # one exception, measured in CI: when maisecrets blocks a prompt, Claude Code stops the other hooks of that
+    # UserPromptSubmit, so the recorder's copy of the prompt stays a .tmp. Nothing went upstream (no request),
+    # and that is checked on its own; every other partial payload still fails
+    if sc.get("expect_blocked") and not bodies:
+        partial = [n for n in partial if "_UserPromptSubmit_" not in n]
     if partial:
         fails.append(f"{len(partial)} hook payload(s) not written whole (a hook was stopped while it wrote): "
                      + ", ".join(partial))

@@ -55,7 +55,7 @@ ruff check --select E,F,W --line-length 120 maisecrets hooks harness tests scrip
 python3 harness/run.py                         # the real claude client against a fake upstream
 ```
 
-The git hooks (`scripts/install-hooks.sh`) run these on commit and push. CI runs as root in
+`scripts/check_all.sh` runs all of these. The git hooks (`scripts/install-hooks.sh`) run only the checks of seconds (a commit: secret scan of the staged diff, manifests, plugin lint; a push: also lint, repository scan, derived counts); the tests, the replay and the harness run in the merge request pipeline, and a red pipeline blocks the merge. CI runs as root in
 `python:3.12-slim` and `python:3.9-slim`: a test that depends on file permissions must allow for
 root.
 

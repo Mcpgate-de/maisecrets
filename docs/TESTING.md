@@ -6,11 +6,11 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 
 | suite | command | where it runs |
 |---|---|---|
-| unit tests | `python3 -m unittest discover -s tests` | pre-push hook, GitLab `unit` (Linux, 3.12 and 3.9), GitHub on Windows and macOS |
-| beliefs | `python3 scripts/replay_can_fail.py` (one worker per CPU, each in a copy of the tree; `--jobs 1` for serial) | pre-push hook, GitLab `beliefs_can_fail_replay` |
+| unit tests | `python3 -m unittest discover -s tests` | GitLab `unit` (Linux, 3.12 and 3.9), GitHub on Windows and macOS; locally `scripts/check_all.sh` |
+| beliefs | `python3 scripts/replay_can_fail.py` (one worker per CPU, each in a copy of the tree; `--jobs 1` for serial) | GitLab `beliefs_can_fail_replay`; locally `scripts/check_all.sh` |
 | stated numbers | `python3 scripts/derived_counts.py` | pre-push hook, GitLab `manifests` |
 | repository scan | `python3 scripts/scan_tree.py` | GitLab `no_secrets_in_tree` |
-| Claude Code harness | `python3 harness/run.py` | pre-push hook (needs `claude`), GitLab `harness_claude` |
+| Claude Code harness | `python3 harness/run.py` | GitLab `harness_claude`; locally `scripts/check_all.sh` (needs `claude`) |
 | Codex harness | `python3 harness/codex.py` | GitLab `harness_codex` |
 | native store and clipboard | `MAISECRETS_NATIVE_BACKEND_TEST=1`, `MAISECRETS_NATIVE_CLIPBOARD_TEST=1` | GitHub runners only: they use the real keychain and clipboard |
 | Codex with a real model | `python3 harness/codex.py --real` | by hand: `mcp_text_field_rehydrate`, `allow_keeps_the_codex_sandbox`, `apply_patch_rehydrate` and `apply_patch_store_refused` need a real model (an MCP call, a sandbox and a patch the fake upstream cannot script) |

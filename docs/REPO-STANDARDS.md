@@ -20,12 +20,12 @@ and OpenAI plugin directories.
 ## Git hooks (now)
 
 - `.githooks/pre-commit`: staged diff through our own detector, manifests
-  parse, unit tests. Installed by `scripts/install-hooks.sh`, which pins
+  parse, plugin lint. It runs in seconds; the unit tests run once per push. Installed by `scripts/install-hooks.sh`, which pins
   `core.hooksPath` for this repo because the global `~/.git-hooks` would
   otherwise bypass it.
-- `.githooks/pre-push`: refuses tag pushes, runs unit tests, runs the hook
-  harness when `claude` is on PATH. `MAISECRETS_SKIP_HARNESS=1` skips only the
-  harness. Nothing skips the tests.
+- `.githooks/pre-push`: refuses tag pushes, runs lint, the repository scan, the plugin lint and
+  the derived counts (seconds). The unit tests, the belief replay and the harness run in the merge
+  request pipeline; `scripts/check_all.sh` runs all of them locally.
 
 ## CI on gitlab.com (now)
 
