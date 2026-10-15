@@ -246,7 +246,8 @@ windows_macos:
     - cp .ci-known-hosts-github ~/.ssh/known_hosts
     - 'test -s "$MAISECRETS_GITHUB_MR_CI_KEY" || { echo "MAISECRETS_GITHUB_MR_CI_KEY is empty (a file variable, environment mr-ci)"; exit 1; }'
     - cp "$MAISECRETS_GITHUB_MR_CI_KEY" ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
-    - python3 scripts/github_matrix.py mr
+    # -u: the wait prints as it goes; a pipe would hold the lines until the job ends
+    - python3 -u scripts/github_matrix.py mr
 
 # Renovate keeps the vendored rulesets current (renovate.json). Self-hosted, because only a
 # self-hosted Renovate runs the postUpgradeTasks that regenerate the JSON rules with the sync scripts;
@@ -428,7 +429,7 @@ mirror:
       elif [ "$rc" = "3" ]; then target=main
       else echo "release.py next failed with $rc"; exit 1; fi
       echo "MATRIX_REUSE_CHECKED=$CI_COMMIT_SHA" > matrix.env
-      if [ "$target" = "ci" ] && run=$(python3 scripts/github_matrix.py reuse "$CI_COMMIT_SHA"); then
+      if [ "$target" = "ci" ] && run=$(python3 -u scripts/github_matrix.py reuse "$CI_COMMIT_SHA"); then
         echo "MATRIX_REUSED_RUN=$run" > matrix.env
         echo "not pushed to ci: $run already tested this tree"
         exit 0
