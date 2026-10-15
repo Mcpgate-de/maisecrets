@@ -1286,6 +1286,9 @@ VALIDATORS = {
     "pl_pesel": checksums.pl_pesel_ok,
     "es_nif": checksums.es_nif_ok,
     "es_nie": checksums.es_nie_ok,
+    "us_npi": checksums.us_npi_ok,
+    "se_organisationsnummer": checksums.se_organisationsnummer_ok,
+    "uk_vehicle_registration": checksums.uk_vehicle_registration_ok,
     "uk_nhs": checksums.uk_nhs_ok,
     "us_aba": checksums.us_aba_ok,
     "it_fiscal_code": checksums.it_fiscal_code_ok,
@@ -1677,8 +1680,10 @@ ENTITY_TYPE = {"EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "CREDIT_CARD": "CA
 # prints the 9-character number without its check digit (it stands in the machine-readable zone only), so 37 of 40
 # real-shaped numbers and the number of the official specimen card were missed (survey of other detectors, 0.6.19).
 # de-handelsregister: a company's register number, public in the Handelsregister and no personal data
+# uk-postcode: a postcode alone identifies no one (a fork's bench, 2026-10-12: every hit was a false alarm); a street
+# address with its postcode is personal.py's
 PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "de-id-card", "de-passport",
-                 "crypto", "de-handelsregister"}
+                 "crypto", "de-handelsregister", "uk-postcode"}
 # validator id per presidio recognizer id; a recognizer with a validator we did not port
 # keeps its pattern score and is treated as weak (context required)
 PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
@@ -1687,12 +1692,16 @@ PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
                       "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id", "us-ssn": "us_ssn",
                       # 0.6.19: with the context word alone a value with a wrong check digit was a hit
                       "pl-pesel": "pl_pesel", "es-nif": "es_nif", "es-nie": "es_nie", "nhs": "uk_nhs",
-                      "aba-routing": "us_aba", "it-fiscal-code": "it_fiscal_code"}
+                      "aba-routing": "us_aba", "it-fiscal-code": "it_fiscal_code",
+                      # 0.6.24, from a fork (danszymkowiak/maisecrets d72ea2b, Apache-2.0): Presidio's own checks
+                      "us-npi": "us_npi", "se-organisationsnummer": "se_organisationsnummer",
+                      "uk-vehicle-registration": "uk_vehicle_registration"}
 # shapes that are plain digit runs: even with a valid checksum, ask for a context word. The validators ported in
 # 0.6.19 keep the context word they needed before: a check digit alone passes one value in 10 to 26
 PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "de-plz", "de-kfz",
                            "de-fuehrerschein", "nhs", "aba-routing", "medical-license", "pl-pesel", "es-nif",
-                           "es-nie", "it-fiscal-code"}
+                           "es-nie", "it-fiscal-code", "us-npi", "se-organisationsnummer",
+                           "uk-vehicle-registration"}
 # a Presidio pattern with no boundary: PESEL's eleven digits matched inside a longer digit run
 PRESIDIO_DIGIT_BOUNDED = {"pl-pesel"}
 # single patterns that need a context word although their recognizer does not: DE and nine digits that pass the

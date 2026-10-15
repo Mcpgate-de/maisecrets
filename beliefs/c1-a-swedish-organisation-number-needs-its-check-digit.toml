@@ -1,0 +1,10 @@
+# c1-a-swedish-organisation-number-needs-its-check-digit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-swedish-organisation-number-needs-its-check-digit"
+control = "C1"
+statement = "A Swedish organisation number after its word is a hit only when its Luhn digit holds, as Presidio checks it; an NPI the same with the prefix 80840."
+runner = ["tests/test_rules_from_the_fork_0624.py::PresidioChecksTests::test_a_swedish_organisation_number_needs_its_check_digit"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''    "se_organisationsnummer": checksums.se_organisationsnummer_ok,'''
+replace = '''    "se_organisationsnummer": lambda v: True,'''
