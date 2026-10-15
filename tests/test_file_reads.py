@@ -1227,6 +1227,37 @@ class TheConverterIsBounded(_Work):
         self.assertNotIn("looks scanned", content)
         self.assertEqual(content.count(line), 2)
 
+    def test_a_pdf_in_a_test_folder_is_no_test_code(self):
+        # a label hit in test code is a fixture and stays; a converted PDF under tests/ is a document (Gate B, round 4)
+        _reset(read_pdf="convert")
+        folder = Path(self.cwd, "tests")
+        folder.mkdir()
+        pdf = folder / "contract.pdf"
+        pdf.write_bytes(Path(self.pdf).read_bytes())
+        value = "Kx7#mQ2v" + "Lp9wZr"
+        self.stub(f"printf 'Vertrag 2026 mit allen Seiten\\nPasswort: {value}\\n\\f'")
+        answer = self.post(file_path=str(pdf))
+        self.assertNotIn(value, json.dumps(answer))
+
+    def test_a_typed_change_of_these_settings_is_weighed_like_the_others(self):
+        self.assertTrue(settings.loosens("read_pdf", "convert", "ask"))
+        self.assertFalse(settings.loosens("read_pdf", "ask", "convert"))
+        self.assertTrue(settings.loosens("read_pdf", "bogus", "allow"), "a value that is no mode works as block")
+        self.assertTrue(settings.loosens("read_image", "block", "ask"))
+        home = os.path.expanduser("~")
+        self.assertFalse(settings.loosens("clean_dirs", ["~/shots"], [os.path.join(home, "shots") + "/"]),
+                         "the same folder in another spelling")
+        self.assertTrue(settings.loosens("clean_dirs", ["~/shots"], ["~/shots", "~/scans"]))
+        self.assertFalse(settings.loosens("clean_dirs", ["~/shots", "~/scans"], ["~/shots"]))
+
+    @unittest.skipIf(os.name == "nt", "a symbolic link needs a privilege on Windows")
+    def test_a_dangling_rpath_link_counts_by_its_target(self):
+        target = self.dir / "open" / "lib"
+        link = self.dir / "linked"
+        os.symlink(target, link)
+        (self.dir / "open").mkdir()
+        self.assertEqual(file_reads._nearest_folder(str(link)), os.path.realpath(self.dir / "open"))
+
     def test_the_text_is_scanned_as_tool_channel_text(self):
         _reset(read_pdf="convert")
         self.stub()
