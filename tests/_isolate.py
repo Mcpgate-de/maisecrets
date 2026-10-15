@@ -56,8 +56,9 @@ if not os.environ.get(_MINE) or os.environ.get(_MINE) != os.environ.get("MAISECR
 # a runner that imported the vault before this module (detect.rules() loads the config) bound the vault to the real
 # ~/.maisecrets, and the resets of the suite deleted the real index, vault file and key (a fork's runner, 2026-10-12)
 _vault = sys.modules.get("maisecrets.vault")
-if _vault is not None and str(getattr(_vault, "HOME", "")) != os.environ["MAISECRETS_HOME"]:
-    os.environ.pop(_MINE, None)   # a later module must not take this process for an isolated one
+if _vault is not None and os.path.realpath(str(getattr(_vault, "HOME", ""))) != os.path.realpath(
+        os.environ["MAISECRETS_HOME"]):
+    # the marker stays: the vault then refuses the user's home in the modules that run after this one anyway
     raise RuntimeError(f"maisecrets.vault was imported with the home {_vault.HOME}; tests/_isolate must be imported "
                        "first (before anything that imports maisecrets), or the tests reach the real store")
 

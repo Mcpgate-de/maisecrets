@@ -102,17 +102,22 @@ class IsolationOrderTests(unittest.TestCase):
                 self.assertEqual(r.stdout.strip(), "refused", r.stderr)
         self.assertEqual(self.user_store(), [], "nothing was written into the user's home")
 
-    def test_a_refused_start_leaves_no_marker_for_the_next_module(self):
+    def test_after_a_refused_start_the_vault_still_refuses_the_user_home(self):
+        # Gate B of the registry, round 2: the modules without _isolate run on after a refused start
         r = self.child("""
-            import os
-            from maisecrets import detect
+            from maisecrets import detect, vault
             detect.rules()
             try:
                 import _isolate
             except RuntimeError:
-                print("marker" if os.environ.get("MAISECRETS_TEST_HOME_OWNED") else "no marker")
+                pass
+            try:
+                vault.load_config()
+            except vault.WrongHome:
+                print("refused")
         """)
-        self.assertEqual(r.stdout.strip(), "no marker", r.stderr)
+        self.assertEqual(r.stdout.strip(), "refused", r.stderr)
+        self.assertEqual(self.user_store(), [])
 
     def test_the_vault_works_when_the_home_is_the_one_the_test_run_owns(self):
         r = self.child("""

@@ -41,9 +41,21 @@ class WrongHome(RuntimeError):
 
 
 def _within_default_home(path: Path) -> bool:
-    """The user's own home or a path inside it, also through `..` or a symbolic link (codex Gate A of the registry)."""
+    """The user's own home or a path inside it, also through `..` or a symbolic link, and the same directory by
+    device and inode: a bind mount, or another case of the name on a case-insensitive disk (codex Gate A of the
+    registry, rounds 1 and 2). Runs only under a test run's marker."""
     real, home = path.resolve(), _DEFAULT_HOME.resolve()
-    return real == home or home in real.parents
+    if real == home or home in real.parents:
+        return True
+    if not home.exists():
+        return False
+    for p in (real, *real.parents):
+        try:
+            if p.exists() and os.path.samefile(p, home):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _check_home() -> None:
