@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## [0.6.19] - 2026-10-15
+
+### Features
+
+- 25 more token formats are found without a label (Google OAuth, Claude Code OAuth, Tailscale, Discord, Telegram, …) (2787122)
+- a crypto wallet seed phrase, private key or extended private key is a secret (9f54dea)
+- Swiss and Austrian numbers with regions ch and at (AHV number, UID, social insurance number) (77fcc27)
+
+### Fixes
+
+- a PESEL, Spanish DNI or NIE, NHS, ABA routing number or codice fiscale with a wrong check digit is no longer a hit (a264b69)
+- a Steuer-ID is checked by the tax office's own repeat rule and found with its spaces (88b80f4)
+- a German ID card or passport number is found as the card prints it (f7a4868)
+
 ## [0.6.18] - 2026-10-14
 
 ### Features
