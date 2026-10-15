@@ -19,6 +19,7 @@ this machine uses the real one. test_gates.py set this at its import, so only th
 after it had it (Codex review, 2026-09-27); here every module has it, in any order.
 """
 import os
+import sys
 import tempfile
 
 _MINE = "MAISECRETS_TEST_HOME_OWNED"
@@ -51,6 +52,15 @@ if not os.environ.get(_MINE) or os.environ.get(_MINE) != os.environ.get("MAISECR
     home = tempfile.mkdtemp(prefix="maisecrets-test-home-")
     os.environ["MAISECRETS_HOME"] = home
     os.environ[_MINE] = home
+
+# a runner that imported the vault before this module (detect.rules() loads the config) bound the vault to the real
+# ~/.maisecrets, and the resets of the suite deleted the real index, vault file and key (a fork's runner, 2026-10-12)
+_vault = sys.modules.get("maisecrets.vault")
+if _vault is not None and os.path.realpath(str(getattr(_vault, "HOME", ""))) != os.path.realpath(
+        os.environ["MAISECRETS_HOME"]):
+    # the marker stays: the vault then refuses the user's home in the modules that run after this one anyway
+    raise RuntimeError(f"maisecrets.vault was imported with the home {_vault.HOME}; tests/_isolate must be imported "
+                       "first (before anything that imports maisecrets), or the tests reach the real store")
 
 if not os.environ.get(_MINE_TMP) or os.environ.get(_MINE_TMP) != os.environ.get("TMPDIR"):
     tmp = tempfile.mkdtemp(prefix="maisecrets-test-tmp-")

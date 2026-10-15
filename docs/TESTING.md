@@ -16,9 +16,10 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | Codex with a real model | `python3 harness/codex.py --real` | by hand: `mcp_text_field_rehydrate`, `allow_keeps_the_codex_sandbox`, `apply_patch_rehydrate` and `apply_patch_store_refused` need a real model (an MCP call, a sandbox and a patch the fake upstream cannot script) |
 | ssh through the sandbox | `MAISECRETS_E2E_HOST=<ssh alias> MAISECRETS_E2E_IP=<address> python3 harness/sandbox/ssh_e2e.py` | by hand before a release that touches the ssh route, on macOS and on Linux: the real Claude Code sandbox against a real host, under `rehydration: automatic` (cases 0a to 0f) and `confirm` |
 | false alarms in a real tree | `python3 scripts/measure_false_alarms.py <dir> [--samples]` | by hand after a detector change: the hits a Read would act on, per rule, with the shape of each value and never the value; the regression corpus of normal work is `tests/fp_corpus.py` (`tests/test_fp_corpus.py`), a night of autonomous work is `tests/test_night_run.py` |
+| detector identity | `python3 scripts/detection_fingerprint.py --out FILE [--creddata DIR]` | by hand before and after a refactor of the rules: the full hit list on fixed inputs, compared with `cmp` (section "A refactor of the rules") |
 | Windows end to end | `GITLAB_COM_TOKEN=… python3 scripts/windows_e2e.py [--rev REV]` | by hand before a release that touches the hooks, the launchers or the harness: GitLab-hosted Windows runners of a separate project, in three shapes (PowerShell 7, Windows PowerShell 5.1, Git Bash). Each job runs `harness/windows/shell_probe.py` (which shell runs a hook, and the `hooks.json` command in each shell) and `harness/run.py` with the shell tool the client offers (`MAISECRETS_HARNESS_SHELL_TOOL`) |
 
-1619 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
+1647 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
 Windows and macOS in three places. In a merge request, the GitLab job `windows_macos` pushes the commit
 that `main` would get to the CI repository `Mcpgate-de/maisecrets-ci` and fails with the names of the
 failing tests. On `main`, it runs on the tested commit of a release (branch `ci`), unless a green run
@@ -91,6 +92,49 @@ for `pbcopy`, `open`, `security` and `powershell` come first on `PATH`. Windows 
 `clip.exe` and `powershell.exe` in System32 before `PATH`, so a sitecustomize installs
 `tests/_platform_fakes.py` in every Python child on every platform. `tests/_hygiene.py` checks
 that no test left the process state changed or a value-serving child alive.
+
+A runner of your own (a script that switches a detector setting and then discovers the tests, a
+bench script) imports `tests/_isolate.py` before anything that imports `maisecrets`. The vault
+binds its home at import, and `detect.rules()` imports the vault to read the config. A runner that
+loaded the rules first kept the user's own store home, and the resets of the suite deleted the
+index, the vault file and the key there (a fork's runner, 2026-10-12). Two guards stop that
+(`tests/test_isolation_order.py`): `_isolate` refuses to start when the vault already names another
+home, and while a test run owns a home, the vault refuses the user's own home.
+
+## A refactor of the rules
+
+A change that only moves the rules (a new data model, a loader rewritten, a filter renamed) must not change a hit.
+`scripts/detection_fingerprint.py` shows that. It scans fixed inputs in both channels (`prompt`, `tool`) and in
+five region sets (`none`, `de`, `us`, `all`, and `de+own`: `de` with rules of your own and an allow list). It
+writes one sorted line per input with the full hit list: rule id, type, start, end, and the flags `is_fixture` (no
+path and a test path) and `is_public_test_value`. The first line names the rule count and a digest of the rule ids
+in their order, per region set. The file holds ids and offsets, never a value.
+
+The inputs:
+
+- CredData (`--creddata`): every unique labelled line.
+- `tests/fp_corpus.py`, and `tests/fp_corpus_pii.py` when the tree has it.
+- The token lists of `tests/test_rules_from_the_catalogs.py` and `tests/test_rules_from_other_detectors.py`.
+- Probes: one or more texts for each matcher and each named filter of `maisecrets/registry.py`, and a password
+  export with its file name.
+- The recorded scans of the detector tests: the script runs those test modules with `detect.scan` wrapped, and
+  replays each call with its path and its `enabled` set (`--no-recorded` leaves them out, `--record FILE` and
+  `--recorded FILE` keep one recording for several runs).
+
+A mutation run on the registry (2026-10-15) switched off each named filter, each matcher and each band in turn. The
+fingerprint without CredData changed for every one of them (34 mutants, two review rounds) except five: the window of
+`generic-api-key` on a long text gives the same hits by design (it is a speed-up), the form fallback for a rule that
+`rules()` did not mark has no caller, and the `enabled` keys of a rule, the export pass and the filter fallback are
+held by unit tests in `tests/test_registry.py`. A recording keeps no text that holds the value of an environment
+variable, and only its owner can read the file.
+
+1. Before the change, write the reference: `python3 scripts/detection_fingerprint.py --creddata <CredData> --out ref.jsonl`.
+2. After each step, write the file again to `new.jsonl` with the same arguments.
+3. Run `cmp ref.jsonl new.jsonl`. If the files differ, the step changed the detector. `diff` names the corpus, the
+   input, the channel and the region set of each changed hit list.
+
+With CredData and 6 workers a run takes about 4 minutes on an M-series laptop, the recording included.
+`tests/test_detection_fingerprint.py` checks that two runs give the same bytes and that a moved hit changes them.
 
 ## Coverage
 

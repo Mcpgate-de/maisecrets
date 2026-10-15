@@ -48,6 +48,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import checksums
+from . import registry as _registry
 
 RULES_DIR = Path(__file__).resolve().parent / "rules"
 
@@ -101,6 +102,12 @@ class Rule:
     whole_match: bool = False          # presidio: the entity is the whole match, never a sub-group
     quote_group: int = 0               # detect-secrets: group of the optional opening quote
     drop: object = None                # betterleaks: the rule's filter and the global one; True drops the finding
+    key: str = ""                      # unique, from maisecrets/registry.py: `<source>:<id>`; set by rules()
+    form: str = ""                     # keyword | label | shape (registry.form_of); set by rules()
+    matcher: str = ""                  # regex | lines | windowed | curl | list | literal | seed (registry.matcher_of)
+    filters: frozenset | None = None   # the named checks after a hit (registry.filters_of); set by rules()
+    region: str = "generic"            # the country of a regional or Presidio rule, set by its loader
+    phase: int = 0                     # registry.PHASES: 1 the built-in rules, 3 the rules of your own; set by rules()
 
 
 # ----------------------------------------------------------------- helpers --
@@ -1755,7 +1762,7 @@ REGIONAL_RULES: list = [
 def _load_regional(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]:
     return [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"]), validator=d["validator"],
                  context=tuple(d.get("context", ())), require_context=d.get("require_context", False),
-                 whole_match=True)
+                 whole_match=True, region=d["region"])
             for d in REGIONAL_RULES if d["region"] in regions]
 
 
@@ -1770,7 +1777,8 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
     data = json.loads((RULES_DIR / "presidio.json").read_text(encoding="utf-8"))
     out: list[Rule] = []
     for rec in data["recognizers"]:
-        if rec["id"] in PRESIDIO_SKIP or presidio_region(rec["id"]) not in regions:
+        region = presidio_region(rec["id"])     # once, here: the rule carries it from now on
+        if rec["id"] in PRESIDIO_SKIP or region not in regions:
             continue
         validator = PRESIDIO_VALIDATOR.get(rec["id"])
         weak = rec["id"] in PRESIDIO_ALWAYS_CONTEXT or (rec["validator"] and validator is None)
@@ -1784,7 +1792,7 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
                 validator=validator, score=float(pat["score"]),
                 context=tuple(c.lower() for c in rec.get("context", [])) + PRESIDIO_EXTRA_CONTEXT.get(rec["id"], ()),
                 require_context=weak or rule_id in PRESIDIO_PATTERN_CONTEXT,
-                whole_match=True,
+                whole_match=True, region=region,
             ))
     return out
 
@@ -2022,6 +2030,122 @@ def _user_rules() -> list[Rule]:
         return []
 
 
+def _rule_sources(active) -> list:
+    """(source, rules) of every rule list source, in the order of registry.BANDS."""
+    own = _load_own()
+    n_own = len(OWN_RULES)
+    return [
+        ("own-secret", [r for r in own[:n_own] if r.type == "SECRET"]),
+        ("prefixes", own[n_own:]),
+        ("detect-secrets", _load_detect_secrets(active.languages)),
+        ("betterleaks", _load_betterleaks()),
+        ("own-json", _load_own_secret_rules()),
+        ("fallback", [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]),
+        ("regional", _load_regional(active.regions)),
+        ("presidio", _load_presidio(active.regions)),
+        ("own-pii", [r for r in own[:n_own] if r.type != "SECRET"]),
+        ("literal", _load_literal(active.languages)),
+        ("user", _user_rules()),
+    ]
+
+
+def _ranked(active) -> list:
+    """(priority, rule) of every rule, sorted by priority = (phase, band, seq) (maisecrets/registry.py)."""
+    from .registry import BANDS, PHASES, filters_of, form_of, key_of, matcher_of
+    rules_phase, user_phase = PHASES["rules"], PHASES["user"]
+    out = []
+    for source, rs in _rule_sources(active):
+        phase, band = (user_phase if source == "user" else rules_phase), BANDS[source]
+        for seq, r in enumerate(rs):
+            object.__setattr__(r, "key", key_of(source, r.id))   # fields of the frozen rule, set once at load
+            object.__setattr__(r, "form", form_of(r.id))
+            object.__setattr__(r, "matcher", matcher_of(r.id, source))
+            object.__setattr__(r, "filters", filters_of(r.id))
+            object.__setattr__(r, "phase", phase)
+            out.append(((phase, band, seq), r))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def rule_specs(active=None) -> list:
+    """(spec, rule) for each rule of every source, sorted by priority (maisecrets/registry.py). The allow list is not
+    applied here: `maisecrets rules list` shows a switched-off rule too."""
+    from . import registry
+    active = active or active_regions()
+    languages = ",".join(active.languages)
+    source_of = {band: source for source, band in registry.BANDS.items()}
+    upstream = _upstream_rules()
+    patches = {"detect-secrets": registry.DETECT_SECRETS_PATCHES,
+               "betterleaks": registry.betterleaks_patches(BETTERLEAKS_PATCHES, registry.patched_upstream(RULES_DIR)),
+               "presidio": registry.presidio_patches(_this_module())}
+    out = []
+    for (_, band, seq), r in _ranked(active):    # the same rules, marked the same way, as rules() takes them
+        source = source_of[band]
+        out.append((registry.make(source, r.id, r.type, seq, region=r.region, channel=registry.CHANNEL[source],
+                                  language=languages if source in ("detect-secrets", "literal") else "",
+                                  upstream=upstream.get((source, r.id.split("#", 1)[0])),
+                                  patches=_patches_of(source, r.id, patches)), r))
+    return out
+
+
+def pass_specs() -> list:
+    """The specs of the passes outside the rule list (registry.pass_specs): the password export and the personal-data
+    rules of maisecrets/personal.py, when this copy of the detector has it."""
+    try:
+        from . import personal
+    except ImportError:
+        personal = None
+    if personal is None:
+        return _registry.pass_specs(EXPORT_RULE, "SECRET", (), frozenset(), {})
+    p = personal
+    types = {"phone-one-digit-groups": p.PHONE, "phone-us-national": p.PHONE, "birth-date-after-label": p.BIRTH_DATE,
+             "id-number-after-label": p.ID_NUMBER, "user-in-url": p.USERNAME, "user-in-home-path": p.USERNAME,
+             "street-address": p.ADDRESS, "name-after-label": p.NAME, "name-before-email": p.NAME,
+             "csv-personal-column": "COLUMN"}
+    return _registry.pass_specs(EXPORT_RULE, "SECRET", tuple(p.RULE_IDS), p.PROMPT_RULES, types)
+
+
+def _patches_of(source: str, rule_id: str, patches: dict) -> tuple:
+    if source == "detect-secrets":
+        return tuple(p for p in patches["detect-secrets"] if p.rule_key in ("detect-secrets:*", "detect-secrets:"
+                                                                              + rule_id))
+    if source == "betterleaks":
+        return patches["betterleaks"].get(rule_id, ())
+    if source == "presidio":
+        return patches["presidio"].get(rule_id.split("#", 1)[0], ()) + (
+            patches["presidio"].get(rule_id, ()) if "#" in rule_id else ())
+    return ()
+
+
+def _this_module():
+    from . import detect
+    return detect
+
+
+def _upstream_rules() -> dict:
+    """{(source, upstream id): registry.Upstream} of the vendored rule files, for rule_specs() only: no hook reads
+    them."""
+    from .registry import Upstream, canonical_sha256
+
+    def version(name: str) -> str:
+        try:
+            return (RULES_DIR / name).read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+    out = {}
+    for source, file, key, ver, lic in (("betterleaks", "betterleaks.json", "rules", "BETTERLEAKS_VERSION",
+                                         "LICENSE-betterleaks"),
+                                        ("detect-secrets", "detect_secrets.json", "rules", "DETECT_SECRETS_VERSION",
+                                         "LICENSE-detect-secrets"),
+                                        ("presidio", "presidio.json", "recognizers", "PRESIDIO_VERSION",
+                                         "LICENSE-presidio")):
+        v = version(ver)
+        for r in json.loads((RULES_DIR / file).read_text(encoding="utf-8"))[key]:
+            if "id" in r:
+                out[(source, r["id"])] = Upstream(source, v, r["id"], canonical_sha256(r), lic)
+    return out
+
+
 def allow_list() -> tuple[frozenset, frozenset]:
     if not _ALLOW:
         try:
@@ -2033,7 +2157,8 @@ def allow_list() -> tuple[frozenset, frozenset]:
 
 
 def rules() -> list[Rule]:
-    """Own secret rules first (longer shapes win the span), then betterleaks and the own rules of
+    """Every rule, sorted by its rank in maisecrets/registry.py (priority). Own secret rules first (longer shapes win
+    the span), then betterleaks and the own rules of
     own_secret_rules.json, the fallback and regional rules, then PII, then the literal rules, then the rules of your
     own. A scan runs the personal-data step (_personal_hits) before the rules of your own (_in_scan_order). A user rule
     never takes a span before a built-in rule: a NAME rule that took a part of an e-mail address left the rest of it in
@@ -2041,14 +2166,8 @@ def rules() -> list[Rule]:
     off."""
     global _RULES
     if _RULES is None:
-        own = _load_own()
-        secrets = [r for r in own if r.type == "SECRET"]
-        pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
-        _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
-                  + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]
-                  + _load_regional(active.regions) + _load_presidio(active.regions) + pii
-                  + _load_literal(active.languages) + _user_rules())
+        _RULES = [r for _, r in _ranked(active)]
         off = allow_list()[1]
         if off:
             from .user_rules import switched_off
@@ -2224,9 +2343,11 @@ def looks_like_placeholder(value: str) -> bool:
 # tests of the Python standard library (2026-09-29). In test code the value is a fixture, and a
 # block or a placeholder there only stops the work. A token shape (glpat-, AKIA, a PEM key) and personal data stay
 # hits in test code too: a real token or a copy of customer data in a test is a leak.
-LABEL_RULES = ("ds-keyword", "label-", "generic-api-key", "url-query-secret", "auth-scheme")
-# the keyword rules: the detect-secrets ones and maisecrets' own label rules with no `=` or `:` (OWN_RULES)
-KEYWORD_RULES = ("ds-keyword", "label-")
+# The id prefixes of the label rules and of the keyword rules (the detect-secrets ones and maisecrets' own label rules
+# with no `=` or `:`) live in maisecrets/registry.py; a rule carries its form (Rule.form), a stored kind is read with
+# registry.is_label. The names stay for the scripts and tests that read them.
+LABEL_RULES = _registry.LABEL_PREFIXES
+KEYWORD_RULES = _registry.KEYWORD_PREFIXES
 _TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?i:tests?|__tests__|spec|testdata|test_data|e2e)[/\\]"
                            r"|(?:^|[/\\]|[a-z])Tests?\.\w+$"
                            r"|(?:^|[/\\])[^/\\]*[._-]e2e[._-][^/\\]*$"
@@ -2291,7 +2412,7 @@ def is_fixture(m: "Match", text: str, path: str = "") -> bool:
     """A label-rule hit in test code: not a secret the person typed (see LABEL_RULES). The first rule to claim a
     span wins, and the label rules run before the shape rules: `token = "<a JWT>"` got the kind of a label rule and
     was dropped with the fixtures (review, 2026-09-29). A value that a shape rule finds on its own stays a hit."""
-    if not (m.type == "SECRET" and m.kind.startswith(LABEL_RULES) and in_test_code(text, m.start, path)):
+    if not (m.type == "SECRET" and _registry.is_label(m.kind) and in_test_code(text, m.start, path)):
         return False
     return not scan(m.value, enabled=_shape_rule_ids())
 
@@ -2301,7 +2422,7 @@ _SHAPE_IDS: list = []
 
 def _shape_rule_ids() -> set:
     if not _SHAPE_IDS:
-        _SHAPE_IDS.append({r.id for r in rules() if not r.id.startswith(LABEL_RULES)})
+        _SHAPE_IDS.append({r.id for r in rules() if (r.form or _registry.form_of(r.id)) == "shape"})
     return _SHAPE_IDS[0]
 
 
@@ -2510,17 +2631,18 @@ def _matches(rule: Rule, text: str):
     A label that ends its line (``passwort:`` and the value on the next line, as a console
     or a chat renders it) is scanned together with the next non-empty line; only a hit whose
     value starts in that next line is taken from the pair (field report, 2026-09-26)."""
-    curl = _curl_parts(rule)
+    matcher = rule.matcher or _registry.matcher_of(rule.id, "literal" if rule.id in _LITERAL_IDS else "")
+    curl = _curl_parts(rule) if matcher == "curl" else None
     if curl is not None:
         yield from _curl_matches(curl, text)
         return
-    if rule.id == "label-secret-list":
+    if matcher == "list":
         yield from _list_matches(rule, text)
         return
-    if rule.id in _LITERAL_IDS:
+    if matcher == "literal":
         yield from _literal_matches(rule.id, text)
         return
-    if rule.id == "crypto-seed-phrase":
+    if matcher == "seed":
         for a, b, words in checksums.bip39_spans(text):
             # the context word stands outside the phrase: seed, phrase and wallet are words of the list
             if words < 15 and not (_SEED_CONTEXT_RE.search(text, max(0, min(a - 200, _line_start(text, a))), a)
@@ -2528,11 +2650,11 @@ def _matches(rule: Rule, text: str):
                 continue
             yield _Spanned(_EMPTY_RE.match(text, b), a, text)
         return
-    kw = _WINDOWED.get(rule.id)
+    kw = _WINDOWED.get(rule.id) if matcher == "windowed" else None
     if kw is not None and len(text) > 4096:
         yield from _windowed(rule, kw, text)
         return
-    if not rule.id.startswith("ds-keyword") or not _newlines(text):
+    if matcher != "lines" or not _newlines(text):
         yield from rule.regex.finditer(text)
         return
     pos = 0
@@ -2813,7 +2935,8 @@ def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt", pa
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins. channel "tool" (a tool
     result or a file) takes a password after a password label without evidence of chance, and the cells of a
     password export (path: the file the text came from, if any). `rule_list` scans with those rules alone, without
-    the allow list and the extra matchers (`maisecrets rules check`)."""
+    the allow list and the extra matchers (`maisecrets rules check`). `enabled` names rules by id or by key
+    (maisecrets/registry.py): an id that two rules share enables both, a key one of them."""
     outer, _CHANNEL[0] = _CHANNEL[0], channel if channel == "tool" else "prompt"
     outer_path, _PATH[0] = _PATH[0], path or ""
     try:
@@ -2827,6 +2950,7 @@ _PATH: list = [""]
 # a label rule (LABEL_RULES): its header labels the cell, so a word in it is stored quiet and a fixture in test code
 # is dropped, as after `password:`
 EXPORT_RULE = "label-password-export"
+EXPORT_KEY = "export:" + EXPORT_RULE    # its key in maisecrets/registry.py: `enabled` takes either
 # the file names of password exports: a browser's (Chrome, Edge, Firefox, Safari), Bitwarden, 1Password, LastPass,
 # KeePass and KeePassXC, Dashlane, and any table whose name says passwords
 _EXPORT_NAME_RE = re.compile(r"(?i)(?:passw|kennw|logins?\b|bitwarden|1password|lastpass|keepass|dashlane|enpass"
@@ -3033,7 +3157,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         taken_starts.insert(i, m.start)
         taken_ends.insert(i, m.end)
         found.append(m)
-    if _CHANNEL[0] == "tool" and not _copy and (enabled is None or EXPORT_RULE in enabled):
+    if _CHANNEL[0] == "tool" and not _copy and (enabled is None or EXPORT_RULE in enabled or EXPORT_KEY in enabled):
         # first: a cell of a password export is a value as a whole, and no other rule claims a part of it
         for m in _export_hits(text, low):
             take(m)
@@ -3046,14 +3170,17 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if _CHANNEL[0] == "tool" and not _copy:
                 _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends)
             continue
-        if enabled is not None and rule.id not in enabled:
+        if enabled is not None and rule.id not in enabled and rule.key not in enabled:
             continue
         if rule.keywords and not any(k in low for k in rule.keywords):
             continue
         # a rule that cannot fire without a context word need not run its regex without one
         if rule.context and (rule.require_context or rule.score < 0.5) and not _has_context_word(low, rule.context):
             continue
-        own = rule.id.startswith("user:")
+        own = _runs_after_personal(rule)
+        form = rule.form or _registry.form_of(rule.id)    # a rule list a caller built has no form set
+        keyword = form == "keyword"
+        filters = rule.filters if rule.filters is not None else _registry.filters_of(rule.id)
         hits = _matches(rule, text)
         for m in (_timed(rule, hits, len(text)) if own and rule_list is None else hits):
             ngroups = rule.regex.groups or 0
@@ -3067,18 +3194,18 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if end <= start:
                 continue
             secret = m.group(g)
-            if rule.id == "private-key-base64":
+            if "base64-wrapped-end" in filters:
                 end = _base64_wrapped_end(text, start, end)   # the further lines of a wrapped value
                 secret = text[start:end]
-            if (rule.id in _ESCAPABLE_COLON_RULES and "\\" in (m.group(2) or "")
+            if ("escaped-label-quote" in filters and "\\" in (m.group(2) or "")
                     and text[start - 2:start] not in ('\\"', "\\'")):
                 # the label's quote is escaped: JSON inside a string, whose values are escaped strings. A value without
                 # an escaped quote is code or a literal: `\"access_token\": finding[\"secret\"]` (19 hits in the
                 # vendored rules file, Gate A of 0.6.15), an escaped null (Gate B)
                 continue
-            if secret.endswith("\\") and text[end:end + 1] in ("\"", "'") and rule.id.startswith("ds-keyword"):
+            if secret.endswith("\\") and text[end:end + 1] in ("\"", "'") and "escaped-value-quote" in filters:
                 secret, end = secret[:-1], end - 1   # {\"password\":\"<value>\"}: the backslash escapes the quote
-            if (rule.id in _ESCAPABLE_COLON_RULES and "\\" in (m.group(2) or "")
+            if ("escaped-label-quote" in filters and "\\" in (m.group(2) or "")
                     and not _label_value_ok(secret)):
                 continue   # {\"passwordLastChanged\":\"2024-10-01T12:00:00Z\"}: the new escaped path, no password
             if rule.quote_group and not m.group(rule.quote_group):
@@ -3089,7 +3216,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     end = start + len(secret)
                     if _CAPITALISED_WORD_RE.fullmatch(secret):
                         continue
-            if rule.id.startswith(KEYWORD_RULES) and _ANCHOR_OR_TAG_RE.fullmatch(secret.strip()):
+            if keyword and _ANCHOR_OR_TAG_RE.fullmatch(secret.strip()):
                 # a quoted scalar is never an anchor: the colon must stand right before it (review of b4a7c54)
                 nxt = re.match(r"[ \t]+([^\s#]+)", text[end:end + 300])
                 if nxt:
@@ -3102,45 +3229,45 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     secret = text[start:end]
                 elif _before_value(text, start).rstrip(" \t").endswith(":"):
                     continue   # a YAML anchor or alias alone after a colon label: &gitlab_token_fields
-            if rule.id.startswith(KEYWORD_RULES) and (is_code_word(secret) or value_is_code(text, start, end, secret)):
+            if keyword and (is_code_word(secret) or value_is_code(text, start, end, secret)):
                 continue
-            if rule.id == "generic-api-key" and _WORD_PATH_RE.fullmatch(secret.strip("'\"")):
+            if "word-path" in filters and _WORD_PATH_RE.fullmatch(secret.strip("'\"")):
                 continue
-            if rule.id.startswith(KEYWORD_RULES) and _names_its_label(text, start, secret):
+            if keyword and _names_its_label(text, start, secret):
                 continue
-            if (rule.id.startswith(KEYWORD_RULES) and _LABEL_SHAPE.fullmatch(secret.strip())
+            if (keyword and _LABEL_SHAPE.fullmatch(secret.strip())
                     and _NAME_LABEL_RE.fullmatch(secret.strip()) and "\n" in text[m.start():start]):
                 continue   # the next line is a label of its own: `DB_PASSWORD=\nAPI_KEY=`, `Zugangsdaten:\nBenutzer:`
-            if (rule.id.startswith(KEYWORD_RULES) and secret.strip("\"' ").isdigit()
+            if (keyword and secret.strip("\"' ").isdigit()
                     and _MEASURE_LABEL_RE.search(_label_before(text, start))):
                 continue   # a limit or a duration: TTL_REFRESH_TOKEN = 2592000
-            if rule.id == "url-query-secret" and secret.startswith("{"):
+            if "template-value" in filters and secret.startswith("{"):
                 continue   # a template: ?token={body['transfer_id']}, ?token={SLACK_AUTO_TOKEN}
-            if (rule.id == "auth-scheme" and not any(c.isdigit() for c in secret)
+            if ("words-not-token" in filters and not any(c.isdigit() for c in secret)
                     and re.fullmatch(r"[A-Za-z]+(?:[_-][A-Za-z]+)+", secret)):
                 continue   # words, not a token: Bearer test_access_token
-            if (rule.id.startswith(KEYWORD_RULES) or rule.id == "generic-api-key") and (
+            if "derived-label" in filters and (
                     (_UUID_RE.fullmatch(secret.strip("\"'` ")) and not _SECRET_LABEL_RE.search(
                         text, max(_line_start(text, start), start - 60), start))
                     or (_ELISION_RE.search(secret) and len(secret.rstrip(".\u2026")) < 20)
                     or _DERIVED_LABEL_RE.search(text, max(_line_start(text, start), start - 60), start)):
                 continue   # a UUID, an elided value (sk-...), or a label that names a derived thing (secret_id)
-            if rule.id in ("ds-basic-auth", "curl-auth-user") and _pass_equals_user(m.group(0), secret):
+            if "user-equals-password" in filters and _pass_equals_user(m.group(0), secret):
                 continue
-            if (rule.id == "aws-access-token" and _SIGV4_CREDENTIAL_RE.search(text, max(0, start - 24), start)
+            if ("sigv4-scope" in filters and _SIGV4_CREDENTIAL_RE.search(text, max(0, start - 24), start)
                     and _SIGV4_SCOPE_RE.match(text, end)):
                 continue   # the key id in a SigV4 credential scope (a presigned URL, an Authorization header)
-            if (rule.id == "label-cli-password" and text[start - 1:start] not in "'\""
+            if ("pg-password-switch" in filters and text[start - 1:start] not in "'\""
                     and _PG_TOOL_RE.search(text, _command_start(text, start), start)):
                 continue   # `psql --password app_db`: a switch that asks for the password, then the database
-            if rule.id == "url-password-no-user" and _url_password_not_a_value(secret):
+            if "url-password-value" in filters and _url_password_not_a_value(secret):
                 continue
-            if rule.id == "hashicorp-tf-password" and not _ds_value_ok(secret.strip("\"'")):
+            if "password-value" in filters and not _ds_value_ok(secret.strip("\"'")):
                 continue
-            if rule.id == "email-percent-encoded" and not _ENCODED_MAIL_CONTEXT_RE.search(
+            if "encoded-mail-context" in filters and not _ENCODED_MAIL_CONTEXT_RE.search(
                     text, max(_line_start(text, start), start - 40), start):
                 continue
-            if rule.id == "phone" and not _phone_ok(text, start, secret):
+            if "phone-shape" in filters and not _phone_ok(text, start, secret):
                 continue
             if rule.type == "IP" and _SECTION_BEFORE_RE.search(text, max(0, start - 24), start):
                 continue   # a section number: RFC 6749 4.1.2.1, OIDC Core 3.1.2.1, section 7.1.2.3
@@ -3165,12 +3292,12 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     ok = False   # a validator that cannot parse the value has not validated it
                 if not ok:
                     continue
-            if rule.type == "SECRET" and rule.id != "crypto-seed-phrase" and looks_like_placeholder(secret):
+            if rule.type == "SECRET" and "seed-phrase" not in filters and looks_like_placeholder(secret):
                 # the checksum of a seed phrase is its proof; "example" and "sample" are words of the list
                 continue
-            labelled = rule.type == "SECRET" and rule.id.startswith(LABEL_RULES)
+            labelled = rule.type == "SECRET" and form != "shape"
             # a seed phrase is compared in one form: its words with one space between them
-            as_published = " ".join(_WORD_RE_ANY.findall(secret)) if rule.id == "crypto-seed-phrase" else secret
+            as_published = " ".join(_WORD_RE_ANY.findall(secret)) if "seed-phrase" in filters else secret
             if is_public_test_value(as_published, rule.type) and not labelled:
                 # a documented test card, key or number that a shape rule found. A published key that a label assigns
                 # (PROD_PASSWORD=<the Stripe docs key>) is used as a credential and stays a hit: being public does not
@@ -3231,12 +3358,18 @@ _PERSONAL = object()             # the place of _personal_hits in the scan order
 _ORDER: list = [None, ()]        # a rule list and its scan order
 
 
+def _runs_after_personal(rule: Rule) -> bool:
+    """A rule of your own: its phase (registry.PHASES["user"]) puts it after the personal-data step. A rule list that a
+    caller built has no phase; its rules of your own have the id prefix `user:`."""
+    return rule.phase == _registry.PHASES["user"] if rule.phase else rule.id.startswith("user:")
+
+
 def _in_scan_order(every: list) -> tuple:
     """The rules of a list in scan order: the built-in ones, then the personal-data step and the cleaned copy, then the
     rules of your own (ids with `user:`). Kept per list, so a scan pays for it once."""
     if _ORDER[0] is not every:
-        _ORDER[:] = [every, tuple(r for r in every if not r.id.startswith("user:")) + (_PERSONAL,)
-                     + tuple(r for r in every if r.id.startswith("user:"))]
+        _ORDER[:] = [every, tuple(r for r in every if not _runs_after_personal(r)) + (_PERSONAL,)
+                     + tuple(r for r in every if _runs_after_personal(r))]
     return _ORDER[1]
 
 
@@ -3249,7 +3382,7 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
         return
     allowed, off = allow_list()
     for start, end, kind, typ in sorted(personal.hits(text, _CHANNEL[0], _pii_regions_cached())):
-        if enabled is not None and kind not in enabled:
+        if enabled is not None and kind not in enabled and "personal:" + kind not in enabled:
             continue
         value = text[start:end]
         if value in allowed or (off and kind in off):
@@ -3326,7 +3459,7 @@ def _scan_cleaned_copy(text: str, enabled, found: list, taken_starts: list, take
         return
     by_start = {f.start: f for f in found}   # the taken spans never overlap, so a start names one
     copy_hits = _changed_windows_scan(text, norm, enabled)
-    if enabled is None or EXPORT_RULE in enabled:
+    if enabled is None or EXPORT_RULE in enabled or EXPORT_KEY in enabled:
         # a header in colour or in entities: the table is read whole in the copy, not only around changed lines
         copy_hits = _export_hits(norm.text, _lower(norm.text)) + copy_hits
     for m in copy_hits:

@@ -30,8 +30,8 @@ replace = "    return True"
 [[proof]]
 path = "a word the person gives in a prompt is quiet too"
 file = "maisecrets/vault.py"
-find = "    return tool and str(kind).startswith(LABEL_RULES) and reads_as_word(value.strip())"
-replace = "    return str(kind).startswith(LABEL_RULES) and reads_as_word(value.strip())"
+find = "    return tool and is_label(kind) and reads_as_word(value.strip())"
+replace = "    return is_label(kind) and reads_as_word(value.strip())"
 
 [[proof]]
 path = "a word first seen in a tool result stays quiet when the person gives it as a password"
