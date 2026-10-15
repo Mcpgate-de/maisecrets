@@ -267,6 +267,13 @@ class SlackTokenTests(unittest.TestCase):
         self.assertEqual(scan("xoxo-hugs-and-kisses-to-everyone!", "prompt"), [])
 
 
+class TwilioTests(unittest.TestCase):
+    def test_a_twilio_account_sid_needs_its_name(self):
+        sid = J(["AC", "3f9a1c0e7b52d8461e9fa0c37b5d2e84"])
+        self.assertEqual([m.kind for m in scan("TWILIO_ACCOUNT_SID=" + sid, "prompt")],
+                         ["twilio-account-sid-labelled"])
+        self.assertEqual([m.kind for m in scan("digest " + sid, "prompt")], [])
+
 
 if __name__ == "__main__":
     unittest.main()

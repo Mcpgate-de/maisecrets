@@ -1451,6 +1451,12 @@ OWN_RULES: list[dict] = [
     # such as seed, mnemonic or wallet in the 200 characters before it or on its line; 15 and more (5 to 8 bits) stand
     # alone
     {"id": "crypto-seed-phrase", "type": "SECRET", "regex": r"(?!)"},
+    # a Twilio Account SID (AC and 32 hex digits) next to its name: the SID and the auth token together log in, and
+    # the holdout sets of the public benchmark (2026-10-14) leaked three. Without the name, AC and 32 hex digits are
+    # also hashes and ids
+    {"id": "twilio-account-sid-labelled", "type": "SECRET", "secret_group": 1,
+     "regex": r"(?i:twilio|account_?sid|(?<![a-z])sid(?![a-z]))[^\n]{0,40}?(?<![A-Za-z0-9])(AC[0-9a-f]{32})"
+              r"(?![A-Za-z0-9])"},
     {"id": "auth-scheme-apikey", "type": "SECRET", "secret_group": 1, "validator": "apikey_value",
      "regex": r"(?i:authorization)[\"']?\]?[ \t]*[:=][ \t]*[\"'`]?ApiKey[ \t]+([A-Za-z0-9+/_-]{8,1024}={0,2})"
               r"(?![\w+/=-])"},
