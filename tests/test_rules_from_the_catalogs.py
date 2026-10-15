@@ -74,6 +74,23 @@ def _intercom(r: random.Random) -> str:
     return base64.b64encode(raw[:45]).decode()
 
 
+def gitlab_routable(r: random.Random, prefix: str = "glpat-", payload_bytes: int = 40) -> str:
+    """GitLab's routable token (lib/authn/token_field/generator/routable_token.rb): base64url of 16 random bytes, the
+    routing payload and its size; ".01."; the payload length (2 base36) and CRC32 (7 base36)."""
+    import zlib
+    raw = bytes(r.randrange(256) for _ in range(16 + payload_bytes))
+    payload = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    def b36(n: int, w: int) -> str:
+        out = ""
+        while n:
+            n, d = divmod(n, 36)
+            out = (D + L)[d] + out
+        return out.rjust(w, "0")
+    body = J([prefix, payload, ".01.", b36(len(payload), 2)])
+    return body + b36(zlib.crc32(body.encode()) & 0xffffffff, 7)
+
+
 # rule id -> (a token, a look-alike that is not one). Every part after the prefix is random
 TOKENS = {
     "google-oauth-client-secret": lambda r: (J(["GOC", "SPX-"]) + rd(r, 28, B64U), J(["GOC", "SPX-"]) + rd(r, 12, AN)),
@@ -110,6 +127,9 @@ TOKENS = {
                                             J(["s", "l."]) + rd(r, 60, B64U)),
     "firecrawl-api-key": lambda r: (J(["f", "c-"]) + rd(r, 32, HEXL), J(["f", "c-"]) + rd(r, 31, HEXL)),
     "elevenlabs-api-key-bare": lambda r: (J(["s", "k_"]) + rd(r, 48, HEXL), J(["s", "k_"]) + rd(r, 47, HEXL)),
+    "gitlab-pipeline-trigger-token-any": lambda r: (gitlab_routable(r, J(["gl", "ptt-"])),
+                                                    J(["gl", "ptt-"]) + rd(r, 12, AN)),
+    "gitlab-ci-job-token-any": lambda r: (J(["gl", "cbt-"]) + rd(r, 24, AN), J(["gl", "cbt-"]) + rd(r, 12, AN)),
 }
 
 PREFIX_IDS_BEFORE = {"gitlab-runner-token", "gitlab-deploy-token-any", "webhook-signing-secret",
@@ -219,7 +239,9 @@ class TokenFormatTests(unittest.TestCase):
 
 # ------------------------------------------------------------ base64 PEM key --
 def pem(r: random.Random, kind: str = "RSA PRIVATE KEY", body_bytes: int = 1190) -> bytes:
-    body = base64.b64encode(bytes(r.randrange(256) for _ in range(body_bytes))).decode()
+    # the body starts as a key does: the OpenSSH magic, a PGP packet tag, else DER (a SEQUENCE)
+    start = b"openssh-key-v1\x00" if kind.startswith("OPENSSH") else b"\x95" if kind.startswith("PGP") else b"\x30\x82"
+    body = base64.b64encode(start + bytes(r.randrange(256) for _ in range(body_bytes))).decode()
     lines = "\n".join(body[i:i + 64] for i in range(0, len(body), 64))
     dashes = "-" * 5
     return J([dashes, "BEGIN ", kind, dashes, "\n", lines, "\n", dashes, "END ", kind, dashes, "\n"]).encode()
@@ -272,11 +294,10 @@ class Base64PemTests(unittest.TestCase):
                     n += 1
                     key = base64.b64encode(pem(r, body_bytes=n)).decode()
                 wrapped = "\n".join(key[i:i + width] for i in range(0, len(key), width))
-                # after a full last line without padding, a further line of base64 alone could be its end: there a
-                # following word such as "next" is taken too
-                # a longer line of base64 alone is of another value in every case
+                # a longer line of base64 alone is of another value; after a full last line, the decoded END line
+                # tells that a shorter line is the next text (codex Gate A of 0.6.20)
                 longer = "\n" + rd(r, width + 4, AN) + "\n"
-                afters = ("\n$ echo done\n", "", longer) + (("\n0123456789abcdef\nnext\n", "\nnext\n") if tail else ())
+                afters = ("\n$ echo done\n", "", longer, "\n0123456789abcdef\nnext\n", "\nnext\n")
                 for after in afters:
                     text = f"$ base64 -w {width} server.key\n{wrapped}{after}"
                     with self.subTest(width=width, tail=tail, after=after[:6]):
@@ -289,6 +310,21 @@ class Base64PemTests(unittest.TestCase):
         block = "\n    ".join(lines)
         text = f"data:\n  tls.key: |\n    {block}\n  tls.crt: abc\n"
         self.assertIn(("private-key-base64", "SECRET", block), found(text, "tool"))
+
+    def test_a_banner_with_a_word_after_it_is_no_hit(self):
+        """codex Gate A of 0.6.20: a CamelCase word after the banner read as a key body."""
+        dashes = "-" * 5
+        for kind, line in (("PRIVATE KEY", "ThisIsOnlyBannerText"), ("OPENSSH PRIVATE KEY", "ExampleKeyGoesHere00"),
+                           ("PGP PRIVATE KEY BLOCK", "ABCDEFGHIJKLMNOPQRST")):
+            raw = J([dashes, "BEGIN ", kind, dashes, "\n", line, "\n", dashes, "END ", kind, dashes, "\n"])
+            v = base64.b64encode(raw.encode()).decode()
+            with self.subTest(kind=kind):
+                self.assertEqual(kinds_over(f"key: {v}\n", v, "prompt"), [])
+
+    def test_a_bundle_after_a_byte_order_mark_is_found(self):
+        r = random.Random(41)
+        v = base64.b64encode(b"\xef\xbb\xbf" + pem(r, "CERTIFICATE") + pem(r)).decode()
+        self.assertIn(("private-key-base64", "SECRET", v), found(f"tls.pem: {v}\n", "prompt"))
 
     def test_a_banner_without_key_material_is_no_hit(self):
         dashes = "-" * 5
@@ -409,23 +445,6 @@ class BetterleaksPatchTests(unittest.TestCase):
 
 
 # ------------------------------------------------------- forms of a session measurement --
-def gitlab_routable(r: random.Random, prefix: str = "glpat-", payload_bytes: int = 40) -> str:
-    """GitLab's routable token (lib/authn/token_field/generator/routable_token.rb): base64url of 16 random bytes, the
-    routing payload and its size; ".01."; the payload length (2 base36) and CRC32 (7 base36)."""
-    import zlib
-    raw = bytes(r.randrange(256) for _ in range(16 + payload_bytes))
-    payload = base64.urlsafe_b64encode(raw).decode().rstrip("=")
-
-    def b36(n: int, w: int) -> str:
-        out = ""
-        while n:
-            n, d = divmod(n, 36)
-            out = (D + L)[d] + out
-        return out.rjust(w, "0")
-    body = J([prefix, payload, ".01.", b36(len(payload), 2)])
-    return body + b36(zlib.crc32(body.encode()) & 0xffffffff, 7)
-
-
 class SessionFormTests(unittest.TestCase):
     """Forms that real session transcripts held and 0.6.17 missed or masked in part (the values were not kept; these
     are built from the vendors' formats)."""
@@ -451,12 +470,15 @@ class SessionFormTests(unittest.TestCase):
 
     def test_gitlab_trigger_and_job_tokens_are_found_in_their_newer_forms(self):
         r = random.Random(51)
-        self.whole(J(["gl", "ptt-"]) + rd(r, 40, HEXL), "gitlab-ptt")
+        self.whole(J(["gl", "ptt-"]) + rd(r, 40, HEXL))
         self.whole(gitlab_routable(r, J(["gl", "ptt-"])))
         self.whole(J(["gl", "cbt-"]) + rd(r, 2, AN) + "_" + rd(r, 20, B64U))
         self.whole(J(["gl", "cbt-"]) + rd(r, 24, B64U), "gitlab-ci-job-token-any")
         self.whole(gitlab_routable(r, J(["gl", "cbt-"])))
         self.whole(J(["gl", "cbt-", "eyJ"]) + rd(r, 30, B64U) + ".eyJ" + rd(r, 120, B64U) + "." + rd(r, 43, B64U))
+        # codex Gate A of 0.6.20: the vendored rule took the first part of a three-part token with _ in it
+        part = "Ab3_xY7-"
+        self.whole(J(["gl", "cbt-"]) + part * 5 + "." + part * 2 + "Ab3_" + "." + part * 2 + "Ab3_")
         for miss in (J(["gl", "ptt-"]) + rd(r, 12, AN), J(["gl", "cbt-"]) + rd(r, 12, AN)):
             self.assertEqual(found(f"see {miss} there"), [])
 

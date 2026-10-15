@@ -51,3 +51,7 @@ aws-appsync-api-key          da2-(?:(?<![A-Za-z0-9_-]da2-)|(?<=\\[nrt]da2-))(?=[
 stackhawk-api-key            hawk\.(?:(?<![A-Za-z0-9_.-]hawk\.)|(?<=\\[nrt]hawk\.))[0-9A-Za-z_-]{20}\.[0-9A-Za-z_-]{20}(?![0-9A-Za-z_-])(?!\.[0-9A-Za-z_-])
 heroku-api-key-uuid          HRKU-(?:(?<![A-Za-z0-9_-]HRKU-)|(?<=\\[nrt]HRKU-))[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(?![0-9A-Za-z_-])
 github-app-installation-jwt  ghs_(?:(?<![A-Za-z0-9_]ghs_)|(?<=\\[nrt]ghs_))[0-9]{1,20}_[A-Za-z0-9_-]{10,2048}\.[A-Za-z0-9_-]{10,2048}\.[A-Za-z0-9_-]{10,2048}(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9_-])
+# GitLab's pipeline trigger and CI job tokens in their newer forms (routable, or a JWT after glcbt-); the vendored rules
+# take glptt- and 40 hex digits, glcbt- with a partition prefix, and claimed the first part of a longer token
+gitlab-pipeline-trigger-token-any glptt-(?:(?<![A-Za-z0-9_-]glptt-)|(?<=\\[nrt]glptt-))[0-9A-Za-z_-]{20,400}(?:\.[0-9a-z]{2}\.[0-9a-z]{9})?(?![0-9A-Za-z_-])
+gitlab-ci-job-token-any      glcbt-(?:(?<![A-Za-z0-9_-]glcbt-)|(?<=\\[nrt]glcbt-))[0-9A-Za-z_-]{20,2048}(?:\.[0-9A-Za-z_-]{2,2048}){0,2}(?![0-9A-Za-z_-])(?!\.[0-9A-Za-z_-])

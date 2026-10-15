@@ -259,9 +259,27 @@ def _de_vat_id_ok(v: str) -> bool:
 # the decoded head of a PEM private key: the header, optional armour or encryption headers (PGP's Version:, the
 # Proc-Type: and DEK-Info: of a legacy encrypted key), then base64 body characters (as many as the head holds, up to
 # 16). A byte order mark may stand before the header
-_B64_PEM_PRIVATE_RE = re.compile(rb"(?:\xef\xbb\xbf)?-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----\r?\n"
-                                 rb"(?:[A-Za-z][A-Za-z0-9-]{0,30}: [^\r\n]{0,200}\r?\n)*(?:\r?\n)?"
-                                 rb"(?:[A-Za-z0-9+/]{16}|[A-Za-z0-9+/]{1,15}\Z)")
+_B64_PEM_PRIVATE_RE = re.compile(rb"(?:\xef\xbb\xbf)?-----BEGIN (?P<kind>[A-Z0-9 ]{0,40})PRIVATE KEY(?: BLOCK)?"
+                                 rb"-----\r?\n"
+                                 rb"(?P<hdrs>(?:[A-Za-z][A-Za-z0-9-]{0,30}: [^\r\n]{0,200}\r?\n)*)(?:\r?\n)?"
+                                 rb"(?P<body>[A-Za-z0-9+/]{16}|[A-Za-z0-9+/]{1,15}\Z)")
+_OPENSSH_MAGIC = b"b3BlbnNzaC1rZXktdjE"   # base64 of "openssh-key-v1"
+
+
+def _pem_body_ok(m) -> bool:
+    """The body starts as a key does: DER (a SEQUENCE: "M"), the OpenSSH magic, a PGP packet (a tag byte of 0x80 or
+    more), or anything after encryption headers (Proc-Type, a PGP armour header). Prose after a banner is no key
+    (codex Gate A of 0.6.20)."""
+    body, kind = m.group("body"), m.group("kind")
+    if m.group("hdrs"):
+        return True
+    if kind.startswith(b"OPENSSH"):
+        return _OPENSSH_MAGIC.startswith(body[:19]) if len(body) < 19 else body.startswith(_OPENSSH_MAGIC[:16])
+    if kind.startswith(b"PGP"):
+        return body[:1] in b"ghijklmnopqrstuvwxyz0123456789+/"
+    return body[:1] == b"M"
+
+
 # a further line of a wrapped base64 value: after a line break, or after an escaped one (\n in a JSON string)
 _B64_LINE_RE = re.compile(r"(?:\r?\n|(?:\\r)?\\n)([ \t]*)([A-Za-z0-9+/]+={0,2})(?=[ \t]*(?:\r?\n|$)|[\"',;]|\\[rn])")
 _B64_PEM_STARTS = ("LS0tLS1CRUdJTi", "77u/LS0tLS1CRUdJTi")
@@ -280,19 +298,37 @@ def _b64_needles(raw: bytes) -> tuple:
 _PRIVATE_KEY_NEEDLES = _b64_needles(b"PRIVATE KEY-----")   # a key later in a bundle (certificate, chain, key)
 
 
+_PEM_END_RE = re.compile(rb"-----END [A-Z0-9 ]{1,60}-----\r?\n?\Z")
+
+
+def _pem_ended(lines: list) -> bool:
+    """Whether the base64 lines so far (each of a width that is a multiple of 4) decode to the end of a PEM block."""
+    import base64
+    try:
+        return _PEM_END_RE.search(base64.b64decode("".join(lines[-2:]), validate=True)) is not None
+    except ValueError:
+        return False
+
+
 def _base64_wrapped_end(text: str, start: int, end: int) -> int:
     """The end of a base64 value that `base64` or openssl wrapped at a fixed width. text[start:end] is its first
     line; each further line holds base64 alone and has the width of the first, the last may be shorter. A line of
-    another width, a line that starts a new value, or any other text ends the value. A first line longer than 120
-    characters is no wrapped line (the tools wrap at 64 or 76), and one that ends in padding is the whole value."""
+    another width, a line that starts a new value, or any other text ends the value, and so does a full line that
+    decodes to the end of a PEM block (a shorter line after it is the next text: codex Gate A of 0.6.20). A first
+    line longer than 120 characters is no wrapped line (the tools wrap at 64 or 76), and one that ends in padding is
+    the whole value."""
     width = end - start
     if width > 120 or text[end - 1] == "=":
         return end
+    lines = [text[start:end]]   # the last two lines only: a value can be megabytes long
     while True:
         m = _B64_LINE_RE.match(text, end)
         if not m or len(m.group(2)) > width or m.group(2).startswith(_B64_PEM_STARTS):
             return end
+        if len(m.group(2)) < width and width % 4 == 0 and _pem_ended(lines):
+            return end
         end = m.end(2)
+        lines = [lines[-1], m.group(2)]
         if len(m.group(2)) < width or m.group(2).endswith("="):
             return end
 
@@ -308,8 +344,11 @@ def _base64_pem_ok(v: str) -> bool:
         raw = base64.b64decode(head[:len(head) // 4 * 4], validate=True)
     except ValueError:
         return False
-    if _B64_PEM_PRIVATE_RE.match(raw):
-        return True
+    m = _B64_PEM_PRIVATE_RE.match(raw)
+    if m:
+        return _pem_body_ok(m)
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]   # a byte order mark before a bundle (codex Gate A of 0.6.20)
     if not raw.startswith(b"-----BEGIN "):
         return False
     for needle in _PRIVATE_KEY_NEEDLES:   # a bundle: decode around each "PRIVATE KEY-----" (the footer has one too)
@@ -318,7 +357,8 @@ def _base64_pem_ok(v: str) -> bool:
             a = max(0, i // 4 * 4 - 80)
             window = flat[a:a + 200]
             try:
-                if _B64_PEM_PRIVATE_RE.search(base64.b64decode(window[:len(window) // 4 * 4], validate=True)):
+                inner = _B64_PEM_PRIVATE_RE.search(base64.b64decode(window[:len(window) // 4 * 4], validate=True))
+                if inner and _pem_body_ok(inner):
                     return True
             except ValueError:
                 pass
@@ -1454,20 +1494,14 @@ OWN_RULES: list[dict] = [
 ]
 
 
-# Fallbacks that run after the vendored rules (0.6.20): forms of a token whose vendored rule fixes one length or one
-# form, so the standard form keeps its vendored rule id. Found in a measurement on real session transcripts (values
-# not kept): GitLab's pipeline trigger token and CI job token in their newer forms (routable, or a JWT after glcbt-;
-# the vendored rules take glptt- and 40 hex digits, glcbt- with a partition prefix), OpenAI project keys of other
-# lengths around T3BlbkFJ (the base64 of "OpenAI"; the vendored rule takes 20, 58 or 74 characters on each side) and
-# Anthropic API keys of other lengths (the vendored rule takes exactly 93 characters before AA). Each also takes a
-# token before a full stop, which the vendored terminators refuse
+# Fallbacks that run after the vendored rules (0.6.20): forms of a key whose vendored rule fixes one length, so the
+# standard form keeps its vendored rule id. Found in a measurement on real session transcripts (values not kept):
+# OpenAI project keys of other lengths around T3BlbkFJ (the base64 of "OpenAI"; the vendored rule takes 20, 58 or 74
+# characters on each side) and Anthropic API keys of other lengths (the vendored rule takes exactly 93 characters
+# before AA). Each also takes a key before a full stop, which the vendored terminators refuse. The vendored rule of
+# such a key matches whole or not at all; GitLab's trigger and job tokens are in rules/prefixes.txt, as the vendored
+# rule there takes the first part of a longer token (codex Gate A)
 FALLBACK_RULES: list[dict] = [
-    {"id": "gitlab-pipeline-trigger-token-any", "type": "SECRET",
-     "regex": r"glptt-(?:(?<![A-Za-z0-9_-]glptt-)|(?<=\\[nrt]glptt-))[0-9A-Za-z_-]{20,400}"
-              r"(?:\.[0-9a-z]{2}\.[0-9a-z]{9})?(?![0-9A-Za-z_-])"},
-    {"id": "gitlab-ci-job-token-any", "type": "SECRET",
-     "regex": r"glcbt-(?:(?<![A-Za-z0-9_-]glcbt-)|(?<=\\[nrt]glcbt-))[0-9A-Za-z_-]{20,2048}"
-              r"(?:\.[0-9A-Za-z_-]{2,2048}){0,2}(?![0-9A-Za-z_-])(?!\.[0-9A-Za-z_-])"},
     {"id": "openai-api-key-any", "type": "SECRET",
      "regex": r"sk-(?:(?<![A-Za-z0-9_-]sk-)|(?<=\\[nrt]sk-))"
               r"(?:proj|svcacct|admin)-[A-Za-z0-9_-]{8,400}?T3BlbkFJ[A-Za-z0-9_-]{8,400}(?![A-Za-z0-9_-])"},
