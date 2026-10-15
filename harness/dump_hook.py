@@ -23,6 +23,10 @@ if d:
             return {k: redact(v) for k, v in node.items()}
         return node
     name = f"{time.time():.3f}_{payload.get('hook_event_name','x')}_{payload.get('tool_name','')}.json"
-    with open(os.path.join(d, name), "w") as f:
+    # write whole or not at all: the harness reads *.json as soon as the client exits, and a hook still
+    # writing (or stopped by the client's timeout) left an empty file that broke the read
+    path = os.path.join(d, name)
+    with open(path + ".tmp", "w") as f:
         json.dump(redact(payload), f, indent=1)
+    os.replace(path + ".tmp", path)
 print("{}")

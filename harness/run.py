@@ -693,6 +693,11 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
     # that tool gets the rewritten input. Everywhere else a value in a payload is a leak.
     goes_to = sc.get("value_goes_to")
     delivered = False
+    # a payload the hook did not finish writing is unchecked, so it may hold a leak: name it, never skip it
+    partial = sorted(p.name for p in dump.glob("*.json.tmp"))
+    if partial:
+        fails.append(f"{len(partial)} hook payload(s) not written whole (a hook was stopped while it wrote): "
+                     + ", ".join(partial))
     for pf in dump.glob("*.json"):
         text = pf.read_text(errors="ignore")
         payload = json.loads(text)
