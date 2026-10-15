@@ -902,7 +902,8 @@ class Robust(Base):
         loaded = user_rules.load({})
         reasons = {q.file: q.reason for q in loaded.quarantined}
         self.assertEqual(reasons["latin.prefixes"], "a file that is not UTF-8")
-        if os.geteuid() != 0:          # root reads the file anyway (CI)
+        # root reads the file anyway (CI); Windows has no geteuid, and mode 0 does not stop a read there
+        if os.name != "nt" and os.geteuid() != 0:
             self.assertEqual(reasons["locked.prefixes"], "a file that cannot be read")
 
 
