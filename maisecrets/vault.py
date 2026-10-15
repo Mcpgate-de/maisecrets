@@ -40,6 +40,12 @@ class WrongHome(RuntimeError):
     """The vault was imported before a test run chose its own home, and still names the user's own home."""
 
 
+def _within_default_home(path: Path) -> bool:
+    """The user's own home or a path inside it, also through `..` or a symbolic link (codex Gate A of the registry)."""
+    real, home = path.resolve(), _DEFAULT_HOME.resolve()
+    return real == home or home in real.parents
+
+
 def _check_home() -> None:
     """A test run owns a temp home (tests/_isolate.py sets MAISECRETS_TEST_HOME_OWNED). HOME is bound at import, so a
     runner that loaded the vault before the isolation kept the real home, and the resets of the suite deleted the
@@ -47,7 +53,7 @@ def _check_home() -> None:
     refused before a read or a write. A second temp home that a test chooses on purpose stays allowed. Without the
     marker (every real hook) this is one environment lookup."""
     owned = os.environ.get("MAISECRETS_TEST_HOME_OWNED")
-    if owned and HOME == _DEFAULT_HOME:
+    if owned and _within_default_home(HOME):
         raise WrongHome(f"the vault names the user's own {HOME}, but this test run owns {owned}: import "
                         "tests/_isolate.py before anything that imports maisecrets.vault")
 

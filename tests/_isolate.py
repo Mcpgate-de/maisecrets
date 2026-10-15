@@ -57,6 +57,7 @@ if not os.environ.get(_MINE) or os.environ.get(_MINE) != os.environ.get("MAISECR
 # ~/.maisecrets, and the resets of the suite deleted the real index, vault file and key (a fork's runner, 2026-10-12)
 _vault = sys.modules.get("maisecrets.vault")
 if _vault is not None and str(getattr(_vault, "HOME", "")) != os.environ["MAISECRETS_HOME"]:
+    os.environ.pop(_MINE, None)   # a later module must not take this process for an isolated one
     raise RuntimeError(f"maisecrets.vault was imported with the home {_vault.HOME}; tests/_isolate must be imported "
                        "first (before anything that imports maisecrets), or the tests reach the real store")
 

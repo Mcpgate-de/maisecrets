@@ -83,6 +83,37 @@ class IsolationOrderTests(unittest.TestCase):
         self.assertNotIn("ran", r.stdout)
         self.assertEqual(self.user_store(), [], "nothing was written into the user's home")
 
+    def test_the_user_home_through_dot_dot_or_a_link_is_refused_too(self):
+        # codex Gate A of the registry: the guard compared the path as text
+        os.symlink(self.fake_user_home / ".maisecrets", self.fake_user_home / "link")
+        (self.fake_user_home / ".maisecrets").mkdir()
+        for via in (".maisecrets/../.maisecrets", "link", ".maisecrets/sub"):
+            with self.subTest(via=via):
+                r = self.child(f"""
+                    import os
+                    os.environ["MAISECRETS_HOME"] = os.path.join(os.environ["HOME"], {via!r})
+                    from maisecrets import vault
+                    os.environ["MAISECRETS_TEST_HOME_OWNED"] = "/elsewhere"
+                    try:
+                        vault.load_config()
+                    except vault.WrongHome:
+                        print("refused")
+                """)
+                self.assertEqual(r.stdout.strip(), "refused", r.stderr)
+        self.assertEqual(self.user_store(), [], "nothing was written into the user's home")
+
+    def test_a_refused_start_leaves_no_marker_for_the_next_module(self):
+        r = self.child("""
+            import os
+            from maisecrets import detect
+            detect.rules()
+            try:
+                import _isolate
+            except RuntimeError:
+                print("marker" if os.environ.get("MAISECRETS_TEST_HOME_OWNED") else "no marker")
+        """)
+        self.assertEqual(r.stdout.strip(), "no marker", r.stderr)
+
     def test_the_vault_works_when_the_home_is_the_one_the_test_run_owns(self):
         r = self.child("""
             import _isolate
