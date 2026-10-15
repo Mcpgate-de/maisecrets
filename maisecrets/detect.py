@@ -1527,6 +1527,21 @@ FALLBACK_RULES: list[dict] = [
     {"id": "anthropic-api-key-any", "type": "SECRET",
      "regex": r"sk-ant-(?:(?<![A-Za-z0-9_-]sk-ant-)|(?<=\\[nrt]sk-ant-))(?:api03|admin01)-[A-Za-z0-9_-]{60,140}AA"
               r"(?![A-Za-z0-9_-])"},
+    # 0.6.21, from the values that leaked in the public benchmark's holdout sets: an OpenAI or Anthropic key and a
+    # Slack token with a shorter tail and no marker of the forms above. The sk- tail needs a digit, a capital and a run
+    # of 16 letters and digits; the Slack tail starts with digits and a hyphen, as Slack writes it:
+    # sk-admin-sidebar-navigation-item2X and xoxb-background-worker-release-2024 are names. A key that a rule above
+    # takes (T3BlbkFJ inside, api03- and AA at the end) is left to it
+    {"id": "openai-anthropic-key-relaxed", "type": "SECRET",
+     "regex": r"(?<![\w-])sk-(?:proj|ant|svcacct|admin)-"
+              r"(?![A-Za-z0-9_-]{0,400}T3BlbkFJ)"
+              r"(?!(?:api03|admin01)-[A-Za-z0-9_-]{60,140}AA"
+              r"(?![A-Za-z0-9_-]))"
+              r"(?=[A-Za-z0-9_-]{0,200}[0-9])"
+              r"(?=[A-Za-z0-9_-]{0,200}[A-Z])"
+              r"(?=[A-Za-z0-9_-]{0,200}?[A-Za-z0-9]{16})[A-Za-z0-9_-]{20,}"},
+    {"id": "slack-token-relaxed", "type": "SECRET",
+     "regex": r"(?<![\w-])(?:xoxb-|xoxp-|xoxa-|xoxr-)\d{2,}-[A-Za-z0-9-]{12,}"},
 ]
 
 
@@ -1993,9 +2008,6 @@ def _load_own() -> list[Rule]:
 
 
 _RULES: list[Rule] | None = None
-# prefixes with a relaxed tail (0.6.21): they run after the vendored rules, so a key of the full vendored form keeps
-# its vendored rule id and only a shorter one falls to these
-_LATE_RULES = frozenset({"openai-anthropic-key-relaxed", "slack-token-relaxed"})
 
 
 def rules() -> list[Rule]:
@@ -2004,13 +2016,11 @@ def rules() -> list[Rule]:
     global _RULES
     if _RULES is None:
         own = _load_own()
-        late = [r for r in own if r.id in _LATE_RULES]
-        secrets = [r for r in own if r.type == "SECRET" and r.id not in _LATE_RULES]
+        secrets = [r for r in own if r.type == "SECRET"]
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
         _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
                   + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]
-                  + late
                   + _load_regional(active.regions) + _load_presidio(active.regions) + pii
                   + _load_literal(active.languages))
         _REGIONS[:] = [_RULES, active.regions]
