@@ -133,10 +133,26 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(s.priority[1], registry.BANDS[s.source])
 
     def test_the_form_is_the_one_of_the_old_id_prefixes(self):
+        # the prefixes of 0.6.21 (detect.LABEL_RULES, KEYWORD_RULES), written out: the registry must not move them
+        label = ("ds-keyword", "label-", "generic-api-key", "url-query-secret", "auth-scheme")
+        keyword = ("ds-keyword", "label-")
         for s, _ in self.specs:
             with self.subTest(rule=s.key):
-                self.assertEqual(s.form != "shape", s.id.startswith(detect.LABEL_RULES))
-                self.assertEqual(s.form == "keyword", s.id.startswith(detect.KEYWORD_RULES))
+                self.assertEqual(s.form != "shape", s.id.startswith(label))
+                self.assertEqual(s.form == "keyword", s.id.startswith(keyword))
+                self.assertEqual(registry.is_label(s.id), s.id.startswith(label))
+
+    def test_a_rule_a_caller_built_with_a_key_still_gets_the_checks_of_its_id(self):
+        # codex Gate A of the registry: the key alone switched the named filters off
+        rule = detect.Rule(id="phone", type="PHONE", regex=detect._Lazy(r"\d{20}"), key="custom:phone")
+        self.assertEqual(detect.scan("1" + "2" * 19, rule_list=[rule]), [])      # more than E.164 allows
+
+    def test_the_key_of_a_pass_enables_it_as_its_id_does(self):
+        label = "pass" + "word"
+        export = f"url,username,{label}\nhttps://a.example.org,alice,Kq7-mZ2p" + "Lw9x!\n"
+        by_id = detect.scan(export, channel="tool", path=f"{label}s.csv", enabled={detect.EXPORT_RULE})
+        self.assertTrue(by_id)
+        self.assertEqual(detect.scan(export, channel="tool", path=f"{label}s.csv", enabled={detect.EXPORT_KEY}), by_id)
 
     def test_a_presidio_or_regional_rule_names_its_region(self):
         active = detect.active_regions().regions
@@ -188,6 +204,13 @@ class RulesListTests(unittest.TestCase):
         self.assertTrue(rows["betterleaks:jwt"]["off"])
         self.assertFalse(rows["betterleaks:github-pat"]["off"])
         self.assertIn("(off: allow list)", self.run_list())
+
+    def test_a_key_on_the_allow_list_is_not_shown_off_since_rules_reads_ids(self):
+        user_rules.ALLOW_FILE.write_text("rule: betterleaks" + ":jwt\n", encoding="utf-8")
+        detect.reset_rules()
+        rows = {r["key"]: r for r in __import__("json").loads(self.run_list("--json"))}
+        self.assertFalse(rows["betterleaks:jwt"]["off"])
+        self.assertIn("jwt", {r.id for r in detect.rules()})
 
     def test_an_unknown_argument_is_refused(self):
         import contextlib

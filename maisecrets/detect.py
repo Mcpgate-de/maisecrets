@@ -105,7 +105,7 @@ class Rule:
     key: str = ""                      # unique, from maisecrets/registry.py: `<source>:<id>`; set by rules()
     form: str = ""                     # keyword | label | shape (registry.form_of); set by rules()
     matcher: str = ""                  # regex | lines | windowed | curl | list | literal | seed (registry.matcher_of)
-    filters: frozenset = frozenset()   # the named checks after a hit (registry.filters_of); set by rules()
+    filters: frozenset | None = None   # the named checks after a hit (registry.filters_of); set by rules()
     region: str = "generic"            # the country of a regional or Presidio rule, set by its loader
     phase: int = 0                     # registry.PHASES: 1 the built-in rules, 3 the rules of your own; set by rules()
 
@@ -2950,6 +2950,7 @@ _PATH: list = [""]
 # a label rule (LABEL_RULES): its header labels the cell, so a word in it is stored quiet and a fixture in test code
 # is dropped, as after `password:`
 EXPORT_RULE = "label-password-export"
+EXPORT_KEY = "export:" + EXPORT_RULE    # its key in maisecrets/registry.py: `enabled` takes either
 # the file names of password exports: a browser's (Chrome, Edge, Firefox, Safari), Bitwarden, 1Password, LastPass,
 # KeePass and KeePassXC, Dashlane, and any table whose name says passwords
 _EXPORT_NAME_RE = re.compile(r"(?i)(?:passw|kennw|logins?\b|bitwarden|1password|lastpass|keepass|dashlane|enpass"
@@ -3156,7 +3157,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         taken_starts.insert(i, m.start)
         taken_ends.insert(i, m.end)
         found.append(m)
-    if _CHANNEL[0] == "tool" and not _copy and (enabled is None or EXPORT_RULE in enabled):
+    if _CHANNEL[0] == "tool" and not _copy and (enabled is None or EXPORT_RULE in enabled or EXPORT_KEY in enabled):
         # first: a cell of a password export is a value as a whole, and no other rule claims a part of it
         for m in _export_hits(text, low):
             take(m)
@@ -3179,7 +3180,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         own = _runs_after_personal(rule)
         form = rule.form or _registry.form_of(rule.id)    # a rule list a caller built has no form set
         keyword = form == "keyword"
-        filters = rule.filters if rule.key else _registry.filters_of(rule.id)
+        filters = rule.filters if rule.filters is not None else _registry.filters_of(rule.id)
         hits = _matches(rule, text)
         for m in (_timed(rule, hits, len(text)) if own and rule_list is None else hits):
             ngroups = rule.regex.groups or 0
@@ -3381,7 +3382,7 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
         return
     allowed, off = allow_list()
     for start, end, kind, typ in sorted(personal.hits(text, _CHANNEL[0], _pii_regions_cached())):
-        if enabled is not None and kind not in enabled:
+        if enabled is not None and kind not in enabled and "personal:" + kind not in enabled:
             continue
         value = text[start:end]
         if value in allowed or (off and kind in off):
@@ -3458,7 +3459,7 @@ def _scan_cleaned_copy(text: str, enabled, found: list, taken_starts: list, take
         return
     by_start = {f.start: f for f in found}   # the taken spans never overlap, so a start names one
     copy_hits = _changed_windows_scan(text, norm, enabled)
-    if enabled is None or EXPORT_RULE in enabled:
+    if enabled is None or EXPORT_RULE in enabled or EXPORT_KEY in enabled:
         # a header in colour or in entities: the table is read whole in the copy, not only around changed lines
         copy_hits = _export_hits(norm.text, _lower(norm.text)) + copy_hits
     for m in copy_hits:
