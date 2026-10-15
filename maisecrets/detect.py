@@ -1332,6 +1332,15 @@ _SYSTEM_USERS = frozenset({"git", "root", "ubuntu", "ec2-user", "admin", "norepl
 
 
 # --------------------------------------------------------------- own rules --
+# The letters of Chinese, Japanese and Korean script. Python's \w includes them, and these scripts put no space
+# between words: in `メールはta@example.jpまで` the boundaries (?<![\w...]) and (?![\w-]) of the e-mail and phone rules
+# never hold, so the address was missed or its span took the words around it. Those rules bound a value by a word
+# character that is no CJK letter (_NON_CJK_WORD) instead. Ranges: CJK punctuation, kana, the ideographs of
+# Extension A and the base block, compatibility ideographs, Hangul Jamo and syllables, and the fullwidth forms.
+_CJK = ("\u1100-\u11ff\u3000-\u303f\u3040-\u30ff\u3130-\u318f\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af"
+        "\uf900-\ufaff\uff00-\uffef")
+_NON_CJK_WORD = "[^\\W" + _CJK + "]"
+_MAIL_LOCAL = "(?:(?![" + _CJK + "])[\\w.+-])"
 OWN_RULES: list[dict] = [
     # ?token=… / &api_key=… in a URL
     {"id": "url-query-secret", "type": "SECRET", "secret_group": 2,
@@ -1339,8 +1348,10 @@ OWN_RULES: list[dict] = [
     {"id": "email", "type": "EMAIL", "validator": "person_email",
      # the last label is alphabetic: `lodash@4.17.21`, `checkout@v4.1.1` and Homebrew's
      # `python@3.14/3.14.7` are version pins, not addresses (review, 2026-09-26)
-     "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})"
-              r"@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
+     # the boundaries skip CJK letters (_CJK): an address right next to Japanese, Chinese or Korean text
+     "regex": r"(?:(?:\b|(?<=[" + _CJK + r"]))" + _MAIL_LOCAL + r"{1,64}|(?<!" + _NON_CJK_WORD + r")(?<![.+-])"
+              + _MAIL_LOCAL + r"{64,}|" + _MAIL_LOCAL + r"{64})"
+              r"@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?!" + _NON_CJK_WORD + r"|-)"},
     # an IBAN in lower case, plain or in groups of four; its validator also wants the country's length
     {"id": "iban-lowercase", "type": "IBAN", "validator": "iban",
      "regex": r"(?<![A-Za-z0-9])[a-z]{2}[0-9]{2}(?:[a-z0-9]{11,30}|(?:[ -][a-z0-9]{4}){2,7}(?:[ -][a-z0-9]{1,3})?)"
@@ -1351,7 +1362,10 @@ OWN_RULES: list[dict] = [
      "regex": r"(?:(?<![\w.+%-])|(?<=(?i:mailto%3a))|(?<=%3[Dd]))[\w.+-]{1,64}%40"
               r"[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "phone", "type": "PHONE",
-     "regex": r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?![\w.]\d|\w)"},
+     # the boundaries skip CJK letters (_CJK), as in the e-mail rule
+     "regex": r"(?<!" + _NON_CJK_WORD + r")(?<!\+)\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}"
+              r"(?:[ \-]?\d{2,5}){1,4}"
+              r"(?![\w.]\d|" + _NON_CJK_WORD + r")"},
     # bare token prefixes newer than the vendored rulesets live in rules/prefixes.txt (see _load_prefixes)
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
