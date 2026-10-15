@@ -19,9 +19,11 @@ value, but never by cutting groups off until a checksum passes; a span whose off
 value, or else becomes uncertain. The checks are written here and do not use the measured checkout, so a release
 cannot change its own gold.
 
-Counts per type: TP is a labelled value that a detection overlaps (any detection type: the value is masked), FN one
-that none overlaps, FP a detection that overlaps no labelled value of any type and no uncertain one. P counts
-detections, R counts values. "R raw" is the recall over the labels before cleaning, at their original offsets.
+Counts per type: TP is a labelled value that a detection of any type overlaps, FN one that none overlaps, FP a
+detection that overlaps no labelled value of any type and no uncertain one. P is the share of a type's detections on
+a labelled value of that type among those and its FP; a detection on a value of another type only counts in neither.
+R counts values. "R own" counts a value only when a detection of its own type overlaps it, "R covered" only when the
+detections cover every character of it, "R raw" counts the labels before cleaning, at their original offsets.
 
 The script prints counts only, never a value or a text, and --out writes counts and per-sample results (sample ids,
 offsets, labels, types, rule ids), never a value. The downloaded data is read as data; nothing in it is run.
@@ -31,6 +33,7 @@ from __future__ import annotations
 import argparse
 import ast
 import collections
+import functools
 import gzip
 import hashlib
 import inspect
@@ -472,10 +475,11 @@ _US_LAYOUT = re.compile(r"\(?\d{3}\)?[-. ]?\d{3}[-. ]\d{4}")
 _NANP_PREFIX = re.compile(r"\s*(?:\+\s?1|1(?=[-. (]))[-. ]?")
 
 
-def phone_reasons(v: str) -> list:
+def phone_reasons(v: str, lang: str = "en") -> list:
     """Why a phone label is no number: letters, not 7 to 15 digits, one repeated digit, or a North American number
     whose area code or exchange starts with 0 or 1 or whose area code has a 9 in the middle ((123) 456-7890,
-    (800) 123-4567, 555-555-5555 are placeholders). A leading 0 is a trunk prefix elsewhere: not judged as NANP."""
+    (800) 123-4567, 555-555-5555 are placeholders). A number is North American when it starts with +1 or 1, or, in
+    English text only, when it has the US layout without a leading 0 (an Italian 3xx xxx xxxx is not judged)."""
     v = _EXTENSION.sub("", v.strip())
     out = []
     if re.search(r"[^\W\d_]", v):
@@ -491,7 +495,7 @@ def phone_reasons(v: str) -> list:
     m = _NANP_PREFIX.match(v)
     if m and len(_digits(v[m.end():])) == 10:
         national = _digits(v[m.end():])
-    elif _US_LAYOUT.fullmatch(v) and not _digits(v).startswith("0"):
+    elif lang == "en" and _US_LAYOUT.fullmatch(v) and not _digits(v).startswith("0"):
         national = _digits(v)
     if national:
         if national[0] in "01" or national[3] in "01" or national[1] == "9":
@@ -572,10 +576,20 @@ def _reasons(fn, v: str) -> list:
         return ["syntax"]
 
 
-def check_value(text: str, start: int, end: int, typ: str):
+_TRAILING_PUNCT = ".,;:"
+
+
+def check_value(text: str, start: int, end: int, typ: str, lang: str = "en"):
     """(verdict, start, end, reason): verdict valid, trimmed or invalid; the bounds of the value when one passes."""
     rx, reasons, shrink = CHECKS[typ]
+    if typ == "PHONE":
+        reasons = functools.partial(phone_reasons, lang=lang)
     value = text[start:end]
+    if typ == "EMAIL" and value.rstrip(_TRAILING_PUNCT + " ") != value.rstrip():
+        # a sentence's full stop after an address is no part of it: the value ends before it
+        cut = len(value.rstrip()) - len(value.rstrip().rstrip(_TRAILING_PUNCT))
+        verdict, a, b, why = check_value(text, start, end - (len(value) - len(value.rstrip())) - cut, typ, lang)
+        return ("trimmed" if verdict == "valid" else verdict), a, b, why
     lead = len(value) - len(value.lstrip())
     core = value.strip()
     first = _reasons(reasons, core)
@@ -651,7 +665,7 @@ def clean(dataset: str, sample: dict, counts: dict) -> list:
         elif typ in NOT_THE_TYPE and NOT_THE_TYPE[typ](text[a:b]):
             g.update(gold="neg", reason="label error")
         elif typ in CHECKS:
-            verdict, va, vb, why = check_value(text, a, b, typ)
+            verdict, va, vb, why = check_value(text, a, b, typ, sample.get("lang", "en"))
             if verdict == "invalid" and typ == "US_BANK_NUMBER":
                 iv, ia, ib, _ = check_value(text, a, b, "IBAN")
                 if iv != "invalid":
@@ -668,6 +682,32 @@ def clean(dataset: str, sample: dict, counts: dict) -> list:
                 g.update(start=va, end=vb)
         c[g["gold"] if not g["reason"] else f"{g['gold']}: {g['reason']}"] += 1
         out.append(g)
+    return _merge(out, counts)
+
+
+def _merge(gold: list, counts: dict) -> list:
+    """Positive spans of one type that overlap are one value (Gretel labels some values twice): their union stays,
+    and each span merged away is counted."""
+    out: list = []
+    for g in sorted(gold, key=lambda g: (g["gold"] != "pos", g["type"], g["start"], g["end"])):
+        last = out[-1] if out else None
+        if (g["gold"] == "pos" and last is not None and last["gold"] == "pos" and last["type"] == g["type"]
+                and g["start"] < last["end"]):
+            last["end"] = max(last["end"], g["end"])
+            counts[g["type"]]["merged: overlaps a value of its type"] += 1
+            continue
+        out.append(dict(g))
+    return sorted(out, key=lambda g: (g["start"], g["end"], g["type"]))
+
+
+def merge_original(original: list) -> list:
+    """The original labels with overlapping spans of one type merged, for the raw recall."""
+    out: list = []
+    for typ, a, b in sorted(original):
+        if out and out[-1][0] == typ and a < out[-1][2]:
+            out[-1] = (typ, out[-1][1], max(out[-1][2], b))
+            continue
+        out.append((typ, a, b))
     return out
 
 
@@ -729,9 +769,23 @@ def _overlaps(a0, a1, b0, b1) -> bool:
     return a0 < b1 and b0 < a1
 
 
+def _covered(a: int, b: int, dets: list) -> bool:
+    """Do the detections together cover every character of a..b?"""
+    at = a
+    for s, e, *_ in sorted(dets):
+        if s > at:
+            return False
+        at = max(at, e)
+        if at >= b:
+            return True
+    return at >= b
+
+
 def score_sample(gold: list, dets: list, original: list):
     """Per type: tp (labelled values a detection overlaps), fn, fp (detections on no labelled or uncertain value),
-    hits (detections on a labelled value), same_type (values found by a detection of their own type), unc_hit
+    hits (detections on a labelled value of their own type), cross (detections on a labelled value of another type
+    only), same_type (values found by a detection of their own type), covered (values the detections cover
+    character by character), unc_hit
     (uncertain values a detection overlaps), raw_tp and raw_fn (the original in-scope labels, before cleaning).
     Also the detection classes for the per-sample file."""
     c: dict = {}
@@ -743,8 +797,9 @@ def score_sample(gold: list, dets: list, original: list):
     neutral = [g for g in gold if g["gold"] in ("oos", "uncertain")]
     classes = []
     for s, e, t, rule in dets:
-        if any(_overlaps(s, e, g["start"], g["end"]) for g in pos):
-            bump(t, "hits")
+        on = [g for g in pos if _overlaps(s, e, g["start"], g["end"])]
+        if on:
+            bump(t, "hits" if any(g["type"] == t for g in on) else "cross")
             classes.append("tp")
         elif any(_overlaps(s, e, g["start"], g["end"]) for g in neutral):
             classes.append("neutral")
@@ -759,6 +814,8 @@ def score_sample(gold: list, dets: list, original: list):
             bump(g["type"], "tp" if hit else "fn")
             if any(d[2] == g["type"] for d in hit):
                 bump(g["type"], "same_type")
+            if _covered(g["start"], g["end"], hit):
+                bump(g["type"], "covered")
         elif g["gold"] == "uncertain" and hit:
             bump(g["type"], "unc_hit")
     for typ, a, b in original:
@@ -777,9 +834,11 @@ def metrics(c: collections.Counter) -> dict:
     f1 = 2 * p * r / (p + r) if p is not None and r is not None and p + r else None
     rr = c["raw_tp"] / (c["raw_tp"] + c["raw_fn"]) if c["raw_tp"] + c["raw_fn"] else None
     ro = c["same_type"] / (tp + fn) if tp + fn else None
-    return {"tp": tp, "fn": fn, "fp": fp, "hits": hits, "same_type": c["same_type"], "unc_hit": c["unc_hit"],
-            "raw_tp": c["raw_tp"], "raw_fn": c["raw_fn"], "P": _rnd(p), "R": _rnd(r), "F1": _rnd(f1),
-            "R_own": _rnd(ro), "R_raw": _rnd(rr)}
+    rc = c["covered"] / (tp + fn) if tp + fn else None
+    return {"tp": tp, "fn": fn, "fp": fp, "hits": hits, "cross": c["cross"], "same_type": c["same_type"],
+            "covered": c["covered"], "unc_hit": c["unc_hit"], "raw_tp": c["raw_tp"], "raw_fn": c["raw_fn"],
+            "P": _rnd(p), "R": _rnd(r), "F1": _rnd(f1), "R_own": _rnd(ro), "R_covered": _rnd(rc),
+            "R_raw": _rnd(rr)}
 
 
 def _keep(sid: str, limit: int, total: int) -> bool:
@@ -825,8 +884,9 @@ def measure(name: str, a) -> dict:
         per_type: dict = {}
         per_tier: dict = {}
         for i, s in enumerate(samples):
-            original = [(LABELS[name][sp["label"]], sp["start"], sp["end"]) for sp in s["spans"]
-                        if LABELS[name][sp["label"]] != OUT_OF_SCOPE and 0 <= sp["start"] < sp["end"] <= len(s["text"])]
+            original = merge_original([(LABELS[name][sp["label"]], sp["start"], sp["end"]) for sp in s["spans"]
+                                       if LABELS[name][sp["label"]] != OUT_OF_SCOPE
+                                       and 0 <= sp["start"] < sp["end"] <= len(s["text"])])
             c, classes, found = score_sample(golds[i], dets[i][ch], original)
             region = LANGUAGE_GROUP[s["lang"]][0] if a.regions == "by-language" else a.regions
             for t, cc in c.items():
@@ -872,7 +932,7 @@ def report(res: dict) -> None:
     for ch, m in res["channels"].items():
         print(f"  channel {ch}")
         print(f"    {'type':30s} {'TP':>6s} {'FN':>6s} {'FP':>6s} {'uncert':>6s} {'hits':>6s} {'P':>6s} {'R':>6s} "
-              f"{'F1':>6s} {'R own':>6s} {'R raw':>6s}")
+              f"{'F1':>6s} {'R own':>6s} {'R cov':>6s} {'R raw':>6s}")
         rows = list(m["types"].items())
         for tier, v in m["tiers"].items():
             rows += [(f"{tier}: all", v["total"])] + [(f"{tier}: region {g}", x) for g, x in v["regions"].items()] \
@@ -881,7 +941,8 @@ def report(res: dict) -> None:
             unc = sum(n for k, n in res["cleaning"].get(t, {}).items() if k.startswith("uncertain"))
             unc_s = f"{unc:6d}" if t in res["cleaning"] else "      "
             print(f"    {t:30s} {v['tp']:6d} {v['fn']:6d} {v['fp']:6d} {unc_s} {v['hits']:6d} {_f(v['P']):>6s} "
-                  f"{_f(v['R']):>6s} {_f(v['F1']):>6s} {_f(v['R_own']):>6s} {_f(v['R_raw']):>6s}")
+                  f"{_f(v['R']):>6s} {_f(v['F1']):>6s} {_f(v['R_own']):>6s} {_f(v['R_covered']):>6s} "
+                  f"{_f(v['R_raw']):>6s}")
 
 
 def main(argv=None) -> int:
@@ -926,9 +987,14 @@ def main(argv=None) -> int:
     except DataError as exc:
         print(f"measure_datasets: {exc}", file=sys.stderr)
         return 2
+    except Exception as exc:  # noqa: BLE001 - a traceback could quote a dataset value: name the type only
+        print(f"measure_datasets: {type(exc).__name__} (the message is left out: it can quote a dataset value)",
+              file=sys.stderr)
+        return 3
     if a.out:
         with open(a.out, "w", encoding="utf-8") as fh:
-            json.dump({"settings": {"channel": a.channel, "regions": a.regions, "limit": a.limit},
+            json.dump({"settings": {"channel": a.channel, "regions": a.regions, "limit": a.limit,
+                                    "python": sys.version.split()[0]},
                        "datasets": results}, fh, sort_keys=True)
     return 0
 

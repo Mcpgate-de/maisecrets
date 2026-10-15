@@ -7,10 +7,10 @@ limits are in their own section. "Repeat this measurement" has the commands.
 |---|---|
 | Date | 2026-10-14 |
 | maisecrets | v0.6.17 (tag `v0.6.17`); earlier releases from their tags; the CredData rows of 0.6.18 to 0.6.21 and the holdout section: 2026-10-15 |
-| Data | Samsung CredData, commit `0b1940e171725ad8937311120b191602608a4801` (2026-09-29) |
+| Data | Samsung CredData, commit `0b1940e171725ad8937311120b191602608a4801` (2026-09-29); four labelled PII datasets, pinned in "Labelled PII datasets" (2026-10-15) |
 | Machine | Apple M5, 10 cores, macOS 27.0 |
 | Python | 3.14.8 (CredData runs); 3.14.8 and 3.9.6 (timing) |
-| Scripts | `scripts/measure_creddata.py`, `scripts/measure_scan_time.py`, `tests/test_fp_corpus.py` |
+| Scripts | `scripts/measure_creddata.py`, `scripts/measure_scan_time.py`, `scripts/measure_datasets.py`, `tests/test_fp_corpus.py` |
 
 ## CredData, results per release
 
@@ -244,6 +244,333 @@ Limits of this measurement:
 - Cloakroom tuned its own engine on v2 to v5 after their first run; v6 is its set that was never tuned on (their
   `bench/RESULTS.md`).
 
+## Labelled PII datasets, 2026-10-15
+
+Four public datasets with labelled personal data and secrets. "0.6.21" is tag `v0.6.21`; "0.6.20" is tag `v0.6.20`.
+Regions by language (`us` for English text), the locale of the language (`en_US` for English). Source:
+`scripts/measure_datasets.py run`, 2026-10-15; "Method and limits" and "Repeat this measurement" below have the
+details.
+
+| Dataset | Version | Licence and attribution | Samples | Records left out |
+|---|---|---|---|---|
+| [Gretel synthetic_pii_finance_multilingual](https://huggingface.co/datasets/gretelai/synthetic_pii_finance_multilingual) | Hugging Face commit `7b844d16738527a04264f50214cb426a4cea0897`, `data/train` and `data/test` | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0), Gretel.ai | 41,932 documents in 7 languages | 14,008 below Gretel's `quality_score` 90 |
+| [NVIDIA Nemotron-PII](https://huggingface.co/datasets/nvidia/Nemotron-PII) | Hugging Face commit `b70ffaf5ff39e079776134c5bf4381f00a9fd1ed`, `data/test` | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), NVIDIA | 100,000 documents (50,000 `us`, 50,000 `intl` locale) | 0 |
+| [Synthetic Dataset for PII Detection and Anonymization in Financial Documents](https://doi.org/10.17632/tzrjx692jy.1) (Mendeley Data) | version 1, doi 10.17632/tzrjx692jy.1 | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), the authors named at the DOI | 45,030 documents (`Training_Set.xlsx`, `Testing_Set.xlsx`) | 0; 5,003 texts repaired (mojibake) |
+| [PIILO](https://www.kaggle.com/datasets/lburleigh/piilo-dataset) (PII Labeling and Obfuscation) | Kaggle dataset version 2 (2024-10-03), `train.json` | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), "PIILO © 2024 by The Learning Agency Lab" | 6,807 student essays | 0 |
+
+The script pins the sha256 of each file. No dataset value enters this repository; the tables hold counts. The script
+cleans the labels as "Method and limits" says and repairs Mendeley's text in memory; it changes no file.
+
+Per type, one row per channel. "Values" are the labelled values that stay after the cleaning. P counts detections, R
+counts values ("Method and limits", "Scoring"). "R, own type" counts a value as found only by a detection of its own
+type; "R, covered" only when the detections cover all of it. "R raw" is the recall over the labels before the
+cleaning, at their original offsets. A type with no labelled values has a row when it has detections. "F1 0.6.20" is
+the same row for tag `v0.6.20`. The types NAME, ADDRESS, BIRTH_DATE, ID_NUMBER and USERNAME (tier "personal") have
+rules from 0.6.21, in the tool channel only (`maisecrets/personal.py`); 0.6.20 has none.
+
+
+### Gretel
+
+Cleaning, labelled values per type:
+
+| Type | Labelled | Kept as a value | Of these trimmed | Merged (labelled twice) | Uncertain, by reason | Negative (label error) | Offset moved | Dropped (offset outside the text) |
+|---|---|---|---|---|---|---|---|---|
+| SECRET | 1,415 | 1,411 | 0 | 0 | 0 | 0 | 0 | 4 |
+| EMAIL | 10,657 | 8,556 | 457 | 65 | 1,794: no value of its type 1, reserved domain 1,694, syntax 99 | 224 | 0 | 18 |
+| PHONE | 6,857 | 4,563 | 71 | 16 | 2,053: digit count 28, letters 14, no value of its type 29, placeholder 1,982 | 208 | 0 | 17 |
+| IP | 2,324 | 2,073 | 0 | 0 | 246: not public 193, syntax 53 | 0 | 0 | 5 |
+| IBAN | 1,530 | 1,185 | 7 | 6 | 336: checksum 336 | 0 | 0 | 3 |
+| CARD | 1,012 | 501 | 1 | 0 | 508: checksum 508 | 0 | 0 | 3 |
+| US_SSN | 1,117 | 774 | 148 | 0 | 343: checksum 343 | 0 | 0 | 0 |
+| ABA_ROUTING_NUMBER | 1,178 | 129 | 0 | 0 | 1,046: checksum 1,046 | 0 | 0 | 3 |
+| NAME | 78,600 | 77,117 | 0 | 1,327 | 0 | 0 | 0 | 156 |
+| ADDRESS | 31,618 | 31,414 | 0 | 160 | 0 | 0 | 0 | 44 |
+| BIRTH_DATE | 1,916 | 1,912 | 0 | 1 | 0 | 0 | 0 | 3 |
+| ID_NUMBER | 2,284 | 2,273 | 0 | 4 | 0 | 0 | 0 | 7 |
+| USERNAME | 729 | 725 | 0 | 0 | 0 | 0 | 0 | 4 |
+
+132,457 more labels have no type that maisecrets claims (`OUT_OF_SCOPE`); a detection on one is neither a find nor a
+false alarm.
+
+Results per type, 0.6.21:
+
+| Type | Channel | Values | TP | FN | FP | P | R | F1 | R, own type | R, covered | R raw | F1 0.6.20 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| SECRET | prompt | 1,411 | 515 | 896 | 95 | 0.844 | 0.365 | 0.510 | 0.364 | 0.364 | 0.365 | 0.510 |
+| SECRET | tool | 1,411 | 530 | 881 | 101 | 0.840 | 0.376 | 0.519 | 0.375 | 0.374 | 0.376 | 0.519 |
+| EMAIL | prompt | 8,556 | 8,551 | 5 | 56 | 0.994 | 0.999 | 0.996 | 0.999 | 0.994 | 0.809 | 0.996 |
+| EMAIL | tool | 8,556 | 8,551 | 5 | 56 | 0.994 | 0.999 | 0.996 | 0.999 | 0.994 | 0.809 | 0.996 |
+| PHONE | prompt | 4,563 | 2,567 | 1,996 | 317 | 0.889 | 0.563 | 0.689 | 0.556 | 0.545 | 0.457 | 0.689 |
+| PHONE | tool | 4,563 | 2,752 | 1,811 | 332 | 0.891 | 0.603 | 0.719 | 0.596 | 0.577 | 0.485 | 0.689 |
+| IP | prompt | 2,073 | 1,929 | 144 | 28 | 0.986 | 0.930 | 0.957 | 0.930 | 0.930 | 0.834 | 0.957 |
+| IP | tool | 2,073 | 1,929 | 144 | 28 | 0.986 | 0.930 | 0.957 | 0.930 | 0.930 | 0.834 | 0.957 |
+| IBAN | prompt | 1,185 | 1,160 | 25 | 43 | 0.964 | 0.979 | 0.972 | 0.977 | 0.977 | 0.764 | 0.972 |
+| IBAN | tool | 1,185 | 1,160 | 25 | 43 | 0.964 | 0.979 | 0.972 | 0.977 | 0.977 | 0.764 | 0.972 |
+| CARD | prompt | 501 | 222 | 279 | 10 | 0.951 | 0.443 | 0.605 | 0.389 | 0.443 | 0.227 | 0.605 |
+| CARD | tool | 501 | 223 | 278 | 10 | 0.951 | 0.445 | 0.606 | 0.389 | 0.445 | 0.309 | 0.605 |
+| US_SSN | prompt | 774 | 460 | 314 | 51 | 0.894 | 0.594 | 0.714 | 0.558 | 0.592 | 0.421 | 0.714 |
+| US_SSN | tool | 774 | 475 | 299 | 51 | 0.894 | 0.614 | 0.728 | 0.558 | 0.611 | 0.436 | 0.714 |
+| ABA_ROUTING_NUMBER | prompt | 129 | 44 | 85 | 25 | 0.432 | 0.341 | 0.381 | 0.147 | 0.341 | 0.367 | 0.381 |
+| ABA_ROUTING_NUMBER | tool | 129 | 45 | 84 | 25 | 0.432 | 0.349 | 0.386 | 0.147 | 0.349 | 0.371 | 0.381 |
+| US_BANK_NUMBER | prompt | 0 | 0 | 0 | 3,276 | 0.000 | – | – | – | – | – | – |
+| US_BANK_NUMBER | tool | 0 | 0 | 0 | 3,276 | 0.000 | – | – | – | – | – | – |
+| NAME | prompt | 77,117 | 232 | 76,885 | 0 | – | 0.003 | – | 0.000 | 0.003 | 0.003 | – |
+| NAME | tool | 77,117 | 5,873 | 71,244 | 32 | 0.994 | 0.076 | 0.141 | 0.073 | 0.059 | 0.076 | – |
+| ADDRESS | prompt | 31,414 | 167 | 31,247 | 0 | – | 0.005 | – | 0.000 | 0.000 | 0.005 | – |
+| ADDRESS | tool | 31,414 | 922 | 30,492 | 105 | 0.883 | 0.029 | 0.057 | 0.025 | 0.020 | 0.029 | – |
+| BIRTH_DATE | prompt | 1,912 | 2 | 1,910 | 0 | – | 0.001 | – | 0.000 | 0.001 | 0.001 | – |
+| BIRTH_DATE | tool | 1,912 | 1,186 | 726 | 85 | 0.933 | 0.620 | 0.745 | 0.619 | 0.620 | 0.620 | – |
+| ID_NUMBER | prompt | 2,273 | 914 | 1,359 | 0 | – | 0.402 | – | 0.000 | 0.294 | 0.402 | – |
+| ID_NUMBER | tool | 2,273 | 1,092 | 1,181 | 77 | 0.698 | 0.480 | 0.569 | 0.078 | 0.373 | 0.480 | – |
+| USERNAME | prompt | 725 | 55 | 670 | 0 | – | 0.076 | – | 0.000 | 0.076 | 0.076 | – |
+| USERNAME | tool | 725 | 57 | 668 | 5 | 0.286 | 0.079 | 0.123 | 0.003 | 0.079 | 0.079 | – |
+
+Results per tier, region and tag, 0.6.21:
+
+| Tier | Part | Channel | TP | FN | FP | P | R | F1 | F1 0.6.20 |
+|---|---|---|---|---|---|---|---|---|---|
+| core | all | prompt | 15,448 | 3,744 | 3,901 | 0.797 | 0.805 | 0.801 | 0.801 |
+| core | region `de` | prompt | 969 | 306 | 61 | 0.941 | 0.760 | 0.841 | 0.841 |
+| core | region `es` | prompt | 1,419 | 269 | 52 | 0.965 | 0.841 | 0.898 | 0.898 |
+| core | region `fr` | prompt | 1,192 | 303 | 60 | 0.952 | 0.797 | 0.868 | 0.868 |
+| core | region `it` | prompt | 1,213 | 268 | 48 | 0.962 | 0.819 | 0.885 | 0.885 |
+| core | region `nl` | prompt | 1,239 | 479 | 26 | 0.979 | 0.721 | 0.831 | 0.831 |
+| core | region `se` | prompt | 1,197 | 404 | 50 | 0.959 | 0.748 | 0.840 | 0.840 |
+| core | region `us` | prompt | 8,219 | 1,715 | 3,604 | 0.693 | 0.827 | 0.754 | 0.754 |
+| core | `format:structured` | prompt | 2,288 | 963 | 2,883 | 0.440 | 0.704 | 0.541 | 0.541 |
+| core | `format:unstructured` | prompt | 13,160 | 2,781 | 1,018 | 0.928 | 0.826 | 0.874 | 0.874 |
+| core | all | tool | 15,665 | 3,527 | 3,922 | 0.798 | 0.816 | 0.807 | 0.801 |
+| core | region `de` | tool | 975 | 300 | 61 | 0.941 | 0.765 | 0.844 | 0.842 |
+| core | region `es` | tool | 1,421 | 267 | 52 | 0.965 | 0.842 | 0.899 | 0.898 |
+| core | region `fr` | tool | 1,192 | 303 | 61 | 0.951 | 0.797 | 0.868 | 0.868 |
+| core | region `it` | tool | 1,213 | 268 | 48 | 0.962 | 0.819 | 0.885 | 0.885 |
+| core | region `nl` | tool | 1,245 | 473 | 26 | 0.979 | 0.725 | 0.833 | 0.831 |
+| core | region `se` | tool | 1,200 | 401 | 50 | 0.959 | 0.750 | 0.842 | 0.840 |
+| core | region `us` | tool | 8,419 | 1,515 | 3,624 | 0.697 | 0.848 | 0.765 | 0.755 |
+| core | `format:structured` | tool | 2,325 | 926 | 2,902 | 0.441 | 0.715 | 0.546 | 0.543 |
+| core | `format:unstructured` | tool | 13,340 | 2,601 | 1,020 | 0.928 | 0.837 | 0.880 | 0.874 |
+| personal | all | prompt | 1,370 | 112,071 | 0 | – | 0.012 | – | – |
+| personal | region `de` | prompt | 194 | 9,690 | 0 | – | 0.020 | – | – |
+| personal | region `es` | prompt | 11 | 9,863 | 0 | – | 0.001 | – | – |
+| personal | region `fr` | prompt | 43 | 8,182 | 0 | – | 0.005 | – | – |
+| personal | region `it` | prompt | 45 | 9,394 | 0 | – | 0.005 | – | – |
+| personal | region `nl` | prompt | 18 | 12,198 | 0 | – | 0.002 | – | – |
+| personal | region `se` | prompt | 29 | 11,672 | 0 | – | 0.003 | – | – |
+| personal | region `us` | prompt | 1,030 | 51,072 | 0 | – | 0.020 | – | – |
+| personal | `format:structured` | prompt | 230 | 20,179 | 0 | – | 0.011 | – | – |
+| personal | `format:unstructured` | prompt | 1,140 | 91,892 | 0 | – | 0.012 | – | – |
+| personal | all | tool | 9,130 | 104,311 | 304 | 0.962 | 0.081 | 0.148 | – |
+| personal | region `de` | tool | 826 | 9,058 | 64 | 0.913 | 0.084 | 0.153 | – |
+| personal | region `es` | tool | 555 | 9,319 | 23 | 0.959 | 0.056 | 0.106 | – |
+| personal | region `fr` | tool | 635 | 7,590 | 14 | 0.977 | 0.077 | 0.143 | – |
+| personal | region `it` | tool | 840 | 8,599 | 43 | 0.949 | 0.089 | 0.163 | – |
+| personal | region `nl` | tool | 248 | 11,968 | 12 | 0.950 | 0.020 | 0.040 | – |
+| personal | region `se` | tool | 323 | 11,378 | 15 | 0.951 | 0.028 | 0.054 | – |
+| personal | region `us` | tool | 5,703 | 46,399 | 133 | 0.972 | 0.110 | 0.197 | – |
+| personal | `format:structured` | tool | 1,254 | 19,155 | 154 | 0.868 | 0.061 | 0.115 | – |
+| personal | `format:unstructured` | tool | 7,876 | 85,156 | 150 | 0.978 | 0.085 | 0.156 | – |
+
+Detections of a type of no tier on no labelled value, 0.6.21: prompt 1,053 (0.6.20: 1,053), tool 1,048 (0.6.20:
+1,053). By type, tool channel: DE_PLZ 274, US_DRIVER_LICENSE 246, US_PASSPORT 191, IT_VAT_CODE 132, SE_PERSONNUMMER
+97, US_NPI 40, SE_ORGANISATIONSNUMMER 34, DE_TAX_NUMBER 11, DE_KFZ 6, ES_NIF 6, DE_VAT_ID 5, US_ITIN 3, IT_FISCAL_CODE
+2, MEDICAL_LICENSE 1.
+
+### Nemotron-PII
+
+Cleaning, labelled values per type:
+
+| Type | Labelled | Kept as a value | Of these trimmed | Merged (labelled twice) | Uncertain, by reason | Negative (label error) | Offset moved | Dropped (offset outside the text) |
+|---|---|---|---|---|---|---|---|---|
+| SECRET | 11,652 | 11,652 | 0 | 0 | 0 | 0 | 0 | 0 |
+| EMAIL | 53,930 | 53,550 | 48 | 0 | 105: reserved domain 92, syntax 13 | 275 | 0 | 0 |
+| PHONE | 30,353 | 30,240 | 7 | 0 | 113: digit count 2, no value of its type 1, placeholder 110 | 0 | 0 | 0 |
+| IP | 9,217 | 7,971 | 3 | 0 | 1,246: no value of its type 7, not public 955, syntax 284 | 0 | 0 | 0 |
+| CARD | 12,867 | 1,527 | 2 | 0 | 11,340: checksum 11,340 | 0 | 0 | 0 |
+| US_SSN | 6,062 | 6,035 | 1 | 0 | 27: checksum 25, no value of its type 2 | 0 | 0 | 0 |
+| ABA_ROUTING_NUMBER | 8,354 | 843 | 0 | 0 | 7,511: checksum 7,511 | 0 | 0 | 0 |
+| US_BANK_NUMBER | 16,693 | 11,660 (6 more are IBANs) | 0 | 0 | 5,027: digit count 9, letters 5,018 | 0 | 0 | 0 |
+| NAME | 143,639 | 143,639 | 0 | 0 | 0 | 0 | 0 | 0 |
+| ADDRESS | 16,879 | 16,879 | 0 | 0 | 0 | 0 | 0 | 0 |
+| BIRTH_DATE | 18,079 | 18,079 | 0 | 0 | 0 | 0 | 0 | 0 |
+| ID_NUMBER | 28,807 | 28,807 | 0 | 0 | 0 | 0 | 0 | 0 |
+| USERNAME | 15,800 | 15,800 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+478,008 more labels have no type that maisecrets claims (`OUT_OF_SCOPE`); a detection on one is neither a find nor a
+false alarm.
+
+Results per type, 0.6.21:
+
+| Type | Channel | Values | TP | FN | FP | P | R | F1 | R, own type | R, covered | R raw | F1 0.6.20 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| SECRET | prompt | 11,652 | 2,841 | 8,811 | 33 | 0.988 | 0.244 | 0.391 | 0.242 | 0.239 | 0.244 | 0.391 |
+| SECRET | tool | 11,652 | 2,852 | 8,800 | 33 | 0.988 | 0.245 | 0.392 | 0.242 | 0.239 | 0.245 | 0.392 |
+| EMAIL | prompt | 53,550 | 53,550 | 0 | 6 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 0.993 | 1.000 |
+| EMAIL | tool | 53,550 | 53,550 | 0 | 6 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 0.993 | 1.000 |
+| PHONE | prompt | 30,240 | 7,004 | 23,236 | 19 | 0.997 | 0.232 | 0.376 | 0.229 | 0.230 | 0.231 | 0.376 |
+| PHONE | tool | 30,240 | 8,034 | 22,206 | 24 | 0.997 | 0.266 | 0.419 | 0.263 | 0.264 | 0.265 | 0.376 |
+| IP | prompt | 7,971 | 7,958 | 13 | 62 | 0.992 | 0.998 | 0.995 | 0.998 | 0.998 | 0.864 | 0.995 |
+| IP | tool | 7,971 | 7,958 | 13 | 62 | 0.992 | 0.998 | 0.995 | 0.998 | 0.998 | 0.864 | 0.995 |
+| IBAN | prompt | 6 | 5 | 1 | 3 | 0.500 | 0.833 | 0.625 | 0.500 | 0.500 | – | 0.625 |
+| IBAN | tool | 6 | 5 | 1 | 3 | 0.500 | 0.833 | 0.625 | 0.500 | 0.500 | – | 0.625 |
+| CARD | prompt | 1,527 | 1,458 | 69 | 1 | 0.999 | 0.955 | 0.977 | 0.951 | 0.955 | 0.117 | 0.977 |
+| CARD | tool | 1,527 | 1,458 | 69 | 1 | 0.999 | 0.955 | 0.977 | 0.951 | 0.955 | 0.118 | 0.977 |
+| US_SSN | prompt | 6,035 | 6,033 | 2 | 424 | 0.934 | 1.000 | 0.966 | 1.000 | 1.000 | 0.995 | 0.966 |
+| US_SSN | tool | 6,035 | 6,033 | 2 | 424 | 0.934 | 1.000 | 0.966 | 1.000 | 1.000 | 0.995 | 0.966 |
+| ABA_ROUTING_NUMBER | prompt | 843 | 834 | 9 | 3 | 0.996 | 0.989 | 0.993 | 0.989 | 0.989 | 0.973 | 0.993 |
+| ABA_ROUTING_NUMBER | tool | 843 | 834 | 9 | 3 | 0.996 | 0.989 | 0.993 | 0.989 | 0.989 | 0.973 | 0.993 |
+| US_BANK_NUMBER | prompt | 11,660 | 7,818 | 3,842 | 115 | 0.986 | 0.670 | 0.798 | 0.669 | 0.480 | 0.477 | 0.798 |
+| US_BANK_NUMBER | tool | 11,660 | 10,018 | 1,642 | 115 | 0.986 | 0.859 | 0.918 | 0.669 | 0.669 | 0.802 | 0.798 |
+| NAME | prompt | 143,639 | 49 | 143,590 | 0 | – | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+| NAME | tool | 143,639 | 4,509 | 139,130 | 12 | 0.995 | 0.031 | 0.061 | 0.031 | 0.031 | 0.031 | – |
+| ADDRESS | prompt | 16,879 | 2 | 16,877 | 0 | – | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+| ADDRESS | tool | 16,879 | 262 | 16,617 | 0 | 1.000 | 0.015 | 0.031 | 0.015 | 0.015 | 0.015 | – |
+| BIRTH_DATE | prompt | 18,079 | 0 | 18,079 | 0 | – | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+| BIRTH_DATE | tool | 18,079 | 5,286 | 12,793 | 1 | 1.000 | 0.292 | 0.453 | 0.292 | 0.292 | 0.292 | – |
+| ID_NUMBER | prompt | 28,807 | 4,350 | 24,457 | 0 | – | 0.151 | – | 0.000 | 0.079 | 0.151 | – |
+| ID_NUMBER | tool | 28,807 | 4,701 | 24,106 | 14 | 0.962 | 0.163 | 0.279 | 0.012 | 0.091 | 0.163 | – |
+| USERNAME | prompt | 15,800 | 43 | 15,757 | 0 | – | 0.003 | – | 0.000 | 0.003 | 0.003 | – |
+| USERNAME | tool | 15,800 | 43 | 15,757 | 0 | – | 0.003 | – | 0.000 | 0.003 | 0.003 | – |
+
+Results per tier, region and tag, 0.6.21:
+
+| Tier | Part | Channel | TP | FN | FP | P | R | F1 | F1 0.6.20 |
+|---|---|---|---|---|---|---|---|---|---|
+| core | all | prompt | 87,501 | 35,983 | 666 | 0.992 | 0.709 | 0.827 | 0.827 |
+| core | `format:structured` | prompt | 47,708 | 19,367 | 405 | 0.992 | 0.711 | 0.828 | 0.828 |
+| core | `format:unstructured` | prompt | 39,793 | 16,616 | 261 | 0.994 | 0.705 | 0.825 | 0.825 |
+| core | `locale:intl` | prompt | 50,723 | 14,656 | 532 | 0.990 | 0.776 | 0.870 | 0.870 |
+| core | `locale:us` | prompt | 36,778 | 21,327 | 134 | 0.996 | 0.633 | 0.774 | 0.774 |
+| core | all | tool | 90,742 | 32,742 | 671 | 0.993 | 0.735 | 0.844 | 0.827 |
+| core | `format:structured` | tool | 49,274 | 17,801 | 410 | 0.992 | 0.735 | 0.844 | 0.828 |
+| core | `format:unstructured` | tool | 41,468 | 14,941 | 261 | 0.994 | 0.735 | 0.845 | 0.825 |
+| core | `locale:intl` | tool | 52,769 | 12,610 | 533 | 0.990 | 0.807 | 0.889 | 0.870 |
+| core | `locale:us` | tool | 37,973 | 20,132 | 138 | 0.996 | 0.653 | 0.789 | 0.774 |
+| personal | all | prompt | 4,444 | 218,760 | 0 | – | 0.020 | – | – |
+| personal | `format:structured` | prompt | 2,348 | 111,993 | 0 | – | 0.021 | – | – |
+| personal | `format:unstructured` | prompt | 2,096 | 106,767 | 0 | – | 0.019 | – | – |
+| personal | `locale:intl` | prompt | 1,510 | 108,856 | 0 | – | 0.014 | – | – |
+| personal | `locale:us` | prompt | 2,934 | 109,904 | 0 | – | 0.026 | – | – |
+| personal | all | tool | 14,801 | 208,403 | 27 | 0.997 | 0.066 | 0.124 | – |
+| personal | `format:structured` | tool | 10,553 | 103,788 | 19 | 0.997 | 0.092 | 0.169 | – |
+| personal | `format:unstructured` | tool | 4,248 | 104,615 | 8 | 0.995 | 0.039 | 0.075 | – |
+| personal | `locale:intl` | tool | 7,240 | 103,126 | 16 | 0.997 | 0.066 | 0.123 | – |
+| personal | `locale:us` | tool | 7,561 | 105,277 | 11 | 0.997 | 0.067 | 0.126 | – |
+
+Detections of a type of no tier on no labelled value, 0.6.21: prompt 146 (0.6.20: 146), tool 146 (0.6.20: 146). By
+type, tool channel: US_DRIVER_LICENSE 106, US_PASSPORT 20, US_NPI 10, MEDICAL_LICENSE 9, US_ITIN 1.
+
+### Mendeley financial documents
+
+Cleaning, labelled values per type:
+
+| Type | Labelled | Kept as a value | Of these trimmed | Merged (labelled twice) | Uncertain, by reason | Negative (label error) | Offset moved | Dropped (offset outside the text) |
+|---|---|---|---|---|---|---|---|---|
+| EMAIL | 34,637 | 0 | 0 | 0 | 34,637: reserved domain 34,637 | 0 | 0 | 0 |
+| PHONE | 45,028 | 45,028 | 0 | 0 | 0 | 0 | 0 | 0 |
+| CARD | 42,527 | 39,060 | 39,060 | 0 | 3,467: checksum 3,102, no value of its type 365 | 0 | 0 | 0 |
+| US_SSN | 51,283 | 51,283 | 0 | 0 | 0 | 0 | 0 | 0 |
+| NAME | 77,200 | 77,200 | 0 | 0 | 0 | 0 | 0 | 0 |
+| ADDRESS | 46,264 | 46,264 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+100,461 more labels have no type that maisecrets claims (`OUT_OF_SCOPE`); a detection on one is neither a find nor a
+false alarm.
+
+Results per type, 0.6.21:
+
+| Type | Channel | Values | TP | FN | FP | P | R | F1 | R, own type | R, covered | R raw | F1 0.6.20 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| PHONE | prompt | 45,028 | 42,268 | 2,760 | 0 | 1.000 | 0.939 | 0.968 | 0.911 | 0.911 | 0.939 | 0.968 |
+| PHONE | tool | 45,028 | 42,268 | 2,760 | 0 | 1.000 | 0.939 | 0.968 | 0.911 | 0.911 | 0.939 | 0.968 |
+| CARD | prompt | 39,060 | 31,687 | 7,373 | 0 | 1.000 | 0.811 | 0.896 | 0.677 | 0.811 | 0.757 | 0.896 |
+| CARD | tool | 39,060 | 31,687 | 7,373 | 0 | 1.000 | 0.811 | 0.896 | 0.677 | 0.811 | 0.757 | 0.896 |
+| US_SSN | prompt | 51,283 | 51,283 | 0 | 0 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+| US_SSN | tool | 51,283 | 51,283 | 0 | 0 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+| NAME | prompt | 77,200 | 0 | 77,200 | 0 | – | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+| NAME | tool | 77,200 | 0 | 77,200 | 0 | – | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+| ADDRESS | prompt | 46,264 | 0 | 46,264 | 0 | – | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+| ADDRESS | tool | 46,264 | 0 | 46,264 | 0 | – | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+
+Results per tier, region and tag, 0.6.21:
+
+| Tier | Part | Channel | TP | FN | FP | P | R | F1 | F1 0.6.20 |
+|---|---|---|---|---|---|---|---|---|---|
+| core | all | prompt | 125,238 | 10,133 | 0 | 1.000 | 0.925 | 0.961 | 0.961 |
+| core | all | tool | 125,238 | 10,133 | 0 | 1.000 | 0.925 | 0.961 | 0.961 |
+| personal | all | prompt | 0 | 123,464 | 0 | – | 0.000 | – | – |
+| personal | all | tool | 0 | 123,464 | 0 | – | 0.000 | – | – |
+
+Detections of a type of no tier on no labelled value: 0 in both channels.
+
+### PIILO
+
+Cleaning, labelled values per type:
+
+| Type | Labelled | Kept as a value | Of these trimmed | Merged (labelled twice) | Uncertain, by reason | Negative (label error) | Offset moved | Dropped (offset outside the text) |
+|---|---|---|---|---|---|---|---|---|
+| EMAIL | 39 | 39 | 0 | 0 | 0 | 0 | 0 | 0 |
+| PHONE | 6 | 6 | 0 | 0 | 0 | 0 | 0 | 0 |
+| NAME | 1,365 | 1,365 | 0 | 0 | 0 | 0 | 0 | 0 |
+| ADDRESS | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 |
+| ID_NUMBER | 78 | 78 | 0 | 0 | 0 | 0 | 0 | 0 |
+| USERNAME | 6 | 6 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+110 more labels have no type that maisecrets claims (`OUT_OF_SCOPE`); a detection on one is neither a find nor a false
+alarm.
+
+Results per type, 0.6.21:
+
+| Type | Channel | Values | TP | FN | FP | P | R | F1 | R, own type | R, covered | R raw | F1 0.6.20 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| EMAIL | prompt | 39 | 39 | 0 | 1 | 0.975 | 1.000 | 0.987 | 1.000 | 1.000 | 1.000 | 0.987 |
+| EMAIL | tool | 39 | 39 | 0 | 1 | 0.975 | 1.000 | 0.987 | 1.000 | 1.000 | 1.000 | 0.987 |
+| PHONE | prompt | 6 | 0 | 6 | 0 | – | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+| PHONE | tool | 6 | 4 | 2 | 0 | 1.000 | 0.667 | 0.800 | 0.667 | 0.167 | 0.667 | – |
+| IP | prompt | 0 | 0 | 0 | 1 | 0.000 | – | – | – | – | – | – |
+| IP | tool | 0 | 0 | 0 | 1 | 0.000 | – | – | – | – | – | – |
+| US_BANK_NUMBER | prompt | 0 | 0 | 0 | 1 | 0.000 | – | – | – | – | – | – |
+| US_BANK_NUMBER | tool | 0 | 0 | 0 | 1 | 0.000 | – | – | – | – | – | – |
+| NAME | prompt | 1,365 | 0 | 1,365 | 0 | – | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+| NAME | tool | 1,365 | 85 | 1,280 | 0 | 1.000 | 0.062 | 0.117 | 0.062 | 0.062 | 0.062 | – |
+| ADDRESS | prompt | 2 | 0 | 2 | 0 | – | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+| ADDRESS | tool | 2 | 0 | 2 | 0 | – | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+| ID_NUMBER | prompt | 78 | 2 | 76 | 0 | – | 0.026 | – | 0.000 | 0.026 | 0.026 | – |
+| ID_NUMBER | tool | 78 | 2 | 76 | 0 | – | 0.026 | – | 0.000 | 0.026 | 0.026 | – |
+| USERNAME | prompt | 6 | 0 | 6 | 0 | – | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+| USERNAME | tool | 6 | 0 | 6 | 2 | 0.000 | 0.000 | – | 0.000 | 0.000 | 0.000 | – |
+
+Results per tier, region and tag, 0.6.21:
+
+| Tier | Part | Channel | TP | FN | FP | P | R | F1 | F1 0.6.20 |
+|---|---|---|---|---|---|---|---|---|---|
+| core | all | prompt | 39 | 6 | 3 | 0.929 | 0.867 | 0.897 | 0.897 |
+| core | all | tool | 43 | 2 | 3 | 0.935 | 0.956 | 0.945 | 0.897 |
+| personal | all | prompt | 2 | 1,449 | 0 | – | 0.001 | – | – |
+| personal | all | tool | 87 | 1,364 | 2 | 0.977 | 0.060 | 0.113 | – |
+
+Detections of a type of no tier on no labelled value: 0 in both channels.
+
+### Label to type
+
+A dataset label maps to the maisecrets type below; every other label is `OUT_OF_SCOPE`. The tables are `LABELS` in
+`scripts/measure_datasets.py`.
+
+| Type | Gretel | Nemotron-PII | Mendeley | PIILO |
+|---|---|---|---|---|
+| SECRET | `password`, `api_key` | `password`, `api_key` | – | – |
+| EMAIL | `email` | `email` | `email` | `EMAIL` |
+| PHONE | `phone_number` | `phone_number`, `fax_number` | `phone` | `PHONE_NUM` |
+| IP | `ipv4`, `ipv6` | `ipv4`, `ipv6` | – | – |
+| IBAN | `iban` | an `account_number` that is a valid IBAN | – | – |
+| CARD | `credit_card_number` | `credit_debit_card` | `credit_card` | – |
+| US_SSN | `ssn` | `ssn` | `ssn` | – |
+| ABA_ROUTING_NUMBER | `bank_routing_number` | `bank_routing_number` | – | – |
+| US_BANK_NUMBER | – | `account_number` | – | – |
+| NAME | `name`, `first_name`, `last_name` | `first_name`, `last_name` | `name` | `NAME_STUDENT` |
+| ADDRESS | `street_address` | `street_address` | `address` | `STREET_ADDRESS` |
+| BIRTH_DATE | `date_of_birth` | `date_of_birth` | – | – |
+| ID_NUMBER | `passport_number`, `driver_license_number` | `national_id`, `tax_id`, `medical_record_number`, `health_plan_beneficiary_number`, `certificate_license_number` | – | `ID_NUM` |
+| USERNAME | `user_name` | `user_name` | – | `USERNAME` |
+
 ## Comparison with other tools
 
 "Theirs" is Cloakroom's
@@ -282,6 +609,13 @@ the discussion in [Mcpgate-de/maisecrets#17](https://github.com/Mcpgate-de/maise
 `scripts/measure_creddata.py` follows its `bench/credata.py`. The holdout sets v2 to v7 are Cloakroom's. The rule families of 0.6.21 for a name before an
 e-mail address and for the columns of a CSV header follow Cloakroom's rules (Apache-2.0); the code is written anew.
 
+The method of the labelled PII datasets comes from the bench of the public fork
+[danszymkowiak/maisecrets](https://github.com/danszymkowiak/maisecrets) (Apache-2.0, commit `73f36bd`, `bench/` and
+`docs/UPSTREAM-DETECTION.md`): the choice of the datasets, the cleaning of the labels before a rule is judged (a
+checksum, a placeholder, a reserved domain, a private address, a label error, the rule that no cut drops a group of a
+value, the repair of Mendeley's mojibake), the label tables and the Mendeley sheet reader.
+`scripts/measure_datasets.py` adapts them; the checks are written again with the standard library.
+
 ## Method and limits
 
 - **Rows.** A row is a CredData label with `GroundTruth` T or F, on one line, with a value position and a value of
@@ -309,6 +643,52 @@ e-mail address and for the columns of a CSV header follow Cloakroom's rules (Apa
 - **The store.** Each run uses a new temp store. Values that a session stores and looks for later play no part.
 - **Obfuscation.** CredData replaces each credential with a random value of the same shape. The seed is fixed per
   row (`obfuscate_creds.py`, `--noise 0`), so a download at the pinned commit gives the same lines.
+
+- **Labelled PII datasets: the cleaning.** Each labelled value of a type with a check goes through it before it is
+  counted. A value that fails is *uncertain*: neither a miss nor a false alarm, and a detection on it counts neither
+  way. The checks: CARD Luhn over 13 to 19 digits; IBAN two letters, two digits, 11 to 30 letters or digits and mod
+  97; US_SSN no area 000, 666 or 9xx, no group 00, no serial 0000, and not an advertising number such as 123-45-6789;
+  ABA_ROUTING_NUMBER the 3-7-1 checksum; PHONE 7 to 15 digits, no letters, not one repeated digit, and a North
+  American number with an area code and an exchange that start with 2 to 9 and an area code without a 9 in the middle
+  (`(123) 456-7890`, `(800) 123-4567` and `555-555-5555` fail). A number is North American when it starts with `+1`
+  or `1`, or, in English text only, when it has the US layout without a leading 0. EMAIL: the address syntax (a full
+  stop after the address is trimmed off) and not a reserved domain (example.com, .net, .org, and .test, .example,
+  .invalid, .localhost); maisecrets leaves these alone on purpose. It also leaves `.local` and `.internal` alone;
+  those count as values here, so they lower R. IP: a public address by Python's `ipaddress` (`is_global`), as
+  maisecrets masks public addresses only; the resolver addresses that maisecrets skips count as values. Python 3.9
+  and 3.14 differ on a few IPv6 ranges; `--out` names the Python of the run (3.14.8 here). US_BANK_NUMBER: 4 to 17
+  digits and no letters. The checks are written in the script; they do not use the measured checkout, so a release
+  cannot change its own gold.
+- **Label errors.** A PHONE, EMAIL or IP label with no digit or no `@` in it (`[Phone Number]`, a phrase) is
+  negative: a detection there is a false alarm.
+- **Spans wider than the value.** A span with text around a valid value (a card block with holder, expiry and CVC)
+  is trimmed to the value. A cut falls only at a separator, and only when the first group it drops differs in length
+  from the last group it keeps (the ` 12` of an expiry after a card number). A fake card or IBAN cut at a group
+  boundary passes its checksum by chance (1 in 10, 1 in 97); such a span stays uncertain. PHONE, EMAIL and IP spans are
+  never shortened inside a match: a shorter phone number passes the rules as easily as the whole one.
+- **Offsets.** A span outside the text is dropped and counted. Where a dataset says what a span holds (Nemotron's own
+  copy of the value, Mendeley's value columns), a span that does not hold it moves to the nearest copy within 64
+  characters, or else becomes uncertain. Mendeley's texts are UTF-8 read as cp1252; the script repairs them first,
+  and then every span holds its value (0 moved).
+- **Values labelled twice.** Positive spans of one type that overlap are one value (Gretel labels some values
+  twice); the cleaning table counts them under "merged". The raw recall merges them the same way.
+- **Account numbers as IBANs.** A Nemotron `account_number` that is no US bank number but a valid IBAN counts as an
+  IBAN.
+- **Scoring.** A labelled value is found (TP) when a detection of any type overlaps it by one character or more.
+  "R, own type" counts a value only when a detection of its own type overlaps it; "R, covered" only when the
+  detections together cover every character of it. A detection on no labelled value of any type and on no uncertain
+  value is a false alarm (FP) of the detected type. P is the share of a type's detections on a labelled value of
+  that type among those detections and its FP; a detection on a value of another type only counts in neither, and
+  each detection counts once (two fragments on one value count twice). Unlabelled text counts as clean: an FP can be
+  a real value that the dataset left unlabelled (the generated datasets have values outside their labels; PIILO
+  labels only a student's own data). A type of no tier (`US_PASSPORT`, `DE_PLZ`, …) has no labelled values; its
+  detections on no labelled value are listed under each dataset.
+- **Gretel.** Train and test splits; records below Gretel's own `quality_score` 90 are left out, as the fork did. The
+  structured formats (CSV, EDI, SWIFT, FIX, BAI, XBRL, FpML, MT940) stay and carry the tag `format:structured`.
+- **Regions.** Each language group runs with its own regions setting and locale: English `us`/`en_US`, German
+  `de`/`de_DE`, French `fr`, Spanish `es`, Italian `it`, Dutch `nl`, Swedish `se`/`sv_SE`. `--regions` sets one
+  regions setting for every text.
+- **The store.** Each language group runs in a new temp home. Values that a session stores play no part.
 
 ## Repeat this measurement
 
@@ -377,6 +757,32 @@ python3 maisecrets/scripts/measure_catalog_coverage.py catalogs --maisecrets mai
     --baseline maisecrets-0.6.19
 ```
 
+The labelled PII datasets need about 400 MB of disk outside the repository (default `~/.cache/maisecrets-datasets`).
+The fetch reads the Hugging Face parquet files with pyarrow (26.0.0 here) and stores them as gzipped JSON lines; the
+run needs the standard library only and works on Python 3.9:
+
+```bash
+python3 -m venv ../pyarrow-venv && ../pyarrow-venv/bin/pip install pyarrow
+../pyarrow-venv/bin/python -I scripts/measure_datasets.py fetch     # about 1 minute; checks each sha256
+git worktree add ../maisecrets-0.6.20 v0.6.20
+python3 -I scripts/measure_datasets.py run --maisecrets ../maisecrets-0.6.20 \
+    --out ~/.cache/maisecrets-datasets/result-0.6.20.json
+git worktree add ../maisecrets-0.6.21 v0.6.21
+python3 -I scripts/measure_datasets.py run --maisecrets ../maisecrets-0.6.21 \
+    --out ~/.cache/maisecrets-datasets/result-0.6.21.json
+```
+
+One run of all four datasets took 6 to 9 minutes here (6 worker processes, load average 8 to 15): Gretel 80 to 95 s,
+Nemotron-PII 160 to 220 s, Mendeley 80 to 170 s, PIILO 30 to 50 s. `--only nemotron` runs one dataset, `--channel
+tool` one channel, `--limit 2000` a fixed choice of about 2,000 samples per dataset. The script prints the cleaning
+counts and, per channel, one line per type and per tier, region and tag; `--out` writes the same counts and, per
+sample, its id, the gold spans (offsets, label, type, verdict), the detections (offsets, type, rule id, class) and
+whether each span was found. It holds no value.
+
+To judge a rule class: run the release before the change and the change, each with `--out`, and compare the rows of
+the rule's type in both channels. TP and FN show the gain; FP shows the cost; "R raw" against R shows how much of a
+change falls on values the cleaning set aside.
+
 ## Add a new release row
 
 1. Add a worktree of the new release tag, and one of the release before it for `--baseline`.
@@ -385,6 +791,8 @@ python3 maisecrets/scripts/measure_catalog_coverage.py catalogs --maisecrets mai
 3. For the second table, run the same four commands with `--exclude-repo ""`.
 4. Run `scripts/measure_scan_time.py` with both channels, on Python 3.9 and on the newest Python, two rounds at a
    load average below 5.
-5. Add the rows to the tables above. Change the date, the release and the machine in the snapshot table. Keep the
+5. Run `scripts/measure_datasets.py run --maisecrets <release> --out <file>` and add a column for the release to
+   the tables of "Labelled PII datasets".
+6. Add the rows to the tables above. Change the date, the release and the machine in the snapshot table. Keep the
    rows of earlier releases as they are.
-6. If the CredData commit changes, run every release again and name the new commit.
+7. If the CredData commit or a pinned dataset changes, run every release again and name the new version.

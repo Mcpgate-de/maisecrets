@@ -165,6 +165,32 @@ class CleaningTests(unittest.TestCase):
         gold, _ = self.one("gretel", fake, "credit_card_number")
         self.assertEqual((gold[0]["gold"], gold[0]["end"]), ("uncertain", len(fake)))
 
+    def test_the_us_layout_is_judged_in_english_text_only(self):
+        mobile = "333 012 3456"
+        gold, _ = counts_of("gretel", {"id": "t:1", "lang": "it", "text": mobile,
+                                       "spans": [{"start": 0, "end": len(mobile), "label": "phone_number"}]})
+        self.assertEqual(gold[0]["gold"], "pos")
+        gold, _ = counts_of("gretel", {"id": "t:1", "lang": "en", "text": mobile,
+                                       "spans": [{"start": 0, "end": len(mobile), "label": "phone_number"}]})
+        self.assertEqual((gold[0]["gold"], gold[0]["reason"]), ("uncertain", "placeholder"))
+
+    def test_a_full_stop_after_an_address_is_trimmed_off(self):
+        email = personal_email()
+        gold, counts = self.one("nemotron", email + ".", "email")
+        self.assertEqual((gold[0]["gold"], gold[0]["reason"], gold[0]["end"]), ("pos", "trimmed", len(email)))
+
+    def test_overlapping_values_of_one_type_count_once(self):
+        email = personal_email()
+        text = "Mail " + email + " now"
+        a = text.index(email)
+        sample = {"id": "t:1", "text": text, "spans": [{"start": a, "end": a + len(email), "label": "email"},
+                                                       {"start": a, "end": a + len(email), "label": "email"}]}
+        gold, counts = counts_of("gretel", sample)
+        self.assertEqual(len([g for g in gold if g["gold"] == "pos"]), 1)
+        self.assertEqual(counts["EMAIL"]["merged: overlaps a value of its type"], 1)
+        self.assertEqual(md.merge_original([("EMAIL", 5, 9), ("EMAIL", 5, 9), ("PHONE", 5, 9)]),
+                         [("EMAIL", 5, 9), ("PHONE", 5, 9)])
+
     def test_cut_ok_refuses_a_cut_at_a_group_boundary(self):
         self.assertFalse(md.cut_ok("4111 1111 1111", " 1111"))
         self.assertTrue(md.cut_ok("4111 1111 1111 1111", " 12"))
@@ -201,8 +227,9 @@ class CleaningTests(unittest.TestCase):
         gold, _ = self.one("gretel", "Test Company", "company")
         self.assertEqual(gold[0]["gold"], "oos")
         with self.assertRaises(md.DataError) as cm:
-            self.one("gretel", "x", "no_such_label")
-        self.assertNotIn("x", str(cm.exception).split(":")[-1].strip())
+            self.one("gretel", "my-test-value-text", "my_test_label_name")
+        self.assertNotIn("my-test-value-text", str(cm.exception))
+        self.assertNotIn("my_test_label_name", str(cm.exception))
 
     def test_every_label_maps_to_a_type_maisecrets_reports_or_out_of_scope(self):
         sys.path.insert(0, str(ROOT))
@@ -312,6 +339,23 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(md.metrics(c["EMAIL"])["fp"], 1)
         self.assertEqual(card["P"], 1.0)
         self.assertEqual(phone["P"], 0.0)
+
+    def test_a_detection_of_another_type_finds_a_value_but_adds_no_precision(self):
+        gold = [{"start": 0, "end": 10, "type": "NAME", "gold": "pos"}]
+        c, classes, _ = md.score_sample(gold, [(0, 10, "SECRET", "rule")], [("NAME", 0, 10)])
+        self.assertEqual(classes, ["tp"])
+        self.assertEqual(md.metrics(c["NAME"])["tp"], 1)
+        self.assertEqual(md.metrics(c["NAME"])["R_own"], 0.0)
+        secret = md.metrics(c["SECRET"])
+        self.assertEqual((secret["hits"], secret["cross"], secret["P"]), (0, 1, None))
+
+    def test_a_partial_overlap_finds_a_value_but_does_not_cover_it(self):
+        gold = [{"start": 0, "end": 10, "type": "PHONE", "gold": "pos"},
+                {"start": 20, "end": 30, "type": "PHONE", "gold": "pos"}]
+        dets = [(0, 6, "PHONE", "a"), (20, 25, "PHONE", "a"), (25, 30, "PHONE", "b")]
+        c, _, _ = md.score_sample(gold, dets, [])
+        m = md.metrics(c["PHONE"])
+        self.assertEqual((m["tp"], m["covered"], m["R"], m["R_covered"]), (2, 1, 1.0, 0.5))
 
 
 class RunTests(unittest.TestCase):
