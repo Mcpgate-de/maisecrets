@@ -1,6 +1,6 @@
 ---
 name: secret-hygiene
-description: Protect secrets from the AI and clean up those that already leaked. Use when the user wants to protect passwords, keys or personal data from the AI or to install maisecrets; when the user asks whether a repository, its git history, a file or their past AI agent sessions contain passwords, API keys, tokens or private keys; when the user says a key or password was pasted into a chat, committed, pushed, logged or shared; or when the user wants a log, config or stack trace made safe to post in an issue, ticket or chat. Never shows a secret value.
+description: Protect secrets from the AI and clean up those that already leaked. Use when the user wants to protect passwords, keys or personal data from the AI or to install maisecrets; when the user asks whether a repository, its git history, a file or their past AI agent sessions contain passwords, API keys, tokens or private keys; when the user says a key or password was pasted into a chat, committed, pushed, logged or shared; when the user wants a log, config or stack trace made safe to post in an issue, ticket or chat; or when you are about to read a file full of secrets, such as a password export, a .har recording, a .vcf or an .ics file. Never shows a secret value.
 ---
 
 # Secret hygiene
@@ -135,6 +135,32 @@ screenshot. It needs no shell, so it also works in a chat without tools.
 8. Then clean up, each step only after the user's yes: remove the value from the file or
    the history (see "Check a repository"), ask the chat or ticket owner to delete the
    message, and update every place that uses the new value.
+
+## Before you read a file full of secrets
+
+Some files hold secrets by their nature: a password export (`passwords.csv`, `logins.csv`,
+a Bitwarden, KeePass, 1Password or LastPass export), a browser recording (`.har`: cookies
+and login tokens), a contact or calendar export (`.vcf`, `.ics`), a key file. If you read
+one, every value in it goes to the AI provider. The hooks replace only what their rules find.
+
+When the user asks you to read such a file, or a file turns out to be one (its name, its
+header row, or a first look that shows passwords, tokens or many personal records):
+
+1. Do not open it, and do not read more of it. Stop and offer a masked copy:
+
+   > This looks like a <password export / HAR recording / contact list>. If I read it, every
+   > value in it goes to the AI provider. I can make a masked copy first and read only that.
+   > Shall I?
+
+2. If the user says yes, run `python3 scripts/redact_copy.py <file>`. It writes
+   `<name>.redacted<ext>` next to the original. It reads a password export by its header
+   row and its file name, and every cookie and credential header of a HAR recording.
+3. Read only the copy, never the original. Tell the user the path of the copy, and pass on
+   what the script says it does NOT replace.
+4. If the user says no, do not read the file. Ask what they need from it.
+
+If you already read part of such a file, say so. Treat what you read as received by the
+provider (see "Contain a leak").
 
 ## Make a file safe to share
 
