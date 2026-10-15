@@ -153,6 +153,11 @@ class RegistryTests(unittest.TestCase):
         by_id = detect.scan(export, channel="tool", path=f"{label}s.csv", enabled={detect.EXPORT_RULE})
         self.assertTrue(by_id)
         self.assertEqual(detect.scan(export, channel="tool", path=f"{label}s.csv", enabled={detect.EXPORT_KEY}), by_id)
+        address = "Adresse: Hauptstra\u00dfe 12, 10115 Berlin"
+        by_id = detect.scan(address, channel="tool", enabled={"street-address"})
+        self.assertEqual([m.kind for m in by_id], ["street-address"])
+        self.assertEqual(detect.scan(address, channel="tool", enabled={"personal:street-address"}), by_id)
+        self.assertEqual(detect.scan(address, channel="tool", enabled={"personal:no-such-rule"}), [])
 
     def test_a_presidio_or_regional_rule_names_its_region(self):
         active = detect.active_regions().regions

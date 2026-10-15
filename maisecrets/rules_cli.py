@@ -367,7 +367,7 @@ def _list_row(spec, off: frozenset) -> dict:
             "rank": ".".join(str(x) for x in spec.priority), "channel": spec.channel, "region": spec.region,
             "class": spec.rule_class, "upstream": f"{up.source} {up.version}" if up else "",
             "patches": ", ".join(f"{p.field} {p.op}" for p in spec.patches),
-            "off": user_rules.switched_off(spec.id, off)}
+            "off": spec.source != "export" and user_rules.switched_off(spec.id, off)}
 
 
 def list_rules(args: list[str]) -> int:
