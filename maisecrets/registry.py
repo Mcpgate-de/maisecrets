@@ -77,6 +77,7 @@ class RuleSpec:
     type: str            # the placeholder type: SECRET, EMAIL, IBAN, DE_ID_CARD, ...
     rule_class: str      # what it finds: "provider:github", "label:keyword", "pii:email", ...
     form: str            # keyword | label | shape
+    matcher: str = "regex"   # matcher_of
     language: str = ""   # the label languages of a label source ("en,de"), else ""
     upstream: Upstream | None = None
     patches: tuple = field(default=())
@@ -94,6 +95,26 @@ def form_of(rule_id: str) -> str:
 def is_label(kind: str) -> bool:
     """Whether a hit of this kind (a rule id, also one read from the vault index) came from a label rule."""
     return str(kind).startswith(LABEL_PREFIXES)
+
+
+def matcher_of(rule_id: str, source: str = "") -> str:
+    """How scan() runs a rule: `regex` (finditer), `lines` (the detect-secrets keyword rules, per line, a label at the
+    end of a line with the next line), `windowed` (generic-api-key on a long text: windows around its keywords),
+    `curl` (a curl command, split at its head), `list` (the values of a labelled list), `literal` (a password after a
+    password label, judged by detect._judge_literal), `seed` (a BIP39 seed phrase by its checksum)."""
+    if rule_id.startswith("curl-"):
+        return "curl"
+    if rule_id == "label-secret-list":
+        return "list"
+    if source == "literal":
+        return "literal"
+    if rule_id == "crypto-seed-phrase":
+        return "seed"
+    if rule_id == "generic-api-key":
+        return "windowed"
+    if rule_id.startswith("ds-keyword"):
+        return "lines"
+    return "regex"
 
 
 def canonical_sha256(rule: dict) -> str:
@@ -146,5 +167,6 @@ def make(source: str, rule_id: str, type_: str, seq: int, *, region: str = "gene
     phase = PHASES["user"] if source == "user" else PHASES["rules"]
     return RuleSpec(key=key_of(source, rule_id), id=rule_id, source=source, origin=origin,
                     priority=(phase, BANDS[source], seq), channel=channel, region=region, type=type_,
-                    rule_class=rule_class(source, rule_id, type_), form=form_of(rule_id), language=language,
+                    rule_class=rule_class(source, rule_id, type_), form=form_of(rule_id),
+                    matcher=matcher_of(rule_id, source), language=language,
                     upstream=upstream, patches=tuple(patches))

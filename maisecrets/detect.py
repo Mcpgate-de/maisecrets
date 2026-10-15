@@ -104,6 +104,7 @@ class Rule:
     drop: object = None                # betterleaks: the rule's filter and the global one; True drops the finding
     key: str = ""                      # unique, from maisecrets/registry.py: `<source>:<id>`; set by rules()
     form: str = ""                     # keyword | label | shape (registry.form_of); set by rules()
+    matcher: str = ""                  # regex | lines | windowed | curl | list | literal | seed (registry.matcher_of)
 
 
 # ----------------------------------------------------------------- helpers --
@@ -2049,7 +2050,7 @@ _REGIONAL_REGION = {d["id"]: d["region"] for d in REGIONAL_RULES}
 
 def _ranked(active) -> list:
     """(priority, rule) of every rule, sorted by priority = (phase, band, seq) (maisecrets/registry.py)."""
-    from .registry import BANDS, PHASES, form_of, key_of
+    from .registry import BANDS, PHASES, form_of, key_of, matcher_of
     rules_phase, user_phase = PHASES["rules"], PHASES["user"]
     out = []
     for source, rs in _rule_sources(active):
@@ -2057,6 +2058,7 @@ def _ranked(active) -> list:
         for seq, r in enumerate(rs):
             object.__setattr__(r, "key", key_of(source, r.id))   # fields of the frozen rule, set once at load
             object.__setattr__(r, "form", form_of(r.id))
+            object.__setattr__(r, "matcher", matcher_of(r.id, source))
             out.append(((phase, band, seq), r))
     out.sort(key=lambda x: x[0])
     return out
@@ -2568,17 +2570,18 @@ def _matches(rule: Rule, text: str):
     A label that ends its line (``passwort:`` and the value on the next line, as a console
     or a chat renders it) is scanned together with the next non-empty line; only a hit whose
     value starts in that next line is taken from the pair (field report, 2026-09-26)."""
-    curl = _curl_parts(rule)
+    matcher = rule.matcher or _registry.matcher_of(rule.id, "literal" if rule.id in _LITERAL_IDS else "")
+    curl = _curl_parts(rule) if matcher == "curl" else None
     if curl is not None:
         yield from _curl_matches(curl, text)
         return
-    if rule.id == "label-secret-list":
+    if matcher == "list":
         yield from _list_matches(rule, text)
         return
-    if rule.id in _LITERAL_IDS:
+    if matcher == "literal":
         yield from _literal_matches(rule.id, text)
         return
-    if rule.id == "crypto-seed-phrase":
+    if matcher == "seed":
         for a, b, words in checksums.bip39_spans(text):
             # the context word stands outside the phrase: seed, phrase and wallet are words of the list
             if words < 15 and not (_SEED_CONTEXT_RE.search(text, max(0, min(a - 200, _line_start(text, a))), a)
@@ -2586,11 +2589,11 @@ def _matches(rule: Rule, text: str):
                 continue
             yield _Spanned(_EMPTY_RE.match(text, b), a, text)
         return
-    kw = _WINDOWED.get(rule.id)
+    kw = _WINDOWED.get(rule.id) if matcher == "windowed" else None
     if kw is not None and len(text) > 4096:
         yield from _windowed(rule, kw, text)
         return
-    if not rule.id.startswith("ds-keyword") or not _newlines(text):
+    if matcher != "lines" or not _newlines(text):
         yield from rule.regex.finditer(text)
         return
     pos = 0

@@ -55,6 +55,14 @@ class RegistryTests(unittest.TestCase):
         for rule in detect.rules():
             self.assertTrue(rule.key, rule.id)                    # rules() gives every rule its key
 
+    def test_a_rule_list_a_caller_built_runs_each_rule_as_the_registry_does(self):
+        # scan(rule_list=...) and tests pass rules that rules() did not mark; the fallback must name the same matcher
+        literal = {d["id"] for d in detect.LITERAL_RULES}
+        for spec, rule in self.specs:
+            with self.subTest(rule=spec.key):
+                self.assertEqual(spec.matcher, registry.matcher_of(rule.id, "literal" if rule.id in literal else ""))
+        self.assertEqual(collections.Counter(s.matcher for s, _ in self.specs)["lines"], 7)
+
     def test_every_source_has_its_band_and_the_bands_keep_the_measured_order(self):
         self.assertEqual({s.source for s, _ in self.specs}, set(registry.SOURCES) - {"user"})
         bands = [registry.BANDS[x] for x in registry.SOURCES]
