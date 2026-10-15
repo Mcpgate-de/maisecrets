@@ -123,7 +123,8 @@ class UrlUserTests(unittest.TestCase):
                          [("user-in-url", "lbrueckner")])
 
     def test_service_accounts_templates_and_key_ids_stay_text(self):
-        for text in ("postgres://postgres:postgres@localhost/db", J(["https://__to", "ken__:x@upload.pypi.org/legacy/"]),
+        for text in ("postgres://postgres:postgres@localhost/db",
+                     J(["https://__to", "ken__:x@upload.pypi.org/legacy/"]),
                      "ftp://anonymous:anonymous@ftp.example.org/pub/", "redis://${REDIS_USER}:${REDIS_PASS}@cache:6379",
                      "https://app4k29x1m8:x@api.example.net/", "amqp://rabbitmq:x@mq:5672/",
                      "https://gitlab-ci-token:x@gitlab.example.net/g/p.git", "postgres://app_user:x@db/app"):
@@ -243,7 +244,8 @@ class CorpusTests(unittest.TestCase):
 class OpenAiAnthropicKeyTests(unittest.TestCase):
     def test_a_short_openai_and_anthropic_key(self):
         for tok, kind in ((J(["sk-", "proj-", "Ab3dEf6hIj9kLm2nOp5qRs8t"]), "openai-anthropic-key-relaxed"),
-                          (J(["sk-", "ant-", "ap" + "i03", "-", "Zx8cVb7nMq6w", "Er5tYu4iOp3a"]), "openai-anthropic-key-relaxed")):
+                          (J(["sk-", "ant-", "ap" + "i03", "-",
+                              "Zx8cVb7nMq6w", "Er5tYu4iOp3a"]), "openai-anthropic-key-relaxed")):
             with self.subTest(kind=kind):
                 hits = [(m.kind, m.value) for m in scan("key " + tok, "prompt")]
                 self.assertEqual(len(hits), 1)
