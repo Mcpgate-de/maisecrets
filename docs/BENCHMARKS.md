@@ -571,6 +571,78 @@ A dataset label maps to the maisecrets type below; every other label is `OUT_OF_
 | ID_NUMBER | `passport_number`, `driver_license_number` | `national_id`, `tax_id`, `medical_record_number`, `health_plan_beneficiary_number`, `certificate_license_number` | – | `ID_NUM` |
 | USERNAME | `user_name` | `user_name` | – | `USERNAME` |
 
+## Rule classes, 2026-10-15
+
+What each class of rules adds at the margin: the script switches one class off and scans every input again
+(`scripts/measure_rule_classes.py`, regions `de`, `--locale de_DE`). When a class is off, another rule can still
+take the span, so a number counts what only that class catches. The classes come from the rule registry
+(`maisecrets/registry.py`, `coarse_class`): a token class per source, one class per label rule, a PII class per
+type and region. `maisecrets rules list` shows the class of each rule.
+
+Base, all rules on:
+
+| Input | Items | Prompt channel | Tool channel |
+|---|---:|---:|---:|
+| CredData, T values masked | 14471 | 9396 | 9913 |
+| CredData, F lines with a masked F value | 9439 | 324 | 329 |
+| Developer texts (`tests/fp_corpus.py`), HIT values masked | 139 | 139 | 139 |
+| Developer texts, NO_HIT snippets with a hit | 1114 | 0 | 0 |
+| PII corpus (`tests/fp_corpus_pii.py`), POSITIVE values masked | 46 | 6 | 41 |
+| PII corpus, PII_NO_HIT samples with a hit | 367 | 7 | 7 |
+| Cloakroom holdout v2 to v7, planted values masked | 1652 | 854 | 1086 |
+| Cloakroom holdout, clean samples with a hit | 215 | 1 | 1 |
+
+Per class, sorted by the values it alone catches (tool channel, CredData plus holdout plus PII corpus). "Lost" is a
+value the base masks and the variant does not; "saved" is an input that has a false hit in the base and none in the
+variant. The other corpora are in the tool channel.
+
+| Class | Rules | CredData T values lost, prompt / tool | CredData F lines saved, prompt / tool | Developer texts: HIT values lost / NO_HIT saved | PII corpus: POSITIVE values lost / PII_NO_HIT saved | Holdout v2-v7: values lost / clean samples saved |
+|---|---:|---:|---:|---:|---:|---:|
+| `label:generic-api-key` | 1 | 3561 / 3563 | 58 / 60 | 0 / 0 | 0 / 0 | 5 / 0 |
+| `label:auth-scheme` | 1 | 767 / 766 | 0 / 0 | 0 / 0 | 0 / 0 | 3 / 0 |
+| `label:literal` | 4 | 230 / 741 | 7 / 9 | 7 / 0 | 0 / 0 | 3 / 0 |
+| `label:keyword` | 16 | 1007 / 588 | 140 / 134 | 64 / 0 | 0 / 0 | 23 / 0 |
+| `token:betterleaks` | 416 | 318 / 303 | 18 / 18 | 5 / 0 | 0 / 0 | 64 / 0 |
+| `pii:email` | 2 | 9 / 9 | 20 / 20 | 2 / 0 | 0 / 1 | 297 / 0 |
+| `token:own-secret` | 21 | 233 / 220 | 3 / 3 | 3 / 0 | 0 / 0 | 10 / 0 |
+| `pii:phone` | 3 | 0 / 0 | 0 / 0 | 3 / 0 | 3 / 4 | 177 / 0 |
+| `token:detect-secrets` | 1 | 128 / 128 | 7 / 7 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:name` | 2 | 0 / 0 | 0 / 0 | 0 / 0 | 11 / 0 | 100 / 0 |
+| `pii:ip` | 5 | 0 / 0 | 15 / 15 | 0 / 0 | 0 / 0 | 61 / 0 |
+| `pii:birth_date` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 8 / 0 | 47 / 0 |
+| `pii:id_number` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 8 / 0 | 25 / 0 |
+| `pii:column` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 3 / 0 | 24 / 0 |
+| `pii:iban` | 2 | 2 / 1 | 0 / 0 | 2 / 0 | 0 / 0 | 24 / 0 |
+| `pii:username` | 2 | 0 / 0 | 0 / 1 | 0 / 0 | 4 / 0 | 20 / 0 |
+| `pii:card` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 18 / 0 |
+| `pii:address` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 7 / 0 |
+| `token:fallback` | 4 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 6 / 0 |
+| `pii:de_plz@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 1 | 4 / 0 |
+| `label:url-query-secret` | 1 | 1 / 1 | 7 / 7 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_passport@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 |
+| `token:own-json` | 9 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 |
+| `label:auth-scheme-apikey` | 1 | 0 / 0 | 0 / 0 | 2 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_bsnr@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_fuehrerschein@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_health_insurance@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_id_card@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_kfz@de` | 5 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_lanr@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_social_security@de` | 3 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_tax_id@de` | 2 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_tax_number@de` | 3 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_vat_id@de` | 2 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 1 | 0 / 0 |
+| `token:prefixes` | 44 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+
+With a class switched off, the variant also masked values that the base leaves: `label:url-query-secret` off: 3 / 3 recall gained (creddata, prompt / tool); `token:own-secret` off: 1 / 1 recall gained (creddata, prompt / tool). There the class
+takes a span, and with the class off a later rule masks the value. The rule order stays as measured; a change of
+it is a change of its own.
+
+Inputs: CredData as in "CredData, results per release" (every unique labelled line, 23155 lines;
+a T value counts once per line); Cloakroom's holdout sets v2 to v7 as in "Cloakroom holdout sets"; the two test
+corpora of this tree. A run takes about 45 seconds with 6 workers: only an input with a hit of the class in the
+base can change, so the script scans the variant on those inputs only, and it checks on 2 % of the inputs that the
+base with every rule enabled by key equals the plain scan.
 ## Comparison with other tools
 
 "Theirs" is Cloakroom's
@@ -711,6 +783,7 @@ git worktree add ../maisecrets-0.6.16 v0.6.16
 python3 scripts/measure_creddata.py ../CredData --maisecrets ../maisecrets-0.6.17 --channel tool --split half \
     --baseline ../maisecrets-0.6.16
 python3 scripts/measure_scan_time.py --maisecrets ../maisecrets-0.6.17 --channel tool
+python3 scripts/measure_rule_classes.py --creddata ../CredData --holdout <Cloakroom checkout>/bench --workers 6
 ```
 
 The download took about 1 hour here. If a clone stops on a network error, run `download_data.py` again; it keeps

@@ -20,8 +20,9 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 
-# the bands of the rule list, in scan order. The order between them is measured, not chosen (docs/BENCHMARKS.md,
-# "Rule order"): a label rule before a shape rule, detect-secrets before generic-api-key, the literal rules last.
+# the bands of the rule list, in scan order. The order between them was measured, not chosen (2026-10-15, every
+# CredData line with the sources moved): a label rule before a shape rule, detect-secrets before generic-api-key, the
+# own SECRET rules before the vendored ones, the literal rules last.
 BANDS = {
     "own-secret": 100,       # OWN_RULES of type SECRET
     "prefixes": 150,         # rules/prefixes.txt
