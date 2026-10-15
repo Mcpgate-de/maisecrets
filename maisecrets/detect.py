@@ -2034,24 +2034,25 @@ def allow_list() -> tuple[frozenset, frozenset]:
 
 def rules() -> list[Rule]:
     """Own secret rules first (longer shapes win the span), then betterleaks and the own rules of
-    own_secret_rules.json, then PII, then the literal rules, then the rules of your own. A user rule never takes a span
-    before a built-in rule: a NAME rule that took a part of an e-mail address left the rest of it in the clear (Opus
-    review of block 1). A user rule runs in both channels. A rule id on the allow list is switched off."""
+    own_secret_rules.json, the fallback and regional rules, then PII, then the literal rules, then the rules of your
+    own. A scan runs the personal-data step (_personal_hits) before the rules of your own (_in_scan_order). A user rule
+    never takes a span before a built-in rule: a NAME rule that took a part of an e-mail address left the rest of it in
+    the clear (Opus review of block 1). A user rule runs in both channels. A rule id on the allow list is switched
+    off."""
     global _RULES
     if _RULES is None:
         own = _load_own()
         secrets = [r for r in own if r.type == "SECRET"]
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
-        every = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
-                 + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]
-                 + _load_regional(active.regions) + _load_presidio(active.regions) + pii
-                 + _load_literal(active.languages) + _user_rules())
+        _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
+                  + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]
+                  + _load_regional(active.regions) + _load_presidio(active.regions) + pii
+                  + _load_literal(active.languages) + _user_rules())
         off = allow_list()[1]
         if off:
             from .user_rules import switched_off
-            every = [r for r in every if not switched_off(r.id, off)]
-        _RULES = every
+            _RULES = [r for r in _RULES if not switched_off(r.id, off)]
         _REGIONS[:] = [_RULES, active.regions]
     return _RULES
 
@@ -3036,7 +3037,12 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         # first: a cell of a password export is a value as a whole, and no other rule claims a part of it
         for m in _export_hits(text, low):
             take(m)
-    for rule in (rules() if rule_list is None else rule_list):
+    for rule in (_in_scan_order(rules()) if rule_list is None else rule_list):
+        if rule is _PERSONAL:
+            # the personal data of 0.6.21 runs after every built-in rule and before the rules of your own: a rule of
+            # your own never takes a span that a built-in rule would have found
+            _personal_hits(text, enabled, found, taken_starts, taken_ends, overlaps)
+            continue
         if enabled is not None and rule.id not in enabled:
             continue
         if rule.keywords and not any(k in low for k in rule.keywords):
@@ -3210,7 +3216,6 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     end = tail.end()
                     secret = text[start:end]
             take(Match(rule.id, rule.type, secret, start, end), own)
-    _personal_hits(text, enabled, found, taken_starts, taken_ends, overlaps)
     if _CHANNEL[0] == "tool" and not _copy:
         _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends)
     for matcher in (extra_matchers if rule_list is None else ()):
@@ -3219,6 +3224,19 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 take(m, True)
     found.sort(key=lambda x: x.start)
     return found
+
+
+_PERSONAL = object()             # the place of _personal_hits in the scan order
+_ORDER: list = [None, ()]        # a rule list and its scan order
+
+
+def _in_scan_order(every: list) -> tuple:
+    """The rules of a list in scan order: the built-in ones, then the personal-data step, then the rules of your own
+    (ids with `user:`). Kept per list, so a scan pays for it once."""
+    if _ORDER[0] is not every:
+        _ORDER[:] = [every, tuple(r for r in every if not r.id.startswith("user:")) + (_PERSONAL,)
+                     + tuple(r for r in every if r.id.startswith("user:"))]
+    return _ORDER[1]
 
 
 def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: list, overlaps) -> None:

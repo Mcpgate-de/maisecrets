@@ -338,6 +338,15 @@ class BothChannels(Base):
             with self.subTest(channel):
                 self.assertEqual([m.kind for m in detect.scan(text, channel=channel)], ["user:team-token", "email"])
 
+    def test_a_rule_of_your_own_never_cuts_a_name_that_the_personal_data_rules_find(self):
+        text = "customer record\nname: " + "Emma " + "Johan" + "sson" + "\ncity: Oslo"
+        detect.reset_rules()
+        before = [(m.kind, m.start, m.end) for m in detect.scan(text, channel="tool")]
+        self.assertTrue(before, "the personal data rules of 0.6.21 find the name")
+        write_rules(OWN, [{"id": "surname", "regex": "Johan" + "sson", "keywords": ["johansson"], "type": "NAME"}])
+        detect.reset_rules()
+        self.assertEqual([(m.kind, m.start, m.end) for m in detect.scan(text, channel="tool")], before)
+
     def test_the_tool_channel_finds_it_behind_a_colour_code(self):
         write_rules(OWN, [{"id": "team-token", "regex": r"tkx_[A-Za-z0-9]{24}", "keywords": ["tkx_"]}])
         detect.reset_rules()
