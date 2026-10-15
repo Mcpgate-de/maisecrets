@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## [0.6.22] - 2026-10-15
+
+### Features
+
+- the session start counts your rules of your own and names a rule folder that is missing (d8c6993)
+- add detection rules of your own from folders, and an allow list for single values (0f782bb)
+
+### Fixes
+
+- a rule of your own runs after the cleaned copy of a tool result, and the allow list holds for the personal-data rules (e0481e2)
+- a rule of your own runs after the personal-data rules of 0.6.21 too, so it never cuts a name or an address (42f6cfd)
+- a correct rule with several keywords is no longer timed out, and `rules check` makes a folder run at the next call (20c4a18)
+- the folder limits also hold for refused, duplicate and oversized rules, and a slow branch is timed (0d3f4b0)
+- a rule folder can no longer take out another folder's rule, run an untested rule, or stall a hook with many files (79a9dd4)
+- a slow rule of your own is found by its own regex time, also over many strings (de45baa)
+- a large output can no longer take a correct rule of your own out (4cc626a)
+- rule folders keep slow, broken and linked rules out, and never print a refused line (923d3b2)
+- a rule of your own no longer cuts an e-mail address, IBAN or phone number short (3772d16)
+- a rule of your own that holds a hook until the watchdog answers is left out from the next call on (150e699)
+
 ## [0.6.21] - 2026-10-15
 
 ### Features
