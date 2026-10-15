@@ -380,7 +380,8 @@ class Base64PemTests(unittest.TestCase):
             t0 = time.process_time()
             detect.scan(text, enabled={"private-key-base64"}, channel="tool")
             times.append(time.process_time() - t0)
-        self.assertLess(times[1], 8 * times[0] + 0.05)
+        # Windows counts CPU time in steps of about 15.6 ms: the slack must hold several steps
+        self.assertLess(times[1], 8 * times[0] + 0.1)
 
     def test_the_forms_a_value_takes(self):
         r = random.Random(33)
