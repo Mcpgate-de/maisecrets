@@ -135,20 +135,31 @@ def _record(out_path: str) -> int:
     seen: dict = {}
     real = detect.scan
     tmp = tempfile.gettempdir()
+    # a value of this machine's environment (a token in a variable) never goes into a recording
+    env_values = [v for v in os.environ.values() if len(v) >= 12]
 
     def scan(text, enabled=None, channel="prompt", path="", rule_list=None):
         if rule_list is None and isinstance(text, str) and len(text) <= RECORD_MAX_CHARS and tmp not in text \
-                and "maisecrets-test-" not in text and tmp not in (path or ""):
+                and "maisecrets-test-" not in text and tmp not in (path or "") \
+                and not any(v in text for v in env_values):
             key = (text, channel if channel == "tool" else "prompt", path or "",
                    None if enabled is None else tuple(sorted(enabled)))
             seen.setdefault(key, None)
         return real(text, enabled=enabled, channel=channel, path=path, rule_list=rule_list)
     detect.scan = scan
     suite = unittest.defaultTestLoader.loadTestsFromNames(list(RECORDED_MODULES))
-    unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+    result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
     detect.scan = real
+    if result.errors or not result.testsRun:
+        # a module that cannot load or a setup that breaks records less, silently (codex Gate A, round 2). A failed
+        # assertion is reported but kept: a timing test under load fails without changing what it scanned
+        print(f"recording refused: {len(result.errors)} errors in {result.testsRun} tests", file=sys.stderr)
+        return 1
+    if result.failures:
+        print(f"recording: {len(result.failures)} failed tests", file=sys.stderr)
     rows = sorted(seen, key=lambda k: (k[0], k[1], k[2], k[3] or ()))
-    with open(out_path, "w", encoding="utf-8") as fh:
+    fd = os.open(out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)   # it holds the test texts
+    with open(fd, "w", encoding="utf-8") as fh:
         json.dump([[t, c, p, list(e) if e is not None else None] for t, c, p, e in rows], fh, ensure_ascii=False)
     return 0
 
@@ -227,6 +238,9 @@ def probe_items() -> list:
         ("a measure after a label", "TTL_REFRESH_TOKEN = 2592000"),
         ("literal", "pw " + pw),
         ("personal data and a rule of your own", "Adresse: Hauptstra\u00dfe 12, 10115 Berlin"),
+        ("a label value that holds a label form", label + ': "api_' + "key=" + rnd(alnum, 24) + '"'),
+        ("a label value that holds a query form", label + ': "https://x.example/cb?token=' + rnd(alnum, 24) + '"'),
+        ("a label value that holds a Bearer form", label + ': "Bearer ' + rnd(alnum, 32) + '"'),
     ]
     items = [("probes", name, text) for name, text in out]
     export = "url,username," + label + "\nhttps://a.example.org,alice," + pw + "\nhttps://b.example.org,bob," \

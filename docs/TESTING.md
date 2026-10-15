@@ -118,10 +118,11 @@ The inputs:
   `--recorded FILE` keep one recording for several runs).
 
 A mutation run on the registry (2026-10-15) switched off each named filter, each matcher and each band in turn. The
-fingerprint without CredData changed for every one of them except the `enabled`-by-key check, which only a unit test
-calls, and four changes that give the same hits by design: the window of `generic-api-key` on a long text, the
-label rules added to the shape rules of `is_fixture` (none of them finds a bare value), and the fallbacks for a rule
-that `rules()` did not mark.
+fingerprint without CredData changed for every one of them (34 mutants, two review rounds) except five: the window of
+`generic-api-key` on a long text gives the same hits by design (it is a speed-up), the form fallback for a rule that
+`rules()` did not mark has no caller, and the `enabled` keys of a rule, the export pass and the filter fallback are
+held by unit tests in `tests/test_registry.py`. A recording keeps no text that holds the value of an environment
+variable, and only its owner can read the file.
 
 1. Before the change, write the reference: `python3 scripts/detection_fingerprint.py --creddata <CredData> --out ref.jsonl`.
 2. After each step, write the file again to `new.jsonl` with the same arguments.
