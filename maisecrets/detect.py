@@ -2009,7 +2009,8 @@ def rules() -> list[Rule]:
         pii = [r for r in own if r.type != "SECRET"]
         active = active_regions()
         _RULES = (secrets + _load_detect_secrets(active.languages) + _load_betterleaks() + _load_own_secret_rules()
-                  + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES] + late
+                  + [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"])) for d in FALLBACK_RULES]
+                  + late
                   + _load_regional(active.regions) + _load_presidio(active.regions) + pii
                   + _load_literal(active.languages))
         _REGIONS[:] = [_RULES, active.regions]

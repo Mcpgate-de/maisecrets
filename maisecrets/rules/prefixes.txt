@@ -61,4 +61,4 @@ gitlab-ci-job-token-any      glcbt-(?:(?<![A-Za-z0-9_-]glcbt-)|(?<=\\[nrt]glcbt-
 # sk-admin-sidebar-navigation-item2X and xoxb-background-worker-release-2024 are names. Both run after the vendored rules
 # (detect._LATE_RULES): a key of the full vendored form keeps its vendored rule
 openai-anthropic-key-relaxed (?<![\w-])sk-(?:proj|ant|svcacct|admin)-(?=[A-Za-z0-9_-]{0,200}[0-9])(?=[A-Za-z0-9_-]{0,200}[A-Z])(?=[A-Za-z0-9_-]{0,200}?[A-Za-z0-9]{16})[A-Za-z0-9_-]{20,}
-slack-token-relaxed          (?<![\w-])xox[abpr]-\d{2,}-[A-Za-z0-9-]{12,}
+slack-token-relaxed          (?<![\w-])(?:xoxb-|xoxp-|xoxa-|xoxr-)\d{2,}-[A-Za-z0-9-]{12,}
