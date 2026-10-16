@@ -55,6 +55,32 @@ class ProfileHookTests(unittest.TestCase):
         self.assertIn("g", clock.excl)
         self.assertEqual(clock.stack, [])
 
+    def test_a_child_gets_the_temp_home_and_no_variable_of_a_client(self):
+        saved = dict(os.environ)
+        self.addCleanup(lambda: (os.environ.clear(), os.environ.update(saved)))
+        for k in ("CLAUDE_PLUGIN_OPTION_PII_REGIONS", "CODEX_HOME", "MAISECRETS_REGIONS"):
+            os.environ[k] = "x"
+        env = ph.make_env("/tmp/a-temp-home")
+        self.assertEqual(env["MAISECRETS" + "_HOME"], "/tmp/a-temp-home")
+        self.assertEqual(env["MAISECRETS_LOCALE"], "de_DE")
+        self.assertFalse([k for k in env if k.startswith(("CLAUDE", "CODEX"))])
+        self.assertEqual(sorted(k for k in env if k.startswith("MAISECRETS")),
+                         ["MAISECRETS" + "_HOME", "MAISECRETS_LOCALE"])
+
+    def test_the_rest_of_the_hook_is_the_call_without_its_phases(self):
+        res = {"interpreter": 0.020, "hook": {"t|p": 0.100},
+               "phases": {"t|p": {"import": 0.030, "rules": 0.010, "first scan": 0.015, "second scan": 0.002}}}
+        self.assertAlmostEqual(ph.rest_of_hook(res, "t", "p"), 0.025)
+
+    def test_the_phases_child_counts_the_import_of_a_hook(self):
+        home = ph.new_home()
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, True))
+        out = ph.run_phases(str(ROOT), "prompt 1 KB", ph.make_env(home))
+        self.assertGreater(out["import"], out["import of re"])
+        self.assertGreater(out["compiles import"], 0)
+        self.assertTrue(any(k.startswith("import|maisecrets.") for k in out["by module"]))
+        self.assertEqual(out["compiles second scan"], 0)                # the first scan compiled every regex
+
     def test_a_rule_takes_its_class_from_the_registry(self):
         from maisecrets import detect
         classes = {ph._class_of(detect, r) for r in detect.rules()}
