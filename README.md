@@ -2022,7 +2022,8 @@ can do is to mask too much. These limits hold that:
   file (not a FIFO or a device), owned by you (or root), and not writable by
   every user. Then it reads it once, up to 8 MB. So a file that is swapped
   between a check and the read, a FIFO, and a file that grows while it is
-  read all fail or stop at the limit. A line that a writer has not finished
+  read all fail or stop at the limit. Windows has no open without a link:
+  there maisecrets refuses a link one step before the open. A line that a writer has not finished
   is not valid JSON, so maisecrets refuses that line by its number and
   imports the rest.
 - A damaged import in the maisecrets folder stops every hook (fail closed),

@@ -213,6 +213,13 @@ def read_source(path: Path) -> bytes:
     descriptor: a regular file (a FIFO, a device or a folder is refused), owned by the person or root, not writable by
     every user; then one read with a byte bound. So a file swapped after a check (TOCTOU), a FIFO that would hold the
     session start, and a file that grows while it is read all fail or stop at the bound."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        # Windows has no O_NOFOLLOW: the link is refused by its own lstat, one step before the open (CI, windows)
+        try:
+            if os.path.islink(path):
+                raise ValueError("a symbolic link (name the file it points to)")
+        except OSError:
+            pass
     try:
         fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
                      | getattr(os, "O_BINARY", 0))
