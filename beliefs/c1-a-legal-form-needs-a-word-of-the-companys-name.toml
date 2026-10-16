@@ -1,0 +1,10 @@
+# c1-a-legal-form-needs-a-word-of-the-companys-name: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-legal-form-needs-a-word-of-the-companys-name"
+control = "C1"
+statement = "A legal form names a company only after a word of its name: a court abbreviation after a file number (Az. 345/26, AG) is no company, and the values near it stay masked."
+runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_legal_form_after_no_word_is_no_companys_name"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''    if not _NAME_BEFORE_FORM_RE.search('''
+replace = '''    if False and not _NAME_BEFORE_FORM_RE.search('''

@@ -1,0 +1,10 @@
+# c1-a-short-legal-form-needs-its-capitals: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-short-legal-form-needs-its-capitals"
+control = "C1"
+statement = "A legal form of up to three letters names a company only in capitals (AG, KG, SA), or as Inc, Ltd, LLC, plc: 2 kg is a weight and Sa a Saturday, so the values near them stay masked."
+runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_short_legal_form_after_a_word_still_needs_its_case"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''    if len(form) <= 3 and not form.isupper()'''
+replace = '''    if False and len(form) <= 3'''

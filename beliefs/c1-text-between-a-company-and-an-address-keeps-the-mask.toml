@@ -1,0 +1,10 @@
+# c1-text-between-a-company-and-an-address-keeps-the-mask: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-text-between-a-company-and-an-address-keeps-the-mask"
+control = "C1"
+statement = "The legal form makes an address a company's only when nothing but separators and one label of the company's own address stand between the company's name and the address: a person's address after a company's address, a home label or a court's place keeps the mask."
+runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_persons_address_after_the_companys_address_keeps_its_vat_id_masked", "tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_home_label_between_the_company_and_the_address_keeps_the_mask"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''    if not _FORM_TO_ADDRESS_RE.fullmatch(between):'''
+replace = '''    if False:'''

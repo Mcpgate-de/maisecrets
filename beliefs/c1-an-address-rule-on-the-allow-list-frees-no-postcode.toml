@@ -1,0 +1,10 @@
+# c1-an-address-rule-on-the-allow-list-frees-no-postcode: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-an-address-rule-on-the-allow-list-frees-no-postcode"
+control = "C1"
+statement = "An address rule that the allow list switches off (rule: street-address) makes no company decision: the postcode and the VAT ID keep their hits."
+runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_an_address_rule_on_the_allow_list_decides_nothing"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''               and not (off and c[4] in off)]'''
+replace = '''               ]'''
