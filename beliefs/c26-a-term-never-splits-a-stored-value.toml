@@ -6,5 +6,5 @@ runner = ["tests/test_terms_hooks.py::StoredValueTests::test_a_tool_result_masks
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "        if any(a <= m.start and m.end <= b for a, b in cover):\n            continue\n"
-replace = ""
+find = "        if inside and not (term_files.is_term_kind(m.kind) and not any(\n"
+replace = "        if False and not (term_files.is_term_kind(m.kind) and not any(\n"
