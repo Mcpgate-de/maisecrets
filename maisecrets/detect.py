@@ -175,6 +175,8 @@ def _entropy_ok(rule: Rule, secret: str) -> bool:
         e = shannon_entropy(secret)
         if e >= 3.5:
             return True    # the old floor: a value it took stays a hit
+        if _CHANNEL[0] != "tool":
+            return False   # a typed prompt keeps 3.5: an identifier with a digit there is blocked, not masked
         return e >= ENTROPY_BY_ALPHABET[alphabet_of(secret)] and not _base64_of_text(secret)
     return not rule.entropy or shannon_entropy(secret) >= rule.entropy
 
@@ -1763,14 +1765,24 @@ _CARD_ISSUERS = re.compile(r"4\d{15}|5[1-5]\d{14}|2(?:2[2-9]|[3-6]\d|7[01])\d{13
 _CARD_GROUPS = re.compile(r"\d{4}([ -])\d{4}\1\d{4}\1\d{4}|\d{4}([ -])\d{6}\2\d{5}|\d{4}([ -])\d{6}\3\d{4}")
 
 
+_ID_LABEL_BEFORE_RE = re.compile(r"(?i)(?:order|invoice|message|trace|request|tracking|transaction|reference|ref|imei"
+                                 r"|serial|ticket|session|account)[ _-]?(?:id|no|nr|number|#)?[\"']?\s{0,3}[:=#]\s{0,3}"
+                                 r"[\"']?\s{0,3}$")
+
+
 def _card_shaped(text: str, start: int, secret: str) -> bool:
     """A number written as a card: in groups of four (4-6-5 for Amex, 4-6-4 for Diners), with the prefix and the
     length of a card network, and not part of a decimal, a phone number or a longer digit run. A float, a timestamp
     and an IMEI pass Luhn as often as a card does (review of 0.6.24), and they are written as one run."""
     v = secret.strip()
-    if start and text[start - 1] in "+.,0123456789" or text[start + len(secret):start + len(secret) + 2][:1] == "." \
-            and text[start + len(secret) + 1:start + len(secret) + 2].isdigit():
-        return False
+    end = start + len(secret)
+    sep = re.sub(r"\d", "", v)[:1]
+    fifth = bool(sep) and re.match(re.escape(sep) + r"\d{4}(?!\d)", text[end:end + 6])
+    if start and text[start - 1] in "+.,-0123456789" or text[end:end + 1].isalnum() \
+            or re.match(r"\.\d", text[end:end + 2]) or fifth:
+        return False   # a decimal, a phone number, a longer run, a fifth group (an expiry such as 12/28 may follow)
+    if _ID_LABEL_BEFORE_RE.search(text, max(0, start - 30), start):
+        return False   # order_id=4111 ...: an id that passes Luhn
     return bool(_CARD_GROUPS.fullmatch(v) and _CARD_ISSUERS.fullmatch(re.sub(r"\D", "", v)))
 # a Presidio pattern with no boundary: PESEL's eleven digits matched inside a longer digit run
 PRESIDIO_DIGIT_BOUNDED = {"pl-pesel"}
@@ -1783,7 +1795,10 @@ PRESIDIO_PATTERN_CONTEXT = {"de-vat-id#0"}
 # neighbour language (kort: short in Danish and Dutch) stays out
 PRESIDIO_EXTRA_CONTEXT = {
     "credit-card": ("karte", "kreditkarte", "kartennummer", "kartennr", "debitkarte", "bankkarte", "ec-karte",
-                    "girocard", "carte", "cartes", "carta", "tarjeta", "creditcard", "kaart", "cart\u00e3o", "karta"),
+                    "girocard", "carte", "cartes", "carta", "tarjeta", "creditcard", "kaart", "cart\u00e3o", "karta",
+                    # 0.6.24, review: the PAN of a payment log, a camelCase key, and the Nordic and Polish words
+                    "pan", "cardnumber", "ccnum", "ccnumber", "karty", "kortnummer", "kaartnummer", "korttinumero",
+                    "kreditkort", "kortnr"),
 }
 # Presidio tags every US/UK/IN/AU/… recognizer as language "en", so language is the wrong
 # switch: an Indian PAN rule produced 290 false positives in one German transcript. The
@@ -2430,12 +2445,16 @@ def _encoded_mail_expected(text: str, start: int, end: int) -> bool:
     before, after = text[start - 1:start] if start > line else "", text[end:end + 1]
     if before not in ("", ",", ";", "\t") or after not in ("", "\n", "\r", ",", ";", "\t") or start - line > 4000:
         return False
-    # the column's header names a mail address: the first line of the text is the CSV header (a file, an export)
+    # the column's header names a mail address: a CSV header in the first five lines (a file, an export, a query
+    # result with a line before it); a row without such a header stays text (review of 0.6.24)
     sep = before or (after if after in (",", ";", "\t") else ",")
-    header = text[:text.find("\n")] if "\n" in text[:4000] else ""
-    cells = header.split(sep)
-    col = text.count(sep, line, start)
-    return line > 0 and col < len(cells) and "mail" in cells[col].lower()
+    import csv   # here: the hooks pay for every module at import
+    col = len(next(csv.reader([text[line:start + 1]], delimiter=sep), [""])) - 1
+    for head in text[:4000].split("\n")[:5]:
+        cells = next(csv.reader([head], delimiter=sep), [])
+        if len(cells) > col and any("mail" in c.lower() for c in cells) and text.find(head) < line:
+            return "mail" in cells[col].lower()
+    return False
 
 
 def is_public_test_value(value: str, kind: str) -> bool:
@@ -2950,7 +2969,9 @@ def _names_its_label(text: str, start: int, secret: str) -> bool:
 # again for 0.6.24 against the password-label rules of 0.6.16 and 0.6.17: the name of a constant with a dash and an
 # underscore, a time or a ratio after a colon label, a number of seconds before the full stop of a sentence, and a
 # keyword that opens a sentence in a markdown table cell
-_CONSTANT_NAME_RE = re.compile(r"[A-Z]+(?:-[A-Z]+)+_[A-Z0-9]*|[A-Z]{2,}(?:_[A-Z]{2,})+_\d{1,2}")
+# the words of a name (each with a vowel, or DB) and a counter of one or two digits: PROD-DB-PASS_7, MY_SECRET_VALUE_1;
+# a run of capitals without a vowel or with a longer suffix is a value (review of 0.6.24)
+_CONSTANT_NAME_RE = re.compile(r"(?:[A-Z]*[AEIOUY][A-Z]*|DB)(?:[-_](?:[A-Z]*[AEIOUY][A-Z]*|DB))+_\d{1,2}")
 _TIME_OR_RATIO_RE = re.compile(r"\d+:[a-z]+")
 _PROSE_AFTER_RE = re.compile(r" (?:and|or|of|for|with|to|in|the|is|are|und|oder|der|die|das|mit|für|ist|sind)"
                              r"(?![^\W_])")
@@ -3540,6 +3561,7 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
     except ImportError:   # a copy of detect.py without its sibling modules
         return
     allowed, off = allow_list()
+    by_start, gone = None, set()
     for start, end, kind, typ in sorted(personal.hits(text, _CHANNEL[0], _pii_regions_cached())):
         if enabled is not None and kind not in enabled and "personal:" + kind not in enabled:
             continue
@@ -3555,19 +3577,29 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
             # value. A phone number wrapped over two lines takes the first line that the phone rule found. Any other
             # hit keeps its span
             lo, hi = bisect.bisect_left(taken_starts, start), bisect.bisect_left(taken_starts, end)
-            inside = [f for f in found if start <= f.start and f.end <= end and f.type not in SECRET_TYPES]
-            wider = typ == personal.ADDRESS or (kind == "phone-wrapped-line" and all(f.type == typ for f in inside))
-            if not wider or not inside or hi - lo != len(inside) or (
+            if (typ != personal.ADDRESS and kind != "phone-wrapped-line") or hi == lo or hi - lo > 32 or (
                     lo > 0 and taken_ends[lo - 1] > start):
                 continue
+            if by_start is None:   # once per scan: a list scan per overlap was quadratic in the hits (review)
+                by_start = {f.start: f for f in found}
+            inside = [by_start[x] for x in taken_starts[lo:hi] if x in by_start]
+            inside = [f for f in inside if f.end <= end and f.type not in SECRET_TYPES]
+            wider = typ == personal.ADDRESS or all(f.type == typ for f in inside)
+            if not wider or not inside or hi - lo != len(inside):
+                continue
+            gone.update(id(f) for f in inside)   # removed from `found` once, after the loop
             for f in inside:
-                found.remove(f)
+                by_start.pop(f.start, None)
                 i = bisect.bisect_left(taken_starts, f.start)
                 del taken_starts[i], taken_ends[i]
         found.append(Match(kind, typ, value, start, end))
+        if by_start is not None:
+            by_start[start] = found[-1]
         i = bisect.bisect_left(taken_starts, start)
         taken_starts.insert(i, start)
         taken_ends.insert(i, end)
+    if gone:
+        found[:] = [f for f in found if id(f) not in gone]
 
 
 _WINDOW_BEFORE = 2048  # context a rule may read before a value: a label 200, a context word 80, an AWS key id up to

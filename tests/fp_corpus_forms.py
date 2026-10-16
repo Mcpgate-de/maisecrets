@@ -189,6 +189,10 @@ FORMS_NO_HIT = [
     ("imei", "device imei 490154203237518 registered"),
     ("numpy row", "[[0.4532015112830366 0.1234 0.5678 0.9012]]"),
     ("base64 of a name after a key", 'apiKey = "' + "c3RhZ2luZy11c2Vy" + '"'),
+    # ---------------------------------------------------------------- review round 2 of 0.6.24
+    ("fhir identifier flag", '{"identifierRequired": false, "system": "urn:member-id", "value": "BUILD-13579"}'),
+    ("order id in groups", "order_id=" + "4539 1488 " + "0343 6467"),
+    ("five digit groups", "4539 1488 " + "0343 6467 0001"),
     ("twilio doc template", "Your Account SID starts with AC; copy it from the console (ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)."),
     ("uppercase AC hex in a dump", "0x0010: AC12 FF00 9A3B 4C5D 6E7F 8091 A2B3 C4D5"),
 ]
@@ -199,6 +203,17 @@ FORMS_HIT = [
     ("postman secret", '{"key": "password", "value": "' + "8fK2" + "qLw9Zx4Rp7Tn" + '"}', ["8fK2" + "qLw9Zx4Rp7Tn"]),
     ("har header", '{"name": "x-internal-token", "value": "' + T2 + '"}', [T2]),
     ("card in groups", "row 17: " + "4532 0151 " + "1283 0366", ["4532 0151 " + "1283 0366"]),
+    ("card after pan", '{"pan": "' + "45320151" + "12830366" + '"}', ["45320151" + "12830366"]),
+    ("card after a swedish word", "Kortnummer: " + "45320151" + "12830366", ["45320151" + "12830366"]),
+    ("postman password counter", '{"key": "password2", "value": "' + "Dragon!" + "Tiger88" + '"}', ["Dragon!" + "Tiger88"]),
+    ("user slash with words", "also my login " + "jdoe.ops" + " / " + "Summer" + "2024!x", ["Summer" + "2024!x"]),
+    ("fhir pretty passport", '{\n  "identifier": [\n    {\n      "type": {"coding": [{"code": "PPN"}]},\n      '
+     '"system": "http://hl7.org/fhir/sid/passportNumber",\n      "value": "' + "X4471" + "9022" + '"\n    }\n  ]\n}',
+     ["X4471" + "9022"]),
+    ("name patient_name", "patient_name: " + "王" + "小明", ["王" + "小明"]),
+    ("dl in json", '{"DL": "' + "D7731" + "904" + '"}', ["D7731" + "904"]),
+    ("address level", "Address: " + "Level 3, 1 Martin Place, Sydney 2000", ["Level 3, 1 Martin Place, Sydney 2000"]),
+    ("encoded mail after a line", "Query returned 2 rows\nname,email\nDana," + "dana.okafor" + "%40mailbox-test.net", ["dana.okafor" + "%40mailbox-test.net"]),
     ("hex48 token prose", "the session token was " + T1 + " until the rotation", [T1]),
     ("redis auth", '1729000200.000 [0 10.0.0.5:51236] "AUTH" "' + "Wq%7r" + "Tz9Lp2Kx" + '"', ["Wq%7r" + "Tz9Lp2Kx"]),
     ("login call", 'server.login("' + "ops.mailer" + '", "' + "Rz%4" + "mKq9Lw" + '")', ["Rz%4" + "mKq9Lw"]),

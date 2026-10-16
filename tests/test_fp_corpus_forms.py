@@ -44,7 +44,11 @@ OWNER = {
     "name cjk": "name-non-latin-after-label", "name latin ext": "name-after-label",
     "phone encoded": "phone-url-encoded", "phone wrapped": "phone-wrapped-line",
     "encoded mail sent to": "email-percent-encoded", "encoded mail csv cell": "email-percent-encoded",
-    "card in groups": "credit-card",
+    "card in groups": "credit-card", "card after pan": "credit-card", "card after a swedish word": "credit-card",
+    "postman password counter": "secret-postman-variable", "user slash with words": "secret-after-user-slash",
+    "fhir pretty passport": "id-number-fhir-identifier", "name patient_name": "name-non-latin-after-label",
+    "dl in json": "id-number-after-record-label", "address level": "address-after-label",
+    "encoded mail after a line": "email-percent-encoded",
 }
 
 

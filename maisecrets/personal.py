@@ -403,7 +403,8 @@ _SAS_KEY_RE = re.compile(r"(?i)\bSharedAccessKey=([A-Za-z0-9+/_=-]{16,256})(?![A
 # a Postman or Insomnia variable, a HAR header: {"key"|"name": "<secret word>", "value": "..."}
 _KV_SECRET_RE = re.compile(r"\"(?:key|name)\"\s*:\s*\"([^\"\n]{1,60})\"\s*,\s*\"value\"\s*:\s*\"([^\"\n]{6,512})\"")
 _SECRET_NAME_PARTS = frozenset({"password", "passwd", "pwd", "secret", "token", "apikey", "pass", "credential",
-                                 "credentials"})
+                                 "credentials", "auth", "passphrase", "bearer", "jwt", "privatekey", "signingkey",
+                                 "clientkey", "accesskey", "secretkey"})
 _META_NAME_RE = re.compile(r"(?i)(?:type|url|uri|name|header|policy|length|len|ttl|seconds|expiry|expires|endpoint|path"
                            r"|id|ids|hint|label|format|scheme|prefix|mode|kind|version|count|audience|issuer|provider"
                            r"|scope|store|tokenizer)$")
@@ -419,15 +420,18 @@ def _name_parts(name: str) -> list:
 def _secret_name(name: str) -> bool:
     parts = _name_parts(name)
     joined = ["".join(parts[i:i + 2]) for i in range(len(parts) - 1)]
-    return any(p in _SECRET_NAME_PARTS for p in parts + joined)
+    # a part with a counter counts as its word: password2, token_1
+    return any(p.rstrip("0123456789") in _SECRET_NAME_PARTS for p in parts + joined)
 
 
 def _words_inside(v: str) -> bool:
     """A value with a dictionary word of five letters or more in it (Release2026Alpha, Billing2FA-Setup) is a name or
     a placeholder: a chosen password or a key has none (holdout values of 0.6.21, review of 0.6.24)."""
     from .detect import _word_set
+    if re.search(r"[^\w.-]", v):
+        return False   # a sign other than - _ . (Summer2024!x, Sunshine#2024): a chosen password, words or not
     words = _word_set()
-    return any(r.lower() in words for r in re.findall(r"[A-Z]?[a-z]{4,}|[A-Z]{5,}", v))
+    return any(r.lower() in words for r in re.findall(r"[A-Z][a-z]{4,}|[a-z]{5,}|[A-Z]{5,}", v))
 
 
 _HEX48_RE = re.compile(r"(?i)(?<![a-z])(token|code|secret|key)(?![a-z])[^\n]{0,24}?(?<![0-9a-fA-F])([0-9a-f]{48})"
@@ -441,13 +445,30 @@ _SQL_CREDS_RE = re.compile(r"(?i)INSERT INTO \w*(?:cred|passw|secret|login)\w*\s
 _USER_SLASH_RE = re.compile(r"(?i)(?<![a-z])(?:login|user|creds?|credentials|account)(?![a-z])[^\n]{0,30}?(?<!\S)"
                             r"[\w.@-]{2,64} / (\S{8,64})(?!\S)")
 _FHIR_RE = re.compile(r"(?i)\"system\"\s*:\s*\"([^\"\n]{0,80})\"\s*,\s*\"value\"\s*:\s*\"([^\"\n]{4,40})\"")
-_FHIR_SYSTEM_RE = re.compile(r"(?i)(?:^|[/:._#-])(?:mrn|passport(?:-[a-z]{2,3})?|ssn|nid|national[-_]?id|tax[-_]?id"
+_FHIR_SYSTEM_RE = re.compile(r"(?i)(?:^|[/:._#-])(?:mrn|passport(?:-[a-z]{2,3}|[-_]?(?:number|no))?|ssn|nid"
+                             r"|national[-_]?id|tax[-_]?id"
                              r"|member[-_]?id|insurance(?:[-_]member)?(?:[-_]id)?)(?:$|[/:._#-])")
+_IDENTIFIER_KEY_RE = re.compile(r"\"identifier\"\s*:\s*\[")
+
+
+def _in_identifier_array(text: str, pos: int, most: int = 4000) -> bool:
+    """`pos` lies inside a FHIR `"identifier": [...]` array: the last such key within `most` characters before it,
+    with its bracket still open (an `identifierRequired` flag or a closed array does not count)."""
+    lo = max(0, pos - most)
+    last = None
+    for m in _IDENTIFIER_KEY_RE.finditer(text, lo, pos):
+        last = m
+    if last is None:
+        return False
+    seg = text[last.end():pos]
+    return seg.count("[") - seg.count("]") >= 0
+
+
 _VERSION_RE = re.compile(r"(?i)^v?\d+(?:\.\d+)+$")
 _ID_VALUE = r"((?-i:[A-Z0-9](?:[A-Z0-9]|[ -](?=[A-Z0-9])){4,24}))(?![A-Za-z0-9])"
 _RECORD_LABEL_RE = re.compile(
     r"(?i)(?<![a-z])(?:insurance(?:[ _-]?member)?(?:[ _-]?id)?|member(?:[ _-]?(?:id|no|number|#))?"
-    r"|record(?:[ _-]?(?:no|number|#))?|patient(?:[ _-]?id)?|account|(?<=\")nid(?=\")|(?-i:DL)(?=[\s:#]))"
+    r"|record(?:[ _-]?(?:no|number|#))?|patient(?:[ _-]?id)?|account|(?<=\")nid(?=\")|(?-i:DL)(?=[\"']?[\s:#]))"
     r"(?![a-z])[\"']?"
     r"(?:\s{0,3}(?:is|number|no\.?|#))?\s{0,3}[:=#]?\s{0,3}[\"']?" + _ID_VALUE)
 _ID_LETTERS_RE = re.compile(r"(?i)(?<![a-z])(?:member(?:[ _-]?id)?|passport|insurance(?:[ _-]?id)?)(?![a-z])[\"']?"
@@ -465,15 +486,17 @@ _ADDRESS_LABEL_RE = re.compile(
     r"|endere[cç]o|direcci[oó]n|adresse|location)[\"']?\s{0,3}:\s{0,3}[\"']?(;*)([^\n\"|;]{8,100}?)"
     r"(?=[\"\n|]|\s{2}|\.\s|$)")
 # a house number and a street word, in either order: 12 Harbour Lane, Rua das Flores 12,
-_HOUSE_RE = re.compile(r"\b\d{1,5}[A-Za-z]?(?:/\d{1,4})?,? [A-ZÀ-Þ][a-zà-ÿ]{2,}|[A-ZÀ-Þ][a-zà-ÿ]{2,} \d{1,5}[A-Za-z]?,")
-_NOT_AN_ADDRESS_RE = re.compile(r"(?i)\b(?:rack|unit|floor|room|row|slot|zone|version|build|schema|field|width|height"
-                                r"|level|signal|size|page|line|port|step|round|score|accepted|proposed|rejected)\b|0x")
+_HOUSE_RE = re.compile(r"\b\d{1,5}[A-Za-z]?(?:/\d{1,4})?,? [A-ZÀ-Þ][a-zà-ÿ]{2,}\b(?! \d)"
+                       r"|[A-ZÀ-Þ][a-zà-ÿ]{2,} \d{1,5}[A-Za-z]?,")
+_NOT_AN_ADDRESS_RE = re.compile(r"(?i)\b(?:rack|row|slot|zone|version|build|schema|width|height|signal|size|page"
+                                r"|step|round|score|accepted|proposed|rejected)\b|0x")
 _IN_ADDRESS_RE = re.compile(r"\b\d{1,4}(?:/\d{1,4})?, [^\n]{10,90}?, [A-Z][a-z]+ \d{6}\b")
 _NONLATIN = "Ͱ-ϿЀ-ӿ֐-׿؀-ۿऀ-ॿঀ-৿"
 _CJK_NAME = "一-鿿가-힯぀-ヿ"
 # labels that name a person and nothing else; `name`, `owner` and `admin` also name a product, a language or a group
 _NONLATIN_LABEL_RE = re.compile(
-    r"(?i)(?:(?<![a-z_])(?:full[ _-]?name|native name|employee[ _-]?name|beneficiary)[\"']?[ \t]{0,3}[:=]?"
+    r"(?i)(?:(?<![a-z_])(?:full[ _-]?name|native name|(?:employee|patient|customer|contact|recipient)[ _-]?name"
+    r"|beneficiary)[\"']?[ \t]{0,3}[:=]?"
     r"|^fn[\"']?[ \t]{0,3}[:=])[ \t]{0,3}[\"']?"
     r"((?:[" + _NONLATIN + r"]{2,20}(?: [" + _NONLATIN + r"]{2,20}){1,3})|[" + _CJK_NAME + r"]{2,5})(?![\w])", re.M)
 # names of a language in its own script: a locale table is no person
@@ -483,6 +506,14 @@ _AUTONYMS = frozenset({"русский", "українська", "беларус
 _PHONE_URL_RE = re.compile(r"(?i)(?<![a-z])(?:phone|tel|mobile|msisdn|cell)[\w-]{0,10}=(%2B\d{7,15})(?!\d)")
 _PHONE_WRAP_RE = re.compile(r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?\d{2,5}(?:[ \-]\d{2,5}){0,2}-\n[ \t]{0,4}\d{2,5}"
                             r"(?:[ \-]\d{2,5}){0,3}(?![\w.]\d|\w)")
+
+
+def _line_back(text: str, pos: int, most: int = 120) -> int:
+    """The start of the line of `pos`, at most `most` characters back: the search itself is bounded, so a long line of
+    hits stays linear (review of 0.6.24)."""
+    lo = max(0, pos - most)
+    nl = text.rfind("\n", lo, pos)
+    return nl + 1 if nl >= 0 else lo
 
 
 def _cut_at_a_word(v: str) -> str:
@@ -545,7 +576,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
     if "id-number-fhir-identifier" in want and "\"system\"" in text:
         for m in _FHIR_RE.finditer(text):
             v = m.group(2)
-            if "identifier" not in text[max(0, m.start() - 300):m.start()]:
+            if not _in_identifier_array(text, m.start()):
                 continue   # a FHIR identifier stands in an `identifier` array; `{"system": "license", ...}` is metadata
             if _FHIR_SYSTEM_RE.search(m.group(1)) and sum(c.isdigit() for c in v) >= 5 and not _VERSION_RE.match(v) \
                     and not v.startswith(_NOT_A_VALUE_START) and not _placeholder_digits(v):
@@ -591,7 +622,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
                 out.append((m.start(1), m.end(1), "id-number-under-sql-alias", ID_NUMBER))
     if "address-jp-postcode" in want and "〒" in text:
         for m in _JP_ADDRESS_RE.finditer(text):
-            line = max(text.rfind("\n", 0, m.start()) + 1, m.start() - 120)   # bounded: one long line stays linear
+            line = _line_back(text, m.start())
             if not _JP_COMPANY_RE.search(text, line, m.end()):
                 out.append((m.start(), m.end(), "address-jp-postcode", ADDRESS))
     if "address-after-label" in want:
@@ -601,7 +632,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
             v = m.group(3).strip()
             # the check for a company or a public place reads at most 120 characters of the line before the label:
             # unbounded, a long line of addresses took quadratic time (review of 0.6.24)
-            line = max(text.rfind("\n", 0, m.start()) + 1, m.start() - 120)
+            line = _line_back(text, m.start())
             if (any(c.isdigit() for c in v) and "," in v and _HOUSE_RE.search(v)
                     and "://" not in v and not re.search(r"\d+\.\d+\.\d+|:\d{2,5}\b|[{}<>$()=_\[\]#@]", v)
                     and not _NOT_A_HOME_RE.search(text, line, m.end()) and not _NOT_AN_ADDRESS_RE.search(v)):
@@ -609,7 +640,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
                 out.append((s0, s0 + len(v), "address-after-label", ADDRESS))
     if "address-in-form" in want and "in" in regions:
         for m in _IN_ADDRESS_RE.finditer(text):
-            line = max(text.rfind("\n", 0, m.start()) + 1, m.start() - 120)
+            line = _line_back(text, m.start())
             if m.group().count(",") >= 3 and not _NOT_A_HOME_RE.search(text, line, min(len(text), m.end() + 80)):
                 out.append((m.start(), m.end(), "address-in-form", ADDRESS))
     if "name-non-latin-after-label" in want:

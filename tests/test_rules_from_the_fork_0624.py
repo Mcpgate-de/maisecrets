@@ -116,6 +116,7 @@ class PasswordLabelChecksTests(unittest.TestCase):
         "password = " + J(["PRD", "_X7K9", "_QW2Z"]),                  # random capitals stay a value
         "secret: " + J(["4", ":f9Kq2", "Lm7"]),
         "db_pass: " + J(["hunter", "2", "!x"]),
+        "password = " + J(["XK-", "QZ_", "7R9W2"]),                    # capitals without a vowel and a long suffix
         "secret: " + J(["rota", "tion"]),                             # one word after a label in plain text stays
     ]
 
