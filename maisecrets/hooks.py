@@ -3004,7 +3004,7 @@ def _holds_a_guarded_folder(value: str) -> bool:
     home = os.path.expanduser("~")
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude")
     spellings = {str(HOME), os.path.realpath(str(HOME)), config_dir, os.path.realpath(config_dir),
-                 str(vault_refs.claude_json()), os.path.join(home, ".ssh"), "~/.ssh", "~/.claude", "~/.maisecrets",
+                 *vault_refs.config_files(), os.path.join(home, ".ssh"), "~/.ssh", "~/.claude", "~/.maisecrets",
                  "$HOME/.ssh", "${HOME}/.ssh", "$HOME/.claude", "${HOME}/.claude"}
     return any(sp and sp in value for sp in spellings)
 
@@ -3018,7 +3018,7 @@ def _a_guarded_path(v: str, cwd: str) -> bool:
         real = os.path.realpath(os.path.expanduser(full))
         config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
         folder = os.path.realpath(config_dir)
-        return real == os.path.realpath(str(vault_refs.claude_json())) or real == folder \
+        return real in {os.path.realpath(f) for f in vault_refs.config_files()} or real == folder \
             or real.startswith(folder + os.sep)
     except (OSError, ValueError):
         return True                             # a path we cannot judge is refused, not served

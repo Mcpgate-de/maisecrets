@@ -1,0 +1,13 @@
+# c27-the-header-goes-into-the-file-the-client-uses: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-the-header-goes-into-the-file-the-client-uses"
+control = "C27"
+statement = "When the client uses a non-empty .config.json in its config folder, maisecrets reads the server URL from it and writes the header there; a stale .claude.json beside it keeps its bytes."
+runner = ["tests/test_vault_config_path.py::Write::test_the_header_goes_into_config_json"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''    legacy, other = legacy_file(), global_file()
+    try:'''
+replace = '''    legacy, other = legacy_file(), global_file()
+    return other
+    try:'''
