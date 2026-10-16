@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.6.25] - 2026-10-16
+
+### Fixes
+
+- masks a vCard address, name and birth date written in their fields, as contact exports write them (da3af5a)
+- masks an encoded e-mail address in a CSV column named contact, login, username, recipient, courriel or correo (6e17722)
+- masks the address, the name and the birth date of a vCard property with parameters, such as ADR;TYPE=home: (7af5ed4)
+
 ## [0.6.24] - 2026-10-16
 
 ### Features
