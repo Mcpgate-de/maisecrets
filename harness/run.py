@@ -130,6 +130,50 @@ SCENARIOS = {
         "with_mod": {"expect_requests": 1, "expect_blocked": False, "expect_placeholders": ["\u27e6SECRET_c1\u27e7"],
                      "expect_hook_prompt": "\u27e6SECRET_c1\u27e7"},
     },
+    # ms:(…), a check of a value: blocked on every client, with the mod too (the mod passes it to the settings hook
+    # without a rewrite), and the verdict goes to the person only. The value is in no request and, as typed, not in the
+    # transcript (maisecrets/check_value.py, C29)
+    "check_value_caught": {
+        "prompt": f"ms:({MARK})",
+        "turns": [{"text": "unreachable"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+        "with_mod": {"expect_blocked": False, "expect_dropped": True},
+        "expect_output": ["\u2713 maisecrets would mask this: SECRET (gitlab-pat)"],
+        "expect_not_in_transcript": ["ms:("],
+    },
+    # a value with no shape (quotes, $( and a closing bracket inside): not caught. `claude -p` is a program, so it is
+    # not stored either; the answer says so, and the value goes nowhere
+    "check_value_not_caught": {
+        "prompt": f"ms:({MARK2})",
+        "turns": [{"text": "unreachable"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+        "with_mod": {"expect_blocked": False, "expect_dropped": True},
+        "expect_output": ["maisecrets would NOT have caught this. It was not stored"],
+        "expect_not_in_transcript": ["ms:("],
+    },
+    # the mod gets no verdict (its question to dispatch.py fails): it drops the check with its own sentence
+    "check_value_mod_fails": {
+        "prompt": f"ms:({MARK2})",
+        "env": {"MAISECRETS_TEST_FAULT": "mod-" + "prompt"},
+        "turns": [{"text": "unreachable"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+        "with_mod": {"expect_blocked": False, "expect_dropped": True,
+                     "expect_output": ["maisecrets could not check this value. Nothing was sent."]},
+        "expect_not_in_transcript": ["ms:("],
+    },
+    # no closing bracket: still a check, still blocked
+    "check_value_no_bracket": {
+        "prompt": f"Ms:( {MARK} and more words",
+        "turns": [{"text": "unreachable"}],
+        "expect_requests": 0,
+        "expect_blocked": True,
+        "with_mod": {"expect_blocked": False, "expect_dropped": True},
+        "expect_output": ["\u2713 maisecrets would mask this"],
+        "expect_not_in_transcript": ["Ms:("],
+    },
     # the mod's question fails on the real client (an injected fault: dispatch.py mod-prompt exits 1). The mod
     # passes the prompt on unchanged and the settings hook blocks it: a broken rewrite never lets a value through
     "prompt_secret_mod_fails": {
@@ -718,6 +762,8 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             fails.append(f"{text[:12]!r}... reached the model")
     if sc.get("expect_blocked") and "blocked by hook" not in (r.stdout + r.stderr):
         fails.append("prompt was not blocked")
+    if sc.get("expect_dropped") and "Prompt dropped by a hook" not in (r.stdout + r.stderr):
+        fails.append("the mod did not drop the prompt")
     for text in sc.get("expect_output", []):
         # what the person sees in the client's own output, not what reaches the model
         if text not in r.stdout + r.stderr:
@@ -796,6 +842,13 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
             session_ids.add(sid)
     time.sleep(2)   # the blocked prompt's record is scrubbed by a detached child shortly after the session ends
     transcripts = [t for sid in session_ids for t in (Path.home() / ".claude" / "projects").glob(f"*/{sid}.jsonl")]
+    if not session_ids and sc.get("expect_dropped"):
+        # a prompt the mod dropped reaches no hook, so no payload names the session: the project folder of this
+        # run's working directory does (Claude Code writes '_' as '-')
+        slug = re.sub(r"[^A-Za-z0-9-]", "-", work.name)
+        transcripts = list((Path.home() / ".claude" / "projects").glob(f"*{slug}-proj/*.jsonl"))
+        if not transcripts:
+            fails.append("transcript not found for the dropped prompt; the on-disk check did not run")
     if session_ids and not transcripts:
         fails.append("transcript not found for the session; the on-disk check did not run")
     for t in transcripts:
