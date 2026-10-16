@@ -512,6 +512,10 @@ class CodexHooks(Base):
     """The real hooks with Codex payloads against the fake server of harness/vault_server.py."""
 
     def setUp(self) -> None:
+        import _hygiene
+        # first, so its check runs last, after the CODEX_HOME of the test is gone: a Bash rewrite starts a
+        # value-serving child, and the check takes it back
+        _hygiene.watch_children(self)
         super().setUp()
         sys.path.insert(0, str(ROOT / "harness"))
         from vault_server import VaultServer
@@ -597,6 +601,9 @@ class CodexHooks(Base):
                 "command": "printf '%s' '⟦NAME_2⟧' > n.txt"}))
             command = out["hookSpecificOutput"]["updatedInput"]["command"]
             self.assertNotIn(VALUES[1], command, "a value never stands in the command text")
+            # the command reads the value from its one-time pipe, as Codex would run it; the serving child ends
+            subprocess.run([shutil.which("bash"), "-c", command], cwd=self.proj, capture_output=True, timeout=30)
+            self.assertEqual((self.proj / "n.txt").read_text(), VALUES[1])
 
     def test_a_token_in_a_file_name_of_the_patch_is_refused(self) -> None:
         self.call("customers: ⟦EMAIL_1⟧")
