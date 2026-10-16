@@ -11,10 +11,13 @@ into the data directory (default ~/.cache/maisecrets-datasets/cloakroom, never i
 sha256 of each file. --bench reads the same files from a Cloakroom checkout instead; the sha256 check is the same.
 
 run scans each sample with detect.scan(text, channel="tool") of the checkout under --maisecrets (and of --baseline),
-once per regions setting, each in a new process with a fresh temp home. A planted value counts as leaked when it still
-appears in the text after every match is replaced. A clean sample (no planted value) counts as a false alarm when a
-match changes its text. Each sample falls into half D or half C by the first 8 hex digits of sha256 of "<set>/<id>"
-(even: D); the rules of 0.6.21 were written from the values of half D.
+once per regions setting, each in a new process with a fresh temp home and no variable of a client or of maisecrets;
+it refuses to run when a machine policy is installed or the scan reports other regions. A planted value counts as
+leaked when it still appears in the text after every match is replaced by a placeholder such as `[EMAIL_3]`, as in
+the scratch script of the first numbers (a value of one to three characters can also appear inside a placeholder).
+A clean sample (no planted value) counts as a false alarm when a match changes its text. Each sample falls into half
+D or half C by the first 8 hex digits of sha256 of "<set>/<id>" (even: D); the rules of 0.6.21 were written from the
+values of half D.
 
 The class of a planted value comes from its shape alone (`value_class`, written for this measurement); the classes
 are the rows of the class table in docs/BENCHMARKS.md.
@@ -89,7 +92,8 @@ def _card(s: str, digits: str) -> bool:
 
 
 def value_shape(v: str) -> str:
-    """The shape of a planted value, from the value alone (a name is two to five capitalised words without a digit)."""
+    """The shape of a planted value, from the value alone (a name is one capitalised word, or two to five, without a
+    digit)."""
     s = v.strip()
     if re.fullmatch(r"[\w.+%-]+@[\w-]+(\.[\w-]+)+", s):
         return "email"
@@ -188,9 +192,13 @@ def fetch(data: Path) -> None:
         req = urllib.request.Request(SOURCE["raw"].format(commit=SOURCE["commit"], name=name),
                                      headers={"User-Agent": USER_AGENT})
         tmp = dest.with_name(dest.name + ".part")
-        with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as fh:
-            shutil.copyfileobj(resp, fh, 1 << 20)
-        tmp.replace(dest)
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as fh:
+                shutil.copyfileobj(resp, fh, 1 << 20)
+            tmp.replace(dest)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
     verify(data)
 
 
@@ -222,6 +230,14 @@ def _scan_child(ms_dir: str, bench: str) -> int:
     import inspect
     from maisecrets import detect
     has_channel = "channel" in inspect.signature(detect.scan).parameters
+    regions = list(detect.active_regions().regions) if hasattr(detect, "active_regions") else None
+    try:
+        from maisecrets import vault
+        import platform
+        policy = vault.POLICY_PATHS.get(platform.system())
+        policy = bool(policy is not None and policy.exists())
+    except (ImportError, AttributeError):
+        policy = False
     values, negatives = [], []
     for s, sid, text, planted in load(Path(bench)):
         found = detect.scan(text, channel="tool") if has_channel else detect.scan(text)
@@ -233,7 +249,8 @@ def _scan_child(ms_dir: str, bench: str) -> int:
             continue
         for idx, v in enumerate(planted):
             values.append([s, sid, idx, v in masked])
-    json.dump({"values": values, "negatives": negatives}, sys.stdout)
+    json.dump({"values": values, "negatives": negatives, "regions": regions, "policy": policy,
+               "channel": "tool" if has_channel else "none (scan() of this release has no channel)"}, sys.stdout)
     return 0
 
 
@@ -243,7 +260,8 @@ def scan_tree(ms_dir: str, bench: Path, regions: list, locale: str) -> dict:
     try:
         with open(os.path.join(home, "config.json"), "w", encoding="utf-8") as fh:
             json.dump({"backend": "jsonfile", "allow_plaintext_store": True, "regions": regions}, fh)
-        env = dict(os.environ)
+        # no variable of a client or of maisecrets reaches the scan: only the temp home and the locale
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("MAISECRETS", "CLAUDE", "CODEX"))}
         env[_HOME_VAR] = home
         env["MAISECRETS_LOCALE"] = locale
         r = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), "_scan", ms_dir, str(bench)],
@@ -251,9 +269,16 @@ def scan_tree(ms_dir: str, bench: Path, regions: list, locale: str) -> dict:
         if r.returncode != 0:
             # the child's traceback could quote a sample: name the failure only
             raise DataError(f"the scan with {ms_dir} failed (exit {r.returncode})")
-        return json.loads(r.stdout)
+        res = json.loads(r.stdout)
     finally:
         shutil.rmtree(home, ignore_errors=True)
+    if res.get("policy"):
+        raise DataError("a machine policy of maisecrets is installed on this computer; it changes the rules, so the "
+                        "counts would not be comparable. Measure on a computer without it")
+    ran = [r for r in res.get("regions") or () if r != "generic"]   # the generic rules run in every setting
+    if res.get("regions") is not None and sorted(ran) != sorted(regions):
+        raise DataError(f"the scan ran with the regions {','.join(ran)}, not {','.join(regions)}")
+    return res
 
 
 # ------------------------------------------------------------------------------------------------------- report
@@ -287,9 +312,12 @@ def _group(t: dict, run: str, sets: tuple, key: str, h: str) -> int:
     return sum(t["sets"][run].get(f"{s}|{key}|{h}", 0) for s in sets)
 
 
-def report(regions: str, t: dict, runs: tuple, names: dict) -> None:
+def report(regions: str, t: dict, runs: tuple, names: dict, channels: dict | None = None) -> None:
     arrow = " → ".join(names[r] for r in runs)
-    print(f"\nRegions {regions}, tool channel. Leaked and false alarms: {arrow}.\n")
+    chans = set((channels or {}).values()) or {"tool"}
+    channel = "tool channel" if chans == {"tool"} else "channel " + "; ".join(
+        f"{names[r]}: {channels[r]}" for r in runs)
+    print(f"\nRegions {regions}, {channel}. Leaked and false alarms: {arrow}.\n")
     print(f"| Set | Values, D | Leaked D, {arrow} | Values, C | Leaked C, {arrow} | Clean samples | "
           f"False alarms, {arrow} |")
     print("|---|---|---|---|---|---|---|")
@@ -326,6 +354,8 @@ def _label(ms_dir: str) -> str:
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")    # the arrows of the tables, also into a file on Windows
     if argv[:1] == ["_scan"]:
         return _scan_child(argv[1], argv[2])
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -357,6 +387,7 @@ def main(argv=None) -> int:
         names = {k: _label(v) for k, v in trees.items()}
         if len(set(names.values())) < len(names):
             names = {k: f"{v} ({k})" for k, v in names.items()}
+        classes = {(s, sid, idx): value_class(v) for s, sid, _t, p in samples for idx, v in enumerate(p)}
         n_values = sum(len(p) for *_x, p in samples)
         n_clean = sum(1 for *_x, p in samples if not p)
         print(f"Cloakroom {SOURCE['commit'][:10]}, holdout v2 to v7: {n_values} planted values in "
@@ -368,11 +399,11 @@ def main(argv=None) -> int:
             runs = {k: scan_tree(v, bench, regions, a.locale) for k, v in trees.items()}
             t = tables(samples, runs)
             label = " ".join(regions)
-            report(label, t, tuple(trees), names)
+            report(label, t, tuple(trees), names, {k: v.get("channel", "tool") for k, v in runs.items()})
             result["regions"][label] = {
                 "counts": t,
-                "values": {k: [[s, sid, idx, half(s, sid), leaked] for s, sid, idx, leaked in v["values"]]
-                           for k, v in runs.items()},
+                "values": {k: [[s, sid, idx, half(s, sid), classes[(s, sid, idx)], leaked]
+                               for s, sid, idx, leaked in v["values"]] for k, v in runs.items()},
             }
     except DataError as exc:
         print(f"measure_holdouts: {exc}", file=sys.stderr)

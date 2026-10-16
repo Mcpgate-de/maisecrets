@@ -47,6 +47,13 @@ class ClassTests(unittest.TestCase):
             "+1 (202) 555-0100": "phone numbers", "4111 1111 1111 1111": "ID numbers",
             "Abc123/def456+ghi789=": "tokens and passwords", "10.0.0.1": "other",
         }
+        cases.update({
+            "Zebrafinch": "names",                    # one capitalised word
+            "4111 1111 1111 1112": "phone numbers",   # 16 digits that fail the Luhn check
+            "555 0100 0000 0008": "phone numbers",    # Luhn-valid, but a fictional 555-01xx number
+            "/home/testuser/app": "user names",       # a path
+            "123-45-6789": "ID numbers",              # national id shape
+        })
         for value, cls in cases.items():
             self.assertEqual(mh.value_class(value), cls, value)
         self.assertEqual(set(mh.CLASS_OF_SHAPE.values()), set(mh.CLASSES))
@@ -59,18 +66,31 @@ class RunTests(unittest.TestCase):
         name = "Talia Brennwald"
         rows = {"holdout_v2": [{"id": "a", "text": f"Name: {name}", "planted": [name]},
                                {"id": "b", "text": "word Zebrafinch stays", "planted": ["Zebrafinch"]},
-                               {"id": "c", "text": "nothing personal here", "planted": []}]}
+                               {"id": "c", "text": "nothing personal here", "planted": []},
+                               # a clean sample with a hit is a false alarm
+                               {"id": "d", "text": "Name: Morwen Oakridge", "planted": []},
+                               # two hits: the planted value is the first; every hit is masked, not only the last
+                               {"id": "e", "text": "Name: Idris Feldmark\nName: Morwen Oakridge",
+                                "planted": ["Idris Feldmark"]}],
+                "holdout_v7": [{"id": "f", "text": "word Quillback stays", "planted": ["Quillback"]}]}
         for s in mh.SETS:
             with open(bench / f"{s}.jsonl", "w", encoding="utf-8") as fh:
                 for r in rows.get(s, []):
                     fh.write(json.dumps(r) + "\n")
         res = mh.scan_tree(str(ROOT), bench, ["us"], "en_US")
         self.assertEqual(sorted(map(tuple, res["values"])), [("holdout_v2", "a", 0, False),
-                                                             ("holdout_v2", "b", 0, True)])
-        self.assertEqual(res["negatives"], [["holdout_v2", "c", False]])
+                                                             ("holdout_v2", "b", 0, True),
+                                                             ("holdout_v2", "e", 0, False),
+                                                             ("holdout_v7", "f", 0, True)])
+        self.assertEqual(res["negatives"], [["holdout_v2", "c", False], ["holdout_v2", "d", True]])
         t = mh.tables(mh.load(bench), {"maisecrets": res})
-        self.assertEqual(t["class_values"]["names"], 2)            # a single capitalised word is a name too
-        self.assertEqual(sum(t["classes"]["maisecrets"].values()), 1)
+        self.assertEqual(t["class_values"]["names"], 4)            # a single capitalised word is a name too
+        self.assertEqual(sum(t["classes"]["maisecrets"].values()), 2)
+        self.assertEqual(t["sets"]["maisecrets"]["holdout_v2|false_alarms|"], 1)
+        self.assertEqual(mh._group(t, "maisecrets", mh.SETS[:-1], "clean", ""), 2)
+        leaked = {g: sum(mh._group(t, "maisecrets", sets, "leaked", h) for h in "DC")
+                  for g, sets in (("v2-v6", mh.SETS[:-1]), ("v2-v7", mh.SETS))}
+        self.assertEqual(leaked, {"v2-v6": 1, "v2-v7": 2})        # v7 counts only in the second sum
         import contextlib
         import io
         buf = io.StringIO()
@@ -79,6 +99,36 @@ class RunTests(unittest.TestCase):
         self.assertNotIn(name, buf.getvalue())
         self.assertNotIn("Zebrafinch", buf.getvalue())
         self.assertIn("| v2 to v7 |", buf.getvalue())
+
+    def test_the_command_writes_no_value_to_stdout_stderr_or_the_out_file(self):
+        bench = Path(tempfile.mkdtemp(prefix="maisecrets-holdouts-test-"))
+        self.addCleanup(shutil.rmtree, bench, True)
+        name, text = "Talia Brennwald", "Name: Talia Brennwald"
+        files = {}
+        for s in mh.SETS:
+            body = json.dumps({"id": "a", "text": text, "planted": [name]}) + "\n" if s == "holdout_v4" else ""
+            (bench / f"{s}.jsonl").write_text(body, encoding="utf-8")
+            files[f"{s}.jsonl"] = mh.sha256_of(bench / f"{s}.jsonl")
+        out = bench / "result.json"
+        saved = dict(mh.SOURCE["files"])
+        mh.SOURCE["files"].clear()
+        mh.SOURCE["files"].update(files)
+        self.addCleanup(lambda: (mh.SOURCE["files"].clear(), mh.SOURCE["files"].update(saved)))
+        import contextlib
+        import io
+        o, e = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(o), contextlib.redirect_stderr(e):
+            rc = mh.main(["run", "--bench", str(bench), "--maisecrets", str(ROOT), "--regions", "us;de",
+                          "--out", str(out)])
+        self.assertEqual(rc, 0, e.getvalue())
+        written = out.read_text(encoding="utf-8")
+        for stream in (o.getvalue(), e.getvalue(), written):
+            self.assertNotIn("Brennwald", stream)
+            self.assertNotIn("Talia", stream)
+        res = json.loads(written)
+        self.assertEqual(sorted(res["regions"]), ["de", "us"])
+        row = ["holdout_v4", "a", 0, mh.half("holdout_v4", "a"), "names", False]
+        self.assertEqual(res["regions"]["us"]["values"]["maisecrets"], [row])
 
     def test_a_changed_file_is_refused(self):
         bench = Path(tempfile.mkdtemp(prefix="maisecrets-holdouts-test-"))
