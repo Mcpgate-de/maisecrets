@@ -98,7 +98,15 @@ class RunTests(unittest.TestCase):
             mh.report("us", t, ("maisecrets",), {"maisecrets": "this"})
         self.assertNotIn(name, buf.getvalue())
         self.assertNotIn("Zebrafinch", buf.getvalue())
-        self.assertIn("| v2 to v7 |", buf.getvalue())
+        printed = buf.getvalue()
+        rows = {line.split("|")[1].strip(): [c.strip() for c in line.split("|")[2:-1]]
+                for line in printed.splitlines() if line.startswith("| v2 to")}
+        # values D + C, leaked D + C, clean samples, false alarms: v7 counts only in the second row
+        for label, values, leaked in (("v2 to v6", 3, 1), ("v2 to v7", 4, 2)):
+            r = rows[label]
+            self.assertEqual(int(r[0]) + int(r[2]), values, label)
+            self.assertEqual(int(r[1]) + int(r[3]), leaked, label)
+            self.assertEqual((r[4], r[5]), ("2", "1"), label)
 
     def test_the_command_writes_no_value_to_stdout_stderr_or_the_out_file(self):
         bench = Path(tempfile.mkdtemp(prefix="maisecrets-holdouts-test-"))
@@ -129,6 +137,22 @@ class RunTests(unittest.TestCase):
         self.assertEqual(sorted(res["regions"]), ["de", "us"])
         row = ["holdout_v4", "a", 0, mh.half("holdout_v4", "a"), "names", False]
         self.assertEqual(res["regions"]["us"]["values"]["maisecrets"], [row])
+
+    def test_a_scan_with_other_regions_or_under_a_policy_is_refused(self):
+        mh.check_child({"regions": ["generic", "us"], "expected": ["generic", "us"], "policy": False})
+        mh.check_child({"regions": None, "expected": None, "policy": False})          # a release before regions
+        with self.assertRaises(mh.DataError):
+            mh.check_child({"regions": ["generic", "de"], "expected": ["generic", "us"], "policy": False})
+        with self.assertRaises(mh.DataError):
+            mh.check_child({"regions": ["generic", "us"], "expected": ["generic", "us"], "policy": True})
+
+    def test_an_alias_of_a_region_is_measured(self):
+        bench = Path(tempfile.mkdtemp(prefix="maisecrets-holdouts-test-"))
+        self.addCleanup(shutil.rmtree, bench, True)
+        for s in mh.SETS:
+            (bench / f"{s}.jsonl").write_text("", encoding="utf-8")
+        res = mh.scan_tree(str(ROOT), bench, ["GB"], "en_US")
+        self.assertIn("uk", res["regions"])
 
     def test_a_changed_file_is_refused(self):
         bench = Path(tempfile.mkdtemp(prefix="maisecrets-holdouts-test-"))

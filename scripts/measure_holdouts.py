@@ -232,6 +232,13 @@ def _scan_child(ms_dir: str, bench: str) -> int:
     has_channel = "channel" in inspect.signature(detect.scan).parameters
     regions = list(detect.active_regions().regions) if hasattr(detect, "active_regions") else None
     try:
+        # the regions of the config file alone, without a variable or a policy: what the scan must run with
+        from maisecrets import regions as regions_mod
+        with open(os.path.join(os.environ[_HOME_VAR], "config.json"), encoding="utf-8") as fh:
+            expected = list(regions_mod.resolve(json.load(fh)).regions)
+    except (ImportError, AttributeError, OSError, ValueError):
+        expected = None
+    try:
         from maisecrets import vault
         import platform
         policy = vault.POLICY_PATHS.get(platform.system())
@@ -249,7 +256,8 @@ def _scan_child(ms_dir: str, bench: str) -> int:
             continue
         for idx, v in enumerate(planted):
             values.append([s, sid, idx, v in masked])
-    json.dump({"values": values, "negatives": negatives, "regions": regions, "policy": policy,
+    json.dump({"values": values, "negatives": negatives, "regions": regions, "expected": expected,
+               "policy": policy,
                "channel": "tool" if has_channel else "none (scan() of this release has no channel)"}, sys.stdout)
     return 0
 
@@ -272,13 +280,18 @@ def scan_tree(ms_dir: str, bench: Path, regions: list, locale: str) -> dict:
         res = json.loads(r.stdout)
     finally:
         shutil.rmtree(home, ignore_errors=True)
+    check_child(res)
+    return res
+
+
+def check_child(res: dict) -> None:
+    """Refuse a scan that a machine policy changed, or that ran with other regions than its config file names."""
     if res.get("policy"):
         raise DataError("a machine policy of maisecrets is installed on this computer; it changes the rules, so the "
                         "counts would not be comparable. Measure on a computer without it")
-    ran = [r for r in res.get("regions") or () if r != "generic"]   # the generic rules run in every setting
-    if res.get("regions") is not None and sorted(ran) != sorted(regions):
-        raise DataError(f"the scan ran with the regions {','.join(ran)}, not {','.join(regions)}")
-    return res
+    ran, want = res.get("regions"), res.get("expected")
+    if ran is not None and want is not None and sorted(ran) != sorted(want):
+        raise DataError(f"the scan ran with the regions {','.join(ran)}, not {','.join(want)}")
 
 
 # ------------------------------------------------------------------------------------------------------- report

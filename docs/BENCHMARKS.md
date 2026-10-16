@@ -1064,7 +1064,7 @@ python3 -I scripts/measure_holdouts.py run --maisecrets ../maisecrets-0.6.25 --b
 
 It prints the tables of "Cloakroom holdout sets": per set and half, the sums v2 to v6 and v2 to v7, the false alarms on
 the clean samples and the class table, once for the regions `us`, `uk`, `in` and once for `de` (`--regions`). `--out`
-writes the counts and, per planted value, its set, sample id, index, half and whether it leaked; no value.
+writes the counts and, per planted value, its set, sample id, index, half, class and whether it leaked; no value.
 
 The catalog coverage needs Python 3.11 or newer (tomllib) and PyYAML. Clone each catalog at its pinned commit into one
 directory, under the names below, and run the script; it reads the catalogs as data and prints counts only:
