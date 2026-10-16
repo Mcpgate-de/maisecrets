@@ -2633,7 +2633,11 @@ def _import_hits(text: str, enabled, found: list, taken_starts: list, taken_ends
         # a placeholder stays whole: an import hit inside its brackets would turn a resolvable placeholder into a
         # masked one (Gate B, round 1). The floor refuses a key as a value too
         from .placeholder import find_refs
-        refs = [(a, b) for _k, a, b in find_refs(text)]
+        for _k, a, b in find_refs(text):
+            # the bracket and the key only: a display text inside a placeholder (`:Jan Kowalski`) is text, and an
+            # imported value in it is masked (Gate B, round 2)
+            colon = text.find(":", a, b)
+            refs += [(a, colon if colon >= 0 else b - 1), (b - 1, b)]
     for m in sorted(found_here, key=lambda x: x.start):
         if not ((enabled is None or IMPORT_RULE in enabled or IMPORT_KEY in enabled or m.kind in enabled)
                 and m.end > m.start):

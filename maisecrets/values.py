@@ -59,6 +59,7 @@ MAX_VALUES = 150_000           # as terms.MAX_TEAM_ENTITIES: the index stays wit
 MAX_RUN_VALUES = 100_000       # of MAX_VALUES: the imports that no value file names
 MAX_IMPORTS = 50
 MAX_RUN_IMPORTS = 30           # of MAX_IMPORTS: the imports that no value file names; the value files keep 20 places
+MAX_IMPORT_BYTES = 24 << 20    # one import file as maisecrets writes it; a merge past it stops (Gate A, round 2)
 MAX_LINES = 200_000            # lines one import parses at most: 8 MB of `0` lines cost millions of JSON reads
 MAX_REFUSED_SHOWN = 20         # refused lines kept with their reason; the rest is a count
 MAX_FILES_PER_START = 20       # value files one session start reads
@@ -281,7 +282,7 @@ def _read_import(iid: str, path: Path) -> tuple[dict, list]:
     """(header, [(value, type)]) of one import. A damaged file raises ValuesError: the hooks fail closed, since the
     alternative is a silent leak of exactly the values the import lists."""
     try:
-        raw = terms._read_bounded(path, MAX_FILE_BYTES * 2)
+        raw = terms._read_bounded(path, MAX_IMPORT_BYTES + (64 << 10))
         if raw is None:
             raise ValueError
         lines = raw.decode("utf-8").splitlines()
@@ -325,9 +326,29 @@ def _save_state(state: dict) -> None:
 
 
 # ------------------------------------------------------------------- import --
-def import_bytes(raw: bytes, key: str, origin: str = "run") -> Result:
+def _configured(key: str) -> bool:
+    """The key is the one of a file in the person's setting `value_files`. Only such a file counts as a value file:
+    `origin` is a caller's word, and a command that called this module with "file" took the places of the value
+    files (Gate A, round 2)."""
+    try:
+        from .vault import load_config
+        files = load_config().get("value_files") or []
+    except Exception:  # noqa: BLE001 - no config: no value file
+        return False
+    return any(isinstance(f, str) and f.strip() and _path_key(Path(os.path.expanduser(f.strip()))) == key
+               for f in files)
+
+
+def _line_bytes(value: str, type_: str) -> int:
+    return len(json.dumps({"v": value, "t": type_}, ensure_ascii=False).encode("utf-8")) + 1
+
+
+def import_bytes(raw: bytes, key: str, origin: str = "run", build: bool = True) -> Result:
     """Add the values of one file to its import (the import of `key`, or a new one). Raises ValueError with a
-    message for the person when the file itself cannot be used. Never removes a value."""
+    message for the person when the file itself cannot be used. Never removes a value. build: build the index now
+    (a session start builds it once, after all value files)."""
+    if origin == "file" and not _configured(key):
+        origin = "run"
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
@@ -367,6 +388,7 @@ def import_bytes(raw: bytes, key: str, origin: str = "run") -> Result:
             result.merged = True
         result.id = iid
         file_origin = head.get("origin") == "file"
+        size = sum(_line_bytes(v, t) for v, t in values) + 200
         for value, type_, n in items:
             if terms._lower(value) in held:
                 result.known += 1
@@ -375,6 +397,8 @@ def import_bytes(raw: bytes, key: str, origin: str = "run") -> Result:
                 why = f"at most {MAX_PER_IMPORT:,} values in one import"
             elif total >= MAX_VALUES:
                 why = f"maisecrets holds {MAX_VALUES:,} imported values, the limit"
+            elif size + _line_bytes(value, type_) > MAX_IMPORT_BYTES:
+                why = f"one import holds at most {MAX_IMPORT_BYTES >> 20} MB"
             elif not file_origin and runs >= MAX_RUN_VALUES:
                 why = (f"the imports that no value file names hold {MAX_RUN_VALUES:,} values, their limit (the rest "
                        "is kept for your value files)")
@@ -385,6 +409,7 @@ def import_bytes(raw: bytes, key: str, origin: str = "run") -> Result:
                                   "your prompt /maisecrets:forget import:ID removes one")
                 break
             values.append((value, type_))
+            size += _line_bytes(value, type_)
             held.add(terms._lower(value))
             result.new[type_] = result.new.get(type_, 0) + 1
             total += 1
@@ -397,7 +422,8 @@ def import_bytes(raw: bytes, key: str, origin: str = "run") -> Result:
             _write_import(iid, head, values)
     reset()
     if result.added:
-        prebuild()
+        if build:
+            prebuild()
         _log(result, origin)
     return result
 
@@ -635,7 +661,7 @@ def _sync(cfg: dict, deadline: float) -> list:
         if rec.get("digest") == digest and (rec.get("empty") or _has_import("file:" + slot)):
             continue
         try:
-            result = import_bytes(raw, slot, "file")
+            result = import_bytes(raw, slot, "file", build=False)
         except ValueError as exc:
             notes.append(f"{label}: {exc}")
             continue

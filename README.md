@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 12 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 263 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 295 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -2011,8 +2011,9 @@ can do is to mask too much. These limits hold that:
   150,000. The imports that no value file names (the imports of a command,
   which the AI can run) hold at most 100,000 of them, so your value files
   always have room. maisecrets holds at most 50 imports, of which at most 30
-  are imports of commands: 20 places stay for your value files. One file is
-  read to at most 200,000 lines. Past a cap, the import stops, says at which
+  are imports of commands: 20 places stay for your value files. Only a file
+  in your setting `value_files` counts as a value file. One file is read to
+  at most 200,000 lines, and one import file holds at most 24 MB. Past a cap, the import stops, says at which
   line, and names the prompt that removes an import. A value file in a
   folder that the AI can write counts as your value file: the AI can fill
   the caps through it, and push out a value file after it.

@@ -189,6 +189,8 @@ class Caps(_Files):
         self.assertIn("imported values, the limit", r.stopped)
 
     def test_the_imports_of_commands_leave_room_for_the_value_files(self):
+        Path(HOME, "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True,
+                                                         "value_files": [str(self.dir / "file.jsonl")]}))
         with mock.patch.object(values, "MAX_RUN_VALUES", 2), mock.patch.object(values, "MAX_VALUES", 10):
             r = self.imported([{"value": f"Laufname Nummer{i:03d}"} for i in range(5)], name="run.jsonl")
             f = self.imported([{"value": f"Dateiname Nummer{i:03d}"} for i in range(5)], name="file.jsonl",
@@ -508,6 +510,35 @@ class ReviewRoundOne(_Files):
         ans = hooks.pre_tool({"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "S1", **CLAUDE,
                               "tool_input": {"command": command}})
         self.assertEqual(ans["hookSpecificOutput"]["permissionDecision"], "deny")
+
+
+class ReviewRoundTwo(_Files):
+    """The findings of round 2 of Gate A (codex gpt-5.6-sol) and Gate B (Opus), each with a test."""
+
+    def test_an_imported_value_in_the_display_text_of_a_placeholder_is_masked(self):
+        self.imported([{"value": NAME, "type": "NAME"}])
+        key = "NAME_" + "c1"
+        for text in (f"row: {OPEN}{key}:{NAME}{CLOSE}", f"{OPEN} row: <{key}:{NAME}>"):
+            hits = detect.scan(text, channel="tool")
+            self.assertTrue([m for m in hits if m.kind.startswith("import:")], text)
+
+    def test_a_removal_padded_with_white_space_in_a_command_is_refused(self):
+        command = "codex exec 'maisecrets: forget" + " " * 450 + "import:v1234abcd'"
+        ans = hooks.pre_tool({"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "S1", **CLAUDE,
+                              "tool_input": {"command": command}})
+        self.assertEqual(ans["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_only_a_configured_value_file_counts_as_a_value_file(self):
+        r = self.imported([{"value": NAME, "type": "NAME"}], origin="file")
+        self.assertEqual([x["origin"] for x in values.rows() if x["id"] == r.id], ["run"])
+
+    def test_an_import_stops_at_its_byte_bound_and_stays_readable(self):
+        with mock.patch.object(values, "MAX_IMPORT_BYTES", 600):
+            r = self.imported([{"value": f"Wertname Nummer{i:03d}"} for i in range(40)])
+        self.assertIn("one import holds at most", r.stopped)
+        self.assertGreater(r.added, 0)
+        detect.reset_rules()
+        self.assertEqual(len(detect.scan("an Wertname Nummer000")), 1)
 
 
 class Provenance(_Files):

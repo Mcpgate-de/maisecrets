@@ -1,0 +1,10 @@
+# c26-an-import-has-a-byte-bound: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-import-has-a-byte-bound"
+control = "C26"
+statement = "One import file stays within MAX_IMPORT_BYTES, so a merge never writes an import that the reader refuses."
+runner = ["tests/test_values.py::ReviewRoundTwo::test_an_import_stops_at_its_byte_bound_and_stays_readable"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "            elif size + _line_bytes(value, type_) > MAX_IMPORT_BYTES:\n"
+replace = "            elif False:\n"

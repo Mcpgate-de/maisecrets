@@ -95,7 +95,7 @@ def parse_removal(prompt) -> list | None:
 # the same removal in a tool call: the prompt typed by a nested client, the CLI form, or the remover called by name.
 # A text match (the C22 class): a name built at run time is not seen, which README "Values from your own tools" says
 IN_A_COMMAND_RE = re.compile(
-    r"(?:/maisecrets:forget|maisecrets:\s*forget)\s[\s\S]{0,400}?import:"
+    r"(?:/maisecrets:forget|maisecrets:\s*forget)\s+import:"
     r"|\bvalues[\s\"']+(?:remove|forget|delete)\b"
     r"|\b(?:remove_typed|_remove_import)\b", re.I)
 IN_A_COMMAND = ("maisecrets: this command removes an import of values, which makes detection weaker; only the person "
