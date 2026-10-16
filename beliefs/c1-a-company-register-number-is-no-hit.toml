@@ -6,5 +6,5 @@ runner = ["tests/test_bank_and_company_numbers.py::GermanCompanyNumberTests::tes
 
 [proof]
 file = "maisecrets/detect.py"
-find = '''"crypto", "de-handelsregister"}'''
-replace = '''"crypto"}'''
+find = '''"crypto", "de-handelsregister", "uk-postcode"}'''
+replace = '''"crypto", "uk-postcode"}'''

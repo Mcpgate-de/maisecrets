@@ -6,5 +6,5 @@ runner = ["tests/test_bank_and_company_numbers.py::IbanFormTests::test_an_iban_i
 
 [proof]
 file = "maisecrets/detect.py"
-find = '''     "regex": r"(?<![A-Za-z0-9])[a-z]{2}[0-9]{2}(?:'''
-replace = '''     "regex": r"(?!)(?<![A-Za-z0-9])[a-z]{2}[0-9]{2}(?:'''
+find = '''     "regex": r"(?:(?<![A-Za-z0-9])|(?<=\?[0-9]{2}))[a-z]{2}[0-9]{2}"'''
+replace = '''     "regex": r"(?!)(?:(?<![A-Za-z0-9])|(?<=\?[0-9]{2}))[a-z]{2}[0-9]{2}"'''
