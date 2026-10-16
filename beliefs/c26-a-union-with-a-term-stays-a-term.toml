@@ -1,0 +1,10 @@
+# c26-a-union-with-a-term-stays-a-term: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-union-with-a-term-stays-a-term"
+control = "C26"
+statement = "When a stored value joins a rule hit and a term hit into one span, the span keeps the term's kind: the store keeps the entity id, and the placeholder is never resolved."
+runner = ["tests/test_terms_hooks.py::ReviewRoundOneTests::test_a_union_that_holds_a_term_stays_a_term"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "            m = m if term_files.is_term_kind(m.kind) and not term_files.is_term_kind(last.kind) else last\n"
+replace = "            m = last\n"

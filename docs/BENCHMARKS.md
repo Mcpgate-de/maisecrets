@@ -155,6 +155,46 @@ and splits the time into interpreter, import, rule list, regex compilation and s
 The forms and the new checks compile their regexes at their first use. One review round measured a long line of
 hits: every new rule stays linear from 70 KB to 560 KB on one line (ratio 7 to 9 for 8 times the text).
 
+## Terms, 2026-10-16
+
+The terms of part 2 of #19 (`maisecrets/terms.py`, the registry pass `terms`), measured on the branch of the merge
+request against `v0.6.25` (`04ee5db`).
+
+**Without a term list, nothing changes.** `scripts/detection_fingerprint.py --creddata` (CredData, the corpora, the
+token lists, the probes and the recorded scans of the detector tests: 50,387 inputs, 503,871 lines, 290,812 hits)
+gives byte-identical files for `v0.6.25` and the branch. Without a list, no hook imports `maisecrets/terms.py`
+(13 ms at import); the check for a list (`maisecrets/term_files.py`) costs 0.2 ms.
+
+**Hook time.** CPU time (user + system) of one hook call, a new process each, the median of 31 calls after one
+warm-up, the trees called in turn so that the load hits each alike. Synthetic payloads as in "Timing" above, with no
+listed name in them. Load average 35 to 60 (other sessions on the same machine), so every number is about 3 to 4
+times the time on an idle machine; read the differences, not the levels. Source: a script outside this repository
+that runs `hooks/dispatch.py` with each payload, in a fresh temp home per tree.
+
+| Payload | 0.6.25 | branch, no list | 10 terms | 100 terms | 1,000 terms |
+|---|---|---|---|---|---|
+| Python 3.14, typed prompt, 1 KB | 309.9 ms | 308.8 ms | 324.8 ms | 320.7 ms | 324.3 ms |
+| Python 3.14, Bash result, 20 KB | 330.0 ms | 329.4 ms | 346.5 ms | 344.3 ms | 339.8 ms |
+| Python 3.14, Read result, 70 KB | 701.8 ms | 702.7 ms | 727.8 ms | 736.6 ms | 734.6 ms |
+| Python 3.9, typed prompt, 1 KB | 348.2 ms | 353.2 ms | 365.6 ms | 365.8 ms | 367.0 ms |
+| Python 3.9, Bash result, 20 KB | 350.4 ms | 347.8 ms | 368.5 ms | 362.5 ms | 363.4 ms |
+| Python 3.9, Read result, 70 KB | 824.6 ms | 817.9 ms | 848.7 ms | 857.0 ms | 851.2 ms |
+
+Without a list the branch is within -0.8 % to +1.4 % of 0.6.25, inside the spread of the runs. With a list, a hook
+pays about 15 to 35 ms at this load: the import of the terms module, the load of the cached index (0.7 ms) and one
+pass over the text. The cost does not grow with the number of terms: the matcher is one index of every list, looked
+up once per word of the text, never a regex per term. In separate processes the term pass over the 70 KB text took
+18 to 20 ms for 10, 100, 1,000 and 10,000 terms alike (Python 3.14, same load).
+
+**A team list of many `*…*` entries.** A 3.75 MB team list of 150,000 unique `*…*` entries took 5.33 s of CPU to
+parse on the branch before review round 1 (each entry walked the stop list) and 1.55 s after it (one lookup in a table
+of substrings), at load 50.
+
+**False hits.** A realistic list (10 people with full name, surname and genitive, among them the surname `Koch`, which
+is also a German word; two case numbers; three customer names) on every NO_HIT snippet of `tests/fp_corpus.py`,
+`tests/fp_corpus_pii.py` and `tests/fp_corpus_forms.py` (1,649 snippets), in both channels: 0 term hits.
+`tests/test_terms_corpora.py` holds it, with a probe text that shows the list is loaded.
+
 ## Cloakroom holdout sets, 2026-10-15
 
 Cloakroom's holdout sets v2 to v7 (`bench/holdout_v*.jsonl` at commit `cc3c88d76a`, 2026-10-14): 1,652 planted values in

@@ -1,0 +1,10 @@
+# c26-a-team-list-cannot-slow-its-parse: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-team-list-cannot-slow-its-parse"
+control = "C26"
+statement = "The floor check of a *stem* team entry is one lookup in a table of the stop list's substrings, so a team list of many *…* entries parses in bounded time."
+runner = ["tests/test_terms.py::TeamFloorTests::test_a_stem_inside_common_words_is_one_lookup_not_a_walk_over_the_stop_list"]
+
+[proof]
+file = "maisecrets/terms.py"
+find = "    return _stop_inside().get(stem, 0)\n"
+replace = "    return sum(1 for w in words if stem in w)\n"

@@ -50,6 +50,13 @@ def show() -> int:
         print(f"\nLoaded with a part dropped ({len(notes)}):")
         for q in notes:
             print(f"  {_q(q)}")
+    from . import terms
+    tl = terms.load(strict=False)
+    print(f"\nTerms: {terms.summary(tl)[7:]}")
+    for f in tl.files:
+        print(f"  {f.source} · {f.entities} term(s) · hash {f.digest}")
+    for r in tl.refused:
+        print(f"  left out: {r.source}" + (f" line {r.line}" if r.line else "") + f" · {r.reason}")
     print(f"\nAllow list: {len(values)} exact value(s), {len(ids)} rule id(s) switched off"
           + (f" ({', '.join(sorted(ids))})" if ids else ""))
     print("\nAdd a folder: /maisecrets:settings rule_dirs add DIR (type it as your own prompt)\n"

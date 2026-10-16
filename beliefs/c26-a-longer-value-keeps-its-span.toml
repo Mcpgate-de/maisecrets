@@ -1,0 +1,10 @@
+# c26-a-longer-value-keeps-its-span: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-longer-value-keeps-its-span"
+control = "C26"
+statement = "A rule hit that holds more than a listed term (a password with a listed name in it) keeps its span and its kind: the store keeps the value whole, and a later output with it is masked whole."
+runner = ["tests/test_terms_hooks.py::Issue19FormTests::test_a_term_inside_a_stored_password_never_splits_it"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "    if any(_WORD_CHAR_RE.search(text, f.start, m.start) or _WORD_CHAR_RE.search(text, m.end, f.end) for f in hit):\n"
+replace = "    if False:\n"

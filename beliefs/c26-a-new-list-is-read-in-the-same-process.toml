@@ -1,0 +1,10 @@
+# c26-a-new-list-is-read-in-the-same-process: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-new-list-is-read-in-the-same-process"
+control = "C26"
+statement = "A process keeps whether a term list exists (term_files.present); a name marked or added in that process makes the next scan read the lists again, so the name is masked in the prompt that holds it."
+runner = ["tests/test_terms_hooks.py::MarkerHookTests::test_a_mark_after_a_scan_without_any_list_is_masked_in_the_same_process"]
+
+[proof]
+file = "maisecrets/terms.py"
+find = "    term_files.forget()     # a list written in this process is there for the next scan\n"
+replace = "\n"

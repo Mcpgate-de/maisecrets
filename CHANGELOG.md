@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## [0.6.27] - 2026-10-16
+
+### Features
+
+- mask the names, case numbers and customer names on your own term list (1699c9d)
+
+### Fixes
+
+- review round 2 of the rebase: a listed value stored before stays a term, team lists are read with a bound (2f42ac3)
+- review round 1 of the rebase: a union with a term stays a term, template braces mark no name (50a8b47)
+- a wipe that cannot take the terms lock says what is left and how to finish (b21a092)
+- a damaged marked-name record stops the hooks, and a wipe removes a proposal written at the same time (3c9bc9a)
+- terms suggest never prints a name; it writes a private proposal file (41b9078)
+- a team list cannot slow every hook with one stem repeated many times (ee0655b)
+- a listed email address or token-shaped case number stays a term and is never resolved (a8ccc9b)
+- term changes at the same time all hold; a damaged marked-name file stops the hooks; expired marks leave the disk (dd908a0)
+- the refusal of an add without a source names the rule it broke in plain words (06229fa)
+- term add masks the surname as a whole word, never as a stem; Codex adds follow your own rules (ebdd1e9)
+- a token that holds a value you resolved is taken out whole again (88ad84c)
+- the session start parses the term lists once (25bea54)
+- an add from a prompt without a source gets the floor of a team list (ead02e6)
+- a private-use character in a file the AI writes stays as it is (e5705e0)
+- term add also masks the surname alone and joined names; typos and other origins change nothing (f1756ab)
+- build the term index at session start and after a typed change, not inside a tool hook (27a1547)
+- mask spaced *…* terms, overlapping names, NFD text, joined names and team lists safely (2a82c69)
+- a listed name inside a stored password no longer leaves the rest of the password in clear (3f7c361)
+
 ## [0.6.26] - 2026-10-16
 
 ### Fixes

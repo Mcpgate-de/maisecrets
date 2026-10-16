@@ -12,6 +12,7 @@ Events:
 """
 from __future__ import annotations
 
+import dataclasses
 import functools
 import html
 import json
@@ -23,7 +24,7 @@ import time
 import sys
 from typing import Any
 
-from . import detect, incidents, rehydration
+from . import detect, incidents, rehydration, term_files
 from .placeholder import KEY_RE, find_refs
 from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config
@@ -121,7 +122,10 @@ def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str 
     ⟦TYPE⟧ without a key (it is not stored and cannot be resolved). tool: the text is a tool result
     or a file, where a word after a label is stored weak (vault.is_weak)."""
     ordered = sorted(matches, key=lambda x: x.start)
-    entries = vault.put_many([(m.value, m.type, m.kind) for m in ordered], session=session, tool=tool)
+    # a term (terms.py) goes into the store as its entity id: every spelling gets the entity's one placeholder, and
+    # the store never holds the term
+    entries = vault.put_many([(term_files.store_value(m.kind) if term_files.is_term_kind(m.kind) else m.value,
+                               m.type, m.kind) for m in ordered], session=session, tool=tool)
     out = text
     for m, e in sorted(zip(ordered, entries), key=lambda me: me[0].start, reverse=True):
         out = out[: m.start] + (e.ref if e is not None else f"⟦{m.type}⟧") + out[m.end:]
@@ -704,20 +708,88 @@ def _prompt_hits(prompt: str) -> list:
     return [m for m in detect.scan(prompt) if not detect.is_fixture(m, prompt)]
 
 
+def _exact_spans(text: str, vault, session: str | None, resolved: list | None, prompt: bool = False) -> list:
+    """The spans of `text` that the exact redaction replaces (stored and resolved values), longest first, no
+    overlap. A dry run: its count, entries and values are thrown away. prompt: as _exact_redact (a typed prompt does
+    not hunt a quiet entry, so its span must not drop a hit either)."""
+    found: list = []
+    _exact_redact(text, vault, session, {"n": 0}, [], resolved, found, prompt=prompt)
+    spans: list = []
+    for raw in sorted(set(found), key=len, reverse=True):
+        at = text.find(raw) if raw else -1
+        while at >= 0:
+            end = at + len(raw)
+            if not any(a < end and at < b for a, b in spans):
+                spans.append((at, end))
+            at = text.find(raw, at + 1)
+    return spans
+
+
+_WORD_CHAR_RE = re.compile(r"\w")
+
+
+def _longest_wins(text: str, matches: list, vault, session: str | None, resolved: list | None,
+                  prompt: bool = False) -> list:
+    """The detector hits after the rule that the longest span wins against a stored or resolved value (C2, C26). A hit
+    inside a stored value is dropped: the exact redaction takes the value whole (a listed name inside a stored
+    password split it, and the rest stayed in clear). A hit that holds a stored value, or that overlaps one, takes
+    the whole union: a resolved value inside a ghp_ token cut the shape, and the rest of the token went out."""
+    if not matches or vault is None or not any(term_files.is_term_kind(m.kind) for m in matches):
+        # without a term hit the detector's spans are taken first, as before the terms, and the exact redaction
+        # runs on the rest: no second pass over the text (the hook time without terms stays what it was)
+        return matches
+    spans = _exact_spans(text, vault, session, resolved, prompt)
+    if not spans:
+        return matches
+    out: list = []
+    absorbed: list = []
+    for m in matches:
+        cover = [(a, b) for a, b in spans if a < m.end and m.start < b]
+        inside = [(a, b) for a, b in cover if a <= m.start and m.end <= b]
+        if inside and not (term_files.is_term_kind(m.kind) and not any(
+                _WORD_CHAR_RE.search(text, a, m.start) or _WORD_CHAR_RE.search(text, m.end, b) for a, b in inside)):
+            # a hit inside a longer stored value: the exact redaction takes the value whole. A term that a stored
+            # value only equals stays a term: an address stored before the list named it kept its resolvable
+            # placeholder (Gate A, round 2)
+            continue
+        a = min([m.start] + [x[0] for x in cover])
+        b = max([m.end] + [x[1] for x in cover])
+        if out and a < out[-1].end:          # two hits that a value joins become one
+            last = out.pop()
+            a, b = min(a, last.start), max(b, last.end)
+            # the union keeps the term's kind when one of them is a term: else the store kept the name in a value
+            # that can be resolved into a command (Gate A and Gate B, review of the rebase)
+            m = m if term_files.is_term_kind(m.kind) and not term_files.is_term_kind(last.kind) else last
+        out.append(m if (a, b) == (m.start, m.end) else dataclasses.replace(m, value=text[a:b], start=a, end=b))
+    for u in out:
+        if term_files.is_term_kind(u.kind):
+            absorbed += [x for x in matches if not term_files.is_term_kind(x.kind) and u.start <= x.start
+                         and x.end <= u.end]
+    if absorbed:
+        # the secret in a union with a term is stored as its own entry, so a later output that holds it alone is
+        # masked by the exact match (Gate B, round 2)
+        vault.put_many([(x.value, x.type, x.kind) for x in absorbed], session=session, tool=not prompt)
+    return out
+
+
 def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str | None) -> tuple:
-    """(rewritten, entries, values, stored): the prompt with a placeholder for each detected value and
-    for each value the store already holds; the hook and the mod share it, so both take out the same."""
-    rewritten, entries = _replace(prompt, matches, vault, session) if matches else (prompt, [])
-    values = [m.value for m in matches]
+    """(rewritten, entries, values, stored, matches): the prompt with a placeholder for each detected value and
+    for each value the store already holds; the hook and the mod share it, so both take out the same. `matches` are
+    the detector hits as taken out, after the longest-span rule."""
     stored = {"n": 0}
+    resolved = None
     if vault is not None and _has_live(cfg):
         # a value the store already holds has a known shape: its fingerprint. Without this a stored
         # password typed again, or a value without a detector shape next to a detected one, went to
         # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
         # from 8 characters; a shorter one would block ordinary words in a prompt.
         resolved = [(v, r) for v, r in _resolved_values(vault, session, prompt=True) if len(v) >= _EXACT_MIN_LEN]
+        matches = _longest_wins(prompt, matches, vault, session, resolved, prompt=True)    # (C26)
+    rewritten, entries = _replace(prompt, matches, vault, session) if matches else (prompt, [])
+    values = [m.value for m in matches]
+    if resolved is not None:
         rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values, prompt=True)
-    return rewritten, entries, values, stored
+    return rewritten, entries, values, stored, matches
 
 
 def _run_sh() -> str:
@@ -759,12 +831,22 @@ def rewrite_prompt(payload: dict) -> dict:
     # a subagent's report is the hook's to judge (C19); a model wrote it, so nothing of it is stored
     if "<task-notification>" in prompt:
         return {}
+    # /maisecrets:term add|remove carries a name: the hook answers it, and the mod must not rewrite the name first
+    if term_files.parse_command(prompt):
+        return {}
     # the hook blocks an @file mention before it stores anything; without a working directory a relative
     # mention cannot be checked, so any mention goes to the hook
     cwd = payload.get("cwd")
     if _blocking_mention(prompt, cwd if isinstance(cwd, str) else "", cfg) or (
             not cwd and cfg.get("block_at_mentions", True) and AT_MENTION_RE.search(prompt)):
         return {}
+    # {{Jan Kowalski}}: only from a prompt the person typed (the mod sends the origin); an `sdk` prompt can come from
+    # a program a tool started, and the hook leaves its marker as text too
+    if payload.get("origin") in ("composer", "bridge"):
+        try:
+            prompt, _marked = term_files.take_markers(prompt, _name_ttl(cfg))
+        except OSError:
+            return {}           # the hook answers it, and blocks when it cannot record the name either
     matches = _prompt_hits(prompt)
     if not matches and not _has_live(cfg):
         return {}
@@ -774,7 +856,7 @@ def rewrite_prompt(payload: dict) -> dict:
     if _mention_prefix_exists(prompt, cwd if isinstance(cwd, str) else "", cfg):
         return {}
     vault = Vault(cfg)
-    rewritten, entries, values, stored = _take_values_out(prompt, matches, cfg, vault, session)
+    rewritten, entries, values, stored, matches = _take_values_out(prompt, matches, cfg, vault, session)
     if not matches and not stored["n"]:
         return {}
     if _blocking_mention(rewritten, cwd if isinstance(cwd, str) else "", cfg):
@@ -789,6 +871,60 @@ def rewrite_prompt(payload: dict) -> dict:
     events.record("UserPromptSubmit", "claude", entries, outcome="rewritten by the mod")
     # what the person reads: each value taken out, a detected one per place and a stored one per place
     return {"text": rewritten, "count": len(matches) + stored["n"]}
+
+
+def _name_ttl(cfg: dict) -> int:
+    """The lifetime of a NAME value: how long a name marked with {{…}} in a prompt stays masked."""
+    ttls = cfg.get("ttl_seconds") if isinstance(cfg.get("ttl_seconds"), dict) else {}
+    try:
+        ttl = int(ttls.get("NAME", ttls.get("default", 86400)))
+        return max(60, min(ttl, int(cfg.get("max_ttl_seconds", 30 * 86400))))
+    except (TypeError, ValueError):
+        return 86400
+
+
+def _term_command(payload: dict, cmd: tuple, typed: bool, cfg: dict) -> dict:
+    """The answer to /maisecrets:term add|remove (Codex: maisecrets: term add …): always a block, because the prompt
+    carries the name. Only the person's typed prompt changes the list (as a setting, C22); the name is masked in the
+    transcript, and the answer names a label and a line, never the name."""
+    from . import terms
+    verb, words = cmd
+    # the name in every form the transcript can hold it: the whole prompt as typed (two spaces, a tab, a line break,
+    # a name under 4 characters that the scrub skips alone), the words, and the variants (gate review, M2)
+    raw = payload.get("prompt") if isinstance(payload.get("prompt"), str) else ""
+    extra = [raw, raw.strip()] + [w for w in re.findall(r"[^\s|*]+", words or "") if len(w) >= 4]
+    scrub: list = [words] if words else []
+    if verb == "usage":
+        reason = terms.USAGE
+    elif not typed:
+        reason = ("maisecrets: a change of your terms counts only when you type it as your prompt; this one came from "
+                  f"the client ({payload.get('source')}), so nothing was changed.")
+    elif verb == "add":
+        # Claude Code sends a source with every prompt; one without it may not come from the person, so the floor of
+        # a team list holds. Codex never sends a source: its adds follow the person's rules (gate review, round 2)
+        floor = client_of(payload) == "claude" and "source" not in payload
+        _ok, reason, scrub = terms.add_typed(words, floor=floor)
+    else:
+        entity = None
+        refs = find_refs(words)
+        if len(refs) == 1 and refs[0][1] == 0 and refs[0][2] == len(words):
+            # the placeholder the person copied from a tool result: the entity of that key
+            from .vault import INDEX
+            try:
+                meta = json.loads(INDEX.read_text(encoding="utf-8")).get("entries", {}).get(refs[0][0]) or {}
+            except (OSError, ValueError):
+                meta = {}
+            entity = meta.get("kind", "")[5:] if term_files.is_term_kind(meta.get("kind")) else None
+        _ok, reason, scrub = terms.term_remove_typed(words, entity)
+    scrub = list(dict.fromkeys(scrub + [x for x in extra if x]))
+    if cfg.get("scrub_transcript", True) and scrub:
+        path = payload.get("transcript_path", "")
+        _scrub_transcript(path, scrub, [])
+        _scrub_transcript_later(path, scrub, [], session=payload.get("session_id"))
+    if client_of(payload) == "codex":
+        return {"decision": "block", "reason": reason}
+    return {"decision": "block", "reason": reason,
+            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
 
 
 def user_prompt(payload: dict) -> dict:
@@ -863,6 +999,22 @@ def user_prompt(payload: dict) -> dict:
             return {"decision": "block", "reason": reason}
         return {"decision": "block", "reason": reason,
                 "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+    # /maisecrets:term add|remove (maisecrets/terms.py): before the detector, which would take the name out first.
+    # Blocked in every case: the prompt carries the name
+    term_cmd = term_files.parse_command(prompt)
+    if term_cmd:
+        # a subagent's prompt is no prompt of the person (as for the marker below)
+        return _term_command(payload, term_cmd, typed and not payload.get("agent_id"), cfg)
+    if typed and not payload.get("agent_id"):
+        # {{Jan Kowalski}} in a prompt the person typed: the name is masked from now on (terms.take_markers)
+        try:
+            prompt, _marked = term_files.take_markers(prompt, _name_ttl(cfg))
+        except OSError as exc:
+            return {"decision": "block", "reason": (
+                f"maisecrets: the name you marked with {{{{…}}}} cannot be recorded ({type(exc).__name__}), so it "
+                "would reach the model unmasked. This prompt was not sent; send it again without the marker, or "
+                "write the name as /maisecrets:term add NAME."),
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
     if grant:
         from . import consent_store
         if grant.group(2):
@@ -895,7 +1047,7 @@ def user_prompt(payload: dict) -> dict:
         vault = Vault(cfg)
         for key, _s, _e in typed:
             vault.admit(key, session)
-    rewritten, entries, values, stored = _take_values_out(prompt, matches, cfg, vault, session)
+    rewritten, entries, values, stored, matches = _take_values_out(prompt, matches, cfg, vault, session)
     if not matches and not stored["n"]:
         if typed:
             # the model has never seen the bracket syntax; without this it asks the user for the
@@ -3144,7 +3296,71 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
     return {}
 
 
+# a placeholder of a term (terms.py) is never resolved (mask only): it is hidden from the resolvers under two
+# private-use characters that the tool input does not hold, and put back in the answer as it was written
+
+
+class _NoPair(Exception):
+    """No private-use pair is free in the tool input."""
+
+
+def _hide_pair(tool_input) -> tuple | None:
+    """Two private-use characters that no string of the tool input holds: a fixed pair turned a real U+E000 in the
+    content of a Write into the bracket of a placeholder (gate review of block 2)."""
+    used = set(json.dumps(tool_input, ensure_ascii=False))
+    # the private-use area of the first plane, then planes 15 and 16; None when the input holds every one of them
+    gen = (chr(c) for r in ((0xE000, 0xF900), (0xF0000, 0xFFFFE), (0x100000, 0x10FFFE)) for c in range(*r)
+           if chr(c) not in used)
+    free = (next(gen, None), next(gen, None))
+    return None if free[1] is None else free
+
+
+def _term_keys() -> set:
+    """The keys of the term entries in the index, purged ones too: such a key never resolves, at any age."""
+    from .vault import INDEX
+    try:
+        entries = json.loads(INDEX.read_text(encoding="utf-8")).get("entries", {})
+    except (OSError, ValueError, AttributeError):
+        return set()
+    return {k for k, m in entries.items() if isinstance(m, dict) and term_files.is_term_kind(m.get("kind"))}
+
+
 def pre_tool(payload: dict) -> dict:
+    """Mask only (README "Terms"): a term placeholder in a command, an argument or a file stays as written. The tool
+    call runs with the placeholder; maisecrets never puts the name back in v1."""
+    tool_input = payload.get("tool_input")
+    keys: list = []
+    pair: list = []
+
+    def hide(s: str) -> str:
+        refs = find_refs(s)
+        if not refs:
+            return s
+        if not keys:
+            keys.append(_term_keys())
+        for key, a, b in sorted(refs, key=lambda r: r[1], reverse=True):
+            if key in keys[0]:
+                if not pair:
+                    free = _hide_pair(tool_input)
+                    if free is None:
+                        raise _NoPair
+                    pair.extend(free)
+                s = s[:a] + pair[0] + s[a + 1:b - 1] + pair[1] + s[b:]
+        return s
+    try:
+        hidden = _walk_strings(tool_input, hide) if isinstance(tool_input, dict) else tool_input
+    except _NoPair:
+        return _deny("maisecrets: this tool call holds every private-use character, so a name placeholder in it "
+                     "cannot be kept apart from the values. Nothing ran; write the content without that run of "
+                     "characters.")
+    if hidden == tool_input:
+        return _pre_tool(payload)
+    out = _pre_tool(dict(payload, tool_input=hidden))
+    from .placeholder import CLOSE, OPEN
+    return _walk_strings(out, lambda s: s.replace(pair[0], OPEN).replace(pair[1], CLOSE)) if pair else out
+
+
+def _pre_tool(payload: dict) -> dict:
     cfg = load_config()
     tool = payload.get("tool_name", "")
     tool_input = payload.get("tool_input") or {}
@@ -3659,6 +3875,8 @@ def post_tool(payload: dict) -> dict:
             vault = Vault(cfg)
             resolved = _resolved_values(vault, session)
         out = s
+        if matches and _has_live(cfg):
+            matches = _longest_wins(s, matches, vault, session, resolved)    # (C26)
         if matches:
             out, ents = _replace(s, matches, vault, session, tool=True)
             hit["n"] += len(matches)
@@ -3762,6 +3980,10 @@ def post_tool(payload: dict) -> dict:
             "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": new_response,
                                    "additionalContext": note},
         }
+    term_refs = list(dict.fromkeys(e.ref for e in entries if term_files.is_term_kind(getattr(e, "kind", ""))))
+    if term_refs:
+        note = (f"{note} {', '.join(term_refs)} stand for names from the person's term list: maisecrets never puts "
+                "the name back, also not in a command or a file. Write them as they are.").strip()
     refs = [e.ref for e in entries]
     if client_of(payload) == "codex":
         # Codex has no updatedToolOutput. A "block" replaces the model-visible result with the
@@ -3966,12 +4188,14 @@ def post_tool_failure(payload: dict) -> dict:
     hit = {"n": 0}
     entries: list = []
     values: list[str] = []
+    resolved = _resolved_values(vault, session)
+    matches = _longest_wins(error, matches, vault, session, resolved)     # (C26)
     out = error
     if matches:
         out, entries = _replace(error, matches, vault, session, tool=True)
         hit["n"] += len(matches)
         values.extend(m.value for m in matches)
-    _exact_redact(out, vault, session, hit, entries, _resolved_values(vault, session), values)
+    _exact_redact(out, vault, session, hit, entries, resolved, values)
     if not hit["n"]:
         return {}
     refs = list(dict.fromkeys(e.ref for e in entries if getattr(e, "ref", None)))

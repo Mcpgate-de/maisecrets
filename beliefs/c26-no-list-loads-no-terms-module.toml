@@ -1,0 +1,10 @@
+# c26-no-list-loads-no-terms-module: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-no-list-loads-no-terms-module"
+control = "C26"
+statement = "Without any term list a scan does not import maisecrets/terms.py (about 13 ms per hook process); with a list it does, and the list is masked."
+runner = ["tests/test_terms_hooks.py::MarkerHookTests::test_without_any_list_a_scan_does_not_load_the_terms_module"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "    if not term_files.present():\n"
+replace = "    if False:\n"

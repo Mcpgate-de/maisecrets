@@ -1,0 +1,10 @@
+# c26-a-team-list-has-a-floor: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-team-list-has-a-floor"
+control = "C26"
+statement = "In a team list (*.terms in a rule folder) an entry of common words only, under 3 characters, or with a * stem under 5 letters or one that common words share is quarantined, and the rest of the file loads."
+runner = ["tests/test_terms.py::TeamFloorTests::test_short_and_common_entries_are_left_out_and_the_rest_loads", "tests/test_terms.py::TeamFloorTests::test_a_team_affix_needs_a_long_stem_that_common_words_do_not_share"]
+
+[proof]
+file = "maisecrets/terms.py"
+find = "        if all(w in floor for w in words):\n"
+replace = "        if False:\n"

@@ -1,0 +1,10 @@
+# c26-a-term-becomes-its-entity-placeholder: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-term-becomes-its-entity-placeholder"
+control = "C26"
+statement = "A term in a tool result is replaced by a placeholder, and every spelling of one entity gets the same one."
+runner = ["tests/test_terms_hooks.py::TermHookTests::test_every_spelling_of_an_entity_gets_its_one_placeholder"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "                     + tuple(r for r in every if _runs_after_personal(r)) + (_TERMS,)]"
+replace = "                     + tuple(r for r in every if _runs_after_personal(r))]"

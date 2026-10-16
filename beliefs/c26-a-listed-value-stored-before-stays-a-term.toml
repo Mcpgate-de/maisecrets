@@ -1,0 +1,10 @@
+# c26-a-listed-value-stored-before-stays-a-term: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-listed-value-stored-before-stays-a-term"
+control = "C26"
+statement = "A term that a stored value only equals (an address stored before the list named it) is masked as a term, never by the older resolvable placeholder."
+runner = ["tests/test_terms_hooks.py::ReviewRoundTwoTests::test_a_term_that_a_stored_value_equals_stays_a_term"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        if inside and not (term_files.is_term_kind(m.kind) and not any(\n"
+replace = "        if inside or not (term_files.is_term_kind(m.kind) and not any(\n"

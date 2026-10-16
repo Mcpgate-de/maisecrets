@@ -1148,7 +1148,8 @@ class Vault:
         now = time.time()
         ttl = min(ttl or self._ttl_for(type_), int(self.cfg.get("max_ttl_seconds", 30 * 86400)))
         e = Entry(key=key, type=type_, kind=kind, fingerprint=fp,
-                  display=display_for(type_, value), created=now, last_used=now,
+                  # a term (terms.py) stores its entity id, not the term: a display of that would mean nothing
+                  display=None if kind.startswith("term:") else display_for(type_, value), created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
                   session=session, uses=0, sessions=[session] if session else [],
                   weak=is_weak(kind, value), quiet=is_quiet(kind, value, tool))
@@ -1611,14 +1612,28 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
             problems.append("destinations.json not deleted")
         from . import incidents
         incidents.clear(HOME)              # the incident record, its aside, lock and temp files, the markers
-        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced"):
-            try:
-                (HOME / name).unlink()
-            except FileNotFoundError:
-                pass
-            except OSError:
-                problems.append(f"{name} not deleted")
-        # vault-refs: the server tokens seen, the key ids and the endpoints (vault_refs.py); its keys are in the store
+        # the names marked with {{…}} and the term index (terms.py); terms.txt is the person's list and stays
+        # under the terms lock too (order: this lock, then the terms lock; a terms writer never takes this one): a
+        # proposal or a mark written at the same time came back after the wipe (codex verification of block 2)
+        def unlink(names: tuple) -> None:
+            for name in names:
+                try:
+                    (HOME / name).unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    problems.append(f"{name} not deleted")
+        unlink(("index.json", "audit.log", "events.log", "hooks.log", ".announced"))
+        term_files = ("terms.marked.json", ".terms-cache", "terms.suggested.txt")
+        try:
+            with _lock_for(HOME / ".terms.lock"):
+                unlink(term_files)
+        except LockTimeout:
+            # another maisecrets process held the terms lock: say what is left and how to finish, never success
+            problems.append(f"{', '.join(term_files)} not deleted (another maisecrets process held the terms lock; "
+                            "run the wipe again)")
+        # vault-refs: the server tokens seen and sent, the key ids and the endpoints (vault_refs.py); its keys
+        # are in the store
         dirs = [HOME / "pending", HOME / "run", HOME / "vault-refs"] + ([Path(run_dir)] if run_dir else [])
         for d in dirs:
             if d.is_dir():

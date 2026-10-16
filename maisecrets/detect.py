@@ -42,6 +42,7 @@ import ipaddress
 import json
 import math
 import re
+import sys
 import time
 import warnings
 from collections import Counter
@@ -2340,6 +2341,10 @@ def reset_rules() -> None:
         times.clear()
     from . import user_rules
     user_rules.reset()
+    for name in ("terms", "term_files"):     # the term lists are read again too, without importing them
+        loaded = sys.modules.get(__name__.rsplit(".", 1)[0] + "." + name)
+        if loaded is not None:
+            (loaded.reset if name == "terms" else loaded.forget)()
 
 
 # Matchers of other kinds than a regex rule (a list of names, a value import): each is a callable text -> list[Match],
@@ -2411,6 +2416,40 @@ def _too_slow(rule: Rule, spent: float) -> None:
         user_rules.note_slow(rule, spent * 1000)
     except Exception:  # noqa: BLE001 - the rule is out of this process either way
         pass
+
+
+def _term_matches(text: str) -> list:
+    """The terms (maisecrets/terms.py): names, case numbers, customer names. A bad terms.txt raises
+    terms.TermsError, a ConfigError: the hook fails closed. Without any list the terms module is never imported (it
+    costs about 13 ms, and each hook call is a new process): maisecrets/term_files.py says whether one is there."""
+    try:
+        from . import term_files
+    except ImportError:   # the standalone skill ships detect.py alone (scripts/build_skill_zip.py): no terms
+        return []
+    if not term_files.present():
+        return []
+    from . import terms
+    return terms.matches(text)
+
+
+TERM_RULE = "term"                 # the pass of the terms in maisecrets/registry.py (phase "terms")
+TERM_KEY = "terms:" + TERM_RULE    # its key; `enabled` takes either, or the kind `term:<id>` of one entity
+
+
+def _term_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: list, overlaps, take) -> None:
+    """The terms pass (registry phase "terms"): after the rules of your own, before the extra matchers. A term that
+    a rule found too (an email address, a token-shaped case number) claims the span (_claim)."""
+    if enabled is not None and TERM_RULE not in enabled and TERM_KEY not in enabled and not any(
+            str(k).startswith("term:") for k in enabled):
+        return
+    for m in sorted(_term_matches(text), key=lambda x: x.start):
+        if not ((enabled is None or TERM_RULE in enabled or TERM_KEY in enabled or m.kind in enabled)
+                and m.end > m.start):
+            continue
+        if not overlaps(m.start, m.end):
+            take(m, True)
+        else:
+            _claim(m, text, found, taken_starts, taken_ends)
 
 
 def active_regions():
@@ -3416,6 +3455,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if _CHANNEL[0] == "tool" and not _copy:
                 _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends)
             continue
+        if rule is _TERMS:
+            _term_hits(text, enabled, found, taken_starts, taken_ends, overlaps, take)
+            continue
         if enabled is not None and rule.id not in enabled and rule.key not in enabled:
             continue
         if rule.keywords and not any(k in low for k in rule.keywords):
@@ -3619,6 +3661,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
 
 
 _PERSONAL = object()             # the place of _personal_hits in the scan order
+_TERMS = object()                # the place of _term_hits: registry phase "terms", after the rules of your own
 _ORDER: list = [None, ()]        # a rule list and its scan order
 
 
@@ -3630,10 +3673,10 @@ def _runs_after_personal(rule: Rule) -> bool:
 
 def _in_scan_order(every: list) -> tuple:
     """The rules of a list in scan order: the built-in ones, then the personal-data step and the cleaned copy, then the
-    rules of your own (ids with `user:`). Kept per list, so a scan pays for it once."""
+    rules of your own (ids with `user:`), then the terms. Kept per list, so a scan pays for it once."""
     if _ORDER[0] is not every:
         _ORDER[:] = [every, tuple(r for r in every if not _runs_after_personal(r)) + (_PERSONAL,)
-                     + tuple(r for r in every if _runs_after_personal(r))]
+                     + tuple(r for r in every if _runs_after_personal(r)) + (_TERMS,)]
     return _ORDER[1]
 
 
@@ -3823,6 +3866,60 @@ def _scan_cleaned_copy(text: str, enabled, found: list, taken_starts: list, take
         i = bisect.bisect_left(taken_starts, start)
         taken_starts.insert(i, start)
         taken_ends.insert(i, end)
+
+
+def _claim(m: Match, text: str, found: list, starts: list, ends: list) -> None:
+    """A listed term (maisecrets/terms.py) that a rule found too, as an email address or a token-shaped case number:
+    the rule keeps its type, the span grows to cover both, and the kind is the term's. So the store keeps the entity
+    id, never the term, and the placeholder is never resolved (C26). Without this the rule's kind won, the store kept
+    the term, and its placeholder was resolved into commands and files (codex review of block 2)."""
+    hit = [f for f in found if f.start < m.end and m.start < f.end]
+    if not hit:
+        return                   # an allowed value holds the span: the person allowed exactly that text
+    if any(_WORD_CHAR_RE.search(text, f.start, m.start) or _WORD_CHAR_RE.search(text, m.end, f.end) for f in hit):
+        # a rule hit that holds more than the term (a password with a listed name in it) keeps its span and its
+        # kind: the store keeps the value whole, and a later output with it is masked whole. As a term the rest of
+        # the password went out in clear in each later output (#19). The parts of the term outside the taken
+        # spans are its own hits
+        _term_rest(m, text, found, starts, ends)
+        return
+    a, b = min([m.start] + [f.start for f in hit]), max([m.end] + [f.end for f in hit])
+    for f in hit:
+        found.remove(f)
+        i = starts.index(f.start)
+        del starts[i], ends[i]
+    if any(x < b and a < y for x, y in zip(starts, ends)):
+        found.extend(hit)        # the union would reach another taken span: leave the rules' hits as they were
+        for f in hit:
+            i = bisect.bisect_left(starts, f.start)
+            starts.insert(i, f.start)
+            ends.insert(i, f.end)
+        return
+    i = bisect.bisect_left(starts, a)
+    starts.insert(i, a)
+    ends.insert(i, b)
+    found.append(Match(m.kind, hit[0].type, text[a:b], a, b))
+
+
+_WORD_CHAR_RE = re.compile(r"\w")
+
+
+def _term_rest(m: Match, text: str, found: list, starts: list, ends: list) -> None:
+    """The parts of a term outside every taken span, each a hit of the term when it holds a word character."""
+    lo, hi = bisect.bisect_left(ends, m.start + 1), bisect.bisect_left(starts, m.end)
+    pos, pieces = m.start, []
+    for x, y in zip(starts[lo:hi], ends[lo:hi]):
+        if x > pos:
+            pieces.append((pos, min(x, m.end)))
+        pos = max(pos, y)
+    if pos < m.end:
+        pieces.append((pos, m.end))
+    for a, b in pieces:
+        if _WORD_CHAR_RE.search(text, a, b):
+            i = bisect.bisect_left(starts, a)
+            starts.insert(i, a)
+            ends.insert(i, b)
+            found.append(Match(m.kind, m.type, text[a:b], a, b))
 
 
 def contains_secret(text: str) -> bool:

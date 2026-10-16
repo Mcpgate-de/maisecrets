@@ -124,6 +124,9 @@ _HINTS_RESET_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+hints\s+reset|mais
 IN_A_COMMAND_RE = re.compile(r"(?:/maisecrets:settings|maisecrets:\s*set)\s+[a-z_]+\s+[a-z0-9-]+|"
                              r"maisecrets:\s*ssh\s+(?:autonomous|ask)\s|"
                              r"maisecrets:\s*reset\s+hints|\b(?:apply_typed|grant_typed|grant_by_code)\b", re.I)
+# a term removal makes detection weaker: only the person types it (terms.py)
+IN_A_COMMAND_RE = re.compile(IN_A_COMMAND_RE.pattern + r"|(?:/maisecrets:term|maisecrets:\s*term)\s+remove\s|"
+                             r"\bterm_remove_typed\b", re.I)
 # who wrote the prompt (Claude Code 2.1.292 UserPromptSubmit `source`): only the person at the composer. A scheduled
 # task, a loop wakeup, a system or poll prompt can carry text the model chose (CronCreate, ScheduleWakeup), and an
 # `sdk` prompt can come from a program a tool started (codex review round 2), so none of them changes anything. A
