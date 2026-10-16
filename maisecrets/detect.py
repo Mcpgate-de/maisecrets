@@ -87,22 +87,34 @@ class _LazyRx:
 
 
 class _Lazy:
-    """A regex compiled on first use. Rule loading then costs a dict, not 265 compilations."""
-    __slots__ = ("pattern", "flags", "_rx")
+    """A regex compiled on first use. Rule loading then costs a dict, not 265 compilations.
+
+    A pattern with the class of CJK letters (_CJK) also has a form without it, for a text that holds no CJK letter:
+    there the class matches nothing, and both forms find the same. The class made the compilation 5 to 8 times
+    slower: 26 ms in each hook process for four rules (e-mail, phone, the two passwords in a sentence)."""
+    __slots__ = ("pattern", "flags", "_rx", "_plain", "_plain_rx")
 
     def __init__(self, pattern: str, flags: int = 0) -> None:
-        self.pattern, self.flags, self._rx = pattern, flags, None
+        self.pattern, self.flags, self._rx, self._plain_rx = pattern, flags, None, None
+        self._plain = _without_cjk(pattern) if isinstance(pattern, str) and _CJK in pattern else None
 
     def _get(self) -> re.Pattern[str]:
         if self._rx is None:
             self._rx = re.compile(self.pattern, self.flags)
         return self._rx
 
+    def _for(self, text: str) -> re.Pattern[str]:
+        if self._plain is None or _has_cjk(text):
+            return self._get()
+        if self._plain_rx is None:
+            self._plain_rx = re.compile(self._plain, self.flags)
+        return self._plain_rx
+
     def finditer(self, text: str):
-        return self._get().finditer(text)
+        return self._for(text).finditer(text)
 
     def search(self, text: str):
-        return self._get().search(text)
+        return self._for(text).search(text)
 
     @property
     def groups(self) -> int:
@@ -1479,6 +1491,21 @@ _CJK = ("\u1100-\u11ff\u3000-\u30ff\u3130-\u318f\u3400-\u4dbf\u4e00-\u9fff\uac00
 _CJK_RANGES = ((0x1100, 0x11ff), (0x3000, 0x30ff), (0x3130, 0x318f), (0x3400, 0x4dbf), (0x4e00, 0x9fff),
                (0xac00, 0xd7af), (0xf900, 0xfaff), (0xff00, 0xffef))
 _NOT_CJK_WORD = "(?![" + _CJK + "])\\w"
+
+
+_CJK_CHAR_RE = _LazyRx("[" + _CJK + "]")
+
+
+def _has_cjk(text: str) -> bool:
+    return not text.isascii() and _CJK_CHAR_RE.search(text) is not None
+
+
+def _without_cjk(pattern: str) -> str | None:
+    """The form of a pattern for a text without a CJK letter: each use of the class _CJK goes. None when a use is
+    left that this cannot remove, so the rule keeps its one form."""
+    plain = (pattern.replace(_NOT_CJK_WORD, r"\w").replace("(?<=[" + _CJK + "])|", "")
+             .replace("[" + _CJK + "]", "(?!)").replace(_CJK, ""))
+    return None if "[]" in plain or "[^]" in plain else plain
 
 
 def _is_cjk(ch: str) -> bool:
