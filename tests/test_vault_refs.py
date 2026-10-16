@@ -102,6 +102,11 @@ class Offline(Base):
         text = f"a {tok('EMAIL_1', 'ma•••@x.de')} b {tok('PHONE_NUMBER_12')} {tok('EMAIL_' + 'c3')} {tok('X_0')}"
         self.assertEqual([k for k, _a, _b in vault_refs.find(text)], ["EMAIL_1", "PHONE_NUMBER_12"])
 
+    def test_a_type_with_a_digit_is_a_placeholder_of_the_client_range_too(self):
+        from maisecrets import placeholder
+        ref = OPEN + "IPV6_" + "c7" + CLOSE
+        self.assertEqual([k for k, _a, _b in placeholder.find_refs(f"x {ref} y")], ["IPV6_" + "c7"])
+
     def test_the_header_goes_on_user_scope_https_servers_only_and_nothing_else_changes(self):
         path = self.client_config({"a": {"type": "http", "url": "https://one.example/mcp",
                                          "headers": {"Authorization": "Bearer keep-me"}},
@@ -191,6 +196,18 @@ class Offline(Base):
         before = vault_refs._key(Vault().backend, "https://one.example", create=False)
         Vault().repair()
         self.assertEqual(vault_refs._key(Vault().backend, "https://one.example", create=False), before)
+
+    @unittest.skipIf(os.name == "nt", "a symbolic link needs a privilege on Windows")
+    def test_a_linked_client_config_stays_a_link(self):
+        real = self.profile / "dotfiles" / "claude.json"
+        real.parent.mkdir()
+        real.write_text(json.dumps({"mcpServers": {"a": {"url": "https://one.example/mcp"}}}))
+        link = self.profile / ".claude.json"
+        link.symlink_to(real)
+        self.assertIsNotNone(self.start())
+        self.assertTrue(link.is_symlink(), "the link stays a link")
+        self.assertIn("Client-Vault", json.loads(real.read_text())["mcpServers"]["a"]["headers"])
+        self.assertFalse((self.profile / ".claude.json.lock").exists())
 
     def test_the_backup_goes_at_the_next_start_that_changes_nothing(self):
         self.client_config({"a": {"url": "https://one.example/mcp"}})
@@ -535,6 +552,12 @@ class Online(Base):
         names = [k for k in Vault().backend.keys() if k.startswith("_maisecrets_vrel_")]
         self.assertEqual(names, [])
 
+    def test_repair_keeps_the_values_a_server_gave_this_hour(self):
+        self.ready()
+        self.write(tok("NAME_2"))
+        Vault().repair()
+        self.assertIn((VALUES[1], tok("NAME_2")), vault_refs.released(Vault().backend, "s1"))
+
     def test_codex_gets_no_server_value(self):
         self.ready()
         out = hooks.pre_tool({"tool_name": "Write", "session_id": "s1", "turn_id": "t", "cwd": str(self.work),
@@ -572,6 +595,24 @@ class Online(Base):
         self.result("demo", tok("EMAIL_1"))           # a fresh sighting starts the time again
         out = self.write(tok("EMAIL_1"))
         self.assertEqual(out["hookSpecificOutput"]["updatedInput"]["content"], "another-person@example.org")
+
+    def test_a_sighting_after_the_24_hours_starts_a_new_note(self):
+        # the deny reason says: call the tool again. With the first sighting kept for good, that never helped
+        self.ready()
+        notes = HOME / "vault-refs" / "notes.json"
+        data = json.loads(notes.read_text())
+        old = vault_refs._now_iso(time.time() - vault_refs.NOTE_TTL - 3600)
+        for by_origin in data.values():
+            for by_key in by_origin.values():
+                for note in by_key.values():
+                    note["seen"] = {u: old for u in note["seen"]}
+                    note["sessions"] = ["s0", "s1"]
+        notes.write_text(json.dumps(data))
+        self.assertIn("more than 24 hours", self.denied(self.write(tok("EMAIL_1"))))
+        self.result("demo", tok("EMAIL_1", "va•••"))
+        self.assertEqual(self.write(tok("EMAIL_1"))["hookSpecificOutput"]["updatedInput"]["content"], VALUES[0])
+        # the server minted the key after the old sighting: the old seen_at would get 410, the new one gets the value
+        self.assertEqual(vault_refs.noted(["EMAIL_1"], "s0"), {}, "the new note has this session only")
 
     def test_a_key_seen_with_two_displays_is_refused_and_starts_again(self):
         self.ready()

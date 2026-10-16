@@ -364,13 +364,19 @@ def note_result(payload: dict, cfg: dict) -> int:
     session = payload.get("session_id")
     if not isinstance(session, str) or not session:
         return 0
-    seen = _now_iso()
+    now = time.time()
+    seen = _now_iso(now)
     with _lock_for(DIR / ".lock"):
         data = _read_json(NOTES) or {}
         mine = data.setdefault(profile(), {}).setdefault(origin, {})
         for key, (type_, display) in found.items():
             old = mine.pop(key, None)           # re-inserted last: the oldest notes are first
             old = old if isinstance(old, dict) else {}
+            before = old.get("seen") if isinstance(old.get("seen"), dict) else {}
+            if old and not any((_seen_time(t) or 0) > now - NOTE_TTL for t in before.values()):
+                # every sighting is older than NOTE_TTL: a new sighting starts a new note, with this session only.
+                # Kept, the old first sighting refused the key for good, also after the tool was called again
+                old = {}
             where = dict(old.get("seen")) if isinstance(old.get("seen"), dict) else {}
             shown = dict(old.get("display")) if isinstance(old.get("display"), dict) else {}
             conflict = [u for u in (old.get("conflict") or []) if isinstance(u, str)]

@@ -1,0 +1,10 @@
+# c27-a-sighting-after-the-24-hours-starts-a-new-note: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-sighting-after-the-24-hours-starts-a-new-note"
+control = "C27"
+statement = "A server token seen again after its note is older than 24 hours starts a new note for this session; the old first sighting does not refuse the key for good."
+runner = ["tests/test_vault_refs.py::Online::test_a_sighting_after_the_24_hours_starts_a_new_note"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''            if old and not any((_seen_time(t) or 0) > now - NOTE_TTL for t in before.values()):'''
+replace = '''            if False:'''

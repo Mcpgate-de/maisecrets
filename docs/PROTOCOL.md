@@ -196,7 +196,8 @@ missing from a 200 answer.
   is refused, also when the two share an origin. A token resolves only in a
   session that saw it, and only for 24 hours after it was first seen; in any
   other case the call is denied with that reason. An `expired` answer deletes
-  the note of its keys, so the next sighting starts the time again. A key that
+  the note of its keys, so the next sighting starts the time again. A
+  sighting after the 24 hours starts a new note too, for its session only. A key that
   one server showed with two different display parts is refused and its note
   goes: the server's mapping changed, and the token may name another person. The result does not change. A token in any other result (a file read,
   a web page, a project-scope server) is not noted.
