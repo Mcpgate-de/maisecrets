@@ -52,7 +52,7 @@ PASSES = {"export": PHASES["export"], "personal": PHASES["personal"], "terms": P
 # their own, not a channel switch
 CHANNEL = {source: "both" for source in BANDS}
 VENDORED = frozenset({"detect-secrets", "betterleaks", "presidio"})   # synced from upstream by scripts/sync_*.py
-OWN_SPECIAL = {"fallback": "fallback", "user": "user", "terms": "user"}
+OWN_SPECIAL = {"fallback": "fallback", "user": "user", "terms": "term"}
 
 # a label rule finds a value by its label alone; a keyword rule is a label rule with no `=` or `:` of its own. Until
 # the registry these were id prefixes (detect.LABEL_RULES, detect.KEYWORD_RULES), and a stored kind still is one
@@ -120,6 +120,8 @@ def matcher_of(rule_id: str, source: str = "") -> str:
     end of a line with the next line), `windowed` (generic-api-key on a long text: windows around its keywords),
     `curl` (a curl command, split at its head), `list` (the values of a labelled list), `literal` (a password after a
     password label, judged by detect._judge_literal), `seed` (a BIP39 seed phrase by its checksum)."""
+    if source == "terms":
+        return "term"      # one index of every list (maisecrets/terms.py), not a regex per term
     if rule_id.startswith("curl-"):
         return "curl"
     if rule_id == "label-secret-list":
@@ -146,7 +148,7 @@ def rule_class(source: str, rule_id: str, type_: str) -> str:
     if source == "user":
         return "user"
     if source == "terms":
-        return "user:terms"
+        return "term"
     if source == "literal":
         return "label:literal"
     if form == "keyword":

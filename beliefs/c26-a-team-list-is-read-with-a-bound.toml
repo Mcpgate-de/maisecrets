@@ -1,0 +1,10 @@
+# c26-a-team-list-is-read-with-a-bound: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-team-list-is-read-with-a-bound"
+control = "C26"
+statement = "A team list is opened once, without a link and without blocking, and read with a byte bound: a FIFO or a growing file swapped in after the listing can neither hold a hook nor pass the size cap."
+runner = ["tests/test_terms_hooks.py::ReviewRoundTwoTests::test_a_team_list_swapped_for_a_fifo_never_holds_the_hook"]
+
+[proof]
+file = "maisecrets/terms.py"
+find = "            raw = _read_bounded(path, MAX_TEAM_BYTES)\n"
+replace = "            raw = path.read_bytes()\n"

@@ -418,10 +418,15 @@ class ReviewRoundOneTests(_Base):
         text = "ghp_Ab12Qx7Lm2 Testowski"
         token = detect.Match("github-pat", "SECRET", text[:14], 0, 14)
         term = detect.Match("term:abc", "NAME", "Testowski", 15, 24)
+        stored = []
+
+        class FakeVault:
+            def put_many(self, items, session=None, tool=False):
+                stored.extend(items)
+                return [None] * len(items)
         with mock.patch.object(hooks, "_exact_spans", lambda *a, **k: [(10, 19)]):
-            for order in ([token, term], ):
-                got = hooks._longest_wins(text, order, object(), "S1", [])
-                self.assertEqual([(m.kind, m.start, m.end) for m in got], [("term:abc", 0, 24)])
+            got = hooks._longest_wins(text, [token, term], FakeVault(), "S1", [])
+        self.assertEqual([(m.kind, m.start, m.end) for m in got], [("term:abc", 0, 24)])
 
     def test_an_expired_last_mark_leaves_no_file(self):
         # Gate B 5: an empty terms.marked.json kept term_files.present() true, and each hook built the terms index
@@ -461,6 +466,61 @@ class ReviewRoundOneTests(_Base):
         r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=dict(os.environ),
                            timeout=60)
         self.assertEqual(r.stdout.split("\n")[:2], ["None False", "('add', 'Jan Kowalski')"], r.stderr[-400:])
+
+
+class ReviewRoundTwoTests(_Base):
+    """The findings of the second round of both review gates on the rebase."""
+
+    def test_a_term_that_a_stored_value_equals_stays_a_term(self):
+        # Gate A, round 2: an address stored before the list named it kept its resolvable placeholder
+        address = "zbigniew.testowski" + "@" + "firma-xyz.de"
+        first = _out(_bash(f"mail {address}"))
+        self.assertRegex(first, re.escape(OPEN) + r"EMAIL_c\d+")
+        _write_terms(f"EMAIL_ZT  {address}\n")
+        out = _out(_bash(f"again {address}"))
+        refs = re.findall(re.escape(OPEN) + r"([A-Z]+_c\d+)", out)
+        self.assertEqual(len(refs), 1, out)
+        index = json.loads(Path(HOME, "index.json").read_text(encoding="utf-8"))["entries"]
+        self.assertTrue(terms.is_term_kind(index[refs[0]]["kind"]), "the listed address is a term now: mask only")
+
+    def test_a_secret_that_a_union_with_a_term_absorbs_is_stored_too(self):
+        # Gate B, round 2: the union became a term, and the secret in it had no entry of its own
+        text = "Hunter2Qx77 Zbigniew Testowski"
+        secret = detect.Match("ds-keyword-colon", "SECRET", "Hunter2Qx77", 0, 11)
+        term = detect.Match("term:abc", "NAME", "Zbigniew Testowski", 12, 30)
+        stored = []
+
+        class FakeVault:
+            def put_many(self, items, session=None, tool=False):
+                stored.extend(items)
+                return [None] * len(items)
+        with mock.patch.object(hooks, "_exact_spans", lambda *a, **k: [(7, 16)]):
+            got = hooks._longest_wins(text, [secret, term], FakeVault(), "S1", [])
+        self.assertEqual([(m.kind, m.start, m.end) for m in got], [("term:abc", 0, 30)])
+        self.assertEqual(stored, [("Hunter2Qx77", "SECRET", "ds-keyword-colon")])
+
+    def test_a_team_list_swapped_for_a_fifo_never_holds_the_hook(self):
+        # Gate A, round 2: the size check and the read were two steps; a FIFO in place of the file held the read
+        team = Path(tempfile.mkdtemp(prefix="team-"))
+        self.addCleanup(shutil.rmtree, team, True)
+        os.mkfifo(team / "x.terms")
+        # the listing saw a regular file; the read finds the FIFO
+        code = ("import sys; from pathlib import Path; sys.path.insert(0, %r); sys.path.insert(0, %r); "
+                "import _isolate; "
+                "from maisecrets import terms, term_files; "
+                "term_files.team_files = lambda cfg: [('team/x.terms', Path(%r) / 'x.terms')]; "
+                "print([r.reason for r in terms._team_sources({})[1]])" % (str(ROOT), str(ROOT / "tests"), str(team)))
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=dict(os.environ),
+                           timeout=60)
+        self.assertEqual(r.stdout.strip(), "['a file that cannot be read']", r.stderr[-400:])
+
+    def test_a_name_with_a_capital_inside_a_word_or_spaces_in_the_braces_is_marked(self):
+        # Gate B, round 2: the template rule of round 1 let these names go to the model in clear
+        for text in ("{{Ronald McDonald}}", "{{Jan DeVries}}", "{{ Jan Kowalczyk }}", "{{Anna-Lena MacLeod}}"):
+            with self.subTest(text=text):
+                self.assertEqual(len(terms.markers(f"write to {text} now")), 1)
+        for text in ("{{FirstName}}", "{{ Title }}"):
+            self.assertEqual(terms.markers(f"hello {text}"), [])
 
 
 class QuietValueTests(_Base):

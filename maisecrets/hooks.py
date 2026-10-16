@@ -725,6 +725,9 @@ def _exact_spans(text: str, vault, session: str | None, resolved: list | None, p
     return spans
 
 
+_WORD_CHAR_RE = re.compile(r"\w")
+
+
 def _longest_wins(text: str, matches: list, vault, session: str | None, resolved: list | None,
                   prompt: bool = False) -> list:
     """The detector hits after the rule that the longest span wins against a stored or resolved value (C2, C26). A hit
@@ -739,9 +742,15 @@ def _longest_wins(text: str, matches: list, vault, session: str | None, resolved
     if not spans:
         return matches
     out: list = []
+    absorbed: list = []
     for m in matches:
         cover = [(a, b) for a, b in spans if a < m.end and m.start < b]
-        if any(a <= m.start and m.end <= b for a, b in cover):
+        inside = [(a, b) for a, b in cover if a <= m.start and m.end <= b]
+        if inside and not (term_files.is_term_kind(m.kind) and not any(
+                _WORD_CHAR_RE.search(text, a, m.start) or _WORD_CHAR_RE.search(text, m.end, b) for a, b in inside)):
+            # a hit inside a longer stored value: the exact redaction takes the value whole. A term that a stored
+            # value only equals stays a term: an address stored before the list named it kept its resolvable
+            # placeholder (Gate A, round 2)
             continue
         a = min([m.start] + [x[0] for x in cover])
         b = max([m.end] + [x[1] for x in cover])
@@ -752,6 +761,14 @@ def _longest_wins(text: str, matches: list, vault, session: str | None, resolved
             # that can be resolved into a command (Gate A and Gate B, review of the rebase)
             m = m if term_files.is_term_kind(m.kind) and not term_files.is_term_kind(last.kind) else last
         out.append(m if (a, b) == (m.start, m.end) else dataclasses.replace(m, value=text[a:b], start=a, end=b))
+    for u in out:
+        if term_files.is_term_kind(u.kind):
+            absorbed += [x for x in matches if not term_files.is_term_kind(x.kind) and u.start <= x.start
+                         and x.end <= u.end]
+    if absorbed:
+        # the secret in a union with a term is stored as its own entry, so a later output that holds it alone is
+        # masked by the exact match (Gate B, round 2)
+        vault.put_many([(x.value, x.type, x.kind) for x in absorbed], session=session, tool=not prompt)
     return out
 
 

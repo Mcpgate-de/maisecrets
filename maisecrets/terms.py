@@ -21,6 +21,7 @@ so every spelling of an entity gets the same placeholder, and the placeholder is
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import marshal
@@ -671,19 +672,42 @@ def _team_sources(cfg: dict) -> tuple[list, list]:
             refused.append(Refused(source, 0, "a symbolic link (a rule folder is read without links)"))
             continue
         try:
-            size = path.stat().st_size
-            if size > MAX_TEAM_BYTES:
-                refused.append(Refused(source, 0, f"a file larger than {MAX_TEAM_BYTES >> 20} MB"))
-                continue
-            if size + sum(len(raw) for _s, raw in found) > MAX_TEAM_BYTES:
-                # the cap holds for all the team lists together: each file alone was no bound on the build
-                refused.append(Refused(source, 0, f"the team lists together are larger than "
-                                                  f"{MAX_TEAM_BYTES >> 20} MB"))
-                continue
-            found.append((source, path.read_bytes()))
-        except OSError:
-            refused.append(Refused(source, 0, "a file that cannot be read as UTF-8"))
+            # one open, without a link, without blocking on a FIFO, read with a bound: a file swapped after the
+            # listing (a FIFO, a link, a file that grows) can neither hold the hook nor pass the cap (Gate A, round 2)
+            raw = _read_bounded(path, MAX_TEAM_BYTES)
+        except OSError as exc:
+            refused.append(Refused(source, 0, "a symbolic link (a rule folder is read without links)"
+                                   if getattr(exc, "errno", None) == errno.ELOOP else "a file that cannot be read"))
+            continue
+        if raw is None:
+            refused.append(Refused(source, 0, f"a file larger than {MAX_TEAM_BYTES >> 20} MB"))
+            continue
+        if len(raw) + sum(len(r) for _s, r in found) > MAX_TEAM_BYTES:
+            # the cap holds for all the team lists together: each file alone was no bound on the build
+            refused.append(Refused(source, 0, f"the team lists together are larger than {MAX_TEAM_BYTES >> 20} MB"))
+            continue
+        found.append((source, raw))
     return found, refused
+
+
+def _read_bounded(path: Path, limit: int) -> bytes | None:
+    """The bytes of a regular file opened without following a link and without blocking, or None past `limit`.
+    Raises OSError for a link (ELOOP), a FIFO or any other file that is not regular."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+                 | getattr(os, "O_NONBLOCK", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file")
+        chunks, size = [], 0
+        while size <= limit:
+            chunk = os.read(fd, limit + 1 - size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        return None if size > limit else b"".join(chunks)
+    finally:
+        os.close(fd)
 
 
 def _key(v: Variant) -> str:
@@ -990,9 +1014,10 @@ def markers(prompt: str) -> list:
     out = []
     for m in _MARKER_RE.finditer(prompt):
         inner = m.group(1)
-        if inner != inner.strip() or any(a.islower() and b.isupper() for a, b in zip(inner, inner[1:])):
-            continue    # `{{ Title }}`, `{{FirstName}}`: the forms of a template, not a name (Gate B, round 1)
         words = inner.split()
+        if len(words) == 1 and (inner != inner.strip() or any(a.islower() and b.isupper()
+                                                               for a, b in zip(inner, inner[1:]))):
+            continue    # `{{ Title }}`, `{{FirstName}}`: one word in the form of a template (Gate B, rounds 1, 2)
         if 1 <= len(words) <= 5 and all(_MARK_WORD_RE.fullmatch(w) for w in words) \
                 and any(w[0].isupper() for w in words) \
                 and not (len(words) == 1 and (len(words[0]) < 2 or _lower(words[0]) in stoplist())):

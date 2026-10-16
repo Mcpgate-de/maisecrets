@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 32 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 197 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 200 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1695,12 +1695,14 @@ list, as with a setting (C22): a removal in a tool call is refused.
 the name in that prompt and in every tool result until the lifetime of a
 name value ends (`ttl_seconds`, one day by default); it does not write
 `terms.txt`. A marker is 1 to 5 words of letters (a hyphen or an apostrophe
-inside a word), and one word starts with a capital letter. Write it with no
-space inside the braces and with no capital inside a word. So
-`{{ .Values.image.tag }}`, `{{ item }}`, `{{ Title }}` and `{{FirstName}}`
-stay text (the forms of a template), and so do one letter and one common
-word alone (`{{A}}`, `{{The}}`). For a name such as `McDonald`, use
-`/maisecrets:term add`. A marker counts only in a
+inside a word), and one word starts with a capital letter. So
+`{{ .Values.image.tag }}` and `{{ item }}` stay text, and so do one letter
+and one common word alone (`{{A}}`, `{{The}}`). One word alone with a space
+inside the braces or with a capital inside it (`{{ Title }}`,
+`{{FirstName}}`) is the form of a template and stays text; mark a one-word
+name such as `{{McDonald}}` with `/maisecrets:term add`. A name of two or
+more words is marked in any of these forms (`{{Ronald McDonald}}`,
+`{{ Jan Kowalski }}`). A marker counts only in a
 prompt that you typed at the composer or over Remote Control, not in one that
 a program or a subagent sent.
 
@@ -1771,7 +1773,10 @@ delete lines of its own folder. The lines pushed out are named in
 
 **Where the terms run.** The terms are a pass of the rule registry, after
 the built-in rules and the rules of your own; `maisecrets rules list` shows
-the pass as `terms:term`. So an email address or an IBAN keeps the span its
+the pass as `terms:term`, with its own origin and class (`term`). It is one
+index of every list, not a rule per term: its cost does not grow with the
+number of terms. A hit says where it came from: its kind is `term:<id>` in
+`maisecrets scan` and in the store, never the term. So an email address or an IBAN keeps the span its
 rule found. A listed term that a rule finds too (an email address on your
 list) gets the rule's type, but it stays a term: mask only. An exact value on
 your allow list (`~/.maisecrets/allow.txt`) stays allowed, also when a term
