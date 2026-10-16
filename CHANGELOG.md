@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.6.26] - 2026-10-16
+
+### Fixes
+
+- a company's postcode and VAT ID stay text with its street (4cd8b0d)
+
 ## [0.6.25] - 2026-10-16
 
 ### Fixes
