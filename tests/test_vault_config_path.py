@@ -131,6 +131,8 @@ class Choice(tvr.Base):
             self.assertEqual(Path(_guard_module()._client_config()).name, ".config.json"
                              if (Path.cwd() / ".config.json").is_file() else ".claude.json")
             self.assertEqual(vault_refs.user_servers(), {}, "no server is read from a file the hook cannot know")
+            self.assertNotIn(".config.json", vault_refs.config_files(), "no relative name is guarded")
+            self.assertFalse(hooks._holds_a_guarded_folder("cat jest.config.json"))
 
     def test_the_config_home_is_normalized_to_nfc_as_the_client_does(self):
         import unicodedata
@@ -251,13 +253,6 @@ class Write(tvr.Base):
         vault_refs._key(Vault().backend, "https://stale.example", create=True)
         with mock.patch.object(vault_refs._ConfigLock, "__enter__", enter):
             self.assertEqual(vault_refs._apply_config(load_config(), Vault().backend)[:2], ([], []))
-
-    def test_an_old_backup_beside_the_unused_global_file_goes(self):
-        self.enable()
-        old = self.profile / ".claude.json.maisecrets-backup"
-        old.write_text("{}")
-        self.assertIsNone(self.start())
-        self.assertFalse(old.exists())
 
     def test_status_names_the_file_it_reads(self):
         lines = vault_refs.status_lines(load_config(), Vault().backend, check=False)

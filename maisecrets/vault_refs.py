@@ -128,9 +128,10 @@ def config_files() -> list[str]:
     chosen = claude_json()
     base = os.environ.get("CLAUDE_CONFIG_DIR")
     plain = (Path(base) if base else Path.home()) / ".claude.json"
-    out = [str(chosen)]
-    for f in (legacy_file(), global_file(), plain):
-        if str(f) not in out:
+    out: list[str] = []
+    for f in (chosen, legacy_file(), global_file(), plain):
+        # a relative name (an empty CLAUDE_CONFIG_DIR) would refuse every value that holds `.config.json`
+        if f.is_absolute() and str(f) not in out:
             out.append(str(f))
     return out
 
@@ -395,16 +396,12 @@ def _apply_config(cfg: dict, backend, lock_wait: float = 5.0) -> tuple[list[str]
     ours = {v.get("kid") for v in _known_keys().values() if isinstance(v, dict)} | {kid_of(k) for k in keys.values()}
     if _apply_headers(copy.deepcopy(first), keys, urls, ours) == ([], []):
         # nothing to change: no lock, and the backup of the last change goes (it holds every server's credentials).
-        # So do the backups that 0.6.29 and 0.6.30 left beside a link's target or beside a global file the client
-        # no longer uses: only files of that name, which only maisecrets writes; never a config file (Gate B review)
-        olds = {backup, path.resolve().with_name(path.resolve().name + ".maisecrets-backup")}
-        if path != global_file():
-            olds.add(global_file().with_name(global_file().name + ".maisecrets-backup"))
-        for old in olds:
-            try:
-                old.unlink()
-            except OSError:
-                pass
+        # A backup that 0.6.29 or 0.6.30 left beside a link's target or beside a global file the client does not use
+        # stays: maisecrets cannot prove it wrote a file of that name there (Gate A review, round 2)
+        try:
+            backup.unlink()
+        except OSError:
+            pass
         return [], [], path, backup
     with _ConfigLock(path, wait=lock_wait):
         # the client may have changed its file between the choice and the lock (a new .config.json): then nothing is
