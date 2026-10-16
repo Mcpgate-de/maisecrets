@@ -1,0 +1,10 @@
+# c6-powershell-names-the-file-route: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c6-powershell-names-the-file-route"
+control = "C6"
+statement = "The refusal of a placeholder in the PowerShell tool of Claude Code names the file route: Write or Edit puts the value into the script or a file it reads, and the script runs with no placeholder in the command."
+runner = ["tests/test_windows_document_route.py::WindowsRefusalNamesTheFileRouteTests::test_claude_code_powershell_gets_the_file_route_with_write_or_edit"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "                     + (_windows_file_route(payload, cfg or {}, keys)\n"
+replace = "                     + (\"\"\n"

@@ -244,7 +244,7 @@ class ClientShapeTests(unittest.TestCase):
         for out in (claude, codex):
             self.assertNotIn(GLPAT, json.dumps(out))
         typed = hooks.user_prompt({"prompt": "print " + self.e.ref, "session_id": "U3", "prompt_id": "p"})
-        self.assertEqual(typed["hookSpecificOutput"]["additionalContext"], hooks.PRIMER)
+        self.assertEqual(typed["hookSpecificOutput"]["additionalContext"], hooks.primer())
         self.assertEqual(Vault().status(self.e.key, "U3"), "ok", "a typed reference admits the session")
         self.assertEqual(hooks.user_prompt({"prompt": "hello", "session_id": "U3", **CLAUDE}), {})
 
@@ -937,7 +937,7 @@ class PayloadMatrixTests(unittest.TestCase):
                 self.assertIn("maisecrets", out["systemMessage"])
         for out in (claude, codex):
             self.assertEqual(out["hookSpecificOutput"], {"hookEventName": "SessionStart",
-                                                         "additionalContext": hooks.PRIMER})
+                                                         "additionalContext": hooks.primer()})
 
 
 if __name__ == "__main__":

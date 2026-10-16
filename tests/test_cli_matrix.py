@@ -965,7 +965,7 @@ class SessionStartTests(unittest.TestCase):
         self.assertIn(" " + tips.try_it_line() + " ", msg, "the first start says how to see it work")
         self.assertTrue(msg.endswith(" Tip: /maisecrets:shortcut adds /ms as a short form of /maisecrets:send."))
         self.assertEqual(out["hookSpecificOutput"], {"hookEventName": "SessionStart",
-                                                     "additionalContext": hooks.PRIMER})
+                                                     "additionalContext": hooks.primer()})
         self.assertEqual((sb.home / ".announced").read_text().strip(), "EncryptedFileBackend")
         self.assertEqual((sb.home / ".shortcut").read_text().strip(), "offered")
         self.assertFalse((sb.user_home / ".claude" / "commands").exists(), "the offer installs nothing")
@@ -973,7 +973,7 @@ class SessionStartTests(unittest.TestCase):
         self.assertEqual(second, f"maisecrets {VERSION} is on. {tips.TIPS[0]}")
         third = _start(self, sb, CLAUDECODE="1")
         self.assertEqual(third["systemMessage"], f"maisecrets {VERSION} is on.")
-        self.assertEqual(third["hookSpecificOutput"]["additionalContext"], hooks.PRIMER)
+        self.assertEqual(third["hookSpecificOutput"]["additionalContext"], hooks.primer())
 
     def test_the_tip_comes_from_the_pool_of_the_client(self):
         from maisecrets import tips
@@ -1282,7 +1282,7 @@ def run_pair(state: str, event: str, client: str) -> list[str]:
 
 def hooks_primer() -> str:
     from maisecrets import hooks
-    return hooks.PRIMER
+    return hooks.primer()
 
 
 class ClientStateEventTests(unittest.TestCase):

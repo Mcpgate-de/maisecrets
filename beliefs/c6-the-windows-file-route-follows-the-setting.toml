@@ -1,0 +1,10 @@
+# c6-the-windows-file-route-follows-the-setting: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c6-the-windows-file-route-follows-the-setting"
+control = "C6"
+statement = "On Windows the file route is named only where the rehydration setting lets the file tool through: block, confirm in Codex and resolve_in_files false name no file route."
+runner = ["tests/test_windows_document_route.py::WindowsRefusalNamesTheFileRouteTests::test_a_setting_that_refuses_the_file_tool_names_no_file_route"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    client = client_of(payload)\n    if rehydration.outcome(client, rehydration.policy(cfg, \"file\")) == \"deny\":\n        return \"\"\n"
+replace = "    client = client_of(payload)\n"
