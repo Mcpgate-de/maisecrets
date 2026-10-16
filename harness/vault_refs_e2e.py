@@ -2,8 +2,10 @@
 
 Probe P1 of vault references (docs/PROTOCOL.md section 4) with the real client:
 
-1. A first session starts: maisecrets writes the Client-Vault header on the user-scope server of a client profile
-   of its own (CLAUDE_CONFIG_DIR in a temp folder; the person's own profile is never touched).
+0. A session start alone writes no header and asks no server.
+1. A first session calls the server's tool: its first token makes maisecrets read the metadata and write the
+   Client-Vault header on that entry of a client profile of its own (CLAUDE_CONFIG_DIR in a temp folder; the person's
+   own profile is never touched), with a notice. It prints whether the client sends the header in the same session.
 2. A second session connects with the header; the fake server binds the kid (auto_bind, as after a login).
 3. The scripted model calls the server's tool, gets tokens, writes them into a file with Write and with Bash.
 4. Checks: the files hold the values; no request to the upstream and no file of the client profile (the transcript)
@@ -76,14 +78,31 @@ def run(header_on: bool) -> list[str]:
                    CLAUDE_CONFIG_DIR=str(profile), MAISECRETS_HOME=str(home), NODE_EXTRA_CA_CERTS=srv.cert,
                    CLAUDE_CODE_MAX_RETRIES="0", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
                    MAISECRETS_GUARD_CLIPBOARD="off")
-        # session 1: the session start writes the header; the client connected before it, without one
+        # session 0: a start alone writes nothing and asks no server
         _claude("Say hello.", [{"text": "hello"}], work, env, "Read")
+        cfg = json.loads((profile / ".claude.json").read_text())
+        if cfg["mcpServers"]["demo"].get("headers") or any(e["path"].startswith("/.well-known/") for e in srv.log):
+            return ["a session start without a server token wrote a header or asked the server"]
+        # session 1: the first result with a server token is the trigger: one metadata request, the header on this
+        # entry, a notice. The second call of the same session shows whether the client reads the header again
+        n_before = len(srv.log)
+        r1 = _claude("List the customers twice.", [{"tool": "mcp__demo__customers", "input": {}},
+                                                   {"tool": "mcp__demo__customers", "input": {}}, {"text": "done"}],
+                     work, env, "mcp__demo__customers")
         cfg = json.loads((profile / ".claude.json").read_text())
         header = cfg["mcpServers"]["demo"].get("headers", {}).get("Client-Vault")
         if header_on and not header:
-            return [f"the first session wrote no header (see {work})"]
+            return [f"the first token wrote no header (see {work}; stdout {r1.stdout[-300:]!r})"]
         if not header_on and header:
             return ["client_header false, and a header was written"]
+        if header_on:
+            calls = [e for e in srv.log[n_before:] if e["path"] == "/mcp" and e["method"] == "POST"]
+            same = any(e["client_vault"] == header for e in calls)
+            print(f"[MEASURE] vault_refs: MCP requests after the header write in the same session carry it: {same} "
+                  f"({len(calls)} POST /mcp in session 1)")
+            if "supports Client-Vault" not in (r1.stdout + r1.stderr) and \
+                    "supports Client-Vault" not in (r1.out / "debug.log").read_text(errors="ignore"):
+                fails.append("no notice for the person after the header write")
         # session 2: the header goes to the server; the model gets tokens and writes them
         tokens = f"{OPEN}EMAIL_1{CLOSE},{OPEN}NAME_2{CLOSE}"
         turns = [{"tool": "mcp__demo__customers", "input": {}},

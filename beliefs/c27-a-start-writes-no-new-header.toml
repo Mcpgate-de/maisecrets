@@ -1,0 +1,14 @@
+# c27-a-start-writes-no-new-header: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-start-writes-no-new-header"
+control = "C27"
+statement = "A session start makes no network request and writes no new header; only a server that sent a token and named a vault endpoint gets one."
+runner = ["tests/test_vault_refs.py::Online::test_trigger_no_header_and_no_request_without_a_token"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''    urls = _enabled() if cfg.get("client_header", True) is not False else {}
+    for origin in urls:
+        k = _key(backend, origin, create=False)'''
+replace = '''    urls = {origin_of(u): [u] for u in user_servers().values()}
+    for origin in urls:
+        k = _key(backend, origin, create=True)'''

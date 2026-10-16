@@ -3901,13 +3901,34 @@ def _post_tool_guarded(payload: dict) -> dict:
     """Claude Code ignores exit 2 from PostToolUse: the raw output would reach the model. So a
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
     _commit_destinations(payload)    # first: the call ran even when the redaction below fails; and before the hint
+    notice = None
     try:
         if str(payload.get("tool_name") or "").startswith("mcp__"):     # no config read for any other tool
             from . import vault_refs
-            # before the redaction, from the result as the server sent it; the result itself does not change
-            vault_refs.note_result(payload, load_config())
+            cfg = load_config()
+            # before the redaction, from the result as the server sent it; the result itself does not change. Codex
+            # gets no header in this version, so its results start no discovery
+            backend = None if client_of(payload) == "codex" else Vault(cfg).backend
+            _count, notice = vault_refs.note_result(payload, cfg, backend)
     except Exception as exc:  # noqa: BLE001 - a token not noted stays text; the output must not be withheld for it
         _debug(f"post-tool vault-refs: {type(exc).__name__}")
+    result = _post_tool_guarded_rest(payload)
+    if notice:
+        try:
+            return _with_notice(result, notice)
+        except Exception as exc:  # noqa: BLE001 - a notice that fails must not change the output
+            _debug(f"post-tool notice: {type(exc).__name__}")
+    return result
+
+
+def _with_notice(result: dict, notice: str) -> dict:
+    """The one-time notice of vault references (vault_refs.enable) for the person, next to any message of the hook."""
+    out = dict(result or {})
+    out["systemMessage"] = (out["systemMessage"] + " " + notice) if out.get("systemMessage") else notice
+    return out
+
+
+def _post_tool_guarded_rest(payload: dict) -> dict:
     try:
         result = post_tool(payload)
     except ConfigError as exc:

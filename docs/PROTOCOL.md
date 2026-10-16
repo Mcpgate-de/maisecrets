@@ -97,6 +97,15 @@ value only to a key that the vault announced when the person logged in.
 - The vault writes the header only on an entry of user scope, never on a
   project file that a repository carries and never on an entry that it cannot
   edit. The URL of the entry must be `https`.
+- The vault writes the header only on demand: when a tool result of that
+  entry's server carries a server-range token, and the server's metadata
+  (§4.3) names `client_vault_endpoint`. Until then it makes no request and
+  changes no file. It writes the header on that one entry, and it tells the
+  person once. A client may read its static headers only at its start
+  (Claude Code 2.1.301 does, measured); the binding then begins at the next
+  start. At a start, the vault puts back a header of such an entry that the
+  client lost, and removes its own header from an entry that no longer
+  qualifies.
 - The write changes one key of the configuration file. The vault takes the
   client's own lock (a `<file>.lock` folder; a lock older than 10 s is stale),
   reads the file again, writes a temporary file in the same folder and renames
@@ -133,7 +142,9 @@ Rules for every binding:
 
 ### 4.3 Finding the endpoint
 
-The vault reads the protected resource metadata of the MCP URL (RFC 9728),
+The vault reads the protected resource metadata of the MCP URL (RFC 9728)
+the first time a result of that server carries a server-range token, and
+again before a resolve when its kept answer is older than an hour:
 `GET <origin>/.well-known/oauth-protected-resource<path of the MCP URL>`, and
 takes the field `client_vault_endpoint`: an absolute URL. If the field is
 missing from a 200 answer, the server does not support vault references.

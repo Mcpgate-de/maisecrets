@@ -66,8 +66,8 @@ MEANING = {
     "guard": "A synced install registers the guard outside its folder.",
     "pass_agent_reports": "A subagent's report is not blocked.",
     "gateway_servers": "MCP servers that resolve placeholders themselves.",
-    "client_header": "A key header on your own MCP servers, so a server that supports it can give its masked "
-                     "values back into your files and commands, never to the AI.",
+    "client_header": "A key header on your own MCP server once it sends a masked value and supports it, so it "
+                     "can give its masked values back into your files and commands, never to the AI.",
     "max_keys_per_session": "How many different stored values one session may use in an hour. A brake against "
                             "sending all values out at once; normal work stays far below it.",
     "max_resolves_per_hour": "How often stored values may go into tool calls in an hour, all sessions together.",

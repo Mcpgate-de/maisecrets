@@ -55,7 +55,8 @@ RELEASED = DIR / "released.json"      # session -> [{"name", "t"}]: the values a
 NOTE_TTL = 24 * 3600                  # a token seen longer ago than this stays text
 RELEASE_WINDOW = 3600                 # a value a server gave is hunted in tool output this long, as a stored one
 MAX_SESSIONS_PER_NOTE = 20
-KEYS = DIR / "keys.json"              # profile -> origin -> {"kid", "created"}; never K
+KEYS = DIR / "keys.json"              # profile -> origin -> {"kid", "created", "urls"}; never K
+DISCOVERY_BUDGET = 4.0                # the one metadata request of the post-tool hook (watchdog 16 s, lock wait 5 s)
 ENDPOINTS = DIR / "endpoints.json"    # origin + path -> {"endpoint", "t"}
 
 
@@ -172,12 +173,30 @@ def _known_keys() -> dict:
     return (_read_json(KEYS) or {}).get(profile()) or {}
 
 
-def _remember_key(origin: str, kid: str) -> None:
+def _enabled() -> dict[str, list[str]]:
+    """origin -> the MCP URLs of this profile whose server named a vault endpoint: only their entries get the header."""
+    out: dict[str, list[str]] = {}
+    for origin, rec in _known_keys().items():
+        if isinstance(rec, dict) and isinstance(rec.get("urls"), list):
+            out[origin] = [u for u in rec["urls"] if isinstance(u, str)]
+    return out
+
+
+def _remember_key(origin: str, kid: str, url: str | None = None) -> None:
     with _lock_for(DIR / ".lock"):
         data = _read_json(KEYS) or {}
         mine = data.setdefault(profile(), {})
-        if mine.get(origin, {}).get("kid") != kid:
-            mine[origin] = {"kid": kid, "created": _now_iso()}
+        rec = mine.get(origin)
+        changed = False
+        if not isinstance(rec, dict) or rec.get("kid") != kid:
+            rec = mine[origin] = {"kid": kid, "created": _now_iso(), "urls": []}
+            changed = True
+        if not isinstance(rec.get("urls"), list):
+            rec["urls"], changed = [], True
+        if url and url not in rec["urls"]:
+            rec["urls"].append(url)
+            changed = True
+        if changed:
             atomic_write(KEYS, json.dumps(data, indent=1))
 
 
@@ -265,60 +284,86 @@ def _kid_in(value: object) -> str | None:
     return m.group("kid") if m else None
 
 
+def _may_change_config() -> bool:
+    """A test home never changes the client config of the person; a test sets CLAUDE_CONFIG_DIR to its own folder."""
+    return HOME == _DEFAULT_HOME or bool(os.environ.get("CLAUDE_CONFIG_DIR"))
+
+
 def ensure_headers(cfg: dict, backend) -> str | None:
-    """At session start (Claude Code): the header on every user-scope server with an https URL, one key per origin.
-    A header of ours (a kid this profile made) goes again from an entry that no longer qualifies, and from every
-    entry with `client_header` false; there a header someone else wrote stays. On an entry that qualifies, any other
-    Client-Vault header is replaced: after a wipe our own old header looks foreign, and kept it would stop the
-    feature for good. Only `mcpServers.<name>.headers` changes.
-    The keys are made before the client's lock is taken, so the lock is held for a re-read and a write only; a file
-    that is not valid JSON is not touched, and a backup is written before a change. Returns one line for the
-    session-start message, or None."""
-    if HOME != _DEFAULT_HOME and not os.environ.get("CLAUDE_CONFIG_DIR"):
-        return None                         # a test home never changes the client config of the person
+    """At session start (Claude Code). Nothing new: a header goes on an entry only after its server sent a token and
+    named a vault endpoint (enable). Here the header of such an entry is put back when the client lost it, and a header
+    of ours (a kid this profile made) goes from an entry that no longer qualifies (another URL, plain http, a removed
+    server) and from every entry with `client_header` false; a header someone else wrote stays there. No network
+    request. Returns one line for the session-start message, or None."""
+    if not _may_change_config():
+        return None
+    added, removed, path, backup = _apply_config(cfg, backend)
+    parts = []
+    if added:
+        parts.append(f"maisecrets put its {HEADER} header back on {len(added)} MCP server(s) in {path}")
+    if removed:
+        parts.append(f"maisecrets removed its {HEADER} header from {len(removed)} MCP server(s) in {path}")
+    if not parts:
+        return None
+    return "; ".join(parts) + f" (backup until the next start: {backup.name}; client_header false turns it off)."
+
+
+def _apply_config(cfg: dict, backend) -> tuple[list[str], list[str], Path, Path]:
+    """The headers of the client config as they should be: ours on each enabled URL, none of ours elsewhere. Only
+    `mcpServers.<name>.headers` changes, under the client's own lock, with a backup first; a file that is not valid JSON
+    is not touched. Returns (added, removed, path, backup)."""
     path = claude_json().resolve()
+    backup = path.with_name(path.name + ".maisecrets-backup")
     first = _read_json(path) if path.is_file() else None
     if first is None:
-        return None
-    on = cfg.get("client_header", True) is not False
+        return [], [], path, backup
     keys: dict[str, bytes] = {}
-    if on:
-        for url in user_servers(first).values():
-            origin = origin_of(url)
-            if origin not in keys:
-                # one step under maisecrets' own lock: two starts at once made two keys, and the header could name
-                # the one the store lost (Fable review, round 3)
-                with _lock_for(DIR / ".lock"):
-                    keys[origin] = _key(backend, origin, create=True)
-                    _remember_key(origin, kid_of(keys[origin]))
+    urls = _enabled() if cfg.get("client_header", True) is not False else {}
+    for origin in urls:
+        k = _key(backend, origin, create=False)
+        if k is not None:
+            keys[origin] = k
     ours = {v.get("kid") for v in _known_keys().values() if isinstance(v, dict)} | {kid_of(k) for k in keys.values()}
-    backup = path.with_name(path.name + ".maisecrets-backup")
-    if _apply_headers(copy.deepcopy(first), keys, ours) == ([], []):
+    if _apply_headers(copy.deepcopy(first), keys, urls, ours) == ([], []):
         # nothing to change: no lock, and the backup of the last change goes (it holds every server's credentials)
         try:
             backup.unlink()
         except OSError:
             pass
-        return None
+        return [], [], path, backup
     with _ConfigLock(path):
         data = _read_json(path)
         if data is None:
-            return None
-        added, removed = _apply_headers(data, keys, ours)
-        if not added and not removed:
-            return None
-        _backup(path, backup)
-        _write_config(path, data)
-    parts = []
-    if added:
-        parts.append(f"maisecrets added its {HEADER} header to {len(added)} MCP server(s) in {path}, so a server that "
-                     "supports it can give values back to this computer")
-    if removed:
-        parts.append(f"maisecrets removed its {HEADER} header from {len(removed)} MCP server(s) in {path}")
-    return "; ".join(parts) + f" (backup until the next start: {backup.name}; client_header false turns it off)."
+            return [], [], path, backup
+        added, removed = _apply_headers(data, keys, urls, ours)
+        if added or removed:
+            _backup(path, backup)
+            _write_config(path, data)
+    return added, removed, path, backup
 
 
-def _apply_headers(data: dict, keys: dict, ours: set) -> tuple[list[str], list[str]]:
+def enable(cfg: dict, backend, name: str, url: str) -> str | None:
+    """The server of this user-scope entry sent a token and named a vault endpoint: a key for its origin, and the
+    header on this entry only. Returns the notice for the person once, when the header was added, or None."""
+    if not _may_change_config() or cfg.get("client_header", True) is False:
+        return None
+    origin = origin_of(url)
+    if not origin:
+        return None
+    # one step under maisecrets' own lock: two calls at once made two keys, and the header could name the one the store
+    # lost (Fable review, round 3)
+    with _lock_for(DIR / ".lock"):
+        k = _key(backend, origin, create=True)
+        _remember_key(origin, kid_of(k), url)
+    added, _removed, _path, _backup_path = _apply_config(cfg, backend)
+    if name not in added:
+        return None
+    return (f"maisecrets: the MCP server {name} supports {HEADER}. From the next start of Claude Code, maisecrets puts "
+            "this server's values into your local files and commands; the AI still sees only tokens. To turn it off: "
+            "/maisecrets:settings client_header false. More: README, section \"Vault references\".")
+
+
+def _apply_headers(data: dict, keys: dict, urls: dict, ours: set) -> tuple[list[str], list[str]]:
     """Change the headers in data (the parsed config) in place; returns (added, removed) server names."""
     added: list[str] = []
     removed: list[str] = []
@@ -332,7 +377,7 @@ def _apply_headers(data: dict, keys: dict, ours: set) -> tuple[list[str], list[s
                 continue                       # a shape we do not know: left as it is
             have = _header_key(headers or {})
             origin = origin_of(spec.get("url"))
-            want = header_value(keys[origin]) if origin in keys else None
+            want = header_value(keys[origin]) if origin in keys and spec.get("url") in urls.get(origin, ()) else None
             if want is None:
                 if have and _kid_in(headers[have]) in ours:
                     del headers[have]
@@ -355,15 +400,18 @@ def _off(cfg: dict | None) -> bool:
     return cfg is not None and cfg.get("client_header", True) is False
 
 
-def note_result(payload: dict, cfg: dict) -> int:
-    """PostToolUse: note each server-range token of an MCP result from a user-scope server with a key. The result
-    stays as it is. Returns the number of tokens noted."""
+def note_result(payload: dict, cfg: dict, backend=None) -> tuple[int, str | None]:
+    """PostToolUse: note each server-range token of an MCP result from a user-scope server. The first token of a server
+    that is not enabled yet is the only trigger for a network request: one metadata request to that server, and the
+    header on its entry when it names a vault endpoint (enable). The result stays as it is. Returns (the number of
+    tokens noted, a notice for the person or None)."""
+    count, notice = 0, None
     if cfg.get("client_header", True) is False:
-        return 0
+        return count, notice
     tool = str(payload.get("tool_name") or "")
     server = payload.get("mcp_server") if isinstance(payload.get("mcp_server"), dict) else {}
     if not tool.startswith("mcp__") or server.get("source") != "user" or not isinstance(server.get("name"), str):
-        return 0
+        return count, notice
     found: dict[str, tuple[str, set]] = {}        # key -> (type, the display parts of this result)
     asked: set = set()
 
@@ -388,14 +436,21 @@ def note_result(payload: dict, cfg: dict) -> int:
     for key in asked:
         found.pop(key, None)
     if not found and not asked:
-        return 0
+        return count, notice
     url = user_servers().get(server["name"])
     origin = origin_of(url)
-    if not origin or origin not in _known_keys():
-        return 0
     session = payload.get("session_id")
-    if not isinstance(session, str) or not session:
-        return 0
+    if not origin or not isinstance(session, str) or not session:
+        return count, notice
+    if url not in _enabled().get(origin, []):
+        # not enabled: a token of this result is the trigger; asked alone (the model sent a token) is none
+        if not found or backend is None or not _may_change_config():
+            return count, notice
+        if not endpoint(cfg, url, time.monotonic() + DISCOVERY_BUDGET):
+            return count, notice            # no field: unsupported, cached; no answer: asked again next time
+        notice = enable(cfg, backend, server["name"], url)
+        if url not in _enabled().get(origin, []):
+            return count, notice
     now = time.time()
     seen = _now_iso(now)
     with _lock_for(DIR / ".lock"):
@@ -417,7 +472,7 @@ def note_result(payload: dict, cfg: dict) -> int:
         for k in [k for k in found if k in sent]:
             found.pop(k)
         if not found:
-            return 0
+            return count, notice
         data = _read_json(NOTES) or {}
         mine = data.setdefault(profile(), {}).setdefault(origin, {})
         for key, (type_, displays) in found.items():
@@ -454,7 +509,7 @@ def note_result(payload: dict, cfg: dict) -> int:
         while len(mine) > MAX_NOTES_PER_ORIGIN:
             del mine[next(iter(mine))]
         atomic_write(NOTES, json.dumps(data, indent=1))
-    return len(found)
+    return len(found), notice
 
 
 def _seen_time(value: object) -> float | None:
@@ -725,7 +780,7 @@ def resolve(cfg: dict, backend, keys: list[str], session: str | None,
             raise Refused(f"{host} is no longer a user-scope MCP server of this client")
         k = _key(backend, origin, create=False)
         if k is None:
-            raise Refused(f"this computer has no key for {host}; a new session writes it")
+            raise Refused(f"this computer has no key for {host}; the next token of that server sets it up again")
         where = endpoint(cfg, url, deadline)
         if not where:
             raise Refused(f"{host} does not name a vault endpoint, or could not be reached")
@@ -765,7 +820,7 @@ def probe(cfg: dict, backend, origin: str, url: str) -> str:
     """The binding state of one origin for /maisecrets:status: a resolve with no tokens."""
     k = _key(backend, origin, create=False)
     if k is None:
-        return "no key yet (a new session writes it)"
+        return "no key yet (the next token of that server sets it up)"
     deadline = time.monotonic() + BUDGET
     where = endpoint(cfg, url, deadline)
     if not where:
@@ -897,12 +952,13 @@ def status_lines(cfg: dict, backend, check: bool = True) -> list[str]:
     servers = user_servers()
     if not servers:
         return ["vault references: no user-scope MCP server with an https URL"]
-    known = _known_keys()
+    enabled = _enabled()
     lines = []
     for name, url in servers.items():
         origin = origin_of(url)
-        if origin not in known:
-            lines.append(f"vault references: {name} ({origin}): no key yet (a new session writes it)")
+        if url not in enabled.get(origin, []):
+            lines.append(f"vault references: {name} ({origin}): not in use (the server sent no token yet, or it "
+                         "names no vault endpoint)")
             continue
         state = probe(cfg, backend, origin, url) if check else "not checked"
         lines.append(f"vault references: {name} ({origin}): {state}")
