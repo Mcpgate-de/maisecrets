@@ -57,7 +57,7 @@ Everything a hook runs is readable source in this folder. No download, no
 package install, no dependency outside the Python standard library and the
 system tools it names (`security`, PowerShell, `openssl`, a clipboard tool).
 
-What it does not do: detect a name without a label, follow a value through an encoding a
+What it does not do: detect a name without a label (it masks the names on your term list), follow a value through an encoding a
 command applies, or protect against a process that runs as you. "Known gaps"
 below lists every limit that was measured.
 
@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 32 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 194 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 214 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1424,7 +1424,7 @@ let single values through. maisecrets reads the rules from three places:
   gets a note when you add it and in `/maisecrets:rules`.
 - each folder of `rule_dirs` in the machine policy. You cannot remove those.
 
-A folder holds two kinds of file, and maisecrets reads nothing else from it
+A folder holds three kinds of file, and maisecrets reads nothing else from it
 (no symbolic link, no git metadata):
 
 - `*.json` in the gitleaks form: `{"rules": [{"id": …, "regex": …,
@@ -1436,6 +1436,8 @@ A folder holds two kinds of file, and maisecrets reads nothing else from it
   `/maisecrets:rules` says so.
 - `*.prefixes`, one rule per line, `id  regex`, as in
   `maisecrets/rules/prefixes.txt`. The whole match is the secret.
+- `*.terms`, a team term list with a floor against common words (Terms). Not
+  in `rules.d`: your own list is `~/.maisecrets/terms.txt`.
 
 A hook reads these files in every call, so each rule passes checks when it is
 loaded: a keyword or a literal of at least 4 characters, at most 300
@@ -1652,6 +1654,171 @@ image into Claude Code) reaches the model without passing any hook; the
 prompt hook sees only your typed text. maisecrets cannot stop or mask it. An
 image in the result of an MCP tool is not covered either.
 
+## Terms: names, case numbers, customer names
+
+A name has no shape, so no rule finds it. Tell maisecrets the names you keep
+from the AI, and it masks them like a secret. The design is based on the
+personal-terms design by [@danszymkowiak](https://github.com/danszymkowiak):
+his file form, his match modes, and his rule that no message shows a term.
+
+**Add a name.** Type it as your own prompt:
+
+```
+/maisecrets:term add Jan Kowalski
+maisecrets: term add Jan Kowalski          (the same, and the form for Codex)
+```
+
+maisecrets writes the name to `~/.maisecrets/terms.txt` and does not send the
+prompt to the model. From the next tool result on, `Jan Kowalski` becomes a
+placeholder such as `⟦NAME_c3⟧`.
+
+When you add a name of two or more words, maisecrets also adds the last word
+alone and its genitive (`Kowalski | Kowalskis`), if it has 4 letters or more
+and is not a common word. So `Herr Kowalski`, `Kowalskis Bericht`,
+`Kowalski, Jan` and `J. Kowalski` are masked too. It adds them as whole words,
+never as a stem with `*`: `Koch*` would mask `Kochen`, `Lang*` would mask
+`language`. Type a stem yourself when you want one (`Kowalsk*`). A surname that
+is also a word (`Jobs`, `Wolf`) is masked where it stands alone as that word. The joined forms `jan.kowalski`,
+`Jan-Kowalski` and `jan_kowalski` (also in `jan_kowalski.pdf`) are masked as
+one word. The first name alone stays visible: `Jan` is a common word, and
+masking it would hide every other Jan. To mask it anyway, add it as a term
+of its own. The answer to the command says what maisecrets added. A typing
+error such as `/maisecrets:terms add …` or `maisecrets term add …` is not
+sent to the model either: maisecrets shows the correct form.
+
+A name inside a value that maisecrets stores never splits it. A password such
+as `Kowalski#Lato2024` stays one value: it is masked whole, in the prompt and
+in every later tool result, and never as a name with the rest in clear.
+
+`/maisecrets:term remove Jan Kowalski` (or
+`remove ⟦NAME_c3⟧`, the placeholder copied from a result) takes it off.
+`/maisecrets:term` alone shows your lists. Only your typed prompt changes the
+list, as with a setting (C22): a removal in a tool call is refused.
+
+**Mark a name once.** Write `{{Jan Kowalski}}` in a prompt. maisecrets masks
+the name in that prompt and in every tool result until the lifetime of a
+name value ends (`ttl_seconds`, one day by default); it does not write
+`terms.txt`. A marker is 1 to 5 words of letters (a hyphen or an apostrophe
+inside a word), and one word starts with a capital letter. So
+`{{ .Values.image.tag }}` and `{{ item }}` stay text, and so do one letter
+and one common word alone (`{{A}}`, `{{The}}`). One word alone with a space
+inside the braces or with a capital inside it (`{{ Title }}`,
+`{{FirstName}}`) is the form of a template and stays text; mark a one-word
+name such as `{{McDonald}}` with `/maisecrets:term add`. A name of two or
+more words is marked in any of these forms (`{{Ronald McDonald}}`,
+`{{ Jan Kowalski }}`). A marker counts only in a
+prompt that you typed at the composer or over Remote Control, not in one that
+a program or a subagent sent.
+
+**The file.** `~/.maisecrets/terms.txt` holds one entity per line: a label,
+then the variants, separated by `|`. `#` starts a comment.
+
+```
+# label      variants
+PERSON_A     Jan Kowalski | Kowalsk* | Jan
+CLIENT_B     Acme Holding | *acme-0042*
+EMAIL_BOSS   boss at work
+```
+
+| variant | matches | does not match |
+|---|---|---|
+| `Jan` | the whole word: `Jan`, `Jan,`, `(Jan)`, `Jan's` | `January`, `Jan2`, `jan_report` |
+| `Kowalsk*` | a word that starts so: `Kowalski`, `Kowalskiego`, `Kowalski_report` | `Nowakowalski` |
+| `*kowalski` | a word that ends so: `Kowalski`, `JanKowalski` | `Kowalskiego` |
+| `*acme-0042*` | the text and the letters, digits and `_` around it: `xacme-0042b` whole; in `x-acme-0042-b` and `acme-0042@example.com` the part `acme-0042` | none |
+
+- Case does not matter (`ŁÓDŹ` matches `łódź`). A space in a variant matches
+  any run of whitespace, also a line break. Other characters are literal.
+- Composed and decomposed letters match alike (a macOS file name holds
+  `Mu` plus a combining diaeresis for `Mü`), and a soft hyphen or a
+  zero-width character inside a name does not hide it. A spelling with other
+  letters does not match: `MUELLER` is not `Müller`, `GROSSMANN` is not
+  `Großmann`, and fullwidth letters (`Ｍüller`) are not `Müller`. List such a
+  spelling as a variant of its own.
+- Two names that overlap (`Anna Maria` and `Maria Kowalski` in
+  `Anna Maria Kowalski`) become one placeholder.
+- A word is a run of letters, digits and `_`. So `Kowalski_report.pdf` is one
+  word: `Kowalski` does not mask a part of it. Write `*kowalski*` to mask
+  file names too.
+- The longest variant wins: `Jan Kowalski` is one hit, not two.
+- All variants of an entity get the same placeholder. The type is `NAME`,
+  or the type in the label (`EMAIL_BOSS` gives `EMAIL`).
+- A stem before or after a `*` needs 3 letters or digits, a `*…*` variant 4
+  characters. maisecrets uses at most 50 `*…*` variants in all the lists: the
+  51st stops your own list with its line, and a team list leaves it out and
+  names it.
+- The file must be private. If others can read it, maisecrets sets it to
+  `0600`. If a line is wrong, every hook fails closed and the message names
+  the line, never its text. Fix the line, and the next hook works. Only you
+  write this file, so a silent skip would let through exactly the names you
+  listed.
+
+**A team list.** Put a `*.terms` file in a folder of `rule_dirs` (Rules of
+your own; in its subfolder `rules/` when it has one, as for the rules). The AI can write a shared checkout, so a team list has a floor: an
+entry of fewer than 3 characters, an entry of only words of
+`maisecrets/rules/term_stoplist.txt` (1,134 words: the 521 words of the closed
+word classes of English and German, and the words that 8 or more files of
+this repository use, as the common words of a developer session; a small
+list on purpose, not a dictionary), a `*` with a stem of
+fewer than 5 letters (`ret*`, `*ing`), and a stem that 3 or more words of
+that list share (`*ation*`), are left out. A line
+that fails is left out with its reason; the rest of the file loads, and a bad
+team file never stops a hook. The session start says when a team list
+changed. `/maisecrets:rules` and `maisecrets terms` show the counts, the
+files and each line left out, never a term. All the team lists together
+can be up to 4 MB and 150,000 entries. A variant that an earlier entry holds
+(your own list first) is left out, and at most 16 team variants share one
+stem or first word: a list cannot make each word of a text walk thousands
+of entries. These caps count the team lists together, in the order of
+`rule_dirs` (the folders of the machine policy first): a list that the AI
+can write can use them up and push out a list after it, as it can also
+delete lines of its own folder. The lines pushed out are named in
+`/maisecrets:rules`. A `*.terms` file that is a symbolic link is not read.
+
+**Where the terms run.** The terms are a pass of the rule registry, after
+the built-in rules and the rules of your own; `maisecrets rules list` shows
+the pass as `terms:term`, with its own origin and class (`term`). It is one
+index of every list, not a rule per term: its cost does not grow with the
+number of terms. A hit says where it came from: its kind is `term:<id>` in
+`maisecrets scan` and in the store, never the term. So an email address or an IBAN keeps the span its
+rule found. A listed term that a rule finds too (an email address on your
+list) gets the rule's type, but it stays a term: mask only. An exact value on
+your allow list (`~/.maisecrets/allow.txt`) stays allowed, also when a term
+list names it: both are yours, and the allow list is the narrower one.
+
+**Not in a PDF or an image.** The matcher reads text. A name inside a PDF, an
+image or another binary file that a tool reads reaches the model as it is.
+
+**Mask only.** maisecrets never puts a name back. A term placeholder in a
+command, an MCP argument or a file that the AI writes stays as it is: a
+letter that the AI drafts holds `⟦NAME_c3⟧`, and you put in the name. The
+store holds no term: one entry per entity, with an id, so the placeholder
+stays the same across documents and sessions while the entry lives.
+
+**Find the names in a document.** `maisecrets terms suggest FILE` (in the
+plugin folder: `bash hooks/run.sh terms suggest FILE`) proposes lines for
+`terms.txt` from a text or CSV file: names after a salutation, after
+`Name:`, in a name column of a CSV file, and pairs of capitalised words. If
+a surname comes in two or more endings, it proposes the stem
+(`Kowalski | Kowalski*`). It never prints a name, not in a terminal either:
+an AI can open a pseudo-terminal and read it. It writes the proposal to
+`terms.suggested.txt` in the maisecrets folder (mode `0600`; the AI cannot
+read that folder) and prints the count and the path. Open the file yourself,
+and copy the lines you want into `terms.txt`. Nothing is added to your terms.
+
+**Cost.** Without any list, maisecrets does not load the terms code: a hook
+costs what it cost before (measured, `docs/BENCHMARKS.md`, "Terms"). With a
+list, a hook pays a fixed amount for the module and the index, and the cost
+does not grow with the number of terms. maisecrets keeps an index of the
+lists in `~/.maisecrets/.terms-cache`.
+With 100,000 entries a new hook process loads it in about 30 ms and scans
+10 KB in 3 to 10 ms (measured on Python 3.9 and 3.14).
+After you change a list, maisecrets builds the index again at the next
+session start, or right after `/maisecrets:term add` or `remove`, so a tool
+hook only loads it. Measured for 100,000 two-word entries (3.8 MB): 1.4 s on
+Python 3.14, 2.2 s on Python 3.9. If a team list changes while a session
+runs, the next hook builds the index.
+
 ## Known gaps (measured or documented)
 
 What the plugin does not protect. Each item is a limit of the mechanism, not
@@ -1694,7 +1861,7 @@ a to-do.
   Bash output that Claude Code sends as an image.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt
   hook blocks them when the path exists; ask Claude to read the file instead.
-- **A name without a label is not detected.** Regex only, by design: "Emma Johansson" alone looks like any two
+- **A name without a label is not detected, unless it is on a term list** (Terms). Regex only, by design: "Emma Johansson" alone looks like any two
   capitalised words. A name after a name label, before an e-mail address or in a CSV name column is masked
   in a tool result (0.6.21); in a typed prompt no name is detected. A name in a non-Latin script is masked only after
   a person label (`full name`, `native name`, `patient_name`, vCard `FN:`, also with parameters such as
@@ -1734,6 +1901,8 @@ a to-do.
   move the note and make a copied file count as clean. A client started
   under another program name (an npm install runs as `node`) is not seen as
   nested. Windows: no file counts as clean.
+- **A term placeholder is never resolved** (Terms, mask only): a command or a
+  file the AI writes keeps the placeholder.
 - **A transformed value can pass.** For a value this session resolved, the
   output is checked as a substring in plain, base64, hex, URL-encoded and
   JSON-escaped form, and a resolving command may not encode it in the first

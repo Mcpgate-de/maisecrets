@@ -8,7 +8,8 @@ The sources, read once per process (detect.rules() keeps the result):
 
 A folder holds `*.json` (the gitleaks form of rules/own_secret_rules.json) and `*.prefixes` (the line form of
 rules/prefixes.txt, `id  regex`). When it has a subfolder `rules/`, that subfolder is read instead (a team repository
-keeps its rules there). Nothing else is read: no code, no word lists, no allow list, no symbolic link, no git metadata.
+keeps its rules there), and maisecrets/terms.py reads `*.terms` there (a team term list with a floor). Nothing else
+is read: no code, no allow list, no symbolic link, no git metadata.
 A folder is data that a hook reads in every call, so each rule passes checks at load; a rule that fails one is
 QUARANTINED: it is left out, and /maisecrets:rules, the status and events.log name it with its reason. A refused rule
 is named by its place (`rule 3`, `line 7`), never by a text of its own: a refused line can be a pasted value. A broken

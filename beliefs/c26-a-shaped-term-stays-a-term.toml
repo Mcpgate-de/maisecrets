@@ -1,0 +1,10 @@
+# c26-a-shaped-term-stays-a-term: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-shaped-term-stays-a-term"
+control = "C26"
+statement = "A listed term that a built-in rule finds too (an email address, a token-shaped case number) keeps the rule's type but stays a term: the store keeps the entity id, and its placeholder is never resolved."
+runner = ["tests/test_terms_hooks.py::ShapedTermTests::test_the_store_keeps_the_entity_and_the_placeholder_stays"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "        else:\n            _claim(m, text, found, taken_starts, taken_ends)\n"
+replace = "        else:\n            pass\n"

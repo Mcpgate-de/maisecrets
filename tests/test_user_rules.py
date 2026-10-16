@@ -310,6 +310,32 @@ class ExtraMatchers(Base):
             detect.reset_rules()
             self.assertEqual([m.kind for m in detect.scan(text)], ["email"], "the allow list holds for them too")
 
+    def test_the_terms_pass_runs_after_the_rules_and_a_term_claims_a_span_a_rule_took(self):
+        # the terms are a pass of the registry (phase "terms"), not an extra matcher
+        address = ADDRESS
+        text = f"Ada Lovelace wrote to {address}"
+
+        def names(t: str) -> list:
+            at = t.index(address)
+            return [detect.Match("term:person", "NAME", "Ada Lovelace", 0, 12),
+                    detect.Match("term:person", "NAME", address, at, at + len(address))]   # taken by email
+        from maisecrets import registry
+        self.assertEqual(detect.extra_matchers, [], "the terms are no extra matcher")
+        self.assertGreater(registry.PHASES["terms"], registry.PHASES["user"])
+        self.assertLess(registry.PHASES["terms"], registry.PHASES["extra"])
+        with mock.patch.object(detect, "_term_matches", names):
+            # a term that a rule took keeps the rule's span and type, and becomes the term: the store keeps the
+            # entity id, and the placeholder is never resolved (C26)
+            self.assertEqual([(m.kind, m.type, m.value) for m in detect.scan(text)],
+                             [("term:person", "NAME", "Ada Lovelace"), ("term:person", "EMAIL", address)])
+            self.assertEqual([m.kind for m in detect.scan(text, enabled={"email"})], ["email"])
+            self.assertEqual([m.kind for m in detect.scan(text, enabled={"terms:term"})], ["term:person"] * 2)
+            self.assertEqual([m.kind for m in detect.scan(text, rule_list=detect.rules())], ["email"],
+                             "a rule list a caller built has no terms pass")
+            ALLOW.write_text("Ada Lovelace\n", encoding="utf-8")
+            detect.reset_rules()
+            self.assertEqual([m.value for m in detect.scan(text)], [address], "the allow list holds for them too")
+
 
 class Quarantine(Base):
     def test_the_session_start_names_a_new_quarantine_once_and_events_log_records_it(self):

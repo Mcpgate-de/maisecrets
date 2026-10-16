@@ -1,0 +1,10 @@
+# c26-a-term-placeholder-is-never-resolved: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-term-placeholder-is-never-resolved"
+control = "C26"
+statement = "Mask only: a term placeholder in a command, a file or an MCP argument stays as written; maisecrets never puts the name back and never refuses the call for it."
+runner = ["tests/test_terms_hooks.py::TermHookTests::test_mask_only_a_placeholder_in_a_tool_call_stays_as_written"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "            if key in keys[0]:\n"
+replace = "            if False:\n"

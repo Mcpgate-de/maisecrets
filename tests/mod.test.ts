@@ -39,7 +39,7 @@ test('a well-formed answer replaces the prompt', async ($, on) => {
   expect(typeof seen.init.cwd).toBe('string')        // the plugin folder: the command line is fixed text
   expect(seen.init.env).toEqual({ PYTHONUTF8: '1' })  // set over the environment, which stays
   expect(seen.init.timeoutMs > 0 && seen.init.timeoutMs <= 8000).toBe(true)
-  expect(JSON.parse(seen.init.stdin)).toEqual({ prompt: TYPED, session_id: 'sess-1', cwd: '/work' })
+  expect(JSON.parse(seen.init.stdin)).toEqual({ prompt: TYPED, session_id: 'sess-1', cwd: '/work', origin: 'composer' })
 })
 
 test('no rewrite from the launcher leaves the prompt unchanged', async ($, on) => {
