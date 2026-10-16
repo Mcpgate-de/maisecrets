@@ -3462,7 +3462,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue
             if rule.type == "SECRET" and len(secret) >= 16 and len(set(secret[-12:])) <= 1:
                 continue   # a prefix and one repeated character: glpat-AAAAAAAAAAAAAAAAAAAA is a placeholder
-            if alone and not _card_shaped(text, start, secret):
+            if alone and not _card_shaped(text, start, secret) and not _has_context_word(
+                    _lower(text[max(0, start - 80):min(len(text), end + 40)]), rule.context):
                 continue   # without a card word, only a number written as a card: groups and an issuer prefix
             if (rule.score < 1.0 or rule.require_context) and not alone:
                 # presidio semantics: a weak shape passes only with a context WORD nearby

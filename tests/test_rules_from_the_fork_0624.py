@@ -187,6 +187,12 @@ class CardWithoutWordTests(unittest.TestCase):
         text = "row 17: " + self.CARD[:4] + " " + self.CARD[4:8] + " " + self.CARD[8:12] + " " + self.CARD[12:]
         self.assertIn("credit-card", kinds(text, channel="tool"))
 
+    def test_a_card_number_after_a_card_word_stays_a_hit_in_any_form(self):
+        for text in ("credit card " + self.CARD, "card: " + self.CARD + "."):
+            for channel in ("tool", "prompt"):
+                with self.subTest(channel=channel):
+                    self.assertIn("credit-card", kinds(text, channel=channel))
+
     def test_a_typed_prompt_keeps_the_card_word(self):
         text = "row 17: " + self.CARD
         self.assertNotIn("credit-card", kinds(text, channel="prompt"))
