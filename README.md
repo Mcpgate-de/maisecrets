@@ -1902,6 +1902,122 @@ hook only loads it. Measured for 100,000 two-word entries (3.8 MB): 1.4 s on
 Python 3.14, 2.2 s on Python 3.9. If a team list changes while a session
 runs, the next hook builds the index.
 
+## Values from your own tools
+
+Your own tools often know values that maisecrets cannot find by their
+shape: a NER finds the names in your case files, an export lists your
+customers, a script knows the internal account ids. Give maisecrets those
+values, and it masks them wherever they appear.
+
+**The file.** Your tool writes one JSON object per line:
+
+```
+{"value": "Jan Kowalski", "type": "NAME"}
+{"value": "jan.kowalski@example.org", "type": "EMAIL"}
+{"value": "a value without a shape"}
+```
+
+`type` is one of `SECRET`, `NAME`, `EMAIL`, `PHONE`, `IBAN`, `CARD`, `IP`
+(`SECRET` when it is missing). It names the placeholder, nothing else.
+maisecrets reads only `value` and `type`; it ignores every other field.
+
+**Import it.** Two ways:
+
+- In a terminal: `bash hooks/run.sh values import FILE` (in the plugin
+  folder). It prints the id of the import and its counts, and the number and
+  reason of each line it refused. It never prints a value or the file name.
+- As a setting: `/maisecrets:settings value_files add ~/work/ner-out.jsonl`
+  (type it as your own prompt). maisecrets imports the file at each session
+  start when its content changed.
+
+maisecrets copies the accepted values to
+`~/.maisecrets/imports/<id>.jsonl` (mode `0600`; the AI cannot read that
+folder, C8). Each import has an opaque id such as `import:v1a2b3c4d`, never
+the name of the file: a file named like one of its values would show that
+value.
+
+**What is masked.** From the next prompt and tool result on, each value is
+masked in any case and with any spacing, also as a phrase of several words
+across a line break (`Jan\n  KOWALSKI`), in composed or decomposed Unicode,
+and with a soft hyphen or a zero-width character inside it. The match is on
+whole words, as for a term (Terms, above): `Kowalski` does not mask a part of
+`Kowalskiego`. The placeholder has the type of the line, for example `⟦NAME_c3⟧`.
+
+**Where the imports run.** The imports are a pass of the rule registry,
+after the terms (`maisecrets rules list` shows it as `imports:import`, origin
+and class `import`). It is one index of all imports, not one rule per value.
+A hit names its import: its kind is `import:<id>:<value id>` in
+`maisecrets scan` and in the store. The store keeps these ids, never the
+value.
+
+**Mask only.** maisecrets never puts an imported value back. An import
+placeholder in a command, an MCP argument or a file that the AI writes stays
+as it is.
+
+**An import only adds.** maisecrets follows the rule of this epic: the AI can
+make detection stricter, never weaker.
+
+- A new import of the same file adds its new values to the same import. A
+  value that the file no longer lists stays. An edit of a value file that
+  removes lines removes no value.
+- A value that a rule finds (an email address, an IBAN) keeps the span, the
+  type and the placeholder of that rule. A value that the store holds
+  already (a password from `/maisecrets:put`) keeps its own placeholder,
+  its type and its lifetime, and it still resolves into your commands. An
+  import never turns a resolvable value into a masked-only one. Only the
+  parts of an imported phrase outside such a value get the import's
+  placeholder.
+- No field of a line can switch a rule off, allow a value or change a
+  lifetime: maisecrets reads `value` and `type` only.
+
+**Only you remove an import.** Type `/maisecrets:forget import:ID` as your
+own prompt (in Codex: `maisecrets: forget import:ID`). maisecrets does not
+send that prompt to the model. A prompt from a scheduled task, a subagent or
+a program that started the client removes nothing. A tool call that carries
+the removal is refused, and `values remove` in a terminal only names the
+prompt. If you remove the import of a value file, the next session start
+imports the file again as it is now. So to drop a few values from a value
+file, edit the file, then remove its import.
+
+**What you see.** `/maisecrets:list` shows each import: its id, the number of
+values per type, its age, and whether it came from a value file or a
+command. It never shows a value. The session start names each new import
+once, with its id and count, also an import that the AI ran.
+
+**Who may write the file.** The AI may run `values import`, and it may write
+a value file that lies in a folder it can write (a repository checkout).
+That is allowed, because an import can only add masking. The worst an import
+can do is to mask too much. These limits hold that:
+
+- A value needs at least 4 characters. A value of only digits needs at
+  least 6. maisecrets refuses one word of lower-case letters, a value of only
+  common words (the stop list of the team terms,
+  `maisecrets/rules/term_stoplist.txt`), and a value that holds a placeholder
+  bracket, `maisecrets` or `import:` (so no import can mask your own
+  controls).
+- One import holds at most 100,000 values, and all imports together at most
+  150,000. The imports that no value file names (the imports of a command,
+  which the AI can run) hold at most 100,000 of them, so your value files
+  always have room. maisecrets holds at most 50 imports. Past a cap, the
+  import stops, says at which line, and names the prompt that removes an
+  import.
+- maisecrets opens the file once, without following a symbolic link and
+  without waiting on it, and checks the opened file: it must be a regular
+  file (not a FIFO or a device), owned by you (or root), and not writable by
+  every user. Then it reads it once, up to 8 MB. So a file that is swapped
+  between a check and the read, a FIFO, and a file that grows while it is
+  read all fail or stop at the limit. A line that a writer has not finished
+  is not valid JSON, so maisecrets refuses that line by its number and
+  imports the rest.
+- A damaged import in the maisecrets folder stops every hook (fail closed),
+  and the message names the prompt that removes it.
+
+**Cost.** Without an import, maisecrets does not load the import code: a hook
+costs what it cost before (measured, `docs/BENCHMARKS.md`, "Values from your
+own tools"). With an import, a hook loads one index from
+`~/.maisecrets/.values-cache`. maisecrets builds the index after each import
+and at session start, so a tool hook only loads it.
+
 ## Vault references
 
 An MCP server can mask a value in its result, for example a customer's e-mail
