@@ -6,7 +6,5 @@ runner = ["tests/test_vault_refs.py::Online::test_a_token_the_call_carried_is_no
 
 [proof]
 file = "maisecrets/vault_refs.py"
-find = '''    for key in asked:
-        found.pop(key, None)'''
-replace = '''    for key in ():
-        found.pop(key, None)'''
+find = '''    walk(payload.get("tool_input"), into_input=True)'''
+replace = '''    pass'''

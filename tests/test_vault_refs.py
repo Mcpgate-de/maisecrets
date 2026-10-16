@@ -802,6 +802,14 @@ class Online(Base):
                 out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", **CLAUDE, "cwd": str(self.work),
                                       "tool_input": {"command": f"tool {tok(key)}"}})
                 self.assertIn("may not choose", self.denied(out))
+        # a relative piece: only the piece, resolved against the working folder, names the client's config folder
+        key, value = "ARG_10", f"--config=../{self.profile.name}/settings.json"
+        self.assertNotIn(str(self.profile), value)
+        self.srv.mint(key, value)
+        self.result("demo", tok(key))
+        out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", **CLAUDE, "cwd": str(self.work),
+                              "tool_input": {"command": f"tool {tok(key)}"}})
+        self.assertIn("may not choose", self.denied(out))
         audit = (HOME / "audit.log").read_text() if (HOME / "audit.log").exists() else ""
         self.assertNotIn("ARG_", audit, "a value that was refused leaves no audit line")
 
