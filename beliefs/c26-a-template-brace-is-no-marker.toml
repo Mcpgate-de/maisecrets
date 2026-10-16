@@ -1,0 +1,10 @@
+# c26-a-template-brace-is-no-marker: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-template-brace-is-no-marker"
+control = "C26"
+statement = "The forms of a template ({{ Title }} with spaces inside the braces, {{FirstName}} with a capital inside a word) are no marked name: only {{Jan Kowalski}} marks."
+runner = ["tests/test_terms.py::MarkerTests::test_the_forms_of_a_template_stay_text"]
+
+[proof]
+file = "maisecrets/terms.py"
+find = "        if inner != inner.strip() or any(a.islower() and b.isupper() for a, b in zip(inner, inner[1:])):\n"
+replace = "        if False:\n"

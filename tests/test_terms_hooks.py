@@ -409,6 +409,60 @@ class StoredValueTests(_Base):
         self.assertNotIn(self.REST, path.read_text(encoding="utf-8").lower(), "the transcript keeps the rest")
 
 
+class ReviewRoundOneTests(_Base):
+    """The findings of the two review gates on the rebase that a test can hold."""
+
+    def test_a_union_that_holds_a_term_stays_a_term(self):
+        # Gate A 8 / Gate B 2: a stored value joins a token hit and a term hit; the union kept the token's kind, and
+        # the store kept the name in a value that a command could resolve
+        text = "ghp_Ab12Qx7Lm2 Testowski"
+        token = detect.Match("github-pat", "SECRET", text[:14], 0, 14)
+        term = detect.Match("term:abc", "NAME", "Testowski", 15, 24)
+        with mock.patch.object(hooks, "_exact_spans", lambda *a, **k: [(10, 19)]):
+            for order in ([token, term], ):
+                got = hooks._longest_wins(text, order, object(), "S1", [])
+                self.assertEqual([(m.kind, m.start, m.end) for m in got], [("term:abc", 0, 24)])
+
+    def test_an_expired_last_mark_leaves_no_file(self):
+        # Gate B 5: an empty terms.marked.json kept term_files.present() true, and each hook built the terms index
+        terms.take_markers(f"letter to {{{{{NAME}}}}}", 60)
+        self.assertTrue(terms.MARKED.exists())
+        self.assertEqual(terms._marked(now=10 ** 12), [])
+        self.assertFalse(terms.MARKED.exists())
+        from maisecrets import term_files
+        term_files.forget()
+        self.assertFalse(term_files.present())
+
+    def test_a_team_list_that_is_a_link_is_refused(self):
+        # Gate B 7: a rule folder is read without links (C25); a *.terms link was read
+        team = Path(tempfile.mkdtemp(prefix="team-"))
+        self.addCleanup(shutil.rmtree, team, True)
+        outside = Path(tempfile.mkdtemp(prefix="outside-"))
+        self.addCleanup(shutil.rmtree, outside, True)
+        (outside / "x.terms").write_text("CLIENT_A  Zbigniew Testowski\n", encoding="utf-8")
+        (team / "x.terms").symlink_to(outside / "x.terms")
+        loaded = terms.load({"rule_dirs": [str(team)]})
+        self.assertEqual(loaded.entities, [])
+        self.assertEqual([r.reason for r in loaded.refused], ["a symbolic link (a rule folder is read without links)"])
+
+    def test_a_new_stop_list_parses_the_team_lists_again(self):
+        # Gate B 8: the cache key did not hold the stop list, so a word the new floor refuses stayed in the index
+        team = [("team/x.terms", b"CLIENT_A  Zbigniew Testowski\n")]
+        key = terms._cache_key(None, team)
+        with mock.patch.object(terms, "_stop_digest", lambda: "another stop list"):
+            self.assertNotEqual(terms._cache_key(None, team), key)
+
+    def test_a_prompt_that_names_a_secret_does_not_load_the_terms_module(self):
+        # Gate B 4: the prefilter took any `ecret` near the start; it is the head of the command patterns now
+        code = ("import sys; sys.path.insert(0, %r); from maisecrets import term_files; "
+                "a = term_files.parse_command('secret rotation is due today'); "
+                "print(a, 'maisecrets.terms' in sys.modules); "
+                "print(term_files.parse_command('  /MAISECRETS:term add Jan Kowalski'))" % str(ROOT))
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=dict(os.environ),
+                           timeout=60)
+        self.assertEqual(r.stdout.split("\n")[:2], ["None False", "('add', 'Jan Kowalski')"], r.stderr[-400:])
+
+
 class QuietValueTests(_Base):
     """A word-like value that a label rule took in a tool result is quiet: a typed prompt does not hunt it
     (vault.is_quiet). The longest-span rule must not drop a term hit inside it there, or the name went out with it."""

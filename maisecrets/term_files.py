@@ -7,6 +7,7 @@ same functions, so the check and the matcher cannot disagree about a source.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from .vault import HOME
@@ -104,10 +105,14 @@ def store_value(kind: str) -> str:
     return STORE_PREFIX + kind[5:]
 
 
+# the head that both patterns of terms.parse_command start with (terms._COMMAND_RE and terms._NEAR_RE), same flags
+_COMMAND_HEAD_RE = re.compile(r"\A\s*/?maisecrets(?::|\s)", re.I)
+
+
 def parse_command(prompt):
-    """terms.parse_command, for a prompt that can be a term command at all: both of its forms start with
-    `/maisecrets` or `maisecrets` after white space (any case), so a prompt without `ecret` near its start is none."""
-    if not isinstance(prompt, str) or "ecret" not in prompt.lstrip()[:32].lower():
+    """terms.parse_command, for a prompt that can be a term command at all: both of its patterns start with
+    `/maisecrets:`, `maisecrets:` or `/maisecrets ` after white space (any case)."""
+    if not isinstance(prompt, str) or not _COMMAND_HEAD_RE.match(prompt):
         return None
     from . import terms
     return terms.parse_command(prompt)

@@ -165,7 +165,24 @@ def _common_stem(stem: str, mode: str) -> int:
     if mode == ENDS:
         r = stem[::-1]
         return bisect_left(rev, r + "\uffff") - bisect_left(rev, r)
-    return sum(1 for w in words if stem in w)
+    return _stop_inside().get(stem, 0)
+
+
+_INSIDE: list = []
+
+
+def _stop_inside() -> dict:
+    """{substring: how many stop words hold it} for every substring of MIN_TEAM_AFFIX characters or more: a *stem*
+    entry is one lookup. A walk over the stop list for each entry made a 4 MB team list of *…* entries cost 5 s of CPU
+    before the cap of MAX_INSIDE left all but 50 of them out (Gate A, review of the rebase)."""
+    if not _INSIDE:
+        counts: dict = {}
+        for w in stoplist():
+            subs = {w[i:j] for i in range(len(w)) for j in range(i + MIN_TEAM_AFFIX, len(w) + 1)}
+            for sub in subs:
+                counts[sub] = counts.get(sub, 0) + 1
+        _INSIDE.append(counts)
+    return _INSIDE[0]
 
 
 def parse(text: str, source: str = "own", strict: bool = True,
@@ -650,6 +667,9 @@ def _team_sources(cfg: dict) -> tuple[list, list]:
     as for the rules of your own (term_files.team_folders)."""
     found, refused = [], []
     for source, path in term_files.team_files(cfg):
+        if path.is_symlink():
+            refused.append(Refused(source, 0, "a symbolic link (a rule folder is read without links)"))
+            continue
         try:
             size = path.stat().st_size
             if size > MAX_TEAM_BYTES:
@@ -768,13 +788,24 @@ def _marked_items() -> list:
     return items
 
 
+def _write_marked(items: list) -> None:
+    """terms.marked.json with `items`, or no file when none is left (term_files.present then sees no list)."""
+    if items:
+        from .vault import atomic_write
+        atomic_write(MARKED, json.dumps({"terms": items}))
+        return
+    try:
+        MARKED.unlink()
+    except FileNotFoundError:
+        pass
+
+
 def _marked(now: float | None = None) -> list:
     """The live marked names. An expired one is deleted from the file here (under the lock), so its clear text
     does not stay on disk after its lifetime (codex review of block 2)."""
     now = time.time() if now is None else now
     items = _marked_items()
     if any(x.get("expires", 0) <= now for x in items):
-        from .vault import atomic_write
         # every hook passes here, so a lock that another process holds for 6 s (vault._Lock.LOCK_DEADLINE) makes
         # this hook fail closed with LockTimeout. Accepted: a holder only reads, merges and writes two small files,
         # and a purge that waited without a bound would run into the client's timeout, which fails open
@@ -782,7 +813,7 @@ def _marked(now: float | None = None) -> list:
             items = _marked_items()
             live = [x for x in items if x.get("expires", 0) > now]
             if len(live) != len(items):
-                atomic_write(MARKED, json.dumps({"terms": live}))
+                _write_marked(live)
             items = live
     return [_marked_entity(x["text"]) for x in items if x.get("expires", 0) > now and _WORD_RE.search(x["text"])]
 
@@ -827,9 +858,18 @@ _FORMAT = 2
 
 def _cache_key(personal: bytes | None, team: list) -> str:
     h = hashlib.sha256(f"{_FORMAT} {sys.version_info[0]}.{sys.version_info[1]}".encode())
+    if team:    # the floor of a team list is the stop list: a new one must parse the team lists again (Gate B)
+        h.update(_stop_digest().encode())
     for source, raw in [("own", personal or b"")] + team:
         h.update(source.encode("utf-8") + b"\0" + str(len(raw)).encode() + b"\0" + raw)
     return h.hexdigest()
+
+
+def _stop_digest() -> str:
+    try:
+        return hashlib.sha256((Path(__file__).parent / "rules" / "term_stoplist.txt").read_bytes()).hexdigest()
+    except OSError:
+        return ""
 
 
 def _cached(key: str) -> Matcher | None:
@@ -949,7 +989,10 @@ def markers(prompt: str) -> list:
     and one common word alone (rules/term_stoplist.txt)."""
     out = []
     for m in _MARKER_RE.finditer(prompt):
-        words = m.group(1).split()
+        inner = m.group(1)
+        if inner != inner.strip() or any(a.islower() and b.isupper() for a, b in zip(inner, inner[1:])):
+            continue    # `{{ Title }}`, `{{FirstName}}`: the forms of a template, not a name (Gate B, round 1)
+        words = inner.split()
         if 1 <= len(words) <= 5 and all(_MARK_WORD_RE.fullmatch(w) for w in words) \
                 and any(w[0].isupper() for w in words) \
                 and not (len(words) == 1 and (len(words[0]) < 2 or _lower(words[0]) in stoplist())):
@@ -1151,7 +1194,7 @@ def _term_remove_typed(words: str, entity_id: str | None = None) -> tuple[bool, 
     left = [x for x in items if not (x["text"].lower() == want or (
         entity_id and entity_id in _ids(_marked_entity(x["text"]))))]
     if len(left) != len(items):
-        atomic_write(MARKED, json.dumps({"terms": left}))
+        _write_marked(left)
         removed.append("a marked name")
     prebuild()
     if not removed:

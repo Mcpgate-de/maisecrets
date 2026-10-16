@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -139,6 +140,22 @@ class TeamFloorTests(unittest.TestCase):
             (4, "a common word (rules/term_stoplist.txt) in a team list")])
         for r in refused:
             self.assertNotIn("montag", r.reason.lower())
+
+    def test_a_stem_inside_common_words_is_one_lookup_not_a_walk_over_the_stop_list(self):
+        # Gate A, review of the rebase: each *stem* entry walked the whole stop list, so a 4 MB team list of *…*
+        # entries cost seconds before the cap of 50 left them out. A stop list of 20,000 words makes a walk per
+        # entry take far longer than the bound; the table of substrings is built once
+        import random
+        rnd = random.Random(5)
+        big = frozenset("".join(rnd.choice("abcdefghijklmnop") for _ in range(9)) for _ in range(20000))
+        with mock.patch.object(terms, "_STOP", [big]), mock.patch.object(terms, "_INSIDE", []):
+            for stem in ("abcde", sorted(big)[7][2:8], "zzzzz"):
+                self.assertEqual(terms._common_stem(stem, terms.INSIDE), sum(1 for w in big if stem in w))
+            text = "".join(f"N{i:05d}  *qqqq{i:05d}*\n" for i in range(5000))
+            start = time.process_time()
+            ents, _refused = terms.parse(text, "team/x.terms", strict=False, floor=big)
+            self.assertEqual(len(ents), 5000)
+            self.assertLess(time.process_time() - start, 3.0)
 
     def test_a_team_affix_needs_a_long_stem_that_common_words_do_not_share(self):
         text = ("A_1  *ing\nA_2  fil*\nA_3  *tion*\nA_4  ret*\nA_5  con*\nA_6  of the\nA_7  count*\nA_8  *thing\n"
@@ -303,8 +320,15 @@ class InsideCapTests(unittest.TestCase):
 
 class MarkerTests(unittest.TestCase):
     def test_a_marked_name_is_one_to_five_words_with_a_capital(self):
-        got = terms.markers("write to {{Jan Kowalski}} and {{ Anna-Maria O'Neil }} and {{jan}}")
+        got = terms.markers("write to {{Jan Kowalski}} and {{Anna-Maria O'Neil}} and {{jan}}")
         self.assertEqual([n for _a, _b, n in got], ["Jan Kowalski", "Anna-Maria O'Neil"])
+
+    def test_the_forms_of_a_template_stay_text(self):
+        # Gate B, review of the rebase: `{{ Title }}` and `{{FirstName}}` were marked as names for a day
+        for text in ("{{ Title }}", "{{ Anna-Maria O'Neil }}", "{{FirstName}}", "{{ProductName}}", "{{ CustomerName }}",
+                     "{{Jan Kowalski }}", "{{ Jan Kowalski}}"):
+            with self.subTest(text=text):
+                self.assertEqual(terms.markers(f"hello {text}"), [])
 
     def test_template_syntax_stays_text(self):
         for text in ("{{ .Values.image.tag }}", "{{ item }}", "{{ item.name }}", "{{ x | default('a') }}",

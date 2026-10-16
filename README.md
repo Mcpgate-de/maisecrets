@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 32 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 194 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 197 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1695,9 +1695,12 @@ list, as with a setting (C22): a removal in a tool call is refused.
 the name in that prompt and in every tool result until the lifetime of a
 name value ends (`ttl_seconds`, one day by default); it does not write
 `terms.txt`. A marker is 1 to 5 words of letters (a hyphen or an apostrophe
-inside a word), and one word starts with a capital letter. So
-`{{ .Values.image.tag }}` and `{{ item }}` stay text, and so do one letter
-and one common word alone (`{{A}}`, `{{The}}`). A marker counts only in a
+inside a word), and one word starts with a capital letter. Write it with no
+space inside the braces and with no capital inside a word. So
+`{{ .Values.image.tag }}`, `{{ item }}`, `{{ Title }}` and `{{FirstName}}`
+stay text (the forms of a template), and so do one letter and one common
+word alone (`{{A}}`, `{{The}}`). For a name such as `McDonald`, use
+`/maisecrets:term add`. A marker counts only in a
 prompt that you typed at the composer or over Remote Control, not in one that
 a program or a subagent sent.
 
@@ -1760,13 +1763,19 @@ files and each line left out, never a term. All the team lists together
 can be up to 4 MB and 150,000 entries. A variant that an earlier entry holds
 (your own list first) is left out, and at most 16 team variants share one
 stem or first word: a list cannot make each word of a text walk thousands
-of entries.
+of entries. These caps count the team lists together, in the order of
+`rule_dirs` (the folders of the machine policy first): a list that the AI
+can write can use them up and push out a list after it, as it can also
+delete lines of its own folder. The lines pushed out are named in
+`/maisecrets:rules`. A `*.terms` file that is a symbolic link is not read.
 
 **Where the terms run.** The terms are a pass of the rule registry, after
 the built-in rules and the rules of your own; `maisecrets rules list` shows
 the pass as `terms:term`. So an email address or an IBAN keeps the span its
 rule found. A listed term that a rule finds too (an email address on your
-list) gets the rule's type, but it stays a term: mask only.
+list) gets the rule's type, but it stays a term: mask only. An exact value on
+your allow list (`~/.maisecrets/allow.txt`) stays allowed, also when a term
+list names it: both are yours, and the allow list is the narrower one.
 
 **Not in a PDF or an image.** The matcher reads text. A name inside a PDF, an
 image or another binary file that a tool reads reaches the model as it is.

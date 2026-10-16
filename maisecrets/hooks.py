@@ -748,7 +748,9 @@ def _longest_wins(text: str, matches: list, vault, session: str | None, resolved
         if out and a < out[-1].end:          # two hits that a value joins become one
             last = out.pop()
             a, b = min(a, last.start), max(b, last.end)
-            m = last
+            # the union keeps the term's kind when one of them is a term: else the store kept the name in a value
+            # that can be resolved into a command (Gate A and Gate B, review of the rebase)
+            m = m if term_files.is_term_kind(m.kind) and not term_files.is_term_kind(last.kind) else last
         out.append(m if (a, b) == (m.start, m.end) else dataclasses.replace(m, value=text[a:b], start=a, end=b))
     return out
 
