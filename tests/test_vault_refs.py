@@ -171,7 +171,7 @@ class Offline(Base):
         self.assertNotIn("headers", json.loads(path.read_text())["mcpServers"]["a"], "a fresh lock: nothing written")
         old = time.time() - 30
         os.utime(lock, (old, old))
-        self.assertIn("that sent a token", self.start(), "the next start writes what the busy lock left")
+        self.assertIn("a supports Client-Vault", self.start(), "the next start writes what the busy lock left")
         self.assertFalse(lock.exists(), "the lock is given back")
 
     def test_off_takes_our_header_out_again_and_notes_nothing(self):
@@ -730,6 +730,21 @@ class Online(Base):
         self.assertEqual(vault_refs.noted(["EMAIL_9"], "s2"), {})
         self.assertEqual(self.srv.resolved, [])
         self.assertEqual(list(vault_refs.noted(["EMAIL_1"], "s1")), ["EMAIL_1"], "a key noted before stays noted")
+
+    def test_a_token_the_model_planted_before_the_server_is_enabled_is_no_sighting(self):
+        # Gate B review of the trigger: call 1 stores the token while the server is not enabled yet; call 2 shows it
+        # and enables the server. The planted key must not be noted
+        self.srv.mint("EMAIL_9", "nine@example.com", minted_at=time.time())
+        base = {"tool_name": "mcp__demo__notes", "mcp_server": {"name": "demo", "source": "user"}, **CLAUDE}
+        hooks._post_tool_guarded({**base, "session_id": "s1", "tool_input": {"text": tok("EMAIL_9")},
+                                  "tool_response": [{"type": "text", "text": "note saved"}]})
+        self.assertEqual(self.srv.log, [], "a token that the model sent starts no request")
+        hooks._post_tool_guarded({**base, "session_id": "s1", "tool_input": {"action": "list"},
+                                  "tool_response": [{"type": "text", "text": f"notes: {tok('EMAIL_9')}"}]})
+        self.assertEqual(vault_refs.noted(["EMAIL_9"], "s1"), {})
+        self.assertEqual(self.headers_of(), {"demo": None}, "the planted token is no trigger either")
+        self.assertEqual(self.write(tok("EMAIL_9")), {})
+        self.assertEqual(self.srv.resolved, [])
 
     @unittest.skipUnless(BASH and os.name != "nt", "bash on POSIX")
     def test_a_long_value_or_a_guarded_folder_with_a_space_does_not_go_into_bash(self):

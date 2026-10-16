@@ -212,8 +212,10 @@ missing from a 200 answer.
   for its session only. A key that one server showed with two different
   display parts, in one result or in two, is refused and its note goes: the
   server's mapping changed, and the token may name another person. A token
-  that the tool call itself carried is no sighting: a server that repeats its
-  query would otherwise give it a new time. The result does not change. A
+  that the model sent to that server, in this call or in any call of the
+  last 24 hours (also before the server was in use), is no sighting and no
+  trigger: a server that repeats or stores text would otherwise give it a new
+  time. The result does not change. A
   token in any other result (a file read, a web page, a project-scope server)
   is not noted.
 - **Resolving.** Before a Write, Edit, MultiEdit, NotebookEdit or Bash call,

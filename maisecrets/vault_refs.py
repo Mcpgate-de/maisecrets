@@ -312,8 +312,8 @@ def ensure_headers(cfg: dict, backend) -> str | None:
     added, removed, path, backup = _apply_config(cfg, backend)
     parts = []
     if added:
-        parts.append(f"maisecrets put its {HEADER} header on {len(added)} MCP server(s) in {path} that sent a token "
-                     "and support it")
+        # a header that a busy client lock kept from the post-tool hook: its notice comes now (Gate B review)
+        parts.extend(_notice(n).rstrip(".") for n in added)
     if removed:
         parts.append(f"maisecrets removed its {HEADER} header from {len(removed)} MCP server(s) in {path}")
     if not parts:
@@ -462,21 +462,13 @@ def note_result(payload: dict, cfg: dict, backend=None) -> tuple[int, str | None
     session = payload.get("session_id")
     if not origin or not isinstance(session, str) or not session:
         return count, notice
-    if not _is_enabled(server["name"], url):
-        # not enabled: a token of this result is the trigger; asked alone (the model sent a token) is none
-        if not found or backend is None or not _may_change_config():
-            return count, notice
-        if not endpoint(cfg, url, time.monotonic() + DISCOVERY_BUDGET):
-            return count, notice            # no field: unsupported, cached; no answer: asked again next time
-        notice = enable(cfg, backend, server["name"], url)
-        if not _is_enabled(server["name"], url):
-            return count, notice
     now = time.time()
     seen = _now_iso(now)
     with _lock_for(DIR / ".lock"):
         # a key that the model sent to this origin, in any call of any session in the last NOTE_TTL, is never noted
         # later: a server that stores text and shows it again ("notes: ⟦EMAIL_9⟧") would give a planted key a new
-        # sighting (Gate B review, round 2). A key noted before stays noted
+        # sighting (Gate B review, round 2). Recorded for every user-scope entry, also one that is not enabled yet:
+        # local state only, no request (Gate B review of the trigger). A key noted before stays noted
         sent_all = _read_json(SENT) or {}
         sent = sent_all.setdefault(profile(), {}).setdefault(origin, {})
         stale = [k for k, t in sent.items() if not (isinstance(t, (int, float)) and t > now - NOTE_TTL)]
@@ -491,8 +483,18 @@ def note_result(payload: dict, cfg: dict, backend=None) -> tuple[int, str | None
             atomic_write(SENT, json.dumps(sent_all, indent=1))
         for k in [k for k in found if k in sent]:
             found.pop(k)
-        if not found:
+    if not found:
+        return count, notice
+    if not _is_enabled(server["name"], url):
+        # not enabled: a token of this result that the model did not send is the trigger
+        if backend is None or not _may_change_config():
             return count, notice
+        if not endpoint(cfg, url, time.monotonic() + DISCOVERY_BUDGET):
+            return count, notice            # no field: unsupported, cached; no answer: asked again next time
+        notice = enable(cfg, backend, server["name"], url)
+        if not _is_enabled(server["name"], url):
+            return count, notice
+    with _lock_for(DIR / ".lock"):
         data = _read_json(NOTES) or {}
         mine = data.setdefault(profile(), {}).setdefault(origin, {})
         for key, (type_, displays) in found.items():
