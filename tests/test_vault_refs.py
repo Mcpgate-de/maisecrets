@@ -165,12 +165,13 @@ class Offline(Base):
         lock.mkdir()
         with mock.patch.object(vault_refs._ConfigLock, "__init__",
                                lambda s, p, wait=0.3: (setattr(s, "dir", lock), setattr(s, "wait", wait))[0]):
+            self.assertIsNone(self.enable(), "a busy client lock: no wait in the post-tool hook, no notice")
             with self.assertRaises(TimeoutError):
-                self.enable()
+                self.start()
         self.assertNotIn("headers", json.loads(path.read_text())["mcpServers"]["a"], "a fresh lock: nothing written")
         old = time.time() - 30
         os.utime(lock, (old, old))
-        self.assertIsNotNone(self.enable())
+        self.assertIn("that sent a token", self.start(), "the next start writes what the busy lock left")
         self.assertFalse(lock.exists(), "the lock is given back")
 
     def test_off_takes_our_header_out_again_and_notes_nothing(self):
@@ -187,6 +188,11 @@ class Offline(Base):
         env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
         with mock.patch.dict(os.environ, env, clear=True):
             self.assertIsNone(self.start())
+            self.assertIsNone(self.enable())
+        # an inherited CLAUDE_CONFIG_DIR outside the temp folder of the run is refused under the test suite
+        with mock.patch.object(vault_refs, "claude_json", return_value=Path.home() / ".claude.json"):
+            self.assertFalse(vault_refs._may_change_config())
+        self.assertTrue(vault_refs._may_change_config())
 
     def test_p3_only_a_result_of_a_user_scope_mcp_server_is_noted(self):
         self.client_config({"a": {"url": "https://one.example/mcp"}})
@@ -396,6 +402,13 @@ class Online(Base):
         self.assertIsNotNone(self.headers_of()["demo"])
         self.assertIsNone(self.start(), "the next start keeps it as it is")
         self.assertEqual(self.headers_of()["other"], None)
+        # another entry with the same URL (a copy or a rename) did not send the token: it gets no header
+        servers = json.loads((self.profile / ".claude.json").read_text())["mcpServers"]
+        servers["copy"] = {"type": "http", "url": self.srv.url + "/mcp"}
+        self.client_config(servers)
+        self.start()
+        self.assertEqual(self.headers_of()["copy"], None)
+        self.assertIsNotNone(self.headers_of()["demo"])
 
     def test_trigger_never_from_a_project_server_or_from_bash_output(self):
         self.client_config({"demo": {"type": "http", "url": self.srv.url + "/mcp"}},

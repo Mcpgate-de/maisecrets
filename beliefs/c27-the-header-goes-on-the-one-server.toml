@@ -6,5 +6,5 @@ runner = ["tests/test_vault_refs.py::Online::test_trigger_the_header_goes_on_tha
 
 [proof]
 file = "maisecrets/vault_refs.py"
-find = '''if origin in keys and spec.get("url") in urls.get(origin, ()) else None'''
-replace = '''if origin in keys else None'''
+find = '''if origin in keys and (name, spec.get("url")) in urls.get(origin, ()) \'''
+replace = '''if origin in keys \'''

@@ -55,7 +55,7 @@ RELEASED = DIR / "released.json"      # session -> [{"name", "t"}]: the values a
 NOTE_TTL = 24 * 3600                  # a token seen longer ago than this stays text
 RELEASE_WINDOW = 3600                 # a value a server gave is hunted in tool output this long, as a stored one
 MAX_SESSIONS_PER_NOTE = 20
-KEYS = DIR / "keys.json"              # profile -> origin -> {"kid", "created", "urls"}; never K
+KEYS = DIR / "keys.json"              # profile -> origin -> {"kid", "created", "entries": [[name, url]]}; never K
 DISCOVERY_BUDGET = 4.0                # the one metadata request of the post-tool hook (watchdog 16 s, lock wait 5 s)
 ENDPOINTS = DIR / "endpoints.json"    # origin + path -> {"endpoint", "t"}
 
@@ -173,28 +173,34 @@ def _known_keys() -> dict:
     return (_read_json(KEYS) or {}).get(profile()) or {}
 
 
-def _enabled() -> dict[str, list[str]]:
-    """origin -> the MCP URLs of this profile whose server named a vault endpoint: only their entries get the header."""
-    out: dict[str, list[str]] = {}
+def _enabled() -> dict[str, list[tuple[str, str]]]:
+    """origin -> the entries (name, URL) of this profile whose server sent a token and named a vault endpoint: only
+    they get the header. A renamed entry, or one with another URL, is another entry (Gate A review of the trigger)."""
+    out: dict[str, list[tuple[str, str]]] = {}
     for origin, rec in _known_keys().items():
-        if isinstance(rec, dict) and isinstance(rec.get("urls"), list):
-            out[origin] = [u for u in rec["urls"] if isinstance(u, str)]
+        if isinstance(rec, dict) and isinstance(rec.get("entries"), list):
+            out[origin] = [(e[0], e[1]) for e in rec["entries"]
+                           if isinstance(e, list) and len(e) == 2 and all(isinstance(x, str) for x in e)]
     return out
 
 
-def _remember_key(origin: str, kid: str, url: str | None = None) -> None:
+def _is_enabled(name: str, url: str) -> bool:
+    return (name, url) in _enabled().get(origin_of(url) or "", [])
+
+
+def _remember_key(origin: str, kid: str, entry: tuple[str, str] | None = None) -> None:
     with _lock_for(DIR / ".lock"):
         data = _read_json(KEYS) or {}
         mine = data.setdefault(profile(), {})
         rec = mine.get(origin)
         changed = False
         if not isinstance(rec, dict) or rec.get("kid") != kid:
-            rec = mine[origin] = {"kid": kid, "created": _now_iso(), "urls": []}
+            rec = mine[origin] = {"kid": kid, "created": _now_iso(), "entries": []}
             changed = True
-        if not isinstance(rec.get("urls"), list):
-            rec["urls"], changed = [], True
-        if url and url not in rec["urls"]:
-            rec["urls"].append(url)
+        if not isinstance(rec.get("entries"), list):
+            rec["entries"], changed = [], True
+        if entry and list(entry) not in rec["entries"]:
+            rec["entries"].append(list(entry))
             changed = True
         if changed:
             atomic_write(KEYS, json.dumps(data, indent=1))
@@ -285,7 +291,13 @@ def _kid_in(value: object) -> str | None:
 
 
 def _may_change_config() -> bool:
-    """A test home never changes the client config of the person; a test sets CLAUDE_CONFIG_DIR to its own folder."""
+    """A test home never changes the client config of the person; a test sets CLAUDE_CONFIG_DIR to its own folder.
+    Under the test suite (tests/_isolate.py) the config must also lie in the temp folder of the run: an inherited
+    CLAUDE_CONFIG_DIR of a real profile is refused (Gate A review of the trigger)."""
+    if os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
+        import tempfile
+        tmp = os.path.realpath(tempfile.gettempdir())
+        return os.path.realpath(str(claude_json())).startswith(tmp + os.sep)
     return HOME == _DEFAULT_HOME or bool(os.environ.get("CLAUDE_CONFIG_DIR"))
 
 
@@ -300,7 +312,8 @@ def ensure_headers(cfg: dict, backend) -> str | None:
     added, removed, path, backup = _apply_config(cfg, backend)
     parts = []
     if added:
-        parts.append(f"maisecrets put its {HEADER} header back on {len(added)} MCP server(s) in {path}")
+        parts.append(f"maisecrets put its {HEADER} header on {len(added)} MCP server(s) in {path} that sent a token "
+                     "and support it")
     if removed:
         parts.append(f"maisecrets removed its {HEADER} header from {len(removed)} MCP server(s) in {path}")
     if not parts:
@@ -308,7 +321,7 @@ def ensure_headers(cfg: dict, backend) -> str | None:
     return "; ".join(parts) + f" (backup until the next start: {backup.name}; client_header false turns it off)."
 
 
-def _apply_config(cfg: dict, backend) -> tuple[list[str], list[str], Path, Path]:
+def _apply_config(cfg: dict, backend, lock_wait: float = 5.0) -> tuple[list[str], list[str], Path, Path]:
     """The headers of the client config as they should be: ours on each enabled URL, none of ours elsewhere. Only
     `mcpServers.<name>.headers` changes, under the client's own lock, with a backup first; a file that is not valid JSON
     is not touched. Returns (added, removed, path, backup)."""
@@ -331,7 +344,7 @@ def _apply_config(cfg: dict, backend) -> tuple[list[str], list[str], Path, Path]
         except OSError:
             pass
         return [], [], path, backup
-    with _ConfigLock(path):
+    with _ConfigLock(path, wait=lock_wait):
         data = _read_json(path)
         if data is None:
             return [], [], path, backup
@@ -354,10 +367,16 @@ def enable(cfg: dict, backend, name: str, url: str) -> str | None:
     # lost (Fable review, round 3)
     with _lock_for(DIR / ".lock"):
         k = _key(backend, origin, create=True)
-        _remember_key(origin, kid_of(k), url)
-    added, _removed, _path, _backup_path = _apply_config(cfg, backend)
-    if name not in added:
+        _remember_key(origin, kid_of(k), (name, url))
+    try:
+        # a short wait inside the post-tool hook: a busy client lock leaves the write to the next session start
+        added, _removed, _path, _backup_path = _apply_config(cfg, backend, lock_wait=1.0)
+    except TimeoutError:
         return None
+    return _notice(name) if name in added else None
+
+
+def _notice(name: str) -> str:
     return (f"maisecrets: the MCP server {name} supports {HEADER}. From the next start of Claude Code, maisecrets puts "
             "this server's values into your local files and commands; the AI still sees only tokens. To turn it off: "
             "/maisecrets:settings client_header false. More: README, section \"Vault references\".")
@@ -377,7 +396,8 @@ def _apply_headers(data: dict, keys: dict, urls: dict, ours: set) -> tuple[list[
                 continue                       # a shape we do not know: left as it is
             have = _header_key(headers or {})
             origin = origin_of(spec.get("url"))
-            want = header_value(keys[origin]) if origin in keys and spec.get("url") in urls.get(origin, ()) else None
+            want = header_value(keys[origin]) if origin in keys and (name, spec.get("url")) in urls.get(origin, ()) \
+                else None
             if want is None:
                 if have and _kid_in(headers[have]) in ours:
                     del headers[have]
@@ -442,14 +462,14 @@ def note_result(payload: dict, cfg: dict, backend=None) -> tuple[int, str | None
     session = payload.get("session_id")
     if not origin or not isinstance(session, str) or not session:
         return count, notice
-    if url not in _enabled().get(origin, []):
+    if not _is_enabled(server["name"], url):
         # not enabled: a token of this result is the trigger; asked alone (the model sent a token) is none
         if not found or backend is None or not _may_change_config():
             return count, notice
         if not endpoint(cfg, url, time.monotonic() + DISCOVERY_BUDGET):
             return count, notice            # no field: unsupported, cached; no answer: asked again next time
         notice = enable(cfg, backend, server["name"], url)
-        if url not in _enabled().get(origin, []):
+        if not _is_enabled(server["name"], url):
             return count, notice
     now = time.time()
     seen = _now_iso(now)
@@ -952,11 +972,10 @@ def status_lines(cfg: dict, backend, check: bool = True) -> list[str]:
     servers = user_servers()
     if not servers:
         return ["vault references: no user-scope MCP server with an https URL"]
-    enabled = _enabled()
     lines = []
     for name, url in servers.items():
         origin = origin_of(url)
-        if url not in enabled.get(origin, []):
+        if not _is_enabled(name, url):
             lines.append(f"vault references: {name} ({origin}): not in use (the server sent no token yet, or it "
                          "names no vault endpoint)")
             continue
