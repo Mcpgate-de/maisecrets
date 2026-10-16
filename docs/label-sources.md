@@ -116,7 +116,7 @@ A label word that is also an ordinary word in running text gives false positives
 
 | Language | Word | Why |
 |---|---|---|
-| es | clave | An ordinary word: palabra clave (keyword), la clave del éxito. Only clave de acceso, clave secreta and clave de la API are labels. |
+| es | clave | An ordinary word: palabra clave (keyword), la clave del éxito. Only clave de acceso, clave secreta and clave de la API are labels. Measured again on 2026-10-16 with a value in the shape of a password after `clave:`: it stays out, because clave is also a code or an id (Mexico: `clave: CURP-ABCD010101`, `clave: LOTE-2024-001`, `clave: B2B-Ventas`), and a false hit blocks a typed prompt. |
 | es | secreto, cliente secreto | secreto alone is prose; cliente secreto (Nextcloud, Client secret) reads as a secret customer. |
 | it | chiave, segreto | Ordinary words: parola chiave (keyword). Only the labels of two or more words. |
 | it | parola d'ordine | No source uses it; Italian interfaces write password. |
