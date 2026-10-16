@@ -5,8 +5,8 @@ limits are in their own section. "Repeat this measurement" has the commands.
 
 | Snapshot | |
 |---|---|
-| Date | 2026-10-14; the 0.6.24 rows and sections: 2026-10-16 |
-| maisecrets | v0.6.17 (tag `v0.6.17`); earlier releases from their tags; the CredData rows of 0.6.18 to 0.6.21 and the holdout section: 2026-10-15; 0.6.24 from its release branch, 2026-10-16 |
+| Date | 2026-10-14; the 0.6.24 and 0.6.25 rows and sections: 2026-10-16 |
+| maisecrets | v0.6.17 (tag `v0.6.17`); earlier releases from their tags; the CredData rows of 0.6.18 to 0.6.21 and the holdout section: 2026-10-15; 0.6.24 and 0.6.25 from their release branches, 2026-10-16 |
 | Data | Samsung CredData, commit `0b1940e171725ad8937311120b191602608a4801` (2026-09-29); four labelled PII datasets, pinned in "Labelled PII datasets" (2026-10-15) |
 | Machine | Apple M5, 10 cores, macOS 27.0 |
 | Python | 3.14.8 (CredData runs); 3.14.8 and 3.9.6 (timing) |
@@ -36,6 +36,8 @@ no detection and give the rows of 0.6.21 (0.6.23 measured as the base of 0.6.24)
 | 0.6.21 | tool | 5,862 | 4,244 | 446 | 0.929 | 0.580 | 0.714 | 0.691 |
 | 0.6.24 | prompt | 5,345 | 4,761 | 441 | 0.924 | 0.529 | 0.673 | 0.650 |
 | 0.6.24 | tool | 5,870 | 4,236 | 446 | 0.929 | 0.581 | 0.715 | 0.692 |
+| 0.6.25 | prompt | 5,345 | 4,761 | 441 | 0.924 | 0.529 | 0.673 | 0.650 |
+| 0.6.25 | tool | 5,870 | 4,236 | 446 | 0.929 | 0.581 | 0.715 | 0.692 |
 
 This table uses all 29,893 rows (14,471 credentials, 15,422 non-secrets). Source: `scripts/measure_creddata.py
 --exclude-repo ""`, 2026-10-14; 0.6.18 to 0.6.21 on 2026-10-15.
@@ -57,6 +59,8 @@ This table uses all 29,893 rows (14,471 credentials, 15,422 non-secrets). Source
 | 0.6.21 | tool | 0.956 | 0.685 | 0.798 | 0.908, 0.685, 0.781 |
 | 0.6.24 | prompt | 0.954 | 0.649 | 0.773 | 0.904, 0.649, 0.756 |
 | 0.6.24 | tool | 0.956 | 0.686 | 0.799 | 0.909, 0.686, 0.782 |
+| 0.6.25 | prompt | 0.954 | 0.649 | 0.773 | 0.904, 0.649, 0.756 |
+| 0.6.25 | tool | 0.956 | 0.686 | 0.799 | 0.909, 0.686, 0.782 |
 
 ## CredData, split by repository
 
@@ -347,6 +351,40 @@ one run of digits (floats, microsecond timestamps and IMEIs pass Luhn as often; 
 card word only in groups of four with an issuer prefix), a password after a password word in prose, a US phone number
 without a phone word, 48 hex digits without a token word (a digest looks the same), a Twilio Account SID without its
 name.
+
+### 0.6.25, 2026-10-16
+
+0.6.24 (`origin/main` at `5208dca`) against the release branch of 0.6.25 (`a44dd52`). Tool channel, `--locale de_DE`,
+the script of this section. 0.6.25 closes three gaps of 0.6.24: a vCard property with parameters and a vCard address,
+name and birth date in their fields; an encoded e-mail address in a CSV column whose header names its owner; and a
+measured decision on the company window before an address label.
+
+- Holdout values: 6 more masked in half D (the family and given names of three vCard samples of v4), 0 in half C, in
+  both region sets; no value that 0.6.24 masked leaks. False alarms on the 215 clean samples: 7 → 7 (`us uk in`),
+  1 → 1 (`de`).
+- CredData (four runs: both channels, `--regions de` and `us`): 0 rows changed. `scripts/detection_fingerprint.py`
+  over CredData, `tests/fp_corpus.py`, the PII corpus and the token lists of the tests (503,871 lines): byte-identical
+  to 0.6.24.
+- Labelled PII datasets (`scripts/measure_datasets.py run`): no count of any type changes in either channel.
+- 0 new hits on the 2,464 developer texts, the 771 typed prompts, the 1,114 NO_HIT texts of `tests/fp_corpus.py` and
+  the 367 texts of the PII corpus. The negative corpus of the forms (`tests/fp_corpus_forms.py`, now 168 texts with the
+  inputs of two review rounds) keeps its 6 known hits in the tool channel and 4 in the prompt channel.
+- Rule classes (`scripts/measure_rule_classes.py`): `pii:name` alone masks 110 holdout values (0.6.24: 104); no other
+  class changes on CredData, the holdout sets or the corpora.
+- Time: Gate B timed a 70 KB single line and thousands of lines for each new regex and the CSV cell check: 0.2 to
+  0.45 s, linear.
+
+Left out after measuring: the check for a company before an address label reads back to the start of the JSON object
+instead of 120 characters. Six synthetic records in minified JSON: the company record and the head office are no longer
+masked (two false hits removed), but the address of a person's record with an employer, or with a hotel in a note,
+passes (two new leaks). Pretty JSON masks all six with and without the change. The holdout sets, the datasets, the
+developer texts, the prompts and the false-hit corpora show no change, so the six records are the whole evidence. A
+false hit masks a company address; a leak sends a home address to the provider. An employer or a hotel within 120
+characters already lets a home address pass in 0.6.24 and 0.6.25 (`tests/test_company_address_window.py`).
+
+Left out after review: a vCard property folded over two lines, a vCard line without its `BEGIN:VCARD`, and a CSV row
+without a header (its shape is the shape of a locale table). An encoded address at a `.md` domain in a CSV cell stays
+text, because `name%40draft.md` is a file name more often.
 
 ## Labelled PII datasets, 2026-10-15
 
