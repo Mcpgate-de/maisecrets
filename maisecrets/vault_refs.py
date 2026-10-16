@@ -20,12 +20,9 @@ from __future__ import annotations
 import base64
 import copy
 import hashlib
-import http.client
 import json
 import os
 import re
-import secrets
-import ssl
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -53,12 +50,21 @@ LOCK_STALE = 10.0                     # the client's own lock rule for its confi
 
 DIR = HOME / "vault-refs"
 NOTES = DIR / "notes.json"            # profile -> origin -> key -> {"type", "seen", "display", "sessions": by MCP URL}
+SENT = DIR / "sent.json"              # profile -> origin -> key -> time: server keys the model sent in a call
 RELEASED = DIR / "released.json"      # session -> [{"name", "t"}]: the values a server gave, kept in the store 1 h
 NOTE_TTL = 24 * 3600                  # a token seen longer ago than this stays text
 RELEASE_WINDOW = 3600                 # a value a server gave is hunted in tool output this long, as a stored one
 MAX_SESSIONS_PER_NOTE = 20
 KEYS = DIR / "keys.json"              # profile -> origin -> {"kid", "created"}; never K
 ENDPOINTS = DIR / "endpoints.json"    # origin + path -> {"endpoint", "t"}
+
+
+def _net_errors() -> tuple:
+    """The errors of one request. http.client and ssl are imported only when a request runs: every hook call
+    imports this module, and the two cost about 20 ms (hook time without a user-scope server stays as it was)."""
+    import http.client
+    import ssl
+    return (OSError, http.client.HTTPException, ssl.SSLError)
 
 
 class Refused(Exception):
@@ -155,6 +161,7 @@ def _key(backend, origin: str, create: bool) -> bytes | None:
             pass
     if not create:
         return None
+    import secrets
     k = secrets.token_bytes(32)
     backend.put(_store_name(origin), k.hex(), label="maisecrets vault reference key",
                 comment="maisecrets: the key that gets values back from a server; not a placeholder value.")
@@ -380,7 +387,7 @@ def note_result(payload: dict, cfg: dict) -> int:
     walk(payload.get("tool_input"), into_input=True)
     for key in asked:
         found.pop(key, None)
-    if not found:
+    if not found and not asked:
         return 0
     url = user_servers().get(server["name"])
     origin = origin_of(url)
@@ -392,6 +399,25 @@ def note_result(payload: dict, cfg: dict) -> int:
     now = time.time()
     seen = _now_iso(now)
     with _lock_for(DIR / ".lock"):
+        # a key that the model sent to this origin, in any call of any session in the last NOTE_TTL, is never noted
+        # later: a server that stores text and shows it again ("notes: ⟦EMAIL_9⟧") would give a planted key a new
+        # sighting (Gate B review, round 2). A key noted before stays noted
+        sent_all = _read_json(SENT) or {}
+        sent = sent_all.setdefault(profile(), {}).setdefault(origin, {})
+        stale = [k for k, t in sent.items() if not (isinstance(t, (int, float)) and t > now - NOTE_TTL)]
+        for k in stale:
+            del sent[k]
+        for k in asked:
+            sent.pop(k, None)
+            sent[k] = now
+        while len(sent) > MAX_NOTES_PER_ORIGIN:
+            del sent[next(iter(sent))]
+        if asked or stale:
+            atomic_write(SENT, json.dumps(sent_all, indent=1))
+        for k in [k for k in found if k in sent]:
+            found.pop(k)
+        if not found:
+            return 0
         data = _read_json(NOTES) or {}
         mine = data.setdefault(profile(), {}).setdefault(origin, {})
         for key, (type_, displays) in found.items():
@@ -551,6 +577,8 @@ def _request(cfg: dict, method: str, url: str, headers: dict, body: bytes | None
 def _send(cfg: dict, method: str, url: str, headers: dict, body: bytes | None, deadline: float):
     """One HTTPS request with no redirect and no proxy. Returns (status, headers, body) with the body cut above
     MAX_ANSWER_BYTES + 1, so a longer body is seen as too long."""
+    import http.client
+    import ssl
     parts = urlsplit(url)
     left = deadline - time.monotonic()
     if left <= 0.2:
@@ -616,7 +644,7 @@ def endpoint(cfg: dict, url: str, deadline: float) -> str | None:
         candidate = meta.get("client_vault_endpoint")
         if origin_of(candidate) == origin:
             found = candidate
-    except (OSError, ValueError, RecursionError, http.client.HTTPException, ssl.SSLError):
+    except (ValueError, RecursionError) + _net_errors():
         return None                             # not cached: the next call asks again (deep JSON: RecursionError)
     with _lock_for(DIR / ".lock"):
         cache = _read_json(ENDPOINTS) or {}
@@ -709,7 +737,7 @@ def resolve(cfg: dict, backend, keys: list[str], session: str | None,
             status, headers, raw = _request(cfg, "POST", where, {"Authorization": f"Bearer {bearer_of(k)}",
                                                                  "Content-Type": "application/json",
                                                                  "Accept": "application/json"}, body, deadline)
-        except (OSError, http.client.HTTPException, ssl.SSLError) as exc:
+        except _net_errors() as exc:
             raise Refused(f"{host} could not be reached ({type(exc).__name__})") from None
         answer = None
         if len(raw) <= MAX_ANSWER_BYTES and _is_json(headers):
@@ -746,7 +774,7 @@ def probe(cfg: dict, backend, origin: str, url: str) -> str:
         status, headers, raw = _request(cfg, "POST", where, {"Authorization": f"Bearer {bearer_of(k)}",
                                                              "Content-Type": "application/json"},
                                         json.dumps({"now": _now_iso(), "refs": []}).encode(), deadline)
-    except (OSError, http.client.HTTPException, ssl.SSLError) as exc:
+    except _net_errors() as exc:
         return f"could not be reached ({type(exc).__name__})"
     try:
         answer = json.loads(raw.decode("utf-8")) if _is_json(headers) and len(raw) <= MAX_ANSWER_BYTES else None
@@ -770,11 +798,12 @@ def remember_released(backend, session: str | None, values: dict[str, tuple[str,
     if not session or not values:
         return
     now = time.time()
+    import secrets
     name = "_maisecrets_vrel_" + secrets.token_hex(12)
-    backend.put(name, json.dumps([[v, f"{OPEN}{k}{CLOSE}"] for k, (v, _o) in values.items()]),
-                label="maisecrets server values", comment="maisecrets: values a server gave, for one hour; "
-                                                          "not a placeholder value.")
     try:
+        backend.put(name, json.dumps([[v, f"{OPEN}{k}{CLOSE}"] for k, (v, _o) in values.items()]),
+                    label="maisecrets server values", comment="maisecrets: values a server gave, for one hour; "
+                                                              "not a placeholder value.")
         with _lock_for(DIR / ".lock"):
             data = _prune(backend, _read_json(RELEASED) or {}, now)
             data.setdefault(session, []).append({"name": name, "t": now})

@@ -2371,10 +2371,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     if any("\0" in v for v, _o in got.values()):
         return _deny(f"maisecrets: a value of {keys} holds a NUL character, which a shell variable cannot carry. "
                      "The command did not run. Write it into a file with Write instead.")
-    # the audit line and the limiter record only for a value that passed every check (Gate B review)
-    fetched, why = _server_release(vault, got, session, "Bash", command)
-    if why:
-        return _deny(why + " The command did not run.")
+    fetched = {k: v for k, (v, _o) in got.items()}
     # automatic: no ask of our own. confirm: an ask per command, or with ssh_approval "per-session" an
     # approved value runs without an ask and a first use asks once and gives its token to the serving
     # child, which confirms it when the approved command reads the value. After phase 1: a key
@@ -2411,6 +2408,11 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
             plan[key] = (None, value)
     if failed:
         return _deny(_deny_reason(failed))
+    # the audit line and the limiter record of a server value only after every check and every stored value
+    # passed (Gate A and Gate B review)
+    _released, why = _server_release(vault, got, session, "Bash", command)
+    if why:
+        return _deny(why + " The command did not run.")
     _note_destinations(cfg, payload, "Bash", tool_input, [k for k in plan if k not in fetched], ssh_command=command)
     # phase 3: serve and rewrite
     prelude: list[str] = []
@@ -2568,8 +2570,10 @@ def _names_a_guarded_file(value: str, cwd: str) -> bool:
     """A value that, used as a path, names the maisecrets home, a store file, an ssh config, the client config or a
     file in the client's config folder (its settings hold the hooks). Each piece is a path too: `--config=PATH`,
     `@PATH`, `file://PATH` (Gate A review)."""
-    if len(value) > 4096 or "\0" in value:
-        return False
+    if "\0" in value:
+        return False                            # refused on its own below, with its own reason
+    if len(value) > 4096 or _holds_a_guarded_folder(value):
+        return True                             # too long to judge, or a guarded folder anywhere (a path with a space)
     pieces = {value.strip()}
     for part in re.split(r"[\s=,;]+", value):
         part = part.strip("'\"")
@@ -2579,6 +2583,19 @@ def _names_a_guarded_file(value: str, cwd: str) -> bool:
         if part:
             pieces.add(part)
     return any(_a_guarded_path(v, cwd) for v in pieces if v)
+
+
+def _holds_a_guarded_folder(value: str) -> bool:
+    """The value holds the spelling of a guarded folder anywhere: a path with a space splits into pieces that each
+    look harmless (Gate A review, round 2)."""
+    from . import vault_refs
+    from .vault import HOME
+    home = os.path.expanduser("~")
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude")
+    spellings = {str(HOME), os.path.realpath(str(HOME)), config_dir, os.path.realpath(config_dir),
+                 str(vault_refs.claude_json()), os.path.join(home, ".ssh"), "~/.ssh", "~/.claude", "~/.maisecrets",
+                 "$HOME/.ssh", "${HOME}/.ssh", "$HOME/.claude", "${HOME}/.claude"}
+    return any(sp and sp in value for sp in spellings)
 
 
 def _a_guarded_path(v: str, cwd: str) -> bool:
@@ -3019,8 +3036,6 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     if failed:
         return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
     got, why = _server_fetch(cfg, vault, server, session)
-    if not why:
-        fetched, why = _server_release(vault, got, session, tool, f"{tool} {path}")
     if why:
         return _deny(why + " Nothing was written.")
     for key in dict.fromkeys(found):
@@ -3033,6 +3048,9 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         values[key] = value
     if failed:
         return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
+    fetched, why = _server_release(vault, got, session, tool, f"{tool} {path}")
+    if why:
+        return _deny(why + " Nothing was written.")
     _note_destinations(cfg, payload, tool, tool_input, list(values))
     values.update(fetched)
 
@@ -3884,9 +3902,10 @@ def _post_tool_guarded(payload: dict) -> dict:
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
     _commit_destinations(payload)    # first: the call ran even when the redaction below fails; and before the hint
     try:
-        from . import vault_refs
-        # before the redaction, from the result as the server sent it; the result itself does not change
-        vault_refs.note_result(payload, load_config())
+        if str(payload.get("tool_name") or "").startswith("mcp__"):     # no config read for any other tool
+            from . import vault_refs
+            # before the redaction, from the result as the server sent it; the result itself does not change
+            vault_refs.note_result(payload, load_config())
     except Exception as exc:  # noqa: BLE001 - a token not noted stays text; the output must not be withheld for it
         _debug(f"post-tool vault-refs: {type(exc).__name__}")
     try:

@@ -624,6 +624,41 @@ class Online(Base):
         self.assertEqual(self.write(tok("EMAIL_9")), {}, "a token never noted stays text")
         self.assertEqual(self.srv.resolved, [])
 
+    def test_a_token_the_model_planted_is_no_sighting_in_a_later_call(self):
+        # Gate B review, round 2: call 1 stores a note with the token, call 2 lists the notes
+        self.ready()
+        self.srv.mint("EMAIL_9", "nine@example.com", minted_at=time.time())
+        base = {"tool_name": "mcp__demo__notes", "mcp_server": {"name": "demo", "source": "user"}, **CLAUDE}
+        hooks._post_tool_guarded({**base, "session_id": "s1", "tool_input": {"text": tok("EMAIL_9")},
+                                  "tool_response": [{"type": "text", "text": "note saved"}]})
+        hooks._post_tool_guarded({**base, "session_id": "s2", "tool_input": {"action": "list"},
+                                  "tool_response": [{"type": "text", "text": f"notes: {tok('EMAIL_9')}"}]})
+        self.assertEqual(vault_refs.noted(["EMAIL_9"], "s2"), {})
+        self.assertEqual(self.srv.resolved, [])
+        self.assertEqual(list(vault_refs.noted(["EMAIL_1"], "s1")), ["EMAIL_1"], "a key noted before stays noted")
+
+    @unittest.skipUnless(BASH and os.name != "nt", "bash on POSIX")
+    def test_a_long_value_or_a_guarded_folder_with_a_space_does_not_go_into_bash(self):
+        self.ready()
+        self.srv.mint("ARG_6", "--name=x " + "y" * 4100)
+        self.result("demo", tok("ARG_6"))
+        out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", **CLAUDE, "cwd": str(self.work),
+                              "tool_input": {"command": f"tool {tok('ARG_6')}"}})
+        self.assertIn("may not choose", self.denied(out))
+        spaced = self.profile / "Claude Config"
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(spaced)}):
+            self.assertTrue(hooks._names_a_guarded_file("--config=" + str(spaced / "settings.json"), str(self.work)))
+        self.assertFalse(hooks._names_a_guarded_file("--name=Person Two", str(self.work)))
+
+    def test_a_stored_value_that_fails_leaves_no_server_audit_line(self):
+        self.ready()
+        e = Vault().put("my-test-token-value-12345", "SECRET", "test", session="s1")
+        with mock.patch.object(Vault, "get", return_value=(None, "store")):     # the store fails after phase 1
+            self.denied(self.write(f"{tok('NAME_2')} {e.ref}"))
+        self.assertEqual(len(self.srv.resolved), 1, "the server was asked")
+        audit = (HOME / "audit.log").read_text() if (HOME / "audit.log").exists() else ""
+        self.assertNotIn("NAME_2@", audit)
+
     def test_a_session_gets_only_the_url_that_showed_it_the_key(self):
         # Gate A review: S1 saw EMAIL_1 from /mcp, S2 from /mcp2 on the same origin. When the S1 sighting is old,
         # S1 must not resolve through the sighting of S2
