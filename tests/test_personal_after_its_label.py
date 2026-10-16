@@ -186,6 +186,56 @@ class SingleNameTests(Base):
         self.assertEqual(kinds, {"name-after-label"})
 
 
+# ------------------------------------------------------------------- a street line after an address label --
+STREET = "4821 Maple " + "Ridge Drive"
+
+
+class StreetLineTests(Base):
+    def test_a_street_line_after_an_address_label_or_a_verb_of_residence_is_masked(self):
+        for text, value in (
+                ("Street address: " + STREET, STREET),
+                ("The tenant resides at 77 Harbour " + "Lane, Apt 4B.", "77 Harbour " + "Lane, Apt 4B"),
+                ('{"address": "' + STREET + '", "city": "Springfield"}', STREET),
+                ("Anschrift: Linden" + "straße 42", "Linden" + "straße 42"),
+                ("Frau Okafor wohnt in der Garten" + "straße 3a.", "Garten" + "straße 3a"),
+                ("Indirizzo: Via Roma " + "12", "Via Roma " + "12"),
+                ("Street address: 123 5th " + "Avenue", "123 5th " + "Avenue"),
+                ("Bank account status: active\nAddress: 100 Harbour " + "Lane", "100 Harbour " + "Lane"),
+                ("The patient lives at " + STREET + " with her son.", STREET),
+                ("Dana, our office manager, lives at 12 Oak " + "Street", "12 Oak " + "Street"),
+                ("Her daughter works at the store and lives at 12 Oak " + "Street", "12 Oak " + "Street"),
+                ("Return address: 12 Oak " + "Street", "12 Oak " + "Street")):
+            with self.subTest(text=text):
+                self.assertMasked(text, value)
+                self.assertIn("address-street-after-label", {m.kind for m in scan(text)})
+
+    def test_a_company_or_public_address_and_a_street_shape_in_code_stay_text(self):
+        for text in ("Our office address: 100 Main Street", "Beispiel GmbH, Address: 100 Main Street",
+                     "The Empire State Building is located at 350 Fifth Avenue", "Listen address: 8080 Rack Row",
+                     "address: 0x7fff Main Street", "Hotel address: 1 Harbour Lane",
+                     "address: see the 2 Main Street docs", "lives at: the 3 Root Path",
+                     "IP address: 10 Network " + "Drive", "address: 0 Main " + "Street",
+                     "The server lives at 10 Downing " + "Street", "Our store lives on 5 Market " + "Street",
+                     "Warehouse address: 9 Industrial " + "Road", "The API lives at 10 Data " + "Drive"):
+            with self.subTest(text=text):
+                self.assertNotIn("address-street-after-label", {m.kind for m in scan(text)})
+
+    def test_a_company_on_the_line_before_keeps_the_address_text_and_a_home_label_keeps_it_masked(self):
+        for text in ("Acme Inc.\nAddress: 100 Harbour Lane", "Employer address: 100 Harbour Lane",
+                     "Northwind Industries\nStreet Address: " + STREET,
+                     "First Harbour Bank\nAddress: 100 Harbour Lane"):
+            with self.subTest(text=text):
+                self.assertNotIn("address-street-after-label", {m.kind for m in scan(text)})
+        self.assertMasked("Employer: Acme Inc.\nHome address: 12 Harbour Lane", "12 Harbour Lane")
+        self.assertMasked("Name: " + NAME + "\nAddress: " + STREET, STREET)
+
+    def test_a_companys_address_takes_the_company_decision(self):
+        company: list = []
+        from maisecrets import personal
+        personal.hits("Beispiel GmbH, Address: 100 Main Street", "tool", ("us",), company)
+        self.assertIn("address-street-after-label", {c[4] for c in company})
+
+
 # ------------------------------------------------------------------------------- health, tax and national IDs --
 class HealthIdLabelTests(Base):
     def test_an_id_after_a_health_tax_or_national_label_is_masked(self):

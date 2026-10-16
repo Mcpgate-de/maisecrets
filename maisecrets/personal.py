@@ -498,6 +498,7 @@ FORMS = {
     "birth-date-vcard-compact": (BIRTH_DATE, "tool", "generic", "form"),
     "phone-after-phone-word": (PHONE, "tool", "generic", "label"),
     "name-single-after-label": (NAME, "tool", "generic", "label"),
+    "address-street-after-label": (ADDRESS, "tool", "generic", "label"),
 }
 # a value that only names one: a variable, a template, an elision, a path
 _NOT_A_VALUE_START = ("$", "%", "{", "<", "(", "[", "*", "#", "/", ".")
@@ -648,6 +649,25 @@ _NAME_LABEL_VALUES = frozenset({
 # the surnames and given names of documentation, which the name rule finds as a pair
 _PLACEHOLDER_NAME_WORDS = frozenset({"doe", "roe", "mustermann", "musterfrau", "muster", "bloggs", "normalverbraucher",
                                      "john", "jane", "max", "erika", "alice", "bob", "foo", "bar", "baz", "qux"})
+# a street line after an address label or a verb of residence, without a city or a postcode (Nemotron-PII,
+# 2026-10-16: "street address: 4821 Maple Ridge Drive", "resides at 77 Harbour Lane"). The company check of the
+# address label holds: a company, an office or a public place on the line keeps the address text
+# a street name word: a capital word or an ordinal (123 5th Avenue)
+_STREET_LINE = (r"(?:\d{1,6}[A-Za-z]?(?:-\d{1,4})? (?:(?:[A-Z][A-Za-z'.-]{0,30}|\d{1,3}(?:st|nd|rd|th)) ){1,4}"
+                r"(?:" + _STREET[3:-1]
+                + r"|Circle|Cir|Parkway|Pkwy|Trail|Trl|Loop|Pike|Alley|Grove|Gardens|Heights|Mews)\.?"
+                r"(?:,? (?:Apt|Apartment|Suite|Unit|Flat|#)\.? ?[A-Za-z0-9-]{1,6})?"
+                r"|[A-ZÄÖÜ][\wäöüß-]{1,40}(?:straße|strasse|str\.|weg|gasse|platz|allee|ring|damm) \d{1,4}[a-z]?"
+                r"|(?:Calle|Avenida|Via|Viale|Piazza|Rua|Carrer) (?:[A-ZÀ-Þ][\wà-ÿ'’-]{1,30} |d[aeio]l?l?[aeo]? |de "
+                r"|das? |dos? ){1,5}?\d{1,5}[A-Za-z]?)(?![\w-])")
+_STREET_LABEL_RE = _lazy(
+    r"(?i)(?<![a-z_])(?:(?:street|home|residential|mailing|postal|billing|shipping|delivery|permanent|current)[ _-]?"
+    r"address|address(?: on file)?|anschrift|wohnadresse|wohnanschrift|adresse|domicilio|direcci[oó]n|indirizzo"
+    r"|endere[cç]o|adres)[\"']?[ \t]{0,3}(?:is[ \t]{1,3}|[:=][ \t]{0,3})[\"']?[ \t]{0,2}(?-i:(" + _STREET_LINE + "))"
+    r"|(?<![a-z])(?:resides?|residing|reside|lives?|living|domiciled|wohnt|wohnhaft)"
+    r"(?: (?:at|in|on|im|am|in der|an der))?[ \t]{1,3}(?-i:(" + _STREET_LINE + "))")
+
+
 # the state of a form field after its label, not a name: the word list holds the stems only (require, mandate)
 _FIELD_STATES = frozenset({"required", "optional", "mandatory", "nullable", "readonly", "redacted", "masked",
                            "anonymized", "anonymised", "withheld", "missing", "blank", "empty", "varchar", "str", "int",
@@ -672,6 +692,36 @@ def _inflected_word(w: str) -> bool:
     return False
 
 
+# the address of a business partner, not of a person (Gretel, 2026-10-16: "Employer address:", "Industries\nAddress:")
+_BUSINESS_RE = _lazy(r"(?i)(?<![a-z])(?:employer|industries|enterprises?|holdings?|vendor|supplier|business"
+                     r"|organi[sz]ation|agency|institution|clinic|practice|pharmacy|lender|insurer|warehouse|depot|factory"
+                     r"|distribution|fulfil?ment"
+                     r"|bank(?![ _-]?(?:account|details|statement|transfer|card|code|holiday|balance|info)))(?![a-z])")
+_BANK_ACCOUNT_RE = _lazy(r"(?i)bank[ _-]?(?:account|details|statement|transfer|card|code|holiday|balance|info)")
+
+
+def _not_a_home(text: str, a: int, b: int) -> bool:
+    """A company, office or public place word in text[a:b]; "bank account" names a person's account, not a bank."""
+    for m in _NOT_A_HOME_RE.finditer(text, a, b):
+        if not (m.group().lower() == "bank" and _BANK_ACCOUNT_RE.match(text, m.start())):
+            return True
+    return False
+
+
+# an address of a machine, a mail box or a wallet, not a street (IP address: 10 Network Drive)
+_NOT_A_STREET_LABEL_RE = _lazy(r"(?i)(?<![a-z])(?:ip|ipv[46]|mac|e-?mail|server|listen|bind|remote|local|web|wallet"
+                               r"|contract|memory|base|host|proxy|gateway|broadcast|multicast|network|bitcoin"
+                               r"|ethereum|ens)[ _-]?$")
+# a thing that "lives at" a place in prose about code (the server lives at, the function lives in)
+# the thing word stands right before the verb: "Dana, our office manager, lives at" is a person
+_THING_SUBJECT_RE = _lazy(r"(?i)(?<![a-z])(?:server|service|function|file|files|code|class|module|config|repo"
+                          r"|repository|package|bucket|app|process|daemon|component|method|helper|store"
+                          r"|shop|office|company|business|logic|variable|api|database|db|endpoint|library|sdk|docs"
+                          r"|documentation"
+                          r"|site|website|page|bot|script|binary|image|container|cluster|host)[ \t]{1,3}$")
+_HOME_LABEL_RE = _lazy(r"(?i)home|residential|permanent|wohn|resid|liv|domicil")
+_STREET_LABEL_WORDS = ("address", "anschrift", "adresse", "domicilio", "direcci", "indirizzo", "endere", "adres",
+                       "resid", "live", "living", "domiciled", "wohn")
 _PHONE_WORDS = ("phone", "tel", "mobil", "cell", "fax", "handy", "portable", "rufnummer", "whatsapp", "hotline",
                 "contact", "call", "reach", "text")
 _ADDRESS_WORDS = ("address", "adr", "ship", "property", "lives", "endere", "direcci", "adresse", "location")
@@ -1025,6 +1075,26 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                 continue
             found.append((m.start(1), m.end(1), "name-single-after-label", NAME))
         out += found
+    if "address-street-after-label" in want and any(w in low for w in _STREET_LABEL_WORDS):
+        for m in _STREET_LABEL_RE.finditer(text):
+            g = 1 if m.group(1) is not None else 2
+            v = m.group(g)
+            if _NOT_AN_ADDRESS_RE.search(v) or _GERUND_STREET_RE.search(v) or v.startswith("0") \
+                    or _NOT_A_STREET_LABEL_RE.search(text, max(0, m.start() - 12), m.start()) \
+                    or (g == 2 and _THING_SUBJECT_RE.search(text, max(0, m.start() - 40), m.start())):
+                continue
+            # the company's name often stands on the line before its address label (Acme Inc.\nAddress: ...): the
+            # window holds that line too, as for street-address, at most 160 characters back
+            line = _line_back(text, m.start(), 160)
+            if line > 0 and text[line - 1] == "\n":
+                line = _line_back(text, line - 1, max(1, 160 - (m.start() - line)))
+            # a label that names a home (home address, Wohnadresse) or a verb of residence is a person's: no company
+            # word nearby turns it into a company's address (an employer on the line before)
+            home = _HOME_LABEL_RE.search(text, m.start(), m.start(g))
+            if home or (not _not_a_home(text, line, m.end()) and not _BUSINESS_RE.search(text, line, m.start())):
+                out.append((m.start(g), m.end(g), "address-street-after-label", ADDRESS))
+            else:
+                _company_window(text, line, m.start(g), m.end(g), "address-street-after-label", company)
     if "phone-wrapped-line" in want and "-\n" in text:
         for m in _PHONE_WRAP_RE.finditer(text):
             d = re.sub(r"\D", "", m.group())

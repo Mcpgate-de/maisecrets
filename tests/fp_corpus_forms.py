@@ -260,9 +260,17 @@ FORMS_NO_HIT = [
     ("first name django", "first_name = models.CharField(max_length=30)"),
     ("first name placeholder", "first name: <name>, given_name: Unknown"),
     ("last name word", "last name: Baker"),
+    # ---------------------------------------------------------------- a street line after an address label
+    ("office street address", "Our office address: 100 Main Street (reception on the 2nd floor)"),
+    ("company street address", "Beispiel GmbH, Address: 100 Main Street"),
+    ("landmark located at", "The Empire State Building is located at 350 Fifth Avenue"),
+    ("listen address rack", "Listen address: 8080 Rack Row"),
+    ("hex address street", "address: 0x7fff Main Street"),
+    ("hotel street address", "Hotel address: 1 Harbour Lane"),
 ]
 
 FORMS_HIT = [
+    ("street line after a label", "Street address: 4821 Maple " + "Ridge Drive", ["4821 Maple " + "Ridge Drive"]),
     ("one first name", '{"first_name": "' + "Da" + "na" + '", "age": 41}', ["Da" + "na"]),
     ("phone after a phone word", "You can reach the tenant at " + "415-382-" + "9174" + " after 6 pm.", ["415-382-" + "9174"]),
     ("phone national after a label", "Telefoonnummer: 06 " + "4829 1735", ["06 " + "4829 1735"]),

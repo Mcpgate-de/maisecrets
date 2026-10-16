@@ -1444,7 +1444,10 @@ Four sources, one scanner (`maisecrets/detect.py`):
   legal form such as `GmbH`, `AG`, `Ltd` or `Inc` ends the company's name right before the address,
   its German postcode and a German VAT ID right after it stay text too; a person's name or record
   key nearby, an employer or job label, a second address, a sender's VAT label or a blank line keeps
-  them masked, and so does a sole trader, who has no legal form), and
+  them masked, and so does a sole trader, who has no legal form), a street line without a city
+  after an address label or a verb of residence (`Street address: 4821 Maple Ridge Drive`,
+  `resides at 77 Harbour Lane`, `wohnt in der Gartenstraße 3a`, `Indirizzo: Via Roma 12`; the same
+  company check), and
   the cells of a CSV column for personal data (`address`, `dob`, `phone`, `ssn`, and a name or user
   column beside one of them; an address or a phone cell only in a row that also names a person). A
   typed prompt takes none of them: a hit blocks a prompt, and a
