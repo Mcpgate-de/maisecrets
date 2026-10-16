@@ -54,6 +54,7 @@ trust_level = "trusted"
 
 
 @unittest.skipUnless(TOMLLIB, SKIP)
+@unittest.skipIf(os.name == "nt", "Codex vault references are off on Windows (codex_vault.available)")
 class Base(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="codex-vault-test-"))
