@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## [0.6.24] - 2026-10-16
+
+### Features
+
+- masks a card number written in groups in a tool result without a card word nearby, and knows more card words (cea3b1f)
+- before reading a password export, a .har, a .vcf or an .ics file, the skill offers a masked copy and reads only that (94eb12e)
+- judges a generic API key in a tool result by the entropy floor of its alphabet, which finds 8 more CredData credentials (d663062)
+- finds personal data and secrets in 18 more fixed forms in tool results, such as an ID after "member", an address after "Address:", a FHIR identifier and a GitHub Actions ::add-mask:: value (44e2169)
+
+### Fixes
+
+- a busy machine no longer lets an encoded key through in a tool result (0f6c60f)
+- after a password label, the name of a constant, a time such as 0:default, the word after "passed:" and a table cell of prose are no longer masked (07312aa)
+- finds the counterparty IBAN in an MT940 bank statement export, right after its subfield code ?31 (c1215d3)
+- a UK postcode alone is no longer masked, and a US NPI, a Swedish organisation number and a UK number plate need their check digit (1e6e78b)
+- finds an e-mail address or a phone number written right next to Chinese, Japanese or Korean text (0889bbf)
+
 ## [0.6.23] - 2026-10-15
 
 ### Features
