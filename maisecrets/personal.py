@@ -497,6 +497,7 @@ FORMS = {
     "name-vcard-n": (NAME, "tool", "generic", "form"),
     "birth-date-vcard-compact": (BIRTH_DATE, "tool", "generic", "form"),
     "phone-after-phone-word": (PHONE, "tool", "generic", "label"),
+    "name-single-after-label": (NAME, "tool", "generic", "label"),
 }
 # a value that only names one: a variable, a template, an elision, a path
 _NOT_A_VALUE_START = ("$", "%", "{", "<", "(", "[", "*", "#", "/", ".")
@@ -614,6 +615,63 @@ _HOUSE_RE = _lazy(r"\b\d{1,5}[A-Za-z]?(?:/\d{1,4})?,? [A-ZÀ-Þ][a-zà-ÿ]{2,}\b
                        r"|[A-ZÀ-Þ][a-zà-ÿ]{2,} \d{1,5}[A-Za-z]?,")
 _NOT_AN_ADDRESS_RE = _lazy(r"(?i)\b(?:rack|row|slot|zone|version|build|schema|width|height|signal|size|page"
                                 r"|step|round|score|accepted|proposed|rejected|field|line|port|http|status|max|min)\b|0x")
+# one name word after a label that names a first or a last name (Nemotron-PII, 2026-10-16: `first name: Dana`). The
+# name rule needs two words; a first or a last name alone is one. The word must not read as an English word or noun
+# (`first_name: String`, `last name: Required`), and a second capitalised word leaves the value to the name rule
+_SINGLE_NAME_LABELS = (r"first[ _-]?name|last[ _-]?name|given[ _-]?name|family[ _-]?name|middle[ _-]?name|surname"
+                       r"|forename|vorname|nachname|familienname|rufname|pr[ée]nom|nom de famille|apellidos?"
+                       r"|nombre de pila|cognome|sobrenome|voornaam|achternaam|f[öo]rnamn|efternamn")
+_SINGLE_NAME_RE = _lazy(r"(?i:(?<![a-z_./-])(?:" + _SINGLE_NAME_LABELS + r"))[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?"
+                        r"[ \t]{0,3}([" + _UP + "\u1e00-\u1eff" + r"]"
+                        r"[" + _LO + "\u1e00-\u1eff\u0300-\u036f" + r"'’-]{1,30})"
+                        r"(?![\w'’-])"   # Nguyễn, Ạnh, and a combining accent
+                        r"(?![ \t]{1,2}[" + _UP + r"])")
+# the value of an i18n file or a form schema, not a name: the label in another language (first_name: Vorname) and the
+# words of a type, a case or an option
+_NAME_LABEL_VALUES = frozenset({
+    "firstname", "lastname", "surname", "forename", "givenname", "familyname", "middlename", "name", "vorname",
+    "nachname", "familienname", "rufname", "prénom", "prenom", "nom", "nombre", "apellido", "apellidos", "nome",
+    "cognome", "prenome", "sobrenome", "voornaam", "achternaam", "förnamn", "fornamn", "efternamn", "imię", "imie",
+    "nazwisko", "etunimi", "sukunimi", "fornavn", "etternavn", "efternavn", "jméno", "jmeno", "příjmení", "prijmeni",
+    "keresztnév", "vezetéknév", "ad", "soyad", "soyadı", "unicode", "lowercase", "uppercase", "titlecase", "asc",
+    "desc", "latin", "validator", "sanitizer", "enum", "alphanumeric", "alpha", "patronymic", "untitled", "pydantic",
+    "joi", "yup", "zod", "deprecated", "removed", "normalized", "normalised", "translated", "pseudonymized",
+    "pseudonymised", "capitalized", "capitalised", "trimmed", "hidden", "visible", "editable", "default", "string",
+    "text", "unknown", "anonymous", "texte", "zeichenfolge", "zeichenkette", "chaîne", "chaine", "cadena", "testo",
+    "tekst", "sträng", "strang", "ciąg", "teksto", "zahl", "número", "numero", "nummer", "liczba", "erforderlich",
+    "obligatoire", "requis", "facultatif", "optionnel", "opcional", "obbligatorio", "facoltativo", "verplicht",
+    "optioneel", "wymagane", "opcjonalne", "obligatorisk", "valfri", "vazio", "vacío", "vide", "leer", "pusty",
+    "prenume", "nume", "ime", "prezime", "priimek", "vardas", "pavardė", "pavarde", "vārds", "vards", "uzvārds",
+    "uzvards", "eesnimi", "perekonnanimi", "fornafn", "eftirnafn", "cognoms", "nom de pila", "nama", "meno",
+    "priezvisko", "jina", "input", "textfield", "textbox", "textarea", "attribute", "multiline", "nvarchar",
+    "lowercased", "uppercased", "confidential", "pii", "sensitive", "label", "placeholder", "field", "value"})
+# the surnames and given names of documentation, which the name rule finds as a pair
+_PLACEHOLDER_NAME_WORDS = frozenset({"doe", "roe", "mustermann", "musterfrau", "muster", "bloggs", "normalverbraucher",
+                                     "john", "jane", "max", "erika", "alice", "bob", "foo", "bar", "baz", "qux"})
+# the state of a form field after its label, not a name: the word list holds the stems only (require, mandate)
+_FIELD_STATES = frozenset({"required", "optional", "mandatory", "nullable", "readonly", "redacted", "masked",
+                           "anonymized", "anonymised", "withheld", "missing", "blank", "empty", "varchar", "str", "int",
+                           "char", "pflicht", "pflichtfeld", "leer", "obligatoire", "obligatorio", "obbligatorio"})
+
+
+def _no_marks(w: str) -> str:
+    """w without its accents (Ạnh: Anh), so the vowel check of _reads_as_words sees the vowels of Vietnamese."""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", w) if not unicodedata.combining(c))
+
+
+def _inflected_word(w: str) -> bool:
+    """An English word in an inflected form (required, hashed, encrypted, nullable) or the state of a field."""
+    from .detect import _word_set
+    words = _word_set()
+    if w in _FIELD_STATES:
+        return True
+    for end, back in (("ied", "y"), ("ed", ""), ("ed", "e"), ("able", ""), ("able", "e"), ("ly", ""), ("ing", "")):
+        if w.endswith(end) and len(w) - len(end) >= 3 and w[:-len(end)] + back in words:
+            return True
+    return False
+
+
 _PHONE_WORDS = ("phone", "tel", "mobil", "cell", "fax", "handy", "portable", "rufnummer", "whatsapp", "hotline",
                 "contact", "call", "reach", "text")
 _ADDRESS_WORDS = ("address", "adr", "ship", "property", "lives", "endere", "direcci", "adresse", "location")
@@ -950,6 +1008,23 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     continue   # Mobile build artifact: 938-274-6157: the words before the colon name no phone
                 if (_national_phone_ok(v) if rx is _PHONE_TIGHT_RE else _nanp_ok(v)):
                     out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
+    if "name-single-after-label" in want and ("name" in low or "nom" in low or "apellido" in low or "cognome" in low
+                                              or "voornaam" in low or "achternaam" in low or "namn" in low):
+        found = []
+        for m in _SINGLE_NAME_RE.finditer(text):
+            v = m.group(1)
+            low_v = v.lower().strip("'’-")
+            if low_v in _NAME_LABEL_VALUES:
+                # a label word as a value: an i18n file or a form schema, whose other values are labels too
+                # (first_name: Prenume, last_name: Nume): no single name of this text is a person's
+                found = []
+                break
+            if low_v in _PLACEHOLDER_NAME_WORDS or low_v in PLACEHOLDER_NAMES \
+                    or low_v in _NOT_A_NAME_START or low_v in _NOT_A_NAME_WORD or low_v in _SHORT_EN \
+                    or len(low_v) < 2 or _reads_as_words(_no_marks(v)) or _inflected_word(low_v):
+                continue
+            found.append((m.start(1), m.end(1), "name-single-after-label", NAME))
+        out += found
     if "phone-wrapped-line" in want and "-\n" in text:
         for m in _PHONE_WRAP_RE.finditer(text):
             d = re.sub(r"\D", "", m.group())

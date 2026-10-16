@@ -253,9 +253,17 @@ FORMS_NO_HIT = [
     ("phone column type", "phone_number = models.CharField(max_length=20)"),
     ("phone hours", "Phone: 12:30 to 14:00, Mo-Fr"),
     ("text size", "text 1234567 bytes, 4 lines"),
+    # ---------------------------------------------------------------- one word after a first or last name label
+    ("first name type", "first_name: String\nlast_name: String\nsurname: Text"),
+    ("last name state", "last name: Required\nfirst name: Optional"),
+    ("first name doc example", 'first_name = "John"\nlast_name: Doe'),
+    ("first name django", "first_name = models.CharField(max_length=30)"),
+    ("first name placeholder", "first name: <name>, given_name: Unknown"),
+    ("last name word", "last name: Baker"),
 ]
 
 FORMS_HIT = [
+    ("one first name", '{"first_name": "' + "Da" + "na" + '", "age": 41}', ["Da" + "na"]),
     ("phone after a phone word", "You can reach the tenant at " + "415-382-" + "9174" + " after 6 pm.", ["415-382-" + "9174"]),
     ("phone national after a label", "Telefoonnummer: 06 " + "4829 1735", ["06 " + "4829 1735"]),
     ("add-mask literal", 'echo "::add-mask::' + "q7Lr" + "Pz2mK9vXw" + '"', ["q7Lr" + "Pz2mK9vXw"]),

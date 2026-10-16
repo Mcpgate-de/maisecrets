@@ -148,6 +148,44 @@ class PhoneAfterWordTests(Base):
         self.assertEqual({m.kind for m in scan("Tel: (312) 846-" + "2291", region=("us",))}, {"phone-us-national"})
 
 
+# ------------------------------------------------------------------- one name word after a first or last name --
+GIVEN, FAMILY = "Da" + "na", "Oka" + "for"
+
+
+class SingleNameTests(Base):
+    def test_one_name_word_after_a_first_or_last_name_label_is_masked(self):
+        for text, value in (
+                ("First name: " + GIVEN, GIVEN),
+                ("last name: " + FAMILY, FAMILY),
+                ('{"first_name": "' + GIVEN + '", "last_name": "' + FAMILY + '"}', FAMILY),
+                ("Vorname: Jürgen\nNachname: " + FAMILY, FAMILY),
+                ("Prénom : Amélie", "Amélie"),
+                ("Last name: Nguy" + "ễn", "Nguy" + "ễn"),
+                ("First name: Nguye\u0302" + "n", "Nguye\u0302" + "n"),
+                ("First name: \u1ea0" + "nh", "\u1ea0" + "nh"),
+                ("First name: Mark", "Mark")):
+            with self.subTest(text=text):
+                self.assertMasked(text, value)
+                self.assertIn("name-single-after-label", {m.kind for m in scan(text)})
+
+    def test_a_word_a_type_a_state_or_a_documentation_name_stays_text(self):
+        for text in ("first_name: String", "last name: Required", 'first_name = "John"', "last_name: Doe",
+                     "surname: Text", "last name: Baker", "first_name: Optional[str] = None", "first name: <name>",
+                     "given_name: Unknown", "first_name = models.CharField(max_length=30)", "lastName: Mustermann",
+                     "first name: Max Mustermann", "last_name: Nullable", "first_name: Hashed",
+                     '{"first_name": "Vorname", "last_name": "Nachname", "surname": "Familienname"}',
+                     "first_name: Prénom\nlast_name: Nom", "first_name=Imię\nlast_name=Nazwisko",
+                     '"firstName": "Firstname"', "last_name: Deprecated", "first_name: Unicode",
+                     '{"first_name":"Texte"}', '{"first_name":"Zeichenfolge"}', "first_name: Prenume\nlast_name: Nume",
+                     '{"first_name": "Vardas", "last_name": "Pavard\u0117"}', "first_name: Input"):
+            with self.subTest(text=text):
+                self.assertNotIn("name-single-after-label", {m.kind for m in scan(text)})
+
+    def test_two_words_are_left_to_the_name_rule(self):
+        kinds = {m.kind for m in scan("Last name: " + FAMILY + " Smith")}
+        self.assertEqual(kinds, {"name-after-label"})
+
+
 # ------------------------------------------------------------------------------- health, tax and national IDs --
 class HealthIdLabelTests(Base):
     def test_an_id_after_a_health_tax_or_national_label_is_masked(self):

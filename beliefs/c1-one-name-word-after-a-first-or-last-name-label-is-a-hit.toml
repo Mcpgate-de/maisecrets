@@ -1,0 +1,10 @@
+# c1-one-name-word-after-a-first-or-last-name-label-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-one-name-word-after-a-first-or-last-name-label-is-a-hit"
+control = "C1"
+statement = "In a tool result, one capitalised name word after a first or last name label (first name, last_name, surname, Vorname, Nachname, prénom, apellido, cognome, voornaam, efternamn) is masked; an English word or an inflected one, a type, a field state, a placeholder and a documentation name stay text, and two words are left to the name rule."
+runner = ["tests/test_personal_after_its_label.py::SingleNameTests::test_one_name_word_after_a_first_or_last_name_label_is_masked"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''            found.append((m.start(1), m.end(1), "name-single-after-label", NAME))'''
+replace = '''            pass'''

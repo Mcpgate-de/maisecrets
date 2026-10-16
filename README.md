@@ -1428,7 +1428,9 @@ Four sources, one scanner (`maisecrets/detect.py`):
 - Personal data after a label or in a fixed form (0.6.21, `maisecrets/personal.py`), in a tool
   result or a file only: a name after a name label (`patient:`, `tenant:`, `full_name:`, `FN:`,
   `Ansprechpartner:`; after the weak labels `name`, `owner` and `author` only a value that does not
-  read as English words or nouns, so `name: Customer Portal` stays text), a name before an e-mail
+  read as English words or nouns, so `name: Customer Portal` stays text; one name word after a first
+  or last name label such as `first name:`, `surname:`, `Nachname:`, `prénom :`, unless it is an
+  English word, a type or a field state), a name before an e-mail
   address (`First Last <mail>`, not before a bot or a service mailbox), a date after a birth label
   (`DOB`, `Geburtsdatum`, `né le`, `fecha de nacimiento`; not after `born`), an ID number of five
   digits and more after an ID label (`MRN`, `passport no`, `DL`, `SIN`, `TFN`, `NIR`, `tax id`,
