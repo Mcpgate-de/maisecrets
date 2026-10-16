@@ -30,6 +30,7 @@ import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
 from maisecrets import hooks, vault_refs  # noqa: E402
 from maisecrets.vault import HOME, Vault, load_config  # noqa: E402
+import _hygiene  # noqa: E402
 from _hygiene import CLAUDE  # noqa: E402
 
 OPEN, CLOSE = "\u27e6", "\u27e7"
@@ -54,10 +55,24 @@ def tok(key: str, display: str = "") -> str:
     return f"{OPEN}{key}{':' + display if display else ''}{CLOSE}"
 
 
+def tearDownModule():  # noqa: N802 - unittest hook
+    # a Bash call with a value starts a child that serves it: one left running failed the next module that checks
+    # for them (tests.test_gates after this one in one process, 2026-10-16)
+    _hygiene.assert_pristine()
+    alive = _hygiene.wait_for_no_serving_child()
+    if alive:
+        raise AssertionError(f"value-serving children still run after the module: {alive}")
+
+
 class Base(unittest.TestCase):
     """A clean vault home with a jsonfile store, and a client profile of its own."""
 
+    @classmethod
+    def tearDownClass(cls) -> None:
+        _hygiene.assert_children_ended()
+
     def setUp(self) -> None:
+        _hygiene.watch_children(self)      # every child it starts is kept, every value it left waiting is taken back
         HOME.mkdir(parents=True, exist_ok=True)
         for name in ("vault-refs", "index.json", "vault.json", "audit.log"):
             p = HOME / name

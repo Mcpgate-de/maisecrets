@@ -22,6 +22,7 @@ import json
 import os
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -59,6 +60,17 @@ def kid_from_header(value: str) -> str | None:
         return kid[1:-1] if len(base64.b64decode(kid[1:-1], validate=True)) == 32 else None
     except ValueError:
         return None
+
+
+class _QuietServer(ThreadingHTTPServer):
+    """A client that closes before it reads the answer is no fault of the server: a test of a timeout or a size limit
+    closes on purpose. socketserver printed a traceback for each one (BrokenPipeError, or an SSLError on the TLS
+    socket), and the noise hid the real failures of a CI log (2026-10-16). Any other error is printed as before."""
+
+    def handle_error(self, request, client_address) -> None:
+        if isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError, ssl.SSLError)):
+            return
+        super().handle_error(request, client_address)
 
 
 class VaultServer:
@@ -202,7 +214,7 @@ class VaultServer:
                     return self._send(200, {"values": dict(list(values.items())[1:])})
                 self._send(200, {"values": values})
 
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd = _QuietServer(("127.0.0.1", 0), Handler)
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(self.cert, self.key)
         self.httpd.socket = ctx.wrap_socket(self.httpd.socket, server_side=True)
