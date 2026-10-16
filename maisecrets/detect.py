@@ -1113,10 +1113,10 @@ _LIT_LABEL = r"(?<![\w.\-$@/\\=])([A-Za-z_$@][\w.\-]{0,60})[\"'\]]?[ \t]*"
 # the quoted forms end at the opening quote: _read_quoted reads the literal to its real closing quote
 _LIT_QUOTED = _LazyRx(_LIT_LABEL + r"(?<![=!<>])(?:=>|:=|=(?!=)|:|,|\()[ \t]*" + _LIT_WRAP + r"([\"'`])")
 _LIT_FORMS = (
-    (re.compile(r"(?m)" + _LIT_LABEL + r"(?:=|:)[ \t]*([^\s\"'`,()\[\]{}<>]{3,299}[^\s\"'`,;()\[\]{}<>]);?"
+    (_LazyRx(r"(?m)" + _LIT_LABEL + r"(?:=|:)[ \t]*([^\s\"'`,()\[\]{}<>]{3,299}[^\s\"'`,;()\[\]{}<>]);?"
                 r"(?:[ \t]+(?:#|//|;).*|[ \t]*(?:#|//).*)?[ \t]*$"), 1, 2),
-    (re.compile(r"[?&;]([\w.\-\[\]]{1,60})=([^&\s\"'#<>]{4,400})"), 1, 2),
-    (re.compile(r"<([\w:.-]{1,60})(?:\s[^<>]{0,200})?>([^<>\s]{4,400})</"), 1, 2),
+    (_LazyRx(r"[?&;]([\w.\-\[\]]{1,60})=([^&\s\"'#<>]{4,400})"), 1, 2),
+    (_LazyRx(r"<([\w:.-]{1,60})(?:\s[^<>]{0,200})?>([^<>\s]{4,400})</"), 1, 2),
 )
 # SQL's IDENTIFIED BY '…' (a doubled quote and MySQL's backslash escape are part of the value) and PowerShell's
 # ConvertTo-SecureString '…' (single quotes: a doubled quote; double quotes: a doubled quote and the backtick escape)
@@ -3042,7 +3042,7 @@ def _phone_ok(text: str, start: int, secret: str) -> bool:
 # window around each: from 50 characters before the keyword (the prefix cannot cross a line) to
 # the end of the 8th line after it (the separators may hold line breaks; the window ends after a
 # newline, which the value's terminator class takes the same way as in the whole text).
-_WINDOWED = {"generic-api-key": re.compile(r"(?i)access|auth|api|credential|creds|key|passw(?:or)?d|secret|token")}
+_WINDOWED = {"generic-api-key": _LazyRx(r"(?i)access|auth|api|credential|creds|key|passw(?:or)?d|secret|token")}
 
 
 def _windowed(rule: Rule, kw: re.Pattern, text: str):

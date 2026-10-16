@@ -31,7 +31,13 @@ except ImportError:
 orig, seen = sre.compile, []
 
 def counting(*a, **k):
-    seen.append(1)
+    # only the compilations that maisecrets asks for: the standard library's own differ by version (Gate B review:
+    # 31 on Python 3.9, 33 on 3.11, about 15 on 3.14)
+    f = sys._getframe(1)
+    while f is not None and f.f_globals.get("__name__", "").split(".")[0] in ("re", "sre_compile", "sre_parse"):
+        f = f.f_back
+    if f is not None and f.f_globals.get("__name__", "").startswith("maisecrets"):
+        seen.append(f.f_globals["__name__"])
     return orig(*a, **k)
 
 sre.compile = counting
@@ -41,15 +47,26 @@ print(len(seen))
 
 
 class ImportCompilesLittleTests(unittest.TestCase):
-    def test_the_import_of_the_hooks_compiles_at_most_30_regexes(self):
+    def test_the_import_of_the_hooks_compiles_at_most_15_regexes_of_maisecrets(self):
         r = subprocess.run([sys.executable, "-c", _COUNT, str(ROOT)], capture_output=True, text=True, timeout=120)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertLessEqual(int(r.stdout), 30, "a module-level re.compile in detect.py or hooks.py: use _LazyRx")
+        self.assertLessEqual(int(r.stdout), 15, "a module-level re.compile in detect.py or hooks.py: use _LazyRx")
 
     def test_every_module_level_regex_of_detect_and_hooks_is_lazy(self):
+        # also a pattern inside a module-level tuple, list or dict (Gate A review: _LIT_FORMS and _WINDOWED)
         from maisecrets import hooks
+
+        def patterns(value, depth: int = 0):
+            if isinstance(value, re.Pattern):
+                yield value
+            elif depth < 3 and isinstance(value, (tuple, list, set, frozenset)):
+                for x in value:
+                    yield from patterns(x, depth + 1)
+            elif depth < 3 and isinstance(value, dict):
+                for x in value.values():
+                    yield from patterns(x, depth + 1)
         for mod in (detect, hooks):
-            eager = [k for k, v in vars(mod).items() if isinstance(v, re.Pattern)]
+            eager = [k for k, v in vars(mod).items() if any(True for _ in patterns(v))]
             self.assertEqual(eager, [], mod.__name__)
 
 
