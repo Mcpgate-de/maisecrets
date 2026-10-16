@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## [0.6.29] - 2026-10-16
+
+### Features
+
+- write the key header only for a server that sent a token and supports it (48ca94b)
+- get a value back from the MCP server that masked it (42afa85)
+
+### Fixes
+
+- a token that the model sent before the server was in use is no sighting and no trigger (28fdfff)
+- the header goes on the entry that sent the token, by name and URL (6ab449d)
+- close the gaps that the fourth review found (538d4c6)
+- close the gaps that the third review found (4e32659)
+- a token seen again after 24 hours resolves again (d0f52cb)
+- send the first sighting, so an old token never gets another person's value (87df6b0)
+- close the gaps that the verification review found (f61ab37)
+- close the gaps that the second review found (4b09970)
+- close the gaps that the first review found (e7a66f5)
+
 ## [0.6.28] - 2026-10-16
 
 ### Fixes
