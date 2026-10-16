@@ -1390,6 +1390,19 @@ class Vault:
             pass
 
     @_mutating
+    def record_server(self, keys: list[str], session: str | None, tool: str, context: str) -> str:
+        """Values a server gave (vault_refs.py), named `KEY@host`: the limiter for all of them together, then one
+        audit line each. They have no entry, so the session rule of the store does not apply; vault_refs does it."""
+        failed = self._limit_all(keys, session)
+        if failed:
+            return failed[0]
+        for key in dict.fromkeys(keys):
+            if not self._record(key, session, tool, context):
+                return "audit log not writable"
+        self._save_index()
+        return "ok"
+
+    @_mutating
     def record_resolve(self, key: str, session: str | None, tool: str, context: str) -> str:
         """For tools that need the value inline (MCP arguments): session rule + limiter + audit."""
         st = self.status(key, session)

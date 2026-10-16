@@ -6,5 +6,5 @@ runner = ["tests/test_vault_refs.py::Online::test_a_sighting_after_the_24_hours_
 
 [proof]
 file = "maisecrets/vault_refs.py"
-find = '''            if old and not any((_seen_time(t) or 0) > now - NOTE_TTL for t in before.values()):'''
+find = '''            if url in where and not (_seen_time(where[url]) or 0) > now - NOTE_TTL:'''
 replace = '''            if False:'''

@@ -194,13 +194,17 @@ missing from a 200 answer.
   notes each server-range token with the origin and the URL of that server,
   the time and the session, per client profile. A token that two servers sent
   is refused, also when the two share an origin. A token resolves only in a
-  session that saw it, and only for 24 hours after it was first seen; in any
-  other case the call is denied with that reason. An `expired` answer deletes
-  the note of its keys, so the next sighting starts the time again. A
-  sighting after the 24 hours starts a new note too, for its session only. A key that
-  one server showed with two different display parts is refused and its note
-  goes: the server's mapping changed, and the token may name another person. The result does not change. A token in any other result (a file read,
-  a web page, a project-scope server) is not noted.
+  session that saw it from that server URL, and only for 24 hours after that
+  URL first showed it; in any other case the call is denied with that reason.
+  An `expired` answer deletes the note of its keys, so the next sighting
+  starts the time again. A sighting after the 24 hours starts a new note too,
+  for its session only. A key that one server showed with two different
+  display parts, in one result or in two, is refused and its note goes: the
+  server's mapping changed, and the token may name another person. A token
+  that the tool call itself carried is no sighting: a server that repeats its
+  query would otherwise give it a new time. The result does not change. A
+  token in any other result (a file read, a web page, a project-scope server)
+  is not noted.
 - **Resolving.** Before a Write, Edit, MultiEdit, NotebookEdit or Bash call,
   the vault looks for noted tokens. It sends one request per origin and puts
   the values in only when every request succeeds; otherwise it denies the call
@@ -214,8 +218,10 @@ missing from a 200 answer.
 - **Transport.** TLS with the system's trust store (or a configured CA file),
   host name check, no redirects, no proxy. The whole fetch, metadata and
   resolve, ends within 5.5 s, inside the hook's 7 s watchdog.
-- **Audit.** One local audit line per value: the key with the server's host,
-  the tool and the call. Never the value.
+- **Limits and audit.** A server value counts in the vault's own limits per
+  session and per hour, as `KEY@host`, before the request. One local audit
+  line per value: the key with the server's host, the tool and the call.
+  Never the value. A value that a later check refuses gets no audit line.
 - **Echo.** For one hour, the vault looks for each value a server gave in the
   later tool results of that session, as it does for a stored value, and
   puts the server's token back in its place. To do that it keeps the values
@@ -223,7 +229,9 @@ missing from a 200 answer.
   as a word is not looked for: it would change every text that holds it.
 - **Paths.** A server value goes into the content of a file tool, never into
   its path. In Bash, a value that names the vault's own folder, a store file,
-  an ssh configuration or the client configuration is refused.
+  an ssh configuration, the client configuration or a file in the client's
+  configuration folder is refused, also as a piece of the value
+  (`--config=PATH`, `@PATH`, `file://PATH`).
 - **Off.** With the opt-out, no token is noted and no noted token resolves.
 
 ### 4.7 What this does not stop

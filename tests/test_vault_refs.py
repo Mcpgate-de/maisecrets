@@ -209,6 +209,23 @@ class Offline(Base):
         self.assertIn("Client-Vault", json.loads(real.read_text())["mcpServers"]["a"]["headers"])
         self.assertFalse((self.profile / ".claude.json.lock").exists())
 
+    def test_a_deeply_nested_answer_is_no_answer(self):
+        deep = (b"[" * 200000) + (b"]" * 200000)
+        with mock.patch.object(vault_refs, "_request", return_value=(200, {"content-type": "application/json"}, deep)):
+            self.assertIsNone(vault_refs.endpoint({}, "https://one.example/mcp", time.monotonic() + 5))
+
+    @unittest.skipIf(os.name == "nt", "a symbolic link needs a privilege on Windows")
+    def test_the_backup_is_0600_and_a_link_there_is_not_followed(self):
+        self.client_config({"a": {"url": "https://one.example/mcp"}})
+        target = self.profile / "elsewhere.txt"
+        target.write_text("keep")
+        backup = self.profile / ".claude.json.maisecrets-backup"
+        backup.symlink_to(target)
+        self.assertIsNotNone(self.start())
+        self.assertEqual(target.read_text(), "keep")
+        self.assertFalse(backup.is_symlink())
+        self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+
     def test_the_backup_goes_at_the_next_start_that_changes_nothing(self):
         self.client_config({"a": {"url": "https://one.example/mcp"}})
         self.start()
@@ -596,6 +613,69 @@ class Online(Base):
         out = self.write(tok("EMAIL_1"))
         self.assertEqual(out["hookSpecificOutput"]["updatedInput"]["content"], "another-person@example.org")
 
+    def test_a_token_the_call_carried_is_no_sighting(self):
+        # Gate B review: the model asks with a token and the server repeats the query in its answer
+        self.ready()
+        self.srv.mint("EMAIL_9", "nine@example.com", minted_at=time.time())
+        hooks._post_tool_guarded({"tool_name": "mcp__demo__customers", "mcp_server": {"name": "demo", "source": "user"},
+                                  "session_id": "s1", **CLAUDE, "tool_input": {"query": tok("EMAIL_9")},
+                                  "tool_response": [{"type": "text", "text": f"no customer matches {tok('EMAIL_9')}"}]})
+        self.assertEqual(vault_refs.noted(["EMAIL_9"], "s1"), {})
+        self.assertEqual(self.write(tok("EMAIL_9")), {}, "a token never noted stays text")
+        self.assertEqual(self.srv.resolved, [])
+
+    def test_a_session_gets_only_the_url_that_showed_it_the_key(self):
+        # Gate A review: S1 saw EMAIL_1 from /mcp, S2 from /mcp2 on the same origin. When the S1 sighting is old,
+        # S1 must not resolve through the sighting of S2
+        self.client_config({"demo": {"type": "http", "url": self.srv.url + "/mcp"},
+                            "demo2": {"type": "http", "url": self.srv.url + "/mcp2"}})
+        self.start()
+        self.result("demo", tok("EMAIL_1"))
+        hooks._post_tool_guarded({"tool_name": "mcp__demo2__customers", "session_id": "s2", **CLAUDE,
+                                  "mcp_server": {"name": "demo2", "source": "user"},
+                                  "tool_response": [{"type": "text", "text": tok("EMAIL_1")}]})
+        notes = HOME / "vault-refs" / "notes.json"
+        data = json.loads(notes.read_text())
+        old = vault_refs._now_iso(time.time() - vault_refs.NOTE_TTL - 60)
+        for by_origin in data.values():
+            for by_key in by_origin.values():
+                by_key["EMAIL_1"]["seen"][self.srv.url + "/mcp"] = old
+        notes.write_text(json.dumps(data))
+        self.assertEqual(vault_refs.noted(["EMAIL_1"], "s1"), {})
+        self.assertEqual(list(vault_refs.noted(["EMAIL_1"], "s2")), ["EMAIL_1"])
+
+    def test_two_displays_of_one_key_in_one_result_are_refused(self):
+        self.ready()
+        self.srv.mint("NAME_3", "Person Three")
+        self.result("demo", f"{tok('NAME_3', 'aa•••')} {tok('NAME_3', 'zz•••')}")
+        self.assertIn("two different values", self.denied(self.write(tok("NAME_3"))))
+        self.assertEqual(self.srv.resolved, [])
+
+    def test_the_limiter_counts_server_values_and_the_audit_names_the_host(self):
+        self.config({"client_vault_cafile": self.srv.cert, "max_keys_per_session": 1})
+        self.ready()
+        self.assertIn("max_keys_per_session", self.denied(self.write(f"{tok('EMAIL_1')} {tok('NAME_2')}")))
+        self.assertEqual(self.srv.resolved, [], "the limiter refuses before the request")
+        self.assertEqual(self.write(tok("NAME_2"))["hookSpecificOutput"]["updatedInput"]["content"], VALUES[1])
+        self.assertIn("\tNAME_2@127.0.0.1\tWrite\t", (HOME / "audit.log").read_text())
+        self.assertIn("max_keys_per_session", self.denied(self.write(tok("EMAIL_1"))))
+
+    @unittest.skipUnless(BASH and os.name != "nt", "bash on POSIX")
+    def test_a_guarded_path_inside_a_server_value_does_not_go_into_bash(self):
+        self.ready()
+        (self.profile / "settings.json").write_text("{}")
+        for key, value in (("ARG_7", "--config=" + str(self.profile / ".claude.json")),
+                           ("ARG_8", str(self.profile / "settings.json")),
+                           ("ARG_9", "@~/.ssh/config")):
+            with self.subTest(key):
+                self.srv.mint(key, value)
+                self.result("demo", tok(key))
+                out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", **CLAUDE, "cwd": str(self.work),
+                                      "tool_input": {"command": f"tool {tok(key)}"}})
+                self.assertIn("may not choose", self.denied(out))
+        audit = (HOME / "audit.log").read_text() if (HOME / "audit.log").exists() else ""
+        self.assertNotIn("ARG_", audit, "a value that was refused leaves no audit line")
+
     def test_a_sighting_after_the_24_hours_starts_a_new_note(self):
         # the deny reason says: call the tool again. With the first sighting kept for good, that never helped
         self.ready()
@@ -606,7 +686,7 @@ class Online(Base):
             for by_key in by_origin.values():
                 for note in by_key.values():
                     note["seen"] = {u: old for u in note["seen"]}
-                    note["sessions"] = ["s0", "s1"]
+                    note["sessions"] = {u: ["s0", "s1"] for u in note["seen"]}
         notes.write_text(json.dumps(data))
         self.assertIn("more than 24 hours", self.denied(self.write(tok("EMAIL_1"))))
         self.result("demo", tok("EMAIL_1", "va•••"))

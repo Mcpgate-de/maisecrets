@@ -25,7 +25,6 @@ import json
 import os
 import re
 import secrets
-import shutil
 import ssl
 import time
 from pathlib import Path
@@ -53,7 +52,7 @@ MAX_NOTES_PER_ORIGIN = 5000
 LOCK_STALE = 10.0                     # the client's own lock rule for its config file
 
 DIR = HOME / "vault-refs"
-NOTES = DIR / "notes.json"            # profile -> origin -> key -> {"type", "seen": {MCP URL: seen_at}, "sessions"}
+NOTES = DIR / "notes.json"            # profile -> origin -> key -> {"type", "seen", "display", "sessions": by MCP URL}
 RELEASED = DIR / "released.json"      # session -> [{"name", "t"}]: the values a server gave, kept in the store 1 h
 NOTE_TTL = 24 * 3600                  # a token seen longer ago than this stays text
 RELEASE_WINDOW = 3600                 # a value a server gave is hunted in tool output this long, as a stored one
@@ -221,7 +220,11 @@ def _write_config(path: Path, data: dict) -> None:
     except OSError:
         mode = 0o600
     tmp = path.with_name(f"{path.name}.maisecrets.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    try:
+        os.unlink(tmp)                          # left by a process that died; never written through
+    except OSError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), mode)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(json.dumps(data, indent=2, ensure_ascii=False))
@@ -233,6 +236,17 @@ def _write_config(path: Path, data: dict) -> None:
             os.unlink(tmp)
         except OSError:
             pass
+
+
+def _backup(path: Path, backup: Path) -> None:
+    """A copy of the config with mode 0600 from its first byte; a link at the backup path is removed, not followed."""
+    try:
+        os.unlink(backup)
+    except FileNotFoundError:
+        pass
+    fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(path.read_bytes())
 
 
 def _header_key(headers: dict) -> str | None:
@@ -247,7 +261,9 @@ def _kid_in(value: object) -> str | None:
 def ensure_headers(cfg: dict, backend) -> str | None:
     """At session start (Claude Code): the header on every user-scope server with an https URL, one key per origin.
     A header of ours (a kid this profile made) goes again from an entry that no longer qualifies, and from every
-    entry with `client_header` false; a header someone else wrote stays. Only `mcpServers.<name>.headers` changes.
+    entry with `client_header` false; there a header someone else wrote stays. On an entry that qualifies, any other
+    Client-Vault header is replaced: after a wipe our own old header looks foreign, and kept it would stop the
+    feature for good. Only `mcpServers.<name>.headers` changes.
     The keys are made before the client's lock is taken, so the lock is held for a re-read and a write only; a file
     that is not valid JSON is not touched, and a backup is written before a change. Returns one line for the
     session-start message, or None."""
@@ -284,8 +300,7 @@ def ensure_headers(cfg: dict, backend) -> str | None:
         added, removed = _apply_headers(data, keys, ours)
         if not added and not removed:
             return None
-        shutil.copy2(path, backup)
-        os.chmod(backup, 0o600)
+        _backup(path, backup)
         _write_config(path, data)
     parts = []
     if added:
@@ -342,19 +357,29 @@ def note_result(payload: dict, cfg: dict) -> int:
     server = payload.get("mcp_server") if isinstance(payload.get("mcp_server"), dict) else {}
     if not tool.startswith("mcp__") or server.get("source") != "user" or not isinstance(server.get("name"), str):
         return 0
-    found: dict[str, str] = {}
+    found: dict[str, tuple[str, set]] = {}        # key -> (type, the display parts of this result)
+    asked: set = set()
 
-    def walk(node) -> None:
+    def walk(node, into_input: bool = False) -> None:
         if isinstance(node, str):
             for m in SERVER_REF_RE.finditer(node):
-                found[f"{m.group('type')}_{m.group('n')}"] = (m.group("type"), m.group("display") or "")
+                key = f"{m.group('type')}_{m.group('n')}"
+                if into_input:
+                    asked.add(key)
+                else:
+                    found.setdefault(key, (m.group("type"), set()))[1].add(m.group("display") or "")
         elif isinstance(node, list):
             for x in node:
-                walk(x)
+                walk(x, into_input)
         elif isinstance(node, dict):
             for x in node.values():
-                walk(x)
+                walk(x, into_input)
     walk(payload.get("tool_response"))
+    # a token that the call itself carried is no sighting: a server that repeats its query ("no match for
+    # ⟦EMAIL_9⟧") would give the model a fresh seen_at for a key it never showed in this session (Gate B review)
+    walk(payload.get("tool_input"), into_input=True)
+    for key in asked:
+        found.pop(key, None)
     if not found:
         return 0
     url = user_servers().get(server["name"])
@@ -369,28 +394,37 @@ def note_result(payload: dict, cfg: dict) -> int:
     with _lock_for(DIR / ".lock"):
         data = _read_json(NOTES) or {}
         mine = data.setdefault(profile(), {}).setdefault(origin, {})
-        for key, (type_, display) in found.items():
+        for key, (type_, displays) in found.items():
             old = mine.pop(key, None)           # re-inserted last: the oldest notes are first
             old = old if isinstance(old, dict) else {}
-            before = old.get("seen") if isinstance(old.get("seen"), dict) else {}
-            if old and not any((_seen_time(t) or 0) > now - NOTE_TTL for t in before.values()):
-                # every sighting is older than NOTE_TTL: a new sighting starts a new note, with this session only.
-                # Kept, the old first sighting refused the key for good, also after the tool was called again
-                old = {}
             where = dict(old.get("seen")) if isinstance(old.get("seen"), dict) else {}
             shown = dict(old.get("display")) if isinstance(old.get("display"), dict) else {}
             conflict = [u for u in (old.get("conflict") or []) if isinstance(u, str)]
-            sessions = [x for x in (old.get("sessions") or []) if isinstance(x, str) and x != session]
+            by_url = old.get("sessions") if isinstance(old.get("sessions"), dict) else {}
+            sessions = {u: [x for x in v if isinstance(x, str)] for u, v in by_url.items()
+                        if isinstance(u, str) and isinstance(v, list)}
+            if url in where and not (_seen_time(where[url]) or 0) > now - NOTE_TTL:
+                # the sighting of this URL is older than NOTE_TTL: a new sighting starts it again, with this session
+                # only. Kept, the old first sighting refused the key for good, also after the tool was called again
+                where.pop(url)
+                shown.pop(url, None)
+                sessions.pop(url, None)
+                conflict = [u for u in conflict if u != url]
             # one entry per server URL: two servers on one origin can both send EMAIL_1, for two people. The time is
             # the FIRST sighting: the server compares it with the time it minted the key, and a later sighting of a
             # key minted again for another person would pass that check with the other person's value (contract;
-            # peer review H1)
+            # peer review H1). The sessions are per URL too: a session that saw the key from one URL must not get
+            # the value of another URL on the same origin (Gate A review)
+            named = sorted(d for d in displays if d)
             if url not in where:
-                where[url], shown[url] = seen, display
-            elif display and shown.get(url) and display != shown[url] and url not in conflict:
+                where[url], shown[url] = seen, (named[0] if named else "")
+            if url not in conflict and (len(named) > 1 or (named and shown.get(url) and named[0] != shown[url])):
                 conflict.append(url)            # the same key with another display: the server's mapping changed
-            mine[key] = {"type": type_, "seen": where, "display": shown, "conflict": conflict,
-                         "sessions": (sessions + [session])[-MAX_SESSIONS_PER_NOTE:]}
+            if not shown.get(url) and named:
+                shown[url] = named[0]
+            here = [x for x in sessions.get(url, []) if x != session]
+            sessions[url] = (here + [session])[-MAX_SESSIONS_PER_NOTE:]
+            mine[key] = {"type": type_, "seen": where, "display": shown, "conflict": conflict, "sessions": sessions}
         while len(mine) > MAX_NOTES_PER_ORIGIN:
             del mine[next(iter(mine))]
         atomic_write(NOTES, json.dumps(data, indent=1))
@@ -406,8 +440,9 @@ def _seen_time(value: object) -> float | None:
 
 
 def _notes(session: str | None) -> dict:
-    """origin -> key -> {"type", "seen": {url: seen_at}}: what this client profile saw in this session, in the last
-    NOTE_TTL. A token that another session saw stays text here, as a stored value of another session does (C4)."""
+    """origin -> key -> {"type", "seen": {url: seen_at}}: the URLs that showed a key to this session of this client
+    profile in the last NOTE_TTL. A token that another session saw stays text here, as a stored value of another
+    session does (C4)."""
     mine = (_read_json(NOTES) or {}).get(profile())
     if not isinstance(mine, dict) or not session:
         return {}
@@ -417,11 +452,13 @@ def _notes(session: str | None) -> dict:
         if not isinstance(notes, dict):
             continue
         for key, note in notes.items():
-            if not isinstance(note, dict) or session not in (note.get("sessions") or []):
+            if not isinstance(note, dict):
                 continue
             seen = note.get("seen") if isinstance(note.get("seen"), dict) else {}
+            by_url = note.get("sessions") if isinstance(note.get("sessions"), dict) else {}
             fresh = {u: t for u, t in seen.items()
-                     if isinstance(u, str) and (_seen_time(t) or 0) > now - NOTE_TTL}
+                     if isinstance(u, str) and (_seen_time(t) or 0) > now - NOTE_TTL
+                     and isinstance(by_url.get(u), list) and session in by_url[u]}
             if fresh:
                 out.setdefault(origin, {})[key] = {"type": note.get("type"), "seen": fresh,
                                                    "conflict": [u for u in (note.get("conflict") or []) if u in fresh]}
@@ -465,7 +502,7 @@ def forget(keys: list[str], origin: str, url: str) -> None:
             note = mine.get(k)
             if not isinstance(note, dict):
                 continue
-            for field in ("seen", "display"):
+            for field in ("seen", "display", "sessions"):
                 if isinstance(note.get(field), dict):
                     note[field].pop(url, None)
             note["conflict"] = [u for u in (note.get("conflict") or []) if u != url]
@@ -579,8 +616,8 @@ def endpoint(cfg: dict, url: str, deadline: float) -> str | None:
         candidate = meta.get("client_vault_endpoint")
         if origin_of(candidate) == origin:
             found = candidate
-    except (OSError, ValueError, http.client.HTTPException, ssl.SSLError):
-        return None                             # not cached: the next call asks again
+    except (OSError, ValueError, RecursionError, http.client.HTTPException, ssl.SSLError):
+        return None                             # not cached: the next call asks again (deep JSON: RecursionError)
     with _lock_for(DIR / ".lock"):
         cache = _read_json(ENDPOINTS) or {}
         cache[cache_key] = {"endpoint": found, "t": time.time()}
@@ -678,7 +715,7 @@ def resolve(cfg: dict, backend, keys: list[str], session: str | None,
         if len(raw) <= MAX_ANSWER_BYTES and _is_json(headers):
             try:
                 answer = json.loads(raw.decode("utf-8"))
-            except ValueError:
+            except (ValueError, RecursionError):
                 answer = None
         answer = answer if isinstance(answer, dict) else None
         if status == 200 and answer is not None:
@@ -713,7 +750,7 @@ def probe(cfg: dict, backend, origin: str, url: str) -> str:
         return f"could not be reached ({type(exc).__name__})"
     try:
         answer = json.loads(raw.decode("utf-8")) if _is_json(headers) and len(raw) <= MAX_ANSWER_BYTES else None
-    except ValueError:
+    except (ValueError, RecursionError):
         answer = None
     answer = answer if isinstance(answer, dict) else {}
     if status == 200:
@@ -737,10 +774,18 @@ def remember_released(backend, session: str | None, values: dict[str, tuple[str,
     backend.put(name, json.dumps([[v, f"{OPEN}{k}{CLOSE}"] for k, (v, _o) in values.items()]),
                 label="maisecrets server values", comment="maisecrets: values a server gave, for one hour; "
                                                           "not a placeholder value.")
-    with _lock_for(DIR / ".lock"):
-        data = _prune(backend, _read_json(RELEASED) or {}, now)
-        data.setdefault(session, []).append({"name": name, "t": now})
-        atomic_write(RELEASED, json.dumps(data, indent=1))
+    try:
+        with _lock_for(DIR / ".lock"):
+            data = _prune(backend, _read_json(RELEASED) or {}, now)
+            data.setdefault(session, []).append({"name": name, "t": now})
+            atomic_write(RELEASED, json.dumps(data, indent=1))
+    except BaseException:
+        # not in the list, the entry would never leave the store: it goes now (Gate A review)
+        try:
+            backend.delete(name)
+        except (RuntimeError, OSError):
+            pass
+        raise
 
 
 def _expired(item: object, now: float) -> bool:
@@ -811,21 +856,6 @@ def has_released() -> bool:
     now = time.time()
     data = _read_json(RELEASED) or {}
     return any(not _expired(i, now) for items in data.values() for i in (items if isinstance(items, list) else []))
-
-
-def audit(values: dict[str, tuple[str, str]], session: str | None, tool: str, context: str) -> bool:
-    """One audit line per value, as for a stored value; the key carries the host. False when it cannot be written."""
-    try:
-        HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd = os.open(HOME / "audit.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
-            stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
-            ctx = context.replace("\n", " ").replace("\t", " ")[:160]
-            for key, (_value, origin) in values.items():
-                f.write(f"{stamp}\t{(session or '-')[:8]}\t{key}@{urlsplit(origin).hostname}\t{tool}\t{ctx}\n")
-        return True
-    except OSError:
-        return False
 
 
 def status_lines(cfg: dict, backend, check: bool = True) -> list[str]:

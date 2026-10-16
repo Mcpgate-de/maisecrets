@@ -2355,21 +2355,26 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     vault = Vault(cfg)
     session = payload.get("session_id")
     uniq = list(dict.fromkeys(k for k, _a, _b in refs))
-    failed = _precheck(vault, [k for k in uniq if k not in server_keys], session)
+    failed = _precheck(vault, [k for k in uniq if k not in server_keys], session,
+                       extra=_server_limit_keys(server_keys, session))
     if failed:
         return _deny(_deny_reason(failed))
     # before any stored value is recorded: a server that refuses leaves no audit line of ours
-    fetched, why = _server_values(cfg, vault, server_keys, session, "Bash", command)
+    got, why = _server_fetch(cfg, vault, server_keys, session)
     if why:
         return _deny(why + " The command did not run.")
-    guarded = [k for k, v in fetched.items() if _names_a_guarded_file(v, str(payload.get("cwd") or ""))]
+    guarded = [k for k, (v, _o) in got.items() if _names_a_guarded_file(v, str(payload.get("cwd") or ""))]
     if guarded:
         # the check above saw the token, not the path: a server must not choose a file of the store or a config
         return _deny(f"maisecrets: the value of ⟦{guarded[0]}⟧ names a file of maisecrets, of ssh or of the client "
                      "configuration, which a value from a server may not choose. The command did not run.")
-    if any("\0" in v for v in fetched.values()):
+    if any("\0" in v for v, _o in got.values()):
         return _deny(f"maisecrets: a value of {keys} holds a NUL character, which a shell variable cannot carry. "
                      "The command did not run. Write it into a file with Write instead.")
+    # the audit line and the limiter record only for a value that passed every check (Gate B review)
+    fetched, why = _server_release(vault, got, session, "Bash", command)
+    if why:
+        return _deny(why + " The command did not run.")
     # automatic: no ask of our own. confirm: an ask per command, or with ssh_approval "per-session" an
     # approved value runs without an ask and a first use asks once and gives its token to the serving
     # child, which confirms it when the approved command reads the value. After phase 1: a key
@@ -2502,30 +2507,53 @@ def shlex_quote(s: str) -> str:
     return shlex.quote(s)
 
 
-def _precheck(vault: Vault, keys: list[str], session: str | None) -> list[str]:
+def _precheck(vault: Vault, keys: list[str], session: str | None, extra: list[str] = ()) -> list[str]:
     """Phase 1 of every resolve: the session rule, then the limiter, for every key, before anything is
     recorded or served. A call with a good key and a bad one wrote the good key's audit line before
-    the refusal on MCP and file tools (review, 2026-09-29); Bash had this order already."""
+    the refusal on MCP and file tools (review, 2026-09-29); Bash had this order already. `extra` are the
+    server keys of the call (`KEY@host`): no session rule of the store, but the same limiter (C7)."""
     failed = [f"{k} ({st})" for k in keys for st in [vault.status(k, session)] if st != "ok"]
-    return failed or vault._limit_all(keys, session)
+    return failed or vault._limit_all(list(keys) + list(extra), session)
 
 
-def _server_values(cfg: dict, vault: Vault, keys: list[str], session: str | None, tool: str,
-                   context: str) -> tuple[dict, str | None]:
+def _server_limit_keys(keys: list[str], session: str | None) -> list[str]:
+    """The limiter names of server keys: `KEY@host` of the origin that noted the key for this session."""
+    if not keys:
+        return []
+    from urllib.parse import urlsplit
+
+    from . import vault_refs
+    origins = vault_refs.noted(keys, session)
+    return [f"{k}@{urlsplit(origins[k][0]).hostname}" for k in keys if origins.get(k)]
+
+
+def _server_fetch(cfg: dict, vault: Vault, keys: list[str], session: str | None) -> tuple[dict, str | None]:
     """Vault references (vault_refs.py): the values of server-range tokens, from the server that minted them, all
-    or none, with an audit line each. Returns (key -> value, None) or ({}, the reason without a value)."""
+    or none. Returns (key -> (value, origin), None) or ({}, the reason without a value). Nothing is recorded yet."""
     if not keys:
         return {}, None
     from . import vault_refs
     names = ", ".join(f"⟦{k}⟧" for k in keys)
     try:
-        got = vault_refs.resolve(cfg, vault.backend, keys, session)
+        return vault_refs.resolve(cfg, vault.backend, keys, session), None
     except vault_refs.Refused as exc:
         return {}, (f"maisecrets: cannot get the value of {names} from the server that sent it: {exc}. Do not ask "
                     "the user for the value; tell them this reason.")
-    if not vault_refs.audit(got, session, tool, context):
-        return {}, "maisecrets: the audit log could not be written, so no value is released. Tell the user."
-    # kept for an hour, so an echo of a value in a later tool result is redacted to the server's token
+
+
+def _server_release(vault: Vault, got: dict, session: str | None, tool: str, context: str) -> tuple[dict, str | None]:
+    """The limiter record and one audit line per server value (`KEY@host`, rotated like every audit line), then
+    the values are kept for an hour, so an echo in a later tool result is redacted to the server's token.
+    Returns (key -> value, None) or ({}, the reason)."""
+    if not got:
+        return {}, None
+    from urllib.parse import urlsplit
+
+    from . import vault_refs
+    status = vault.record_server([f"{k}@{urlsplit(o).hostname}" for k, (_v, o) in got.items()], session, tool,
+                                 context)
+    if status != "ok":
+        return {}, (f"maisecrets: no value from the server is released ({status}). Tell the user.")
     vault_refs.remember_released(vault.backend, session, got)
     return {k: v for k, (v, _origin) in got.items()}, None
 
@@ -2537,16 +2565,33 @@ def _elsewhere_reason(keys: list[str]) -> str:
 
 
 def _names_a_guarded_file(value: str, cwd: str) -> bool:
-    """A value that, used as a path, names the maisecrets home, a store file, an ssh config or the client config."""
-    from . import vault_refs
-    v = value.strip()
-    if not v or len(v) > 4096 or "\0" in v:
+    """A value that, used as a path, names the maisecrets home, a store file, an ssh config, the client config or a
+    file in the client's config folder (its settings hold the hooks). Each piece is a path too: `--config=PATH`,
+    `@PATH`, `file://PATH` (Gate A review)."""
+    if len(value) > 4096 or "\0" in value:
         return False
+    pieces = {value.strip()}
+    for part in re.split(r"[\s=,;]+", value):
+        part = part.strip("'\"")
+        for lead in ("file://", "@"):
+            if part.startswith(lead):
+                part = part[len(lead):]
+        if part:
+            pieces.add(part)
+    return any(_a_guarded_path(v, cwd) for v in pieces if v)
+
+
+def _a_guarded_path(v: str, cwd: str) -> bool:
+    from . import vault_refs
     try:
         if _store_read_match(v) or _in_the_home(v, cwd) or _is_ssh_config_path(v, cwd):
             return True
         full = v if os.path.isabs(os.path.expanduser(v)) else os.path.join(cwd or os.getcwd(), v)
-        return os.path.realpath(os.path.expanduser(full)) == os.path.realpath(str(vault_refs.claude_json()))
+        real = os.path.realpath(os.path.expanduser(full))
+        config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+        folder = os.path.realpath(config_dir)
+        return real == os.path.realpath(str(vault_refs.claude_json())) or real == folder \
+            or real.startswith(folder + os.sep)
     except (OSError, ValueError):
         return True                             # a path we cannot judge is refused, not served
 
@@ -2970,10 +3015,12 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     vault = Vault(cfg)
     session = payload.get("session_id")
     values: dict[str, str] = {}
-    failed = _precheck(vault, list(dict.fromkeys(found)), session)
+    failed = _precheck(vault, list(dict.fromkeys(found)), session, extra=_server_limit_keys(server, session))
     if failed:
         return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
-    fetched, why = _server_values(cfg, vault, server, session, tool, f"{tool} {path}")
+    got, why = _server_fetch(cfg, vault, server, session)
+    if not why:
+        fetched, why = _server_release(vault, got, session, tool, f"{tool} {path}")
     if why:
         return _deny(why + " Nothing was written.")
     for key in dict.fromkeys(found):

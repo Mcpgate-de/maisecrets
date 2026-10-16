@@ -6,5 +6,5 @@ runner = ["tests/test_vault_refs.py::Online::test_a_token_another_session_saw_is
 
 [proof]
 file = "maisecrets/vault_refs.py"
-find = '''            if not isinstance(note, dict) or session not in (note.get("sessions") or []):'''
-replace = '''            if not isinstance(note, dict):'''
+find = '''                     and isinstance(by_url.get(u), list) and session in by_url[u]}'''
+replace = '''                     }'''
