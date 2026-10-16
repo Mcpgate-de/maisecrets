@@ -6,5 +6,5 @@ runner = ["tests/test_values.py::Caps::test_the_number_of_imports_is_capped"]
 
 [proof]
 file = "maisecrets/values.py"
-find = "        if mine is None and len(every) >= MAX_IMPORTS:\n"
-replace = "        if False:\n"
+find = "            if len(every) >= MAX_IMPORTS:\n"
+replace = "            if False:\n"

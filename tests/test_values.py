@@ -38,6 +38,7 @@ CODE = "Quarzel-" + "Wendrop-55"           # a value without a shape, as a tool 
 STATE = ("index.json", "vault.json", "audit.log", "hooks.log", "events.log", ".values-state", ".values-cache",
          ".values.lock")
 REF_RE = re.compile(re.escape(OPEN) + r"([A-Z]+_c\d+)" + re.escape(CLOSE))
+SETTINGS_ADD = "/maisecrets:" + "settings value_files add"
 
 
 def _clean() -> None:
@@ -416,6 +417,97 @@ class Removal(_Files):
         ans = hooks.user_prompt({"prompt": f"/maisecrets:forget import:{r.id}", "session_id": "S1", **CLAUDE})
         self.assertNotIn(OPEN, ans["reason"])
         self.assertIn("removed", ans["reason"])
+
+
+class ReviewRoundOne(_Files):
+    """The findings of Gate A (codex gpt-5.6-sol) and Gate B (Opus) on the first build, each with a test."""
+
+    def _config(self, files: list) -> dict:
+        cfg = {"backend": "jsonfile", "allow_plaintext_store": True, "value_files": [str(f) for f in files]}
+        Path(HOME, "config.json").write_text(json.dumps(cfg))
+        return load_config()
+
+    def test_imports_of_commands_leave_places_for_the_value_files(self):
+        with mock.patch.object(values, "MAX_RUN_IMPORTS", 2), mock.patch.object(values, "MAX_IMPORTS", 3):
+            self.imported([{"value": "Erstname Eins"}], name="1.jsonl")
+            self.imported([{"value": "Zweitname Zwei"}], name="2.jsonl")
+            with self.assertRaisesRegex(ValueError, "imports of commands, their limit"):
+                self.imported([{"value": "Drittname Drei"}], name="3.jsonl")
+            p = self.file([{"value": NAME, "type": "NAME"}], name="mine.jsonl")
+            values.session_note(self._config([p]))
+        detect.reset_rules()
+        self.assertEqual(len(detect.scan(f"an {NAME}")), 1)
+
+    def test_a_command_import_of_a_value_file_is_an_import_of_its_own(self):
+        p = self.file([{"value": NAME, "type": "NAME"}], name="mine.jsonl")
+        values.session_note(self._config([p]))
+        values.import_file(p)
+        self.assertEqual(sorted(r["origin"] for r in values.rows()), ["file", "run"])
+
+    def test_a_value_two_imports_list_stays_when_one_is_removed(self):
+        a = self.imported([{"value": NAME, "type": "NAME"}], name="a.jsonl")
+        b = self.imported([{"value": NAME, "type": "NAME"}, {"value": CODE}], name="b.jsonl")
+        self.assertEqual((b.added, b.known), (2, 0))
+        values.remove_typed([a.id])
+        detect.reset_rules()
+        self.assertEqual(len(detect.scan(f"an {NAME}")), 1)
+
+    def test_a_value_file_whose_import_is_gone_is_imported_again(self):
+        p = self.file([{"value": NAME, "type": "NAME"}], name="mine.jsonl")
+        cfg = self._config([p])
+        values.session_note(cfg)
+        values.remove_typed([values.rows()[0]["id"]])
+        values.session_note(cfg)
+        detect.reset_rules()
+        self.assertEqual(len(detect.scan(f"an {NAME}")), 1)
+
+    def test_a_setting_key_or_a_placeholder_key_is_no_value(self):
+        text = "".join(json.dumps({"value": v}) + "\n" for v in ("value_files", "Mein rule_dirs Ordner",
+                                                                  "PASSWORD_c1", "secret_c12 alt"))
+        items, refused, _d = values.parse(text)
+        self.assertEqual((items, [n for n, _w in refused]), ([], [1, 2, 3, 4]))
+
+    def test_an_import_hit_never_lands_inside_a_placeholder(self):
+        with mock.patch.object(values, "_reason", lambda v: ""):
+            self.imported([{"value": "SECRET_c1"}])
+        hits = detect.scan(f"use {OPEN}SECRET_c1{CLOSE} now", channel="tool")
+        self.assertFalse([m for m in hits if m.kind.startswith("import:")])
+
+    def test_the_mod_leaves_a_settings_prompt_to_the_hook(self):
+        self.imported([{"value": "Kroneberg Pfadwert", "type": "NAME"}])
+        prompt = SETTINGS_ADD + " /home/x/Kroneberg Pfadwert/v.jsonl"
+        self.assertEqual(hooks.rewrite_prompt({"prompt": prompt, "session_id": "S1", "cwd": ""}), {})
+
+    def test_a_file_in_the_imports_folder_that_is_no_import_fails_closed(self):
+        r = self.imported([{"value": NAME, "type": "NAME"}])
+        os.rename(values.IMPORTS / f"{r.id}.jsonl", values.IMPORTS / "broken.jsonl")
+        detect.reset_rules()
+        with self.assertRaises(values.ValuesError):
+            detect.scan(f"an {NAME}")
+
+    def test_a_damaged_import_withholds_a_tool_result(self):
+        r = self.imported([{"value": NAME, "type": "NAME"}])
+        (values.IMPORTS / f"{r.id}.jsonl").write_text("not json\n")
+        detect.reset_rules()
+        hooks._live_cache.clear()
+        out = hooks._post_tool_guarded({"hook_event_name": "PostToolUse", "tool_name": "Bash", "session_id": "S1",
+                                        "tool_input": {"command": "cat notes.txt"}, **CLAUDE,
+                                        "tool_response": {"stdout": f"an {NAME}", "stderr": ""}})
+        self.assertIn(f"import:{r.id} is damaged", json.dumps(out))
+        self.assertNotIn("Testowski", json.dumps(out))
+
+    def test_a_flood_of_lines_is_read_to_a_bound_and_the_refusals_are_counted(self):
+        with mock.patch.object(values, "MAX_LINES", 50):
+            r = values.import_file(self.file([], raw="0\n" * 200))
+        self.assertLessEqual(len(r.refused), values.MAX_REFUSED_SHOWN)
+        self.assertEqual(r.refused_count, 51)
+        self.assertIn("51 line(s) refused", values.summary(r))
+
+    def test_a_removal_split_over_two_lines_in_a_command_is_refused(self):
+        command = "codex exec 'maisecrets: forget\n import:v1234abcd'"
+        ans = hooks.pre_tool({"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "S1", **CLAUDE,
+                              "tool_input": {"command": command}})
+        self.assertEqual(ans["hookSpecificOutput"]["permissionDecision"], "deny")
 
 
 class Provenance(_Files):

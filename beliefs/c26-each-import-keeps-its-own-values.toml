@@ -1,0 +1,10 @@
+# c26-each-import-keeps-its-own-values: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-each-import-keeps-its-own-values"
+control = "C26"
+statement = "Each import keeps every value it lists, also one that another import holds, so the removal of one import leaves the value masked while another import lists it."
+runner = ["tests/test_values.py::ReviewRoundOne::test_a_value_two_imports_list_stays_when_one_is_removed"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "        held = {terms._lower(v) for v, _t in (mine[3] if mine else [])}\n"
+replace = "        held = {terms._lower(v) for x in every for v, _t in x[3]}\n"

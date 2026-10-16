@@ -2627,9 +2627,18 @@ def _import_hits(text: str, enabled, found: list, taken_starts: list, taken_ends
     if enabled is not None and IMPORT_RULE not in enabled and IMPORT_KEY not in enabled and not any(
             str(k).startswith("import:") for k in enabled):
         return
-    for m in sorted(_import_matches(text), key=lambda x: x.start):
+    found_here = _import_matches(text)
+    refs: list = []
+    if found_here and "\u27e6" in text:
+        # a placeholder stays whole: an import hit inside its brackets would turn a resolvable placeholder into a
+        # masked one (Gate B, round 1). The floor refuses a key as a value too
+        from .placeholder import find_refs
+        refs = [(a, b) for _k, a, b in find_refs(text)]
+    for m in sorted(found_here, key=lambda x: x.start):
         if not ((enabled is None or IMPORT_RULE in enabled or IMPORT_KEY in enabled or m.kind in enabled)
                 and m.end > m.start):
+            continue
+        if refs and any(a < m.end and m.start < b for a, b in refs):
             continue
         if not overlaps(m.start, m.end):
             take(m, True)

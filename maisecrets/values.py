@@ -58,6 +58,9 @@ MAX_PER_IMPORT = 100_000
 MAX_VALUES = 150_000           # as terms.MAX_TEAM_ENTITIES: the index stays within one build of about 2 s
 MAX_RUN_VALUES = 100_000       # of MAX_VALUES: the imports that no value file names
 MAX_IMPORTS = 50
+MAX_RUN_IMPORTS = 30           # of MAX_IMPORTS: the imports that no value file names; the value files keep 20 places
+MAX_LINES = 200_000            # lines one import parses at most: 8 MB of `0` lines cost millions of JSON reads
+MAX_REFUSED_SHOWN = 20         # refused lines kept with their reason; the rest is a count
 MAX_FILES_PER_START = 20       # value files one session start reads
 MIN_LEN = 4
 MIN_DIGITS = 6                 # a value of digits only: 2024 or 10115 would mask years and postcodes everywhere
@@ -67,6 +70,18 @@ _FORMAT = 1
 _CONTROL_TEXT = ("⟦", "⟧", "maisecrets", "import:")
 _LOWER_WORD = re.compile(r"[a-zß-ÿ]+")
 _WORD_RE = re.compile(r"\w+")
+_KEY_WORD = re.compile(r"(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9_]{0,39}?_c\d{1,9}(?![0-9])", re.I)
+_RESERVED: list = []
+
+
+def _reserved() -> frozenset:
+    """The setting keys (config.json and the settings cards), lower case."""
+    if not _RESERVED:
+        from . import settings
+        from .vault import DEFAULT_CONFIG
+        keys = list(DEFAULT_CONFIG) + list(settings.TITLE) + list(settings.MEANING)
+        _RESERVED.append(frozenset(k.lower() for k in keys if "_" in k))
+    return _RESERVED[0]
 
 
 class ValuesError(ConfigError):
@@ -79,7 +94,8 @@ class Result:
     new: dict = field(default_factory=dict)          # type -> values added now
     known: int = 0                                    # values this import or another one held already
     duplicates: int = 0                               # the same value twice in the file
-    refused: list = field(default_factory=list)       # (line number, reason), never the text
+    refused: list = field(default_factory=list)       # (line number, reason), never the text; the first ones
+    refused_count: int = 0                            # every refused line
     stopped: str = ""                                 # why the import stopped before the end, or ""
     merged: bool = False                              # the file had an import already
 
@@ -112,6 +128,14 @@ def _reason(value: str) -> str:
         # a value with one of them would mask the person's own controls (/maisecrets:forget import:ID) and the
         # placeholders (review of block 3, Opus H1)
         return "holds text of maisecrets itself (a placeholder bracket, maisecrets or import:)"
+    if _KEY_WORD.search(value):
+        # a placeholder key (SECRET_c1): the import pass would find it inside the brackets of a placeholder, and the
+        # stored value behind it would no longer resolve (Gate B, round 1)
+        return "holds a placeholder key"
+    if any(w in _reserved() for w in words):
+        # a setting key (value_files, rule_dirs): masked, the person's own settings prompt no longer works (Gate A and
+        # Gate B, round 1)
+        return "holds the name of a maisecrets setting"
     if _LOWER_WORD.fullmatch(value):
         return "an ordinary word (one word of lower-case letters)"
     stop = terms.stoplist()
@@ -123,17 +147,33 @@ def _reason(value: str) -> str:
     return ""
 
 
+class _Refused(list):
+    """The refused lines: the first MAX_REFUSED_SHOWN with their reason, and the count of all (`count`)."""
+    count = 0
+
+    def append(self, item) -> None:
+        self.count += 1
+        if len(self) < MAX_REFUSED_SHOWN:
+            super().append(item)
+
+
 def parse(text: str) -> tuple[list, list, int]:
     """(values as (value, type, line), refused lines as (line, reason), duplicates). Blank lines and lines that start
-    with `#` are skipped. Only `value` and `type` are read; any other field is ignored, so no field can loosen."""
+    with `#` are skipped. Only `value` and `type` are read; any other field is ignored, so no field can loosen. At most
+    MAX_LINES lines are read; the refused list keeps its first entries and the count of all (_Refused.count)."""
     items: list = []
-    refused: list = []
+    refused = _Refused()
     seen: set = set()
     duplicates = 0
+    lines = 0
     for n, line in enumerate(text.splitlines(), 1):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
+        lines += 1
+        if lines > MAX_LINES:
+            refused.append((n, f"line {n} and later not read: at most {MAX_LINES:,} lines in one file"))
+            break
         try:
             obj = json.loads(line)
         except (ValueError, RecursionError):
@@ -228,7 +268,13 @@ def _import_files() -> list:
         return []
     except OSError as exc:
         raise ValuesError(f"{IMPORTS}: cannot be read ({type(exc).__name__})") from None
-    return [(n[:-len(SUFFIX)], IMPORTS / n) for n in names if value_files.ID_RE.fullmatch(n[:-len(SUFFIX)])]
+    bad = [n for n in names if not value_files.ID_RE.fullmatch(n[:-len(SUFFIX)])]
+    if bad:
+        # value_files.present() counts every *.jsonl: one that no import id names was renamed or put there, and its
+        # values would pass unmasked (Gate A, round 1)
+        raise ValuesError(f"{IMPORTS} holds a file that is no import ({len(bad)} file(s) not named v<8 hex>.jsonl), "
+                          "so the imports cannot be trusted. Move it out of that folder in a terminal.")
+    return [(n[:-len(SUFFIX)], IMPORTS / n) for n in names]
 
 
 def _read_import(iid: str, path: Path) -> tuple[dict, list]:
@@ -287,14 +333,27 @@ def import_bytes(raw: bytes, key: str, origin: str = "run") -> Result:
     except UnicodeDecodeError:
         raise ValueError("not UTF-8 text") from None
     items, refused, duplicates = parse(text)
-    result = Result(refused=refused, duplicates=duplicates)
+    result = Result(refused=list(refused), refused_count=getattr(refused, "count", len(refused)),
+                    duplicates=duplicates)
+    # a command's import and a value file's import of the same path are two imports: a command cannot fill the place
+    # of the person's value file (Gate A, round 1)
+    key = ("file:" if origin == "file" else "run:") + key
     with _lock():
         every = [(iid, path) + _read_import(iid, path) for iid, path in _import_files()]
         mine = next((x for x in every if x[2].get("key") == key), None)
-        if mine is None and len(every) >= MAX_IMPORTS:
-            raise ValueError(f"maisecrets holds {MAX_IMPORTS} imports, the limit; /maisecrets:list names them, and "
-                             "your prompt /maisecrets:forget import:ID removes one")
-        held = {terms._lower(v) for x in every for v, _t in x[3]}
+        if mine is None:
+            runs_n = sum(1 for x in every if x[2].get("origin") != "file")
+            if origin != "file" and runs_n >= MAX_RUN_IMPORTS:
+                raise ValueError(f"maisecrets holds {MAX_RUN_IMPORTS} imports of commands, their limit (the other "
+                                 f"{MAX_IMPORTS - MAX_RUN_IMPORTS} places are kept for your value files); "
+                                 "/maisecrets:list names them, and your prompt /maisecrets:forget import:ID "
+                                 "removes one")
+            if len(every) >= MAX_IMPORTS:
+                raise ValueError(f"maisecrets holds {MAX_IMPORTS} imports, the limit; /maisecrets:list names them, and "
+                                 "your prompt /maisecrets:forget import:ID removes one")
+        # each import keeps every value it lists, also one that another import holds: a removal of that other import
+        # then leaves this one whole (Gate A and Gate B, round 1). The index keeps one entry per value
+        held = {terms._lower(v) for v, _t in (mine[3] if mine else [])}
         total = sum(len(x[3]) for x in every)
         runs = sum(len(x[3]) for x in every if x[2].get("origin") != "file")
         if mine is None:
@@ -306,8 +365,6 @@ def import_bytes(raw: bytes, key: str, origin: str = "run") -> Result:
         else:
             iid, head, values = mine[0], dict(mine[2]), list(mine[3])
             result.merged = True
-            if origin == "file":
-                head["origin"] = "file"     # a value file that the person set names it from now on
         result.id = iid
         file_origin = head.get("origin") == "file"
         for value, type_, n in items:
@@ -357,7 +414,7 @@ def _log(result: Result, origin: str) -> None:
     from . import events
     events.record("ValueImport", origin, [SimpleNamespace(key="import:" + result.id, type=t, kind=f"import:{n}")
                                           for t, n in sorted(result.new.items())],
-                  outcome=f"added {result.added}, known {result.known}, refused {len(result.refused)}")
+                  outcome=f"added {result.added}, known {result.known}, refused {result.refused_count}")
 
 
 def type_text(counts: dict) -> str:
@@ -376,10 +433,11 @@ def summary(result: Result) -> str:
         parts.append(f"{result.known} held already")
     if result.duplicates:
         parts.append(f"{result.duplicates} duplicate line(s) skipped")
-    if result.refused:
+    count = max(result.refused_count, len(result.refused))
+    if count:
         shown = "; ".join(f"line {n} {why}" for n, why in result.refused[:5])
-        more = f"; and {len(result.refused) - 5} more" if len(result.refused) > 5 else ""
-        parts.append(f"{len(result.refused)} line(s) refused: {shown}{more}")
+        more = f"; and {count - min(5, len(result.refused))} more" if count > 5 else ""
+        parts.append(f"{count} line(s) refused: {shown}{more}")
     if result.stopped:
         parts.append(result.stopped)
     return ", ".join(parts) + "."
@@ -408,16 +466,11 @@ def remove_typed(ids: list) -> str:
     an import is removed. A value file's next import then reads the file as it is."""
     said = []
     with _lock():
-        state = _load_state()
         for iid in ids:
             if not value_files.ID_RE.fullmatch(iid):
                 said.append(f"import:{iid[:20]} is no import id (/maisecrets:list shows them)")
                 continue
             path = IMPORTS / f"{iid}{SUFFIX}"
-            try:
-                head = json.loads(terms._read_bounded(path, MAX_FILE_BYTES * 2).decode("utf-8").split("\n", 1)[0])
-            except (OSError, ValueError, AttributeError, UnicodeDecodeError):
-                head = {}
             try:
                 path.unlink()
             except FileNotFoundError:
@@ -426,14 +479,9 @@ def remove_typed(ids: list) -> str:
             except OSError as exc:
                 said.append(f"import:{iid} could not be removed ({type(exc).__name__}); nothing was changed")
                 continue
-            files = state.get("files")
-            if isinstance(files, dict) and isinstance(head, dict):
-                for k in [k for k, rec in files.items() if isinstance(rec, dict) and rec.get("key") == head.get("key")]:
-                    files.pop(k, None)
             said.append(f"import:{iid} removed; its values are no longer masked")
             from . import events
             events.record_weakening("value-import", "import:" + iid, "typed prompt")
-        _save_state(state)
     reset()
     prebuild()
     return "maisecrets: " + "; ".join(said) + "."
@@ -540,12 +588,33 @@ def matches(text: str) -> list:
 
 
 # ------------------------------------------------------------ session start --
-def _sync(cfg: dict, state: dict, deadline: float) -> list:
-    """Import each file of `value_files` whose content changed since its last import. Notes for the person; a file
-    is named by its place in the setting, never by its name."""
+def _record(slot: str, rec: dict) -> None:
+    """Write one value file's record into the state at once, under the lock: a whole state written back at the end of
+    a session start overwrote what another session did in between (Gate A, round 1)."""
+    with _lock():
+        state = _load_state()
+        files = state.get("files") if isinstance(state.get("files"), dict) else {}
+        files[slot] = rec
+        state["files"] = files
+        _save_state(state)
+
+
+def _has_import(key: str) -> bool:
+    try:
+        return any(_read_import(iid, path)[0].get("key") == key for iid, path in _import_files())
+    except ValuesError:
+        return False
+
+
+def _sync(cfg: dict, deadline: float) -> list:
+    """Import each file of `value_files` whose content changed since its last import, or whose import is gone (the
+    person removed it, or another session did meanwhile): the file is then imported as it is now. Notes for the
+    person; a file is named by its place in the setting, never by its name."""
     files = [f for f in cfg.get("value_files") or [] if isinstance(f, str) and f.strip()]
     notes = []
-    known = state.setdefault("files", {})
+    with _lock():
+        state = _load_state()
+    known = state.get("files") if isinstance(state.get("files"), dict) else {}
     for number, shown in enumerate(files[:MAX_FILES_PER_START], 1):
         label = f"value file {number}"
         if time.time() > deadline:
@@ -553,24 +622,25 @@ def _sync(cfg: dict, state: dict, deadline: float) -> list:
             break
         path = Path(os.path.expanduser(shown.strip()))
         slot = _path_key(path)
+        rec = known.get(slot) if isinstance(known.get(slot), dict) else {}
         try:
             raw = read_source(path)
         except ValueError as exc:
             said = f"{label}: {exc}"
-            if (known.get(slot) or {}).get("said") != said:
+            if rec.get("said") != said:
                 notes.append(said)
-                known[slot] = {"said": said}
+                _record(slot, {"said": said})
             continue
         digest = hashlib.sha256(raw).hexdigest()[:16]
-        if (known.get(slot) or {}).get("digest") == digest:
+        if rec.get("digest") == digest and (rec.get("empty") or _has_import("file:" + slot)):
             continue
         try:
             result = import_bytes(raw, slot, "file")
         except ValueError as exc:
             notes.append(f"{label}: {exc}")
             continue
-        known[slot] = {"digest": digest, "key": slot}
-        if result.added or result.refused or result.stopped:
+        _record(slot, {"digest": digest, "empty": not result.id})
+        if result.added or result.refused_count or result.stopped:
             notes.append(f"{label}: " + summary(result).rstrip("."))
     if len(files) > MAX_FILES_PER_START:
         notes.append(f"only the first {MAX_FILES_PER_START} value files are read")
@@ -581,31 +651,27 @@ def session_note(cfg: dict, started: float | None = None) -> str | None:
     """At session start: import the value files that changed, then name each import that is new since the last
     start (an import an agent ran is seen), and an import that is damaged. Unchanged, it says nothing."""
     deadline = (started if started is not None else time.time()) + 8.0
-    with _lock():
-        state = _load_state()
-    notes = _sync(cfg, state, deadline)
+    notes = _sync(cfg, deadline)
     every = rows()
     ids = sorted(r["id"] for r in every)
-    before = state.get("announced")
+    with _lock():
+        state = _load_state()
+        before = state.get("announced")
+        state["announced"] = ids
+        _save_state(state)
     new = [r for r in every if r["id"] not in set(before or [])]
     parts = []
     if notes:
         parts.append("value files: " + "; ".join(notes) + ".")
-    if before is None or set(before) != set(ids):
-        if new:
-            shown = ", ".join(f"import:{r['id']} ({r['count']} value(s))" for r in new[:5])
-            more = f" and {len(new) - 5} more" if len(new) > 5 else ""
-            parts.append(f"from now on maisecrets masks the values of {shown}{more}. /maisecrets:list shows each "
-                         "import; your prompt /maisecrets:forget import:ID removes one.")
+    if new:
+        shown = ", ".join(f"import:{r['id']} ({r['count']} value(s))" for r in new[:5])
+        more = f" and {len(new) - 5} more" if len(new) > 5 else ""
+        parts.append(f"from now on maisecrets masks the values of {shown}{more}. /maisecrets:list shows each "
+                     "import; your prompt /maisecrets:forget import:ID removes one.")
     damaged = [r["id"] for r in every if r["origin"] == "damaged"]
     if damaged:
         parts.append(f"import:{damaged[0]} is damaged, so maisecrets withholds every tool result until your prompt "
                      f"/maisecrets:forget import:{damaged[0]} removes it.")
-    with _lock():
-        fresh = _load_state()
-        fresh["files"] = state.get("files", {})
-        fresh["announced"] = ids
-        _save_state(fresh)
     prebuild()
     return ("maisecrets: " + " ".join(parts)) if parts else None
 

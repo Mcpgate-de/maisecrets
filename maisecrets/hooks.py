@@ -1013,6 +1013,12 @@ def rewrite_prompt(payload: dict) -> dict:
     # /maisecrets:term add|remove carries a name: the hook answers it, and the mod must not rewrite the name first
     if term_files.parse_command(prompt) or value_files.parse_removal(prompt):
         return {}
+    # a settings prompt and the ssh grant sentence are the person's controls: the hook reads them before the detector,
+    # and the mod must not rewrite a word of them first (an imported or listed value would break the control; Gate A
+    # and Gate B of #19 part 3)
+    from . import settings as settings_mod
+    if settings_mod.parse_prompt(prompt) or _GRANT_RE.match(prompt):
+        return {}
     # the hook blocks an @file mention before it stores anything; without a working directory a relative
     # mention cannot be checked, so any mention goes to the hook
     cwd = payload.get("cwd")
