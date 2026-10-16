@@ -1802,7 +1802,11 @@ an AI can open a pseudo-terminal and read it. It writes the proposal to
 read that folder) and prints the count and the path. Open the file yourself,
 and copy the lines you want into `terms.txt`. Nothing is added to your terms.
 
-**Cost.** maisecrets keeps an index of the lists in `~/.maisecrets/.terms-cache`.
+**Cost.** Without any list, maisecrets does not load the terms code: a hook
+costs what it cost before (measured, `docs/BENCHMARKS.md`, "Terms"). With a
+list, a hook pays a fixed amount for the module and the index, and the cost
+does not grow with the number of terms. maisecrets keeps an index of the
+lists in `~/.maisecrets/.terms-cache`.
 With 100,000 entries a new hook process loads it in about 30 ms and scans
 10 KB in 3 to 10 ms (measured on Python 3.9 and 3.14).
 After you change a list, maisecrets builds the index again at the next
