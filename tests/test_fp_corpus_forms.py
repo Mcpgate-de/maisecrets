@@ -54,6 +54,8 @@ OWNER = {
     "encoded mail after a line": "email-percent-encoded",
     "card in a csv row": "credit-card", "encoded mail quoted cell": "email-percent-encoded",
     "postman password of words": "secret-postman-variable", "add-mask of words": "secret-add-mask",
+    "vcard adr fields": "address-vcard-fields", "vcard n fields": "name-vcard-n",
+    "vcard bday digits": "birth-date-vcard-compact", "encoded mail contact column": "email-percent-encoded",
 }
 
 

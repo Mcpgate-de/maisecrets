@@ -87,5 +87,38 @@ class VcardParameterTests(unittest.TestCase):
                 self.assertEqual([m for m in scan(text) if m.type == "ADDRESS"], [])
 
 
+STREET = "7 Rosemount Gardens;Dunmore;Wexford;" + "4471;Ireland"
+
+
+class VcardFieldTests(unittest.TestCase):
+    """ADR and N write their value in fields (RFC 6350): box;extended;street;locality;region;code;country and
+    family;given;additional;prefix;suffix. Contact exports of Apple, Google and Outlook write them so, and a BDAY of
+    eight digits is the form of the RFC's own examples. The labels of 0.6.24 saw none of them (review of 0.6.25)."""
+
+    def test_an_address_in_its_fields_is_masked_with_and_without_parameters(self):
+        for prop in ("ADR", "ADR;TYPE=home", "item1.ADR;type=HOME;type=pref", "ADR;HOME"):
+            with self.subTest(prop=prop):
+                self.assertIn(("ADDRESS", STREET), masked(card(prop + ":;;" + STREET)))
+
+    def test_a_name_in_its_fields_is_masked(self):
+        family_given = "Brückner;" + "Lena"
+        for prop in ("N", "N;CHARSET=UTF-8"):
+            with self.subTest(prop=prop):
+                self.assertIn(("NAME", family_given), masked(card(prop + ":" + family_given + ";;;")))
+        self.assertIn(("NAME", family_given + ";Marie"), masked(card("N:" + family_given + ";Marie;Dr.;")))
+
+    def test_a_birth_date_of_eight_digits_is_masked(self):
+        for prop in ("BDAY", "BDAY;VALUE=date"):
+            with self.subTest(prop=prop):
+                self.assertIn(("BIRTH_DATE", "19850412"), masked(card(prop + ":19850412")))
+
+    def test_shapes_that_are_no_vcard_field_stay_text(self):
+        for text in ("GET /api/users/bday;from=2020-01-01;to=2020-12-31", "/api/report;bday;since=2021-03-04",
+                     card("ADR: 0007 Use Postgres; Accepted"), card("ADR:;;;;;;"), card("ADR;TYPE=work:;;Suite 4;;;;"),
+                     card("N:Roe;Jane;;;"), card("N:Total;Count;;;"), card("BDAY:19700101"), card("BDAY:20990412")):
+            with self.subTest(text=text):
+                self.assertEqual({t for t, _ in masked(text)} & {"ADDRESS", "NAME", "BIRTH_DATE"}, set())
+
+
 if __name__ == "__main__":
     unittest.main()

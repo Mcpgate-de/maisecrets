@@ -45,8 +45,9 @@ _PHONE_WORD_RE = re.compile(r"(?i)phone|(?<![a-z])(?:telefon\w*|tel|cell|mobile?
 _DATE = (r"(?:\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{1,2}\.?\s+[A-Za-zäéû]{3,9}\.?\s+\d{4}"
          r"|[A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})")
 # the parameters of a vCard property between its name and the colon: ADR;TYPE=home:, FN;CHARSET=UTF-8:,
-# BDAY;VALUE=date:, and the bare type of vCard 2.1 (TEL;CELL:). With them, the property is the same field as without
-_VCARD_PARAMS = r"(?:;[A-Za-z][\w-]{0,20}(?:=(?:\"[^\"\n]{0,80}\"|[^:;\"\n]{0,60}))?){0,8}"
+# BDAY;VALUE=date:, and the bare type of vCard 2.1 (TEL;CELL:). With them, the property is the same field as without.
+# A colon must follow: /api/users/bday;from=2020-01-01 is a path, and its date is no birth date (review of 0.6.25)
+_VCARD_PARAMS = r"(?:(?:;[A-Za-z][\w-]{0,20}(?:=(?:\"[^\"\n]{0,80}\"|[^:;\"\n]{0,60}))?){1,8}(?=:))?"
 # "born" alone is left out: "born 23 June 1912" is history in a text about a public person (holdout v6 negative)
 _BIRTH_RE = re.compile(r"(?i)(?:\bd\.?o\.?b\b|date of birth|birth[ _-]?date|\bbday\b" + _VCARD_PARAMS
                        + r"|\bgeb(?:\.|oren am|urtsdatum)"
@@ -400,6 +401,9 @@ FORMS = {
     "name-non-latin-after-label": (NAME, "tool", "generic", "label"),
     "phone-url-encoded": (PHONE, "tool", "generic", "label"),
     "phone-wrapped-line": (PHONE, "tool", "generic", "form"),
+    "address-vcard-fields": (ADDRESS, "tool", "generic", "form"),
+    "name-vcard-n": (NAME, "tool", "generic", "form"),
+    "birth-date-vcard-compact": (BIRTH_DATE, "tool", "generic", "form"),
 }
 # a value that only names one: a variable, a template, an elision, a path
 _NOT_A_VALUE_START = ("$", "%", "{", "<", "(", "[", "*", "#", "/", ".")
@@ -544,6 +548,57 @@ def _line_back(text: str, pos: int, most: int = 120) -> int:
     return nl + 1 if nl >= 0 else lo
 
 
+# the structured properties of a vCard (RFC 6350), one per line, optionally in a group (item1.ADR): ADR holds
+# box;extended;street;locality;region;code;country, N holds family;given;additional;prefix;suffix. Contact exports
+# of Apple, Google and Outlook write the address in its fields, so the address label never saw it (review of 0.6.25)
+_VCARD_ADR_RE = _lazy(r"(?im)^(?:item\d{1,3}\.)?ADR" + _VCARD_PARAMS + r":([^\n\r]{5,400})")
+_VCARD_N_RE = _lazy(r"(?im)^(?:item\d{1,3}\.)?N" + _VCARD_PARAMS + r":([^\n\r]{3,200})")
+_VCARD_BDAY_RE = _lazy(r"(?im)^(?:item\d{1,3}\.)?BDAY" + _VCARD_PARAMS + r":(\d{8})(?![\w-])")
+
+
+def _vcard_fields(value: str, start: int) -> list:
+    """(start, end) of each field of a structured vCard value; an escaped semicolon (\\;) stays inside its field."""
+    out, i, a = [], 0, 0
+    while i < len(value):
+        if value[i] == "\\":
+            i += 2
+            continue
+        if value[i] == ";":
+            out.append((start + a, start + i))
+            a = i + 1
+        i += 1
+    out.append((start + a, start + len(value)))
+    return out
+
+
+def _vcard_hits(text: str) -> list:
+    out = []
+    if "ADR" in text.upper():
+        for m in _VCARD_ADR_RE.finditer(text):
+            fields = _vcard_fields(m.group(1), m.start(1))
+            filled = [(a, b) for a, b in fields if text[a:b].strip()]
+            if len(fields) < 6 or len(filled) < 2:
+                continue   # ADR: 0007 Use Postgres is a decision record: a vCard address has seven fields
+            street = text[fields[2][0]:fields[2][1]]
+            if re.search(r"\d", street) and re.search(r"[^\W\d_]{3}", street):
+                out.append((filled[0][0], filled[-1][1], "address-vcard-fields", ADDRESS))
+    if "N" in text:
+        for m in _VCARD_N_RE.finditer(text):
+            fields = _vcard_fields(m.group(1), m.start(1))
+            if len(fields) < 5:
+                continue
+            family, given = (text[a:b].strip() for a, b in fields[:2])
+            if family and given and _name_ok(given + " " + family) and not _reads_as_words(given + " " + family):
+                end = fields[2][1] if text[fields[2][0]:fields[2][1]].strip() else fields[1][1]   # a middle name
+                out.append((fields[0][0], end, "name-vcard-n", NAME))
+    if "BDAY" in text.upper():
+        for m in _VCARD_BDAY_RE.finditer(text):
+            v = m.group(1)
+            if _a_date(v) and _past_year(v[:4]) and not _placeholder_digits(v, dates=True):
+                out.append((m.start(1), m.end(1), "birth-date-vcard-compact", BIRTH_DATE))
+    return out
+
+
 def _cut_at_a_word(v: str) -> str:
     """An ID ends before a word that follows its digits: `20231115 LIMIT 10` is a value and an SQL clause."""
     parts = v.split(" ")
@@ -671,6 +726,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
                     and not _NOT_A_HOME_RE.search(text, line, m.end()) and not _NOT_AN_ADDRESS_RE.search(v)):
                 s0 = m.start(3) + (len(m.group(3)) - len(m.group(3).lstrip()))
                 out.append((s0, s0 + len(v), "address-after-label", ADDRESS))
+    if "address-vcard-fields" in want and ":" in text:
+        out += [h for h in _vcard_hits(text) if h[2] in want]
     if "address-in-form" in want and "in" in regions:
         for m in _IN_ADDRESS_RE.finditer(text):
             line = _line_back(text, m.start())
