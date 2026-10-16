@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+from _timing import SLACK, cpu_best  # noqa: E402
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
@@ -305,15 +306,9 @@ class GateReviewMatchTests(unittest.TestCase):
         times = []
         for n in (1000, 100000):
             m = terms.Matcher([Entity(f"C{i}", (Variant(f"abc{i:06d}", terms.STARTS),), i) for i in range(n)])
-            best = None
-            for _ in range(3):
-                t = time.process_time()
-                found = m.find(words)
-                took = time.process_time() - t
-                best = took if best is None else min(best, took)
-            self.assertEqual(len(found), 1000)
-            times.append(best)
-        self.assertLess(times[1], 5 * times[0] + 0.02, f"{times[0] * 1000:.1f} ms, then {times[1] * 1000:.1f} ms")
+            self.assertEqual(len(m.find(words)), 1000)
+            times.append(cpu_best(m.find, words))
+        self.assertLess(times[1], 5 * times[0] + SLACK, f"{times[0] * 1000:.1f} ms, then {times[1] * 1000:.1f} ms")
 
     def test_the_id_holds_the_variants(self):
         a = terms.parse("NAME_1  Jan Kowalski\n")[0][0]

@@ -15,7 +15,6 @@ import os
 import random
 import string
 import sys
-import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -24,6 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+from _timing import assert_linear  # noqa: E402
 
 from maisecrets import checksums, detect, regions  # noqa: E402
 
@@ -329,12 +329,11 @@ class CryptoSecretTests(unittest.TestCase):
         self.assertEqual(hits, 0)
 
     def test_a_long_run_of_words_takes_linear_time(self):
+        # 20,000 words, then an eighth of them: at most 16 times the CPU time (tests/_timing.py), not a fixed 5 s
         words = list(checksums.bip39_words())
         r = random.Random(11)
-        text = " ".join(r.choice(words) for _ in range(20000))
-        t0 = time.process_time()
-        detect.scan(text)
-        self.assertLess(time.process_time() - t0, 5.0)
+        run = [r.choice(words) for _ in range(20000)]
+        assert_linear(self, detect.scan, lambda n: " ".join(run[:n]), 20000)
 
 
 # ----------------------------------------------------- Switzerland, Austria --
@@ -559,11 +558,8 @@ class TokenFormatTests(unittest.TestCase):
         r = random.Random(16)
         for rule_id, gen in TOKENS.items():
             tok, _ = gen(r)
-            near = (tok[:-2] + "  ") * 1000            # each copy one short of a match
-            t0 = time.process_time()
-            found(near)
-            with self.subTest(rule=rule_id):
-                self.assertLess(time.process_time() - t0, 3.0)
+            with self.subTest(rule=rule_id):             # each copy one short of a match; not a fixed 3 s of CPU
+                assert_linear(self, found, lambda n, tok=tok: (tok[:-2] + "  ") * n, 1000)
 
     def test_a_telegram_token_of_the_documented_short_form_is_found(self):
         r = random.Random(18)

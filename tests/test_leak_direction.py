@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+from _timing import SLACK, cpu_best  # noqa: E402
 CONFIG = '{"backend": "jsonfile", "allow_plaintext_store": true}'
 Path(_isolate.HOME).mkdir(parents=True, exist_ok=True)
 Path(_isolate.HOME, "config.json").write_text(CONFIG)
@@ -43,18 +44,6 @@ def found(text: str, path: str = "") -> list[tuple[str, str]]:
 def secrets(text: str, path: str = "") -> list[str]:
     return [v for t, v in found(text, path) if t == "SECRET"]
 
-
-
-def _cpu_best(fn, *args, runs: int = 3) -> float:
-    """The least CPU time of a few calls: other processes on the machine only ever add to it."""
-    import time
-    best = None
-    for _ in range(runs):
-        t = time.process_time()
-        fn(*args)
-        took = time.process_time() - t
-        best = took if best is None else min(best, took)
-    return best
 
 
 class LeakDirectionTests(unittest.TestCase):
@@ -235,8 +224,8 @@ class CodexSecondReviewTests(unittest.TestCase):
         for size in (125_000, 1_000_000):
             text = ("<task-notification>\n" * 60000)[:size]
             self.assertFalse(hooks.agent_report({"transcript_path": "/tmp/x.jsonl", **CLAUDE}, text))
-            times.append(_cpu_best(hooks.agent_report, {"transcript_path": "/tmp/x.jsonl", **CLAUDE}, text))
-        self.assertLess(times[1], 16 * times[0] + 0.05)
+            times.append(cpu_best(hooks.agent_report, {"transcript_path": "/tmp/x.jsonl", **CLAUDE}, text))
+        self.assertLess(times[1], 16 * times[0] + SLACK)
         self.assertLess(times[1], 10.0)
 
 
@@ -261,8 +250,8 @@ class FinalReviewTests(unittest.TestCase):
         self.assertEqual(secrets(cases["a long word run"]), ["Qx7vR2mK9pLw"])
         # no backtracking that grows with the run of %: twice the run, at most four times the time (the fastest of
         # three calls). A fixed 0.05 s of wall time failed on a loaded machine (2026-10-16)
-        short, long = (_cpu_best(detect._FORMAT_ONLY_RE.fullmatch, "%" * n + "Z") for n in (100, 200))
-        self.assertLess(long, 4 * short + 0.01)
+        short, long = (cpu_best(detect._FORMAT_ONLY_RE.fullmatch, "%" * n + "Z") for n in (100, 200))
+        self.assertLess(long, 4 * short + SLACK)
 
     def test_a_camel_case_key_on_the_next_line_is_a_label(self):
         self.assertEqual(found("pass§word:\n    driverClassName: org.h2.Driver\n"), [])
@@ -334,8 +323,8 @@ class LastCommitReviewTests(unittest.TestCase):
         def line(n: int) -> str:
             return ("{" + ",".join(f'"id{i}":"{"x" * 1800}","tok§en":"t{i}"' for i in range(n)) + "}").replace("§", "")
         detect.scan(line(3))                          # the regexes of the first scan are compiled before the clock
-        small = _cpu_best(detect.scan, line(62))
-        big = _cpu_best(detect.scan, line(500), runs=1)
+        small = cpu_best(detect.scan, line(62))
+        big = cpu_best(detect.scan, line(500), runs=1)
         self.assertLess(big, 16 * small + 0.2, f"{small:.2f} s, then {big:.2f} s for 8 times the text")
         self.assertLess(big, 60.0)
 

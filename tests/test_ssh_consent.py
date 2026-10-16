@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+from _timing import SLACK, cpu_best  # noqa: E402
 
 from maisecrets import consent_store, hooks, ssh_consent  # noqa: E402
 from maisecrets.vault import HOME  # noqa: E402
@@ -53,17 +54,6 @@ def parse(text: str):
 
 def kind(command: str) -> str:
     return ssh_consent.classify(command, parse).kind
-
-
-def _cpu_best(fn, *args, runs: int = 3) -> float:
-    """The least CPU time of a few calls: other processes on the machine only ever add to it."""
-    best = None
-    for _ in range(runs):
-        t = time.process_time()
-        fn(*args)
-        took = time.process_time() - t
-        best = took if best is None else min(best, took)
-    return best
 
 
 _ASKED: list[str] = []
@@ -313,13 +303,13 @@ class ClassifierMatrixTests(unittest.TestCase):
                   lambda m: "ssh -o " + "a" * m + " web1 x", lambda m: "cat " + "a" * m + ".ssh/b")
         for shape in shapes:
             with self.subTest(shape(8)):
-                small, whole = (_cpu_best(kind, shape(m)) for m in (n // 8, n))
-                self.assertLess(whole, 16 * small + 0.02, f"{small * 1000:.1f} ms, then {whole * 1000:.1f} ms")
+                small, whole = (cpu_best(kind, shape(m)) for m in (n // 8, n))
+                self.assertLess(whole, 16 * small + SLACK, f"{small * 1000:.1f} ms, then {whole * 1000:.1f} ms")
                 self.assertLess(whole, 5.0)
         big = "ssh web1 'mkfs.ext4 /dev/sda'; : " + "A" * 100_000
         self.assertEqual(kind(big), "unknown", "over the cap a command that names ssh is not read")
         # over the cap nothing is read: 12 times the text, about the same time
-        self.assertLess(_cpu_best(kind, big), 4 * _cpu_best(kind, big[:n]) + 0.02)
+        self.assertLess(cpu_best(kind, big), 4 * cpu_best(kind, big[:n]) + SLACK)
         self.assertEqual(kind("ls " + "A" * 100_000), "none")
 
     def test_the_approval_key_carries_user_and_port(self):

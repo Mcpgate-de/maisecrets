@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402  first: a temp vault home, never the real one
+from _timing import assert_linear  # noqa: E402
 Path(_isolate.HOME).mkdir(parents=True, exist_ok=True)
 Path(_isolate.HOME, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
@@ -55,15 +56,10 @@ def took(text: str, ids) -> float:
     return time.process_time() - t
 
 
-def assert_linear(case: unittest.TestCase, make, ids, n: int) -> None:
-    """The CPU time of a scan of make(n // 8), then of make(n): linear is 8 times, quadratic 64 times. The short scan
-    is the fastest of three, after one scan that compiles the regexes. A fixed 1.0 s of wall time failed on a loaded
-    machine (2026-10-16), and the released code of each case took seconds at n (quadratic). 10 s catches a hang."""
-    detect.scan(make(64), enabled=set(ids))
-    small = min(took(make(n // 8), ids) for _ in range(3))
-    big = took(make(n), ids)
-    case.assertLess(big, 16 * small + 0.05, f"{small * 1000:.1f} ms, then {big * 1000:.1f} ms for 8 times the text")
-    case.assertLess(big, 10.0)
+def linear(case: unittest.TestCase, make, ids, n: int) -> None:
+    """tests/_timing.py: the scan of 8 times the text takes at most 16 times the CPU time. A fixed 1.0 s of wall time
+    failed on a loaded machine (2026-10-16); the released code of each case took seconds at n (quadratic)."""
+    assert_linear(case, lambda text: detect.scan(text, enabled=set(ids)), make, n)
 
 
 class AwsSecretAfterKeyIdTests(unittest.TestCase):
@@ -92,7 +88,7 @@ class AwsSecretAfterKeyIdTests(unittest.TestCase):
 
     def test_a_line_of_64k_of_key_ids_scans_in_linear_time(self):
         # released code: 32K took 2.3 s, 256K took 97 s in the hook (client timeout 20 s, then the output passes)
-        assert_linear(self, lambda n: " ".join(akid() for _ in range(n // 21)), [AWS], 64000)
+        linear(self, lambda n: " ".join(akid() for _ in range(n // 21)), [AWS], 64000)
 
 
 class CurlRuleTests(unittest.TestCase):
@@ -160,7 +156,7 @@ class CurlRuleTests(unittest.TestCase):
         # released code: 32K characters of "curl " took 16.6 s for the two curl rules and the AWS rule
         for tok in ("curl ", "curl -u ", "curl -H 'Authorization: Bearer "):
             with self.subTest(tok):
-                assert_linear(self, lambda n, tok=tok: (tok * (n // 4))[:n], CURL, 32000)
+                linear(self, lambda n, tok=tok: (tok * (n // 4))[:n], CURL, 32000)
 
 
 class LabelRuleTests(unittest.TestCase):
@@ -169,7 +165,7 @@ class LabelRuleTests(unittest.TestCase):
         # 32K characters took 0.35 s, 256K about 22 s (Gate A of 0.6.15); bounded to 400 characters as the AWS rule
         for tok in ("mysql -u root ", "redis-cli -h cache "):
             with self.subTest(tok):
-                assert_linear(self, lambda n, tok=tok: (tok * (n // 10))[:n], ("label-mysql-p", "label-redis-cli-a"),
+                linear(self, lambda n, tok=tok: (tok * (n // 10))[:n], ("label-mysql-p", "label-redis-cli-a"),
                               96000)
 
     def test_the_option_400_characters_after_the_command_is_still_found(self):
@@ -189,15 +185,15 @@ class KeywordLabelTailTests(unittest.TestCase):
     def test_a_long_run_of_letters_after_a_label_scans_in_linear_time(self):
         run = "".join(_R.choice("bcdfghjkmnpqrstvwxz") for _ in range(320000))
         ids = [r.id for r in detect.rules() if r.id.startswith("ds-keyword")]
-        assert_linear(self, lambda n: "password=" + run[:n], ids, 320000)
-        assert_linear(self, lambda n: "password=" + "pwd" * (n // 3), ids, 300000)
+        linear(self, lambda n: "password=" + run[:n], ids, 320000)
+        linear(self, lambda n: "password=" + "pwd" * (n // 3), ids, 300000)
 
     def test_a_megabyte_of_label_chains_scans_in_linear_time(self):
         # `pw=pw=…` started a label at each `pw` and each value ran 300 characters to fail at the line end: 1 MB took
         # 5.5 s (Gate B of 0.6.16, 0.6.15: 1.1 s). A label never starts after `=` now
         lit = [d["id"] for d in detect.LITERAL_RULES]
-        assert_linear(self, lambda n: "pw=" * (n // 3), lit, 1020000)
-        assert_linear(self, lambda n: "password: " * (n // 10), lit, 1000000)
+        linear(self, lambda n: "pw=" * (n // 3), lit, 1020000)
+        linear(self, lambda n: "password: " * (n // 10), lit, 1000000)
 
     def test_one_long_word_does_not_slow_the_rest_of_the_text(self):
         # codex verification of 0.6.16: one unrelated word of 200 characters sent a whole 270 KB text of password
