@@ -31,7 +31,7 @@ def cpu_best(fn, *args, runs: int = 3) -> float:
     return best
 
 
-def assert_linear(case, run, make, n: int, *, hang: float = 3.0, slack: float = SLACK) -> tuple:
+def assert_linear(case, run, make, n: int, *, hang: float = 3.0, wall: float = 7.0, slack: float = SLACK) -> tuple:
     """run(make(n // 8)), the fastest of three, then run(make(n)), the faster of two: at most 16 times plus the slack
     (linear is 8 times, quadratic 64 times), and below `hang` seconds. The inputs are made before the clock starts, and
     one call of run(make(64)) before the first measurement compiles what a first call compiles. One call of the large
@@ -39,7 +39,11 @@ def assert_linear(case, run, make, n: int, *, hang: float = 3.0, slack: float = 
     run(make(64))
     small_input, big_input = make(n // 8), make(n)
     small = cpu_best(run, small_input)
+    started = time.perf_counter()
     big = cpu_best(run, big_input, runs=2)
+    # CPU time does not see a wait (a sleep, a lock, blocking I/O): the two calls of the large input stay, on average,
+    # below `wall` seconds of wall time, the 7 s watchdog of a hook by default (Gate A review, round 2)
+    case.assertLess(time.perf_counter() - started, 2 * wall, "the large input waited, not only computed")
     case.assertLess(big, 16 * small + slack, f"{small * 1000:.1f} ms, then {big * 1000:.1f} ms for 8 times the input")
     case.assertLess(big, hang)
     return small, big

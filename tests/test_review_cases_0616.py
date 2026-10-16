@@ -142,9 +142,10 @@ class SpeedTests(unittest.TestCase):
         # each text of 8 times the size takes at most 16 times the CPU time (tests/_timing.py); a fixed 3.0 s of CPU
         # for both scans held only on an idle machine
         rec = "password: ${DB_PASSWORD}\nmot de passe : voir le coffre\n"
-        assert_linear(self, detect.scan, lambda n: rec * (n // len(rec)) + "x" * 300, 2000 * len(rec), hang=7.0)
+        assert_linear(self, detect.scan, lambda n: rec * (n // len(rec)) + "x" * 300, 2000 * len(rec),
+                      hang=7.0, wall=20.0)
         run = "".join(RNG.choice("bcdfghjkmnpqrstvwxz") for _ in range(320000))
-        assert_linear(self, detect.scan, lambda n: "password=" + run[:n], 320000, hang=7.0)
+        assert_linear(self, detect.scan, lambda n: "password=" + run[:n], 320000, hang=7.0, wall=20.0)
 
 
 if __name__ == "__main__":

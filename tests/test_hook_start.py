@@ -50,7 +50,7 @@ class ImportCompilesLittleTests(unittest.TestCase):
     def test_the_import_of_the_hooks_compiles_at_most_15_regexes_of_maisecrets(self):
         r = subprocess.run([sys.executable, "-c", _COUNT, str(ROOT)], capture_output=True, text=True, timeout=120)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertLessEqual(int(r.stdout), 15, "a module-level re.compile in detect.py or hooks.py: use _LazyRx")
+        self.assertLessEqual(int(r.stdout), 12, "a module-level re.compile in detect.py or hooks.py: use _LazyRx")
 
     def test_every_module_level_regex_of_detect_and_hooks_is_lazy(self):
         # also a pattern inside a module-level tuple, list or dict (Gate A review: _LIT_FORMS and _WINDOWED)

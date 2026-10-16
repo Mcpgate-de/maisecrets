@@ -207,7 +207,7 @@ class TokenFormatTests(unittest.TestCase):
         for rule_id, gen in TOKENS.items():
             tok, _ = gen(r)
             with self.subTest(rule=rule_id):             # each copy one short of a match; not a fixed 3 s of CPU
-                assert_linear(self, found, lambda n, tok=tok: (tok[:-2] + "  ") * n, 200, hang=7.0)
+                assert_linear(self, found, lambda n, tok=tok: (tok[:-2] + "  ") * n, 200, hang=7.0, wall=20.0)
 
     def test_an_identifier_or_a_digest_after_a_prefix_is_no_hit(self):
         """codex Gate A of 0.6.20: names of words after AVNS_, cio or oy2, and a hex digest after nfp_ or odt_."""
@@ -525,7 +525,8 @@ class SessionFormTests(unittest.TestCase):
                             (J(["sk-ant-", "api03-"]) + rd(r, 139, B64U) + " ", 500),
                             (J(["gl", "pat-"]) + rd(r, 390, B64U) + ".01. ", 300)):
             with self.subTest(n=len(one) * copies):
-                assert_linear(self, lambda text: found(text, "tool"), lambda n, one=one: one * n, copies, hang=7.0)
+                assert_linear(self, lambda text: found(text, "tool"), lambda n, one=one: one * n, copies,
+                              hang=7.0, wall=20.0)
 
 
 if __name__ == "__main__":
