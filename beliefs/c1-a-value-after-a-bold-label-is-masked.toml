@@ -1,0 +1,10 @@
+# c1-a-value-after-a-bold-label-is-masked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-value-after-a-bold-label-is-masked"
+control = "C1"
+statement = "In a tool result, a value after a label in Markdown bold (**Label:** value, **Label**: value, __Label:__ value) is masked as after the plain label: the cleaned copy drops the stars around the label. A typed prompt keeps its decisions."
+runner = ["tests/test_personal_after_its_label.py::BoldLabelTests::test_a_value_after_a_bold_label_is_masked_like_after_the_plain_label"]
+
+[proof]
+file = "maisecrets/normalise.py"
+find = '''STAGES = ("entity", "ansi", "invisible", "fullwidth", "emphasis", "decode")'''
+replace = '''STAGES = ("entity", "ansi", "invisible", "fullwidth", "decode")'''

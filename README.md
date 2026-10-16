@@ -817,7 +817,8 @@ A value can also hide from the shape rules behind what a terminal or a renderer 
 tool result or a file (not in a typed prompt), the detector also scans a cleaned copy: without ANSI
 colour codes, without zero-width and direction characters (U+00AD, U+200B to U+200F, U+202A to
 U+202E, U+2060 to U+2064, U+2066 to U+2069, U+FEFF), with HTML entities and fullwidth letters
-written out, and with each base64 or hex run decoded that holds text (gzip inside base64 is opened,
+written out, without the stars of a label in Markdown bold (`**Date of birth:** <value>`,
+`**Password**: <value>`, `__Name:__ <value>` read as the plain label, so every label rule sees the value), and with each base64 or hex run decoded that holds text (gzip inside base64 is opened,
 a run inside the text is decoded once more). A hit in the copy redacts the original span, the hidden
 characters with it; a value in a decoded run takes the whole run, as in a Kubernetes Secret or a
 docker `auth` field. The copy is only scanned around the lines that changed. Bounds: a text over 1

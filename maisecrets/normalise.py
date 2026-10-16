@@ -2,7 +2,9 @@
 
 A value the model reads can be split or disguised by what a terminal or a renderer hides: an ANSI colour code or a
 zero-width space inside a token, an HTML entity, fullwidth letters, or a base64 or hex run around it. Each stage
-removes or decodes one of them. The copy keeps, per character, the range of the original it came from, so a span
+removes or decodes one of them. Markdown bold around a label (`**Password:** <value>`) hides the label from
+the label rules; the emphasis stage drops its stars.
+The copy keeps, per character, the range of the original it came from, so a span
 found in the copy redacts the true text, with whatever was hidden inside it. A value found in a decoded run takes the
 whole run.
 
@@ -25,7 +27,7 @@ import zlib
 
 # entities first: `&#8203;` and `&#27;[1m` written as entities become a zero-width character and an ANSI code that the
 # next stages remove (`&#27;` by _ESCAPE_ENTITIES: html.unescape drops it)
-STAGES = ("entity", "ansi", "invisible", "fullwidth", "decode")
+STAGES = ("entity", "ansi", "invisible", "fullwidth", "emphasis", "decode")
 
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
 # zero-width and format characters a terminal does not show: soft hyphen, zero-width space and joiners, direction
@@ -34,6 +36,11 @@ _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\
 _INVISIBLE_RE = re.compile("[­​-‏‪-‮⁠-⁤⁦-⁩﻿]")
 _ENTITY_RE = re.compile(r"&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")
 _FULLWIDTH_RE = re.compile("[！-～]")
+# a label in Markdown bold: **Label:** value, **Label**: value, __Label:__ value. The copy keeps the label and its colon
+# without the stars, so every label rule reads the value after it. `__` needs a capital first and a colon, never `=`:
+# __version__ = "1.2", __all__: list are Python names
+_EMPHASIS_RE = re.compile(r"(?<![*\w])\*\*([^\W\d_][^*\n:]{0,48}?)(?:(:)\*\*(?=[ \t])|\*\*(?=[ \t]{0,3}[:=]))"
+                          r"|(?<![_\w])__([A-ZÀ-Þ][^_*\n:]{0,48}?)(?:(:)__(?=[ \t])|__(?=[ \t]{0,3}:[ \t]))")
 
 MIN_B64 = 24
 MIN_HEX = 32
@@ -87,6 +94,37 @@ def _sub(text: str, rx, repl, stop=None):
         pos = b
     if not out:
         return None
+    out.append(text[pos:])
+    starts.extend(range(pos, len(text)))
+    ends.extend(range(pos + 1, len(text) + 1))
+    return "".join(out), starts, ends
+
+
+def _drop_stars(text: str):
+    """text without the stars of each bold label; the label and the rest keep their own ranges. Inside a line the
+    opening stars become one space, so a value before the next bold label ends there (**Full name:** Dana Okafor
+    **Role:** reviewer: the name rules join words with one space only)."""
+    cut = []
+    for m in _EMPHASIS_RE.finditer(text):
+        g = 1 if m.group(1) is not None else 3
+        a = m.start()
+        cut.append((a, m.start(g), " " if a and text[a - 1] != "\n" else ""))
+        cut.append((m.end(g) + (1 if m.group(g + 1) else 0), m.end(), ""))
+    if not cut:
+        return None
+    out: list = []
+    starts: list = []
+    ends: list = []
+    pos = 0
+    for a, b, rep in cut:
+        out.append(text[pos:a])
+        starts.extend(range(pos, a))
+        ends.extend(range(pos + 1, a + 1))
+        if rep:
+            out.append(rep)
+            starts.append(a)
+            ends.append(b)
+        pos = b
     out.append(text[pos:])
     starts.extend(range(pos, len(text)))
     ends.extend(range(pos + 1, len(text) + 1))
@@ -199,6 +237,10 @@ def _stage(name: str, text: str):
         return None if text.isascii() else _sub(text, _INVISIBLE_RE, lambda m: "")
     if name == "entity":
         return _sub(text, _ENTITY_RE, _entity) if "&" in text else None
+    if name == "emphasis":
+        if "**" not in text and "__" not in text:
+            return None
+        return _drop_stars(text)
     if name == "fullwidth":
         return None if text.isascii() else _sub(text, _FULLWIDTH_RE, lambda m: chr(ord(m.group(0)) - 0xFEE0))
     if name == "decode":
