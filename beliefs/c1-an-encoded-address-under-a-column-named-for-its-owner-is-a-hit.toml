@@ -1,0 +1,10 @@
+# c1-an-encoded-address-under-a-column-named-for-its-owner-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-an-encoded-address-under-a-column-named-for-its-owner-is-a-hit"
+control = "C1"
+statement = "An address with its @ written as %40 in a CSV cell is masked when the header of its column names a mail address or its owner (contact, login, username, recipient, courriel, correo)."
+runner = ["tests/test_encoded_mail_columns.py::EncodedMailColumnTests::test_a_column_named_for_the_owner_of_an_address_masks_it"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''                          r"|(?<![a-z])(?:contacts?|logins?|users?|user[ _-]?name|sender|recipients?|reply[ _-]?to)"'''
+replace = '''                          r"|(?<![a-z])(?:x-no-such-column)"'''

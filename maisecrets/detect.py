@@ -2476,13 +2476,34 @@ def _encoded_mail_expected(text: str, start: int, end: int) -> bool:
     sep = before or (after if after in (",", ";", "\t") else ",")
     if not before and not after:
         return False   # a value alone on its line is no cell of a row
+    if text[start:end].strip('"').rsplit(".", 1)[-1].lower() in _FILE_EXTENSIONS:
+        return False   # logo%402x.png: an asset at twice the size, not an address
     import csv   # here: the hooks pay for every module at import
     col = len(next(csv.reader([text[line:start + 1]], delimiter=sep), [""])) - 1
     for head in text[:4000].split("\n")[:5]:
         cells = next(csv.reader([head], delimiter=sep), [])
-        if len(cells) > col and any("mail" in c.lower() for c in cells) and text.find(head) < line:
-            return "mail" in cells[col].lower()
+        # a header holds names, not values: a row with an address in it is data, even with mailbox.org in it
+        if (len(cells) > col and "%40" not in head and "@" not in head and any(map(_names_a_mail_column, cells))
+                and text.find(head) < line):
+            return _names_a_mail_column(cells[col])
     return False
+
+
+# a header cell of a column of addresses: a mail word in a few languages, or a word that names who an address
+# belongs to (contact, login, user, recipient). Before 0.6.25 only "mail" counted, and an encoded address under a
+# header such as `contact` or `login` passed. `to` and `from` are left out: a migration table has them as columns
+_MAIL_COLUMN_RE = _LazyRx(r"(?i)mail|courriel|correo|e-?post(?![a-z])|s\u00e4hk\u00f6posti"
+                          r"|(?<![a-z])(?:contacts?|logins?|users?|user[ _-]?name|sender|recipients?|reply[ _-]?to)"
+                          r"(?![a-z])")
+# the extension of a file that an asset name ends in: name%402x.png is an image at twice the size
+_FILE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "ico", "bmp", "tif", "tiff", "js",
+                              "mjs", "cjs", "ts", "css", "map", "json", "html", "htm", "xml", "txt", "pdf",
+                              "woff", "woff2", "ttf", "otf", "mp3", "mp4", "webm", "wasm", "gz", "tgz", "jar"})
+
+
+def _names_a_mail_column(cell: str) -> bool:
+    cell = cell.strip().strip("\"'")
+    return bool(_MAIL_COLUMN_RE.search(cell))
 
 
 def is_public_test_value(value: str, kind: str) -> bool:

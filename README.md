@@ -1222,7 +1222,8 @@ Four sources, one scanner (`maisecrets/detect.py`):
 - **Own rules** for what none of the three covers: email (a
   bounded regex; the unbounded one took 11 s on an 80 KB dotted run), an email with its
   `@` written `%40` where an address is expected (after `=`, `mailto:`, `users/` or a mail
-  word such as `To:`), phone
+  word such as `To:`, or in a CSV column whose header names a mail address or its owner, such as
+  `email`, `contact`, `login` or `courriel`), phone
   with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, a
   password with no user in a URL (`redis://:…@host`), the secret half of an AWS
   key pair within a few lines after its `AKIA…` id (at most 4 lines on, and at most
