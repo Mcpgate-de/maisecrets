@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 12 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 262 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 263 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -406,8 +406,9 @@ run".
   and the endpoint of each server; never a value or a key; the values a server
   gave stay in the store for one hour, so their echo in a tool result is
   redacted); one
-  `Client-Vault` header per user-scope MCP server in the client's
-  `.claude.json`, with a backup beside it ("Vault references"); the value FIFOs in the per-user runtime or temp
+  `Client-Vault` header per user-scope MCP server in the config file the
+  client uses (`~/.claude/.config.json` when it is not empty, else
+  `~/.claude.json`), with a backup beside it ("Vault references"); the value FIFOs in the per-user runtime or temp
   directory; the vault backend; on a blocked prompt the clipboard. With
   `scrub_transcript` on, it masks the raw value inside the client's transcript
   file named in the hook payload, in place, because the client writes the
@@ -1913,12 +1914,16 @@ How it works (`docs/PROTOCOL.md` section 4):
 
 1. Until an MCP server that you added yourself (user scope, an `https` URL)
    sends such a token, maisecrets asks no server and writes nothing into
-   `~/.claude.json`. Tokens in a Bash output, a file, a web page or from a
+   the client's config file. Tokens in a Bash output, a file, a web page or from a
    server in a project's `.mcp.json` start nothing.
 2. With the first token of that server, maisecrets asks it once for its
    metadata (RFC 9728). Only if the server names a vault endpoint there does
    maisecrets make a random key for it and write a `Client-Vault` header with
-   a hash of that key into that server's entry in `~/.claude.json`. It
+   a hash of that key into that server's entry in the config file that
+   Claude Code itself uses: `~/.claude/.config.json` when that file is not
+   empty, else `~/.claude.json` (both in `CLAUDE_CONFIG_DIR` when it is set;
+   the rule of 2.1.301). The other file is then an old copy, and maisecrets
+   never reads or writes it. `/maisecrets:status` names the file. It
    changes nothing else in the file and keeps a backup beside it. You see a
    notice once. Claude Code reads the header at its next start (measured with
    2.1.301), so the values come from then on. A server without the field

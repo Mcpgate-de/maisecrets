@@ -501,11 +501,11 @@ class Online(Base):
         self.result("demo", tok("EMAIL_1"))
         reason = self.denied(self.write(tok("EMAIL_1")))
         self.assertRegex(reason, r"links this computer from \d{4}-\d\d-\d\dT")
-        self.assertRegex(vault_refs.status_lines(load_config(), Vault().backend)[0], r": pending until \d{4}-")
+        self.assertRegex(vault_refs.status_lines(load_config(), Vault().backend)[-1], r": pending until \d{4}-")
 
     def test_status_says_linked(self):
         self.ready()
-        self.assertTrue(vault_refs.status_lines(load_config(), Vault().backend)[0].endswith(": linked"))
+        self.assertTrue(vault_refs.status_lines(load_config(), Vault().backend)[-1].endswith(": linked"))
 
     def test_p6_an_old_reference_is_expired_and_a_wrong_clock_is_named(self):
         self.ready()
@@ -571,7 +571,7 @@ class Online(Base):
         self.result("demo", tok("EMAIL_1"))
         reason = self.denied(self.write(tok("EMAIL_1")))
         self.assertNotIn("ignore", reason)
-        line = vault_refs.status_lines(load_config(), Vault().backend)[0]
+        line = vault_refs.status_lines(load_config(), Vault().backend)[-1]
         self.assertNotIn("ignore", line)
         self.assertIn("pending until a time the server did not give", line)
 
