@@ -1,0 +1,10 @@
+# c6-codex-on-windows-names-the-file-route: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c6-codex-on-windows-names-the-file-route"
+control = "C6"
+statement = "On Codex for Windows a placeholder in a shell command is refused, and the refusal names the route that works there: apply_patch puts the value into the script or a file it reads, and the script runs with no placeholder in the command. It never names the script argument, which is refused there too."
+runner = ["tests/test_windows_document_route.py::WindowsRefusalNamesTheFileRouteTests::test_codex_on_windows_gets_the_file_route_and_not_the_argument_route"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "                     + (_windows_file_route(payload, cfg, keys)\n"
+replace = "                     + (\"\"\n"

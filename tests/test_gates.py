@@ -1161,7 +1161,9 @@ class DocumentRouteTests(unittest.TestCase):
             out = _bash_pre("python3 -c 'print(1)' " + self.e.ref, client=_hygiene.CODEX)["hookSpecificOutput"]
         self.assertEqual(out.get("permissionDecision"), "deny", out)
         self.assertIn("cannot be placed in a shell command on Codex for Windows", out["permissionDecisionReason"])
-        self.assertNotIn("make_doc", out["permissionDecisionReason"])
+        # the argument route is refused there too: only the file route (tests/test_windows_document_route.py)
+        self.assertNotIn("with the placeholder as its argument", out["permissionDecisionReason"])
+        self.assertIn("write a text file with apply_patch", out["permissionDecisionReason"])
 
     def test_the_route_names_the_refused_interpreter_and_every_key(self):
         e2 = Vault().put(PLAIN, "SECRET", "manual", session="S1")

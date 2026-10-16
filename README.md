@@ -279,9 +279,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 33 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/run.py                                 # 34 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 10 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 247 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 252 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -861,7 +861,12 @@ A placeholder turns back into its value only here:
   with Write, Edit or apply_patch. The file on disk gets the value; the model
   keeps the placeholder (harness scenario `document_gets_the_value`, Claude Code
   and Codex). Where the rehydration setting refuses these routes too, the
-  refusal names none of them.
+  refusal names none of them. On Windows the argument route does not work
+  where a shell placeholder is refused (Codex, and the PowerShell tool of
+  Claude Code). There the refusal and the primer name the file route only:
+  a text file with the placeholder alone on a line (apply_patch, Write or
+  Edit), which the script reads; then the script runs with no placeholder in
+  the command.
 - **ssh through the Claude Code sandbox.** A value may go to your own servers
   over ssh on one condition: the command runs in Claude Code's Bash sandbox,
   where the operating system forces every connection through Claude Code's
@@ -1998,7 +2003,10 @@ a to-do.
 - **Codex on Windows** runs commands in PowerShell, where the bash quoting
   contexts of the grant rewrite do not apply. The prompt block, the output
   redaction and the inline MCP resolve run through `hooks/run.cmd`; a
-  placeholder in a shell command is denied with a reason. The launcher is
+  placeholder in a shell command is denied with a reason, and the reason
+  names the route that works: apply_patch puts the value into a text file
+  that the script reads, and the script then runs with no placeholder in the
+  command. The launcher is
   proven in the GitHub Actions Windows job in the exact form Codex uses
   (`cmd.exe /C`, block and pass with a UTF-8 payload), not yet in a live
   Codex session.

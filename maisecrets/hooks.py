@@ -447,7 +447,7 @@ def take_pending(session: str | None = None) -> str | None:
     return text
 
 
-PRIMER = (
+_PRIMER_HEAD = (
     # Written as what to do, not as a list of what is refused: a primer of prohibitions next to an
     # ordinary ops request (base64, sudo) read like an attempt to get around a control, and a model
     # safeguard paused the session (field report on 0.5.8, 2026-09-28)
@@ -456,21 +456,56 @@ PRIMER = (
     "value in when the call runs. In an MCP tool argument and in the content of Write, Edit, MultiEdit or "
     "NotebookEdit it goes in at call time; WebFetch and a subagent prompt keep it as plain text. In Bash, "
     "give it as a plain argument, inside '…' or \"…\", or in an unquoted heredoc; the shell reads the value "
-    "when the command runs. For awk, pass it as V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. To put a value into a "
-    "document or a generated file (a PDF, a .docx, a page), save the generator as a script file and run it with "
-    "the placeholder as its argument, for example python3 make_pdf.py ⟦KEY⟧, or put the placeholder into the "
-    "file content with Write, Edit or apply_patch; the file on disk gets the value, and you keep the "
-    "placeholder. To give a value to a "
-    "remote host, pipe it on stdin to the command that reads it, for example "
-    "printf '%s' ⟦KEY⟧ | ssh host 'sudo zgrep -F -f - /var/log/app.log' (inside the Claude Code sandbox, "
-    "one host per command). A form that would run the value as code or change it "
-    "(a nested shell, eval, backticks, $'…', a quoted heredoc, an encoder, a slice, set -x) gets an answer "
-    "that names a form that works. The value stays with the user: to use it, use the placeholder; the user "
-    "manages the stored values and the settings. When the user asks for the value in a file or a command, "
-    "put the placeholder there as they asked. In test data, write values that name themselves (testpass, "
-    "my-test-token), addresses at example.com and placeholders such as <your-token>: maisecrets leaves them "
-    "alone, and a password in a test file is taken for a fixture."
+    "when the command runs. For awk, pass it as V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. "
 )
+# the document route: on POSIX and in Git Bash the shell reads the value for a script argument
+_PRIMER_DOCUMENT = (
+    "To put a value into a document or a generated file (a PDF, a .docx, a page), save the generator as a "
+    "script file and run it with the placeholder as its argument, for example python3 make_pdf.py ⟦KEY⟧, "
+    "or put the placeholder into the file content with Write, Edit or apply_patch; the file on disk gets "
+    "the value, and you keep the placeholder. "
+)
+# on Windows a placeholder in a PowerShell command, and in every shell command of Codex, is refused, so the
+# argument route cannot work there; the file tools take the value (field report, Codex on Windows, 2026-10-16).
+# A text file first: a value in program code is parsed as code, the reason inline code is refused (Gate B)
+_PRIMER_DOCUMENT_WINDOWS = (
+    "To put a value into a document or a generated file (a PDF, a .docx, a page), write a text file with the "
+    "placeholder alone on a line (for example value.txt) with Write, Edit or apply_patch, and let the generator "
+    "script read the value from that file; the file on disk gets the value, and you keep the placeholder. Then "
+    "run the script with no placeholder in the command. Put the placeholder into program code only where a "
+    "quote or a backslash in the value cannot change the code. "
+)
+_PRIMER_TAIL = (
+    "To give a value to a remote host, pipe it on stdin to the command that reads it, for example printf "
+    "'%s' ⟦KEY⟧ | ssh host 'sudo zgrep -F -f - /var/log/app.log' (inside the Claude Code sandbox, one "
+    "host per command). A form that would run the value as code or change it (a nested shell, eval, "
+    "backticks, $'…', a quoted heredoc, an encoder, a slice, set -x) gets an answer that names a form "
+    "that works. The value stays with the user: to use it, use the placeholder; the user manages the "
+    "stored values and the settings. When the user asks for the value in a file or a command, put the "
+    "placeholder there as they asked. In test data, write values that name themselves (testpass, "
+    "my-test-token), addresses at example.com and placeholders such as <your-token>: maisecrets leaves "
+    "them alone, and a password in a test file is taken for a fixture."
+)
+PRIMER = _PRIMER_HEAD + _PRIMER_DOCUMENT + _PRIMER_TAIL
+# on Windows a shell command takes a value only in the Bash tool of Claude Code (Git Bash)
+_PRIMER_HEAD_WINDOWS = _PRIMER_HEAD.replace(
+    "In Bash, give it as a plain argument",
+    "On Windows, a placeholder in a PowerShell command, and in any shell command of Codex, is refused. In the "
+    "Bash tool of Claude Code (Git Bash), give it as a plain argument").replace("For awk, pass it", "For awk "
+                                                                                "in Git Bash, pass it")
+_PRIMER_TAIL_WINDOWS = _PRIMER_TAIL.replace("To give a value to a remote host", "In Git Bash, to give a value "
+                                                                              "to a remote host")
+PRIMER_WINDOWS = _PRIMER_HEAD_WINDOWS + _PRIMER_DOCUMENT_WINDOWS + _PRIMER_TAIL_WINDOWS
+
+
+def primer(cfg: dict | None = None, client: str = "claude") -> str:
+    """The primer for this system. On Windows it names the file route for a document, not the script argument,
+    and it names that route only where the rehydration setting lets the file tool through (Gate B, 2026-10-16)."""
+    if platform.system() != "Windows":
+        return PRIMER
+    if cfg is not None and rehydration.outcome(client, rehydration.policy(cfg, "file")) == "deny":
+        return _PRIMER_HEAD_WINDOWS + _PRIMER_TAIL_WINDOWS
+    return PRIMER_WINDOWS
 
 
 # --------------------------------------------------------- UserPromptSubmit --
@@ -1057,7 +1092,7 @@ def user_prompt(payload: dict) -> dict:
             # the model has never seen the bracket syntax; without this it asks the user for the
             # value, and that value is blocked again (agent review, 2026-09-26)
             return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                           "additionalContext": PRIMER}}
+                                           "additionalContext": primer(cfg, client_of(payload))}}
         return {}
     copied = _clipboard(rewritten)
     _save_pending(rewritten, session)
@@ -2434,6 +2469,24 @@ def _file_route(payload: dict, cfg: dict, keys: list[str], interpreter: str = "p
             f"{args}.{files} Do not ask the user to type the value in.")
 
 
+def _windows_file_route(payload: dict, cfg: dict, keys: str) -> str:
+    """The route for a value that must go into a file or a document where no shell command can take it: Codex on
+    Windows and the PowerShell tool of Claude Code. There a placeholder as a script argument is refused too, so the
+    route of ``_file_route`` (run the script with the placeholder as its argument) cannot work; the model followed it
+    and gave up (field report, Codex in the ChatGPT app on Windows, 2026-10-16). The file tool can take the value on
+    Windows as on the other systems. Empty when the rehydration policy refuses the file tool too."""
+    client = client_of(payload)
+    if rehydration.outcome(client, rehydration.policy(cfg, "file")) == "deny":
+        return ""
+    tool = "apply_patch" if client == "codex" else "Write or Edit"
+    return (f" To put the value into a file or a document, write a text file with {tool} that holds {keys} "
+            "alone on a line (for example value.txt), and let the script read the value from that file: "
+            "maisecrets puts the value in when the file is written. Then run the script with no placeholder in "
+            "the command, for example python make_doc.py. A placeholder as an argument of a PowerShell command, "
+            "or of any shell command of Codex on Windows, does not work. For a call to a service, an MCP tool "
+            "takes the placeholder. Do not ask the user to type the value in.")
+
+
 def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     """Bash: every value is read into a shell variable in the MAIN shell before the command
     runs, and the placeholder becomes that variable in its quoting context. The read fails
@@ -2505,8 +2558,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                      "command on Windows yet. The command did not run. Write it into a file with Write instead.")
     if windows and client_of(payload) == "codex":
         return _deny(f"maisecrets: {keys} cannot be placed in a shell command on Codex for Windows "
-                     "(PowerShell quoting is not supported). The command did not run. Use the value "
-                     "through an MCP tool, or ask the user to run the command themselves.")
+                     "(PowerShell quoting is not supported). The command did not run."
+                     + (_windows_file_route(payload, cfg, keys)
+                        or " Use the value through an MCP tool, or ask the user to run the command themselves."))
     for k, a, _b in refs:
         why = _REFUSED_CONTEXT.get(ctxs[a])
         if why:
@@ -3318,9 +3372,10 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
     keys = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(k for k, _a, _b in find_refs(command)))
     if keys:
         return _deny(f"maisecrets: {keys} cannot be placed in a PowerShell command (maisecrets places values "
-                     "in Bash commands only; PowerShell quoting is not supported). The command did not run. Use "
-                     "the value through an MCP tool or a file tool, or ask the user to run the command "
-                     "themselves. With Git for Windows installed, Claude Code offers Bash instead.")
+                     "in Bash commands only; PowerShell quoting is not supported). The command did not run."
+                     + (_windows_file_route(payload, cfg or {}, keys)
+                        or " Use the value through an MCP tool or a file tool, or ask the user to run the command "
+                        "themselves.") + " With Git for Windows installed, Claude Code offers Bash instead.")
     if (cfg or {}).get("ssh_consent"):
         from . import ssh_consent
         m = ssh_consent._TOKEN_RE.search(command)

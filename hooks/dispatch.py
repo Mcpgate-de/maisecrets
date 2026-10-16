@@ -145,7 +145,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     codex = _is_codex()
     from maisecrets.vault import intro_line  # noqa: E402
     import time
-    from maisecrets.hooks import PRIMER  # noqa: E402
+    from maisecrets.hooks import primer  # noqa: E402
     from maisecrets.vault import ConfigError, load_config  # noqa: E402
     HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
@@ -293,7 +293,8 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         if note:
             out["systemMessage"] = out.get("systemMessage", "") + " " + note
     # the model reads what a placeholder is once per session, before it meets one
-    out["hookSpecificOutput"] = {"hookEventName": "SessionStart", "additionalContext": PRIMER}
+    out["hookSpecificOutput"] = {"hookEventName": "SessionStart",
+                                 "additionalContext": primer(cfg, "codex" if codex else "claude")}
     print(json.dumps(out))
     sys.exit(0)
 sys.exit(main(["hook", sys.argv[1] if len(sys.argv) == 2 else ""]))

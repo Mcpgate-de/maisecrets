@@ -1,0 +1,10 @@
+# c6-the-windows-primer-names-the-file-route: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c6-the-windows-primer-names-the-file-route"
+control = "C6"
+statement = "On Windows the primer names the file route for a document and not the script argument, which a shell command there cannot take."
+runner = ["tests/test_windows_document_route.py::WindowsRefusalNamesTheFileRouteTests::test_the_primer_on_windows_names_the_file_route_only"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if platform.system() != \"Windows\":\n        return PRIMER\n"
+replace = "    if True:\n        return PRIMER\n"
