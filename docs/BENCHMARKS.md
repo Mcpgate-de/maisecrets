@@ -142,7 +142,9 @@ differ by up to 7 %). Source: `scripts/measure_scan_time.py --maisecrets <v0.6.1
 Hook time, 0.6.24 against 0.6.23 (2026-10-16): the CPU time (user + system) of one hook call, a new process each, the
 median of 21 calls after one warm-up, with compiled modules in both trees. Synthetic payloads: a typed prompt of 1 KB
 (`UserPromptSubmit`), a Bash result of 20 KB of log lines and a Read result of 70 KB of Python code (`PostToolUse`).
-Load average 2 to 3. Source: a script outside this repository that runs `hooks/dispatch.py` with each payload.
+Load average 2 to 3. Source: a script outside this repository that runs `hooks/dispatch.py` with each payload;
+`scripts/profile_hook.py` uses the same payloads (the "70 KB" Read result holds 62,311 characters) and a similar method,
+and splits the time into interpreter, import, rule list, regex compilation and scan, per rule class.
 
 | Payload | Python 3.14, 0.6.23 | Python 3.14, 0.6.24 | Python 3.9, 0.6.23 | Python 3.9, 0.6.24 |
 |---|---|---|---|---|
