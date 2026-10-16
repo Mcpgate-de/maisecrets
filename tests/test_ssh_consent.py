@@ -55,6 +55,17 @@ def kind(command: str) -> str:
     return ssh_consent.classify(command, parse).kind
 
 
+def _cpu_best(fn, *args, runs: int = 3) -> float:
+    """The least CPU time of a few calls: other processes on the machine only ever add to it."""
+    best = None
+    for _ in range(runs):
+        t = time.process_time()
+        fn(*args)
+        took = time.process_time() - t
+        best = took if best is None else min(best, took)
+    return best
+
+
 _ASKED: list[str] = []
 
 
@@ -292,20 +303,23 @@ class ClassifierMatrixTests(unittest.TestCase):
         self.assertEqual(counted, 328, "a row was added or lost: update the count")
 
     def test_a_long_command_is_answered_in_time(self):
-        # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)
-        import time as _t
+        # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3). The
+        # growth from an eighth of the longest command that is read to the whole is the check (linear: 8 times,
+        # quadratic: 64 times), the best of three calls each. A fixed 2 s failed under load (2026-10-16); 5 s only
+        # catches a hang
         n = ssh_consent.MAX_READ - 100
-        for command in ("ssh web1 'x'; : " + "A" * n, "ssh web1 x; " + ".ss" * (n // 3), "ssh web1 x " + ">" * n,
-                        "ssh web1 '" + "dd " * (n // 3) + "'", "ssh -o " + "a" * n + " web1 x",
-                        "cat " + "a" * n + ".ssh/b"):
-            with self.subTest(command[:20]):
-                t = _t.time()
-                kind(command)
-                self.assertLess(_t.time() - t, 2.0)
+        shapes = (lambda m: "ssh web1 'x'; : " + "A" * m, lambda m: "ssh web1 x; " + ".ss" * (m // 3),
+                  lambda m: "ssh web1 x " + ">" * m, lambda m: "ssh web1 '" + "dd " * (m // 3) + "'",
+                  lambda m: "ssh -o " + "a" * m + " web1 x", lambda m: "cat " + "a" * m + ".ssh/b")
+        for shape in shapes:
+            with self.subTest(shape(8)):
+                small, whole = (_cpu_best(kind, shape(m)) for m in (n // 8, n))
+                self.assertLess(whole, 16 * small + 0.02, f"{small * 1000:.1f} ms, then {whole * 1000:.1f} ms")
+                self.assertLess(whole, 5.0)
         big = "ssh web1 'mkfs.ext4 /dev/sda'; : " + "A" * 100_000
-        t = _t.time()
         self.assertEqual(kind(big), "unknown", "over the cap a command that names ssh is not read")
-        self.assertLess(_t.time() - t, 1.0)
+        # over the cap nothing is read: 12 times the text, about the same time
+        self.assertLess(_cpu_best(kind, big), 4 * _cpu_best(kind, big[:n]) + 0.02)
         self.assertEqual(kind("ls " + "A" * 100_000), "none")
 
     def test_the_approval_key_carries_user_and_port(self):
