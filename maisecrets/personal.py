@@ -44,8 +44,13 @@ _PHONE_WORD_RE = re.compile(r"(?i)phone|(?<![a-z])(?:telefon\w*|tel|cell|mobile?
 # ------------------------------------------------------------------------------------ birth date after a label --
 _DATE = (r"(?:\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{1,2}\.?\s+[A-Za-zäéû]{3,9}\.?\s+\d{4}"
          r"|[A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})")
+# the parameters of a vCard property between its name and the colon: ADR;TYPE=home:, FN;CHARSET=UTF-8:,
+# BDAY;VALUE=date:, and the bare type of vCard 2.1 (TEL;CELL:). With them, the property is the same field as without.
+# A colon must follow: /api/users/bday;from=2020-01-01 is a path, and its date is no birth date (review of 0.6.25)
+_VCARD_PARAMS = r"(?:(?:;[A-Za-z][\w-]{0,20}(?:=(?:\"[^\"\n]{0,80}\"|[^:;\"\n]{0,60}))?){1,8}(?=:))?"
 # "born" alone is left out: "born 23 June 1912" is history in a text about a public person (holdout v6 negative)
-_BIRTH_RE = re.compile(r"(?i)(?:\bd\.?o\.?b\b|date of birth|birth[ _-]?date|\bbday\b|\bgeb(?:\.|oren am|urtsdatum)"
+_BIRTH_RE = re.compile(r"(?i)(?:\bd\.?o\.?b\b|date of birth|birth[ _-]?date|\bbday\b" + _VCARD_PARAMS
+                       + r"|\bgeb(?:\.|oren am|urtsdatum)"
                        r"|n[ée]\(?e?\)? le|date de naissance|fecha de nacimiento|\bnac[ií](?:d[oa])? el"
                        r"|data de nascimento|data di nascita|\bnato il)[\"'\]]?\s{0,3}[:=]?\s{0,3}[\"'(]?\s{0,3}"
                        r"(" + _DATE + r")(?!\d)")
@@ -149,7 +154,8 @@ _PERSON_LABELS = (r"full[ _-]?name|customer[ _-]?name|first[ _-]?name|last[ _-]?
                   r"|guardian|beneficiary|billed to|oncall|on-call|requested by|reviewed by|approved by|salari[ée]"
                   r"|vorname|nachname|mieter|vermieter|ansprechpartner(?:in)?|pr[ée]nom")
 # a label that also names a product, a service, a team or a document: its value must not read as words
-_WEAK_LABELS = r"fn|name|display[ _-]?name|owner|author|driver|holder|kunde|inhaber(?:in)?|nom|nombre|nome"
+_WEAK_LABELS = (r"fn" + _VCARD_PARAMS
+                + r"|name|display[ _-]?name|owner|author|driver|holder|kunde|inhaber(?:in)?|nom|nombre|nome")
 _NAME_LABEL_RE = re.compile(
     r"(?i:(?<![a-z_./-])(?:(" + _PERSON_LABELS + r")|(" + _WEAK_LABELS + r")))"
     r"[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?[ \t]{0,3}" + _NAME_VALUE + r"(?![\w'’])")
@@ -395,6 +401,9 @@ FORMS = {
     "name-non-latin-after-label": (NAME, "tool", "generic", "label"),
     "phone-url-encoded": (PHONE, "tool", "generic", "label"),
     "phone-wrapped-line": (PHONE, "tool", "generic", "form"),
+    "address-vcard-fields": (ADDRESS, "tool", "generic", "form"),
+    "name-vcard-n": (NAME, "tool", "generic", "form"),
+    "birth-date-vcard-compact": (BIRTH_DATE, "tool", "generic", "form"),
 }
 # a value that only names one: a variable, a template, an elision, a path
 _NOT_A_VALUE_START = ("$", "%", "{", "<", "(", "[", "*", "#", "/", ".")
@@ -503,7 +512,8 @@ _JP_ADDRESS_RE = _lazy(r"〒\d{3}-\d{4}[ 　]?[^\s\"',;<>|]{2,40}")
 _JP_COMPANY_RE = _lazy(r"株式会社|有限会社|合同会社|本社|支社|支店|営業所|事務所|工場|センター|ビル|役所"
                             r"|大学|病院")
 _ADDRESS_LABEL_RE = _lazy(
-    r"(?i)(?<![a-z_])(address(?: on file)?|home[ _-]?address|adr|ship[ _-]?to|reship to|property|lives"
+    r"(?i)(?<![a-z_])(address(?: on file)?|home[ _-]?address|adr" + _VCARD_PARAMS
+    + r"|ship[ _-]?to|reship to|property|lives"
     r"|endere[cç]o|direcci[oó]n|adresse|location)[\"']?\s{0,3}:\s{0,3}[\"']?(;*)([^\n\"|;]{8,100}?)"
     r"(?=[\"\n|]|\s{2}|\.\s|$)")
 # a house number and a street word, in either order: 12 Harbour Lane, Rua das Flores 12,
@@ -519,7 +529,7 @@ _CJK_NAME = "一-鿿가-힯぀-ヿ"
 _NONLATIN_LABEL_RE = _lazy(
     r"(?i)(?:(?<![a-z_])(?:full[ _-]?name|native name|(?:employee|patient|customer|contact|recipient)[ _-]?name"
     r"|beneficiary)[\"']?[ \t]{0,3}[:=]?"
-    r"|^fn[\"']?[ \t]{0,3}[:=])[ \t]{0,3}[\"']?"
+    r"|^fn" + _VCARD_PARAMS + r"[\"']?[ \t]{0,3}[:=])[ \t]{0,3}[\"']?"
     r"((?:[" + _NONLATIN + r"]{2,20}(?: [" + _NONLATIN + r"]{2,20}){1,3})|[" + _CJK_NAME + r"]{2,5})(?![\w])", re.M)
 # names of a language in its own script: a locale table is no person
 _AUTONYMS = frozenset({"русский", "українська", "беларуская", "български", "српски", "македонски", "ελληνικά",
@@ -536,6 +546,92 @@ def _line_back(text: str, pos: int, most: int = 120) -> int:
     lo = max(0, pos - most)
     nl = text.rfind("\n", lo, pos)
     return nl + 1 if nl >= 0 else lo
+
+
+# the structured properties of a vCard (RFC 6350), one per line, in any group (item1.ADR, home.ADR): ADR holds
+# box;extended;street;locality;region;code;country, N holds family;given;additional;prefix;suffix. Contact exports
+# of Apple, Google and Outlook write the address in its fields, so the address label never saw it (review of 0.6.25).
+# A line starts after a newline, after spaces (YAML, a heredoc) or after an escaped \n (a vCard in a JSON string), and
+# its value ends there too
+_VCARD_LINE = r"(?im)(?:^|(?<=\\n))[ \t]*(?:[a-z0-9-]{1,64}\.)?"
+_VCARD_VALUE = r":((?:\\[^nr]|[^\n\r\\\"]){3,400})"
+_VCARD_ADR_RE = _lazy(_VCARD_LINE + r"ADR" + _VCARD_PARAMS + _VCARD_VALUE)
+_VCARD_N_RE = _lazy(_VCARD_LINE + r"N" + _VCARD_PARAMS + _VCARD_VALUE)
+_VCARD_BDAY_RE = _lazy(_VCARD_LINE + r"BDAY" + _VCARD_PARAMS + r":(\d{8})(?:T[\dZ:+-]{1,20})?(?![\w-])")
+_VCARD_FORMS = ("address-vcard-fields", "name-vcard-n", "birth-date-vcard-compact")
+
+
+def _vcard_fields(value: str, start: int) -> list:
+    """(start, end) of each field of a structured vCard value; a semicolon after a backslash stays in its field."""
+    out, i, a = [], 0, 0
+    while i < len(value):
+        if value[i] == "\\":
+            i += 2
+            continue
+        if value[i] == ";":
+            out.append((start + a, start + i))
+            a = i + 1
+        i += 1
+    out.append((start + a, start + len(value)))
+    return out
+
+
+def _vcard_spans(text: str) -> list:
+    """(start, end) of each vCard: from BEGIN:VCARD to its END:VCARD or the end of the text. A line counts only
+    inside one: `ADR: 0012;Accepted;Use Postgres 16;…` in the docs and `N:Europe;Asia;…` in a config are no vCard
+    (review of 0.6.25)."""
+    up = text.upper()
+    out = []
+    for m in re.finditer("BEGIN:VCARD", up):
+        if out and m.start() < out[-1][1]:
+            continue
+        end = up.find("END:VCARD", m.end())
+        out.append((m.start(), len(text) if end < 0 else end))
+    return out
+
+
+def _vcard_hits(text: str, want) -> list:
+    out = []
+    spans = _vcard_spans(text)
+    if not spans:
+        return out
+    import bisect   # here: the hooks pay for every module at import
+    starts = [a for a, _ in spans]
+
+    def inside(pos: int) -> bool:
+        i = bisect.bisect_right(starts, pos) - 1
+        return i >= 0 and pos < spans[i][1]
+
+    def val(f) -> str:
+        return text[f[0]:f[1]].strip()
+    if "address-vcard-fields" in want:
+        for m in _VCARD_ADR_RE.finditer(text):
+            if not inside(m.start()):
+                continue
+            fields = _vcard_fields(m.group(1), m.start(1))
+            filled = [f for f in fields if val(f)]
+            if len(fields) != 7 or len(filled) < 2:
+                continue   # a vCard address has seven fields
+            # a number in the box, the extended or the street field, or a postal code: Rose Cottage;Dunmore;Y35 X2K
+            if any(re.search(r"\d", val(f)) for f in fields[:3]) or val(fields[5]):
+                out.append((filled[0][0], filled[-1][1], "address-vcard-fields", ADDRESS))
+    if "name-vcard-n" in want:
+        for m in _VCARD_N_RE.finditer(text):
+            if not inside(m.start()):
+                continue
+            fields = _vcard_fields(m.group(1), m.start(1))
+            if len(fields) < 2:
+                continue   # vCard 2.1 may write family;given alone
+            family, given = val(fields[0]), val(fields[1])
+            if family and given and _name_ok(given + " " + family) and not _reads_as_words(given + " " + family):
+                end = fields[2][1] if len(fields) > 2 and val(fields[2]) else fields[1][1]   # a middle name
+                out.append((fields[0][0], end, "name-vcard-n", NAME))
+    if "birth-date-vcard-compact" in want:
+        for m in _VCARD_BDAY_RE.finditer(text):
+            v = m.group(1)
+            if inside(m.start()) and _a_date(v) and _past_year(v[:4]) and not _placeholder_digits(v, dates=True):
+                out.append((m.start(1), m.end(1), "birth-date-vcard-compact", BIRTH_DATE))
+    return out
 
 
 def _cut_at_a_word(v: str) -> str:
@@ -651,17 +747,22 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
                 out.append((m.start(), m.end(), "address-jp-postcode", ADDRESS))
     if "address-after-label" in want and any(w in low for w in _ADDRESS_WORDS):
         for m in _ADDRESS_LABEL_RE.finditer(text):
-            if m.group(1).lower() == "adr" and not m.group(2):
-                continue   # ADR alone is an architecture decision record; the vCard field is ADR:;;<street>
+            if re.match(r"(?i)adr(?![a-z])", m.group(1)) and not m.group(2):
+                continue   # ADR alone is an architecture decision record; the vCard field is ADR:;;<street>, also
+                #            with parameters (ADR;TYPE=home:;;<street>)
             v = m.group(3).strip()
             # the check for a company or a public place reads at most 120 characters of the line before the label:
-            # unbounded, a long line of addresses took quadratic time (review of 0.6.24)
+            # unbounded, a long line of addresses took quadratic time (review of 0.6.24). Back to the start of a
+            # JSON object was measured in 0.6.25 and left out: it also finds the employer in a person's record
+            # (tests/test_company_address_window.py)
             line = _line_back(text, m.start())
             if (any(c.isdigit() for c in v) and "," in v and _HOUSE_RE.search(v)
                     and "://" not in v and not re.search(r"\d+\.\d+\.\d+|:\d{2,5}\b|[{}<>$()=_\[\]#@]", v)
                     and not _NOT_A_HOME_RE.search(text, line, m.end()) and not _NOT_AN_ADDRESS_RE.search(v)):
                 s0 = m.start(3) + (len(m.group(3)) - len(m.group(3).lstrip()))
                 out.append((s0, s0 + len(v), "address-after-label", ADDRESS))
+    if any(f in want for f in _VCARD_FORMS) and "VCARD" in text.upper():
+        out += _vcard_hits(text, want)
     if "address-in-form" in want and "in" in regions:
         for m in _IN_ADDRESS_RE.finditer(text):
             line = _line_back(text, m.start())

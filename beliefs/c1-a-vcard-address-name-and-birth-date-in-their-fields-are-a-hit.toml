@@ -1,0 +1,10 @@
+# c1-a-vcard-address-name-and-birth-date-in-their-fields-are-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-vcard-address-name-and-birth-date-in-their-fields-are-a-hit"
+control = "C1"
+statement = "A vCard ADR written in its fields (;;street;city;region;code;country), an N (family;given) and a BDAY of eight digits are masked in a tool result, with and without parameters."
+runner = ["tests/test_vcard_parameters.py::VcardFieldTests::test_an_address_in_its_fields_is_masked_with_and_without_parameters", "tests/test_vcard_parameters.py::VcardFieldTests::test_a_name_in_its_fields_is_masked"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''        out += _vcard_hits(text, want)'''
+replace = '''        pass'''

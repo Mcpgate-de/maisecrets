@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 32 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 175 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 179 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1222,7 +1222,8 @@ Four sources, one scanner (`maisecrets/detect.py`):
 - **Own rules** for what none of the three covers: email (a
   bounded regex; the unbounded one took 11 s on an 80 KB dotted run), an email with its
   `@` written `%40` where an address is expected (after `=`, `mailto:`, `users/` or a mail
-  word such as `To:`), phone
+  word such as `To:`, or in a CSV column whose header names a mail address or its owner, such as
+  `email`, `contact`, `login` or `courriel`), phone
   with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, a
   password with no user in a URL (`redis://:…@host`), the secret half of an AWS
   key pair within a few lines after its `AKIA…` id (at most 4 lines on, and at most
@@ -1692,9 +1693,15 @@ a to-do.
 - **A name without a label is not detected.** Regex only, by design: "Emma Johansson" alone looks like any two
   capitalised words. A name after a name label, before an e-mail address or in a CSV name column is masked
   in a tool result (0.6.21); in a typed prompt no name is detected. A name in a non-Latin script is masked only after
-  a person label (`full name`, `native name`, `patient_name`, vCard `FN:`; 0.6.24), not after `name:` or `owner:`,
+  a person label (`full name`, `native name`, `patient_name`, vCard `FN:`, also with parameters such as
+  `FN;CHARSET=UTF-8:`; 0.6.24), not after `name:` or `owner:`,
   which also name products and languages. A street address without a postcode or an address label, or in a form of a
-  region that is not active, passes too.
+  region that is not active, passes too. Inside a vCard (after `BEGIN:VCARD`), an `ADR` in its fields, an `N`
+  and a `BDAY` of eight digits are masked in a tool result, with or without parameters (0.6.25); a property folded over
+  two lines, or a vCard line without its `BEGIN:VCARD`, is not. The check for a
+  company before an address label reads 120 characters of the line: in minified JSON a company address with its
+  company word farther back is masked, and a person's address with an employer or a hotel within that reach passes.
+  A wider reach was measured and left out, because it lets more home addresses pass (0.6.25).
 - **The forms of 0.6.24 act on tool results only.** An ID after `member`, `record` or `account`, an address after
   `Address:`, a FHIR identifier, a `::add-mask::` value, a `SharedAccessKey=`, a Postman variable with a secret name and
   the other forms in `maisecrets rules list` (column "needs": label or form) are masked in a tool result or a file. A

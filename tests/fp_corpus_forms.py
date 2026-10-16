@@ -206,6 +206,18 @@ FORMS_NO_HIT = [
      '"urn:member-id", "value": "BUILD-13579"}]}'),
     ("twilio doc template", "Your Account SID starts with AC; copy it from the console (ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)."),
     ("uppercase AC hex in a dump", "0x0010: AC12 FF00 9A3B 4C5D 6E7F 8091 A2B3 C4D5"),
+    # ---------------------------------------------------------------- review round 1 of 0.6.25
+    ("bday path parameters", "GET /api/users/bday;from=2020-01-01;to=2020-12-31"),
+    ("bday matrix parameters", "/api/report;bday;since=2021-03-04"),
+    ("adr decision record semicolons", "ADR: 0007 Use Postgres; Accepted; 2026-01-02; owner team; superseded"),
+    ("vcard work address without a street", "BEGIN:VCARD\nADR;TYPE=work:;;Suite 4;;;;\nEND:VCARD"),
+    ("vcard n of words", "BEGIN:VCARD\nN:Total;Count;;;\nEND:VCARD"),
+    ("vcard bday epoch", "BEGIN:VCARD\nBDAY:19700101\nEND:VCARD"),
+    ("csv end user id", "end_user_id,status\npkg%40v2.dev,ok"),
+    ("csv contact asset", "contact_asset,size\nportrait%402x.heic,2048"),
+    ("csv login version", "login,dep\npkg%401.0.0-beta.rc,x"),
+    ("csv user animation", "user,file\nanim%402x.lottie,1"),
+    ("csv migration from to", "package,from,to\nreact,react%40v17.dev,react%40v18.dev"),
 ]
 
 FORMS_HIT = [
@@ -252,4 +264,10 @@ FORMS_HIT = [
     ("phone wrapped", "Phone: +49 " + "1523-" + "\n4471-902 (mobile)", ["+49 " + "1523-" + "\n4471-902"]),
     ("encoded mail sent to", "Receipt sent to " + "dana.okafor" + "%40mailbox-test.net", ["dana.okafor" + "%40mailbox-test.net"]),
     ("encoded mail csv cell", "name,email,phone\nDana," + "dana.okafor" + "%40mailbox-test.net,unknown", ["dana.okafor" + "%40mailbox-test.net"]),
+    ("vcard adr fields", "BEGIN:VCARD\nADR;TYPE=home:;;" + "7 Rosemount Gardens;Dunmore;Wexford;4471;Ireland" + "\nEND:VCARD",
+     ["7 Rosemount Gardens;Dunmore;Wexford;4471;Ireland"]),
+    ("vcard n fields", "BEGIN:VCARD\nN;CHARSET=UTF-8:" + "Okafor;Dana" + ";;;\nEND:VCARD", ["Okafor;Dana"]),
+    ("vcard bday digits", "BEGIN:VCARD\nBDAY:" + "19850412" + "\nEND:VCARD", ["19850412"]),
+    ("encoded mail contact column", "Report for user list, generated 2026-10-01\nname,contact\nDana, " + "dana.okafor"
+     + "%40mailbox-test.net", ["dana.okafor" + "%40mailbox-test.net"]),
 ]
