@@ -1,0 +1,91 @@
+"""A vCard property with parameters is the same field as without them: `ADR;TYPE=home:`, `FN;CHARSET=UTF-8:`,
+`BDAY;VALUE=date:` and the bare type of vCard 2.1 (`ADR;HOME;PREF:`) mask what `ADR:`, `FN:` and `BDAY:` mask.
+Before 0.6.25 the parameters stood between the label and its colon, and the address, the name and the birth date
+of a contact export passed (TEL and EMAIL were found by their shape already).
+
+Run: python3 -m unittest tests.test_vcard_parameters -v
+"""
+from __future__ import annotations
+
+import os
+import sys
+import unittest
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+
+from maisecrets import detect, regions  # noqa: E402
+
+ADDRESS = "7 Rosemount Gardens, Dunmore, Wexford " + "4471"
+NAME = "Lena " + "Brückner"
+CYRILLIC = "Ирина" + " Соколова"
+BIRTH = "1980-" + "04-12"
+MAIL = "lena.brueckner" + "@" + "mailbox-test.net"
+PHONE = "+49 151 " + "2345 6789"
+
+# (property, value, the parameter forms); each form must mask what the plain `PROPERTY:` masks
+CASES = [
+    ("ADR", ";;" + ADDRESS, ["ADR;TYPE=home", "ADR;TYPE=HOME,PREF", "ADR;HOME;PREF", "item1.ADR;type=HOME;type=pref",
+                             'ADR;TYPE=home;LABEL="Rosemount Gardens"']),
+    ("FN", NAME, ["FN;CHARSET=UTF-8", "FN;LANGUAGE=de", "FN;TYPE=work"]),
+    ("FN", CYRILLIC, ["FN;CHARSET=UTF-8", "FN;LANGUAGE=ru"]),
+    ("BDAY", BIRTH, ["BDAY;VALUE=date", "BDAY;VALUE=DATE"]),
+    ("EMAIL", MAIL, ["EMAIL;TYPE=INTERNET", "EMAIL;TYPE=INTERNET,HOME;PREF=1"]),
+    ("TEL", PHONE, ["TEL;TYPE=CELL", "TEL;CELL", "TEL;TYPE=cell;PREF=1"]),
+]
+
+
+def scan(text: str, channel: str = "tool") -> list:
+    saved = detect._RULES
+    active = regions.Active(regions=("generic", "us", "uk", "de"), languages=("en", "de"), source="test")
+    try:
+        detect._RULES = None
+        with mock.patch.object(detect, "active_regions", return_value=active):
+            return detect.scan(text, channel=channel)
+    finally:
+        detect._RULES = saved
+
+
+def card(line: str) -> str:
+    return "BEGIN:VCARD\nVERSION:3.0\n" + line + "\nEND:VCARD\n"
+
+
+def masked(text: str, channel: str = "tool") -> set:
+    return {(m.type, text[m.start:m.end]) for m in scan(text, channel)}
+
+
+class VcardParameterTests(unittest.TestCase):
+    def test_a_property_with_parameters_masks_what_the_plain_property_masks(self):
+        for prop, value, forms in CASES:
+            plain = masked(card(prop + ":" + value))
+            self.assertTrue(plain, f"{prop}: the plain form must mask its value")
+            for form in forms:
+                with self.subTest(form=form):
+                    self.assertEqual(masked(card(form + ":" + value)), plain)
+
+    def test_the_value_itself_is_masked(self):
+        self.assertIn(("ADDRESS", ADDRESS), masked(card("ADR;TYPE=home:;;" + ADDRESS)))
+        self.assertIn(("NAME", NAME), masked(card("FN;CHARSET=UTF-8:" + NAME)))
+        self.assertIn(("NAME", CYRILLIC), masked(card("FN;CHARSET=UTF-8:" + CYRILLIC)))
+        self.assertIn(("BIRTH_DATE", BIRTH), masked(card("BDAY;VALUE=date:" + BIRTH)))
+
+    def test_a_label_that_starts_with_adr_is_no_vcard_field(self):
+        # Adresse is a German address label: it needs no `;;` before its value (a check of the first three letters
+        # took it for ADR and lost four holdout addresses)
+        text = "Adresse: " + ADDRESS
+        self.assertIn(("ADDRESS", ADDRESS), masked(text))
+
+    def test_an_architecture_decision_record_stays_text(self):
+        # ADR without the empty fields of a vCard address is a decision record, with parameters too
+        for text in ("ADR: 0007 Use Postgres, Accepted", "ADR;status=accepted: 0007 Use Postgres, Accepted",
+                     "ADR;TYPE=home: 12 Harbour Lane, Springfield"):
+            with self.subTest(text=text):
+                self.assertEqual([m for m in scan(text) if m.type == "ADDRESS"], [])
+
+
+if __name__ == "__main__":
+    unittest.main()

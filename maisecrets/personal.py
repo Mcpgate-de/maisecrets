@@ -44,8 +44,12 @@ _PHONE_WORD_RE = re.compile(r"(?i)phone|(?<![a-z])(?:telefon\w*|tel|cell|mobile?
 # ------------------------------------------------------------------------------------ birth date after a label --
 _DATE = (r"(?:\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{1,2}\.?\s+[A-Za-zäéû]{3,9}\.?\s+\d{4}"
          r"|[A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})")
+# the parameters of a vCard property between its name and the colon: ADR;TYPE=home:, FN;CHARSET=UTF-8:,
+# BDAY;VALUE=date:, and the bare type of vCard 2.1 (TEL;CELL:). With them, the property is the same field as without
+_VCARD_PARAMS = r"(?:;[A-Za-z][\w-]{0,20}(?:=(?:\"[^\"\n]{0,80}\"|[^:;\"\n]{0,60}))?){0,8}"
 # "born" alone is left out: "born 23 June 1912" is history in a text about a public person (holdout v6 negative)
-_BIRTH_RE = re.compile(r"(?i)(?:\bd\.?o\.?b\b|date of birth|birth[ _-]?date|\bbday\b|\bgeb(?:\.|oren am|urtsdatum)"
+_BIRTH_RE = re.compile(r"(?i)(?:\bd\.?o\.?b\b|date of birth|birth[ _-]?date|\bbday\b" + _VCARD_PARAMS
+                       + r"|\bgeb(?:\.|oren am|urtsdatum)"
                        r"|n[ée]\(?e?\)? le|date de naissance|fecha de nacimiento|\bnac[ií](?:d[oa])? el"
                        r"|data de nascimento|data di nascita|\bnato il)[\"'\]]?\s{0,3}[:=]?\s{0,3}[\"'(]?\s{0,3}"
                        r"(" + _DATE + r")(?!\d)")
@@ -149,7 +153,8 @@ _PERSON_LABELS = (r"full[ _-]?name|customer[ _-]?name|first[ _-]?name|last[ _-]?
                   r"|guardian|beneficiary|billed to|oncall|on-call|requested by|reviewed by|approved by|salari[ée]"
                   r"|vorname|nachname|mieter|vermieter|ansprechpartner(?:in)?|pr[ée]nom")
 # a label that also names a product, a service, a team or a document: its value must not read as words
-_WEAK_LABELS = r"fn|name|display[ _-]?name|owner|author|driver|holder|kunde|inhaber(?:in)?|nom|nombre|nome"
+_WEAK_LABELS = (r"fn" + _VCARD_PARAMS
+                + r"|name|display[ _-]?name|owner|author|driver|holder|kunde|inhaber(?:in)?|nom|nombre|nome")
 _NAME_LABEL_RE = re.compile(
     r"(?i:(?<![a-z_./-])(?:(" + _PERSON_LABELS + r")|(" + _WEAK_LABELS + r")))"
     r"[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?[ \t]{0,3}" + _NAME_VALUE + r"(?![\w'’])")
@@ -503,7 +508,8 @@ _JP_ADDRESS_RE = _lazy(r"〒\d{3}-\d{4}[ 　]?[^\s\"',;<>|]{2,40}")
 _JP_COMPANY_RE = _lazy(r"株式会社|有限会社|合同会社|本社|支社|支店|営業所|事務所|工場|センター|ビル|役所"
                             r"|大学|病院")
 _ADDRESS_LABEL_RE = _lazy(
-    r"(?i)(?<![a-z_])(address(?: on file)?|home[ _-]?address|adr|ship[ _-]?to|reship to|property|lives"
+    r"(?i)(?<![a-z_])(address(?: on file)?|home[ _-]?address|adr" + _VCARD_PARAMS
+    + r"|ship[ _-]?to|reship to|property|lives"
     r"|endere[cç]o|direcci[oó]n|adresse|location)[\"']?\s{0,3}:\s{0,3}[\"']?(;*)([^\n\"|;]{8,100}?)"
     r"(?=[\"\n|]|\s{2}|\.\s|$)")
 # a house number and a street word, in either order: 12 Harbour Lane, Rua das Flores 12,
@@ -519,7 +525,7 @@ _CJK_NAME = "一-鿿가-힯぀-ヿ"
 _NONLATIN_LABEL_RE = _lazy(
     r"(?i)(?:(?<![a-z_])(?:full[ _-]?name|native name|(?:employee|patient|customer|contact|recipient)[ _-]?name"
     r"|beneficiary)[\"']?[ \t]{0,3}[:=]?"
-    r"|^fn[\"']?[ \t]{0,3}[:=])[ \t]{0,3}[\"']?"
+    r"|^fn" + _VCARD_PARAMS + r"[\"']?[ \t]{0,3}[:=])[ \t]{0,3}[\"']?"
     r"((?:[" + _NONLATIN + r"]{2,20}(?: [" + _NONLATIN + r"]{2,20}){1,3})|[" + _CJK_NAME + r"]{2,5})(?![\w])", re.M)
 # names of a language in its own script: a locale table is no person
 _AUTONYMS = frozenset({"русский", "українська", "беларуская", "български", "српски", "македонски", "ελληνικά",
@@ -651,8 +657,9 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
                 out.append((m.start(), m.end(), "address-jp-postcode", ADDRESS))
     if "address-after-label" in want and any(w in low for w in _ADDRESS_WORDS):
         for m in _ADDRESS_LABEL_RE.finditer(text):
-            if m.group(1).lower() == "adr" and not m.group(2):
-                continue   # ADR alone is an architecture decision record; the vCard field is ADR:;;<street>
+            if re.match(r"(?i)adr(?![a-z])", m.group(1)) and not m.group(2):
+                continue   # ADR alone is an architecture decision record; the vCard field is ADR:;;<street>, also
+                #            with parameters (ADR;TYPE=home:;;<street>)
             v = m.group(3).strip()
             # the check for a company or a public place reads at most 120 characters of the line before the label:
             # unbounded, a long line of addresses took quadratic time (review of 0.6.24)

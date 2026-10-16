@@ -1,0 +1,10 @@
+# c1-a-vcard-property-with-parameters-is-the-same-field: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-vcard-property-with-parameters-is-the-same-field"
+control = "C1"
+statement = "A vCard property with parameters (ADR;TYPE=home:, FN;CHARSET=UTF-8:, BDAY;VALUE=date:) masks in a tool result what the same property without parameters masks."
+runner = ["tests/test_vcard_parameters.py::VcardParameterTests::test_a_property_with_parameters_masks_what_the_plain_property_masks"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''_VCARD_PARAMS = r"(?:;[A-Za-z][\w-]{0,20}(?:=(?:\"[^\"\n]{0,80}\"|[^:;\"\n]{0,60}))?){0,8}"'''
+replace = '''_VCARD_PARAMS = r""'''
