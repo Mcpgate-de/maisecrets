@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 
 OPEN, CLOSE, MASK = "\u27e6", "\u27e7", "\u2022"
-KEY_RE = r"(?P<type>[A-Z][A-Z_]*?)_(?P<key>c\d{1,9})"   # digits capped like the gateway
+KEY_RE = r"(?P<type>[A-Z][A-Z0-9_]{0,39}?)_(?P<key>c\d{1,9})"   # digits capped like the gateway; IPV6_c1 too
 REF_RE = re.compile(
     rf"(?:{OPEN}{KEY_RE}(?::(?P<display>[^{OPEN}{CLOSE}]{{0,80}}))?{CLOSE})"
     rf"|(?:<(?P<ltype>[A-Z][A-Z_]*?)_(?P<lkey>c\d{{1,9}})(?::(?P<ldisplay>[^<>]{{0,80}}))?>)"

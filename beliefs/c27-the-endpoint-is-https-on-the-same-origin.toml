@@ -6,5 +6,5 @@ runner = ["tests/test_vault_refs.py::Online::test_the_endpoint_must_be_https_on_
 
 [proof]
 file = "maisecrets/vault_refs.py"
-find = '''            if origin_of(candidate) == origin:'''
-replace = '''            if candidate:'''
+find = '''        if origin_of(candidate) == origin:'''
+replace = '''        if candidate:'''

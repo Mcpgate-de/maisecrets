@@ -1,0 +1,12 @@
+# c27-the-time-sent-is-the-first-sighting: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-the-time-sent-is-the-first-sighting"
+control = "C27"
+statement = "The seen_at sent for a key is the first time its server URL showed it; a later sighting of a key the server minted again for another person does not move it, so the server answers expired, not the other person's value."
+runner = ["tests/test_vault_refs.py::Online::test_the_time_sent_is_the_first_sighting_and_an_expired_note_goes"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''            if url not in where:
+                where[url], shown[url] = seen, display'''
+replace = '''            if True:
+                where[url], shown[url] = seen, display'''

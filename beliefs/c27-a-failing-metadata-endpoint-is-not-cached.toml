@@ -1,0 +1,10 @@
+# c27-a-failing-metadata-endpoint-is-not-cached: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-failing-metadata-endpoint-is-not-cached"
+control = "C27"
+statement = "Only a metadata answer 200 without client_vault_endpoint means unsupported and is kept; a 404 or 5xx is not kept, so the next call asks again."
+runner = ["tests/test_vault_refs.py::Online::test_a_failing_metadata_endpoint_is_not_cached"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''            return None                         # a 404 or 5xx in a deploy is no answer: not cached (peer review M2)'''
+replace = '''            pass'''

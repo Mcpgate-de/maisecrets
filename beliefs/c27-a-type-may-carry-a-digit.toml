@@ -1,0 +1,10 @@
+# c27-a-type-may-carry-a-digit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-type-may-carry-a-digit"
+control = "C27"
+statement = "A server token whose type carries a digit (IPV6_1) is noted and resolved like any other."
+runner = ["tests/test_vault_refs.py::Online::test_a_type_with_a_digit_resolves"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''SERVER_REF_RE = re.compile(rf"{OPEN}(?P<type>[A-Z][A-Z0-9_]{{0,39}}?)'''
+replace = '''SERVER_REF_RE = re.compile(rf"{OPEN}(?P<type>[A-Z][A-Z_]{{0,39}}?)'''

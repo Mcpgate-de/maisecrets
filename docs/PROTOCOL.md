@@ -136,10 +136,11 @@ Rules for every binding:
 The vault reads the protected resource metadata of the MCP URL (RFC 9728),
 `GET <origin>/.well-known/oauth-protected-resource<path of the MCP URL>`, and
 takes the field `client_vault_endpoint`: an absolute URL. If the field is
-missing, the server does not support vault references. If the URL is not
-`https` or its origin differs from the origin of the MCP URL, the vault does
-not resolve. The vault may keep the answer per origin for a time (an hour in
-maisecrets).
+missing from a 200 answer, the server does not support vault references.
+Any other status is a failure, not an answer, and the vault does not keep it.
+If the URL is not `https` or its origin differs from the origin of the MCP
+URL, the vault does not resolve. The vault may keep the answer per origin for
+a time (an hour in maisecrets). The path keeps a trailing slash.
 
 ### 4.4 The resolve request
 
@@ -153,8 +154,11 @@ Content-Type: application/json
 ```
 
 - `key` is the token's key without its display part.
-- `now` is the client's clock; `seen_at` is when the vault last saw the key
-  in a result of that server. Both are ISO 8601 in UTC.
+- `now` is the client's clock; `seen_at` is when the vault FIRST saw the key
+  in a result of that server. Both are ISO 8601 in UTC. A later sighting does
+  not move it: when the server mints the key again for another person, a
+  later time would pass the server's check with that person's value.
+- `TYPE` is `[A-Z][A-Z0-9_]*`, at most 40 characters (`IPV6_1`).
 - At most 100 refs and 64 KB per request.
 - The endpoint accepts `K` only. It refuses the client's OAuth token.
 
@@ -190,8 +194,11 @@ missing from a 200 answer.
   notes each server-range token with the origin and the URL of that server,
   the time and the session, per client profile. A token that two servers sent
   is refused, also when the two share an origin. A token resolves only in a
-  session that saw it, and only for 24 hours after it was last seen; in any
-  other case the call is denied with that reason. The result does not change. A token in any other result (a file read,
+  session that saw it, and only for 24 hours after it was first seen; in any
+  other case the call is denied with that reason. An `expired` answer deletes
+  the note of its keys, so the next sighting starts the time again. A key that
+  one server showed with two different display parts is refused and its note
+  goes: the server's mapping changed, and the token may name another person. The result does not change. A token in any other result (a file read,
   a web page, a project-scope server) is not noted.
 - **Resolving.** Before a Write, Edit, MultiEdit, NotebookEdit or Bash call,
   the vault looks for noted tokens. It sends one request per origin and puts

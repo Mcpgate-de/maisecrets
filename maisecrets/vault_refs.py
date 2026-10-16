@@ -35,8 +35,9 @@ from .vault import _DEFAULT_HOME, HOME, _lock_for, atomic_write
 
 OPEN, CLOSE = "⟦", "⟧"
 # the server range: no `c`, a counter from 1 (PROTOCOL.md section 1); the display part is for humans only
-SERVER_REF_RE = re.compile(rf"{OPEN}(?P<type>[A-Z][A-Z_]*?)_(?P<n>[1-9]\d{{0,8}})(?::[^{OPEN}{CLOSE}]{{0,80}})?{CLOSE}")
-_SERVER_KEY_RE = re.compile(r"[A-Z][A-Z_]*?_[1-9]\d{0,8}")
+SERVER_REF_RE = re.compile(rf"{OPEN}(?P<type>[A-Z][A-Z0-9_]{{0,39}}?)_(?P<n>[1-9]\d{{0,8}})"
+                           rf"(?::(?P<display>[^{OPEN}{CLOSE}]{{0,80}}))?{CLOSE}")
+_SERVER_KEY_RE = re.compile(r"[A-Z][A-Z0-9_]{0,39}?_[1-9]\d{0,8}")
 HEADER = "Client-Vault"
 _HEADER_RE = re.compile(r"v=1, kid=:(?P<kid>[A-Za-z0-9+/]{43}=):")
 # an ISO 8601 time as the server may send it; anything else is never shown (a server must not put text before the AI)
@@ -252,7 +253,7 @@ def ensure_headers(cfg: dict, backend) -> str | None:
     session-start message, or None."""
     if HOME != _DEFAULT_HOME and not os.environ.get("CLAUDE_CONFIG_DIR"):
         return None                         # a test home never changes the client config of the person
-    path = claude_json()
+    path = claude_json().resolve()
     first = _read_json(path) if path.is_file() else None
     if first is None:
         return None
@@ -346,7 +347,7 @@ def note_result(payload: dict, cfg: dict) -> int:
     def walk(node) -> None:
         if isinstance(node, str):
             for m in SERVER_REF_RE.finditer(node):
-                found[f"{m.group('type')}_{m.group('n')}"] = m.group("type")
+                found[f"{m.group('type')}_{m.group('n')}"] = (m.group("type"), m.group("display") or "")
         elif isinstance(node, list):
             for x in node:
                 walk(x)
@@ -367,13 +368,22 @@ def note_result(payload: dict, cfg: dict) -> int:
     with _lock_for(DIR / ".lock"):
         data = _read_json(NOTES) or {}
         mine = data.setdefault(profile(), {}).setdefault(origin, {})
-        for key, type_ in found.items():
+        for key, (type_, display) in found.items():
             old = mine.pop(key, None)           # re-inserted last: the oldest notes are first
             old = old if isinstance(old, dict) else {}
-            where = old.get("seen") if isinstance(old.get("seen"), dict) else {}
+            where = dict(old.get("seen")) if isinstance(old.get("seen"), dict) else {}
+            shown = dict(old.get("display")) if isinstance(old.get("display"), dict) else {}
+            conflict = [u for u in (old.get("conflict") or []) if isinstance(u, str)]
             sessions = [x for x in (old.get("sessions") or []) if isinstance(x, str) and x != session]
-            # one entry per server URL: two servers on one origin can both send EMAIL_1, for two people
-            mine[key] = {"type": type_, "seen": {**where, url: seen},
+            # one entry per server URL: two servers on one origin can both send EMAIL_1, for two people. The time is
+            # the FIRST sighting: the server compares it with the time it minted the key, and a later sighting of a
+            # key minted again for another person would pass that check with the other person's value (contract;
+            # peer review H1)
+            if url not in where:
+                where[url], shown[url] = seen, display
+            elif display and shown.get(url) and display != shown[url] and url not in conflict:
+                conflict.append(url)            # the same key with another display: the server's mapping changed
+            mine[key] = {"type": type_, "seen": where, "display": shown, "conflict": conflict,
                          "sessions": (sessions + [session])[-MAX_SESSIONS_PER_NOTE:]}
         while len(mine) > MAX_NOTES_PER_ORIGIN:
             del mine[next(iter(mine))]
@@ -407,7 +417,8 @@ def _notes(session: str | None) -> dict:
             fresh = {u: t for u, t in seen.items()
                      if isinstance(u, str) and (_seen_time(t) or 0) > now - NOTE_TTL}
             if fresh:
-                out.setdefault(origin, {})[key] = {"type": note.get("type"), "seen": fresh}
+                out.setdefault(origin, {})[key] = {"type": note.get("type"), "seen": fresh,
+                                                   "conflict": [u for u in (note.get("conflict") or []) if u in fresh]}
     return out
 
 
@@ -435,6 +446,26 @@ def noted_elsewhere(text: str, cfg: dict | None, session: str | None) -> list[st
         return []
     return [k for k in refs if k not in here
             and any(isinstance(notes, dict) and isinstance(notes.get(k), dict) for notes in mine.values())]
+
+
+def forget(keys: list[str], origin: str, url: str) -> None:
+    """The notes of these keys from this server URL go: the server said they are older than its data."""
+    with _lock_for(DIR / ".lock"):
+        data = _read_json(NOTES) or {}
+        mine = (data.get(profile()) or {}).get(origin)
+        if not isinstance(mine, dict):
+            return
+        for k in keys:
+            note = mine.get(k)
+            if not isinstance(note, dict):
+                continue
+            for field in ("seen", "display"):
+                if isinstance(note.get(field), dict):
+                    note[field].pop(url, None)
+            note["conflict"] = [u for u in (note.get("conflict") or []) if u != url]
+            if not note.get("seen"):
+                del mine[k]
+        atomic_write(NOTES, json.dumps(data, indent=1))
 
 
 def find_noted(text: str, cfg: dict | None, session: str | None) -> list[tuple[str, int, int]]:
@@ -515,7 +546,8 @@ def endpoint(cfg: dict, url: str, deadline: float) -> str | None:
     origin = origin_of(url)
     if not origin:
         return None
-    path = urlsplit(url).path.rstrip("/")
+    path = urlsplit(url).path
+    path = "" if path == "/" else path          # RFC 9728: the resource path as it is, a trailing slash included
     cache_key = origin + path
     cache = _read_json(ENDPOINTS) or {}
     hit = cache.get(cache_key)
@@ -533,11 +565,14 @@ def endpoint(cfg: dict, url: str, deadline: float) -> str | None:
     try:
         status, headers, body = _request(cfg, "GET", f"{origin}/.well-known/oauth-protected-resource{path}",
                                          {"Accept": "application/json"}, None, deadline)
-        if status == 200 and _is_json(headers) and len(body) <= MAX_ANSWER_BYTES:
-            meta = json.loads(body.decode("utf-8"))
-            candidate = meta.get("client_vault_endpoint") if isinstance(meta, dict) else None
-            if origin_of(candidate) == origin:
-                found = candidate
+        if status != 200 or not _is_json(headers) or len(body) > MAX_ANSWER_BYTES:
+            return None                         # a 404 or 5xx in a deploy is no answer: not cached (peer review M2)
+        meta = json.loads(body.decode("utf-8"))
+        if not isinstance(meta, dict):
+            return None
+        candidate = meta.get("client_vault_endpoint")
+        if origin_of(candidate) == origin:
+            found = candidate
     except (OSError, ValueError, http.client.HTTPException, ssl.SSLError):
         return None                             # not cached: the next call asks again
     with _lock_for(DIR / ".lock"):
@@ -603,7 +638,12 @@ def resolve(cfg: dict, backend, keys: list[str], session: str | None,
     for k in keys:
         if k not in where_from:
             raise Refused(f"⟦{k}⟧ was not seen in a result of an MCP server")
-        groups.setdefault(next(iter(where_from[k])), []).append(k)
+        origin, url = next(iter(where_from[k]))
+        if url in (notes[origin][k].get("conflict") or []):
+            forget([k], origin, url)
+            raise Refused(f"the server sent ⟦{k}⟧ for two different values, so it may name another person now; "
+                          "call the server's tool again and use the new tokens")
+        groups.setdefault((origin, url), []).append(k)
     current = set(user_servers().values())
     out: dict[str, tuple[str, str]] = {}
     for (origin, url), mine in groups.items():
@@ -644,6 +684,8 @@ def resolve(cfg: dict, backend, keys: list[str], session: str | None,
             raise Refused(f"{host} gave no usable answer (a value is missing or not text)")
         code = answer.get("error") if answer is not None else None
         code = code if (status, code) in _CODES else None
+        if code == "expired":
+            forget(mine, origin, url)           # a fresh sighting starts the time again (contract)
         raise Refused(_why(origin, status, code, answer or {}, headers, mine))
     return out
 

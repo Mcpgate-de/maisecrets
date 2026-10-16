@@ -1557,7 +1557,7 @@ class Vault:
         for key in keys:
             # the fingerprint key and the vault reference keys (vault_refs.py) are no values: a new key would unlink
             # every server
-            if key != FP_KEY_ENTRY and not key.startswith("_maisecrets_vref_"):
+            if key != FP_KEY_ENTRY and not key.startswith(("_maisecrets_vref_", "_maisecrets_vrel_")):
                 try:
                     self.backend.delete(key)
                     deleted += 1

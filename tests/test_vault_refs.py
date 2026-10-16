@@ -559,6 +559,71 @@ class Online(Base):
         self.assertIn("could not be reached", self.denied(self.write(tok("EMAIL_1"))))
         self.assertLess(time.monotonic() - began, 6.5)
 
+    def test_the_time_sent_is_the_first_sighting_and_an_expired_note_goes(self):
+        # peer review H1: the server mints EMAIL_1 again for another person; a later result shows the new one. The
+        # old token in the model's context must not resolve to the new person's value
+        self.ready()
+        time.sleep(1.1)
+        self.srv.mint("EMAIL_1", "another-person@example.org", minted_at=time.time())
+        time.sleep(1.1)
+        self.result("demo", tok("EMAIL_1"))           # a second sighting, after the new mint
+        self.assertIn("older than", self.denied(self.write(tok("EMAIL_1"))))
+        self.assertEqual(vault_refs.noted(["EMAIL_1"], "s1"), {}, "the 410 took the note")
+        self.result("demo", tok("EMAIL_1"))           # a fresh sighting starts the time again
+        out = self.write(tok("EMAIL_1"))
+        self.assertEqual(out["hookSpecificOutput"]["updatedInput"]["content"], "another-person@example.org")
+
+    def test_a_key_seen_with_two_displays_is_refused_and_starts_again(self):
+        self.ready()
+        self.result("demo", tok("EMAIL_1", "zz•••@other.example"))
+        self.assertIn("two different values", self.denied(self.write(tok("EMAIL_1"))))
+        self.result("demo", tok("EMAIL_1", "va•••"))
+        self.assertEqual(self.write(tok("EMAIL_1"))["hookSpecificOutput"]["updatedInput"]["content"], VALUES[0])
+
+    def test_a_type_with_a_digit_resolves(self):
+        self.ready()
+        self.srv.mint("IPV6_1", "2001:db8::1")
+        self.result("demo", tok("IPV6_1", "2001:db8::•"))
+        out = self.write(tok("IPV6_1"))
+        self.assertEqual(out["hookSpecificOutput"]["updatedInput"]["content"], "2001:db8::1")
+
+    def test_a_failing_metadata_endpoint_is_not_cached(self):
+        self.start()
+        self.login()
+        self.result("demo", tok("NAME_2"))
+        self.srv.meta_status = 503
+        self.assertIn("does not name a vault endpoint", self.denied(self.write(tok("NAME_2"))))
+        self.srv.meta_status = 200
+        self.assertEqual(self.write(tok("NAME_2"))["hookSpecificOutput"]["updatedInput"]["content"], VALUES[1])
+
+    def test_the_metadata_path_keeps_a_trailing_slash(self):
+        self.client_config({"demo": {"type": "http", "url": self.srv.url + "/mcp/"}})
+        self.ready()
+        self.denied(self.write(tok("NAME_2")))
+        self.assertIn("/.well-known/oauth-protected-resource/mcp/", [e["path"] for e in self.srv.log])
+
+    def test_more_than_100_tokens_in_one_call_are_refused(self):
+        self.ready()
+        for n in range(3, 105):
+            self.srv.mint(f"NAME_{n}", f"Person Number {n}")
+        self.result("demo", " ".join(tok(f"NAME_{n}") for n in range(3, 105)))
+        self.assertIn("at most 100", self.denied(self.write(" ".join(tok(f"NAME_{n}") for n in range(3, 105)))))
+        self.assertEqual(self.srv.resolved, [])
+
+    @unittest.skipUnless(BASH and os.name != "nt", "bash on POSIX")
+    def test_k_is_in_no_file_but_the_store(self):
+        # a population check: every file of the home and of the client profile, every spelling of K
+        self.ready()
+        self.write(tok("EMAIL_1"))
+        hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", **CLAUDE,
+                        "tool_input": {"command": f"echo {tok('NAME_2')}"}})
+        vault_refs.status_lines(load_config(), Vault().backend)
+        k = vault_refs._key(Vault().backend, vault_refs.origin_of(self.srv.url), create=False)
+        spellings = [k.hex(), vault_refs.bearer_of(k), __import__("base64").b64encode(k).decode()]
+        holders = [str(p) for root in (HOME, self.profile) for p in root.rglob("*") if p.is_file()
+                   and any(sp in p.read_text(errors="ignore") for sp in spellings)]
+        self.assertEqual(holders, [str(HOME / "vault.json")])
+
     def test_p5_a_project_server_gets_no_header_and_its_tokens_do_not_resolve(self):
         self.client_config({}, projects={str(self.work): {"mcpServers": {"demo": {"url": self.srv.url + "/mcp"}}}})
         self.assertIsNone(self.start())

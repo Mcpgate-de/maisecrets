@@ -74,6 +74,7 @@ class VaultServer:
         self.metadata: dict | None = None        # None: the default metadata; {}: no field
         self.clock_offset = 0.0                  # the server's clock against the real one
         self.resolved: list[dict] = []           # what the resolve endpoint released
+        self.meta_status = 200                   # another status: the metadata endpoint fails (a deploy)
         self.auto_bind = False                   # True: a new kid on /mcp is active at once (as after a login)
         server = self
 
@@ -97,6 +98,8 @@ class VaultServer:
 
             def do_GET(self) -> None:
                 self._record()
+                if self.path == "/.well-known/oauth-protected-resource/mcp" and server.meta_status != 200:
+                    return self._send(server.meta_status, {"error": "unavailable"})
                 if self.path == "/.well-known/oauth-protected-resource/mcp":
                     meta = {"resource": server.url + "/mcp", "authorization_servers": [server.url]}
                     meta.update({"client_vault_endpoint": server.url + "/vault/resolve"}
