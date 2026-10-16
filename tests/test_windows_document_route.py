@@ -234,7 +234,8 @@ class WindowsFileToolsTakeTheValueTests(unittest.TestCase):
         self._check(e.key, e.ref)
 
     @unittest.skipUnless(os.name == "nt" and (os.environ.get("CI") or os.environ.get("MAISECRETS_NATIVE_BACKEND_TEST")
-                                              == "1"), "the Credential Locker of the Windows runner")
+                                              == "1"), "the native store (the Credential Locker) of a Windows machine: "
+                                              "on a Windows runner, or with MAISECRETS_NATIVE_BACKEND_TEST=1")
     def test_the_same_with_the_windows_credential_locker(self):
         home = Path(tempfile.mkdtemp(prefix="ms-winvault-home-", dir=str(Path(_isolate.TMP).parent)))
         self.addCleanup(__import__("shutil").rmtree, home, True)
