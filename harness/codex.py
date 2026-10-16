@@ -16,17 +16,45 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
+import zlib
 from pathlib import Path
+
+from run import MAIL   # the harness address: masked by maisecrets, not a reserved domain
 
 ROOT = Path(__file__).resolve().parent.parent
 MARK = "glpat-" + "CodexHarnessXyz123456789"
 MODEL = os.environ.get("MAISECRETS_CODEX_MODEL", "gpt-5.6-sol")
 PORT = 8792
 REAL = "--real" in sys.argv
+REF_MAIL = "\u27e6EMAIL_c1\u27e7"
+MAKE_DOC = "import sys\nopen('account.html', 'w').write('<p>' + sys.argv[1] + '</p>')\n"
+
+
+def value_in_file(path: Path, value: str) -> bool:
+    """The value in a file a model produced: plain text, a zip container (.docx, .odt) or a PDF stream."""
+    data = path.read_bytes()
+    want = value.encode()
+    if want in data or value.encode("utf-16-le") in data or value.encode("utf-16-be") in data:
+        return True
+    if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as z:
+            return any(want in z.read(n) for n in z.namelist())
+    if data.startswith(b"%PDF"):
+        for m in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", data, re.S):
+            try:
+                if want in zlib.decompress(m.group(1)):
+                    return True
+            except zlib.error:
+                pass
+        if shutil.which("pdftotext"):
+            return want in subprocess.run(["pdftotext", str(path), "-"], capture_output=True).stdout
+    return False
 
 
 def _js(cmd: str) -> str:
@@ -105,6 +133,27 @@ SCENARIOS = {
         "expect_home_file_missing": "notes.txt",
         "expect_hook": ("pre-tool", "apply_patch", "deny"),
     },
+    # a value for a document (field report, 2026-10-16: the model asked the user to type the address into the PDF by
+    # hand). Inline code is refused and the refusal names the route; the route puts the value into the file on disk,
+    # and no request, rollout or final message holds it
+    "document_gets_the_value": {
+        "prompt": "Create a page with our trade-fair account, e-mail address " + REF_MAIL + ".",
+        "preload_mail": True,
+        "files": {"make_doc.py": MAKE_DOC},
+        "turns": [{"exec": _js("python3 -c \"open('account.html', 'w').write('<p>" + REF_MAIL + "</p>')\"")},
+                  {"exec": _js("python3 make_doc.py '" + REF_MAIL + "'")}, {"text": "done"}],
+        "expect_text": "run it with the placeholder as its argument: python3 make_doc.py " + REF_MAIL,
+        "expect_file": ("account.html", f"<p>{MAIL}</p>"),
+    },
+    # the same request to a real model, in its own words: the address must reach a document it makes (a PDF, a
+    # .docx or a page), and the model must not hand the work back to the user (--real only)
+    "document_gets_the_value_real": {
+        "prompt": "Create a PDF file (or, if no PDF library is installed, a .docx or .html file) with our trade-fair "
+                  "account: company Example Fairs Ltd, user name fair-team, e-mail address " + REF_MAIL + ".",
+        "preload_mail": True,
+        "real_only": True,
+        "expect_value_in_a_file": True,
+    },
     # rehydration "confirm": Codex cannot ask with a rewritten input, so the hook refuses the command
     # and it does not run; the model reads the reason, which names the key, not the value
     "bash_rehydrate_confirm": {
@@ -182,6 +231,10 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         code = ("import sys; sys.path.insert(0, sys.argv[1]); from maisecrets.vault import Vault; "
                 "Vault().put(sys.stdin.read(), 'SECRET', 'gitlab-pat')")
         subprocess.run([sys.executable, "-c", code, str(ROOT)], input=MARK, text=True, check=True, env=env)
+    if sc.get("preload_mail"):
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); from maisecrets.vault import Vault; "
+                "Vault().put(sys.stdin.read(), 'EMAIL', 'email')")
+        subprocess.run([sys.executable, "-c", code, str(ROOT)], input=MAIL, text=True, check=True, env=env)
     last = work / "last.txt"
     srv = None
     if not REAL:
@@ -215,6 +268,8 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         fails.append(f"UNCLASSIFIED TOOL {tool}: add it to tests/client_tools.json with its class")
     if MARK in bodies or MARK[-8:] in bodies:
         fails.append("LEAK: the marker (or its tail) reached the upstream request body")
+    if MAIL in bodies:
+        fails.append("LEAK: the address reached the upstream request body")
     out = r.stdout + "\n--- stderr ---\n" + r.stderr
     (work / "codex_out.txt").write_text(out)
     final = last.read_text() if last.exists() else ""
@@ -224,6 +279,8 @@ def run_scenario(name: str, sc: dict) -> list[str]:
                      if MARK not in bodies else "LEAK: the marker is in the rollout transcript")
     if MARK in final or MARK[-8:] in final:
         fails.append("LEAK: the marker (or its tail) is in the final message")
+    if MAIL in rollouts or MAIL in final:
+        fails.append("LEAK: the address is in the rollout transcript or the final message")
     lines = [ln.strip() for ln in out.splitlines()]
     failed_hooks = [ln for ln in lines if ln.startswith("hook: ") and ln.endswith("Failed")]
     if failed_hooks:
@@ -247,7 +304,12 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         fname, content = sc["expect_file"]
         got = (cwd / fname).read_text() if (cwd / fname).exists() else "<missing>"
         if got != content:
-            fails.append(f"rehydration: {fname} holds {got!r}")
+            shown = got.replace(MAIL, "<MAIL>").replace(MARK, "<MARK>")
+            fails.append(f"rehydration: {fname} holds {shown!r}")
+    if sc.get("expect_value_in_a_file"):
+        made = sorted(p for p in cwd.rglob("*") if p.is_file())
+        if not any(value_in_file(p, MAIL) for p in made):
+            fails.append(f"no file the model made holds the address (files: {[p.name for p in made]})")
     if sc.get("expect_home_file_missing") and (home / sc["expect_home_file_missing"]).exists():
         fails.append(f"{sc['expect_home_file_missing']} was written into the maisecrets home")
     if sc.get("expect_hook"):
@@ -277,7 +339,7 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         print("     -", f)
     if fails:
         # what codex itself said, marker redacted: the work dir is gone once a CI job ends
-        tail = out.replace(MARK, "<MARK>").splitlines()[-25:]
+        tail = out.replace(MARK, "<MARK>").replace(MAIL, "<MAIL>").splitlines()[-25:]
         print("     codex output (tail):")
         for line in tail:
             print("       |", line[:200])
