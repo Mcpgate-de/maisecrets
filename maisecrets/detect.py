@@ -673,6 +673,68 @@ def _prose_value_ok(v: str) -> bool:
             and any(c.isdigit() for c in v) and any(c.isalpha() for c in v))
 
 
+# one word, a number and at most one sign: the example of a weak password that docs and prompts write in a sentence
+# ("The password is Hunter2!", "Das Passwort ist Sommer2024!", tests/fp_corpus.py). After `:` or `=` the label rules
+# still take it (_pw_literal_ok); in a sentence it stays text. Two words or a word of no list (Hafen7Kran) are values
+_EXAMPLE_PASSWORD_RE = re.compile(r"([^\W\d_]{3,})\d{1,4}[^\w\s]?")
+# the word for password itself before a number (Passwort1, Salasana1, Haslo2024) is an example in every language, and
+# so are the German words of example passwords that the English list lacks (Willkommen1, Hallo123!, Init1234)
+_PW_WORD_EXAMPLES = frozenset({"willkommen", "hallo", "init", "start", "geheim", "passwort", "kennwort", "salasana",
+                               "hasło", "haslo", "heslo", "senha", "wachtwoord",
+                               "passord", "lösenord", "losenord", "adgangskode", "kodeord", "şifre", "sifre",
+                               "parola", "contraseña", "contrasena"})
+
+
+def _example_password(v: str) -> bool:
+    m = _EXAMPLE_PASSWORD_RE.fullmatch(v)
+    if not m:
+        return False
+    word = m.group(1).lower()
+    return word in _PW_WORD_EXAMPLES or (word.isascii() and word in _word_set())
+
+
+# a participle or a noun of any language after a name and a number: SHA256-gehasht, Base64-kodiert, AES256-cifrada,
+# 2FA-geschützt, SHA256-hash. The parts before it are names with digits or capitals; the last part is a small word
+_COMPOUND_PROSE_RE = re.compile(r"(?:[A-Za-z]*\d{2,}|\d*[A-Z]{2,}\d*)(?:-(?:[A-Za-z]*\d{2,}|\d*[A-Z]{2,}\d*))*"
+                                r"-[^\W\d_A-Z][^\W\d_]{2,}")
+
+
+_MD_ESCAPE_RE = re.compile(r"\\(?=[^\w\s])")
+
+
+def _sentence_value_ok(v: str) -> bool:
+    """A value after a password word and a copula (label-password-after-word): as the prose rule, no example of a weak
+    password, and no participle after a name ("Das Passwort ist SHA256-gehasht")."""
+    v = v.strip()
+    # a Markdown escape before a sign (\*, \$) is no escaped line break of generated docs (valid.\n): judge the sign
+    return (_prose_value_ok(_MD_ESCAPE_RE.sub("", v)) and not _example_password(v)
+            and not _COMPOUND_PROSE_RE.fullmatch(v))
+
+
+# one word of any language and a short number: Version2, Schritt2, Kapitel4, Mandant3, Kerberos5 after a space
+# (Mausi1234 and Bergsee1987! are passwords)
+_WORD_NUMBER_ANY_RE = re.compile(r"[^\W\d_][^\W\d_A-Z\u00c4\u00d6\u00dc]{2,}\d{1,2}")
+
+
+# an id or a reference: a ticket (PBE-3403, #PR-1234), a CVE, a standard and its year (BSI-C5:2020, A07:2021,
+# NIST-800-63B, OWASP-ASVS4), a character class (A-Za-z0-9)
+_TICKET_ID_RE = re.compile(r"#?(?:[A-Za-z][A-Za-z0-9]{1,9}-\d{1,7}|[A-Z]{2,}\d*(?:-(?:[A-Z0-9]+|[A-Z][a-z]{0,3}\d+))+"
+                           r"(?::\d{4})?|[A-Z]{2,}\d+"
+                           r"|[A-Z]\d{1,3}:\d{4})|(?:.*(?:a-z|A-Z|0-9)){2}.*")
+# signs that a sentence after a password word uses for a rule, a range or a pattern: /, >=, ≥, ≤, [, ^, $
+_RULE_SIGNS_RE = re.compile(r"[/<>\u2264\u2265\[\]^$]")
+
+
+def _spaced_value_ok(v: str) -> bool:
+    """A value after a password word and only a space, an arrow, a dash or a parenthesis (label-password-after-space):
+    as after a copula, it starts with a letter or a digit, and it is no run of English words, no id and no rule.
+    "Passwort SHA256-Hash", "password iPhone15", "password (PBE-3403)", "Passwort #1-Fehler" and "Passwort (Länge≥12)"
+    are prose; a passphrase of English words or a value that starts with a sign needs a `:` or a copula here."""
+    v = v.strip()
+    return (_sentence_value_ok(v) and v[:1].isalnum() and not _TICKET_ID_RE.fullmatch(v)
+            and not _WORD_NUMBER_ANY_RE.fullmatch(v) and not _RULE_SIGNS_RE.search(v) and _wordlike(v) < 0.6)
+
+
 _DIGEST_PREFIX_RE = re.compile(r"(?i)(?:sha\d*|md5|blake\w*|h1)[-:]")
 # words and numbers run together: ProdDbPassword2024Rotated, Authentication123, SECRET_NAME_2024. A word has two
 # letters at least; a random key has a lone letter (a capital before a digit, a small letter between digits) in it
@@ -1323,6 +1385,8 @@ VALIDATORS = {
     "flag_value": lambda v: _word_value_ok(v, prose_punct=True),
     "glued_value": lambda v: _word_value_ok(v, min_len=6),
     "prose_value": _prose_value_ok,
+    "sentence_value": _sentence_value_ok,
+    "spaced_value": _spaced_value_ok,
     "de_tax_id": _de_tax_id_ok,
     "de_social_security": _de_social_security_ok,
     "de_social_security_spaced": lambda v: _de_social_security_ok(v.replace("\u00a0", " ")),
@@ -1414,6 +1478,24 @@ def _is_cjk(ch: str) -> bool:
     return any(lo <= o <= hi for lo, hi in _CJK_RANGES)
 
 
+# the value of a password in a sentence: optional quotes, no stop of the sentence at its end (`!` stays), and a stop,
+# a space, a quote or the end after it
+# a word before the password word that names whose password it is: WLAN-Passwort, Root-Passwort, wifi-password with a
+# hyphen; joined without one only a few German words (Adminpasswort). Other words end in a password word by chance:
+# deşifre (decipher), resenha (review)
+_PW_COMPOUND = (r"(?:[^\W\d_]{2,20}-|(?:admin|root|master|haupt|einmal|start|initial|wlan|benutzer|nutzer)"
+                r"(?=pass|kenn))?")
+# a value of Markdown inline code or in bold (`<value>`, **<value>**) is the value without the marks. The value is the
+# shortest run that a space, a quote, the end or the stops of a sentence (. , ; : ? ) 。 …) follow: a `*`, `!`, `<` or
+# `\` inside or at the end stays part of it (Abc*12x!, Gretel: a password with a Markdown escape)
+_SENTENCE_VALUE = (r"(?:\*\*|[\"'`\u201e\u201c\u201a\u2018\u00ab\u00bb])?"
+                   r"(?=[^\s\d]{0,255}\d)"   # a digit is in it (the checks need one): a word is refused at once
+                   r"([^\s\"'`\u201c\u201d\u201e\u201a\u2018\u2019\u00ab\u00bb]{0,255}?"
+                   r"[^\s\"'`\u201c\u201d\u201e\u201a\u2018\u2019\u00ab\u00bb.,;:?)\u3002\u2026" + _CJK + r"])"
+                   r"(?:\*\*|[\"'`\u201c\u201d\u2018\u2019\u00ab\u00bb])?"
+                   r"(?=[.,;:?)\u3002\u2026]*(?:[\s\"'`\u201c\u201d\u2018\u2019\u00ab\u00bb" + _CJK + r"]|$))")
+
+
 OWN_RULES: list[dict] = [
     # ?token=… / &api_key=… in a URL
     {"id": "url-query-secret", "type": "SECRET", "secret_group": 2,
@@ -1496,6 +1578,21 @@ OWN_RULES: list[dict] = [
     {"id": "label-prose-password", "type": "SECRET", "secret_group": 1, "validator": "prose_value",
      "regex": r"(?i)(?<![\w-])(?:password|passwd|passphrase)[ \t]+(?:is|was)[ \t]*:?[ \t]+"
               r"[\"'„“]?([^\s\"'“”]{0,255}[^\s\"'“”.,;:!?)])[\"'“”]?(?=[.,;:!?)]*(?:[\s\"'<\\]|$))"},
+    # a typed sentence with no `:` or `=` after the password word (field report, 2026-10-16: Codex sent the value of
+    # "Passwort <value>." in the clear). The words of each label language that is on (_PW_WORDS_OF). With a copula
+    # ("Kennwort ist <value>", "mot de passe est <value>") the value check of the prose rule above: a digit and a
+    # letter, and a capital or a sign beyond - _ . ("Passwort ist geheim" stays text). With only a space, an arrow,
+    # a dash or a parenthesis ("Passwort <value>.", "password -> <value>") the sentence says less, so the value must
+    # also be no run of English words (SHA256-Hash, iPhone15, JDK21-Update) and no ticket id (PBE-3403). A stop of
+    # the sentence after the value is no part of it; `!` is, as passwords end with it
+    {"id": "label-password-after-word", "type": "SECRET", "secret_group": 1, "validator": "sentence_value",
+     "regex": r"(?i)(?<![\w-])" + _PW_COMPOUND + r"(?:{pairs})[ \t]+" + _SENTENCE_VALUE,
+     "languages": True},
+    {"id": "label-password-after-space", "type": "SECRET", "secret_group": 1, "validator": "spaced_value",
+     "regex": r"(?i)(?<![\w-])" + _PW_COMPOUND + r"(?:{words})(?![\w-])"
+              r"(?:[ \t]*(?:->|=>|\u2192|\u2013|\u2014)[ \t]*|[ \t]+-{1,2}[ \t]+|[ \t]+\(?[ \t]*)"
+              + _SENTENCE_VALUE,
+     "languages": True},
     # each quoted value of a list after a label that names secrets: `"api_keys": ["<v1>", "<v2>"]`,
     # `passwords = ['<v1>']`, Go `Secrets: []string{"<v1>"}`. The label rules took no value that starts with a
     # bracket, so a whole list of keys stayed in the clear. Only a label that names secrets and nothing else: a bare
@@ -2094,6 +2191,10 @@ _LONG_WORD_RUN_RE = re.compile(r"\w{200}")
 _LOOKAROUND_RE = re.compile(r"\(\?<?[=!][^()]*\)")
 _CROSS_CHARS_RE = re.compile(r"[ .\[-]|\\[sWdbBSD]")   # a space, a dot, a class, a hyphen or a non-word escape
 _CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
+# the stops of a sentence after an unquoted value (the regex never ends a value on a comma)
+_SENTENCE_STOP = ".;"
+# rules whose value check is cheap and refuses most candidates: it runs before the checks of the code around a value
+_VALIDATE_FIRST = frozenset({"label-password-after-word", "label-password-after-space"})
 
 
 def _load_detect_secrets(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
@@ -2156,8 +2257,57 @@ def _load_literal(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
             for d in LITERAL_RULES]
 
 
-def _load_own() -> list[Rule]:
-    return [Rule(id=d["id"], type=d["type"], regex=_Lazy(d["regex"]),
+def _own_regex(d: dict, languages: tuple) -> str:
+    """The regex of an own rule. A rule with `languages` takes the words of the label languages that are on; with
+    none of its languages on it never matches."""
+    want = d.get("languages")
+    if not want:
+        return d["regex"]
+    if want is not True:
+        return d["regex"] if any(lang in languages for lang in want) else r"(?!)()"
+    langs = ("en",) + tuple(lang for lang in languages if lang != "en")
+    words = [w for lang in langs for w in _PW_WORDS_OF.get(lang, ())]
+    # a copula joins only the words of its own language (Finnish "on" after salasana, never "password on GitLab16");
+    # a language whose people write the English word (Italian: "password è") joins it to the English words
+    pairs = []
+    for lang in langs:
+        copulas = sorted(_PW_COPULAS_OF.get(lang, ()), key=lambda c: (-len(c), c))
+        if copulas:
+            own = _PW_WORDS_OF.get(lang) or _PW_WORDS_OF["en"]
+            gap = r"[ \t]*" if lang == "th" else r"(?![\w-])[ \t]+"   # Thai writes no space between words
+            pairs.append("(?:" + "|".join(own) + ")" + gap + "(?:" + "|".join(copulas) + r")[ \t]*:?")
+    return d["regex"].replace("{words}", "|".join(words)).replace("{pairs}", "|".join(pairs))
+
+
+# the words for "password" per label language (rules/labels/<language>.txt names the same words for the keyword
+# rules), and the words that join it to its value in a sentence ("ist", "est", "är"). Only words that name a password
+# and nothing else: `pass`, `pw` and `pin` start ordinary sentences ("boarding pass LH4821X", "PIN 4821 der SIM")
+_PW_WORDS_OF = {
+    "en": (r"password", r"passwd", r"passphrase"),
+    "de": (r"passwort", r"kennwort"),
+    "es": (r"contrase(?:ñ|n)a", r"clave[ \t]+de[ \t]+acceso"),
+    "fr": (r"mot[ \t]+de[ \t]+passe",),
+    "pt": (r"senha", r"palavra[ -]passe"),
+    "nl": (r"wachtwoord",),
+    "pl": (r"has(?:ł|l)o",),
+    "tr": (r"(?:ş|s)ifre", r"parola"),
+    "nb": (r"passord(?:et)?",),
+    "sv": (r"l(?:ö|o)senord(?:et)?",),
+    "da": (r"adgangskoden?", r"kodeord(?:et)?"),
+    "fi": (r"salasana",),
+    "cs": (r"heslo",),
+    "ko": (r"비밀번호(?:는|가)?", r"패스워드(?:는|가)?", r"암호(?:는|가)?"),
+    "th": (r"รหัสผ่าน",),
+}
+_PW_COPULAS_OF = {
+    "en": ("is", "was"), "de": ("ist", "lautet", "war"), "es": ("es", "era"), "fr": ("est", "était"),
+    "it": ("è",), "pt": ("é", "era"), "nl": ("is", "was"), "pl": ("to", "jest"), "nb": ("er", "var"),
+    "sv": ("är", "var"), "da": ("er", "var"), "fi": ("on", "oli"), "cs": ("je",), "th": ("คือ",),
+}
+
+
+def _load_own(languages: tuple = ("en",)) -> list[Rule]:
+    return [Rule(id=d["id"], type=d["type"], regex=_Lazy(_own_regex(d, languages)),
                  secret_group=d.get("secret_group", 0), validator=d.get("validator"),
                  context=tuple(d.get("context", ())), require_context=d.get("require_context", False))
             for d in OWN_RULES] + _load_prefixes()
@@ -2179,7 +2329,7 @@ def _user_rules() -> list[Rule]:
 
 def _rule_sources(active) -> list:
     """(source, rules) of every rule list source, in the order of registry.BANDS."""
-    own = _load_own()
+    own = _load_own(active.languages)
     n_own = len(OWN_RULES)
     return [
         ("own-secret", [r for r in own[:n_own] if r.type == "SECRET"]),
@@ -3526,6 +3676,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     secret = text[start:end]
                 elif _before_value(text, start).rstrip(" \t").endswith(":"):
                     continue   # a YAML anchor or alias alone after a colon label: &gitlab_token_fields
+            if rule.id in _VALIDATE_FIRST and not VALIDATORS[rule.validator](secret):
+                continue   # a word after a password word in a sentence: the cheap check first (else 3x slower)
             if keyword and (is_code_word(secret) or value_is_code(text, start, end, secret)):
                 continue
             if "word-path" in filters and _WORD_PATH_RE.fullmatch(secret.strip("'\"")):
@@ -3651,6 +3803,15 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 if tail and not overlaps(end, tail.end()):
                     end = tail.end()
                     secret = text[start:end]
+            if (keyword and len(secret) > 1 and secret[-1] in _SENTENCE_STOP
+                    and (end >= len(text) or text[end].isspace())):
+                # `password: <value>.` ends a sentence: the stop is no part of the value, or the store keeps a wrong
+                # password (field report, 2026-10-16). A value that ends with a dot is written in quotes. The checks
+                # above judged the value with its stop, as before: the cut moves the end of a hit, never makes one
+                # one stop; two dots or more are an ellipsis and stay (tests/test_leak_direction.py: <value>!...)
+                cut = len(secret) if secret.endswith("..") else len(secret) - 1
+                end -= len(secret) - cut
+                secret = secret[:cut]
             take(Match(rule.id, rule.type, secret, start, end), own)
     for matcher in (extra_matchers if rule_list is None else ()):
         for m in sorted(matcher(text), key=lambda x: x.start):
