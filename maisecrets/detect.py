@@ -63,6 +63,20 @@ class Match:
     end: int
 
 
+class _LazyRx:
+    """A module-level regex compiled at its first use, with every method of a pattern: a hook process pays each
+    compilation at import, and most texts never reach these checks (0.6.24)."""
+    __slots__ = ("_args", "_rx")
+
+    def __init__(self, *args) -> None:
+        self._args, self._rx = args, None
+
+    def __getattr__(self, name: str):
+        if self._rx is None:
+            object.__setattr__(self, "_rx", re.compile(*self._args))
+        return getattr(self._rx, name)
+
+
 class _Lazy:
     """A regex compiled on first use. Rule loading then costs a dict, not 265 compilations."""
     __slots__ = ("pattern", "flags", "_rx")
@@ -143,10 +157,6 @@ def shannon_entropy(s: str) -> float:
 # base64url keeps 3.5: kebab-case names with a digit read as keys under 3.426 (review of 0.6.24)
 ENTROPY_BY_ALPHABET = {"hex": 3.5, "base32": 3.5, "base62": 3.322, "base64": 3.252, "base64url": 3.5,
                        "printable": 3.5}
-# the challenges of SMTP and IMAP AUTH LOGIN, base64 of `Username:` and `Password:`: a mail server prints them after
-# `authentication failed:`, and with the floor of base62 they read as a key (a typed prompt, 0.6.24 measurement)
-_LOGIN_CHALLENGES = frozenset(_b64.b64encode(w).decode() for w in (b"Username:", b"Password:", b"User Name\x00",
-                                                                   b"Password\x00"))
 ENTROPY_BY_ALPHABET_RULES = frozenset({"generic-api-key"})
 _B62 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 _ALPHABETS = (("hex", frozenset("0123456789abcdefABCDEF")), ("base32", frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567=")),
@@ -160,11 +170,12 @@ def alphabet_of(value: str) -> str:
 
 
 def _base64_of_text(v: str) -> bool:
-    """base64 of printable text (`staging-user`, `Password:`): an encoded word or name, not a key."""
-    if len(v) % 4 or len(v) < 8:
+    """base64 of printable text (`staging-user`, the `Password:` challenge of a mail server's AUTH LOGIN after
+    `authentication failed:`), padded or not: an encoded word or name, not a key."""
+    if len(v) % 4 == 1 or len(v) < 8:
         return False
     try:
-        raw = _b64.b64decode(v, validate=True)
+        raw = _b64.b64decode(v + "=" * (-len(v) % 4), validate=True)
     except (ValueError, TypeError):
         return False
     return bool(raw) and all(32 <= b < 127 for b in raw)
@@ -1385,13 +1396,23 @@ _SYSTEM_USERS = frozenset({"git", "root", "ubuntu", "ec2-user", "admin", "norepl
 # --------------------------------------------------------------- own rules --
 # The letters of Chinese, Japanese and Korean script. Python's \w includes them, and these scripts put no space
 # between words: in `メールはta@example.jpまで` the boundaries (?<![\w...]) and (?![\w-]) of the e-mail and phone rules
-# never hold, so the address was missed or its span took the words around it. Those rules bound a value by a word
-# character that is no CJK letter (_NON_CJK_WORD) instead. Ranges: CJK punctuation, kana, the ideographs of
-# Extension A and the base block, compatibility ideographs, Hangul Jamo and syllables, and the fullwidth forms.
-_CJK = ("\u1100-\u11ff\u3000-\u303f\u3040-\u30ff\u3130-\u318f\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af"
-        "\uf900-\ufaff\uff00-\uffef")
-_NON_CJK_WORD = "[^\\W" + _CJK + "]"
-_MAIL_LOCAL = "(?:(?![" + _CJK + "])[\\w.+-])"
+# never hold, so the address was missed or its span took the words around it. Those rules end a value at a word
+# character that is no CJK letter (_NOT_CJK_WORD), and scan() cuts CJK letters off the front of an address (filter
+# cjk-head). Ranges: Hangul Jamo, CJK punctuation and kana, Extension A and the base block of the ideographs, Hangul
+# syllables, compatibility ideographs and the fullwidth forms. Each class costs about 0.5 ms to compile in every hook
+# process, so the rules hold one each (review of 0.6.24).
+_CJK = ("\u1100-\u11ff\u3000-\u30ff\u3130-\u318f\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff"
+        "\uff00-\uffef")
+_CJK_RANGES = ((0x1100, 0x11ff), (0x3000, 0x30ff), (0x3130, 0x318f), (0x3400, 0x4dbf), (0x4e00, 0x9fff),
+               (0xac00, 0xd7af), (0xf900, 0xfaff), (0xff00, 0xffef))
+_NOT_CJK_WORD = "(?![" + _CJK + "])\\w"
+
+
+def _is_cjk(ch: str) -> bool:
+    o = ord(ch)
+    return any(lo <= o <= hi for lo, hi in _CJK_RANGES)
+
+
 OWN_RULES: list[dict] = [
     # ?token=… / &api_key=… in a URL
     {"id": "url-query-secret", "type": "SECRET", "secret_group": 2,
@@ -1399,10 +1420,11 @@ OWN_RULES: list[dict] = [
     {"id": "email", "type": "EMAIL", "validator": "person_email",
      # the last label is alphabetic: `lodash@4.17.21`, `checkout@v4.1.1` and Homebrew's
      # `python@3.14/3.14.7` are version pins, not addresses (review, 2026-09-26)
-     # the boundaries skip CJK letters (_CJK): an address right next to Japanese, Chinese or Korean text
-     "regex": r"(?:(?:\b|(?<=[" + _CJK + r"]))" + _MAIL_LOCAL + r"{1,64}|(?<!" + _NON_CJK_WORD + r")(?<![.+-])"
-              + _MAIL_LOCAL + r"{64,}|" + _MAIL_LOCAL + r"{64})"
-              r"@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?!" + _NON_CJK_WORD + r"|-)"},
+     # a look ahead for the @ first: a text without an address is passed at once. A CJK letter ends the address
+     # (_NOT_CJK_WORD) and scan() cuts CJK letters off its front (cjk-head): an address next to Japanese text
+     "regex": r"(?=[\w.+-]{0,64}@|(?<![\w.+-])[\w.+-]{65,}@)"
+              r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})"
+              r"@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?!-|" + _NOT_CJK_WORD + r")"},
     # an IBAN in lower case, plain or in groups of four; its validator also wants the country's length
     {"id": "iban-lowercase", "type": "IBAN", "validator": "iban",
      # also after an MT940 subfield code (?31), as PRESIDIO_LEFT_SUBFIELD
@@ -1415,10 +1437,9 @@ OWN_RULES: list[dict] = [
      "regex": r"(?:(?<![\w.+%-])|(?<=(?i:mailto%3a))|(?<=%3[Dd]))[\w.+-]{1,64}%40"
               r"[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "phone", "type": "PHONE",
-     # the boundaries skip CJK letters (_CJK), as in the e-mail rule
-     "regex": r"(?<!" + _NON_CJK_WORD + r")(?<!\+)\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}"
-              r"(?:[ \-]?\d{2,5}){1,4}"
-              r"(?![\w.]\d|" + _NON_CJK_WORD + r")"},
+     # a CJK letter before or after the number is a boundary, as in the e-mail rule
+     "regex": r"(?:(?<=[" + _CJK + r"])|(?<!\w))(?<!\+)\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}"
+              r"(?:[ \-]?\d{2,5}){1,4}(?![\w.]\d|" + _NOT_CJK_WORD + r")"},
     # bare token prefixes newer than the vendored rulesets live in rules/prefixes.txt (see _load_prefixes)
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
@@ -1760,14 +1781,14 @@ PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "
 CARD_ALONE_IN_TOOL = frozenset({"credit-card"})
 # issuer prefixes and lengths (ISO/IEC 7812 IIN ranges of the networks): Visa, Mastercard, American Express, Discover,
 # JCB, Diners Club, UnionPay
-_CARD_ISSUERS = re.compile(r"4\d{15}|5[1-5]\d{14}|2(?:2[2-9]|[3-6]\d|7[01])\d{13}|2720\d{12}|3[47]\d{13}"
+_CARD_ISSUERS = _LazyRx(r"4\d{15}|5[1-5]\d{14}|2(?:2[2-9]|[3-6]\d|7[01])\d{13}|2720\d{12}|3[47]\d{13}"
                            r"|6(?:011|5\d\d|4[4-9]\d)\d{12}|35(?:2[89]|[3-8]\d)\d{12}|3(?:0[0-5]|[68]\d)\d{11}|62\d{14}")
-_CARD_GROUPS = re.compile(r"\d{4}([ -])\d{4}\1\d{4}\1\d{4}|\d{4}([ -])\d{6}\2\d{5}|\d{4}([ -])\d{6}\3\d{4}")
+_CARD_GROUPS = _LazyRx(r"\d{4}([ -])\d{4}\1\d{4}\1\d{4}|\d{4}([ -])\d{6}\2\d{5}|\d{4}([ -])\d{6}\3\d{4}")
 
 
-_ID_LABEL_BEFORE_RE = re.compile(r"(?i)(?:order|invoice|message|trace|request|tracking|transaction|reference|ref|imei"
-                                 r"|serial|ticket|session|account)[ _-]?(?:id|no|nr|number|#)?[\"']?\s{0,3}[:=#]\s{0,3}"
-                                 r"[\"']?\s{0,3}$")
+# a label that names an id (order_id, event_id, "job_id", invoice no, imei, serial): the number after it is that id
+_ID_LABEL_BEFORE_RE = _LazyRx(r"(?i)(?:(?:^|[^a-z])(?:imei|serial|reference|ref)|(?:id|no|nr|num|number|#))[\"']?"
+                                 r"\s{0,3}[:=#]\s{0,3}[\"']?\s{0,3}$")
 
 
 def _card_shaped(text: str, start: int, secret: str) -> bool:
@@ -1778,12 +1799,15 @@ def _card_shaped(text: str, start: int, secret: str) -> bool:
     end = start + len(secret)
     sep = re.sub(r"\d", "", v)[:1]
     fifth = bool(sep) and re.match(re.escape(sep) + r"\d{4}(?!\d)", text[end:end + 6])
-    if start and text[start - 1] in "+.,-0123456789" or text[end:end + 1].isalnum() \
+    # a comma before the number is a CSV cell (17,4532 0151 ...), not a decimal: a decimal is no group of four
+    if start and text[start - 1] in "+.-0123456789" or text[end:end + 1].isalnum() \
             or re.match(r"\.\d", text[end:end + 2]) or fifth:
         return False   # a decimal, a phone number, a longer run, a fifth group (an expiry such as 12/28 may follow)
     if _ID_LABEL_BEFORE_RE.search(text, max(0, start - 30), start):
         return False   # order_id=4111 ...: an id that passes Luhn
     return bool(_CARD_GROUPS.fullmatch(v) and _CARD_ISSUERS.fullmatch(re.sub(r"\D", "", v)))
+
+
 # a Presidio pattern with no boundary: PESEL's eleven digits matched inside a longer digit run
 PRESIDIO_DIGIT_BOUNDED = {"pl-pesel"}
 # single patterns that need a context word although their recognizer does not: DE and nine digits that pass the
@@ -2431,7 +2455,7 @@ _ENCODED_MAIL_CONTEXT_RE = re.compile(
     r"|\b(?:e-?mail|mail|sender|recipient|bounce|reply-to|contact|login|users?|username)[ \t]*[:=/]?[ \t]*)$")
 _DIGITS_ONLY_RE = re.compile(r"\+?[\d\s().-]+")
 # `sent to name%40host` in prose: `to` and spaces, not `path/to/` or `import x to`
-_ENCODED_MAIL_TO_RE = re.compile(r"(?i)(?<![/\w])(?:sent|send|mailed|forwarded|reply|replied|receipt|invoice|copy)"
+_ENCODED_MAIL_TO_RE = _LazyRx(r"(?i)(?<![/\w])(?:sent|send|mailed|forwarded|reply|replied|receipt|invoice|copy)"
                                  r"[^\n/]{0,20}?(?<![/\w])to[ \t]+$")
 
 
@@ -2442,12 +2466,16 @@ def _encoded_mail_expected(text: str, start: int, end: int) -> bool:
     if _ENCODED_MAIL_CONTEXT_RE.search(text, max(line, start - 40), start) or _ENCODED_MAIL_TO_RE.search(
             text, max(line, start - 40), start):
         return True
+    if text[start - 1:start] == '"' and text[end:end + 1] == '"':
+        start, end = start - 1, end + 1   # a quoted cell: "name%40host.de"
     before, after = text[start - 1:start] if start > line else "", text[end:end + 1]
     if before not in ("", ",", ";", "\t") or after not in ("", "\n", "\r", ",", ";", "\t") or start - line > 4000:
         return False
     # the column's header names a mail address: a CSV header in the first five lines (a file, an export, a query
     # result with a line before it); a row without such a header stays text (review of 0.6.24)
     sep = before or (after if after in (",", ";", "\t") else ",")
+    if not before and not after:
+        return False   # a value alone on its line is no cell of a row
     import csv   # here: the hooks pay for every module at import
     col = len(next(csv.reader([text[line:start + 1]], delimiter=sep), [""])) - 1
     for head in text[:4000].split("\n")[:5]:
@@ -2971,9 +2999,9 @@ def _names_its_label(text: str, start: int, secret: str) -> bool:
 # keyword that opens a sentence in a markdown table cell
 # the words of a name (each with a vowel, or DB) and a counter of one or two digits: PROD-DB-PASS_7, MY_SECRET_VALUE_1;
 # a run of capitals without a vowel or with a longer suffix is a value (review of 0.6.24)
-_CONSTANT_NAME_RE = re.compile(r"(?:[A-Z]*[AEIOUY][A-Z]*|DB)(?:[-_](?:[A-Z]*[AEIOUY][A-Z]*|DB))+_\d{1,2}")
-_TIME_OR_RATIO_RE = re.compile(r"\d+:[a-z]+")
-_PROSE_AFTER_RE = re.compile(r" (?:and|or|of|for|with|to|in|the|is|are|und|oder|der|die|das|mit|für|ist|sind)"
+_CONSTANT_NAME_RE = _LazyRx(r"(?:[A-Z]*[AEIOUY][A-Z]*|DB)(?:[-_](?:[A-Z]*[AEIOUY][A-Z]*|DB))+_\d{1,2}")
+_TIME_OR_RATIO_RE = _LazyRx(r"\d+:[a-z]+")
+_PROSE_AFTER_RE = _LazyRx(r" (?:and|or|of|for|with|to|in|the|is|are|und|oder|der|die|das|mit|für|ist|sind)"
                              r"(?![^\W_])")
 
 
@@ -3363,6 +3391,13 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if end <= start:
                 continue
             secret = m.group(g)
+            if "cjk-head" in filters and _is_cjk(secret[0]):
+                # the address took the Japanese, Chinese or Korean words before it (\w holds their letters)
+                k = next((i for i, ch in enumerate(secret) if not _is_cjk(ch)), len(secret))
+                start += k
+                secret = text[start:end]
+                if not secret or secret[0] in "@.":
+                    continue
             if "base64-wrapped-end" in filters:
                 end = _base64_wrapped_end(text, start, end)   # the further lines of a wrapped value
                 secret = text[start:end]
@@ -3450,8 +3485,6 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue
             if rule.entropy and not _entropy_ok(rule, secret):
                 continue
-            if "login-challenge" in filters and secret.strip("\"'") in _LOGIN_CHALLENGES:
-                continue   # base64 of Username: or Password: after `authentication failed:`
             if rule.drop is not None and rule.drop({"secret": secret, "match": m.group(0), "path": "",
                                                     "line": text[_line_start(text, start):_line_end(text, end)]}):
                 continue                     # the betterleaks filter of the rule, or the global one

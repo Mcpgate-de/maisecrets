@@ -80,7 +80,7 @@ FILTERS = {
     "ds-keyword-colon": ("escaped-label-quote", "constant-name", "time-or-ratio"),
     "ds-keyword-colon-quotes-required": ("escaped-label-quote", "constant-name", "time-or-ratio"),
     "ds-keyword-equal-signs": ("constant-name",),
-    "generic-api-key": ("word-path", "derived-label", "login-challenge"),   # base64 of Password: (SMTP AUTH LOGIN)
+    "generic-api-key": ("word-path", "derived-label"),
     "url-query-secret": ("template-value",),                    # ?token={...}
     "auth-scheme": ("words-not-token",),                        # Bearer and words joined by - or _
     "ds-basic-auth": ("user-equals-password",),
@@ -91,6 +91,7 @@ FILTERS = {
     "hashicorp-tf-password": ("password-value",),               # detect-secrets' value check
     "email-percent-encoded": ("encoded-mail-context",),         # name%40host only where an address is expected
     "phone": ("phone-shape",),
+    "email": ("cjk-head",),                                     # an address glued to CJK text: the words are no part
     "crypto-seed-phrase": ("seed-phrase",),                     # no placeholder check; compared as single-spaced words
 }
 # the filters of every rule whose id starts so: a value that ends in a backslash before its quote

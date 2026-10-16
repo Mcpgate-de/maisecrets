@@ -29,6 +29,9 @@ KNOWN = {
     "key fingerprint": {"generic-api-key"},
     "owner team": {"name-after-label"},
     "base64 of a name after a key": {"ds-keyword-equal-signs"},   # the password-label rule, not generic-api-key
+    # ::add-mask:: declares its value a secret: in a tool result even a doc example is masked; a typed prompt is not
+    # blocked (every form is tool-only)
+    "add-mask question": {"secret-add-mask"},
 }
 # the rule that must take each positive (the corpus id → the rule id)
 OWNER = {
@@ -49,6 +52,8 @@ OWNER = {
     "fhir pretty passport": "id-number-fhir-identifier", "name patient_name": "name-non-latin-after-label",
     "dl in json": "id-number-after-record-label", "address level": "address-after-label",
     "encoded mail after a line": "email-percent-encoded",
+    "card in a csv row": "credit-card", "encoded mail quoted cell": "email-percent-encoded",
+    "postman password of words": "secret-postman-variable", "add-mask of words": "secret-add-mask",
 }
 
 
@@ -75,7 +80,8 @@ class FormsCorpusTests(unittest.TestCase):
             for channel in ("tool", "prompt"):
                 with self.subTest(name=name, channel=channel):
                     kinds = {m.kind for m in scan(text, channel)}
-                    self.assertLessEqual(kinds, KNOWN.get(name, set()))
+                    known = KNOWN.get(name, set()) if channel == "tool" or name != "add-mask question" else set()
+                    self.assertLessEqual(kinds, known)
 
     def test_each_form_masks_its_value_in_the_tool_channel(self):
         for name, text, values in corpus.FORMS_HIT:

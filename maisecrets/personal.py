@@ -354,6 +354,20 @@ def _csv_hits(text: str) -> list:
     return out
 
 
+class _lazy:
+    """A regex compiled at its first use: a hook pays every millisecond of import, and most texts need no form."""
+    __slots__ = ("_args", "_rx")
+
+    def __init__(self, *args):
+        self._args, self._rx = args, None
+
+    def __getattr__(self, name):
+        if self._rx is None:
+            object.__setattr__(self, "_rx", re.compile(*self._args))
+        return getattr(self._rx, name)
+
+
+
 # ------------------------------------------------------------------------------------------ the forms of 0.6.24 --
 # A value in a fixed form or after a label that names it, from the holdout values that 0.6.21 still leaked
 # (2026-10-15). Each rule declares (type, channel, region, needs): channel "tool" (tool results and files) or "both".
@@ -398,17 +412,17 @@ def _complex(v: str) -> bool:
                 any(not c.isalnum() for c in v))) >= 3
 
 
-_ADD_MASK_RE = re.compile(r"::add-mask::([^\s\"'`]{6,256})")
-_SAS_KEY_RE = re.compile(r"(?i)\bSharedAccessKey=([A-Za-z0-9+/_=-]{16,256})(?![A-Za-z0-9+/_=-])")
+_ADD_MASK_RE = _lazy(r"::add-mask::([^\s\"'`]{6,256})")
+_SAS_KEY_RE = _lazy(r"(?i)\bSharedAccessKey=([A-Za-z0-9+/_=-]{16,256})(?![A-Za-z0-9+/_=-])")
 # a Postman or Insomnia variable, a HAR header: {"key"|"name": "<secret word>", "value": "..."}
-_KV_SECRET_RE = re.compile(r"\"(?:key|name)\"\s*:\s*\"([^\"\n]{1,60})\"\s*,\s*\"value\"\s*:\s*\"([^\"\n]{6,512})\"")
+_KV_SECRET_RE = _lazy(r"\"(?:key|name)\"\s*:\s*\"([^\"\n]{1,60})\"\s*,\s*\"value\"\s*:\s*\"([^\"\n]{6,512})\"")
 _SECRET_NAME_PARTS = frozenset({"password", "passwd", "pwd", "secret", "token", "apikey", "pass", "credential",
                                  "credentials", "auth", "passphrase", "bearer", "jwt", "privatekey", "signingkey",
                                  "clientkey", "accesskey", "secretkey"})
-_META_NAME_RE = re.compile(r"(?i)(?:type|url|uri|name|header|policy|length|len|ttl|seconds|expiry|expires|endpoint|path"
+_META_NAME_RE = _lazy(r"(?i)(?:type|url|uri|name|header|policy|length|len|ttl|seconds|expiry|expires|endpoint|path"
                            r"|id|ids|hint|label|format|scheme|prefix|mode|kind|version|count|audience|issuer|provider"
-                           r"|scope|store|tokenizer)$")
-_HOST_RE = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\.?")
+                           r"|scope|store|tokenizer|algorithm|alg|encoding|status|method|rate|format)$")
+_HOST_RE = _lazy(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\.?")
 
 
 def _name_parts(name: str) -> list:
@@ -434,21 +448,21 @@ def _words_inside(v: str) -> bool:
     return any(r.lower() in words for r in re.findall(r"[A-Z][a-z]{4,}|[a-z]{5,}|[A-Z]{5,}", v))
 
 
-_HEX48_RE = re.compile(r"(?i)(?<![a-z])(token|code|secret|key)(?![a-z])[^\n]{0,24}?(?<![0-9a-fA-F])([0-9a-f]{48})"
+_HEX48_RE = _lazy(r"(?i)(?<![a-z])(token|code|secret|key)(?![a-z])[^\n]{0,24}?(?<![0-9a-fA-F])([0-9a-f]{48})"
                        r"(?![0-9a-zA-Z])")
-_DIGEST_WORD_RE = re.compile(r"(?i)hash|digest|checksum|fingerprint|cache|etag|sha|md5|tiger|integrity|commit")
-_REDIS_AUTH_RE = re.compile(r"\"AUTH\"\s+\"([^\"\n]{6,128})\"(?!\s+\")")
-_LOGIN_CALL_RE = re.compile(r"\.login\(\s*([\"'])[^\"'\n]{1,64}\1\s*,\s*([\"'])([^\"'\n]{6,128})\2\s*\)")
-_OP_FIELDS_RE = re.compile(r"op item get[^\n]*--fields[^\n]*\busername,password\b[^\n]*\n[^\n]{1,128}\n([^\s]{6,128})"
+_DIGEST_WORD_RE = _lazy(r"(?i)hash|digest|checksum|fingerprint|cache|etag|sha|md5|tiger|integrity|commit")
+_REDIS_AUTH_RE = _lazy(r"\"AUTH\"\s+\"([^\"\n]{6,128})\"(?!\s+\")")
+_LOGIN_CALL_RE = _lazy(r"\.login\(\s*([\"'])[^\"'\n]{1,64}\1\s*,\s*([\"'])([^\"'\n]{6,128})\2\s*\)")
+_OP_FIELDS_RE = _lazy(r"op item get[^\n]*--fields[^\n]*\busername,password\b[^\n]*\n[^\n]{1,128}\n([^\s]{6,128})"
                            r"(?=\n|$)")
-_SQL_CREDS_RE = re.compile(r"(?i)INSERT INTO \w*(?:cred|passw|secret|login)\w*\s+VALUES\s*\(([^)\n]{1,300})\)")
-_USER_SLASH_RE = re.compile(r"(?i)(?<![a-z])(?:login|user|creds?|credentials|account)(?![a-z])[^\n]{0,30}?(?<!\S)"
+_SQL_CREDS_RE = _lazy(r"(?i)INSERT INTO \w*(?:cred|passw|secret|login)\w*\s+VALUES\s*\(([^)\n]{1,300})\)")
+_USER_SLASH_RE = _lazy(r"(?i)(?<![a-z])(?:login|user|creds?|credentials|account)(?![a-z])[^\n]{0,30}?(?<!\S)"
                             r"[\w.@-]{2,64} / (\S{8,64})(?!\S)")
-_FHIR_RE = re.compile(r"(?i)\"system\"\s*:\s*\"([^\"\n]{0,80})\"\s*,\s*\"value\"\s*:\s*\"([^\"\n]{4,40})\"")
-_FHIR_SYSTEM_RE = re.compile(r"(?i)(?:^|[/:._#-])(?:mrn|passport(?:-[a-z]{2,3}|[-_]?(?:number|no))?|ssn|nid"
+_FHIR_RE = _lazy(r"(?i)\"system\"\s*:\s*\"([^\"\n]{0,80})\"\s*,\s*\"value\"\s*:\s*\"([^\"\n]{4,40})\"")
+_FHIR_SYSTEM_RE = _lazy(r"(?i)(?:^|[/:._#-])(?:mrn|passport(?:-[a-z]{2,3}|[-_]?(?:number|no))?|ssn|nid"
                              r"|national[-_]?id|tax[-_]?id"
                              r"|member[-_]?id|insurance(?:[-_]member)?(?:[-_]id)?)(?:$|[/:._#-])")
-_IDENTIFIER_KEY_RE = re.compile(r"\"identifier\"\s*:\s*\[")
+_IDENTIFIER_KEY_RE = _lazy(r"\"identifier\"\s*:\s*\[")
 
 
 def _in_identifier_array(text: str, pos: int, most: int = 4000) -> bool:
@@ -460,41 +474,49 @@ def _in_identifier_array(text: str, pos: int, most: int = 4000) -> bool:
         last = m
     if last is None:
         return False
-    seg = text[last.end():pos]
-    return seg.count("[") - seg.count("]") >= 0
+    depth = 1
+    for ch in text[last.end():pos]:
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return False   # the identifier array closed before the value
+    return True
 
 
-_VERSION_RE = re.compile(r"(?i)^v?\d+(?:\.\d+)+$")
+_VERSION_RE = _lazy(r"(?i)^v?\d+(?:\.\d+)+$")
 _ID_VALUE = r"((?-i:[A-Z0-9](?:[A-Z0-9]|[ -](?=[A-Z0-9])){4,24}))(?![A-Za-z0-9])"
-_RECORD_LABEL_RE = re.compile(
+_RECORD_LABEL_RE = _lazy(
     r"(?i)(?<![a-z])(?:insurance(?:[ _-]?member)?(?:[ _-]?id)?|member(?:[ _-]?(?:id|no|number|#))?"
     r"|record(?:[ _-]?(?:no|number|#))?|patient(?:[ _-]?id)?|account|(?<=\")nid(?=\")|(?-i:DL)(?=[\"']?[\s:#]))"
     r"(?![a-z])[\"']?"
     r"(?:\s{0,3}(?:is|number|no\.?|#))?\s{0,3}[:=#]?\s{0,3}[\"']?" + _ID_VALUE)
-_ID_LETTERS_RE = re.compile(r"(?i)(?<![a-z])(?:member(?:[ _-]?id)?|passport|insurance(?:[ _-]?id)?)(?![a-z])[\"']?"
+_ID_LETTERS_RE = _lazy(r"(?i)(?<![a-z])(?:member(?:[ _-]?id)?|passport|insurance(?:[ _-]?id)?)(?![a-z])[\"']?"
                             r"(?:\s{0,3}(?:is|number|no\.?|#))?\s{0,3}[:=#]?\s{0,3}[\"']?"
                             r"((?-i:[A-Z0-9][A-Z0-9-]{6,22}[A-Z0-9]))(?![A-Za-z0-9])")
-_MEMBER_PAREN_RE = re.compile(r"(?i)(?<![a-z])member[\"']?\s{0,3}:\s{0,3}[^\n()]{2,40}\((?-i:([A-Z0-9][A-Z0-9-]{4,22}"
+_MEMBER_PAREN_RE = _lazy(r"(?i)(?<![a-z])member[\"']?\s{0,3}:\s{0,3}[^\n()]{2,40}\((?-i:([A-Z0-9][A-Z0-9-]{4,22}"
                               r"[A-Z0-9]))\)")
-_SQL_ALIAS_RE = re.compile(r"'([^'\n]{5,80})'\s+(?i:AS)\s+(?i:(sin|ssn|tax_?id|mrn|nid|passport(?:_no)?|member_?id"
+_SQL_ALIAS_RE = _lazy(r"'([^'\n]{5,80})'\s+(?i:AS)\s+(?i:(sin|ssn|tax_?id|mrn|nid|passport(?:_no)?|member_?id"
                            r"|national_?id|aadhaar|pan|nhs|tfn|address|home_address))\b")
-_JP_ADDRESS_RE = re.compile(r"〒\d{3}-\d{4}[ 　]?[^\s\"',;<>|]{2,40}")
-_JP_COMPANY_RE = re.compile(r"株式会社|有限会社|合同会社|本社|支社|支店|営業所|事務所|工場|センター|ビル|役所"
+_JP_ADDRESS_RE = _lazy(r"〒\d{3}-\d{4}[ 　]?[^\s\"',;<>|]{2,40}")
+_JP_COMPANY_RE = _lazy(r"株式会社|有限会社|合同会社|本社|支社|支店|営業所|事務所|工場|センター|ビル|役所"
                             r"|大学|病院")
-_ADDRESS_LABEL_RE = re.compile(
+_ADDRESS_LABEL_RE = _lazy(
     r"(?i)(?<![a-z_])(address(?: on file)?|home[ _-]?address|adr|ship[ _-]?to|reship to|property|lives"
     r"|endere[cç]o|direcci[oó]n|adresse|location)[\"']?\s{0,3}:\s{0,3}[\"']?(;*)([^\n\"|;]{8,100}?)"
     r"(?=[\"\n|]|\s{2}|\.\s|$)")
 # a house number and a street word, in either order: 12 Harbour Lane, Rua das Flores 12,
-_HOUSE_RE = re.compile(r"\b\d{1,5}[A-Za-z]?(?:/\d{1,4})?,? [A-ZÀ-Þ][a-zà-ÿ]{2,}\b(?! \d)"
+_HOUSE_RE = _lazy(r"\b\d{1,5}[A-Za-z]?(?:/\d{1,4})?,? [A-ZÀ-Þ][a-zà-ÿ]{2,}\b(?! \d)"
                        r"|[A-ZÀ-Þ][a-zà-ÿ]{2,} \d{1,5}[A-Za-z]?,")
-_NOT_AN_ADDRESS_RE = re.compile(r"(?i)\b(?:rack|row|slot|zone|version|build|schema|width|height|signal|size|page"
-                                r"|step|round|score|accepted|proposed|rejected)\b|0x")
-_IN_ADDRESS_RE = re.compile(r"\b\d{1,4}(?:/\d{1,4})?, [^\n]{10,90}?, [A-Z][a-z]+ \d{6}\b")
+_NOT_AN_ADDRESS_RE = _lazy(r"(?i)\b(?:rack|row|slot|zone|version|build|schema|width|height|signal|size|page"
+                                r"|step|round|score|accepted|proposed|rejected|field|line|port|http|status|max|min)\b|0x")
+_ADDRESS_WORDS = ("address", "adr", "ship", "property", "lives", "endere", "direcci", "adresse", "location")
+_IN_ADDRESS_RE = _lazy(r"\b\d{1,4}(?:/\d{1,4})?, [^\n]{10,90}?, [A-Z][a-z]+ \d{6}\b")
 _NONLATIN = "Ͱ-ϿЀ-ӿ֐-׿؀-ۿऀ-ॿঀ-৿"
 _CJK_NAME = "一-鿿가-힯぀-ヿ"
 # labels that name a person and nothing else; `name`, `owner` and `admin` also name a product, a language or a group
-_NONLATIN_LABEL_RE = re.compile(
+_NONLATIN_LABEL_RE = _lazy(
     r"(?i)(?:(?<![a-z_])(?:full[ _-]?name|native name|(?:employee|patient|customer|contact|recipient)[ _-]?name"
     r"|beneficiary)[\"']?[ \t]{0,3}[:=]?"
     r"|^fn[\"']?[ \t]{0,3}[:=])[ \t]{0,3}[\"']?"
@@ -503,8 +525,8 @@ _NONLATIN_LABEL_RE = re.compile(
 _AUTONYMS = frozenset({"русский", "українська", "беларуская", "български", "српски", "македонски", "ελληνικά",
                        "עברית", "العربية", "فارسی", "اردو", "हिन्दी", "বাংলা", "中文", "简体中文", "繁體中文", "日本語",
                        "한국어", "русский язык", "қазақ тілі"})
-_PHONE_URL_RE = re.compile(r"(?i)(?<![a-z])(?:phone|tel|mobile|msisdn|cell)[\w-]{0,10}=(%2B\d{7,15})(?!\d)")
-_PHONE_WRAP_RE = re.compile(r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?\d{2,5}(?:[ \-]\d{2,5}){0,2}-\n[ \t]{0,4}\d{2,5}"
+_PHONE_URL_RE = _lazy(r"(?i)(?<![a-z])(?:phone|tel|mobile|msisdn|cell)[\w-]{0,10}=(%2B\d{7,15})(?!\d)")
+_PHONE_WRAP_RE = _lazy(r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?\d{2,5}(?:[ \-]\d{2,5}){0,2}-\n[ \t]{0,4}\d{2,5}"
                             r"(?:[ \-]\d{2,5}){0,3}(?![\w.]\d|\w)")
 
 
@@ -534,7 +556,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
     out = []
     if "secret-add-mask" in want and "::add-mask::" in text:
         for m in _ADD_MASK_RE.finditer(text):
-            if _random_value(m.group(1)) and not _words_inside(m.group(1)):
+            # ::add-mask:: declares its value a secret: a password made of words stays one
+            if _random_value(m.group(1)):
                 out.append((m.start(1), m.end(1), "secret-add-mask", "SECRET"))
     if "secret-shared-access-key" in want and "haredaccesskey=" in text.lower():
         for m in _SAS_KEY_RE.finditer(text):
@@ -544,10 +567,12 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
     if "secret-postman-variable" in want and "\"value\"" in text:
         for m in _KV_SECRET_RE.finditer(text):
             name, v = m.group(1), m.group(2)
-            if _secret_name(name) and not _META_NAME_RE.search(name) and _random_value(v) and "://" not in v \
-                    and not _HOST_RE.fullmatch(v) and not _words_inside(v):
+            strong = bool(set(_name_parts(name)) & {"password", "passwd", "pwd", "passphrase"})
+            if _secret_name(name) and not _META_NAME_RE.search(name.rstrip("0123456789")) and _random_value(v) \
+                    and "://" not in v and not _HOST_RE.fullmatch(v) and (strong or not _words_inside(v)):
                 out.append((m.start(2), m.end(2), "secret-postman-variable", "SECRET"))
-    if "secret-hex48-after-token-word" in want:
+    low = text.lower()
+    if "secret-hex48-after-token-word" in want and any(w in low for w in ("token", "code", "secret", "key")):
         for m in _HEX48_RE.finditer(text):
             v = m.group(2)
             if _DIGEST_WORD_RE.search(text, max(0, m.start() - 16), m.start(2)):
@@ -572,7 +597,6 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
             v = m.group(1)
             if _complex(v) and any(c.isdigit() for c in v) and "/" not in v and not _words_inside(v):
                 out.append((m.start(1), m.end(1), "secret-after-user-slash", "SECRET"))
-    low = text.lower()
     if "id-number-fhir-identifier" in want and "\"system\"" in text:
         for m in _FHIR_RE.finditer(text):
             v = m.group(2)
@@ -625,7 +649,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
             line = _line_back(text, m.start())
             if not _JP_COMPANY_RE.search(text, line, m.end()):
                 out.append((m.start(), m.end(), "address-jp-postcode", ADDRESS))
-    if "address-after-label" in want:
+    if "address-after-label" in want and any(w in low for w in _ADDRESS_WORDS):
         for m in _ADDRESS_LABEL_RE.finditer(text):
             if m.group(1).lower() == "adr" and not m.group(2):
                 continue   # ADR alone is an architecture decision record; the vCard field is ADR:;;<street>
@@ -643,7 +667,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
             line = _line_back(text, m.start())
             if m.group().count(",") >= 3 and not _NOT_A_HOME_RE.search(text, line, min(len(text), m.end() + 80)):
                 out.append((m.start(), m.end(), "address-in-form", ADDRESS))
-    if "name-non-latin-after-label" in want:
+    if "name-non-latin-after-label" in want and not text.isascii():
         for m in _NONLATIN_LABEL_RE.finditer(text):
             if m.group(1).lower() not in _AUTONYMS:
                 out.append((m.start(1), m.end(1), "name-non-latin-after-label", NAME))

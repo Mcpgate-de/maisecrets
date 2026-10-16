@@ -443,6 +443,20 @@ class ReadAFileFullOfSecretsTests(unittest.TestCase):
         self.assertEqual((self.dir / "plain.redacted.har").read_text(encoding="utf-8"), har)
 
 
+    def test_a_har_value_in_another_json_escape_is_masked_too(self):
+        """A writer may escape `/` as `\\/` or a letter as `\\u0041`: the copy is written again in one JSON form, so
+        the search finds the value (review of 0.6.24)."""
+        cookie = _rnd(6) + "/" + _rnd(6)
+        raw = cookie.replace("/", "\\/")
+        har = '{"log":{"entries":[{"request":{"cookies":[{"name":"sid","value":"' + raw + '"}]}}]}}'
+        (self.dir / "escaped.har").write_text(har, encoding="utf-8")
+        r = _run(SCRIPTS / "redact_copy.py", "escaped.har", cwd=self.dir)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        copy = (self.dir / "escaped.redacted.har").read_text(encoding="utf-8")
+        self.assertNotIn(cookie, json.dumps(json.loads(copy)))
+        self.assertNotIn(raw, copy)
+
+
 class RedactSameValueTests(unittest.TestCase):
     def test_an_iban_with_and_without_spaces_gets_one_tag(self):
         work = Path(tempfile.mkdtemp(prefix="maisecrets-redact-"))

@@ -193,6 +193,17 @@ FORMS_NO_HIT = [
     ("fhir identifier flag", '{"identifierRequired": false, "system": "urn:member-id", "value": "BUILD-13579"}'),
     ("order id in groups", "order_id=" + "4539 1488 " + "0343 6467"),
     ("five digit groups", "4539 1488 " + "0343 6467 0001"),
+    # ---------------------------------------------------------------- review round 3 of 0.6.24
+    ("event id in groups", "event_id: " + "4532 0151 " + "1283 0366"),
+    ("job id json in groups", '{"job_id": "' + "4532 0151 " + "1283 0366" + '"}'),
+    ("address field doc", "Address: Field 2, 1 Header Name, max 100"),
+    ("address line doc", "Address: Line 3, 1 Error Code, HTTP 500"),
+    ("address port doc", "Address: Port 1, 2 Network Nodes, status 200"),
+    ("postman bearer format", '{"key": "bearerFormat2", "value": "JWT2026_test"}'),
+    ("postman key format", '{"key": "privateKeyFormat2", "value": "pkcs8_der"}'),
+    ("postman jwt algorithm", '{"key": "jwtAlgorithm2", "value": "RS256_SHA"}'),
+    ("fhir closed identifier array", '{"identifier": [{"system": "urn:mrn", "value": "1"}], "extension": [{"system": '
+     '"urn:member-id", "value": "BUILD-13579"}]}'),
     ("twilio doc template", "Your Account SID starts with AC; copy it from the console (ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)."),
     ("uppercase AC hex in a dump", "0x0010: AC12 FF00 9A3B 4C5D 6E7F 8091 A2B3 C4D5"),
 ]
@@ -203,6 +214,13 @@ FORMS_HIT = [
     ("postman secret", '{"key": "password", "value": "' + "8fK2" + "qLw9Zx4Rp7Tn" + '"}', ["8fK2" + "qLw9Zx4Rp7Tn"]),
     ("har header", '{"name": "x-internal-token", "value": "' + T2 + '"}', [T2]),
     ("card in groups", "row 17: " + "4532 0151 " + "1283 0366", ["4532 0151 " + "1283 0366"]),
+    ("card in a csv row", "order,name,card_number,expiry\n101,Customer 1,x,12/28\n" + "\n".join(
+        "1%02d,Customer %d,%s,12/28" % (i, i, c) for i, c in enumerate(["4532 0151 1283 0366"] * 4)),
+     ["4532 0151 1283 0366"]),
+    ("encoded mail quoted cell", 'name,email,status\nDana,"' + "dana.okafor" + '%40mailbox-test.net",ok',
+     ["dana.okafor" + "%40mailbox-test.net"]),
+    ("postman password of words", '{"key": "db_password", "value": "' + "hunter2" + "Kx9q" + '"}', ["hunter2" + "Kx9q"]),
+    ("add-mask of words", 'echo "::add-mask::' + "Bluebird" + "2024" + '"', ["Bluebird" + "2024"]),
     ("card after pan", '{"pan": "' + "45320151" + "12830366" + '"}', ["45320151" + "12830366"]),
     ("card after a swedish word", "Kortnummer: " + "45320151" + "12830366", ["45320151" + "12830366"]),
     ("postman password counter", '{"key": "password2", "value": "' + "Dragon!" + "Tiger88" + '"}', ["Dragon!" + "Tiger88"]),

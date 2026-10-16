@@ -167,6 +167,11 @@ class GenericKeyFloorTests(unittest.TestCase):
         self.assertTrue(detect.shannon_entropy(v) < 3.5)
         self.assertEqual(self.generic(v), [])
 
+    def test_unpadded_base64_of_a_word_is_no_key(self):
+        import base64
+        v = base64.b64encode(J(["hello", "-world"]).encode()).decode().rstrip("=")
+        self.assertEqual(self.generic(v), [])
+
     def test_a_kebab_case_name_keeps_the_floor_of_3_5(self):
         self.assertEqual(detect.ENTROPY_BY_ALPHABET["base64url"], 3.5)
         self.assertEqual(self.generic(J(["deploy-", "worker-", "eu2-prod"])), [])

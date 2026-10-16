@@ -109,7 +109,16 @@ def matches(detect, text: str, path: str = "") -> list:
     return sorted(taken + found, key=lambda m: m.start)
 
 
+def _canonical_har(text: str) -> str:
+    """A HAR recording written again in one JSON form: an escape the writer chose (`\\/`, `\\u002d`) would hide a
+    credential from the search for its value (review of 0.6.24). Any other text stays as it is."""
+    if not _har_values(text):
+        return text
+    return json.dumps(json.loads(text), indent=2, ensure_ascii=False)
+
+
 def redact(detect, text: str, secrets_only: bool, path: str = "") -> tuple[str, Counter]:
+    text = _canonical_har(text)
     tags: dict[str, str] = {}
     per_type: Counter = Counter()
     out, last = [], 0
