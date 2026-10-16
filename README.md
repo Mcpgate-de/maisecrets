@@ -1454,6 +1454,12 @@ Four sources, one scanner (`maisecrets/detect.py`):
   result, and in a typed prompt after a phone word; a US number in the national form
   `(312) 846-2291` after a phone word with region `us` or `ca`, in a tool result only (an area code
   and an exchange start with 2 to 9; the fictional 555 exchange stays text).
+- A phone number in its national form after a phone label (`Phone number: 415-382-…`,
+  `Telefon: 030 …`, `telefoonnummer: 06 …`, `contact number is …`), and a North American number after
+  a phone verb (`call`, `reach me at`, `contacted at`), in a tool result only. A North American number
+  (`415-382-…`) needs region `us` or `ca`, as the `(312)` form does. A date, a time, a version, a
+  timestamp, a count (`3 412 908`), a range of years, a subscriber number of one digit or of a run
+  (`030 12345678`) and the fictional `555-0100` to `555-0199` stay text.
 - Three token forms with a tail shorter than the vendored rules want (0.6.21): an OpenAI or
   Anthropic key (`sk-proj-`, `sk-ant-`, `sk-svcacct-`, `sk-admin-`; the tail needs a digit, a capital
   and a run of 16 letters and digits, so a CSS class such as `sk-admin-sidebar-item2X` stays text),

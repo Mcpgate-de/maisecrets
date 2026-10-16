@@ -242,9 +242,22 @@ FORMS_NO_HIT = [
     ("underscore bold note", "__Note:__ deprecated since 2.0"),
     ("python dunders", "__version__ = \"1.2.3\"\n__all__: list = [\"scan\"]\n__author__ = \"Release Bot\""),
     ("python kwargs", "def f(**kwargs): return g(**kwargs)"),
+    # ---------------------------------------------------------------- a number after a phone word that is no phone
+    ("phone fictional exchange", "Fax: (212) 555-0147, Phone: 415-555-0123"),
+    ("phone placeholder digits", "phone: 123-456-7890 (format only)"),
+    ("mobile version", "mobile: 1.2.3\nMobile build 2024.10.16.1 shipped"),
+    ("phone verified timestamp", "phone_verified_at: 1712345678"),
+    ("phone year range", "Phone support: 2019-2024"),
+    ("call duration", "call took 1712345678 ns; called 3 times on 2024-10-16 12:00:01"),
+    ("cell output", "cell [2]: 3.14159"),
+    ("phone column type", "phone_number = models.CharField(max_length=20)"),
+    ("phone hours", "Phone: 12:30 to 14:00, Mo-Fr"),
+    ("text size", "text 1234567 bytes, 4 lines"),
 ]
 
 FORMS_HIT = [
+    ("phone after a phone word", "You can reach the tenant at " + "415-382-" + "9174" + " after 6 pm.", ["415-382-" + "9174"]),
+    ("phone national after a label", "Telefoonnummer: 06 " + "4829 1735", ["06 " + "4829 1735"]),
     ("add-mask literal", 'echo "::add-mask::' + "q7Lr" + "Pz2mK9vXw" + '"', ["q7Lr" + "Pz2mK9vXw"]),
     ("sas key", "Endpoint=sb://ns.servicebus.windows.net/;SharedAccessKeyName=send;SharedAccessKey=" + "x+Q_4" + "pZ9kL2_mW7r" + ";EntityPath=orders", ["x+Q_4" + "pZ9kL2_mW7r"]),
     ("postman secret", '{"key": "password", "value": "' + "8fK2" + "qLw9Zx4Rp7Tn" + '"}', ["8fK2" + "qLw9Zx4Rp7Tn"]),

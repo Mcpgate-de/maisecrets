@@ -496,6 +496,7 @@ FORMS = {
     "address-vcard-fields": (ADDRESS, "tool", "generic", "form"),
     "name-vcard-n": (NAME, "tool", "generic", "form"),
     "birth-date-vcard-compact": (BIRTH_DATE, "tool", "generic", "form"),
+    "phone-after-phone-word": (PHONE, "tool", "generic", "label"),
 }
 # a value that only names one: a variable, a template, an elision, a path
 _NOT_A_VALUE_START = ("$", "%", "{", "<", "(", "[", "*", "#", "/", ".")
@@ -613,6 +614,8 @@ _HOUSE_RE = _lazy(r"\b\d{1,5}[A-Za-z]?(?:/\d{1,4})?,? [A-ZÀ-Þ][a-zà-ÿ]{2,}\b
                        r"|[A-ZÀ-Þ][a-zà-ÿ]{2,} \d{1,5}[A-Za-z]?,")
 _NOT_AN_ADDRESS_RE = _lazy(r"(?i)\b(?:rack|row|slot|zone|version|build|schema|width|height|signal|size|page"
                                 r"|step|round|score|accepted|proposed|rejected|field|line|port|http|status|max|min)\b|0x")
+_PHONE_WORDS = ("phone", "tel", "mobil", "cell", "fax", "handy", "portable", "rufnummer", "whatsapp", "hotline",
+                "contact", "call", "reach", "text")
 _ADDRESS_WORDS = ("address", "adr", "ship", "property", "lives", "endere", "direcci", "adresse", "location")
 _IN_ADDRESS_RE = _lazy(r"\b\d{1,4}(?:/\d{1,4})?, [^\n]{10,90}?, [A-Z][a-z]+ \d{6}\b")
 _NONLATIN = "Ͱ-ϿЀ-ӿ֐-׿؀-ۿऀ-ॿঀ-৿"
@@ -628,6 +631,68 @@ _AUTONYMS = frozenset({"русский", "українська", "беларус
                        "עברית", "العربية", "فارسی", "اردو", "हिन्दी", "বাংলা", "中文", "简体中文", "繁體中文", "日本語",
                        "한국어", "русский язык", "қазақ тілі"})
 _PHONE_URL_RE = _lazy(r"(?i)(?<![a-z])(?:phone|tel|mobile|msisdn|cell)[\w-]{0,10}=(%2B\d{7,15})(?!\d)")
+# a phone number in its national form after a phone word (Nemotron-PII and Gretel, 2026-10-16: 999-999-9999 after
+# "phone number:", 99 9999 9999 after "telefoonnummer:"). A label (phone, Telefon, téléphone, + number, then `:`, `=`
+# or "is") takes any national form; a verb (call, reach … at, contact … at) and a label with words between them take a
+# North American number only, whose shape is rare outside a phone number
+_PHONE_LABEL_WORDS = (r"phone|telephone|tel|mobile?|mobil(?:e|nummer|telefon)?|cell(?:ular|phone)?|fax|handy"
+                      r"|telefon(?:nummer|o)?|t[ée]l[ée]phone|tel[ée]fono|telefoon(?:nummer)?|telefone|portable"
+                      r"|cellulare|rufnummer|whatsapp|hotline|contact[ _-]?(?:number|no)")
+_PHONE_NUMBER_WORD = r"(?:[ _-]?(?:number|no\.?|nr\.?|nummer|num[ée]ro|n[úu]mero|numero|#))?"
+_PHONE_TIGHT_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r")" + _PHONE_NUMBER_WORD + r"(?![\w-])\.?[\"']?"
+                        r"(?:[ \t]{0,3}(?:is|ist|est|es|è|é|:|=|-|–)[ \t]{0,3}|[ \t]{1,3})[\"']?[ \t]{0,2}"
+                        r"(\+?(?:\(\d{1,8}\)|\d{1,8})(?:[ .\-/]{1,2}(?:\(\d{1,8}\)|\d{1,8})){0,5})(?![\w+]|[.,/:-]\d)")
+_PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed)?|reach(?:ed)?(?: \w{1,12}){0,2} at"
+                        r"|contact(?:ed)?(?: \w{1,12}){0,2} at|text(?:ed)?)(?![\w-])[^\n\d+]{0,30}?(?<![\w+.-])"
+                        r"((?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4})(?![\w-]|[.,:]\d)")
+_PHONE_DATE_RE = _lazy(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|\d{1,2}:\d{2}")
+_ISO_DATE_RE = _lazy(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
+# a North American number (3-3-4); it needs region us or ca, as phone-us-national (0.6.24)
+_NANP_SHAPE_RE = _lazy(r"(?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4}")
+# a count with a space between thousands (3 412 908 users, 1 000 000) and a list of small numbers (4 8 15 16 23 42)
+# fullmatch on a value of _PHONE_TIGHT_RE only (6 groups at most): the last branch is quadratic on a long text
+_COUNT_RE = _lazy(r"\d{1,2}(?: \d{3})+|\d{1,3}(?: \d{3})* 000(?: \d{3})*"
+                  r"|[1-9]\d*(?:[ .\-/]+\d+)*[ .\-/]\d(?:[ .\-/]\d+)*")
+# the words between a phone label and a number that end in a colon: a phone word or its number word ends them
+_GAP_SEP_RE = _lazy(r"[:=]| [-–] ")
+_PAREN_END_RE = _lazy(r"[ \t]*\([^()\n]{0,15}\)[ \t]*$")   # Phone (work): 938-274-6157
+_PHONE_GAP_END_RE = _lazy(r"(?i)(?:" + _PHONE_LABEL_WORDS + r"|number|no\.?|nr\.?|#|num[ée]ro|n[úu]mero|nummer)$")
+
+
+def _national_phone_ok(v: str) -> bool:
+    """7 to 15 digits in groups: not a date, a time, a version, an IP address, a range of years or a placeholder. A
+    single run needs 10 to 12 digits, a pair of groups 9 or more; dots only in the North American 3.3.4 or in pairs."""
+    d = re.sub(r"\D", "", v)
+    groups = re.findall(r"\d+", v)
+    if not 7 <= len(d) <= 15 or _placeholder_digits(v) or _PHONE_DATE_RE.fullmatch(v.strip("+()")):
+        return False
+    if _ISO_DATE_RE.search(v) or (not v.startswith("+") and _COUNT_RE.fullmatch(v)):
+        return False
+    if len(groups) == 1 and not 10 <= len(d) <= 12:
+        return False
+    if len(groups) == 2 and len(d) < 9:
+        return False
+    if len(groups[-1]) >= 4 and _placeholder_digits(groups[-1]):
+        return False   # 0151 1111111, 030 12345678: a subscriber number of one digit or of a run is a placeholder
+    if "." in v and not (re.fullmatch(r"\(?\d{3}\)?\.\d{3}\.\d{4}", v)
+                         or all(len(g) == 2 for g in groups[1:])):
+        return False
+    return _nanp_ok(v)
+
+
+def _nanp_ok(v: str) -> bool:
+    """A North American number (ten digits, or 1 and ten): the area code and the exchange start with 2 to 9, and the
+    fictional 555-0100 to 555-0199 is an example."""
+    d = re.sub(r"\D", "", v)
+    if len(d) == 11 and d[0] == "1":
+        d = d[1:]
+    elif len(d) != 10 or v.lstrip("(").startswith("0") or v.startswith("+"):
+        return True   # not North American: its own country's rules
+    if len(re.findall(r"\d+", v)) == 2 and not v.startswith("("):
+        return True   # 99 9999 9999 and the like: a national form of another country
+    return d[0] not in "01" and d[3] not in "01" and not (d[3:6] == "555" and d[6:8] == "01")
+
+
 _PHONE_WRAP_RE = _lazy(r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?\d{2,5}(?:[ \-]\d{2,5}){0,2}-\n[ \t]{0,4}\d{2,5}"
                             r"(?:[ \-]\d{2,5}){0,3}(?![\w.]\d|\w)")
 
@@ -872,6 +937,19 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
             d = m.group(1)[3:]
             if 8 <= len(d) <= 15 and len(set(d)) > 2:
                 out.append((m.start(1), m.end(1), "phone-url-encoded", PHONE))
+    if "phone-after-phone-word" in want and any(w in low for w in _PHONE_WORDS):
+        us = bool(_US_PHONE_REGIONS.intersection(regions))
+        for rx in (_PHONE_TIGHT_RE, _PHONE_LOOSE_RE):
+            for m in rx.finditer(text):
+                v = m.group(1).rstrip(" .-/")
+                if _US_PHONE_RE.fullmatch(v) or (_NANP_SHAPE_RE.fullmatch(v) and not us):
+                    continue   # (312) 846-2291 is phone-us-national's; a North American number needs us or ca
+                gap = text[m.start():m.start(1)]
+                sep = [x.start() for x in _GAP_SEP_RE.finditer(gap)] if rx is _PHONE_LOOSE_RE else ()
+                if sep and not _PHONE_GAP_END_RE.search(_PAREN_END_RE.sub("", gap[:sep[-1]]).rstrip(" )\"'")):
+                    continue   # Mobile build artifact: 938-274-6157: the words before the colon name no phone
+                if (_national_phone_ok(v) if rx is _PHONE_TIGHT_RE else _nanp_ok(v)):
+                    out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
     if "phone-wrapped-line" in want and "-\n" in text:
         for m in _PHONE_WRAP_RE.finditer(text):
             d = re.sub(r"\D", "", m.group())

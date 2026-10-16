@@ -103,6 +103,51 @@ class BoldLabelTests(Base):
         self.assertLess(time.process_time() - t0, 20)
 
 
+# ---------------------------------------------------------------------------------- phone after a phone word --
+US = "415-382-" + "9174"
+
+
+class PhoneAfterWordTests(Base):
+    def test_a_national_number_after_a_phone_word_is_masked(self):
+        for text, value in (
+                ("Phone number: " + US, US),
+                ("You can reach me at " + US + " or by mail.", US),
+                ("Please call " + US.replace("-", ".") + " tomorrow.", US.replace("-", ".")),
+                ('{"phone": "' + US + '", "name": "x"}', US),
+                ("Telefoonnummer: 06 " + "4829 1735", "06 " + "4829 1735"),
+                ("Telefon: 030 " + "4829" + "1735", "030 " + "4829" + "1735"),
+                ("contact number is 07700 " + "900123", "07700 " + "900123"),
+                ("Handy: 0151/" + "4829" + "1735", "0151/" + "4829" + "1735"),
+                ("Phone (work): " + US, US),
+                ("Tel.: 030 482917-" + "0", "030 482917-" + "0"), ("Tel: 030 482917 " + "0", "030 482917 " + "0")):
+            with self.subTest(text=text):
+                self.assertMasked(text, value)
+                self.assertIn("phone-after-phone-word", {m.kind for m in scan(text)})
+
+    def test_a_number_that_is_no_phone_number_stays_text(self):
+        for text in ("Fax: (212) 555-" + "0147", "Phone: 415-555-" + "0123", "phone: 123-456-" + "7890",
+                     "mobile: 1.2.3", "Mobile build 2024.10.16.1 shipped", "phone_verified_at: 1712345678",
+                     "Phone: 2019-2024", "call took 1712345678 ms", "contact: 2024-10-16", "cell [2]: 3.14159",
+                     "phone_number = models.CharField(max_length=20)", "Called 3 times in 2024-10-16 12:00:01",
+                     "Mobile: 0151 1111111", "text 1234567 bytes", "Phone: 12:30 to 14:00",
+                     "Phone: 2024-10-16 14:30", "mobile 2024-10-16 14:30:01 INFO app started",
+                     "mobile: 3 412 908 users", "Fax: 1 500 000", "phone 4 8 15 16 23 42",
+                     "Mobile build artifact: 938-274-" + "6157 completed",
+                     "Mobile build artifact = 938-274-" + "6157", "Mobile build artifact - 938-274-" + "6157"):
+            with self.subTest(text=text):
+                self.assertNotIn("phone-after-phone-word", {m.kind for m in scan(text)})
+
+    def test_a_typed_prompt_is_not_blocked_by_it(self):
+        self.assertNotIn("phone-after-phone-word", {m.kind for m in scan("Phone number: " + US, "prompt")})
+
+    def test_a_north_american_number_needs_region_us_or_ca(self):
+        self.assertNotIn("phone-after-phone-word", {m.kind for m in scan("Phone number: " + US, region=("de",))})
+        self.assertIn("phone-after-phone-word", {m.kind for m in scan("Phone number: " + US, region=("ca",))})
+        self.assertMasked("Telefon: 030 " + "4829" + "1735", "030 " + "4829" + "1735", region=("de",))
+        # the (312) form stays with phone-us-national
+        self.assertEqual({m.kind for m in scan("Tel: (312) 846-" + "2291", region=("us",))}, {"phone-us-national"})
+
+
 # ------------------------------------------------------------------------------- health, tax and national IDs --
 class HealthIdLabelTests(Base):
     def test_an_id_after_a_health_tax_or_national_label_is_masked(self):
