@@ -3646,7 +3646,16 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
         return
     allowed, off = allow_list()
     by_start, gone = None, set()
-    for start, end, kind, typ in sorted(personal.hits(text, _CHANNEL[0], _pii_regions_cached())):
+    company: list = []
+    every = sorted(personal.hits(text, _CHANNEL[0], _pii_regions_cached(), company))
+    # the decision belongs to an address rule that runs: a rule that `enabled` or the allow list turns off decides
+    # nothing (Gate B of this change)
+    company = [c for c in company if (enabled is None or c[4] in enabled or "personal:" + c[4] in enabled)
+               and not (off and c[4] in off)]
+    if company:
+        _free_company_numbers(text, found, taken_starts, taken_ends, company,
+                              [s for s, _, _, t in every if t == personal.NAME])
+    for start, end, kind, typ in every:
         if enabled is not None and kind not in enabled and "personal:" + kind not in enabled:
             continue
         value = text[start:end]
@@ -3684,6 +3693,61 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
         taken_ends.insert(i, end)
     if gone:
         found[:] = [f for f in found if id(f) not in gone]
+
+
+# between a company's address and its VAT ID: separators, the country, and a VAT label (USt-IdNr., VAT ID, UID, also
+# the recipient's: Ihre, Kunden-) with at most one line break. Any other text (a second address, a name, the sender's
+# label: Unsere, meine; a value, a blank line) ends the company's block
+_SEP = r"[ \t,;|·\"'()]{0,6}(?:\r?\n[ \t,;|·\"'()]{0,6})?"
+_VAT_GAP_RE = re.compile(r"(?i)" + _SEP + r"(?:(?:deutschland|germany)" + _SEP + r")?"
+                         r"(?:(?:(?:ihre|your|kunden|customer|recipient|client|empfänger)[ _-]?)?"
+                         r"(?:ust|vat|umsatzsteuer|uid|mwst)(?:[ ._-]?(?:id|identifikationsnummer|identification"
+                         r"|nummer|number|no|nr)\.?){0,2}[\"']?[ ]?[:#=]?" + _SEP + r")?")
+_COMPANY_REACH = 800
+COMPANY_NUMBER_TYPES = frozenset({"DE_PLZ", "DE_VAT_ID"})
+
+
+def _free_company_numbers(text: str, found: list, taken_starts: list, taken_ends: list, company: list,
+                          names: list) -> None:
+    """The postcode and the VAT ID follow the company decision of the address rules. An address rule leaves an address
+    as text when a word of a company or a public place stands near it; personal._company_window keeps the addresses
+    whose holder is a company: a legal form (GmbH, AG, Ltd, Inc) ends the company's name right before the address.
+    Its postcode (de-plz) and a German VAT ID right after it are no personal data either. Masked alone, they left
+    the street of the same address in the clear, and that half mask protected nothing (field report, 2026-10-16: an
+    invoice to a GmbH). Each entry of `company` is (lo, legal form, address start, address end, address rule).
+    A name of a person (a personal NAME hit) in the paragraph up to 160 characters before the legal form, or between
+    it and the value, keeps the value masked (tests/test_company_address_window.py). A sole trader has no legal form,
+    so the postcode and the VAT ID of a sole trader stay masked."""
+    drop = set()
+    company = sorted(company, key=lambda c: c[2])
+    starts = [c[2] for c in company]
+    for f in found:
+        if f.type not in COMPANY_NUMBER_TYPES:
+            continue
+        # an address rule's window and value are bounded (a line back of at most 160 characters, a value of at most
+        # a few hundred), so only the addresses that start near the value can hold it: a text of many company
+        # addresses stays linear. An address beyond this reach keeps its postcode masked, never the other way
+        i = bisect.bisect_left(starts, f.start - _COMPANY_REACH)
+        j = bisect.bisect_right(starts, f.start + 1)
+        for lo, form, a, b, _ in company[i:j]:
+            if f.type == "DE_PLZ":
+                if not (a <= f.start and f.end <= b):
+                    continue
+            elif not (b <= f.start and _VAT_GAP_RE.fullmatch(text, b, f.start)):
+                continue
+            para = text.rfind("\n\n", max(0, form - 160), form)
+            g = max(0, form - 160) if para < 0 else para
+            k = bisect.bisect_left(names, g)
+            if not (k < len(names) and names[k] < f.end):
+                drop.add(id(f))
+            break
+    if not drop:
+        return
+    for f in found:
+        if id(f) in drop:
+            i = bisect.bisect_left(taken_starts, f.start)
+            del taken_starts[i], taken_ends[i]
+    found[:] = [f for f in found if id(f) not in drop]
 
 
 _WINDOW_BEFORE = 2048  # context a rule may read before a value: a label 200, a context word 80, an AWS key id up to

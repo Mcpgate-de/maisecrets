@@ -1,0 +1,10 @@
+# c1-a-company-in-parentheses-after-a-person-keeps-the-mask: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-company-in-parentheses-after-a-person-keeps-the-mask"
+control = "C1"
+statement = "A company in an open parenthesis on its line (Max Muster (Beispiel GmbH), Gartenweg 3) is a person's affiliation, so the values after it stay masked."
+runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_company_in_parentheses_after_a_person_keeps_the_mask"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''    if head.count("(") > head.count(")"):'''
+replace = '''    if False:'''

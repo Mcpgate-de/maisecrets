@@ -1,0 +1,12 @@
+# c1-a-companys-postcode-and-vat-id-follow-its-address: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-companys-postcode-and-vat-id-follow-its-address"
+control = "C1"
+statement = "When an address rule leaves an address as text because a legal form (GmbH, AG, Ltd, Inc) ends the company's name right before it, the German postcode in that address and a German VAT ID right after it stay text too in a tool result; a half mask that left the street in the clear protected nothing."
+runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_an_invoice_to_a_company_keeps_its_postcode_and_vat_id_with_its_street", "tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_company_record_after_an_address_label_keeps_its_postcode_and_vat_id"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''    if company:
+        _free_company_numbers('''
+replace = '''    if False:
+        _free_company_numbers('''
