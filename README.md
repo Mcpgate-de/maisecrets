@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 32 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 165 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 175 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1691,8 +1691,16 @@ a to-do.
   hook blocks them when the path exists; ask Claude to read the file instead.
 - **A name without a label is not detected.** Regex only, by design: "Emma Johansson" alone looks like any two
   capitalised words. A name after a name label, before an e-mail address or in a CSV name column is masked
-  in a tool result (0.6.21); in a typed prompt no name is detected. A street address without a postcode, or
-  in a form of a region that is not active, passes too.
+  in a tool result (0.6.21); in a typed prompt no name is detected. A name in a non-Latin script is masked only after
+  a person label (`full name`, `native name`, `patient_name`, vCard `FN:`; 0.6.24), not after `name:` or `owner:`,
+  which also name products and languages. A street address without a postcode or an address label, or in a form of a
+  region that is not active, passes too.
+- **The forms of 0.6.24 act on tool results only.** An ID after `member`, `record` or `account`, an address after
+  `Address:`, a FHIR identifier, a `::add-mask::` value, a `SharedAccessKey=`, a Postman variable with a secret name and
+  the other forms in `maisecrets rules list` (column "needs": label or form) are masked in a tool result or a file. A
+  typed prompt with the same text is not blocked by them. A card number without a card word is masked in a tool
+  result only when it is written in groups of four with the prefix of a card network; one run of digits needs the
+  word (a float, a timestamp and an IMEI pass the Luhn check as often).
 - **A pasted image is invisible to the hooks.** Claude Code gives the prompt
   hook only the typed text (measured on 2.1.296). An image or a PDF that the
   AI reads is in your hands ("PDFs and images"); maisecrets does not scan or

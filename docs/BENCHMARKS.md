@@ -5,8 +5,8 @@ limits are in their own section. "Repeat this measurement" has the commands.
 
 | Snapshot | |
 |---|---|
-| Date | 2026-10-14 |
-| maisecrets | v0.6.17 (tag `v0.6.17`); earlier releases from their tags; the CredData rows of 0.6.18 to 0.6.21 and the holdout section: 2026-10-15 |
+| Date | 2026-10-14; the 0.6.24 rows and sections: 2026-10-16 |
+| maisecrets | v0.6.17 (tag `v0.6.17`); earlier releases from their tags; the CredData rows of 0.6.18 to 0.6.21 and the holdout section: 2026-10-15; 0.6.24 from its release branch, 2026-10-16 |
 | Data | Samsung CredData, commit `0b1940e171725ad8937311120b191602608a4801` (2026-09-29); four labelled PII datasets, pinned in "Labelled PII datasets" (2026-10-15) |
 | Machine | Apple M5, 10 cores, macOS 27.0 |
 | Python | 3.14.8 (CredData runs); 3.14.8 and 3.9.6 (timing) |
@@ -16,7 +16,8 @@ limits are in their own section. "Repeat this measurement" has the commands.
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
 `--locale de_DE`. Source: `scripts/measure_creddata.py`, 2026-10-14; 0.6.18 to 0.6.21 on 2026-10-15, each from a worktree
-of its tag (0.6.21: the merge request branch). A release before 0.6.17 has one channel.
+of its tag (0.6.21: the merge request branch); 0.6.24 on 2026-10-16 from its release branch. 0.6.22 and 0.6.23 changed
+no detection and give the rows of 0.6.21 (0.6.23 measured as the base of 0.6.24). A release before 0.6.17 has one channel.
 
 | Release | Channel | TP | FN | FP | P | R | F1 | F1, `--regions us` |
 |---|---|---|---|---|---|---|---|---|
@@ -33,6 +34,8 @@ of its tag (0.6.21: the merge request branch). A release before 0.6.17 has one c
 | 0.6.20 | tool | 5,854 | 4,252 | 445 | 0.929 | 0.579 | 0.714 | 0.691 |
 | 0.6.21 | prompt | 5,345 | 4,761 | 441 | 0.924 | 0.529 | 0.673 | 0.650 |
 | 0.6.21 | tool | 5,862 | 4,244 | 446 | 0.929 | 0.580 | 0.714 | 0.691 |
+| 0.6.24 | prompt | 5,345 | 4,761 | 441 | 0.924 | 0.529 | 0.673 | 0.650 |
+| 0.6.24 | tool | 5,870 | 4,236 | 446 | 0.929 | 0.581 | 0.715 | 0.692 |
 
 This table uses all 29,893 rows (14,471 credentials, 15,422 non-secrets). Source: `scripts/measure_creddata.py
 --exclude-repo ""`, 2026-10-14; 0.6.18 to 0.6.21 on 2026-10-15.
@@ -52,6 +55,8 @@ This table uses all 29,893 rows (14,471 credentials, 15,422 non-secrets). Source
 | 0.6.20 | tool | 0.956 | 0.684 | 0.798 | 0.908, 0.684, 0.781 |
 | 0.6.21 | prompt | 0.954 | 0.649 | 0.773 | 0.904, 0.649, 0.756 |
 | 0.6.21 | tool | 0.956 | 0.685 | 0.798 | 0.908, 0.685, 0.781 |
+| 0.6.24 | prompt | 0.954 | 0.649 | 0.773 | 0.904, 0.649, 0.756 |
+| 0.6.24 | tool | 0.956 | 0.686 | 0.799 | 0.909, 0.686, 0.782 |
 
 ## CredData, split by repository
 
@@ -85,6 +90,14 @@ and 0.6.17 on half D. Half V holds the other repositories. Source: `scripts/meas
 |---|---|---|---|
 | `NO_HIT`: code, configuration, docs, logs and prose without a secret | 1,114 texts | 0 texts with a hit | 0 texts with a hit |
 | `HIT`: texts with known values | 136 texts | 136 give exactly their values | 136 give exactly their values |
+
+0.6.24 against 0.6.23 (2026-10-16): 0 new hits on the 1,114 NO_HIT texts in either channel, 0 new hits on 2,464
+developer texts in the tool channel (`tests/fp_corpus.py` and the review corpora of 0.6.15 and 0.6.16), 0 new blocks over
+771 typed prompts, 0 new hits on the 367 texts of `tests/fp_corpus_pii.py`. The negative corpus of the forms of 0.6.24
+(`tests/fp_corpus_forms.py`, 157 texts in exactly their shapes, among them the inputs of three review rounds) holds the
+hits listed in "Rule classes". 19,189 files of public code (the Python 3.14 standard library, its site-packages and one
+`node_modules`): one hit of a new rule, a fake person's address in a package's test data; 800 of these files with
+card-like digits: no new card hit.
 
 Typed prompts from the maintainers' own sessions, through the hook: 0 new blocks against 0.6.16 over 771 prompts.
 Source: the 0.6.17 release measurement, 2026-10-14. The prompts are not published, so this number cannot be
@@ -121,6 +134,20 @@ differ by up to 7 %). Source: `scripts/measure_scan_time.py --maisecrets <v0.6.1
 | Python code, 70 KB | 121 ms | 122 ms | 135 ms | 135 ms |
 | log, 70 KB | 80 ms | 80 ms | 96 ms | 94 ms |
 | configuration, 70 KB, 2,092 password labels | 187 ms | 185 ms | 242 ms | 241 ms |
+
+Hook time, 0.6.24 against 0.6.23 (2026-10-16): the CPU time (user + system) of one hook call, a new process each, the
+median of 21 calls after one warm-up, with compiled modules in both trees. Synthetic payloads: a typed prompt of 1 KB
+(`UserPromptSubmit`), a Bash result of 20 KB of log lines and a Read result of 70 KB of Python code (`PostToolUse`).
+Load average 2 to 3. Source: a script outside this repository that runs `hooks/dispatch.py` with each payload.
+
+| Payload | Python 3.14, 0.6.23 | Python 3.14, 0.6.24 | Python 3.9, 0.6.23 | Python 3.9, 0.6.24 |
+|---|---|---|---|---|
+| typed prompt, 1 KB | 68.8 ms | 72.4 ms | 83.9 ms | 86.2 ms |
+| Bash result, 20 KB | 98.8 ms | 103.6 ms | 118.9 ms | 120.6 ms |
+| Read result, 70 KB | 163.4 ms | 171.3 ms | 193.2 ms | 197.9 ms |
+
+The forms and the new checks compile their regexes at their first use. One review round measured a long line of
+hits: every new rule stays linear from 70 KB to 560 KB on one line (ratio 7 to 9 for 8 times the text).
 
 ## Cloakroom holdout sets, 2026-10-15
 
@@ -243,6 +270,83 @@ Limits of this measurement:
   (Apache-2.0, credited in the commits and in "Credit"); the code here is written anew.
 - Cloakroom tuned its own engine on v2 to v5 after their first run; v6 is its set that was never tuned on (their
   `bench/RESULTS.md`).
+
+### 0.6.24, 2026-10-16
+
+0.6.23 (`origin/main` at `717a83e`, the base of 0.6.24, with the same detection as 0.6.21) against the release
+branch of 0.6.24. Tool channel, `--locale de_DE`. Source: the script of this section, 2026-10-16. The rules of 0.6.24
+come from a class analysis of the 102 values that 0.6.21 leaked for no other reason than a missing rule. That
+analysis looked at the leaked values of both halves, so half C is no unseen holdout for these rules either.
+
+Regions `us`, `uk`, `in`:
+
+| Set | Values, D | Leaked D, 0.6.23 → 0.6.24 | Values, C | Leaked C, 0.6.23 → 0.6.24 | Clean samples | False alarms, 0.6.23 → 0.6.24 |
+|---|---|---|---|---|---|---|
+| v2 | 92 | 24 → 22 | 127 | 33 → 29 | 40 | 1 → 1 |
+| v3 | 208 | 49 → 42 | 112 | 30 → 26 | 40 | 1 → 1 |
+| v4 | 154 | 55 → 45 | 174 | 60 → 51 | 40 | 2 → 2 |
+| v5 | 178 | 58 → 53 | 216 | 77 → 65 | 40 | 2 → 2 |
+| v6 | 157 | 51 → 41 | 157 | 59 → 48 | 40 | 0 → 0 |
+| v7 | 33 | 0 → 0 | 44 | 0 → 0 | 15 | 1 → 1 |
+| v2 to v6 | 789 | 237 → 203 | 786 | 259 → 219 | 200 | 6 → 6 |
+| v2 to v7 | 822 | 237 → 203 | 830 | 259 → 219 | 215 | 7 → 7 |
+
+Regions `de`:
+
+| Set | Values, D | Leaked D, 0.6.23 → 0.6.24 | Values, C | Leaked C, 0.6.23 → 0.6.24 | Clean samples | False alarms, 0.6.23 → 0.6.24 |
+|---|---|---|---|---|---|---|
+| v2 | 92 | 30 → 30 | 127 | 39 → 35 | 40 | 0 → 0 |
+| v3 | 208 | 58 → 48 | 112 | 36 → 28 | 40 | 0 → 0 |
+| v4 | 154 | 59 → 46 | 174 | 62 → 52 | 40 | 0 → 0 |
+| v5 | 178 | 62 → 56 | 216 | 84 → 71 | 40 | 0 → 0 |
+| v6 | 157 | 67 → 56 | 157 | 69 → 55 | 40 | 0 → 0 |
+| v7 | 33 | 0 → 0 | 44 | 0 → 0 | 15 | 1 → 1 |
+| v2 to v6 | 789 | 276 → 236 | 786 | 290 → 241 | 200 | 0 → 0 |
+| v2 to v7 | 822 | 276 → 236 | 830 | 290 → 241 | 215 | 1 → 1 |
+
+By class, values leaked in half D / half C, regions `us`, `uk`, `in`:
+
+| Class | Values | 0.6.23 | 0.6.24 |
+|---|---|---|---|
+| names | 324 | 103 / 107 | 103 / 107 |
+| user names | 146 | 57 / 68 | 57 / 68 |
+| addresses | 26 | 14 / 11 | 8 / 5 |
+| birth dates | 72 | 9 / 14 | 9 / 14 |
+| ID numbers | 114 | 10 / 8 | 4 / 2 |
+| phone numbers | 207 | 0 / 6 | 0 / 4 |
+| tokens and passwords | 334 | 24 / 24 | 15 / 10 |
+| e-mail addresses | 286 | 0 / 3 | 0 / 0 |
+| other | 143 | 20 / 18 | 7 / 9 |
+
+The 102 values of the "remaining gap" column of 0.6.21: 61 closed (28 in half D, 33 in half C), 41 still leak. The
+values that 0.6.24 still leaks, by reason (the same sorting as for 0.6.21 above):
+
+| Class | needs a model (no label, no postcode) | ambiguous without context | left out for its false hits | remaining gap |
+|---|---|---|---|---|
+| names | 210 | 0 | 0 | 0 |
+| user names | 0 | 79 | 46 | 0 |
+| addresses | 13 | 0 | 0 | 0 |
+| birth dates | 0 | 23 | 0 | 0 |
+| ID numbers | 0 | 0 | 0 | 6 |
+| phone numbers | 0 | 0 | 0 | 4 |
+| tokens and passwords | 0 | 0 | 10 | 15 |
+| other | 0 | 0 | 0 | 16 |
+| all | 223 | 102 | 56 | 41 |
+
+Values closed per rule of 0.6.24 (regions `us`, `uk`, `in`, both halves; a value counts for the rule whose hit covers
+it): `address-after-label` 22, `id-number-after-record-label` 10, `id-letters-after-label` 6,
+`secret-hex48-after-token-word` 4, `name-non-latin-after-label` 4, `secret-in-login-code` 4, `address-jp-postcode` 3,
+`secret-postman-variable` 2, `id-number-fhir-identifier` 2, `id-number-in-member-parentheses` 2,
+`secret-after-user-slash` 2, `email-percent-encoded` (new contexts) 2, `id-number-under-sql-alias` 2, the e-mail and
+phone rules next to CJK text 2, and one each for `address-in-form`, `phone-url-encoded`, `secret-add-mask`,
+`secret-shared-access-key`, `csv-personal-column`, `phone-wrapped-line`, `address-under-sql-alias`. No value that
+0.6.23 masked leaks in 0.6.24.
+
+Left out after measuring (2026-10-15 and 2026-10-16): a card number found by its Luhn digit alone when it is written as
+one run of digits (floats, microsecond timestamps and IMEIs pass Luhn as often; 0.6.24 masks a card number without a
+card word only in groups of four with an issuer prefix), a password after a password word in prose, a US phone number
+without a phone word, 48 hex digits without a token word (a digest looks the same), a Twilio Account SID without its
+name.
 
 ## Labelled PII datasets, 2026-10-15
 
@@ -549,6 +653,49 @@ Results per tier, region and tag, 0.6.21:
 
 Detections of a type of no tier on no labelled value: 0 in both channels.
 
+### 0.6.24 against 0.6.23, 2026-10-16
+
+Every type whose counts changed, both channels, by-language regions. 0.6.23 is `origin/main` at `717a83e`; 0.6.24 the
+release branch. Mendeley and PIILO changed in no type. Source: `scripts/measure_datasets.py run`, 2026-10-16.
+
+| Dataset | Type | Channel | TP | FP | P | R |
+|---|---|---|---|---|---|---|
+| Gretel | ADDRESS | tool | 922 → 6,203 | 105 → 380 | 0.883 → 0.942 | 0.029 → 0.198 |
+| Gretel | CARD | tool | 223 → 232 | 10 → 11 | 0.951 → 0.949 | 0.445 → 0.463 |
+| Gretel | DE_PLZ | tool | 0 → 0 | 274 → 267 | 0.000 → 0.000 | – → – |
+| Gretel | ID_NUMBER | tool | 1,092 → 1,093 | 77 → 97 | 0.698 → 0.649 | 0.480 → 0.481 |
+| Gretel | NAME | tool | 5,873 → 5,895 | 32 → 32 | 0.994 → 0.994 | 0.076 → 0.076 |
+| Gretel | SECRET | tool | 530 → 530 | 101 → 98 | 0.840 → 0.844 | 0.376 → 0.376 |
+| Gretel | SE_ORGANISATIONSNUMMER | tool | 0 → 0 | 34 → 5 | 0.000 → 0.000 | – → – |
+| Gretel | US_NPI | tool | 0 → 0 | 40 → 0 | 0.000 → – | – → – |
+| Gretel | CARD | prompt | 222 → 228 | 10 → 11 | 0.951 → 0.948 | 0.443 → 0.455 |
+| Gretel | NAME | prompt | 232 → 231 | 0 → 0 | – → – | 0.003 → 0.003 |
+| Gretel | SECRET | prompt | 515 → 515 | 95 → 92 | 0.844 → 0.848 | 0.365 → 0.365 |
+| Gretel | SE_ORGANISATIONSNUMMER | prompt | 0 → 0 | 34 → 5 | 0.000 → 0.000 | – → – |
+| Gretel | US_NPI | prompt | 0 → 0 | 40 → 0 | 0.000 → – | – → – |
+| Nemotron-PII | ADDRESS | tool | 262 → 957 | 0 → 1 | 1.000 → 0.999 | 0.015 → 0.057 |
+| Nemotron-PII | BIRTH_DATE | tool | 5,286 → 5,290 | 1 → 1 | 1.000 → 1.000 | 0.292 → 0.293 |
+| Nemotron-PII | CARD | tool | 1,458 → 1,516 | 1 → 1 | 0.999 → 0.999 | 0.955 → 0.993 |
+| Nemotron-PII | ID_NUMBER | tool | 4,701 → 8,947 | 14 → 15 | 0.962 → 0.997 | 0.163 → 0.311 |
+| Nemotron-PII | PHONE | tool | 8,034 → 8,041 | 24 → 24 | 0.997 → 0.997 | 0.266 → 0.266 |
+| Nemotron-PII | SECRET | tool | 2,852 → 2,851 | 33 → 33 | 0.988 → 0.988 | 0.245 → 0.245 |
+| Nemotron-PII | USERNAME | tool | 43 → 45 | 0 → 0 | – → – | 0.003 → 0.003 |
+| Nemotron-PII | US_BANK_NUMBER | tool | 10,018 → 10,027 | 115 → 115 | 0.986 → 0.986 | 0.859 → 0.860 |
+| Nemotron-PII | US_NPI | tool | 0 → 0 | 10 → 0 | 0.000 → – | – → – |
+| Nemotron-PII | ID_NUMBER | prompt | 4,350 → 4,347 | 0 → 0 | – → – | 0.151 → 0.151 |
+| Nemotron-PII | SECRET | prompt | 2,841 → 2,840 | 33 → 33 | 0.988 → 0.988 | 0.244 → 0.244 |
+| Nemotron-PII | US_NPI | prompt | 0 → 0 | 10 → 0 | 0.000 → – | – → – |
+
+The new detections by rule, tool channel (`maisecrets/personal.py`, `FORMS`): `address-after-label` 5,372
+detections on labelled Gretel addresses and 276 on no labelled value (most of these are addresses of a company named in
+the line before the label, or addresses Gretel did not label), 709 on Nemotron-PII addresses;
+`id-number-after-record-label` 4,269 detections on labelled Nemotron-PII ID numbers. Gretel ID_NUMBER +20 false alarms: account numbers after `account` and `account number` that Gretel did not
+label. Gretel SE_ORGANISATIONSNUMMER −29 and US_NPI −40, Nemotron-PII US_NPI −10 false alarms: Presidio's check
+digits. CARD: +9 (Gretel) and +58 (Nemotron-PII) card numbers, mostly in groups without a card word or after the new
+card words (`pan`, `cardnumber`, Nordic and Polish words). Nemotron-PII SECRET −1: a lowercase password after a label in
+a markdown table cell followed by `and` (the table-cell check of item C4); Nemotron-PII ID_NUMBER −3 in the prompt
+channel: the check digit of `us-npi` drops a hit that covered an ID value of another label.
+
 ### Label to type
 
 A dataset label maps to the maisecrets type below; every other label is `OUT_OF_SCOPE`. The tables are `LABELS` in
@@ -571,78 +718,123 @@ A dataset label maps to the maisecrets type below; every other label is `OUT_OF_
 | ID_NUMBER | `passport_number`, `driver_license_number` | `national_id`, `tax_id`, `medical_record_number`, `health_plan_beneficiary_number`, `certificate_license_number` | – | `ID_NUM` |
 | USERNAME | `user_name` | `user_name` | – | `USERNAME` |
 
-## Rule classes, 2026-10-15
+## Rule classes, 2026-10-16
 
-What each class of rules adds at the margin: the script switches one class off and scans every input again
-(`scripts/measure_rule_classes.py`, regions `de`, `--locale de_DE`). When a class is off, another rule can still
-take the span, so a number counts what only that class catches. The classes come from the rule registry
+What each class of rules adds at the margin, 0.6.24 against 0.6.23: the script switches one class off and scans every
+input again (`scripts/measure_rule_classes.py`, regions `de`, `--locale de_DE`). When a class is off, another rule
+can still take the span, so a number counts what only that class catches. The classes come from the rule registry
 (`maisecrets/registry.py`, `coarse_class`): a token class per source, one class per label rule, a PII class per
-type and region. `maisecrets rules list` shows the class of each rule.
+type and region, and one class per secret form of 0.6.24 (`form:`). `maisecrets rules list` shows the class, the
+channel, the region and what a rule needs (a label or a form) for each rule.
 
-Base, all rules on:
+Base, all rules on (0.6.23 → 0.6.24):
 
 | Input | Items | Prompt channel | Tool channel |
 |---|---:|---:|---:|
-| CredData, T values masked | 14471 | 9396 | 9913 |
-| CredData, F lines with a masked F value | 9439 | 324 | 329 |
-| Developer texts (`tests/fp_corpus.py`), HIT values masked | 139 | 139 | 139 |
-| Developer texts, NO_HIT snippets with a hit | 1114 | 0 | 0 |
-| PII corpus (`tests/fp_corpus_pii.py`), POSITIVE values masked | 46 | 6 | 41 |
-| PII corpus, PII_NO_HIT samples with a hit | 367 | 7 | 7 |
-| Cloakroom holdout v2 to v7, planted values masked | 1652 | 854 | 1086 |
-| Cloakroom holdout, clean samples with a hit | 215 | 1 | 1 |
+| CredData, T values masked | 14471 | 9396 → 9396 | 9913 → 9935 |
+| CredData, F lines with a masked F value | 9439 | 324 → 324 | 329 → 329 |
+| Developer texts (`tests/fp_corpus.py`), HIT values masked | 139 | 139 → 139 | 139 → 139 |
+| Developer texts, NO_HIT snippets with a hit | 1114 | 0 → 0 | 0 → 0 |
+| PII corpus (`tests/fp_corpus_pii.py`), POSITIVE values masked | 46 | 6 → 6 | 41 → 41 |
+| PII corpus, PII_NO_HIT samples with a hit | 367 | 7 → 7 | 7 → 7 |
+| Forms corpus (`tests/fp_corpus_forms.py`), FORMS_HIT values masked | 38 | 7 | 37 |
+| Forms corpus, FORMS_NO_HIT samples with a hit | 157 | 4 | 6 |
+| Cloakroom holdout v2 to v7, planted values masked | 1652 | 854 → 858 | 1086 → 1175 |
+| Cloakroom holdout, clean samples with a hit | 215 | 1 → 1 | 1 → 1 |
 
-Per class, sorted by the values it alone catches (tool channel, CredData plus holdout plus PII corpus). "Lost" is a
-value the base masks and the variant does not; "saved" is an input that has a false hit in the base and none in the
-variant. The other corpora are in the tool channel.
+The hits on FORMS_NO_HIT are hits of older rules on the corpus, measured on 0.6.23 and named in
+`tests/test_fp_corpus_forms.py` (`KNOWN`): `us-bank` on a 12-digit AWS account id (two texts), an OID read as an IPv4
+address, `generic-api-key` on a 48-digit digest after `key` (two texts), `name-after-label` on `owner: Équipe
+Plateforme`, `ds-keyword-equal-signs` on base64 of a name after `apiKey =`. The only hit of 0.6.24 there is
+`secret-add-mask` on `::add-mask::` with a word value in the tool channel: `::add-mask::` declares its value a secret.
 
-| Class | Rules | CredData T values lost, prompt / tool | CredData F lines saved, prompt / tool | Developer texts: HIT values lost / NO_HIT saved | PII corpus: POSITIVE values lost / PII_NO_HIT saved | Holdout v2-v7: values lost / clean samples saved |
-|---|---:|---:|---:|---:|---:|---:|
-| `label:generic-api-key` | 1 | 3561 / 3563 | 58 / 60 | 0 / 0 | 0 / 0 | 5 / 0 |
-| `label:auth-scheme` | 1 | 767 / 766 | 0 / 0 | 0 / 0 | 0 / 0 | 3 / 0 |
-| `label:literal` | 4 | 230 / 741 | 7 / 9 | 7 / 0 | 0 / 0 | 3 / 0 |
-| `label:keyword` | 16 | 1007 / 588 | 140 / 134 | 64 / 0 | 0 / 0 | 23 / 0 |
-| `token:betterleaks` | 416 | 318 / 303 | 18 / 18 | 5 / 0 | 0 / 0 | 64 / 0 |
-| `pii:email` | 2 | 9 / 9 | 20 / 20 | 2 / 0 | 0 / 1 | 297 / 0 |
-| `token:own-secret` | 21 | 233 / 220 | 3 / 3 | 3 / 0 | 0 / 0 | 10 / 0 |
-| `pii:phone` | 3 | 0 / 0 | 0 / 0 | 3 / 0 | 3 / 4 | 177 / 0 |
-| `token:detect-secrets` | 1 | 128 / 128 | 7 / 7 | 0 / 0 | 0 / 0 | 0 / 0 |
-| `pii:name` | 2 | 0 / 0 | 0 / 0 | 0 / 0 | 11 / 0 | 100 / 0 |
-| `pii:ip` | 5 | 0 / 0 | 15 / 15 | 0 / 0 | 0 / 0 | 61 / 0 |
-| `pii:birth_date` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 8 / 0 | 47 / 0 |
-| `pii:id_number` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 8 / 0 | 25 / 0 |
-| `pii:column` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 3 / 0 | 24 / 0 |
-| `pii:iban` | 2 | 2 / 1 | 0 / 0 | 2 / 0 | 0 / 0 | 24 / 0 |
-| `pii:username` | 2 | 0 / 0 | 0 / 1 | 0 / 0 | 4 / 0 | 20 / 0 |
-| `pii:card` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 18 / 0 |
-| `pii:address` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 7 / 0 |
-| `token:fallback` | 4 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 6 / 0 |
-| `pii:de_plz@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 1 | 4 / 0 |
-| `label:url-query-secret` | 1 | 1 / 1 | 7 / 7 | 0 / 0 | 0 / 0 | 0 / 0 |
-| `pii:de_passport@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 |
-| `token:own-json` | 9 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 |
-| `label:auth-scheme-apikey` | 1 | 0 / 0 | 0 / 0 | 2 / 0 | 0 / 0 | 0 / 0 |
-| `pii:de_bsnr@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| `pii:de_fuehrerschein@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| `pii:de_health_insurance@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| `pii:de_id_card@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| `pii:de_kfz@de` | 5 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 |
-| `pii:de_lanr@de` | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| `pii:de_social_security@de` | 3 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| `pii:de_tax_id@de` | 2 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
-| `pii:de_tax_number@de` | 3 | 0 / 0 | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 |
-| `pii:de_vat_id@de` | 2 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 1 | 0 / 0 |
-| `token:prefixes` | 44 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+Per class, sorted by the values it alone catches (tool channel, CredData plus holdout plus PII corpus). "T only this
+class" is a value the base masks and the variant does not; "F only this class" is a CredData F line that has a false
+hit in the base and none in the variant. "Margin precision" is T / (T + F) of the CredData tool column: the precision of
+what only this class adds. The other corpora are in the tool channel, as values lost / clean samples saved. A number in
+brackets is 0.6.23 where it differs.
 
-With a class switched off, the variant also masked values that the base leaves: `label:url-query-secret` off: 3 / 3 recall gained (creddata, prompt / tool); `token:own-secret` off: 1 / 1 recall gained (creddata, prompt / tool). There the class
-takes a span, and with the class off a later rule masks the value. The rule order stays as measured; a change of
-it is a change of its own.
+| Class | Rules | CredData T only this class, prompt / tool | CredData F only this class, prompt / tool | Margin precision, tool | Holdout values / clean samples | PII corpus values / clean | Forms corpus values / clean | Developer texts HIT / NO_HIT |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `label:generic-api-key` | 1 | 3561 / 2555 (0.6.23: 3563) | 58 / 60 | 0.98 | 5 / 0 | 0 / 0 | 0 / 2 | 0 / 0 |
+| `label:auth-scheme` | 1 | 767 / 766 | 0 / 0 | 1.00 | 3 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `label:literal` | 4 | 230 / 739 (0.6.23: 741) | 7 / 9 | 0.99 | 3 / 0 | 0 / 0 | 0 / 0 | 7 / 0 |
+| `label:keyword` | 16 | 1007 / 576 (0.6.23: 588) | 140 / 134 | 0.81 | 23 / 0 | 0 / 0 | 0 / 0 | 64 / 0 |
+| `token:betterleaks` | 416 | 318 / 303 | 18 / 18 | 0.94 | 63 / 0 | 0 / 0 | 0 / 0 | 5 / 0 |
+| `pii:email` | 2 | 9 / 9 | 20 / 20 | 0.31 | 300 / 0 | 0 / 1 | 4 / 0 | 2 / 0 |
+| `token:own-secret` | 21 | 233 / 220 | 3 / 3 | 0.99 | 10 / 0 | 0 / 0 | 0 / 0 | 3 / 0 |
+| `pii:phone` | 3 → 5 | 0 / 0 | 0 / 0 | – | 180 / 0 | 3 / 4 | 2 / 0 | 3 / 0 |
+| `token:detect-secrets` | 1 | 128 / 128 | 7 / 7 | 0.95 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:name` | 2 → 3 | 0 / 0 | 0 / 0 | – | 104 / 0 | 11 / 0 | 4 / 1 | 0 / 0 |
+| `pii:id_number` | 1 → 6 | 0 / 0 | 0 / 0 | – | 49 / 0 | 8 / 0 | 7 / 0 | 0 / 0 |
+| `pii:ip` | 5 | 0 / 0 | 15 / 15 | 0.00 | 61 / 0 | 0 / 0 | 0 / 1 | 0 / 0 |
+| `pii:birth_date` | 1 | 0 / 0 | 0 / 0 | – | 47 / 0 | 8 / 0 | 0 / 0 | 0 / 0 |
+| `pii:address` | 1 → 4 | 0 / 0 | 0 / 0 | – | 47 / 0 | 1 / 0 | 4 / 0 | 0 / 0 |
+| `pii:column` | 1 | 0 / 0 | 0 / 0 | – | 25 / 0 | 3 / 0 | 0 / 0 | 0 / 0 |
+| `pii:iban` | 2 | 2 / 1 | 0 / 0 | 1.00 | 24 / 0 | 0 / 0 | 0 / 0 | 2 / 0 |
+| `pii:username` | 2 | 0 / 0 | 0 / 1 | 0.00 | 20 / 0 | 4 / 0 | 0 / 0 | 0 / 0 |
+| `pii:card` | 1 | 0 / 0 | 0 / 0 | – | 18 / 0 | 0 / 0 | 4 / 0 | 0 / 0 |
+| `form:secret-hex48-after-token-word` | 0 → 1 | 0 / 14 (0.6.23: 0) | 0 / 0 | 1.00 | 3 / 0 | 0 / 0 | 1 / 0 | 0 / 0 |
+| `form:secret-in-login-code` | 0 → 1 | 0 / 0 | 0 / 0 | – | 4 / 0 | 0 / 0 | 2 / 0 | 0 / 0 |
+| `form:secret-postman-variable` | 0 → 1 | 0 / 0 | 0 / 0 | – | 2 / 0 | 0 / 0 | 3 / 0 | 0 / 0 |
+| `token:fallback` | 4 | 0 / 0 | 0 / 0 | – | 5 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `form:secret-after-user-slash` | 0 → 1 | 0 / 0 | 0 / 0 | – | 2 / 0 | 0 / 0 | 2 / 0 | 0 / 0 |
+| `form:secret-add-mask` | 0 → 1 | 0 / 0 | 0 / 0 | – | 1 / 0 | 0 / 0 | 2 / 1 | 0 / 0 |
+| `form:secret-shared-access-key` | 0 → 1 | 0 / 0 | 0 / 0 | – | 1 / 0 | 0 / 0 | 1 / 0 | 0 / 0 |
+| `pii:de_passport@de` | 1 | 0 / 0 | 0 / 0 | – | 0 / 0 | 1 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_plz@de` | 1 | 0 / 0 | 0 / 0 | – | 1 / 0 | 0 / 1 | 0 / 0 | 0 / 0 |
+| `token:own-json` | 9 | 0 / 0 | 0 / 0 | – | 1 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `label:url-query-secret` | 1 | 1 / 1 | 7 / 7 | 0.12 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `label:auth-scheme-apikey` | 1 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 0 | 0 / 0 | 2 / 0 |
+| `pii:de_social_security@de` | 3 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_vat_id@de` | 2 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 1 | 0 / 0 | 0 / 0 |
+| `pii:de_id_card@de` | 1 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_kfz@de` | 5 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 |
+| `pii:de_tax_number@de` | 3 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 0 |
+| `pii:de_health_insurance@de` | 1 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_lanr@de` | 1 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_tax_id@de` | 2 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_bsnr@de` | 1 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:address@in` | 0 → 1 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `pii:de_fuehrerschein@de` | 1 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `token:prefixes` | 44 | 0 / 0 | 0 / 0 | – | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 
-Inputs: CredData as in "CredData, results per release" (every unique labelled line, 23155 lines;
-a T value counts once per line); Cloakroom's holdout sets v2 to v7 as in "Cloakroom holdout sets"; the two test
-corpora of this tree. A run takes about 45 seconds with 6 workers: only an input with a hit of the class in the
-base can change, so the script scans the variant on those inputs only, and it checks on 2 % of the inputs that the
-base with every rule enabled by key equals the plain scan.
+`label:generic-api-key` alone catches fewer values than in 0.6.23 (tool 2555, 0.6.23: 3563) because the secret forms
+of 0.6.24 also take many of its values when it is off (`form:secret-hex48-after-token-word` 14 alone); together they
+mask more (CredData T values masked in the tool channel 9913 → 9935).
+
+With a class switched off, the variant also masked values that the base leaves: `label:url-query-secret` off: 3 / 3
+(CredData, prompt / tool); `token:own-secret` off: 1 / 1. There the class takes a span, and with the class off a later
+rule masks the value. See "Rule order" below.
+
+### Rule order, measured and kept (0.6.24)
+
+The registry measurement of 2026-10-15 found that the own SECRET rules ranked after every other built-in rule catch 4
+more CredData credentials. Measured again on 0.6.24 (`scripts/detection_fingerprint.py --creddata`, regions `de`,
+both channels, and the unit suite):
+
+Measured on the branch at the commit of the entropy floors (`a0d2628`, CredData T 5,876 and F 446 in the tool channel):
+
+| Variant | CredData T / F, tool, regions `de` | Hit lists that change (CredData lines, per channel) | Unit tests red |
+|---|---|---|---|
+| own SECRET rules first (as released) | 5,876 / 446 | – | 0 |
+| own SECRET rules last (band 850) | 5,880 / 446 (+4 in half V) | 396 | at least 9 test methods |
+| only `url-query-secret` and `aws-secret-after-access-key` last | 5,880 / 446 (+4 in half V) | not measured | 5 test methods |
+
+The 4 rows: three tokens of the CredData category UUID that `ds-keyword-equal-signs` takes whole when
+`url-query-secret` comes later, and one AWS key id that `label-secret-literal` takes when
+`aws-secret-after-access-key` comes later. What the move costs, by transition of the hit list (CredData, regions `de`,
+per channel): `auth-scheme` → `grafana-api-key` 69 lines and → `jwt` 22 (same characters, a label rule becomes a shape
+rule), `paseto-token` → `ds-keyword-colon` 39, `url-query-secret` → `ds-keyword-equal-signs` 33 (same characters)
+and 20 (more characters: the next query parameter, `&x=1`, joins the value), `auth-scheme` → `curl-auth-header` 5;
+in the token lists of the tests, 20 provider ids each become `ds-keyword-equal-signs` (a token in test code then counts
+as a label hit). With only the two rules moved, `?token=<value>&x=1` stores `<value>&x=1`, and the secret half of an
+AWS key pair in the console's two-line form is no longer found. The order stays.
+
+Inputs: CredData as in "CredData, results per release" (every unique labelled line, 23155 lines; a T value counts once
+per line); Cloakroom's holdout sets v2 to v7 as in "Cloakroom holdout sets"; the three test corpora of this tree. The
+0.6.23 column runs the same script with the same corpora. A run takes about 60 seconds with 6 workers.
+
 ## Comparison with other tools
 
 "Theirs" is Cloakroom's
@@ -680,6 +872,12 @@ repository come from the [Cloakroom](https://github.com/shanjeevrajendran/cloakr
 the discussion in [Mcpgate-de/maisecrets#17](https://github.com/Mcpgate-de/maisecrets/issues/17).
 `scripts/measure_creddata.py` follows its `bench/credata.py`. The holdout sets v2 to v7 are Cloakroom's. The rule families of 0.6.21 for a name before an
 e-mail address and for the columns of a CSV header follow Cloakroom's rules (Apache-2.0); the code is written anew.
+
+The rules of 0.6.24 from the same fork's list (`docs/UPSTREAM-DETECTION.md`, Apache-2.0): Presidio's check digits for
+the US NPI, the Swedish organisation number and the UK number plate, no UK postcode alone, the IBAN after an MT940
+subfield code, four checks of the password-label rules, one entropy floor per alphabet for `generic-api-key`, a card
+number without a card word, and the masked copy that the skill offers before it reads a file full of secrets. Each
+commit names the fork's commits; the code is written again and measured here.
 
 The method of the labelled PII datasets comes from the bench of the public fork
 [danszymkowiak/maisecrets](https://github.com/danszymkowiak/maisecrets) (Apache-2.0, commit `73f36bd`, `bench/` and
