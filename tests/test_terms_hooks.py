@@ -168,7 +168,7 @@ class TypedCommandTests(_Base):
         self.addCleanup(shutil.rmtree, tmp, True)
         path = tmp / "session.jsonl"
         record = json.dumps({"type": "user", "message": {"content": f"/maisecrets:term add {NAME}"}}) + "\n"
-        path.write_text(record, encoding="utf-8")
+        path.write_bytes(record.encode("utf-8"))      # no newline translation: Windows wrote \r\n
         with mock.patch.object(hooks, "_scrub_transcript_later", lambda *a, **k: None):
             hooks.user_prompt({"hook_event_name": "UserPromptSubmit", "prompt": f"/maisecrets:term add {NAME}",
                                "session_id": "S1", "source": "user", "transcript_path": str(path), **CLAUDE})
@@ -499,6 +499,7 @@ class ReviewRoundTwoTests(_Base):
         self.assertEqual([(m.kind, m.start, m.end) for m in got], [("term:abc", 0, 30)])
         self.assertEqual(stored, [("Hunter2Qx77", "SECRET", "ds-keyword-colon")])
 
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "no FIFO on this system")
     def test_a_team_list_swapped_for_a_fifo_never_holds_the_hook(self):
         # Gate A, round 2: the size check and the read were two steps; a FIFO in place of the file held the read
         team = Path(tempfile.mkdtemp(prefix="team-"))
