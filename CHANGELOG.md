@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [0.6.28] - 2026-10-16
+
+### Fixes
+
+- the document route of a deno refusal says deno run (fdb82d7)
+- a refusal names the document route only where the rehydration setting lets it through (f3b9814)
+- the skill tells the model how a placeholder goes into a document or a file (86c5ae4)
+- when inline code cannot take a value, the refusal names the route to a document (dbabb47)
+
 ## [0.6.27] - 2026-10-16
 
 ### Features
