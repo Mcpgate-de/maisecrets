@@ -402,7 +402,10 @@ run".
   fingerprints, never a value), `audit.log`, `events.log`, `hooks.log`,
   `pending/`, `.announced`, `destinations.json` (where each value went, never a
   value), `incidents.json` and `incident-marker.*` folders (maisecrets' own
-  failures as closed codes); the value FIFOs in the per-user runtime or temp
+  failures as closed codes), `vault-refs/` (the server tokens seen, the key ids
+  and the endpoint of each server; never a value or a key); one
+  `Client-Vault` header per user-scope MCP server in the client's
+  `.claude.json`, with a backup beside it ("Vault references"); the value FIFOs in the per-user runtime or temp
   directory; the vault backend; on a blocked prompt the clipboard. With
   `scrub_transcript` on, it masks the raw value inside the client's transcript
   file named in the hook payload, in place, because the client writes the
@@ -412,7 +415,12 @@ run".
   `git log`) and `redact_copy.py` (writes a new file) when the model follows it; neither
   opens a network connection.
 - Sends and fetches: no telemetry and no download. These connections start from
-  a command you run, and nothing else in the plugin opens one:
+  a command you run or a call that needs a value, and nothing else in the plugin
+  opens one:
+  - a Write, Edit or Bash call with a token that one of your own MCP servers
+    sent: one metadata request and one resolve request to that server's own
+    origin, over https, with this computer's key for that server ("Vault
+    references"); `/maisecrets:status` makes the same request with no token;
   - the ssh route of your own ssh command inside the Claude Code sandbox
     (`hooks/proxy_connect.py`, the `ProxyCommand` of that ssh call): one
     CONNECT through Claude Code's local sandbox proxy (localhost only) to the
@@ -1651,6 +1659,39 @@ Bash, and that output is text, which maisecrets redacts like any output.
 image into Claude Code) reaches the model without passing any hook; the
 prompt hook sees only your typed text. maisecrets cannot stop or mask it. An
 image in the result of an MCP tool is not covered either.
+
+## Vault references
+
+An MCP server can mask a value in its result, for example a customer's e-mail
+address, with a token such as `⟦EMAIL_1:ma•••@example.org⟧` (no `c`: the server
+made it). Without maisecrets, a file that the AI writes from that result holds
+the token. With maisecrets and a server that supports vault references, the
+file holds the real value, and the AI still sees only the token.
+
+How it works (`docs/PROTOCOL.md` section 4):
+
+1. At the session start, maisecrets makes a random key for each MCP server
+   that you added yourself (user scope, an `https` URL) and writes a
+   `Client-Vault` header with a hash of that key into that server's entry in
+   `~/.claude.json`. It changes nothing else in the file and keeps a backup
+   beside it. A server in a project's `.mcp.json` never gets one.
+2. The server links the hash to you when you log in to it. A link that comes
+   from an existing login waits a day and the server tells you; you can
+   confirm it earlier or revoke it there.
+3. After a tool result of that server, maisecrets notes the tokens in it. The
+   result does not change.
+4. When the AI writes such a token into a file or a Bash command, maisecrets
+   asks the server for the values, with the key, and puts them in. It gets all
+   values or none; if the server refuses, the call is denied with the reason.
+
+`/maisecrets:status` shows the link state of each server. `client_header:
+false` turns it off and removes the header again. A server behind a
+certificate authority of your own needs `client_vault_cafile`. Codex gets no
+header in this version, and on Windows a Bash command gets no server value.
+
+The limit: an AI agent that runs as your user can read the key from the
+store, as it can read any stored value. The server's cap, its audit and the
+revoke bound that. A value written into a file is plain text there.
 
 ## Known gaps (measured or documented)
 

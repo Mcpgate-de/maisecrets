@@ -81,7 +81,7 @@ DEFAULT_CONFIG = {
     "strip_hidden_characters": True,
     # Claude Code with mods (the mod): a prompt with a value goes through with placeholders; false blocks it
     "rewrite_prompts": True,
-    "gateway_servers": [],           # MCP servers that resolve placeholders themselves (PROTOCOL §4); none by default
+    "gateway_servers": [],           # MCP servers that resolve placeholders themselves; read by nothing yet
     # country codes for the PII rules and the label languages; "auto" is the country of the system
     # setting (maisecrets/regions.py). pii_regions is the old name and still read.
     "regions": ["auto"],
@@ -1603,7 +1603,8 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
                 pass
             except OSError:
                 problems.append(f"{name} not deleted")
-        dirs = [HOME / "pending", HOME / "run"] + ([Path(run_dir)] if run_dir else [])
+        # vault-refs: the server tokens seen, the key ids and the endpoints (vault_refs.py); its keys are in the store
+        dirs = [HOME / "pending", HOME / "run", HOME / "vault-refs"] + ([Path(run_dir)] if run_dir else [])
         for d in dirs:
             if d.is_dir():
                 for f in d.iterdir():

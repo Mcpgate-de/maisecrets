@@ -1,0 +1,10 @@
+# c27-only-a-user-scope-mcp-result-is-noted: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-only-a-user-scope-mcp-result-is-noted"
+control = "C27"
+statement = "A server-range token is noted only from a result of an mcp__ tool whose mcp_server.source is user; a token in a file read or from a project-scope server is not."
+runner = ["tests/test_vault_refs.py::Offline::test_p3_only_a_result_of_a_user_scope_mcp_server_is_noted"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''server.get("source") != "user" or '''
+replace = ''''''

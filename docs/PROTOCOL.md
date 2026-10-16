@@ -12,7 +12,7 @@ is a Jira link and a regex class, `***` is a regex quantifier; `⟦…⟧` with
 `•` survives CommonMark, HTML, XHTML, URL query, regex and SQL LIKE.
 
 - `TYPE` is one of `SECRET`, `EMAIL`, `IBAN`, `CARD`, `IP`, `PHONE`.
-- `c` marks a client-minted reference. A gateway mints `<TYPE_N>` without `c`
+- `c` marks a client-minted reference. A server mints `⟦TYPE_N⟧` or `⟦TYPE_N:display⟧` without `c`
   and never mints the `c` range, so the two never collide.
 - `N` is a per-client, per-type counter. It is never derived from the value.
 - Resolution matches the key `TYPE_cN` only. The display part is for humans
@@ -44,7 +44,7 @@ is a Jira link and a regex class, `***` is a regex quantifier; `⟦…⟧` with
 | purged | value deleted; metadata kept |
 
 A value never leaves the backend except into (a) a tool's arguments at
-execution time, (b) a gateway deposit, (c) `maisecrets get` for a human.
+execution time, (b) `maisecrets get` for a human.
 
 ## 3. Rehydration at the client
 
@@ -59,8 +59,7 @@ references deny the call with a reason that names the key and the status.
 Partial resolution never happens.
 
 `PreToolUse` on an MCP tool: every string argument is walked; references are
-resolved inline under the same session rule and cap. Gateway servers are
-included until the deposit path (§4) exists.
+resolved inline under the same session rule and cap. A server-range token (§4) in an MCP argument stays as it is.
 
 Session rule: a reference resolves only in the session that minted it or in
 one where a human typed it into a prompt (`UserPromptSubmit` admits it).
@@ -70,20 +69,163 @@ token (and the rest of a `KEY=value` line) is compared by keyed fingerprint
 with the live entries; hits become references (existing reference when the
 fingerprint is known). The response keeps its shape.
 
-## 4. Deposit to a gateway (not built)
+## 4. Vault references
 
-`POST /api/vault/deposit` with the user's vault key:
+Status: draft. Built in the client (`maisecrets/vault_refs.py`); the field and header names are
+provisional until the IANA registries are checked.
 
-```json
-{"ref": "EMAIL_c1", "type": "EMAIL", "fingerprint": "…", "value": "…", "ttl_seconds": 86400}
+A server can keep a value away from the model: it puts a token of the server
+range (§1, `⟦TYPE_N⟧` or `⟦TYPE_N:display⟧`) into its tool result and keeps the
+value. This section lets a vault on the person's computer get that value back
+for a local Write, Edit or Bash call, so that the model still sees only the
+token. A client without a vault sees what it saw before. The server gives a
+value only to a key that the vault announced when the person logged in.
+
+### 4.1 The key and the header
+
+- The vault makes a random 32-byte key `K` per server origin and per client
+  profile. It stores `K` like a vault entry, but no placeholder names it, so no
+  tool call can resolve it. Two profiles, or two servers, never share a `K`.
+- The vault announces `kid = SHA-256(K)` in a static header on the server's
+  entry in the client configuration. The header is an RFC 9651 Dictionary:
+
+  ```
+  Client-Vault: v=1, kid=:<standard base64 of the 32 bytes, with padding>:
+  ```
+
+- The vault writes the header only on an entry of user scope, never on a
+  project file that a repository carries and never on an entry that it cannot
+  edit. The URL of the entry must be `https`.
+- The write changes one key of the configuration file. The vault takes the
+  client's own lock (a `<file>.lock` folder; a lock older than 10 s is stale),
+  reads the file again, writes a temporary file in the same folder and renames
+  it over the original. It does not change a file that is not valid JSON, and
+  it keeps a backup. The person can turn this off (`client_header: false`).
+  The vault then removes its own header.
+- `K` never travels on the MCP connection. It goes only to the resolve
+  endpoint (§4.4).
+
+### 4.2 The binding on the server
+
+1. **At login.** The client sends its static headers on the OAuth token
+   request too (measured with one client; a client that does not is bound by
+   path 2). The server reads `Client-Vault` on the request with
+   `grant_type=authorization_code` and binds the `kid` to the subject at once.
+   That request needs the PKCE verifier of the login that the person did, so a
+   stolen access or refresh token cannot use this path.
+2. **On an MCP request.** A `kid` that is not yet bound and arrives on an MCP
+   request becomes `pending`. The server tells the subject on a channel that
+   the agent does not control. The binding becomes active after a cool-down
+   (24 hours in the first server) or earlier when the person confirms. The
+   notice lets the person revoke it.
+
+Rules for every binding:
+
+- One `kid` belongs to one subject, ever. If a bound or pending `kid` arrives
+  with a second subject, the server binds nothing, revokes both records and
+  tells both subjects.
+- The server stores `kid` only, never `K`. It compares `SHA-256(K)` with the
+  stored `kid` in constant time, and it never logs `K`.
+- The server limits the number of active `kid`s per subject and the number
+  of values per day, writes one audit line per value released, and makes a
+  revoke take effect at once.
+
+### 4.3 Finding the endpoint
+
+The vault reads the protected resource metadata of the MCP URL (RFC 9728),
+`GET <origin>/.well-known/oauth-protected-resource<path of the MCP URL>`, and
+takes the field `client_vault_endpoint`: an absolute URL. If the field is
+missing, the server does not support vault references. If the URL is not
+`https` or its origin differs from the origin of the MCP URL, the vault does
+not resolve. The vault may keep the answer per origin for a time (an hour in
+maisecrets).
+
+### 4.4 The resolve request
+
+```
+POST <client_vault_endpoint>
+Authorization: Bearer <K, base64url without padding: 43 characters>
+Content-Type: application/json
+
+{"now": "2026-10-16T09:00:00Z",
+ "refs": [{"key": "EMAIL_1", "seen_at": "2026-10-16T08:58:12Z"}]}
 ```
 
-Idempotent by `ref` per user. The gateway stores the value in its per-user
-mapping under the same key and rehydrates it in actions that opt in per field.
-Its response scrubber returns the same reference for the same value.
+- `key` is the token's key without its display part.
+- `now` is the client's clock; `seen_at` is when the vault last saw the key
+  in a result of that server. Both are ISO 8601 in UTC.
+- At most 100 refs and 64 KB per request.
+- The endpoint accepts `K` only. It refuses the client's OAuth token.
 
-Trigger: `PreToolUse` on a gateway MCP tool whose arguments carry a client
-reference. The client deposits first, then lets the call through unchanged.
+The server corrects each `seen_at` by the difference between its own clock
+and `now`. If that difference is above 5 minutes, it answers `clock_skew`. A
+key whose value the server minted after the corrected `seen_at` is `expired`:
+the same key can name another value after the server's mapping restarts.
+
+### 4.5 The answer
+
+All values, or one error for the whole request. Partial resolution never
+happens.
+
+| status | body | meaning |
+|---|---|---|
+| 200 | `{"values": {"EMAIL_1": "…"}}` | one string for each requested key |
+| 401 | `{"error": "unknown_key"}` | no active `kid` for this `K`, or revoked |
+| 403 | `{"error": "pending", "activates_at": "<ISO 8601>"}` | the binding waits for its cool-down |
+| 403 | `{"error": "clock_skew"}` | the client's clock is off by more than 5 minutes |
+| 404 | `{"error": "unknown_ref"}` | a key is not in the subject's mapping |
+| 410 | `{"error": "expired"}` | a key is newer than its `seen_at` |
+| 429 | `{"error": "rate_limited"}` and `Retry-After` | the cap is reached |
+| 503 | `{"error": "disabled"}` | the server has the feature off |
+
+Every other answer is a deny: any 3xx (the client follows no redirect), any
+other status, a body that is not JSON, a `Content-Type` other than
+`application/json`, a body above 1 MB, a value that is not a string, a key
+missing from a 200 answer.
+
+### 4.6 The client
+
+- **Noting.** After a tool result of an MCP server of user scope, the vault
+  notes each server-range token with the origin of that server's URL and the
+  time. The result does not change. A token in any other result (a file read,
+  a web page, a project-scope server) is not noted.
+- **Resolving.** Before a Write, Edit, MultiEdit, NotebookEdit or Bash call,
+  the vault looks for noted tokens. It sends one request per origin and puts
+  the values in only when every request succeeds; otherwise it denies the call
+  and names the reason. A token that was never noted stays text, so a client
+  that never noted a token behaves as before. A token noted from two origins
+  is refused, because the vault cannot tell which server to ask.
+- **Where a value goes.** In Write and Edit content, inline; in Bash, through
+  the same shell variable and FIFO as a stored value (§3), so the command
+  text holds no value. An MCP argument keeps the token: it goes back to the
+  server that minted it.
+- **Transport.** TLS with the system's trust store (or a configured CA file),
+  host name check, no redirects, no proxy. The whole fetch, metadata and
+  resolve, ends within 5.5 s, inside the hook's 7 s watchdog.
+- **Audit.** One local audit line per value: the key with the server's host,
+  the tool and the call. Never the value.
+
+### 4.7 What this does not stop
+
+An agent that runs as the same user as the vault can read the store and use
+`K` (the store backstop is a backstop, not a boundary). The defence against it
+is on the server: the cap, the audit line per value, the notice and the
+revoke. A token that the model plants, or that a server echoes, still resolves
+only to the subject's own current mapping on that server.
+
+### 4.8 Conformance
+
+A server conforms when a client gets these answers:
+
+1. A login with the header binds the `kid`; a resolve with `K` returns the values.
+2. An MCP request with a new `kid` gives `pending` with `activates_at`.
+3. The client's OAuth token on the endpoint gives `unknown_key`.
+4. One `kid` with two subjects gives no value to either.
+5. A `seen_at` older than the value gives `expired`; a `now` one day off gives `clock_skew`.
+6. A request with one unknown key among known ones gives `unknown_ref` and no value.
+
+The client side is tested against a fake server with both endpoints
+(`harness/vault_server.py`, `tests/test_vault_refs.py`).
 
 ## 5. Failure rules
 

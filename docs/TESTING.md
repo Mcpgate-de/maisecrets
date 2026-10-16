@@ -12,6 +12,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | repository scan | `python3 scripts/scan_tree.py` | GitLab `no_secrets_in_tree` |
 | Claude Code harness | `python3 harness/run.py` | GitLab `harness_claude`; locally `scripts/check_all.sh` (needs `claude`) |
 | Codex harness | `python3 harness/codex.py` | GitLab `harness_codex` |
+| vault references, end to end | `python3 harness/vault_refs_e2e.py` | by hand before a release that touches `maisecrets/vault_refs.py` (needs `claude` and `openssl`): the real client, a client profile of its own and the fake server of `harness/vault_server.py`; the resolve and the `client_header: false` run |
 | native store and clipboard | `MAISECRETS_NATIVE_BACKEND_TEST=1`, `MAISECRETS_NATIVE_CLIPBOARD_TEST=1` | GitHub runners only: they use the real keychain and clipboard |
 | Codex with a real model | `python3 harness/codex.py --real` | by hand: `mcp_text_field_rehydrate`, `allow_keeps_the_codex_sandbox`, `apply_patch_rehydrate` and `apply_patch_store_refused` need a real model (an MCP call, a sandbox and a patch the fake upstream cannot script) |
 | ssh through the sandbox | `MAISECRETS_E2E_HOST=<ssh alias> MAISECRETS_E2E_IP=<address> python3 harness/sandbox/ssh_e2e.py` | by hand before a release that touches the ssh route, on macOS and on Linux: the real Claude Code sandbox against a real host, under `rehydration: automatic` (cases 0a to 0f) and `confirm` |

@@ -182,6 +182,15 @@ class Offline(Base):
         self.result("a", f"x {tok('EMAIL_4', 'ab•••')}")
         self.assertEqual(vault_refs.noted(["EMAIL_4"]), {"EMAIL_4": ["https://one.example"]})
 
+    def test_wipe_takes_the_notes_and_the_key(self):
+        from maisecrets.vault import wipe_everything
+        self.client_config({"a": {"url": "https://one.example/mcp"}})
+        self.start()
+        self.result("a", f"x {tok('EMAIL_1')}")
+        wipe_everything(load_config())
+        self.assertEqual(sorted(os.listdir(HOME / "vault-refs")), [])
+        self.assertIsNone(vault_refs._key(Vault().backend, "https://one.example", create=False))
+
     def test_a_token_never_noted_stays_text(self):
         self.client_config({"a": {"url": "https://one.example/mcp"}})
         self.start()

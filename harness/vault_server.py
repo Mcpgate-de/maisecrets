@@ -74,6 +74,7 @@ class VaultServer:
         self.metadata: dict | None = None        # None: the default metadata; {}: no field
         self.clock_offset = 0.0                  # the server's clock against the real one
         self.resolved: list[dict] = []           # what the resolve endpoint released
+        self.auto_bind = False                   # True: a new kid on /mcp is active at once (as after a login)
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -116,7 +117,8 @@ class VaultServer:
                 if self.path == "/mcp":
                     kid = kid_from_header(header or "")
                     if kid and kid not in server.bindings:
-                        server.bindings[kid] = {"state": "pending", "activates_at": _iso(time.time() + 86400)}
+                        server.bindings[kid] = ({"state": "active"} if server.auto_bind else
+                                                {"state": "pending", "activates_at": _iso(time.time() + 86400)})
                     return self._mcp(json.loads(raw or b"{}"))
                 if self.path == "/vault/resolve":
                     return self._resolve(raw)

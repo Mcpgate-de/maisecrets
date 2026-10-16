@@ -1,0 +1,10 @@
+# c27-the-endpoint-is-https-on-the-same-origin: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-the-endpoint-is-https-on-the-same-origin"
+control = "C27"
+statement = "The resolve endpoint from the server's metadata is used only when it is an https URL on the origin of the MCP URL; K goes nowhere else."
+runner = ["tests/test_vault_refs.py::Online::test_the_endpoint_must_be_https_on_the_same_origin"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''            if origin_of(candidate) == origin:'''
+replace = '''            if candidate:'''

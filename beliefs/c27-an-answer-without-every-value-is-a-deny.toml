@@ -1,0 +1,10 @@
+# c27-an-answer-without-every-value-is-a-deny: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-an-answer-without-every-value-is-a-deny"
+control = "C27"
+statement = "A 200 answer that misses a requested key or gives a value that is not a string is a deny; no value goes in."
+runner = ["tests/test_vault_refs.py::Online::test_every_error_code_denies_with_its_reason"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''            if isinstance(values, dict) and all(isinstance(values.get(key), str) for key in mine):'''
+replace = '''            if isinstance(values, dict):'''

@@ -3038,9 +3038,9 @@ def pre_tool(payload: dict) -> dict:
     if tool in _FILE_TOOLS or tool == "apply_patch":
         return _pre_file_tool(payload, cfg, tool, tool_input, str(payload.get("cwd") or ""))
     if tool.startswith("mcp__"):
-        # Gateway servers too: the deposit path (gateway resolves ⟦REF⟧ itself, PROTOCOL §4) is not
-        # built; until it is, a placeholder that reaches a gateway action is parsed as text
-        # (measured 2026-09-26 with gmail_create_draft: the recipient was split at the colon).
+        # Every server, a gateway too: a placeholder that reaches a gateway action unresolved is parsed as
+        # text (measured 2026-09-26 with gmail_create_draft: the recipient was split at the colon). A token
+        # of the server range stays as it is; it goes back to the server that minted it (PROTOCOL §4).
         return _pre_mcp(payload, cfg, tool, tool_input)
     return {}
 
