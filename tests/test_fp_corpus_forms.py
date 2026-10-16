@@ -28,6 +28,7 @@ KNOWN = {
     "digest after key word": {"generic-api-key"},
     "key fingerprint": {"generic-api-key"},
     "owner team": {"name-after-label"},
+    "base64 of a name after a key": {"ds-keyword-equal-signs"},   # the password-label rule, not generic-api-key
 }
 # the rule that must take each positive (the corpus id → the rule id)
 OWNER = {
@@ -43,6 +44,7 @@ OWNER = {
     "name cjk": "name-non-latin-after-label", "name latin ext": "name-after-label",
     "phone encoded": "phone-url-encoded", "phone wrapped": "phone-wrapped-line",
     "encoded mail sent to": "email-percent-encoded", "encoded mail csv cell": "email-percent-encoded",
+    "card in groups": "credit-card",
 }
 
 
@@ -85,19 +87,16 @@ class FormsCorpusTests(unittest.TestCase):
 
 
 class FormsChannelTests(unittest.TestCase):
-    def test_a_personal_form_never_blocks_a_typed_prompt(self):
+    def test_a_form_never_blocks_a_typed_prompt(self):
         for name, text, values in corpus.FORMS_HIT:
             rule = OWNER[name]
-            if rule in personal.FORMS and personal.FORMS[rule][1] == "tool":
+            if rule in personal.FORMS:
                 with self.subTest(name=name):
                     self.assertNotIn(rule, {m.kind for m in scan(text, "prompt")})
 
-    def test_a_secret_form_is_a_hit_in_a_typed_prompt_too(self):
-        for name, text, values in corpus.FORMS_HIT:
-            rule = OWNER[name]
-            if rule in personal.FORMS and personal.FORMS[rule][1] == "both":
-                with self.subTest(name=name):
-                    self.assertNotIn(values[0], masked(text, scan(text, "prompt")))
+    def test_every_form_runs_in_the_tool_channel_only(self):
+        # a typed question about a form (`How does ::add-mask::x work?`) is no secret, and a hit blocks the prompt
+        self.assertEqual({v[1] for v in personal.FORMS.values()}, {"tool"})
 
     def test_the_indian_address_form_runs_only_in_its_region(self):
         name, text, values = next(x for x in corpus.FORMS_HIT if x[0] == "indian address")

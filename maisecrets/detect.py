@@ -139,8 +139,10 @@ def shannon_entropy(s: str) -> float:
 # value, else printable). From a fork (danszymkowiak/maisecrets 795b411, Apache-2.0, floors chosen on its bench);
 # measured on CredData for 0.6.24 (docs/BENCHMARKS.md, "Rule classes"). Hex keeps 3.5: the fork's 3.449 caught only
 # cipher test vectors of the left-out repository and one key, and it took a 32-digit revoked token in developer text
-ENTROPY_BY_ALPHABET = {"hex": 3.5, "base32": 3.584, "base62": 3.322, "base64": 3.252, "base64url": 3.426,
-                       "printable": 3.594}
+# A floor never rises above the old 3.5 (base32 and printable: a higher floor lost two Nemotron-PII secrets), and
+# base64url keeps 3.5: kebab-case names with a digit read as keys under 3.426 (review of 0.6.24)
+ENTROPY_BY_ALPHABET = {"hex": 3.5, "base32": 3.5, "base62": 3.322, "base64": 3.252, "base64url": 3.5,
+                       "printable": 3.5}
 # the challenges of SMTP and IMAP AUTH LOGIN, base64 of `Username:` and `Password:`: a mail server prints them after
 # `authentication failed:`, and with the floor of base62 they read as a key (a typed prompt, 0.6.24 measurement)
 _LOGIN_CHALLENGES = frozenset(_b64.b64encode(w).decode() for w in (b"Username:", b"Password:", b"User Name\x00",
@@ -157,9 +159,23 @@ def alphabet_of(value: str) -> str:
     return next((name for name, alpha in _ALPHABETS if chars <= alpha), "printable")
 
 
+def _base64_of_text(v: str) -> bool:
+    """base64 of printable text (`staging-user`, `Password:`): an encoded word or name, not a key."""
+    if len(v) % 4 or len(v) < 8:
+        return False
+    try:
+        raw = _b64.b64decode(v, validate=True)
+    except (ValueError, TypeError):
+        return False
+    return bool(raw) and all(32 <= b < 127 for b in raw)
+
+
 def _entropy_ok(rule: Rule, secret: str) -> bool:
     if rule.id in ENTROPY_BY_ALPHABET_RULES:
-        return shannon_entropy(secret) >= ENTROPY_BY_ALPHABET[alphabet_of(secret)]
+        e = shannon_entropy(secret)
+        if e >= 3.5:
+            return True    # the old floor: a value it took stays a hit
+        return e >= ENTROPY_BY_ALPHABET[alphabet_of(secret)] and not _base64_of_text(secret)
     return not rule.entropy or shannon_entropy(secret) >= rule.entropy
 
 
@@ -1740,6 +1756,22 @@ PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "
 # more than a mask. A documented test card stays text (rules/public_test_values.txt). From a fork
 # (danszymkowiak/maisecrets 795b411, d5807ea, Apache-2.0)
 CARD_ALONE_IN_TOOL = frozenset({"credit-card"})
+# issuer prefixes and lengths (ISO/IEC 7812 IIN ranges of the networks): Visa, Mastercard, American Express, Discover,
+# JCB, Diners Club, UnionPay
+_CARD_ISSUERS = re.compile(r"4\d{15}|5[1-5]\d{14}|2(?:2[2-9]|[3-6]\d|7[01])\d{13}|2720\d{12}|3[47]\d{13}"
+                           r"|6(?:011|5\d\d|4[4-9]\d)\d{12}|35(?:2[89]|[3-8]\d)\d{12}|3(?:0[0-5]|[68]\d)\d{11}|62\d{14}")
+_CARD_GROUPS = re.compile(r"\d{4}([ -])\d{4}\1\d{4}\1\d{4}|\d{4}([ -])\d{6}\2\d{5}|\d{4}([ -])\d{6}\3\d{4}")
+
+
+def _card_shaped(text: str, start: int, secret: str) -> bool:
+    """A number written as a card: in groups of four (4-6-5 for Amex, 4-6-4 for Diners), with the prefix and the
+    length of a card network, and not part of a decimal, a phone number or a longer digit run. A float, a timestamp
+    and an IMEI pass Luhn as often as a card does (review of 0.6.24), and they are written as one run."""
+    v = secret.strip()
+    if start and text[start - 1] in "+.,0123456789" or text[start + len(secret):start + len(secret) + 2][:1] == "." \
+            and text[start + len(secret) + 1:start + len(secret) + 2].isdigit():
+        return False
+    return bool(_CARD_GROUPS.fullmatch(v) and _CARD_ISSUERS.fullmatch(re.sub(r"\D", "", v)))
 # a Presidio pattern with no boundary: PESEL's eleven digits matched inside a longer digit run
 PRESIDIO_DIGIT_BOUNDED = {"pl-pesel"}
 # single patterns that need a context word although their recognizer does not: DE and nine digits that pass the
@@ -2396,10 +2428,14 @@ def _encoded_mail_expected(text: str, start: int, end: int) -> bool:
             text, max(line, start - 40), start):
         return True
     before, after = text[start - 1:start] if start > line else "", text[end:end + 1]
-    if before not in ("", ",", ";", "\t") or after not in ("", "\n", "\r", ",", ";", "\t"):
+    if before not in ("", ",", ";", "\t") or after not in ("", "\n", "\r", ",", ";", "\t") or start - line > 4000:
         return False
-    row = text[line:_line_end(text, end)]
-    return max(row.count(","), row.count(";"), row.count("\t")) >= 2
+    # the column's header names a mail address: the first line of the text is the CSV header (a file, an export)
+    sep = before or (after if after in (",", ";", "\t") else ",")
+    header = text[:text.find("\n")] if "\n" in text[:4000] else ""
+    cells = header.split(sep)
+    col = text.count(sep, line, start)
+    return line > 0 and col < len(cells) and "mail" in cells[col].lower()
 
 
 def is_public_test_value(value: str, kind: str) -> bool:
@@ -3426,8 +3462,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue
             if rule.type == "SECRET" and len(secret) >= 16 and len(set(secret[-12:])) <= 1:
                 continue   # a prefix and one repeated character: glpat-AAAAAAAAAAAAAAAAAAAA is a placeholder
-            if alone and start and text[start - 1] == "+":
-                continue   # +49 1520 ... passes Luhn too: a card number never follows a +, a phone number does
+            if alone and not _card_shaped(text, start, secret):
+                continue   # without a card word, only a number written as a card: groups and an issuer prefix
             if (rule.score < 1.0 or rule.require_context) and not alone:
                 # presidio semantics: a weak shape passes only with a context WORD nearby
                 # cut from the original text, then lowered: a lowered text is not the same length (the

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import Counter, namedtuple
 from pathlib import Path
@@ -43,8 +44,12 @@ _HAR_WORDS = ("cookie", "authorization", "token", "secret", "session", "password
 
 
 def _secret_name(name) -> bool:
-    low = str(name).lower()
-    return any(w in low for w in _HAR_WORDS)
+    """The name as words (x-api-key, sessionId, XSRF_TOKEN): a credential word must be one of them, so keyboardLayout
+    and monkeyPatch stay (review of 0.6.24). Two words joined count too: api key, api_key, apiKey."""
+    words = [w.lower() for w in re.split(r"[^A-Za-z0-9]+", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(name))) if w]
+    pairs = [a + b for a, b in zip(words, words[1:])] + [a + "-" + b for a, b in zip(words, words[1:])] \
+        + [a + "_" + b for a, b in zip(words, words[1:])]
+    return any(w in _HAR_WORDS for w in words + pairs)
 
 
 def _har_values(text: str) -> set:
