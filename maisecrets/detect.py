@@ -1849,17 +1849,23 @@ def _load_betterleaks() -> list[Rule]:
         cfg = json.loads((RULES_DIR / "betterleaks.json").read_text(encoding="utf-8"))
         global_drop = rule_filter.compile_filter(cfg["filter"]) if cfg.get("filter") else None
         rules: list[Rule] = []
+        # 379 filters are 45 different texts: each text is read once. A filter is a pure function of its text, so the
+        # rules with the same text share it (the parse of every filter was two thirds of rules(), 2026-10-16)
+        read: dict = {}
         for r in cfg.get("rules", []):
             if "regex" not in r or r.get("skipReport"):
                 continue
             r = _patched(r)
             own = None
             if r.get("filter"):
-                try:
-                    own = rule_filter.compile_filter(r["filter"])
-                except rule_filter.Unsupported:
-                    if BETTERLEAKS_SKIP_UNSUPPORTED:
-                        continue
+                if r["filter"] not in read:
+                    try:
+                        read[r["filter"]] = rule_filter.compile_filter(r["filter"])
+                    except rule_filter.Unsupported:
+                        read[r["filter"]] = None
+                own = read[r["filter"]]
+                if own is None and BETTERLEAKS_SKIP_UNSUPPORTED:
+                    continue
             drop = _combine_drops(own, global_drop)
             rules.append(Rule(
                 id=r["id"], type="SECRET", regex=_Lazy(_re2_to_python(r["regex"])),
