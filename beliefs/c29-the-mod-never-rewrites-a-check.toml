@@ -1,0 +1,10 @@
+# c29-the-mod-never-rewrites-a-check: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c29-the-mod-never-rewrites-a-check"
+control = "C29"
+statement = "The mod's question answers a check with a drop that holds the verdict and never with a rewritten text, so a check is never sent, also with placeholders."
+runner = ["tests/test_check_value.py::AlwaysBlockedTests::test_the_mod_gets_a_drop_with_the_verdict_and_never_a_text"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        return {\"drop\": \" \".join(out[\"reason\"].split())}\n"
+replace = "        return {\"text\": out[\"reason\"], \"count\": 1}\n"

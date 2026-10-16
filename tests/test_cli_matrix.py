@@ -515,8 +515,9 @@ def transition_problems(state: str, command: str, args: list[str], r: subprocess
         # locks stay with their files
         # sessions-seen holds no value, only when each session began: a wipe that removed it would let the next
         # prompt note a later start, and a file copied into a clean folder before then would pass (C28)
+        # hints.json records which hints were given (a feature name and a date, no value), with its lock
         kept = {".lock", ".destinations.lock", ".incidents.lock", ".terms.lock", "config.json", "pending", "vault.json",
-                "sessions-seen"}
+                "sessions-seen", "hints.json", ".settings.lock"}
         expect(set(after.files) <= kept, f"wipe left {after.files}")
         return p
     if command == "repair":
@@ -984,6 +985,8 @@ class SessionStartTests(unittest.TestCase):
                 (sb.home / ".announced").write_text("EncryptedFileBackend\n")
                 (sb.home / ".shortcut").write_text("offered\n")
                 (sb.home / ".tip").write_text("2000-01-01 1\n")
+                # the ms:(…) hint of Codex is given already (tests/test_check_value.py has its own case)
+                (sb.home / "hints.json").write_text('{"check_value": {"revision": 99, "given": "2000-01-01"}}')
                 msg = _start(self, sb, **env)["systemMessage"]
                 self.assertEqual(msg, f"maisecrets {VERSION} is on. {pool[2]}")
         self.assertNotEqual(tips.TIPS[2], tips.TIPS_CODEX[2], "the case above must tell the pools apart")

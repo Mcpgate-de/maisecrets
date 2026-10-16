@@ -1,0 +1,10 @@
+# c29-a-check-without-a-closing-bracket-is-blocked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c29-a-check-without-a-closing-bracket-is-blocked"
+control = "C29"
+statement = "A check without the closing bracket is still a check: the value runs to the end of the prompt, and the prompt is blocked."
+runner = ["tests/test_check_value.py::AlwaysBlockedTests::test_every_check_is_blocked_with_and_without_the_closing_bracket", "tests/test_check_value.py::ParseTests::test_the_value_ends_at_the_last_bracket_or_at_the_end"]
+
+[proof]
+file = "maisecrets/check_value.py"
+find = "    value = rest[:close] if close >= 0 else rest\n"
+replace = "    if close < 0:\n        return None\n    value = rest[:close]\n"
