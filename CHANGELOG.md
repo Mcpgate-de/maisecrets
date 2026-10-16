@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.6.31] - 2026-10-16
+
+### Fixes
+
+- a password after its word and a space is redacted, without the stop of the sentence (5096239)
+
 ## [0.6.30] - 2026-10-16
 
 ### Fixes
