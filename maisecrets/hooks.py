@@ -2290,6 +2290,10 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         (k, a, b) for k, a, b in vault_refs.find_noted(command, cfg, payload.get("session_id")) if ctxs[a] != "comment"]
     refs = sorted(refs + server, key=lambda r: r[1])
     server_keys = list(dict.fromkeys(k for k, _a, _b in server))
+    elsewhere = [] if client_of(payload) == "codex" else vault_refs.noted_elsewhere(command, cfg,
+                                                                                   payload.get("session_id"))
+    if elsewhere:
+        return _deny(_elsewhere_reason(elsewhere) + " The command did not run.")
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
@@ -2358,6 +2362,11 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     fetched, why = _server_values(cfg, vault, server_keys, session, "Bash", command)
     if why:
         return _deny(why + " The command did not run.")
+    guarded = [k for k, v in fetched.items() if _names_a_guarded_file(v, str(payload.get("cwd") or ""))]
+    if guarded:
+        # the check above saw the token, not the path: a server must not choose a file of the store or a config
+        return _deny(f"maisecrets: the value of ⟦{guarded[0]}⟧ names a file of maisecrets, of ssh or of the client "
+                     "configuration, which a value from a server may not choose. The command did not run.")
     if any("\0" in v for v in fetched.values()):
         return _deny(f"maisecrets: a value of {keys} holds a NUL character, which a shell variable cannot carry. "
                      "The command did not run. Write it into a file with Write instead.")
@@ -2519,6 +2528,27 @@ def _server_values(cfg: dict, vault: Vault, keys: list[str], session: str | None
     # kept for an hour, so an echo of a value in a later tool result is redacted to the server's token
     vault_refs.remember_released(vault.backend, session, got)
     return {k: v for k, (v, _origin) in got.items()}, None
+
+
+def _elsewhere_reason(keys: list[str]) -> str:
+    names = ", ".join(f"⟦{k}⟧" for k in keys)
+    return (f"maisecrets: {names} came from a server in another session or more than 24 hours ago, so it does not "
+            "resolve here. Call that server's tool again in this session and use the new tokens.")
+
+
+def _names_a_guarded_file(value: str, cwd: str) -> bool:
+    """A value that, used as a path, names the maisecrets home, a store file, an ssh config or the client config."""
+    from . import vault_refs
+    v = value.strip()
+    if not v or len(v) > 4096 or "\0" in v:
+        return False
+    try:
+        if _store_read_match(v) or _in_the_home(v, cwd) or _is_ssh_config_path(v, cwd):
+            return True
+        full = v if os.path.isabs(os.path.expanduser(v)) else os.path.join(cwd or os.getcwd(), v)
+        return os.path.realpath(os.path.expanduser(full)) == os.path.realpath(str(vault_refs.claude_json()))
+    except (OSError, ValueError):
+        return True                             # a path we cannot judge is refused, not served
 
 
 def _all_refs(text: str, values: dict) -> list[tuple[str, int, int]]:
@@ -2910,6 +2940,15 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         return v
     _walk_strings(target, collect_server)
     server = list(dict.fromkeys(server))
+    elsewhere: list[str] = []
+
+    def collect_elsewhere(v: str) -> str:
+        if client_of(payload) != "codex":
+            elsewhere.extend(vault_refs.noted_elsewhere(v, cfg, payload.get("session_id")))
+        return v
+    _walk_strings(target, collect_elsewhere)
+    if elsewhere:
+        return _deny(_elsewhere_reason(list(dict.fromkeys(elsewhere))) + " Nothing was written.")
     # a server value goes into the content only: in a path the server would choose the file, after the home check
     # above saw the token (Codex review, 2026-10-16)
     outside: list[str] = []
@@ -3184,7 +3223,10 @@ def _resolved_values(vault: Vault, session: str | None, prompt: bool = False) ->
         if value:
             out.append((value, Entry.from_meta(vault._index["entries"][key]).ref))
     from . import vault_refs
-    out.extend(vault_refs.released(vault.backend, session))     # the values a server gave this session
+    # the values a server gave this session; a short one or a word would rewrite every output that holds it
+    # ("true" inside "construed"), so those are not hunted (Fable review, round 3)
+    out.extend((v, t) for v, t in vault_refs.released(vault.backend, session)
+               if len(v) >= _EXACT_MIN_LEN and not detect.reads_as_word(v))
     return out
 
 

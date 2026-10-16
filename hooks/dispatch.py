@@ -275,6 +275,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
     if not codex:
         try:
             from maisecrets import vault_refs  # noqa: E402
+            vault_refs.prune_released(v.backend)   # the values a server gave leave the store after their hour
             note = vault_refs.ensure_headers(cfg, v.backend)
         except Exception:  # noqa: BLE001 - never stops a session start; without the header no value comes back
             note = None

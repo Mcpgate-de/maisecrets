@@ -1,8 +1,8 @@
 # c27-a-token-resolves-only-in-the-session-that-saw-it: the test owns the rule; this file names it and the mutation that must turn it red.
 belief = "c27-a-token-resolves-only-in-the-session-that-saw-it"
 control = "C27"
-statement = "A server token resolves only in the session whose MCP result carried it; in another session it stays text, as a stored value of another session does (C4)."
-runner = ["tests/test_vault_refs.py::Online::test_a_token_another_session_saw_stays_text"]
+statement = "A server token resolves only in the session whose MCP result carried it; in another session it is refused with a reason, as a stored value of another session is (C4)."
+runner = ["tests/test_vault_refs.py::Online::test_a_token_another_session_saw_is_refused_with_a_reason"]
 
 [proof]
 file = "maisecrets/vault_refs.py"

@@ -190,7 +190,8 @@ missing from a 200 answer.
   notes each server-range token with the origin and the URL of that server,
   the time and the session, per client profile. A token that two servers sent
   is refused, also when the two share an origin. A token resolves only in a
-  session that saw it, and only for 24 hours after it was last seen. The result does not change. A token in any other result (a file read,
+  session that saw it, and only for 24 hours after it was last seen; in any
+  other case the call is denied with that reason. The result does not change. A token in any other result (a file read,
   a web page, a project-scope server) is not noted.
 - **Resolving.** Before a Write, Edit, MultiEdit, NotebookEdit or Bash call,
   the vault looks for noted tokens. It sends one request per origin and puts
@@ -210,7 +211,11 @@ missing from a 200 answer.
 - **Echo.** For one hour, the vault looks for each value a server gave in the
   later tool results of that session, as it does for a stored value, and
   puts the server's token back in its place. To do that it keeps the values
-  in its store for that hour.
+  in its store for that hour. A value under 8 characters or one that reads
+  as a word is not looked for: it would change every text that holds it.
+- **Paths.** A server value goes into the content of a file tool, never into
+  its path. In Bash, a value that names the vault's own folder, a store file,
+  an ssh configuration or the client configuration is refused.
 - **Off.** With the opt-out, no token is noted and no noted token resolves.
 
 ### 4.7 What this does not stop

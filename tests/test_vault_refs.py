@@ -490,11 +490,50 @@ class Online(Base):
         self.assertEqual(self.write(tok("EMAIL_1")), {})
         self.assertEqual(self.srv.resolved, [])
 
-    def test_a_token_another_session_saw_stays_text(self):
+    def test_a_token_another_session_saw_is_refused_with_a_reason(self):
         self.ready()
         out = hooks.pre_tool({"tool_name": "Write", "session_id": "s2", **CLAUDE, "cwd": str(self.work),
                               "tool_input": {"file_path": str(self.work / "o.csv"), "content": tok("EMAIL_1")}})
-        self.assertEqual(out, {})
+        self.assertIn("another session", self.denied(out))
+        self.assertEqual(self.srv.resolved, [], "nothing was asked of the server")
+
+    @unittest.skipUnless(BASH and os.name != "nt", "bash on POSIX")
+    def test_a_server_value_that_names_a_guarded_file_does_not_go_into_bash(self):
+        self.ready()
+        for key, path in (("PATH_7", str(HOME / "config.json")), ("PATH_8", str(self.profile / ".claude.json")),
+                          ("PATH_9", "~/.ssh/config")):
+            with self.subTest(key):
+                self.srv.mint(key, path)
+                self.result("demo", tok(key))
+                out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", **CLAUDE, "cwd": str(self.work),
+                                      "tool_input": {"command": f"cat {tok(key)}"}})
+                self.assertIn("may not choose", self.denied(out))
+
+    def test_a_short_or_word_value_is_not_hunted_in_later_output(self):
+        self.ready()
+        self.srv.mint("WORD_1", "true")
+        self.srv.mint("NAME_5", "Annabelle")
+        self.result("demo", f"{tok('WORD_1')} {tok('NAME_5')}")
+        self.write(f"{tok('WORD_1')} {tok('NAME_5')}")
+        hooks._live_cache.clear()
+        out = hooks._post_tool_guarded({"tool_name": "Bash", "session_id": "s1", **CLAUDE,
+                                        "tool_input": {"command": "cat x"},
+                                        "tool_response": {"stdout": "construed Annabelle\n", "stderr": ""}})
+        text = json.dumps(out)
+        self.assertNotIn("WORD_1", text)
+        self.assertNotIn("NAME_5", text)
+
+    def test_a_released_value_leaves_the_store_after_its_hour(self):
+        self.ready()
+        self.write(tok("NAME_2"))
+        self.assertTrue(vault_refs.has_released())
+        later = time.time() + vault_refs.RELEASE_WINDOW + 10
+        with mock.patch.object(vault_refs.time, "time", return_value=later):
+            self.assertFalse(vault_refs.has_released())
+            vault_refs.prune_released(Vault().backend)
+        self.assertFalse((HOME / "vault-refs" / "released.json").exists())
+        names = [k for k in Vault().backend.keys() if k.startswith("_maisecrets_vrel_")]
+        self.assertEqual(names, [])
 
     def test_codex_gets_no_server_value(self):
         self.ready()

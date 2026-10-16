@@ -1,0 +1,12 @@
+# c27-a-server-value-chooses-no-guarded-file: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-server-value-chooses-no-guarded-file"
+control = "C27"
+statement = "A server value that names the maisecrets home, a store file, an ssh config or the client config does not go into a Bash command: the checks before saw only the token."
+runner = ["tests/test_vault_refs.py::Online::test_a_server_value_that_names_a_guarded_file_does_not_go_into_bash"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''    if guarded:
+        # the check above saw the token'''
+replace = '''    if False:
+        # the check above saw the token'''

@@ -262,8 +262,11 @@ def ensure_headers(cfg: dict, backend) -> str | None:
         for url in user_servers(first).values():
             origin = origin_of(url)
             if origin not in keys:
-                keys[origin] = _key(backend, origin, create=True)
-                _remember_key(origin, kid_of(keys[origin]))
+                # one step under maisecrets' own lock: two starts at once made two keys, and the header could name
+                # the one the store lost (Fable review, round 3)
+                with _lock_for(DIR / ".lock"):
+                    keys[origin] = _key(backend, origin, create=True)
+                    _remember_key(origin, kid_of(keys[origin]))
     ours = {v.get("kid") for v in _known_keys().values() if isinstance(v, dict)} | {kid_of(k) for k in keys.values()}
     backup = path.with_name(path.name + ".maisecrets-backup")
     if _apply_headers(copy.deepcopy(first), keys, ours) == ([], []):
@@ -418,6 +421,20 @@ def noted(keys: list[str], session: str | None) -> dict[str, list[str]]:
             if isinstance(mine.get(key), dict):
                 out.setdefault(key, []).append(origin)
     return out
+
+
+def noted_elsewhere(text: str, cfg: dict | None, session: str | None) -> list[str]:
+    """The server tokens of text that this profile noted, but not for this session or not in the last NOTE_TTL: they
+    get a reason, as a stored value of another session does. A token never noted stays text."""
+    refs = list(dict.fromkeys(k for k, _a, _b in find(text)))
+    if _off(cfg) or not refs:
+        return []
+    here = noted(refs, session)
+    mine = (_read_json(NOTES) or {}).get(profile())
+    if not isinstance(mine, dict):
+        return []
+    return [k for k in refs if k not in here
+            and any(isinstance(notes, dict) and isinstance(notes.get(k), dict) for notes in mine.values())]
 
 
 def find_noted(text: str, cfg: dict | None, session: str | None) -> list[tuple[str, int, int]]:
@@ -673,23 +690,53 @@ def remember_released(backend, session: str | None, values: dict[str, tuple[str,
                 label="maisecrets server values", comment="maisecrets: values a server gave, for one hour; "
                                                           "not a placeholder value.")
     with _lock_for(DIR / ".lock"):
-        data = _read_json(RELEASED) or {}
-        for sess, items in list(data.items()):
-            keep = []
-            for item in items if isinstance(items, list) else []:
-                if isinstance(item, dict) and now - float(item.get("t") or 0) < RELEASE_WINDOW:
-                    keep.append(item)
-                elif isinstance(item, dict) and isinstance(item.get("name"), str):
-                    try:
-                        backend.delete(item["name"])
-                    except (RuntimeError, OSError):
-                        keep.append(item)        # tried again at the next release
-            if keep:
-                data[sess] = keep
-            else:
-                del data[sess]
+        data = _prune(backend, _read_json(RELEASED) or {}, now)
         data.setdefault(session, []).append({"name": name, "t": now})
         atomic_write(RELEASED, json.dumps(data, indent=1))
+
+
+def _expired(item: object, now: float) -> bool:
+    try:
+        return not isinstance(item, dict) or not 0 <= now - float(item.get("t")) < RELEASE_WINDOW
+    except (TypeError, ValueError):
+        return True
+
+
+def _prune(backend, data: dict, now: float) -> dict:
+    """data without the entries older than RELEASE_WINDOW; their values leave the store."""
+    out: dict = {}
+    for sess, items in data.items():
+        keep = []
+        for item in items if isinstance(items, list) else []:
+            if not _expired(item, now):
+                keep.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("name"), str):
+                try:
+                    backend.delete(item["name"])
+                except (RuntimeError, OSError):
+                    keep.append(item)            # tried again at the next prune
+        if keep:
+            out[sess] = keep
+    return out
+
+
+def prune_released(backend) -> None:
+    """At session start and when an expired entry is seen: the values older than their hour leave the store."""
+    data = _read_json(RELEASED)
+    if not data:
+        return
+    now = time.time()
+    if not any(_expired(i, now) for items in data.values() for i in (items if isinstance(items, list) else [None])):
+        return
+    with _lock_for(DIR / ".lock"):
+        data = _prune(backend, _read_json(RELEASED) or {}, now)
+        if data:
+            atomic_write(RELEASED, json.dumps(data, indent=1))
+        else:
+            try:
+                RELEASED.unlink()
+            except OSError:
+                pass
 
 
 def released(backend, session: str | None) -> list[tuple[str, str]]:
@@ -697,8 +744,10 @@ def released(backend, session: str | None) -> list[tuple[str, str]]:
     items = (_read_json(RELEASED) or {}).get(session or "") if session else None
     out: list[tuple[str, str]] = []
     now = time.time()
+    if any(_expired(i, now) for i in (items if isinstance(items, list) else [])):
+        prune_released(backend)
     for item in items if isinstance(items, list) else []:
-        if not isinstance(item, dict) or now - float(item.get("t") or 0) >= RELEASE_WINDOW:
+        if _expired(item, now):
             continue
         raw = backend.get(str(item.get("name")))
         try:
@@ -710,8 +759,10 @@ def released(backend, session: str | None) -> list[tuple[str, str]]:
 
 
 def has_released() -> bool:
-    data = _read_json(RELEASED)
-    return bool(data)
+    """Any value a server gave in the last hour, in any session: then the output hook opens the store."""
+    now = time.time()
+    data = _read_json(RELEASED) or {}
+    return any(not _expired(i, now) for items in data.values() for i in (items if isinstance(items, list) else []))
 
 
 def audit(values: dict[str, tuple[str, str]], session: str | None, tool: str, context: str) -> bool:
