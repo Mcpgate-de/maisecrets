@@ -153,7 +153,9 @@ SCENARIOS = {
         "expect_output": ["maisecrets would NOT have caught this. It was not stored"],
         "expect_not_in_transcript": ["ms:("],
     },
-    # the mod gets no verdict (its question to dispatch.py fails): it drops the check with its own sentence
+    # the mod gets no verdict (its question to dispatch.py fails): it drops the check with its own sentence, and nothing
+    # reaches the model. Nothing scrubs then: Claude Code 2.1.293 keeps the typed prompt in a queue-operation record
+    # of the transcript, 2.1.301 does not (measured 2026-10-16); docs/THREAT-MODEL.md C29 names it
     "check_value_mod_fails": {
         "prompt": f"ms:({MARK2})",
         "env": {"MAISECRETS_TEST_FAULT": "mod-" + "prompt"},
@@ -162,7 +164,6 @@ SCENARIOS = {
         "expect_blocked": True,
         "with_mod": {"expect_blocked": False, "expect_dropped": True,
                      "expect_output": ["maisecrets could not check this value. Nothing was sent."]},
-        "expect_not_in_transcript": ["ms:("],
     },
     # no closing bracket: still a check, still blocked
     "check_value_no_bracket": {
