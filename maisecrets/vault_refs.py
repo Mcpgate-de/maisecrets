@@ -98,9 +98,13 @@ def global_file() -> Path:
 
 
 def legacy_file() -> Path:
-    """`<config home>/.config.json`: the config home is CLAUDE_CONFIG_DIR, else ~/.claude (2.1.301, `legacyPath`)."""
+    """`<config home>/.config.json` (2.1.301, `legacyPath`). The config home is CLAUDE_CONFIG_DIR, also when it is
+    empty (`??` in the client: then `.config.json` relative to the working folder), else ~/.claude; the client
+    normalizes it to NFC, and so does this. hooks/guard.py _client_config has the same rule."""
+    import unicodedata
     base = os.environ.get("CLAUDE_CONFIG_DIR")
-    return (Path(base) if base else Path.home() / ".claude") / ".config.json"
+    home = base if base is not None else str(Path.home() / ".claude")
+    return Path(unicodedata.normalize("NFC", home)) / ".config.json"
 
 
 def claude_json() -> Path:
@@ -119,9 +123,16 @@ def claude_json() -> Path:
 
 
 def config_files() -> list[str]:
-    """Both files the client may read, the chosen one first: a Bash value that names either one is refused (C27)."""
+    """Every file the client may read, the chosen one first: a Bash value that names one is refused (C27). The plain
+    `.claude.json` stays in the list when a custom OAuth URL names another global file (Gate B review)."""
     chosen = claude_json()
-    return [str(chosen)] + [str(f) for f in (legacy_file(), global_file()) if f != chosen]
+    base = os.environ.get("CLAUDE_CONFIG_DIR")
+    plain = (Path(base) if base else Path.home()) / ".claude.json"
+    out = [str(chosen)]
+    for f in (legacy_file(), global_file(), plain):
+        if str(f) not in out:
+            out.append(str(f))
+    return out
 
 
 def profile() -> str:
@@ -159,7 +170,10 @@ def _read_json(path: Path) -> dict | None:
 
 
 def user_servers(config: dict | None = None) -> dict[str, str]:
-    """name -> URL of each user-scope server (top-level `mcpServers`) with an https URL."""
+    """name -> URL of each user-scope server (top-level `mcpServers`) with an https URL. None with an empty
+    CLAUDE_CONFIG_DIR: the client then reads `.config.json` in its own working folder, which a hook cannot know."""
+    if config is None and os.environ.get("CLAUDE_CONFIG_DIR") == "":
+        return {}
     data = config if config is not None else (_read_json(claude_json()) or {})
     servers = data.get("mcpServers")
     if not isinstance(servers, dict):
@@ -380,13 +394,23 @@ def _apply_config(cfg: dict, backend, lock_wait: float = 5.0) -> tuple[list[str]
             keys[origin] = k
     ours = {v.get("kid") for v in _known_keys().values() if isinstance(v, dict)} | {kid_of(k) for k in keys.values()}
     if _apply_headers(copy.deepcopy(first), keys, urls, ours) == ([], []):
-        # nothing to change: no lock, and the backup of the last change goes (it holds every server's credentials)
-        try:
-            backup.unlink()
-        except OSError:
-            pass
+        # nothing to change: no lock, and the backup of the last change goes (it holds every server's credentials).
+        # So do the backups that 0.6.29 and 0.6.30 left beside a link's target or beside a global file the client
+        # no longer uses: only files of that name, which only maisecrets writes; never a config file (Gate B review)
+        olds = {backup, path.resolve().with_name(path.resolve().name + ".maisecrets-backup")}
+        if path != global_file():
+            olds.add(global_file().with_name(global_file().name + ".maisecrets-backup"))
+        for old in olds:
+            try:
+                old.unlink()
+            except OSError:
+                pass
         return [], [], path, backup
     with _ConfigLock(path, wait=lock_wait):
+        # the client may have changed its file between the choice and the lock (a new .config.json): then nothing is
+        # written now, and the next start writes the file the client uses then (Gate A and Gate B review)
+        if claude_json() != path or not path.is_file():
+            return [], [], path, backup
         data = _read_json(path)
         if data is None:
             return [], [], path, backup
@@ -1015,6 +1039,9 @@ def status_lines(cfg: dict, backend, check: bool = True) -> list[str]:
                 "is not set"]
     chosen = claude_json()
     others = [str(f) for f in (legacy_file(), global_file()) if f != chosen and f.exists()]
+    if os.environ.get("CLAUDE_CONFIG_DIR") == "":
+        return ["vault references: off, because CLAUDE_CONFIG_DIR is set but empty (the client then reads a file in "
+                "its working folder)"]
     lines = [f"vault references: client config {chosen}" + (f" ({others[0]} is not read)" if others else "")]
     servers = user_servers()
     if not servers:

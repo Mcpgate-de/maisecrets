@@ -156,10 +156,12 @@ def _client_config() -> str:
     """The config file Claude Code uses (2.1.301, function `v_`; maisecrets/vault_refs.py claude_json has the same
     rule): `.config.json` in the config folder when it is a regular file and not empty, or empty with a write bit and
     no global file; else `.claude<suffix>.json` in CLAUDE_CONFIG_DIR or the home folder."""
+    import unicodedata
     base = os.environ.get("CLAUDE_CONFIG_DIR")
     suffix = "-custom-oauth" if os.environ.get("CLAUDE_CODE_CUSTOM_OAUTH_URL") else ""
     other = os.path.join(base or os.path.expanduser("~"), f".claude{suffix}.json")
-    legacy = os.path.join(_claude_dir(), ".config.json")
+    home = base if base is not None else os.path.join(os.path.expanduser("~"), ".claude")
+    legacy = os.path.join(unicodedata.normalize("NFC", home), ".config.json")
     try:
         st = os.stat(legacy)
         if stat.S_ISREG(st.st_mode) and (st.st_size > 0 or ((st.st_mode & 0o222) and not os.path.exists(other))):

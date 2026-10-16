@@ -127,6 +127,49 @@ class Choice(tvr.Base):
         with mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(vault_refs, "HOME", vault_refs._DEFAULT_HOME):
             self.assertFalse(vault_refs._may_change_config())
+            self.assertEqual(vault_refs.legacy_file(), Path(".config.json"), "relative, as `??` in the client")
+            self.assertEqual(Path(_guard_module()._client_config()).name, ".config.json"
+                             if (Path.cwd() / ".config.json").is_file() else ".claude.json")
+            self.assertEqual(vault_refs.user_servers(), {}, "no server is read from a file the hook cannot know")
+
+    def test_the_config_home_is_normalized_to_nfc_as_the_client_does(self):
+        import unicodedata
+        nfd = unicodedata.normalize("NFD", str(self.profile / "Pr\u00f6file"))
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": nfd}):
+            want = unicodedata.normalize("NFC", nfd)
+            self.assertEqual(str(vault_refs.legacy_file()), os.path.join(want, ".config.json"))
+            self.assertEqual(str(vault_refs.global_file()), os.path.join(nfd, ".claude.json"), "b() keeps the spelling")
+            g, seen, real_stat = _guard_module(), [], os.stat
+            with mock.patch.object(g.os, "stat", side_effect=lambda p: seen.append(p) or real_stat(p)):
+                g._client_config()
+            self.assertEqual(seen, [os.path.join(want, ".config.json")], "the guard looks at the NFC name too")
+
+    def test_an_empty_writable_config_json_beside_a_broken_global_link_is_used(self):
+        if os.name == "nt":
+            self.skipTest("a symbolic link needs a privilege on Windows")
+        path = self.legacy(raw="")
+        os.chmod(path, 0o600)
+        (self.profile / ".claude.json").symlink_to(self.profile / "missing.json")
+        self.assertChosen(".config.json")
+
+    def test_a_global_file_that_is_a_folder_still_counts_as_existing(self):
+        path = self.legacy(raw="")
+        os.chmod(path, 0o600)
+        (self.profile / ".claude.json").mkdir()
+        self.assertChosen(".claude.json")
+
+    def test_the_plain_claude_json_stays_guarded_with_a_custom_oauth_url(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_CUSTOM_OAUTH_URL": "https://login.example"}):
+            self.assertIn(str(self.profile / ".claude.json"), vault_refs.config_files())
+            self.assertTrue(hooks._a_guarded_path(str(self.profile / ".claude.json"), str(self.work)))
+
+    def test_the_account_of_the_install_check_comes_from_the_chosen_file(self):
+        from maisecrets import cli
+        self.client_config({}, oauthAccount={"organizationUuid": "org-stale", "accountUuid": "acc-stale"})
+        self.assertEqual(cli._active_account(), "org-stale_acc-stale")
+        self.legacy(raw=json.dumps({"oauthAccount": {"organizationUuid": "org-new", "accountUuid": "acc-new"}}))
+        self.assertEqual(cli._active_account(), "org-new_acc-new")
+        self.assertEqual(_guard_module()._account(), "org-new_acc-new")
 
     def test_both_files_are_guarded_from_a_bash_value(self):
         self.client_config({"a": {"url": STALE_URL}})
@@ -185,7 +228,9 @@ class Write(tvr.Base):
         lock = self.profile / ".config.json.lock"
         lock.mkdir()
         try:
-            with mock.patch.object(vault_refs._ConfigLock, "__init__",
+            # a long stale time: under a high load the 10 s of the client passed before the start (local run)
+            with mock.patch.object(vault_refs, "LOCK_STALE", 3600), \
+                    mock.patch.object(vault_refs._ConfigLock, "__init__",
                                    lambda s, p, wait=0.3: (setattr(s, "dir", p.with_name(p.name + ".lock")),
                                                            setattr(s, "wait", wait))[0]):
                 with self.assertRaises(TimeoutError):
@@ -194,6 +239,25 @@ class Write(tvr.Base):
             lock.rmdir()
         self.assertIn("Client-Vault", json.loads(self.fresh.read_text())["mcpServers"]["a"]["headers"],
                       "a fresh client lock: nothing was written")
+
+    def test_a_file_that_changed_before_the_lock_is_not_written(self):
+        self.fresh.unlink()                     # the global file is chosen now; .config.json appears under the lock
+        real = vault_refs._ConfigLock.__enter__
+
+        def enter(lock):
+            self.fresh.write_text(json.dumps({"mcpServers": {"a": {"type": "http", "url": FRESH_URL}}}))
+            return real(lock)
+        vault_refs._remember_key("https://stale.example", "k", ("a", STALE_URL))
+        vault_refs._key(Vault().backend, "https://stale.example", create=True)
+        with mock.patch.object(vault_refs._ConfigLock, "__enter__", enter):
+            self.assertEqual(vault_refs._apply_config(load_config(), Vault().backend)[:2], ([], []))
+
+    def test_an_old_backup_beside_the_unused_global_file_goes(self):
+        self.enable()
+        old = self.profile / ".claude.json.maisecrets-backup"
+        old.write_text("{}")
+        self.assertIsNone(self.start())
+        self.assertFalse(old.exists())
 
     def test_status_names_the_file_it_reads(self):
         lines = vault_refs.status_lines(load_config(), Vault().backend, check=False)
@@ -214,7 +278,15 @@ class Write(tvr.Base):
         target = target_dir / "config.json"
         os.replace(self.fresh, target)
         self.fresh.symlink_to(target)
-        self.assertIsNotNone(self.enable())
+        taken = []
+        real = vault_refs._ConfigLock.__enter__
+
+        def enter(lock):
+            taken.append(lock.dir)
+            return real(lock)
+        with mock.patch.object(vault_refs._ConfigLock, "__enter__", enter):
+            self.assertIsNotNone(self.enable())
+        self.assertEqual(taken, [self.profile / ".config.json.lock"], "the lock of the link's name, as the client's")
         self.assertTrue(self.fresh.is_symlink())
         self.assertIn("Client-Vault", json.loads(target.read_text())["mcpServers"]["a"]["headers"])
         self.assertTrue((self.profile / ".config.json.maisecrets-backup").exists())
