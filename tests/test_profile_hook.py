@@ -80,6 +80,14 @@ class ProfileHookTests(unittest.TestCase):
         self.assertGreater(out["compiles import"], 0)
         self.assertTrue(any(k.startswith("import|maisecrets.") for k in out["by module"]))
         self.assertEqual(out["compiles second scan"], 0)                # the first scan compiled every regex
+        self.assertGreater(out["compiles first scan"], 0)
+        # no module of the hook is loaded before t0, except what the interpreter itself loads in this environment
+        import json
+        import subprocess
+        env = ph.make_env(home)
+        r = subprocess.run([sys.executable, "-B", "-c", "import sys, json; print(json.dumps(sorted(sys.modules)))"],
+                           capture_output=True, text=True, env=env, cwd=home)
+        self.assertEqual(set(out["preloaded"]) - set(json.loads(r.stdout)), set())
 
     def test_a_rule_takes_its_class_from_the_registry(self):
         from maisecrets import detect

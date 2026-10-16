@@ -197,6 +197,9 @@ def timed(*a, **k):
 
 sre.compile = timed
 sys.path.insert(0, tree)
+# modules a hook imports that must not be loaded yet, or their import time would be missing from the import phase
+preloaded = [m for m in ("json", "subprocess", "tempfile", "shutil", "argparse", "random", "statistics", "hashlib")
+             if m in sys.modules]
 t0 = time.process_time()
 from maisecrets import hooks
 from maisecrets import detect
@@ -214,7 +217,7 @@ sre.compile = orig
 import json
 out = {"import": t_re + t1 - t0, "import of re": t_re, "rules": t2 - t1, "first scan": t3 - t2,
        "second scan": t4 - t3, "regex compile": sum(v[0] for v in spent.values()),
-       "compiles": sum(v[1] for v in spent.values())}
+       "compiles": sum(v[1] for v in spent.values()), "preloaded": preloaded}
 for ph in ("import", "rules", "first scan", "second scan"):
     out["compile " + ph] = sum(v[0] for k, v in spent.items() if k.startswith(ph + "|"))
     out["compiles " + ph] = sum(v[1] for k, v in spent.items() if k.startswith(ph + "|"))
@@ -367,7 +370,7 @@ def measure(trees: list, runs: int, do_cprofile: bool) -> dict:
         for kind, key, _cmd, _data, _env in cases:
             (res if kind == "interp" else res["hook"])[key] = _median(samples[key])
         for key, ph in phases.items():
-            res["phases"][key] = {k: _median([p[k] for p in ph]) for k in ph[0] if k != "by module"}
+            res["phases"][key] = {k: _median([p[k] for p in ph]) for k in ph[0] if k not in ("by module", "preloaded")}
             res["phases"][key]["by module"] = {
                 k: [_median([p["by module"].get(k, [0.0, 0])[0] for p in ph]), ph[0]["by module"][k][1]]
                 for k in ph[0]["by module"]}
@@ -481,6 +484,9 @@ def main(argv=None) -> int:
     ap.add_argument("--out", help="write the raw medians as JSON")
     a = ap.parse_args(argv)
     trees = [os.path.abspath(t) for t in a.tree]
+    names = [os.path.basename(os.path.normpath(t)) for t in trees]
+    if len(set(names)) < len(names):
+        ap.error("two trees have the same folder name; the tables name a tree by it")
     for t in trees:
         if not os.path.isfile(os.path.join(t, "hooks", _DISPATCH)):
             ap.error(f"{t} is no maisecrets checkout (hooks/{_DISPATCH} is missing)")
