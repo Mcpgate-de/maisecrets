@@ -58,7 +58,8 @@ class RewriteTests(unittest.TestCase):
 
     def test_a_secret_becomes_a_placeholder_and_the_value_goes_to_the_store(self):
         out = hooks.rewrite_prompt({"prompt": f"check {GLPAT} in CI", "session_id": "s1"})
-        self.assertEqual(out, {"text": "check ⟦SECRET_c1⟧ in CI", "count": 1})
+        # the first rewrite also names ms:(…) once (tip): not part of the rewrite itself
+        self.assertEqual({k: v for k, v in out.items() if k != "tip"}, {"text": "check ⟦SECRET_c1⟧ in CI", "count": 1})
         self.assertEqual(Vault().get("SECRET_c1", session="s1"), (GLPAT, "ok"))
 
     def test_the_scrub_starts_with_the_values_and_the_session(self):

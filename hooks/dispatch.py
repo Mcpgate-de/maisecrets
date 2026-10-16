@@ -258,6 +258,16 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         note = None
     if note:
         out["systemMessage"] = out.get("systemMessage", "") + " " + note
+    # ms:(…) in Codex: named once here, not in a block notice, where the person must only read paste and send
+    # (Claude Code names it under the first blocked or rewritten prompt with a value, hooks._check_tip)
+    if codex:
+        try:
+            from maisecrets import settings as _settings  # noqa: E402
+            from maisecrets.check_value import TIP_CODEX  # noqa: E402
+            if _settings.hint_due("check_value", cfg) and _settings.claim_hint("check_value"):
+                out["systemMessage"] = out.get("systemMessage", "") + " " + TIP_CODEX
+        except Exception:  # noqa: BLE001 - a tip never stops a session start
+            pass
     # /ms is offered once, not installed: writing ~/.claude/commands without a question was a
     # change behind the user's back, and Codex cannot use it (UX review, 2026-09-27)
     if not codex and cfg.get("shortcut", True) and not (HOME / ".shortcut").exists():

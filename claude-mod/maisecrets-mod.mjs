@@ -11,6 +11,11 @@ const MARK = 'mod-prompt'
 // a person's own prompt: typed or queued at the terminal, sent through Remote Control, or the turn of
 // claude -p. A subagent's report, a peer's or a channel's message stays with the settings hook (C19)
 const PERSON = new Set(['composer', 'bridge', 'sdk'])
+// ms:(…): a check of a value. It is never rewritten and never sent: the mod drops it with the verdict of
+// dispatch.py mod-prompt (maisecrets/check_value.py), or with its own sentence when no verdict comes. A prompt that is
+// not a person's goes on to the settings hook, which blocks it as a check
+// (blanks around the colon and the full-width colon and bracket count, as in check_value.py, which takes more)
+const CHECK = /^\s*ms\s*[:\uff1a]\s*[(\uff08]/i
 
 // The plugin's own hooks/dispatch.py, started by this computer's Python, in the plugin folder: each call is
 // fixed text, no shell and no environment read (the directory review asks for one program by name with fixed
@@ -57,29 +62,46 @@ async function ask($, prompt, session, cwd, origin) {
   const r = await runDispatch($, JSON.stringify({ prompt, session_id: session, cwd, origin }))
   if (!r) return null
   const answer = JSON.parse(r.stdout)
-  if (!answer || answer.maisecrets !== MARK || typeof answer.text !== 'string') return null
+  if (!answer || answer.maisecrets !== MARK) return null
+  if (typeof answer.text !== 'string' && typeof answer.drop !== 'string') return null
   return answer
 }
 
 export function register(on) {
   on('prompt.submit', async ($, e, next) => {
     if (!PERSON.has(e.origin?.kind)) return next(e)
+    if (CHECK.test(e.text)) {
+      // a check of a value is never passed on: the verdict, or this sentence when Python gives none in time
+      let verdict = null
+      try {
+        verdict = await ask($, e.text, await $.session.id(), await $.session.cwd(), e.origin?.kind)
+      } catch {
+        // the sentence below
+      }
+      if (verdict && typeof verdict.drop === 'string') return { drop: verdict.drop }
+      return { drop: 'maisecrets could not check this value. Nothing was sent.' }
+    }
     let answer = null
     try {
       answer = await ask($, e.text, await $.session.id(), await $.session.cwd(), e.origin?.kind)
     } catch {
       // the hook decides it
     }
-    if (!answer) return next(e)
+    if (!answer || typeof answer.text !== 'string') return next(e)
     try {
       $.ui.log(`replaced ${answer.count} value(s) with placeholders before the prompt was sent`)
+      // once: the line that names ms:(…), a check of a value that never reaches the model (hooks._check_tip)
+      if (typeof answer.tip === 'string') $.ui.log(answer.tip)
     } catch {
       // a line for the person only; the rewrite does not depend on it
     }
     return next({ ...e, text: answer.text })
   }).catch(async ($, e, next) => {
     // the hook above threw or timed out before it passed the prompt on: the prompt goes on unchanged,
-    // to the settings hook, which decides it as without the mod
+    // to the settings hook, which decides it as without the mod. A person's check is never passed on
+    if (PERSON.has(e.origin?.kind) && CHECK.test(e.text)) {
+      return { drop: 'maisecrets could not check this value. Nothing was sent.' }
+    }
     if (!next.called) return next(e)
     // it failed after it had passed the prompt on: nothing is sent a second time
     return { drop: 'maisecrets could not finish its check of this prompt. Send it again.' }

@@ -279,9 +279,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 34 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
-python3 harness/codex.py [--real]                      # 10 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 255 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
+python3 harness/codex.py [--real]                      # 12 scenarios through codex exec (five need --real)
+python3 scripts/replay_can_fail.py                     # 263 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -648,6 +648,65 @@ other users. None of them stops a process that runs as you: `security`,
 PowerShell or openssl hand the value to any such process without a dialog
 (`docs/THREAT-MODEL.md`). The gates below stand in front of the agent, not in
 front of you.
+
+## Check a value first: ms:(…)
+
+Not sure whether maisecrets knows a password or a token? Send it in brackets
+after `ms:` as your whole prompt:
+
+```
+> ms:(the-value-you-want-to-check)
+✓ maisecrets would mask this: SECRET (gitlab-pat)
+
+This prompt was not sent. The value did not reach the AI.
+```
+
+```
+> ms:(another-value)
+⚠ maisecrets would NOT have caught this. It is now stored (⟦SECRET_c4⟧). From now on it is masked wherever it stands as a word of its own.
+
+This prompt was not sent. The value did not reach the AI.
+```
+
+- **Never sent.** A prompt that starts with `ms:(` (any case, blanks before it
+  allowed) is always stopped, in Claude Code with and without the mod and in
+  Codex, also when the closing `)` is missing. The mod never rewrites it: it
+  drops the prompt and shows the verdict, and when maisecrets gives no verdict
+  in time it drops the prompt all the same. Without the mod (Codex, an older
+  Claude Code) the prompt hook blocks it and shows the verdict. Only you see
+  the verdict. The prompt as you typed it is removed from the session
+  transcript on disk (unless you turned `scrub_transcript` off), also when
+  the prompt hook fails on it. Without the mod, a hook that cannot start at
+  all (a half-updated plugin folder) blocks the prompt but does not clean the
+  transcript. Blanks around the colon (`ms: (`) and the full-width `：（` of an
+  input method count as the same start but store nothing; `ms:` without the
+  bracket is an ordinary prompt.
+- **The value** is the text between `ms:(` and the last `)`, or up to the end.
+  One blank on each side is dropped, so `ms:( value )` and a key on its own
+  lines between `ms:(` and `)` both work.
+- **The verdict** is the one a normal prompt with that value gets: the
+  detection rules, your rules of your own, your terms, the values already
+  stored, the allow list and your regions. The answer names the type and the
+  rule of each hit, never the value; a value that is caught is stored, as for
+  a normal prompt.
+- **Not caught:** maisecrets stores the value as `/maisecrets:put` does (type
+  SECRET) and names its placeholder, so it is masked from then on wherever it
+  stands as a word of its own (glued to other letters, it is not found). A
+  value with spaces is found again alone on a line or after `:` or `=`, not
+  inside a sentence, and the answer says so. It is not stored when the allow list
+  allows it (the answer names the line), when it is shorter than 8
+  characters or has more than one line (maisecrets could not find it again),
+  when it holds a placeholder, or when the prompt did not come from you (a
+  scheduled prompt, a subagent, `claude -p`). The client's own list of earlier
+  prompts (the up arrow) may keep the prompt as typed; that is not measured.
+- **Finding it.** Claude Code names `ms:(…)` once, under the first prompt that
+  was blocked or rewritten because it carried a value; Codex names it once at
+  a session start. `/maisecrets:settings` lists it under "Feature hints", and
+  `/maisecrets:settings hints reset` shows it again.
+
+In Remote Control the block notice is not shown (see "Sending a blocked
+prompt" below), so the verdict is not visible there; the value is still not
+sent.
 
 ## Handing a value to Claude on purpose
 

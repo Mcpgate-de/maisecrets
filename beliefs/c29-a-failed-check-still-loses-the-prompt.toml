@@ -1,0 +1,10 @@
+# c29-a-failed-check-still-loses-the-prompt: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c29-a-failed-check-still-loses-the-prompt"
+control = "C29"
+statement = "When the prompt hook fails on a check (a damaged index, a config error, the watchdog), the scrub of the failure path masks the check's prompt as typed, which the detector alone does not find."
+runner = ["tests/test_check_value.py::NeverTheValueTests::test_a_failed_check_still_loses_the_prompt_as_typed"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "            values = check_value.scrub_forms(prompt, checked)\n"
+replace = "            values = []\n"

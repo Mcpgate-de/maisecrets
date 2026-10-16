@@ -1,0 +1,10 @@
+# c29-a-check-is-scrubbed-from-the-transcript: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c29-a-check-is-scrubbed-from-the-transcript"
+control = "C29"
+statement = "The prompt of a check, as typed, leaves the transcript, also a value of several lines and one without a detector shape."
+runner = ["tests/test_check_value.py::NeverTheValueTests::test_the_transcript_loses_the_prompt_as_typed"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        scrub = [x for x in dict.fromkeys(check_value.scrub_forms(raw, value) + list(values)) if x]\n"
+replace = "        scrub = [x for x in dict.fromkeys(list(values)) if x]\n"
