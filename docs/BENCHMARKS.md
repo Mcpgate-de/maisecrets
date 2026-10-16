@@ -5,8 +5,8 @@ limits are in their own section. "Repeat this measurement" has the commands.
 
 | Snapshot | |
 |---|---|
-| Date | 2026-10-14; the 0.6.24 and 0.6.25 rows and sections: 2026-10-16 |
-| maisecrets | v0.6.17 (tag `v0.6.17`); earlier releases from their tags; the CredData rows of 0.6.18 to 0.6.21 and the holdout section: 2026-10-15; 0.6.24 and 0.6.25 from their release branches, 2026-10-16 |
+| Date | 2026-10-14; the 0.6.24, 0.6.25 and 0.6.26 rows and sections: 2026-10-16 |
+| maisecrets | v0.6.17 (tag `v0.6.17`); earlier releases from their tags; the CredData rows of 0.6.18 to 0.6.21 and the holdout section: 2026-10-15; 0.6.24, 0.6.25 and 0.6.26 from their release branches, 2026-10-16 |
 | Data | Samsung CredData, commit `0b1940e171725ad8937311120b191602608a4801` (2026-09-29); four labelled PII datasets, pinned in "Labelled PII datasets" (2026-10-15) |
 | Machine | Apple M5, 10 cores, macOS 27.0 |
 | Python | 3.14.8 (CredData runs); 3.14.8 and 3.9.6 (timing) |
@@ -432,6 +432,43 @@ characters already lets a home address pass in 0.6.24 and 0.6.25 (`tests/test_co
 Left out after review: a vCard property folded over two lines, a vCard line without its `BEGIN:VCARD`, and a CSV row
 without a header (its shape is the shape of a locale table). An encoded address at a `.md` domain in a CSV cell stays
 text, because `name%40draft.md` is a file name more often.
+
+### 0.6.26, 2026-10-16
+
+0.6.25 (`origin/main` at `04ee5db`) against the fix commit of the branch of 0.6.26 (the next commit only adds a
+quick test before the person-key regex, which needs a `:` or `=`). Tool channel, `--locale de_DE`. Holdout numbers:
+`scripts/measure_holdouts.py` on the rebased branch, with the same result as the scratch script of the other rows.
+0.6.26 closes a half mask of a field report: a PDF invoice to a German GmbH, read in the
+tool channel. The address rules left the company's address as text, because a legal form stood before it, but de-plz
+masked its postcode and de-vat-id its VAT ID, so the street stayed in the clear. Now the postcode of such an address
+and a German VAT ID right after it stay text too. The decision reads the legal forms of the existing company check and
+stays masked in the cases of `tests/test_company_numbers_follow_the_address.py` (a sole trader, a hotel or an office,
+a person's name or record key, an employer label, a second address or a blank line, the sender's VAT label).
+
+- Holdout values (v2 to v7, both halves, regions `us uk in` and `de`): no value changes. Leaked in half D / C:
+  197 / 219 (`us uk in`) and 230 / 241 (`de`), as in 0.6.25. False alarms on the 215 clean samples: 7 → 7 and 1 → 1.
+- CredData (four runs: both channels, `--regions de` and `us`): 0 rows changed. `scripts/detection_fingerprint.py`
+  over CredData, `tests/fp_corpus.py`, the PII corpus and the token lists of the tests (503,870 lines): byte-identical
+  to 0.6.25. These inputs hold no company address with a German postcode or VAT ID.
+- Labelled PII datasets (`scripts/measure_datasets.py run`): the prompt channel does not change. In the tool channel
+  only Gretel changes, in four German documents, each about a company: the postcode in the contact line of an
+  insurer (an AG; DE_PLZ FP 267 → 266), the VAT ID after the address of a seller (a GmbH; DE_VAT_ID FP 5 → 4), and the
+  postcode in the delivery address of a GmbH and in the address of a GmbH that sends a report. Gretel labels these two
+  company addresses as ADDRESS, so ADDRESS TP goes 6,203 → 6,201: the postcode was the only part of them that 0.6.25
+  masked.
+  No address of a person changes.
+- 0 new hits and 0 lost hits on the 2,464 developer texts, the 771 typed prompts, the 1,114 NO_HIT texts of
+  `tests/fp_corpus.py`, the 367 texts of the PII corpus and the 168 texts of the forms corpus.
+- Rule classes (`scripts/measure_rule_classes.py`): no class changes.
+- Values masked in 0.6.25 and free now: the four company values above, and no other. The shapes of both review gates
+  (a person's postcode or VAT ID next to a company) are tests now, and each gives the result of 0.6.25.
+- Time: 2,000 and 4,000 company addresses with a VAT ID each on one line (176 KB and 351 KB), CPU time: 0.78 s and
+  1.81 s in 0.6.25, 0.90 s and 2.0 s in 0.6.26 (+7 to 15 %), linear.
+
+Left out after review: a company's postcode and VAT ID stay masked when a line such as a department stands between
+the company's name and its address, when a `Kunde:` label stands before the company, and when the street and the
+postcode stand on two lines (no address rule reads that form, so there is no company decision to follow). A VAT ID of
+another EU country and a billing ID have no rule here.
 
 ## Labelled PII datasets, 2026-10-15
 

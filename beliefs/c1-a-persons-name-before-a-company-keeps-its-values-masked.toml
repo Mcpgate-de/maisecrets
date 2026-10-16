@@ -1,0 +1,10 @@
+# c1-a-persons-name-before-a-company-keeps-its-values-masked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-persons-name-before-a-company-keeps-its-values-masked"
+control = "C1"
+statement = "A person's name (a personal NAME hit) in the paragraph before the company's legal form, or between it and the value, keeps the postcode and the VAT ID masked."
+runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_persons_name_before_the_company_keeps_the_mask"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''if not (k < len(names) and names[k] < f.end):'''
+replace = '''if True:'''

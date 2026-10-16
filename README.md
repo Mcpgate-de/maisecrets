@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 32 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 199 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 214 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1351,7 +1351,11 @@ Four sources, one scanner (`maisecrets/detect.py`):
   `account number`), the user in `user:password@host` and in another person's home path
   (`/home/<user>/`, `C:\Users\<user>\`; service accounts and your own user name stay text), a
   street address with its postcode in the form of an active region (US, UK, IN; DE, AT, CH; FR,
-  BE, LU; PT, BR, ES, IT; an address next to a company, office or landmark word stays text), and
+  BE, LU; PT, BR, ES, IT; an address next to a company, office or landmark word stays text; when a
+  legal form such as `GmbH`, `AG`, `Ltd` or `Inc` ends the company's name right before the address,
+  its German postcode and a German VAT ID right after it stay text too; a person's name or record
+  key nearby, an employer or job label, a second address, a sender's VAT label or a blank line keeps
+  them masked, and so does a sole trader, who has no legal form), and
   the cells of a CSV column for personal data (`address`, `dob`, `phone`, `ssn`, and a name or user
   column beside one of them; an address or a phone cell only in a row that also names a person). A
   typed prompt takes none of them: a hit blocks a prompt, and a
@@ -1868,6 +1872,9 @@ a to-do.
   two lines, or a vCard line without its `BEGIN:VCARD`, is not. The check for a
   company before an address label reads 120 characters of the line: in minified JSON a company address with its
   company word farther back is masked, and a person's address with an employer or a hotel within that reach passes.
+  Its postcode stays masked when an employer label, a person's name or a key of a person's record stands near the
+  company's name. The other way round, a company's postcode and VAT ID stay masked when a line such as a department
+  stands between the company's name and its address, or when a `Kunde:` label stands before the company (0.6.26).
   A wider reach was measured and left out, because it lets more home addresses pass (0.6.25).
 - **The forms of 0.6.24 act on tool results only.** An ID after `member`, `record` or `account`, an address after
   `Address:`, a FHIR identifier, a `::add-mask::` value, a `SharedAccessKey=`, a Postman variable with a secret name and

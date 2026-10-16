@@ -1,0 +1,10 @@
+# c1-an-address-without-a-legal-form-keeps-its-postcode-and-vat-id-masked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-an-address-without-a-legal-form-keeps-its-postcode-and-vat-id-masked"
+control = "C1"
+statement = "Only a legal form makes the postcode and the VAT ID of an address a company's. A hotel, an office or a park leaves the address as text but names no holder, and a sole trader has no legal form, so their postcode and VAT ID stay masked."
+runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_hotel_or_an_office_names_no_holder", "tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_sole_traders_invoice_keeps_its_postcode_and_vat_id_masked"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''    for m in _LEGAL_FORM_RE.finditer(text, lo, a_start):'''
+replace = '''    for m in _NOT_A_HOME_RE.finditer(text, lo, a_start):'''

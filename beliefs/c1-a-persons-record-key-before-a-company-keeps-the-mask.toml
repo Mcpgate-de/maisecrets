@@ -1,0 +1,10 @@
+# c1-a-persons-record-key-before-a-company-keeps-the-mask: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-persons-record-key-before-a-company-keeps-the-mask"
+control = "C1"
+statement = "A key of a person's record (name, person, user, customer, Kunde, Mitarbeiter) in the paragraph before the company's name keeps the postcode and the VAT ID masked, also when the name rules do not find the name in its value."
+runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_persons_key_before_the_company_keeps_the_mask", "tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_user_or_staff_record_keeps_the_mask"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''            and _PERSON_KEY_RE.search(text, key_lo, a_start):'''
+replace = '''            and False:'''

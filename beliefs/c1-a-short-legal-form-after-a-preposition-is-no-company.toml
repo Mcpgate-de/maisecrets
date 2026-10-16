@@ -1,0 +1,10 @@
+# c1-a-short-legal-form-after-a-preposition-is-no-company: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-short-legal-form-after-a-preposition-is-no-company"
+control = "C1"
+statement = "A short legal form after a preposition is a floor or a court (im UG, beim AG), so the values near it stay masked."
+runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_short_legal_form_after_a_preposition_is_a_floor"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''    if len(form) <= 3 and _PREPOSITION_BEFORE_RE.search('''
+replace = '''    if False and _PREPOSITION_BEFORE_RE.search('''

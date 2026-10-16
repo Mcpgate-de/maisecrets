@@ -1,0 +1,10 @@
+# c1-a-vat-id-outside-the-companys-block-stays-masked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-vat-id-outside-the-companys-block-stays-masked"
+control = "C1"
+statement = "A German VAT ID follows a company's address out of the mask only right after it: separators, the country and the recipient's VAT label may stand between them, with at most one line break. A second address, a second VAT ID, a blank line or a page break ends the company's block, and the VAT ID after it stays masked."
+runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_vat_id_after_a_blank_line_is_not_the_companys", "tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_persons_address_after_the_companys_address_keeps_its_vat_id_masked", "tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_vat_id_after_a_page_break_is_not_the_companys"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''elif not (b <= f.start and _VAT_GAP_RE.fullmatch(text, b, f.start)):'''
+replace = '''elif not (b <= f.start):'''

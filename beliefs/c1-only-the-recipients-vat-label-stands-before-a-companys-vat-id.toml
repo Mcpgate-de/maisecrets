@@ -1,0 +1,10 @@
+# c1-only-the-recipients-vat-label-stands-before-a-companys-vat-id: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-only-the-recipients-vat-label-stands-before-a-companys-vat-id"
+control = "C1"
+statement = "The VAT label between a company's address and its VAT ID is a closed list (USt-IdNr., VAT ID, Ihre, Kunden-): a person's name before the label or the sender's label (Unsere, meine) keeps the VAT ID masked."
+runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests::test_a_name_or_the_senders_label_before_the_vat_id_keeps_it_masked"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''(?:(?:(?:ihre|your|kunden|customer|recipient|client|empfänger)[ _-]?)?'''
+replace = '''(?:(?:[a-zäöüß.\- ]{0,20})?'''
