@@ -1,0 +1,10 @@
+# c27-codex-a-test-home-never-changes-the-real-config: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-test-home-never-changes-the-real-config"
+control = "C27"
+statement = "Under the test suite the Codex config must lie in the temp folder of the run; the person's ~/.codex is never changed."
+runner = ["tests/test_codex_vault.py::Guards::test_a_test_home_never_changes_a_real_config"]
+
+[proof]
+file = "maisecrets/codex_vault.py"
+find = '''        return profile().startswith(os.path.realpath(tempfile.gettempdir()) + os.sep)'''
+replace = '''        return True'''

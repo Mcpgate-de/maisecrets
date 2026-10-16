@@ -292,16 +292,21 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
                     out["systemMessage"] = out.get("systemMessage", "") + " " + note
             else:
                 guard_off_by_policy()
-    # vault references: the key header on the user-scope MCP servers of this profile (maisecrets/vault_refs.py)
-    if not codex:
-        try:
-            from maisecrets import vault_refs  # noqa: E402
-            vault_refs.prune_released(v.backend)   # the values a server gave leave the store after their hour
-            note = vault_refs.ensure_headers(cfg, v.backend)
-        except Exception:  # noqa: BLE001 - never stops a session start; without the header no value comes back
-            note = None
-        if note:
-            out["systemMessage"] = out.get("systemMessage", "") + " " + note
+    # vault references: the key header on the user-scope MCP servers of this profile (maisecrets/vault_refs.py); in
+    # Codex the helper line of codex_vault.py
+    try:
+        from maisecrets import vault_refs  # noqa: E402
+        vault_refs.use_client("codex" if codex else "claude")
+        vault_refs.prune_released(v.backend)   # the values a server gave leave the store after their hour
+        if codex:
+            from maisecrets import codex_vault  # noqa: E402
+            if codex_vault.available() and codex_vault.STATE.exists():
+                codex_vault.place_helper()     # an update of the plugin brings a new helper
+        note = vault_refs.ensure_headers(cfg, v.backend)
+    except Exception:  # noqa: BLE001 - never stops a session start; without the header no value comes back
+        note = None
+    if note:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + note
     # the model reads what a placeholder is once per session, before it meets one
     out["hookSpecificOutput"] = {"hookEventName": "SessionStart",
                                  "additionalContext": primer(cfg, "codex" if codex else "claude")}

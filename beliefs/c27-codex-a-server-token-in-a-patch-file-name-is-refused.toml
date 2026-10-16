@@ -1,0 +1,10 @@
+# c27-codex-a-server-token-in-a-patch-file-name-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-server-token-in-a-patch-file-name-is-refused"
+control = "C27"
+statement = "A server token in a file name of a Codex patch is refused with its own reason: the server would choose the file."
+runner = ["tests/test_codex_vault.py::CodexHooks::test_a_token_in_a_file_name_of_the_patch_is_refused"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''find_refs(line) + vault_refs.find_noted(line, cfg, payload.get("session_id"))]'''
+replace = '''find_refs(line)]'''

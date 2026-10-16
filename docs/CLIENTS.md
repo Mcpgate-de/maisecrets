@@ -96,6 +96,39 @@ name exactly the files the checked one named. A context line that reads like a h
 The captured payload is `tests/client_payloads/codex-apply-patch.json`; the rehydration matrix
 builds its Codex file row from it.
 
+## Codex: vault references
+
+Measured on codex-cli 0.162.0, and the helper also on 0.155.1 (2026-10-16), with a temp `CODEX_HOME`, a local
+https MCP server with its own CA, and the fake upstream. The harness scenario `vault_refs` of `harness/codex.py`
+repeats it on each pipeline.
+
+- **Config.** `$CODEX_HOME/config.toml` (default `~/.codex`), `[mcp_servers.<name>] url = …`. A streamable-HTTP
+  entry takes `http_headers`, `env_http_headers` and `http_headers_helper` (a command that prints a JSON object of
+  headers). The headers of an entry go to every request to the origin of its URL: initialize, tools/list,
+  tools/call, the OAuth metadata, the client registration and the `authorization_code` token request. The browser
+  leg of the login gets none (the browser makes it), and another origin gets none.
+- **A project moves a user entry.** Codex merges `<dir>/.codex/config.toml` of each folder from the project root
+  down to the session folder over the user's file, deeply. A project file with only `[mcp_servers.demo] url = B`
+  sent the user's `demo` entry, its static header included, to B. "Untrusted" would stop it, but the app server
+  trusts a project on its own when the sandbox may write the folder (the default `workspace-write`) and writes the
+  trust into the user's file. So maisecrets writes no static header in Codex.
+- **The helper.** Codex runs `http_headers_helper` once per connection, in the session folder, with a cleared
+  environment (`HOME`, `PATH`, `USER`, `TMPDIR` and a few more; no `CODEX_HOME`). `{}` gives no header and the
+  server works; a helper that exits with an error stops the connection. maisecrets writes one helper line on the
+  entry; the helper (`maisecrets/codex_helper.py`, copied to `~/.maisecrets/bin/`) prints the header only when no
+  project layer of the folder has `mcp_servers`, and the command ends in `|| echo '{}'`.
+- **When Codex reads the file.** At its start: a header written during a `codex exec` run did not reach the later
+  requests of that run. In the app server (the terminal UI and the desktop app) a new thread loads the config again
+  (`thread/start`); not measured.
+- **The PostToolUse payload** of an MCP call: `session_id, turn_id, cwd, model, permission_mode, tool_name,
+  tool_input, tool_response, tool_use_id, transcript_path`. `tool_name` is `mcp__<server>__<tool>`, with every
+  character outside `[A-Za-z0-9_]` as `_`; there is no server name, URL or scope. maisecrets maps the name to a user
+  entry and notes nothing when two entries could make it.
+- **A hook's `systemMessage`** becomes a warning of the hook run. `codex exec` prints neither it nor the start line
+  of maisecrets, in its text or its `--json` output.
+- **Windows** (not measured): the file is `%USERPROFILE%\.codex\config.toml`, and the helper would run under
+  `cmd.exe /C`. Codex vault references are off on Windows in this version.
+
 ## Sessions, subagents and headless runs
 
 A reference resolves in the session that created it or admitted it. A Claude

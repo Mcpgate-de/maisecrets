@@ -1,0 +1,10 @@
+# c27-codex-a-client-vault-header-of-someone-else-stays: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-client-vault-header-of-someone-else-stays"
+control = "C27"
+statement = "An entry that carries a Client-Vault header of someone else gets no helper."
+runner = ["tests/test_codex_vault.py::LineEdit::test_a_helper_or_header_someone_else_wrote_stays"]
+
+[proof]
+file = "maisecrets/codex_vault.py"
+find = '''            if want is not None and isinstance(spec.get("http_headers"), dict) and any('''
+replace = '''            if False and isinstance(spec.get("http_headers"), dict) and any('''

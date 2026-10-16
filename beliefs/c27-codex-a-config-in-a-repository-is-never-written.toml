@@ -1,0 +1,10 @@
+# c27-codex-a-config-in-a-repository-is-never-written: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-config-in-a-repository-is-never-written"
+control = "C27"
+statement = "A Codex config.toml inside a git work tree is a file a repository carries: maisecrets never writes it."
+runner = ["tests/test_codex_vault.py::LineEdit::test_a_config_in_a_repository_is_never_written"]
+
+[proof]
+file = "maisecrets/codex_vault.py"
+find = '''    if not path.is_file() or in_a_repository(str(path)):'''
+replace = '''    if not path.is_file():'''
