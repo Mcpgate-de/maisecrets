@@ -6,5 +6,5 @@ runner = ["tests/test_codex_vault.py::LineEdit::test_a_helper_or_header_someone_
 
 [proof]
 file = "maisecrets/codex_vault.py"
-find = '''            if want is not None and isinstance(spec.get("http_headers"), dict) and any('''
-replace = '''            if False and isinstance(spec.get("http_headers"), dict) and any('''
+find = '''            if want is not None and any(isinstance(spec.get(key), dict) and any('''
+replace = '''            if False and any(isinstance(spec.get(key), dict) and any('''

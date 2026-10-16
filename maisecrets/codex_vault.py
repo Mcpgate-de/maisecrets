@@ -38,8 +38,9 @@ def available() -> bool:
 
 
 def codex_home() -> Path:
+    """CODEX_HOME as Codex takes it, not resolved: a linked config.toml says nothing about where the folder is."""
     base = os.environ.get("CODEX_HOME")
-    return Path(base).expanduser() if base else Path.home() / ".codex"
+    return Path(os.path.abspath(os.path.expanduser(base))) if base else Path.home() / ".codex"
 
 
 def config_path() -> Path:
@@ -68,6 +69,67 @@ def user_servers(data: dict | None = None) -> dict[str, str]:
             and spec.get("enabled", True) is not False and _origin_ok(spec.get("url"))}
 
 
+SESSIONS = HOME / "vault-refs" / "codex-sessions.json"   # session id -> {"cwd", "t"}: the folder a session began in
+SESSION_TTL = 7 * 24 * 3600
+
+
+def note_session(payload: dict) -> None:
+    """At SessionStart: the folder of the session. Codex fixes the server URLs from the project layers of this folder;
+    a later turn in another folder keeps them (Gate B review)."""
+    session, cwd = payload.get("session_id"), payload.get("cwd")
+    if isinstance(session, str) and session and isinstance(cwd, str) and cwd:
+        _first_folder(session, cwd)
+
+
+def _first_folder(session: str, cwd: str) -> str | None:
+    """The first folder recorded for this session; this cwd when there is none yet. None when the file is damaged."""
+    with _lock_for(SESSIONS.parent / ".lock"):
+        try:
+            data = json.loads(SESSIONS.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            data = {}
+        except (OSError, ValueError, RecursionError):
+            return None
+        data = data if isinstance(data, dict) else {}
+        rec = data.get(session)
+        if isinstance(rec, dict) and isinstance(rec.get("cwd"), str):
+            return rec["cwd"]
+        now = time.time()
+        data = {k: v for k, v in data.items() if isinstance(v, dict) and isinstance(v.get("t"), (int, float))
+                and now - v["t"] < SESSION_TTL}
+        data[session] = {"cwd": cwd, "t": now}
+        atomic_write(SESSIONS, json.dumps(data, indent=1))
+        return cwd
+
+
+def plugin_server_names(home: Path | None = None) -> list[str] | None:
+    """The names of the MCP servers of the installed Codex plugins (`plugins/cache/<market>/<plugin>/<version>`): they
+    share the tool names of user entries. None when a manifest cannot be read (then no tool name is trusted)."""
+    base = (home or codex_home()) / "plugins" / "cache"
+    names: list[str] = []
+    try:
+        versions = [v for m in base.iterdir() if m.is_dir() for p in m.iterdir() if p.is_dir()
+                    for v in p.iterdir() if v.is_dir()]
+    except FileNotFoundError:
+        return names
+    except OSError:
+        return None
+    for v in versions:
+        for f in (v / ".mcp.json", v / ".codex-plugin" / "plugin.json"):
+            if not f.exists():
+                continue
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError, RecursionError):
+                return None
+            servers = data.get("mcpServers") if isinstance(data, dict) else None
+            if f.name == ".mcp.json" and servers is None and isinstance(data, dict):
+                servers = {k: s for k, s in data.items() if isinstance(s, dict)}
+            if isinstance(servers, dict):
+                names.extend(k for k in servers if isinstance(k, str))
+    return names
+
+
 # ------------------------------------------------------------- tool names --
 def _sanitize(s: str) -> str:
     """codex-mcp/src/mcp/mod.rs sanitize_responses_api_tool_name: each character outside [A-Za-z0-9_] becomes `_`."""
@@ -82,12 +144,18 @@ def namespace(server: str) -> str:
     return ns.rstrip("_")
 
 
-def server_of_tool(tool: object, servers) -> str | None:
-    """The one entry whose prefix the tool name has; None for no match or for two (`a` and `a__b`)."""
+def server_of_tool(tool: object, servers, others=()) -> str | None:
+    """The one entry of `servers` whose prefix the tool name has, when no name of `others` (every other server Codex
+    knows: stdio and switched-off entries, plugin servers) has it too, and the tool part has no `__`: `a` with the
+    tool `b__c` and a server `a__b` with the tool `c` make the same name (Gate A and Gate B review)."""
     if not isinstance(tool, str):
         return None
-    hits = [n for n in servers if tool.startswith(namespace(n) + "__") and len(tool) > len(namespace(n)) + 2]
-    return hits[0] if len(hits) == 1 else None
+    # a plugin server with the name of a user entry is a second server of that name: it counts
+    hits = [n for n in [*servers, *others]
+            if tool.startswith(namespace(n) + "__") and len(tool) > len(namespace(n)) + 2]
+    if len(hits) != 1 or hits[0] not in servers or "__" in tool[len(namespace(hits[0])) + 2:]:
+        return None
+    return hits[0]
 
 
 def mcp_server_of(payload: dict) -> dict | None:
@@ -97,13 +165,22 @@ def mcp_server_of(payload: dict) -> dict | None:
         return None
     data = codex_helper.load(profile())
     servers = user_servers(data)
-    name = server_of_tool(payload.get("tool_name"), servers)
+    plugins = plugin_server_names()
+    if plugins is None:
+        return None
+    every = data.get("mcp_servers") if isinstance(data, dict) and isinstance(data.get("mcp_servers"), dict) else {}
+    name = server_of_tool(payload.get("tool_name"), servers, [*(n for n in every if n not in servers), *plugins])
     if name is None:
         return None
-    home = os.path.dirname(profile())
+    home = str(codex_home())
+    cwd, session = payload.get("cwd"), payload.get("session_id")
+    if not isinstance(cwd, str) or not isinstance(session, str) or not session:
+        return None
+    if _first_folder(session, cwd) != cwd:
+        return None                          # the session began in another folder, whose layers Codex still uses
     if not codex_helper.user_entry_is_plain(data, name, servers[name]) \
             or codex_helper.profile_files_bring_servers(home) \
-            or codex_helper.project_brings_servers(payload.get("cwd"), home):
+            or codex_helper.project_brings_servers(cwd, home):
         return None
     return {"name": name, "source": "user"}
 
@@ -113,13 +190,25 @@ def helper_command(name: str, url: str) -> str:
     """The command line of the entry. `-I`: no environment and no script folder on the import path. The `|| echo`
     keeps the server working when the Python is gone (a helper that fails stops the connection, measured)."""
     import shlex
-    parts = [sys.executable, "-I", str(HELPER_FILE), str(STATE), profile(), name, url]
-    return " ".join(shlex.quote(p) for p in parts) + " 2>/dev/null || echo '{}'"
+    parts = [sys.executable, "-I", str(HELPER_FILE), str(STATE), str(codex_home()), name, url]
+    return " ".join(shlex.quote(p) for p in parts) + _TAIL
+
+
+_TAIL = " 2>/dev/null || echo '{}'"
 
 
 def is_ours(value: object) -> bool:
-    """A helper line this maisecrets home wrote: it names our helper file and our state file."""
-    return isinstance(value, str) and str(HELPER_FILE) in value and str(STATE) in value
+    """A helper line this maisecrets home wrote: exactly our command, with any Python. A command that only names our
+    files (a wrapper of the person's) is not ours (Gate A review)."""
+    import shlex
+    if not isinstance(value, str) or not value.endswith(_TAIL):
+        return False
+    try:
+        parts = shlex.split(value[:-len(_TAIL)])
+    except ValueError:
+        return False
+    return len(parts) == 7 and parts[1:5] == ["-I", str(HELPER_FILE), str(STATE), str(codex_home())] \
+        and " ".join(shlex.quote(p) for p in parts) + _TAIL == value
 
 
 def place_helper() -> bool:
@@ -269,9 +358,13 @@ class _Lock:
 
 
 def in_a_repository(path: str) -> bool:
-    """The file lies in a git work tree (a dotfiles repository, a CODEX_HOME inside a project): a repository carries
-    it, so maisecrets never writes it."""
-    d = os.path.dirname(os.path.realpath(path))
+    """The file, as named or as its link target, lies in a git work tree (a dotfiles repository, a CODEX_HOME inside a
+    project): a repository carries it, so maisecrets never writes it (Gate A review: a link in a repository)."""
+    return _in_a_repository(os.path.dirname(os.path.abspath(path))) or \
+        _in_a_repository(os.path.dirname(os.path.realpath(path)))
+
+
+def _in_a_repository(d: str) -> bool:
     while True:
         if os.path.lexists(os.path.join(d, ".git")):
             return True
@@ -291,8 +384,10 @@ def may_change_config() -> bool:
     return HOME == _DEFAULT_HOME or bool(os.environ.get("CODEX_HOME"))
 
 
-def _write(real: str, text: str) -> None:
-    """A temporary file in the same folder, renamed over the file; the mode of the file stays."""
+def _prepare(real: str, text: str) -> str:
+    """The new text in a temporary file in the same folder, with the mode of the file, flushed to disk. The caller
+    renames it over the file after its last check, so the window in which a write of Codex can be lost is the time of
+    one stat and one rename (Codex takes no lock; Gate A and Gate B review)."""
     try:
         mode = os.stat(real).st_mode & 0o777
     except OSError:
@@ -308,16 +403,34 @@ def _write(real: str, text: str) -> None:
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, real)
-    finally:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+    except BaseException:
+        _drop(tmp)
+        raise
+    return tmp
 
 
-def _backup(real: str, data: bytes) -> str:
-    backup = real + ".maisecrets-backup"
+def _drop(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _same(path: Path, raw: bytes, st: os.stat_result) -> bool:
+    try:
+        now = os.stat(path)
+        return (now.st_size, now.st_mtime_ns, now.st_ino) == (st.st_size, st.st_mtime_ns, st.st_ino) \
+            and path.read_bytes() == raw
+    except OSError:
+        return False
+
+
+BACKUP = HOME / "vault-refs" / "codex-config.toml.backup"   # in maisecrets' own folder: no file of the person goes
+
+
+def _backup(data: bytes) -> str:
+    backup = str(BACKUP)
+    BACKUP.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
         os.unlink(backup)
     except FileNotFoundError:
@@ -334,12 +447,13 @@ def apply_config(wanted: dict[str, tuple[str, str]], lock_wait: float = 5.0) -> 
     URL is still that URL, none of ours elsewhere. The state file first, so a header goes at once when it is taken
     back. Returns (added, removed, path, backup). A symlinked config is written through to its target, as Codex does."""
     path = Path(profile())
-    backup = Path(str(path) + ".maisecrets-backup")
+    backup = BACKUP
     write_state(wanted)
-    if not path.is_file() or in_a_repository(str(path)):
+    if not path.is_file() or in_a_repository(str(config_path())):
         return [], [], path, backup
     for _attempt in range(2):
         try:
+            st = os.stat(path)
             raw = path.read_bytes()
             text = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError):
@@ -356,9 +470,10 @@ def apply_config(wanted: dict[str, tuple[str, str]], lock_wait: float = 5.0) -> 
             url = plain.get(name)
             have = spec.get(HELPER_KEY)
             want = helper_command(name, url) if url and wanted.get(name, ("",))[0] == url else None
-            if want is not None and isinstance(spec.get("http_headers"), dict) and any(
-                    k.lower() == codex_helper.HEADER.lower() for k in spec["http_headers"]):
-                continue                       # a Client-Vault header someone else wrote
+            if want is not None and any(isinstance(spec.get(key), dict) and any(
+                    isinstance(k, str) and k.lower() == codex_helper.HEADER.lower() for k in spec[key])
+                    for key in ("http_headers", "env_http_headers")):
+                continue                       # a Client-Vault header someone else wrote (also from the environment)
             if have == want or (want is None and not is_ours(have)):
                 continue
             step = plan(new, name, want)
@@ -373,13 +488,17 @@ def apply_config(wanted: dict[str, tuple[str, str]], lock_wait: float = 5.0) -> 
                 pass
             return [], [], path, backup
         with _Lock(path, lock_wait):
+            if not _same(path, raw, st):
+                continue                       # Codex wrote the file meanwhile: once more from its new text
+            _backup(raw)
+            tmp = _prepare(str(path), new)
+            if not _same(path, raw, st):
+                _drop(tmp)
+                continue
             try:
-                if path.read_bytes() != raw:
-                    continue                   # Codex wrote the file meanwhile: once more from its new text
-            except OSError:
-                return [], [], path, backup
-            _backup(str(path), raw)
-            _write(str(path), new)
+                os.replace(tmp, str(path))
+            finally:
+                _drop(tmp)
         return added, removed, path, backup
     return [], [], path, backup
 

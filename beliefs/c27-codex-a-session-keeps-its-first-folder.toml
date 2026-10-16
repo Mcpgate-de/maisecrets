@@ -1,0 +1,10 @@
+# c27-codex-a-session-keeps-its-first-folder: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-session-keeps-its-first-folder"
+control = "C27"
+statement = "A Codex result is noted only in the folder its session began in: the project layers of that folder decide the server URLs for the whole session."
+runner = ["tests/test_codex_vault.py::ToolNames::test_a_session_that_began_in_another_folder_names_nothing"]
+
+[proof]
+file = "maisecrets/codex_vault.py"
+find = '''    if _first_folder(session, cwd) != cwd:'''
+replace = '''    if False:'''

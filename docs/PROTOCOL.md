@@ -122,12 +122,17 @@ value only to a key that the vault announced when the person logged in.
   `authorization_code` token request included, never the browser leg. The
   helper prints the header only when its state file names this entry and URL,
   the user's file still has them, no profile can change them, and no project
-  layer of the session folder has `mcp_servers`; else `{}`. Its command ends in
+  layer of the session folder has `mcp_servers`; else `{}`. Codex keeps the
+  server URLs of the folder a session began in and runs the helper again after
+  a change of the folder or a 401, so a later run of one Codex process gives
+  the header only when the first run gave it, in the same folder. Its command ends in
   `|| echo '{}'`, because a helper that fails stops Codex from connecting. The
   PostToolUse payload of Codex names the tool only (`mcp__<server>__<tool>`,
   each character outside `[A-Za-z0-9_]` as `_`). The vault maps it to a user
-  entry by that rule, and notes nothing when two entries could make the name or
-  a project layer has servers. The vault never writes a `config.toml` that lies
+  entry by that rule, and notes nothing when another server (a stdio or
+  switched-off entry, a plugin server) could make the name, when the tool part
+  holds `__`, when a project layer has servers, or when the session began in
+  another folder. The vault never writes a `config.toml` that lies
   in a git work tree.
 - `K` never travels on the MCP connection. It goes only to the resolve
   endpoint (§4.4).

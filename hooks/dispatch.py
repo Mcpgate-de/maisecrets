@@ -300,8 +300,10 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         vault_refs.prune_released(v.backend)   # the values a server gave leave the store after their hour
         if codex:
             from maisecrets import codex_vault  # noqa: E402
-            if codex_vault.available() and codex_vault.STATE.exists():
-                codex_vault.place_helper()     # an update of the plugin brings a new helper
+            if codex_vault.available():
+                codex_vault.note_session(payload)  # the folder whose project layers Codex uses for this session
+                if codex_vault.STATE.exists():
+                    codex_vault.place_helper()     # an update of the plugin brings a new helper
         note = vault_refs.ensure_headers(cfg, v.backend)
     except Exception:  # noqa: BLE001 - never stops a session start; without the header no value comes back
         note = None

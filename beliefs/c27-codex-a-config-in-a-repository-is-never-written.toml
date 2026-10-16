@@ -6,5 +6,5 @@ runner = ["tests/test_codex_vault.py::LineEdit::test_a_config_in_a_repository_is
 
 [proof]
 file = "maisecrets/codex_vault.py"
-find = '''    if not path.is_file() or in_a_repository(str(path)):'''
+find = '''    if not path.is_file() or in_a_repository(str(config_path())):'''
 replace = '''    if not path.is_file():'''

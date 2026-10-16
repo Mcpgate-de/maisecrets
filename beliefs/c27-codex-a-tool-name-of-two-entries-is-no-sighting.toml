@@ -2,9 +2,9 @@
 belief = "c27-codex-a-tool-name-of-two-entries-is-no-sighting"
 control = "C27"
 statement = "A Codex tool name that two user entries could make (`a` and `a__b`) maps to no entry, so its tokens stay text."
-runner = ["tests/test_codex_vault.py::ToolNames::test_codex_name_rule"]
+runner = ["tests/test_codex_vault.py::ToolNames::test_every_server_codex_knows_takes_part_in_the_name_rule"]
 
 [proof]
 file = "maisecrets/codex_vault.py"
-find = '''    return hits[0] if len(hits) == 1 else None'''
-replace = '''    return hits[0] if hits else None'''
+find = '''    if len(hits) != 1 or hits[0] not in servers'''
+replace = '''    if not hits or hits[0] not in servers'''

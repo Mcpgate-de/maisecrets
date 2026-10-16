@@ -64,7 +64,8 @@ class Base(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         self.cfg = self.home / "config.toml"
-        for p in (codex_vault.STATE, codex_vault.HELPER_FILE):
+        for p in (codex_vault.STATE, codex_vault.HELPER_FILE, codex_vault.SESSIONS, codex_vault.BACKUP,
+                  codex_vault.STATE.parent / "codex-helper-runs.json"):
             if p.exists():
                 p.unlink()
 
@@ -135,7 +136,8 @@ class LineEdit(Base):
 
     def test_a_helper_or_header_someone_else_wrote_stays(self) -> None:
         for extra in ('http_headers_helper = "my-auth headers"\n',
-                      'http_headers = { "client-vault" = "theirs" }\n'):
+                      'http_headers = { "client-vault" = "theirs" }\n',
+                      'env_http_headers = { "Client-Vault" = "THEIR_ENV" }\n'):
             with self.subTest(extra=extra):
                 before = self.write(SAMPLE.replace('startup_timeout_sec = 20\n', 'startup_timeout_sec = 20\n' + extra))
                 self.assertEqual(codex_vault.apply_config({"demo": (URL, KID)})[:2], ([], []))
@@ -146,6 +148,34 @@ class LineEdit(Base):
         text = SAMPLE.replace("startup_timeout_sec = 20\n", 'startup_timeout_sec = 20\nhttp_headers_helper = "mine"\n')
         self.assertIsNone(codex_vault.plan(text, "demo", codex_vault.helper_command("demo", URL)))
         self.assertIsNone(codex_vault.plan(text, "demo", None))
+
+    def test_a_wrapper_that_names_our_files_is_not_ours(self) -> None:
+        mine = codex_vault.helper_command("demo", URL)
+        self.assertTrue(codex_vault.is_ours(mine))
+        self.assertTrue(codex_vault.is_ours(mine.replace(sys.executable, "/usr/local/bin/python3.12", 1)))
+        self.assertFalse(codex_vault.is_ours("my-filter $(" + mine + ")"))
+        self.assertFalse(codex_vault.is_ours(mine.replace(" 2>/dev/null", " | my-filter 2>/dev/null")))
+
+    def test_a_config_linked_from_a_repository_is_never_written(self) -> None:
+        """The link lies in a repository, its target does not: the repository chose the file (Gate A review)."""
+        repo = self.tmp / "repo"
+        (repo / ".git").mkdir(parents=True)
+        target = self.tmp / "outside.toml"
+        target.write_text(SAMPLE)
+        with mock.patch.dict(os.environ, {"CODEX_HOME": str(repo / "codex")}):
+            (repo / "codex").mkdir()
+            (repo / "codex" / "config.toml").symlink_to(target)
+            self.assertEqual(codex_vault.apply_config({"demo": (URL, KID)})[:2], ([], []))
+        self.assertEqual(target.read_text(), SAMPLE)
+
+    def test_the_backup_lies_in_the_maisecrets_folder(self) -> None:
+        mine = self.home / "config.toml.maisecrets-backup"
+        mine.write_text("the person's own file")
+        self.write()
+        codex_vault.apply_config({"demo": (URL, KID)})
+        codex_vault.apply_config({"demo": (URL, KID)})
+        self.assertEqual(mine.read_text(), "the person's own file")
+        self.assertTrue(str(codex_vault.BACKUP).startswith(str(HOME)))
 
     def test_only_the_entry_with_that_url_gets_it(self) -> None:
         """A URL that changed since the server was enabled is another entry: no helper, and ours goes."""
@@ -191,12 +221,55 @@ class ToolNames(Base):
             with self.subTest(tool=tool):
                 self.assertEqual(codex_vault.server_of_tool(tool, servers), want)
 
+    def test_every_server_codex_knows_takes_part_in_the_name_rule(self) -> None:
+        """A stdio entry, a switched-off entry or a plugin server `demo__x` makes `mcp__demo__x__t` too."""
+        self.assertIsNone(codex_vault.server_of_tool("mcp__demo__x__t", ["demo"], ["demo__x"]))
+        self.assertIsNone(codex_vault.server_of_tool("mcp__demo__t", ["demo"], ["demo"]), "a plugin of that name")
+        self.assertIsNone(codex_vault.server_of_tool("mcp__demo__x__t", ["demo"]), "a tool part with __")
+        self.assertIsNone(codex_vault.server_of_tool("mcp__demo__t", ["demo"], ["demo_"]), "demo_ trims to demo")
+        self.assertEqual(codex_vault.server_of_tool("mcp__demo__t", ["demo"], ["other"]), "demo")
+
+    def payload(self, cwd: Path, session: str = "s1") -> dict:
+        return {"tool_name": "mcp__demo__customers", "cwd": str(cwd), "session_id": session}
+
     def test_the_payload_of_a_user_entry_names_it(self) -> None:
         self.write()
         proj = self.tmp / "proj"
         proj.mkdir()
-        got = codex_vault.mcp_server_of({"tool_name": "mcp__demo__customers", "cwd": str(proj)})
-        self.assertEqual(got, {"name": "demo", "source": "user"})
+        self.assertEqual(codex_vault.mcp_server_of(self.payload(proj)), {"name": "demo", "source": "user"})
+
+    def test_a_plugin_server_of_the_same_name_names_nothing(self) -> None:
+        self.write()
+        proj = self.tmp / "proj"
+        proj.mkdir()
+        plug = self.home / "plugins" / "cache" / "market" / "tools" / "1.0.0"
+        plug.mkdir(parents=True)
+        (plug / ".mcp.json").write_text(json.dumps({"mcpServers": {"demo": {"url": "https://b.example.net/mcp"}}}))
+        self.assertIsNone(codex_vault.mcp_server_of(self.payload(proj)))
+        (plug / ".mcp.json").write_text("{not json")
+        self.assertIsNone(codex_vault.mcp_server_of(self.payload(proj)), "a manifest that does not parse")
+        (plug / ".mcp.json").write_text(json.dumps({"mcpServers": {"other": {"url": "https://b.example.net/mcp"}}}))
+        self.assertIsNotNone(codex_vault.mcp_server_of(self.payload(proj)))
+
+    def test_a_session_that_began_in_another_folder_names_nothing(self) -> None:
+        """Codex keeps the server URLs of the folder a session began in; a later turn elsewhere keeps them (Gate B)."""
+        self.write()
+        repo, clean = self.tmp / "repo", self.tmp / "clean"
+        for d in (repo, clean):
+            d.mkdir()
+        (repo / ".codex").mkdir()
+        (repo / ".codex" / "config.toml").write_text('[mcp_servers.demo]\nurl = "https://b.example.net/mcp"\n')
+        codex_vault.note_session({"session_id": "s9", "cwd": str(repo)})
+        self.assertIsNone(codex_vault.mcp_server_of(self.payload(clean, "s9")))
+        self.assertIsNotNone(codex_vault.mcp_server_of(self.payload(clean, "s10")), "another session began there")
+
+    def test_a_fifo_in_a_project_layer_does_not_hang(self) -> None:
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("no FIFO here")
+        proj = self.tmp / "proj"
+        (proj / ".codex").mkdir(parents=True)
+        os.mkfifo(proj / ".codex" / "config.toml")
+        self.assertTrue(codex_helper.project_brings_servers(str(proj), str(self.home)))
 
     def test_a_project_layer_with_servers_names_nothing(self) -> None:
         """Measured: a project's [mcp_servers.demo] url = B sends the user's entry to B (codex-cli 0.162.0)."""
@@ -211,10 +284,9 @@ class ToolNames(Base):
         for layer in layers:
             with self.subTest(layer=layer):
                 (self.tmp / "repo" / ".codex" / "config.toml").write_text(layer)
-                self.assertIsNone(codex_vault.mcp_server_of({"tool_name": "mcp__demo__customers",
-                                                             "cwd": str(proj)}))
+                self.assertIsNone(codex_vault.mcp_server_of(self.payload(proj)))
         (self.tmp / "repo" / ".codex" / "config.toml").write_text('model = "x"\n')
-        self.assertIsNotNone(codex_vault.mcp_server_of({"tool_name": "mcp__demo__customers", "cwd": str(proj)}))
+        self.assertIsNotNone(codex_vault.mcp_server_of(self.payload(proj)))
 
     def test_the_user_layer_is_no_project_layer(self) -> None:
         """A session in the folder above CODEX_HOME (CODEX_HOME = <dir>/.codex) is no project override."""
@@ -222,7 +294,8 @@ class ToolNames(Base):
         (home / ".codex").mkdir(parents=True)
         with mock.patch.dict(os.environ, {"CODEX_HOME": str(home / ".codex")}):
             (home / ".codex" / "config.toml").write_text(SAMPLE)
-            self.assertIsNotNone(codex_vault.mcp_server_of({"tool_name": "mcp__demo__t", "cwd": str(home)}))
+            self.assertIsNotNone(codex_vault.mcp_server_of({"tool_name": "mcp__demo__t", "cwd": str(home),
+                                                            "session_id": "s1"}))
 
     def test_a_profile_of_the_user_names_nothing(self) -> None:
         for extra, side in (('profile = "work"\n', None),
@@ -233,13 +306,14 @@ class ToolNames(Base):
                     f.unlink()
                 if side:
                     (self.home / side[0]).write_text(side[1])
-                self.assertIsNone(codex_vault.mcp_server_of({"tool_name": "mcp__demo__t", "cwd": str(self.tmp)}))
+                self.assertIsNone(codex_vault.mcp_server_of(self.payload(self.tmp)))
 
     def test_an_unknown_folder_names_nothing(self) -> None:
         self.write()
         for cwd in (None, "", "relative/path", 3):
             with self.subTest(cwd=cwd):
-                self.assertIsNone(codex_vault.mcp_server_of({"tool_name": "mcp__demo__t", "cwd": cwd}))
+                self.assertIsNone(codex_vault.mcp_server_of({"tool_name": "mcp__demo__t", "cwd": cwd,
+                                                             "session_id": "s1"}))
 
 
 class Helper(Base):
@@ -263,6 +337,39 @@ class Helper(Base):
 
     def test_the_header_in_a_clean_folder(self) -> None:
         self.assertEqual(self.run_helper(self.proj), {"Client-Vault": KID})
+
+    def test_a_later_run_in_another_folder_gets_no_header(self) -> None:
+        """Codex fixes the server URLs at the start of a session and runs the helper again after a change of the folder
+        or a 401: only the first answer of the process counts, and a `{}` stays (Gate B review)."""
+        other = self.tmp / "other"
+        other.mkdir()
+        self.assertEqual(self.run_helper(self.proj), {"Client-Vault": KID})
+        self.assertEqual(self.run_helper(self.proj), {"Client-Vault": KID}, "a refresh in the same folder")
+        self.assertEqual(self.run_helper(other), {})
+        self.assertEqual(self.run_helper(self.proj), {}, "the process stays without the header")
+
+    def test_a_first_no_stays_for_the_process(self) -> None:
+        (self.proj / ".codex").mkdir()
+        layer = self.proj / ".codex" / "config.toml"
+        layer.write_text('[mcp_servers.demo]\nurl = "https://b.example.net/mcp"\n')
+        self.assertEqual(self.run_helper(self.proj), {})
+        layer.unlink()
+        self.assertEqual(self.run_helper(self.proj), {}, "the file is gone at a retry; the session URL is still B")
+
+    def test_a_linked_config_keeps_the_real_codex_home(self) -> None:
+        """config.toml links into another folder: profile files and the user layer are those of CODEX_HOME."""
+        real = self.tmp / "sync"
+        real.mkdir()
+        (real / "config.toml").write_text(self.cfg.read_text())
+        self.cfg.unlink()
+        self.cfg.symlink_to(real / "config.toml")
+        codex_vault.write_state({"demo": (URL, KID)})
+        command = codex_vault.helper_command("demo", URL)
+        (self.home / "work.config.toml").write_text('[mcp_servers.demo]\nurl = "https://b.example.net/mcp"\n')
+        self.assertEqual(self.run_helper(self.proj, command), {}, "a profile file of CODEX_HOME moves the entry")
+        (self.home / "work.config.toml").unlink()
+        os.remove(codex_vault.STATE.parent / "codex-helper-runs.json")
+        self.assertEqual(self.run_helper(self.proj, command), {"Client-Vault": KID})
 
     def test_no_header_where_a_project_brings_servers(self) -> None:
         (self.proj / ".codex").mkdir()
