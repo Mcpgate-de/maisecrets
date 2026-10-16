@@ -1,0 +1,12 @@
+# c27-a-server-token-goes-into-content-only: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-server-token-goes-into-content-only"
+control = "C27"
+statement = "A server token in a file path of Write, Edit or NotebookEdit is refused: the server would choose the file after the home check saw only the token."
+runner = ["tests/test_vault_refs.py::Offline::test_a_server_token_in_a_path_is_refused"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''    if outside:
+        return _deny(f"maisecrets: ⟦{outside[0]}⟧ came from a server'''
+replace = '''    if False:
+        return _deny(f"maisecrets: ⟦{outside[0]}⟧ came from a server'''

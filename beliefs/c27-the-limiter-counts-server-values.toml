@@ -1,0 +1,10 @@
+# c27-the-limiter-counts-server-values: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-the-limiter-counts-server-values"
+control = "C27"
+statement = "Server values count in max_keys_per_session and max_resolves_per_hour (C7) before any request, as KEY@host."
+runner = ["tests/test_vault_refs.py::Online::test_the_limiter_counts_server_values_and_the_audit_names_the_host"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''    return failed or vault._limit_all(list(keys) + list(extra), session)'''
+replace = '''    return failed or vault._limit_all(list(keys), session)'''

@@ -1,0 +1,10 @@
+# c27-off-stops-the-resolve-of-old-notes: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-off-stops-the-resolve-of-old-notes"
+control = "C27"
+statement = "With client_header false, a token noted before stays text: nothing is asked of the server."
+runner = ["tests/test_vault_refs.py::Online::test_off_after_a_note_resolves_nothing"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''    if not refs or _off(cfg):'''
+replace = '''    if not refs:'''

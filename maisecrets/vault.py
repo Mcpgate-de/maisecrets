@@ -81,7 +81,7 @@ DEFAULT_CONFIG = {
     "strip_hidden_characters": True,
     # Claude Code with mods (the mod): a prompt with a value goes through with placeholders; false blocks it
     "rewrite_prompts": True,
-    "gateway_servers": [],           # MCP servers that resolve placeholders themselves (PROTOCOL §4); none by default
+    "gateway_servers": [],           # MCP servers that resolve placeholders themselves; read by nothing yet
     # country codes for the PII rules and the label languages; "auto" is the country of the system
     # setting (maisecrets/regions.py). pii_regions is the old name and still read.
     "regions": ["auto"],
@@ -100,6 +100,8 @@ DEFAULT_CONFIG = {
     "secret_destinations": "observe",  # observe: note where each stored secret is sent (destinations.py); off
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
+    "client_header": True,           # vault references: a key header on user-scope MCP servers (vault_refs.py)
+    "client_vault_cafile": "",       # vault references: a CA file for a server behind an own CA; empty: the system's
     "pass_agent_reports": True,      # the report of a subagent of this session is model text: not blocked (hooks.py)
     "tips": True,                    # a tip at session start, and a hint when a case for a setting first comes up
     # the limiter (C7): a brake for a session that sends its own values out in bulk; the session rule (C4) keeps the
@@ -127,7 +129,8 @@ _CONFIG_TYPES = {
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
     "ssh_consent": bool, "ssh_host_groups": dict, "ssh_autonomous_hosts": list, "secret_destinations": str,
-    "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool, "rule_dirs": list,
+    "ssh_approval": str, "rehydration": str, "guard": bool, "client_header": bool, "client_vault_cafile": str,
+    "pass_agent_reports": bool, "rule_dirs": list,
     "read_pdf": str, "read_image": str, "clean_dirs": list,
 }
 
@@ -1388,6 +1391,19 @@ class Vault:
             pass
 
     @_mutating
+    def record_server(self, keys: list[str], session: str | None, tool: str, context: str) -> str:
+        """Values a server gave (vault_refs.py), named `KEY@host`: the limiter for all of them together, then one
+        audit line each. They have no entry, so the session rule of the store does not apply; vault_refs does it."""
+        failed = self._limit_all(keys, session)
+        if failed:
+            return failed[0]
+        for key in dict.fromkeys(keys):
+            if not self._record(key, session, tool, context):
+                return "audit log not writable"
+        self._save_index()
+        return "ok"
+
+    @_mutating
     def record_resolve(self, key: str, session: str | None, tool: str, context: str) -> str:
         """For tools that need the value inline (MCP arguments): session rule + limiter + audit."""
         st = self.status(key, session)
@@ -1553,7 +1569,9 @@ class Vault:
             pass
         deleted = 0
         for key in keys:
-            if key != FP_KEY_ENTRY:
+            # the fingerprint key and the vault reference keys (vault_refs.py) are no values: a new key would unlink
+            # every server
+            if key != FP_KEY_ENTRY and not key.startswith(("_maisecrets_vref_", "_maisecrets_vrel_")):
                 try:
                     self.backend.delete(key)
                     deleted += 1
@@ -1614,7 +1632,9 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
             # another maisecrets process held the terms lock: say what is left and how to finish, never success
             problems.append(f"{', '.join(term_files)} not deleted (another maisecrets process held the terms lock; "
                             "run the wipe again)")
-        dirs = [HOME / "pending", HOME / "run"] + ([Path(run_dir)] if run_dir else [])
+        # vault-refs: the server tokens seen and sent, the key ids and the endpoints (vault_refs.py); its keys
+        # are in the store
+        dirs = [HOME / "pending", HOME / "run", HOME / "vault-refs"] + ([Path(run_dir)] if run_dir else [])
         for d in dirs:
             if d.is_dir():
                 for f in d.iterdir():

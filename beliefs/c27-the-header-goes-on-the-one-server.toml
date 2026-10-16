@@ -1,0 +1,10 @@
+# c27-the-header-goes-on-the-one-server: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-the-header-goes-on-the-one-server"
+control = "C27"
+statement = "The header goes on the entry of the server that sent the token only, not on another entry of the same origin."
+runner = ["tests/test_vault_refs.py::Online::test_trigger_the_header_goes_on_that_server_only"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''if origin in keys and (name, spec.get("url")) in urls.get(origin, ()) \'''
+replace = '''if origin in keys \'''

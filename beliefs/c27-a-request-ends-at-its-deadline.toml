@@ -1,0 +1,10 @@
+# c27-a-request-ends-at-its-deadline: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-request-ends-at-its-deadline"
+control = "C27"
+statement = "A server that sends its answer one header line at a time cannot hold the hook past the budget: the request ends at its deadline and the call is denied."
+runner = ["tests/test_vault_refs.py::Online::test_a_server_that_drips_its_headers_ends_inside_the_budget"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''    t.join(max(0.0, deadline - time.monotonic()) + 0.1)'''
+replace = '''    t.join()'''

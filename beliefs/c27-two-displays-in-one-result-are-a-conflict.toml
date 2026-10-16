@@ -1,0 +1,10 @@
+# c27-two-displays-in-one-result-are-a-conflict: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-two-displays-in-one-result-are-a-conflict"
+control = "C27"
+statement = "A key that one result shows with two different display parts is refused."
+runner = ["tests/test_vault_refs.py::Online::test_two_displays_of_one_key_in_one_result_are_refused"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''(len(named) > 1 or (named'''
+replace = '''(False or (named'''

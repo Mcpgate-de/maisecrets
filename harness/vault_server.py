@@ -1,0 +1,234 @@
+"""A fake MCP server for vault references (docs/PROTOCOL.md section 4): metadata, resolve, token and a small MCP.
+
+It plays the server side of the contract so that the client side can be tested without a real server:
+
+- `GET /.well-known/oauth-protected-resource/mcp` names `client_vault_endpoint` (RFC 9728 metadata).
+- `POST /vault/resolve` takes `Authorization: Bearer <K>` and answers with all values or one error code.
+- `POST /token` binds the kid of a `Client-Vault` header, active at once (the login path).
+- `POST /mcp` speaks enough JSON-RPC for one tool, `customers`, whose result carries server-range tokens; a kid
+  that arrives here and is not bound becomes pending (the path of an existing login).
+
+Every request is recorded in `server.log` (method, path, header names and the Client-Vault value). `server.mode`
+switches a fault on: redirect, sleep, rate_limited, disabled, wrong_type, too_big, not_text, missing_key.
+Standard library and the openssl command only. Run alone for a manual test:
+
+    python3 harness/vault_server.py      # prints the URL and the CA file
+"""
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import ssl
+import subprocess
+import tempfile
+import threading
+import time
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+OPEN, CLOSE = "⟦", "⟧"
+
+
+def make_cert(folder: str) -> tuple[str, str]:
+    """A self-signed certificate for 127.0.0.1 and localhost: (cert file, key file). The cert is its own CA."""
+    cert, key = os.path.join(folder, "cert.pem"), os.path.join(folder, "key.pem")
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=localhost",
+                    "-addext", "subjectAltName=IP:127.0.0.1,DNS:localhost",
+                    "-addext", "basicConstraints=critical,CA:TRUE",
+                    "-keyout", key, "-out", cert], check=True, capture_output=True)
+    return cert, key
+
+
+def _iso(t: float) -> str:
+    return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse(s: str) -> float:
+    return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+
+
+def kid_from_header(value: str) -> str | None:
+    """The kid of `v=1, kid=:<base64>:`, or None."""
+    parts = dict(p.strip().split("=", 1) for p in value.split(",") if "=" in p)
+    kid = parts.get("kid", "")
+    if parts.get("v") != "1" or len(kid) < 3 or kid[0] != ":" or kid[-1] != ":":
+        return None
+    try:
+        return kid[1:-1] if len(base64.b64decode(kid[1:-1], validate=True)) == 32 else None
+    except ValueError:
+        return None
+
+
+class VaultServer:
+    def __init__(self, folder: str | None = None, cert: tuple[str, str] | None = None) -> None:
+        self.folder = folder or tempfile.mkdtemp(prefix="vault-server-")
+        self.cert, self.key = cert or make_cert(self.folder)
+        self.log: list[dict] = []
+        self.bindings: dict[str, dict] = {}      # kid -> {"state": "active" | "pending", "activates_at": iso}
+        self.values: dict[str, tuple[str, float]] = {}   # key -> (value, minted_at)
+        self.mode: str | None = None
+        self.sleep = 0.0
+        self.redirect_to = ""
+        self.metadata: dict | None = None        # None: the default metadata; {}: no field
+        self.clock_offset = 0.0                  # the server's clock against the real one
+        self.resolved: list[dict] = []           # what the resolve endpoint released
+        self.meta_status = 200                   # another status: the metadata endpoint fails (a deploy)
+        self.auto_bind = False                   # True: a new kid on /mcp is active at once (as after a login)
+        server = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a) -> None:
+                pass
+
+            def _send(self, status: int, body: object, ctype: str = "application/json", extra: dict | None = None):
+                raw = body if isinstance(body, bytes) else json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(raw)))
+                for k, v in (extra or {}).items():
+                    self.send_header(k, v)
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def _record(self) -> None:
+                server.log.append({"method": self.command, "path": self.path, "headers": sorted(self.headers.keys()),
+                                   "client_vault": self.headers.get("Client-Vault")})
+
+            def do_GET(self) -> None:
+                self._record()
+                if self.path == "/.well-known/oauth-protected-resource/mcp" and server.meta_status != 200:
+                    return self._send(server.meta_status, {"error": "unavailable"})
+                if self.path == "/.well-known/oauth-protected-resource/mcp":
+                    meta = {"resource": server.url + "/mcp", "authorization_servers": [server.url]}
+                    meta.update({"client_vault_endpoint": server.url + "/vault/resolve"}
+                                if server.metadata is None else server.metadata)
+                    return self._send(200, meta)
+                self._send(404, {"error": "not_found"})
+
+            def do_POST(self) -> None:
+                self._record()
+                length = int(self.headers.get("Content-Length") or 0)
+                raw = self.rfile.read(length) if length else b""
+                header = self.headers.get("Client-Vault")
+                if self.path == "/token":
+                    kid = kid_from_header(header or "")
+                    if kid:
+                        server.bindings[kid] = {"state": "active"}
+                    return self._send(200, {"access_token": "fake", "token_type": "Bearer"})
+                if self.path == "/mcp":
+                    kid = kid_from_header(header or "")
+                    if kid and kid not in server.bindings:
+                        server.bindings[kid] = ({"state": "active"} if server.auto_bind else
+                                                {"state": "pending", "activates_at": _iso(time.time() + 86400)})
+                    return self._mcp(json.loads(raw or b"{}"))
+                if self.path == "/vault/resolve":
+                    return self._resolve(raw)
+                self._send(404, {"error": "not_found"})
+
+            def _mcp(self, msg: dict) -> None:
+                method, ident = msg.get("method"), msg.get("id")
+                if ident is None:
+                    self.send_response(202)
+                    self.end_headers()
+                    return
+                if method == "initialize":
+                    result = {"protocolVersion": msg.get("params", {}).get("protocolVersion", "2025-06-18"),
+                              "capabilities": {"tools": {}}, "serverInfo": {"name": "vault-demo", "version": "1"}}
+                elif method == "tools/list":
+                    result = {"tools": [{"name": "customers", "description": "List the customers.",
+                                         "inputSchema": {"type": "object", "properties": {}}}]}
+                elif method == "tools/call":
+                    text = "\n".join(f"{OPEN}{k}:{v[0][:2]}•••{CLOSE}" for k, v in server.values.items())
+                    result = {"content": [{"type": "text", "text": "customers:\n" + text}]}
+                else:
+                    result = {}
+                self._send(200, {"jsonrpc": "2.0", "id": ident, "result": result})
+
+            def _resolve(self, raw: bytes) -> None:
+                if server.sleep:
+                    time.sleep(server.sleep)
+                mode = server.mode
+                if mode == "drip":
+                    # one header line every 2 s: each read is short, the whole answer is not
+                    self.wfile.write(b"HTTP/1.1 200 OK\r\n")
+                    for i in range(10):
+                        self.wfile.flush()
+                        time.sleep(2)
+                        self.wfile.write(f"X-Drip-{i}: x\r\n".encode())
+                    return
+                if mode == "redirect":
+                    return self._send(302, b"", "text/plain", {"Location": server.redirect_to})
+                if mode == "rate_limited":
+                    return self._send(429, {"error": "rate_limited"}, extra={"Retry-After": "30"})
+                if mode == "disabled":
+                    return self._send(503, {"error": "disabled"})
+                auth = self.headers.get("Authorization", "")
+                if not auth.startswith("Bearer "):
+                    return self._send(401, {"error": "unknown_key"})
+                token = auth[len("Bearer "):]
+                try:
+                    k = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
+                except ValueError:
+                    return self._send(401, {"error": "unknown_key"})
+                kid = base64.b64encode(hashlib.sha256(k).digest()).decode()
+                binding = server.bindings.get(kid)
+                if len(k) != 32 or not binding:
+                    return self._send(401, {"error": "unknown_key"})
+                if binding["state"] == "pending":
+                    return self._send(403, {"error": "pending", "activates_at": binding["activates_at"]})
+                body = json.loads(raw)
+                now = time.time() + server.clock_offset
+                skew = now - _parse(body["now"])
+                if abs(skew) > 300:
+                    return self._send(403, {"error": "clock_skew"})
+                values = {}
+                for ref in body["refs"]:
+                    if ref["key"] not in server.values:
+                        return self._send(404, {"error": "unknown_ref"})
+                    value, minted = server.values[ref["key"]]
+                    if minted > _parse(ref["seen_at"]) + skew:
+                        return self._send(410, {"error": "expired"})
+                    values[ref["key"]] = value
+                server.resolved.append(values)
+                if mode == "wrong_type":
+                    return self._send(200, {"values": values}, "text/plain")
+                if mode == "too_big":
+                    return self._send(200, {"values": values, "pad": "x" * (1024 * 1024 + 10)})
+                if mode == "not_text":
+                    return self._send(200, {"values": {k: 1 for k in values}})
+                if mode == "missing_key":
+                    return self._send(200, {"values": dict(list(values.items())[1:])})
+                self._send(200, {"values": values})
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(self.cert, self.key)
+        self.httpd.socket = ctx.wrap_socket(self.httpd.socket, server_side=True)
+        self.url = f"https://127.0.0.1:{self.httpd.server_address[1]}"
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+
+    def __enter__(self) -> "VaultServer":
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+    def mint(self, key: str, value: str, minted_at: float | None = None) -> str:
+        """Put a value into the server's map; returns the token the server sends in its results."""
+        self.values[key] = (value, time.time() - 60 if minted_at is None else minted_at)
+        return f"{OPEN}{key}{CLOSE}"
+
+
+if __name__ == "__main__":
+    with VaultServer() as s:
+        s.mint("EMAIL_1", "someone@example.org")
+        print(f"MCP URL: {s.url}/mcp\nCA file: {s.cert}\nCtrl-C ends it.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
