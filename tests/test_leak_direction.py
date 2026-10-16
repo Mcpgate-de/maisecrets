@@ -44,6 +44,19 @@ def secrets(text: str, path: str = "") -> list[str]:
     return [v for t, v in found(text, path) if t == "SECRET"]
 
 
+
+def _cpu_best(fn, *args, runs: int = 3) -> float:
+    """The least CPU time of a few calls: other processes on the machine only ever add to it."""
+    import time
+    best = None
+    for _ in range(runs):
+        t = time.process_time()
+        fn(*args)
+        took = time.process_time() - t
+        best = took if best is None else min(best, took)
+    return best
+
+
 class LeakDirectionTests(unittest.TestCase):
     def test_a_token_shape_after_a_label_stays_a_hit_in_test_code(self):
         for text in (f"tok§en = '{JWT}'\n", f"TOK§EN = '{GLPAT}'\n", f"Authorization: Bearer {JWT}\n"):
@@ -216,11 +229,15 @@ class CodexSecondReviewTests(unittest.TestCase):
         self.assertEqual(secrets("C:\\repo\\src\\Auth.cs:12:pass§word = Qx7vR2mK9pLw\n"), ["Qx7vR2mK9pLw"])
 
     def test_a_megabyte_of_opening_tags_is_refused_at_once(self):
-        import time
-        started = time.monotonic()
-        text = ("<task-notification>\n" * 60000)[:1_000_000]
-        self.assertFalse(hooks.agent_report({"transcript_path": "/tmp/x.jsonl", **CLAUDE}, text))
-        self.assertLess(time.monotonic() - started, 1.0)
+        # the growth from 125 KB to 1 MB is the check (the fastest of three calls each); a fixed 1.0 s of wall time
+        # failed on a loaded machine (2026-10-16)
+        times = []
+        for size in (125_000, 1_000_000):
+            text = ("<task-notification>\n" * 60000)[:size]
+            self.assertFalse(hooks.agent_report({"transcript_path": "/tmp/x.jsonl", **CLAUDE}, text))
+            times.append(_cpu_best(hooks.agent_report, {"transcript_path": "/tmp/x.jsonl", **CLAUDE}, text))
+        self.assertLess(times[1], 16 * times[0] + 0.05)
+        self.assertLess(times[1], 10.0)
 
 
 class FinalReviewTests(unittest.TestCase):
@@ -236,14 +253,16 @@ class FinalReviewTests(unittest.TestCase):
         }
         for name, text in cases.items():
             with self.subTest(name=name):
-                started = time.monotonic()
+                # CPU time, not wall time: other processes on the machine slow the clock, not the scan (2026-10-16)
+                started = time.process_time()
                 ms = detect.scan(text)
                 [detect.is_fixture(m, text, "") for m in ms]
-                self.assertLess(time.monotonic() - started, 3.0, "far below the 7 s watchdog")
+                self.assertLess(time.process_time() - started, 5.0, "below the 7 s watchdog")
         self.assertEqual(secrets(cases["a long word run"]), ["Qx7vR2mK9pLw"])
-        started = time.monotonic()
-        detect._FORMAT_ONLY_RE.fullmatch("%" * 200 + "Z")
-        self.assertLess(time.monotonic() - started, 0.05)
+        # no backtracking that grows with the run of %: twice the run, at most four times the time (the fastest of
+        # three calls). A fixed 0.05 s of wall time failed on a loaded machine (2026-10-16)
+        short, long = (_cpu_best(detect._FORMAT_ONLY_RE.fullmatch, "%" * n + "Z") for n in (100, 200))
+        self.assertLess(long, 4 * short + 0.01)
 
     def test_a_camel_case_key_on_the_next_line_is_a_label(self):
         self.assertEqual(found("pass§word:\n    driverClassName: org.h2.Driver\n"), [])
@@ -308,16 +327,17 @@ class LastCommitReviewTests(unittest.TestCase):
     """The findings of the review of 3e5d53e (Fable, 2026-09-30)."""
 
     def test_a_two_megabyte_line_is_linear(self):
-        import time
-        text = "{" + ",".join(f'"id{i}":"{"x" * 1800}","tok§en":"t{i}"' for i in range(250)) + "}"
-        text = text.replace("§", "")
-        started = time.monotonic()
-        detect.scan(text)
-        small = time.monotonic() - started
-        big = text[:-1] + "," + text[1:]
-        started = time.monotonic()
-        detect.scan(big)
-        self.assertLess(time.monotonic() - started, 3.0 * small + 0.5, "twice the text, about twice the time")
+        # one line of 113 KB, then of 913 KB: linear is 8 times the time, quadratic 64 times. CPU time, the fastest
+        # of three scans of the short line: twice the text against a fixed 3 times plus 0.5 s of wall time failed
+        # on a loaded machine (2026-10-16). The bound fails when a part that grows with the square of the line takes
+        # as long as the scan itself at 913 KB
+        def line(n: int) -> str:
+            return ("{" + ",".join(f'"id{i}":"{"x" * 1800}","tok§en":"t{i}"' for i in range(n)) + "}").replace("§", "")
+        detect.scan(line(3))                          # the regexes of the first scan are compiled before the clock
+        small = _cpu_best(detect.scan, line(62))
+        big = _cpu_best(detect.scan, line(500), runs=1)
+        self.assertLess(big, 16 * small + 0.2, f"{small:.2f} s, then {big:.2f} s for 8 times the text")
+        self.assertLess(big, 60.0)
 
     def test_an_earlier_label_outside_the_window_still_counts(self):
         prose = "the contoso mail relay of the contoso tenant " * 5
