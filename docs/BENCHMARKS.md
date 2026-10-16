@@ -142,7 +142,9 @@ differ by up to 7 %). Source: `scripts/measure_scan_time.py --maisecrets <v0.6.1
 Hook time, 0.6.24 against 0.6.23 (2026-10-16): the CPU time (user + system) of one hook call, a new process each, the
 median of 21 calls after one warm-up, with compiled modules in both trees. Synthetic payloads: a typed prompt of 1 KB
 (`UserPromptSubmit`), a Bash result of 20 KB of log lines and a Read result of 70 KB of Python code (`PostToolUse`).
-Load average 2 to 3. Source: a script outside this repository that runs `hooks/dispatch.py` with each payload.
+Load average 2 to 3. Source: a script outside this repository that runs `hooks/dispatch.py` with each payload;
+`scripts/profile_hook.py` uses the same payloads (the "70 KB" Read result holds 62,311 characters) and a similar method,
+and splits the time into interpreter, import, rule list, regex compilation and scan, per rule class.
 
 | Payload | Python 3.14, 0.6.23 | Python 3.14, 0.6.24 | Python 3.9, 0.6.23 | Python 3.9, 0.6.24 |
 |---|---|---|---|---|
@@ -195,11 +197,12 @@ is also a German word; two case numbers; three customer names) on every NO_HIT s
 
 ## Cloakroom holdout sets, 2026-10-15
 
-Cloakroom's holdout sets v2 to v7 (`bench/holdout_v*.jsonl` at commit `cc3c88d76a`, 2026-10-14): 1,652 planted values
-in 470 samples, and 215 clean samples (200 in v2 to v6, 15 in v7). A value counts as leaked when it still appears
-after every match is masked. Tool channel (`detect.scan(text, channel="tool")`), `--locale de_DE`. Source: a script
-outside this repository that reads the sets and calls `detect.scan`, 2026-10-15. 0.6.20 is tag `v0.6.20`; 0.6.21 is
-the release of these rules.
+Cloakroom's holdout sets v2 to v7 (`bench/holdout_v*.jsonl` at commit `cc3c88d76a`, 2026-10-14): 1,652 planted values in
+470 samples, and 215 clean samples (200 in v2 to v6, 15 in v7). A value counts as leaked when it still appears after
+every match is masked. Tool channel (`detect.scan(text, channel="tool")`), `--locale de_DE`. Source:
+`scripts/measure_holdouts.py` (written 2026-10-16; the numbers were first taken on 2026-10-15 with the scratch scripts
+it replaces, and it gives the same numbers for 0.6.20, 0.6.21, 0.6.23, 0.6.24 and 0.6.25). 0.6.20 is tag `v0.6.20`;
+0.6.21 is the release of these rules.
 
 Each sample falls into half D or half C by the first 8 hex digits of sha256 of `<set>/<id>` (even: D). The rules of
 0.6.21 were written from the values of half D that 0.6.18 leaked; half C was counted. Half C is the number to read.
@@ -229,8 +232,8 @@ Regions `de`:
 | v2 to v6 | 789 | 410 → 276 | 786 | 403 → 290 | 200 | 0 → 0 |
 | v2 to v7 | 822 | 412 → 276 | 830 | 404 → 290 | 215 | 1 → 1 |
 
-By class of the planted value (the shape of the value, sorted by the analysis script; for example a name is two to
-five capitalised words without a digit), regions `us`, `uk`, `in`:
+By class of the planted value (the shape of the value, `value_class` in `scripts/measure_holdouts.py`; for example a
+name is one capitalised word, or two to five, without a digit), regions `us`, `uk`, `in`:
 
 | Class | Values | Leaked 0.6.20, D / C | Leaked 0.6.21, D / C |
 |---|---|---|---|
@@ -282,9 +285,10 @@ channel, the rest the tool channel):
 An AWS key id with any capital and digit was left out on CredData (+105 credentials, +48 false alarms, precision
 −0.006, holdout analysis of 2026-10-14); a Twilio Account SID without its name was left out as an id of other uses.
 
-The values 0.6.21 still leaks (regions `us`, `uk`, `in`), by class and by reason. A name or an address without a
-label or a postcode needs a model; a user name or a date with no label is ambiguous without context; "left out" are
-the values that one of the three rules above would close; the rest is a remaining gap:
+The values 0.6.21 still leaks (regions `us`, `uk`, `in`), by class and by reason (this sorting and the table of each new
+rule alone above need probe trees with single rules switched on or off; the script does not make them). A name or an
+address without a label or a postcode needs a model; a user name or a date with no label is ambiguous without context;
+"left out" are the values that one of the three rules above would close; the rest is a remaining gap:
 
 | Class | needs a model (no label, no postcode) | ambiguous without context | left out for its false hits | remaining gap |
 |---|---|---|---|---|
@@ -318,7 +322,8 @@ Limits of this measurement:
 ### 0.6.24, 2026-10-16
 
 0.6.23 (`origin/main` at `717a83e`, the base of 0.6.24, with the same detection as 0.6.21) against the release
-branch of 0.6.24. Tool channel, `--locale de_DE`. Source: the script of this section, 2026-10-16. The rules of 0.6.24
+branch of 0.6.24. Tool channel, `--locale de_DE`. Source: `scripts/measure_holdouts.py`, 2026-10-16; the tags
+`v0.6.23` and `v0.6.24` give the same numbers. The rules of 0.6.24
 come from a class analysis of the 102 values that 0.6.21 leaked for no other reason than a missing rule. That
 analysis looked at the leaked values of both halves, so half C is no unseen holdout for these rules either.
 
@@ -395,9 +400,11 @@ name.
 ### 0.6.25, 2026-10-16
 
 0.6.24 (`origin/main` at `5208dca`) against the release branch of 0.6.25 (`a44dd52`). Tool channel, `--locale de_DE`,
-the script of this section. 0.6.25 closes three gaps of 0.6.24: a vCard property with parameters and a vCard address,
-name and birth date in their fields; an encoded e-mail address in a CSV column whose header names its owner; and a
-measured decision on the company window before an address label.
+`scripts/measure_holdouts.py`; the tags `v0.6.24` and `v0.6.25` give the same numbers. Leaked values, all of v2 to v7:
+half D 203 → 197 and half C 219 → 219 (regions `us`, `uk`, `in`), half D 236 → 230 and half C 241 → 241 (`de`); the
+names row of the class table moves from 103 / 107 to 97 / 107 in both region sets. 0.6.25 closes three gaps of 0.6.24: a
+vCard property with parameters and a vCard address, name and birth date in their fields; an encoded e-mail address in a
+CSV column whose header names its owner; and a measured decision on the company window before an address label.
 
 - Holdout values: 6 more masked in half D (the family and given names of three vCard samples of v4), 0 in half C, in
   both region sets; no value that 0.6.24 masked leaks. False alarms on the 215 clean samples: 7 → 7 (`us uk in`),
@@ -934,7 +941,7 @@ and inputs differ, so a time gives an order of magnitude, not a ranking.
 | Holdouts v2–v6 rerun, false alarms in 200 clean samples | 0.6.14: 5 (default regions), 6 (us, uk, in) | 0.2.0: 23 | theirs, 2026-10-12; sets seen before |
 | Holdout v6, values leaked of 314 / false alarms of 40 | 176 / 5 (version not given) | 3 / 12 | theirs, 2026-10-10 |
 | Holdout v7, real vendor key formats: values leaked of 77 / false alarms of 15 | 0.6.14: 13 / 1 | 0 / 3 | theirs, 2026-10-12 |
-| Holdout v7, values leaked of 77 | 0.6.15: 3 (Twilio Account SIDs) | – | ours, 2026-10-13, their `holdout_v7` set, reported in [#17](https://github.com/Mcpgate-de/maisecrets/issues/17); no script in this repository |
+| Holdout v7, values leaked of 77 | 0.6.15: 3 (Twilio Account SIDs) | – | ours, 2026-10-13, their `holdout_v7` set, reported in [#17](https://github.com/Mcpgate-de/maisecrets/issues/17); `scripts/measure_holdouts.py` gives the same 3 (2026-10-16) |
 | Names and street addresses | not detected (README, "Names are not detected") | detected by its model (PII-Tracer) | README; theirs |
 | Time per item in their harness, holdout v6 | 0.4 ms (version not given) | 63 ms | theirs, 2026-10-10 |
 | Time per item, other machines | – | 62 ms on an Apple M-series CPU; 887 ms on a 2-vCPU Windows server; `cloakroom doctor`, one check on that server: 412 ms | theirs, 2026-10-10 |
@@ -1085,6 +1092,21 @@ credentials still missed: 4268
 
 Options: `--channel prompt`, `--regions us`, `--exclude-repo ""` (all rows), `--out result.json` (counts and
 per-row results with row ids, labels and rule ids; no value).
+
+The Cloakroom holdout sets (six files, about 230 KB, Apache-2.0) come from their pinned commit; `fetch` checks the
+sha256 of each file, and `--bench <Cloakroom checkout>/bench` reads a checkout instead. One run of two releases in both
+region sets takes about 10 seconds:
+
+```bash
+python3 -I scripts/measure_holdouts.py fetch          # into ~/.cache/maisecrets-datasets/cloakroom
+git worktree add ../maisecrets-0.6.24 v0.6.24
+git worktree add ../maisecrets-0.6.25 v0.6.25
+python3 -I scripts/measure_holdouts.py run --maisecrets ../maisecrets-0.6.25 --baseline ../maisecrets-0.6.24
+```
+
+It prints the tables of "Cloakroom holdout sets": per set and half, the sums v2 to v6 and v2 to v7, the false alarms on
+the clean samples and the class table, once for the regions `us`, `uk`, `in` and once for `de` (`--regions`). `--out`
+writes the counts and, per planted value, its set, sample id, index, half, class and whether it leaked; no value.
 
 The catalog coverage needs Python 3.11 or newer (tomllib) and PyYAML. Clone each catalog at its pinned commit into one
 directory, under the names below, and run the script; it reads the catalogs as data and prints counts only:
