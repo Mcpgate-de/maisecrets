@@ -1108,7 +1108,10 @@ class DocumentRouteTests(unittest.TestCase):
         self.e = Vault().put(NASTY, "SECRET", "manual", session="S1")
 
     def _reason(self, cmd: str, client: dict) -> str:
-        out = _bash_pre(cmd, client=client)["hookSpecificOutput"]
+        # the POSIX text: on Windows, Codex gets its own refusal before the route (test_windows_codex_keeps_its_own)
+        from unittest import mock
+        with mock.patch.object(hooks.platform, "system", return_value="Linux"):
+            out = _bash_pre(cmd, client=client)["hookSpecificOutput"]
         self.assertEqual(out.get("permissionDecision"), "deny", out)
         return out["permissionDecisionReason"]
 
@@ -1123,8 +1126,8 @@ class DocumentRouteTests(unittest.TestCase):
                 with self.subTest(name, client=client):
                     why = self._reason(cmd, client)
                     self.assertIn("did not run", why)
-                    self.assertIn("run it with the placeholder as its argument: python3 make_doc.py "
-                                  f"⟦{self.e.key}⟧", why)
+                    script = "node make_doc.js" if name == "node -e" else "python3 make_doc.py"
+                    self.assertIn(f"run it with the placeholder as its argument: {script} ⟦{self.e.key}⟧", why)
                     self.assertIn(f"Or write the file with {tool}: the placeholder in the content gets the value", why)
                     self.assertIn("Do not ask the user to type the value in", why)
 
@@ -1133,6 +1136,34 @@ class DocumentRouteTests(unittest.TestCase):
             why = self._reason("python3 -c 'print(1)' " + self.e.ref, CLAUDE)
         self.assertIn("python3 make_doc.py", why)
         self.assertNotIn("Write or Edit", why)
+
+    def test_a_policy_that_refuses_the_route_gets_no_route(self):
+        # block refuses every path, and confirm on Codex refuses both routes: the text must not send the model
+        # to a route that is refused next, nor forbid it to ask the user, which the policy's refusal asks for
+        cmd = "python3 -c 'print(1)' " + self.e.ref
+        for name, keys, client in (("block", {"rehydration": "block"}, CLAUDE),
+                                   ("block codex", {"rehydration": "block"}, _hygiene.CODEX),
+                                   ("confirm codex", {"rehydration": "confirm"}, _hygiene.CODEX)):
+            with self.subTest(name), _config(**keys):
+                why = self._reason(cmd, client)
+                self.assertIn("inline code would parse the value as program text", why)
+                self.assertNotIn("make_doc", why)
+                self.assertNotIn("Do not ask the user", why)
+        with _config(rehydration="confirm"):
+            self.assertIn("Write or Edit", self._reason(cmd, CLAUDE))   # Claude Code asks: the route works
+
+    def test_windows_codex_keeps_its_own_refusal(self):
+        from unittest import mock
+        with mock.patch.object(hooks.platform, "system", return_value="Windows"):
+            out = _bash_pre("python3 -c 'print(1)' " + self.e.ref, client=_hygiene.CODEX)["hookSpecificOutput"]
+        self.assertEqual(out.get("permissionDecision"), "deny", out)
+        self.assertIn("cannot be placed in a shell command on Codex for Windows", out["permissionDecisionReason"])
+        self.assertNotIn("make_doc", out["permissionDecisionReason"])
+
+    def test_the_route_names_the_refused_interpreter_and_every_key(self):
+        e2 = Vault().put(PLAIN, "SECRET", "manual", session="S1")
+        why = self._reason("node -e 'x' " + self.e.ref + " " + e2.ref, CLAUDE)
+        self.assertIn(f"node make_doc.js \u27e6{self.e.key}\u27e7 \u27e6{e2.key}\u27e7.", why)
 
     def test_other_refusals_keep_their_own_next_step(self):
         why = self._reason("bash -c 'echo " + self.e.ref + "'", CLAUDE)

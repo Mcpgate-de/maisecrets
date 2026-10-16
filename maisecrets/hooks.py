@@ -2407,16 +2407,29 @@ def _is_ssh_config_path(path: str, cwd: str) -> bool:
     return real == home_ssh or real.startswith(home_ssh + os.sep)
 
 
-def _file_route(payload: dict, cfg: dict, key: str) -> str:
+# the file extension of a script for each interpreter that the inline-code refusal names
+_SCRIPT_EXT = {"python": "py", "python2": "py", "python3": "py", "perl": "pl", "ruby": "rb", "node": "js",
+               "nodejs": "js", "deno": "js", "bun": "js", "php": "php", "lua": "lua", "osascript": "applescript"}
+
+
+def _file_route(payload: dict, cfg: dict, keys: list[str], interpreter: str = "python3") -> str:
     """The next step for a value that must go into a file or a document, after a refusal of inline code or a
     quoted heredoc. Without it a model gave up and asked the user to type the value into the document by hand
-    (field report, Codex, 2026-10-16)."""
-    tool = "apply_patch" if client_of(payload) == "codex" else "Write or Edit"
+    (field report, Codex, 2026-10-16). Only a route that the rehydration policy lets through is named: under
+    block, or confirm on Codex, the policy refuses the script route too and its own refusal names the next step
+    (Gate B, 2026-10-16)."""
+    client = client_of(payload)
+    if rehydration.refusal(cfg, "bash", client, "", "") is not None:
+        return ""
+    tool = "apply_patch" if client == "codex" else "Write or Edit"
     files = (f" Or write the file with {tool}: the placeholder in the content gets the value."
-             if cfg.get("resolve_in_files", True) is not False else "")
+             if rehydration.outcome(client, rehydration.policy(cfg, "file")) != "deny" else "")
+    if interpreter not in _SCRIPT_EXT:
+        interpreter = "python3"
+    args = " ".join(f"⟦{k}⟧" for k in dict.fromkeys(keys))
     return (" To put the value into a file or a document, save the program as a script file, "
-            f"then run it with the placeholder as its argument: python3 make_doc.py ⟦{key}⟧.{files} "
-            "Do not ask the user to type the value in.")
+            f"then run it with the placeholder as its argument: {interpreter} make_doc.{_SCRIPT_EXT[interpreter]} "
+            f"{args}.{files} Do not ask the user to type the value in.")
 
 
 def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
@@ -2484,7 +2497,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         if why:
             return _deny(f"maisecrets: ⟦{k}⟧ sits where the value cannot be placed safely: {why}. "
                          "The command did not run. Pass the placeholder as a plain argument of the "
-                         "command that needs it." + (_file_route(payload, cfg, k) if ctxs[a] == "hdq" else ""))
+                         "command that needs it." + (_file_route(payload, cfg, [k for k, _a, _b in refs])
+                                                         if ctxs[a] == "hdq" else ""))
     why = _refusal_for(command, ctxs)
     ssh_plan, ssh_refused = None, False
     if why == "ssh hands the command line to another shell" and not windows and client_of(payload) == "claude" \
@@ -2499,7 +2513,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                      "not run. " + _ssh_way(why))
     if why and why.endswith("with inline code would parse the value as program text"):
         return _deny(f"maisecrets: {keys} cannot be placed in this command: {why}. The command did not run."
-                     + _file_route(payload, cfg, refs[0][0]))
+                     + _file_route(payload, cfg, [k for k, _a, _b in refs], why.split(" ", 1)[0]))
     if why:
         return _deny(f"maisecrets: {keys} cannot be placed in this command: {why}. The command did not run. "
                      "Give the placeholder as a plain argument of the tool that needs the value; for a "
