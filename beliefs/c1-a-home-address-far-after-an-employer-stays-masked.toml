@@ -1,0 +1,10 @@
+# c1-a-home-address-far-after-an-employer-stays-masked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-home-address-far-after-an-employer-stays-masked"
+control = "C1"
+statement = "The check for a company before an address label reads at most 120 characters of the line, so a home address in minified JSON far after an employer or a hotel in the same record stays masked in a tool result."
+runner = ["tests/test_company_address_window.py::CompanyWindowTests::test_a_home_address_far_after_an_employer_stays_masked"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''def _line_back(text: str, pos: int, most: int = 120) -> int:'''
+replace = '''def _line_back(text: str, pos: int, most: int = 2000) -> int:'''

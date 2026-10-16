@@ -662,7 +662,9 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
                 #            with parameters (ADR;TYPE=home:;;<street>)
             v = m.group(3).strip()
             # the check for a company or a public place reads at most 120 characters of the line before the label:
-            # unbounded, a long line of addresses took quadratic time (review of 0.6.24)
+            # unbounded, a long line of addresses took quadratic time (review of 0.6.24). Back to the start of a
+            # JSON object was measured in 0.6.25 and left out: it also finds the employer in a person's record
+            # (tests/test_company_address_window.py)
             line = _line_back(text, m.start())
             if (any(c.isdigit() for c in v) and "," in v and _HOUSE_RE.search(v)
                     and "://" not in v and not re.search(r"\d+\.\d+\.\d+|:\d{2,5}\b|[{}<>$()=_\[\]#@]", v)
