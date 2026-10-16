@@ -470,6 +470,66 @@ the company's name and its address, when a `Kunde:` label stands before the comp
 postcode stand on two lines (no address rule reads that form, so there is no company decision to follow). A VAT ID of
 another EU country and a billing ID have no rule here.
 
+### A password after its word in a sentence, 2026-10-16
+
+0.6.28 (`af5ef91`; 0.6.29 and 0.6.30 have the same detection) against the branch of this change. A field report from Codex in the
+ChatGPT app: "Messe-Account: <mail>, Passwort <value>." masked the address and kept the password in the clear, and
+"password: <value>." stored the value with the dot. Two label rules now read the password words of each label
+language after a copula (`label-password-after-word`) or after only a space, an arrow, a dash or a parenthesis
+(`label-password-after-space`), and a stop after an unquoted label value is cut from the span.
+
+A matrix of invented sentences: 16 label languages, 32 password words, 10 separators (`:`, ` :`, `=`, ` = `, a
+space, the copula of the language, `->`, ` – `, a quoted value after `:`, parentheses), 6 value shapes and 7 endings,
+11,970 cells per channel. A value in the shape of a credential (letters and digits, with signs, two words and a
+digit) is masked in 1,001 of the 1,995 cells of each shape in 0.6.28 and in 1,829 now, in both channels. A dictionary word and a PIN are
+masked in no new cell. In 0.6.28, 1,011 cells with a final `.` or `;` took it into the value (prompt channel); now
+none does.
+`!` stays part of a value (Winter2024!), and `?` stays part of a value after `:` or `=`, as the detection matrix of
+the tests needs. Per language, credential-shaped cells masked, prompt channel:
+
+| Language | 0.6.28 | Now | Cells |
+|---|---|---|---|
+| en | 590 | 831 | 1,050 |
+| de | 210 | 414 | 420 |
+| es | 210 | 414 | 630 |
+| fr, it, nl, nb, sv, fi, cs, th (each) | 105 to 106 | 207 | 210 |
+| pt, pl, da | 210 | 414 | 420 |
+| tr | 210 | 372 | 378 |
+| ko | 315 | 558 | 567 |
+
+The cells still missed are by design: `pass` and `pwd` with no `:` or `=` (a boarding pass, a test pass), Spanish
+`clave` alone (also a code or an id: `clave: CURP-ABCD010101`), a value with `)` before a `!`, and a passphrase of
+letters only.
+
+- 0 new hits on the 771 typed prompts and the 2,464 developer texts, also with all 16 label languages on. One prompt
+  that 0.6.28 already blocked (`--password=VALUE.`) keeps its hit without the dot.
+- 0 new hits and 0 lost hits on the 1,114 NO_HIT texts of `tests/fp_corpus.py`, the 367 texts of the PII corpus and
+  the 168 texts of the forms corpus, in both channels.
+- CredData (six runs: both channels, `--regions de` and `us`, and all rows): +1 credential (a SQL `CREATE USER …
+  PASSWORD '…'` line), 0 false alarms, in each run. `scripts/detection_fingerprint.py` (503,800 lines; the lines of
+  the recorded test inputs differ, because the new test module adds scans): 9 inputs change. The end of the value
+  moves before a final `;` or `.` on 7 CredData lines (3 credentials, and 4 rows labelled no credential that
+  0.6.28 already masked), the SQL line is new, and one HIT text of `tests/fp_corpus.py` gives the same span by the new rule.
+- Holdout values (v2 to v7): half D 197 → 196 and half C 219 → 219 (`us uk in`), 230 → 229 and 241 → 241 (`de`), all
+  in "tokens and passwords". False alarms on the 215 clean samples: 7 → 7 and 1 → 1.
+- Labelled PII datasets (`scripts/measure_datasets.py run`, both channels): only SECRET changes. Nemotron-PII: TP
+  2,840 → 3,276 (prompt channel; tool 2,851 → 3,287), FP 33 → 33. Gretel: TP 515 → 540, FP 92 → 101 (prompt; tool 530
+  → 555 and 98 → 107). The 9 new false hits by the labels of Gretel are passwords in the text that the labels miss or
+  cut at a Markdown escape (`wachtwoord is <value>`, `Passwort lautet: <value>`, `the password "<value>"`); one hit is
+  neutral. Mendeley and PIILO do not change.
+- Rule classes (`scripts/measure_rule_classes.py`): `label:keyword` has 18 rules (16 before) and alone masks one more
+  CredData credential and one more holdout value in each channel; no other class changes.
+- Time: the new rules check the value before the checks of the code around it. 200 KB of `password is `,
+  `Passwort `, `Passwort Ab1x ` and a JSON log of `"password changed"` take the time of 0.6.28 (0.9 to 1.9 s CPU on a
+  loaded machine).
+
+Left out after review (Fable for Gate A, as codex had no credits, and Opus for Gate B, two rounds each with their own
+inputs): in the space form, a value that starts with a sign, a run of English words (iPhone15), an id or a reference
+(PBE-3403, CVE-2024-3094, BSI-C5:2020), a rule (Länge>=12), a word and a short number (Version2), and the example of a
+weak password (Sommer2024!, Hunter2!) stay text; such a value needs a `:` or a copula. Still a hit after a password
+word and a space: a band (WLAN-5GHz), a room number (Raum3.12), a rule word with a number (2FA-Pflicht). A token in a
+URL query or after `Bearer` keeps a final dot, as in 0.6.28: these are no label rules.
+
 ## Labelled PII datasets, 2026-10-15
 
 Four public datasets with labelled personal data and secrets. "0.6.21" is tag `v0.6.21`; "0.6.20" is tag `v0.6.20`.

@@ -1,0 +1,13 @@
+# c1-the-stop-of-a-sentence-is-no-part-of-a-value: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-the-stop-of-a-sentence-is-no-part-of-a-value"
+control = "C1"
+statement = "After an unquoted value of a label (password: <value>. and password=<value>;), a final dot or semicolon before a space or the end of the text is no part of the value, so the store holds the real password."
+runner = ["tests/test_password_after_word.py::SentenceStopTests::test_the_stop_after_an_unquoted_value_is_no_part_of_it"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''                end -= len(secret) - cut
+                secret = secret[:cut]
+            take('''
+replace = '''                pass
+            take('''
