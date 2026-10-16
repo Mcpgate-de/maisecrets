@@ -18,6 +18,7 @@ keyed by the origin of that entry's URL. A token that was never noted stays text
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import http.client
 import json
@@ -51,7 +52,11 @@ MAX_NOTES_PER_ORIGIN = 5000
 LOCK_STALE = 10.0                     # the client's own lock rule for its config file
 
 DIR = HOME / "vault-refs"
-NOTES = DIR / "notes.json"            # profile -> origin -> key -> {"type", "seen": {MCP URL: seen_at}}
+NOTES = DIR / "notes.json"            # profile -> origin -> key -> {"type", "seen": {MCP URL: seen_at}, "sessions"}
+RELEASED = DIR / "released.json"      # session -> [{"name", "t"}]: the values a server gave, kept in the store 1 h
+NOTE_TTL = 24 * 3600                  # a token seen longer ago than this stays text
+RELEASE_WINDOW = 3600                 # a value a server gave is hunted in tool output this long, as a stored one
+MAX_SESSIONS_PER_NOTE = 20
 KEYS = DIR / "keys.json"              # profile -> origin -> {"kid", "created"}; never K
 ENDPOINTS = DIR / "endpoints.json"    # origin + path -> {"endpoint", "t"}
 
@@ -260,13 +265,39 @@ def ensure_headers(cfg: dict, backend) -> str | None:
                 keys[origin] = _key(backend, origin, create=True)
                 _remember_key(origin, kid_of(keys[origin]))
     ours = {v.get("kid") for v in _known_keys().values() if isinstance(v, dict)} | {kid_of(k) for k in keys.values()}
-    added: list[str] = []
-    removed: list[str] = []
+    backup = path.with_name(path.name + ".maisecrets-backup")
+    if _apply_headers(copy.deepcopy(first), keys, ours) == ([], []):
+        # nothing to change: no lock, and the backup of the last change goes (it holds every server's credentials)
+        try:
+            backup.unlink()
+        except OSError:
+            pass
+        return None
     with _ConfigLock(path):
         data = _read_json(path)
-        servers = data.get("mcpServers") if data is not None else None
-        if not isinstance(servers, dict):
+        if data is None:
             return None
+        added, removed = _apply_headers(data, keys, ours)
+        if not added and not removed:
+            return None
+        shutil.copy2(path, backup)
+        os.chmod(backup, 0o600)
+        _write_config(path, data)
+    parts = []
+    if added:
+        parts.append(f"maisecrets added its {HEADER} header to {len(added)} MCP server(s) in {path}, so a server that "
+                     "supports it can give values back to this computer")
+    if removed:
+        parts.append(f"maisecrets removed its {HEADER} header from {len(removed)} MCP server(s) in {path}")
+    return "; ".join(parts) + f" (backup until the next start: {backup.name}; client_header false turns it off)."
+
+
+def _apply_headers(data: dict, keys: dict, ours: set) -> tuple[list[str], list[str]]:
+    """Change the headers in data (the parsed config) in place; returns (added, removed) server names."""
+    added: list[str] = []
+    removed: list[str] = []
+    servers = data.get("mcpServers")
+    if isinstance(servers, dict):
         for name, spec in servers.items():
             if not isinstance(spec, dict):
                 continue
@@ -290,22 +321,14 @@ def ensure_headers(cfg: dict, backend) -> str | None:
                 del headers[have]
             headers[HEADER] = want
             added.append(name)
-        if not added and not removed:
-            return None
-        backup = path.with_name(path.name + ".maisecrets-backup")
-        shutil.copy2(path, backup)
-        os.chmod(backup, 0o600)
-        _write_config(path, data)
-    parts = []
-    if added:
-        parts.append(f"maisecrets added its {HEADER} header to {len(added)} MCP server(s) in {path}, so a server that "
-                     "supports it can give values back to this computer")
-    if removed:
-        parts.append(f"maisecrets removed its {HEADER} header from {len(removed)} MCP server(s) in {path}")
-    return "; ".join(parts) + f" (backup: {backup.name}; client_header false turns it off)."
+    return added, removed
 
 
 # --------------------------------------------------------------- the notes --
+def _off(cfg: dict | None) -> bool:
+    return cfg is not None and cfg.get("client_header", True) is False
+
+
 def note_result(payload: dict, cfg: dict) -> int:
     """PostToolUse: note each server-range token of an MCP result from a user-scope server with a key. The result
     stays as it is. Returns the number of tokens noted."""
@@ -334,31 +357,61 @@ def note_result(payload: dict, cfg: dict) -> int:
     origin = origin_of(url)
     if not origin or origin not in _known_keys():
         return 0
+    session = payload.get("session_id")
+    if not isinstance(session, str) or not session:
+        return 0
     seen = _now_iso()
     with _lock_for(DIR / ".lock"):
         data = _read_json(NOTES) or {}
         mine = data.setdefault(profile(), {}).setdefault(origin, {})
         for key, type_ in found.items():
             old = mine.pop(key, None)           # re-inserted last: the oldest notes are first
-            where = old.get("seen") if isinstance(old, dict) and isinstance(old.get("seen"), dict) else {}
+            old = old if isinstance(old, dict) else {}
+            where = old.get("seen") if isinstance(old.get("seen"), dict) else {}
+            sessions = [x for x in (old.get("sessions") or []) if isinstance(x, str) and x != session]
             # one entry per server URL: two servers on one origin can both send EMAIL_1, for two people
-            mine[key] = {"type": type_, "seen": {**where, url: seen}}
+            mine[key] = {"type": type_, "seen": {**where, url: seen},
+                         "sessions": (sessions + [session])[-MAX_SESSIONS_PER_NOTE:]}
         while len(mine) > MAX_NOTES_PER_ORIGIN:
             del mine[next(iter(mine))]
         atomic_write(NOTES, json.dumps(data, indent=1))
     return len(found)
 
 
-def _notes() -> dict:
-    """origin -> key -> note, of this client profile only."""
+def _seen_time(value: object) -> float | None:
+    import calendar
+    try:
+        return calendar.timegm(time.strptime(value, "%Y-%m-%dT%H:%M:%SZ")) if isinstance(value, str) else None
+    except ValueError:
+        return None
+
+
+def _notes(session: str | None) -> dict:
+    """origin -> key -> {"type", "seen": {url: seen_at}}: what this client profile saw in this session, in the last
+    NOTE_TTL. A token that another session saw stays text here, as a stored value of another session does (C4)."""
     mine = (_read_json(NOTES) or {}).get(profile())
-    return mine if isinstance(mine, dict) else {}
+    if not isinstance(mine, dict) or not session:
+        return {}
+    now = time.time()
+    out: dict = {}
+    for origin, notes in mine.items():
+        if not isinstance(notes, dict):
+            continue
+        for key, note in notes.items():
+            if not isinstance(note, dict) or session not in (note.get("sessions") or []):
+                continue
+            seen = note.get("seen") if isinstance(note.get("seen"), dict) else {}
+            fresh = {u: t for u, t in seen.items()
+                     if isinstance(u, str) and (_seen_time(t) or 0) > now - NOTE_TTL}
+            if fresh:
+                out.setdefault(origin, {})[key] = {"type": note.get("type"), "seen": fresh}
+    return out
 
 
-def noted(keys: list[str]) -> dict[str, list[str]]:
-    """key -> the origins that noted it in this profile, for the keys that any origin noted."""
+def noted(keys: list[str], session: str | None) -> dict[str, list[str]]:
+    """key -> the origins that noted it for this session, for the keys that any origin noted."""
     out: dict[str, list[str]] = {}
-    for origin, mine in _notes().items():
+    for origin, mine in _notes(session).items():
         if not isinstance(mine, dict):
             continue
         for key in keys:
@@ -367,12 +420,13 @@ def noted(keys: list[str]) -> dict[str, list[str]]:
     return out
 
 
-def find_noted(text: str) -> list[tuple[str, int, int]]:
-    """The server-range tokens in text that a server result noted; any other one stays text."""
+def find_noted(text: str, cfg: dict | None, session: str | None) -> list[tuple[str, int, int]]:
+    """The server-range tokens in text that a server result noted for this session; any other one stays text, and
+    every one does when client_header is off."""
     refs = find(text)
-    if not refs:
+    if not refs or _off(cfg):
         return []
-    known = noted(list(dict.fromkeys(k for k, _a, _b in refs)))
+    known = noted(list(dict.fromkeys(k for k, _a, _b in refs)), session)
     return [r for r in refs if r[0] in known]
 
 
@@ -383,6 +437,27 @@ def _cafile(cfg: dict) -> str | None:
 
 
 def _request(cfg: dict, method: str, url: str, headers: dict, body: bytes | None, deadline: float):
+    """_send in a thread that the caller waits for until the deadline only: a socket timeout bounds one read, not a
+    server that sends one header line every few seconds."""
+    import threading
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            box["ok"] = _send(cfg, method, url, headers, body, deadline)
+        except BaseException as exc:  # noqa: BLE001 - handed to the caller
+            box["err"] = exc
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(max(0.0, deadline - time.monotonic()) + 0.1)
+    if "ok" in box:
+        return box["ok"]
+    if "err" in box:
+        raise box["err"]
+    raise TimeoutError("the server took too long")
+
+
+def _send(cfg: dict, method: str, url: str, headers: dict, body: bytes | None, deadline: float):
     """One HTTPS request with no redirect and no proxy. Returns (status, headers, body) with the body cut above
     MAX_ANSWER_BYTES + 1, so a longer body is seen as too long."""
     parts = urlsplit(url)
@@ -488,12 +563,15 @@ def _why(origin: str, status: int, code: str | None, body: dict, headers: dict, 
     return f"{host} gave no usable answer (HTTP {status})"
 
 
-def resolve(cfg: dict, backend, keys: list[str], deadline: float | None = None) -> dict[str, tuple[str, str]]:
+def resolve(cfg: dict, backend, keys: list[str], session: str | None,
+            deadline: float | None = None) -> dict[str, tuple[str, str]]:
     """key -> (value, origin) for every key, or Refused. All or nothing, for every origin together."""
     if not keys:
         return {}
     deadline = deadline if deadline is not None else time.monotonic() + BUDGET
-    notes = _notes()
+    if _off(cfg):
+        raise Refused("vault references are off (client_header false)")
+    notes = _notes(session)
     where_from: dict[str, set] = {}
     for origin, mine in notes.items():
         for k in keys:
@@ -583,6 +661,59 @@ def probe(cfg: dict, backend, origin: str, url: str) -> str:
     return f"unknown (HTTP {status}{', ' + code if isinstance(code, str) and (status, code) in _CODES else ''})"
 
 
+def remember_released(backend, session: str | None, values: dict[str, tuple[str, str]]) -> None:
+    """The values a server gave for this session go into the store as one entry with no placeholder, for
+    RELEASE_WINDOW: a command that prints one, or an Edit result that shows it, is redacted to the server's token
+    like a value the session resolved (Fable review). Older entries leave the store here."""
+    if not session or not values:
+        return
+    now = time.time()
+    name = "_maisecrets_vrel_" + secrets.token_hex(12)
+    backend.put(name, json.dumps([[v, f"{OPEN}{k}{CLOSE}"] for k, (v, _o) in values.items()]),
+                label="maisecrets server values", comment="maisecrets: values a server gave, for one hour; "
+                                                          "not a placeholder value.")
+    with _lock_for(DIR / ".lock"):
+        data = _read_json(RELEASED) or {}
+        for sess, items in list(data.items()):
+            keep = []
+            for item in items if isinstance(items, list) else []:
+                if isinstance(item, dict) and now - float(item.get("t") or 0) < RELEASE_WINDOW:
+                    keep.append(item)
+                elif isinstance(item, dict) and isinstance(item.get("name"), str):
+                    try:
+                        backend.delete(item["name"])
+                    except (RuntimeError, OSError):
+                        keep.append(item)        # tried again at the next release
+            if keep:
+                data[sess] = keep
+            else:
+                del data[sess]
+        data.setdefault(session, []).append({"name": name, "t": now})
+        atomic_write(RELEASED, json.dumps(data, indent=1))
+
+
+def released(backend, session: str | None) -> list[tuple[str, str]]:
+    """(value, token) for every value a server gave this session in the last RELEASE_WINDOW."""
+    items = (_read_json(RELEASED) or {}).get(session or "") if session else None
+    out: list[tuple[str, str]] = []
+    now = time.time()
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict) or now - float(item.get("t") or 0) >= RELEASE_WINDOW:
+            continue
+        raw = backend.get(str(item.get("name")))
+        try:
+            pairs = json.loads(raw) if raw else []
+        except ValueError:
+            pairs = []
+        out.extend((v, t) for v, t in pairs if isinstance(v, str) and isinstance(t, str))
+    return out
+
+
+def has_released() -> bool:
+    data = _read_json(RELEASED)
+    return bool(data)
+
+
 def audit(values: dict[str, tuple[str, str]], session: str | None, tool: str, context: str) -> bool:
     """One audit line per value, as for a stored value; the key carries the host. False when it cannot be written."""
     try:
@@ -602,6 +733,9 @@ def status_lines(cfg: dict, backend, check: bool = True) -> list[str]:
     """One line per user-scope server of this profile."""
     if cfg.get("client_header", True) is False:
         return ["vault references: off (client_header false)"]
+    if HOME != _DEFAULT_HOME and not os.environ.get("CLAUDE_CONFIG_DIR"):
+        return ["vault references: off, because this maisecrets home is not the default one and CLAUDE_CONFIG_DIR "
+                "is not set"]
     servers = user_servers()
     if not servers:
         return ["vault references: no user-scope MCP server with an https URL"]

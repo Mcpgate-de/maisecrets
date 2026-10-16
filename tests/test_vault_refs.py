@@ -70,6 +70,7 @@ class Base(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         self.work = Path(tempfile.mkdtemp(prefix="vault-refs-work-"))
+        hooks._live_cache.clear()
         self.config({})
 
     def config(self, extra: dict) -> None:
@@ -179,9 +180,31 @@ class Offline(Base):
         self.result("a", f"x {tok('EMAIL_1')}", tool="Read")
         self.result("a", f"x {tok('EMAIL_2')}", source="project")
         self.result("unknown", f"x {tok('EMAIL_3')}")
-        self.assertEqual(vault_refs.noted(["EMAIL_1", "EMAIL_2", "EMAIL_3"]), {})
+        self.assertEqual(vault_refs.noted(["EMAIL_1", "EMAIL_2", "EMAIL_3"], "s1"), {})
         self.result("a", f"x {tok('EMAIL_4', 'ab•••')}")
-        self.assertEqual(vault_refs.noted(["EMAIL_4"]), {"EMAIL_4": ["https://one.example"]})
+        self.assertEqual(vault_refs.noted(["EMAIL_4"], "s1"), {"EMAIL_4": ["https://one.example"]})
+        self.assertEqual(vault_refs.noted(["EMAIL_4"], "s2"), {}, "another session did not see it")
+
+    def test_repair_keeps_the_key_of_each_server(self):
+        self.client_config({"a": {"url": "https://one.example/mcp"}})
+        self.start()
+        before = vault_refs._key(Vault().backend, "https://one.example", create=False)
+        Vault().repair()
+        self.assertEqual(vault_refs._key(Vault().backend, "https://one.example", create=False), before)
+
+    def test_the_backup_goes_at_the_next_start_that_changes_nothing(self):
+        self.client_config({"a": {"url": "https://one.example/mcp"}})
+        self.start()
+        backup = self.profile / ".claude.json.maisecrets-backup"
+        self.assertTrue(backup.exists())
+        self.assertIsNone(self.start())
+        self.assertFalse(backup.exists(), "it holds every server's credentials; it stays no longer than needed")
+
+    def test_a_start_that_changes_nothing_takes_no_lock(self):
+        self.client_config({"a": {"url": "https://one.example/mcp"}})
+        self.start()
+        (self.profile / ".claude.json.lock").mkdir()
+        self.assertIsNone(self.start(), "a fresh lock of the client: no wait, nothing to write")
 
     def test_port_0_is_no_origin(self):
         self.assertIsNone(vault_refs.origin_of("https://one.example:0/mcp"))
@@ -449,6 +472,53 @@ class Online(Base):
         out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", **CLAUDE,
                               "tool_input": {"command": f"echo {tok('NAME_3')}"}})
         self.assertIn("NUL", self.denied(out))
+
+    def test_a_value_echoed_by_a_command_is_redacted_to_the_server_token(self):
+        self.ready()
+        self.write(tok("NAME_2"))
+        hooks._live_cache.clear()                     # one hook process per call in the client; one process here
+        out = hooks._post_tool_guarded({"tool_name": "Bash", "session_id": "s1", **CLAUDE,
+                                        "tool_input": {"command": "cat out.csv"},
+                                        "tool_response": {"stdout": f"got:{VALUES[1]}\n", "stderr": ""}})
+        upd = out["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertNotIn(VALUES[1], json.dumps(upd))
+        self.assertIn(tok("NAME_2"), upd["stdout"])
+
+    def test_off_after_a_note_resolves_nothing(self):
+        self.ready()
+        self.config({"client_vault_cafile": self.srv.cert, "client_header": False})
+        self.assertEqual(self.write(tok("EMAIL_1")), {})
+        self.assertEqual(self.srv.resolved, [])
+
+    def test_a_token_another_session_saw_stays_text(self):
+        self.ready()
+        out = hooks.pre_tool({"tool_name": "Write", "session_id": "s2", **CLAUDE, "cwd": str(self.work),
+                              "tool_input": {"file_path": str(self.work / "o.csv"), "content": tok("EMAIL_1")}})
+        self.assertEqual(out, {})
+
+    def test_codex_gets_no_server_value(self):
+        self.ready()
+        out = hooks.pre_tool({"tool_name": "Write", "session_id": "s1", "turn_id": "t", "cwd": str(self.work),
+                              "tool_input": {"file_path": str(self.work / "o.csv"), "content": tok("EMAIL_1")}})
+        self.assertEqual(out, {})
+
+    @unittest.skipUnless(BASH and os.name != "nt", "bash on POSIX")
+    def test_an_ssh_form_with_a_server_token_is_refused(self):
+        self.ready()
+        for cmd in (f"scp backup.tgz host.example:{tok('NAME_2')}",
+                    f"GIT_SSH_COMMAND='ssh -i {tok('NAME_2')}' git fetch"):
+            with self.subTest(cmd):
+                out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", **CLAUDE,
+                                      "tool_input": {"command": cmd}})
+                self.denied(out)
+
+    def test_a_server_that_drips_its_headers_ends_inside_the_budget(self):
+        self.ready()
+        self.write(tok("EMAIL_1"))
+        self.srv.mode = "drip"
+        began = time.monotonic()
+        self.assertIn("could not be reached", self.denied(self.write(tok("EMAIL_1"))))
+        self.assertLess(time.monotonic() - began, 6.5)
 
     def test_p5_a_project_server_gets_no_header_and_its_tokens_do_not_resolve(self):
         self.client_config({}, projects={str(self.work): {"mcpServers": {"demo": {"url": self.srv.url + "/mcp"}}}})

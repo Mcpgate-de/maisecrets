@@ -1504,7 +1504,8 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
     # A word that only mentions ssh (ansible -c ssh, a path ending in /rsync) does not count (final
     # review and differential test against 0.5.2, 2026-09-28)
     segs = _segments(command, ctxs)
-    offsets = [a for _k, a, _b in find_refs(command) if ctxs[a] != "comment"]
+    # every token, a server's too (vault_refs.py): offsets of the stored-value form alone missed `scp f h:⟦NAME_2⟧`
+    offsets = [m.start() for m in _REF_RE.finditer(command) if ctxs[m.start()] != "comment"]
     if offsets and _SSH_VAR_RE.search(plain):
         return "a variable that names an ssh command would hand the value to ssh in a form that cannot be checked"
     with_value = {n for n, sg in enumerate(segs) if any(sg["start"] <= a < sg["end"] for a in offsets)}
@@ -2285,7 +2286,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
     from . import vault_refs
     # a token a server minted and a server result noted (vault_refs.py): it takes the same way as a stored value
-    server = [(k, a, b) for k, a, b in vault_refs.find_noted(command) if ctxs[a] != "comment"]
+    server = [] if client_of(payload) == "codex" else [
+        (k, a, b) for k, a, b in vault_refs.find_noted(command, cfg, payload.get("session_id")) if ctxs[a] != "comment"]
     refs = sorted(refs + server, key=lambda r: r[1])
     server_keys = list(dict.fromkeys(k for k, _a, _b in server))
     from . import settings as settings_mod
@@ -2508,12 +2510,14 @@ def _server_values(cfg: dict, vault: Vault, keys: list[str], session: str | None
     from . import vault_refs
     names = ", ".join(f"⟦{k}⟧" for k in keys)
     try:
-        got = vault_refs.resolve(cfg, vault.backend, keys)
+        got = vault_refs.resolve(cfg, vault.backend, keys, session)
     except vault_refs.Refused as exc:
         return {}, (f"maisecrets: cannot get the value of {names} from the server that sent it: {exc}. Do not ask "
                     "the user for the value; tell them this reason.")
     if not vault_refs.audit(got, session, tool, context):
         return {}, "maisecrets: the audit log could not be written, so no value is released. Tell the user."
+    # kept for an hour, so an echo of a value in a later tool result is redacted to the server's token
+    vault_refs.remember_released(vault.backend, session, got)
     return {k: v for k, (v, _origin) in got.items()}, None
 
 
@@ -2901,15 +2905,20 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     server: list[str] = []
 
     def collect_server(v: str) -> str:
-        server.extend(k for k, _a, _b in vault_refs.find_noted(v))
+        if client_of(payload) != "codex":         # Codex gets no header in this version, so no server value either
+            server.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
         return v
     _walk_strings(target, collect_server)
     server = list(dict.fromkeys(server))
     # a server value goes into the content only: in a path the server would choose the file, after the home check
     # above saw the token (Codex review, 2026-10-16)
     outside: list[str] = []
-    _walk_strings({k: v for k, v in target.items() if k not in _CONTENT_FIELDS},
-                  lambda v: (outside.extend(k for k, _a, _b in vault_refs.find_noted(v)), v)[1])
+
+    def collect_outside(v: str) -> str:
+        if client_of(payload) != "codex":
+            outside.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
+        return v
+    _walk_strings({k: v for k, v in target.items() if k not in _CONTENT_FIELDS}, collect_outside)
     if outside:
         return _deny(f"maisecrets: ⟦{outside[0]}⟧ came from a server and stands outside the content of {tool}, where "
                      "a server value cannot go. Nothing was written. Put it into the content only.")
@@ -3174,6 +3183,8 @@ def _resolved_values(vault: Vault, session: str | None, prompt: bool = False) ->
         value = found.get(key)
         if value:
             out.append((value, Entry.from_meta(vault._index["entries"][key]).ref))
+    from . import vault_refs
+    out.extend(vault_refs.released(vault.backend, session))     # the values a server gave this session
     return out
 
 
@@ -3700,6 +3711,9 @@ def _has_live(cfg: dict) -> bool:
         except ValueError:
             # a damaged index is not an empty one: the vault opens and fails, the output is withheld
             _live_cache["v"] = True
+        if not _live_cache["v"]:
+            from . import vault_refs
+            _live_cache["v"] = vault_refs.has_released()        # a value a server gave this hour
     return _live_cache["v"]
 
 

@@ -403,7 +403,9 @@ run".
   `pending/`, `.announced`, `destinations.json` (where each value went, never a
   value), `incidents.json` and `incident-marker.*` folders (maisecrets' own
   failures as closed codes), `vault-refs/` (the server tokens seen, the key ids
-  and the endpoint of each server; never a value or a key); one
+  and the endpoint of each server; never a value or a key; the values a server
+  gave stay in the store for one hour, so their echo in a tool result is
+  redacted); one
   `Client-Vault` header per user-scope MCP server in the client's
   `.claude.json`, with a backup beside it ("Vault references"); the value FIFOs in the per-user runtime or temp
   directory; the vault backend; on a blocked prompt the clipboard. With

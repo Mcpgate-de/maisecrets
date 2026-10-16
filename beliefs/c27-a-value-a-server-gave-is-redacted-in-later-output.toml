@@ -1,0 +1,10 @@
+# c27-a-value-a-server-gave-is-redacted-in-later-output: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-value-a-server-gave-is-redacted-in-later-output"
+control = "C27"
+statement = "A value that a server gave this session is hunted in tool output for an hour, like a value the session resolved, and becomes the server's token again."
+runner = ["tests/test_vault_refs.py::Online::test_a_value_echoed_by_a_command_is_redacted_to_the_server_token"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''    out.extend(vault_refs.released(vault.backend, session))     # the values a server gave this session'''
+replace = '''    pass'''

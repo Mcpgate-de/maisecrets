@@ -1,0 +1,10 @@
+# c27-the-ssh-forms-see-a-server-token: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-the-ssh-forms-see-a-server-token"
+control = "C27"
+statement = "scp, rsync with a remote shell and GIT_SSH_COMMAND are refused for a server token as for a stored value."
+runner = ["tests/test_vault_refs.py::Online::test_an_ssh_form_with_a_server_token_is_refused"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''    offsets = [m.start() for m in _REF_RE.finditer(command) if ctxs[m.start()] != "comment"]'''
+replace = '''    offsets = [a for _k, a, _b in find_refs(command) if ctxs[a] != "comment"]'''

@@ -147,6 +147,14 @@ class VaultServer:
                 if server.sleep:
                     time.sleep(server.sleep)
                 mode = server.mode
+                if mode == "drip":
+                    # one header line every 2 s: each read is short, the whole answer is not
+                    self.wfile.write(b"HTTP/1.1 200 OK\r\n")
+                    for i in range(10):
+                        self.wfile.flush()
+                        time.sleep(2)
+                        self.wfile.write(f"X-Drip-{i}: x\r\n".encode())
+                    return
                 if mode == "redirect":
                     return self._send(302, b"", "text/plain", {"Location": server.redirect_to})
                 if mode == "rate_limited":

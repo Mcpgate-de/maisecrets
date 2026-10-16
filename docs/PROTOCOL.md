@@ -187,9 +187,10 @@ missing from a 200 answer.
 ### 4.6 The client
 
 - **Noting.** After a tool result of an MCP server of user scope, the vault
-  notes each server-range token with the origin and the URL of that server
-  and the time, per client profile. A token that two servers sent is refused,
-  also when the two share an origin. The result does not change. A token in any other result (a file read,
+  notes each server-range token with the origin and the URL of that server,
+  the time and the session, per client profile. A token that two servers sent
+  is refused, also when the two share an origin. A token resolves only in a
+  session that saw it, and only for 24 hours after it was last seen. The result does not change. A token in any other result (a file read,
   a web page, a project-scope server) is not noted.
 - **Resolving.** Before a Write, Edit, MultiEdit, NotebookEdit or Bash call,
   the vault looks for noted tokens. It sends one request per origin and puts
@@ -206,6 +207,11 @@ missing from a 200 answer.
   resolve, ends within 5.5 s, inside the hook's 7 s watchdog.
 - **Audit.** One local audit line per value: the key with the server's host,
   the tool and the call. Never the value.
+- **Echo.** For one hour, the vault looks for each value a server gave in the
+  later tool results of that session, as it does for a stored value, and
+  puts the server's token back in its place. To do that it keeps the values
+  in its store for that hour.
+- **Off.** With the opt-out, no token is noted and no noted token resolves.
 
 ### 4.7 What this does not stop
 
