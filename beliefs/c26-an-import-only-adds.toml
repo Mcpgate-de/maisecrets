@@ -1,0 +1,10 @@
+# c26-an-import-only-adds: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-import-only-adds"
+control = "C26"
+statement = "A new import of the same file merges into its import and never drops a value the import held."
+runner = ["tests/test_values.py::Import::test_a_new_import_of_the_same_file_only_adds", "tests/test_values.py::SessionStart::test_an_edit_that_drops_lines_from_a_value_file_drops_no_value"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "            iid, head, values = mine[0], dict(mine[2]), list(mine[3])\n"
+replace = "            iid, head, values = mine[0], dict(mine[2]), []\n"

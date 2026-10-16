@@ -1,0 +1,10 @@
+# c26-a-command-cannot-remove-an-import: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-command-cannot-remove-an-import"
+control = "C26"
+statement = "A tool call that carries the removal of an import (the prompt for a nested client, the CLI form, the remover by name) is refused."
+runner = ["tests/test_values.py::Removal::test_a_tool_call_that_carries_the_removal_is_refused"]
+
+[proof]
+file = "maisecrets/value_files.py"
+find = "IN_A_COMMAND_RE = re.compile(\n"
+replace = "IN_A_COMMAND_RE = re.compile(r\"(?!)\" +\n"

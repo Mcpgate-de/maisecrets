@@ -1,0 +1,10 @@
+# c26-an-import-keeps-a-rule-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-import-keeps-a-rule-hit"
+control = "C26"
+statement = "A rule hit inside an imported value keeps its span and its kind (an email address stays resolvable); only the rest of the imported value is a hit of the import."
+runner = ["tests/test_values.py::Registry::test_an_imported_value_inside_a_rule_hit_keeps_the_rules_kind"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "            _term_rest(m, text, found, taken_starts, taken_ends)\n"
+replace = "            _claim(m, text, found, taken_starts, taken_ends)\n"

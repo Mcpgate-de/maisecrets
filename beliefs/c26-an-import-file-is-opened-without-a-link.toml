@@ -1,0 +1,10 @@
+# c26-an-import-file-is-opened-without-a-link: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-import-file-is-opened-without-a-link"
+control = "C26"
+statement = "An import file is opened without following a link, so a link swapped in after a check is refused at the open."
+runner = ["tests/test_values.py::FileChecks::test_a_symbolic_link_is_refused"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "        fd = os.open(str(path), os.O_RDONLY | getattr(os, \"O_NOFOLLOW\", 0) | getattr(os, \"O_NONBLOCK\", 0)\n"
+replace = "        fd = os.open(str(path), os.O_RDONLY | getattr(os, \"O_NONBLOCK\", 0)\n"

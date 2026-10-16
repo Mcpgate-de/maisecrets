@@ -1,0 +1,10 @@
+# c26-an-import-placeholder-is-never-resolved: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-import-placeholder-is-never-resolved"
+control = "C26"
+statement = "Mask only: an import placeholder in a command stays as written; maisecrets never puts the value back."
+runner = ["tests/test_values.py::Hooks::test_an_import_placeholder_is_never_put_into_a_command"]
+
+[proof]
+file = "maisecrets/value_files.py"
+find = "    return isinstance(kind, str) and kind.startswith((\"term:\", KIND_PREFIX))\n"
+replace = "    return isinstance(kind, str) and kind.startswith((\"term:\",))\n"
