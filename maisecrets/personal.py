@@ -196,7 +196,10 @@ def _company_window(text: str, lo: int, a_start: int, a_end: int, kind: str, com
     if head.count("(") > head.count(")"):
         return   # Max Muster (Beispiel GmbH), Gartenweg 3: the company in parentheses is a person's affiliation
     para = text.rfind("\n\n", max(0, f.start() - 160), f.start())
-    if _PERSON_KEY_RE.search(text, max(0, f.start() - 160) if para < 0 else para, a_start):
+    key_lo = max(0, f.start() - 160) if para < 0 else para
+    # a key ends in : or =; without one the long alternation need not run (a line of many company addresses)
+    if (text.find(":", key_lo, a_start) >= 0 or text.find("=", key_lo, a_start) >= 0) \
+            and _PERSON_KEY_RE.search(text, key_lo, a_start):
         return
     company.append((lo, f.start(), a_start, a_end, kind))
 
