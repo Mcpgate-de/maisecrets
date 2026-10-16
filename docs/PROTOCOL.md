@@ -85,7 +85,8 @@ value only to a key that the vault announced when the person logged in.
 
 - The vault makes a random 32-byte key `K` per server origin and per client
   profile. It stores `K` like a vault entry, but no placeholder names it, so no
-  tool call can resolve it. Two profiles, or two servers, never share a `K`.
+  tool call can resolve it. Two profiles, or two origins, never share a `K`;
+  two servers on one origin share it.
 - The vault announces `kid = SHA-256(K)` in a static header on the server's
   entry in the client configuration. The header is an RFC 9651 Dictionary:
 
@@ -186,8 +187,9 @@ missing from a 200 answer.
 ### 4.6 The client
 
 - **Noting.** After a tool result of an MCP server of user scope, the vault
-  notes each server-range token with the origin of that server's URL and the
-  time. The result does not change. A token in any other result (a file read,
+  notes each server-range token with the origin and the URL of that server
+  and the time, per client profile. A token that two servers sent is refused,
+  also when the two share an origin. The result does not change. A token in any other result (a file read,
   a web page, a project-scope server) is not noted.
 - **Resolving.** Before a Write, Edit, MultiEdit, NotebookEdit or Bash call,
   the vault looks for noted tokens. It sends one request per origin and puts

@@ -37,7 +37,9 @@ OPEN, CLOSE = "⟦", "⟧"
 SERVER_REF_RE = re.compile(rf"{OPEN}(?P<type>[A-Z][A-Z_]*?)_(?P<n>[1-9]\d{{0,8}})(?::[^{OPEN}{CLOSE}]{{0,80}})?{CLOSE}")
 _SERVER_KEY_RE = re.compile(r"[A-Z][A-Z_]*?_[1-9]\d{0,8}")
 HEADER = "Client-Vault"
-_HEADER_RE = re.compile(r"v=1, kid=:[A-Za-z0-9+/]{43}=:")
+_HEADER_RE = re.compile(r"v=1, kid=:(?P<kid>[A-Za-z0-9+/]{43}=):")
+# an ISO 8601 time as the server may send it; anything else is never shown (a server must not put text before the AI)
+_TIME_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?(?:Z|[+-]\d\d:\d\d)")
 MAX_REFS = 100
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_ANSWER_BYTES = 1024 * 1024
@@ -49,7 +51,7 @@ MAX_NOTES_PER_ORIGIN = 5000
 LOCK_STALE = 10.0                     # the client's own lock rule for its config file
 
 DIR = HOME / "vault-refs"
-NOTES = DIR / "notes.json"            # origin -> key -> {"type", "seen_at"}
+NOTES = DIR / "notes.json"            # profile -> origin -> key -> {"type", "seen": {MCP URL: seen_at}}
 KEYS = DIR / "keys.json"              # profile -> origin -> {"kid", "created"}; never K
 ENDPOINTS = DIR / "endpoints.json"    # origin + path -> {"endpoint", "t"}
 
@@ -93,6 +95,8 @@ def origin_of(url: object) -> str | None:
     except ValueError:
         return None
     if parts.scheme.lower() != "https" or not parts.hostname or parts.username or parts.password:
+        return None
+    if port == 0:
         return None
     host = parts.hostname.lower()
     if ":" in host:
@@ -179,6 +183,7 @@ class _ConfigLock:
         while True:
             try:
                 os.mkdir(self.dir, 0o700)
+                self.ino = os.stat(self.dir).st_ino
                 return self
             except FileExistsError:
                 try:
@@ -197,7 +202,8 @@ class _ConfigLock:
 
     def __exit__(self, *exc) -> None:
         try:
-            os.rmdir(self.dir)
+            if os.stat(self.dir).st_ino == self.ino:     # another process took it over as stale: it is theirs
+                os.rmdir(self.dir)
         except OSError:
             pass
 
@@ -227,61 +233,76 @@ def _header_key(headers: dict) -> str | None:
     return next((h for h in headers if isinstance(h, str) and h.lower() == HEADER.lower()), None)
 
 
+def _kid_in(value: object) -> str | None:
+    m = _HEADER_RE.fullmatch(value) if isinstance(value, str) else None
+    return m.group("kid") if m else None
+
+
 def ensure_headers(cfg: dict, backend) -> str | None:
     """At session start (Claude Code): the header on every user-scope server with an https URL, one key per origin.
-    With `client_header` false, a header of ours is taken out again. Only `mcpServers.<name>.headers.Client-Vault`
-    changes, under the client's lock, after a re-read; a file that is not valid JSON is not touched, and a backup
-    is written before the first change. Returns one line for the session-start message, or None."""
+    A header of ours (a kid this profile made) goes again from an entry that no longer qualifies, and from every
+    entry with `client_header` false; a header someone else wrote stays. Only `mcpServers.<name>.headers` changes.
+    The keys are made before the client's lock is taken, so the lock is held for a re-read and a write only; a file
+    that is not valid JSON is not touched, and a backup is written before a change. Returns one line for the
+    session-start message, or None."""
     if HOME != _DEFAULT_HOME and not os.environ.get("CLAUDE_CONFIG_DIR"):
         return None                         # a test home never changes the client config of the person
     path = claude_json()
-    if not path.is_file():
+    first = _read_json(path) if path.is_file() else None
+    if first is None:
         return None
     on = cfg.get("client_header", True) is not False
+    keys: dict[str, bytes] = {}
+    if on:
+        for url in user_servers(first).values():
+            origin = origin_of(url)
+            if origin not in keys:
+                keys[origin] = _key(backend, origin, create=True)
+                _remember_key(origin, kid_of(keys[origin]))
+    ours = {v.get("kid") for v in _known_keys().values() if isinstance(v, dict)} | {kid_of(k) for k in keys.values()}
+    added: list[str] = []
+    removed: list[str] = []
     with _ConfigLock(path):
         data = _read_json(path)
-        if data is None:
-            return None
-        servers = data.get("mcpServers")
+        servers = data.get("mcpServers") if data is not None else None
         if not isinstance(servers, dict):
             return None
-        changed: list[str] = []
-        for name, url in user_servers(data).items():
-            spec = servers[name]
+        for name, spec in servers.items():
+            if not isinstance(spec, dict):
+                continue
             headers = spec.get("headers")
             if headers is not None and not isinstance(headers, dict):
                 continue                       # a shape we do not know: left as it is
             have = _header_key(headers or {})
-            if not on:
-                if have and _HEADER_RE.fullmatch(str(headers[have])):
+            origin = origin_of(spec.get("url"))
+            want = header_value(keys[origin]) if origin in keys else None
+            if want is None:
+                if have and _kid_in(headers[have]) in ours:
                     del headers[have]
                     if not headers:
                         del spec["headers"]
-                    changed.append(name)
+                    removed.append(name)
                 continue
-            origin = origin_of(url)
-            k = _key(backend, origin, create=True)
-            _remember_key(origin, kid_of(k))
-            want = header_value(k)
             if have == HEADER and headers[have] == want:
                 continue
             headers = spec.setdefault("headers", {})
             if have:
                 del headers[have]
             headers[HEADER] = want
-            changed.append(name)
-        if not changed:
+            added.append(name)
+        if not added and not removed:
             return None
         backup = path.with_name(path.name + ".maisecrets-backup")
         shutil.copy2(path, backup)
         os.chmod(backup, 0o600)
         _write_config(path, data)
-    if not on:
-        return (f"maisecrets removed its {HEADER} header from {len(changed)} MCP server(s) in {path} "
-                "(client_header is off).")
-    return (f"maisecrets added its {HEADER} header to {len(changed)} MCP server(s) in {path}, so a server that "
-            f"supports it can give values back to this computer (backup: {backup.name}; client_header false "
-            "turns it off).")
+    parts = []
+    if added:
+        parts.append(f"maisecrets added its {HEADER} header to {len(added)} MCP server(s) in {path}, so a server that "
+                     "supports it can give values back to this computer")
+    if removed:
+        parts.append(f"maisecrets removed its {HEADER} header from {len(removed)} MCP server(s) in {path}")
+    return "; ".join(parts) + f" (backup: {backup.name}; client_header false turns it off)."
 
 
 # --------------------------------------------------------------- the notes --
@@ -309,31 +330,39 @@ def note_result(payload: dict, cfg: dict) -> int:
     walk(payload.get("tool_response"))
     if not found:
         return 0
-    origin = origin_of(user_servers().get(server["name"]))
+    url = user_servers().get(server["name"])
+    origin = origin_of(url)
     if not origin or origin not in _known_keys():
         return 0
     seen = _now_iso()
     with _lock_for(DIR / ".lock"):
         data = _read_json(NOTES) or {}
-        mine = data.setdefault(origin, {})
+        mine = data.setdefault(profile(), {}).setdefault(origin, {})
         for key, type_ in found.items():
-            mine.pop(key, None)                 # re-inserted last: the oldest notes are first
-            mine[key] = {"type": type_, "seen_at": seen}
+            old = mine.pop(key, None)           # re-inserted last: the oldest notes are first
+            where = old.get("seen") if isinstance(old, dict) and isinstance(old.get("seen"), dict) else {}
+            # one entry per server URL: two servers on one origin can both send EMAIL_1, for two people
+            mine[key] = {"type": type_, "seen": {**where, url: seen}}
         while len(mine) > MAX_NOTES_PER_ORIGIN:
             del mine[next(iter(mine))]
         atomic_write(NOTES, json.dumps(data, indent=1))
     return len(found)
 
 
+def _notes() -> dict:
+    """origin -> key -> note, of this client profile only."""
+    mine = (_read_json(NOTES) or {}).get(profile())
+    return mine if isinstance(mine, dict) else {}
+
+
 def noted(keys: list[str]) -> dict[str, list[str]]:
-    """key -> the origins that noted it, for the keys that any origin noted."""
-    data = _read_json(NOTES) or {}
+    """key -> the origins that noted it in this profile, for the keys that any origin noted."""
     out: dict[str, list[str]] = {}
-    for origin, mine in data.items():
+    for origin, mine in _notes().items():
         if not isinstance(mine, dict):
             continue
         for key in keys:
-            if key in mine:
+            if isinstance(mine.get(key), dict):
                 out.setdefault(key, []).append(origin)
     return out
 
@@ -361,7 +390,8 @@ def _request(cfg: dict, method: str, url: str, headers: dict, body: bytes | None
     if left <= 0.2:
         raise TimeoutError("no time left")
     ctx = ssl.create_default_context(cafile=_cafile(cfg))
-    conn = http.client.HTTPSConnection(parts.hostname, parts.port or 443, timeout=min(CONNECT_TIMEOUT, left),
+    conn = http.client.HTTPSConnection(parts.hostname, 443 if parts.port is None else parts.port,
+                                       timeout=min(CONNECT_TIMEOUT, left),
                                        context=ctx)
     try:
         conn.connect()
@@ -397,8 +427,16 @@ def endpoint(cfg: dict, url: str, deadline: float) -> str | None:
     cache_key = origin + path
     cache = _read_json(ENDPOINTS) or {}
     hit = cache.get(cache_key)
-    if isinstance(hit, dict) and time.time() - float(hit.get("t") or 0) < METADATA_TTL:
-        return hit.get("endpoint")
+    try:
+        age = time.time() - float(hit.get("t")) if isinstance(hit, dict) else -1.0
+    except (TypeError, ValueError):
+        age = -1.0
+    if 0 <= age < METADATA_TTL:
+        cached = hit.get("endpoint")
+        if cached is None:
+            return None
+        if isinstance(cached, str) and origin_of(cached) == origin:
+            return cached
     found = None
     try:
         status, headers, body = _request(cfg, "GET", f"{origin}/.well-known/oauth-protected-resource{path}",
@@ -422,6 +460,10 @@ _CODES = {(401, "unknown_key"), (403, "pending"), (403, "clock_skew"), (404, "un
           (429, "rate_limited"), (503, "disabled")}
 
 
+def _safe_time(value: object) -> str | None:
+    return value if isinstance(value, str) and _TIME_RE.fullmatch(value) else None
+
+
 def _why(origin: str, status: int, code: str | None, body: dict, headers: dict, keys: list[str]) -> str:
     host = urlsplit(origin).hostname
     names = ", ".join(f"⟦{k}⟧" for k in keys)
@@ -429,8 +471,7 @@ def _why(origin: str, status: int, code: str | None, body: dict, headers: dict, 
         return (f"{host} does not know this computer's key yet. It learns it at the next login to that server "
                 "from this client")
     if code == "pending":
-        when = body.get("activates_at")
-        when = when if isinstance(when, str) and re.fullmatch(r"[0-9T:.+Z-]{10,40}", when) else "later"
+        when = _safe_time(body.get("activates_at")) or "later"
         return (f"{host} links this computer from {when}, or earlier when the person confirms the notice the "
                 "server sent them")
     if code == "clock_skew":
@@ -452,24 +493,29 @@ def resolve(cfg: dict, backend, keys: list[str], deadline: float | None = None) 
     if not keys:
         return {}
     deadline = deadline if deadline is not None else time.monotonic() + BUDGET
-    origins = noted(keys)
-    ambiguous = [k for k in keys if len(origins.get(k, [])) > 1]
+    notes = _notes()
+    where_from: dict[str, set] = {}
+    for origin, mine in notes.items():
+        for k in keys:
+            note = mine.get(k) if isinstance(mine, dict) else None
+            seen = note.get("seen") if isinstance(note, dict) else None
+            for url in (seen if isinstance(seen, dict) else {}):
+                where_from.setdefault(k, set()).add((origin, url))
+    ambiguous = [k for k in keys if len(where_from.get(k, ())) > 1]
     if ambiguous:
         raise Refused(f"⟦{ambiguous[0]}⟧ came from more than one server, so maisecrets cannot tell which one to ask")
-    by_origin: dict[str, list[str]] = {}
+    groups: dict[tuple[str, str], list[str]] = {}
     for k in keys:
-        if k not in origins:
+        if k not in where_from:
             raise Refused(f"⟦{k}⟧ was not seen in a result of an MCP server")
-        by_origin.setdefault(origins[k][0], []).append(k)
-    notes = _read_json(NOTES) or {}
-    servers = {origin_of(u): u for u in user_servers().values()}
+        groups.setdefault(next(iter(where_from[k])), []).append(k)
+    current = set(user_servers().values())
     out: dict[str, tuple[str, str]] = {}
-    for origin, mine in by_origin.items():
+    for (origin, url), mine in groups.items():
         host = urlsplit(origin).hostname
         if len(mine) > MAX_REFS:
             raise Refused(f"{len(mine)} tokens of {host} in one call; at most {MAX_REFS} go in one call")
-        url = servers.get(origin)
-        if not url:
+        if url not in current or origin_of(url) != origin:
             raise Refused(f"{host} is no longer a user-scope MCP server of this client")
         k = _key(backend, origin, create=False)
         if k is None:
@@ -478,7 +524,7 @@ def resolve(cfg: dict, backend, keys: list[str], deadline: float | None = None) 
         if not where:
             raise Refused(f"{host} does not name a vault endpoint, or could not be reached")
         body = json.dumps({"now": _now_iso(),
-                           "refs": [{"key": key, "seen_at": notes[origin][key]["seen_at"]} for key in mine]}).encode()
+                           "refs": [{"key": key, "seen_at": notes[origin][key]["seen"][url]} for key in mine]}).encode()
         if len(body) > MAX_REQUEST_BYTES:
             raise Refused(f"the request to {host} is larger than 64 KB")
         try:
@@ -531,7 +577,7 @@ def probe(cfg: dict, backend, origin: str, url: str) -> str:
         return "linked"
     code = answer.get("error")
     if (status, code) == (403, "pending"):
-        return f"pending until {answer.get('activates_at', '?')}"
+        return f"pending until {_safe_time(answer.get('activates_at')) or 'a time the server did not give'}"
     if (status, code) == (401, "unknown_key"):
         return "not linked (the next login to that server links it)"
     return f"unknown (HTTP {status}{', ' + code if isinstance(code, str) and (status, code) in _CODES else ''})"

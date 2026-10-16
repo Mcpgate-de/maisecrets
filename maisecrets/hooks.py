@@ -2356,6 +2356,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     fetched, why = _server_values(cfg, vault, server_keys, session, "Bash", command)
     if why:
         return _deny(why + " The command did not run.")
+    if any("\0" in v for v in fetched.values()):
+        return _deny(f"maisecrets: a value of {keys} holds a NUL character, which a shell variable cannot carry. "
+                     "The command did not run. Write it into a file with Write instead.")
     # automatic: no ask of our own. confirm: an ask per command, or with ssh_approval "per-session" an
     # approved value runs without an ask and a first use asks once and gives its token to the serving
     # child, which confirms it when the approved command reads the value. After phase 1: a key
@@ -2655,6 +2658,8 @@ def _dict_keys(node: Any) -> list[str]:
 
 
 _FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+# the fields of a file tool that hold content; `edits` holds the old and new strings of MultiEdit, `command` the patch
+_CONTENT_FIELDS = ("content", "old_string", "new_string", "edits", "new_source", "command")
 # tools that read files by path; they carry no placeholder, but they could read the store itself
 _READ_TOOLS = ("Read", "Grep", "Glob", "LS", "NotebookRead")
 _PATH_FIELDS = ("file_path", "path", "notebook_path", "directory", "dir", "root", "cwd")
@@ -2900,6 +2905,14 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         return v
     _walk_strings(target, collect_server)
     server = list(dict.fromkeys(server))
+    # a server value goes into the content only: in a path the server would choose the file, after the home check
+    # above saw the token (Codex review, 2026-10-16)
+    outside: list[str] = []
+    _walk_strings({k: v for k, v in target.items() if k not in _CONTENT_FIELDS},
+                  lambda v: (outside.extend(k for k, _a, _b in vault_refs.find_noted(v)), v)[1])
+    if outside:
+        return _deny(f"maisecrets: ⟦{outside[0]}⟧ came from a server and stands outside the content of {tool}, where "
+                     "a server value cannot go. Nothing was written. Put it into the content only.")
     if not found and not server:
         return {}
     names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found + server))

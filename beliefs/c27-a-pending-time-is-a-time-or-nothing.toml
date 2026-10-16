@@ -1,0 +1,10 @@
+# c27-a-pending-time-is-a-time-or-nothing: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-pending-time-is-a-time-or-nothing"
+control = "C27"
+statement = "The activates_at of a pending answer reaches the hook reason and the status line only when it is an ISO 8601 time; a server cannot put its own text before the AI."
+runner = ["tests/test_vault_refs.py::Online::test_a_pending_time_that_is_no_time_is_never_shown"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''        when = _safe_time(body.get("activates_at")) or "later"'''
+replace = '''        when = body.get("activates_at") or "later"'''
