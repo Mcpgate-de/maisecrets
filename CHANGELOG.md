@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.6.30] - 2026-10-16
+
+### Fixes
+
+- on Windows the route for a document puts the value into a text file that the script reads (fa362f1)
+- on Windows a refusal names the route that puts a value into a document (5dc8af7)
+
 ## [0.6.29] - 2026-10-16
 
 ### Features
