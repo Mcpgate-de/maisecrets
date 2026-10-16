@@ -394,12 +394,20 @@ class Base64PemTests(unittest.TestCase):
     def test_a_large_yaml_is_fast_for_this_rule(self):
         r = random.Random(34)
         cert, key = b64_pem(r, "CERTIFICATE"), b64_pem(r)
-        for docs, n in ((k8s_secret(cert, cert) * 400, 0), (k8s_secret(key, cert) * 400, 400)):   # 1.8 MB each
-            t0 = time.process_time()
-            hits = detect.scan(docs, enabled={"private-key-base64"}, channel="tool")
-            with self.subTest(keys=n):
-                self.assertLess(time.process_time() - t0, 1.0)
-                self.assertEqual(len(hits), n)
+        # The growth from 50 to 400 documents is the check (linear: 8 times, quadratic: 64 times). A fixed
+        # 1.0 s failed on loaded CI runners at 1.07 to 1.21 s with no change to this rule (2026-10-16, four
+        # pipelines). 5 s only catches a hang.
+        for doc, per_doc in ((k8s_secret(cert, cert), 0), (k8s_secret(key, cert), 1)):
+            times = []
+            for count in (50, 400):                                                   # 400: 1.8 MB
+                t0 = time.process_time()
+                hits = detect.scan(doc * count, enabled={"private-key-base64"}, channel="tool")
+                times.append(time.process_time() - t0)
+                with self.subTest(keys=per_doc * count):
+                    self.assertEqual(len(hits), per_doc * count)
+            with self.subTest(keys=per_doc * 400):
+                self.assertLess(times[1], 16 * times[0] + 0.2)
+                self.assertLess(times[1], 5.0)
 
     def test_the_validator_decodes_only_the_head(self):
         r = random.Random(35)
