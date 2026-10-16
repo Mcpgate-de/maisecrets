@@ -1449,7 +1449,8 @@ Four sources, one scanner (`maisecrets/detect.py`):
   `resides at 77 Harbour Lane`, `wohnt in der Gartenstraße 3a`, `Indirizzo: Via Roma 12`; the same
   company check), and
   the cells of a CSV column for personal data (`address`, `dob`, `phone`, `ssn`, and a name or user
-  column beside one of them; an address or a phone cell only in a row that also names a person). A
+  column beside one of them; an address or a phone cell only in a row that also names a person), and
+  the same columns of a Markdown table (`| Name | Date of Birth | Phone Number |`). A
   typed prompt takes none of them: a hit blocks a prompt, and a
   person who types a name means to send it. Documentation names (`Erika Mustermann`, `John Doe`)
   stay text. `tests/fp_corpus_pii.py` holds 367 developer texts in these shapes that are no

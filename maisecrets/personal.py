@@ -369,6 +369,8 @@ _NOT_A_CELL = frozenset({"", "null", "none", "n/a", "na", "-", "true", "false", 
 
 
 _DATE_CELL_RE = re.compile(_DATE)
+_ADDRESS_WORD_RE = re.compile(r"[^\W\d_]{3}")
+_HOST_PORT_RE = re.compile(r":\d{2,5}(?!\d)|://|\b\d{1,3}(?:\.\d{1,3}){3}\b|\.(?:com|net|org|io|local|internal)\b")
 _NAME_CELL_RE = re.compile(_NAME_VALUE)
 
 
@@ -394,7 +396,10 @@ def _cell_ok(v: str, typ: str) -> bool:
     if typ == BIRTH_DATE:
         return bool(_DATE_CELL_RE.fullmatch(v)) and not _placeholder_digits(v, dates=True) and _past_year(v)
     if typ == ADDRESS:
-        return digits >= 1 and len(v) >= 8 and not _NOT_A_HOME_RE.search(v)
+        # two words, one of three letters, and no host, port or URL: 127.0.0.1:8080 and node1.acme.dev in a table of
+        # servers are no address
+        return digits >= 1 and len(v) >= 8 and " " in v.strip() and not _NOT_A_HOME_RE.search(v) \
+            and bool(_ADDRESS_WORD_RE.search(v)) and not _HOST_PORT_RE.search(v)
     if typ == NAME:
         return bool(_NAME_CELL_RE.fullmatch(v)) and _name_ok(v) and not _reads_as_words(v)
     if typ == USERNAME:
@@ -452,6 +457,79 @@ def _csv_hits(text: str) -> list:
     return out
 
 
+# ------------------------------------------------------------------------------------ Markdown table columns --
+# the CSV rule for a Markdown table: a header row of `|` cells, a row of dashes, then rows. Its column names hold
+# spaces (Date of Birth, Phone Number), so a name is folded to the CSV form (date_of_birth) and a few longer names map
+# to a column of the CSV rule. The same person check: a strong column, and a row that also names a person
+_MD_SEP_RE = re.compile(r"[ \t]*(?:\|[ \t]*)?:?-{3,}:?(?:[ \t]*\|[ \t]*:?-{3,}:?)*[ \t]*(?:\|[ \t]*)?")
+_MD_ALIASES = {"telephone_number": "telephone", "mobile_number": "mobile", "cell_phone": "cell",
+               "contact_number": "phone", "phone_no": "phone", "social_security_number": "ssn",
+               "national_id_number": "national_id", "tax_id_number": "tax_id", "medical_record_number": "mrn",
+               "passport_no": "passport_number", "home_address": "home_address", "street_address": "street_address",
+               "patient": "patient", "date_of_birth_dob": "date_of_birth", "dob_date_of_birth": "date_of_birth"}
+
+
+def _md_column(cell: str) -> str:
+    name = re.sub(r"[\s/.-]+", "_", cell.strip().strip("*_`'\" ").strip().lower()).strip("_")
+    name = re.sub(r"_?\(.*\)$", "", name)   # Date of Birth (YYYY-MM-DD)
+    return _MD_ALIASES.get(name, name)
+
+
+def _md_cells(line: str) -> list:
+    """(start, end) of each cell's text in a table row; the outer bars open and close the row."""
+    out = []
+    a = line.find("|") + 1 if line.lstrip().startswith("|") else 0
+    while a <= len(line):
+        b = line.find("|", a)
+        while b > 0 and line[b - 1] == "\\":
+            b = line.find("|", b + 1)
+        if b < 0:
+            if line[a:].strip():
+                out.append((a, len(line)))
+            break
+        out.append((a, b))
+        a = b + 1
+    return out
+
+
+def _md_table_hits(text: str) -> list:
+    out = []
+    lines = text.split("\n")
+    pos = [0]
+    for ln in lines:
+        pos.append(pos[-1] + len(ln) + 1)
+    li = 0
+    while li < len(lines) - 2:
+        hdr = lines[li]
+        if "|" not in hdr or len(hdr) > 2000 or len(lines[li + 1]) > 2000 \
+                or not _MD_SEP_RE.fullmatch(lines[li + 1]):
+            li += 1
+            continue
+        names = [_md_column(hdr[a:b]) for a, b in _md_cells(hdr)]
+        strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
+        cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
+        li += 2
+        rows = 0
+        while li < len(lines) and rows < _CSV_ROWS and "|" in lines[li] and lines[li].strip():
+            line = lines[li]
+            row: list = []
+            if cols:
+                for col, (a, b) in enumerate(_md_cells(line)):
+                    if col not in cols:
+                        continue
+                    v = line[a:b].strip().strip("*`")
+                    typ = _column_type(names[col])
+                    if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ):
+                        s0 = a + line[a:b].index(v)
+                        row.append((pos[li] + s0, pos[li] + s0 + len(v), "md-table-personal-column", typ, col))
+            # a date alone names no person in a table of releases (| Name | Birthday | Version |): a name or an id
+            if any(c in strong for *_, c in row) and any(h[3] in (NAME, ID_NUMBER) for h in row):
+                out += [h[:4] for h in row]
+            li += 1
+            rows += 1
+    return out
+
+
 class _lazy:
     """A regex compiled at its first use: a hook pays every millisecond of import, and most texts need no form."""
     __slots__ = ("_args", "_rx")
@@ -499,6 +577,7 @@ FORMS = {
     "phone-after-phone-word": (PHONE, "tool", "generic", "label"),
     "name-single-after-label": (NAME, "tool", "generic", "label"),
     "address-street-after-label": (ADDRESS, "tool", "generic", "label"),
+    "md-table-personal-column": ("COLUMN", "tool", "generic", "label"),
 }
 # a value that only names one: a variable, a template, an elision, a path
 _NOT_A_VALUE_START = ("$", "%", "{", "<", "(", "[", "*", "#", "/", ".")
@@ -1095,6 +1174,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                 out.append((m.start(g), m.end(g), "address-street-after-label", ADDRESS))
             else:
                 _company_window(text, line, m.start(g), m.end(g), "address-street-after-label", company)
+    if "md-table-personal-column" in want and "|" in text and "---" in text:
+        out += _md_table_hits(text)
     if "phone-wrapped-line" in want and "-\n" in text:
         for m in _PHONE_WRAP_RE.finditer(text):
             d = re.sub(r"\D", "", m.group())

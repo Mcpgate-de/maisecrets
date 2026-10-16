@@ -236,6 +236,40 @@ class StreetLineTests(Base):
         self.assertIn("address-street-after-label", {c[4] for c in company})
 
 
+# ----------------------------------------------------------------------- person columns of a Markdown table --
+class MarkdownTableTests(Base):
+    TABLE = ("| Name | Date of Birth | Phone Number |\n|------|---------------|--------------|\n"
+             "| " + NAME + " | " + BIRTH + " | " + US + " |\n")
+
+    def test_the_person_columns_of_a_markdown_table_mask_their_cells(self):
+        for value in (NAME, BIRTH, US):
+            self.assertMasked(self.TABLE, value)
+        self.assertIn("md-table-personal-column", {m.kind for m in scan(self.TABLE)})
+        # a table without the outer bars
+        self.assertMasked("Name | Phone\n--- | ---\n" + NAME + " | 030 846 " + "2291 |", NAME)
+        self.assertMasked("| Patient Name | MRN |\n|:---|---:|\n| " + NAME + " | " + "4821" + "3977 |", "4821" + "3977")
+
+    def test_a_table_without_a_person_stays_text(self):
+        for text in ("| Name | Version | Phone |\n|---|---|---|\n| maisecrets | 0.6.31 | n/a |",
+                     "| Depot | Address | Phone |\n|---|---|---|\n| North | 12 Harbour Lane, Dunmore | " + US + " |",
+                     "| Field | Type | Description |\n|---|---|---|\n| name | string | Full Name |",
+                     "| Name | Phone |\n|---|---|\n| Front Desk | " + US + " |",
+                     "| Name | Address |\n|---|---|\n| Zorvia Quent | 127.0.0.1:8080 |",
+                     "| Name | Address | DOB |\n|---|---|---|\n| Zorvia Quent | db.internal:5432 | n/a |",
+                     "| Name | Date of Birth |\n|---|---|\n| Release Candidate | 2024-05-01 |",
+                     "| Name | Address | DOB |\n| --- | --- | --- |\n| Orion Vega | node1.acme.dev | n/a |"):
+            with self.subTest(text=text):
+                self.assertText(text)
+        self.assertText("name,address\nZorvia Quent,127.0.0.1:8080\n")
+
+    def test_a_long_separator_line_stays_linear(self):
+        import time
+        for sep in ("|---|---" + " " * 1990 + "x", "|" + "---|" * 490 + "x", " " * 1990 + "x"):
+            t0 = time.process_time()
+            scan("| Name | DOB |\n" + sep + "\n| " + NAME + " | " + BIRTH + " |")
+            self.assertLess(time.process_time() - t0, 5)
+
+
 # ------------------------------------------------------------------------------- health, tax and national IDs --
 class HealthIdLabelTests(Base):
     def test_an_id_after_a_health_tax_or_national_label_is_masked(self):

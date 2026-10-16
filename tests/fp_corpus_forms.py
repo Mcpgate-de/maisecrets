@@ -267,9 +267,16 @@ FORMS_NO_HIT = [
     ("listen address rack", "Listen address: 8080 Rack Row"),
     ("hex address street", "address: 0x7fff Main Street"),
     ("hotel street address", "Hotel address: 1 Harbour Lane"),
+    # ---------------------------------------------------------------- Markdown tables without a person
+    ("md table of packages", "| Name | Version | Phone |\n|---|---|---|\n| maisecrets | 0.6.31 | n/a |"),
+    ("md table of depots", "| Depot | Address | Phone |\n|---|---|---|\n| North | 12 Harbour Lane, Dunmore | 0800 4829173 |"),
+    ("md table of fields", "| Field | Type | Description |\n|---|---|---|\n| name | string | Full Name |\n| dob | date | Date of Birth |"),
+    ("md table of desks", "| Name | Phone |\n|---|---|\n| Front Desk | 0800 4829173 |"),
+    ("md table of releases", "| Release | Date of Birth of the feature | SSN |\n|---|---|---|\n| v2 | 2024-05-01 | n/a |"),
 ]
 
 FORMS_HIT = [
+    ("markdown table of persons", "| Name | Date of Birth |\n|---|---|\n| " + "Dana Oka" + "for | " + "1984-03-" + "12 |", ["Dana Oka" + "for", "1984-03-" + "12"]),
     ("street line after a label", "Street address: 4821 Maple " + "Ridge Drive", ["4821 Maple " + "Ridge Drive"]),
     ("one first name", '{"first_name": "' + "Da" + "na" + '", "age": 41}', ["Da" + "na"]),
     ("phone after a phone word", "You can reach the tenant at " + "415-382-" + "9174" + " after 6 pm.", ["415-382-" + "9174"]),

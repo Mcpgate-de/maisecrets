@@ -1,0 +1,10 @@
+# c1-the-person-columns-of-a-markdown-table-are-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-the-person-columns-of-a-markdown-table-are-a-hit"
+control = "C1"
+statement = "In a tool result, the cells of a Markdown table column for personal data (Name, Date of Birth, Phone Number, Address, MRN, SSN, ...) are masked with the header and person checks of the CSV rule: a strong column, and a row that also names a person; a table of packages, depots, fields or desks stays text."
+runner = ["tests/test_personal_after_its_label.py::MarkdownTableTests::test_the_person_columns_of_a_markdown_table_mask_their_cells"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''        out += _md_table_hits(text)'''
+replace = '''        pass'''
