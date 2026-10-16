@@ -1,0 +1,10 @@
+# c27-the-sessions-of-a-note-are-per-url: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-the-sessions-of-a-note-are-per-url"
+control = "C27"
+statement = "A session resolves a key only through the server URL that showed it the key to that session, not through another URL on the same origin."
+runner = ["tests/test_vault_refs.py::Online::test_a_session_gets_only_the_url_that_showed_it_the_key"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''                     and isinstance(by_url.get(u), list) and session in by_url[u]}'''
+replace = '''                     and any(session in v for v in by_url.values() if isinstance(v, list))}'''

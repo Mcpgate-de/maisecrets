@@ -1,0 +1,10 @@
+# c27-the-header-carries-the-hash-of-k: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-the-header-carries-the-hash-of-k"
+control = "C27"
+statement = "The Client-Vault header carries SHA-256(K), never K: the server that bound the kid at login answers the resolve made with K."
+runner = ["tests/test_vault_refs.py::Online::test_p1_a_write_gets_the_values_and_the_reason_names_only_the_tokens"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''    return base64.b64encode(hashlib.sha256(k).digest()).decode()'''
+replace = '''    return base64.b64encode(k).decode()'''

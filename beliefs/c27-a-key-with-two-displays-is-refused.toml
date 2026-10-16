@@ -1,0 +1,10 @@
+# c27-a-key-with-two-displays-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-key-with-two-displays-is-refused"
+control = "C27"
+statement = "A key that one server URL showed with two different display parts is refused, because the server's mapping changed; its note goes, and a fresh sighting resolves."
+runner = ["tests/test_vault_refs.py::Online::test_a_key_seen_with_two_displays_is_refused_and_starts_again"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''                conflict.append(url)            # the same key with another display: the server's mapping changed'''
+replace = '''                pass'''

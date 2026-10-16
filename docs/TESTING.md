@@ -12,6 +12,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | repository scan | `python3 scripts/scan_tree.py` | GitLab `no_secrets_in_tree` |
 | Claude Code harness | `python3 harness/run.py` | GitLab `harness_claude`; locally `scripts/check_all.sh` (needs `claude`) |
 | Codex harness | `python3 harness/codex.py` | GitLab `harness_codex` |
+| vault references, end to end | `python3 harness/vault_refs_e2e.py` | by hand before a release that touches `maisecrets/vault_refs.py` (needs `claude` and `openssl`): the real client, a client profile of its own and the fake server of `harness/vault_server.py`; the resolve and the `client_header: false` run |
 | native store and clipboard | `MAISECRETS_NATIVE_BACKEND_TEST=1`, `MAISECRETS_NATIVE_CLIPBOARD_TEST=1` | GitHub runners only: they use the real keychain and clipboard |
 | Codex with a real model | `python3 harness/codex.py --real` | by hand: `mcp_text_field_rehydrate`, `allow_keeps_the_codex_sandbox`, `apply_patch_rehydrate` and `apply_patch_store_refused` need a real model (an MCP call, a sandbox and a patch the fake upstream cannot script) |
 | ssh through the sandbox | `MAISECRETS_E2E_HOST=<ssh alias> MAISECRETS_E2E_IP=<address> python3 harness/sandbox/ssh_e2e.py` | by hand before a release that touches the ssh route, on macOS and on Linux: the real Claude Code sandbox against a real host, under `rehydration: automatic` (cases 0a to 0f) and `confirm` |
@@ -19,7 +20,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | detector identity | `python3 scripts/detection_fingerprint.py --out FILE [--creddata DIR]` | by hand before and after a refactor of the rules: the full hit list on fixed inputs, compared with `cmp` (section "A refactor of the rules") |
 | Windows end to end | `GITLAB_COM_TOKEN=… python3 scripts/windows_e2e.py [--rev REV]` | by hand before a release that touches the hooks, the launchers or the harness: GitLab-hosted Windows runners of a separate project, in three shapes (PowerShell 7, Windows PowerShell 5.1, Git Bash). Each job runs `harness/windows/shell_probe.py` (which shell runs a hook, and the `hooks.json` command in each shell) and `harness/run.py` with the shell tool the client offers (`MAISECRETS_HARNESS_SHELL_TOOL`) |
 
-1890 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
+1964 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
 Windows and macOS in two places. In a merge request, the GitLab job `windows_macos` pushes the commit
 that `main` would get to the CI repository `Mcpgate-de/maisecrets-ci` and fails with the names of the
 failing tests. On `main`, it runs on the tested commit of a release (branch `ci`), unless a green run

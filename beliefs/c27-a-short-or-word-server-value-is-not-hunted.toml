@@ -1,0 +1,10 @@
+# c27-a-short-or-word-server-value-is-not-hunted: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-short-or-word-server-value-is-not-hunted"
+control = "C27"
+statement = "A server value under 8 characters or one that reads as a word is not hunted in later output, so a server cannot rewrite every output that holds a common word."
+runner = ["tests/test_vault_refs.py::Online::test_a_short_or_word_value_is_not_hunted_in_later_output"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''               if len(v) >= _EXACT_MIN_LEN and not detect.reads_as_word(v))'''
+replace = '''               )'''

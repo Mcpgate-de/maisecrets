@@ -1,0 +1,15 @@
+# c27-a-server-value-is-recorded-after-the-stored-values: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-server-value-is-recorded-after-the-stored-values"
+control = "C27"
+statement = "The audit line and the limiter record of a server value come after every stored value of the call passed; a call that a stored value fails leaves no server audit line."
+runner = ["tests/test_vault_refs.py::Online::test_a_stored_value_that_fails_leaves_no_server_audit_line"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''    got, why = _server_fetch(cfg, vault, server, session)
+    if why:
+        return _deny(why + " Nothing was written.")'''
+replace = '''    got, why = _server_fetch(cfg, vault, server, session)
+    _server_release(vault, got, session, tool, "early")
+    if why:
+        return _deny(why + " Nothing was written.")'''

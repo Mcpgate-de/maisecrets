@@ -1660,7 +1660,8 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
     # A word that only mentions ssh (ansible -c ssh, a path ending in /rsync) does not count (final
     # review and differential test against 0.5.2, 2026-09-28)
     segs = _segments(command, ctxs)
-    offsets = [a for _k, a, _b in find_refs(command) if ctxs[a] != "comment"]
+    # every token, a server's too (vault_refs.py): offsets of the stored-value form alone missed `scp f h:⟦NAME_2⟧`
+    offsets = [m.start() for m in _REF_RE.finditer(command) if ctxs[m.start()] != "comment"]
     if offsets and _SSH_VAR_RE.search(plain):
         return "a variable that names an ssh command would hand the value to ssh in a form that cannot be checked"
     with_value = {n for n, sg in enumerate(segs) if any(sg["start"] <= a < sg["end"] for a in offsets)}
@@ -2465,6 +2466,16 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                      "The command did not run.")
     ctxs = _shell_contexts(command)
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
+    from . import vault_refs
+    # a token a server minted and a server result noted (vault_refs.py): it takes the same way as a stored value
+    server = [] if client_of(payload) == "codex" else [
+        (k, a, b) for k, a, b in vault_refs.find_noted(command, cfg, payload.get("session_id")) if ctxs[a] != "comment"]
+    refs = sorted(refs + server, key=lambda r: r[1])
+    server_keys = list(dict.fromkeys(k for k, _a, _b in server))
+    elsewhere = [] if client_of(payload) == "codex" else vault_refs.noted_elsewhere(command, cfg,
+                                                                                   payload.get("session_id"))
+    if elsewhere:
+        return _deny(_elsewhere_reason(elsewhere) + " The command did not run.")
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
@@ -2489,6 +2500,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         return _ask(dict(tool_input), _consent_text(consent))
     keys = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(k for k, _a, _b in refs))
     windows = platform.system() == "Windows"
+    if windows and server_keys:
+        return _deny(f"maisecrets: {keys} come from a server, and a value from a server cannot go into a shell "
+                     "command on Windows yet. The command did not run. Write it into a file with Write instead.")
     if windows and client_of(payload) == "codex":
         return _deny(f"maisecrets: {keys} cannot be placed in a shell command on Codex for Windows "
                      "(PowerShell quoting is not supported). The command did not run. Use the value "
@@ -2527,9 +2541,23 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     vault = Vault(cfg)
     session = payload.get("session_id")
     uniq = list(dict.fromkeys(k for k, _a, _b in refs))
-    failed = _precheck(vault, uniq, session)
+    failed = _precheck(vault, [k for k in uniq if k not in server_keys], session,
+                       extra=_server_limit_keys(server_keys, session))
     if failed:
         return _deny(_deny_reason(failed))
+    # before any stored value is recorded: a server that refuses leaves no audit line of ours
+    got, why = _server_fetch(cfg, vault, server_keys, session)
+    if why:
+        return _deny(why + " The command did not run.")
+    guarded = [k for k, (v, _o) in got.items() if _names_a_guarded_file(v, str(payload.get("cwd") or ""))]
+    if guarded:
+        # the check above saw the token, not the path: a server must not choose a file of the store or a config
+        return _deny(f"maisecrets: the value of ⟦{guarded[0]}⟧ names a file of maisecrets, of ssh or of the client "
+                     "configuration, which a value from a server may not choose. The command did not run.")
+    if any("\0" in v for v, _o in got.values()):
+        return _deny(f"maisecrets: a value of {keys} holds a NUL character, which a shell variable cannot carry. "
+                     "The command did not run. Write it into a file with Write instead.")
+    fetched = {k: v for k, (v, _o) in got.items()}
     # automatic: no ask of our own. confirm: an ask per command, or with ssh_approval "per-session" an
     # approved value runs without an ask and a first use asks once and gives its token to the serving
     # child, which confirms it when the approved command reads the value. After phase 1: a key
@@ -2547,6 +2575,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     # phase 2: record (audit line, limiter) and fetch; a failure here has recorded nothing served
     plan: dict[str, tuple[str | None, str | None]] = {}    # key -> (nonce, value)
     for key in uniq:
+        if key in fetched:
+            plan[key] = (None, fetched[key])
+            continue
         if windows:
             nonce, status = vault.grant(key, session, "Bash", command)
             if status != "ok":
@@ -2563,7 +2594,12 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
             plan[key] = (None, value)
     if failed:
         return _deny(_deny_reason(failed))
-    _note_destinations(cfg, payload, "Bash", tool_input, list(plan), ssh_command=command)
+    # the audit line and the limiter record of a server value only after every check and every stored value
+    # passed (Gate A and Gate B review)
+    _released, why = _server_release(vault, got, session, "Bash", command)
+    if why:
+        return _deny(why + " The command did not run.")
+    _note_destinations(cfg, payload, "Bash", tool_input, [k for k in plan if k not in fetched], ssh_command=command)
     # phase 3: serve and rewrite
     prelude: list[str] = []
     var_by_key: dict[str, str] = {}
@@ -2659,12 +2695,114 @@ def shlex_quote(s: str) -> str:
     return shlex.quote(s)
 
 
-def _precheck(vault: Vault, keys: list[str], session: str | None) -> list[str]:
+def _precheck(vault: Vault, keys: list[str], session: str | None, extra: list[str] = ()) -> list[str]:
     """Phase 1 of every resolve: the session rule, then the limiter, for every key, before anything is
     recorded or served. A call with a good key and a bad one wrote the good key's audit line before
-    the refusal on MCP and file tools (review, 2026-09-29); Bash had this order already."""
+    the refusal on MCP and file tools (review, 2026-09-29); Bash had this order already. `extra` are the
+    server keys of the call (`KEY@host`): no session rule of the store, but the same limiter (C7)."""
     failed = [f"{k} ({st})" for k in keys for st in [vault.status(k, session)] if st != "ok"]
-    return failed or vault._limit_all(keys, session)
+    return failed or vault._limit_all(list(keys) + list(extra), session)
+
+
+def _server_limit_keys(keys: list[str], session: str | None) -> list[str]:
+    """The limiter names of server keys: `KEY@host` of the origin that noted the key for this session."""
+    if not keys:
+        return []
+    from urllib.parse import urlsplit
+
+    from . import vault_refs
+    origins = vault_refs.noted(keys, session)
+    return [f"{k}@{urlsplit(origins[k][0]).hostname}" for k in keys if origins.get(k)]
+
+
+def _server_fetch(cfg: dict, vault: Vault, keys: list[str], session: str | None) -> tuple[dict, str | None]:
+    """Vault references (vault_refs.py): the values of server-range tokens, from the server that minted them, all
+    or none. Returns (key -> (value, origin), None) or ({}, the reason without a value). Nothing is recorded yet."""
+    if not keys:
+        return {}, None
+    from . import vault_refs
+    names = ", ".join(f"⟦{k}⟧" for k in keys)
+    try:
+        return vault_refs.resolve(cfg, vault.backend, keys, session), None
+    except vault_refs.Refused as exc:
+        return {}, (f"maisecrets: cannot get the value of {names} from the server that sent it: {exc}. Do not ask "
+                    "the user for the value; tell them this reason.")
+
+
+def _server_release(vault: Vault, got: dict, session: str | None, tool: str, context: str) -> tuple[dict, str | None]:
+    """The limiter record and one audit line per server value (`KEY@host`, rotated like every audit line), then
+    the values are kept for an hour, so an echo in a later tool result is redacted to the server's token.
+    Returns (key -> value, None) or ({}, the reason)."""
+    if not got:
+        return {}, None
+    from urllib.parse import urlsplit
+
+    from . import vault_refs
+    status = vault.record_server([f"{k}@{urlsplit(o).hostname}" for k, (_v, o) in got.items()], session, tool,
+                                 context)
+    if status != "ok":
+        return {}, (f"maisecrets: no value from the server is released ({status}). Tell the user.")
+    vault_refs.remember_released(vault.backend, session, got)
+    return {k: v for k, (v, _origin) in got.items()}, None
+
+
+def _elsewhere_reason(keys: list[str]) -> str:
+    names = ", ".join(f"⟦{k}⟧" for k in keys)
+    return (f"maisecrets: {names} came from a server in another session or more than 24 hours ago, so it does not "
+            "resolve here. Call that server's tool again in this session and use the new tokens.")
+
+
+def _names_a_guarded_file(value: str, cwd: str) -> bool:
+    """A value that, used as a path, names the maisecrets home, a store file, an ssh config, the client config or a
+    file in the client's config folder (its settings hold the hooks). Each piece is a path too: `--config=PATH`,
+    `@PATH`, `file://PATH` (Gate A review)."""
+    if "\0" in value:
+        return False                            # refused on its own below, with its own reason
+    if len(value) > 4096 or _holds_a_guarded_folder(value):
+        return True                             # too long to judge, or a guarded folder anywhere (a path with a space)
+    pieces = {value.strip()}
+    for part in re.split(r"[\s=,;]+", value):
+        part = part.strip("'\"")
+        for lead in ("file://", "@"):
+            if part.startswith(lead):
+                part = part[len(lead):]
+        if part:
+            pieces.add(part)
+    return any(_a_guarded_path(v, cwd) for v in pieces if v)
+
+
+def _holds_a_guarded_folder(value: str) -> bool:
+    """The value holds the spelling of a guarded folder anywhere: a path with a space splits into pieces that each
+    look harmless (Gate A review, round 2)."""
+    from . import vault_refs
+    from .vault import HOME
+    home = os.path.expanduser("~")
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude")
+    spellings = {str(HOME), os.path.realpath(str(HOME)), config_dir, os.path.realpath(config_dir),
+                 str(vault_refs.claude_json()), os.path.join(home, ".ssh"), "~/.ssh", "~/.claude", "~/.maisecrets",
+                 "$HOME/.ssh", "${HOME}/.ssh", "$HOME/.claude", "${HOME}/.claude"}
+    return any(sp and sp in value for sp in spellings)
+
+
+def _a_guarded_path(v: str, cwd: str) -> bool:
+    from . import vault_refs
+    try:
+        if _store_read_match(v) or _in_the_home(v, cwd) or _is_ssh_config_path(v, cwd):
+            return True
+        full = v if os.path.isabs(os.path.expanduser(v)) else os.path.join(cwd or os.getcwd(), v)
+        real = os.path.realpath(os.path.expanduser(full))
+        config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+        folder = os.path.realpath(config_dir)
+        return real == os.path.realpath(str(vault_refs.claude_json())) or real == folder \
+            or real.startswith(folder + os.sep)
+    except (OSError, ValueError):
+        return True                             # a path we cannot judge is refused, not served
+
+
+def _all_refs(text: str, values: dict) -> list[tuple[str, int, int]]:
+    """The stored-value placeholders of text, and the server-range tokens that have a value in `values`."""
+    from . import vault_refs
+    return find_refs(text) + [r for r in vault_refs.find(text) if r[0] in values]
 
 
 def _deny_reason(failed: list[str]) -> str:
@@ -2802,6 +2940,8 @@ def _dict_keys(node: Any) -> list[str]:
 
 
 _FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+# the fields of a file tool that hold content; `edits` holds the old and new strings of MultiEdit, `command` the patch
+_CONTENT_FIELDS = ("content", "old_string", "new_string", "edits", "new_source", "command")
 # tools that read files by path; they carry no placeholder, but they could read the store itself
 _READ_TOOLS = ("Read", "Grep", "Glob", "LS", "NotebookRead")
 _PATH_FIELDS = ("file_path", "path", "notebook_path", "directory", "dir", "root", "cwd")
@@ -3039,18 +3179,51 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     # a Codex patch resolves in its text only; another field keeps a placeholder as text
     target = {"command": tool_input["command"]} if tool == "apply_patch" else tool_input
     _walk_strings(target, collect)
-    if not found:
+    from . import vault_refs
+    server: list[str] = []
+
+    def collect_server(v: str) -> str:
+        if client_of(payload) != "codex":         # Codex gets no header in this version, so no server value either
+            server.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
+        return v
+    _walk_strings(target, collect_server)
+    server = list(dict.fromkeys(server))
+    elsewhere: list[str] = []
+
+    def collect_elsewhere(v: str) -> str:
+        if client_of(payload) != "codex":
+            elsewhere.extend(vault_refs.noted_elsewhere(v, cfg, payload.get("session_id")))
+        return v
+    _walk_strings(target, collect_elsewhere)
+    if elsewhere:
+        return _deny(_elsewhere_reason(list(dict.fromkeys(elsewhere))) + " Nothing was written.")
+    # a server value goes into the content only: in a path the server would choose the file, after the home check
+    # above saw the token (Codex review, 2026-10-16)
+    outside: list[str] = []
+
+    def collect_outside(v: str) -> str:
+        if client_of(payload) != "codex":
+            outside.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
+        return v
+    _walk_strings({k: v for k, v in target.items() if k not in _CONTENT_FIELDS}, collect_outside)
+    if outside:
+        return _deny(f"maisecrets: ⟦{outside[0]}⟧ came from a server and stands outside the content of {tool}, where "
+                     "a server value cannot go. Nothing was written. Put it into the content only.")
+    if not found and not server:
         return {}
-    names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found))
+    names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found + server))
     stop = rehydration.refusal(cfg, "file", client_of(payload), names, "Nothing was written.")
     if stop:
         return _deny(stop)
     vault = Vault(cfg)
     session = payload.get("session_id")
     values: dict[str, str] = {}
-    failed = _precheck(vault, list(dict.fromkeys(found)), session)
+    failed = _precheck(vault, list(dict.fromkeys(found)), session, extra=_server_limit_keys(server, session))
     if failed:
         return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
+    got, why = _server_fetch(cfg, vault, server, session)
+    if why:
+        return _deny(why + " Nothing was written.")
     for key in dict.fromkeys(found):
         status = vault.record_resolve(key, session, tool, f"{tool} {path}")
         if status == "ok":
@@ -3061,11 +3234,15 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         values[key] = value
     if failed:
         return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
+    fetched, why = _server_release(vault, got, session, tool, f"{tool} {path}")
+    if why:
+        return _deny(why + " Nothing was written.")
     _note_destinations(cfg, payload, tool, tool_input, list(values))
+    values.update(fetched)
 
     def substitute(v: str) -> str:
         out = v
-        for key, start, end in sorted(find_refs(v), key=lambda r: r[1], reverse=True):
+        for key, start, end in sorted(_all_refs(v, values), key=lambda r: r[1], reverse=True):
             out = out[:start] + values[key] + out[end:]
         return out
     if cfg.get("scrub_transcript", True):
@@ -3096,7 +3273,7 @@ def _resolve_patch(patch: str, values: dict) -> tuple:
     (None, why)."""
     out = []
     for line in patch.split("\n"):
-        refs = find_refs(line)
+        refs = _all_refs(line, values)
         if not refs:
             out.append(line)
             continue
@@ -3237,9 +3414,9 @@ def _pre_tool(payload: dict) -> dict:
     if tool in _FILE_TOOLS or tool == "apply_patch":
         return _pre_file_tool(payload, cfg, tool, tool_input, str(payload.get("cwd") or ""))
     if tool.startswith("mcp__"):
-        # Gateway servers too: the deposit path (gateway resolves ⟦REF⟧ itself, PROTOCOL §4) is not
-        # built; until it is, a placeholder that reaches a gateway action is parsed as text
-        # (measured 2026-09-26 with gmail_create_draft: the recipient was split at the colon).
+        # Every server, a gateway too: a placeholder that reaches a gateway action unresolved is parsed as
+        # text (measured 2026-09-26 with gmail_create_draft: the recipient was split at the colon). A token
+        # of the server range stays as it is; it goes back to the server that minted it (PROTOCOL §4).
         return _pre_mcp(payload, cfg, tool, tool_input)
     return {}
 
@@ -3360,6 +3537,11 @@ def _resolved_values(vault: Vault, session: str | None, prompt: bool = False) ->
         value = found.get(key)
         if value:
             out.append((value, Entry.from_meta(vault._index["entries"][key]).ref))
+    from . import vault_refs
+    # the values a server gave this session; a short one or a word would rewrite every output that holds it
+    # ("true" inside "construed"), so those are not hunted (Fable review, round 3)
+    out.extend((v, t) for v, t in vault_refs.released(vault.backend, session)
+               if len(v) >= _EXACT_MIN_LEN and not detect.reads_as_word(v))
     return out
 
 
@@ -3892,6 +4074,9 @@ def _has_live(cfg: dict) -> bool:
         except ValueError:
             # a damaged index is not an empty one: the vault opens and fails, the output is withheld
             _live_cache["v"] = True
+        if not _live_cache["v"]:
+            from . import vault_refs
+            _live_cache["v"] = vault_refs.has_released()        # a value a server gave this hour
     return _live_cache["v"]
 
 
@@ -3972,6 +4157,34 @@ def _post_tool_guarded(payload: dict) -> dict:
     """Claude Code ignores exit 2 from PostToolUse: the raw output would reach the model. So a
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
     _commit_destinations(payload)    # first: the call ran even when the redaction below fails; and before the hint
+    notice = None
+    try:
+        if str(payload.get("tool_name") or "").startswith("mcp__"):     # no config read for any other tool
+            from . import vault_refs
+            cfg = load_config()
+            # before the redaction, from the result as the server sent it; the result itself does not change. Codex
+            # gets no header in this version, so its results start no discovery
+            backend = None if client_of(payload) == "codex" else Vault(cfg).backend
+            _count, notice = vault_refs.note_result(payload, cfg, backend)
+    except Exception as exc:  # noqa: BLE001 - a token not noted stays text; the output must not be withheld for it
+        _debug(f"post-tool vault-refs: {type(exc).__name__}")
+    result = _post_tool_guarded_rest(payload)
+    if notice:
+        try:
+            return _with_notice(result, notice)
+        except Exception as exc:  # noqa: BLE001 - a notice that fails must not change the output
+            _debug(f"post-tool notice: {type(exc).__name__}")
+    return result
+
+
+def _with_notice(result: dict, notice: str) -> dict:
+    """The one-time notice of vault references (vault_refs.enable) for the person, next to any message of the hook."""
+    out = dict(result or {})
+    out["systemMessage"] = (out["systemMessage"] + " " + notice) if out.get("systemMessage") else notice
+    return out
+
+
+def _post_tool_guarded_rest(payload: dict) -> dict:
     try:
         result = post_tool(payload)
     except ConfigError as exc:

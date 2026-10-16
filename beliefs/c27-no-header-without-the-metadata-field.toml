@@ -1,0 +1,10 @@
+# c27-no-header-without-the-metadata-field: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-no-header-without-the-metadata-field"
+control = "C27"
+statement = "A server whose metadata names no client_vault_endpoint gets no header and no notice."
+runner = ["tests/test_vault_refs.py::Online::test_trigger_no_field_no_header_no_notice_and_it_is_remembered"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''        if not endpoint(cfg, url, time.monotonic() + DISCOVERY_BUDGET):'''
+replace = '''        if False:'''

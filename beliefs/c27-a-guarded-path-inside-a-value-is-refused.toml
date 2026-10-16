@@ -1,0 +1,10 @@
+# c27-a-guarded-path-inside-a-value-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-guarded-path-inside-a-value-is-refused"
+control = "C27"
+statement = "A server value whose piece (--name=PATH, @PATH, file://PATH) names a guarded file, or a file in the client's config folder, does not go into Bash, and leaves no audit line."
+runner = ["tests/test_vault_refs.py::Online::test_a_guarded_path_inside_a_server_value_does_not_go_into_bash"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = '''    return any(_a_guarded_path(v, cwd) for v in pieces if v)'''
+replace = '''    return _a_guarded_path(value.strip(), cwd)'''

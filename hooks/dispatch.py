@@ -282,6 +282,16 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
                     out["systemMessage"] = out.get("systemMessage", "") + " " + note
             else:
                 guard_off_by_policy()
+    # vault references: the key header on the user-scope MCP servers of this profile (maisecrets/vault_refs.py)
+    if not codex:
+        try:
+            from maisecrets import vault_refs  # noqa: E402
+            vault_refs.prune_released(v.backend)   # the values a server gave leave the store after their hour
+            note = vault_refs.ensure_headers(cfg, v.backend)
+        except Exception:  # noqa: BLE001 - never stops a session start; without the header no value comes back
+            note = None
+        if note:
+            out["systemMessage"] = out.get("systemMessage", "") + " " + note
     # the model reads what a placeholder is once per session, before it meets one
     out["hookSpecificOutput"] = {"hookEventName": "SessionStart", "additionalContext": PRIMER}
     print(json.dumps(out))

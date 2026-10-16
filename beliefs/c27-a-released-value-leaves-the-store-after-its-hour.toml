@@ -1,0 +1,10 @@
+# c27-a-released-value-leaves-the-store-after-its-hour: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-released-value-leaves-the-store-after-its-hour"
+control = "C27"
+statement = "A value a server gave leaves the store after its hour, also when no later release comes."
+runner = ["tests/test_vault_refs.py::Online::test_a_released_value_leaves_the_store_after_its_hour"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''    return any(not _expired(i, now) for items in data.values() for i in (items if isinstance(items, list) else []))'''
+replace = '''    return bool(data)'''

@@ -1,0 +1,10 @@
+# c27-a-cached-endpoint-passes-the-origin-check-again: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-cached-endpoint-passes-the-origin-check-again"
+control = "C27"
+statement = "An endpoint read from the cache is used only when it is still an https URL on the MCP URL's origin; a cache entry that names another host is fetched again."
+runner = ["tests/test_vault_refs.py::Online::test_a_cached_endpoint_on_another_host_is_not_used"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''        if isinstance(cached, str) and origin_of(cached) == origin:'''
+replace = '''        if isinstance(cached, str):'''

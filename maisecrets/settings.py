@@ -22,10 +22,10 @@ DISCOVERABLE = ("ssh_consent", "ssh_autonomous_hosts", "secret_destinations", "r
                 "read_image")
 ADVANCED = ("ssh_host_groups", "ssh_approval", "resolve_in_files", "ssh_via_sandbox", "block_at_mentions",
             "rewrite_prompts", "scrub_transcript", "strip_hidden_characters", "regions", "ttl_seconds",
-            "renew_on_use", "tips", "shortcut", "guard", "pass_agent_reports", "gateway_servers",
+            "renew_on_use", "tips", "shortcut", "guard", "pass_agent_reports", "gateway_servers", "client_header",
             "max_keys_per_session", "max_resolves_per_hour", "rule_dirs", "clean_dirs")
 INTERNAL = ("backend", "allow_plaintext_store", "report_url", "max_ttl_seconds", "max_new_entries_per_result",
-            "keep_purged_days", "audit_max_lines", "pii_regions")
+            "keep_purged_days", "audit_max_lines", "pii_regions", "client_vault_cafile")
 
 TITLE = {
     "ssh_consent": "SSH consent", "ssh_autonomous_hosts": "Autonomous hosts",
@@ -37,7 +37,7 @@ TITLE = {
     "regions": "Regions", "ttl_seconds": "Lifetime of a value", "renew_on_use": "Renew on use",
     "tips": "Tips and hints",
     "shortcut": "/ms shortcut", "guard": "Update guard", "pass_agent_reports": "Subagent reports",
-    "gateway_servers": "Gateway servers", "rule_dirs": "Rule folders",
+    "gateway_servers": "Gateway servers", "client_header": "Vault references", "rule_dirs": "Rule folders",
     "read_pdf": "PDFs the AI reads", "read_image": "Images the AI reads", "clean_dirs": "Folders with clean files",
     "max_keys_per_session": "Values per session and hour", "max_resolves_per_hour": "Uses per hour",
 }
@@ -66,6 +66,8 @@ MEANING = {
     "guard": "A synced install registers the guard outside its folder.",
     "pass_agent_reports": "A subagent's report is not blocked.",
     "gateway_servers": "MCP servers that resolve placeholders themselves.",
+    "client_header": "A key header on your own MCP server once it sends a masked value and supports it, so it "
+                     "can give its masked values back into your files and commands, never to the AI.",
     "max_keys_per_session": "How many different stored values one session may use in an hour. A brake against "
                             "sending all values out at once; normal work stays far below it.",
     "max_resolves_per_hour": "How often stored values may go into tool calls in an hour, all sessions together.",
@@ -84,6 +86,7 @@ GROUPS = (("Protection", ("ssh_consent", "ssh_autonomous_hosts", "secret_destina
           ("Using stored values", ("rehydration",)),
           ("PDFs and images", ("read_pdf", "read_image")))
 ADVANCED_GROUPS = (("Stored values", ("ttl_seconds", "renew_on_use", "resolve_in_files", "gateway_servers",
+                                      "client_header",
                                       "max_keys_per_session", "max_resolves_per_hour")),
                    ("ssh", ("ssh_host_groups", "ssh_approval", "ssh_via_sandbox")),
                    ("Prompts and tool output", ("block_at_mentions", "rewrite_prompts", "scrub_transcript",
@@ -320,7 +323,8 @@ def _too_wide(folder, cwd: str) -> str:
 # a new autonomous host. A key in NEUTRAL changes no protection (a test holds that every key is in one of them).
 PROTECTIVE_BOOL = {"ssh_consent": True, "block_at_mentions": True, "scrub_transcript": True,
                    "strip_hidden_characters": True, "guard": True, "resolve_in_files": False,
-                   "ssh_via_sandbox": False, "renew_on_use": False, "pass_agent_reports": False}
+                   "ssh_via_sandbox": False, "renew_on_use": False, "pass_agent_reports": False,
+                   "client_header": False}
 STRICTER_LAST = {"rehydration": ("automatic", "confirm", "block"), "ssh_approval": ("per-session", "per-command"),
                  "secret_destinations": ("off", "observe"),
                  # convert sends masked text only; ask can send the whole file

@@ -1,0 +1,11 @@
+# c27-a-token-the-model-sent-is-never-noted-later: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-token-the-model-sent-is-never-noted-later"
+control = "C27"
+statement = "A server key that the model sent to an origin in any call of the last 24 hours is not noted from a later result of that origin; a server that stores text and shows it again cannot give a planted key a sighting."
+runner = ["tests/test_vault_refs.py::Online::test_a_token_the_model_planted_is_no_sighting_in_a_later_call",
+          "tests/test_vault_refs.py::Online::test_a_token_the_model_planted_before_the_server_is_enabled_is_no_sighting"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''        for k in [k for k in found if k in sent]:'''
+replace = '''        for k in []:'''

@@ -420,7 +420,7 @@ class HookTests(unittest.TestCase):
                               "tool_input": {"command": "echo ⟦SECRET_c42⟧"}})
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_pre_tool_resolves_gateway_tool_arguments_until_the_deposit_path_exists(self):
+    def test_pre_tool_resolves_a_stored_value_in_gateway_tool_arguments(self):
         e = Vault().put("max@example.org", "EMAIL", "email", session="s1")
         out = hooks.pre_tool({"tool_name": "mcp__example-gateway__x", "tool_input": {"q": e.ref}, "session_id": "s1",
                               **CLAUDE,

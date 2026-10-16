@@ -1,0 +1,10 @@
+# c27-a-token-never-noted-stays-text: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-token-never-noted-stays-text"
+control = "C27"
+statement = "A server-range token that no user-scope server result noted stays text in a Write: nothing is asked of any server, so a client that never noted a token behaves as before."
+runner = ["tests/test_vault_refs.py::Offline::test_a_token_never_noted_stays_text"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''    return [r for r in refs if r[0] in known]'''
+replace = '''    return refs'''

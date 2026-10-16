@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 33 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 10 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 214 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 247 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -402,7 +402,12 @@ run".
   fingerprints, never a value), `audit.log`, `events.log`, `hooks.log`,
   `pending/`, `.announced`, `destinations.json` (where each value went, never a
   value), `incidents.json` and `incident-marker.*` folders (maisecrets' own
-  failures as closed codes); the value FIFOs in the per-user runtime or temp
+  failures as closed codes), `vault-refs/` (the server tokens seen, the key ids
+  and the endpoint of each server; never a value or a key; the values a server
+  gave stay in the store for one hour, so their echo in a tool result is
+  redacted); one
+  `Client-Vault` header per user-scope MCP server in the client's
+  `.claude.json`, with a backup beside it ("Vault references"); the value FIFOs in the per-user runtime or temp
   directory; the vault backend; on a blocked prompt the clipboard. With
   `scrub_transcript` on, it masks the raw value inside the client's transcript
   file named in the hook payload, in place, because the client writes the
@@ -412,7 +417,12 @@ run".
   `git log`) and `redact_copy.py` (writes a new file) when the model follows it; neither
   opens a network connection.
 - Sends and fetches: no telemetry and no download. These connections start from
-  a command you run, and nothing else in the plugin opens one:
+  a command you run or a call that needs a value, and nothing else in the plugin
+  opens one:
+  - a Write, Edit or Bash call with a token that one of your own MCP servers
+    sent: one metadata request and one resolve request to that server's own
+    origin, over https, with this computer's key for that server ("Vault
+    references"); `/maisecrets:status` makes the same request with no token;
   - the ssh route of your own ssh command inside the Claude Code sandbox
     (`hooks/proxy_connect.py`, the `ProxyCommand` of that ssh call): one
     CONNECT through Claude Code's local sandbox proxy (localhost only) to the
@@ -1826,6 +1836,47 @@ session start, or right after `/maisecrets:term add` or `remove`, so a tool
 hook only loads it. Measured for 100,000 two-word entries (3.8 MB): 1.4 s on
 Python 3.14, 2.2 s on Python 3.9. If a team list changes while a session
 runs, the next hook builds the index.
+
+## Vault references
+
+An MCP server can mask a value in its result, for example a customer's e-mail
+address, with a token such as `⟦EMAIL_1:ma•••@example.org⟧` (no `c`: the server
+made it). Without maisecrets, a file that the AI writes from that result holds
+the token. With maisecrets and a server that supports vault references, the
+file holds the real value, and the AI still sees only the token.
+
+How it works (`docs/PROTOCOL.md` section 4):
+
+1. Until an MCP server that you added yourself (user scope, an `https` URL)
+   sends such a token, maisecrets asks no server and writes nothing into
+   `~/.claude.json`. Tokens in a Bash output, a file, a web page or from a
+   server in a project's `.mcp.json` start nothing.
+2. With the first token of that server, maisecrets asks it once for its
+   metadata (RFC 9728). Only if the server names a vault endpoint there does
+   maisecrets make a random key for it and write a `Client-Vault` header with
+   a hash of that key into that server's entry in `~/.claude.json`. It
+   changes nothing else in the file and keeps a backup beside it. You see a
+   notice once. Claude Code reads the header at its next start (measured with
+   2.1.301), so the values come from then on. A server without the field
+   gets no header, and maisecrets asks it again at the earliest after an
+   hour.
+3. The server links the hash to you when you log in to it. A link that comes
+   from an existing login waits a day and the server tells you; you can
+   confirm it earlier or revoke it there. After a tool result of that server,
+   maisecrets notes the tokens in it. The result does not change.
+4. When the AI writes such a token into a file or a Bash command, maisecrets
+   asks the server for the values, with the key, and puts them in. It gets all
+   values or none; if the server refuses, the call is denied with the reason.
+
+`/maisecrets:status` shows the link state of each server. `client_header:
+false` (`/maisecrets:settings client_header false`) turns it off and removes
+the header again. A server behind a
+certificate authority of your own needs `client_vault_cafile`. Codex gets no
+header in this version, and on Windows a Bash command gets no server value.
+
+The limit: an AI agent that runs as your user can read the key from the
+store, as it can read any stored value. The server's cap, its audit and the
+revoke bound that. A value written into a file is plain text there.
 
 ## Known gaps (measured or documented)
 
