@@ -3,7 +3,8 @@
 Each lock of the path waited up to its own 6 s, one after the other: the post-tool hook could pass its 16 s watchdog,
 which then withheld the output of the tool, and the resolve of a pre-tool call could pass its 7 s watchdog. The lock of
 vault references (vault-refs/.lock) and the lock of the store (.lock) are held here by another process, and the lock's
-own wait is set to 30 s, so a wait that the deadline does not bound shows as 30 s.
+own wait is set to 30 s. Each step must end within 2 s after its deadline (3 s for a whole hook): a wait that ends at
+any other bound fails (Gate A review).
 
 Run: python3 -m unittest tests.test_vault_refs_deadline -v
 """
@@ -76,10 +77,10 @@ class PostToolTests(Base):
             started = time.monotonic()
             with self.assertRaises(LockTimeout):
                 vault_refs.note_result(self.result_payload(), load_config(), Vault(load_config()).backend)
-            self.assertLess(time.monotonic() - started, 10.0, "the wait of 30 s was not bounded")
+            self.assertLess(time.monotonic() - started, 0.5 + 2.0, "the wait ends at the budget of 0.5 s")
             started = time.monotonic()
             out = hooks._post_tool_guarded(self.result_payload())
-            self.assertLess(time.monotonic() - started, 10.0)
+            self.assertLess(time.monotonic() - started, 0.5 + 3.0, "the budget, then the redaction of a short output")
         self.assertNotIn("withheld", json.dumps(out), "the output of the tool passes")
         self.assertFalse(vault_refs.NOTES.exists(), "the token stays text")
 
@@ -89,7 +90,7 @@ class PostToolTests(Base):
         started = time.monotonic()
         with self.assertRaises(LockTimeout):
             vault_refs.note_result(self.result_payload(), load_config(), None, deadline=time.monotonic() + 0.3)
-        self.assertLess(time.monotonic() - started, 10.0)
+        self.assertLess(time.monotonic() - started, 0.3 + 2.0, "the wait ends near the deadline of 0.3 s")
 
 
 class ResolveTests(Base):
@@ -98,13 +99,13 @@ class ResolveTests(Base):
         started = time.monotonic()
         with self.assertRaises(LockTimeout):
             vault_refs.forget(["EMAIL_1"], ORIGIN, URL, time.monotonic() + 0.3)
-        self.assertLess(time.monotonic() - started, 10.0)
+        self.assertLess(time.monotonic() - started, 0.3 + 2.0, "the wait ends near the deadline of 0.3 s")
         backend = Vault(load_config()).backend
         self.hold(HOME / ".lock")
         started = time.monotonic()
         with self.assertRaises(LockTimeout):
             vault_refs._key(backend, ORIGIN, False, deadline=time.monotonic() + 0.3)
-        self.assertLess(time.monotonic() - started, 10.0)
+        self.assertLess(time.monotonic() - started, 0.3 + 2.0, "the wait ends near the deadline of 0.3 s")
 
     def test_a_busy_lock_costs_the_answer_of_the_metadata_only_its_cache(self):
         meta = json.dumps({"client_vault_endpoint": ORIGIN + "/vault/resolve"}).encode()
@@ -112,7 +113,7 @@ class ResolveTests(Base):
         with mock.patch.object(vault_refs, "_request", return_value=(200, {"content-type": "application/json"}, meta)):
             started = time.monotonic()
             got = vault_refs.endpoint({}, URL, time.monotonic() + 0.3)
-            self.assertLess(time.monotonic() - started, 10.0)
+            self.assertLess(time.monotonic() - started, 0.3 + 2.0, "the wait ends near the deadline of 0.3 s")
         self.assertEqual(got, ORIGIN + "/vault/resolve")
         self.assertFalse(vault_refs.ENDPOINTS.exists(), "not cached: the next call asks again")
 
@@ -126,7 +127,7 @@ class ResolveTests(Base):
         started = time.monotonic()
         with self.assertRaises(LockTimeout):
             vault_refs.resolve({}, backend, ["EMAIL_1"], "s1", deadline=time.monotonic() + 0.3)
-        self.assertLess(time.monotonic() - started, 10.0)
+        self.assertLess(time.monotonic() - started, 0.3 + 2.0, "the wait ends near the deadline of 0.3 s")
 
 
 class BoundedLockTests(Base):

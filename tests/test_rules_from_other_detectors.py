@@ -333,7 +333,7 @@ class CryptoSecretTests(unittest.TestCase):
         words = list(checksums.bip39_words())
         r = random.Random(11)
         run = [r.choice(words) for _ in range(20000)]
-        assert_linear(self, detect.scan, lambda n: " ".join(run[:n]), 20000)
+        assert_linear(self, detect.scan, lambda n: " ".join(run[:n]), 20000, hang=7.0)
 
 
 # ----------------------------------------------------- Switzerland, Austria --
@@ -559,7 +559,7 @@ class TokenFormatTests(unittest.TestCase):
         for rule_id, gen in TOKENS.items():
             tok, _ = gen(r)
             with self.subTest(rule=rule_id):             # each copy one short of a match; not a fixed 3 s of CPU
-                assert_linear(self, found, lambda n, tok=tok: (tok[:-2] + "  ") * n, 1000)
+                assert_linear(self, found, lambda n, tok=tok: (tok[:-2] + "  ") * n, 1000, hang=7.0)
 
     def test_a_telegram_token_of_the_documented_short_form_is_found(self):
         r = random.Random(18)

@@ -5,9 +5,13 @@ with no change to the code (2026-10-16). The claim of such a test is about how t
 the square of its text, or a wait per key. So a check here measures CPU time, not wall time (other processes slow the
 clock, not the call), takes the fastest of a few calls of the small case (other processes only ever add to it), and
 compares two sizes: 8 times the input is 8 times the time when the call is linear and 64 times when it is quadratic.
-A generous absolute bound stays, and it only catches a hang.
+An absolute bound stays for a cost that does not grow with the input: 3 s of CPU by default (the calls here take at
+most 115 ms at load 35), the 7 s watchdog of a hook for a call that takes over 0.5 s (Gate A review: a fixed cost of
+8 s passed a check of the growth alone).
 
-The slack holds several steps of the CPU clock of Windows (about 15.6 ms each).
+The slack holds several steps of the CPU clock of Windows (about 15.6 ms each). So a check of the growth sees a part
+that grows with the square of the input only when that part takes about as long as the linear work at the large size,
+and at least some 70 ms (Gate B review). The fixed bounds before were not stricter.
 """
 from __future__ import annotations
 
@@ -27,7 +31,7 @@ def cpu_best(fn, *args, runs: int = 3) -> float:
     return best
 
 
-def assert_linear(case, run, make, n: int, *, hang: float = 10.0, slack: float = SLACK) -> tuple:
+def assert_linear(case, run, make, n: int, *, hang: float = 3.0, slack: float = SLACK) -> tuple:
     """run(make(n // 8)), the fastest of three, then run(make(n)), the faster of two: at most 16 times plus the slack
     (linear is 8 times, quadratic 64 times), and below `hang` seconds. The inputs are made before the clock starts, and
     one call of run(make(64)) before the first measurement compiles what a first call compiles. One call of the large

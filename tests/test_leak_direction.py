@@ -226,7 +226,7 @@ class CodexSecondReviewTests(unittest.TestCase):
             self.assertFalse(hooks.agent_report({"transcript_path": "/tmp/x.jsonl", **CLAUDE}, text))
             times.append(cpu_best(hooks.agent_report, {"transcript_path": "/tmp/x.jsonl", **CLAUDE}, text))
         self.assertLess(times[1], 16 * times[0] + SLACK)
-        self.assertLess(times[1], 10.0)
+        self.assertLess(times[1], 3.0)
 
 
 class FinalReviewTests(unittest.TestCase):
@@ -326,7 +326,7 @@ class LastCommitReviewTests(unittest.TestCase):
         small = cpu_best(detect.scan, line(62))
         big = cpu_best(detect.scan, line(500), runs=1)
         self.assertLess(big, 16 * small + 0.2, f"{small:.2f} s, then {big:.2f} s for 8 times the text")
-        self.assertLess(big, 60.0)
+        self.assertLess(big, 30.0)             # 11.8 s of CPU at load 100: a hang or a fixed cost of seconds
 
     def test_an_earlier_label_outside_the_window_still_counts(self):
         prose = "the contoso mail relay of the contoso tenant " * 5

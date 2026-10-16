@@ -295,8 +295,8 @@ class ClassifierMatrixTests(unittest.TestCase):
     def test_a_long_command_is_answered_in_time(self):
         # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3). The
         # growth from an eighth of the longest command that is read to the whole is the check (linear: 8 times,
-        # quadratic: 64 times), the best of three calls each. A fixed 2 s failed under load (2026-10-16); 5 s only
-        # catches a hang
+        # quadratic: 64 times), the best of three calls each. A fixed 2 s failed under load (2026-10-16); 3 s of CPU
+        # catches a hang or a fixed cost
         n = ssh_consent.MAX_READ - 100
         shapes = (lambda m: "ssh web1 'x'; : " + "A" * m, lambda m: "ssh web1 x; " + ".ss" * (m // 3),
                   lambda m: "ssh web1 x " + ">" * m, lambda m: "ssh web1 '" + "dd " * (m // 3) + "'",
@@ -305,7 +305,7 @@ class ClassifierMatrixTests(unittest.TestCase):
             with self.subTest(shape(8)):
                 small, whole = (cpu_best(kind, shape(m)) for m in (n // 8, n))
                 self.assertLess(whole, 16 * small + SLACK, f"{small * 1000:.1f} ms, then {whole * 1000:.1f} ms")
-                self.assertLess(whole, 5.0)
+                self.assertLess(whole, 3.0)
         big = "ssh web1 'mkfs.ext4 /dev/sda'; : " + "A" * 100_000
         self.assertEqual(kind(big), "unknown", "over the cap a command that names ssh is not read")
         # over the cap nothing is read: 12 times the text, about the same time
