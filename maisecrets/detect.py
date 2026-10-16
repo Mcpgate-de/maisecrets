@@ -3600,6 +3600,18 @@ def _export_hits(text: str, low: str) -> list:
     return out
 
 
+def _any_keyword(keywords: tuple, low: str, known: dict) -> bool:
+    """Whether the lower-case text holds one of the keywords. Each keyword is searched once per text: a search runs
+    over the whole text, and the same keyword gates several rules."""
+    for k in keywords:
+        hit = known.get(k)
+        if hit is None:
+            hit = known[k] = k in low
+        if hit:
+            return True
+    return False
+
+
 def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
           rule_list: list[Rule] | None = None) -> list[Match]:
     """_copy: the text is the normaliser's cleaned copy of a tool result, which is not cleaned again."""
@@ -3637,6 +3649,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         # first: a cell of a password export is a value as a whole, and no other rule claims a part of it
         for m in _export_hits(text, low):
             take(m)
+    keywords_in: dict = {}      # keyword -> whether the text holds it: the 652 keywords of the rules are 519 texts
     for rule in (_in_scan_order(rules()) if rule_list is None else rule_list):
         if rule is _PERSONAL:
             # the personal data of 0.6.21 and the cleaned copy of the tool channel run after every built-in rule and
@@ -3651,7 +3664,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             continue
         if enabled is not None and rule.id not in enabled and rule.key not in enabled:
             continue
-        if rule.keywords and not any(k in low for k in rule.keywords):
+        if rule.keywords and not _any_keyword(rule.keywords, low, keywords_in):
             continue
         # a rule that cannot fire without a context word need not run its regex without one
         alone = _CHANNEL[0] == "tool" and rule.id in CARD_ALONE_IN_TOOL
