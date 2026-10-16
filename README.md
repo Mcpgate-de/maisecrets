@@ -1433,7 +1433,9 @@ Four sources, one scanner (`maisecrets/detect.py`):
   (`DOB`, `Geburtsdatum`, `né le`, `fecha de nacimiento`; not after `born`), an ID number of five
   digits and more after an ID label (`MRN`, `passport no`, `DL`, `SIN`, `TFN`, `NIR`, `tax id`,
   `account number`; also `medical record number`, `health plan beneficiary number`, `national ID`,
-  `tax ID number`, `TIN`, `social security number`), the user in `user:password@host` and in another person's home path
+  `tax ID number`, `TIN`, `social security number`, and the passport and driving licence labels of
+  the EU languages: `Führerscheinnummer`, `Pass-Nr.`, `permis de conduire`, `número de pasaporte`,
+  `patente di guida`, `rijbewijsnummer`, `körkortsnummer` and more), the user in `user:password@host` and in another person's home path
   (`/home/<user>/`, `C:\Users\<user>\`; service accounts and your own user name stay text), a
   street address with its postcode in the form of an active region (US, UK, IN; DE, AT, CH; FR,
   BE, LU; PT, BR, ES, IT; an address next to a company, office or landmark word stays text; when a

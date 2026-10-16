@@ -65,11 +65,26 @@ _HEALTH_ID_LABELS = (r"|health[ _-]?plan[ _-]?beneficiary(?:[ _-]?(?:number|no\.
                      r"|national[ _-]?id(?:entification|entity)?(?:[ _-]?(?:number|no\.?|card))?"
                      r"|tax(?:payer)?[ _-]?id(?:entification)?(?:[ _-]?(?:number|no\.?))?|tin"
                      r"|social[ _-]?security[ _-]?(?:number|no\.?|#)")
+# passport and driving licence in the label languages of the EU (Gretel writes them in its forms, 2026-10-16), and the
+# English "driving licence": de, fr, es, it, nl, pt, sv, pl. "pass" alone is a password, "patente" alone a patent
+_TRAVEL_ID_LABELS = (r"|driving[ _-]?licen[cs]e(?:[ _-]?(?:no|number))?"
+                     r"|reisepass(?:[ _-]?(?:nummer|nr\.?))?|pass(?:nummer|[ _-]nr\.?)"
+                     r"|f(?:ü|ue)hrerschein(?:[ _-]?(?:nummer|nr\.?))?"
+                     r"|(?:num[ée]ro (?:de |du )?)?(?:passeport|permis de conduire)"
+                     r"|(?:n[úu]mero (?:de |del |do )?)?(?:pasaporte|passaporte"
+                     r"|(?:carn[ée]t|permiso|licencia) de conducir"
+                     r"|carta de condu[çc][ãa]o|carteira de (?:motorista|habilita[çc][ãa]o))"
+                     r"|(?:numero (?:di |del |della )?)?passaporto|numero (?:di |della )?patente|patente di guida"
+                     r"|paspoort(?:nummer)?|rijbewijs(?:nummer)?|k[öo]rkort(?:snummer)?"
+                     r"|(?:numer )?paszportu?|(?:numer )?praw[oa] jazdy")
 _ID_RE = re.compile(r"(?i)(?<![a-z])(?:mrn|member[ -]?id|passport(?:[ _-]?(?:no|number))?|driver'?s? licen[cs]e"
                     r"(?:[ _-]?(?:no|number))?|dl[ _-]?(?:no|number|#)|(?-i:DL)(?=\s{0,3}[:#])|sin|tfn|nir|tax[ _-]?id"
                     r"|insurance (?:member )?id"
-                    r"|account (?:number|no\.?)|patient[ -]?id|id on file" + _HEALTH_ID_LABELS + r")(?![a-z])[\"']?"
-                    r"(?:\s{0,3}(?:on file|is|number|no\.?|#))?\s{0,3}[:=#]?\s{0,3}[\"']?"
+                    r"|account (?:number|no\.?)|patient[ -]?id|id on file" + _HEALTH_ID_LABELS
+                    + _TRAVEL_ID_LABELS + r")(?![a-z])[\"']?"
+                    r"(?:\s{0,3}(?:on file|is|number|no\.?|#|n\.?[º°o]\.?|nr\.?|num[ée]ro|n[úu]mero|numero"
+                    r"|nummer|numer))?"
+                    r"\s{0,3}[:=#]?\s{0,3}[\"']?"
                     r"((?-i:[A-Z0-9](?:[A-Z0-9]|[ -](?=[A-Z0-9])){4,24}))(?![A-Za-z0-9])")
 
 # ------------------------------------------------------------------------------------- user in a URL or path --
@@ -872,7 +887,10 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
 _BIRTH_WORDS = ("dob", "d.o.b", "birth", "bday", "geb", "n\u00e9", "ne le", "nee le", "naissance", "nacimiento", "naci",
                 "nac\u00ed", "nascimento", "nascita", "nato")
 _ID_WORDS = ("mrn", "member", "passport", "licen", "dl", "sin", "tfn", "nir", "tax", "insurance", "account",
-             "patient", "id on file", "beneficiary", "medical", "national", "tin", "social")
+             "patient", "id on file", "beneficiary", "medical", "national", "tin", "social",
+             "reisepass", "passnummer", "pass-nr", "pass nr", "hrerschein", "passeport", "permis", "pasaporte",
+             "passaporte", "conducir", "condu", "carteira", "passaporto", "patente", "paspoort", "rijbewijs",
+             "körkort", "korkort", "paszport", "prawo jazdy", "prawa jazdy", "driving")
 RULE_IDS = ("phone-one-digit-groups", "phone-us-national", "birth-date-after-label", "id-number-after-label",
             "user-in-url", "user-in-home-path", "street-address", "name-after-label", "name-before-email",
             "csv-personal-column") + tuple(FORMS)

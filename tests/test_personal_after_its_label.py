@@ -125,5 +125,24 @@ class HealthIdLabelTests(Base):
                 self.assertText(text)
 
 
+# --------------------------------------------------------------- passport and driving licence, EU languages --
+class TravelIdLabelTests(Base):
+    def test_a_passport_or_licence_number_after_its_label_in_an_eu_language_is_masked(self):
+        for label in ("Führerscheinnummer:", "Pass-Nr.", "permis de conduire n°", "Número de pasaporte:",
+                      "carnet de conducir:", "numero di passaporto", "patente di guida:", "Paspoortnummer:",
+                      "rijbewijsnummer", "Passaporte n.º", "körkortsnummer", "numer paszportu:", "Numer prawa jazdy:",
+                      "driving licence number:"):
+            value = "XC" + "4821" + "3977"
+            with self.subTest(label=label):
+                self.assertMasked(label + " " + value, value)
+                self.assertIn("id-number-after-label", {m.kind for m in scan(label + " " + value)})
+
+    def test_a_patent_a_password_and_a_label_without_a_number_stay_text(self):
+        for text in ("Patente: EP" + "1234567", "pass: " + "48213977", "Reisepass: abgelaufen, neu beantragen",
+                     "permis de conduire: catégorie B", "numero di passaporto: vedi allegato"):
+            with self.subTest(text=text):
+                self.assertNotIn("id-number-after-label", {m.kind for m in scan(text)})
+
+
 if __name__ == "__main__":
     unittest.main()
