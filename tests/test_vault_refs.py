@@ -56,12 +56,9 @@ def tok(key: str, display: str = "") -> str:
 
 
 def tearDownModule():  # noqa: N802 - unittest hook
-    # a Bash call with a value starts a child that serves it: one left running failed the next module that checks
-    # for them (tests.test_gates after this one in one process, 2026-10-16)
+    # the children of this module are checked per class (Base.tearDownClass); a check of every serving child of the
+    # process here would name the children of the modules before this one
     _hygiene.assert_pristine()
-    alive = _hygiene.wait_for_no_serving_child()
-    if alive:
-        raise AssertionError(f"value-serving children still run after the module: {alive}")
 
 
 class Base(unittest.TestCase):

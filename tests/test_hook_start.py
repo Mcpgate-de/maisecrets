@@ -45,6 +45,25 @@ import maisecrets.hooks  # noqa: F401
 print(len(seen))
 """
 
+# the module-level names of detect and hooks that hold a compiled pattern, also inside a tuple, list or dict
+_EAGER = r"""
+import re, sys
+sys.path.insert(0, sys.argv[1])
+from maisecrets import detect, hooks
+
+def patterns(value, depth=0):
+    if isinstance(value, re.Pattern):
+        yield value
+    elif depth < 3 and isinstance(value, (tuple, list, set, frozenset)):
+        for x in value:
+            yield from patterns(x, depth + 1)
+    elif depth < 3 and isinstance(value, dict):
+        for x in value.values():
+            yield from patterns(x, depth + 1)
+print(sorted(m.__name__ + "." + k for m in (detect, hooks) for k, v in vars(m).items()
+             if any(True for _ in patterns(v))))
+"""
+
 
 class ImportCompilesLittleTests(unittest.TestCase):
     def test_the_import_of_the_hooks_compiles_at_most_15_regexes_of_maisecrets(self):
@@ -53,21 +72,11 @@ class ImportCompilesLittleTests(unittest.TestCase):
         self.assertLessEqual(int(r.stdout), 12, "a module-level re.compile in detect.py or hooks.py: use _LazyRx")
 
     def test_every_module_level_regex_of_detect_and_hooks_is_lazy(self):
-        # also a pattern inside a module-level tuple, list or dict (Gate A review: _LIT_FORMS and _WINDOWED)
-        from maisecrets import hooks
-
-        def patterns(value, depth: int = 0):
-            if isinstance(value, re.Pattern):
-                yield value
-            elif depth < 3 and isinstance(value, (tuple, list, set, frozenset)):
-                for x in value:
-                    yield from patterns(x, depth + 1)
-            elif depth < 3 and isinstance(value, dict):
-                for x in value.values():
-                    yield from patterns(x, depth + 1)
-        for mod in (detect, hooks):
-            eager = [k for k, v in vars(mod).items() if any(True for _ in patterns(v))]
-            self.assertEqual(eager, [], mod.__name__)
+        # also a pattern inside a module-level tuple, list or dict (Gate A review: _LIT_FORMS and _WINDOWED). In a new
+        # process right after the import: the caches that the scans fill later hold compiled patterns on purpose
+        r = subprocess.run([sys.executable, "-c", _EAGER, str(ROOT)], capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "[]")
 
 
 class LazyRxTests(unittest.TestCase):
