@@ -73,8 +73,8 @@ class WindowsRefusalNamesTheFileRouteTests(unittest.TestCase):
             with self.subTest(name), _on("Windows"):
                 why = _reason(self._pre("Bash", cmd, CODEX))
             self.assertIn("cannot be placed in a shell command on Codex for Windows", why)
-            self.assertIn(f"write the script with apply_patch and put {OPEN}{self.e.key}{CLOSE} into the file "
-                          "content", why)
+            self.assertIn(f"write a text file with apply_patch that holds {OPEN}{self.e.key}{CLOSE} alone on a "
+                          "line", why)
             self.assertIn("Then run the script with no placeholder in the command", why)
             self.assertNotIn(ARGUMENT_ROUTE, why)
             self.assertNotIn("make_doc.py " + OPEN, why)
@@ -84,7 +84,7 @@ class WindowsRefusalNamesTheFileRouteTests(unittest.TestCase):
         with _on("Windows"):
             why = _reason(self._pre("PowerShell", "python make_pdf.py " + self.e.ref, CLAUDE))
         self.assertIn("cannot be placed in a PowerShell command", why)
-        self.assertIn(f"write the script with Write or Edit and put {OPEN}{self.e.key}{CLOSE}", why)
+        self.assertIn(f"write a text file with Write or Edit that holds {OPEN}{self.e.key}{CLOSE}", why)
         self.assertNotIn(ARGUMENT_ROUTE, why)
         self.assertIn("With Git for Windows installed, Claude Code offers Bash instead", why)
 
@@ -97,13 +97,13 @@ class WindowsRefusalNamesTheFileRouteTests(unittest.TestCase):
         for name, keys, tool, client in cases:
             with self.subTest(name), _config(**keys), _on("Windows"):
                 why = _reason(self._pre(tool, "python make_pdf.py " + self.e.ref, client))
-            self.assertNotIn("into the file content", why)
+            self.assertNotIn("write a text file", why)
             self.assertNotIn("Do not ask the user", why)
             self.assertIn("ask the user to run the command themselves", why)
         # Claude Code asks under confirm: the file route works there
         with _config(rehydration="confirm"), _on("Windows"):
             why = _reason(self._pre("PowerShell", "python make_pdf.py " + self.e.ref, CLAUDE))
-        self.assertIn("into the file content", why)
+        self.assertIn("write a text file", why)
 
     def test_posix_keeps_the_argument_route(self):
         with _on("Linux"):
@@ -115,10 +115,26 @@ class WindowsRefusalNamesTheFileRouteTests(unittest.TestCase):
             text = hooks.primer()
         self.assertNotIn("make_pdf.py " + OPEN, text)
         self.assertNotIn(ARGUMENT_ROUTE, text)
-        self.assertIn("put the placeholder into the file content with Write, Edit or apply_patch", text)
+        self.assertIn("write a text file with the placeholder alone on a line", text)
         self.assertIn("run the script with no placeholder in the command", text)
+        # the Bash forms and the stdin route are named for Git Bash only, after the Windows refusal (Gate B)
+        self.assertNotIn("In Bash, give it as a plain argument", text)
+        self.assertIn("in any shell command of Codex, is refused. In the Bash tool of Claude Code (Git Bash)", text)
+        self.assertIn("In Git Bash, to give a value to a remote host", text)
         with _on("Darwin"):
             self.assertEqual(hooks.primer(), hooks.PRIMER)
+            self.assertEqual(hooks.primer({"rehydration": "block"}), hooks.PRIMER)
+
+    def test_the_windows_primer_names_no_file_route_where_the_setting_refuses_it(self):
+        for name, keys, client in (("block", {"rehydration": "block"}, "claude"),
+                                   ("confirm codex", {"rehydration": "confirm"}, "codex"),
+                                   ("no values in files", {"resolve_in_files": False}, "claude")):
+            with self.subTest(name), _on("Windows"):
+                text = hooks.primer({**hooks.load_config(), **keys}, client)
+            self.assertNotIn("value.txt", text)
+            self.assertNotIn(ARGUMENT_ROUTE, text)
+        with _on("Windows"):
+            self.assertIn("value.txt", hooks.primer({**hooks.load_config(), "rehydration": "confirm"}, "claude"))
 
     def test_the_session_start_primer_follows_the_system(self):
         # the session start of the launcher on this system: Windows gets the file route, the others the argument
@@ -165,7 +181,8 @@ def _added_files(patch: str) -> dict[str, str]:
     return {p: "\n".join(lines) + "\n" for p, lines in files.items()}
 
 
-MAKE_DOC = ("address = \"{ref}\"\n"
+# the route the refusal names: the value in a text file, read by the script (no value in program code)
+MAKE_DOC = ("address = open('value.txt', encoding='utf-8').read().rstrip('\\r\\n')\n"
             "open('account.html', 'w', encoding='utf-8').write('<p>' + address + '</p>')\n")
 
 
@@ -182,36 +199,37 @@ class WindowsFileToolsTakeTheValueTests(unittest.TestCase):
         self.work = Path(tempfile.mkdtemp(prefix="ms-windoc-", dir=str(Path(_isolate.TMP).parent)))
         self.addCleanup(__import__("shutil").rmtree, self.work, True)
 
-    def _run_script(self, name: str, content: str) -> str:
-        (self.work / name).write_text(content, encoding="utf-8")
-        r = subprocess.run([sys.executable, name], cwd=str(self.work), capture_output=True, text=True, timeout=60)
+    def _run_doc(self, value_file: str) -> str:
+        (self.work / "value.txt").write_text(value_file, encoding="utf-8")
+        (self.work / "make_doc.py").write_text(MAKE_DOC, encoding="utf-8")
+        # the script runs with no placeholder in the command
+        r = subprocess.run([sys.executable, "make_doc.py"], cwd=str(self.work), capture_output=True, text=True,
+                           timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
         return (self.work / "account.html").read_text(encoding="utf-8")
 
     def _check(self, key: str, ref: str, env: dict | None = None) -> None:
-        patch = "*** Begin Patch\n*** Add File: make_doc.py\n+" + MAKE_DOC.format(ref=ref).rstrip("\n").replace(
-            "\n", "\n+") + "\n*** End Patch"
+        patch = "*** Begin Patch\n*** Add File: value.txt\n+" + ref + "\n*** End Patch"
         out = _hook_entry({"tool_name": "apply_patch", "tool_input": {"command": patch}, "session_id": "S1",
                            "cwd": str(self.work), "transcript_path": "", "hook_event_name": "PreToolUse",
                            "model": "codex-model", "turn_id": "t1"}, env)
         hso = out["hookSpecificOutput"]
         self.assertEqual(hso.get("permissionDecision"), "allow", out)
         files = _added_files(hso["updatedInput"]["command"])
-        self.assertNotIn(OPEN, files["make_doc.py"])
-        self.assertEqual(self._run_script("make_doc.py", files["make_doc.py"]), f"<p>{ADDRESS}</p>")
+        self.assertEqual(files["value.txt"], ADDRESS + "\n")
+        self.assertEqual(self._run_doc(files["value.txt"]), f"<p>{ADDRESS}</p>")
 
         (self.work / "account.html").unlink()
         out = _hook_entry({"tool_name": "Write", "session_id": "S1", "cwd": str(self.work), "transcript_path": "",
                            "hook_event_name": "PreToolUse", "prompt_id": "p",
-                           "tool_input": {"file_path": str(self.work / "make_doc2.py"),
-                                          "content": MAKE_DOC.format(ref=ref)}}, env)
+                           "tool_input": {"file_path": str(self.work / "value.txt"), "content": ref + "\n"}}, env)
         hso = out["hookSpecificOutput"]
         self.assertNotIn("permissionDecision", hso, out)      # automatic: Claude Code's own rules decide
         content = hso["updatedInput"]["content"]
-        self.assertNotIn(OPEN, content)
-        self.assertEqual(self._run_script("make_doc2.py", content), f"<p>{ADDRESS}</p>")
+        self.assertEqual(content, ADDRESS + "\n")
+        self.assertEqual(self._run_doc(content), f"<p>{ADDRESS}</p>")
 
-    def test_apply_patch_and_write_put_the_value_into_the_script(self):
+    def test_apply_patch_and_write_put_the_value_into_the_file_the_script_reads(self):
         e = Vault().put(ADDRESS, "EMAIL", "email", session="S1")
         self._check(e.key, e.ref)
 
@@ -219,6 +237,7 @@ class WindowsFileToolsTakeTheValueTests(unittest.TestCase):
                                               == "1"), "the Credential Locker of the Windows runner")
     def test_the_same_with_the_windows_credential_locker(self):
         home = Path(tempfile.mkdtemp(prefix="ms-winvault-home-", dir=str(Path(_isolate.TMP).parent)))
+        self.addCleanup(__import__("shutil").rmtree, home, True)
         (home / "config.json").write_text('{"backend": "windows-vault"}', encoding="utf-8")
         env = dict(os.environ)
         env[_HOME_VAR] = str(home)

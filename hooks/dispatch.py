@@ -283,7 +283,8 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
             else:
                 guard_off_by_policy()
     # the model reads what a placeholder is once per session, before it meets one
-    out["hookSpecificOutput"] = {"hookEventName": "SessionStart", "additionalContext": primer()}
+    out["hookSpecificOutput"] = {"hookEventName": "SessionStart",
+                                 "additionalContext": primer(cfg, "codex" if codex else "claude")}
     print(json.dumps(out))
     sys.exit(0)
 sys.exit(main(["hook", sys.argv[1] if len(sys.argv) == 2 else ""]))

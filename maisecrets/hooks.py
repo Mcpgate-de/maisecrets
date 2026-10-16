@@ -466,13 +466,14 @@ _PRIMER_DOCUMENT = (
     "the value, and you keep the placeholder. "
 )
 # on Windows a placeholder in a PowerShell command, and in every shell command of Codex, is refused, so the
-# argument route cannot work there; the file tools take the value (field report, Codex on Windows, 2026-10-16)
+# argument route cannot work there; the file tools take the value (field report, Codex on Windows, 2026-10-16).
+# A text file first: a value in program code is parsed as code, the reason inline code is refused (Gate B)
 _PRIMER_DOCUMENT_WINDOWS = (
-    "To put a value into a document or a generated file (a PDF, a .docx, a page) on Windows, put the "
-    "placeholder into the file content with Write, Edit or apply_patch, in the generator script itself or "
-    "in a text file that the script reads; the file on disk gets the value, and you keep the placeholder. "
-    "Then run the script with no placeholder in the command: a placeholder in a PowerShell command, and "
-    "in any shell command of Codex on Windows, is refused. "
+    "To put a value into a document or a generated file (a PDF, a .docx, a page), write a text file with the "
+    "placeholder alone on a line (for example value.txt) with Write, Edit or apply_patch, and let the generator "
+    "script read the value from that file; the file on disk gets the value, and you keep the placeholder. Then "
+    "run the script with no placeholder in the command. Put the placeholder into program code only where a "
+    "quote or a backslash in the value cannot change the code. "
 )
 _PRIMER_TAIL = (
     "To give a value to a remote host, pipe it on stdin to the command that reads it, for example printf "
@@ -486,12 +487,25 @@ _PRIMER_TAIL = (
     "them alone, and a password in a test file is taken for a fixture."
 )
 PRIMER = _PRIMER_HEAD + _PRIMER_DOCUMENT + _PRIMER_TAIL
-PRIMER_WINDOWS = _PRIMER_HEAD + _PRIMER_DOCUMENT_WINDOWS + _PRIMER_TAIL
+# on Windows a shell command takes a value only in the Bash tool of Claude Code (Git Bash)
+_PRIMER_HEAD_WINDOWS = _PRIMER_HEAD.replace(
+    "In Bash, give it as a plain argument",
+    "On Windows, a placeholder in a PowerShell command, and in any shell command of Codex, is refused. In the "
+    "Bash tool of Claude Code (Git Bash), give it as a plain argument").replace("For awk, pass it", "For awk "
+                                                                                "in Git Bash, pass it")
+_PRIMER_TAIL_WINDOWS = _PRIMER_TAIL.replace("To give a value to a remote host", "In Git Bash, to give a value "
+                                                                              "to a remote host")
+PRIMER_WINDOWS = _PRIMER_HEAD_WINDOWS + _PRIMER_DOCUMENT_WINDOWS + _PRIMER_TAIL_WINDOWS
 
 
-def primer() -> str:
-    """The primer for this system: on Windows it names the file route, not the script argument."""
-    return PRIMER_WINDOWS if platform.system() == "Windows" else PRIMER
+def primer(cfg: dict | None = None, client: str = "claude") -> str:
+    """The primer for this system. On Windows it names the file route for a document, not the script argument,
+    and it names that route only where the rehydration setting lets the file tool through (Gate B, 2026-10-16)."""
+    if platform.system() != "Windows":
+        return PRIMER
+    if cfg is not None and rehydration.outcome(client, rehydration.policy(cfg, "file")) == "deny":
+        return _PRIMER_HEAD_WINDOWS + _PRIMER_TAIL_WINDOWS
+    return PRIMER_WINDOWS
 
 
 # --------------------------------------------------------- UserPromptSubmit --
@@ -1078,7 +1092,7 @@ def user_prompt(payload: dict) -> dict:
             # the model has never seen the bracket syntax; without this it asks the user for the
             # value, and that value is blocked again (agent review, 2026-09-26)
             return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                           "additionalContext": primer()}}
+                                           "additionalContext": primer(cfg, client_of(payload))}}
         return {}
     copied = _clipboard(rewritten)
     _save_pending(rewritten, session)
@@ -2464,11 +2478,12 @@ def _windows_file_route(payload: dict, cfg: dict, keys: str) -> str:
     if rehydration.outcome(client, rehydration.policy(cfg, "file")) == "deny":
         return ""
     tool = "apply_patch" if client == "codex" else "Write or Edit"
-    return (f" To put the value into a file or a document on Windows, write the script with {tool} and put {keys} "
-            "into the file content, in the script itself or in a text file that the script reads: maisecrets puts "
-            "the value in when the file is written. Then run the script with no placeholder in the command, for "
-            "example python make_doc.py. A placeholder as an argument of a command does not work on Windows. "
-            "Do not ask the user to type the value in.")
+    return (f" To put the value into a file or a document, write a text file with {tool} that holds {keys} "
+            "alone on a line (for example value.txt), and let the script read the value from that file: "
+            "maisecrets puts the value in when the file is written. Then run the script with no placeholder in "
+            "the command, for example python make_doc.py. A placeholder as an argument of a PowerShell command, "
+            "or of any shell command of Codex on Windows, does not work. For a call to a service, an MCP tool "
+            "takes the placeholder. Do not ask the user to type the value in.")
 
 
 def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:

@@ -477,7 +477,7 @@ SCENARIOS = {
                                               "content": "E-mail: " + REF_MAIL + "\n"}},
                   {"text": "done"}],
         "expect_requests": 3,
-        "expect_text": "write the script with Write or Edit and put " + REF_MAIL + " into the file content",
+        "expect_text": "write a text file with Write or Edit that holds " + REF_MAIL + " alone on a line",
         "expect_files": [("account.txt", f"E-mail: {MAIL}\n")],
         "expect_no_file": "account.html",
         "expect_not_in_transcript": [MAIL],

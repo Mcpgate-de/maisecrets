@@ -1,0 +1,10 @@
+# c6-the-windows-primer-follows-the-setting: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c6-the-windows-primer-follows-the-setting"
+control = "C6"
+statement = "On Windows the primer names the file route for a document only where the rehydration setting lets the file tool through: block, confirm in Codex and resolve_in_files false name no route."
+runner = ["tests/test_windows_document_route.py::WindowsRefusalNamesTheFileRouteTests::test_the_windows_primer_names_no_file_route_where_the_setting_refuses_it"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if cfg is not None and rehydration.outcome(client, rehydration.policy(cfg, \"file\")) == \"deny\":\n"
+replace = "    if False:\n"

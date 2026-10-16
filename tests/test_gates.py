@@ -1163,7 +1163,7 @@ class DocumentRouteTests(unittest.TestCase):
         self.assertIn("cannot be placed in a shell command on Codex for Windows", out["permissionDecisionReason"])
         # the argument route is refused there too: only the file route (tests/test_windows_document_route.py)
         self.assertNotIn("with the placeholder as its argument", out["permissionDecisionReason"])
-        self.assertIn("write the script with apply_patch", out["permissionDecisionReason"])
+        self.assertIn("write a text file with apply_patch", out["permissionDecisionReason"])
 
     def test_the_route_names_the_refused_interpreter_and_every_key(self):
         e2 = Vault().put(PLAIN, "SECRET", "manual", session="S1")

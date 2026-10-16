@@ -76,8 +76,10 @@ through the placeholder. Do not ask the user to type the value in.
    in Codex. The file on disk gets the value.
 
 On Windows, step 2 does not work: a placeholder in a PowerShell command, and in any shell
-command of Codex, is refused. Use step 3 there: put the placeholder into the script, or into a
-text file that the script reads, and then run the script with no placeholder in the command.
+command of Codex, is refused. Use step 3 there: write a text file with the placeholder alone
+on a line (for example `value.txt`), let the script read the value from that file, and then
+run the script with no placeholder in the command. A value in program code is parsed as code,
+so put the placeholder into the script itself only where a quote or a backslash cannot break it.
 
 Inline code (`python3 -c`, `node -e`) and a quoted heredoc (`<<'EOF'`) cannot take a value:
 maisecrets stops the command and names this route. You keep seeing the placeholder, also when
