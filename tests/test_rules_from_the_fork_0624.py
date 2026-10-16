@@ -169,5 +169,26 @@ class GenericKeyFloorTests(unittest.TestCase):
                 self.assertEqual(found(text, channel=channel), [])
 
 
+
+class CardWithoutWordTests(unittest.TestCase):
+    CARD = luhn10("453201511283036"[:15])
+
+    def test_a_card_number_without_a_card_word_is_masked_in_a_tool_result(self):
+        text = "row 17: " + self.CARD[:4] + " " + self.CARD[4:8] + " " + self.CARD[8:12] + " " + self.CARD[12:]
+        self.assertIn("credit-card", kinds(text, channel="tool"))
+
+    def test_a_typed_prompt_keeps_the_card_word(self):
+        text = "row 17: " + self.CARD
+        self.assertNotIn("credit-card", kinds(text, channel="prompt"))
+        self.assertIn("credit-card", kinds("my credit card " + self.CARD, channel="prompt"))
+
+    def test_a_number_after_a_plus_a_test_card_and_a_wrong_check_digit_stay_text(self):
+        bad = self.CARD[:-1] + str((int(self.CARD[-1]) + 1) % 10)
+        test_card = J(["4111", "1111", "1111", "1111"])
+        for text in ("call +" + self.CARD, "row 17: " + bad, "row 17: " + test_card):
+            with self.subTest(text=len(text)):
+                self.assertNotIn("credit-card", kinds(text, channel="tool"))
+
+
 if __name__ == "__main__":
     unittest.main()

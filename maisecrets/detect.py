@@ -1734,6 +1734,12 @@ PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "
                            "de-fuehrerschein", "nhs", "aba-routing", "medical-license", "pl-pesel", "es-nif",
                            "es-nie", "it-fiscal-code", "us-npi", "se-organisationsnummer",
                            "uk-vehicle-registration"}
+# A card number that passes Luhn is masked in a tool result without a card word nearby (0.6.24). Measured on the four
+# labelled PII datasets: +340 card numbers, +49 false alarms (41 of them identifiers of structured financial messages
+# in Gretel), CredData +2 false alarms; docs/BENCHMARKS.md. A typed prompt keeps the card word: a block there costs
+# more than a mask. A documented test card stays text (rules/public_test_values.txt). From a fork
+# (danszymkowiak/maisecrets 795b411, d5807ea, Apache-2.0)
+CARD_ALONE_IN_TOOL = frozenset({"credit-card"})
 # a Presidio pattern with no boundary: PESEL's eleven digits matched inside a longer digit run
 PRESIDIO_DIGIT_BOUNDED = {"pl-pesel"}
 # single patterns that need a context word although their recognizer does not: DE and nine digits that pass the
@@ -3279,7 +3285,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         if rule.keywords and not any(k in low for k in rule.keywords):
             continue
         # a rule that cannot fire without a context word need not run its regex without one
-        if rule.context and (rule.require_context or rule.score < 0.5) and not _has_context_word(low, rule.context):
+        alone = _CHANNEL[0] == "tool" and rule.id in CARD_ALONE_IN_TOOL
+        if (rule.context and (rule.require_context or rule.score < 0.5) and not alone
+                and not _has_context_word(low, rule.context)):
             continue
         own = _runs_after_personal(rule)
         form = rule.form or _registry.form_of(rule.id)    # a rule list a caller built has no form set
@@ -3418,7 +3426,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue
             if rule.type == "SECRET" and len(secret) >= 16 and len(set(secret[-12:])) <= 1:
                 continue   # a prefix and one repeated character: glpat-AAAAAAAAAAAAAAAAAAAA is a placeholder
-            if rule.score < 1.0 or rule.require_context:
+            if alone and start and text[start - 1] == "+":
+                continue   # +49 1520 ... passes Luhn too: a card number never follows a +, a phone number does
+            if (rule.score < 1.0 or rule.require_context) and not alone:
                 # presidio semantics: a weak shape passes only with a context WORD nearby
                 # cut from the original text, then lowered: a lowered text is not the same length (the
                 # Turkish İ lowers to two characters), so its offsets are not the original's
