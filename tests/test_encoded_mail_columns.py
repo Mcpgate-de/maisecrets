@@ -81,6 +81,17 @@ class EncodedMailColumnTests(unittest.TestCase):
             with self.subTest(head=head):
                 self.assertEqual(encoded("id," + head + "\n1," + ADDRESS), [ADDRESS])
 
+    def test_round_2_header_forms(self):
+        for head in ("ID,Recipient Address", "id,Sender Address", "id,Login Name", "id,Benutzername", "id,Kontakt",
+                     "id,Empfänger", "id,Absender", "id,destinataire"):
+            with self.subTest(head=head):
+                self.assertEqual(encoded(head + "\n1," + ADDRESS), [ADDRESS])
+        preamble = "Export\nGenerated automatically\nRegion: EU\nActive accounts\n---\nid,contact\n1," + ADDRESS
+        self.assertEqual(encoded(preamble), [ADDRESS])
+        for text in ("contact,size\nreadme%40draft.md,1200", "user,page\nhome%40v2.vue,1"):
+            with self.subTest(text=text):
+                self.assertEqual(encoded(text) + encoded(text, "prompt"), [])
+
     def test_a_data_row_is_no_header(self):
         # the first row holds an address on mailbox.org: data, not the header of a mail column
         text = "Dana," + "dana" + "@" + "mailbox-test.net,ok\nOmar,omar%40v2.dev,ok"

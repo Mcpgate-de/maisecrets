@@ -120,5 +120,37 @@ class VcardFieldTests(unittest.TestCase):
                 self.assertEqual({t for t, _ in masked(text)} & {"ADDRESS", "NAME", "BIRTH_DATE"}, set())
 
 
+class VcardContextTests(unittest.TestCase):
+    """The field forms count only inside a vCard (BEGIN:VCARD before the line), in any group, also indented or in a
+    JSON string (review round 2 of 0.6.25)."""
+
+    def test_a_line_outside_a_vcard_stays_text(self):
+        for text in ("ADR: 0012;Accepted;Use Postgres 16;2026-01-01;platform;db;x",
+                     "adr:1;Shop;12 Market Street;Leeds;LS1;UK;x", "N:Europe;Asia;Africa;America;Oceania",
+                     "[grid]\nN:Smallville;Metropolis;Gotham;Central;Star", "BDAY:20240101",
+                     card("ADR:0007;Accepted;123 Use Postgres;platform;2024;yes"),
+                     card("VERSION:3.0") + "N:Europe;Asia;Africa;America;Oceania\n" + "BDAY:19991231"):
+            with self.subTest(text=text):
+                self.assertEqual({t for t, _ in masked(text)} & {"ADDRESS", "NAME", "BIRTH_DATE"}, set())
+
+    def test_a_vcard_in_a_json_string_an_indented_vcard_and_any_group(self):
+        import json
+        family_given = "Brückner;" + "Lena"
+        inner = "BEGIN:VCARD\nADR;TYPE=home:;;" + STREET + "\nN:" + family_given + ";;;\nBDAY:19850412\nEND:VCARD"
+        text = json.dumps({"vcard": inner}, ensure_ascii=False)
+        self.assertEqual(masked(text) & {("ADDRESS", STREET), ("NAME", family_given), ("BIRTH_DATE", "19850412")},
+                         {("ADDRESS", STREET), ("NAME", family_given), ("BIRTH_DATE", "19850412")})
+        indented = "contacts:\n  - |\n    BEGIN:VCARD\n    ADR:;;" + STREET + "\n    END:VCARD"
+        self.assertIn(("ADDRESS", STREET), masked(indented))
+        grouped = "BEGIN:VCARD\nhome.ADR:;;" + STREET + "\nprivate.BDAY:19850412\nEND:VCARD"
+        self.assertTrue({("ADDRESS", STREET), ("BIRTH_DATE", "19850412")} <= masked(grouped))
+
+    def test_the_shorter_forms_of_older_exports(self):
+        cottage = "Rose Cottage;Dunmore;Wexford;Y35 X2K;Ireland"
+        self.assertIn(("ADDRESS", cottage), masked(card("ADR;TYPE=home:;;" + cottage)))
+        self.assertIn(("NAME", "Brückner;" + "Lena"), masked(card("N:Brückner;" + "Lena")))
+        self.assertIn(("BIRTH_DATE", "19850412"), masked(card("BDAY:19850412T000000Z")))
+
+
 if __name__ == "__main__":
     unittest.main()

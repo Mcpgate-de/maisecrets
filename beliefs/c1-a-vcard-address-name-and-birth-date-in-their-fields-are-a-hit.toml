@@ -6,5 +6,5 @@ runner = ["tests/test_vcard_parameters.py::VcardFieldTests::test_an_address_in_i
 
 [proof]
 file = "maisecrets/personal.py"
-find = '''        out += [h for h in _vcard_hits(text) if h[2] in want]'''
+find = '''        out += _vcard_hits(text, want)'''
 replace = '''        pass'''

@@ -548,16 +548,21 @@ def _line_back(text: str, pos: int, most: int = 120) -> int:
     return nl + 1 if nl >= 0 else lo
 
 
-# the structured properties of a vCard (RFC 6350), one per line, optionally in a group (item1.ADR): ADR holds
+# the structured properties of a vCard (RFC 6350), one per line, in any group (item1.ADR, home.ADR): ADR holds
 # box;extended;street;locality;region;code;country, N holds family;given;additional;prefix;suffix. Contact exports
-# of Apple, Google and Outlook write the address in its fields, so the address label never saw it (review of 0.6.25)
-_VCARD_ADR_RE = _lazy(r"(?im)^(?:item\d{1,3}\.)?ADR" + _VCARD_PARAMS + r":([^\n\r]{5,400})")
-_VCARD_N_RE = _lazy(r"(?im)^(?:item\d{1,3}\.)?N" + _VCARD_PARAMS + r":([^\n\r]{3,200})")
-_VCARD_BDAY_RE = _lazy(r"(?im)^(?:item\d{1,3}\.)?BDAY" + _VCARD_PARAMS + r":(\d{8})(?![\w-])")
+# of Apple, Google and Outlook write the address in its fields, so the address label never saw it (review of 0.6.25).
+# A line starts after a newline, after spaces (YAML, a heredoc) or after an escaped \n (a vCard in a JSON string), and
+# its value ends there too
+_VCARD_LINE = r"(?im)(?:^|(?<=\\n))[ \t]*(?:[a-z0-9-]{1,64}\.)?"
+_VCARD_VALUE = r":((?:\\[^nr]|[^\n\r\\\"]){3,400})"
+_VCARD_ADR_RE = _lazy(_VCARD_LINE + r"ADR" + _VCARD_PARAMS + _VCARD_VALUE)
+_VCARD_N_RE = _lazy(_VCARD_LINE + r"N" + _VCARD_PARAMS + _VCARD_VALUE)
+_VCARD_BDAY_RE = _lazy(_VCARD_LINE + r"BDAY" + _VCARD_PARAMS + r":(\d{8})(?:T[\dZ:+-]{1,20})?(?![\w-])")
+_VCARD_FORMS = ("address-vcard-fields", "name-vcard-n", "birth-date-vcard-compact")
 
 
 def _vcard_fields(value: str, start: int) -> list:
-    """(start, end) of each field of a structured vCard value; an escaped semicolon (\\;) stays inside its field."""
+    """(start, end) of each field of a structured vCard value; a semicolon after a backslash stays in its field."""
     out, i, a = [], 0, 0
     while i < len(value):
         if value[i] == "\\":
@@ -571,30 +576,60 @@ def _vcard_fields(value: str, start: int) -> list:
     return out
 
 
-def _vcard_hits(text: str) -> list:
+def _vcard_spans(text: str) -> list:
+    """(start, end) of each vCard: from BEGIN:VCARD to its END:VCARD or the end of the text. A line counts only
+    inside one: `ADR: 0012;Accepted;Use Postgres 16;…` in the docs and `N:Europe;Asia;…` in a config are no vCard
+    (review of 0.6.25)."""
+    up = text.upper()
     out = []
-    if "ADR" in text.upper():
+    for m in re.finditer("BEGIN:VCARD", up):
+        if out and m.start() < out[-1][1]:
+            continue
+        end = up.find("END:VCARD", m.end())
+        out.append((m.start(), len(text) if end < 0 else end))
+    return out
+
+
+def _vcard_hits(text: str, want) -> list:
+    out = []
+    spans = _vcard_spans(text)
+    if not spans:
+        return out
+    import bisect   # here: the hooks pay for every module at import
+    starts = [a for a, _ in spans]
+
+    def inside(pos: int) -> bool:
+        i = bisect.bisect_right(starts, pos) - 1
+        return i >= 0 and pos < spans[i][1]
+
+    def val(f) -> str:
+        return text[f[0]:f[1]].strip()
+    if "address-vcard-fields" in want:
         for m in _VCARD_ADR_RE.finditer(text):
-            fields = _vcard_fields(m.group(1), m.start(1))
-            filled = [(a, b) for a, b in fields if text[a:b].strip()]
-            if len(fields) < 6 or len(filled) < 2:
-                continue   # ADR: 0007 Use Postgres is a decision record: a vCard address has seven fields
-            street = text[fields[2][0]:fields[2][1]]
-            if re.search(r"\d", street) and re.search(r"[^\W\d_]{3}", street):
-                out.append((filled[0][0], filled[-1][1], "address-vcard-fields", ADDRESS))
-    if "N" in text:
-        for m in _VCARD_N_RE.finditer(text):
-            fields = _vcard_fields(m.group(1), m.start(1))
-            if len(fields) < 5:
+            if not inside(m.start()):
                 continue
-            family, given = (text[a:b].strip() for a, b in fields[:2])
+            fields = _vcard_fields(m.group(1), m.start(1))
+            filled = [f for f in fields if val(f)]
+            if len(fields) != 7 or len(filled) < 2:
+                continue   # a vCard address has seven fields
+            # a number in the box, the extended or the street field, or a postal code: Rose Cottage;Dunmore;Y35 X2K
+            if any(re.search(r"\d", val(f)) for f in fields[:3]) or val(fields[5]):
+                out.append((filled[0][0], filled[-1][1], "address-vcard-fields", ADDRESS))
+    if "name-vcard-n" in want:
+        for m in _VCARD_N_RE.finditer(text):
+            if not inside(m.start()):
+                continue
+            fields = _vcard_fields(m.group(1), m.start(1))
+            if len(fields) < 2:
+                continue   # vCard 2.1 may write family;given alone
+            family, given = val(fields[0]), val(fields[1])
             if family and given and _name_ok(given + " " + family) and not _reads_as_words(given + " " + family):
-                end = fields[2][1] if text[fields[2][0]:fields[2][1]].strip() else fields[1][1]   # a middle name
+                end = fields[2][1] if len(fields) > 2 and val(fields[2]) else fields[1][1]   # a middle name
                 out.append((fields[0][0], end, "name-vcard-n", NAME))
-    if "BDAY" in text.upper():
+    if "birth-date-vcard-compact" in want:
         for m in _VCARD_BDAY_RE.finditer(text):
             v = m.group(1)
-            if _a_date(v) and _past_year(v[:4]) and not _placeholder_digits(v, dates=True):
+            if inside(m.start()) and _a_date(v) and _past_year(v[:4]) and not _placeholder_digits(v, dates=True):
                 out.append((m.start(1), m.end(1), "birth-date-vcard-compact", BIRTH_DATE))
     return out
 
@@ -726,8 +761,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want) -> list:
                     and not _NOT_A_HOME_RE.search(text, line, m.end()) and not _NOT_AN_ADDRESS_RE.search(v)):
                 s0 = m.start(3) + (len(m.group(3)) - len(m.group(3).lstrip()))
                 out.append((s0, s0 + len(v), "address-after-label", ADDRESS))
-    if "address-vcard-fields" in want and ":" in text:
-        out += [h for h in _vcard_hits(text) if h[2] in want]
+    if any(f in want for f in _VCARD_FORMS) and "VCARD" in text.upper():
+        out += _vcard_hits(text, want)
     if "address-in-form" in want and "in" in regions:
         for m in _IN_ADDRESS_RE.finditer(text):
             line = _line_back(text, m.start())

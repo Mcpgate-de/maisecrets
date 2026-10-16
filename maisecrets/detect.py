@@ -2491,7 +2491,10 @@ def _encoded_mail_expected(text: str, start: int, end: int) -> bool:
         return False   # logo%402x.png is an asset at twice the size, pkg%401.0.0-beta.rc a version
     import csv   # here: the hooks pay for every module at import
     col = len(next(csv.reader([text[line:start + 1]], delimiter=sep), [""])) - 1
-    for head in text[:4000].split("\n")[:5]:
+    # the first five lines of the text, and up to 20 lines above the row within 4,000 characters: a header after a
+    # preamble of an export (review of 0.6.25)
+    above = text[max(0, line - 4000):max(0, line - 1)].split("\n")[-20:]
+    for head in text[:4000].split("\n")[:5] + above[::-1]:
         cells = next(csv.reader([head], delimiter=sep), [])
         # a header holds names, not values: a row with an address in it is data, even with mailbox.org in it. Each
         # line counts on its own: a title line above the header (`Report for user list, 2026-10-01`) does not hide it
@@ -2508,21 +2511,28 @@ _MAIL_COLUMN_RE = _LazyRx(r"(?i)mail|courriel|correo|e-?post(?![a-z])|s\u00e4hk\
 # the owner word must be the last word of the header: login_user and user are addresses, end_user_id and
 # contact_asset are an id and a file (review of 0.6.25)
 _OWNER_WORDS = frozenset({"contact", "contacts", "login", "logins", "user", "users", "username", "usernames",
-                          "sender", "recipient", "recipients", "upn"})
+                          "sender", "recipient", "recipients", "upn", "benutzer", "benutzername", "kontakt",
+                          "empf\u00e4nger", "absender", "destinataire", "exp\u00e9diteur", "utilisateur"})
 _OWNER_PAIRS = (["user", "name"], ["reply", "to"], ["principal", "name"])
+# an owner word before one of these is the same column: Recipient Address, Login Name, sender_addr
+_OWNER_TAILS = frozenset({"address", "addr", "name", "adresse"})
 # the extension of a file that an asset name ends in: name%402x.png is an image at twice the size
 _FILE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "ico", "bmp", "tif", "tiff", "js",
                               "mjs", "cjs", "ts", "css", "map", "json", "html", "htm", "xml", "txt", "pdf",
                               "woff", "woff2", "ttf", "otf", "mp3", "mp4", "webm", "wasm", "gz", "tgz", "jar",
                               "heic", "heif", "lottie", "scss", "sass", "less", "jsx", "tsx", "csv", "yaml", "yml",
-                              "toml", "lock", "wav", "ogg", "mov", "zip"})
+                              "toml", "lock", "wav", "ogg", "mov", "zip", "md", "mdx", "vue", "svelte", "rst",
+                              "adoc", "ipynb"})
 
 
 def _names_a_mail_column(cell: str) -> bool:
     cell = cell.strip().strip("\"'")
     if _MAIL_COLUMN_RE.search(cell):
         return True
-    words = [w.lower() for w in re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])", cell)]
+    words = [w.lower() for w in re.findall(r"[^\W\d_]+", re.sub(r"([^\W\d_])(?<=[a-z\u00df-\u00ff])([A-Z])", r"\1 \2",
+                                                                  cell))]
+    if words and words[-1] in _OWNER_TAILS and len(words) >= 2 and words[-2] in _OWNER_WORDS:
+        return True
     return bool(words) and (words[-1] in _OWNER_WORDS or words[-2:] in _OWNER_PAIRS)
 
 
