@@ -1152,6 +1152,9 @@ class DocumentRouteTests(unittest.TestCase):
         with _config(rehydration="confirm"):
             self.assertIn("Write or Edit", self._reason(cmd, CLAUDE))   # Claude Code asks: the route works
 
+    def test_deno_gets_its_run_word(self):
+        self.assertIn("deno run make_doc.js", self._reason("deno --eval 'x' " + self.e.ref, CLAUDE))
+
     def test_windows_codex_keeps_its_own_refusal(self):
         from unittest import mock
         with mock.patch.object(hooks.platform, "system", return_value="Windows"):

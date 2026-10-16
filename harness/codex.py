@@ -313,7 +313,8 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         made = sorted(p for p in cwd.rglob("*") if p.is_file() and p.suffix.lower() in DOCUMENTS)
         if not any(value_in_file(p, MAIL) for p in made):
             fails.append("no document the model made holds the address (documents: "
-                         f"{[p.name for p in made]}, all files: {sorted(p.name for p in cwd.rglob('*'))})")
+                         f"{[p.name for p in made]}, all files: {sorted(p.name for p in cwd.rglob('*'))})"
+                         .replace(MAIL, "<MAIL>"))
     if sc.get("expect_home_file_missing") and (home / sc["expect_home_file_missing"]).exists():
         fails.append(f"{sc['expect_home_file_missing']} was written into the maisecrets home")
     if sc.get("expect_hook"):

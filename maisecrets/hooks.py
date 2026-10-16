@@ -2427,8 +2427,9 @@ def _file_route(payload: dict, cfg: dict, keys: list[str], interpreter: str = "p
     if interpreter not in _SCRIPT_EXT:
         interpreter = "python3"
     args = " ".join(f"⟦{k}⟧" for k in dict.fromkeys(keys))
+    run = "deno run" if interpreter == "deno" else interpreter      # deno runs a file only with `run`
     return (" To put the value into a file or a document, save the program as a script file, "
-            f"then run it with the placeholder as its argument: {interpreter} make_doc.{_SCRIPT_EXT[interpreter]} "
+            f"then run it with the placeholder as its argument: {run} make_doc.{_SCRIPT_EXT[interpreter]} "
             f"{args}.{files} Do not ask the user to type the value in.")
 
 
