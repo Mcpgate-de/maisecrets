@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 32 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 179 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 194 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1682,6 +1682,10 @@ of its own. The answer to the command says what maisecrets added. A typing
 error such as `/maisecrets:terms add …` or `maisecrets term add …` is not
 sent to the model either: maisecrets shows the correct form.
 
+A name inside a value that maisecrets stores never splits it. A password such
+as `Kowalski#Lato2024` stays one value: it is masked whole, in the prompt and
+in every later tool result, and never as a name with the rest in clear.
+
 `/maisecrets:term remove Jan Kowalski` (or
 `remove ⟦NAME_c3⟧`, the placeholder copied from a result) takes it off.
 `/maisecrets:term` alone shows your lists. Only your typed prompt changes the
@@ -1741,7 +1745,7 @@ EMAIL_BOSS   boss at work
   listed.
 
 **A team list.** Put a `*.terms` file in a folder of `rule_dirs` (Rules of
-your own). The AI can write a shared checkout, so a team list has a floor: an
+your own; in its subfolder `rules/` when it has one, as for the rules). The AI can write a shared checkout, so a team list has a floor: an
 entry of fewer than 3 characters, an entry of only words of
 `maisecrets/rules/term_stoplist.txt` (1,134 words: the 521 words of the closed
 word classes of English and German, and the words that 8 or more files of
@@ -1757,6 +1761,12 @@ can be up to 4 MB and 150,000 entries. A variant that an earlier entry holds
 (your own list first) is left out, and at most 16 team variants share one
 stem or first word: a list cannot make each word of a text walk thousands
 of entries.
+
+**Where the terms run.** The terms are a pass of the rule registry, after
+the built-in rules and the rules of your own; `maisecrets rules list` shows
+the pass as `terms:term`. So an email address or an IBAN keeps the span its
+rule found. A listed term that a rule finds too (an email address on your
+list) gets the rule's type, but it stays a term: mask only.
 
 **Not in a PDF or an image.** The matcher reads text. A name inside a PDF, an
 image or another binary file that a tool reads reaches the model as it is.

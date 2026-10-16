@@ -249,8 +249,11 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         out["systemMessage"] = out.get("systemMessage", "") + " " + note
     # the terms (maisecrets/terms.py): a changed team list, or a terms.txt that stops the hooks
     try:
-        from maisecrets.terms import session_note as terms_note  # noqa: E402
-        note = terms_note()
+        from maisecrets import term_files  # noqa: E402
+        note = None
+        if term_files.start_note_due(cfg):    # without a list the terms module is not loaded at all
+            from maisecrets.terms import session_note as terms_note  # noqa: E402
+            note = terms_note()
     except Exception:  # noqa: BLE001 - terms never stop a session start; a bad terms.txt stops the next hook
         note = None
     if note:

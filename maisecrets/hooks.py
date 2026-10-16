@@ -24,7 +24,7 @@ import time
 import sys
 from typing import Any
 
-from . import detect, incidents, rehydration, terms
+from . import detect, incidents, rehydration, term_files
 from .placeholder import KEY_RE, find_refs
 from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config
@@ -124,8 +124,8 @@ def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str 
     ordered = sorted(matches, key=lambda x: x.start)
     # a term (terms.py) goes into the store as its entity id: every spelling gets the entity's one placeholder, and
     # the store never holds the term
-    entries = vault.put_many([(terms.store_value(m.kind) if terms.is_term_kind(m.kind) else m.value, m.type, m.kind)
-                              for m in ordered], session=session, tool=tool)
+    entries = vault.put_many([(term_files.store_value(m.kind) if term_files.is_term_kind(m.kind) else m.value,
+                               m.type, m.kind) for m in ordered], session=session, tool=tool)
     out = text
     for m, e in sorted(zip(ordered, entries), key=lambda me: me[0].start, reverse=True):
         out = out[: m.start] + (e.ref if e is not None else f"⟦{m.type}⟧") + out[m.end:]
@@ -731,7 +731,7 @@ def _longest_wins(text: str, matches: list, vault, session: str | None, resolved
     inside a stored value is dropped: the exact redaction takes the value whole (a listed name inside a stored
     password split it, and the rest stayed in clear). A hit that holds a stored value, or that overlaps one, takes
     the whole union: a resolved value inside a ghp_ token cut the shape, and the rest of the token went out."""
-    if not matches or vault is None or not any(terms.is_term_kind(m.kind) for m in matches):
+    if not matches or vault is None or not any(term_files.is_term_kind(m.kind) for m in matches):
         # without a term hit the detector's spans are taken first, as before the terms, and the exact redaction
         # runs on the rest: no second pass over the text (the hook time without terms stays what it was)
         return matches
@@ -813,7 +813,7 @@ def rewrite_prompt(payload: dict) -> dict:
     if "<task-notification>" in prompt:
         return {}
     # /maisecrets:term add|remove carries a name: the hook answers it, and the mod must not rewrite the name first
-    if terms.parse_command(prompt):
+    if term_files.parse_command(prompt):
         return {}
     # the hook blocks an @file mention before it stores anything; without a working directory a relative
     # mention cannot be checked, so any mention goes to the hook
@@ -825,7 +825,7 @@ def rewrite_prompt(payload: dict) -> dict:
     # a program a tool started, and the hook leaves its marker as text too
     if payload.get("origin") in ("composer", "bridge"):
         try:
-            prompt, _marked = terms.take_markers(prompt, _name_ttl(cfg))
+            prompt, _marked = term_files.take_markers(prompt, _name_ttl(cfg))
         except OSError:
             return {}           # the hook answers it, and blocks when it cannot record the name either
     matches = _prompt_hits(prompt)
@@ -868,6 +868,7 @@ def _term_command(payload: dict, cmd: tuple, typed: bool, cfg: dict) -> dict:
     """The answer to /maisecrets:term add|remove (Codex: maisecrets: term add …): always a block, because the prompt
     carries the name. Only the person's typed prompt changes the list (as a setting, C22); the name is masked in the
     transcript, and the answer names a label and a line, never the name."""
+    from . import terms
     verb, words = cmd
     # the name in every form the transcript can hold it: the whole prompt as typed (two spaces, a tab, a line break,
     # a name under 4 characters that the scrub skips alone), the words, and the variants (gate review, M2)
@@ -894,7 +895,7 @@ def _term_command(payload: dict, cmd: tuple, typed: bool, cfg: dict) -> dict:
                 meta = json.loads(INDEX.read_text(encoding="utf-8")).get("entries", {}).get(refs[0][0]) or {}
             except (OSError, ValueError):
                 meta = {}
-            entity = meta.get("kind", "")[5:] if terms.is_term_kind(meta.get("kind")) else None
+            entity = meta.get("kind", "")[5:] if term_files.is_term_kind(meta.get("kind")) else None
         _ok, reason, scrub = terms.term_remove_typed(words, entity)
     scrub = list(dict.fromkeys(scrub + [x for x in extra if x]))
     if cfg.get("scrub_transcript", True) and scrub:
@@ -981,14 +982,14 @@ def user_prompt(payload: dict) -> dict:
                 "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
     # /maisecrets:term add|remove (maisecrets/terms.py): before the detector, which would take the name out first.
     # Blocked in every case: the prompt carries the name
-    term_cmd = terms.parse_command(prompt)
+    term_cmd = term_files.parse_command(prompt)
     if term_cmd:
         # a subagent's prompt is no prompt of the person (as for the marker below)
         return _term_command(payload, term_cmd, typed and not payload.get("agent_id"), cfg)
     if typed and not payload.get("agent_id"):
         # {{Jan Kowalski}} in a prompt the person typed: the name is masked from now on (terms.take_markers)
         try:
-            prompt, _marked = terms.take_markers(prompt, _name_ttl(cfg))
+            prompt, _marked = term_files.take_markers(prompt, _name_ttl(cfg))
         except OSError as exc:
             return {"decision": "block", "reason": (
                 f"maisecrets: the name you marked with {{{{…}}}} cannot be recorded ({type(exc).__name__}), so it "
@@ -3125,7 +3126,7 @@ def _term_keys() -> set:
         entries = json.loads(INDEX.read_text(encoding="utf-8")).get("entries", {})
     except (OSError, ValueError, AttributeError):
         return set()
-    return {k for k, m in entries.items() if isinstance(m, dict) and terms.is_term_kind(m.get("kind"))}
+    return {k for k, m in entries.items() if isinstance(m, dict) and term_files.is_term_kind(m.get("kind"))}
 
 
 def pre_tool(payload: dict) -> dict:
@@ -3778,7 +3779,7 @@ def post_tool(payload: dict) -> dict:
             "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": new_response,
                                    "additionalContext": note},
         }
-    term_refs = list(dict.fromkeys(e.ref for e in entries if terms.is_term_kind(getattr(e, "kind", ""))))
+    term_refs = list(dict.fromkeys(e.ref for e in entries if term_files.is_term_kind(getattr(e, "kind", ""))))
     if term_refs:
         note = (f"{note} {', '.join(term_refs)} stand for names from the person's term list: maisecrets never puts "
                 "the name back, also not in a command or a file. Write them as they are.").strip()

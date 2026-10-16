@@ -6,5 +6,5 @@ runner = ["tests/test_terms_hooks.py::ShapedTermTests::test_the_store_keeps_the_
 
 [proof]
 file = "maisecrets/detect.py"
-find = "            elif m.kind.startswith(\"term:\"):\n                _claim(m, text, found, taken_starts, taken_ends)\n"
-replace = ""
+find = "        else:\n            _claim(m, text, found, taken_starts, taken_ends)\n"
+replace = "        else:\n            pass\n"

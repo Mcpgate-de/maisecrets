@@ -140,9 +140,11 @@ def canonical_sha256(rule: dict) -> str:
 
 def pass_specs(export_rule: str, export_type: str, personal_rules: tuple, prompt_rules: frozenset,
                personal_types: dict, regions: dict | None = None, needs: dict | None = None) -> list:
-    """The specs of the passes outside the rule list: the password export (tool channel only) and the personal-data
-    rules (tool channel; the ones in personal.PROMPT_RULES in both), each with its region and what it needs."""
-    out = [make("export", export_rule, export_type, 0, channel="tool", needs="form")]
+    """The specs of the passes outside the rule list: the password export (tool channel only), the personal-data
+    rules (tool channel; the ones in personal.PROMPT_RULES in both), each with its region and what it needs, and the
+    terms pass (both channels; one spec for every list, the placeholder type is each entry's own)."""
+    out = [make("export", export_rule, export_type, 0, channel="tool", needs="form"),
+           make("terms", "term", "NAME", 0, channel="both")]
     for seq, rid in enumerate(personal_rules):
         out.append(make("personal", rid, personal_types.get(rid, "PERSON"), seq,
                         channel="both" if rid in prompt_rules else "tool",
@@ -154,7 +156,7 @@ def make(source: str, rule_id: str, type_: str, seq: int, *, region: str = "gene
          language: str = "", upstream: Upstream | None = None, patches: tuple = (), needs: str = "") -> RuleSpec:
     origin = "vendored" if source in VENDORED else OWN_SPECIAL.get(source, "own")
     if source in PASSES:
-        origin = "own"
+        origin = OWN_SPECIAL.get(source, "own")     # the terms pass reads your own lists: origin user
     if origin == "vendored" and patches:
         origin = "patched"
     phase = PHASES["user"] if source == "user" else PASSES.get(source, PHASES["rules"])

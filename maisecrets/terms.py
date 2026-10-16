@@ -37,6 +37,7 @@ from array import array
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import term_files
 from .vault import HOME, ConfigError
 
 WORD = "word"        # Jan: the whole word
@@ -44,12 +45,12 @@ STARTS = "starts"    # Kowalsk*: word start, any ending
 ENDS = "ends"        # *kowalski: any start, word end
 INSIDE = "inside"    # *kowalski*: anywhere inside a word
 
-PERSONAL = HOME / "terms.txt"
-MARKED = HOME / "terms.marked.json"
-STATE_FILE = HOME / ".terms-state"
+PERSONAL = term_files.PERSONAL
+MARKED = term_files.MARKED
+STATE_FILE = term_files.STATE_FILE
 SUGGESTED = HOME / "terms.suggested.txt"    # the proposal of `maisecrets terms suggest`: names, so in the store
-SUFFIX = ".terms"
-STORE_PREFIX = "maisecrets-term:"   # the store value of a term entry: the id, never the term
+SUFFIX = term_files.SUFFIX
+STORE_PREFIX = term_files.STORE_PREFIX
 
 MIN_INSIDE = 4        # *x*: a shorter x would mask half of every text
 MIN_AFFIX = 3         # the stem of Kowalsk* or *kowalski
@@ -645,31 +646,23 @@ class Loaded:
 
 def _team_sources(cfg: dict) -> tuple[list, list]:
     """([(source, bytes)], [Refused]) of the *.terms files in the folders of rule_dirs (the setting and the policy;
-    not rules.d, the person's own folder: their list is terms.txt)."""
-    from . import user_rules
+    not rules.d, the person's own folder: their list is terms.txt). A folder with a subfolder `rules/` is read there,
+    as for the rules of your own (term_files.team_folders)."""
     found, refused = [], []
-    for shown, path, src in user_rules.folders(cfg):
-        if src == "own" or user_rules.refused_folder(path) or not path.is_dir():
-            continue
+    for source, path in term_files.team_files(cfg):
         try:
-            names = sorted(p.name for p in path.iterdir() if p.suffix == SUFFIX and p.is_file())
+            size = path.stat().st_size
+            if size > MAX_TEAM_BYTES:
+                refused.append(Refused(source, 0, f"a file larger than {MAX_TEAM_BYTES >> 20} MB"))
+                continue
+            if size + sum(len(raw) for _s, raw in found) > MAX_TEAM_BYTES:
+                # the cap holds for all the team lists together: each file alone was no bound on the build
+                refused.append(Refused(source, 0, f"the team lists together are larger than "
+                                                  f"{MAX_TEAM_BYTES >> 20} MB"))
+                continue
+            found.append((source, path.read_bytes()))
         except OSError:
-            continue
-        for name in names:
-            source = f"{shown.rstrip('/')}/{name}"
-            try:
-                size = (path / name).stat().st_size
-                if size > MAX_TEAM_BYTES:
-                    refused.append(Refused(source, 0, f"a file larger than {MAX_TEAM_BYTES >> 20} MB"))
-                    continue
-                if size + sum(len(raw) for _s, raw in found) > MAX_TEAM_BYTES:
-                    # the cap holds for all the team lists together: each file alone was no bound on the build
-                    refused.append(Refused(source, 0, f"the team lists together are larger than "
-                                                      f"{MAX_TEAM_BYTES >> 20} MB"))
-                    continue
-                found.append((source, (path / name).read_bytes()))
-            except OSError:
-                refused.append(Refused(source, 0, "a file that cannot be read as UTF-8"))
+            refused.append(Refused(source, 0, "a file that cannot be read as UTF-8"))
     return found, refused
 
 
@@ -900,6 +893,7 @@ def matcher() -> Matcher:
 
 def reset() -> None:
     _CACHE.clear()
+    term_files.forget()     # a list written in this process is there for the next scan
 
 
 def _cache_loaded(loaded: Loaded) -> None:
@@ -935,19 +929,13 @@ def prebuild() -> None:
 
 
 def matches(text: str) -> list:
-    """The detect.extra_matchers entry: a Match of kind term:<id> per run."""
+    """The hits of the terms pass (detect._term_hits, registry phase "terms"): a Match of kind term:<id> per run."""
     from .detect import Match
     return [Match("term:" + ent.id, ent.type, text[s:e], s, e) for s, e, ent in matcher().find(text)]
 
 
-def store_value(kind: str) -> str:
-    """What the store keeps for a term hit: the entity id, never the term. One entry per entity, so every spelling
-    of it gets the same placeholder."""
-    return STORE_PREFIX + kind[5:]
-
-
-def is_term_kind(kind) -> bool:
-    return isinstance(kind, str) and kind.startswith("term:")
+store_value = term_files.store_value      # a hook reads these from term_files without importing this module
+is_term_kind = term_files.is_term_kind
 
 
 # --------------------------------------------------------- inline markers --

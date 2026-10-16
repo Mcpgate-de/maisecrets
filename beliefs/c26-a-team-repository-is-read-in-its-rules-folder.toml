@@ -1,0 +1,10 @@
+# c26-a-team-repository-is-read-in-its-rules-folder: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-team-repository-is-read-in-its-rules-folder"
+control = "C26"
+statement = "A team list is read where the rules of your own are read: in the subfolder rules/ of a folder of rule_dirs when it has one, else in the folder."
+runner = ["tests/test_terms.py::TeamFileTests::test_a_team_repository_is_read_in_its_rules_folder_as_the_rules_of_your_own"]
+
+[proof]
+file = "maisecrets/term_files.py"
+find = "        target = user_rules.rule_folder(path)\n"
+replace = "        target = path\n"

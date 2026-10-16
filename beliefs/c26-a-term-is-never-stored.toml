@@ -6,5 +6,5 @@ runner = ["tests/test_terms_hooks.py::TermHookTests::test_the_term_is_never_copi
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "    entries = vault.put_many([(terms.store_value(m.kind) if terms.is_term_kind(m.kind) else m.value, m.type, m.kind)\n"
-replace = "    entries = vault.put_many([(m.value, m.type, m.kind)\n"
+find = "    entries = vault.put_many([(term_files.store_value(m.kind) if term_files.is_term_kind(m.kind) else m.value,\n"
+replace = "    entries = vault.put_many([(m.value,\n"

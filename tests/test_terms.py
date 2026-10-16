@@ -422,6 +422,19 @@ class TeamFileTests(unittest.TestCase):
                          [(2, "a common word (rules/term_stoplist.txt) in a team list")])
         self.assertEqual([f.entities for f in loaded.files], [1])
 
+    def test_a_team_repository_is_read_in_its_rules_folder_as_the_rules_of_your_own(self):
+        # user_rules.rule_folder: a folder with a subfolder rules/ is read there (0.6.22); the terms followed the top
+        (self.dir / "rules").mkdir()
+        (self.dir / "rules" / "clients.terms").write_text("CLIENT_A  Zbigniew Testowski\n", encoding="utf-8")
+        (self.dir / "top.terms").write_text("CLIENT_T  Not Read At The Top\n", encoding="utf-8")
+        self.assertEqual([e.label for e in terms.load(self.cfg).entities], ["CLIENT_A"])
+        from maisecrets import term_files
+        self.assertEqual([(p.parent.name, p.name) for _s, p in term_files.team_files(self.cfg)],
+                         [("rules", "clients.terms")])
+        self.assertTrue(term_files.any_terms(self.cfg))
+        (self.dir / "rules" / "clients.terms").unlink()
+        self.assertFalse(term_files.team_files(self.cfg), "the top of a team repository is not read")
+
     def test_a_team_file_that_is_not_text_is_left_out_whole(self):
         (self.dir / "bad.terms").write_bytes(b"\xff\xfe\x00")
         loaded = terms.load(self.cfg)

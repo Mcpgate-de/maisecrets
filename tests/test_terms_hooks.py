@@ -409,6 +409,23 @@ class StoredValueTests(_Base):
         self.assertNotIn(self.REST, path.read_text(encoding="utf-8").lower(), "the transcript keeps the rest")
 
 
+class QuietValueTests(_Base):
+    """A word-like value that a label rule took in a tool result is quiet: a typed prompt does not hunt it
+    (vault.is_quiet). The longest-span rule must not drop a term hit inside it there, or the name went out with it."""
+
+    def test_a_term_inside_a_quiet_value_is_masked_in_a_typed_prompt(self):
+        # stored quiet before the list named the word inside it; then the list gets the name
+        value = "testowski" + "haus"
+        _out(_bash(f"password: {value}"))
+        index = json.loads(Path(HOME, "index.json").read_text(encoding="utf-8"))["entries"]
+        self.assertTrue(any(m.get("quiet") for m in index.values()), "the scenario needs a quiet entry")
+        _write_terms("PERSON_A  *testowski*\n")
+        self.assertEqual(_prompt(f"the house is {value} now")["decision"], "block")
+        self.assertNotIn("testowski", hooks.take_pending("S1").lower())
+        mod = hooks.rewrite_prompt({"prompt": f"the house is {value} now", "session_id": "S1", "cwd": ""})
+        self.assertNotIn("testowski", mod["text"].lower())
+
+
 class LongestSpanTests(_Base):
     """A value this session resolved inside a longer token the detector knows (C2): the whole token is taken out,
     never the value alone with the rest of the token in clear (gate review of block 2, round 2, HIGH-1)."""
@@ -438,6 +455,15 @@ class LongestSpanTests(_Base):
                 out = _out(_bash(f"token {token} end"))
                 self.assertWhole(out, token, head, tail, "the tool result")
                 self.assertRegex(out, r"\Atoken " + self.secret.pattern + r" end\Z")
+
+    def test_with_a_term_in_the_text_a_tool_result_takes_the_whole_token(self):
+        # a term hit in the text turns on the longest-span rule (hooks._longest_wins); the token still goes whole
+        _write_terms("PERSON_A  Testowski\n")
+        for token, head, tail in self.cases:
+            with self.subTest(token=head):
+                out = _out(_bash(f"Testowski: token {token} end"))
+                self.assertWhole(out, token, head, tail, "the tool result")
+                self.assertRegex(out, r"\A" + REF_RE.pattern + r": token " + self.secret.pattern + r" end\Z")
 
     def test_the_prompt_and_the_mod_take_the_whole_token(self):
         for token, head, tail in self.cases:
@@ -508,6 +534,27 @@ class MarkerHookTests(_Base):
         self.assertRegex(_out(_bash(f"Re: {NAME}")), r"\ARe: " + REF_RE.pattern + r"\Z")
         self.assertFalse(terms.PERSONAL.exists(), "a mark is not permanent: only term add writes terms.txt")
 
+    def test_a_mark_after_a_scan_without_any_list_is_masked_in_the_same_process(self):
+        # the process looked for a list before the mark existed (term_files.present is kept per process): the mark
+        # makes the next scan read the lists again, in the prompt that holds it and in a later tool result
+        self.assertFalse(terms.MARKED.exists())
+        self.assertEqual(detect.scan(f"nothing to mask, {NAME}"), [])
+        out = _prompt(f"draft a letter to {{{{{NAME}}}}}; {NAME} asked for it")
+        self.assertEqual(out["decision"], "block")
+        self.assertRegex(hooks.take_pending("S1"), r"\Adraft a letter to (" + REF_RE.pattern + r"); \1 asked for it\Z")
+        self.assertRegex(_out(_bash(f"Re: {NAME}")), r"\ARe: " + REF_RE.pattern + r"\Z")
+
+    def test_without_any_list_a_scan_does_not_load_the_terms_module(self):
+        code = ("import sys; sys.path.insert(0, %r); from maisecrets import detect, hooks; "
+                "detect.scan('Jan wrote to the team'); print('maisecrets.terms' in sys.modules)" % str(ROOT))
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=dict(os.environ),
+                           timeout=60)
+        self.assertEqual(r.stdout.strip(), "False", r.stderr[-400:])
+        _write_terms("PERSON_A  Testowski\n")
+        r = subprocess.run([sys.executable, "-c", code.replace("Jan wrote", "Testowski wrote")], capture_output=True,
+                           text=True, env=dict(os.environ), timeout=60)
+        self.assertEqual(r.stdout.strip(), "True", r.stderr[-400:])
+
     def test_the_mod_takes_the_marker_out(self):
         mod = hooks.rewrite_prompt({"prompt": f"letter to {{{{{NAME}}}}}", "session_id": "S1", "cwd": "",
                                     "origin": "composer"})
@@ -577,6 +624,45 @@ class LeakTests(_Base):
         self.assertNotIn("Pan ", shown, "a salutation is no part of a name")
         self.assertIn("Anna Kowalska", shown)
         self.assertFalse(terms.PERSONAL.exists())
+
+
+class Issue19FormTests(_Base):
+    """The forms that the text of the epic names (Mcpgate-de/maisecrets#19, part 2): `/maisecrets:term add Jan
+    Kowalski` masks the full name and the surname, also `Kowalskis`, `jan.kowalski` and a file name in NFD, and a
+    term inside a stored password never splits it. Jan Kowalski is the stand-in name of the epic."""
+
+    def setUp(self):
+        super().setUp()
+        self.assertEqual(_prompt("/maisecrets:term add Jan Kowalski")["decision"], "block")
+        self.assertEqual(_prompt("/maisecrets:term add Łucja Wiśniewska")["decision"], "block")
+
+    def test_the_full_name_and_the_surname_in_its_forms(self):
+        for text in ("Jan Kowalski", "Herr Kowalski schreibt", "Kowalskis Akte", "jan.kowalski@", "jan.kowalski",
+                     "JAN KOWALSKI", "Kowalski, Jan", "Jan\nKowalski"):
+            with self.subTest(text=text):
+                out = _out(_bash(f"<{text}>"))
+                self.assertNotIn("kowalsk", out.lower())
+                self.assertRegex(out, REF_RE)
+        self.assertEqual(_bash("Jan alone"), {}, "the first name alone stays visible")
+        self.assertEqual(_bash("Kowalskiego"), {}, "the surname is a whole word, never a stem")
+
+    def test_a_file_name_in_nfd(self):
+        import unicodedata
+        for text in ("łucja_wiśniewska.pdf", "Wiśniewska.docx", "Akte Wiśniewska"):
+            nfd = unicodedata.normalize("NFD", text)
+            self.assertNotEqual(nfd, text)
+            with self.subTest(text=text):
+                out = _out(_bash(f"/Users/x/Documents/{nfd}"))
+                self.assertNotIn(unicodedata.normalize("NFD", "wiśniewsk"), out.lower())
+                self.assertNotIn("wiśniewsk", unicodedata.normalize("NFC", out).lower())
+
+    def test_a_term_inside_a_stored_password_never_splits_it(self):
+        value = "Kowalski#Lato" + "2024"
+        self.assertEqual(_prompt(f"password: {value}")["decision"], "block")
+        secret = re.compile(re.escape(OPEN) + r"SECRET_c\d+" + re.escape(CLOSE))
+        out = _out(_bash(f"the value is {value} ok"))
+        self.assertNotIn("lato2024", out.lower())
+        self.assertRegex(out, r"\Athe value is " + secret.pattern + r" ok\Z")
 
 
 class EndToEndTests(_Base):
