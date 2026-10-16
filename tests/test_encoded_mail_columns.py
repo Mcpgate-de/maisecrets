@@ -58,6 +58,29 @@ class EncodedMailColumnTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(encoded(text), [])
 
+    def test_a_title_line_above_the_header_does_not_hide_it(self):
+        # the title has a comma and the word user: it is a line of its own, and the header below it still counts
+        for title in ("Report for user list, generated 2026-10-01", "Login audit, page 1", "Contacts export, v2"):
+            text = title + "\nid,email\n1," + ADDRESS + "\n"
+            with self.subTest(title=title):
+                self.assertEqual(encoded(text), [ADDRESS])
+
+    def test_a_cell_with_spaces_around_it_is_a_cell(self):
+        for row in ("Dana, " + ADDRESS + ",ok", 'Dana, "' + ADDRESS + '",ok', "Dana ; " + ADDRESS + " ; ok"):
+            text = ("name;contact;status\n" if ";" in row else "name,contact,status\n") + row
+            for channel in ("tool", "prompt"):
+                with self.subTest(row=row, channel=channel):
+                    self.assertEqual(encoded(text, channel), [ADDRESS])
+
+    def test_an_owner_word_inside_a_longer_column_name_is_no_address_column(self):
+        for text in ("end_user_id,status\npkg%40v2.dev,ok", "contact_asset,size\nreadme%40v2.dev,2048",
+                     "login,dep\npkg%401.0.0-beta.rc,x", "user,file\nanim%402x.lottie,1"):
+            with self.subTest(text=text.split("\n")[0]):
+                self.assertEqual(encoded(text) + encoded(text, "prompt"), [])
+        for head in ("login_user", "userName", "userPrincipalName", "reply_to"):
+            with self.subTest(head=head):
+                self.assertEqual(encoded("id," + head + "\n1," + ADDRESS), [ADDRESS])
+
     def test_a_data_row_is_no_header(self):
         # the first row holds an address on mailbox.org: data, not the header of a mail column
         text = "Dana," + "dana" + "@" + "mailbox-test.net,ok\nOmar,omar%40v2.dev,ok"

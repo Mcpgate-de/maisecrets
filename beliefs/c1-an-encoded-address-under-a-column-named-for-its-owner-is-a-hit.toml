@@ -6,5 +6,5 @@ runner = ["tests/test_encoded_mail_columns.py::EncodedMailColumnTests::test_a_co
 
 [proof]
 file = "maisecrets/detect.py"
-find = '''                          r"|(?<![a-z])(?:contacts?|logins?|users?|user[ _-]?name|sender|recipients?|reply[ _-]?to)"'''
-replace = '''                          r"|(?<![a-z])(?:x-no-such-column)"'''
+find = '''_OWNER_WORDS = frozenset({"contact", "contacts", "login", "logins", "user", "users", "username", "usernames",'''
+replace = '''_OWNER_WORDS = frozenset({"x-no-such-column",'''

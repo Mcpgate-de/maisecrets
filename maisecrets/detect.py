@@ -2466,8 +2466,18 @@ def _encoded_mail_expected(text: str, start: int, end: int) -> bool:
     if _ENCODED_MAIL_CONTEXT_RE.search(text, max(line, start - 40), start) or _ENCODED_MAIL_TO_RE.search(
             text, max(line, start - 40), start):
         return True
+    value = text[start:end]
+    # a cell may have spaces around it (`Dana, name%40host.de`) and quotes ("name%40host.de"), in that order
+    while start > line and text[start - 1] == " ":
+        start -= 1
+    while text[end:end + 1] == " ":
+        end += 1
     if text[start - 1:start] == '"' and text[end:end + 1] == '"':
         start, end = start - 1, end + 1   # a quoted cell: "name%40host.de"
+        while start > line and text[start - 1] == " ":
+            start -= 1
+        while text[end:end + 1] == " ":
+            end += 1
     before, after = text[start - 1:start] if start > line else "", text[end:end + 1]
     if before not in ("", ",", ";", "\t") or after not in ("", "\n", "\r", ",", ";", "\t") or start - line > 4000:
         return False
@@ -2476,34 +2486,44 @@ def _encoded_mail_expected(text: str, start: int, end: int) -> bool:
     sep = before or (after if after in (",", ";", "\t") else ",")
     if not before and not after:
         return False   # a value alone on its line is no cell of a row
-    if text[start:end].strip('"').rsplit(".", 1)[-1].lower() in _FILE_EXTENSIONS:
-        return False   # logo%402x.png: an asset at twice the size, not an address
+    labels = value.rsplit("%40", 1)[-1].lower().split(".")
+    if labels[-1] in _FILE_EXTENSIONS or sum(x.isdigit() for x in labels) >= 2:
+        return False   # logo%402x.png is an asset at twice the size, pkg%401.0.0-beta.rc a version
     import csv   # here: the hooks pay for every module at import
     col = len(next(csv.reader([text[line:start + 1]], delimiter=sep), [""])) - 1
     for head in text[:4000].split("\n")[:5]:
         cells = next(csv.reader([head], delimiter=sep), [])
-        # a header holds names, not values: a row with an address in it is data, even with mailbox.org in it
-        if (len(cells) > col and "%40" not in head and "@" not in head and any(map(_names_a_mail_column, cells))
-                and text.find(head) < line):
-            return _names_a_mail_column(cells[col])
+        # a header holds names, not values: a row with an address in it is data, even with mailbox.org in it. Each
+        # line counts on its own: a title line above the header (`Report for user list, 2026-10-01`) does not hide it
+        if (len(cells) > col and "%40" not in head and "@" not in head and text.find(head) < line
+                and _names_a_mail_column(cells[col])):
+            return True
     return False
 
 
 # a header cell of a column of addresses: a mail word in a few languages, or a word that names who an address
 # belongs to (contact, login, user, recipient). Before 0.6.25 only "mail" counted, and an encoded address under a
 # header such as `contact` or `login` passed. `to` and `from` are left out: a migration table has them as columns
-_MAIL_COLUMN_RE = _LazyRx(r"(?i)mail|courriel|correo|e-?post(?![a-z])|s\u00e4hk\u00f6posti"
-                          r"|(?<![a-z])(?:contacts?|logins?|users?|user[ _-]?name|sender|recipients?|reply[ _-]?to)"
-                          r"(?![a-z])")
+_MAIL_COLUMN_RE = _LazyRx(r"(?i)mail|courriel|correo|e-?post(?![a-z])|s\u00e4hk\u00f6posti")
+# the owner word must be the last word of the header: login_user and user are addresses, end_user_id and
+# contact_asset are an id and a file (review of 0.6.25)
+_OWNER_WORDS = frozenset({"contact", "contacts", "login", "logins", "user", "users", "username", "usernames",
+                          "sender", "recipient", "recipients", "upn"})
+_OWNER_PAIRS = (["user", "name"], ["reply", "to"], ["principal", "name"])
 # the extension of a file that an asset name ends in: name%402x.png is an image at twice the size
 _FILE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "ico", "bmp", "tif", "tiff", "js",
                               "mjs", "cjs", "ts", "css", "map", "json", "html", "htm", "xml", "txt", "pdf",
-                              "woff", "woff2", "ttf", "otf", "mp3", "mp4", "webm", "wasm", "gz", "tgz", "jar"})
+                              "woff", "woff2", "ttf", "otf", "mp3", "mp4", "webm", "wasm", "gz", "tgz", "jar",
+                              "heic", "heif", "lottie", "scss", "sass", "less", "jsx", "tsx", "csv", "yaml", "yml",
+                              "toml", "lock", "wav", "ogg", "mov", "zip"})
 
 
 def _names_a_mail_column(cell: str) -> bool:
     cell = cell.strip().strip("\"'")
-    return bool(_MAIL_COLUMN_RE.search(cell))
+    if _MAIL_COLUMN_RE.search(cell):
+        return True
+    words = [w.lower() for w in re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])", cell)]
+    return bool(words) and (words[-1] in _OWNER_WORDS or words[-2:] in _OWNER_PAIRS)
 
 
 def is_public_test_value(value: str, kind: str) -> bool:
