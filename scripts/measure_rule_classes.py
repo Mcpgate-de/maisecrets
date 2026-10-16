@@ -9,11 +9,11 @@ keys of every other rule and pass). The difference is what the class adds at the
 can still take the span.
 
 - recall lost: the labelled values the base masks and the variant does not (CredData rows with GroundTruth T, the
-  HIT values of tests/fp_corpus.py, the POSITIVE values of tests/fp_corpus_pii.py, the planted values of the
-  Cloakroom holdout sets v2 to v7);
+  HIT values of tests/fp_corpus.py, the POSITIVE values of tests/fp_corpus_pii.py, FORMS_HIT of
+  tests/fp_corpus_forms.py, the planted values of the Cloakroom holdout sets v2 to v7);
 - false hits saved: the inputs that have a hit in the base and none in the variant (CredData rows with GroundTruth F,
-  whose value is masked; the NO_HIT snippets of tests/fp_corpus.py; PII_NO_HIT of tests/fp_corpus_pii.py; the clean
-  holdout samples).
+  whose value is masked; the NO_HIT snippets of tests/fp_corpus.py; PII_NO_HIT of tests/fp_corpus_pii.py;
+  FORMS_NO_HIT of tests/fp_corpus_forms.py; the clean holdout samples).
 
 A value counts as masked when it no longer appears after every match is replaced, as in measure_creddata.py. Only an
 input with a hit of the class in the base can change when the class is off: a rule that took no span blocked no other
@@ -64,6 +64,10 @@ def inputs(creddata: str | None, holdout: str | None) -> list:
         import fp_corpus_pii
         out += [("fp_corpus_pii", text, (), True) for _, text in fp_corpus_pii.PII_NO_HIT]
         out += [("fp_corpus_pii", text, tuple(vals), ()) for _, text, vals in fp_corpus_pii.POSITIVE]
+    if (TESTS / "fp_corpus_forms.py").exists():
+        import fp_corpus_forms
+        out += [("fp_corpus_forms", text, (), True) for _, text in fp_corpus_forms.FORMS_NO_HIT]
+        out += [("fp_corpus_forms", text, tuple(vals), ()) for _, text, vals in fp_corpus_forms.FORMS_HIT]
     if holdout:
         for n in range(2, 8):
             path = Path(holdout) / f"holdout_v{n}.jsonl"

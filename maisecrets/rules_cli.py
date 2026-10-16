@@ -14,7 +14,8 @@ from pathlib import Path
 from . import detect, user_rules
 
 USAGE = ("maisecrets rules                       the folders, their rules and what was left out\n"
-         "maisecrets rules list [--json]         every rule: key, id, origin, rank, channel, region, class, upstream\n"
+         "maisecrets rules list [--json]         every rule: key, id, origin, rank, channel, region, class, needs,\n"
+         "                                       upstream\n"
          "maisecrets rules check [DIR]           check a folder (or every folder the hooks read) and its samples.txt\n"
          "maisecrets rules test [text]           what the rules find in the text (or stdin); never the value\n"
          "maisecrets rules init DIR              start a rule folder for a team\n"
@@ -358,14 +359,14 @@ def import_toml(args: list[str]) -> int:
     return 1 if any(n.startswith("refused") for n in notes) else 0
 
 
-_LIST_COLUMNS = ("key", "id", "origin", "rank", "channel", "region", "class", "upstream", "patches")
+_LIST_COLUMNS = ("key", "id", "origin", "rank", "channel", "region", "class", "needs", "upstream", "patches")
 
 
 def _list_row(spec, off: frozenset) -> dict:
     up = spec.upstream
     return {"key": spec.key, "id": spec.id, "origin": spec.origin,
             "rank": ".".join(str(x) for x in spec.priority), "channel": spec.channel, "region": spec.region,
-            "class": spec.rule_class, "upstream": f"{up.source} {up.version}" if up else "",
+            "class": spec.rule_class, "needs": spec.needs, "upstream": f"{up.source} {up.version}" if up else "",
             "patches": ", ".join(f"{p.field} {p.op}" for p in spec.patches),
             "off": spec.source != "export" and user_rules.switched_off(spec.id, off)}
 

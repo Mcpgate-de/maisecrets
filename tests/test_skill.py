@@ -354,6 +354,109 @@ class SkillChannelTests(unittest.TestCase):
             self.assertNotIn(v, r.stdout + r.stderr)
 
 
+def _rnd(n: int, alphabet: str = string.ascii_letters + string.digits) -> str:
+    return "".join(secrets.choice(alphabet) for _ in range(n))
+
+
+def _files_full_of_secrets() -> dict:
+    """{file name: (text, values)}: a password export, a HAR recording, a contact and a calendar export, each value
+    generated at run time."""
+    pw = ["Tp" + _rnd(10) + "!", "testpass" + _rnd(6), "kx" + _rnd(12)]
+    csv = "name,url,username,password,note\n" + "".join(
+        f"site{i},https://site{i}.example.com/login,user{i},{p},\n" for i, p in enumerate(pw))
+    bearer = "ey" + "J" + _rnd(20) + "." + _rnd(30) + "." + _rnd(24)
+    cookie, cookie2 = _rnd(32, "0123456789abcdef"), _rnd(26, "0123456789abcdef")
+    token = "gh" + "p_" + _rnd(36)
+    har = json.dumps({"log": {"version": "1.2", "entries": [{
+        "request": {"method": "GET", "url": "https://api.example.com/v1/me",
+                    "headers": [{"name": "Authorization", "value": "Bearer " + bearer},
+                                {"name": "Cookie", "value": "session=" + cookie},
+                                {"name": "X-Token", "value": token}],
+                    "cookies": [{"name": "sid", "value": cookie2}]},
+        "response": {"status": 200, "headers": [], "cookies": []}}]}}, indent=2)
+    domain = "mail" + "box.org"
+    mail, tel = "jane.roe." + _rnd(5).lower() + "@" + domain, "+49 151 " + _rnd(8, string.digits)
+    vcf = ("BEGIN:VCARD\nVERSION:3.0\nFN:Jane Roe\nN:Roe;Jane;;;\n"
+           f"EMAIL;TYPE=INTERNET:{mail}\nTEL;TYPE=CELL:{tel}\nEND:VCARD\n")
+    mail2, meeting_code = "john.doe." + _rnd(5).lower() + "@" + domain, _rnd(24)
+    ics = ("BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nSUMMARY:Planning\n"
+           f"ATTENDEE;CN=John Doe:mailto:{mail2}\n"
+           f"LOCATION:https://meet.example.com/j/123456789?pwd={meeting_code}\nEND:VEVENT\nEND:VCALENDAR\n")
+    return {"passwords.csv": (csv, pw), "session.har": (har, [bearer, cookie, cookie2, token]),
+            "contacts.vcf": (vcf, [mail, tel]), "meeting.ics": (ics, [mail2, meeting_code])}
+
+
+class ReadAFileFullOfSecretsTests(unittest.TestCase):
+    """Before the model reads a file full of secrets (a password export, a .har, a .vcf, an .ics), the skill stops,
+    offers a masked copy and reads only the copy: the hooks replace only what their rules find, and a file read whole
+    sends every value in it to the provider (after danszymkowiak/maisecrets 53c839e)."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="maisecrets-skill-export-"))
+        self.addCleanup(shutil.rmtree, self.dir, True)
+
+    def test_the_skill_stops_offers_a_masked_copy_and_reads_only_the_copy(self):
+        text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        head = text.split("---\n", 2)[1]
+        self.assertIn("about to read a file full of secrets", head)
+        section = text.split("## Before you read a file full of secrets", 1)[1].split("\n## ", 1)[0]
+        for sign in ("passwords.csv", "logins.csv", ".har", ".vcf", ".ics", "header row"):
+            self.assertIn(sign, section, sign)
+        for step in ("Do not open it", "offer a masked copy", "python3 scripts/redact_copy.py <file>",
+                     "Read only the copy, never the original", "If the user says no, do not read the file"):
+            self.assertIn(step, section, step)
+
+    def test_a_masked_copy_of_each_file_holds_no_value_and_the_original_is_kept(self):
+        for name, (text, values) in _files_full_of_secrets().items():
+            with self.subTest(name):
+                src = self.dir / name
+                src.write_text(text, encoding="utf-8")
+                before = src.read_bytes()
+                r = _run(SCRIPTS / "redact_copy.py", name, cwd=self.dir)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                copy = (self.dir / (src.stem + ".redacted" + src.suffix)).read_text(encoding="utf-8")
+                for i, v in enumerate(values):
+                    self.assertNotIn(v, copy, f"value {i} of {name} is in the copy")
+                    self.assertNotIn(v, r.stdout + r.stderr)
+                self.assertEqual(src.read_bytes(), before)
+                if name.endswith(".har"):
+                    json.loads(copy)   # a masked recording stays a recording
+
+    def test_a_password_export_is_read_by_its_file_name(self):
+        """A secret column with no entry column is an export's only when the file name says so: the copy reads it
+        as the Read hook does, with the file name."""
+        pw = [_rnd(10), _rnd(9)]
+        (self.dir / "passwords.csv").write_text("folder,password\n" + "".join(f"f{i},{p}\n" for i, p in enumerate(pw)),
+                                                encoding="utf-8")
+        r = _run(SCRIPTS / "redact_copy.py", "passwords.csv", cwd=self.dir)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        copy = (self.dir / "passwords.redacted.csv").read_text(encoding="utf-8")
+        for p in pw:
+            self.assertNotIn(p, copy)
+
+    def test_a_har_header_that_names_no_credential_stays(self):
+        har = json.dumps({"log": {"entries": [{"request": {"headers": [
+            {"name": "Accept", "value": "application/json"}, {"name": "User-Agent", "value": "probe-agent/1.0"}]}}]}})
+        (self.dir / "plain.har").write_text(har, encoding="utf-8")
+        r = _run(SCRIPTS / "redact_copy.py", "plain.har", cwd=self.dir)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((self.dir / "plain.redacted.har").read_text(encoding="utf-8"), har)
+
+
+    def test_a_har_value_in_another_json_escape_is_masked_too(self):
+        """A writer may escape `/` as `\\/` or a letter as `\\u0041`: the copy is written again in one JSON form, so
+        the search finds the value (review of 0.6.24)."""
+        cookie = _rnd(6) + "/" + _rnd(6)
+        raw = cookie.replace("/", "\\/")
+        har = '{"log":{"entries":[{"request":{"cookies":[{"name":"sid","value":"' + raw + '"}]}}]}}'
+        (self.dir / "escaped.har").write_text(har, encoding="utf-8")
+        r = _run(SCRIPTS / "redact_copy.py", "escaped.har", cwd=self.dir)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        copy = (self.dir / "escaped.redacted.har").read_text(encoding="utf-8")
+        self.assertNotIn(cookie, json.dumps(json.loads(copy)))
+        self.assertNotIn(raw, copy)
+
+
 class RedactSameValueTests(unittest.TestCase):
     def test_an_iban_with_and_without_spaces_gets_one_tag(self):
         work = Path(tempfile.mkdtemp(prefix="maisecrets-redact-"))

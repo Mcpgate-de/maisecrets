@@ -1,0 +1,10 @@
+# c17-a-masked-copy-of-a-har-holds-no-cookie: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c17-a-masked-copy-of-a-har-holds-no-cookie"
+control = "C17"
+statement = "The masked copy of a file full of secrets (a password export, a .har, a .vcf, an .ics) holds none of its values; a cookie or a credential header of a HAR recording is masked by its place, not by a rule."
+runner = ["tests/test_skill.py::ReadAFileFullOfSecretsTests::test_a_masked_copy_of_each_file_holds_no_value_and_the_original_is_kept"]
+
+[proof]
+file = "skills/secret-hygiene/scripts/redact_copy.py"
+find = "    own = sorted(set(_har_spans(text)), key=lambda s: s.start)"
+replace = "    own = sorted(set([] and _har_spans(text)), key=lambda s: s.start)"

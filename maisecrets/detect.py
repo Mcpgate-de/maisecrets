@@ -34,6 +34,7 @@ slightly different rules is how a redaction leaks.
 """
 from __future__ import annotations
 
+import base64 as _b64
 import bisect
 import itertools
 import hashlib
@@ -60,6 +61,20 @@ class Match:
     value: str     # the exact text to replace
     start: int
     end: int
+
+
+class _LazyRx:
+    """A module-level regex compiled at its first use, with every method of a pattern: a hook process pays each
+    compilation at import, and most texts never reach these checks (0.6.24)."""
+    __slots__ = ("_args", "_rx")
+
+    def __init__(self, *args) -> None:
+        self._args, self._rx = args, None
+
+    def __getattr__(self, name: str):
+        if self._rx is None:
+            object.__setattr__(self, "_rx", re.compile(*self._args))
+        return getattr(self._rx, name)
 
 
 class _Lazy:
@@ -131,6 +146,50 @@ def shannon_entropy(s: str) -> float:
         return 0.0
     n = len(s)
     return -sum(c / n * math.log2(c / n) for c in Counter(s).values())
+
+
+# The entropy of a value rises with its alphabet, so one floor of 3.5 judges a hex value and a base64 value alike:
+# generic-api-key gets one floor per alphabet (the smallest of hex, base32, base62, base64, base64url that holds the
+# value, else printable). From a fork (danszymkowiak/maisecrets 795b411, Apache-2.0, floors chosen on its bench);
+# measured on CredData for 0.6.24 (docs/BENCHMARKS.md, "Rule classes"). Hex keeps 3.5: the fork's 3.449 caught only
+# cipher test vectors of the left-out repository and one key, and it took a 32-digit revoked token in developer text
+# A floor never rises above the old 3.5 (base32 and printable: a higher floor lost two Nemotron-PII secrets), and
+# base64url keeps 3.5: kebab-case names with a digit read as keys under 3.426 (review of 0.6.24)
+ENTROPY_BY_ALPHABET = {"hex": 3.5, "base32": 3.5, "base62": 3.322, "base64": 3.252, "base64url": 3.5,
+                       "printable": 3.5}
+ENTROPY_BY_ALPHABET_RULES = frozenset({"generic-api-key"})
+_B62 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+_ALPHABETS = (("hex", frozenset("0123456789abcdefABCDEF")), ("base32", frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567=")),
+              ("base62", frozenset(_B62)), ("base64", frozenset(_B62 + "+/=")), ("base64url", frozenset(_B62 + "-_=")))
+
+
+def alphabet_of(value: str) -> str:
+    """The smallest of hex, base32, base62, base64, base64url that holds the value, else printable."""
+    chars = set(value)
+    return next((name for name, alpha in _ALPHABETS if chars <= alpha), "printable")
+
+
+def _base64_of_text(v: str) -> bool:
+    """base64 of printable text (`staging-user`, the `Password:` challenge of a mail server's AUTH LOGIN after
+    `authentication failed:`), padded or not: an encoded word or name, not a key."""
+    if len(v) % 4 == 1 or len(v) < 8:
+        return False
+    try:
+        raw = _b64.b64decode(v + "=" * (-len(v) % 4), validate=True)
+    except (ValueError, TypeError):
+        return False
+    return bool(raw) and all(32 <= b < 127 for b in raw)
+
+
+def _entropy_ok(rule: Rule, secret: str) -> bool:
+    if rule.id in ENTROPY_BY_ALPHABET_RULES:
+        e = shannon_entropy(secret)
+        if e >= 3.5:
+            return True    # the old floor: a value it took stays a hit
+        if _CHANNEL[0] != "tool":
+            return False   # a typed prompt keeps 3.5: an identifier with a digit there is blocked, not masked
+        return e >= ENTROPY_BY_ALPHABET[alphabet_of(secret)] and not _base64_of_text(secret)
+    return not rule.entropy or shannon_entropy(secret) >= rule.entropy
 
 
 def _luhn_ok(digits: str) -> bool:
@@ -1286,6 +1345,9 @@ VALIDATORS = {
     "pl_pesel": checksums.pl_pesel_ok,
     "es_nif": checksums.es_nif_ok,
     "es_nie": checksums.es_nie_ok,
+    "us_npi": checksums.us_npi_ok,
+    "se_organisationsnummer": checksums.se_organisationsnummer_ok,
+    "uk_vehicle_registration": checksums.uk_vehicle_registration_ok,
     "uk_nhs": checksums.uk_nhs_ok,
     "us_aba": checksums.us_aba_ok,
     "it_fiscal_code": checksums.it_fiscal_code_ok,
@@ -1332,6 +1394,25 @@ _SYSTEM_USERS = frozenset({"git", "root", "ubuntu", "ec2-user", "admin", "norepl
 
 
 # --------------------------------------------------------------- own rules --
+# The letters of Chinese, Japanese and Korean script. Python's \w includes them, and these scripts put no space
+# between words: in `メールはta@example.jpまで` the boundaries (?<![\w...]) and (?![\w-]) of the e-mail and phone rules
+# never hold, so the address was missed or its span took the words around it. Those rules end a value at a word
+# character that is no CJK letter (_NOT_CJK_WORD), and scan() cuts CJK letters off the front of an address (filter
+# cjk-head). Ranges: Hangul Jamo, CJK punctuation and kana, Extension A and the base block of the ideographs, Hangul
+# syllables, compatibility ideographs and the fullwidth forms. Each class costs about 0.5 ms to compile in every hook
+# process, so the rules hold one each (review of 0.6.24).
+_CJK = ("\u1100-\u11ff\u3000-\u30ff\u3130-\u318f\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff"
+        "\uff00-\uffef")
+_CJK_RANGES = ((0x1100, 0x11ff), (0x3000, 0x30ff), (0x3130, 0x318f), (0x3400, 0x4dbf), (0x4e00, 0x9fff),
+               (0xac00, 0xd7af), (0xf900, 0xfaff), (0xff00, 0xffef))
+_NOT_CJK_WORD = "(?![" + _CJK + "])\\w"
+
+
+def _is_cjk(ch: str) -> bool:
+    o = ord(ch)
+    return any(lo <= o <= hi for lo, hi in _CJK_RANGES)
+
+
 OWN_RULES: list[dict] = [
     # ?token=… / &api_key=… in a URL
     {"id": "url-query-secret", "type": "SECRET", "secret_group": 2,
@@ -1339,11 +1420,16 @@ OWN_RULES: list[dict] = [
     {"id": "email", "type": "EMAIL", "validator": "person_email",
      # the last label is alphabetic: `lodash@4.17.21`, `checkout@v4.1.1` and Homebrew's
      # `python@3.14/3.14.7` are version pins, not addresses (review, 2026-09-26)
-     "regex": r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})"
-              r"@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
+     # a look ahead for the @ first: a text without an address is passed at once. A CJK letter ends the address
+     # (_NOT_CJK_WORD) and scan() cuts CJK letters off its front (cjk-head): an address next to Japanese text
+     "regex": r"(?=[\w.+-]{0,64}@|(?<![\w.+-])[\w.+-]{65,}@)"
+              r"(?:\b[\w.+-]{1,64}|(?<![\w.+-])[\w.+-]{64,}|[\w.+-]{64})"
+              r"@[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?!-|" + _NOT_CJK_WORD + r")"},
     # an IBAN in lower case, plain or in groups of four; its validator also wants the country's length
     {"id": "iban-lowercase", "type": "IBAN", "validator": "iban",
-     "regex": r"(?<![A-Za-z0-9])[a-z]{2}[0-9]{2}(?:[a-z0-9]{11,30}|(?:[ -][a-z0-9]{4}){2,7}(?:[ -][a-z0-9]{1,3})?)"
+     # also after an MT940 subfield code (?31), as PRESIDIO_LEFT_SUBFIELD
+     "regex": r"(?:(?<![A-Za-z0-9])|(?<=\?[0-9]{2}))[a-z]{2}[0-9]{2}"
+              r"(?:[a-z0-9]{11,30}|(?:[ -][a-z0-9]{4}){2,7}(?:[ -][a-z0-9]{1,3})?)"
               r"(?![A-Za-z0-9])"},
     {"id": "email-percent-encoded", "type": "EMAIL", "validator": "person_email_encoded",
      # the @ as %40 in a query string, a form body, an access log (public benchmark, 2026-10-11: 7 addresses
@@ -1351,7 +1437,9 @@ OWN_RULES: list[dict] = [
      "regex": r"(?:(?<![\w.+%-])|(?<=(?i:mailto%3a))|(?<=%3[Dd]))[\w.+-]{1,64}%40"
               r"[\w-]{1,63}(?:\.[\w-]{1,63})*\.[A-Za-z]{2,63}(?![\w-])"},
     {"id": "phone", "type": "PHONE",
-     "regex": r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}(?:[ \-]?\d{2,5}){1,4}(?![\w.]\d|\w)"},
+     # a CJK letter before or after the number is a boundary, as in the e-mail rule
+     "regex": r"(?:(?<=[" + _CJK + r"])|(?<!\w))(?<!\+)\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}"
+              r"(?:[ \-]?\d{2,5}){1,4}(?![\w.]\d|" + _NOT_CJK_WORD + r")"},
     # bare token prefixes newer than the vendored rulesets live in rules/prefixes.txt (see _load_prefixes)
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
@@ -1663,8 +1751,10 @@ ENTITY_TYPE = {"EMAIL_ADDRESS": "EMAIL", "IBAN_CODE": "IBAN", "CREDIT_CARD": "CA
 # prints the 9-character number without its check digit (it stands in the machine-readable zone only), so 37 of 40
 # real-shaped numbers and the number of the official specimen card were missed (survey of other detectors, 0.6.19).
 # de-handelsregister: a company's register number, public in the Handelsregister and no personal data
+# uk-postcode: a postcode alone identifies no one (a fork's bench, 2026-10-12: every hit was a false alarm); a street
+# address with its postcode is personal.py's
 PRESIDIO_SKIP = {"email", "url", "date", "mac-address", "uuid", "phone", "de-id-card", "de-passport",
-                 "crypto", "de-handelsregister"}
+                 "crypto", "de-handelsregister", "uk-postcode"}
 # validator id per presidio recognizer id; a recognizer with a validator we did not port
 # keeps its pattern score and is treated as weak (context required)
 PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
@@ -1673,12 +1763,51 @@ PRESIDIO_VALIDATOR = {"iban": "iban", "credit-card": "luhn", "ip": "public_ip",
                       "de-bsnr": "de_bsnr", "de-vat-id": "de_vat_id", "us-ssn": "us_ssn",
                       # 0.6.19: with the context word alone a value with a wrong check digit was a hit
                       "pl-pesel": "pl_pesel", "es-nif": "es_nif", "es-nie": "es_nie", "nhs": "uk_nhs",
-                      "aba-routing": "us_aba", "it-fiscal-code": "it_fiscal_code"}
+                      "aba-routing": "us_aba", "it-fiscal-code": "it_fiscal_code",
+                      # 0.6.24, from a fork (danszymkowiak/maisecrets d72ea2b, Apache-2.0): Presidio's own checks
+                      "us-npi": "us_npi", "se-organisationsnummer": "se_organisationsnummer",
+                      "uk-vehicle-registration": "uk_vehicle_registration"}
 # shapes that are plain digit runs: even with a valid checksum, ask for a context word. The validators ported in
 # 0.6.19 keep the context word they needed before: a check digit alone passes one value in 10 to 26
 PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "de-plz", "de-kfz",
                            "de-fuehrerschein", "nhs", "aba-routing", "medical-license", "pl-pesel", "es-nif",
-                           "es-nie", "it-fiscal-code"}
+                           "es-nie", "it-fiscal-code", "us-npi", "se-organisationsnummer",
+                           "uk-vehicle-registration"}
+# A card number that passes Luhn is masked in a tool result without a card word nearby (0.6.24). Measured on the four
+# labelled PII datasets: +340 card numbers, +49 false alarms (41 of them identifiers of structured financial messages
+# in Gretel), CredData +2 false alarms; docs/BENCHMARKS.md. A typed prompt keeps the card word: a block there costs
+# more than a mask. A documented test card stays text (rules/public_test_values.txt). From a fork
+# (danszymkowiak/maisecrets 795b411, d5807ea, Apache-2.0)
+CARD_ALONE_IN_TOOL = frozenset({"credit-card"})
+# issuer prefixes and lengths (ISO/IEC 7812 IIN ranges of the networks): Visa, Mastercard, American Express, Discover,
+# JCB, Diners Club, UnionPay
+_CARD_ISSUERS = _LazyRx(r"4\d{15}|5[1-5]\d{14}|2(?:2[2-9]|[3-6]\d|7[01])\d{13}|2720\d{12}|3[47]\d{13}"
+                           r"|6(?:011|5\d\d|4[4-9]\d)\d{12}|35(?:2[89]|[3-8]\d)\d{12}|3(?:0[0-5]|[68]\d)\d{11}|62\d{14}")
+_CARD_GROUPS = _LazyRx(r"\d{4}([ -])\d{4}\1\d{4}\1\d{4}|\d{4}([ -])\d{6}\2\d{5}|\d{4}([ -])\d{6}\3\d{4}")
+
+
+# a label that names an id (order_id, event_id, "job_id", invoice no, imei, serial): the number after it is that id
+_ID_LABEL_BEFORE_RE = _LazyRx(r"(?i)(?:(?:^|[^a-z])(?:imei|serial|reference|ref)|(?:id|no|nr|num|number|#))[\"']?"
+                                 r"\s{0,3}[:=#]\s{0,3}[\"']?\s{0,3}$")
+
+
+def _card_shaped(text: str, start: int, secret: str) -> bool:
+    """A number written as a card: in groups of four (4-6-5 for Amex, 4-6-4 for Diners), with the prefix and the
+    length of a card network, and not part of a decimal, a phone number or a longer digit run. A float, a timestamp
+    and an IMEI pass Luhn as often as a card does (review of 0.6.24), and they are written as one run."""
+    v = secret.strip()
+    end = start + len(secret)
+    sep = re.sub(r"\d", "", v)[:1]
+    fifth = bool(sep) and re.match(re.escape(sep) + r"\d{4}(?!\d)", text[end:end + 6])
+    # a comma before the number is a CSV cell (17,4532 0151 ...), not a decimal: a decimal is no group of four
+    if start and text[start - 1] in "+.-0123456789" or text[end:end + 1].isalnum() \
+            or re.match(r"\.\d", text[end:end + 2]) or fifth:
+        return False   # a decimal, a phone number, a longer run, a fifth group (an expiry such as 12/28 may follow)
+    if _ID_LABEL_BEFORE_RE.search(text, max(0, start - 30), start):
+        return False   # order_id=4111 ...: an id that passes Luhn
+    return bool(_CARD_GROUPS.fullmatch(v) and _CARD_ISSUERS.fullmatch(re.sub(r"\D", "", v)))
+
+
 # a Presidio pattern with no boundary: PESEL's eleven digits matched inside a longer digit run
 PRESIDIO_DIGIT_BOUNDED = {"pl-pesel"}
 # single patterns that need a context word although their recognizer does not: DE and nine digits that pass the
@@ -1690,7 +1819,10 @@ PRESIDIO_PATTERN_CONTEXT = {"de-vat-id#0"}
 # neighbour language (kort: short in Danish and Dutch) stays out
 PRESIDIO_EXTRA_CONTEXT = {
     "credit-card": ("karte", "kreditkarte", "kartennummer", "kartennr", "debitkarte", "bankkarte", "ec-karte",
-                    "girocard", "carte", "cartes", "carta", "tarjeta", "creditcard", "kaart", "cart\u00e3o", "karta"),
+                    "girocard", "carte", "cartes", "carta", "tarjeta", "creditcard", "kaart", "cart\u00e3o", "karta",
+                    # 0.6.24, review: the PAN of a payment log, a camelCase key, and the Nordic and Polish words
+                    "pan", "cardnumber", "ccnum", "ccnumber", "karty", "kortnummer", "kaartnummer", "korttinumero",
+                    "kreditkort", "kortnr"),
 }
 # Presidio tags every US/UK/IN/AU/… recognizer as language "en", so language is the wrong
 # switch: an Indian PAN rule produced 290 false positives in one German transcript. The
@@ -1773,6 +1905,20 @@ def presidio_region(rec_id: str) -> str:
     return head if len(head) == 2 and rec_id.count("-") >= 1 else "generic"
 
 
+# an IBAN after a subfield code of an MT940 bank statement export (`:86:...?31DE89...?32NAME`): Presidio's left
+# boundary refuses a digit before the country code, so the counterparty IBAN reached the model. From a fork
+# (danszymkowiak/maisecrets 8c943ee, Apache-2.0); the subfield code is `?` and two digits
+_IBAN_LEFT = "(?<![A-Z0-9])"
+PRESIDIO_LEFT_SUBFIELD = {"iban": "(?:(?<![A-Z0-9])|(?<=\\?[0-9]{2}))"}
+
+
+def _presidio_regex(rec_id: str, regex: str) -> str:
+    left = PRESIDIO_LEFT_SUBFIELD.get(rec_id)
+    if left and regex.startswith(_IBAN_LEFT):
+        return left + regex[len(_IBAN_LEFT):]
+    return regex
+
+
 def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]:
     data = json.loads((RULES_DIR / "presidio.json").read_text(encoding="utf-8"))
     out: list[Rule] = []
@@ -1788,7 +1934,7 @@ def _load_presidio(regions: tuple[str, ...] = DEFAULT_PII_REGIONS) -> list[Rule]
                 id=rule_id,
                 type=ENTITY_TYPE.get(rec["entity"], rec["entity"]),
                 regex=_Lazy(rf"(?<!\d)(?:{_re2_to_python(pat['regex'])})(?!\d)" if rec["id"] in PRESIDIO_DIGIT_BOUNDED
-                            else _re2_to_python(pat["regex"])),
+                            else _presidio_regex(rec["id"], _re2_to_python(pat["regex"]))),
                 validator=validator, score=float(pat["score"]),
                 context=tuple(c.lower() for c in rec.get("context", [])) + PRESIDIO_EXTRA_CONTEXT.get(rec["id"], ()),
                 require_context=weak or rule_id in PRESIDIO_PATTERN_CONTEXT,
@@ -2098,11 +2244,8 @@ def pass_specs() -> list:
     if personal is None:
         return _registry.pass_specs(EXPORT_RULE, "SECRET", (), frozenset(), {})
     p = personal
-    types = {"phone-one-digit-groups": p.PHONE, "phone-us-national": p.PHONE, "birth-date-after-label": p.BIRTH_DATE,
-             "id-number-after-label": p.ID_NUMBER, "user-in-url": p.USERNAME, "user-in-home-path": p.USERNAME,
-             "street-address": p.ADDRESS, "name-after-label": p.NAME, "name-before-email": p.NAME,
-             "csv-personal-column": "COLUMN"}
-    return _registry.pass_specs(EXPORT_RULE, "SECRET", tuple(p.RULE_IDS), p.PROMPT_RULES, types)
+    return _registry.pass_specs(EXPORT_RULE, "SECRET", tuple(p.RULE_IDS), p.PROMPT_RULES, p.TYPES,
+                                regions=p.REGIONS, needs=p.NEEDS)
 
 
 def _patches_of(source: str, rule_id: str, patches: dict) -> tuple:
@@ -2311,6 +2454,35 @@ _ENCODED_MAIL_CONTEXT_RE = re.compile(
     r"|\b(?:to|from|cc|bcc)[ \t]*[:=][ \t]*"   # `to` and `from` alone are paths and imports: path/to/pkg%40v.com
     r"|\b(?:e-?mail|mail|sender|recipient|bounce|reply-to|contact|login|users?|username)[ \t]*[:=/]?[ \t]*)$")
 _DIGITS_ONLY_RE = re.compile(r"\+?[\d\s().-]+")
+# `sent to name%40host` in prose: `to` and spaces, not `path/to/` or `import x to`
+_ENCODED_MAIL_TO_RE = _LazyRx(r"(?i)(?<![/\w])(?:sent|send|mailed|forwarded|reply|replied|receipt|invoice|copy)"
+                                 r"[^\n/]{0,20}?(?<![/\w])to[ \t]+$")
+
+
+def _encoded_mail_expected(text: str, start: int, end: int) -> bool:
+    """Where an address with its @ as %40 is an address: after a mail word or `=` (_ENCODED_MAIL_CONTEXT_RE), after
+    `sent to` in prose, or as a whole cell of a CSV row (a column of a roster export, holdout 2026-10-15)."""
+    line = _line_start(text, start)
+    if _ENCODED_MAIL_CONTEXT_RE.search(text, max(line, start - 40), start) or _ENCODED_MAIL_TO_RE.search(
+            text, max(line, start - 40), start):
+        return True
+    if text[start - 1:start] == '"' and text[end:end + 1] == '"':
+        start, end = start - 1, end + 1   # a quoted cell: "name%40host.de"
+    before, after = text[start - 1:start] if start > line else "", text[end:end + 1]
+    if before not in ("", ",", ";", "\t") or after not in ("", "\n", "\r", ",", ";", "\t") or start - line > 4000:
+        return False
+    # the column's header names a mail address: a CSV header in the first five lines (a file, an export, a query
+    # result with a line before it); a row without such a header stays text (review of 0.6.24)
+    sep = before or (after if after in (",", ";", "\t") else ",")
+    if not before and not after:
+        return False   # a value alone on its line is no cell of a row
+    import csv   # here: the hooks pay for every module at import
+    col = len(next(csv.reader([text[line:start + 1]], delimiter=sep), [""])) - 1
+    for head in text[:4000].split("\n")[:5]:
+        cells = next(csv.reader([head], delimiter=sep), [])
+        if len(cells) > col and any("mail" in c.lower() for c in cells) and text.find(head) < line:
+            return "mail" in cells[col].lower()
+    return False
 
 
 def is_public_test_value(value: str, kind: str) -> bool:
@@ -2821,6 +2993,29 @@ def _names_its_label(text: str, start: int, secret: str) -> bool:
 
 
 # lookarounds, not ^: search(text, pos) anchors ^ at the start of the text, never at pos (a file's line 19 passed)
+# Four checks from a fork (danszymkowiak/maisecrets f2c9ee2, 24e0162, 3355cb8; Apache-2.0), measured on CredData
+# again for 0.6.24 against the password-label rules of 0.6.16 and 0.6.17: the name of a constant with a dash and an
+# underscore, a time or a ratio after a colon label, a number of seconds before the full stop of a sentence, and a
+# keyword that opens a sentence in a markdown table cell
+# the words of a name (each with a vowel, or DB) and a counter of one or two digits: PROD-DB-PASS_7, MY_SECRET_VALUE_1;
+# a run of capitals without a vowel or with a longer suffix is a value (review of 0.6.24)
+_CONSTANT_NAME_RE = _LazyRx(r"(?:[A-Z]*[AEIOUY][A-Z]*|DB)(?:[-_](?:[A-Z]*[AEIOUY][A-Z]*|DB))+_\d{1,2}")
+_TIME_OR_RATIO_RE = _LazyRx(r"\d+:[a-z]+")
+_PROSE_AFTER_RE = _LazyRx(r" (?:and|or|of|for|with|to|in|the|is|are|und|oder|der|die|das|mit|für|ist|sind)"
+                             r"(?![^\W_])")
+
+
+def _number_of(secret: str) -> str:
+    """The value without its quotes and the full stop of a sentence: `TOKEN_TTL = 3600.`"""
+    v = secret.strip("\"' ")
+    return v[:-1] if v.endswith(".") else v
+
+
+def _in_table_cell(text: str, start: int) -> bool:
+    """The value at `start` sits in a row of a markdown table."""
+    return text[_line_start(text, start):start].lstrip().startswith("|")
+
+
 _MEASURE_LABEL_RE = re.compile(r"(?i)(?<![a-z])(?:ttl|timeout|expir\w*|lifetime|max|min|len|length|size|count|limit"
                                r"|port|age|seconds|minutes|hours|days|retries|interval|ms|budget|refresh|rotation|cost"
                                r"|price|quota|window|delay|offset|threshold|rate|bytes|exp|iat|nbf|at|counter|index"
@@ -3175,7 +3370,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         if rule.keywords and not any(k in low for k in rule.keywords):
             continue
         # a rule that cannot fire without a context word need not run its regex without one
-        if rule.context and (rule.require_context or rule.score < 0.5) and not _has_context_word(low, rule.context):
+        alone = _CHANNEL[0] == "tool" and rule.id in CARD_ALONE_IN_TOOL
+        if (rule.context and (rule.require_context or rule.score < 0.5) and not alone
+                and not _has_context_word(low, rule.context)):
             continue
         own = _runs_after_personal(rule)
         form = rule.form or _registry.form_of(rule.id)    # a rule list a caller built has no form set
@@ -3194,6 +3391,13 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if end <= start:
                 continue
             secret = m.group(g)
+            if "cjk-head" in filters and _is_cjk(secret[0]):
+                # the address took the Japanese, Chinese or Korean words before it (\w holds their letters)
+                k = next((i for i, ch in enumerate(secret) if not _is_cjk(ch)), len(secret))
+                start += k
+                secret = text[start:end]
+                if not secret or secret[0] in "@.":
+                    continue
             if "base64-wrapped-end" in filters:
                 end = _base64_wrapped_end(text, start, end)   # the further lines of a wrapped value
                 secret = text[start:end]
@@ -3238,9 +3442,16 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if (keyword and _LABEL_SHAPE.fullmatch(secret.strip())
                     and _NAME_LABEL_RE.fullmatch(secret.strip()) and "\n" in text[m.start():start]):
                 continue   # the next line is a label of its own: `DB_PASSWORD=\nAPI_KEY=`, `Zugangsdaten:\nBenutzer:`
-            if (keyword and secret.strip("\"' ").isdigit()
+            if (keyword and _number_of(secret).isdigit()
                     and _MEASURE_LABEL_RE.search(_label_before(text, start))):
-                continue   # a limit or a duration: TTL_REFRESH_TOKEN = 2592000
+                continue   # a limit or a duration: TTL_REFRESH_TOKEN = 2592000, also at the end of a sentence
+            if "constant-name" in filters and _CONSTANT_NAME_RE.fullmatch(secret.strip("\"'`")):
+                continue   # the name of a constant, not its value: PROD-DB-PASS_7
+            if "time-or-ratio" in filters and _TIME_OR_RATIO_RE.fullmatch(secret.strip("\"'`")):
+                continue   # 0:default after `secret:`
+            if (keyword and secret.isalpha() and secret.islower() and _PROSE_AFTER_RE.match(text, end)
+                    and _in_table_cell(text, start)):
+                continue   # | token: counts and ... |: a sentence in a markdown table cell goes on after the word
             if "template-value" in filters and secret.startswith("{"):
                 continue   # a template: ?token={body['transfer_id']}, ?token={SLACK_AUTO_TOKEN}
             if ("words-not-token" in filters and not any(c.isdigit() for c in secret)
@@ -3264,8 +3475,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue
             if "password-value" in filters and not _ds_value_ok(secret.strip("\"'")):
                 continue
-            if "encoded-mail-context" in filters and not _ENCODED_MAIL_CONTEXT_RE.search(
-                    text, max(_line_start(text, start), start - 40), start):
+            if "encoded-mail-context" in filters and not _encoded_mail_expected(text, start, end):
                 continue
             if "phone-shape" in filters and not _phone_ok(text, start, secret):
                 continue
@@ -3273,7 +3483,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue   # a section number: RFC 6749 4.1.2.1, OIDC Core 3.1.2.1, section 7.1.2.3
             if overlaps(start, end):
                 continue
-            if rule.entropy and shannon_entropy(secret) < rule.entropy:
+            if rule.entropy and not _entropy_ok(rule, secret):
                 continue
             if rule.drop is not None and rule.drop({"secret": secret, "match": m.group(0), "path": "",
                                                     "line": text[_line_start(text, start):_line_end(text, end)]}):
@@ -3306,7 +3516,10 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue
             if rule.type == "SECRET" and len(secret) >= 16 and len(set(secret[-12:])) <= 1:
                 continue   # a prefix and one repeated character: glpat-AAAAAAAAAAAAAAAAAAAA is a placeholder
-            if rule.score < 1.0 or rule.require_context:
+            if alone and not _card_shaped(text, start, secret) and not _has_context_word(
+                    _lower(text[max(0, start - 80):min(len(text), end + 40)]), rule.context):
+                continue   # without a card word, only a number written as a card: groups and an issuer prefix
+            if (rule.score < 1.0 or rule.require_context) and not alone:
                 # presidio semantics: a weak shape passes only with a context WORD nearby
                 # cut from the original text, then lowered: a lowered text is not the same length (the
                 # Turkish İ lowers to two characters), so its offsets are not the original's
@@ -3381,6 +3594,7 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
     except ImportError:   # a copy of detect.py without its sibling modules
         return
     allowed, off = allow_list()
+    by_start, gone = None, set()
     for start, end, kind, typ in sorted(personal.hits(text, _CHANNEL[0], _pii_regions_cached())):
         if enabled is not None and kind not in enabled and "personal:" + kind not in enabled:
             continue
@@ -3393,20 +3607,32 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
             continue
         if overlaps(start, end):
             # an address takes the postcode that a region rule found inside it (de-plz): the whole address is the
-            # value. Any other hit keeps its span
+            # value. A phone number wrapped over two lines takes the first line that the phone rule found. Any other
+            # hit keeps its span
             lo, hi = bisect.bisect_left(taken_starts, start), bisect.bisect_left(taken_starts, end)
-            inside = [f for f in found if start <= f.start and f.end <= end and f.type not in SECRET_TYPES]
-            if typ != personal.ADDRESS or not inside or hi - lo != len(inside) or (
+            if (typ != personal.ADDRESS and kind != "phone-wrapped-line") or hi == lo or hi - lo > 32 or (
                     lo > 0 and taken_ends[lo - 1] > start):
                 continue
+            if by_start is None:   # once per scan: a list scan per overlap was quadratic in the hits (review)
+                by_start = {f.start: f for f in found}
+            inside = [by_start[x] for x in taken_starts[lo:hi] if x in by_start]
+            inside = [f for f in inside if f.end <= end and f.type not in SECRET_TYPES]
+            wider = typ == personal.ADDRESS or all(f.type == typ for f in inside)
+            if not wider or not inside or hi - lo != len(inside):
+                continue
+            gone.update(id(f) for f in inside)   # removed from `found` once, after the loop
             for f in inside:
-                found.remove(f)
+                by_start.pop(f.start, None)
                 i = bisect.bisect_left(taken_starts, f.start)
                 del taken_starts[i], taken_ends[i]
         found.append(Match(kind, typ, value, start, end))
+        if by_start is not None:
+            by_start[start] = found[-1]
         i = bisect.bisect_left(taken_starts, start)
         taken_starts.insert(i, start)
         taken_ends.insert(i, end)
+    if gone:
+        found[:] = [f for f in found if id(f) not in gone]
 
 
 _WINDOW_BEFORE = 2048  # context a rule may read before a value: a label 200, a context word 80, an AWS key id up to

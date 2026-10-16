@@ -1,0 +1,10 @@
+# c1-an-address-next-to-cjk-text-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-an-address-next-to-cjk-text-is-a-hit"
+control = "C1"
+statement = "An e-mail address or a phone number written right next to Chinese, Japanese or Korean letters is a hit, and its span is the value alone."
+runner = ["tests/test_cjk_boundaries.py::CjkBoundaryTests::test_an_address_or_number_next_to_cjk_text_is_found_alone_in_both_channels"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''_NOT_CJK_WORD = "(?![" + _CJK + "])\\w"'''
+replace = '''_NOT_CJK_WORD = "\\w"'''

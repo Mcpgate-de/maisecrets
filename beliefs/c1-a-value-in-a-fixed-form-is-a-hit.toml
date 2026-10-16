@@ -1,0 +1,10 @@
+# c1-a-value-in-a-fixed-form-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-value-in-a-fixed-form-is-a-hit"
+control = "C1"
+statement = "A value in a fixed form or after a label that names it (an ::add-mask:: value, a SharedAccessKey, a FHIR identifier, an ID after member or record, an address after an address label) is masked in a tool result."
+runner = ["tests/test_fp_corpus_forms.py::FormsCorpusTests::test_each_form_masks_its_value_in_the_tool_channel"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''    out += _form_hits(text, channel, regions, want)'''
+replace = '''    pass'''

@@ -1432,6 +1432,12 @@ class RaceAgainstPutTests(unittest.TestCase):
     entry is lost, or an index entry names a value that is gone (suite review, 2026-09-27)."""
 
     # process A: puts only. Its own sweep is off, so the expired seeds are left for process B.
+    # It pauses 50 ms outside the lock after each put, as separate hook processes do (each call is a new
+    # process; one call stores its values with one put_many). The lock is a poll: a waiter tries every 20 ms
+    # (31 ms with Windows' 15.6 ms timer). Without the pause, A re-took the lock within a millisecond of its
+    # release, B's poll almost never fell into that gap, and on a slow Windows runner A's 25 puts outlasted
+    # B's 6 s deadline: LockTimeout in B (windows-latest, 2026-10-15). The pause is longer than one poll,
+    # so B gets the lock after at most one put of A.
     WRITER = (
         "import sys, time\n"
         "from pathlib import Path\n"
@@ -1448,15 +1454,18 @@ class RaceAgainstPutTests(unittest.TestCase):
         "for i in range(n):\n"
         "    e = Vault().put(f'race-fake-w-{i:03d}', 'SECRET', 'manual', session='S-w')\n"
         "    print(e.key, i, flush=True)\n"
+        "    time.sleep(0.05)\n"
     )
-    # process B: a slow delete (a keychain call takes ~10 ms) widens the window a lock must cover
+    # process B: a slow delete (a keychain call takes ~10 ms) widens the window a lock must cover. 30 ms: with
+    # 3 ms, B's forgets fit into A's pauses, and without the lock 8 of 30 test runs stayed green
+    # (10 rounds, measured 2026-10-16); with 30 ms, 30 of 30 went red.
     OTHER = (
         "import json, os, sys, time\n"
         "from pathlib import Path\n"
         "from maisecrets.vault import JsonFileBackend, Vault, load_config, wipe_everything\n"
         "_delete = JsonFileBackend.delete\n"
         "def slow_delete(self, *a, **k):\n"
-        "    time.sleep(0.003)\n"
+        "    time.sleep(0.03)\n"
         "    return _delete(self, *a, **k)\n"
         "JsonFileBackend.delete = slow_delete\n"
         "mode, go, keys = sys.argv[1], Path(sys.argv[2]), sys.argv[3:]\n"

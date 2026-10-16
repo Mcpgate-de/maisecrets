@@ -1,0 +1,10 @@
+# c1-a-card-number-in-a-tool-result-needs-no-card-word: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-card-number-in-a-tool-result-needs-no-card-word"
+control = "C1"
+statement = "A card number that passes Luhn is masked in a tool result without a card word nearby; a typed prompt keeps the card word, and a number after a + stays a phone number."
+runner = ["tests/test_rules_from_the_fork_0624.py::CardWithoutWordTests::test_a_card_number_without_a_card_word_is_masked_in_a_tool_result"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''CARD_ALONE_IN_TOOL = frozenset({"credit-card"})'''
+replace = '''CARD_ALONE_IN_TOOL = frozenset()'''

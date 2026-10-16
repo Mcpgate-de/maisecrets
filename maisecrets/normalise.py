@@ -8,7 +8,9 @@ whole run.
 
 Only the tool channel uses it (detect.scan with channel "tool"): a typed prompt keeps its decisions. Bounded: a text
 longer than MAX_TEXT is not cleaned, a run longer than MAX_RUN is not decoded (a whole file, an image), at most
-MAX_CANDIDATES runs and MAX_DECODED bytes per text, and no new run after TIME_SLICE seconds.
+MAX_CANDIDATES runs and MAX_DECODED bytes per text. The bounds count work, not time: a time slice (20 ms until
+0.6.24) let a busy machine skip a run, and the key it held reached the model (1 of 503,860 fingerprint lines, under
+load). The work is linear in the text: under MAX_TEXT, 1 MB of runs costs about 25 ms of CPU with or without it.
 
 Adapted from a public fork of maisecrets (Apache License 2.0, see NOTICE). Changed: five stages (no carriage return,
 gutter, escape or unwrap stage), one module, a budget per call. The standard library only.
@@ -19,7 +21,6 @@ import base64
 import binascii
 import html
 import re
-import time
 import zlib
 
 # entities first: `&#8203;` and `&#27;[1m` written as entities become a zero-width character and an ANSI code that the
@@ -39,7 +40,6 @@ MIN_HEX = 32
 MAX_RUN = 16_384            # encoded characters
 MAX_DECODED = 65_536        # bytes per text, over every run and depth: the copy scan reads at most this much more
 MAX_CANDIDATES = 64         # runs per text
-TIME_SLICE = 0.02           # seconds per text
 MAX_TEXT = 1_000_000        # characters: a larger text is not decoded (its offset map alone would cost more)
 MAX_DEPTH = 2
 PRINTABLE = 0.9
@@ -104,19 +104,19 @@ def _entity(m) -> str:
 
 
 class Budget:
-    """What one text may still spend on decoding: candidates, decoded bytes, time."""
-    __slots__ = ("candidates", "decoded", "until")
+    """What one text may still spend on decoding: candidates and decoded bytes. No clock: the copy must be the same
+    on a busy machine."""
+    __slots__ = ("candidates", "decoded")
 
     def __init__(self) -> None:
         self.candidates = MAX_CANDIDATES
         self.decoded = MAX_DECODED
-        self.until = time.perf_counter() + TIME_SLICE
 
     def spent(self) -> bool:
-        return self.candidates <= 0 or self.decoded <= 0 or time.perf_counter() > self.until
+        return self.candidates <= 0 or self.decoded <= 0
 
     def take(self, n_bytes: int) -> bool:
-        if self.candidates <= 0 or n_bytes > self.decoded or time.perf_counter() > self.until:
+        if self.candidates <= 0 or n_bytes > self.decoded:
             return False
         self.candidates -= 1
         self.decoded -= n_bytes

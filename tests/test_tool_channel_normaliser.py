@@ -17,6 +17,7 @@ import random
 import string
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -170,6 +171,39 @@ class NormaliseTests(unittest.TestCase):
         out = normalise.normalise("\n".join(big), ("decode",)).text.split("\n")
         self.assertLessEqual(sum(len(line) for line in out if line.startswith("w")), normalise.MAX_DECODED)
         self.assertTrue(any(not line.startswith("w") for line in out), "the bytes budget ends the decoding")
+
+    def test_a_busy_machine_decodes_the_same(self):
+        """The copy must not depend on time. Under load, a time slice of 20 ms ran out before a run was decoded, and
+        a base64 key in quoted lines kept only its first line masked (1 of 503,860 fingerprint lines, 2026-10-15).
+        A clock that jumps one second per reading stands for a process that the machine sets aside."""
+        r = random.Random(41)
+        dashes, kind = "-" * 5, "RSA PRIVATE KEY"
+        body = base64.b64encode(b"\x30\x82" + bytes(r.randrange(256) for _ in range(1190))).decode()
+        pem = "".join([dashes, "BEGIN ", kind, dashes, "\n", "\n".join(body[i:i + 64] for i in range(0, len(body), 64)),
+                       "\n", dashes, "END ", kind, dashes, "\n"])
+        key = b64(pem)
+        quoted = "KEY = (\n" + "".join(f'    "{key[i:i + 64]}"\n' for i in range(0, len(key), 64)) + ")\n"
+        texts = {
+            "base64 key in quoted lines": quoted,
+            "base64 config": f"data:\n  config: {b64(f'password={PASSWORD}')}\n",
+            "gzip in base64": "blob: " + base64.b64encode(gzip.compress(f"password={PASSWORD}\n".encode())).decode(),
+            "hex token": f"token {TOKEN.encode().hex()} end",
+        }
+        calm = {name: spans(text) for name, text in texts.items()}
+        clock = [0.0]
+
+        def jumping():
+            clock[0] += 1.0
+            return clock[0]
+        with mock.patch("time.perf_counter", jumping), mock.patch("time.monotonic", jumping), \
+                mock.patch("time.time", jumping):
+            busy = {name: spans(text) for name, text in texts.items()}
+        for name in texts:
+            with self.subTest(name=name):
+                self.assertTrue(calm[name], "the calm scan finds the value")
+                self.assertEqual(busy[name], calm[name])
+        self.assertEqual([t for t, v in calm["base64 key in quoted lines"]], ["SECRET"])
+        self.assertGreater(len(calm["base64 key in quoted lines"][0][1]), 2000, "the whole key, not its first line")
 
     def test_an_unknown_stage_is_refused(self):
         with self.assertRaises(ValueError):

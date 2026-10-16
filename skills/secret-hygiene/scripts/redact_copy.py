@@ -12,8 +12,10 @@ Exit code: 0 written, 2 error.
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import sys
-from collections import Counter
+from collections import Counter, namedtuple
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -34,11 +36,93 @@ def _same(mtype: str, value: str) -> str:
     return mtype + ":" + value
 
 
-def redact(detect, text: str, secrets_only: bool) -> tuple[str, Counter]:
+Span = namedtuple("Span", "start end type value")
+# a header or a field of a HAR recording whose value is a credential by its name: the rules see a cookie value or a
+# session id as a word, so a .har read whole put every session of the recording in front of the model
+_HAR_WORDS = ("cookie", "authorization", "token", "secret", "session", "password", "passwd", "apikey", "api-key",
+              "api_key", "csrf", "xsrf", "key", "signature", "jwt")
+
+
+def _secret_name(name) -> bool:
+    """The name as words (x-api-key, sessionId, XSRF_TOKEN): a credential word must be one of them, so keyboardLayout
+    and monkeyPatch stay (review of 0.6.24). Two words joined count too: api key, api_key, apiKey."""
+    words = [w.lower() for w in re.split(r"[^A-Za-z0-9]+", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(name))) if w]
+    pairs = [a + b for a, b in zip(words, words[1:])] + [a + "-" + b for a, b in zip(words, words[1:])] \
+        + [a + "_" + b for a, b in zip(words, words[1:])]
+    return any(w in _HAR_WORDS for w in words + pairs)
+
+
+def _har_values(text: str) -> set:
+    """The values of a HAR recording that are credentials by their place: every cookie, and every header, query or
+    form field whose name names a credential. Empty for a file that is no HAR."""
+    try:
+        doc = json.loads(text)
+    except ValueError:
+        return set()
+    entries = doc.get("log", {}).get("entries") if isinstance(doc, dict) and isinstance(doc.get("log"), dict) else None
+    if not isinstance(entries, list):
+        return set()
+    out = set()
+
+    def pairs(items, every=False):
+        for it in items if isinstance(items, list) else ():
+            if isinstance(it, dict) and isinstance(it.get("value"), str) and (every or _secret_name(it.get("name"))):
+                out.add(it["value"])
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        for part in (entry.get("request"), entry.get("response")):
+            if not isinstance(part, dict):
+                continue
+            pairs(part.get("headers"))
+            pairs(part.get("cookies"), every=True)
+            pairs(part.get("queryString"))
+            post = part.get("postData")
+            if isinstance(post, dict):
+                pairs(post.get("params"))
+    return {v for v in out if len(v) >= 4}
+
+
+def _har_spans(text: str) -> list:
+    """Where each HAR credential stands in the text, as a whole JSON string (its escaped form, as the file has it)."""
+    spans = []
+    for v in _har_values(text):
+        for enc in {json.dumps(v, ensure_ascii=False)[1:-1], json.dumps(v)[1:-1]}:
+            needle = '"' + enc + '"'
+            i = text.find(needle)
+            while i >= 0:
+                spans.append(Span(i + 1, i + 1 + len(enc), "SECRET", v))
+                i = text.find(needle, i + 1)
+    return spans
+
+
+def matches(detect, text: str, path: str = "") -> list:
+    """The detector's matches (a file, as the Read hook: the tool channel and the file name, so a password export is
+    read as one) and the credentials of a HAR recording; a HAR value wins where both claim a span."""
+    own = sorted(set(_har_spans(text)), key=lambda s: s.start)
+    taken = []
+    for s in own:
+        if not taken or s.start >= taken[-1].end:
+            taken.append(s)
+    found = [m for m in detect.scan(text, channel="tool", path=path)
+             if not any(m.start < s.end and s.start < m.end for s in taken)]
+    return sorted(taken + found, key=lambda m: m.start)
+
+
+def _canonical_har(text: str) -> str:
+    """A HAR recording written again in one JSON form: an escape the writer chose (`\\/`, `\\u002d`) would hide a
+    credential from the search for its value (review of 0.6.24). Any other text stays as it is."""
+    if not _har_values(text):
+        return text
+    return json.dumps(json.loads(text), indent=2, ensure_ascii=False)
+
+
+def redact(detect, text: str, secrets_only: bool, path: str = "") -> tuple[str, Counter]:
+    text = _canonical_har(text)
     tags: dict[str, str] = {}
     per_type: Counter = Counter()
     out, last = [], 0
-    for m in sorted(detect.scan(text, channel="tool"), key=lambda m: m.start):   # a file, as the Read hook
+    for m in matches(detect, text, path):
         keep = secrets_only and m.type != "SECRET"
         if keep:
             continue
@@ -73,7 +157,7 @@ def main(argv: list[str]) -> int:
         return 2
     detect = _detector.load()
     text = src.read_bytes().decode("utf-8", errors="replace")
-    clean, per_type = redact(detect, text, args.secrets_only)
+    clean, per_type = redact(detect, text, args.secrets_only, src.name)
     dst.write_text(clean, encoding="utf-8")
     def label(t: str, n: int) -> str:
         word = LABELS.get(t, t.lower())

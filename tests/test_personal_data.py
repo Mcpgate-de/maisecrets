@@ -167,7 +167,8 @@ class AddressTests(unittest.TestCase):
                 ("Morada: Rua das Flores, 12, 4050-262 Porto", "Rua das Flores, 12, 4050-262 Porto", ("pt",))):
             with self.subTest(text=text):
                 self.assertEqual(values(text, region=region), [("street-address", v)])
-                self.assertEqual(values(text, region=("generic",)), [])   # the form runs in its region only
+                # the form runs in its region only (an address after an address label is address-after-label, generic)
+                self.assertEqual([x for x in values(text, region=("generic",)) if x[0] == "street-address"], [])
 
     def test_a_documentation_address_keeps_the_postcode_hit_of_its_region_rule(self):
         hits = [m.kind for m in scan("Adresse: Examplestraße 12, 10115 Berlin", region=("de",))]

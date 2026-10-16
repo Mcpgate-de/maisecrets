@@ -1,0 +1,12 @@
+# c1-the-cleaned-copy-does-not-depend-on-time: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-the-cleaned-copy-does-not-depend-on-time"
+control = "C1"
+statement = "The decoder of the tool channel is bounded by work (runs and decoded bytes), not by a clock: a busy machine decodes the same runs and masks the same values."
+runner = ["tests/test_tool_channel_normaliser.py::NormaliseTests::test_a_busy_machine_decodes_the_same"]
+
+[proof]
+file = "maisecrets/normalise.py"
+find = '''        return self.candidates <= 0 or self.decoded <= 0
+'''
+replace = '''        return self.candidates <= 0 or self.decoded <= 0 or __import__("time").perf_counter() % 2 == 0
+'''

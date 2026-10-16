@@ -1,0 +1,10 @@
+# c1-a-generic-key-is-judged-by-the-floor-of-its-alphabet: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-generic-key-is-judged-by-the-floor-of-its-alphabet"
+control = "C1"
+statement = "generic-api-key judges a value by the entropy floor of its alphabet: a base62 key of entropy 3.45 in a tool result is a hit; a hex value, a base64url name and a typed prompt keep the floor of 3.5."
+runner = ["tests/test_rules_from_the_fork_0624.py::GenericKeyFloorTests::test_a_base62_key_under_the_old_floor_is_a_hit"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''ENTROPY_BY_ALPHABET = {"hex": 3.5, "base32": 3.5, "base62": 3.322,'''
+replace = '''ENTROPY_BY_ALPHABET = {"hex": 3.5, "base32": 3.5, "base62": 3.5,'''

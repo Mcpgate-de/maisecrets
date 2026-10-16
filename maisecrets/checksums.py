@@ -120,6 +120,29 @@ def us_aba_ok(v: str) -> bool:
     return sum(int(c) * w for c, w in zip(d, (3, 7, 1) * 3)) % 10 == 0
 
 
+
+def us_npi_ok(v: str) -> bool:
+    """US NPI (CMS): Luhn over the prefix 80840 and the ten digits; a body of one repeated digit is no number."""
+    d = re.sub(r"[- ]", "", v.strip())
+    return len(d) == 10 and d.isdigit() and len(set(d[:-1])) > 1 and _luhn_sum("80840" + d) == 0
+
+
+def se_organisationsnummer_ok(v: str) -> bool:
+    """Swedish organisationsnummer: ten digits, the third at least 2, Luhn."""
+    d = _digits(v)
+    if len(d) == 12 and d.startswith("16"):
+        d = d[2:]                        # the century form 16NNNNNN-NNNN of an organisation
+    return len(d) == 10 and int(d[2]) >= 2 and _luhn_sum(d) == 0
+
+
+def uk_vehicle_registration_ok(v: str) -> bool:
+    """A UK number plate: in the current form (two letters, an age identifier, three letters) the age identifier is 02
+    to 29 or 51 to 79. Presidio leaves the older prefix and suffix forms unjudged; they pass."""
+    d = re.sub(r"[- ]", "", v.strip()).upper()
+    if len(d) == 7 and d[:2].isalpha() and d[2:4].isdigit() and d[4:].isalpha():
+        return 2 <= int(d[2:4]) <= 29 or 51 <= int(d[2:4]) <= 79
+    return True
+
 # codice fiscale: the value of a character at an odd place (1st, 3rd, ...); at an even place a digit counts its value
 # and a letter its place in the alphabet from 0
 _IT_ODD = dict(zip(string.digits + string.ascii_uppercase,

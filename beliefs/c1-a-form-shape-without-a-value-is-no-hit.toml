@@ -1,0 +1,10 @@
+# c1-a-form-shape-without-a-value-is-no-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-form-shape-without-a-value-is-no-hit"
+control = "C1"
+statement = "Developer text in the shape of a form of 0.6.24 without a value stays text: a team or a runner in parentheses after member, a ticket key after account."
+runner = ["tests/test_fp_corpus_forms.py::FormsCorpusTests::test_no_rule_fires_on_the_developer_text_in_the_shapes_of_the_forms"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''                if sum(c.isdigit() for c in v) >= 2 and re.search(r"\d[A-Z]", v):'''
+replace = '''                if sum(c.isdigit() for c in v) >= 2:'''

@@ -90,9 +90,11 @@ class CardWordTests(unittest.TestCase):
     def test_luhn_still_decides(self):
         self.assertEqual(both(f"Karte {BAD_CARD} Bezug"), [])
 
-    def test_without_a_card_word_the_number_stays_text(self):
-        self.assertEqual(both(f"Referenz {GROUPED} vom Konto"), [])
-        self.assertEqual(both(f"Kartoffel {GROUPED}"), [], "a whole word only: Kartoffel is no Karte")
+    def test_without_a_card_word_the_number_stays_text_in_a_typed_prompt(self):
+        # a tool result masks a card number written in groups without the word (0.6.24, test_rules_from_the_fork_0624)
+        self.assertEqual(found(f"Referenz {GROUPED} vom Konto", "prompt"), [])
+        self.assertEqual(found(f"Kartoffel {GROUPED}", "prompt"), [], "a whole word only: Kartoffel is no Karte")
+        self.assertEqual(found(f"Kartoffel {GROUPED}", "tool"), [("CARD", GROUPED)])
 
 
 class IbanFormTests(unittest.TestCase):
