@@ -2283,6 +2283,11 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                      "The command did not run.")
     ctxs = _shell_contexts(command)
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
+    from . import vault_refs
+    # a token a server minted and a server result noted (vault_refs.py): it takes the same way as a stored value
+    server = [(k, a, b) for k, a, b in vault_refs.find_noted(command) if ctxs[a] != "comment"]
+    refs = sorted(refs + server, key=lambda r: r[1])
+    server_keys = list(dict.fromkeys(k for k, _a, _b in server))
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
@@ -2307,6 +2312,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         return _ask(dict(tool_input), _consent_text(consent))
     keys = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(k for k, _a, _b in refs))
     windows = platform.system() == "Windows"
+    if windows and server_keys:
+        return _deny(f"maisecrets: {keys} come from a server, and a value from a server cannot go into a shell "
+                     "command on Windows yet. The command did not run. Write it into a file with Write instead.")
     if windows and client_of(payload) == "codex":
         return _deny(f"maisecrets: {keys} cannot be placed in a shell command on Codex for Windows "
                      "(PowerShell quoting is not supported). The command did not run. Use the value "
@@ -2341,9 +2349,13 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     vault = Vault(cfg)
     session = payload.get("session_id")
     uniq = list(dict.fromkeys(k for k, _a, _b in refs))
-    failed = _precheck(vault, uniq, session)
+    failed = _precheck(vault, [k for k in uniq if k not in server_keys], session)
     if failed:
         return _deny(_deny_reason(failed))
+    # before any stored value is recorded: a server that refuses leaves no audit line of ours
+    fetched, why = _server_values(cfg, vault, server_keys, session, "Bash", command)
+    if why:
+        return _deny(why + " The command did not run.")
     # automatic: no ask of our own. confirm: an ask per command, or with ssh_approval "per-session" an
     # approved value runs without an ask and a first use asks once and gives its token to the serving
     # child, which confirms it when the approved command reads the value. After phase 1: a key
@@ -2361,6 +2373,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     # phase 2: record (audit line, limiter) and fetch; a failure here has recorded nothing served
     plan: dict[str, tuple[str | None, str | None]] = {}    # key -> (nonce, value)
     for key in uniq:
+        if key in fetched:
+            plan[key] = (None, fetched[key])
+            continue
         if windows:
             nonce, status = vault.grant(key, session, "Bash", command)
             if status != "ok":
@@ -2377,7 +2392,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
             plan[key] = (None, value)
     if failed:
         return _deny(_deny_reason(failed))
-    _note_destinations(cfg, payload, "Bash", tool_input, list(plan), ssh_command=command)
+    _note_destinations(cfg, payload, "Bash", tool_input, [k for k in plan if k not in fetched], ssh_command=command)
     # phase 3: serve and rewrite
     prelude: list[str] = []
     var_by_key: dict[str, str] = {}
@@ -2479,6 +2494,30 @@ def _precheck(vault: Vault, keys: list[str], session: str | None) -> list[str]:
     the refusal on MCP and file tools (review, 2026-09-29); Bash had this order already."""
     failed = [f"{k} ({st})" for k in keys for st in [vault.status(k, session)] if st != "ok"]
     return failed or vault._limit_all(keys, session)
+
+
+def _server_values(cfg: dict, vault: Vault, keys: list[str], session: str | None, tool: str,
+                   context: str) -> tuple[dict, str | None]:
+    """Vault references (vault_refs.py): the values of server-range tokens, from the server that minted them, all
+    or none, with an audit line each. Returns (key -> value, None) or ({}, the reason without a value)."""
+    if not keys:
+        return {}, None
+    from . import vault_refs
+    names = ", ".join(f"⟦{k}⟧" for k in keys)
+    try:
+        got = vault_refs.resolve(cfg, vault.backend, keys)
+    except vault_refs.Refused as exc:
+        return {}, (f"maisecrets: cannot get the value of {names} from the server that sent it: {exc}. Do not ask "
+                    "the user for the value; tell them this reason.")
+    if not vault_refs.audit(got, session, tool, context):
+        return {}, "maisecrets: the audit log could not be written, so no value is released. Tell the user."
+    return {k: v for k, (v, _origin) in got.items()}, None
+
+
+def _all_refs(text: str, values: dict) -> list[tuple[str, int, int]]:
+    """The stored-value placeholders of text, and the server-range tokens that have a value in `values`."""
+    from . import vault_refs
+    return find_refs(text) + [r for r in vault_refs.find(text) if r[0] in values]
 
 
 def _deny_reason(failed: list[str]) -> str:
@@ -2853,9 +2892,17 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     # a Codex patch resolves in its text only; another field keeps a placeholder as text
     target = {"command": tool_input["command"]} if tool == "apply_patch" else tool_input
     _walk_strings(target, collect)
-    if not found:
+    from . import vault_refs
+    server: list[str] = []
+
+    def collect_server(v: str) -> str:
+        server.extend(k for k, _a, _b in vault_refs.find_noted(v))
+        return v
+    _walk_strings(target, collect_server)
+    server = list(dict.fromkeys(server))
+    if not found and not server:
         return {}
-    names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found))
+    names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found + server))
     stop = rehydration.refusal(cfg, "file", client_of(payload), names, "Nothing was written.")
     if stop:
         return _deny(stop)
@@ -2865,6 +2912,9 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     failed = _precheck(vault, list(dict.fromkeys(found)), session)
     if failed:
         return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
+    fetched, why = _server_values(cfg, vault, server, session, tool, f"{tool} {path}")
+    if why:
+        return _deny(why + " Nothing was written.")
     for key in dict.fromkeys(found):
         status = vault.record_resolve(key, session, tool, f"{tool} {path}")
         if status == "ok":
@@ -2876,10 +2926,11 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     if failed:
         return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
     _note_destinations(cfg, payload, tool, tool_input, list(values))
+    values.update(fetched)
 
     def substitute(v: str) -> str:
         out = v
-        for key, start, end in sorted(find_refs(v), key=lambda r: r[1], reverse=True):
+        for key, start, end in sorted(_all_refs(v, values), key=lambda r: r[1], reverse=True):
             out = out[:start] + values[key] + out[end:]
         return out
     if cfg.get("scrub_transcript", True):
@@ -2910,7 +2961,7 @@ def _resolve_patch(patch: str, values: dict) -> tuple:
     (None, why)."""
     out = []
     for line in patch.split("\n"):
-        refs = find_refs(line)
+        refs = _all_refs(line, values)
         if not refs:
             out.append(line)
             continue
@@ -3716,6 +3767,12 @@ def _post_tool_guarded(payload: dict) -> dict:
     """Claude Code ignores exit 2 from PostToolUse: the raw output would reach the model. So a
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
     _commit_destinations(payload)    # first: the call ran even when the redaction below fails; and before the hint
+    try:
+        from . import vault_refs
+        # before the redaction, from the result as the server sent it; the result itself does not change
+        vault_refs.note_result(payload, load_config())
+    except Exception as exc:  # noqa: BLE001 - a token not noted stays text; the output must not be withheld for it
+        _debug(f"post-tool vault-refs: {type(exc).__name__}")
     try:
         result = post_tool(payload)
     except ConfigError as exc:

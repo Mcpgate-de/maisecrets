@@ -100,6 +100,8 @@ DEFAULT_CONFIG = {
     "secret_destinations": "observe",  # observe: note where each stored secret is sent (destinations.py); off
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
+    "client_header": True,           # vault references: a key header on user-scope MCP servers (vault_refs.py)
+    "client_vault_cafile": "",       # vault references: a CA file for a server behind an own CA; empty: the system's
     "pass_agent_reports": True,      # the report of a subagent of this session is model text: not blocked (hooks.py)
     "tips": True,                    # a tip at session start, and a hint when a case for a setting first comes up
     # the limiter (C7): a brake for a session that sends its own values out in bulk; the session rule (C4) keeps the
@@ -127,7 +129,8 @@ _CONFIG_TYPES = {
     "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
     "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
     "ssh_consent": bool, "ssh_host_groups": dict, "ssh_autonomous_hosts": list, "secret_destinations": str,
-    "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool, "rule_dirs": list,
+    "ssh_approval": str, "rehydration": str, "guard": bool, "client_header": bool, "client_vault_cafile": str,
+    "pass_agent_reports": bool, "rule_dirs": list,
     "read_pdf": str, "read_image": str, "clean_dirs": list,
 }
 

@@ -381,6 +381,9 @@ def cmd_status(_: list[str]) -> int:
         except OSError:
             n = 0
         print(f"{name}: {n} lines")
+    from . import vault_refs
+    for line in vault_refs.status_lines(v.cfg, v.backend):
+        print(line)
     from . import incidents
     groups, damaged = incidents.load()
     markers = incidents.unfolded_markers()
