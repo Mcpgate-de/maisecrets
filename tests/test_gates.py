@@ -1094,6 +1094,104 @@ class ConcurrencyTests(unittest.TestCase):
         self.assertEqual(len(live), 12)                                    # nothing lost in the index
 
 
+class DocumentRouteTests(unittest.TestCase):
+    """A value for a document: the refusal of inline code and of a quoted heredoc names the route that works
+    (field report, Codex, 2026-10-16: the model asked the user to type the address into the PDF by hand)."""
+
+    @classmethod
+    def tearDownClass(cls):  # noqa: N802 - unittest hook
+        _hygiene.assert_children_ended()
+
+    def setUp(self):
+        _hygiene.watch_children(self)
+        _reset()
+        self.e = Vault().put(NASTY, "SECRET", "manual", session="S1")
+
+    def _reason(self, cmd: str, client: dict) -> str:
+        # the POSIX text: on Windows, Codex gets its own refusal before the route (test_windows_codex_keeps_its_own)
+        from unittest import mock
+        with mock.patch.object(hooks.platform, "system", return_value="Linux"):
+            out = _bash_pre(cmd, client=client)["hookSpecificOutput"]
+        self.assertEqual(out.get("permissionDecision"), "deny", out)
+        return out["permissionDecisionReason"]
+
+    def test_inline_code_and_a_quoted_heredoc_name_the_script_file_route(self):
+        r = self.e.ref
+        forms = {"python3 -c": "python3 -c \"open('a.html','w').write('" + r + "')\"",
+                 "node -e": "node -e \"require('fs').writeFileSync('a.html','" + r + "')\"",
+                 "python3 heredoc": "python3 - <<'PY'\nopen('a.html','w').write('" + r + "')\nPY\n",
+                 "cat heredoc": "cat > a.html <<'EOF'\n<p>" + r + "</p>\nEOF\n"}
+        for client, tool in ((CLAUDE, "Write or Edit"), (_hygiene.CODEX, "apply_patch")):
+            for name, cmd in forms.items():
+                with self.subTest(name, client=client):
+                    why = self._reason(cmd, client)
+                    self.assertIn("did not run", why)
+                    script = "node make_doc.js" if name == "node -e" else "python3 make_doc.py"
+                    self.assertIn(f"run it with the placeholder as its argument: {script} ⟦{self.e.key}⟧", why)
+                    self.assertIn(f"Or write the file with {tool}: the placeholder in the content gets the value", why)
+                    self.assertIn("Do not ask the user to type the value in", why)
+
+    def test_without_values_in_files_the_route_names_only_the_argument(self):
+        with _config(resolve_in_files=False):
+            why = self._reason("python3 -c 'print(1)' " + self.e.ref, CLAUDE)
+        self.assertIn("python3 make_doc.py", why)
+        self.assertNotIn("Write or Edit", why)
+
+    def test_a_policy_that_refuses_the_route_gets_no_route(self):
+        # block refuses every path, and confirm on Codex refuses both routes: the text must not send the model
+        # to a route that is refused next, nor forbid it to ask the user, which the policy's refusal asks for
+        cmd = "python3 -c 'print(1)' " + self.e.ref
+        for name, keys, client in (("block", {"rehydration": "block"}, CLAUDE),
+                                   ("block codex", {"rehydration": "block"}, _hygiene.CODEX),
+                                   ("confirm codex", {"rehydration": "confirm"}, _hygiene.CODEX)):
+            with self.subTest(name), _config(**keys):
+                why = self._reason(cmd, client)
+                self.assertIn("inline code would parse the value as program text", why)
+                self.assertNotIn("make_doc", why)
+                self.assertNotIn("Do not ask the user", why)
+        with _config(rehydration="confirm"):
+            self.assertIn("Write or Edit", self._reason(cmd, CLAUDE))   # Claude Code asks: the route works
+
+    def test_deno_gets_its_run_word(self):
+        self.assertIn("deno run make_doc.js", self._reason("deno --eval 'x' " + self.e.ref, CLAUDE))
+
+    def test_windows_codex_keeps_its_own_refusal(self):
+        from unittest import mock
+        with mock.patch.object(hooks.platform, "system", return_value="Windows"):
+            out = _bash_pre("python3 -c 'print(1)' " + self.e.ref, client=_hygiene.CODEX)["hookSpecificOutput"]
+        self.assertEqual(out.get("permissionDecision"), "deny", out)
+        self.assertIn("cannot be placed in a shell command on Codex for Windows", out["permissionDecisionReason"])
+        self.assertNotIn("make_doc", out["permissionDecisionReason"])
+
+    def test_the_route_names_the_refused_interpreter_and_every_key(self):
+        e2 = Vault().put(PLAIN, "SECRET", "manual", session="S1")
+        why = self._reason("node -e 'x' " + self.e.ref + " " + e2.ref, CLAUDE)
+        self.assertIn(f"node make_doc.js \u27e6{self.e.key}\u27e7 \u27e6{e2.key}\u27e7.", why)
+
+    def test_other_refusals_keep_their_own_next_step(self):
+        why = self._reason("bash -c 'echo " + self.e.ref + "'", CLAUDE)
+        self.assertNotIn("make_doc.py", why)
+        self.assertIn("run its inner command directly", why)
+
+    @unittest.skipIf(BASH is None or os.name == "nt", "a POSIX shell runs the rewritten command")
+    def test_the_route_the_refusal_names_puts_the_value_into_the_file(self):
+        work = Path(tempfile.mkdtemp(prefix="ms-doc-"))   # outside the vault home: a command there is refused
+        self.addCleanup(shutil.rmtree, work, True)
+        (work / "make_doc.py").write_text("import sys\nopen(sys.argv[2], 'w').write('<p>' + sys.argv[1] + '</p>')\n")
+        cmd = f"cd '{work}' && '{sys.executable}' make_doc.py {self.e.ref} doc.html"
+        out = _bash_pre(cmd)["hookSpecificOutput"]
+        self.assertNotIn("permissionDecision", out, out)
+        new = out["updatedInput"]["command"]
+        self.assertNotIn(NASTY[:6], new)
+        r = _run(new)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((work / "doc.html").read_text(), "<p>" + NASTY + "</p>")
+
+    def test_the_primer_names_the_document_route(self):
+        self.assertIn("python3 make_pdf.py ⟦KEY⟧", hooks.PRIMER)
+        self.assertIn("Write, Edit or apply_patch", hooks.PRIMER)
+
+
 class TipTests(unittest.TestCase):
     def test_one_tip_per_day_rotating_and_switchable_off(self):
         from maisecrets import tips

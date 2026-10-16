@@ -279,8 +279,8 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 32 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
-python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
+python3 harness/run.py                                 # 33 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
+python3 harness/codex.py [--real]                      # 10 scenarios through codex exec (five need --real)
 python3 scripts/replay_can_fail.py                     # 247 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
@@ -853,7 +853,15 @@ A placeholder turns back into its value only here:
   shape the redaction cannot see. The check reads command words, so
   `python3 script.py ⟦KEY⟧`, `docker run -e T=⟦KEY⟧ img` and a word inside
   quotes or a comment pass. A refused command is refused as a whole: split off
-  the step that needs the value and run it on its own.
+  the step that needs the value and run it on its own. For a value that goes
+  into a document or a generated file (a PDF, a .docx, a page), the refusal of
+  inline code and of a quoted heredoc names the route that works: save the
+  generator as a script file and run it with the placeholder as its argument
+  (`python3 make_pdf.py ⟦KEY⟧`), or put the placeholder into the file content
+  with Write, Edit or apply_patch. The file on disk gets the value; the model
+  keeps the placeholder (harness scenario `document_gets_the_value`, Claude Code
+  and Codex). Where the rehydration setting refuses these routes too, the
+  refusal names none of them.
 - **ssh through the Claude Code sandbox.** A value may go to your own servers
   over ssh on one condition: the command runs in Claude Code's Bash sandbox,
   where the operating system forces every connection through Claude Code's

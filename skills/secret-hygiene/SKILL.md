@@ -1,6 +1,6 @@
 ---
 name: secret-hygiene
-description: Protect secrets from the AI and clean up those that already leaked. Use when the user wants to protect passwords, keys or personal data from the AI or to install maisecrets; when the user asks whether a repository, its git history, a file or their past AI agent sessions contain passwords, API keys, tokens or private keys; when the user says a key or password was pasted into a chat, committed, pushed, logged or shared; when the user wants a log, config or stack trace made safe to post in an issue, ticket or chat; or when you are about to read a file full of secrets, such as a password export, a .har recording, a .vcf or an .ics file. Never shows a secret value.
+description: Protect secrets from the AI and clean up those that already leaked. Use when the user wants to protect passwords, keys or personal data from the AI or to install maisecrets; when the user asks whether a repository, its git history, a file or their past AI agent sessions contain passwords, API keys, tokens or private keys; when the user says a key or password was pasted into a chat, committed, pushed, logged or shared; when the user wants a log, config or stack trace made safe to post in an issue, ticket or chat; or when you are about to read a file full of secrets, such as a password export, a .har recording, a .vcf or an .ics file; or when a placeholder such as ⟦EMAIL_c1⟧ must go into a document or a file. Never shows a secret value.
 ---
 
 # Secret hygiene
@@ -62,6 +62,22 @@ default prompt of this skill is not a yes: make the offer and wait. Then:
   "nothing found".
 - The scripts need Python 3.9 or newer (the stock python3 of macOS works). They live in `scripts/` next to this file; in
   Claude Code that folder is `${CLAUDE_SKILL_DIR}/scripts`.
+
+## Put a placeholder into a document or a file
+
+A placeholder such as `⟦EMAIL_c1⟧` stands for a value that maisecrets keeps on this computer.
+When the user asks for that value in a PDF, a .docx, a page or another file, put the value in
+through the placeholder. Do not ask the user to type the value in.
+
+1. Write the generator as a script file, for example `make_pdf.py`.
+2. Give the placeholder to the script as an argument, and run it: `python3 make_pdf.py ⟦EMAIL_c1⟧`.
+   The shell reads the value when the command runs. The script reads it from `sys.argv[1]`.
+3. Or put the placeholder into the content of the file: Write or Edit in Claude Code, apply_patch
+   in Codex. The file on disk gets the value.
+
+Inline code (`python3 -c`, `node -e`) and a quoted heredoc (`<<'EOF'`) cannot take a value:
+maisecrets stops the command and names this route. You keep seeing the placeholder, also when
+you read the file again.
 
 ## Check a repository
 

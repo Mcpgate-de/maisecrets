@@ -35,6 +35,9 @@ PORT = 8791
 # run fails when the client does not offer this one
 SHELL_TOOL = os.environ.get("MAISECRETS_HARNESS_SHELL_TOOL", "Bash")
 REF1 = "\u27e6SECRET_c1\u27e7"
+REF_MAIL = "\u27e6EMAIL_c1\u27e7"
+# a script that writes its first argument into a page: the route for a value that goes into a document
+MAKE_DOC = "import sys\nopen('account.html', 'w').write('<p>' + sys.argv[1] + '</p>')\n"
 REPORT_VALUE = "glpat-" + "HARNESSreport1234567890ab"   # a secret shape in a subagent's report, not the marker
 
 
@@ -215,6 +218,28 @@ SCENARIOS = {
         "expect_requests": 2,
         "expect_placeholders": ["⟦SECRET_c1⟧"],
         "expect_text": "this call gets the real value of \u27e6SECRET_c1\u27e7 in message of mcp__everything__echo",
+    },
+    # a value for a document (field report, Codex, 2026-10-16: the model asked the user to type the address into the
+    # PDF by hand). Inline code is refused and the refusal names the route; the route puts the value into the files
+    # on disk: a script run with the placeholder as its argument, and Write with the placeholder in the content. The
+    # model keeps the placeholder: no request and no transcript holds the address
+    "document_gets_the_value": {
+        "prompt": "Create a page with our trade-fair account, e-mail address " + REF_MAIL + ".",
+        "preload": [[MAIL, "EMAIL", "email"]],
+        "files": {"make_doc.py": MAKE_DOC},
+        "allowed_tools": "Bash,Read,Write",
+        "max_turns": 4,
+        "needs": "python3",
+        "turns": [{"tool": "Bash", "input": {"command": "python3 -c \"open('account.html', 'w').write('<p>"
+                                                        + REF_MAIL + "</p>')\""}},
+                  {"tool": "Bash", "input": {"command": "python3 make_doc.py " + REF_MAIL}},
+                  {"tool": "Write", "input": {"file_path": "{cwd}/account.txt",
+                                              "content": "E-mail: " + REF_MAIL + "\n"}},
+                  {"text": "done"}],
+        "expect_requests": 4,
+        "expect_text": "run it with the placeholder as its argument: python3 make_doc.py " + REF_MAIL,
+        "expect_files": [("account.html", f"<p>{MAIL}</p>"), ("account.txt", f"E-mail: {MAIL}\n")],
+        "expect_not_in_transcript": [MAIL],
     },
     # the model runs a command whose output holds a secret
     "bash_echo": {
@@ -577,7 +602,7 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
              # a fixed mode: in the developer's auto mode the client sent every Bash command to a classifier on the
              # same upstream, which took the scripted turns (2.1.285, 2026-09-29: four requests instead of two)
              "--permission-mode", "default",
-             "--allowedTools", sc.get("allowed_tools", "Bash,Read"), "--max-turns", "3",
+             "--allowedTools", sc.get("allowed_tools", "Bash,Read"), "--max-turns", str(sc.get("max_turns", 3)),
              "--debug-file", str(debug_log), *extra, *sc.get("extra_args", [])],
             cwd=cwd, env=env, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
         )
@@ -678,11 +703,12 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
         # what the person sees in the client's own output, not what reaches the model
         if text not in r.stdout + r.stderr:
             fails.append(f"expected {text!r} in the client's output")
-    if sc.get("expect_file"):
-        fname, content = sc["expect_file"]
+    for fname, content in ([sc["expect_file"]] if sc.get("expect_file") else []) + sc.get("expect_files", []):
         got = (cwd / fname).read_text() if (cwd / fname).exists() else "<missing>"
         if got != content:
-            fails.append(f"rehydration: {fname} holds {got!r}")
+            # the value itself never goes to the log: a CI job prints it
+            shown = got.replace(MAIL, "<MAIL>").replace(MARK, "<MARK>").replace(MARK2, "<MARK2>")
+            fails.append(f"rehydration: {fname} holds {shown!r}")
     if sc.get("expect_home_json"):
         # a record the hooks wrote into the vault home: (file, a key path that must exist)
         fname, path = sc["expect_home_json"]
@@ -761,7 +787,9 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                 break
         for marker in sc.get("expect_not_in_transcript", []):
             if marker in txt:
-                fails.append(f"transcript {t.parent.name}/{t.name} holds {marker!r}")
+                # the address itself never goes to the CI log
+                fails.append(f"transcript {t.parent.name}/{t.name} holds "
+                             f"{'the address' if marker == MAIL else repr(marker)}")
     # golden keys
     for pf in sorted(dump.glob("*.json")):
         payload = json.loads(pf.read_text())
@@ -820,6 +848,9 @@ def main() -> int:
                                                    else SHELL_TOOL)
         if wants != SHELL_TOOL:
             print(f"[SKIP] {n}: needs the {wants} tool; this client offers {SHELL_TOOL}")
+            continue
+        if SCENARIOS[n].get("needs") and shutil.which(SCENARIOS[n]["needs"]) is None:
+            print(f"[SKIP] {n}: needs {SCENARIOS[n]['needs']} on the PATH")
             continue
         if SCENARIOS[n].get("guard") and _installed_guard():
             # the installed guard runs next to the guard under test, reads the same switches and can answer
