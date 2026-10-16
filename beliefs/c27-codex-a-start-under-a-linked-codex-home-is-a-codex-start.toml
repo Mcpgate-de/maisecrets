@@ -1,0 +1,11 @@
+# c27-codex-a-start-under-a-linked-codex-home-is-a-codex-start: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-start-under-a-linked-codex-home-is-a-codex-start"
+control = "C27"
+statement = "A Codex SessionStart whose transcript path names the resolved CODEX_HOME is a Codex start, so the folder of the session is recorded."
+runner = ["tests/test_codex_vault.py::ToolNames::test_a_codex_start_under_a_linked_codex_home_records_its_folder"]
+
+[proof]
+file = "hooks/dispatch.py"
+find = '''            return any(a.startswith(b + os.sep) for a in (os.path.abspath(path), os.path.realpath(path))
+                       for b in (os.path.abspath(home), os.path.realpath(home)))'''
+replace = '''            return os.path.abspath(path).startswith(os.path.abspath(home) + os.sep)'''

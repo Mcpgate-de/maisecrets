@@ -125,7 +125,10 @@ value only to a key that the vault announced when the person logged in.
   layer of the session folder has `mcp_servers`; else `{}`. Codex keeps the
   server URLs of the folder a session began in and runs the helper again after
   a change of the folder or a 401, so a later run of one Codex process gives
-  the header only when the first run gave it, in the same folder. Its command ends in
+  the header only when the first run gave it, in the same folder; a run with no
+  record counts as the first only while the process is younger than two minutes
+  (deny by default). The hook notes a result only in the folder that SessionStart
+  recorded for its session. Its command ends in
   `|| echo '{}'`, because a helper that fails stops Codex from connecting. The
   PostToolUse payload of Codex names the tool only (`mcp__<server>__<tool>`,
   each character outside `[A-Za-z0-9_]` as `_`). The vault maps it to a user

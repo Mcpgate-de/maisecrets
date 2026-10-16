@@ -64,7 +64,7 @@ class Base(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         self.cfg = self.home / "config.toml"
-        for p in (codex_vault.STATE, codex_vault.HELPER_FILE, codex_vault.SESSIONS, codex_vault.BACKUP,
+        for p in (codex_vault.STATE, codex_vault.HELPER_FILE, codex_vault.SESSIONS, codex_vault.backup_path(),
                   codex_vault.STATE.parent / "codex-helper-runs.json"):
             if p.exists():
                 p.unlink()
@@ -175,7 +175,7 @@ class LineEdit(Base):
         codex_vault.apply_config({"demo": (URL, KID)})
         codex_vault.apply_config({"demo": (URL, KID)})
         self.assertEqual(mine.read_text(), "the person's own file")
-        self.assertTrue(str(codex_vault.BACKUP).startswith(str(HOME)))
+        self.assertTrue(str(codex_vault.backup_path()).startswith(str(HOME)))
 
     def test_only_the_entry_with_that_url_gets_it(self) -> None:
         """A URL that changed since the server was enabled is another entry: no helper, and ours goes."""
@@ -230,7 +230,39 @@ class ToolNames(Base):
         self.assertEqual(codex_vault.server_of_tool("mcp__demo__t", ["demo"], ["other"]), "demo")
 
     def payload(self, cwd: Path, session: str = "s1") -> dict:
+        """A Codex result of the session `session`, which began in `cwd` unless SessionStart named another folder."""
+        codex_vault.note_session({"session_id": session, "cwd": str(cwd)})
         return {"tool_name": "mcp__demo__customers", "cwd": str(cwd), "session_id": session}
+
+    def test_a_first_session_start_records_its_folder(self) -> None:
+        """At the very first start the vault-refs folder does not exist yet; the record must still be written."""
+        shutil.rmtree(codex_vault.SESSIONS.parent, ignore_errors=True)
+        codex_vault.note_session({"session_id": "s-first", "cwd": str(self.tmp)})
+        self.assertEqual(codex_vault._session_folder("s-first"), str(self.tmp))
+
+    def test_a_codex_start_under_a_linked_codex_home_records_its_folder(self) -> None:
+        """Codex resolves CODEX_HOME, so the transcript path of SessionStart can name the resolved folder while the
+        variable names the link (/var and /private/var on macOS): the start is still a Codex start."""
+        real = self.tmp / "real-codex"
+        real.mkdir()
+        link = self.tmp / "linked-codex"
+        link.symlink_to(real)
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        env["CODEX_HOME"] = str(link)
+        payload = {"session_id": "s-link", "cwd": str(self.tmp), "hook_event_name": "SessionStart", "model": "m",
+                   "source": "startup", "transcript_path": str(real.resolve() / "sessions" / "r.jsonl")}
+        r = subprocess.run([sys.executable, str(ROOT / "hooks" / "dispatch.py"), "session-start"],
+                           input=json.dumps(payload), capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(codex_vault._session_folder("s-link"), str(self.tmp))
+
+    def test_a_result_without_a_session_start_names_nothing(self) -> None:
+        """Only SessionStart records the folder of a session: a record that failed or expired notes nothing, and the
+        folder of a later result never becomes the first one (Gate A and Gate B review, round 2)."""
+        self.write()
+        self.assertIsNone(codex_vault.mcp_server_of({"tool_name": "mcp__demo__customers", "cwd": str(self.tmp),
+                                                     "session_id": "never-started"}))
+        self.assertFalse(codex_vault.SESSIONS.exists() and "never-started" in codex_vault.SESSIONS.read_text())
 
     def test_the_payload_of_a_user_entry_names_it(self) -> None:
         self.write()
@@ -250,6 +282,33 @@ class ToolNames(Base):
         self.assertIsNone(codex_vault.mcp_server_of(self.payload(proj)), "a manifest that does not parse")
         (plug / ".mcp.json").write_text(json.dumps({"mcpServers": {"other": {"url": "https://b.example.net/mcp"}}}))
         self.assertIsNotNone(codex_vault.mcp_server_of(self.payload(proj)))
+
+    def test_every_place_codex_reads_plugin_servers_counts(self) -> None:
+        """codex-rs 0.162.0 reads the manifests of four places, `mcpServers` inline or as a path, and .mcp.json or
+        mcp.json; a server named there makes the tool name of a user entry ambiguous."""
+        self.write()
+        proj = self.tmp / "proj"
+        proj.mkdir()
+        plug = self.home / "plugins" / "cache" / "market" / "tools" / "1.0.0"
+        server = {"demo": {"url": "https://b.example.net/mcp"}}
+        cases = {".claude-plugin/plugin.json": {"mcpServers": server},
+                 ".cursor-plugin/plugin.json": {"mcpServers": "./servers/list.json"},
+                 "plugin.json": {"name": "tools"},
+                 "mcp.json": {"mcpServers": server}}
+        for where, manifest in cases.items():
+            with self.subTest(where=where):
+                shutil.rmtree(self.home / "plugins", ignore_errors=True)
+                (plug / where).parent.mkdir(parents=True, exist_ok=True)
+                (plug / where).write_text(json.dumps(manifest))
+                (plug / "servers").mkdir(exist_ok=True)
+                (plug / "servers" / "list.json").write_text(json.dumps({"mcpServers": server}))
+                if where == "plugin.json":
+                    (plug / "mcp.json").write_text(json.dumps(server))
+                self.assertIsNone(codex_vault.mcp_server_of(self.payload(proj)))
+        shutil.rmtree(self.home / "plugins")
+        (plug / ".codex-plugin").mkdir(parents=True)
+        (plug / ".codex-plugin" / "plugin.json").write_text(json.dumps({"mcpServers": "../../../../../x.json"}))
+        self.assertIsNone(codex_vault.mcp_server_of(self.payload(proj)), "a path outside the plugin: not trusted")
 
     def test_a_session_that_began_in_another_folder_names_nothing(self) -> None:
         """Codex keeps the server URLs of the folder a session began in; a later turn elsewhere keeps them (Gate B)."""
@@ -294,6 +353,7 @@ class ToolNames(Base):
         (home / ".codex").mkdir(parents=True)
         with mock.patch.dict(os.environ, {"CODEX_HOME": str(home / ".codex")}):
             (home / ".codex" / "config.toml").write_text(SAMPLE)
+            codex_vault.note_session({"session_id": "s1", "cwd": str(home)})
             self.assertIsNotNone(codex_vault.mcp_server_of({"tool_name": "mcp__demo__t", "cwd": str(home),
                                                             "session_id": "s1"}))
 
@@ -327,13 +387,36 @@ class Helper(Base):
         self.proj = self.tmp / "proj"
         self.proj.mkdir()
 
+    # a young process that plays Codex for one test: it runs each helper command as Codex does (sh -c, a cleared
+    # environment, the session folder), so all runs of a test have one parent process, as in one Codex session
+    DRIVER = ("import json, subprocess, sys\n"
+              "for line in sys.stdin:\n"
+              "    job = json.loads(line)\n"
+              "    r = subprocess.run(['sh', '-c', job['cmd']], cwd=job['cwd'], capture_output=True, text=True,\n"
+              "                       env=job['env'], timeout=30)\n"
+              "    print(json.dumps([r.returncode, r.stdout]), flush=True)\n")
+
     def run_helper(self, cwd: Path, command: str | None = None) -> dict:
         command = command or self.entry()["http_headers_helper"]
-        # as Codex runs it: sh -c, a cleared environment, the session folder
-        r = subprocess.run(["sh", "-c", command], cwd=cwd, capture_output=True, text=True, timeout=30,
-                           env={"PATH": os.environ.get("PATH", ""), "HOME": str(self.tmp)})
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return json.loads(r.stdout)
+        if getattr(self, "driver", None) is None:
+            self.driver = subprocess.Popen([sys.executable, "-c", self.DRIVER], stdin=subprocess.PIPE,
+                                           stdout=subprocess.PIPE, text=True)
+            self.addCleanup(self.driver.wait)
+            self.addCleanup(self.driver.stdin.close)
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": str(self.tmp)}
+        self.driver.stdin.write(json.dumps({"cmd": command, "cwd": str(cwd), "env": env}) + "\n")
+        self.driver.stdin.flush()
+        code, out = json.loads(self.driver.stdout.readline())
+        self.assertEqual(code, 0)
+        return json.loads(out)
+
+    def test_an_old_process_without_a_record_gets_no_header(self) -> None:
+        """Deny by default: a run with no record of its process counts as the first only while the process is young,
+        so a first run that failed (a busy lock, the alarm) never lets a later run elsewhere be the first."""
+        runs = str(self.tmp / "runs.json")
+        self.assertFalse(codex_helper.first_answer(runs, "p:old", str(self.proj), True, 3600))
+        self.assertFalse(codex_helper.first_answer(runs, "p:old", str(self.proj), True, 1), "the no stays")
+        self.assertTrue(codex_helper.first_answer(runs, "p:young", str(self.proj), True, 5))
 
     def test_the_header_in_a_clean_folder(self) -> None:
         self.assertEqual(self.run_helper(self.proj), {"Client-Vault": KID})
@@ -450,6 +533,7 @@ class CodexHooks(Base):
         self.write(SAMPLE.replace(URL, self.url))
         self.proj = self.tmp / "proj"
         self.proj.mkdir()
+        codex_vault.note_session({"session_id": "s1", "cwd": str(self.proj)})   # what SessionStart records
         vault_refs.use_client("codex")
         self.addCleanup(vault_refs.use_client, "claude")
         hooks._live_cache.clear()
@@ -469,8 +553,11 @@ class CodexHooks(Base):
         import ssl
         import urllib.request
         command = self.entry()["http_headers_helper"]
-        r = subprocess.run(["sh", "-c", command], cwd=self.proj, capture_output=True, text=True, timeout=30,
-                           env={"PATH": os.environ.get("PATH", ""), "HOME": str(self.tmp)})
+        # a young parent process plays Codex: only a young process makes the first run of the helper
+        play = "import subprocess, sys; sys.stdout.write(subprocess.run(['sh', '-c', sys.argv[1]], " \
+               "capture_output=True, text=True).stdout)"
+        r = subprocess.run([sys.executable, "-c", play, command], cwd=self.proj, capture_output=True, text=True,
+                           timeout=30, env={"PATH": os.environ.get("PATH", ""), "HOME": str(self.tmp)})
         header = json.loads(r.stdout)
         self.assertIn("Client-Vault", header)
         req = urllib.request.Request(self.srv.url + "/token", data=b"grant_type=authorization_code", headers=header)

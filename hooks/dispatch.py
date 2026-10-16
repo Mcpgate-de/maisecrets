@@ -138,7 +138,10 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         path = str(payload.get("transcript_path") or "")
         home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
         if path:
-            return os.path.abspath(path).startswith(os.path.abspath(home) + os.sep)
+            # Codex resolves CODEX_HOME (a canonical path), so compare resolved paths: /var against /private/var on
+            # macOS took a Codex start for Claude Code, and the folder of the session was never recorded
+            return any(a.startswith(b + os.sep) for a in (os.path.abspath(path), os.path.realpath(path))
+                       for b in (os.path.abspath(home), os.path.realpath(home)))
         if os.environ.get("CLAUDECODE") == "1":
             return False
         return any(k.startswith("CODEX_") for k in os.environ)

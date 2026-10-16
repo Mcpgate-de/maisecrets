@@ -81,8 +81,20 @@ def note_session(payload: dict) -> None:
         _first_folder(session, cwd)
 
 
+def _session_folder(session: str) -> str | None:
+    """The folder recorded at the SessionStart of this session, or None. Only SessionStart records one: a result
+    without it notes nothing, also when the record failed or expired (Gate A and Gate B review, round 2)."""
+    try:
+        data = json.loads(SESSIONS.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return None
+    rec = data.get(session) if isinstance(data, dict) else None
+    return rec["cwd"] if isinstance(rec, dict) and isinstance(rec.get("cwd"), str) else None
+
+
 def _first_folder(session: str, cwd: str) -> str | None:
     """The first folder recorded for this session; this cwd when there is none yet. None when the file is damaged."""
+    SESSIONS.parent.mkdir(mode=0o700, parents=True, exist_ok=True)     # a first start: the folder is not there yet
     with _lock_for(SESSIONS.parent / ".lock"):
         try:
             data = json.loads(SESSIONS.read_text(encoding="utf-8"))
@@ -104,7 +116,10 @@ def _first_folder(session: str, cwd: str) -> str | None:
 
 def plugin_server_names(home: Path | None = None) -> list[str] | None:
     """The names of the MCP servers of the installed Codex plugins (`plugins/cache/<market>/<plugin>/<version>`): they
-    share the tool names of user entries. None when a manifest cannot be read (then no tool name is trusted)."""
+    share the tool names of user entries. Every place Codex reads (codex-rs 0.162.0: the manifests `.codex-plugin/`,
+    `.claude-plugin/`, `.cursor-plugin/plugin.json` and a root `plugin.json`; `mcpServers` inline or as a path; the
+    files `.mcp.json` and `mcp.json`) is read, more is no harm. None when one cannot be read (then no tool name is
+    trusted; Gate A and Gate B review, round 2)."""
     base = (home or codex_home()) / "plugins" / "cache"
     names: list[str] = []
     try:
@@ -114,19 +129,40 @@ def plugin_server_names(home: Path | None = None) -> list[str] | None:
         return names
     except OSError:
         return None
-    for v in versions:
-        for f in (v / ".mcp.json", v / ".codex-plugin" / "plugin.json"):
-            if not f.exists():
-                continue
-            try:
-                data = json.loads(f.read_text(encoding="utf-8"))
-            except (OSError, ValueError, RecursionError):
-                return None
-            servers = data.get("mcpServers") if isinstance(data, dict) else None
-            if f.name == ".mcp.json" and servers is None and isinstance(data, dict):
-                servers = {k: s for k, s in data.items() if isinstance(s, dict)}
-            if isinstance(servers, dict):
-                names.extend(k for k in servers if isinstance(k, str))
+
+    def read(f: Path):
+        try:
+            return json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError, RecursionError):
+            raise LookupError(str(f)) from None
+
+    def servers_of(data: object, mcp_file: bool) -> dict:
+        servers = data.get("mcpServers") if isinstance(data, dict) else None
+        if servers is None and mcp_file and isinstance(data, dict):
+            servers = {k: s for k, s in data.items() if isinstance(s, dict)}
+        return servers if isinstance(servers, dict) else {}
+
+    try:
+        for v in versions:
+            root = os.path.realpath(v)
+            files = [v / ".mcp.json", v / "mcp.json"]
+            for manifest in (v / ".codex-plugin" / "plugin.json", v / ".claude-plugin" / "plugin.json",
+                             v / ".cursor-plugin" / "plugin.json", v / "plugin.json"):
+                if not manifest.exists():
+                    continue
+                data = read(manifest)
+                ref = data.get("mcpServers") if isinstance(data, dict) else None
+                if isinstance(ref, str):
+                    target = os.path.realpath(os.path.join(v, ref))
+                    if not target.startswith(root + os.sep):
+                        return None
+                    files.append(Path(target))
+                names.extend(k for k in servers_of(data, False) if isinstance(k, str))
+            for f in files:
+                if f.exists():
+                    names.extend(k for k in servers_of(read(f), True) if isinstance(k, str))
+    except LookupError:
+        return None
     return names
 
 
@@ -176,7 +212,7 @@ def mcp_server_of(payload: dict) -> dict | None:
     cwd, session = payload.get("cwd"), payload.get("session_id")
     if not isinstance(cwd, str) or not isinstance(session, str) or not session:
         return None
-    if _first_folder(session, cwd) != cwd:
+    if _session_folder(session) != cwd:
         return None                          # the session began in another folder, whose layers Codex still uses
     if not codex_helper.user_entry_is_plain(data, name, servers[name]) \
             or codex_helper.profile_files_bring_servers(home) \
@@ -207,7 +243,8 @@ def is_ours(value: object) -> bool:
         parts = shlex.split(value[:-len(_TAIL)])
     except ValueError:
         return False
-    return len(parts) == 7 and parts[1:5] == ["-I", str(HELPER_FILE), str(STATE), str(codex_home())] \
+    return len(parts) == 7 and parts[1:4] == ["-I", str(HELPER_FILE), str(STATE)] \
+        and os.path.realpath(parts[4]) == os.path.realpath(str(codex_home())) \
         and " ".join(shlex.quote(p) for p in parts) + _TAIL == value
 
 
@@ -425,12 +462,18 @@ def _same(path: Path, raw: bytes, st: os.stat_result) -> bool:
         return False
 
 
-BACKUP = HOME / "vault-refs" / "codex-config.toml.backup"   # in maisecrets' own folder: no file of the person goes
+BACKUP_DIR = HOME / "vault-refs"     # the backups lie in maisecrets' own folder: no file of the person goes
+
+
+def backup_path() -> Path:
+    """One backup per Codex profile (Gate B review, round 2)."""
+    import hashlib
+    return BACKUP_DIR / f"codex-config-{hashlib.sha256(profile().encode()).hexdigest()[:12]}.toml.backup"
 
 
 def _backup(data: bytes) -> str:
-    backup = str(BACKUP)
-    BACKUP.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    backup = str(backup_path())
+    BACKUP_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
         os.unlink(backup)
     except FileNotFoundError:
@@ -447,7 +490,7 @@ def apply_config(wanted: dict[str, tuple[str, str]], lock_wait: float = 5.0) -> 
     URL is still that URL, none of ours elsewhere. The state file first, so a header goes at once when it is taken
     back. Returns (added, removed, path, backup). A symlinked config is written through to its target, as Codex does."""
     path = Path(profile())
-    backup = BACKUP
+    backup = backup_path()
     write_state(wanted)
     if not path.is_file() or in_a_repository(str(config_path())):
         return [], [], path, backup

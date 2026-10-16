@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 13 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 279 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 282 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1955,11 +1955,15 @@ hold, with three differences:
   then go to that URL. So maisecrets adds one line, `http_headers_helper`, to
   that one entry. Codex runs this command when it connects to the server. It
   prints the header only when no `.codex/config.toml` of the folder you work
-  in, or of a folder above it, names MCP servers, and only in the folder the
-  Codex session began in; else it prints nothing.
+  in, or of a folder above it, names MCP servers, and only in the first folder
+  of that Codex process, within two minutes of its start; else it prints
+  nothing. The server needs the header only once, to link your key, so this
+  limit costs little: in the desktop app a later chat in another folder sends
+  no header until the app starts again.
   maisecrets changes no other byte of the file, does not touch a file that
-  does not parse or that lies in a git repository, and keeps a backup beside
-  it until the next start that changes nothing.
+  does not parse or that lies in a git repository, and keeps a backup in its
+  own folder (`~/.maisecrets/vault-refs/`) until the next start that changes
+  nothing.
 - The values come from the next start of Codex. Codex shows the notice as a
   warning of the hook in its terminal UI; `codex exec` does not print it.
 - In a repository that brings its own MCP servers, maisecrets notes no token

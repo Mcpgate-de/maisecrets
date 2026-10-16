@@ -35,6 +35,8 @@ MAX_FILE = 4 * 1024 * 1024            # a config file larger than this is not re
 DEADLINE = 3                          # seconds; Codex stops a helper after 10
 SHELLS = {"sh", "bash", "dash", "zsh", "ksh", "mksh", "fish", "busybox"}
 RUN_TTL = 30 * 24 * 3600              # the record of a Codex process is kept this long
+FIRST_WINDOW = 120                    # seconds: only a Codex process this young can make its first run
+LOCK_STALE = 2                        # seconds, below DEADLINE: a lock of a helper the alarm ended goes in time
 
 
 def _toml():
@@ -144,8 +146,8 @@ def profile_files_bring_servers(codex_home: str) -> bool:
 
 
 # ------------------------------------------------------- the Codex process --
-def _proc_linux(pid: int) -> tuple[int, str, str] | None:
-    """(parent pid, command name, start time) from /proc."""
+def _proc_linux(pid: int) -> tuple[int, str, str, float] | None:
+    """(parent pid, command name, start time, age in seconds) from /proc."""
     try:
         with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as f:
             text = f.read()
@@ -156,13 +158,16 @@ def _proc_linux(pid: int) -> tuple[int, str, str] | None:
         return None
     rest = text[right + 2:].split()
     try:
-        return int(rest[1]), text[left + 1:right], rest[19]
-    except (IndexError, ValueError):
+        with open("/proc/stat", encoding="ascii", errors="replace") as f:
+            boot = next(int(ln.split()[1]) for ln in f if ln.startswith("btime "))
+        started = boot + int(rest[19]) / os.sysconf("SC_CLK_TCK")
+        return int(rest[1]), text[left + 1:right], rest[19], time.time() - started
+    except (IndexError, ValueError, StopIteration, OSError):
         return None
 
 
-def _proc_ps(pid: int) -> tuple[int, str, str] | None:
-    """(parent pid, command name, start time) from ps (macOS and other systems without /proc)."""
+def _proc_ps(pid: int) -> tuple[int, str, str, float] | None:
+    """(parent pid, command name, start time, age in seconds) from ps (macOS and other systems without /proc)."""
     import subprocess
     try:
         out = subprocess.run(["ps", "-o", "ppid=,lstart=,comm=", "-p", str(pid)], capture_output=True, text=True,
@@ -172,31 +177,36 @@ def _proc_ps(pid: int) -> tuple[int, str, str] | None:
     if len(out) < 7:
         return None
     try:
-        return int(out[0]), " ".join(out[6:]), " ".join(out[1:6])
-    except ValueError:
+        start = " ".join(out[1:6])
+        age = time.time() - time.mktime(time.strptime(start, "%a %b %d %H:%M:%S %Y"))
+        return int(out[0]), " ".join(out[6:]), start, age
+    except (ValueError, OverflowError):
         return None
 
 
-def codex_process() -> str | None:
-    """`<pid>:<start time>` of the process that started this helper: the nearest ancestor that is no shell (Codex runs
-    the command with `sh -c`). None when it cannot be told."""
+def codex_process() -> tuple[str, float] | None:
+    """(`<pid>:<start time>`, age in seconds) of the process that started this helper: the nearest ancestor that is no
+    shell (Codex runs the command with `sh -c`). None when it cannot be told."""
     read = _proc_linux if os.path.isdir("/proc/self") else _proc_ps
     pid = os.getppid()
     for _ in range(4):
         info = read(pid)
         if info is None:
             return None
-        parent, name, start = info
+        parent, name, start, age = info
         if os.path.basename(name).lstrip("-") not in SHELLS:
-            return f"{pid}:{start}"
+            return f"{pid}:{start}", age
         pid = parent
     return None
 
 
-def first_answer(runs_file: str, proc: str, folder: str, fresh: bool) -> bool:
-    """The answer of this Codex process: the first run records its folder and its answer; a later run gives the header
-    only when the first one did, in the same folder, and this one would too. Any `{}` stays for the process. A file
-    that cannot be read or written gives no header."""
+def first_answer(runs_file: str, proc: str, folder: str, fresh: bool, age: float) -> bool:
+    """The answer of this Codex process for this entry: the first run records its folder and its answer; a later run
+    gives the header only when the first one did, in the same folder, and this one would too. Any `{}` stays. Deny by
+    default: a run with no record counts as the first only while the process is younger than FIRST_WINDOW, so a first
+    run that failed (a busy lock, the alarm) never lets a later run in another folder count as first, and neither
+    does a record that expired (Gate A and Gate B review, round 2). A file that cannot be read or written gives no
+    header."""
     lock = runs_file + ".lock"
     deadline = time.time() + 1.0
     while True:
@@ -205,7 +215,7 @@ def first_answer(runs_file: str, proc: str, folder: str, fresh: bool) -> bool:
             break
         except FileExistsError:
             try:
-                if time.time() - os.stat(lock).st_mtime > 10:
+                if time.time() - os.stat(lock).st_mtime > LOCK_STALE:
                     os.rmdir(lock)
                     continue
             except OSError:
@@ -225,11 +235,11 @@ def first_answer(runs_file: str, proc: str, folder: str, fresh: bool) -> bool:
             return False
         runs = runs if isinstance(runs, dict) else {}
         now = time.time()
+        rec = runs.get(proc)
         runs = {k: v for k, v in runs.items() if isinstance(v, dict) and isinstance(v.get("t"), (int, float))
                 and now - v["t"] < RUN_TTL}
-        rec = runs.get(proc)
-        if rec is None:
-            ok = fresh
+        if not isinstance(rec, dict) or not isinstance(rec.get("t"), (int, float)):
+            ok = fresh and 0 <= age < FIRST_WINDOW
             runs[proc] = {"cwd": folder, "ok": ok, "t": now}
         else:
             ok = bool(rec.get("ok")) and rec.get("cwd") == folder and fresh
@@ -274,11 +284,13 @@ def entry_header(state_file: str, codex_home: str, name: str, url: str, folder: 
 def header_for(state_file: str, codex_home: str, name: str, url: str, folder: str) -> str | None:
     """The header for this entry in this run, or None."""
     header = entry_header(state_file, codex_home, name, url, folder)
-    proc = codex_process()
-    if proc is None:
+    found = codex_process()
+    if found is None:
         return None
+    proc, age = found
     runs = os.path.join(os.path.dirname(state_file), "codex-helper-runs.json")
-    return header if first_answer(runs, proc, folder, header is not None) else None
+    key = f"{proc}\0{os.path.realpath(os.path.join(codex_home, 'config.toml'))}\0{name}"
+    return header if first_answer(runs, key, folder, header is not None, age) else None
 
 
 def _answer(header: str | None) -> None:

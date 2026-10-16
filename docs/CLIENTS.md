@@ -126,6 +126,13 @@ repeats it on each pipeline.
   entry and notes nothing when two entries could make it.
 - **A hook's `systemMessage`** becomes a warning of the hook run. `codex exec` prints neither it nor the start line
   of maisecrets, in its text or its `--json` output.
+- **One answer per process.** Codex keeps the server URLs of the folder a session began in and runs the helper
+  again after a change of the folder or a 401 or 403 (`core/src/session/turn_context.rs`,
+  `rmcp-client/src/http_headers.rs`). So the first run of a Codex process decides for each entry, and only within
+  two minutes of the process start; later runs elsewhere print `{}`. The desktop app runs one app server for all its
+  chats, so a later chat in another folder sends no header until the app restarts (not measured). The plugin servers
+  are read from every place codex-rs 0.162.0 reads them (four manifest places, `mcpServers` inline or as a path,
+  `.mcp.json`, `mcp.json`).
 - **Windows** (not measured): the file is `%USERPROFILE%\.codex\config.toml`, and the helper would run under
   `cmd.exe /C`. Codex vault references are off on Windows in this version.
 
