@@ -56,10 +56,19 @@ _BIRTH_RE = re.compile(r"(?i)(?:\bd\.?o\.?b\b|date of birth|birth[ _-]?date|\bbd
                        r"(" + _DATE + r")(?!\d)")
 
 # --------------------------------------------------------------------------------- ID number after a label --
+# the labels of health, tax and national numbers: the number of a health plan's beneficiary, a medical record, a
+# national ID card, a tax ID and a social security number (Nemotron-PII writes them in its forms and notes, 2026-10-16)
+# "beneficiary" and "social security" alone name a payee and a benefit (Beneficiary: VENDOR 00042)
+_HEALTH_ID_LABELS = (r"|health[ _-]?plan[ _-]?beneficiary(?:[ _-]?(?:number|no\.?|id|#))?"
+                     r"|beneficiary[ _-]?(?:number|no\.?|id|#)"
+                     r"|medical[ _-]?record(?:[ _-]?(?:number|no\.?|#))?"
+                     r"|national[ _-]?id(?:entification|entity)?(?:[ _-]?(?:number|no\.?|card))?"
+                     r"|tax(?:payer)?[ _-]?id(?:entification)?(?:[ _-]?(?:number|no\.?))?|tin"
+                     r"|social[ _-]?security[ _-]?(?:number|no\.?|#)")
 _ID_RE = re.compile(r"(?i)(?<![a-z])(?:mrn|member[ -]?id|passport(?:[ _-]?(?:no|number))?|driver'?s? licen[cs]e"
                     r"(?:[ _-]?(?:no|number))?|dl[ _-]?(?:no|number|#)|(?-i:DL)(?=\s{0,3}[:#])|sin|tfn|nir|tax[ _-]?id"
                     r"|insurance (?:member )?id"
-                    r"|account (?:number|no\.?)|patient[ -]?id|id on file)(?![a-z])[\"']?"
+                    r"|account (?:number|no\.?)|patient[ -]?id|id on file" + _HEALTH_ID_LABELS + r")(?![a-z])[\"']?"
                     r"(?:\s{0,3}(?:on file|is|number|no\.?|#))?\s{0,3}[:=#]?\s{0,3}[\"']?"
                     r"((?-i:[A-Z0-9](?:[A-Z0-9]|[ -](?=[A-Z0-9])){4,24}))(?![A-Za-z0-9])")
 
@@ -863,7 +872,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
 _BIRTH_WORDS = ("dob", "d.o.b", "birth", "bday", "geb", "n\u00e9", "ne le", "nee le", "naissance", "nacimiento", "naci",
                 "nac\u00ed", "nascimento", "nascita", "nato")
 _ID_WORDS = ("mrn", "member", "passport", "licen", "dl", "sin", "tfn", "nir", "tax", "insurance", "account",
-             "patient", "id on file")
+             "patient", "id on file", "beneficiary", "medical", "national", "tin", "social")
 RULE_IDS = ("phone-one-digit-groups", "phone-us-national", "birth-date-after-label", "id-number-after-label",
             "user-in-url", "user-in-home-path", "street-address", "name-after-label", "name-before-email",
             "csv-personal-column") + tuple(FORMS)

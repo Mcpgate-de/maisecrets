@@ -103,5 +103,27 @@ class BoldLabelTests(Base):
         self.assertLess(time.process_time() - t0, 20)
 
 
+# ------------------------------------------------------------------------------- health, tax and national IDs --
+class HealthIdLabelTests(Base):
+    def test_an_id_after_a_health_tax_or_national_label_is_masked(self):
+        for text, value in (
+                ("Health plan beneficiary number: " + "4821" + "39771", "4821" + "39771"),
+                ("The patient's medical record number is MRX-" + "4821" + "3977.", "MRX-" + "4821" + "3977"),
+                ("National ID: " + "7741 2290 " + "5531", "7741 2290 " + "5531"),
+                ("Tax ID number: " + "48-21" + "39771", "48-21" + "39771"),
+                ('beneficiary_id = "BNF-' + "4821" + '397"', "BNF-" + "4821" + "397")):
+            with self.subTest(text=text):
+                self.assertMasked(text, value)
+                self.assertIn("id-number-after-label", {m.kind for m in scan(text)})
+
+    def test_the_label_without_a_number_stays_text(self):
+        for text in ("Medical record: see the chart (no number yet)", "national_id: str = Field(..., max_length=12)",
+                     "TIN format: 9 digits", "Tax ID: ${TAX_ID}", "national id card 123456789",
+                     "beneficiary: the person who receives the payout", "Beneficiary: VENDOR " + "00042",
+                     "Social Security: 2024 COLA " + "3.2"):
+            with self.subTest(text=text):
+                self.assertText(text)
+
+
 if __name__ == "__main__":
     unittest.main()
