@@ -229,6 +229,7 @@ SCENARIOS = {
         "files": {"make_doc.py": MAKE_DOC},
         "allowed_tools": "Bash,Read,Write",
         "max_turns": 4,
+        "needs": "python3",
         "turns": [{"tool": "Bash", "input": {"command": "python3 -c \"open('account.html', 'w').write('<p>"
                                                         + REF_MAIL + "</p>')\""}},
                   {"tool": "Bash", "input": {"command": "python3 make_doc.py " + REF_MAIL}},
@@ -786,7 +787,9 @@ def run_scenario(name: str, sc: dict, update_golden: bool) -> list[str]:
                 break
         for marker in sc.get("expect_not_in_transcript", []):
             if marker in txt:
-                fails.append(f"transcript {t.parent.name}/{t.name} holds {marker!r}")
+                # the address itself never goes to the CI log
+                fails.append(f"transcript {t.parent.name}/{t.name} holds "
+                             f"{'the address' if marker == MAIL else repr(marker)}")
     # golden keys
     for pf in sorted(dump.glob("*.json")):
         payload = json.loads(pf.read_text())
@@ -845,6 +848,9 @@ def main() -> int:
                                                    else SHELL_TOOL)
         if wants != SHELL_TOOL:
             print(f"[SKIP] {n}: needs the {wants} tool; this client offers {SHELL_TOOL}")
+            continue
+        if SCENARIOS[n].get("needs") and shutil.which(SCENARIOS[n]["needs"]) is None:
+            print(f"[SKIP] {n}: needs {SCENARIOS[n]['needs']} on the PATH")
             continue
         if SCENARIOS[n].get("guard") and _installed_guard():
             # the installed guard runs next to the guard under test, reads the same switches and can answer

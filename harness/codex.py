@@ -34,6 +34,7 @@ PORT = 8792
 REAL = "--real" in sys.argv
 REF_MAIL = "\u27e6EMAIL_c1\u27e7"
 MAKE_DOC = "import sys\nopen('account.html', 'w').write('<p>' + sys.argv[1] + '</p>')\n"
+DOCUMENTS = {".pdf", ".docx", ".odt", ".rtf", ".html", ".htm"}
 
 
 def value_in_file(path: Path, value: str) -> bool:
@@ -146,7 +147,8 @@ SCENARIOS = {
         "expect_file": ("account.html", f"<p>{MAIL}</p>"),
     },
     # the same request to a real model, in its own words: the address must reach a document it makes (a PDF, a
-    # .docx or a page), and the model must not hand the work back to the user (--real only)
+    # .docx or a page). A PDF whose font maps text to glyph ids can show red although the address is in it: look at
+    # the file before you call it a regression (--real only)
     "document_gets_the_value_real": {
         "prompt": "Create a PDF file (or, if no PDF library is installed, a .docx or .html file) with our trade-fair "
                   "account: company Example Fairs Ltd, user name fair-team, e-mail address " + REF_MAIL + ".",
@@ -307,9 +309,11 @@ def run_scenario(name: str, sc: dict) -> list[str]:
             shown = got.replace(MAIL, "<MAIL>").replace(MARK, "<MARK>")
             fails.append(f"rehydration: {fname} holds {shown!r}")
     if sc.get("expect_value_in_a_file"):
-        made = sorted(p for p in cwd.rglob("*") if p.is_file())
+        # a document, not the generator: a script that apply_patch wrote holds the value too, also when it never ran
+        made = sorted(p for p in cwd.rglob("*") if p.is_file() and p.suffix.lower() in DOCUMENTS)
         if not any(value_in_file(p, MAIL) for p in made):
-            fails.append(f"no file the model made holds the address (files: {[p.name for p in made]})")
+            fails.append("no document the model made holds the address (documents: "
+                         f"{[p.name for p in made]}, all files: {sorted(p.name for p in cwd.rglob('*'))})")
     if sc.get("expect_home_file_missing") and (home / sc["expect_home_file_missing"]).exists():
         fails.append(f"{sc['expect_home_file_missing']} was written into the maisecrets home")
     if sc.get("expect_hook"):
