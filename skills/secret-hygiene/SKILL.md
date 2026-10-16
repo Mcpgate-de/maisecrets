@@ -75,6 +75,10 @@ through the placeholder. Do not ask the user to type the value in.
 3. Or put the placeholder into the content of the file: Write or Edit in Claude Code, apply_patch
    in Codex. The file on disk gets the value.
 
+On Windows, step 2 does not work: a placeholder in a PowerShell command, and in any shell
+command of Codex, is refused. Use step 3 there: put the placeholder into the script, or into a
+text file that the script reads, and then run the script with no placeholder in the command.
+
 Inline code (`python3 -c`, `node -e`) and a quoted heredoc (`<<'EOF'`) cannot take a value:
 maisecrets stops the command and names this route. You keep seeing the placeholder, also when
 you read the file again.
