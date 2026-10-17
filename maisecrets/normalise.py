@@ -14,7 +14,7 @@ MAX_CANDIDATES runs and MAX_DECODED bytes per text. The bounds count work, not t
 0.6.24) let a busy machine skip a run, and the key it held reached the model (1 of 503,860 fingerprint lines, under
 load). The work is linear in the text: under MAX_TEXT, 1 MB of runs costs about 25 ms of CPU with or without it.
 
-Adapted from a public fork of maisecrets (Apache License 2.0, see NOTICE). Changed: five stages (no carriage return,
+Adapted from a public fork of maisecrets (Apache License 2.0, see NOTICE). Changed: six stages (no carriage return,
 gutter, escape or unwrap stage), one module, a budget per call. The standard library only.
 """
 from __future__ import annotations
@@ -27,7 +27,16 @@ import zlib
 
 # entities first: `&#8203;` and `&#27;[1m` written as entities become a zero-width character and an ANSI code that the
 # next stages remove (`&#27;` by _ESCAPE_ENTITIES: html.unescape drops it)
-STAGES = ("entity", "ansi", "invisible", "fullwidth", "emphasis", "decode")
+STAGES = ("unfold", "entity", "ansi", "invisible", "fullwidth", "emphasis", "decode")
+
+# RFC 6350 3.2: a line break and one space or tab continue the line before it. Inside a vCard (BEGIN:VCARD to
+# END:VCARD) the copy joins the parts, so the vCard rules read the whole property and the mask covers both parts. The
+# indent of BEGIN:VCARD (a vCard in YAML or a heredoc) is part of each line. A binary property (PHOTO, LOGO, SOUND,
+# KEY, ENCODING=b) stays folded: its base64 holds no field, and joined it is one more run to decode
+_VCARD_BEGIN_RE = re.compile(r"(?im)^([ \t]*)BEGIN:VCARD[ \t]*\r?$")
+_VCARD_END_RE = re.compile(r"(?im)^[ \t]*END:VCARD")
+_BINARY_PROP_RE = re.compile(r"(?i)[ \t]*(?:[a-z0-9-]{1,64}\.)?(?:PHOTO|LOGO|SOUND|KEY)[;:]"
+                             r"|[^:\n]{0,200};ENCODING=(?:b|base64)[;:]")
 
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
 # zero-width and format characters a terminal does not show: soft hyphen, zero-width space and joiners, direction
@@ -100,18 +109,9 @@ def _sub(text: str, rx, repl, stop=None):
     return "".join(out), starts, ends
 
 
-def _drop_stars(text: str):
-    """text without the stars of each bold label; the label and the rest keep their own ranges. Inside a line the
-    opening stars become one space, so a value before the next bold label ends there (**Full name:** Dana Okafor
-    **Role:** reviewer: the name rules join words with one space only)."""
-    cut = []
-    for m in _EMPHASIS_RE.finditer(text):
-        g = 1 if m.group(1) is not None else 3
-        a = m.start()
-        cut.append((a, m.start(g), " " if a and text[a - 1] != "\n" else ""))
-        cut.append((m.end(g) + (1 if m.group(g + 1) else 0), m.end(), ""))
-    if not cut:
-        return None
+def _apply_cuts(text: str, cut: list):
+    """text with each (a, b, rep) of cut, in order and apart, replaced by rep; per output character its range in text.
+    A one-character rep takes the range of what it replaces."""
     out: list = []
     starts: list = []
     ends: list = []
@@ -129,6 +129,44 @@ def _drop_stars(text: str):
     starts.extend(range(pos, len(text)))
     ends.extend(range(pos + 1, len(text) + 1))
     return "".join(out), starts, ends
+
+
+def _drop_stars(text: str):
+    """text without the stars of each bold label; the label and the rest keep their own ranges. Inside a line the
+    opening stars become one space, so a value before the next bold label ends there (**Full name:** Dana Okafor
+    **Role:** reviewer: the name rules join words with one space only)."""
+    cut = []
+    for m in _EMPHASIS_RE.finditer(text):
+        g = 1 if m.group(1) is not None else 3
+        a = m.start()
+        cut.append((a, m.start(g), " " if a and text[a - 1] != "\n" else ""))
+        cut.append((m.end(g) + (1 if m.group(g + 1) else 0), m.end(), ""))
+    return _apply_cuts(text, cut) if cut else None
+
+
+def _unfold(text: str):
+    """text with the folded lines of each vCard joined: the line break and the one space or tab after the indent of
+    BEGIN:VCARD go, each other character keeps its range. None: no folded line."""
+    cut: list = []
+    done = 0
+    for b in _VCARD_BEGIN_RE.finditer(text):
+        if b.start() < done:
+            continue
+        indent = b.group(1)
+        k = len(indent)
+        e = _VCARD_END_RE.search(text, b.end())
+        done = e.start() if e else len(text)
+        binary = False
+        nl = text.find("\n", b.end(), done)
+        while nl >= 0:
+            line = nl + 1
+            if line + k < done and text[line + k] in " \t" and text.startswith(indent, line):
+                if not binary:
+                    cut.append((nl - 1 if text[nl - 1] == "\r" else nl, line + k + 1, ""))
+            else:
+                binary = bool(_BINARY_PROP_RE.match(text, line))
+            nl = text.find("\n", line, done)
+    return _apply_cuts(text, cut) if cut else None
 
 
 _ESCAPE_ENTITIES = frozenset({"&#27;", "&#027;", "&#x1b;", "&#x1B;", "&#X1b;", "&#X1B;"})
@@ -231,6 +269,8 @@ def _decode_text(text: str, depth: int, budget: Budget) -> str:
 
 def _stage(name: str, text: str):
     """One stage as (text, starts, ends) relative to its input, or None when it changes nothing."""
+    if name == "unfold":
+        return _unfold(text) if "VCARD" in text.upper() else None
     if name == "ansi":
         return _sub(text, _ANSI_RE, lambda m: "") if "\x1b" in text else None
     if name == "invisible":
