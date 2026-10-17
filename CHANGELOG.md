@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## [0.6.35] - 2026-10-17
+
+### Features
+
+- finds personal data in the person columns of a Markdown table (aa5384e)
+- finds a street line after an address label or "resides at" (3d4b6e1)
+- finds a first name or a last name alone after its label (e3374c1)
+- finds a phone number in its national form after a phone word (af27a10)
+- finds a passport or driving licence number after its label in eight EU languages (2f70512)
+- finds an ID number after a health, tax or national label (e6d3a49)
+- finds personal data and passwords after a label in Markdown bold (40ca2d9)
+
+### Fixes
+
+- placeholder streets, sentences after a name label and four-digit groups stay text (a1b76fd)
+- the probe timer takes /bin/sleep before a sleep on the PATH (ce1f272)
+- the probe bound holds when the client ignores a signal (ae7b354)
+- a Python that hangs or holds the hook's output can no longer let a call through (54e799d)
+
 ## [0.6.34] - 2026-10-17
 
 ### Fixes
