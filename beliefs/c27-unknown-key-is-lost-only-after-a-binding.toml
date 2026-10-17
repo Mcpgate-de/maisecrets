@@ -1,0 +1,10 @@
+# c27-unknown-key-is-lost-only-after-a-binding: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-unknown-key-is-lost-only-after-a-binding"
+control = "C27"
+statement = "An unknown_key answer for a key that the server never answered as pending or active means the header is not sent yet; it never makes a new key."
+runner = ["tests/test_vault_states.py::States::test_unknown_key_before_any_binding_is_no_quarantine"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''state = ("lost" if bound else "header") if answer'''
+replace = '''state = "lost" if answer'''

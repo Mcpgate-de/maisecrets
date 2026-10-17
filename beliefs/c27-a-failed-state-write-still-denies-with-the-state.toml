@@ -1,0 +1,16 @@
+# c27-a-failed-state-write-still-denies-with-the-state: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-failed-state-write-still-denies-with-the-state"
+control = "C27"
+statement = "A state record that cannot be written leaves the deny as it is: the reason still names the state."
+runner = ["tests/test_vault_states.py::States::test_a_busy_lock_still_denies_with_the_state"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''    except (LockTimeout, OSError):
+        pass
+    return rec
+'''
+replace = '''    finally:
+        pass
+    return rec
+'''

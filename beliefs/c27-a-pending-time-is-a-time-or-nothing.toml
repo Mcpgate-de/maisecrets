@@ -6,5 +6,5 @@ runner = ["tests/test_vault_refs.py::Online::test_a_pending_time_that_is_no_time
 
 [proof]
 file = "maisecrets/vault_refs.py"
-find = '''        when = _safe_time(body.get("activates_at")) or "later"'''
-replace = '''        when = body.get("activates_at") or "later"'''
+find = '''    when = _safe_time(activates_at)'''
+replace = '''    when = activates_at if isinstance(activates_at, str) else None'''

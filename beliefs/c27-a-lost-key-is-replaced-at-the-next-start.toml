@@ -1,0 +1,10 @@
+# c27-a-lost-key-is-replaced-at-the-next-start: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-lost-key-is-replaced-at-the-next-start"
+control = "C27"
+statement = "A key that the server no longer accepts after it was bound is never used again: the next session start makes a new key and writes its header."
+runner = ["tests/test_vault_states.py::States::test_a_quarantined_key_is_replaced_at_the_next_start"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''renewed = rotate_lost(backend) if cfg.get("client_header", True) is not False else []'''
+replace = '''renewed = []'''

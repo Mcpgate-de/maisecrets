@@ -606,8 +606,9 @@ class CodexHooks(Base):
             p["cwd"] = str(cwd)
         return self.hooks._post_tool_guarded(p)
 
-    def login(self) -> None:
-        """What Codex does at its next start: it runs the helper and sends its header on the token request."""
+    def login(self, path: str = "/token") -> None:
+        """What Codex does at its next start: it runs the helper and sends its header on the token request (or, with
+        path /mcp, on an MCP request of an existing login: the binding is then pending)."""
         import ssl
         import urllib.request
         command = self.entry()["http_headers_helper"]
@@ -618,7 +619,9 @@ class CodexHooks(Base):
                            timeout=30, env={"PATH": os.environ.get("PATH", ""), "HOME": str(self.tmp)})
         header = json.loads(r.stdout)
         self.assertIn("Client-Vault", header)
-        req = urllib.request.Request(self.srv.url + "/token", data=b"grant_type=authorization_code", headers=header)
+        data = b"grant_type=authorization_code" if path == "/token" else \
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
+        req = urllib.request.Request(self.srv.url + path, data=data, headers=header)
         urllib.request.urlopen(req, context=ssl.create_default_context(cafile=self.srv.cert)).read()
 
     def patch(self, body: str) -> dict:
@@ -705,6 +708,40 @@ class CodexHooks(Base):
             tool_name="Bash", tool_use_id="u4", tool_input={"command": "cat c.csv"},
             tool_response={"stdout": "x"}))
         self.assertNotIn(VALUES[0], json.dumps(out))
+
+    def test_each_state_names_the_codex_step_in_the_deny_and_the_status(self) -> None:
+        from maisecrets.vault import Vault, load_config
+        cfg = load_config()
+        add = "*** Begin Patch\n*** Add File: c.csv\n+\u27e6EMAIL_1\u27e7\n*** End Patch\n"
+
+        def reason(out: dict) -> str:
+            hso = out["hookSpecificOutput"]
+            self.assertEqual(hso["permissionDecision"], "deny", out)
+            self.assertNotIn(VALUES[0], json.dumps(out))
+            self.assertNotIn(VALUES[1], json.dumps(out))
+            return hso["permissionDecisionReason"]
+
+        def status() -> str:
+            return [ln for ln in self.vault_refs.status_lines(cfg, Vault(cfg).backend) if "demo (" in ln][0]
+        self.assertIn("demo (", status())
+        self.assertIn(": not used yet (no server token seen", status())
+        self.call("customers: \u27e6EMAIL_1\u27e7 \u27e6NAME_2\u27e7")
+        self.assertIn("is: header written — start Codex again.", reason(self.patch(add)))
+        self.assertIn(": header written — start Codex again (checked ", status())
+        self.login("/mcp")                           # the next codex run sends the header: pending
+        shell = self.hooks.pre_tool(self.payload(tool_name="Bash", tool_use_id="u3", tool_input={
+            "command": "printf '%s' '\u27e6NAME_2\u27e7' > n.txt"}))
+        self.assertRegex(reason(shell), r"waiting for activation until \d{4}-\S+ — activate it on the server's "
+                                        r"connections page, or sign in to demo again in the browser\. .*did not run")
+        self.srv.activate()
+        self.assertTrue(status().endswith("Z)") and ": active (checked " in status(), status())
+        self.srv.quarantine()
+        self.assertIn("this key is quarantined (used by two accounts) or revoked — maisecrets makes a new key at the "
+                      "next start of Codex", reason(self.patch(add)))
+        note = self.vault_refs.ensure_headers(cfg, Vault(cfg).backend)
+        self.assertIn("made a new key", note)
+        self.assertIn("made a new key. Start Codex again (a new codex run sends it)", note)
+        self.assertIsNone(self.vault_refs.session_check(cfg, Vault(cfg).backend), "the line told it")
 
 
 if __name__ == "__main__":

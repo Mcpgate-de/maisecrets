@@ -323,6 +323,15 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         note = None
     if note:
         out["systemMessage"] = out.get("systemMessage", "") + " " + note
+    # the state of each server with a header: one status probe per origin (no value, no token), all inside one
+    # budget, and a line once when the state changed since the person last heard it
+    try:
+        from maisecrets import vault_refs  # noqa: E402
+        note = vault_refs.session_check(cfg, v.backend)
+    except Exception:  # noqa: BLE001 - a state check never stops a session start
+        note = None
+    if note:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + note
     # the model reads what a placeholder is once per session, before it meets one
     out["hookSpecificOutput"] = {"hookEventName": "SessionStart",
                                  "additionalContext": primer(cfg, "codex" if codex else "claude")}

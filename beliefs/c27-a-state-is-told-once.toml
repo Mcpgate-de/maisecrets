@@ -1,0 +1,10 @@
+# c27-a-state-is-told-once: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-state-is-told-once"
+control = "C27"
+statement = "The session start names the state of a server only when it differs from the state the person last saw."
+runner = ["tests/test_vault_states.py::States::test_the_session_start_hook_names_a_change_once"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''if why or not state or state == rec.get("told"):'''
+replace = '''if why or not state:'''

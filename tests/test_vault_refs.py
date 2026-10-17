@@ -327,8 +327,8 @@ class Offline(Base):
 
 
 @unittest.skipUnless(HAS_OPENSSL, "the fake server needs the openssl command for its certificate")
-class Online(Base):
-    """The resolve against the fake server."""
+class OnlineBase(Base):
+    """The fake server and the steps of a client, without tests (tests/test_vault_states.py builds on it too)."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -369,6 +369,11 @@ class Online(Base):
     def metadata_requests(self) -> int:
         return len([e for e in self.srv.log if e["path"].startswith("/.well-known/")])
 
+
+
+class Online(OnlineBase):
+    """The resolve against the fake server."""
+
     def test_trigger_no_header_and_no_request_without_a_token(self):
         self.assertIsNone(self.start())
         self.call("demo", "customers: none")
@@ -378,7 +383,7 @@ class Online(Base):
     def test_trigger_the_first_token_enables_the_server_once_with_a_notice(self):
         out = self.call("demo", f"customers: {tok('EMAIL_1', 'va•••')}")
         self.assertIn("demo supports Client-Vault", out.get("systemMessage", ""))
-        self.assertIn("next start", out["systemMessage"])
+        self.assertIn("Type /mcp reconnect demo (or start Claude Code again).", out["systemMessage"])
         self.assertRegex(self.headers_of()["demo"], r"\Av=1, kid=:[A-Za-z0-9+/]{43}=:\Z")
         self.assertEqual(list(vault_refs.noted(["EMAIL_1"], "s1")), ["EMAIL_1"], "the trigger result is noted")
         again = self.call("demo", f"customers: {tok('NAME_2')}")
@@ -493,7 +498,7 @@ class Online(Base):
         marker = self.work / "ran"
         out = hooks.pre_tool({"tool_name": "Bash", "session_id": "s1", **CLAUDE,
                               "tool_input": {"command": f"touch {marker}; echo {tok('NAME_2')}"}})
-        self.assertIn("does not know this computer's key", self.denied(out))
+        self.assertIn("header written — type /mcp reconnect demo (or start Claude Code again)", self.denied(out))
         self.assertIn("The command did not run.", self.denied(out))
         self.assertFalse(marker.exists())
 
@@ -512,12 +517,15 @@ class Online(Base):
         urllib.request.urlopen(req, context=ssl.create_default_context(cafile=self.srv.cert)).read()
         self.result("demo", tok("EMAIL_1"))
         reason = self.denied(self.write(tok("EMAIL_1")))
-        self.assertRegex(reason, r"links this computer from \d{4}-\d\d-\d\dT")
-        self.assertRegex(vault_refs.status_lines(load_config(), Vault().backend)[-1], r": pending until \d{4}-")
+        self.assertRegex(reason, r"waiting for activation until \d{4}-\d\d-\d\dT\S+ — activate it on the server's "
+                                 r"connections page, or sign in to demo again in the browser")
+        self.assertRegex(vault_refs.status_lines(load_config(), Vault().backend)[-1],
+                         r": waiting for activation until \d{4}-")
 
     def test_status_says_linked(self):
         self.ready()
-        self.assertTrue(vault_refs.status_lines(load_config(), Vault().backend)[-1].endswith(": linked"))
+        self.assertRegex(vault_refs.status_lines(load_config(), Vault().backend)[-1],
+                         r": active \(checked \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\)\Z")
 
     def test_p6_an_old_reference_is_expired_and_a_wrong_clock_is_named(self):
         self.ready()
@@ -528,7 +536,7 @@ class Online(Base):
 
     def test_every_error_code_denies_with_its_reason(self):
         self.ready()
-        cases = {"rate_limited": "try again in 30 s", "disabled": "switched this off",
+        cases = {"rate_limited": "try again in 30 s", "disabled": "the server's operator switch is off",
                  "wrong_type": "no usable answer", "too_big": "no usable answer",
                  "not_text": "no usable answer", "missing_key": "no usable answer"}
         for mode, words in cases.items():
@@ -585,7 +593,7 @@ class Online(Base):
         self.assertNotIn("ignore", reason)
         line = vault_refs.status_lines(load_config(), Vault().backend)[-1]
         self.assertNotIn("ignore", line)
-        self.assertIn("pending until a time the server did not give", line)
+        self.assertIn("waiting for activation until a time the server did not give", line)
 
     def test_a_cached_endpoint_on_another_host_is_not_used(self):
         self.ready()

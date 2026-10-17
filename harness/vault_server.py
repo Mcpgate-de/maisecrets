@@ -10,6 +10,8 @@ It plays the server side of the contract so that the client side can be tested w
 
 Every request is recorded in `server.log` (method, path, header names and the Client-Vault value). `server.mode`
 switches a fault on: redirect, sleep, rate_limited, disabled, wrong_type, too_big, not_text, missing_key.
+`activate()` plays the person on the server's connections page (pending to active); `quarantine()` plays a second
+account that brought the same kid (the kid answers `401 unknown_key` for good).
 Standard library and the openssl command only. Run alone for a manual test:
 
     python3 harness/vault_server.py      # prints the URL and the CA file
@@ -142,7 +144,7 @@ class VaultServer:
                 header = self.headers.get("Client-Vault")
                 if self.path == "/token":
                     kid = kid_from_header(header or "")
-                    if kid:
+                    if kid and server.bindings.get(kid, {}).get("state") != "quarantined":   # it never binds again
                         server.bindings[kid] = {"state": "active"}
                     return self._send(200, {"access_token": "fake", "token_type": "Bearer"})
                 if self.path == "/mcp":
@@ -190,8 +192,6 @@ class VaultServer:
                     return self._send(302, b"", "text/plain", {"Location": server.redirect_to})
                 if mode == "rate_limited":
                     return self._send(429, {"error": "rate_limited"}, extra={"Retry-After": "30"})
-                if mode == "disabled":
-                    return self._send(503, {"error": "disabled"})
                 auth = self.headers.get("Authorization", "")
                 if not auth.startswith("Bearer "):
                     return self._send(401, {"error": "unknown_key"})
@@ -202,8 +202,12 @@ class VaultServer:
                     return self._send(401, {"error": "unknown_key"})
                 kid = base64.b64encode(hashlib.sha256(k).digest()).decode()
                 binding = server.bindings.get(kid)
-                if len(k) != 32 or not binding:
+                # the order of the contract (SPEC 8.4): the key, then the switch, then the state of the binding. A
+                # quarantined kid answers as an unknown one: a client cannot tell it from a revoke
+                if len(k) != 32 or not binding or binding["state"] == "quarantined":
                     return self._send(401, {"error": "unknown_key"})
+                if mode == "disabled":
+                    return self._send(503, {"error": "disabled"})
                 if binding["state"] == "pending":
                     return self._send(403, {"error": "pending", "activates_at": binding["activates_at"]})
                 body = json.loads(raw)
@@ -244,6 +248,17 @@ class VaultServer:
     def __exit__(self, *exc) -> None:
         self.httpd.shutdown()
         self.httpd.server_close()
+
+    def quarantine(self) -> None:
+        """Every bound kid is quarantined, as when a second account brought it (SPEC 6.4): it never resolves again."""
+        for kid in self.bindings:
+            self.bindings[kid] = {"state": "quarantined"}
+
+    def activate(self) -> None:
+        """The person activates every pending binding on the connections page of the server (SPEC 6.7)."""
+        for kid, b in self.bindings.items():
+            if b["state"] == "pending":
+                self.bindings[kid] = {"state": "active"}
 
     def mint(self, key: str, value: str, minted_at: float | None = None) -> str:
         """Put a value into the server's map; returns the token the server sends in its results."""
