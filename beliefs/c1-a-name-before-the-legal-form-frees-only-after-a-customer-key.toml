@@ -1,0 +1,10 @@
+# c1-a-name-before-the-legal-form-frees-only-after-a-customer-key: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-name-before-the-legal-form-frees-only-after-a-customer-key"
+control = "C1"
+statement = "A NAME hit that ends right before the legal form counts as the company's own name only as the value of a Kunde: or Customer: key; after any other label (Inhaber:) it keeps the company's postcode and VAT ID masked."
+runner = ["tests/test_company_numbers_more_forms.py::CompanyFormTests::test_each_guard_alone_keeps_the_mask"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = '''and _CUSTOMER_VALUE_RE.search(text, max(0, names[k][0] - 16), names[k][0]):'''
+replace = ''':'''

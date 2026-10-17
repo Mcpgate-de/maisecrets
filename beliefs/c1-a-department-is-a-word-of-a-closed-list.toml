@@ -1,0 +1,10 @@
+# c1-a-department-is-a-word-of-a-closed-list: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-department-is-a-word-of-a-closed-list"
+control = "C1"
+statement = "Between a company's name and its address only a department of a closed list (Einkauf, Buchhaltung, Accounts Payable) keeps the company decision; a person's name after Abteilung keeps the postcode and the VAT ID masked."
+runner = ["tests/test_company_numbers_more_forms.py::CompanyFormTests::test_a_persons_name_before_the_company_keeps_the_mask"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''r"(?i:" + _DEPARTMENTS + r")(?:[ ](?:(?:und|and|&)[ ])?(?i:" + _DEPARTMENTS + r"))?"'''
+replace = '''r"[^\W\d_][\w&/.-]{0,30}(?:[ ][\w&/.-]{1,30})?"'''

@@ -78,6 +78,7 @@ class CompanyFormTests(unittest.TestCase):
     def test_a_department_between_the_company_and_its_address(self):
         self.assertFree(CO + "\nAbteilung Einkauf\n" + STREET + "\n" + PLACE + "\nUSt-IdNr.: " + VAT + "\n")
         self.assertFree(CO + "\nDept. Accounts Payable\n" + STREET + "\n" + PLACE + "\nVAT ID: " + VAT + "\n")
+        self.assertFree(CO + "\nAbteilung Finanzen und Controlling\n" + STREET + "\n" + PLACE + "\nUSt-IdNr.: " + VAT)
         self.assertFree(CO + ", Abteilung Einkauf, " + STREET + ", " + PLACE + ", USt-IdNr. " + VAT + "\n")
 
     def test_a_customer_label_before_the_company(self):
@@ -102,6 +103,33 @@ class CompanyFormTests(unittest.TestCase):
                           plz=False)
         self.assertMasked(CO + "\nAbteilung Einkauf " + PERSON + "\n" + STREET + "\n" + PLACE + "\nUSt-IdNr.: " + VAT,
                           plz=False)
+        # a department is a word of a closed list: a person's name in the slot is no department (Gate A)
+        for dept in ("Abteilung Mara Winter", "Abteilung Winter", "Dept. Mara Winter", "Abteilung Einkauf Winter"):
+            with self.subTest(dept=dept):
+                self.assertMasked(CO + "\n" + dept + "\n" + STREET + "\n" + PLACE + "\nUSt-IdNr.: " + VAT)
+                self.assertMasked(CO + ", " + dept + ", " + STREET + ", " + PLACE + ", USt-IdNr. " + VAT, plz=False)
+
+    def test_a_person_on_or_above_the_company_line_keeps_the_mask(self):
+        # Gate B: a name without a label gets no NAME hit, so the line itself decides in the two-line form
+        two = "\n" + STREET + "\n" + PLACE + "\nUSt-IdNr.: " + VAT
+        self.assertMasked(PERSON + ", " + CO + two)
+        self.assertMasked(PERSON + " - " + CO + two)
+        self.assertMasked("Frau " + PERSON + "\n" + CO + two)
+        self.assertMasked(PERSON + "\n" + CO + two)
+        self.assertFree("Rechnungsempfänger:\n" + CO + two)
+        self.assertFree("Bill to\n" + CO + two)
+
+    def test_a_salutation_or_a_longer_key_before_the_company_keeps_the_mask(self):
+        for key in ("Kunde: Frau ", "Customer: Mr ", "customer_name: "):
+            with self.subTest(key=key):
+                self.assertMasked(key + PERSON + " Lindner GmbH\n" + STREET + ", " + PLACE + "\nUSt-IdNr.: " + VAT,
+                                  plz=False)
+
+    def test_each_guard_alone_keeps_the_mask(self):
+        # one layer each: the name rule does not read a name in lower case, and Inhaber: is no key of a person's
+        # record, so the key check and the name check cannot cover for each other
+        self.assertMasked("customer_name: lena brückner Lindner GmbH\n" + STREET + ", " + PLACE + "\nUSt-IdNr.: " + VAT)
+        self.assertMasked("Inhaber: " + PERSON + " Lindner GmbH\n" + STREET + ", " + PLACE + "\nUSt-IdNr.: " + VAT)
 
     def test_a_customer_who_is_a_person_keeps_the_mask(self):
         self.assertMasked("Kunde: " + PERSON + "\n" + CO + "\n" + STREET + "\n" + PLACE + "\nUSt-IdNr.: " + VAT)
