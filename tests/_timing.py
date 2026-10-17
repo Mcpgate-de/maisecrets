@@ -36,14 +36,23 @@ def assert_linear(case, run, make, n: int, *, hang: float = 3.0, wall: float = 7
     (linear is 8 times, quadratic 64 times), and below `hang` seconds. The inputs are made before the clock starts, and
     one call of run(make(64)) before the first measurement compiles what a first call compiles. One call of the large
     input once took 17 times its usual time (a first allocation of that size): so two. Returns (small, big)."""
-    run(make(64))
+    # CPU time does not see a wait (a sleep, a lock, blocking I/O): each call here, the first one included, stays below
+    # `wall` seconds of wall time, the 7 s watchdog of a hook by default (Gate A review, rounds 2 and 3: a sum over two
+    # calls let one wait of 13 s pass, and a wait in the first call only was never measured). The few calls that take
+    # over 0.5 s of CPU pass wall=20.0: they took 11.8 s at load 100. A wait in detect.scan itself is caught at 7 s by
+    # tests.test_scan_bounds, which uses the default
+    slowest = [0.0]
+
+    def timed(arg):
+        t = time.perf_counter()
+        run(arg)
+        slowest[0] = max(slowest[0], time.perf_counter() - t)
+
+    timed(make(64))
     small_input, big_input = make(n // 8), make(n)
-    small = cpu_best(run, small_input)
-    started = time.perf_counter()
-    big = cpu_best(run, big_input, runs=2)
-    # CPU time does not see a wait (a sleep, a lock, blocking I/O): the two calls of the large input stay, on average,
-    # below `wall` seconds of wall time, the 7 s watchdog of a hook by default (Gate A review, round 2)
-    case.assertLess(time.perf_counter() - started, 2 * wall, "the large input waited, not only computed")
+    small = cpu_best(timed, small_input)
+    big = cpu_best(timed, big_input, runs=2)
+    case.assertLess(slowest[0], wall, "a call waited, not only computed")
     case.assertLess(big, 16 * small + slack, f"{small * 1000:.1f} ms, then {big * 1000:.1f} ms for 8 times the input")
     case.assertLess(big, hang)
     return small, big
