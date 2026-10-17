@@ -1,0 +1,10 @@
+# c27-a-deny-names-the-state-and-the-step: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-deny-names-the-state-and-the-step"
+control = "C27"
+statement = "A resolve that the server refuses as unknown_key, pending or disabled is denied with the state of that server and the next step of the person, in the words of the status."
+runner = ["tests/test_vault_states.py::States::test_bash_and_edit_name_the_state_and_nothing_runs"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''    if code in ("unknown_key", "pending", "disabled"):'''
+replace = '''    if False:'''

@@ -1,0 +1,12 @@
+# c27-a-probe-without-a-key-asks-nothing: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-probe-without-a-key-asks-nothing"
+control = "C27"
+statement = "A server with no key on this computer (no server token seen yet) gets no request from the status or the session start."
+runner = ["tests/test_vault_states.py::States::test_a_probe_without_a_key_asks_nothing"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''    if k is None:
+        return state_of(origin), "this computer has no key for it"
+'''
+replace = ''''''

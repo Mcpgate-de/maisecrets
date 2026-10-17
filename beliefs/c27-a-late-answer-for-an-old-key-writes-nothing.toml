@@ -1,0 +1,12 @@
+# c27-a-late-answer-for-an-old-key-writes-nothing: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-late-answer-for-an-old-key-writes-nothing"
+control = "C27"
+statement = "An answer for a key that a new key replaced meanwhile writes no state: it would name the state of the new key."
+runner = ["tests/test_vault_states.py::States::test_a_late_answer_takes_no_lock"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''    if now and asked != now:
+        return state_of(origin) or rec '''
+replace = '''    if False:
+        return state_of(origin) or rec '''
