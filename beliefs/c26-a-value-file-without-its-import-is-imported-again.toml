@@ -1,0 +1,10 @@
+# c26-a-value-file-without-its-import-is-imported-again: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-value-file-without-its-import-is-imported-again"
+control = "C26"
+statement = "A value file whose import is gone (removed by the person or by another session) is imported again at the next session start, also when its content did not change."
+runner = ["tests/test_values.py::ReviewRoundOne::test_a_value_file_whose_import_is_gone_is_imported_again"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "        if rec.get(\"digest\") == digest and (rec.get(\"empty\") or _has_import(\"file:\" + slot)):\n"
+replace = "        if rec.get(\"digest\") == digest:\n"

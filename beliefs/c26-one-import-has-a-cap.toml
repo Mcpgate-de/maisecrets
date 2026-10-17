@@ -1,0 +1,10 @@
+# c26-one-import-has-a-cap: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-one-import-has-a-cap"
+control = "C26"
+statement = "One import holds at most MAX_PER_IMPORT values; the rest stops with a message that names the line and the prompt that removes an import."
+runner = ["tests/test_values.py::Caps::test_a_flood_stops_at_the_cap_of_one_import_with_a_message"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "            if len(values) >= MAX_PER_IMPORT:\n"
+replace = "            if False:\n"

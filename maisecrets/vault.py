@@ -97,6 +97,7 @@ DEFAULT_CONFIG = {
     "read_pdf": "allow",             # allow | ask | block | convert: a PDF that the AI reads (file_reads.py, C28)
     "read_image": "allow",           # allow | ask | block: an image that the AI reads
     "clean_dirs": [],                # folders whose PDFs and images pass as allow; a typed prompt adds one
+    "value_files": [],               # files of values from your own tools (values.py); a typed prompt adds one
     "secret_destinations": "observe",  # observe: note where each stored secret is sent (destinations.py); off
     "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
     "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
@@ -131,7 +132,7 @@ _CONFIG_TYPES = {
     "ssh_consent": bool, "ssh_host_groups": dict, "ssh_autonomous_hosts": list, "secret_destinations": str,
     "ssh_approval": str, "rehydration": str, "guard": bool, "client_header": bool, "client_vault_cafile": str,
     "pass_agent_reports": bool, "rule_dirs": list,
-    "read_pdf": str, "read_image": str, "clean_dirs": list,
+    "read_pdf": str, "read_image": str, "clean_dirs": list, "value_files": list,
 }
 
 
@@ -1149,7 +1150,8 @@ class Vault:
         ttl = min(ttl or self._ttl_for(type_), int(self.cfg.get("max_ttl_seconds", 30 * 86400)))
         e = Entry(key=key, type=type_, kind=kind, fingerprint=fp,
                   # a term (terms.py) stores its entity id, not the term: a display of that would mean nothing
-                  display=None if kind.startswith("term:") else display_for(type_, value), created=now, last_used=now,
+                  display=None if kind.startswith(("term:", "import:")) else display_for(type_, value),
+                  created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
                   session=session, uses=0, sessions=[session] if session else [],
                   weak=is_weak(kind, value), quiet=is_quiet(kind, value, tool))
@@ -1623,7 +1625,8 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
                     pass
                 except OSError:
                     problems.append(f"{name} not deleted")
-        unlink(("index.json", "audit.log", "events.log", "hooks.log", ".announced"))
+        # the index of the imports (values.py) is built again from them; the imports are the person's, as terms.txt
+        unlink(("index.json", "audit.log", "events.log", "hooks.log", ".announced", ".values-cache"))
         term_files = ("terms.marked.json", ".terms-cache", "terms.suggested.txt")
         try:
             with _lock_for(HOME / ".terms.lock"):

@@ -24,7 +24,7 @@ import time
 import sys
 from typing import Any
 
-from . import check_value, detect, incidents, rehydration, term_files
+from . import check_value, detect, incidents, rehydration, term_files, value_files
 from .placeholder import KEY_RE, find_refs
 from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config
@@ -123,8 +123,9 @@ def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str 
     or a file, where a word after a label is stored weak (vault.is_weak)."""
     ordered = sorted(matches, key=lambda x: x.start)
     # a term (terms.py) goes into the store as its entity id: every spelling gets the entity's one placeholder, and
-    # the store never holds the term
-    entries = vault.put_many([(term_files.store_value(m.kind) if term_files.is_term_kind(m.kind) else m.value,
+    # the store never holds the term. An imported value (values.py) goes in as its import id and value id
+    entries = vault.put_many([(term_files.store_value(m.kind) if term_files.is_term_kind(m.kind)
+                               else value_files.store_value(m.kind) if value_files.is_import_kind(m.kind) else m.value,
                                m.type, m.kind) for m in ordered], session=session, tool=tool)
     out = text
     for m, e in sorted(zip(ordered, entries), key=lambda me: me[0].start, reverse=True):
@@ -773,7 +774,7 @@ def _longest_wins(text: str, matches: list, vault, session: str | None, resolved
     inside a stored value is dropped: the exact redaction takes the value whole (a listed name inside a stored
     password split it, and the rest stayed in clear). A hit that holds a stored value, or that overlaps one, takes
     the whole union: a resolved value inside a ghp_ token cut the shape, and the rest of the token went out."""
-    if not matches or vault is None or not any(term_files.is_term_kind(m.kind) for m in matches):
+    if not matches or vault is None or not any(value_files.is_mask_only(m.kind) for m in matches):
         # without a term hit the detector's spans are taken first, as before the terms, and the exact redaction
         # runs on the rest: no second pass over the text (the hook time without terms stays what it was)
         return matches
@@ -784,6 +785,12 @@ def _longest_wins(text: str, matches: list, vault, session: str | None, resolved
     absorbed: list = []
     for m in matches:
         cover = [(a, b) for a, b in spans if a < m.end and m.start < b]
+        if cover and value_files.is_import_kind(m.kind):
+            # an import only adds masking: a stored value keeps its own placeholder, so one that resolves still
+            # resolves (an import must not turn it into a mask-only one, as a term does). The parts of the imported
+            # value outside the stored ones stay hits of the import
+            out += _import_rest(text, m, cover)
+            continue
         inside = [(a, b) for a, b in cover if a <= m.start and m.end <= b]
         if inside and not (term_files.is_term_kind(m.kind) and not any(
                 _WORD_CHAR_RE.search(text, a, m.start) or _WORD_CHAR_RE.search(text, m.end, b) for a, b in inside)):
@@ -808,6 +815,21 @@ def _longest_wins(text: str, matches: list, vault, session: str | None, resolved
         # the secret in a union with a term is stored as its own entry, so a later output that holds it alone is
         # masked by the exact match (Gate B, round 2)
         vault.put_many([(x.value, x.type, x.kind) for x in absorbed], session=session, tool=not prompt)
+    return out
+
+
+def _import_rest(text: str, m, cover: list) -> list:
+    """The parts of an import hit outside the stored spans `cover`, each a hit of the import when it holds a word
+    character (as detect._term_rest for a span that a rule took)."""
+    out, pos = [], m.start
+    for a, b in sorted(cover) + [(m.end, m.end)]:
+        words = [w.span() for w in _WORD_CHAR_RE.finditer(text, pos, min(a, m.end))]
+        if words:
+            # from its first to its last word character: the separators next to a stored value stay, so the
+            # exact redaction after this still finds the stored value as a token of its own
+            lo, hi = words[0][0], words[-1][1]
+            out.append(dataclasses.replace(m, value=text[lo:hi], start=lo, end=hi))
+        pos = max(pos, b)
     return out
 
 
@@ -989,7 +1011,13 @@ def rewrite_prompt(payload: dict) -> dict:
     if "<task-notification>" in prompt:
         return {}
     # /maisecrets:term add|remove carries a name: the hook answers it, and the mod must not rewrite the name first
-    if term_files.parse_command(prompt):
+    if term_files.parse_command(prompt) or value_files.parse_removal(prompt):
+        return {}
+    # a settings prompt and the ssh grant sentence are the person's controls: the hook reads them before the detector,
+    # and the mod must not rewrite a word of them first (an imported or listed value would break the control; Gate A
+    # and Gate B of #19 part 3)
+    from . import settings as settings_mod
+    if settings_mod.parse_prompt(prompt) or _GRANT_RE.match(prompt):
         return {}
     # the hook blocks an @file mention before it stores anything; without a working directory a relative
     # mention cannot be checked, so any mention goes to the hook
@@ -1170,6 +1198,24 @@ def user_prompt(payload: dict) -> dict:
     if term_cmd:
         # a subagent's prompt is no prompt of the person (as for the marker below)
         return _term_command(payload, term_cmd, typed and not payload.get("agent_id"), cfg)
+    # /maisecrets:forget import:ID (Codex: maisecrets: forget import:ID): the only way an import of values is removed
+    # (C26). It makes detection weaker, so only the person's typed prompt counts, and a tool call that carries it is
+    # refused (_pre_bash). Before the detector: an imported value never masks the prompt that removes it
+    removal = value_files.parse_removal(prompt)
+    if removal:
+        if typed and not payload.get("agent_id"):
+            from . import values
+            try:
+                reason = values.remove_typed(removal)
+            except Exception as exc:  # noqa: BLE001 - the answer says it failed; nothing else depends on it
+                reason = f"maisecrets: the import could not be removed ({type(exc).__name__}); nothing was changed."
+        else:
+            reason = ("maisecrets: the removal of an import counts only when you type it as your prompt; this one came "
+                      f"from the client ({payload.get('source')}), so nothing was removed.")
+        if client_of(payload) == "codex":
+            return {"decision": "block", "reason": reason}
+        return {"decision": "block", "reason": reason,
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
     if typed and not payload.get("agent_id"):
         # {{Jan Kowalski}} in a prompt the person typed: the name is masked from now on (terms.take_markers)
         try:
@@ -2660,6 +2706,8 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
+    if value_files.removal_in_command(command):
+        return _deny(value_files.IN_A_COMMAND)
     # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line
     if cfg.get("ssh_consent") and re.search(r"maisecrets:\s*allow\s+ssh\s+\S|allow\s+ssh\s+\S+\s+\d{6}", command,
                                            re.I):
@@ -3497,6 +3545,8 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
+    if value_files.removal_in_command(command):
+        return _deny(value_files.IN_A_COMMAND)
     if _HOOK_ENTRY_TEXT_RE.search(command):
         # PowerShell has no word parser here: any mention of a hook entry with its event is refused
         return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "
@@ -3537,13 +3587,14 @@ def _hide_pair(tool_input) -> tuple | None:
 
 
 def _term_keys() -> set:
-    """The keys of the term entries in the index, purged ones too: such a key never resolves, at any age."""
+    """The keys of the term and import entries in the index, purged ones too: such a key never resolves, at any
+    age."""
     from .vault import INDEX
     try:
         entries = json.loads(INDEX.read_text(encoding="utf-8")).get("entries", {})
     except (OSError, ValueError, AttributeError):
         return set()
-    return {k for k, m in entries.items() if isinstance(m, dict) and term_files.is_term_kind(m.get("kind"))}
+    return {k for k, m in entries.items() if isinstance(m, dict) and value_files.is_mask_only(m.get("kind"))}
 
 
 def pre_tool(payload: dict) -> dict:
@@ -4205,6 +4256,11 @@ def post_tool(payload: dict) -> dict:
     if term_refs:
         note = (f"{note} {', '.join(term_refs)} stand for names from the person's term list: maisecrets never puts "
                 "the name back, also not in a command or a file. Write them as they are.").strip()
+    import_refs = list(dict.fromkeys(e.ref for e in entries if value_files.is_import_kind(getattr(e, "kind", ""))))
+    if import_refs:
+        note = (f"{note} {', '.join(import_refs)} stand for values the person imported from their own tools: "
+                "maisecrets never puts the value back, also not in a command or a file. Write them as they are."
+                ).strip()
     refs = [e.ref for e in entries]
     if client_of(payload) == "codex":
         # Codex has no updatedToolOutput. A "block" replaces the model-visible result with the

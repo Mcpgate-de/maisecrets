@@ -1,0 +1,10 @@
+# c26-a-padded-removal-in-a-command-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-padded-removal-in-a-command-is-refused"
+control = "C26"
+statement = "A tool call that carries the removal of an import with any white space between forget and import: is refused."
+runner = ["tests/test_values.py::ReviewRoundTwo::test_a_removal_padded_with_white_space_in_a_command_is_refused"]
+
+[proof]
+file = "maisecrets/value_files.py"
+find = "    _FORGET + r\"[\\s\\S]*?import:|import:[\\s\\S]*?\" + _FORGET\n"
+replace = "    _FORGET + r\"\\s{1,400}import:|import:\\s{1,400}\" + _FORGET\n"

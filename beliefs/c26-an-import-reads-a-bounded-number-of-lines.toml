@@ -1,0 +1,10 @@
+# c26-an-import-reads-a-bounded-number-of-lines: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-import-reads-a-bounded-number-of-lines"
+control = "C26"
+statement = "One import parses at most MAX_LINES lines and keeps the first refusals with a count of all."
+runner = ["tests/test_values.py::ReviewRoundOne::test_a_flood_of_lines_is_read_to_a_bound_and_the_refusals_are_counted"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "        if lines > MAX_LINES:\n"
+replace = "        if False:\n"

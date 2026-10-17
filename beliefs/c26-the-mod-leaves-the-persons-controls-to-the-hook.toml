@@ -1,0 +1,10 @@
+# c26-the-mod-leaves-the-persons-controls-to-the-hook: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-the-mod-leaves-the-persons-controls-to-the-hook"
+control = "C26"
+statement = "The mod never rewrites a settings prompt or the ssh grant sentence: the hook reads them before the detector."
+runner = ["tests/test_values.py::ReviewRoundOne::test_the_mod_leaves_a_settings_prompt_to_the_hook"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    if settings_mod.parse_prompt(prompt) or _GRANT_RE.match(prompt):\n        return {}\n"
+replace = "    if False:\n        return {}\n"

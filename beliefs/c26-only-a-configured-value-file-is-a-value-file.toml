@@ -1,0 +1,10 @@
+# c26-only-a-configured-value-file-is-a-value-file: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-only-a-configured-value-file-is-a-value-file"
+control = "C26"
+statement = "An import counts as a value file only when the file is in the person's setting value_files; a caller's word \"file\" does not count."
+runner = ["tests/test_values.py::ReviewRoundTwo::test_only_a_configured_value_file_counts_as_a_value_file"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "    if origin == \"file\" and not _configured(key):\n"
+replace = "    if False:\n"

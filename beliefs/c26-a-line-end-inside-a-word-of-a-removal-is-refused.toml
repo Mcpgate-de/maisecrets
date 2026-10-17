@@ -1,0 +1,10 @@
+# c26-a-line-end-inside-a-word-of-a-removal-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-line-end-inside-a-word-of-a-removal-is-refused"
+control = "C26"
+statement = "A tool call that splits a word of the removal of an import over a line continuation (backslash or backtick) is refused; the guard refuses every form that an earlier round refused."
+runner = ["tests/test_values.py::ReviewRoundThree::test_a_line_end_inside_a_word_of_a_removal_is_refused"]
+
+[proof]
+file = "maisecrets/value_files.py"
+find = "_JOINED_FORMS = (re.compile(r\"\\\\\\r?\\n|`\\r?\\n|[\\\"']\"),                # round 3\n                 re.compile(r\"[\\\"'\\\\`]|\\s*\\+\\s*\"),                        # round 4: keeps the line break of a\n                 re.compile(r\"\\\\\\r?\\n|`\\r?\\n|[\\\"'\\\\`]|\\s*\\+\\s*\"))     # continuation; round 5 drops it\n"
+replace = "_JOINED_FORMS = (re.compile(r\"[\\\"'\\\\`]|\\s*\\+\\s*\"),)\n"
