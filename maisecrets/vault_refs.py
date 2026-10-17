@@ -439,7 +439,7 @@ def ensure_headers(cfg: dict, backend) -> str | None:
     if cfg.get("client_header", True) is not False:
         try:
             renewed = rotate_lost(backend, time.monotonic() + BUDGET)
-        except (LockTimeout, OSError, RuntimeError):
+        except Exception:  # noqa: BLE001 - a store backend has its own errors; the header repair below still runs
             renewed = []                        # tried again at the next start; the header repair below still runs
     added, removed, path, backup = _apply_config(cfg, backend)
     parts = []
@@ -950,13 +950,13 @@ def _safe_time(value: object) -> str | None:
 
 
 def _why(origin: str, status: int, code: str | None, body: dict, headers: dict, keys: list[str],
-         url: str = "", deadline: float | None = None) -> str:
+         url: str = "", deadline: float | None = None, kid: str | None = None) -> str:
     host = urlsplit(origin).hostname
     names = ", ".join(f"⟦{k}⟧" for k in keys)
     if code in ("unknown_key", "pending", "disabled"):
         # the state of the binding, in the words of /maisecrets:status, with the one step the person takes
         rec = _set_state(origin, code, body.get("activates_at") if code == "pending" else None,
-                         deadline=deadline)
+                         deadline=deadline, kid=kid)
         name = _entry_name(origin, url)
         return (f"the state of the MCP server {_say_name(name, host)} ({host}) is: "
                 f"{describe(rec['state'], name or host, rec.get('activates_at'))}")
@@ -1037,14 +1037,14 @@ def resolve(cfg: dict, backend, keys: list[str], session: str | None,
             if isinstance(values, dict) and all(isinstance(values.get(key), str) for key in mine):
                 for key in mine:
                     out[key] = (values[key], origin)
-                _set_state(origin, "active", deadline=deadline)
+                _set_state(origin, "active", deadline=deadline, kid=kid_of(k))
                 continue
             raise Refused(f"{host} gave no usable answer (a value is missing or not text)")
         code = answer.get("error") if answer is not None else None
         code = code if (status, code) in _CODES else None
         if code == "expired":
             forget(mine, origin, url, deadline)     # a fresh sighting starts the time again (contract)
-        raise Refused(_why(origin, status, code, answer or {}, headers, mine, url, deadline))
+        raise Refused(_why(origin, status, code, answer or {}, headers, mine, url, deadline, kid_of(k)))
     return out
 
 
@@ -1094,23 +1094,30 @@ def _same(old: dict, rec: dict) -> bool:
 
 
 def _set_state(origin: str, answer: str, activates_at: str | None = None, told: str | None = None,
-               deadline: float | None = None) -> dict:
+               deadline: float | None = None, kid: str | None = None) -> dict:
     """Record a server answer (`active`, `pending`, `disabled`, `unknown_key`) or a told state. Returns the record.
     `unknown_key` is `lost` when this key was bound once, else `header`. The old record is read again under the lock,
     so a parallel answer never takes `bound` back (Gate A review). A busy lock or a failed write keeps the old record
-    on disk; the record is returned all the same, so the reason of a deny still names the state."""
-    kid = _kid_now(origin)
-    old = state_of(origin)
-    rec = _next_state(old, kid, answer, activates_at, told)
-    if not kid or (told is None and _same(old, rec)):
-        return old if kid and old else rec
+    on disk; the record is returned all the same, so the reason of a deny still names the state. `kid` is the kid
+    of the key that got the answer: an answer for a key that a new key replaced meanwhile is not written (Gate A
+    review, round 2), it would name the state of the new key."""
+    now = _kid_now(origin)
+    asked = kid or now
+    old = _current(_mine(STATES).get(origin), asked)     # the record of the key that got the answer
+    rec = _next_state(old, asked, answer, activates_at, told)
+    if now and asked != now:
+        return state_of(origin) or rec          # a new key came meanwhile: the reason names the state of that key
+    if not now or (told is None and _same(old, rec)):
+        return old if now and old else rec
     try:
         with _own_lock(deadline):
+            if _kid_now(origin) != asked:
+                return state_of(origin) or rec      # a new key came while the answer was on its way
             data = _read_json(STATES) or {}
             mine = data.get(profile())
             if not isinstance(mine, dict):
                 mine = data[profile()] = {}         # a damaged part is written new, not a reason to fail
-            rec = _next_state(_current(mine.get(origin), kid), kid, answer, activates_at, told)
+            rec = _next_state(_current(mine.get(origin), asked), asked, answer, activates_at, told)
             mine[origin] = rec
             atomic_write(STATES, json.dumps(data, indent=1))
     except (LockTimeout, OSError):
@@ -1181,13 +1188,13 @@ def check_state(cfg: dict, backend, origin: str, url: str, deadline: float | Non
     answer = answer if isinstance(answer, dict) else None
     code = answer.get("error") if answer is not None else None
     if status == 200 and answer is not None and isinstance(answer.get("values"), dict):
-        return _set_state(origin, "active", deadline=deadline), None
+        return _set_state(origin, "active", deadline=deadline, kid=kid_of(k)), None
     if (status, code) == (403, "pending"):
-        return _set_state(origin, "pending", answer.get("activates_at"), deadline=deadline), None
+        return _set_state(origin, "pending", answer.get("activates_at"), deadline=deadline, kid=kid_of(k)), None
     if (status, code) == (401, "unknown_key"):
-        return _set_state(origin, "unknown_key", deadline=deadline), None
+        return _set_state(origin, "unknown_key", deadline=deadline, kid=kid_of(k)), None
     if (status, code) == (503, "disabled"):
-        return _set_state(origin, "disabled", deadline=deadline), None
+        return _set_state(origin, "disabled", deadline=deadline, kid=kid_of(k)), None
     if (status, code) == (403, "clock_skew"):
         return state_of(origin), "the clock of this computer is off by more than 5 minutes"
     return state_of(origin), f"no usable answer (HTTP {status})"
@@ -1228,6 +1235,11 @@ def session_check(cfg: dict, backend) -> str | None:
     return " ".join(lines) or None
 
 
+def _put_key(backend, origin: str, k: bytes) -> None:
+    backend.put(_store_name(origin), k.hex(), label="maisecrets vault reference key",
+                comment="maisecrets: the key that gets values back from a server; not a placeholder value.")
+
+
 def rotate_lost(backend, deadline: float | None = None) -> list[str]:
     """At a session start: a new K for each origin whose server no longer accepts its key (quarantined or revoked). A
     vault must not use that K again (SPEC 6.4). The entries stay enabled, so the header write that follows puts the
@@ -1251,16 +1263,22 @@ def rotate_lost(backend, deadline: float | None = None) -> list[str]:
                 if old is None or kid_of(old) != kid or state_of(origin).get("state") != "lost":
                     continue
                 k = secrets.token_bytes(32)
-                backend.put(_store_name(origin), k.hex(), label="maisecrets vault reference key",
-                            comment="maisecrets: the key that gets values back from a server; not a placeholder "
-                                    "value.")
-            data = _read_json(KEYS) or {}
-            mine = data.get(profile()) if isinstance(data.get(profile()), dict) else {}
-            rec = mine.get(origin)
-            entries = rec.get("entries") if isinstance(rec, dict) and isinstance(rec.get("entries"), list) else []
-            mine[origin] = {"kid": kid_of(k), "created": _now_iso(), "entries": entries}
-            data[profile()] = mine
-            atomic_write(KEYS, json.dumps(data, indent=1))
+                _put_key(backend, origin, k)
+                try:
+                    data = _read_json(KEYS) or {}
+                    mine = data.get(profile()) if isinstance(data.get(profile()), dict) else {}
+                    rec = mine.get(origin)
+                    entries = rec.get("entries") if isinstance(rec, dict) and isinstance(rec.get("entries"), list) \
+                        else []
+                    mine[origin] = {"kid": kid_of(k), "created": _now_iso(), "entries": entries}
+                    data[profile()] = mine
+                    atomic_write(KEYS, json.dumps(data, indent=1))
+                except BaseException:
+                    # keys.json still names the old kid: the old key goes back, so the store and keys.json agree and
+                    # the next start tries again. Kept, the new key would never match keys.json, and no start would
+                    # replace it again (Gate A and Gate B review, round 2)
+                    _put_key(backend, origin, old)
+                    raise
         out.append(origin)
     return out
 

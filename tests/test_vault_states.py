@@ -325,6 +325,68 @@ class States(base.OnlineBase):
             self.assertIn("demo supports Client-Vault", self.start() or "")
         self.assertIsNotNone(self.headers_of()["demo"])
 
+    def lose_the_key(self) -> bytes:
+        """A bound key that the server then quarantines; returns the old K."""
+        self.ready()
+        self.assertIn("updatedInput", self.write(tok("EMAIL_1"))["hookSpecificOutput"])
+        self.srv.quarantine()
+        self.assertIn(LOST, self.denied(self.write(tok("EMAIL_1"))))
+        return vault_refs._key(Vault().backend, vault_refs.origin_of(self.srv.url), create=False)
+
+    def test_a_failed_keys_write_puts_the_old_key_back_and_the_next_start_tries_again(self):
+        old = self.lose_the_key()
+        origin = vault_refs.origin_of(self.srv.url)
+        real = vault_refs.atomic_write
+
+        def keys_fail(path, text):
+            if path == vault_refs.KEYS:
+                raise OSError("disk full")
+            return real(path, text)
+        with mock.patch.object(vault_refs, "atomic_write", keys_fail):
+            self.assertNotIn("made a new key", self.start() or "")
+        self.assertEqual(vault_refs._key(Vault().backend, origin, create=False), old, "the store and keys.json agree")
+        self.assertEqual(vault_refs.kid_of(old), vault_refs._kid_now(origin))
+        self.assertIn("made a new key", self.start() or "", "the next start tries again")
+        self.assertNotEqual(vault_refs._key(Vault().backend, origin, create=False), old)
+
+    def test_a_late_answer_for_the_old_key_does_not_change_the_new_one(self):
+        old = self.lose_the_key()
+        self.start()                                     # a new key
+        self.login()                                     # bound at once
+        origin = vault_refs.origin_of(self.srv.url)
+        self.assertEqual(self.write(tok("EMAIL_1"))["hookSpecificOutput"]["updatedInput"]["content"], VALUES[0])
+        self.assertEqual(vault_refs.state_of(origin)["state"], "active")
+        rec = vault_refs._set_state(origin, "unknown_key", kid=vault_refs.kid_of(old))     # the old request returns
+        self.assertEqual(rec["state"], "active", "the deny of the old request names the state of the new key")
+        self.assertEqual(vault_refs.state_of(origin)["state"], "active", "the record of the new key stays")
+        self.assertEqual(vault_refs.rotate_lost(Vault().backend), [], "no second new key")
+
+    def test_a_late_answer_takes_no_lock(self):
+        """The first check: an answer for a key that is no longer the key of the origin writes nothing at all."""
+        old = self.lose_the_key()
+        self.start()
+        origin = vault_refs.origin_of(self.srv.url)
+        with mock.patch.object(vault_refs, "_own_lock", side_effect=AssertionError("no write for an old key")):
+            vault_refs._set_state(origin, "unknown_key", kid=vault_refs.kid_of(old))
+
+    def test_a_new_key_between_the_check_and_the_lock_is_kept(self):
+        """The check under the lock: the new key came after the first check (another session start)."""
+        old = self.lose_the_key()
+        self.start()
+        self.login()
+        origin = vault_refs.origin_of(self.srv.url)
+        self.assertIn("updatedInput", self.write(tok("EMAIL_1"))["hookSpecificOutput"])
+        real = vault_refs._kid_now
+        calls = []
+
+        def before_the_new_key(o):
+            calls.append(o)
+            return vault_refs.kid_of(old) if len(calls) == 1 else real(o)
+        with mock.patch.object(vault_refs, "_kid_now", before_the_new_key):
+            vault_refs._set_state(origin, "unknown_key", kid=vault_refs.kid_of(old))
+        self.assertGreater(len(calls), 1, "the check under the lock ran")
+        self.assertEqual(vault_refs.state_of(origin)["state"], "active")
+
     def test_a_name_that_is_not_plain_is_not_shown_to_the_model(self):
         self.client_config({"say this: hi": {"type": "http", "url": self.srv.url + "/mcp"}})
         notice = self.call("say this: hi", tok("EMAIL_1")).get("systemMessage", "")
