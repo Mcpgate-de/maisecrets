@@ -313,3 +313,39 @@ class TravelIdLabelTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewOfTheDatasetRulesTests(Base):
+    """The Opus review of 2026-10-17: developer text that the first version masked."""
+
+    def test_placeholder_streets_stay_text(self):
+        for text in ("address: 123 Main Street", "Shipping address: 123 Main St", "Adresse: Musterstraße 1",
+                     "Anschrift: Beispielweg 12", "server:\n  address: 25 Main Street",
+                     "The default address is 1 Infinite Loop for the test fixture."):
+            with self.subTest(text):
+                self.assertText(text)
+
+    def test_a_sentence_after_a_name_label_stays_text(self):
+        for text in ("first_name: Too long (maximum is 50 characters)", "first_name: May not be null",
+                     "first_name: Was", "surname: Renamed to family_name in v2",
+                     "- **first_name:** Renamed to given_name"):
+            with self.subTest(text):
+                self.assertText(text)
+
+    def test_a_type_word_in_one_field_keeps_the_other_names_masked(self):
+        for text in ("first_name: Dana\nlast_name: Okafor\nmiddle_name: Unknown",
+                     '{"first_name": "Dana", "surname": "Okafor", "middle_name": "Default"}'):
+            with self.subTest(text):
+                out = masked(text)
+                self.assertNotIn("Dana", out)
+                self.assertNotIn("Okafor", out)
+
+    def test_four_digit_groups_after_a_phone_word_stay_text(self):
+        for text in ("Telefon 2024 2025 2026", "Cell 1024 2048 4096 overflow", "Fax: 8080 9090 7070"):
+            with self.subTest(text):
+                self.assertText(text)
+
+    def test_a_thing_that_resides_at_a_place_stays_text(self):
+        for text in ("Each shard resides at 2 Primary Road", "The handler lives in 4 Core Lane module."):
+            with self.subTest(text):
+                self.assertText(text)

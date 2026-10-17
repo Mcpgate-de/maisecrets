@@ -708,6 +708,17 @@ _SINGLE_NAME_RE = _lazy(r"(?i:(?<![a-z_./-])(?:" + _SINGLE_NAME_LABELS + r"))[\"
                         r"(?![ \t]{1,2}[" + _UP + r"])")
 # the value of an i18n file or a form schema, not a name: the label in another language (first_name: Vorname) and the
 # words of a type, a case or an option
+# the translations of a name label: a text whose name fields hold these is an i18n file or a form schema
+_NAME_LABEL_TRANSLATIONS = frozenset({
+    "firstname", "lastname", "surname", "forename", "givenname", "familyname", "middlename", "name", "vorname",
+    "nachname", "familienname", "rufname", "prénom", "prenom", "nom", "nombre", "apellido", "apellidos", "nome",
+    "cognome", "prenome", "sobrenome", "voornaam", "achternaam", "förnamn", "fornamn", "efternamn", "imię", "imie",
+    "nazwisko", "etunimi", "sukunimi", "fornavn", "etternavn", "efternavn", "jméno", "jmeno", "příjmení", "prijmeni",
+    "keresztnév", "vezetéknév", "ad", "soyad", "soyadı", "patronymic"})
+# a word that starts a validation message or a changelog line after a name label
+_NAME_SENTENCE_START = frozenset({"too", "may", "was", "renamed", "must", "should", "cannot", "is", "not"})
+# a lower-case word right after the value on the same line: the value starts a sentence
+_WORD_AFTER_RE = _lazy(r"[ \t]+[a-zäöüßàâçéèêëîïôûùüÿñ]{2,}")
 _NAME_LABEL_VALUES = frozenset({
     "firstname", "lastname", "surname", "forename", "givenname", "familyname", "middlename", "name", "vorname",
     "nachname", "familienname", "rufname", "prénom", "prenom", "nom", "nombre", "apellido", "apellidos", "nome",
@@ -791,13 +802,21 @@ def _not_a_home(text: str, a: int, b: int) -> bool:
 _NOT_A_STREET_LABEL_RE = _lazy(r"(?i)(?<![a-z])(?:ip|ipv[46]|mac|e-?mail|server|listen|bind|remote|local|web|wallet"
                                r"|contract|memory|base|host|proxy|gateway|broadcast|multicast|network|bitcoin"
                                r"|ethereum|ens)[ _-]?$")
+# a placeholder street of docs, seed files and fixtures (123 Main Street, 1 Infinite Loop, Musterstraße 1)
+_PLACEHOLDER_STREET_RE = _lazy(r"(?i)^\s*(?:123\s+main\s+st(?:reet|\.)?\b|1\s+infinite\s+loop\b"
+                                r"|[\w-]*(?:muster|beispiel)[\w-]*\s*\d*\b)")
+# the parent key of a YAML or TOML block names a machine (server:\n  address: …): its address is no street
+_PARENT_NOT_A_STREET_RE = _lazy(r"(?i)(?<![a-z])(?:server|servers|host|hosts|listen|bind|network|proxy|gateway|upstream"
+                                r"|backend|endpoint|node|peer|cluster|smtp|mail|dns|ldap)[\w-]*[ \t]*:[ \t]*\r?\n"
+                                r"(?:[ \t]+[\w-]+[ \t]*:[^\n]*\r?\n){0,3}[ \t]+$")
 # a thing that "lives at" a place in prose about code (the server lives at, the function lives in)
 # the thing word stands right before the verb: "Dana, our office manager, lives at" is a person
 _THING_SUBJECT_RE = _lazy(r"(?i)(?<![a-z])(?:server|service|function|file|files|code|class|module|config|repo"
                           r"|repository|package|bucket|app|process|daemon|component|method|helper|store"
                           r"|shop|office|company|business|logic|variable|api|database|db|endpoint|library|sdk|docs"
                           r"|documentation"
-                          r"|site|website|page|bot|script|binary|image|container|cluster|host)[ \t]{1,3}$")
+                          r"|site|website|page|bot|script|binary|image|container|cluster|host|shard|handler|worker|job|task)"
+                          r"[ \t]{1,3}$")
 _HOME_LABEL_RE = _lazy(r"(?i)home|residential|permanent|wohn|resid|liv|domicil")
 _STREET_LABEL_WORDS = ("address", "anschrift", "adresse", "domicilio", "direcci", "indirizzo", "endere", "adres",
                        "resid", "live", "living", "domiciled", "wohn")
@@ -857,6 +876,8 @@ def _national_phone_ok(v: str) -> bool:
         return False
     if len(groups) == 1 and not 10 <= len(d) <= 12:
         return False
+    if len(groups) >= 3 and all(len(g) == 4 for g in groups) and not v.startswith(("+", "0")):
+        return False   # Telefon 2024 2025 2026, Cell 1024 2048 4096: years and sizes (review, 2026-10-17)
     if len(groups) == 2 and len(d) < 9:
         return False
     if len(groups[-1]) >= 4 and _placeholder_digits(groups[-1]):
@@ -1143,11 +1164,16 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
         for m in _SINGLE_NAME_RE.finditer(text):
             v = m.group(1)
             low_v = v.lower().strip("'’-")
-            if low_v in _NAME_LABEL_VALUES:
-                # a label word as a value: an i18n file or a form schema, whose other values are labels too
+            if low_v in _NAME_LABEL_TRANSLATIONS:
+                # a label translation as a value: an i18n file or a form schema, whose other values are labels too
                 # (first_name: Prenume, last_name: Nume): no single name of this text is a person's
                 found = []
                 break
+            if low_v in _NAME_LABEL_VALUES:
+                continue   # a type or state word (Unknown, Default, String): this value only, a real record keeps
+                # its other names (review, 2026-10-17)
+            if v.lower() in _NAME_SENTENCE_START or _WORD_AFTER_RE.match(text, m.end(1)):
+                continue   # first_name: Too long (maximum…), Renamed to given_name: a sentence, not a name
             if low_v in _PLACEHOLDER_NAME_WORDS or low_v in PLACEHOLDER_NAMES \
                     or low_v in _NOT_A_NAME_START or low_v in _NOT_A_NAME_WORD or low_v in _SHORT_EN \
                     or len(low_v) < 2 or _reads_as_words(_no_marks(v)) or _inflected_word(low_v):
@@ -1159,6 +1185,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
             g = 1 if m.group(1) is not None else 2
             v = m.group(g)
             if _NOT_AN_ADDRESS_RE.search(v) or _GERUND_STREET_RE.search(v) or v.startswith("0") \
+                    or _PLACEHOLDER_STREET_RE.match(v) \
+                    or _PARENT_NOT_A_STREET_RE.search(text, max(0, m.start() - 60), m.start()) \
                     or _NOT_A_STREET_LABEL_RE.search(text, max(0, m.start() - 12), m.start()) \
                     or (g == 2 and _THING_SUBJECT_RE.search(text, max(0, m.start() - 40), m.start())):
                 continue
