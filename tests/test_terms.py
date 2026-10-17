@@ -157,8 +157,14 @@ class TeamFloorTests(unittest.TestCase):
             def __iter__(self):
                 type(self).walks += 1
                 return super().__iter__()
+        class WalkedList(list):
+            def __iter__(self):
+                Walked.walks += 1
+                return super().__iter__()
         big = Walked("".join(rnd.choice("abcdefghijklmnop") for _ in range(9)) for _ in range(20000))
-        with mock.patch.object(terms, "_STOP", [big]), mock.patch.object(terms, "_INSIDE", []):
+        # the sorted forms of the stop list count their walks too: a walk over them is as slow (belief replay)
+        ordered = (WalkedList(sorted(big)), WalkedList(sorted(w[::-1] for w in big)))
+        with mock.patch.object(terms, "_STOP", [big, ordered]), mock.patch.object(terms, "_INSIDE", []):
             for stem in ("abcde", sorted(big)[7][2:8], "zzzzz"):
                 self.assertEqual(terms._common_stem(stem, terms.INSIDE), sum(1 for w in big if stem in w))
             text = "".join(f"N{i:05d}  *qqqq{i:05d}*\n" for i in range(5000))
