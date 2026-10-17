@@ -37,6 +37,13 @@ PASSWORD = "Wq7-" + "pLm2xZr9Tv"                   # no shape: caught only when 
 UNSEEN = "Hv4-" + "kTr8mZq2Wx"                     # no shape and not stored: not caught
 MAIL = "jane.roe" + "@probe-mail.de"               # a rule catches it; `rule: email` switches the rule off
 NAME = "Zbigniew " + "Testowski"                   # a term
+PHRASE = "Tr0ub4dor& " + "7horses! b4tt3ry"         # a passphrase: each word has a letter and a digit or a sign
+# ordinary text that no rule catches and that a check must not store: two words, prose, prose with a number, a digest
+# with its file, a UUID, a version pin, a command line, a name, a sentence of East Asia, a vendor's example key
+ORDINARY_TEXTS = ("Apfel Birne", "correct horse battery staple", "Call me at 5 tomorrow!",
+                  "e3b0c44298fc1c14" + "9afbf4c8996fb924  file.txt", "3f2504e0-4f89-11d3-" + "9a0c-0305e82c3301",
+                  "passlib>=1.7,<2", "git log --oneline -n 20", "Wartungsfenster", "密码：至少8位（含1个大写字母）",
+                  "wJalrXUtnFEMI/K7MDENG/" + "bPxRfiCYEXAMPLEKEY", "release-notes-2026:")
 STATE = ("index.json", "vault.json", "audit.log", "hooks.log", "events.log", "terms.txt", "terms.marked.json",
          ".terms-state", ".terms-cache", "allow.txt", "hints.json")
 # the files that hold a value by design: the plaintext test store, the term list and the allow list
@@ -129,6 +136,20 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(check_value.parse("ms:( abc )"), "abc")
         self.assertEqual(check_value.parse("ms:(  abc  )"), " abc ")
         self.assertEqual(check_value.parse("ms:(abc "), "abc")
+
+    def test_several_groups_are_parsed_one_by_one(self):
+        self.assertEqual(check_value.parse_all("ms:(A B) ms:(x)"), [("A B", True), ("x", True)])
+        self.assertEqual(check_value.parse_all("ms:(a)\nMS:( b )  ms:(c"), [("a", True), ("b", True), ("c", True)])
+        # without a `)` before it, the next group still ends the one before: no value holds `ms:(`
+        self.assertEqual(check_value.parse_all("ms:(a b ms:(c)"), [("a b", True), ("c", True)])
+        # a `)` inside a value works in every group; the last group ends at its last `)`
+        self.assertEqual(check_value.parse_all("ms:(pa)ss) ms:(x)y) and more"), [("pa)ss", True), ("x)y", True)])
+        self.assertEqual(check_value.parse_all("ms:(a)b)"), [("a)b", True)])
+        # a later group stores only when the first one may (a near form at the start stores nothing)
+        self.assertEqual(check_value.parse_all("ms: (a) ms:(b)"), [("a", False), ("b", False)])
+        # `ms:(` glued to a word is no new group
+        self.assertEqual(check_value.parse_all("ms:(xms:(y)"), [("xms:(y", True)])
+        self.assertEqual(check_value.parse("ms:(A B) ms:(x)"), "A B")
 
     def test_a_key_on_its_own_lines_keeps_its_lines(self):
         key = "-----BEGIN " + "KEY-----\nAAAA\nBBBB\n-----END " + "KEY-----"
@@ -247,6 +268,53 @@ class SameVerdictTests(_Base):
         self.assertIn("SECRET (gitlab-pat)", out["reason"])
         self.assertIn("EMAIL (email)", out["reason"])
 
+    def test_each_group_gives_the_verdict_of_its_own_normal_prompt(self):
+        # ms:(v) ms:(w): each line is the verdict that the normal prompt v (and w) gives alone, from the same state
+        others = (GLPAT, "Apfel Birne")
+        for name, (value, how) in self.CASES.items():
+            for other in others:
+                if other == value:
+                    continue
+                for first in (True, False):
+                    with self.subTest(name, other=other[:5], first=first):
+                        self._arrange(how)
+                        normal = _prompt(value).get("decision") == "block"
+                        normal_hits = _hits() if normal else []
+                        self._arrange(how)
+                        prompt = f"ms:({value}) ms:({other})" if first else f"ms:({other}) ms:({value})"
+                        out = _prompt(prompt)
+                        self.assertEqual(out["decision"], "block")
+                        lines = out["reason"].split("\n\n")[0].split("\n")
+                        self.assertEqual(len(lines), 2, out["reason"])
+                        line = lines[0 if first else 1]
+                        self.assertTrue(line.startswith(f"Value {1 if first else 2}: "), line)
+                        self.assertEqual("✓ maisecrets would mask this" in line, normal, line)
+                        for type_, kind in normal_hits:
+                            self.assertIn(check_value.hit_label(type_, kind, stored=kind == "manual"), line)
+                        other_line = lines[1 if first else 0]
+                        self.assertEqual("SECRET (gitlab-pat)" in other_line, other == GLPAT, other_line)
+                        if other == GLPAT:
+                            self.assertNotIn("gitlab-pat", line, "the hit of the other group stays in its line")
+                        self.assertTrue(out["reason"].endswith(check_value.NOT_SENT))
+
+    def test_the_text_ms_bracket_is_never_a_hit(self):
+        # the live finding: `ms:(A B) ms:(x)` read "A B) ms:(x" as one value; now each group is its own value
+        out = _prompt("ms:(Apfel Birne) ms:(x)")
+        self.assertEqual(out["reason"].count(check_value.NOT_CAUGHT), 2, out["reason"])
+        self.assertNotIn("✓", out["reason"])
+        self.assertEqual(_hits(), [])
+        self.assertFalse(Path(HOME, "index.json").exists(), "nothing is stored")
+
+    def test_the_mod_gets_one_drop_with_every_verdict(self):
+        out = hooks.rewrite_prompt({"prompt": f"ms:({GLPAT}) ms:({UNSEEN})", "session_id": "S1", "origin": "composer"})
+        self.assertEqual(sorted(out), ["drop"])
+        self.assertIn("Value 1: ✓ maisecrets would mask this: SECRET (gitlab-pat)", out["drop"])
+        self.assertIn("Value 2: " + check_value.NOT_CAUGHT + " It is now stored", out["drop"])
+        self.assertNotIn(GLPAT, out["drop"])
+        self.assertNotIn(UNSEEN, out["drop"])
+        # the scrub takes each value alone, not only the prompt as typed: a later record can hold the value alone
+        self.assertTrue(any(UNSEEN in scrub and GLPAT in scrub for scrub in self.scrubs), self.scrubs and "each value")
+
     def test_a_private_key_over_several_lines_is_caught_whole(self):
         body = "\n".join("MIIEowIBAAKCAQEA" + c * 48 for c in "xyzw")
         key = "-----BEGIN " + "RSA PRIVATE KEY-----\n" + body + "\n-----END " + "RSA PRIVATE KEY-----"
@@ -344,14 +412,30 @@ class StoreTests(_Base):
         again = _prompt(f"ms:({UNSEEN})")
         self.assertIn("SECRET (stored value)", again["reason"])
 
-    def test_a_value_with_spaces_is_stored_and_the_answer_says_where_it_is_found(self):
-        out = _prompt("ms:(correct horse battery staple)")
+    def test_a_passphrase_with_spaces_is_stored_and_the_answer_says_where_it_is_found(self):
+        out = _prompt(f"ms:({PHRASE})")
         self.assertIn("It is now stored", out["reason"])
         self.assertIn("Inside a sentence maisecrets does not find it", out["reason"])
-        self.assertEqual(_prompt("correct horse battery staple")["decision"], "block")
+        self.assertEqual(_prompt(PHRASE)["decision"], "block")
+
+    def test_ordinary_text_is_not_stored(self):
+        # a check of ordinary words stored them, and every later prompt with them was blocked (live finding, 0.6.32)
+        want = (check_value.NOT_CAUGHT + " It looks like ordinary text, so it was not stored. If it is a secret, store "
+                "it with /maisecrets:put.\n\n" + check_value.NOT_SENT)
+        for text in ORDINARY_TEXTS:
+            with self.subTest(text[:12]):
+                self.assertEqual(_prompt(f"ms:({text})")["reason"], want)
+                self.assertEqual(_prompt(text).get("decision"), None, "the normal prompt still goes out")
+        self.assertFalse(Path(HOME, "index.json").exists())
+
+    def test_a_credential_without_a_shape_is_still_stored(self):
+        for value in (UNSEEN, PASSWORD, "Sommer" + "2026!x", "K7#mQ2" + "vL9pZ"):
+            with self.subTest(value[:3]):
+                self.assertTrue(check_value.looks_like_a_credential(value), value[:3])
+        self.assertIn("It is now stored", _prompt(f"ms:({PASSWORD})")["reason"])
 
     def test_storing_is_refused_where_it_is_not_allowed_or_would_not_help(self):
-        for prompt, why in ((f"ms:({UNSEEN[:6]})", "only from 8 characters"),
+        for prompt, why in ((f"ms:({UNSEEN[:6]})", "only from 8 characters"), ("ms:(Apfel)", "only from 8 characters"),
                             (f"ms:({UNSEEN}\n{UNSEEN})", "more than one line")):
             out = _prompt(prompt)
             self.assertIn(why, out["reason"])

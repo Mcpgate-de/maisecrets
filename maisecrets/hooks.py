@@ -914,7 +914,7 @@ def _allowed_by_the_list(value: str) -> str | None:
     return None
 
 
-def _store_unseen(payload: dict, cfg: dict, value: str, session: str | None) -> str:
+def _store_unseen(payload: dict, cfg: dict, value: str, session: str | None, exact: bool) -> str:
     """No rule and no stored value caught `value`: store it as /maisecrets:put does, so that it is masked from now
     on, and say where maisecrets finds it again. Each case where storing is not allowed or would not help says so."""
     from . import settings as settings_mod
@@ -922,7 +922,7 @@ def _store_unseen(payload: dict, cfg: dict, value: str, session: str | None) -> 
     if allowed:
         return check_value.not_caught(f"maisecrets lets it through: {allowed}. It was not stored. Remove that line "
                                       "from the allow list to protect it.")
-    if not check_value.exact(payload.get("prompt")):
+    if not exact:
         return check_value.not_caught("It was not stored, because the prompt does not start with ms:( exactly. Send "
                                       "it again as ms:(…) to store it.")
     # the mod names who sent the prompt: only the person at the terminal or in Remote Control stores (an `sdk` turn can
@@ -940,6 +940,10 @@ def _store_unseen(payload: dict, cfg: dict, value: str, session: str | None) -> 
     if len(value) < _EXACT_MIN_LEN:
         return check_value.not_caught(f"maisecrets finds a stored value only from {_EXACT_MIN_LEN} characters on, "
                                       "so it was not stored.")
+    if not check_value.looks_like_a_credential(value):
+        # a check of ordinary words stored them for good, and every later prompt with them was blocked (field report,
+        # 0.6.32): only a value that the credential checks of the detector take is stored here
+        return check_value.not_caught(check_value.ORDINARY)
     try:
         e = Vault(cfg).put(value, "SECRET", "manual", session=session)
     except Exception as exc:  # noqa: BLE001 - the answer says it; the prompt stays blocked
@@ -951,29 +955,29 @@ def _store_unseen(payload: dict, cfg: dict, value: str, session: str | None) -> 
     return check_value.stored_text(e.ref, alone, in_text)
 
 
-def _check_value(payload: dict, value: str) -> dict:
-    """The answer to ms:(…): always a block, whatever the verdict. The reason goes to the person and names types and
-    rule ids, never the value; the transcript loses the prompt as typed."""
+def _check_value(payload: dict, groups: list) -> dict:
+    """The answer to ms:(…): always a block, whatever the verdict. Each group of the prompt (check_value.parse_all)
+    gets its own verdict, from the same calls as a normal prompt with that value. The reason goes to the person and
+    names types and rule ids, never the value; the transcript loses the prompt as typed."""
     cfg = load_config()
     session = payload.get("session_id")
     codex = client_of(payload) == "codex"
     entries: list = []
     values: list = []
-    if not value.strip():
-        reason = check_value.USAGE
-    elif check_value.only_placeholders(value, find_refs(value)):
-        reason = check_value.A_PLACEHOLDER
+    lines: list = []
+    for value, exact in groups:
+        got, taken, line = _check_one(payload, cfg, session, value, exact)
+        entries += got
+        values += taken
+        lines.append(line)
+    if len(lines) == 1:
+        reason = lines[0] + "\n\n" + check_value.NOT_SENT
     else:
-        entries, matches, n_stored, values = _verdict(value, cfg, session)
-        if matches or n_stored:
-            labels = [check_value.hit_label(m.type, m.kind) for m in matches]
-            labels += [check_value.hit_label(e.type, e.kind, stored=True) for e in entries[len(matches):]]
-            reason = check_value.caught(labels)
-        else:
-            reason = _store_unseen(payload, cfg, value, session)
+        reason = "\n".join(f"Value {i}: {line}" for i, line in enumerate(lines, 1)) + "\n\n" + check_value.NOT_SENT
     if cfg.get("scrub_transcript", True):
         raw = payload.get("prompt") if isinstance(payload.get("prompt"), str) else ""
-        scrub = [x for x in dict.fromkeys(check_value.scrub_forms(raw, value) + list(values)) if x]
+        forms = check_value.scrub_forms(raw, [v for v, _exact in groups])
+        scrub = [x for x in dict.fromkeys(forms + list(values)) if x]
         _scrub_transcript(payload.get("transcript_path", ""), scrub, [])
         _scrub_transcript_later(payload.get("transcript_path", ""), scrub, [], session=session)
     from . import events
@@ -984,6 +988,21 @@ def _check_value(payload: dict, value: str) -> dict:
             "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
 
 
+def _check_one(payload: dict, cfg: dict, session: str | None, value: str, exact: bool) -> tuple:
+    """(entries, values taken out, verdict line) of one group of a check. The line ends without the sentence that the
+    prompt was not sent: _check_value adds it once."""
+    if not value.strip():
+        return [], [], check_value.USAGE_LINE
+    if check_value.only_placeholders(value, find_refs(value)):
+        return [], [], check_value.A_PLACEHOLDER_LINE
+    entries, matches, n_stored, values = _verdict(value, cfg, session)
+    if matches or n_stored:
+        labels = [check_value.hit_label(m.type, m.kind) for m in matches]
+        labels += [check_value.hit_label(e.type, e.kind, stored=True) for e in entries[len(matches):]]
+        return entries, values, check_value.caught_line(labels)
+    return entries, values, _store_unseen(payload, cfg, value, session, exact)
+
+
 def rewrite_prompt(payload: dict) -> dict:
     """The question of the mod (claude-mod/maisecrets-mod.mjs, Claude Code 2.1.287 and later): this prompt with a
     placeholder in place of each value, so it goes through instead of being blocked. ``{}`` leaves
@@ -992,12 +1011,12 @@ def rewrite_prompt(payload: dict) -> dict:
     that turns the rewrite off. The answer carries placeholders, never a value."""
     if incidents.recognize(payload.get("prompt"), client_of(payload)):
         return {}            # the prompt hook answers it, before the config and the store (docs/DIAGNOSTICS.md, 7)
-    value = check_value.parse(payload.get("prompt"))
-    if value is not None:
+    groups = check_value.parse_all(payload.get("prompt"))
+    if groups is not None:
         # ms:(…) is never sent: the mod drops it with this verdict, and drops it with its own sentence when no answer
         # comes, so a hook that hangs or cannot start cannot let it through (Gate A, round 2). The transcript is found
         # by the session id, as for a rewrite
-        out = _check_value({**payload, "prompt_id": "mod", "transcript_path": ""}, value)
+        out = _check_value({**payload, "prompt_id": "mod", "transcript_path": ""}, groups)
         # one line: `claude -p` prints the line breaks of a drop as replacement characters (measured on 2.1.301)
         return {"drop": " ".join(out["reason"].split())}
     cfg = load_config()
@@ -1118,10 +1137,10 @@ def _term_command(payload: dict, cmd: tuple, typed: bool, cfg: dict) -> dict:
 
 
 def user_prompt(payload: dict) -> dict:
-    value = check_value.parse(payload.get("prompt"))
-    if value is not None:
+    groups = check_value.parse_all(payload.get("prompt"))
+    if groups is not None:
         # ms:(…): blocked on every path, also without a closing bracket, before anything else reads the prompt
-        return _check_value(payload, value)
+        return _check_value(payload, groups)
     asked = incidents.recognize(payload.get("prompt"), client_of(payload))
     if asked:
         if asked[0] == "usage":
@@ -4748,11 +4767,11 @@ def _scrub_failed_prompt_now(prompt: str, path: str) -> None:
         except Exception:  # noqa: BLE001 - a config that cannot be read must not stop the scrub
             pass
         values = []
-        checked = check_value.parse(prompt)
+        checked = check_value.parse_all(prompt)
         if checked is not None:
             # ms:(…): the value often has no shape, so the detector below finds nothing. The prompt as typed goes
             # first, and it needs neither the store nor the detector (Gate A and Gate B, round 1)
-            values = check_value.scrub_forms(prompt, checked)
+            values = check_value.scrub_forms(prompt, [v for v, _exact in checked])
             _scrub_transcript(path, values, [])
             # the record comes after the hook answered, and the detector below can outlast this child's 30 s on a
             # huge paste: the late scrub of the check starts first (Gate B, round 2)

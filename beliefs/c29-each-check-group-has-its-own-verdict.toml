@@ -1,0 +1,11 @@
+# c29-each-check-group-has-its-own-verdict: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c29-each-check-group-has-its-own-verdict"
+control = "C29"
+statement = "ms:(a) ms:(b) checks each value alone, with its own verdict line, and no value holds the ms:( of the next group."
+runner = ["tests/test_check_value.py::SameVerdictTests::test_the_text_ms_bracket_is_never_a_hit",
+          "tests/test_check_value.py::SameVerdictTests::test_each_group_gives_the_verdict_of_its_own_normal_prompt"]
+
+[proof]
+file = "maisecrets/check_value.py"
+find = "        nxt = _NEXT_RE.search(prompt, start)\n"
+replace = "        nxt = None\n"

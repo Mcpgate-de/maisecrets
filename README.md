@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 13 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 323 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 325 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -664,8 +664,15 @@ This prompt was not sent. The value did not reach the AI.
 ```
 
 ```
-> ms:(another-value)
+> ms:(Kx7#another-value)
 ⚠ maisecrets would NOT have caught this. It is now stored (⟦SECRET_c4⟧). From now on it is masked wherever it stands as a word of its own.
+
+This prompt was not sent. The value did not reach the AI.
+```
+
+```
+> ms:(two words)
+⚠ maisecrets would NOT have caught this. It looks like ordinary text, so it was not stored. If it is a secret, store it with /maisecrets:put.
 
 This prompt was not sent. The value did not reach the AI.
 ```
@@ -686,18 +693,26 @@ This prompt was not sent. The value did not reach the AI.
 - **The value** is the text between `ms:(` and the last `)`, or up to the end.
   One blank on each side is dropped, so `ms:( value )` and a key on its own
   lines between `ms:(` and `)` both work.
+- **Several values** in one prompt: `ms:(first) ms:(second)`. Each value
+  ends where blanks and the next `ms:(` start, and each gets its own line
+  (`Value 1: …`, `Value 2: …`). The prompt is not sent.
 - **The verdict** is the one a normal prompt with that value gets: the
   detection rules, your rules of your own, your terms, the values already
   stored, the allow list and your regions. The answer names the type and the
   rule of each hit, never the value; a value that is caught is stored, as for
   a normal prompt.
-- **Not caught:** maisecrets stores the value as `/maisecrets:put` does (type
-  SECRET) and names its placeholder, so it is masked from then on wherever it
+- **Not caught:** when the value looks like a credential (no blanks, 8
+  characters or more, and a mix of letters, digits and signs or the
+  randomness of a key, no word and no hex id), maisecrets stores it as
+  `/maisecrets:put` does (type SECRET) and names its placeholder, so it is masked from then on wherever it
   stands as a word of its own (glued to other letters, it is not found). A
-  value with spaces is found again alone on a line or after `:` or `=`, not
+  passphrase with spaces is stored only when each word has a letter and a
+  digit or a sign; it is found again alone on a line or after `:` or `=`, not
   inside a sentence, and the answer says so. It is not stored when the allow list
   allows it (the answer names the line), when it is shorter than 8
   characters or has more than one line (maisecrets could not find it again),
+  when it looks like ordinary text (words, a sentence, a hash, an id, a
+  command: the answer says so; store such a password with `/maisecrets:put`),
   when it holds a placeholder, or when the prompt did not come from you (a
   scheduled prompt, a subagent, `claude -p`). The client's own list of earlier
   prompts (the up arrow) may keep the prompt as typed; that is not measured.
