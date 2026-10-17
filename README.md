@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 12 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 299 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 300 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1981,7 +1981,8 @@ send that prompt to the model. A prompt from a scheduled task, a subagent or
 a program that started the client removes nothing. A tool call that carries
 the removal is refused, also when quotes, escapes, line continuations or a
 PowerShell `+` split it. A removal that a program builds at run time (brace
-expansion, an empty variable inside a word, a character code) is not seen:
+expansion, an empty variable or `$()` inside a word, a character code,
+PowerShell `-join`) is not seen:
 the same text-match limit as for a setting (C22), and `values remove` in a terminal only names the
 prompt. If you remove the import of a value file, the next session start
 imports the file again as it is now (also when you removed it in another

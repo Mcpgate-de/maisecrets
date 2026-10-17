@@ -6,5 +6,5 @@ runner = ["tests/test_values.py::ReviewRoundThree::test_an_escape_or_a_split_ins
 
 [proof]
 file = "maisecrets/value_files.py"
-find = "_JOINED_RE = re.compile(r\"[\\\"'\\\\`]|\\s*\\+\\s*\")\n"
-replace = "_JOINED_RE = re.compile(r\"[\\\"']\")\n"
+find = "_JOINED_FORMS = (re.compile(r\"\\\\\\r?\\n|`\\r?\\n|[\\\"']\"),                # round 3\n                 re.compile(r\"[\\\"'\\\\`]|\\s*\\+\\s*\"),                        # round 4: keeps the line break of a\n                 re.compile(r\"\\\\\\r?\\n|`\\r?\\n|[\\\"'\\\\`]|\\s*\\+\\s*\"))     # continuation; round 5 drops it\n"
+replace = "_JOINED_FORMS = (re.compile(r\"\\\\\\r?\\n|`\\r?\\n|[\\\"']\"),)\n"

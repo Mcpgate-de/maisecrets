@@ -6,5 +6,5 @@ runner = ["tests/test_values.py::ReviewRoundThree::test_every_form_that_a_shell_
 
 [proof]
 file = "maisecrets/value_files.py"
-find = "    return bool(IN_A_COMMAND_RE.search(command) or IN_A_COMMAND_RE.search(_JOINED_RE.sub(\"\", command)))\n"
-replace = "    return bool(IN_A_COMMAND_RE.search(command))\n"
+find = "                or any(IN_A_COMMAND_RE.search(form.sub(\"\", command)) for form in _JOINED_FORMS))\n"
+replace = "                or False)\n"

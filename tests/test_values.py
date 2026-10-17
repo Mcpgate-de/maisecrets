@@ -583,6 +583,30 @@ class ReviewRoundThree(_Files):
                                           **CLAUDE, "tool_input": {"command": command}})
                     self.assertEqual(ans["hookSpecificOutput"]["permissionDecision"], "deny", command)
 
+    CONTINUED = {
+        "line end inside forget": "claude -p /maisecrets:for\\\nget\\ import:v1234abcd",
+        "line end inside import": "claude -p /maisecrets:forget\\ imp\\\nort:v1234abcd",
+        "crlf line end inside import": "claude -p /maisecrets:forget\\ imp\\\r\nort:v1234abcd",
+        "quoted halves over a line end": "claude -p '/maisecrets:forget imp'\\\n'ort:v1234abcd'",
+        "codex over a line end": "codex exec 'maisecrets: forget imp'\\\n'ort:v1234abcd'",
+        "powershell backtick line end inside a word": "claude -p /maisecrets:forget` imp`\nort:v1234abcd",
+    }
+
+    def test_a_line_end_inside_a_word_of_a_removal_is_refused(self):
+        for name, command in self.CONTINUED.items():
+            for tool in ("Bash", "PowerShell"):
+                with self.subTest(name, tool=tool):
+                    ans = hooks.pre_tool({"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": "S1",
+                                          **CLAUDE, "tool_input": {"command": command}})
+                    self.assertEqual(ans["hookSpecificOutput"]["permissionDecision"], "deny", command)
+
+    def test_each_round_of_the_guard_only_adds_refusals(self):
+        # every form that an earlier round refused is refused still (a strict widening)
+        earlier = ["bash run.sh values\\\nremove v1234abcd"]      # refused by the form of round 4 alone
+        for command in (list(self.FORMS.values()) + list(self.POWERSHELL.values()) + list(self.ESCAPED.values())
+                        + earlier):
+            self.assertTrue(value_files.removal_in_command(command), command)
+
     def test_a_command_without_the_removal_runs(self):
         for command in ("python3 -c 'import json'", "grep -r 'import:' src", "echo forget it"):
             self.assertFalse(value_files.removal_in_command(command), command)

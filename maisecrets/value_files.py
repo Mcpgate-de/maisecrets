@@ -102,15 +102,27 @@ IN_A_COMMAND_RE = re.compile(
     _FORGET + r"[\s\S]*?import:|import:[\s\S]*?" + _FORGET
     + r"|\bvalues[\s\"']+(?:remove|forget|delete)\b"
     r"|\b(?:remove_typed|_remove_import|_import_bytes)\b", re.I)
-# quotes, every backslash and backtick (an escape or a line end inside a word: imp\ort, imp`ort), and a PowerShell `+`
-# with the space around it ('…imp' + 'ort:v1'): the shell joins the pieces again (Gate B, round 4)
-_JOINED_RE = re.compile(r"[\"'\\`]|\s*\+\s*")
+# Each form is checked in turn, and a command is refused when any of them matches, so a later form only adds
+# refusals (a strict widening of each round):
+# - the line ends of a continuation (a backslash or a backtick before a line break, also inside a word: for\<NL>get)
+#   and the quotes, as round 3 had it;
+# - every backslash and backtick (an escape inside a word: imp\ort, imp`ort) and a PowerShell `+` with the space
+#   around it ('…imp' + 'ort:v1'), as round 4 had it;
+# - both, with the line ends of a continuation taken out first: the shell joins the pieces again (Gate B, round 5).
+# A form built at run time (brace expansion, an empty variable inside a word, a character code, -join) is not seen:
+# the text-match limit of C22, named in README "Values from your own tools".
+_JOINED_FORMS = (re.compile(r"\\\r?\n|`\r?\n|[\"']"),                # round 3
+                 re.compile(r"[\"'\\`]|\s*\+\s*"),                        # round 4: keeps the line break of a
+                 re.compile(r"\\\r?\n|`\r?\n|[\"'\\`]|\s*\+\s*"))     # continuation; round 5 drops it
 
 
 def removal_in_command(command: str) -> bool:
-    """Whether a tool call's command text carries the removal of an import (IN_A_COMMAND_RE), also when quotes or
-    line continuations split its words."""
-    return bool(IN_A_COMMAND_RE.search(command) or IN_A_COMMAND_RE.search(_JOINED_RE.sub("", command)))
+    """Whether a tool call's command text carries the removal of an import (IN_A_COMMAND_RE): as written, or in one
+    of the _JOINED_FORMS."""
+    return bool(IN_A_COMMAND_RE.search(command)
+                or any(IN_A_COMMAND_RE.search(form.sub("", command)) for form in _JOINED_FORMS))
+
+
 IN_A_COMMAND = ("maisecrets: this command removes an import of values, which makes detection weaker; only the person "
                 "removes one, as their own prompt (/maisecrets:forget import:ID, in Codex: maisecrets: forget "
                 "import:ID). The command did not run. Tell the user the prompt to send.")

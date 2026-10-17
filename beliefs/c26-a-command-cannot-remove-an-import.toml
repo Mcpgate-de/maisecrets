@@ -6,5 +6,5 @@ runner = ["tests/test_values.py::Removal::test_a_tool_call_that_carries_the_remo
 
 [proof]
 file = "maisecrets/value_files.py"
-find = "    return bool(IN_A_COMMAND_RE.search(command) or IN_A_COMMAND_RE.search(_JOINED_RE.sub(\"\", command)))\n"
-replace = "    return False\n"
+find = "    return bool(IN_A_COMMAND_RE.search(command)\n"
+replace = "    return False and bool(IN_A_COMMAND_RE.search(command)\n"
