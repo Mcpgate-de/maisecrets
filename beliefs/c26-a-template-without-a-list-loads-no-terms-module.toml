@@ -1,0 +1,10 @@
+# c26-a-template-without-a-list-loads-no-terms-module: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-template-without-a-list-loads-no-terms-module"
+control = "C26"
+statement = "Without any term list a typed prompt with a `{{` of a template (`{{ .Values.x }}`, `{{ item }}`) does not import maisecrets/terms.py in the prompt hook or the mod, when term_files.marker_forms rejects its form (a word with spaces inside the braces, a capital inside a word, a dot); a `{{Name}}` marker does, and marks the name."
+runner = ["tests/test_terms_hooks.py::MarkerHookTests::test_a_template_without_any_list_does_not_load_the_terms_module"]
+
+[proof]
+file = "maisecrets/term_files.py"
+find = "    if not marker_forms(prompt):\n        return prompt, 0\n"
+replace = "    if \"{{\" not in prompt:\n        return prompt, 0\n"
