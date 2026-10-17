@@ -60,6 +60,31 @@ def _curl(ref: str, host: str) -> str:
     return "curl -s -u " + "u" + ":" + ref + " https://" + host + "/"
 
 
+class _LockTakes:
+    """The takes of the record's lock in a block (the outer ones; the lock is re-entrant) and the waits that ran out.
+    A count says what a fixed time bound said, without the load of the machine in it: a fixed 1.0 s failed under
+    load (2026-10-16)."""
+
+    def __enter__(self) -> "_LockTakes":
+        self.takes = self.timeouts = 0
+        real = destinations._ShortLock.__enter__
+
+        def counting(lock):
+            if lock.depth == 0:
+                self.takes += 1
+            try:
+                return real(lock)
+            except destinations.LockTimeout:
+                self.timeouts += 1
+                raise
+        self.patch = mock.patch.object(destinations._ShortLock, "__enter__", counting)
+        self.patch.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.patch.stop()
+
+
 def _norm(out: dict, ref: str) -> str:
     """An answer with the parts that differ per call made equal: FIFO paths, nonces and the key itself."""
     text = json.dumps(out, sort_keys=True).replace(_key(ref), "KEY")
@@ -151,11 +176,13 @@ class Recording(unittest.TestCase):
             failed = _norm(_ran("Bash", {"command": call["command"].replace(ref, ref3)}), ref3)
         self.assertEqual(failed, observed, "a record that fails leaves the answer as it is")
 
-    def test_a_busy_record_costs_a_call_well_under_a_second(self):
+    def test_a_busy_record_costs_a_call_one_short_wait(self):
         # codex review of 0.6.7: each key waited for the 6 s vault lock, two keys 12 s, past the hook's watchdog.
-        # Measured against the same call with a free lock: a slow runner makes the call itself slow (1.4 s on a
-        # GitHub macOS runner), and the claim is about what the busy lock adds
+        # The claim is counted: one wait of the short lock per call, whatever the number of keys. A fixed bound on
+        # what the busy lock adds (1.0 s) failed under load (2026-10-16); 5 s over the same call with a free lock
+        # only catches the wait of the vault lock (6 s)
         import subprocess
+        self.assertLessEqual(destinations._ShortLock.LOCK_DEADLINE, 0.5)
         free = [_secret(f"dest-free-value-{i}xxxxxxxxx{i}") for i in range(8)]
         started = time.monotonic()
         _ran("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in free)})
@@ -169,14 +196,16 @@ class Recording(unittest.TestCase):
         try:
             self.assertEqual(holder.stdout.readline().strip(), "held")
             refs = [_secret(f"dest-busy-value-{i}xxxxxxxxx{i}") for i in range(8)]
-            started = time.monotonic()
-            out = _ran("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in refs)})
-            took = time.monotonic() - started
+            with _LockTakes() as lock:
+                started = time.monotonic()
+                out = _ran("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in refs)})
+                took = time.monotonic() - started
         finally:
             holder.kill()
             holder.wait()
         self.assertIn("updatedInput", out["hookSpecificOutput"], "the call still gets its values")
-        self.assertLess(took - baseline, 1.0,
+        self.assertEqual(lock.timeouts, 1, "one wait for the busy record, not one per key")
+        self.assertLess(took - baseline, 5.0,
                         f"a busy record added {took - baseline:.1f}s for 8 keys ({took:.1f}s against {baseline:.1f}s)")
 
     def test_a_damaged_record_is_kept_aside_and_never_breaks_the_list(self):
@@ -250,12 +279,20 @@ class Bounds(unittest.TestCase):
         self.assertEqual(len(data["interactive"]), 50)
         self.assertEqual(data["interactive"][-1], "S-69", "the newest stay")
 
-    def test_a_call_with_many_keys_is_noted_quickly(self):
-        refs = [_secret(f"dest-many-value-{i}yyyyyyyy{i}") for i in range(8)]
-        started = time.monotonic()
-        _ran("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in refs)})
-        self.assertLess(time.monotonic() - started, 1.0)
-        self.assertTrue(all(_seen(r) for r in refs))
+    def test_a_call_with_many_keys_is_noted_under_as_many_locks_as_one_key(self):
+        # the record of a call takes its lock as often for 8 keys as for 1 (a take per key waited per key, codex
+        # review of 0.6.7). A fixed 1.0 s for the call failed under load (2026-10-16); 10 s only catches a hang
+        takes = []
+        for n in (1, 8):
+            refs = [_secret(f"dest-many-value-{n}-{i}yyyyyyyy{i}") for i in range(n)]
+            with _LockTakes() as lock:
+                started = time.monotonic()
+                _ran("Bash", {"command": "; ".join(_curl(r, "api.example.com") for r in refs)})
+                self.assertLess(time.monotonic() - started, 10.0)
+            self.assertTrue(all(_seen(r) for r in refs))
+            takes.append(lock.takes)
+        self.assertGreater(takes[0], 0, "the count sees the lock")
+        self.assertEqual(takes[0], takes[1])
 
     def test_wipe_everything_takes_the_record(self):
         ref = _secret()

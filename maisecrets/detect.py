@@ -65,36 +65,56 @@ class Match:
 
 
 class _LazyRx:
-    """A module-level regex compiled at its first use, with every method of a pattern: a hook process pays each
-    compilation at import, and most texts never reach these checks (0.6.24)."""
-    __slots__ = ("_args", "_rx")
+    """A module-level regex compiled at its first use, with every method of a pattern: a hook process paid each
+    compilation at import, and most texts never reach most of these checks (0.6.24). After the first use the methods
+    of the compiled pattern sit in the instance, so a call costs one attribute lookup, as on the pattern itself."""
+    _METHODS = ("search", "match", "fullmatch", "finditer", "findall", "sub", "subn", "split", "scanner")
 
     def __init__(self, *args) -> None:
-        self._args, self._rx = args, None
+        self._args = args
+
+    @property
+    def pattern(self):
+        return self._args[0]      # the source, without a compilation: a regex built from another one at import
 
     def __getattr__(self, name: str):
-        if self._rx is None:
-            object.__setattr__(self, "_rx", re.compile(*self._args))
-        return getattr(self._rx, name)
+        rx = self.__dict__.get("_rx")
+        if rx is None:
+            rx = self.__dict__["_rx"] = re.compile(*self._args)
+            for method in self._METHODS:
+                self.__dict__[method] = getattr(rx, method)
+        return getattr(rx, name)
 
 
 class _Lazy:
-    """A regex compiled on first use. Rule loading then costs a dict, not 265 compilations."""
-    __slots__ = ("pattern", "flags", "_rx")
+    """A regex compiled on first use. Rule loading then costs a dict, not 265 compilations.
+
+    A pattern with the class of CJK letters (_CJK) also has a form without it, for a text that holds no CJK letter:
+    there the class matches nothing, and both forms find the same. The class made the compilation 5 to 8 times
+    slower: 26 ms in each hook process for four rules (e-mail, phone, the two passwords in a sentence)."""
+    __slots__ = ("pattern", "flags", "_rx", "_plain", "_plain_rx")
 
     def __init__(self, pattern: str, flags: int = 0) -> None:
-        self.pattern, self.flags, self._rx = pattern, flags, None
+        self.pattern, self.flags, self._rx, self._plain_rx = pattern, flags, None, None
+        self._plain = _without_cjk(pattern) if isinstance(pattern, str) and _CJK in pattern else None
 
     def _get(self) -> re.Pattern[str]:
         if self._rx is None:
             self._rx = re.compile(self.pattern, self.flags)
         return self._rx
 
+    def _for(self, text: str) -> re.Pattern[str]:
+        if self._plain is None or _has_cjk(text):
+            return self._get()
+        if self._plain_rx is None:
+            self._plain_rx = re.compile(self._plain, self.flags)
+        return self._plain_rx
+
     def finditer(self, text: str):
-        return self._get().finditer(text)
+        return self._for(text).finditer(text)
 
     def search(self, text: str):
-        return self._get().search(text)
+        return self._for(text).search(text)
 
     @property
     def groups(self) -> int:
@@ -327,7 +347,7 @@ def _de_vat_id_ok(v: str) -> bool:
 # the decoded head of a PEM private key: the header, optional armour or encryption headers (PGP's Version:, the
 # Proc-Type: and DEK-Info: of a legacy encrypted key), then base64 body characters (as many as the head holds, up to
 # 16). A byte order mark may stand before the header
-_B64_PEM_PRIVATE_RE = re.compile(rb"(?:\xef\xbb\xbf)?-----BEGIN (?P<kind>[A-Z0-9 ]{0,40})PRIVATE KEY(?: BLOCK)?"
+_B64_PEM_PRIVATE_RE = _LazyRx(rb"(?:\xef\xbb\xbf)?-----BEGIN (?P<kind>[A-Z0-9 ]{0,40})PRIVATE KEY(?: BLOCK)?"
                                  rb"-----\r?\n"
                                  rb"(?P<hdrs>(?:[A-Za-z][A-Za-z0-9-]{0,30}: [^\r\n]{0,200}\r?\n)*)(?:\r?\n)?"
                                  rb"(?P<body>[A-Za-z0-9+/]{16}|[A-Za-z0-9+/]{1,15}\Z)")
@@ -349,7 +369,7 @@ def _pem_body_ok(m) -> bool:
 
 
 # a further line of a wrapped base64 value: after a line break, or after an escaped one (\n in a JSON string)
-_B64_LINE_RE = re.compile(r"(?:\r?\n|(?:\\r)?\\n)([ \t]*)([A-Za-z0-9+/]+={0,2})(?=[ \t]*(?:\r?\n|$)|[\"',;]|\\[rn])")
+_B64_LINE_RE = _LazyRx(r"(?:\r?\n|(?:\\r)?\\n)([ \t]*)([A-Za-z0-9+/]+={0,2})(?=[ \t]*(?:\r?\n|$)|[\"',;]|\\[rn])")
 _B64_PEM_STARTS = ("LS0tLS1CRUdJTi", "77u/LS0tLS1CRUdJTi")
 
 
@@ -366,7 +386,7 @@ def _b64_needles(raw: bytes) -> tuple:
 _PRIVATE_KEY_NEEDLES = _b64_needles(b"PRIVATE KEY-----")   # a key later in a bundle (certificate, chain, key)
 
 
-_PEM_END_RE = re.compile(rb"-----END [A-Z0-9 ]{1,60}-----\r?\n?\Z")
+_PEM_END_RE = _LazyRx(rb"-----END [A-Z0-9 ]{1,60}-----\r?\n?\Z")
 
 
 def _pem_ended(lines: list) -> bool:
@@ -449,13 +469,13 @@ def _us_ssn_ok(v: str) -> bool:
     return d not in ("1234" + "56789", "9876" + "54320", "0780" + "51120")
 
 
-_DS_TEMPLATED = re.compile(r"^(\{\{.*\}\}|\$\{.*\}|<.*>|%.*%|\$[A-Za-z_][A-Za-z0-9_]*)$")
-_DS_INDIRECT = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*\s*(\(.*\)|\[.*\])$")
+_DS_TEMPLATED = _LazyRx(r"^(\{\{.*\}\}|\$\{.*\}|<.*>|%.*%|\$[A-Za-z_][A-Za-z0-9_]*)$")
+_DS_INDIRECT = _LazyRx(r"^[A-Za-z_][A-Za-z0-9_.]*\s*(\(.*\)|\[.*\])$")
 # words joined by `.`, `_` or `-`, optionally ending where the regex cut the line (`:` of a
 # condition, `;` of a statement, `[` before a quoted key): `settings.API_KEY`, `self._password`,
 # `os.environ[`, `confirm_password:` were taken for values (false-positive corpus, 2026-09-27)
-_DS_REFERENCE = re.compile(r"_*[A-Za-z]+(?:(?:\?\.|[._/:-]+)#?[A-Za-z]+)+_*\??[:;\[]?")
-_FORMAT_ONLY_RE = re.compile(r"(?:%[-+ #0]*\d*(?:\.\d+)?[sdifxXeEgGrcoba%]|\{[^{}]*\}|[^A-Za-z0-9%{])+")
+_DS_REFERENCE = _LazyRx(r"_*[A-Za-z]+(?:(?:\?\.|[._/:-]+)#?[A-Za-z]+)+_*\??[:;\[]?")
+_FORMAT_ONLY_RE = _LazyRx(r"(?:%[-+ #0]*\d*(?:\.\d+)?[sdifxXeEgGrcoba%]|\{[^{}]*\}|[^A-Za-z0-9%{])+")
 
 
 # a short glued value that is a type or a keyword of code or config, or a camelCase identifier:
@@ -466,29 +486,29 @@ _SHORT_WORDS = frozenset({
     "tokens", "hidden", "masked", "optional", "default", "require", "undefined", "double", "decimal", "varchar",
     "binary", "buffer", "array", "values", "string[]", "never", "nullable", "boolean[]", "option", "settings",
     "private", "public", "enabled", "disabled", "secretstr", "secretbytes", "securestring"})
-_CAMEL_RE = re.compile(r"^[a-z]+(?:[A-Z][a-z0-9]*)+$")
+_CAMEL_RE = _LazyRx(r"^[a-z]+(?:[A-Z][a-z0-9]*)+$")
 # the review of 2026-09-29 (679 snippets of normal work): the next label taken for the value (`DB_PASSWORD=` then
 # `API_KEY=`), a generic type (`Option<String>`), a UUID, and a fixture that names itself (`testpass`, `secret123`,
 # `Passw0rd!`: letters after undoing the digits and symbols people use for them)
-_LABEL_SHAPE = re.compile(r"[A-Za-z_][\w.-]*[:=]")
-_NAME_LABEL_RE = re.compile(r"(?:[A-Z][A-Z0-9_]*|[a-z][a-z0-9_]*|[A-Z][a-z]+(?:[ _-][A-Za-z][a-z]+)*"
+_LABEL_SHAPE = _LazyRx(r"[A-Za-z_][\w.-]*[:=]")
+_NAME_LABEL_RE = _LazyRx(r"(?:[A-Z][A-Z0-9_]*|[a-z][a-z0-9_]*|[A-Z][a-z]+(?:[ _-][A-Za-z][a-z]+)*"
                             r"|[a-z]{2,}(?:[A-Z][a-z]{2,})+|[A-Za-z][a-z0-9]+(?:[A-Z][a-z0-9]{2,})*(?:[A-Z][a-z0-9]{2,}|[A-Z]{2,}|[A-Z][a-z0-9]))[.-]?[:=]")
-_GENERIC_TYPE = re.compile(r"<[A-Za-z_][\w, ]*>")
-_VERSION_RE = re.compile(r"v?\d+(?:\.\d+){1,3}(?:[-+.]?[A-Za-z0-9]+)?")
-_PART_TEMPLATE_RE = re.compile(r"\{[A-Za-z_][\w.]*(?:\[[^\]]*\]?)?\}?$|\{[A-Za-z_][\w.]*\}")
-_SHELL_EXPANSION_RE = re.compile(r"[?:+=-]{1,2}[A-Z_][A-Z0-9_]*")
+_GENERIC_TYPE = _LazyRx(r"<[A-Za-z_][\w, ]*>")
+_VERSION_RE = _LazyRx(r"v?\d+(?:\.\d+){1,3}(?:[-+.]?[A-Za-z0-9]+)?")
+_PART_TEMPLATE_RE = _LazyRx(r"\{[A-Za-z_][\w.]*(?:\[[^\]]*\]?)?\}?$|\{[A-Za-z_][\w.]*\}")
+_SHELL_EXPANSION_RE = _LazyRx(r"[?:+=-]{1,2}[A-Z_][A-Z0-9_]*")
 # the names of anchors and tags are lower case (&creds_2024, &gitlab_token_fields, !vault, !!str); a value with
 # capitals after & or ! is a password (&Xk9v2Qm7…, !Passw0rd…; review of b4a7c54)
-_ANCHOR_OR_TAG_RE = re.compile(r"[&*][a-z_][a-z0-9_-]*|!!?[a-z][a-z0-9_/-]*")
-_PATH_IN_VALUE_RE = re.compile(r"(?:^|\s)(?:~|\.{1,2})?/[\w.-]+/[\w.-]+")
-_ESCAPED_TAIL_RE = re.compile(r"(?:\\[nrt])+$")
-_SUBSCRIPT_RE = re.compile(r"[A-Za-z_][\w.]*\[[\w.,\s]*\]?")
-_GLOB_RE = re.compile(r"[:/._-]\*$|^\*\.\w+$|/\*[/.]")   # token:*, *.py, logs/*.txt; a star inside a value stays
-_NUMBER_RE = re.compile(r"\d{1,3}(?:_\d{3})+|\d+(?:_\d+)+")
-_PRIVATE_NAME_RE = re.compile(r"_[A-Za-z][A-Za-z_]*")
-_EMAIL_VALUE_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
-_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-_FIXTURE_WORD = re.compile(r"passwor[dt]|passw|pass(?![a-z])|(?<![a-z])pass|secret|token|test|geheim|kennwort")
+_ANCHOR_OR_TAG_RE = _LazyRx(r"[&*][a-z_][a-z0-9_-]*|!!?[a-z][a-z0-9_/-]*")
+_PATH_IN_VALUE_RE = _LazyRx(r"(?:^|\s)(?:~|\.{1,2})?/[\w.-]+/[\w.-]+")
+_ESCAPED_TAIL_RE = _LazyRx(r"(?:\\[nrt])+$")
+_SUBSCRIPT_RE = _LazyRx(r"[A-Za-z_][\w.]*\[[\w.,\s]*\]?")
+_GLOB_RE = _LazyRx(r"[:/._-]\*$|^\*\.\w+$|/\*[/.]")   # token:*, *.py, logs/*.txt; a star inside a value stays
+_NUMBER_RE = _LazyRx(r"\d{1,3}(?:_\d{3})+|\d+(?:_\d+)+")
+_PRIVATE_NAME_RE = _LazyRx(r"_[A-Za-z][A-Za-z_]*")
+_EMAIL_VALUE_RE = _LazyRx(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_UUID_RE = _LazyRx(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_FIXTURE_WORD = _LazyRx(r"passwor[dt]|passw|pass(?![a-z])|(?<![a-z])pass|secret|token|test|geheim|kennwort")
 _LEET = str.maketrans({"0": "o", "3": "e", "4": "a", "5": "s", "$": "s", "@": "a", "1": "i", "!": "i", "|": "l",
                        "7": "t"})
 
@@ -499,7 +519,7 @@ def _deleet(v: str) -> str:
 
 # the words a fixture is made of around its fixture word: mypassword, wrongpassword, SuperSecret1, rootpass,
 # sk_test_123. Longest first, so that `password` is taken before `pass`
-_FIXTURE_PARTS = re.compile("|".join(sorted((
+_FIXTURE_PARTS = _LazyRx("|".join(sorted((
     "password", "passwort", "passwd", "passw", "pass", "secret", "token", "testing", "test", "geheim", "kennwort",
     "key", "my", "new", "old", "wrong", "bad", "top", "super", "very", "not", "so", "dummy", "fake", "default",
     "admin", "user", "root", "db", "dev", "local", "sample", "example", "secure", "strong", "weak", "correct",
@@ -601,14 +621,14 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
     return True
 
 
-_LOWER_WORDS_RE = re.compile(r"[a-z0-9]+(?:[-_.][a-z0-9]+)*")
+_LOWER_WORDS_RE = _LazyRx(r"[a-z0-9]+(?:[-_.][a-z0-9]+)*")
 
 
-_MARKER_RE = re.compile(r"\[[^\]]*\]|<[^>]*>|\{[^}]*\}")
+_MARKER_RE = _LazyRx(r"\[[^\]]*\]|<[^>]*>|\{[^}]*\}")
 # values the new label paths of 0.6.15 read that hold no password (release review of 0.6.15, Gate B): a date or a
 # timestamp (passwordLastChanged, AUTH 2024-10-13), a file a tool reads (--password @/run/secrets/pw), a template
 # variable a build fills (-p@MYSQL_PWD@), a placeholder to replace (CHANGE_ME_2024). The ds rules keep their own filter
-_LABEL_NOT_A_VALUE_RE = re.compile(
+_LABEL_NOT_A_VALUE_RE = _LazyRx(
     r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
     r"|@[~.]?/[^\s]*|@[A-Za-z_][A-Za-z0-9_]*@"
     r"|(?i:change[_-]?me)(?:[_-]?[A-Za-z0-9]+)*")
@@ -645,7 +665,7 @@ _PROSE_LAST = frozenset({
     "compliant", "based", "derived", "generated", "stored", "secured", "wrapped", "rotated", "required", "enforced",
     "backed", "verified", "validated", "compatible", "formatted", "only", "free", "safe", "aware", "style", "format",
     "encryption", "hashing", "encoding"})
-_VERSION_PART_RE = re.compile(r"v?\d+(?:\.\d+)*")
+_VERSION_PART_RE = _LazyRx(r"v?\d+(?:\.\d+)*")
 _ALGORITHM_PARTS = frozenset({
     "md5", "sha1", "sha2", "sha3", "sha224", "sha256", "sha384", "sha512", "pbkdf2", "bcrypt", "scrypt", "argon2",
     "argon2i", "argon2d", "argon2id", "aes", "aes128", "aes192", "aes256", "gcm", "cbc", "ctr", "rsa", "hmac", "des",
@@ -676,7 +696,7 @@ def _prose_value_ok(v: str) -> bool:
 # one word, a number and at most one sign: the example of a weak password that docs and prompts write in a sentence
 # ("The password is Hunter2!", "Das Passwort ist Sommer2024!", tests/fp_corpus.py). After `:` or `=` the label rules
 # still take it (_pw_literal_ok); in a sentence it stays text. Two words or a word of no list (Hafen7Kran) are values
-_EXAMPLE_PASSWORD_RE = re.compile(r"([^\W\d_]{3,})\d{1,4}[^\w\s]?")
+_EXAMPLE_PASSWORD_RE = _LazyRx(r"([^\W\d_]{3,})\d{1,4}[^\w\s]?")
 # the word for password itself before a number (Passwort1, Salasana1, Haslo2024) is an example in every language, and
 # so are the German words of example passwords that the English list lacks (Willkommen1, Hallo123!, Init1234)
 _PW_WORD_EXAMPLES = frozenset({"willkommen", "hallo", "init", "start", "geheim", "passwort", "kennwort", "salasana",
@@ -695,11 +715,11 @@ def _example_password(v: str) -> bool:
 
 # a participle or a noun of any language after a name and a number: SHA256-gehasht, Base64-kodiert, AES256-cifrada,
 # 2FA-geschützt, SHA256-hash. The parts before it are names with digits or capitals; the last part is a small word
-_COMPOUND_PROSE_RE = re.compile(r"(?:[A-Za-z]*\d{2,}|\d*[A-Z]{2,}\d*)(?:-(?:[A-Za-z]*\d{2,}|\d*[A-Z]{2,}\d*))*"
+_COMPOUND_PROSE_RE = _LazyRx(r"(?:[A-Za-z]*\d{2,}|\d*[A-Z]{2,}\d*)(?:-(?:[A-Za-z]*\d{2,}|\d*[A-Z]{2,}\d*))*"
                                 r"-[^\W\d_A-Z][^\W\d_]{2,}")
 
 
-_MD_ESCAPE_RE = re.compile(r"\\(?=[^\w\s])")
+_MD_ESCAPE_RE = _LazyRx(r"\\(?=[^\w\s])")
 
 
 def _sentence_value_ok(v: str) -> bool:
@@ -713,16 +733,16 @@ def _sentence_value_ok(v: str) -> bool:
 
 # one word of any language and a short number: Version2, Schritt2, Kapitel4, Mandant3, Kerberos5 after a space
 # (Mausi1234 and Bergsee1987! are passwords)
-_WORD_NUMBER_ANY_RE = re.compile(r"[^\W\d_][^\W\d_A-Z\u00c4\u00d6\u00dc]{2,}\d{1,2}")
+_WORD_NUMBER_ANY_RE = _LazyRx(r"[^\W\d_][^\W\d_A-Z\u00c4\u00d6\u00dc]{2,}\d{1,2}")
 
 
 # an id or a reference: a ticket (PBE-3403, #PR-1234), a CVE, a standard and its year (BSI-C5:2020, A07:2021,
 # NIST-800-63B, OWASP-ASVS4), a character class (A-Za-z0-9)
-_TICKET_ID_RE = re.compile(r"#?(?:[A-Za-z][A-Za-z0-9]{1,9}-\d{1,7}|[A-Z]{2,}\d*(?:-(?:[A-Z0-9]+|[A-Z][a-z]{0,3}\d+))+"
+_TICKET_ID_RE = _LazyRx(r"#?(?:[A-Za-z][A-Za-z0-9]{1,9}-\d{1,7}|[A-Z]{2,}\d*(?:-(?:[A-Z0-9]+|[A-Z][a-z]{0,3}\d+))+"
                            r"(?::\d{4})?|[A-Z]{2,}\d+"
                            r"|[A-Z]\d{1,3}:\d{4})|(?:.*(?:a-z|A-Z|0-9)){2}.*")
 # signs that a sentence after a password word uses for a rule, a range or a pattern: /, >=, ≥, ≤, [, ^, $
-_RULE_SIGNS_RE = re.compile(r"[/<>\u2264\u2265\[\]^$]")
+_RULE_SIGNS_RE = _LazyRx(r"[/<>\u2264\u2265\[\]^$]")
 
 
 def _spaced_value_ok(v: str) -> bool:
@@ -735,10 +755,10 @@ def _spaced_value_ok(v: str) -> bool:
             and not _WORD_NUMBER_ANY_RE.fullmatch(v) and not _RULE_SIGNS_RE.search(v) and _wordlike(v) < 0.6)
 
 
-_DIGEST_PREFIX_RE = re.compile(r"(?i)(?:sha\d*|md5|blake\w*|h1)[-:]")
+_DIGEST_PREFIX_RE = _LazyRx(r"(?i)(?:sha\d*|md5|blake\w*|h1)[-:]")
 # words and numbers run together: ProdDbPassword2024Rotated, Authentication123, SECRET_NAME_2024. A word has two
 # letters at least; a random key has a lone letter (a capital before a digit, a small letter between digits) in it
-_WORDS_RUN_RE = re.compile(r"(?:[A-Z][a-z]+|[a-z]{2,}|[A-Z]{2,}(?![a-z])|\d+|[_.-])+")
+_WORDS_RUN_RE = _LazyRx(r"(?:[A-Z][a-z]+|[a-z]{2,}|[A-Z]{2,}(?![a-z])|\d+|[_.-])+")
 
 
 def _keylike(v: str) -> bool:
@@ -751,13 +771,13 @@ def _keylike(v: str) -> bool:
 # ($2b$…, $argon2id$…), an Ethereum address (0x and 40 hex), an id with a type prefix (pm_…, sess_…, cus_…). Hex
 # alone and base58 stay values here: every label of label-secret-list names secrets (a commit, an ObjectId or a
 # Solana mint sits in a list of tokens or ids, which the rule does not read; a base58 check lost 12 % of random keys)
-_LIST_NOT_A_KEY_RE = re.compile(r"\$[\w-]+\$.*|[a-z][\w+.-]*:.*|0x[0-9a-fA-F]+|[a-z]{2,6}_[A-Za-z0-9_-]+")
+_LIST_NOT_A_KEY_RE = _LazyRx(r"\$[\w-]+\$.*|[a-z][\w+.-]*:.*|0x[0-9a-fA-F]+|[a-z]{2,6}_[A-Za-z0-9_-]+")
 # a path has a segment of small letters between slashes (base64 has a slash too, but rarely a word between two)
-_PATH_SEGMENT_RE = re.compile(r"(?:^|/)[a-z][a-z_.-]{2,}/")
+_PATH_SEGMENT_RE = _LazyRx(r"(?:^|/)[a-z][a-z_.-]{2,}/")
 # a word part: two small letters or more after an optional capital, or three capitals or more; it counts as a word
 # when it has a vowel (and three letters, unless all small)
-_WORD_PART_RE = re.compile(r"[A-Z]?[a-z]{2,}|[A-Z]{3,}")
-_VOWEL_RE = re.compile(r"[aeiouyAEIOUY]")
+_WORD_PART_RE = _LazyRx(r"[A-Z]?[a-z]{2,}|[A-Z]{3,}")
+_VOWEL_RE = _LazyRx(r"[aeiouyAEIOUY]")
 
 
 def _word_shaped(v: str) -> bool:
@@ -894,7 +914,7 @@ def _cover(run: str) -> int:
     return got
 
 
-_WORD_RUN_RE = re.compile(r"[A-Z\u00c4\u00d6\u00dc]?[a-z\u00e4\u00f6\u00fc\u00df]+|[A-Z\u00c4\u00d6\u00dc]+"
+_WORD_RUN_RE = _LazyRx(r"[A-Z\u00c4\u00d6\u00dc]?[a-z\u00e4\u00f6\u00fc\u00df]+|[A-Z\u00c4\u00d6\u00dc]+"
                           r"(?![a-z\u00e4\u00f6\u00fc\u00df])|[0-9]+")
 
 
@@ -925,13 +945,13 @@ def _charset(v: str) -> str:
 
 
 # a value that says it is no value: a mask, a template, a reference, a word of a form
-_LITERAL_PLACEHOLDER_RE = re.compile(
+_LITERAL_PLACEHOLDER_RE = _LazyRx(
     r"(?i)x{3,}|\*{3,}|\.{3}|<[^>]*>|\{\{|\}\}|\$\{|%\(|%s|\$[A-Za-z_]|your[_-]?|example|sample|dummy|placeholder|"
     r"changeme|change_me|redacted|replace|insert|enter[_-]|todo|fixme|foobar|lorem|secret_here|here$|^test|test$|"
     r"^fake|^mock|^none$|^null$|^true$|^false$|^undefined$|^password$|^secret$|^token$|^string$|^empty$|^default$")
-_DOTTED_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+")
-_CLOSED_TEMPLATE_RE = re.compile(r"\{[A-Za-z_][\w.]*(?:\[[^\]{}]*\])?\}")   # {pw}, {cfg.pw}, {row['pw']}; not a lone {
-_CAMEL_SPLIT_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_DOTTED_RE = _LazyRx(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+")
+_CLOSED_TEMPLATE_RE = _LazyRx(r"\{[A-Za-z_][\w.]*(?:\[[^\]{}]*\])?\}")   # {pw}, {cfg.pw}, {row['pw']}; not a lone {
+_CAMEL_SPLIT_RE = _LazyRx(r"(?<=[a-z0-9])(?=[A-Z])")
 
 
 def _norm_label(name: str) -> list:
@@ -981,15 +1001,15 @@ def _sequential(low: str) -> bool:
 # what a value after a password label is when it is no password: a number, a ratio, a percentage, a range, a time, a
 # duration or a size with its unit (95.2%, 118/124, 8-64, 12:30, ~30d, 24h/7d, 14C/27, 2025/26), a section (§3.2), a
 # dotted abbreviation (s.o., z.B.), and a word with a number (Seite#3, Gate-12)
-_MEASURE_VALUE_RE = re.compile(r"[~<>=+\u00a7#-]?\d+(?:[.,:/-]\d+)*(?:[a-z]{1,3}|[A-Z]{1,2})?"
+_MEASURE_VALUE_RE = _LazyRx(r"[~<>=+\u00a7#-]?\d+(?:[.,:/-]\d+)*(?:[a-z]{1,3}|[A-Z]{1,2})?"
                                r"(?:[/ -]\d+(?:[.,:]\d+)*(?:[a-z]{1,3}|[A-Z]{1,2})?)*%?")
-_ABBREVIATION_RE = re.compile(r"(?:[A-Za-z\u00c0-\u024f]{1,4}\.)+[A-Za-z\u00c0-\u024f]{0,4}")
+_ABBREVIATION_RE = _LazyRx(r"(?:[A-Za-z\u00c0-\u024f]{1,4}\.)+[A-Za-z\u00c0-\u024f]{0,4}")
 # a path or a reference after a password label names where the password lives: /run/secrets/db, ../x/y, ~/.pw,
 # C:\keys\db.pw, \\server\share, file:///etc/pw, vault:secret/db#pw, env:DB_PASSWORD
-_PATH_REFERENCE_RE = re.compile(r"(?:[/~]|\.{1,2}[/\\]|[A-Za-z]:[/\\]|\\\\)\S*"
+_PATH_REFERENCE_RE = _LazyRx(r"(?:[/~]|\.{1,2}[/\\]|[A-Za-z]:[/\\]|\\\\)\S*"
                                 r"|[A-Za-z][A-Za-z0-9+.-]{2,15}:(?://|[A-Za-z_$])\S*")
-_ISO_DURATION_RE = re.compile(r"P(?:\d+[YMWD])*(?:T(?:\d+[HMS])+)?")   # P90D, PT15M
-_WORD_NUMBER_RE = re.compile(r"[A-Za-z\u00c0-\u024f]{2,}[#_. :/-]\d{1,4}|\d{1,4}[#_. :/-][A-Za-z\u00c0-\u024f]{2,}")
+_ISO_DURATION_RE = _LazyRx(r"P(?:\d+[YMWD])*(?:T(?:\d+[HMS])+)?")   # P90D, PT15M
+_WORD_NUMBER_RE = _LazyRx(r"[A-Za-z\u00c0-\u024f]{2,}[#_. :/-]\d{1,4}|\d{1,4}[#_. :/-][A-Za-z\u00c0-\u024f]{2,}")
 
 
 def _random_evidence(v: str, tool: bool = False) -> bool:
@@ -1091,19 +1111,19 @@ _LIT_WRAP = (r"(?:(?:Some|Ok|String::from|str|bytes|SecretString::new|Secret::ne
 # label pw, and `pw=pw=pw=…` (1 MB took 5.5 s) starts one label only
 _LIT_LABEL = r"(?<![\w.\-$@/\\=])([A-Za-z_$@][\w.\-]{0,60})[\"'\]]?[ \t]*"
 # the quoted forms end at the opening quote: _read_quoted reads the literal to its real closing quote
-_LIT_QUOTED = re.compile(_LIT_LABEL + r"(?<![=!<>])(?:=>|:=|=(?!=)|:|,|\()[ \t]*" + _LIT_WRAP + r"([\"'`])")
+_LIT_QUOTED = _LazyRx(_LIT_LABEL + r"(?<![=!<>])(?:=>|:=|=(?!=)|:|,|\()[ \t]*" + _LIT_WRAP + r"([\"'`])")
 _LIT_FORMS = (
-    (re.compile(r"(?m)" + _LIT_LABEL + r"(?:=|:)[ \t]*([^\s\"'`,()\[\]{}<>]{3,299}[^\s\"'`,;()\[\]{}<>]);?"
+    (_LazyRx(r"(?m)" + _LIT_LABEL + r"(?:=|:)[ \t]*([^\s\"'`,()\[\]{}<>]{3,299}[^\s\"'`,;()\[\]{}<>]);?"
                 r"(?:[ \t]+(?:#|//|;).*|[ \t]*(?:#|//).*)?[ \t]*$"), 1, 2),
-    (re.compile(r"[?&;]([\w.\-\[\]]{1,60})=([^&\s\"'#<>]{4,400})"), 1, 2),
-    (re.compile(r"<([\w:.-]{1,60})(?:\s[^<>]{0,200})?>([^<>\s]{4,400})</"), 1, 2),
+    (_LazyRx(r"[?&;]([\w.\-\[\]]{1,60})=([^&\s\"'#<>]{4,400})"), 1, 2),
+    (_LazyRx(r"<([\w:.-]{1,60})(?:\s[^<>]{0,200})?>([^<>\s]{4,400})</"), 1, 2),
 )
 # SQL's IDENTIFIED BY '…' (a doubled quote and MySQL's backslash escape are part of the value) and PowerShell's
 # ConvertTo-SecureString '…' (single quotes: a doubled quote; double quotes: a doubled quote and the backtick escape)
-_LIT_SQL = re.compile(r"(?i)\bidentified[ \t]+(?:with[ \t]+\w+[ \t]+)?by[ \t]*(?:password[ \t]*)?([\"'])")
-_LIT_PS = re.compile(r"(?i)ConvertTo-SecureString[ \t]+(?:-String[ \t]+)?([\"'])")
+_LIT_SQL = _LazyRx(r"(?i)\bidentified[ \t]+(?:with[ \t]+\w+[ \t]+)?by[ \t]*(?:password[ \t]*)?([\"'])")
+_LIT_PS = _LazyRx(r"(?i)ConvertTo-SecureString[ \t]+(?:-String[ \t]+)?([\"'])")
 _LIT_BOUND = 300   # a literal longer than this, or one that its line ends, is taken to the bound: never a prefix
-_BACKSLASH_ESCAPE_RE = re.compile(r"\\(?:u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))", re.S)
+_BACKSLASH_ESCAPE_RE = _LazyRx(r"\\(?:u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))", re.S)
 _ESCAPED_CHAR = {"n": "\n", "t": "\t", "r": "\r", "0": "\0"}
 
 
@@ -1146,10 +1166,10 @@ def _read_quoted(text: str, i: int, quote: str, backslash: bool = True, backtick
 # a label that names a secret by its whole tail (`client_secret`, `apiKey`, `x-auth-token`), and a weak label that may
 # name one (`key`, `hmac`, `session`, `cookie`). A word before the tail can make it name something else: password_hint,
 # public_key, cache_key, primary_key, csrf_token, next_page_token
-_SECRET_TAIL_RE = re.compile(r"(?:^|_)(?:secret|token|apikey|api_key|access_key|secret_key|private_key|client_secret"
+_SECRET_TAIL_RE = _LazyRx(r"(?:^|_)(?:secret|token|apikey|api_key|access_key|secret_key|private_key|client_secret"
                              r"|auth_token|access_token|refresh_token|session_token|bearer|credentials?|app_secret"
                              r"|consumer_secret|signing_key|encryption_key|master_key|auth_key)$")
-_WEAK_TAIL_RE = re.compile(r"(?:^|_)(?:key|auth|salt|seed|otp|totp|cred|cookie|session|hmac|psk)$")
+_WEAK_TAIL_RE = _LazyRx(r"(?:^|_)(?:key|auth|salt|seed|otp|totp|cred|cookie|session|hmac|psk)$")
 _WEAK_NEG_WORDS = frozenset({
     "public", "pub", "primary", "foreign", "sort", "partition", "cache", "idempotency", "row", "map", "lookup",
     "cursor", "object", "s3", "dedup", "dedupe", "routing", "shard", "group", "sequence", "index", "composite",
@@ -1161,7 +1181,7 @@ _WEAK_NEG_WORDS = frozenset({
 
 # a TOTP or HOTP seed: base32 of 10 to 40 bytes after a one-time-password label (otpauth://… carries it as secret=)
 _OTP_WORDS = frozenset({"totp", "hotp", "otp", "mfa", "2fa", "otpauth", "authenticator"})
-_OTP_SEED_RE = re.compile(r"[A-Z2-7]{16,64}={0,6}")
+_OTP_SEED_RE = _LazyRx(r"[A-Z2-7]{16,64}={0,6}")
 
 
 def _alphabet_size(v: str) -> int:
@@ -1183,7 +1203,7 @@ def _norm_entropy(v: str) -> float:
 
 # a value that is a pattern, not a key: a character class with a quantifier, a counted repeat, an escape class, a group
 # (`token: '[A-Za-z0-9_-]{20,}'`, `secret: '[a-f0-9]{64}'`, `^\d{6}$`; Opus verification of 0.6.16)
-_REGEX_LIKE_RE = re.compile(r"\[[^\]]{1,60}\](?:[*+?]|\{\d+(?:,\d*)?\})|\{\d+(?:,\d*)?\}|\\[dwsDWSbB]"
+_REGEX_LIKE_RE = _LazyRx(r"\[[^\]]{1,60}\](?:[*+?]|\{\d+(?:,\d*)?\})|\{\d+(?:,\d*)?\}|\\[dwsDWSbB]"
                             r"|\(\?[:=!<]|\.[*+]")
 
 
@@ -1471,6 +1491,21 @@ _CJK = ("\u1100-\u11ff\u3000-\u30ff\u3130-\u318f\u3400-\u4dbf\u4e00-\u9fff\uac00
 _CJK_RANGES = ((0x1100, 0x11ff), (0x3000, 0x30ff), (0x3130, 0x318f), (0x3400, 0x4dbf), (0x4e00, 0x9fff),
                (0xac00, 0xd7af), (0xf900, 0xfaff), (0xff00, 0xffef))
 _NOT_CJK_WORD = "(?![" + _CJK + "])\\w"
+
+
+_CJK_CHAR_RE = _LazyRx("[" + _CJK + "]")
+
+
+def _has_cjk(text: str) -> bool:
+    return not text.isascii() and _CJK_CHAR_RE.search(text) is not None
+
+
+def _without_cjk(pattern: str) -> str | None:
+    """The form of a pattern for a text without a CJK letter: each use of the class _CJK goes. None when a use is
+    left that this cannot remove, so the rule keeps its one form."""
+    plain = (pattern.replace(_NOT_CJK_WORD, r"\w").replace("(?<=[" + _CJK + "])|", "")
+             .replace("[" + _CJK + "]", "(?!)").replace(_CJK, ""))
+    return None if "[]" in plain or "[^]" in plain else plain
 
 
 def _is_cjk(ch: str) -> bool:
@@ -1814,17 +1849,23 @@ def _load_betterleaks() -> list[Rule]:
         cfg = json.loads((RULES_DIR / "betterleaks.json").read_text(encoding="utf-8"))
         global_drop = rule_filter.compile_filter(cfg["filter"]) if cfg.get("filter") else None
         rules: list[Rule] = []
+        # 379 filters are 45 different texts: each text is read once. A filter is a pure function of its text, so the
+        # rules with the same text share it (the parse of every filter was two thirds of rules(), 2026-10-16)
+        read: dict = {}
         for r in cfg.get("rules", []):
             if "regex" not in r or r.get("skipReport"):
                 continue
             r = _patched(r)
             own = None
             if r.get("filter"):
-                try:
-                    own = rule_filter.compile_filter(r["filter"])
-                except rule_filter.Unsupported:
-                    if BETTERLEAKS_SKIP_UNSUPPORTED:
-                        continue
+                if r["filter"] not in read:
+                    try:
+                        read[r["filter"]] = rule_filter.compile_filter(r["filter"])
+                    except rule_filter.Unsupported:
+                        read[r["filter"]] = None
+                own = read[r["filter"]]
+                if own is None and BETTERLEAKS_SKIP_UNSUPPORTED:
+                    continue
             drop = _combine_drops(own, global_drop)
             rules.append(Rule(
                 id=r["id"], type="SECRET", regex=_Lazy(_re2_to_python(r["regex"])),
@@ -2063,7 +2104,7 @@ _COLON_AFTER_LABEL_ESCAPED = "((?:\\\\?[]'\"]){0,2})?[ \\t\u00a0\u202f]{0,3}:"
 _ESCAPABLE_COLON_RULES = ("ds-keyword-colon", "ds-keyword-colon-quotes-required")   # group 2: the label's quote
 _COLON_THEN_QUOTE = (":\\s*([\\'\"`]?)", ":(\\s*)([\\'\"`])")
 _ESCAPED_QUOTE_SKIP = "(?:\\\\(?=[\"']))?"
-_WHITESPACE_RE = re.compile(r"\s")
+_WHITESPACE_RE = _LazyRx(r"\s")
 # the label tail of the vendored keyword rules: `<keyword>\w*` and then a separator. On `password=` and a long run of
 # letters with no space, each keyword inside the run (pwd, key) took the rest of the run and gave it back one character
 # at a time (the rule with a quote and a semicolon tried 50 more characters each time): quadratic, 320 KB took 10 s,
@@ -2186,11 +2227,11 @@ class _HeadTail:
         return self.start(i), self.end(i)
 
 
-_WORD_RUN_ANY_RE = re.compile(r"\w+")
-_LONG_WORD_RUN_RE = re.compile(r"\w{200}")
-_LOOKAROUND_RE = re.compile(r"\(\?<?[=!][^()]*\)")
-_CROSS_CHARS_RE = re.compile(r"[ .\[-]|\\[sWdbBSD]")   # a space, a dot, a class, a hyphen or a non-word escape
-_CAPITALISED_WORD_RE = re.compile(r"(?:[A-Z][a-z]+)+")
+_WORD_RUN_ANY_RE = _LazyRx(r"\w+")
+_LONG_WORD_RUN_RE = _LazyRx(r"\w{200}")
+_LOOKAROUND_RE = _LazyRx(r"\(\?<?[=!][^()]*\)")
+_CROSS_CHARS_RE = _LazyRx(r"[ .\[-]|\\[sWdbBSD]")   # a space, a dot, a class, a hyphen or a non-word escape
+_CAPITALISED_WORD_RE = _LazyRx(r"(?:[A-Z][a-z]+)+")
 # the stops of a sentence after an unquoted value (the regex never ends a value on a comma)
 _SENTENCE_STOP = ".;"
 # rules whose value check is cheap and refuses most candidates: it runs before the checks of the code around a value
@@ -2671,7 +2712,7 @@ PLACEHOLDER_VALUES = frozenset({"changeme", "change_me", "password", "placeholde
                                 "secret", "your_api_key", "xxxxxxxx", "todo", "none", "null"})
 PLACEHOLDER_PARTS = ("your_", "your-", "bogus", "dummy", "example", "sample", "placeholder", "changeme",
                      "xxxxxxxx", "test-token", "secure-token", "<redacted", "fake")
-_TEMPLATE_NAME = re.compile(r"^[A-Z]+(?:_[A-Z]+)+$")   # YOUR_PORTKEY_API_KEY: words joined by underscores, no digits
+_TEMPLATE_NAME = _LazyRx(r"^[A-Z]+(?:_[A-Z]+)+$")   # YOUR_PORTKEY_API_KEY: words joined by underscores, no digits
 
 
 # a placeholder word counts at the start of the value, after a character that is not a letter or a
@@ -2680,17 +2721,17 @@ _TEMPLATE_NAME = re.compile(r"^[A-Z]+(?:_[A-Z]+)+$")   # YOUR_PORTKEY_API_KEY: w
 # "DuMmy" about once in 20,000, and it was then let through as a placeholder (found by a random
 # test token on windows-latest, 2026-09-27)
 _PARTS = "|".join(re.escape(p) for p in PLACEHOLDER_PARTS)
-_PLACEHOLDER_PART_RE = re.compile(f"(?<![a-z0-9])(?:{_PARTS})|(?:{_PARTS})(?:key)?$")
+_PLACEHOLDER_PART_RE = _LazyRx(f"(?<![a-z0-9])(?:{_PARTS})|(?:{_PARTS})(?:key)?$")
 
 
 _PUBLIC_TEST_VALUES: list = []
 # an encoded address is an address after `=` (email=, to=, login=), after mailto%3A, or after a mail word; elsewhere
 # name%40version.com is a package, a git ref or an asset name (codex review)
-_ENCODED_MAIL_CONTEXT_RE = re.compile(
+_ENCODED_MAIL_CONTEXT_RE = _LazyRx(
     r"(?i)(?:=|%3d|mailto(?::|%3a)"
     r"|\b(?:to|from|cc|bcc)[ \t]*[:=][ \t]*"   # `to` and `from` alone are paths and imports: path/to/pkg%40v.com
     r"|\b(?:e-?mail|mail|sender|recipient|bounce|reply-to|contact|login|users?|username)[ \t]*[:=/]?[ \t]*)$")
-_DIGITS_ONLY_RE = re.compile(r"\+?[\d\s().-]+")
+_DIGITS_ONLY_RE = _LazyRx(r"\+?[\d\s().-]+")
 # `sent to name%40host` in prose: `to` and spaces, not `path/to/` or `import x to`
 _ENCODED_MAIL_TO_RE = _LazyRx(r"(?i)(?<![/\w])(?:sent|send|mailed|forwarded|reply|replied|receipt|invoice|copy)"
                                  r"[^\n/]{0,20}?(?<![/\w])to[ \t]+$")
@@ -2808,25 +2849,25 @@ def looks_like_placeholder(value: str) -> bool:
 # registry.is_label. The names stay for the scripts and tests that read them.
 LABEL_RULES = _registry.LABEL_PREFIXES
 KEYWORD_RULES = _registry.KEYWORD_PREFIXES
-_TEST_PATH_RE = re.compile(r"(?:^|[/\\])(?i:tests?|__tests__|spec|testdata|test_data|e2e)[/\\]"
+_TEST_PATH_RE = _LazyRx(r"(?:^|[/\\])(?i:tests?|__tests__|spec|testdata|test_data|e2e)[/\\]"
                            r"|(?:^|[/\\]|[a-z])Tests?\.\w+$"
                            r"|(?:^|[/\\])[^/\\]*[._-]e2e[._-][^/\\]*$"
                            r"|(?:^|[/\\])(?:test_[^/\\]*|[^/\\]*_test\.\w+|[^/\\]*\.(?:test|spec)\.\w+|conftest\.py)$")
 # a file of real values even under tests/: an .env, a recorded HTTP cassette (review, 2026-09-29)
-_REAL_VALUE_FILE_RE = re.compile(r"(?i)(?:^|[/\\])(?:\.env[^/\\]*|[^/\\]*\.env(?:\.[^/\\]*)?|[^/\\]*\.har"
+_REAL_VALUE_FILE_RE = _LazyRx(r"(?i)(?:^|[/\\])(?:\.env[^/\\]*|[^/\\]*\.env(?:\.[^/\\]*)?|[^/\\]*\.har"
                                  r"|[^/\\]*\.har\.\w+|(?:cassettes?|(?:__)?recordings?(?:__)?|recorded|tapes|vcr"
                                  r"|__nock-fixtures__)[/\\].*)$")
-_TEST_MARKER_RE = re.compile(
+_TEST_MARKER_RE = _LazyRx(
     r"(?m)^(?:(?:async[ \t]+)?def[ \t]+test_?\w*[ \t]*\(|[ \t]*class[ \t]+Tests?(?:[A-Z_(:]|$)|[ \t]*@pytest\."
     r"|[ \t]*@Test\b|[ \t]*#\[test\]"
     r"|[ \t]*(?:import|from)[ \t]+(?:pytest|unittest)\b|[ \t]*func[ \t]+Test\w*\("
     r"|[ \t]*(?:describe|it|test|beforeEach)[ \t]*\()")
-_TEST_METHOD_RE = re.compile(r"(?m)^[ \t+-]+(?:async[ \t]+)?def[ \t]+test_?\w*[ \t]*\([ \t]*self\b")
-_CLASS_LINE_RE = re.compile(r"(?m)^[ \t+-]*class[ \t]+\w|^@@[^\n]*\bclass[ \t]+\w")
-_TEST_CLASS_LINE_RE = re.compile(r"[ \t+-]*class[ \t]+Tests?(?:[A-Z_(:]|$)|@@[^\n]*\bclass[ \t]+Tests?(?:[A-Z_(:]|\b)")
+_TEST_METHOD_RE = _LazyRx(r"(?m)^[ \t+-]+(?:async[ \t]+)?def[ \t]+test_?\w*[ \t]*\([ \t]*self\b")
+_CLASS_LINE_RE = _LazyRx(r"(?m)^[ \t+-]*class[ \t]+\w|^@@[^\n]*\bclass[ \t]+\w")
+_TEST_CLASS_LINE_RE = _LazyRx(r"[ \t+-]*class[ \t]+Tests?(?:[A-Z_(:]|$)|@@[^\n]*\bclass[ \t]+Tests?(?:[A-Z_(:]|\b)")
 # `assert` alone is no marker: production code asserts too (review, 2026-09-29). A diff starts a new file here
-_DIFF_FILE_RE = re.compile(r"(?m)^(?:diff --git |\+\+\+ |--- a/)")
-_GREP_PATH_RE = re.compile(r"((?:[A-Za-z]:)?[^\s:]+):\d+[:-]")
+_DIFF_FILE_RE = _LazyRx(r"(?m)^(?:diff --git |\+\+\+ |--- a/)")
+_GREP_PATH_RE = _LazyRx(r"((?:[A-Za-z]:)?[^\s:]+):\d+[:-]")
 _TEST_LOOKBACK_LINES = 40
 
 
@@ -2901,7 +2942,7 @@ def _has_context_word(window: str, context: tuple[str, ...]) -> bool:
     return rx.search(window) is not None
 
 
-_LABEL_ONLY_RE = re.compile(r"[:=]\s*$")
+_LABEL_ONLY_RE = _LazyRx(r"[:=]\s*$")
 # a line of code that ends in a colon is a condition, not a label: `if kind != "SECRET":` and
 # `continue` on the next line was taken for a labelled secret (twice in this repository's own
 # pre-commit check, 2026-09-27)
@@ -2909,7 +2950,7 @@ _LABEL_ONLY_RE = re.compile(r"[:=]\s*$")
 # no space between the keyword and the rest of a sentence. "for the db, password:" and "if
 # needed, passwort:" are labels in a sentence and must still take the next line (review,
 # 2026-09-27: matching the bare words hid them).
-_CODE_CONDITION_RE = re.compile(r"(?:==|!=|<=|>=|\bis not\b|^\s*(?:def|class)\s+\w+\s*[(:])")
+_CODE_CONDITION_RE = _LazyRx(r"(?:==|!=|<=|>=|\bis not\b|^\s*(?:def|class)\s+\w+\s*[(:])")
 # a keyword rule reads `if not token: <statement>` as label and value: the statement word went into the vault
 # and every later text with that word was redacted, code included (field report, 2026-09-29). A statement
 # keyword is never a value. A check of the whole line ("it opens a block") was tried and dropped: the colon
@@ -2939,7 +2980,7 @@ def code_word_spellings() -> list[str]:
             for s in (b, b + ";")]
 
 
-_NL_RE = re.compile("\n")
+_NL_RE = _LazyRx("\n")
 _INDEX: list = [None, None]   # the last text and its line index: scan() and is_fixture() ask about one text
 
 
@@ -2983,16 +3024,16 @@ def _positions(text: str, name: str, rx: re.Pattern) -> list:
     return cache[name]
 
 
-_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_IDENT_RE = _LazyRx(r"[A-Za-z_][A-Za-z0-9_]*")
 _LABEL_WINDOW = 200   # characters before a value in which its label is looked for
 
 
 def _before_value(text: str, start: int) -> str:
     """The text of the value's line before it, at most _LABEL_WINDOW characters."""
     return text[max(_line_start(text, start), start - _LABEL_WINDOW):start]
-_LABEL_TAIL_RE = re.compile(r"([A-Za-z_][\w.]*)\\?[\"']?\s*(?::=|=|:)\s*\\?[\"'`]?$")   # \" in JSON in a string
-_OPERATOR_AFTER_RE = re.compile(r"[ \t]+[|&^*+][ \t]+[A-Za-z_(]")
-_SELF_ATTR_RE = re.compile(r"(?:^|[\s,(])(?:self|this|cls)\.\w+$")
+_LABEL_TAIL_RE = _LazyRx(r"([A-Za-z_][\w.]*)\\?[\"']?\s*(?::=|=|:)\s*\\?[\"'`]?$")   # \" in JSON in a string
+_OPERATOR_AFTER_RE = _LazyRx(r"[ \t]+[|&^*+][ \t]+[A-Za-z_(]")
+_SELF_ATTR_RE = _LazyRx(r"(?:^|[\s,(])(?:self|this|cls)\.\w+$")
 
 
 def value_is_code(text: str, start: int, end: int, secret: str) -> bool:
@@ -3020,14 +3061,14 @@ def value_is_code(text: str, start: int, end: int, secret: str) -> bool:
 
 # gitleaks' generic-api-key takes `key = "Europe/Dublin"`: words joined by `/` without a digit are a time zone or a
 # path, never a key (Python standard library, 2026-09-29)
-_WORD_PATH_RE = re.compile(r"[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*(?:/[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*)+")
+_WORD_PATH_RE = _LazyRx(r"[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*(?:/[A-Z]?[a-z]+(?:_[A-Z]?[a-z]+)*)+")
 # a signed number in code: `a = +4294967296`, `f(+12345678)`
-_SECTION_BEFORE_RE = re.compile(r"(?i)(?:\bRFC[ -]?\d{3,5}|\bCore|\bsection|\bsec\.|\bchapter|\bKapitel|\bAbschnitt"
+_SECTION_BEFORE_RE = _LazyRx(r"(?i)(?:\bRFC[ -]?\d{3,5}|\bCore|\bsection|\bsec\.|\bchapter|\bKapitel|\bAbschnitt"
                                 r"|\u00a7)[ ,:(]*\u00a7?[ ]*$")
 # whole words of the label: TELEMETRY_OFFSET is no telephone (Codex review, 2026-09-30)
-_PHONE_LABEL_RE = re.compile(r"(?i)phone|(?<![a-z])(?:telefon|mobil|handy(?!man)|fax|contact|kontakt|rufnummer|whatsapp"
+_PHONE_LABEL_RE = _LazyRx(r"(?i)phone|(?<![a-z])(?:telefon|mobil|handy(?!man)|fax|contact|kontakt|rufnummer|whatsapp"
                              r"|msisdn|festnetz|hotline|durchwahl)|(?<![a-z])(?:tel|cell|sms)(?![a-z])")
-_NUMBER_BEFORE_RE = re.compile(r"(?:=\s+|[(\[]\s*|return\s+)$")   # not KEY=+49…, not a CSV column
+_NUMBER_BEFORE_RE = _LazyRx(r"(?:=\s+|[(\[]\s*|return\s+)$")   # not KEY=+49…, not a CSV column
 
 
 def _phone_ok(text: str, start: int, secret: str) -> bool:
@@ -3049,7 +3090,7 @@ def _phone_ok(text: str, start: int, secret: str) -> bool:
 # window around each: from 50 characters before the keyword (the prefix cannot cross a line) to
 # the end of the 8th line after it (the separators may hold line breaks; the window ends after a
 # newline, which the value's terminator class takes the same way as in the whole text).
-_WINDOWED = {"generic-api-key": re.compile(r"(?i)access|auth|api|credential|creds|key|passw(?:or)?d|secret|token")}
+_WINDOWED = {"generic-api-key": _LazyRx(r"(?i)access|auth|api|credential|creds|key|passw(?:or)?d|secret|token")}
 
 
 def _windowed(rule: Rule, kw: re.Pattern, text: str):
@@ -3076,11 +3117,11 @@ def _windowed(rule: Rule, kw: re.Pattern, text: str):
             yield _Shifted(m, a)
 
 
-_EMPTY_RE = re.compile("")
-_WORD_RE_ANY = re.compile(r"[a-z]+")   # the words of a seed phrase, whatever stands between them
+_EMPTY_RE = _LazyRx("")
+_WORD_RE_ANY = _LazyRx(r"[a-z]+")   # the words of a seed phrase, whatever stands between them
 # the words that make 12 list words a seed phrase: the phrase's own names, and the labels of a secret (a phrase after
 # "Password:" or "private key:" was text, Gate B of 0.6.19)
-_SEED_CONTEXT_RE = re.compile(r"(?i)(?<![a-z])(?:seed|mnemonic|bip-?39|recovery|wallet|metamask|ledger|trezor|phrase"
+_SEED_CONTEXT_RE = _LazyRx(r"(?i)(?<![a-z])(?:seed|mnemonic|bip-?39|recovery|wallet|metamask|ledger|trezor|phrase"
                               r"|backup|secret|passphrase|password|passwort|kennwort|words|wörter|private|keys?"
                               r"|token|wiederherstellung)(?![a-z])")   # a whole word: not tokenization, keyboard
 
@@ -3199,7 +3240,7 @@ def _curl_matches(parts, text: str):
 
 # one quoted value of a list and what follows it: a comma (the next value) or the closing bracket. Up to two line
 # breaks around it: a list written one value per line
-_LIST_ITEM_RE = re.compile(r"[ \t]*(?:\r?\n[ \t]*){0,2}([\"'`])([^\"'`\\\n]{1,256})\1"
+_LIST_ITEM_RE = _LazyRx(r"[ \t]*(?:\r?\n[ \t]*){0,2}([\"'`])([^\"'`\\\n]{1,256})\1"
                            r"[ \t]*(?:\r?\n[ \t]*){0,2}(,|[\]})])")
 
 
@@ -3304,17 +3345,17 @@ def _in_table_cell(text: str, start: int) -> bool:
     return text[_line_start(text, start):start].lstrip().startswith("|")
 
 
-_MEASURE_LABEL_RE = re.compile(r"(?i)(?<![a-z])(?:ttl|timeout|expir\w*|lifetime|max|min|len|length|size|count|limit"
+_MEASURE_LABEL_RE = _LazyRx(r"(?i)(?<![a-z])(?:ttl|timeout|expir\w*|lifetime|max|min|len|length|size|count|limit"
                                r"|port|age|seconds|minutes|hours|days|retries|interval|ms|budget|refresh|rotation|cost"
                                r"|price|quota|window|delay|offset|threshold|rate|bytes|exp|iat|nbf|at|counter|index"
                                r"|generation)(?![a-z])")
 # a label that names a secret: a UUID after it is one (Postmark server token, Scaleway secret key, a uuid4 API key)
-_SECRET_LABEL_RE = re.compile(r"(?i)(?:token|secret[_-]?key|secret|secret[_-]?value|api[_-]?key|apikey|access[_-]?key"
+_SECRET_LABEL_RE = _LazyRx(r"(?i)(?:token|secret[_-]?key|secret|secret[_-]?value|api[_-]?key|apikey|access[_-]?key"
                               r"|auth[_-]?key|\w+[_-]key|password|passwd|pwd|passphrase)\\?[\"']?\s*(?::=|=>|[:=])\s*\\?[\"'`]?$")
-_ELISION_RE = re.compile(r"(?:\.\.\.|\u2026)$")
+_ELISION_RE = _LazyRx(r"(?:\.\.\.|\u2026)$")
 # a label that names a derived thing: secret_id, password_hash, token_type, hashed_secret. Anchored at the value: in
 # `secret_name: x, password: <value>` the password stays a hit
-_DERIVED_LABEL_RE = re.compile(
+_DERIVED_LABEL_RE = _LazyRx(
     r"(?i)(?:(?:secret|password|passwd|pwd|token|key)[_-]?(?:id|name|hash|hashed|len|length|path|file|arn|ref|url|uri"
     r"|version|type|policy|rules?|last(?:_\w+)?)|hashed_(?:secret|password|token)|(?:secret|password|token|key)Id"
     r"|(?:secret|password|token)Name)\\?[\"']?\s*(?::=|=>|[:=])\s*\\?[\"'`]?$")
@@ -3360,11 +3401,11 @@ def _allowed(rule: Rule, text: str, m: re.Match, secret: str) -> bool:
     return False
 
 
-_TOKEN_CHAR_RE = re.compile(r"[A-Za-z0-9_\-]")
+_TOKEN_CHAR_RE = _LazyRx(r"[A-Za-z0-9_\-]")
 # GitLab's routable token: payload, ".", version (2 base36), ".", length (2) and CRC32 (7) in base36: 9 characters;
 # the older form has one dot: payload, ".", 9 characters (lib/authn/token_field/generator/routable_token.rb)
-_ROUTABLE_TAIL_RE = re.compile(r"\.(?:[0-9a-z]{2}\.)?[0-9a-z]{9}(?![0-9A-Za-z_-])")
-_GITLAB_PREFIX_RE = re.compile(r"gl[a-z]+-")
+_ROUTABLE_TAIL_RE = _LazyRx(r"\.(?:[0-9a-z]{2}\.)?[0-9a-z]{9}(?![0-9A-Za-z_-])")
+_GITLAB_PREFIX_RE = _LazyRx(r"gl[a-z]+-")
 
 
 def _lower(text: str) -> str:
@@ -3376,14 +3417,14 @@ def _lower(text: str) -> str:
 
 # X-Amz-Credential=AKIA…/20261008/eu-central-1/s3/aws4_request: the access key id names the key, it is not the
 # secret half; a presigned URL carries it in the clear by design (corpus of 0.6.7: 142 such hits in tool output)
-_SIGV4_CREDENTIAL_RE = re.compile(r"\b(?i:x-amz-credential|credential)(?:=|%3[Dd])$")
+_SIGV4_CREDENTIAL_RE = _LazyRx(r"\b(?i:x-amz-credential|credential)(?:=|%3[Dd])$")
 # and the scope that must follow it: /date/region/service/aws4_request, plain or percent-encoded. A bare
 # Credential=AKIA… is no SigV4 scope and stays a hit (codex review of 0.6.8)
-_SIGV4_SCOPE_RE = re.compile(r"(?:/|%2[Ff])\d{8}(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff])aws4_request"
+_SIGV4_SCOPE_RE = _LazyRx(r"(?:/|%2[Ff])\d{8}(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff])[a-z0-9-]+(?:/|%2[Ff])aws4_request"
                              r"(?=$|[\s&,;\"'#])")    # then a query or header separator: not aws4_requestX (codex)
 # a whole reference or a whole date in the password place of a URL: redis://:%24%7BREDIS_PASSWORD%7D@…,
 # redis://:2026-10-08@…; an encoded $ or { inside a real password stays a value (codex, Opus review of 0.6.8)
-_URL_PASSWORD_NOT_A_VALUE_RE = re.compile(r"%24[A-Za-z_][A-Za-z0-9_]*|%24%7[Bb][A-Za-z_][A-Za-z0-9_]*%7[Dd]"
+_URL_PASSWORD_NOT_A_VALUE_RE = _LazyRx(r"%24[A-Za-z_][A-Za-z0-9_]*|%24%7[Bb][A-Za-z_][A-Za-z0-9_]*%7[Dd]"
                                           r"|\d{4}-\d{2}-\d{2}")    # a time has a colon, which this rule never takes
 
 
@@ -3402,7 +3443,7 @@ def _url_password_not_a_value(v: str) -> bool:
 
 
 # PostgreSQL's tools take --password (-W) as a switch with no value (Gate B of 0.6.15)
-_PG_TOOL_RE = re.compile(r"(?<![\w-])(?:psql|pg_dump|pg_dumpall|pg_restore|pg_basebackup|createdb|dropdb|createuser"
+_PG_TOOL_RE = _LazyRx(r"(?<![\w-])(?:psql|pg_dump|pg_dumpall|pg_restore|pg_basebackup|createdb|dropdb|createuser"
                          r"|dropuser|vacuumdb|reindexdb|clusterdb|pgbench)(?:\.exe)?(?![\w-])")
 
 
@@ -3436,11 +3477,11 @@ EXPORT_RULE = "label-password-export"
 EXPORT_KEY = "export:" + EXPORT_RULE    # its key in maisecrets/registry.py: `enabled` takes either
 # the file names of password exports: a browser's (Chrome, Edge, Firefox, Safari), Bitwarden, 1Password, LastPass,
 # KeePass and KeePassXC, Dashlane, and any table whose name says passwords
-_EXPORT_NAME_RE = re.compile(r"(?i)(?:passw|kennw|logins?\b|bitwarden|1password|lastpass|keepass|dashlane|enpass"
+_EXPORT_NAME_RE = _LazyRx(r"(?i)(?:passw|kennw|logins?\b|bitwarden|1password|lastpass|keepass|dashlane|enpass"
                              r"|nordpass|roboform)[^/\\]*\.(?:csv|tsv|txt)$")
 # a header names what its cells hold by its words (camelCase, _ - . and spaces split them): the last word, or the
 # last two together. A flag (is_secret, has_password) holds no value; `token` alone is often an NLP column
-_HEADER_WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
+_HEADER_WORD_RE = _LazyRx(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
 _EXPORT_SECRET_WORDS = frozenset({"password", "passwd", "pwd", "passphrase", "passwort", "kennwort", "secret", "totp",
                                   "hotp", "otp", "otpauth"})
 _EXPORT_SECRET_PAIRS = frozenset({"apikey", "secretkey", "privatekey", "accesstoken", "otpauth", "otpsecret",
@@ -3508,7 +3549,7 @@ def _csv_cells(text: str, pos: int, delim: str):
         return cells, i
 
 
-_PLACEHOLDER_IN_CELL_RE = re.compile("\u27e6[A-Z][A-Z_]*_c\\d+(?::[^\u27e7\n]*)?\u27e7")
+_PLACEHOLDER_IN_CELL_RE = _LazyRx("\u27e6[A-Z][A-Z_]*_c\\d+(?::[^\u27e7\n]*)?\u27e7")
 # what a cell of a schema, a form or a masked export holds instead of a password
 _NOT_A_CELL_VALUE = frozenset({"true", "false", "null", "none", "nil", "undefined", "string", "str", "text", "int",
                                "integer", "bool", "boolean", "varchar", "yes", "no", "n/a", "na", "-", "--", "*",
@@ -3541,10 +3582,10 @@ def _not_a_cell_value(v: str) -> bool:
 
 # a header row starts at the start of its line (code is indented) and each cell is a column name: up to four words,
 # no brackets, operators or colons (a signature `def login(user, password):`, a call, a list line ending in a comma)
-_HEADER_LINE_RE = re.compile(r"[\"'\w]")
-_HEADER_CELL_RE = re.compile(r"[ \t]*\"?[A-Za-z][\w.#/-]*(?: [\w.#/-]+){0,3}\"?[ \t]*")
-_NAME_RE = re.compile(r"\"?[A-Za-z][\w.-]*\"?")
-_EXPORT_HINT_RE = re.compile(r"pass|pwd|kennw|totp|otp|secret|apikey|api_key|private_?key|access_?token")
+_HEADER_LINE_RE = _LazyRx(r"[\"'\w]")
+_HEADER_CELL_RE = _LazyRx(r"[ \t]*\"?[A-Za-z][\w.#/-]*(?: [\w.#/-]+){0,3}\"?[ \t]*")
+_NAME_RE = _LazyRx(r"\"?[A-Za-z][\w.-]*\"?")
+_EXPORT_HINT_RE = _LazyRx(r"pass|pwd|kennw|totp|otp|secret|apikey|api_key|private_?key|access_?token")
 
 
 def _export_hits(text: str, low: str) -> list:
@@ -3607,6 +3648,18 @@ def _export_hits(text: str, low: str) -> list:
     return out
 
 
+def _any_keyword(keywords: tuple, low: str, known: dict) -> bool:
+    """Whether the lower-case text holds one of the keywords. Each keyword is searched once per text: a search runs
+    over the whole text, and the same keyword gates several rules."""
+    for k in keywords:
+        hit = known.get(k)
+        if hit is None:
+            hit = known[k] = k in low
+        if hit:
+            return True
+    return False
+
+
 def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
           rule_list: list[Rule] | None = None) -> list[Match]:
     """_copy: the text is the normaliser's cleaned copy of a tool result, which is not cleaned again."""
@@ -3644,6 +3697,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         # first: a cell of a password export is a value as a whole, and no other rule claims a part of it
         for m in _export_hits(text, low):
             take(m)
+    keywords_in: dict = {}      # keyword -> whether the text holds it: the 652 keywords of the rules are 519 texts
     for rule in (_in_scan_order(rules()) if rule_list is None else rule_list):
         if rule is _PERSONAL:
             # the personal data of 0.6.21 and the cleaned copy of the tool channel run after every built-in rule and
@@ -3661,7 +3715,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             continue
         if enabled is not None and rule.id not in enabled and rule.key not in enabled:
             continue
-        if rule.keywords and not any(k in low for k in rule.keywords):
+        if rule.keywords and not _any_keyword(rule.keywords, low, keywords_in):
             continue
         # a rule that cannot fire without a context word need not run its regex without one
         alone = _CHANNEL[0] == "tool" and rule.id in CARD_ALONE_IN_TOOL
@@ -3956,7 +4010,7 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
 # the recipient's: Ihre, Kunden-) with at most one line break. Any other text (a second address, a name, the sender's
 # label: Unsere, meine; a value, a blank line) ends the company's block
 _SEP = r"[ \t,;|·\"'()]{0,6}(?:\r?\n[ \t,;|·\"'()]{0,6})?"
-_VAT_GAP_RE = re.compile(r"(?i)" + _SEP + r"(?:(?:deutschland|germany)" + _SEP + r")?"
+_VAT_GAP_RE = _LazyRx(r"(?i)" + _SEP + r"(?:(?:deutschland|germany)" + _SEP + r")?"
                          r"(?:(?:(?:ihre|your|kunden|customer|recipient|client|empfänger)[ _-]?)?"
                          r"(?:ust|vat|umsatzsteuer|uid|mwst)(?:[ ._-]?(?:id|identifikationsnummer|identification"
                          r"|nummer|number|no|nr)\.?){0,2}[\"']?[ ]?[:#=]?" + _SEP + r")?")
@@ -4115,7 +4169,7 @@ def _claim(m: Match, text: str, found: list, starts: list, ends: list) -> None:
     found.append(Match(m.kind, hit[0].type, text[a:b], a, b))
 
 
-_WORD_CHAR_RE = re.compile(r"\w")
+_WORD_CHAR_RE = _LazyRx(r"\w")
 
 
 def _term_rest(m: Match, text: str, found: list, starts: list, ends: list) -> None:

@@ -28,7 +28,7 @@ import _isolate  # noqa: E402  first: a temp vault home, never the real one
 Path(_isolate.HOME).mkdir(parents=True, exist_ok=True)
 Path(_isolate.HOME, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
-from maisecrets import hooks  # noqa: E402
+from maisecrets import detect, hooks  # noqa: E402
 
 PAYLOADS = Path(__file__).resolve().parent / "client_payloads"
 _R = random.Random(1506)
@@ -110,13 +110,25 @@ class ReadOfAFileAsBase64Tests(unittest.TestCase):
         self.assertNotIn(base64.b64encode(raw.encode()).decode().rstrip("="), json.dumps(out))
         self.assertIn(e.ref, out["file"]["base64"])
 
-    def test_a_1_mb_image_is_checked_in_under_a_second(self):
-        # released code: 1 MB took 10.9 s; from about 1.5 MB the watchdog withheld the image
+    def test_a_1_mb_image_is_not_scanned_as_text(self):
+        # released code: the scan of the base64 as text took 10.9 s for 1 MB; from about 1.5 MB the watchdog withheld
+        # the image. That cost is linear, so a check of the growth cannot see it, and a fixed 1.0 s of wall time
+        # failed on a loaded machine (2026-10-16): the scans are counted. 10 s of CPU only catches a hang
+        from unittest import mock
         p = recorded("read-png")
-        p["tool_response"]["file"]["base64"] = body(PNG, size=750 * 1024)
-        started = time.perf_counter()
-        hooks.post_tool(p)
-        self.assertLess(time.perf_counter() - started, 1.0)
+        image = body(PNG, size=750 * 1024)
+        p["tool_response"]["file"]["base64"] = image
+        real, scanned = detect.scan, []
+
+        def spy(text, *a, **k):
+            scanned.append(len(text))
+            return real(text, *a, **k)
+        started = time.process_time()
+        with mock.patch.object(detect, "scan", spy):
+            hooks.post_tool(p)
+        self.assertLess(time.process_time() - started, 10.0)
+        self.assertTrue(scanned, "the spy sees the scans of the hook")
+        self.assertLess(max(scanned), len(image) // 100, "no scan of the base64 of the image")
 
     def test_a_text_read_and_another_tool_with_the_same_shape_are_scanned(self):
         token = glpat()

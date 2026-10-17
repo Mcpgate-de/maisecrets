@@ -6,5 +6,5 @@ runner = ["tests/test_vault_refs.py::Online::test_trigger_no_field_no_header_no_
 
 [proof]
 file = "maisecrets/vault_refs.py"
-find = '''        if not endpoint(cfg, url, time.monotonic() + DISCOVERY_BUDGET):'''
+find = '''        if not endpoint(cfg, url, min(deadline, time.monotonic() + DISCOVERY_BUDGET)):'''
 replace = '''        if False:'''

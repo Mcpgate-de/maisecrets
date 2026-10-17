@@ -25,12 +25,13 @@ import sys
 from typing import Any
 
 from . import check_value, detect, incidents, rehydration, term_files, value_files
+from .detect import _LazyRx
 from .placeholder import KEY_RE, find_refs
 from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config
 
 # a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
-AT_MENTION_RE = re.compile(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
+AT_MENTION_RE = _LazyRx(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
 
 
 # ---------------------------------------------------------------- helpers --
@@ -395,8 +396,8 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
         return False
 
 
-_SESSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
-_KEY_RE = re.compile(KEY_RE)
+_SESSION_ID_RE = _LazyRx(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+_KEY_RE = _LazyRx(KEY_RE)
 
 
 def _pending_path(session: str | None):
@@ -569,7 +570,7 @@ def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: 
 # session's subagents folder, and a result equal to that subagent's last answer. A typed or pasted text,
 # a background command, a monitor event: none of them passes, and no value outside the result passes
 # (docs/THREAT-MODEL.md C19).
-_NOTIFICATION_RE = re.compile(r"<task-notification>\n(?P<body>.*?)\n</task-notification>", re.S)
+_NOTIFICATION_RE = _LazyRx(r"<task-notification>\n(?P<body>.*?)\n</task-notification>", re.S)
 _AGENT_TOOLS = ("Agent", "Task", "SendMessage")
 
 
@@ -765,7 +766,7 @@ def _exact_spans(text: str, vault, session: str | None, resolved: list | None, p
     return spans
 
 
-_WORD_CHAR_RE = re.compile(r"\w")
+_WORD_CHAR_RE = _LazyRx(r"\w")
 
 
 def _longest_wins(text: str, matches: list, vault, session: str | None, resolved: list | None,
@@ -1322,9 +1323,9 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
     ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\](?:v-|sealed)|__ms_\d+\b"
                               r"|XDG_RUNTIME_DIR[^\n]*maisecrets"),
 ]
-_STORE_READ_RE = re.compile("|".join(f"(?P<p{i}>{rx})" for i, (_n, rx) in enumerate(_STORE_READ_PATTERNS)))
+_STORE_READ_RE = _LazyRx("|".join(f"(?P<p{i}>{rx})" for i, (_n, rx) in enumerate(_STORE_READ_PATTERNS)))
 # PowerShell on Windows: command names and file names in any case (Get-Content VAULT.ENC.JSON reads the file)
-_STORE_READ_RE_I = re.compile(_STORE_READ_RE.pattern, re.IGNORECASE)
+_STORE_READ_RE_I = _LazyRx(_STORE_READ_RE.pattern, re.IGNORECASE)
 
 
 def _store_read_match(command: str, windows_paths: bool = False) -> str | None:
@@ -1348,7 +1349,7 @@ def _store_read_match(command: str, windows_paths: bool = False) -> str | None:
     return "store read"
 
 
-_HEREDOC_RE = re.compile(r"<<(?P<dash>-?)[ \t]*(?P<tag>(?:'[^'\n]*'|\"[^\"\n]*\"|\\[^\s]|[^\s;&|<>()'\"\\])+)")
+_HEREDOC_RE = _LazyRx(r"<<(?P<dash>-?)[ \t]*(?P<tag>(?:'[^'\n]*'|\"[^\"\n]*\"|\\[^\s]|[^\s;&|<>()'\"\\])+)")
 _REFUSED_CONTEXT = {
     "ansi": "inside $'…' the value would need ANSI-C escaping",
     "backtick": "inside `…` the value would be parsed a second time",
@@ -1359,15 +1360,15 @@ _REFUSED_CONTEXT = {
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish", "ash", "mksh"}
 INLINE_INTERPRETERS = {"python", "python2", "python3", "perl", "ruby", "node", "nodejs", "php", "lua", "osascript",
                        "deno", "bun"}
-INLINE_CODE_FLAGS = re.compile(r"^-(?:[A-Za-z]*[ceE][A-Za-z]*|-eval|-command|-exec)$")
+INLINE_CODE_FLAGS = _LazyRx(r"^-(?:[A-Za-z]*[ceE][A-Za-z]*|-eval|-command|-exec)$")
 REMOTE_OR_EVAL = {"ssh", "eval", "su", "expect", "script", "sshpass", "plink", "mosh", "screen", "tmux"}
 # commands that run other commands with arguments they build from their input
 ARG_RUNNERS = {"xargs", "parallel", "watch", "flock", "chroot", "nsenter", "unshare", "setsid", "runuser",
                "strace", "ltrace", "gdb", "script", "busybox", "systemd-run", "toybox"}
 # variables that name the ssh command another tool runs
-_SSH_VAR_RE = re.compile(r"(?<![\w])(?:GIT_SSH_COMMAND|GIT_SSH|RSYNC_RSH|CVS_RSH)=")
+_SSH_VAR_RE = _LazyRx(r"(?<![\w])(?:GIT_SSH_COMMAND|GIT_SSH|RSYNC_RSH|CVS_RSH)=")
 # a variable in front of a fixed path is a known command word: "$HOME/bin/tool", ${REPO}/bin/x
-_FIXED_TAIL_RE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z_0-9]*\}?(?:/[^/$`\s]+)+$")
+_FIXED_TAIL_RE = _LazyRx(r"^\$\{?[A-Za-z_][A-Za-z_0-9]*\}?(?:/[^/$`\s]+)+$")
 # arguments that name stdin as the file to run
 _STDIN_FILES = {"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}
 # clients that read statements from stdin when no statement is given
@@ -1378,9 +1379,9 @@ SHELL_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "while", "u
 # the options of a wrapper that take the next word as their argument; every other option takes none
 # a part that feeds its input to a later shell, a group closer with a redirection, and trace settings
 # from outside the shell's own words (reviews of 0.5.4, 2026-09-28)
-_EXEC_RE = re.compile(r"^(?:(?:command|builtin)\s+)*exec\b")
-_CLOSER_RE = re.compile(r"^(?:(?:\}|\)|done|fi|esac)(?![A-Za-z0-9_])|\d*<)")   # `( bash )<f` leaves `<f`
-_TRACE_RE = re.compile(
+_EXEC_RE = _LazyRx(r"^(?:(?:command|builtin)\s+)*exec\b")
+_CLOSER_RE = _LazyRx(r"^(?:(?:\}|\)|done|fi|esac)(?![A-Za-z0-9_])|\d*<)")   # `( bash )<f` leaves `<f`
+_TRACE_RE = _LazyRx(
     r"(?:^|[\s;&|(])(?:SHELLOPTS|BASHOPTS)="                                     # an assignment
     r"|(?:^|[\s;&|(])(?:export|declare|typeset|readonly)\b[^;&|\n]*\b(?:SHELLOPTS|BASHOPTS)\b"
     r"|(?:^|[\s;&|(])set\b[^;&|\n]*\s[-+]o\s+(?:xtrace|verbose)\b"             # set … -o xtrace
@@ -1430,15 +1431,15 @@ WRAPPER_ARG_OPTIONS = {
 }
 WRAPPERS = {"env", "genv", "command", "exec", "nice", "time", "nohup", "sudo", "doas", "builtin", "timeout", "stdbuf",
             "caffeinate", "ionice", "chronic"}
-_SLICE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
+_SLICE_RE = _LazyRx(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
 
 
 # before a comment or a heredoc body: the parser's reading is sure only when no bracket, brace, parenthesis,
 # backslash or backtick comes first. Inside (( )), $[ ], [[ ]], ${ }, a zsh pattern or after an escape the shell
 # reads no comment or heredoc there and runs what follows (reviews of 0.6.7, rounds 4 to 6). The parser itself is
 # not changed: a misread comment would flip its quote state and hide the next line.
-_UNSURE_BEFORE_COMMENT = re.compile(r"[()\[\]{}\\`]")
-_UNSURE_BEFORE_HEREDOC = re.compile(r"[(){}\[\\`]")       # ((1<<TAG)) is a shift, no heredoc (codex round 7)
+_UNSURE_BEFORE_COMMENT = _LazyRx(r"[()\[\]{}\\`]")
+_UNSURE_BEFORE_HEREDOC = _LazyRx(r"[(){}\[\\`]")       # ((1<<TAG)) is a shift, no heredoc (codex round 7)
 
 
 def comment_is_sure(command: str, ctxs: list[str], pos: int) -> bool:
@@ -1654,9 +1655,9 @@ def _quote_state(command: str, pos: int) -> str:
     return ctxs[pos] if pos < len(ctxs) else ""
 
 
-_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z_0-9]*=")
+_ASSIGN_RE = _LazyRx(r"^[A-Za-z_][A-Za-z_0-9]*=")
 # a redirection word: group 1 is a target glued to the operator
-_REDIR_RE = re.compile(r"^(?:\d+|&)?(?:<<<|<<-?|<>|<&|>&|>>|>\||<|>)(.*)$")
+_REDIR_RE = _LazyRx(r"^(?:\d+|&)?(?:<<<|<<-?|<>|<&|>&|>>|>\||<|>)(.*)$")
 
 
 def _segments(command: str, ctxs: list[str]) -> list[dict]:
@@ -1755,7 +1756,7 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
     return segs
 
 
-_REF_RE = re.compile(r"⟦[^⟦⟧]*⟧")
+_REF_RE = _LazyRx(r"⟦[^⟦⟧]*⟧")
 
 
 def _value_reaches(command: str, ctxs: list[str], segs: list[dict]) -> list[bool]:
@@ -2023,10 +2024,10 @@ _JOURNALCTL_STATEFUL = ("--rotate", "--vacuum-size", "--vacuum-files", "--vacuum
 _READ_ONLY_WRAPPERS = {"sudo", "nice", "command"}
 # the only options of sort and uniq the session approval allows: none of them writes a file or runs a
 # program (Codex review, 2026-09-28: `sort --out=FILE`, an abbreviation, wrote the value to a file)
-_SORT_OK = re.compile(r"^(?:-[bdfghinrsuMV]+|-k\S*|-t\S?|--(?:numeric-sort|reverse|unique|ignore-case|"
+_SORT_OK = _LazyRx(r"^(?:-[bdfghinrsuMV]+|-k\S*|-t\S?|--(?:numeric-sort|reverse|unique|ignore-case|"
                       r"human-numeric-sort|version-sort|month-sort|general-numeric-sort|ignore-leading-blanks|"
                       r"dictionary-order|stable))$")
-_UNIQ_OK = re.compile(r"^(?:-[cdiuz]+|-[fsw]\d*|\d+|--(?:count|repeated|unique|ignore-case))$")
+_UNIQ_OK = _LazyRx(r"^(?:-[cdiuz]+|-[fsw]\d*|\d+|--(?:count|repeated|unique|ignore-case))$")
 
 
 def _remote_is_read_only(remote: str) -> bool:
@@ -2364,7 +2365,7 @@ def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: st
 
 
 _ARGS_END = "MAISECRETS_ARGS_END"
-_ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" "
+_ARGS_CALL_RE = _LazyRx(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" "
                            r"(?:audit|forget|guard|put --clipboard|report|settings|shortcut) "
                            r"--args-stdin <<'" + _ARGS_END + r"'\n(.*)\n" + _ARGS_END + r"\n?\Z", re.S)
 
@@ -2414,9 +2415,9 @@ def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
 _SETTINGS_IN_A_COMMAND = ("maisecrets: this command carries a maisecrets settings change; only the person makes one, "
                           "as their own prompt (/maisecrets:settings KEY VALUE). The command did not run. Tell the "
                           "user the prompt to send.")
-_HOOK_ENTRY_TEXT_RE = re.compile(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
+_HOOK_ENTRY_TEXT_RE = _LazyRx(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
                                  r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt)\b", re.I)
-_GRANT_RE = re.compile(r"\A\s*maisecrets:\s*allow\s+ssh\s+([\w.@:\[\]-]+)(?:\s+(\d{6}))?\s*\Z")
+_GRANT_RE = _LazyRx(r"\A\s*maisecrets:\s*allow\s+ssh\s+([\w.@:\[\]-]+)(?:\s+(\d{6}))?\s*\Z")
 
 
 _HOOK_ENTRIES = {"session-start", "user-prompt", "pre-tool", "post-tool", "post-tool-failure", "mod-prompt"}
@@ -3660,8 +3661,8 @@ def _pre_tool(payload: dict) -> dict:
 
 
 # -------------------------------------------------------------- PostToolUse --
-_TOKEN_SPLIT_RE = re.compile(r"[\s\"'`<>()\[\]{},;]+")
-_FINE_SPLIT_RE = re.compile(r"[/?&#=:@,;+|\\]")
+_TOKEN_SPLIT_RE = _LazyRx(r"[\s\"'`<>()\[\]{},;]+")
+_FINE_SPLIT_RE = _LazyRx(r"[/?&#=:@,;+|\\]")
 _EXACT_MIN_LEN = 8
 
 
@@ -3702,8 +3703,8 @@ def _candidates(token: str):
     yield from _decoded(token)
 
 
-_HEX_RE = re.compile(r"(?:[0-9a-fA-F]{2}){6,}")
-_B64_RE = re.compile(r"[A-Za-z0-9+/_-]{12,}={0,2}")
+_HEX_RE = _LazyRx(r"(?:[0-9a-fA-F]{2}){6,}")
+_B64_RE = _LazyRx(r"[A-Za-z0-9+/_-]{12,}={0,2}")
 
 
 def _decoded(token: str):
@@ -3894,10 +3895,10 @@ def _raw_form(token: str, cand: str) -> str:
 # Text a model reads and a person does not see (README, "Invisible characters"): Unicode tag characters, each the
 # twin of an ASCII character ("ASCII smuggling"), and variation selectors used as bytes. Bidi controls are not
 # in it: they reorder what a person sees, the model reads the text in its logical order (Opus review, 2026-10-06).
-_TAGS_RE = re.compile("[\U000E0000-\U000E007F]+")
+_TAGS_RE = _LazyRx("[\U000E0000-\U000E007F]+")
 # the three flags of the standard emoji set that are tag sequences: England, Scotland, Wales
 _FLAG_TAGS = {"".join(chr(0xE0000 + ord(c)) for c in name) + "\U000E007F" for name in ("gbeng", "gbsct", "gbwls")}
-_VS_RE = re.compile("[\uFE00-\uFE0F\U000E0100-\U000E01EF]")
+_VS_RE = _LazyRx("[\uFE00-\uFE0F\U000E0100-\U000E01EF]")
 
 
 def _cjk(ch: str) -> bool:
@@ -3960,7 +3961,7 @@ def strip_hidden(text: str) -> tuple[str, int, list[str]]:
 # The byte forms, raw UTF-8 and JSON escape in any case, of what a transcript must not keep: a tag character
 # (U+E0000-U+E007F), an ideographic selector (U+E0100-U+E01EF) and VS1 to VS14 (U+FE00-U+FE0D). VS15 and VS16 stay:
 # emoji need them, and one of them carries one bit.
-_HIDDEN_BYTES_RE = re.compile(
+_HIDDEN_BYTES_RE = _LazyRx(
     rb"\xf3\xa0(?:[\x80\x81\x84-\x86][\x80-\xbf]|\x87[\x80-\xaf])|\xef\xb8[\x80-\x8d]"
     rb"|\\u[dD][bB]40\\u[dD](?:[cC][0-7]|[dD][0-9a-eA-E])[0-9a-fA-F]|\\u[fF][eE]0[0-9a-dA-D]")
 
@@ -4042,7 +4043,7 @@ def _mask_hidden_in_transcript(path: str, start: int = 0) -> int:
 # (tests/client_payloads/claude-read-*-post.json, recorded from Claude Code 2.1.296). A scan of it as text cost
 # 10.9 s for 1 MB and found only chance shapes, and a placeholder inside it would break the image.
 _BINARY_READ_TYPES = ("image", "pdf", "parts")
-_DATA_URI_RE = re.compile(r"data:image/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/=\s]*)")
+_DATA_URI_RE = _LazyRx(r"data:image/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/=\s]*)")
 _IMAGE_MAGIC = {"png": (b"\x89PNG\r\n\x1a\n",), "jpeg": (b"\xff\xd8\xff",), "gif": (b"GIF87a", b"GIF89a"),
                 "webp": (b"RIFF",)}
 

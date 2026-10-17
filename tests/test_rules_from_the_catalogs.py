@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+from _timing import assert_linear  # noqa: E402
 
 from maisecrets import detect  # noqa: E402
 
@@ -205,11 +206,8 @@ class TokenFormatTests(unittest.TestCase):
         r = random.Random(20)
         for rule_id, gen in TOKENS.items():
             tok, _ = gen(r)
-            near = (tok[:-2] + "  ") * 200             # each copy one short of a match
-            t0 = time.process_time()
-            found(near)
-            with self.subTest(rule=rule_id):
-                self.assertLess(time.process_time() - t0, 3.0)
+            with self.subTest(rule=rule_id):             # each copy one short of a match; not a fixed 3 s of CPU
+                assert_linear(self, found, lambda n, tok=tok: (tok[:-2] + "  ") * n, 200, hang=7.0, wall=20.0)
 
     def test_an_identifier_or_a_digest_after_a_prefix_is_no_hit(self):
         """codex Gate A of 0.6.20: names of words after AVNS_, cio or oy2, and a hex digest after nfp_ or odt_."""
@@ -521,14 +519,14 @@ class SessionFormTests(unittest.TestCase):
     def test_a_long_run_of_near_misses_takes_linear_time(self):
         r = random.Random(54)
         mid = J(["T3Blbk", "FJ"])
-        for near in ((J(["sk-", "proj-"]) + rd(r, 390, B64U) + " ") * 300,
-                     (J(["sk-", "proj-"]) + rd(r, 200, B64U) + mid + rd(r, 500, B64U) + " ") * 100,
-                     (J(["sk-ant-", "api03-"]) + rd(r, 139, B64U) + " ") * 500,
-                     (J(["gl", "pat-"]) + rd(r, 390, B64U) + ".01. ") * 300):
-            t0 = time.process_time()
-            found(near, "tool")
-            with self.subTest(n=len(near)):
-                self.assertLess(time.process_time() - t0, 3.0)
+        # each run of 8 times the copies takes at most 16 times the CPU time (tests/_timing.py), not a fixed 3 s
+        for one, copies in ((J(["sk-", "proj-"]) + rd(r, 390, B64U) + " ", 300),
+                            (J(["sk-", "proj-"]) + rd(r, 200, B64U) + mid + rd(r, 500, B64U) + " ", 100),
+                            (J(["sk-ant-", "api03-"]) + rd(r, 139, B64U) + " ", 500),
+                            (J(["gl", "pat-"]) + rd(r, 390, B64U) + ".01. ", 300)):
+            with self.subTest(n=len(one) * copies):
+                assert_linear(self, lambda text: found(text, "tool"), lambda n, one=one: one * n, copies,
+                              hang=7.0, wall=20.0)
 
 
 if __name__ == "__main__":

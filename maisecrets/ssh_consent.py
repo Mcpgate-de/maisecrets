@@ -135,9 +135,15 @@ class Verdict:
 _RANK = {"none": 0, "read": 1, "write": 2, "unknown": 3, "deny": 4}
 
 
+# the text a pattern of _DENY cannot match without. The pattern runs only on a text that holds it: each command word
+# of a long command made the dd pattern scan the rest of the command, 0.4 s for `dd dd dd ...` at the cap of 8192
+# characters, longer than 2 s on a loaded machine (2026-10-16)
+_DENY_NEEDS = {"mkfs": "/dev/", "wipefs": "/dev/", "dd to a device": "of=/dev/"}
+
+
 def _deny_hit(text: str) -> str | None:
     for name, rx in _DENY:
-        if rx.search(text):
+        if _DENY_NEEDS.get(name, "") in text and rx.search(text):
             return name
     return None
 
