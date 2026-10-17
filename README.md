@@ -1,6 +1,45 @@
 # maisecrets
 
-[maisecrets.dev](https://maisecrets.dev) · by [mcpgate](https://mcpgate.de) · Apache-2.0 · free
+[![version](https://img.shields.io/github/v/tag/Mcpgate-de/maisecrets?label=version&sort=semver)](CHANGELOG.md)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-d97757)](#install)
+[![Codex](https://img.shields.io/badge/Codex-plugin-10a37f)](#install)
+[![Python](https://img.shields.io/badge/python-3.9%2B%2C%20stdlib%20only-3776ab)](#requirements)
+[![telemetry](https://img.shields.io/badge/telemetry-none-brightgreen)](PRIVACY.md)
+
+Keeps passwords, tokens and personal data out of Claude Code and Codex. A value becomes a placeholder before the
+model sees it, and goes back in on your machine only where a command or a file needs it.
+
+## What it does
+
+- **Blocks or rewrites a prompt** that carries a secret: the model gets a placeholder such as `⟦SECRET_c1⟧`, never
+  the value.
+- **Masks tool output** (files, commands, MCP results) before the model reads it.
+- **Puts the value back locally** when the agent uses the placeholder in a command or a file.
+- **Checks a value first:** `ms:(your value)` tells you whether it would be caught, without sending it.
+- **Your own rules, terms and imports:** team rule folders, `/maisecrets:term add Jan Kowalski`, values from your
+  own NER.
+- **PDFs and images:** a PDF goes to the model as masked text only, or you are asked first.
+- **Local and deterministic:** no model, no network request of its own unless a server you added offers
+  [vault references](#vault-references), no telemetry.
+
+## Quick start
+
+```bash
+claude plugin marketplace add Mcpgate-de/maisecrets
+claude plugin install maisecrets@maisecrets     # then start a new session
+```
+
+```text
+/maisecrets:status        what runs, which version
+ms:(your value)           would this value be caught?
+/maisecrets:settings      the choices you make
+```
+
+Codex and other installs: [Install](#install). More: [How it works](#how-it-works) ·
+[Threat model](docs/THREAT-MODEL.md) · [Benchmarks](docs/BENCHMARKS.md) · [Known gaps](#known-gaps-measured-or-documented).
+
+## How it works
 
 An AI agent sees what you type and what its tools print: passwords, tokens, a
 customer's e-mail address. maisecrets intercepts detected secrets and personal
