@@ -1121,6 +1121,197 @@ class EndToEnd(_Work):
         self._run(os.path.dirname(REAL_PDFTOTEXT))
 
 
+_PAD = bytes.fromhex("28bf4e5e4e758a4164004e56fffa01082e2e00b6d0683e802f0ca9fe6453697a")
+
+
+def _rc4(key: bytes, data: bytes) -> bytes:
+    s = list(range(256))
+    j = 0
+    for i in range(256):
+        j = (j + s[i] + key[i % len(key)]) % 256
+        s[i], s[j] = s[j], s[i]
+    out = bytearray()
+    i = j = 0
+    for b in data:
+        i = (i + 1) % 256
+        j = (j + s[i]) % 256
+        s[i], s[j] = s[j], s[i]
+        out.append(b ^ s[(s[i] + s[j]) % 256])
+    return bytes(out)
+
+
+def locked_pdf_bytes(user: str, *lines: str, perms: int = -4) -> bytes:
+    """pdf_bytes encrypted by the standard security handler, revision 2 (RC4, 40 bits; PDF 1.7, 7.6.3), standard
+    library only. An empty `user` password is a PDF that only its owner password restricts: any reader opens it. A
+    user password locks it: pdftotext ends with `Incorrect password`, as for AES-128 and AES-256 (measured with qpdf's
+    output on poppler 26.10.0, 2026-10-17)."""
+    import hashlib
+    plain = pdf_bytes(*lines)
+    pad = lambda pw: (pw.encode("latin-1") + _PAD)[:32]  # noqa: E731
+    owner = _rc4(hashlib.md5(pad("owner-test")).digest()[:5], pad(user))
+    p_entry = perms
+    perms = perms.to_bytes(4, "little", signed=True)
+    file_id = hashlib.md5(b"a test pdf").digest()
+    key = hashlib.md5(pad(user) + owner + perms + file_id).digest()[:5]
+    check = _rc4(key, _PAD)
+    # encrypt each stream with the key of its object (algorithm 1); the test PDF has no string outside a stream
+    objs = re.findall(rb"(\d+) 0 obj\n(.*?)\nendobj\n", plain, re.S)
+    out = b"%PDF-1.4\n"
+    offs = []
+    for num, body in objs:
+        m = re.match(rb"(<< /Length )\d+( >>\nstream\n)(.*)(\nendstream)\Z", body, re.S)
+        if m:
+            okey = hashlib.md5(key + int(num).to_bytes(3, "little") + b"\0\0").digest()[:10]
+            data = _rc4(okey, m.group(3))
+            body = m.group(1) + b"%d" % len(data) + m.group(2) + data + m.group(4)
+        offs.append(len(out))
+        out += num + b" 0 obj\n" + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offs)
+    out += (b"trailer\n<< /Size %d /Root 1 0 R /Encrypt << /Filter /Standard /V 1 /R 2 /O <%s> /U <%s> /P %d >> "
+            b"/ID [<%s> <%s>] >>\nstartxref\n%d\n%%%%EOF\n") % (
+        len(objs) + 1, owner.hex().encode(), check.hex().encode(), p_entry, file_id.hex().encode(),
+        file_id.hex().encode(), xref)
+    return out
+
+
+class LockedOrDamaged(_Work):
+    """A PDF locked by a password, one only its owner restricts, and a damaged one (2026-10-17): under convert the PDF
+    never reaches the model as bytes, and the refusal names the cause."""
+
+    def _convert(self, data: bytes) -> tuple:
+        Path(self.pdf).write_bytes(data)
+        answer = self.post()
+        out = output(answer)
+        self.assertEqual(out["type"], "text", "the PDF is replaced by text, never passed")
+        self.assertNotIn(base64.b64encode(data).decode()[:40], json.dumps(answer))
+        return out["file"]["content"], answer
+
+    def test_the_cause_comes_from_pdftotext(self):
+        _reset(read_pdf="convert")
+        for body, cause in (
+                ("echo 'Command Line Error: Incorrect password' >&2; exit 1", file_reads.LOCKED),
+                ("echo \"Syntax Error: Couldn't find trailer dictionary\" >&2; exit 1",
+                 "the file is damaged or no PDF"),
+                ("exit 3", "does not allow its text to be copied"),
+                # the message that ends the run comes after many warnings: the end of stderr is kept
+                ("/usr/bin/yes 'Syntax Error: a damaged object' | /usr/bin/head -n 6000 >&2; "
+                 "echo 'Command Line Error: Incorrect password' >&2; exit 1", file_reads.LOCKED),
+                # the phrase in an earlier message, or with another exit code, is no lock
+                ("echo 'Command Line Error: Incorrect password' >&2; echo 'Syntax Error: x' >&2; exit 1",
+                 "the file is damaged or no PDF"),
+                ("echo 'Command Line Error: Incorrect password' >&2; exit 2", "the file is damaged or no PDF")):
+            with self.subTest(body):
+                self.stub(body)
+                self.calls.unlink(missing_ok=True)
+                text, answer = self._convert(pdf_bytes("Invoice 2026"))
+                self.assertIn(cause, text)
+                self.assertIn("withheld", answer["systemMessage"])
+                # the conversion runs with -q; only a failure brings the second run, of page 1, that reads the messages
+                first, second = self.calls.read_text().splitlines()
+                self.assertTrue(first.startswith("-q "), first)
+                self.assertNotIn("-q", second.split())
+                self.assertIn("-f 1 -l 1", second)
+
+    def _second_run(self, second: str) -> tuple:
+        """A conversion that fails (exit 1), and a second run of the stub given by `second`. (text, seconds, calls)."""
+        _reset(read_pdf="convert")
+        self.stub(f'if [ "$1" = "-q" ]; then exit 1; fi\n{second}')
+        started = time.monotonic()
+        text, _answer = self._convert(pdf_bytes("Invoice 2026"))
+        return text, time.monotonic() - started, self.calls.read_text().splitlines()
+
+    def test_a_second_run_that_hangs_is_stopped(self):
+        # extract itself, not the hook: the hook's watchdog would end the test process with exit 0
+        _reset(read_pdf="convert")
+        self.stub('if [ "$1" = "-q" ]; then exit 1; fi\n'
+                  "echo 'Command Line Error: Incorrect password' >&2; exec /bin/sleep 30")
+        started = time.monotonic()
+        with mock.patch.object(file_reads, "DIAGNOSE_SECONDS", 0.5):
+            text, why = file_reads.extract(self.pdf, None, self.cwd)
+        self.assertIsNone(text)
+        self.assertIn("the file is damaged or no PDF", why, "no cause from a run that did not end")
+        self.assertLess(time.monotonic() - started, 4)
+        self.assertEqual(len(self.calls.read_text().splitlines()), 2)
+
+    def test_a_second_run_above_the_memory_limit_is_stopped(self):
+        diag = []
+        real_start = file_reads._start
+
+        def start(args, stdout, stderr):
+            child = real_start(args, stdout, stderr)
+            if "-q" not in args:
+                diag.append(child.pid)
+            return child
+        with mock.patch.object(file_reads, "_start", start), mock.patch.object(file_reads, "DIAGNOSE_SECONDS", 10.0), \
+                mock.patch.object(file_reads, "_rss", lambda pid: file_reads.MAX_RSS_BYTES + 1 if pid in diag else 0):
+            text, took, _calls = self._second_run("exec /bin/sleep 30")
+        self.assertIn("the file is damaged or no PDF", text)
+        self.assertLess(took, 4, "stopped by the memory check, not by the time limit")
+
+    def test_a_program_changed_before_the_second_run_is_not_started(self):
+        started = []
+        real_start, real_check = file_reads._start, file_reads._no_other_writer
+
+        def start(args, stdout, stderr):
+            started.append(args)
+            return real_start(args, stdout, stderr)
+        with mock.patch.object(file_reads, "_start", start), mock.patch.object(
+                file_reads, "_no_other_writer", lambda path: not started and real_check(path)):
+            text, _took, calls = self._second_run("echo 'Command Line Error: Incorrect password' >&2; exit 1")
+        self.assertEqual(len(calls), 1, "only the conversion ran")
+        self.assertIn("the file is damaged or no PDF", text)
+
+    def test_a_locked_pdf_tells_the_model_not_to_ask_for_the_password(self):
+        _reset(read_pdf="convert")
+        self.stub("echo 'Command Line Error: Incorrect password' >&2; exit 1")
+        text, _answer = self._convert(pdf_bytes("Invoice 2026"))
+        self.assertIn("do not ask the user for the password", text)
+
+    def test_much_stderr_does_not_stop_pdftotext(self):
+        # a damaged PDF can make pdftotext print a warning per object: the conversion never blocks on its messages
+        _reset(read_pdf="convert")
+        self.stub("/usr/bin/yes 'Syntax Error: a damaged object' | /usr/bin/head -c 2000000 >&2; "
+                  "printf 'Invoice 2026, a text after the warnings\\n'")
+        with mock.patch.object(file_reads, "EXTRACT_SECONDS", 3.0):
+            text, _answer = self._convert(pdf_bytes("Invoice 2026"))
+        self.assertIn("a text after the warnings", text)
+
+    @unittest.skipUnless(REAL_PDFTOTEXT, "no pdftotext that maisecrets trusts (fixed folder, no other writer)")
+    def test_with_the_real_pdftotext(self):
+        p = mock.patch.object(file_reads, "_EXTRA_DIRS", (os.path.dirname(REAL_PDFTOTEXT),))
+        p.start()
+        self.addCleanup(p.stop)
+        locked = locked_pdf_bytes("user-test", "Invoice 2026", f"deploy token {TOKEN}")
+        # only an owner password, and printing (bit 3) and copying (bit 5) forbidden: poppler 26.10.0 converts it
+        restricted = locked_pdf_bytes("", "Invoice 2026", f"deploy token {TOKEN}", perms=-4 - 4 - 16)
+        plain = pdf_bytes("Invoice 2026", f"deploy token {TOKEN}")
+        for mode in ("convert", "ask", "block"):
+            _reset(read_pdf=mode)
+            for name, data in (("locked", locked), ("restricted", restricted), ("damaged", plain[:len(plain) // 3])):
+                with self.subTest(mode=mode, pdf=name):
+                    Path(self.pdf).write_bytes(data)
+                    pre = self.pre()
+                    if mode == "block":
+                        self.assertEqual(decision(pre), "deny")
+                    if mode == "ask":
+                        self.assertEqual(decision(pre), "ask", "the person decides, as for any PDF")
+                        self.post()     # the answer of the call takes its ask note
+                        continue
+                    text, answer = self._convert(data)
+                    self.assertNotIn(TOKEN, json.dumps(answer))
+                    if mode == "block":
+                        self.assertIn("the setting read_pdf is block", text)
+                    elif name == "locked":
+                        self.assertIn(file_reads.LOCKED, text)
+                    elif name == "restricted":
+                        # poppler 26.10.0 converts it; an older poppler may refuse with its exit 3 (Gate A, round 2)
+                        self.assertTrue("Invoice 2026" in text or "does not allow its text to be copied" in text, text)
+                    else:
+                        self.assertIn("the file is damaged or no PDF", text)
+
+
 def bomb_pdf(mib: int) -> bytes:
     """A one-page PDF whose content stream inflates to `mib` MiB of text operators, all at one place on the page: a
     few KB on disk. pdftotext took 4 MiB of them to 234 MB, 16 MiB past 900 MB (poppler 26.10.0, 2026-10-14)."""
@@ -1514,7 +1705,7 @@ class RealPdftotext(unittest.TestCase):
         (d / "bad.pdf").write_bytes(b"not a pdf")
         text, why = file_reads.extract(str(d / "bad.pdf"))
         self.assertIsNone(text)
-        self.assertIn("failed", why)
+        self.assertIn("the file is damaged or no PDF", why)
         shutil.rmtree(d, True)
 
 
