@@ -320,7 +320,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 13 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 336 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 345 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -2133,19 +2133,46 @@ How it works (`docs/PROTOCOL.md` section 4):
    the rule of 2.1.301). The other file is then an old copy, and maisecrets
    never reads or writes it. `/maisecrets:status` names the file. It
    changes nothing else in the file and keeps a backup beside it. You see a
-   notice once. Claude Code reads the header at its next start (measured with
-   2.1.301), so the values come from then on. A server without the field
-   gets no header, and maisecrets asks it again at the earliest after an
-   hour.
+   notice once, with one step: type `/mcp reconnect <server name>` (or start
+   Claude Code again). The reconnect reads the server entry again, its
+   headers included, and every later request carries the header (measured
+   with 2.1.302). A server without the field gets no header, and maisecrets
+   asks it again at the earliest after an hour.
 3. The server links the hash to you when you log in to it. A link that comes
-   from an existing login waits a day and the server tells you; you can
-   confirm it earlier or revoke it there. After a tool result of that server,
-   maisecrets notes the tokens in it. The result does not change.
+   from an existing login waits a day. The server tells you on its own
+   channel; Claude Code does not show a server's notice in the chat
+   (measured with 2.1.302). To use it earlier, activate it on the server's
+   connections page, or sign in to the server again in the browser. You can
+   revoke it there too. After a tool result of that server, maisecrets notes
+   the tokens in it. The result does not change.
 4. When the AI writes such a token into a file or a Bash command, maisecrets
    asks the server for the values, with the key, and puts them in. It gets all
-   values or none; if the server refuses, the call is denied with the reason.
+   values or none. If the server refuses, the call is denied, and the reason
+   names the state of the server and your next step (the table below).
 
-`/maisecrets:status` shows the link state of each server. `client_header:
+`/maisecrets:status` shows the state of each server, with the time of the
+last answer. It asks once per server origin that has a key on this
+computer (an empty request that can return no value); two entries on one
+origin share the key and the answer. At a session start maisecrets asks the
+same question once per such origin, within 5.5 s for all, and tells you in
+one line when a state changed since you last saw it. The deny reason of a Write, Edit or Bash call uses the same words:
+
+| State | What you do (Claude Code) | In Codex |
+|---|---|---|
+| not used yet (no server token seen, or the server names no vault endpoint) | nothing | nothing |
+| header written | type `/mcp reconnect <server name>` (or start Claude Code again) | start Codex again |
+| waiting for activation until `<time>` | activate it on the server's connections page, or sign in to the server again in the browser | the same |
+| active | nothing | nothing |
+| this key is quarantined (used by two accounts) or revoked | nothing: maisecrets makes a new key at the next start, and you see the header step again | the same, then start Codex again |
+| the server's operator switch is off | ask the server's operator | the same |
+
+The server gives the same answer for a quarantined key, a revoked key and a
+key it never saw. maisecrets tells them apart only by its own record: a key
+that the server once answered as active or waiting is "quarantined or
+revoked" now, any other key is "header written". A key that a server bound
+and quarantined before maisecrets asked it once reads as "header written".
+A revoke alone makes maisecrets make a new key at the next start. To stop
+the link for good, turn the feature off: `client_header:
 false` (`/maisecrets:settings client_header false`) turns it off (in Codex at
 the next connection to the server) and removes
 the header again. A server behind a
@@ -2171,8 +2198,10 @@ hold, with three differences:
   does not parse or that lies in a git repository, and keeps a backup in its
   own folder (`~/.maisecrets/vault-refs/`) until the next start that changes
   nothing.
-- The values come from the next start of Codex. Codex shows the notice as a
-  warning of the hook in its terminal UI; `codex exec` does not print it.
+- The values come from the next start of Codex: a new `codex` run sends the
+  header, an open session does not (measured with codex-cli 0.162.0). Codex
+  shows the notice as a warning of the hook in its terminal UI; `codex exec`
+  does not print it.
 - In a repository that brings its own MCP servers, maisecrets notes no token
   and sends no header. Codex vault references need Python 3.11 or later
   (`tomllib`), and they are off on Windows in this version. `apply_patch` and

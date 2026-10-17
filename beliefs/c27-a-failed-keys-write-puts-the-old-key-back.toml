@@ -1,0 +1,11 @@
+# c27-a-failed-keys-write-puts-the-old-key-back: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-failed-keys-write-puts-the-old-key-back"
+control = "C27"
+statement = "When keys.json cannot take the kid of a new key, the old key goes back into the store, so the store and keys.json agree and the next start makes the new key."
+runner = ["tests/test_vault_states.py::States::test_a_failed_keys_write_puts_the_old_key_back_and_the_next_start_tries_again"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''                    _put_key(backend, origin, old)
+                    raise'''
+replace = '''                    raise'''

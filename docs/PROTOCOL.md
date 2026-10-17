@@ -101,9 +101,11 @@ value only to a key that the vault announced when the person logged in.
   entry's server carries a server-range token, and the server's metadata
   (§4.3) names `client_vault_endpoint`. Until then it makes no request and
   changes no file. It writes the header on that one entry, and it tells the
-  person once. A client may read its static headers only at its start
-  (Claude Code 2.1.301 does, measured); the binding then begins at the next
-  start. At a start, the vault puts back a header of such an entry that the
+  person once, with the one step that makes the client send it. Claude Code
+  reads the entry again, its headers included, on `/mcp reconnect <name>`
+  (measured on 2.1.302); a new start does the same. A new Codex run sends it,
+  an open session does not (measured on codex-cli 0.162.0). The binding begins
+  after that step. At a start, the vault puts back a header of such an entry that the
   client lost, and removes its own header from an entry that no longer
   qualifies.
 - The write changes one key of the configuration file. The vault takes the
@@ -274,6 +276,20 @@ missing from a 200 answer.
   an ssh configuration, the client configuration or a file in the client's
   configuration folder is refused, also as a piece of the value
   (`--config=PATH`, `@PATH`, `file://PATH`).
+- **State.** The vault keeps the last answer of the server per origin and
+  key: `header` (the header is written, and the server knows no binding yet),
+  `pending` (with `activates_at`), `active`, `lost` or `disabled`. A
+  `401 unknown_key` is `lost` only when the same key got `pending` or `active`
+  before; the server gives the same answer for a quarantine, a revoke and a key
+  it never saw. The status and the session start ask with the status probe: a
+  resolve with `"refs": []`, which carries no key of a token and can return no
+  value. One probe per origin, only for an origin with a key (so never before a
+  server token), at most once per session start, all origins inside one 5.5 s
+  budget. The session start tells the person a state once, when it differs
+  from the state the person last saw (a notice, a hint, the status). A deny
+  of a resolve names the state and the next step of the person in the same
+  words. At the next start after `lost` the vault makes a new `K` and writes
+  its header; it never uses the old `K` again.
 - **Off.** With the opt-out, no token is noted and no noted token resolves.
 
 ### 4.7 What this does not stop

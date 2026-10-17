@@ -279,8 +279,14 @@ def _key_locked(backend, origin: str, create: bool) -> bytes | None:
     return k
 
 
+def _mine(path: Path) -> dict:
+    """The part of this profile in a file of the vault-refs folder; {} when the file or its shape is damaged."""
+    mine = (_read_json(path) or {}).get(profile())
+    return mine if isinstance(mine, dict) else {}
+
+
 def _known_keys() -> dict:
-    return (_read_json(KEYS) or {}).get(profile()) or {}
+    return _mine(KEYS)
 
 
 def _enabled() -> dict[str, list[tuple[str, str]]]:
@@ -428,11 +434,28 @@ def ensure_headers(cfg: dict, backend) -> str | None:
     request. Returns one line for the session-start message, or None."""
     if not _may_change_config():
         return None
+    # a key the server no longer accepts (quarantined or revoked) is never used again: a new one, and its header below
+    renewed: list[str] = []
+    if cfg.get("client_header", True) is not False:
+        try:
+            renewed = rotate_lost(backend, time.monotonic() + BUDGET)
+        except Exception:  # noqa: BLE001 - a store backend has its own errors; the header repair below still runs
+            renewed = []                        # tried again at the next start; the header repair below still runs
     added, removed, path, backup = _apply_config(cfg, backend)
     parts = []
+    if renewed:
+        hosts = ", ".join(urlsplit(o).hostname or o for o in renewed)
+        # Codex keeps its helper line, so no notice follows there: the step goes here
+        step = f". {reconnect_step('')}".rstrip(".") if is_codex() else ""
+        parts.append(f"maisecrets: {hosts} no longer accepted the key of this computer (quarantined or revoked), so "
+                     f"maisecrets made a new key{step}")
+    told = set(renewed)
     if added:
         # a header that a busy client lock kept from the post-tool hook: its notice comes now (Gate B review)
         parts.extend(_notice(n).rstrip(".") for n in added)
+        told |= {o for o, entries in _enabled().items() if any(n in added for n, _u in entries)}
+    for origin in told:
+        _mark_told(origin, "header")            # the line above tells it: no session-start hint for it
     if removed:
         parts.append(f"maisecrets removed its {HEADER} {'helper' if is_codex() else 'header'} from {len(removed)} "
                      f"MCP server(s) in {path}")
@@ -526,16 +549,41 @@ def enable(cfg: dict, backend, name: str, url: str, deadline: float | None = Non
         added, _removed, _path, _backup_path = _apply_config(cfg, backend, lock_wait=1.0, deadline=deadline)
     except TimeoutError:
         return None
-    return _notice(name) if name in added else None
+    if name not in added:
+        return None
+    try:
+        _mark_told(origin, "header", deadline)      # the notice tells it: no session-start hint for it again
+    except (LockTimeout, OSError):
+        pass
+    return _notice(name)
 
 
 def _notice(name: str) -> str:
     if is_codex():
         from . import codex_vault
         return codex_vault.notice(name)
-    return (f"maisecrets: the MCP server {name} supports {HEADER}. From the next start of Claude Code, maisecrets puts "
-            "this server's values into your local files and commands; the AI still sees only tokens. To turn it off: "
-            "/maisecrets:settings client_header false. More: README, section \"Vault references\".")
+    # measured on Claude Code 2.1.302: `/mcp reconnect <name>` reads the entry again, its headers included, and every
+    # later request carries the new header; no restart is needed
+    return (f"maisecrets: the MCP server {_say_name(name)} supports {HEADER}, and maisecrets wrote its header into "
+            f"the client config. {reconnect_step(name)} Then maisecrets puts this server's values into your local "
+            "files and commands; the AI still sees only tokens. To turn it off: /maisecrets:settings client_header "
+            "false. More: README, section \"Vault references\".")
+
+
+def reconnect_step(name: str) -> str:
+    """The one step after a header write: what makes the client send the new header."""
+    if is_codex():
+        return "Start Codex again (a new codex run sends it)."
+    return f"Type /mcp reconnect {_say_name(name)} (or start Claude Code again)."
+
+
+_NAME_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
+def _say_name(name: object, fallback: str = "<server name>") -> str:
+    """A server name as the texts show it: the name of the entry when it is a plain name, else the fallback. The name
+    comes from the person's own config, but a deny reason goes to the model, so only a plain name goes there."""
+    return name if isinstance(name, str) and _NAME_RE.fullmatch(name) else fallback
 
 
 def _apply_headers(data: dict, keys: dict, urls: dict, ours: set) -> tuple[list[str], list[str]]:
@@ -901,16 +949,17 @@ def _safe_time(value: object) -> str | None:
     return value if isinstance(value, str) and _TIME_RE.fullmatch(value) else None
 
 
-def _why(origin: str, status: int, code: str | None, body: dict, headers: dict, keys: list[str]) -> str:
+def _why(origin: str, status: int, code: str | None, body: dict, headers: dict, keys: list[str],
+         url: str = "", deadline: float | None = None, kid: str | None = None) -> str:
     host = urlsplit(origin).hostname
     names = ", ".join(f"⟦{k}⟧" for k in keys)
-    if code == "unknown_key":
-        return (f"{host} does not know this computer's key yet. It learns it at the next login to that server "
-                "from this client")
-    if code == "pending":
-        when = _safe_time(body.get("activates_at")) or "later"
-        return (f"{host} links this computer from {when}, or earlier when the person confirms the notice the "
-                "server sent them")
+    if code in ("unknown_key", "pending", "disabled"):
+        # the state of the binding, in the words of /maisecrets:status, with the one step the person takes
+        rec = _set_state(origin, code, body.get("activates_at") if code == "pending" else None,
+                         deadline=deadline, kid=kid)
+        name = _entry_name(origin, url)
+        return (f"the state of the MCP server {_say_name(name, host)} ({host}) is: "
+                f"{describe(rec['state'], name or host, rec.get('activates_at'))}")
     if code == "clock_skew":
         return f"the clock of this computer is off by more than 5 minutes for {host}; the person fixes the clock"
     if code == "unknown_ref":
@@ -920,8 +969,6 @@ def _why(origin: str, status: int, code: str | None, body: dict, headers: dict, 
     if code == "rate_limited":
         after = headers.get("retry-after", "")
         return f"{host} reached its limit" + (f"; try again in {after} s" if after.isdigit() else "; try later")
-    if code == "disabled":
-        return f"{host} has switched this off"
     return f"{host} gave no usable answer (HTTP {status})"
 
 
@@ -990,44 +1037,250 @@ def resolve(cfg: dict, backend, keys: list[str], session: str | None,
             if isinstance(values, dict) and all(isinstance(values.get(key), str) for key in mine):
                 for key in mine:
                     out[key] = (values[key], origin)
+                _set_state(origin, "active", deadline=deadline, kid=kid_of(k))
                 continue
             raise Refused(f"{host} gave no usable answer (a value is missing or not text)")
         code = answer.get("error") if answer is not None else None
         code = code if (status, code) in _CODES else None
         if code == "expired":
             forget(mine, origin, url, deadline)     # a fresh sighting starts the time again (contract)
-        raise Refused(_why(origin, status, code, answer or {}, headers, mine))
+        raise Refused(_why(origin, status, code, answer or {}, headers, mine, url, deadline, kid_of(k)))
     return out
 
 
-def probe(cfg: dict, backend, origin: str, url: str) -> str:
-    """The binding state of one origin for /maisecrets:status: a resolve with no tokens."""
-    k = _key(backend, origin, create=False)
+# ---------------------------------------------------------------- the state --
+# The state of the binding of one origin, as the server last answered it, for the key this profile has now. The
+# server answers `401 unknown_key` both before a binding and after a quarantine or a revoke (SPEC 8.4); only a record
+# that this key was bound once (`bound`) tells the two apart. Never K, never a value: the kid, the state, the time.
+STATES = DIR / "states.json"          # profile -> origin -> {"kid", "state", "t", "bound", "activates_at", "told"}
+STATE_WORDS = ("header", "pending", "active", "lost", "disabled")
+
+
+def _kid_now(origin: str) -> str | None:
+    rec = _known_keys().get(origin)
+    kid = rec.get("kid") if isinstance(rec, dict) else None
+    return kid if isinstance(kid, str) else None
+
+
+def state_of(origin: str) -> dict:
+    """The record of this origin for the key of this profile now, or {} (no answer yet, or the key changed)."""
+    return _current(_mine(STATES).get(origin), _kid_now(origin))
+
+
+def _current(rec: object, kid: str | None) -> dict:
+    if not isinstance(rec, dict) or not kid or rec.get("kid") != kid or rec.get("state") not in STATE_WORDS:
+        return {}
+    return rec
+
+
+def _next_state(old: dict, kid: str | None, answer: str, activates_at: object, told: str | None) -> dict:
+    bound = bool(old.get("bound"))
+    state = ("lost" if bound else "header") if answer == "unknown_key" else answer
+    if state in ("active", "pending"):
+        bound = True                    # a 503 alone proves no binding: an allow list can answer it without one
+    rec = {"kid": kid, "state": state, "t": time.time(), "bound": bound}
+    # a server must not put text before the AI: the time is kept only when it is a time (SPEC 8.4)
+    when = _safe_time(activates_at)
+    if state == "pending" and when:
+        rec["activates_at"] = when
+    rec["told"] = told if told is not None else old.get("told")
+    return rec
+
+
+def _same(old: dict, rec: dict) -> bool:
+    """The same answer within a minute: no write in a resolve."""
+    return {k: old.get(k) for k in ("state", "activates_at")} == {k: rec.get(k) for k in ("state", "activates_at")} \
+        and isinstance(old.get("t"), (int, float)) and 0 <= time.time() - old["t"] < 60
+
+
+def _set_state(origin: str, answer: str, activates_at: str | None = None, told: str | None = None,
+               deadline: float | None = None, kid: str | None = None) -> dict:
+    """Record a server answer (`active`, `pending`, `disabled`, `unknown_key`) or a told state. Returns the record.
+    `unknown_key` is `lost` when this key was bound once, else `header`. The old record is read again under the lock,
+    so a parallel answer never takes `bound` back (Gate A review). A busy lock or a failed write keeps the old record
+    on disk; the record is returned all the same, so the reason of a deny still names the state. `kid` is the kid
+    of the key that got the answer: an answer for a key that a new key replaced meanwhile is not written (Gate A
+    review, round 2), it would name the state of the new key."""
+    now = _kid_now(origin)
+    asked = kid or now
+    old = _current(_mine(STATES).get(origin), asked)     # the record of the key that got the answer
+    rec = _next_state(old, asked, answer, activates_at, told)
+    if now and asked != now:
+        return state_of(origin) or rec          # a new key came meanwhile: the reason names the state of that key
+    if not now or (told is None and _same(old, rec)):
+        return old if now and old else rec
+    try:
+        with _own_lock(deadline):
+            if _kid_now(origin) != asked:
+                return state_of(origin) or rec      # a new key came while the answer was on its way
+            data = _read_json(STATES) or {}
+            mine = data.get(profile())
+            if not isinstance(mine, dict):
+                mine = data[profile()] = {}         # a damaged part is written new, not a reason to fail
+            rec = _next_state(_current(mine.get(origin), asked), asked, answer, activates_at, told)
+            mine[origin] = rec
+            atomic_write(STATES, json.dumps(data, indent=1))
+    except (LockTimeout, OSError):
+        pass
+    return rec
+
+
+def _mark_told(origin: str, state: str, deadline: float | None = None) -> None:
+    """The person heard this state (a notice, a session-start hint, the status): no hint for it again."""
+    rec = state_of(origin)
+    if rec.get("state") == state:
+        _set_state(origin, state, rec.get("activates_at"), told=state, deadline=deadline)
+    elif state == "header" and not rec:
+        _set_state(origin, "header", told="header", deadline=deadline)
+
+
+def describe(state: str | None, name: object, activates_at: str | None = None) -> str:
+    """The state of one server in the person's words, with the one next step. `state` None: not used yet."""
+    who = _say_name(name)
+    if state == "header":
+        if is_codex():
+            return "header written — start Codex again"
+        return f"header written — type /mcp reconnect {who} (or start Claude Code again)"
+    if state == "pending":
+        when = activates_at or "a time the server did not give"
+        return (f"waiting for activation until {when} — activate it on the server's connections page, or sign in to "
+                f"{who} again in the browser")
+    if state == "active":
+        return "active"
+    if state == "lost":
+        return ("this key is quarantined (used by two accounts) or revoked — maisecrets makes a new key at the next "
+                f"start of {'Codex' if is_codex() else 'Claude Code'}")
+    if state == "disabled":
+        return "the server's operator switch is off"
+    return "not used yet (no server token seen, or the server names no vault endpoint)"
+
+
+def _entry_name(origin: str, url: str) -> str | None:
+    """The name of the enabled entry with this URL; the first one when two entries share it."""
+    return next((n for n, u in _enabled().get(origin, []) if u == url), None)
+
+
+def check_state(cfg: dict, backend, origin: str, url: str, deadline: float | None = None) -> tuple[dict, str | None]:
+    """The status probe (SPEC 8.5): one resolve with no refs, so no value can come back and none is sent. Returns
+    (the new record, None), or (the last record, why no answer came). Only for an origin with a key: a key exists only
+    after a server token and a vault endpoint, so no request goes out before a server token."""
+    deadline = deadline if deadline is not None else time.monotonic() + BUDGET
+    try:
+        k = _key(backend, origin, create=False, deadline=deadline)
+    except LockTimeout:
+        return state_of(origin), "the store was busy"
     if k is None:
-        return "no key yet (the next token of that server sets it up)"
-    deadline = time.monotonic() + BUDGET
+        return state_of(origin), "this computer has no key for it"
     where = endpoint(cfg, url, deadline)
     if not where:
-        return "the server names no vault endpoint (or could not be reached)"
+        return state_of(origin), "it names no vault endpoint, or it could not be reached"
     try:
         status, headers, raw = _request(cfg, "POST", where, {"Authorization": f"Bearer {bearer_of(k)}",
-                                                             "Content-Type": "application/json"},
+                                                             "Content-Type": "application/json",
+                                                             "Accept": "application/json"},
                                         json.dumps({"now": _now_iso(), "refs": []}).encode(), deadline)
     except _net_errors() as exc:
-        return f"could not be reached ({type(exc).__name__})"
+        return state_of(origin), f"it could not be reached ({type(exc).__name__})"
     try:
         answer = json.loads(raw.decode("utf-8")) if _is_json(headers) and len(raw) <= MAX_ANSWER_BYTES else None
     except (ValueError, RecursionError):
         answer = None
-    answer = answer if isinstance(answer, dict) else {}
-    if status == 200:
-        return "linked"
-    code = answer.get("error")
+    answer = answer if isinstance(answer, dict) else None
+    code = answer.get("error") if answer is not None else None
+    if status == 200 and answer is not None and isinstance(answer.get("values"), dict):
+        return _set_state(origin, "active", deadline=deadline, kid=kid_of(k)), None
     if (status, code) == (403, "pending"):
-        return f"pending until {_safe_time(answer.get('activates_at')) or 'a time the server did not give'}"
+        return _set_state(origin, "pending", answer.get("activates_at"), deadline=deadline, kid=kid_of(k)), None
     if (status, code) == (401, "unknown_key"):
-        return "not linked (the next login to that server links it)"
-    return f"unknown (HTTP {status}{', ' + code if isinstance(code, str) and (status, code) in _CODES else ''})"
+        return _set_state(origin, "unknown_key", deadline=deadline, kid=kid_of(k)), None
+    if (status, code) == (503, "disabled"):
+        return _set_state(origin, "disabled", deadline=deadline, kid=kid_of(k)), None
+    if (status, code) == (403, "clock_skew"):
+        return state_of(origin), "the clock of this computer is off by more than 5 minutes"
+    return state_of(origin), f"no usable answer (HTTP {status})"
+
+
+def _state_line(name: str, origin: str, rec: dict, why: str | None) -> str:
+    text = describe(rec.get("state") or "header", name, rec.get("activates_at"))
+    when = f"checked {_now_iso(rec['t'])}" if isinstance(rec.get("t"), (int, float)) else "no answer yet"
+    if why:
+        return f"vault references: {name} ({origin}): {text} ({when}; not checked now: {why})"
+    return f"vault references: {name} ({origin}): {text} ({when})"
+
+
+def session_check(cfg: dict, backend) -> str | None:
+    """At a session start: one status probe per origin with a header, all inside one BUDGET, and one line for each
+    server whose state changed since the person last heard it. A server that does not answer gives no line."""
+    enabled = _enabled()
+    if _off(cfg) or not enabled:
+        return None                     # no server token seen yet: no config read, no request
+    servers = user_servers()
+    deadline = time.monotonic() + BUDGET
+    lines = []
+    for origin, entries in enabled.items():
+        live = [(n, u) for n, u in entries if servers.get(n) == u]
+        if not live or time.monotonic() >= deadline - 0.2:
+            continue
+        name, url = live[0]
+        try:
+            rec, why = check_state(cfg, backend, origin, url, deadline)
+        except (LockTimeout, OSError):
+            continue
+        state = rec.get("state")
+        if why or not state or state == rec.get("told"):
+            continue
+        lines.append(f"maisecrets: vault references of {_say_name(name)}: "
+                     f"{describe(state, name, rec.get('activates_at'))}.")
+        _mark_told(origin, state, deadline)
+    return " ".join(lines) or None
+
+
+def _put_key(backend, origin: str, k: bytes) -> None:
+    backend.put(_store_name(origin), k.hex(), label="maisecrets vault reference key",
+                comment="maisecrets: the key that gets values back from a server; not a placeholder value.")
+
+
+def rotate_lost(backend, deadline: float | None = None) -> list[str]:
+    """At a session start: a new K for each origin whose server no longer accepts its key (quarantined or revoked). A
+    vault must not use that K again (SPEC 6.4). The entries stay enabled, so the header write that follows puts the
+    new kid on them. Only a key this computer holds, whose kid keys.json and the `lost` record both name, and an entry
+    that the client config still has: local files alone never make a key, so no request goes out before a server
+    token (Gate B review). The check runs again under the locks: two starts at once make one new key (Gate A review).
+    Returns the origins."""
+    out = []
+    servers = None
+    for origin, entries in _enabled().items():
+        if state_of(origin).get("state") != "lost":
+            continue
+        servers = user_servers() if servers is None else servers
+        if not any(servers.get(n) == u for n, u in entries):
+            continue
+        import secrets
+        with _own_lock(deadline):
+            with _store_lock(deadline):
+                old = _key_locked(backend, origin, create=False)
+                kid = _kid_now(origin)
+                if old is None or kid_of(old) != kid or state_of(origin).get("state") != "lost":
+                    continue
+                k = secrets.token_bytes(32)
+                _put_key(backend, origin, k)
+                try:
+                    data = _read_json(KEYS) or {}
+                    mine = data.get(profile()) if isinstance(data.get(profile()), dict) else {}
+                    rec = mine.get(origin)
+                    entries = rec.get("entries") if isinstance(rec, dict) and isinstance(rec.get("entries"), list) \
+                        else []
+                    mine[origin] = {"kid": kid_of(k), "created": _now_iso(), "entries": entries}
+                    data[profile()] = mine
+                    atomic_write(KEYS, json.dumps(data, indent=1))
+                except BaseException:
+                    # keys.json still names the old kid: the old key goes back, so the store and keys.json agree and
+                    # the next start tries again. Kept, the new key would never match keys.json, and no start would
+                    # replace it again (Gate A and Gate B review, round 2)
+                    _put_key(backend, origin, old)
+                    raise
+        out.append(origin)
+    return out
 
 
 def remember_released(backend, session: str | None, values: dict[str, tuple[str, str]]) -> None:
@@ -1152,12 +1405,20 @@ def status_lines(cfg: dict, backend, check: bool = True) -> list[str]:
     servers = user_servers()
     if not servers:
         return lines + ["vault references: no user-scope MCP server with an https URL"]
+    probed: dict[str, tuple[dict, str | None]] = {}
     for name, url in servers.items():
         origin = origin_of(url)
         if not _is_enabled(name, url):
-            lines.append(f"vault references: {name} ({origin}): not in use (the server sent no token yet, or it "
-                         "names no vault endpoint)")
+            lines.append(f"vault references: {name} ({origin}): {describe(None, name)}")
             continue
-        state = probe(cfg, backend, origin, url) if check else "not checked"
-        lines.append(f"vault references: {name} ({origin}): {state}")
+        if not check:
+            lines.append(_state_line(name, origin, state_of(origin), "not asked"))
+            continue
+        if origin not in probed:                # one probe per origin: one key, one binding
+            probed[origin] = check_state(cfg, backend, origin, url)
+            rec, why = probed[origin]
+            if not why and rec.get("state"):
+                _mark_told(origin, rec["state"])    # the person reads it here: no session-start hint for it
+        rec, why = probed[origin]
+        lines.append(_state_line(name, origin, rec, why))
     return lines
