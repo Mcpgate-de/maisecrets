@@ -101,7 +101,9 @@ def _session_folder(session: str) -> str | None:
 
 
 def _first_folder(session: str, cwd: str, moved: bool = True) -> str | None:
-    """The first folder recorded for this session; this cwd when there is none yet. None when the file is damaged."""
+    """The first folder recorded for this session; this cwd when there is none yet. None when the file is damaged.
+    A later SessionStart of the same session (a resume, a new Codex process that merges the layers again) can only
+    raise `moved`, never lower it, and so can a start in another folder (Fable review of !94)."""
     SESSIONS.parent.mkdir(mode=0o700, parents=True, exist_ok=True)     # a first start: the folder is not there yet
     with _lock_for(SESSIONS.parent / ".lock"):
         try:
@@ -112,11 +114,14 @@ def _first_folder(session: str, cwd: str, moved: bool = True) -> str | None:
             return None
         data = data if isinstance(data, dict) else {}
         rec = data.get(session)
-        if isinstance(rec, dict) and isinstance(rec.get("cwd"), str):
-            return rec["cwd"]
         now = time.time()
         data = {k: v for k, v in data.items() if isinstance(v, dict) and isinstance(v.get("t"), (int, float))
                 and now - v["t"] < SESSION_TTL}
+        if isinstance(rec, dict) and isinstance(rec.get("cwd"), str):
+            raised = rec.get("moved") is not False or bool(moved) or rec["cwd"] != cwd
+            data[session] = {"cwd": rec["cwd"], "t": now, "moved": raised}
+            atomic_write(SESSIONS, json.dumps(data, indent=1))
+            return rec["cwd"]
         data[session] = {"cwd": cwd, "t": now, "moved": bool(moved)}
         atomic_write(SESSIONS, json.dumps(data, indent=1))
         return cwd

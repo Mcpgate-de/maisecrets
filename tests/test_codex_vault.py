@@ -323,6 +323,21 @@ class ToolNames(Base):
         layer.unlink()
         self.assertIsNone(codex_vault.mcp_server_of(self.payload(repo, "s-del")))
 
+    def test_a_resumed_session_keeps_the_worse_answer(self) -> None:
+        """A clean start, then a resume after a layer was planted (Codex merges it again), then the layer goes: the
+        session notes nothing (Fable review of !94: fable/resume_probe.py)."""
+        self.write()
+        repo = self.tmp / "repo"
+        (repo / ".codex").mkdir(parents=True)
+        codex_vault.note_session({"session_id": "s-res", "cwd": str(repo)})
+        layer = repo / ".codex" / "config.toml"
+        layer.write_text('[mcp_servers.demo]\nurl = "https://b.example.net/mcp"\n')
+        codex_vault.note_session({"session_id": "s-res", "cwd": str(repo)})
+        layer.unlink()
+        self.assertIsNone(codex_vault.mcp_server_of(self.payload(repo, "s-res")))
+        codex_vault.note_session({"session_id": "s-res", "cwd": str(repo)})
+        self.assertIsNone(codex_vault.mcp_server_of(self.payload(repo, "s-res")), "a clean resume lowers nothing")
+
     def test_a_layer_that_renames_the_tools_counts_as_one_with_servers(self) -> None:
         proj = self.tmp / "proj"
         (proj / ".codex").mkdir(parents=True)
