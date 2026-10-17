@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.6.34] - 2026-10-17
+
+### Fixes
+
+- ms:(…) keeps passwords with # < > as credentials and scrubs random letters alone (1453166)
+- ms:(…) also stores random passwords with $, = or < in them, and judges each value alone (1ea083f)
+- ms:(…) stores only a value that looks like a credential, and checks several values one by one (ef30391)
+
 ## [0.6.33] - 2026-10-17
 
 ### Features
