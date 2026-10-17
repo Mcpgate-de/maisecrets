@@ -1,0 +1,10 @@
+# c27-codex-a-tool-part-with-the-delimiter-is-ambiguous: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-tool-part-with-the-delimiter-is-ambiguous"
+control = "C27"
+statement = "A Codex tool name whose tool part holds `__` maps to no entry: a server `a__b` that the hook cannot see makes the same name."
+runner = ["tests/test_codex_vault.py::ToolNames::test_every_server_codex_knows_takes_part_in_the_name_rule"]
+
+[proof]
+file = "maisecrets/codex_vault.py"
+find = ''' or "__" in tool[len(namespace(hits[0])) + 2:]:'''
+replace = ''':'''

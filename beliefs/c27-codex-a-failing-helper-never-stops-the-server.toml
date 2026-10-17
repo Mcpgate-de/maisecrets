@@ -1,0 +1,10 @@
+# c27-codex-a-failing-helper-never-stops-the-server: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-failing-helper-never-stops-the-server"
+control = "C27"
+statement = "The helper command ends in a fallback that prints {}: a helper that fails would stop Codex from connecting to the server (measured)."
+runner = ["tests/test_codex_vault.py::Helper::test_a_missing_python_or_helper_still_answers"]
+
+[proof]
+file = "maisecrets/codex_vault.py"
+find = '''" 2>/dev/null || echo '{}'"'''
+replace = '''" 2>/dev/null"'''

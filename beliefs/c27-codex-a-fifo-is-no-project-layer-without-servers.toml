@@ -1,0 +1,10 @@
+# c27-codex-a-fifo-is-no-project-layer-without-servers: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-fifo-is-no-project-layer-without-servers"
+control = "C27"
+statement = "A Codex project layer that is no regular file (a FIFO) counts as a layer with servers: no header, and the helper does not wait on it."
+runner = ["tests/test_codex_vault.py::ToolNames::test_a_fifo_in_a_project_layer_does_not_hang"]
+
+[proof]
+file = "maisecrets/codex_helper.py"
+find = '''            if not stat.S_ISREG(os.fstat(fd).st_mode):'''
+replace = '''            if False:'''

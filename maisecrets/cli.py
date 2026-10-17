@@ -389,9 +389,17 @@ def cmd_status(_: list[str]) -> int:
         except OSError:
             n = 0
         print(f"{name}: {n} lines")
-    from . import vault_refs
+    from . import codex_vault, vault_refs
     for line in vault_refs.status_lines(v.cfg, v.backend):
         print(line)
+    if codex_vault.config_path().is_file():
+        # the command does not know which client started it: the Codex profile gets its own lines when it exists
+        vault_refs.use_client("codex")
+        try:
+            for line in vault_refs.status_lines(v.cfg, v.backend):
+                print(line)
+        finally:
+            vault_refs.use_client("claude")
     from . import incidents
     groups, damaged = incidents.load()
     markers = incidents.unfolded_markers()

@@ -1,0 +1,10 @@
+# c27-codex-a-profile-can-move-the-entry: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-profile-can-move-the-entry"
+control = "C27"
+statement = "A user config that selects a profile, or has servers in a profile, gives the entry no header and notes nothing: the profile can give it another URL."
+runner = ["tests/test_codex_vault.py::ToolNames::test_a_profile_of_the_user_names_nothing"]
+
+[proof]
+file = "maisecrets/codex_helper.py"
+find = '''if not isinstance(data, dict) or "profile" in data or _mentions_servers(data.get("profiles")):'''
+replace = '''if not isinstance(data, dict):'''
