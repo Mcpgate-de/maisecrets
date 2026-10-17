@@ -6,5 +6,5 @@ runner = ["tests/test_check_value.py::AlwaysBlockedTests::test_every_check_is_bl
 
 [proof]
 file = "maisecrets/check_value.py"
-find = "    value = rest[:close] if close >= 0 else rest\n"
-replace = "    if close < 0:\n        return None\n    value = rest[:close]\n"
+find = "            groups.append((_trim(rest[:close] if close >= 0 else rest), is_exact))\n"
+replace = "            if close < 0:\n                return None\n            groups.append((_trim(rest[:close]), is_exact))\n"
