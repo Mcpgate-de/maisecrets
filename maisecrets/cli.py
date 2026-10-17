@@ -609,9 +609,8 @@ def place_guard_script() -> bool:
 
 def _active_account() -> str:
     """<organizationUuid>_<accountUuid> of the account this Claude Code runs as (the guard compares it)."""
-    from pathlib import Path as _P
-    cfg_dir = os.environ.get("CLAUDE_CONFIG_DIR")
-    path = _P(cfg_dir) / ".claude.json" if cfg_dir else _P.home() / ".claude.json"
+    from .vault_refs import claude_json
+    path = claude_json()                        # the file the client uses, as the guard reads it
     try:
         acc = json.loads(path.read_text(encoding="utf-8")).get("oauthAccount") or {}
     except (OSError, ValueError, AttributeError):

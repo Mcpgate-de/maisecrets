@@ -1,0 +1,10 @@
+# c29-a-check-prompt-is-always-blocked: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c29-a-check-prompt-is-always-blocked"
+control = "C29"
+statement = "A typed prompt that starts with ms:( is blocked on Claude Code and Codex, whatever the verdict; it never reaches the model."
+runner = ["tests/test_check_value.py::AlwaysBlockedTests::test_every_check_is_blocked_with_and_without_the_closing_bracket"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        return _check_value(payload, value)\n"
+replace = "        pass\n"

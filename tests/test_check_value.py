@@ -1,0 +1,425 @@
+"""ms:(…): the person checks whether maisecrets would catch a value, and the value never reaches the model
+(maisecrets/check_value.py, hooks._check_value, README "Check a value first").
+
+The rules under test: a prompt that starts with ms:( is always blocked, also without the closing bracket; the verdict is
+the one the normal prompt path gives for the same value; the answer names types and rule ids and never the value; a
+value no rule caught is stored as /maisecrets:put stores it, where storing is allowed and helps; the transcript loses
+the prompt as typed. Synthetic values only; a placeholder is built from OPEN and CLOSE, so the file holds none.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
+Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
+
+from maisecrets import check_value, detect, hooks, incidents, settings, terms, user_rules  # noqa: E402
+from maisecrets.placeholder import CLOSE, OPEN  # noqa: E402
+from maisecrets.vault import HOME, Vault  # noqa: E402
+import _hygiene  # noqa: E402
+from _hygiene import CLAUDE, CODEX  # noqa: E402
+
+CONFIG = '{"backend": "jsonfile", "allow_plaintext_store": true}'
+GLPAT = "glpat-" + "A1b2C3d4E5f6G7h8I9j0"          # a rule catches it (gitlab-pat)
+ALLOWED = "glpat-" + "Q9w8E7r6T5y4U3i2O1p0"        # a rule would catch it; the allow list allows it
+PASSWORD = "Wq7-" + "pLm2xZr9Tv"                   # no shape: caught only when the store holds it
+UNSEEN = "Hv4-" + "kTr8mZq2Wx"                     # no shape and not stored: not caught
+MAIL = "jane.roe" + "@probe-mail.de"               # a rule catches it; `rule: email` switches the rule off
+NAME = "Zbigniew " + "Testowski"                   # a term
+STATE = ("index.json", "vault.json", "audit.log", "hooks.log", "events.log", "terms.txt", "terms.marked.json",
+         ".terms-state", ".terms-cache", "allow.txt", "hints.json")
+# the files that hold a value by design: the plaintext test store, the term list and the allow list
+HOLD_VALUES = ("vault.json", "terms.txt", "terms.marked.json", ".terms-cache", "allow.txt")
+
+
+def _clean() -> None:
+    for f in STATE:
+        Path(HOME, f).unlink(missing_ok=True)
+    shutil.rmtree(Path(HOME, "pending"), ignore_errors=True)
+    Path(HOME, "config.json").write_text(CONFIG)
+    incidents.clear(Path(HOME))
+    hooks._live_cache.clear()
+    detect.reset_rules()
+
+
+def setUpModule():  # noqa: N802 - unittest hook
+    _clean()
+
+
+def tearDownModule():  # noqa: N802 - unittest hook
+    _clean()
+    _hygiene.assert_pristine()
+
+
+def _prompt(prompt: str, client=CLAUDE, session: str = "S1", **extra) -> dict:
+    hooks._live_cache.clear()
+    payload = {"hook_event_name": "UserPromptSubmit", "prompt": prompt, "session_id": session, "transcript_path": "",
+               "source": "user", **client, **extra}
+    if client is CODEX:
+        del payload["source"]          # Codex sends none
+    return hooks.user_prompt(payload)
+
+
+def _hits() -> list:
+    """(type, rule) of the last detection the events log records: what the prompt path took out."""
+    try:
+        lines = Path(HOME, "events.log").read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    events = [json.loads(x) for x in lines if '"hits"' in x]
+    return sorted((h["type"], h["kind"]) for h in events[-1]["hits"]) if events else []
+
+
+def _home_text() -> str:
+    parts = []
+    for p in Path(HOME).rglob("*"):
+        if p.is_file() and p.name not in HOLD_VALUES:
+            parts.append(p.read_bytes().decode("utf-8", errors="replace"))
+    return "\n".join(parts)
+
+
+class _Base(unittest.TestCase):
+    def setUp(self):
+        _clean()
+        self.addCleanup(_clean)
+        self.copied = []
+        _hygiene.patch(self, hooks, "_clipboard", lambda t: self.copied.append(t) or True)
+        self.scrubs = []
+        _hygiene.patch(self, hooks, "_scrub_transcript_later",
+                       lambda path, values, refs, seconds=15.0, session=None, hidden=False:
+                       self.scrubs.append(list(values)))
+
+
+class ParseTests(unittest.TestCase):
+    def test_only_a_prompt_that_starts_with_ms_bracket_is_a_check(self):
+        for p in ("ms:(x)", "  ms:(x)", "\n\tms:(x", "Ms:(x)", "MS:(x)", "ms:()", "ms:(", "ms: (x)", "ms : ( x",
+                  "ms\uff1a\uff08x\uff09", "ms:\uff08x"):
+            self.assertIsNotNone(check_value.parse(p), p)
+        for p in ("ms:", "ms: x", "ms: see (x)", "ms (x)", "ms(x)", "see ms:(x)", "#ms:(x)", "ms:[x]", "/ms:(x)", "",
+                  None, 3):
+            self.assertIsNone(check_value.parse(p), p)
+
+    def test_every_blank_the_mod_takes_is_taken_here_too(self):
+        # the blanks of JavaScript's \s (claude-mod/maisecrets-mod.mjs CHECK): the mod passes such a prompt on as a
+        # check, so the hook must block it as one
+        js_blanks = "\t\n\v\f\r \u00a0\u1680" + "".join(map(chr, range(0x2000, 0x200B))) + \
+            "\u2028\u2029\u202f\u205f\u3000\ufeff"
+        for ch in js_blanks + "\u200b\u200c\u200d\u2060":
+            self.assertEqual(check_value.parse(ch + "ms:(x)"), "x", hex(ord(ch)))
+
+    def test_the_value_ends_at_the_last_bracket_or_at_the_end(self):
+        self.assertEqual(check_value.parse("ms:(a)b)"), "a)b")
+        self.assertEqual(check_value.parse("ms:(pa(ss)"), "pa(ss")
+        self.assertEqual(check_value.parse("ms:(abc"), "abc")
+        self.assertEqual(check_value.parse("ms:(abc) and more"), "abc")
+        self.assertEqual(check_value.parse("ms\uff1a\uff08abc\uff09"), "abc")
+
+    def test_one_blank_at_most_goes_on_each_side(self):
+        self.assertEqual(check_value.parse("ms:( abc )"), "abc")
+        self.assertEqual(check_value.parse("ms:(  abc  )"), " abc ")
+        self.assertEqual(check_value.parse("ms:(abc "), "abc")
+
+    def test_a_key_on_its_own_lines_keeps_its_lines(self):
+        key = "-----BEGIN " + "KEY-----\nAAAA\nBBBB\n-----END " + "KEY-----"
+        self.assertEqual(check_value.parse(f"ms:(\n{key}\n)"), key)
+        self.assertEqual(check_value.parse(f"ms:(\r\n{key}\r\n)"), key)
+        self.assertEqual(check_value.parse(f"ms:(\n{key}\n"), key)
+
+
+class AlwaysBlockedTests(_Base):
+    def test_every_check_is_blocked_with_and_without_the_closing_bracket(self):
+        Vault().put(PASSWORD, "SECRET", "manual")
+        for value in (GLPAT, PASSWORD, UNSEEN, "hello world", "", MAIL):
+            for prompt in (f"ms:({value})", f"ms:({value}", f"  Ms:( {value} "):
+                for client in (CLAUDE, CODEX):
+                    with self.subTest(prompt=prompt[:7], client=client):
+                        out = _prompt(prompt, client=client)
+                        self.assertEqual(out.get("decision"), "block")
+                        if client is CLAUDE:
+                            self.assertTrue(out["hookSpecificOutput"]["suppressOriginalPrompt"])
+                        self.assertIn("This prompt was not sent", out["reason"])
+
+    def test_a_check_from_a_program_or_a_subagent_is_blocked_too(self):
+        for extra in ({"source": "scheduled"}, {"agent_id": "a1"}):
+            out = _prompt(f"ms:({UNSEEN})", **extra)
+            self.assertEqual(out["decision"], "block")
+            self.assertIn("It was not stored", out["reason"])
+            self.assertFalse(Path(HOME, "vault.json").exists() and UNSEEN in Path(HOME, "vault.json").read_text())
+
+    def test_the_mod_gets_a_drop_with_the_verdict_and_never_a_text(self):
+        for prompt, said in ((f"ms:({GLPAT})", "SECRET (gitlab-pat)"), (f"ms:({GLPAT}", "SECRET (gitlab-pat)"),
+                             (f" ms:( {UNSEEN} )", "It is now stored")):
+            out = hooks.rewrite_prompt({"prompt": prompt, "session_id": "S1", "origin": "composer"})
+            self.assertEqual(sorted(out), ["drop"], "a check is never rewritten")
+            self.assertIn(said, out["drop"])
+            self.assertNotIn(GLPAT, out["drop"])
+            self.assertNotIn(UNSEEN, out["drop"])
+        self.assertTrue(any(s[0] == f" ms:( {UNSEEN} )" for s in self.scrubs), "the transcript scrub starts")
+
+    def test_a_check_through_the_mod_from_a_program_stores_nothing(self):
+        out = hooks.rewrite_prompt({"prompt": f"ms:({UNSEEN})", "session_id": "S1", "origin": "sdk"})
+        self.assertIn("It was not stored", out["drop"])
+        self.assertFalse(Path(HOME, "index.json").exists())
+
+    def test_a_near_form_is_blocked_but_stores_nothing(self):
+        for prompt in (f"ms: ({UNSEEN})", f"MS : ( {UNSEEN} ) and more", f"ms\uff1a\uff08{UNSEEN}\uff09"):
+            out = _prompt(prompt)
+            self.assertEqual(out["decision"], "block")
+            self.assertIn("does not start with ms:( exactly", out["reason"])
+        self.assertFalse(Path(HOME, "index.json").exists())
+
+    def test_a_check_saves_no_pending_prompt_and_copies_nothing(self):
+        _prompt(f"ms:({GLPAT})")
+        _prompt(f"ms:({UNSEEN})")
+        self.assertFalse(Path(HOME, "pending").exists(), "/maisecrets:send must have nothing of a check to send")
+        self.assertEqual(self.copied, [])
+
+
+class SameVerdictTests(_Base):
+    """For each kind of value, ms:(v) gives the verdict that the normal prompt v gives: caught or not, with the same
+    types and rules. Each side runs from the same state of the store, the terms and the allow list."""
+
+    CASES = {
+        "a rule": (GLPAT, None),
+        "a stored value only": (PASSWORD, "store"),
+        "a term": (NAME, "term"),
+        "allowed by the allow list (a value)": (ALLOWED, "allow-value"),
+        "allowed by the allow list (a rule)": (MAIL, "allow-rule"),
+        "not caught": (UNSEEN, None),
+    }
+
+    def _arrange(self, how) -> None:
+        _clean()
+        if how == "store":
+            Vault().put(PASSWORD, "SECRET", "manual", session="S0")
+        elif how == "term":
+            terms.PERSONAL.write_text(f"PERSON_A  {NAME}\n", encoding="utf-8")
+            os.chmod(terms.PERSONAL, 0o600)
+        elif how == "allow-value":
+            user_rules.ALLOW_FILE.write_text(ALLOWED + "\n", encoding="utf-8")
+        elif how == "allow-rule":
+            user_rules.ALLOW_FILE.write_text("rule: email\n", encoding="utf-8")
+        detect.reset_rules()
+        hooks._live_cache.clear()
+
+    def test_ms_and_the_normal_prompt_give_the_same_verdict(self):
+        seen = set()
+        for name, (value, how) in self.CASES.items():
+            with self.subTest(name):
+                self._arrange(how)
+                normal = _prompt(value)
+                normal_caught = normal.get("decision") == "block"
+                normal_hits = _hits() if normal_caught else []
+                self._arrange(how)
+                check = _prompt(f"ms:({value})")
+                self.assertEqual(check["decision"], "block")
+                check_caught = check["reason"].startswith("✓ maisecrets would mask this")
+                self.assertEqual(check_caught, normal_caught)
+                self.assertEqual(check["reason"].startswith(check_value.NOT_CAUGHT), not normal_caught)
+                self.assertEqual(_hits() if check_caught else [], normal_hits)
+                for type_, kind in normal_hits:
+                    self.assertIn(check_value.hit_label(type_, kind, stored=kind == "manual"), check["reason"])
+                seen.add(normal_caught)
+        self.assertEqual(seen, {True, False}, "the cases cover both verdicts")
+
+    def test_the_allow_list_is_named_and_nothing_is_stored(self):
+        for value, how, why in ((ALLOWED, "allow-value", "allows this exact value"),
+                                (MAIL, "allow-rule", "switches off the rule email")):
+            self._arrange(how)
+            out = _prompt(f"ms:({value})")
+            self.assertIn(why, out["reason"])
+            self.assertIn("It was not stored", out["reason"])
+            self.assertFalse(Path(HOME, "index.json").exists())
+
+    def test_several_hits_are_all_named(self):
+        out = _prompt(f"ms:({GLPAT} {MAIL})")
+        self.assertIn("SECRET (gitlab-pat)", out["reason"])
+        self.assertIn("EMAIL (email)", out["reason"])
+
+    def test_a_private_key_over_several_lines_is_caught_whole(self):
+        body = "\n".join("MIIEowIBAAKCAQEA" + c * 48 for c in "xyzw")
+        key = "-----BEGIN " + "RSA PRIVATE KEY-----\n" + body + "\n-----END " + "RSA PRIVATE KEY-----"
+        normal = _prompt(key)
+        self.assertEqual(normal["decision"], "block")
+        hits = _hits()
+        _clean()
+        out = _prompt(f"ms:(\n{key}\n)")
+        self.assertTrue(out["reason"].startswith("✓"), out["reason"])
+        self.assertEqual(_hits(), hits)
+
+
+class NeverTheValueTests(_Base):
+    def test_no_answer_and_no_file_but_the_store_holds_the_value(self):
+        Vault().put(PASSWORD, "SECRET", "manual")
+        hooks._live_cache.clear()
+        for value in (GLPAT, PASSWORD, UNSEEN, MAIL, NAME, "zz-short", "two words here"):
+            for client in (CLAUDE, CODEX):
+                out = _prompt(f"ms:({value})", client=client)
+                self.assertNotIn(value, json.dumps(out, ensure_ascii=False))
+                self.assertNotIn(value, _home_text())
+        for scrub in self.scrubs:
+            self.assertTrue(any(s.startswith("ms:(") for s in scrub), "the scrub takes the prompt as typed")
+
+    def test_the_transcript_loses_the_prompt_as_typed(self):
+        for prompt in (f"ms:({GLPAT})", f"ms:( {UNSEEN}", "ms:(\npassword: " + PASSWORD + "z\nline two\n)"):
+            with tempfile.TemporaryDirectory() as d:
+                t = Path(d, "t.jsonl")
+                t.write_text(json.dumps({"type": "user", "message": {"content": prompt}}) + "\n", encoding="utf-8")
+                hooks._live_cache.clear()
+                hooks.user_prompt({"prompt": prompt, "session_id": "S1", "transcript_path": str(t), "source": "user",
+                                   **CLAUDE})
+                text = t.read_text(encoding="utf-8")
+                for value in (GLPAT, UNSEEN, PASSWORD):
+                    self.assertNotIn(value, text)
+                self.assertNotIn(json.dumps(prompt)[1:-1], text)
+                json.loads(text)            # the record stays valid JSON
+
+    def test_a_failed_check_still_loses_the_prompt_as_typed(self):
+        # the hook could not finish (a damaged index, a config error, the watchdog): the scrub of the failure path
+        # masks the check's prompt, which the detector alone does not find (Gate A and Gate B, round 1)
+        prompt = f"ms:( {UNSEEN}"
+        with tempfile.TemporaryDirectory() as d:
+            t = Path(d, "t.jsonl")
+            t.write_text(json.dumps({"type": "user", "message": {"content": prompt}}) + "\n", encoding="utf-8")
+            hooks._scrub_failed_prompt_now(prompt, str(t))
+            self.assertNotIn(UNSEEN, t.read_text(encoding="utf-8"))
+
+    def test_a_failed_check_starts_the_late_scrub_before_the_detector(self):
+        # the record comes after the hook; a detector that outlasts the child must not stop the late scrub
+        prompt = f"ms:( {UNSEEN}"
+
+        class Killed(BaseException):
+            """the child's alarm ends the process in the middle of the scan: nothing after it runs"""
+
+        def slow(*_a, **_k):
+            raise Killed()
+        _hygiene.patch(self, hooks.detect, "scan", slow)
+        with self.assertRaises(Killed):
+            hooks._scrub_failed_prompt_now(prompt, "/nonexistent/t.jsonl")
+        self.assertTrue(any(prompt in s for s in self.scrubs), self.scrubs)
+
+    def test_a_check_of_a_word_keeps_the_transcript_whole(self):
+        # a value such as `true` or `content` is masked as the prompt that holds it, never in every record
+        with tempfile.TemporaryDirectory() as d:
+            t = Path(d, "t.jsonl")
+            for word in ("true", "content", "message", "permissionMode"):
+                prompt = f"ms:({word})"
+                rec = {"type": "user", "isMeta": True, "message": {"role": "user", "content": prompt},
+                       "permissionMode": "default"}
+                t.write_text(json.dumps(rec) + "\n", encoding="utf-8")
+                hooks._live_cache.clear()
+                hooks.user_prompt({"prompt": prompt, "session_id": "S1", "transcript_path": str(t), "source": "user",
+                                   **CLAUDE})
+                got = json.loads(t.read_text(encoding="utf-8"))
+                self.assertEqual(sorted(got), sorted(rec), word)
+                self.assertTrue(got["isMeta"], word)
+                self.assertNotIn(prompt, got["message"]["content"])
+
+    def test_the_scrub_setting_off_starts_no_scrub(self):
+        Path(HOME, "config.json").write_text(CONFIG[:-1] + ', "scrub_transcript": false}')
+        _prompt(f"ms:({GLPAT})")
+        self.assertEqual(self.scrubs, [])
+
+
+class StoreTests(_Base):
+    def test_a_value_no_rule_caught_is_stored_and_caught_from_then_on(self):
+        out = _prompt(f"ms:({UNSEEN})")
+        self.assertIn("It is now stored (" + OPEN + "SECRET_c1" + CLOSE + "). From now on it is masked wherever it "
+                      "stands as a word of its own.", out["reason"])
+        self.assertEqual(Vault().get("SECRET_c1", session="S1"), (UNSEEN, "ok"))
+        meta = json.loads(Path(HOME, "index.json").read_text())["entries"]["SECRET_c1"]
+        self.assertEqual((meta["type"], meta["kind"]), ("SECRET", "manual"), "as /maisecrets:put stores it")
+        self.assertEqual(_prompt(f"please use {UNSEEN} here")["decision"], "block")
+        again = _prompt(f"ms:({UNSEEN})")
+        self.assertIn("SECRET (stored value)", again["reason"])
+
+    def test_a_value_with_spaces_is_stored_and_the_answer_says_where_it_is_found(self):
+        out = _prompt("ms:(correct horse battery staple)")
+        self.assertIn("It is now stored", out["reason"])
+        self.assertIn("Inside a sentence maisecrets does not find it", out["reason"])
+        self.assertEqual(_prompt("correct horse battery staple")["decision"], "block")
+
+    def test_storing_is_refused_where_it_is_not_allowed_or_would_not_help(self):
+        for prompt, why in ((f"ms:({UNSEEN[:6]})", "only from 8 characters"),
+                            (f"ms:({UNSEEN}\n{UNSEEN})", "more than one line")):
+            out = _prompt(prompt)
+            self.assertIn(why, out["reason"])
+            self.assertIn("It was not stored" if "line" in why else "so it was not stored", out["reason"])
+        self.assertFalse(Path(HOME, "index.json").exists())
+
+    def test_a_placeholder_next_to_a_value_does_not_hide_the_verdict(self):
+        out = _prompt("ms:(" + OPEN + "SECRET_c9" + CLOSE + f" {GLPAT})")
+        self.assertIn("SECRET (gitlab-pat)", out["reason"])
+        out = _prompt("ms:(" + OPEN + "SECRET_c9" + CLOSE + f" {UNSEEN})")
+        self.assertIn("It holds a maisecrets placeholder, so it was not stored", out["reason"])
+
+    def test_an_empty_check_and_a_placeholder_store_nothing(self):
+        self.assertIn("put the value between the brackets", _prompt("ms:()")["reason"])
+        self.assertIn("this is a maisecrets placeholder", _prompt("ms:(" + OPEN + "SECRET_c9" + CLOSE + ")")["reason"])
+        self.assertFalse(Path(HOME, "index.json").exists())
+
+
+class TipTests(_Base):
+    def test_claude_code_names_the_check_once_under_a_blocked_prompt(self):
+        first = _prompt(f"check {GLPAT} in CI")
+        self.assertIn(check_value.TIP_CLAUDE, first["reason"])
+        second = _prompt(f"check {GLPAT} in CI")
+        self.assertNotIn(check_value.TIP_CLAUDE, second["reason"])
+        ok, _ = settings.apply_typed("hints", "reset")
+        self.assertTrue(ok)
+        self.assertIn(check_value.TIP_CLAUDE, _prompt(f"check {GLPAT} in CI")["reason"])
+
+    def test_the_mod_gets_the_tip_once(self):
+        first = hooks.rewrite_prompt({"prompt": f"check {GLPAT} in CI", "session_id": "S1"})
+        self.assertEqual(first.get("tip"), check_value.TIP_CLAUDE)
+        self.assertNotIn("tip", hooks.rewrite_prompt({"prompt": f"check {GLPAT} in CI", "session_id": "S1"}))
+
+    def test_codex_gets_no_tip_in_its_block_notice(self):
+        out = _prompt(f"check {GLPAT} in CI", client=CODEX)
+        self.assertNotIn("ms:(", out["reason"])
+
+    def test_tips_off_gives_no_tip(self):
+        Path(HOME, "config.json").write_text(CONFIG[:-1] + ', "tips": false}')
+        self.assertNotIn("ms:(", _prompt(f"check {GLPAT} in CI")["reason"])
+
+    def test_the_settings_list_names_the_hint(self):
+        self.assertIn("Check a value with ms:(…) · not shown yet", "\n".join(settings._hint_lines()))
+        _prompt(f"check {GLPAT} in CI")
+        self.assertIn("Check a value with ms:(…) · shown", "\n".join(settings._hint_lines()))
+
+    @unittest.skipIf(os.name == "nt", "run.sh: the session start of a POSIX launcher")
+    def test_codex_names_the_check_once_at_the_session_start(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            (home / "store").mkdir()
+            (home / "store" / "config.json").write_text(CONFIG)
+            env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX_"))}
+            env.update({"HOME": str(home), "MAISECRETS_" + "HOME": str(home / "store"), "PYTHONDONTWRITEBYTECODE": "1"})
+            payload = {"session_id": "S2", "source": "startup", "hook_event_name": "SessionStart",
+                       "transcript_path": str(home / ".codex" / "sessions" / "r.jsonl")}
+
+            def start() -> str:
+                r = subprocess.run(["bash", str(ROOT / "hooks" / "run.sh"), "session-start"],
+                                   input=json.dumps(payload), capture_output=True, text=True, env=env, timeout=60)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                return json.loads(r.stdout).get("systemMessage", "")
+            self.assertIn(check_value.TIP_CODEX, start())
+            self.assertNotIn("ms:(", start())
+            payload["transcript_path"] = str(home / ".claude" / "projects" / "p" / "r.jsonl")
+            (home / "store" / "hints.json").unlink()
+            self.assertNotIn("ms:(", start(), "Claude Code names it under a blocked prompt, not at the start")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -251,7 +251,7 @@ def _hint_lines() -> list[str]:
     for feature in HINTS:
         seen = given.get(feature)
         when = f"shown {seen.get('given')}" if _given_this_revision(feature, given) else "not shown yet"
-        lines.append(f"  {TITLE[feature]} · {when}")
+        lines.append(f"  {TITLE.get(feature) or HINTS[feature]['title']} · {when}")
     lines.append("  Reset: /maisecrets:settings hints reset")
     return lines
 
@@ -520,6 +520,9 @@ for _key, _noun, _more in (("read_pdf", "PDF", "convert (only its text goes to y
                   f"where MODE is {_more}, or allow so this note does not come again. Do not change settings "
                   "yourself."),
     }
+# ms:(…) is no setting: its hint is a line for the person, once (maisecrets/check_value.py). Claude Code shows it under
+# the first blocked or rewritten prompt that carried a value, Codex at the session start
+HINTS["check_value"] = {"revision": 1, "title": "Check a value with ms:(…)"}
 _HINTS_FILE = HOME / "hints.json"
 
 

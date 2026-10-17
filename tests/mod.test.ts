@@ -93,6 +93,87 @@ test('a prompt that is not a person\'s goes on unchanged and the launcher does n
   expect(runs).toBe(0)
 })
 
+const CHECKS = ['ms:(TOKENWORD)', '  Ms:(TOKENWORD', 'MS:(a)b)', '\nms:(x', 'ms: (TOKENWORD)', 'ms：（TOKENWORD）']
+
+function checkSetup(on, run) {
+  let downstream = 0
+  on('clock.now', () => ({ value: clock.t }))
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('session.cwd', () => ({ value: '/work' }))
+  on('env.get', () => { throw new Error('the mod read an environment variable') })
+  on('ui.log', () => ({ value: undefined }))
+  on('process.run', run)
+  on('prompt.submit', ($, e) => { downstream += 1; return { text: e.text } })
+  return () => downstream
+}
+
+test('a check ms:(…) is dropped with the verdict and never passed on', async ($, on) => {
+  const sent = checkSetup(on, () => ({ value: { exitCode: 0, stderr: '',
+    stdout: JSON.stringify({ maisecrets: 'mod-prompt', drop: 'VERDICT' }) } }))
+  for (const text of CHECKS) {
+    const r = await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+    expect(r.drop).toBe('VERDICT')
+  }
+  expect(sent()).toBe(0)
+})
+
+test('a check without a verdict is dropped all the same: no launcher, a failed one, or a rewrite', async ($, on) => {
+  let n = 0
+  const answers = [
+    () => ({ deny: 'cannot start' }),
+    () => ({ value: { exitCode: 1, stderr: 'boom', stdout: '' } }),
+    () => ({ value: { exitCode: 0, stderr: '', stdout: 'not json' } }),
+    () => ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-prompt', text: REWRITTEN }) } }),
+  ]
+  const sent = checkSetup(on, () => answers[Math.min(Math.floor(n++ / 3), answers.length - 1)]())
+  for (let i = 0; i < 4; i++) {
+    const r = await $.prompt.submit({ text: 'ms:(TOKENWORD)', wait: false, origin: { kind: 'composer' } })
+    expect(typeof r.drop).toBe('string')
+    expect(r.text).toBe(undefined)
+  }
+  expect(sent()).toBe(0)
+})
+
+test('a check that is no person\'s goes on to the settings hook, and plain "ms:" is an ordinary prompt', async ($, on) => {
+  let runs = 0
+  common(on, () => {
+    runs += 1
+    return { value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ maisecrets: 'mod-prompt', text: REWRITTEN }) } }
+  })
+  expect((await $.prompt.submit({ text: 'ms:(TOKENWORD)', wait: false, origin: { kind: 'peer' } })).text)
+    .toBe('ms:(TOKENWORD)')
+  expect(runs).toBe(0)
+  expect((await $.prompt.submit({ text: 'ms: see (TOKENWORD)', wait: false, origin: { kind: 'composer' } })).text)
+    .toBe(REWRITTEN)
+})
+
+test('a check whose session cannot be read is dropped too', async ($, on) => {
+  on('clock.now', () => ({ value: clock.t }))
+  on('session.id', () => { throw new Error('no session') })
+  on('session.cwd', () => ({ value: '/work' }))
+  on('env.get', () => { throw new Error('the mod read an environment variable') })
+  on('ui.log', () => ({ value: undefined }))
+  on('process.run', () => { throw new Error('the launcher broke the handler') })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  const r = await $.prompt.submit({ text: 'ms:(TOKENWORD)', wait: false, origin: { kind: 'composer' } })
+  expect(typeof r.drop).toBe('string')
+})
+
+test('the tip of the answer is shown once next to the line of the rewrite', async ($, on) => {
+  const logs = []
+  on('clock.now', () => ({ value: clock.t }))
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('session.cwd', () => ({ value: '/work' }))
+  on('env.get', () => { throw new Error('the mod read an environment variable') })
+  on('ui.log', ($, e) => { logs.push(JSON.stringify(e)); return { value: undefined } })
+  on('process.run', () => ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify(
+    { maisecrets: 'mod-prompt', text: REWRITTEN, count: 1, tip: 'Tip: check a value first with ms:(…)' }) } }))
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  expect((await submit($)).text).toBe(REWRITTEN)
+  expect(logs.length).toBe(2)
+  expect(logs[1]).toContain('ms:(')
+})
+
 test('a failure after the prompt was passed on drops it and sends nothing a second time', async ($, on) => {
   let downstream = 0
   on('session.id', () => ({ value: 'sess-1' }))

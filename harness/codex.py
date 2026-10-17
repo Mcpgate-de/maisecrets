@@ -29,6 +29,7 @@ from run import MAIL   # the harness address: masked by maisecrets, not a reserv
 
 ROOT = Path(__file__).resolve().parent.parent
 MARK = "glpat-" + "CodexHarnessXyz123456789"
+UNSEEN = "Cx7-" + "hRn4wQp8Zv"     # no detector shape: a check stores it
 MODEL = os.environ.get("MAISECRETS_CODEX_MODEL", "gpt-5.6-sol")
 PORT = 8792
 REAL = "--real" in sys.argv
@@ -66,6 +67,22 @@ SCENARIOS = {
     "prompt_secret": {
         "prompt": f"Please check the token {MARK} in CI",
         "expect_blocked": True,
+    },
+    # ms:(…): Codex blocks it in UserPromptSubmit and shows the verdict; the value reaches neither the model nor the
+    # rollout (C29). Without a closing bracket too
+    "check_value_caught": {
+        "prompt": f"ms:({MARK})",
+        "expect_blocked": True,
+        # codex exec prints no block reason (0.162.0: "UserPromptSubmit Blocked" only), so the verdict is read from
+        # the detection record in the maisecrets home: the rule, no value
+        "expect_home_text": [("events.log", '"kind": "gitlab-pat"}], "outcome": "ms:( check"')],
+    },
+    "check_value_not_caught": {
+        "prompt": f"ms:( {UNSEEN}",
+        "expect_blocked": True,
+        # not caught, so stored as /maisecrets:put stores it (Codex sends no `source`: the person typed it)
+        "expect_home_text": [("index.json", '"kind": "manual"')],
+        "expect_absent": [UNSEEN],
     },
     "bash_echo": {
         # a real model refuses "print .env verbatim" on its own (2026-09-26); asking for the
@@ -283,6 +300,14 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         fails.append("LEAK: the marker (or its tail) is in the final message")
     if MAIL in rollouts or MAIL in final:
         fails.append("LEAK: the address is in the rollout transcript or the final message")
+    for fname, text in sc.get("expect_home_text", []):
+        got = (home / fname).read_text(errors="ignore") if (home / fname).exists() else ""
+        if text not in got:
+            fails.append(f"{fname} in the maisecrets home has no {text!r}")
+    for value in sc.get("expect_absent", []):
+        # a value of the scenario that must reach neither the model nor the rollout
+        if value in bodies or value in rollouts or value in final:
+            fails.append("LEAK: a value of the scenario is in a request, the rollout or the final message")
     lines = [ln.strip() for ln in out.splitlines()]
     failed_hooks = [ln for ln in lines if ln.startswith("hook: ") and ln.endswith("Failed")]
     if failed_hooks:

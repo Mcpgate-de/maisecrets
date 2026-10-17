@@ -11,7 +11,10 @@ Probe P1 of vault references (docs/PROTOCOL.md section 4) with the real client:
 4. Checks: the files hold the values; no request to the upstream and no file of the client profile (the transcript)
    holds a value; the header is still in the client config after the client's own writes; the audit names the key.
 
-A second run with client_header false (P2) must leave the tokens in the files and resolve nothing.
+A second run with client_header false (P2) must leave the tokens in the files and resolve nothing. A third run
+puts the server entry into a non-empty `.config.json` of the profile and a stale `.claude.json` beside it with the
+same server name on another URL: the client then uses `.config.json` (2.1.301), so maisecrets must read and write
+that file, and the stale one keeps its bytes.
 
 Usage: python3 harness/vault_refs_e2e.py        (needs claude and openssl; about a minute)
 """
@@ -55,7 +58,7 @@ def _claude(prompt: str, turns: list, work: Path, env: dict, tools: str) -> subp
     return r
 
 
-def run(header_on: bool) -> list[str]:
+def run(header_on: bool, legacy: bool = False) -> list[str]:
     fails: list[str] = []
     work = Path(tempfile.mkdtemp(prefix="maisecrets-vault-refs-e2e-"))
     proj, profile, home = work / "proj", work / "profile", work / "vaulthome"
@@ -65,10 +68,17 @@ def run(header_on: bool) -> list[str]:
         srv.auto_bind = True
         srv.mint("EMAIL_1", EMAIL)
         srv.mint("NAME_2", NAME)
-        (profile / ".claude.json").write_text(json.dumps({
+        client_file = profile / (".config.json" if legacy else ".claude.json")
+        client_file.write_text(json.dumps({
             "hasCompletedOnboarding": True,
             "mcpServers": {"demo": {"type": "http", "url": srv.url + "/mcp"}},
             "projects": {str(proj): {"hasTrustDialogAccepted": True}}}, indent=2))
+        stale = profile / ".claude.json"
+        if legacy:
+            stale.write_text(json.dumps({"hasCompletedOnboarding": True,
+                                         "mcpServers": {"demo": {"type": "http", "url": "https://stale.example/mcp"}},
+                                         "projects": {str(proj): {"hasTrustDialogAccepted": True}}}, indent=2))
+        stale_before = stale.read_bytes() if legacy else b""
         (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True,
                                                       "client_vault_cafile": srv.cert, "client_header": header_on}))
         (home / "guard.json").write_text(json.dumps({"expect": "off"}))
@@ -80,7 +90,7 @@ def run(header_on: bool) -> list[str]:
                    MAISECRETS_GUARD_CLIPBOARD="off")
         # session 0: a start alone writes nothing and asks no server
         _claude("Say hello.", [{"text": "hello"}], work, env, "Read")
-        cfg = json.loads((profile / ".claude.json").read_text())
+        cfg = json.loads(client_file.read_text())
         if cfg["mcpServers"]["demo"].get("headers") or any(e["path"].startswith("/.well-known/") for e in srv.log):
             return ["a session start without a server token wrote a header or asked the server"]
         # session 1: the first result with a server token is the trigger: one metadata request, the header on this
@@ -89,7 +99,7 @@ def run(header_on: bool) -> list[str]:
         r1 = _claude("List the customers twice.", [{"tool": "mcp__demo__customers", "input": {}},
                                                    {"tool": "mcp__demo__customers", "input": {}}, {"text": "done"}],
                      work, env, "mcp__demo__customers")
-        cfg = json.loads((profile / ".claude.json").read_text())
+        cfg = json.loads(client_file.read_text())
         header = cfg["mcpServers"]["demo"].get("headers", {}).get("Client-Vault")
         if header_on and not header:
             return [f"the first token wrote no header (see {work}; stdout {r1.stdout[-300:]!r})"]
@@ -143,9 +153,14 @@ def run(header_on: bool) -> list[str]:
             time.sleep(1)
         if leaked:
             fails.append(f"a value stays in {len(leaked)} transcript file(s), e.g. {leaked[0].name}")
-        after = json.loads((profile / ".claude.json").read_text())["mcpServers"]["demo"].get("headers", {})
+        after = json.loads(client_file.read_text())["mcpServers"]["demo"].get("headers", {})
         if header_on and after.get("Client-Vault") != header:
             fails.append("P7: the header is gone after the client's own writes")
+        if legacy and stale.read_bytes() != stale_before:
+            fails.append("the stale .claude.json changed: maisecrets or the client wrote the file the client "
+                         "does not use")
+        if legacy and (profile / ".claude.json.maisecrets-backup").exists():
+            fails.append("a backup lies beside the stale .claude.json")
         audit = (home / "audit.log").read_text() if (home / "audit.log").exists() else ""
         if header_on and "EMAIL_1@127.0.0.1\tWrite" not in audit:
             fails.append("no audit line for the Write")
@@ -163,9 +178,9 @@ def main() -> int:
         print("[SKIP] vault_refs_e2e: needs claude and openssl")
         return 0
     bad = 0
-    for on in (True, False):
-        name = "vault_refs_resolve" if on else "vault_refs_off"
-        fails = run(on)
+    for name, on, legacy in (("vault_refs_resolve", True, False), ("vault_refs_off", False, False),
+                             ("vault_refs_config_json", True, True)):
+        fails = run(on, legacy)
         print(("[FAIL] " if fails else "[ok  ] ") + name + ("".join(f"\n       {f}" for f in fails)))
         bad += bool(fails)
     return 1 if bad else 0

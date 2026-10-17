@@ -1,0 +1,10 @@
+# c29-a-check-gives-the-verdict-of-the-prompt-path: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c29-a-check-gives-the-verdict-of-the-prompt-path"
+control = "C29"
+statement = "ms:(v) gives the verdict that the normal prompt v gives (rule, stored value, term, allow list, not caught), from the same calls of the prompt path."
+runner = ["tests/test_check_value.py::SameVerdictTests::test_ms_and_the_normal_prompt_give_the_same_verdict"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "    _rewritten, entries, values, stored, matches = _take_values_out(text, matches, cfg, vault, session)\n"
+replace = "    _rewritten, entries, values, stored, matches = _take_values_out(text, matches, cfg, None, session)\n"
