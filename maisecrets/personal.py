@@ -253,8 +253,10 @@ _NAME_WORD = r"(?:[" + _UP + r"][" + _LO + r"'’-]{1,30}|[A-Z]\.)"
 _NAME_PARTICLE = r"(?:van|von|de|da|del|der|al|bin|di|du|la|le)"
 _NAME_VALUE = (r"((?:[" + _UP + r"][" + _LO + r"'’-]{1,30})(?:[ ](?:" + _NAME_WORD + "|" + _NAME_PARTICLE + r")){1,3})")
 # the value of a customer key up to the legal form: the company's name alone, on the key's line
-_COMPANY_AFTER_KEY_RE = re.compile(r"[ \t\"']{0,3}(?!(?i:frau|herrn?|mrs?|ms|mx|dr|prof)\b)\w[\w&.'’-]{0,40}"
-                                   r"(?:[ ]\w[\w&.'’-]{0,40}){0,4}[ ]")
+# at most two words, and & or und between them: a person and a company without a separator
+# (Kunde: Lena Brückner Lindner GmbH) cannot be told from a longer company name, so a longer name keeps the mask
+_COMPANY_NAME = r"\w[\w.'’-]{0,40}(?:[ ](?:(?:&|\+|und|and)[ ])?\w[\w.'’-]{0,40})?[ ]"
+_COMPANY_AFTER_KEY_RE = re.compile(r"[ \t\"']{0,3}(?!(?i:frau|herrn?|mrs?|ms|mx|dr|prof)\b)" + _COMPANY_NAME)
 # the key itself, not a longer one (customer_name: is a person's)
 _CUSTOMER_KEY_RE = re.compile(r"(?i)(?:kunde|customer)[\"']?[ \t]{0,3}[:=]")
 # before the company's name on its line, in the two-line form: the start of the text, a blank line or a heading of the
@@ -263,8 +265,8 @@ _ADDRESS_HEADING_RE = re.compile(r"(?i)[ \t]*(?:(?:rechnungs|liefer)?(?:adresse|
                                  r"|empfänger|billing address|invoice address|bill to|invoice to|sold to|an|to)"
                                  r"[ \t]*:?[ \t]*\r?")
 # the company's line in the two-line form: the company's name alone, or after a Kunde: or Customer: key
-_COMPANY_LINE_RE = re.compile(r"[ \t]*(?:(?i:kunde|customer)[ \t]*:[ \t]*)?\w[\w&.'’-]{0,40}"
-                              r"(?:[ ]\w[\w&.'’-]{0,40}){0,4}[ ]")
+_COMPANY_LINE_RE = re.compile(r"[ \t]*(?:(?i:kunde|customer)[ \t]*:[ \t]*)?(?!(?i:frau|herrn?|mrs?|ms|mx|dr|prof)\b)"
+                              + _COMPANY_NAME)
 # a label that names a person and nothing else
 _PERSON_LABELS = (r"full[ _-]?name|customer[ _-]?name|first[ _-]?name|last[ _-]?name|given[ _-]?name|family[ _-]?name"
                   r"|patient(?:[ _-]?name)?|employee(?:[ _-]?name)?|student(?:[ _-]?name)?|contact[ _-]?person"
@@ -967,8 +969,10 @@ _VCARD_BARE_RE = _lazy(r"(?im)^(?:((?:[a-z]:\\)?[^\s:]{1,200}):(?:\d{1,9}[:-])?|
                        r"(ADR|N|BDAY)(" + _VCARD_PARAMS + r")" + _VCARD_VALUE)
 # the cheap check before _VCARD_BARE_RE: a property name before its parameters or its colon at the start of a line
 _VCARD_BARE_HINT_RE = re.compile(r"(?im)(?:^|:)[ \t]*(?:[a-z0-9-]{1,64}\.)?(?:ADR|N|BDAY)[;:]")
-_VCARD_PARAM_NAME_RE = re.compile(r"(?i);(?:type|pref|label|charset|language|value|altid|pid|calscale|home|work"
-                                  r"|postal|parcel|dom|intl)(?![\w-])")
+# a parameter of a card; TYPE with a type of an address or a date (TYPE=cache is a config key)
+_VCARD_PARAM_NAME_RE = re.compile(r"(?i);(?:type=\"?(?:home|work|pref|postal|parcel|dom|intl|other)(?![\w-])"
+                                  r"|pref|label|charset|language|value|altid|pid|calscale|home|work|postal|parcel"
+                                  r"|dom|intl)(?![\w-])")
 _VCARD_BARE_WORDS_RE = re.compile(r"(?i)adr|n[:;]|bday")
 _VCARD_TITLE_RE = re.compile(r"(?i)(?:dr|prof|mr|mrs|ms|mx|miss|sir|herr|frau|mme|mlle|m|sr|sra|sig|dott|ing|mag)\.?"
                              r"(?:[ ,]+(?:dr|prof|med|rer|nat|phil|ing)\.?){0,3}")
@@ -990,6 +994,9 @@ def _vcard_fields(value: str, start: int) -> list:
     return out
 
 
+# BEGIN:VCARD at the start of a line, after an escaped \n or after a quote (a card in a JSON string): in a sentence
+# (the markers are BEGIN:VCARD and END:VCARD) it starts no card
+_VCARD_BEGIN_LINE_RE = re.compile(r"(?m)(?:^[ \t]*|(?<=\\N)[ \t]*|(?<=[\"'>]))BEGIN:VCARD")
 _VCARD_END_LINE_RE = re.compile(r"(?im)(?:^|(?<=\\n))[ \t]*END:VCARD")
 
 
@@ -999,7 +1006,7 @@ def _vcard_spans(text: str) -> list:
     (review of 0.6.25)."""
     up = text.upper()
     out = []
-    for m in re.finditer("BEGIN:VCARD", up):
+    for m in _VCARD_BEGIN_LINE_RE.finditer(up):
         if out and m.start() < out[-1][1]:
             continue
         e = _VCARD_END_LINE_RE.search(text, m.end())   # at the start of a line: NOTE:… END:VCARD … is a value

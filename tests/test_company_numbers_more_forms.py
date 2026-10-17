@@ -125,10 +125,23 @@ class CompanyFormTests(unittest.TestCase):
                 self.assertMasked(key + PERSON + " Lindner GmbH\n" + STREET + ", " + PLACE + "\nUSt-IdNr.: " + VAT,
                                   plz=False)
 
+    def test_a_person_glued_to_the_company_name_keeps_the_mask(self):
+        # round 2 of both gates: without a separator a person and a company read as one name. The new forms take a
+        # company's name of at most two words, so a longer name keeps the mask, as on origin/next
+        rest = "\n" + STREET + "\n" + PLACE + "\nUSt-IdNr.: " + VAT
+        self.assertMasked(PERSON + " Lindner GmbH" + rest)
+        self.assertMasked(PERSON + " Lindner Logistik GmbH" + rest)
+        self.assertMasked("Kunde: " + PERSON + " Lindner GmbH" + rest)
+        self.assertMasked("Kunde: " + PERSON + " Lindner GmbH, " + STREET + ", " + PLACE + "\nUSt-IdNr.: " + VAT,
+                          plz=False)
+        self.assertMasked("Customer: " + PERSON + " Lindner GmbH, " + STREET + ", " + PLACE + ", VAT ID " + VAT,
+                          plz=False)
+        self.assertFree("Kunde: Lindner & Partner GmbH" + rest)
+
     def test_each_guard_alone_keeps_the_mask(self):
         # one layer each: the name rule does not read a name in lower case, and Inhaber: is no key of a person's
         # record, so the key check and the name check cannot cover for each other
-        self.assertMasked("customer_name: lena brückner Lindner GmbH\n" + STREET + ", " + PLACE + "\nUSt-IdNr.: " + VAT)
+        self.assertMasked("customer_name: lena Lindner GmbH\n" + STREET + ", " + PLACE + "\nUSt-IdNr.: " + VAT)
         self.assertMasked("Inhaber: " + PERSON + " Lindner GmbH\n" + STREET + ", " + PLACE + "\nUSt-IdNr.: " + VAT)
 
     def test_a_customer_who_is_a_person_keeps_the_mask(self):
