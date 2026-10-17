@@ -1,0 +1,10 @@
+# c1-a-street-line-after-an-address-label-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-street-line-after-an-address-label-is-a-hit"
+control = "C1"
+statement = "In a tool result, a street line (a house number and a street word, or a German, Italian, Spanish or Portuguese street and its number) after an address label or a verb of residence (resides at, lives at, wohnt in der) is masked without a city or a postcode; with a company, an office or a public place on the line it stays text and takes the company decision of the address rules."
+runner = ["tests/test_personal_after_its_label.py::StreetLineTests::test_a_street_line_after_an_address_label_or_a_verb_of_residence_is_masked"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''                out.append((m.start(g), m.end(g), "address-street-after-label", ADDRESS))'''
+replace = '''                pass'''

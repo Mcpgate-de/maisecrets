@@ -56,6 +56,9 @@ OWNER = {
     "postman password of words": "secret-postman-variable", "add-mask of words": "secret-add-mask",
     "vcard adr fields": "address-vcard-fields", "vcard n fields": "name-vcard-n",
     "vcard bday digits": "birth-date-vcard-compact", "encoded mail contact column": "email-percent-encoded",
+    "phone after a phone word": "phone-after-phone-word", "phone national after a label": "phone-after-phone-word",
+    "one first name": "name-single-after-label", "street line after a label": "address-street-after-label",
+    "markdown table of persons": "md-table-personal-column",
 }
 
 
