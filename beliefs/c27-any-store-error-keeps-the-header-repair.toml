@@ -1,0 +1,10 @@
+# c27-any-store-error-keeps-the-header-repair: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-any-store-error-keeps-the-header-repair"
+control = "C27"
+statement = "When the new key of a session start fails with any error of a store backend, not only OSError, the header repair of that start still runs."
+runner = ["tests/test_vault_states.py::States::test_a_store_error_that_is_no_os_error_keeps_the_header_repair_too"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''        except Exception:  # noqa: BLE001 - a store backend has its own errors; the header repair below still runs'''
+replace = '''        except OSError:'''
