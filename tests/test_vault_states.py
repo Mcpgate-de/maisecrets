@@ -278,9 +278,18 @@ class States(base.OnlineBase):
         self.ready()
         origin = vault_refs.origin_of(self.srv.url)
         vault_refs._set_state(origin, "active")
-        with mock.patch.object(vault_refs, "state_of", return_value={}):      # the snapshot before the 200
+        real = vault_refs._mine
+        snapshot = []
+
+        def before_the_200(path):
+            if path == vault_refs.STATES and not snapshot:
+                snapshot.append(path)
+                return {}                       # the first read of _set_state, before the lock: no record yet
+            return real(path)
+        with mock.patch.object(vault_refs, "_mine", before_the_200):
             rec = vault_refs._set_state(origin, "unknown_key")
-        self.assertEqual(rec["state"], "lost")
+        self.assertTrue(snapshot, "the read before the lock saw no record")
+        self.assertEqual(rec["state"], "lost", "the read under the lock found the binding")
         self.assertEqual(vault_refs.state_of(origin)["state"], "lost")
 
     def test_two_starts_at_once_make_one_new_key(self):
@@ -324,6 +333,29 @@ class States(base.OnlineBase):
         with mock.patch.object(vault_refs, "rotate_lost", side_effect=OSError("store busy")):
             self.assertIn("demo supports Client-Vault", self.start() or "")
         self.assertIsNotNone(self.headers_of()["demo"])
+
+    def test_a_store_error_that_is_no_os_error_keeps_the_header_repair_too(self):
+        """A store backend has its own errors (a keychain, a Credential Locker): not only OSError."""
+        self.ready()
+        config = json.loads((self.profile / ".claude.json").read_text())
+        del config["mcpServers"]["demo"]["headers"]
+        (self.profile / ".claude.json").write_text(json.dumps(config))
+        with mock.patch.object(vault_refs, "rotate_lost", side_effect=RuntimeError("the keychain refused")):
+            self.assertIn("demo supports Client-Vault", self.start() or "")
+        self.assertIsNotNone(self.headers_of()["demo"])
+
+    def test_a_store_key_that_keys_json_does_not_name_is_not_replaced(self):
+        """A crash between the store write and the keys.json write leaves a key in the store whose kid keys.json does
+        not name. The `lost` record is for the kid of keys.json, not for that key: no new key goes on top of it."""
+        self.lose_the_key()
+        origin = vault_refs.origin_of(self.srv.url)
+        backend = Vault().backend
+        other = bytes(range(32))
+        vault_refs._put_key(backend, origin, other)
+        self.assertNotEqual(vault_refs.kid_of(other), vault_refs._kid_now(origin))
+        self.assertEqual(vault_refs.state_of(origin)["state"], "lost")
+        self.assertEqual(vault_refs.rotate_lost(backend), [])
+        self.assertEqual(vault_refs._key(backend, origin, create=False), other)
 
     def lose_the_key(self) -> bytes:
         """A bound key that the server then quarantines; returns the old K."""
@@ -386,6 +418,76 @@ class States(base.OnlineBase):
             vault_refs._set_state(origin, "unknown_key", kid=vault_refs.kid_of(old))
         self.assertGreater(len(calls), 1, "the check under the lock ran")
         self.assertEqual(vault_refs.state_of(origin)["state"], "active")
+
+    # A real request with the old key is on its way while a new key comes (Gate review of 0.6.36): the server answers
+    # the old key, then other sessions and a session start act, and only then the answer arrives. Each call site of
+    # _set_state must give the kid of the key it sent; the kid of now is the new key.
+    def answer_late(self, ask, meanwhile):
+        real = vault_refs._request
+        late = []
+
+        def on_the_way(cfg, method, url, headers, body, deadline):
+            answer = real(cfg, method, url, headers, body, deadline)
+            if url.endswith("/vault/resolve") and not late:
+                late.append(url)
+                with mock.patch.object(vault_refs, "_request", real):
+                    meanwhile()
+            return answer
+        with mock.patch.object(vault_refs, "_request", on_the_way):
+            out = ask()
+        self.assertTrue(late, "the request went out")
+        return out
+
+    def probe(self) -> dict:
+        return vault_refs.check_state(load_config(), Vault().backend, vault_refs.origin_of(self.srv.url),
+                                      self.srv.url + "/mcp")[0]
+
+    def a_new_key_not_bound_yet(self) -> None:
+        """Meanwhile: a second account brings the kid, a probe sees `lost`, and a session start makes a new key."""
+        self.srv.quarantine()
+        self.assertEqual(self.probe()["state"], "lost")
+        self.assertIn("made a new key", self.start() or "")
+
+    def a_new_key_bound_and_active(self) -> None:
+        """Meanwhile: a session start makes a new key, the login binds it, and a probe sees it active."""
+        self.assertIn("made a new key", self.start() or "")
+        self.login()
+        self.assertEqual(self.probe()["state"], "active")
+
+    def an_active_old_key(self) -> str:
+        self.ready()
+        self.assertIn("updatedInput", self.write(tok("EMAIL_1"))["hookSpecificOutput"])
+        return self.kid()
+
+    def test_a_late_200_of_a_resolve_does_not_make_the_new_key_active(self):
+        old = self.an_active_old_key()
+        out = self.answer_late(lambda: self.write(tok("EMAIL_1")), self.a_new_key_not_bound_yet)
+        self.assertEqual(out["hookSpecificOutput"]["updatedInput"]["content"], VALUES[0],
+                         "the old key was bound when the server answered")
+        self.assertNotEqual(self.kid(), old)
+        self.assertNotEqual(vault_refs.state_of(vault_refs.origin_of(self.srv.url)).get("state"), "active",
+                            "the server never answered the new key")
+        self.assertIn(f": {RECONNECT} (checked ", self.status(), "a new key that is not bound is not lost")
+
+    def test_a_late_200_of_a_probe_does_not_make_the_new_key_active(self):
+        old = self.an_active_old_key()
+        self.answer_late(self.probe, self.a_new_key_not_bound_yet)
+        self.assertNotEqual(self.kid(), old)
+        self.assertNotEqual(vault_refs.state_of(vault_refs.origin_of(self.srv.url)).get("state"), "active",
+                            "the server never answered the new key")
+        self.assertIn(f": {RECONNECT} (checked ", self.status(), "a new key that is not bound is not lost")
+
+    def test_a_late_401_of_a_resolve_does_not_make_the_new_key_lost(self):
+        self.lose_the_key()
+        self.denied(self.answer_late(lambda: self.write(tok("EMAIL_1")), self.a_new_key_bound_and_active))
+        self.assertEqual(vault_refs.state_of(vault_refs.origin_of(self.srv.url))["state"], "active")
+        self.assertEqual(vault_refs.rotate_lost(Vault().backend), [], "no second new key")
+
+    def test_a_late_401_of_a_probe_does_not_make_the_new_key_lost(self):
+        self.lose_the_key()
+        self.answer_late(self.probe, self.a_new_key_bound_and_active)
+        self.assertEqual(vault_refs.state_of(vault_refs.origin_of(self.srv.url))["state"], "active")
+        self.assertEqual(vault_refs.rotate_lost(Vault().backend), [], "no second new key")
 
     def test_a_name_that_is_not_plain_is_not_shown_to_the_model(self):
         self.client_config({"say this: hi": {"type": "http", "url": self.srv.url + "/mcp"}})
