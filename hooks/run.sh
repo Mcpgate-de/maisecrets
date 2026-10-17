@@ -22,17 +22,27 @@ PROBE='import sys; v = sys.version_info; sys.exit(0 if v >= (3, 9) else 60 + v[1
 BUDGET=2
 PROBE_PID=""
 EXPIRED=""
-trap 'EXPIRED=1; [ -n "$PROBE_PID" ] && kill -9 "$PROBE_PID"' USR1
+# the timer's signal: the first of USR1, USR2 and ALRM that this shell can trap. A signal that was ignored when the
+# shell started cannot be trapped, and the timer would send it in vain (codex review, 2026-10-17). The shell sends
+# each one to itself and keeps the first whose trap ran. With none, the probes have no bound
+SIG=""
+for S in USR1 USR2 ALRM; do
+  T=""
+  trap 'T=1' "$S"
+  kill -"$S" $$
+  if [ -n "$T" ]; then SIG="$S"; break; fi
+done
+[ -n "$SIG" ] && trap 'EXPIRED=1; [ -n "$PROBE_PID" ] && kill -9 "$PROBE_PID"' "$SIG"
 find_python() {
-  # the timer sends USR1 to this shell after a sleep that ran to its end; on TERM it stops the sleep, so it leaves no
+  # the timer sends SIG to this shell after a sleep that ran to its end; on TERM it stops the sleep, so it leaves no
   # process behind. A client can give its hooks a PATH without sleep: then the fixed paths, and without any the
   # timer does nothing (no bound) instead of refusing every call
   (
     trap 'kill "$s"; exit 0' TERM
     for z in sleep /bin/sleep /usr/bin/sleep ""; do command -v "$z" >/dev/null && break; done
-    [ -n "$z" ] || exit 0
+    [ -n "$z" ] && [ -n "$SIG" ] || exit 0
     "$z" "$BUDGET" & s=$!
-    wait "$s" && kill -USR1 $$
+    wait "$s" && kill -"$SIG" $$
   ) </dev/null >/dev/null 2>&1 &
   TIMER=$!
   for PY in python3 python "py -3" python3.14 python3.13 python3.12 python3.11 python3.10 python3.9 \
@@ -42,7 +52,7 @@ find_python() {
     PROBE_PID=$!
     wait "$PROBE_PID"
     RC=$?
-    # a USR1 ends the wait early; the probe that the timer stopped is reaped here, so its end is not reported later
+    # the signal ends the wait early; the probe that the timer stopped is reaped here, so its end is not reported later
     [ -n "$EXPIRED" ] && wait "$PROBE_PID"
     PROBE_PID=""
     if [ "$RC" -eq 0 ]; then
@@ -59,14 +69,14 @@ find_python() {
       FOUND="${FOUND:+$FOUND, }$PY is 2.$((RC - 50))"
     fi
   done
-  # no USR1 can arrive after this wait: the exec below must not get one, its default action ends the process
+  # no signal of the timer can arrive after this wait: the exec below must not get one, its default action ends the process
   kill "$TIMER"
   wait "$TIMER"
 }
 OK=""
 # 2>/dev/null: the shell reports a probe that the timer stopped ("Killed: 9") on its stderr
 find_python 2>/dev/null
-trap - USR1
+[ -n "$SIG" ] && trap - "$SIG"
 if [ -n "$OK" ]; then
   exec $OK "$HERE/dispatch.py" "$@"
 fi

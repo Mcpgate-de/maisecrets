@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -177,7 +178,7 @@ class LauncherProbeHoldsNothingTests(unittest.TestCase):
     measured): past the client's timeout, and both clients let the call through then (Claude Code 2.1.302 and
     codex-cli 0.162.0, measured 2026-10-17). Codex also waits until the hook's stdout closes. The launcher must
     finish within its bound, with the verdict of the working Python or a refusal, and hold no descriptor open."""
-    LIMIT = 8.0   # the budget of 2 s plus a loaded machine; a held descriptor holds the hook for 30 s
+    LIMIT = 5.0   # the budget of 2 s plus a loaded machine; a held descriptor holds the hook for 30 s
 
     def setUp(self):
         self.sb = Sandbox(JSONFILE, backend="jsonfile")
@@ -198,7 +199,8 @@ class LauncherProbeHoldsNothingTests(unittest.TestCase):
         for tool in ("dirname", "mkdir", "cat", "sleep"):
             os.symlink(shutil.which(tool), self.tools / tool)
 
-    def launch(self, body: str | None, event: str = "pre-tool") -> tuple[subprocess.CompletedProcess, float]:
+    def launch(self, body: str | None, event: str = "pre-tool",
+               ignored: tuple = ()) -> tuple[subprocess.CompletedProcess, float]:
         for old in self.fake.iterdir():
             old.unlink()
         if body is not None:
@@ -210,7 +212,9 @@ class LauncherProbeHoldsNothingTests(unittest.TestCase):
         t0 = time.monotonic()
         # capture_output reads until both pipes close, as Codex does: a descriptor that a probe's job holds shows here
         p = subprocess.Popen([BASH, str(self.hooks / "run.sh"), event], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
+                             stderr=subprocess.PIPE, text=True, env=env, start_new_session=True,
+                             # a client can start its hooks with a signal ignored; the shell cannot trap that one
+                             preexec_fn=(lambda: [signal.signal(s, signal.SIG_IGN) for s in ignored]) if ignored else None)
         try:
             out, err = p.communicate(payload, timeout=60)
         finally:
@@ -243,6 +247,13 @@ class LauncherProbeHoldsNothingTests(unittest.TestCase):
                 self.assertNotIn("dispatch ran", r.stdout)
                 self.assertEqual(r.stderr, "", "the end of the stopped probe is not reported")
                 assert_refuses(self, event, r)
+
+    def test_a_signal_ignored_by_the_client_does_not_take_the_bound(self):
+        # USR1 ignored when the launcher starts: the timer must use another signal (codex review, 2026-10-17)
+        r, took = self.launch(_STALLING_PYTHONS["hangs"], "user-prompt", ignored=(signal.SIGUSR1,))
+        self.assertLess(took, self.LIMIT, f"the launcher took {took:.1f} s: the timer's signal was ignored")
+        self.assertIn("(found: python3 gave no answer in 2 s)", r.stdout)
+        assert_refuses(self, "user-prompt", r)
 
     def test_without_a_stalling_candidate_the_first_python_answers(self):
         r, took = self.launch(None)
