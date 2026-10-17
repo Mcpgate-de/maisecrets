@@ -1,6 +1,45 @@
 # maisecrets
 
-[maisecrets.dev](https://maisecrets.dev) · by [mcpgate](https://mcpgate.de) · Apache-2.0 · free
+[![version](https://img.shields.io/github/v/tag/Mcpgate-de/maisecrets?label=version&sort=semver)](CHANGELOG.md)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-d97757)](#install)
+[![Codex](https://img.shields.io/badge/Codex-plugin-10a37f)](#install)
+[![Python](https://img.shields.io/badge/python-3.9%2B%2C%20stdlib%20only-3776ab)](#requirements)
+[![telemetry](https://img.shields.io/badge/telemetry-none-brightgreen)](PRIVACY.md)
+
+Keeps passwords, tokens and personal data out of Claude Code and Codex. A value becomes a placeholder before the
+model sees it, and goes back in on your machine only where a command or a file needs it.
+
+## What it does
+
+- **Blocks or rewrites a prompt** that carries a secret: the model gets a placeholder such as `⟦SECRET_c1⟧`, never
+  the value.
+- **Masks tool output** (files, commands, MCP results) before the model reads it.
+- **Puts the value back locally** when the agent uses the placeholder in a command or a file.
+- **Checks a value first:** `ms:(your value)` tells you whether it would be caught, without sending it.
+- **Your own rules, terms and imports:** team rule folders, `/maisecrets:term add Jan Kowalski`, values from your
+  own NER.
+- **PDFs and images:** a PDF goes to the model as masked text only, or you are asked first.
+- **Local and deterministic:** no model, no network request of its own unless a server you added offers
+  [vault references](#vault-references), no telemetry.
+
+## Quick start
+
+```bash
+claude plugin marketplace add Mcpgate-de/maisecrets
+claude plugin install maisecrets@maisecrets     # then start a new session
+```
+
+```text
+/maisecrets:status        what runs, which version
+ms:(your value)           would this value be caught?
+/maisecrets:settings      the choices you make
+```
+
+Codex and other installs: [Install](#install). More: [How it works](#how-it-works) ·
+[Threat model](docs/THREAT-MODEL.md) · [Benchmarks](docs/BENCHMARKS.md) · [Known gaps](#known-gaps-measured-or-documented).
+
+## How it works
 
 An AI agent sees what you type and what its tools print: passwords, tokens, a
 customer's e-mail address. maisecrets intercepts detected secrets and personal
@@ -125,10 +164,7 @@ comment, runs `hooks/run.cmd`. Codex on Windows runs the `commandWindows`
 entry of each hook through `cmd.exe`, which starts `hooks/run.cmd` too. Both
 launchers run the same `dispatch.py`. Without a Python
 3.9+ the launcher blocks every prompt and every tool call and withholds every
-tool result, and its message names what to install: fail closed, with a cause. No probe of a
-candidate gets the hook's stdin, stdout or stderr, and all probes together get 2 s: a
-candidate that gives no answer in that time (a wrapper that hangs) is stopped, and the launcher
-refuses in the same way and names it.
+tool result, and its message names what to install: fail closed, with a cause.
 
 Proven with the harness on macOS (Claude Code 2.1.283) and on Debian 13
 (2.1.223), the scenarios of `harness/run.py`, on every push in CI; Windows through the GitHub
@@ -284,7 +320,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 13 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 325 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 329 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -667,8 +703,15 @@ This prompt was not sent. The value did not reach the AI.
 ```
 
 ```
-> ms:(another-value)
+> ms:(Kx7#another-value)
 ⚠ maisecrets would NOT have caught this. It is now stored (⟦SECRET_c4⟧). From now on it is masked wherever it stands as a word of its own.
+
+This prompt was not sent. The value did not reach the AI.
+```
+
+```
+> ms:(two words)
+⚠ maisecrets would NOT have caught this. It looks like ordinary text, so it was not stored. If it is a secret, store it with /maisecrets:put.
 
 This prompt was not sent. The value did not reach the AI.
 ```
@@ -689,18 +732,29 @@ This prompt was not sent. The value did not reach the AI.
 - **The value** is the text between `ms:(` and the last `)`, or up to the end.
   One blank on each side is dropped, so `ms:( value )` and a key on its own
   lines between `ms:(` and `)` both work.
+- **Several values** in one prompt: `ms:(first) ms:(second)`. Each value
+  ends at its last `)` before the next `ms:(` (text after that `)` is not
+  part of it), and each gets its own line (`Value 1: …`, `Value 2: …`). Each
+  verdict is the one that value gets alone: a value is stored only after
+  every value has its verdict. The prompt is not sent.
 - **The verdict** is the one a normal prompt with that value gets: the
   detection rules, your rules of your own, your terms, the values already
   stored, the allow list and your regions. The answer names the type and the
   rule of each hit, never the value; a value that is caught is stored, as for
   a normal prompt.
-- **Not caught:** maisecrets stores the value as `/maisecrets:put` does (type
-  SECRET) and names its placeholder, so it is masked from then on wherever it
+- **Not caught:** when the value looks like a credential (no blanks, 8
+  characters or more, a mix of letters, digits and signs or the randomness
+  of a key; no word, no hex value, no id in capitals and digits, no date,
+  version, file name or `name=value`), maisecrets stores it as
+  `/maisecrets:put` does (type SECRET) and names its placeholder, so it is masked from then on wherever it
   stands as a word of its own (glued to other letters, it is not found). A
-  value with spaces is found again alone on a line or after `:` or `=`, not
+  passphrase with spaces is stored only when each word has a letter and a
+  digit or a sign; it is found again alone on a line or after `:` or `=`, not
   inside a sentence, and the answer says so. It is not stored when the allow list
   allows it (the answer names the line), when it is shorter than 8
   characters or has more than one line (maisecrets could not find it again),
+  when it looks like ordinary text (words, a sentence, a hash, an id, a
+  command: the answer says so; store such a password with `/maisecrets:put`),
   when it holds a placeholder, or when the prompt did not come from you (a
   scheduled prompt, a subagent, `claude -p`). The client's own list of earlier
   prompts (the up arrow) may keep the prompt as typed; that is not measured.
@@ -1653,7 +1707,12 @@ is no such folder, so `convert` refuses there. Without pdftotext, maisecrets
 refuses every PDF and says so; it never lets the PDF through.
 
 A PDF that pdftotext cannot read in 6 seconds, that makes pdftotext use more
-than 512 MB of memory, or that is damaged, is refused. A crafted PDF of a few
+than 512 MB of memory, or that is damaged, is refused. A PDF locked by a
+password is refused too, and the AI is told that cause and not to ask you
+for the password; save a copy without the password and give the AI that
+copy. A PDF with only an owner password (it opens without one and limits
+printing or copying) converts, AES-256 included (measured with poppler
+26.10.0). A crafted PDF of a few
 MB can make pdftotext take 1.5 GB in 2.4 seconds: maisecrets watches the
 memory of pdftotext every 50 ms while it waits and stops it there (macOS does not
 enforce a memory limit on a process, measured; on Linux the kernel limits
