@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## [0.6.32] - 2026-10-17
+
+### Features
+
+- check a value with ms:(…) before you send it (0b3dde1)
+
+### Fixes
+
+- keep backups that maisecrets cannot prove it wrote (d7438f7)
+- follow the client's file choice in the edge cases too (5521abb)
+- use the config file that Claude Code itself reads (6cf98da)
+
 ## [0.6.31] - 2026-10-16
 
 ### Fixes
