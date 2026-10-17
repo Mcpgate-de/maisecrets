@@ -1,6 +1,45 @@
 # maisecrets
 
-[maisecrets.dev](https://maisecrets.dev) · by [mcpgate](https://mcpgate.de) · Apache-2.0 · free
+[![version](https://img.shields.io/github/v/tag/Mcpgate-de/maisecrets?label=version&sort=semver)](CHANGELOG.md)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-d97757)](#install)
+[![Codex](https://img.shields.io/badge/Codex-plugin-10a37f)](#install)
+[![Python](https://img.shields.io/badge/python-3.9%2B%2C%20stdlib%20only-3776ab)](#requirements)
+[![telemetry](https://img.shields.io/badge/telemetry-none-brightgreen)](PRIVACY.md)
+
+Keeps passwords, tokens and personal data out of Claude Code and Codex. A value becomes a placeholder before the
+model sees it, and goes back in on your machine only where a command or a file needs it.
+
+## What it does
+
+- **Blocks or rewrites a prompt** that carries a secret: the model gets a placeholder such as `⟦SECRET_c1⟧`, never
+  the value.
+- **Masks tool output** (files, commands, MCP results) before the model reads it.
+- **Puts the value back locally** when the agent uses the placeholder in a command or a file.
+- **Checks a value first:** `ms:(your value)` tells you whether it would be caught, without sending it.
+- **Your own rules, terms and imports:** team rule folders, `/maisecrets:term add Jan Kowalski`, values from your
+  own NER.
+- **PDFs and images:** a PDF goes to the model as masked text only, or you are asked first.
+- **Local and deterministic:** no model, no network request of its own unless a server you added offers
+  [vault references](#vault-references), no telemetry.
+
+## Quick start
+
+```bash
+claude plugin marketplace add Mcpgate-de/maisecrets
+claude plugin install maisecrets@maisecrets     # then start a new session
+```
+
+```text
+/maisecrets:status        what runs, which version
+ms:(your value)           would this value be caught?
+/maisecrets:settings      the choices you make
+```
+
+Codex and other installs: [Install](#install). More: [How it works](#how-it-works) ·
+[Threat model](docs/THREAT-MODEL.md) · [Benchmarks](docs/BENCHMARKS.md) · [Known gaps](#known-gaps-measured-or-documented).
+
+## How it works
 
 An AI agent sees what you type and what its tools print: passwords, tokens, a
 customer's e-mail address. maisecrets intercepts detected secrets and personal
@@ -281,7 +320,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 13 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 330 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 336 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -664,8 +703,15 @@ This prompt was not sent. The value did not reach the AI.
 ```
 
 ```
-> ms:(another-value)
+> ms:(Kx7#another-value)
 ⚠ maisecrets would NOT have caught this. It is now stored (⟦SECRET_c4⟧). From now on it is masked wherever it stands as a word of its own.
+
+This prompt was not sent. The value did not reach the AI.
+```
+
+```
+> ms:(two words)
+⚠ maisecrets would NOT have caught this. It looks like ordinary text, so it was not stored. If it is a secret, store it with /maisecrets:put.
 
 This prompt was not sent. The value did not reach the AI.
 ```
@@ -686,18 +732,29 @@ This prompt was not sent. The value did not reach the AI.
 - **The value** is the text between `ms:(` and the last `)`, or up to the end.
   One blank on each side is dropped, so `ms:( value )` and a key on its own
   lines between `ms:(` and `)` both work.
+- **Several values** in one prompt: `ms:(first) ms:(second)`. Each value
+  ends at its last `)` before the next `ms:(` (text after that `)` is not
+  part of it), and each gets its own line (`Value 1: …`, `Value 2: …`). Each
+  verdict is the one that value gets alone: a value is stored only after
+  every value has its verdict. The prompt is not sent.
 - **The verdict** is the one a normal prompt with that value gets: the
   detection rules, your rules of your own, your terms, the values already
   stored, the allow list and your regions. The answer names the type and the
   rule of each hit, never the value; a value that is caught is stored, as for
   a normal prompt.
-- **Not caught:** maisecrets stores the value as `/maisecrets:put` does (type
-  SECRET) and names its placeholder, so it is masked from then on wherever it
+- **Not caught:** when the value looks like a credential (no blanks, 8
+  characters or more, a mix of letters, digits and signs or the randomness
+  of a key; no word, no hex value, no id in capitals and digits, no date,
+  version, file name or `name=value`), maisecrets stores it as
+  `/maisecrets:put` does (type SECRET) and names its placeholder, so it is masked from then on wherever it
   stands as a word of its own (glued to other letters, it is not found). A
-  value with spaces is found again alone on a line or after `:` or `=`, not
+  passphrase with spaces is stored only when each word has a letter and a
+  digit or a sign; it is found again alone on a line or after `:` or `=`, not
   inside a sentence, and the answer says so. It is not stored when the allow list
   allows it (the answer names the line), when it is shorter than 8
   characters or has more than one line (maisecrets could not find it again),
+  when it looks like ordinary text (words, a sentence, a hash, an id, a
+  command: the answer says so; store such a password with `/maisecrets:put`),
   when it holds a placeholder, or when the prompt did not come from you (a
   scheduled prompt, a subagent, `claude -p`). The client's own list of earlier
   prompts (the up arrow) may keep the prompt as typed; that is not measured.
@@ -819,8 +876,7 @@ A value can also hide from the shape rules behind what a terminal or a renderer 
 tool result or a file (not in a typed prompt), the detector also scans a cleaned copy: without ANSI
 colour codes, without zero-width and direction characters (U+00AD, U+200B to U+200F, U+202A to
 U+202E, U+2060 to U+2064, U+2066 to U+2069, U+FEFF), with HTML entities and fullwidth letters
-written out, without the stars of a label in Markdown bold (`**Date of birth:** <value>`,
-`**Password**: <value>`, `__Name:__ <value>` read as the plain label, so every label rule sees the value), and with each base64 or hex run decoded that holds text (gzip inside base64 is opened,
+written out, and with each base64 or hex run decoded that holds text (gzip inside base64 is opened,
 a run inside the text is decoded once more). A hit in the copy redacts the original span, the hidden
 characters with it; a value in a decoded run takes the whole run, as in a Kubernetes Secret or a
 docker `auth` field. The copy is only scanned around the lines that changed. Bounds: a text over 1
@@ -1430,29 +1486,20 @@ Four sources, one scanner (`maisecrets/detect.py`):
 - Personal data after a label or in a fixed form (0.6.21, `maisecrets/personal.py`), in a tool
   result or a file only: a name after a name label (`patient:`, `tenant:`, `full_name:`, `FN:`,
   `Ansprechpartner:`; after the weak labels `name`, `owner` and `author` only a value that does not
-  read as English words or nouns, so `name: Customer Portal` stays text; one name word after a first
-  or last name label such as `first name:`, `surname:`, `Nachname:`, `prénom :`, unless it is an
-  English word, a type or a field state), a name before an e-mail
+  read as English words or nouns, so `name: Customer Portal` stays text), a name before an e-mail
   address (`First Last <mail>`, not before a bot or a service mailbox), a date after a birth label
   (`DOB`, `Geburtsdatum`, `né le`, `fecha de nacimiento`; not after `born`), an ID number of five
   digits and more after an ID label (`MRN`, `passport no`, `DL`, `SIN`, `TFN`, `NIR`, `tax id`,
-  `account number`; also `medical record number`, `health plan beneficiary number`, `national ID`,
-  `tax ID number`, `TIN`, `social security number`, and the passport and driving licence labels of
-  the EU languages: `Führerscheinnummer`, `Pass-Nr.`, `permis de conduire`, `número de pasaporte`,
-  `patente di guida`, `rijbewijsnummer`, `körkortsnummer` and more), the user in `user:password@host` and in another person's home path
+  `account number`), the user in `user:password@host` and in another person's home path
   (`/home/<user>/`, `C:\Users\<user>\`; service accounts and your own user name stay text), a
   street address with its postcode in the form of an active region (US, UK, IN; DE, AT, CH; FR,
   BE, LU; PT, BR, ES, IT; an address next to a company, office or landmark word stays text; when a
   legal form such as `GmbH`, `AG`, `Ltd` or `Inc` ends the company's name right before the address,
   its German postcode and a German VAT ID right after it stay text too; a person's name or record
   key nearby, an employer or job label, a second address, a sender's VAT label or a blank line keeps
-  them masked, and so does a sole trader, who has no legal form), a street line without a city
-  after an address label or a verb of residence (`Street address: 4821 Maple Ridge Drive`,
-  `resides at 77 Harbour Lane`, `wohnt in der Gartenstraße 3a`, `Indirizzo: Via Roma 12`; the same
-  company check), and
+  them masked, and so does a sole trader, who has no legal form), and
   the cells of a CSV column for personal data (`address`, `dob`, `phone`, `ssn`, and a name or user
-  column beside one of them; an address or a phone cell only in a row that also names a person), and
-  the same columns of a Markdown table (`| Name | Date of Birth | Phone Number |`). A
+  column beside one of them; an address or a phone cell only in a row that also names a person). A
   typed prompt takes none of them: a hit blocks a prompt, and a
   person who types a name means to send it. Documentation names (`Erika Mustermann`, `John Doe`)
   stay text. `tests/fp_corpus_pii.py` holds 367 developer texts in these shapes that are no
@@ -1462,12 +1509,6 @@ Four sources, one scanner (`maisecrets/detect.py`):
   result, and in a typed prompt after a phone word; a US number in the national form
   `(312) 846-2291` after a phone word with region `us` or `ca`, in a tool result only (an area code
   and an exchange start with 2 to 9; the fictional 555 exchange stays text).
-- A phone number in its national form after a phone label (`Phone number: 415-382-…`,
-  `Telefon: 030 …`, `telefoonnummer: 06 …`, `contact number is …`), and a North American number after
-  a phone verb (`call`, `reach me at`, `contacted at`), in a tool result only. A North American number
-  (`415-382-…`) needs region `us` or `ca`, as the `(312)` form does. A date, a time, a version, a
-  timestamp, a count (`3 412 908`), a range of years, a subscriber number of one digit or of a run
-  (`030 12345678`) and the fictional `555-0100` to `555-0199` stay text.
 - Three token forms with a tail shorter than the vendored rules want (0.6.21): an OpenAI or
   Anthropic key (`sk-proj-`, `sk-ant-`, `sk-svcacct-`, `sk-admin-`; the tail needs a digit, a capital
   and a run of 16 letters and digits, so a CSS class such as `sk-admin-sidebar-item2X` stays text),
@@ -1666,7 +1707,12 @@ is no such folder, so `convert` refuses there. Without pdftotext, maisecrets
 refuses every PDF and says so; it never lets the PDF through.
 
 A PDF that pdftotext cannot read in 6 seconds, that makes pdftotext use more
-than 512 MB of memory, or that is damaged, is refused. A crafted PDF of a few
+than 512 MB of memory, or that is damaged, is refused. A PDF locked by a
+password is refused too, and the AI is told that cause and not to ask you
+for the password; save a copy without the password and give the AI that
+copy. A PDF with only an owner password (it opens without one and limits
+printing or copying) converts, AES-256 included (measured with poppler
+26.10.0). A crafted PDF of a few
 MB can make pdftotext take 1.5 GB in 2.4 seconds: maisecrets watches the
 memory of pdftotext every 50 ms while it waits and stops it there (macOS does not
 enforce a memory limit on a process, measured; on Linux the kernel limits

@@ -6,5 +6,5 @@ runner = ["tests/test_check_value.py::NeverTheValueTests::test_a_failed_check_st
 
 [proof]
 file = "maisecrets/hooks.py"
-find = "            values = check_value.scrub_forms(prompt, checked)\n"
+find = "            values = check_value.scrub_forms(prompt, [v for v, _exact in checked])\n"
 replace = "            values = []\n"

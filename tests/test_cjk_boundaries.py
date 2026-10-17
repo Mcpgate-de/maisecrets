@@ -61,5 +61,42 @@ class CjkBoundaryTests(unittest.TestCase):
         self.assertEqual([("EMAIL", MAIL)], [s for s in spans(text, "tool") if s[0] == "EMAIL"])
 
 
+class CjkFreeFormTests(unittest.TestCase):
+    """A rule with the class of CJK letters also has a form without it (detect._Lazy), for a text with no CJK letter:
+    the class made the compilation of four rules cost 26 ms in each hook process. Both forms must find the same."""
+    RULES = {"email", "phone", "label-password-after-word", "label-password-after-space"}
+
+    def rules(self) -> list:
+        return [r for r in detect.rules() if isinstance(r.regex, detect._Lazy) and r.regex._plain is not None]
+
+    def test_each_rule_with_the_cjk_class_has_a_form_without_it(self):
+        self.assertEqual({r.id for r in self.rules()}, self.RULES)
+        for r in self.rules():
+            self.assertNotIn(detect._CJK, r.regex._plain, r.id)
+
+    def test_both_forms_find_the_same_in_a_text_without_a_cjk_letter(self):
+        import re
+        import fp_corpus
+        import fp_corpus_pii
+        texts = [t[1].replace("\u00a7", "") for t in fp_corpus.NO_HIT + fp_corpus.HIT + fp_corpus_pii.PII_NO_HIT
+                 + fp_corpus_pii.POSITIVE]
+        texts += ["Mail an " + MAIL + ", Telefon " + PHONE + ".", MAIL + "-x", "x" + PHONE, "Gr\u00fc\u00dfe " + MAIL,
+                  "Das Passwort ist " + J(["Test", "pass", "45!"]) + " und " + PHONE.replace(" ", "") + "\u00e9",
+                  "my password is '" + J(["test", "pass", "2024"]) + "' and the WLAN-Passwort ist \u201e"
+                  + J(["Test", "77"]) + "\u201c."]
+        texts = [t for t in texts if not detect._has_cjk(t)]
+        found = 0
+        for r in self.rules():
+            full = re.compile(r.regex.pattern, r.regex.flags)
+            plain = re.compile(r.regex._plain, r.regex.flags)
+            for text in texts:
+                want = [(m.span(), m.groups()) for m in full.finditer(text)]
+                with self.subTest(rule=r.id, text=text[:40]):
+                    self.assertEqual([(m.span(), m.groups()) for m in r.regex.finditer(text)], want)
+                    self.assertEqual([(m.span(), m.groups()) for m in plain.finditer(text)], want)
+                found += len(want)
+        self.assertGreater(found, 50, "the texts give the rules hits to compare")
+
+
 if __name__ == "__main__":
     unittest.main()

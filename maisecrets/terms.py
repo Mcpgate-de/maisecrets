@@ -1003,26 +1003,12 @@ is_term_kind = term_files.is_term_kind
 
 
 # --------------------------------------------------------- inline markers --
-_MARKER_RE = re.compile(r"\{\{([^{}\n]{1,200})\}\}")
-_MARK_WORD_RE = re.compile(r"[^\W\d_](?:[^\W\d_]|['’-](?=[^\W\d_]))*")
-
-
 def markers(prompt: str) -> list:
     """(start, end, name) of each `{{Jan Kowalski}}` in a prompt: 1 to 5 words of letters (a hyphen or an apostrophe
     inside a word), at least one of them capitalised. `{{ .Values.x }}` and `{{ item }}` stay text, and so do one letter
     and one common word alone (rules/term_stoplist.txt)."""
-    out = []
-    for m in _MARKER_RE.finditer(prompt):
-        inner = m.group(1)
-        words = inner.split()
-        if len(words) == 1 and (inner != inner.strip() or any(a.islower() and b.isupper()
-                                                               for a, b in zip(inner, inner[1:]))):
-            continue    # `{{ Title }}`, `{{FirstName}}`: one word in the form of a template (Gate B, rounds 1, 2)
-        if 1 <= len(words) <= 5 and all(_MARK_WORD_RE.fullmatch(w) for w in words) \
-                and any(w[0].isupper() for w in words) \
-                and not (len(words) == 1 and (len(words[0]) < 2 or _lower(words[0]) in stoplist())):
-            out.append((m.start(), m.end(), " ".join(words)))
-    return out
+    return [(a, b, " ".join(words)) for a, b, words in term_files.marker_forms(prompt)
+            if not (len(words) == 1 and _lower(words[0]) in stoplist())]
 
 
 def take_markers(prompt: str, ttl: int) -> tuple[str, int]:

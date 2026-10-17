@@ -118,9 +118,38 @@ def parse_command(prompt):
     return terms.parse_command(prompt)
 
 
-def take_markers(prompt: str, ttl: int) -> tuple:
-    """terms.take_markers, for a prompt that can hold a marker at all (`{{`)."""
+# the form of an inline marker `{{Jan Kowalski}}`. It lives here so that a prompt without a marker never loads terms.py:
+# a `{{` of a template (`{{ .Values.x }}`, `{{ item }}`) is no marker. Its import cost a prompt with
+# a `{{` about 3 ms of CPU on Python 3.14 and 3.9, and 7.4 ms on 3.9 without a bytecode cache (measured 2026-10-17,
+# after the hook module loaded)
+# sources, not compiled patterns: the import of the hooks compiles no regex it may not use (test_hook_start); re keeps
+# the compiled form in its cache after the first prompt with a `{{`
+_MARKER_RE = r"\{\{([^{}\n]{1,200})\}\}"
+_MARK_WORD_RE = r"[^\W\d_](?:[^\W\d_]|['’-](?=[^\W\d_]))*"
+
+
+def marker_forms(prompt: str) -> list:
+    """(start, end, words) of each `{{…}}` in the form of a marker: 1 to 5 words of letters (a hyphen or an apostrophe
+    inside a word), at least one of them capitalised, not one letter alone. terms.markers also leaves out one common
+    word alone (rules/term_stoplist.txt), which only terms.py reads."""
     if "{{" not in prompt:
+        return []
+    out = []
+    for m in re.finditer(_MARKER_RE, prompt):
+        inner = m.group(1)
+        words = inner.split()
+        if len(words) == 1 and (inner != inner.strip() or any(a.islower() and b.isupper()
+                                                               for a, b in zip(inner, inner[1:]))):
+            continue    # `{{ Title }}`, `{{FirstName}}`: one word in the form of a template (Gate B, rounds 1, 2)
+        if 1 <= len(words) <= 5 and all(re.fullmatch(_MARK_WORD_RE, w) for w in words) \
+                and any(w[0].isupper() for w in words) and not (len(words) == 1 and len(words[0]) < 2):
+            out.append((m.start(), m.end(), words))
+    return out
+
+
+def take_markers(prompt: str, ttl: int) -> tuple:
+    """terms.take_markers, for a prompt that holds a marker at all (marker_forms)."""
+    if not marker_forms(prompt):
         return prompt, 0
     from . import terms
     return terms.take_markers(prompt, ttl)

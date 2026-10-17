@@ -1,0 +1,10 @@
+# c13-a-python-probe-cannot-hold-the-hook: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-a-python-probe-cannot-hold-the-hook"
+control = "C13"
+statement = "A Python candidate whose probe fails and leaves a job in the background keeps no descriptor of the hook: run.sh starts the working Python within its bound, and the payload reaches it whole. Both clients let a call through when a hook runs past their timeout."
+runner = ["tests/test_promises.py::LauncherProbeHoldsNothingTests::test_a_probe_that_fails_or_holds_a_descriptor_does_not_hold_the_hook"]
+
+[proof]
+file = "hooks/run.sh"
+find = '''    $PY -c "$PROBE" </dev/null >/dev/null 2>&1 &'''
+replace = '''    $PY -c "$PROBE" </dev/null 2>/dev/null &'''
