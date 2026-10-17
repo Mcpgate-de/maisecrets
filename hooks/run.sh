@@ -12,7 +12,7 @@ export PYTHONUTF8=1
 HERE="$(cd "$(dirname "$0")" && pwd)"
 FOUND=""
 # One probe per candidate. It answers by its exit code only: 0 for 3.9 or newer, 60 + minor for an older 3, 50 + minor
-# for a 2 (codes clear of 126 and 127 of the shell, 128 + n of a signal, and 9009 % 256 of a Windows store alias). A probe gets no descriptor of the hook: stdin, stdout and stderr are /dev/null, so a wrapper (a shim, a
+# for a 2 (codes clear of 126 and 127 of the shell, 128 + n of a signal, and 9009 % 256 of a Windows store alias). A probe gets none of the hook's stdin, stdout and stderr: all three are /dev/null, so a wrapper (a shim, a
 # script that starts a job in the background) cannot eat the payload or hold the pipe that the client reads. Codex
 # reads a hook until its stdout closes, and both clients let the call through when a hook runs past their timeout
 # (measured on Claude Code 2.1.302 and codex-cli 0.162.0, docs/THREAT-MODEL.md, C13).
@@ -35,11 +35,12 @@ done
 [ -n "$SIG" ] && trap 'EXPIRED=1; [ -n "$PROBE_PID" ] && kill -9 "$PROBE_PID"' "$SIG"
 find_python() {
   # the timer sends SIG to this shell after a sleep that ran to its end; on TERM it stops the sleep, so it leaves no
-  # process behind. A client can give its hooks a PATH without sleep: then the fixed paths, and without any the
-  # timer does nothing (no bound) instead of refusing every call
+  # process behind. The fixed paths come first, so a sleep that the PATH puts before them cannot take the bound
+  # (codex review, 2026-10-17); a PATH sleep only where neither exists, and without any the timer does nothing
+  # (no bound) instead of refusing every call
   (
     trap 'kill "$s"; exit 0' TERM
-    for z in sleep /bin/sleep /usr/bin/sleep ""; do command -v "$z" >/dev/null && break; done
+    for z in /bin/sleep /usr/bin/sleep sleep ""; do command -v "$z" >/dev/null && break; done
     [ -n "$z" ] && [ -n "$SIG" ] || exit 0
     "$z" "$BUDGET" & s=$!
     wait "$s" && kill -"$SIG" $$

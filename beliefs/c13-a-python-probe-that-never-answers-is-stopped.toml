@@ -6,5 +6,5 @@ runner = ["tests/test_promises.py::LauncherProbeHoldsNothingTests::test_a_probe_
 
 [proof]
 file = "hooks/run.sh"
-find = '''trap 'EXPIRED=1; [ -n "$PROBE_PID" ] && kill -9 "$PROBE_PID"' USR1'''
-replace = '''trap 'EXPIRED=1' USR1'''
+find = '''[ -n "$SIG" ] && trap 'EXPIRED=1; [ -n "$PROBE_PID" ] && kill -9 "$PROBE_PID"' "$SIG"'''
+replace = '''[ -n "$SIG" ] && trap 'EXPIRED=1' "$SIG"'''

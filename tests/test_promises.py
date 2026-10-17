@@ -256,6 +256,17 @@ class LauncherProbeHoldsNothingTests(unittest.TestCase):
         self.assertIn("(found: python3 gave no answer in 2 s)", r.stdout)
         assert_refuses(self, "user-prompt", r)
 
+    def test_a_good_python3_first_answers_alone(self):
+        # the normal machine: python3 is the first candidate and works; `python` is taken away, so only python3
+        # can answer
+        (self.tools / "python").unlink()
+        self.addCleanup(lambda: os.symlink(sys.executable, self.tools / "python"))
+        r, took = self.launch(f"#!/bin/sh\nexec {sys.executable} \"$@\"\n")
+        out = json.loads(r.stdout)
+        self.assertEqual(out["reason"], "dispatch ran")
+        self.assertIn("probe-payload", out["payload"])
+        self.assertLess(took, self.LIMIT)
+
     def test_without_a_stalling_candidate_the_first_python_answers(self):
         r, took = self.launch(None)
         self.assertEqual(json.loads(r.stdout)["reason"], "dispatch ran")
