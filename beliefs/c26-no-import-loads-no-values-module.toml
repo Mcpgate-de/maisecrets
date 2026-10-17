@@ -1,0 +1,10 @@
+# c26-no-import-loads-no-values-module: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-no-import-loads-no-values-module"
+control = "C26"
+statement = "Without any import a scan does not import maisecrets/values.py or maisecrets/terms.py."
+runner = ["tests/test_values.py::Registry::test_without_an_import_the_values_module_is_not_loaded"]
+
+[proof]
+file = "maisecrets/detect.py"
+find = "    if not value_files.present():\n        return []\n    from . import values\n"
+replace = "    if False:\n        return []\n    from . import values\n"

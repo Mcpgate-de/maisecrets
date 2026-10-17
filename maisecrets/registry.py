@@ -6,7 +6,8 @@ label hit is stored quiet). A measurement of the order (2026-10-15) found ten su
 Here each rule gets a RuleSpec with an explicit rank, `priority = (phase, band, seq)`, and detect.rules() sorts by it.
 
 - `phase` orders the passes of a scan: 0 the password export, 1 the rule list, 2 the personal-data step and the
-  cleaned copy of a tool result, 3 the rules of your own, 4 the terms (maisecrets/terms.py), 5 the extra matchers.
+  cleaned copy of a tool result, 3 the rules of your own, 4 the terms (maisecrets/terms.py), 5 the imported values
+  (maisecrets/values.py), 6 the extra matchers.
 - `band` is the source inside the rule list (BANDS), with gaps for a source to come.
 - `seq` is the position in the source file.
 
@@ -39,20 +40,23 @@ BANDS = {
     "user": 900,             # the rules of your own (maisecrets/user_rules.py)
 }
 SOURCES = tuple(BANDS)
-PHASES = {"export": 0, "rules": 1, "personal": 2, "user": 3, "terms": 4, "extra": 5}
+PHASES = {"export": 0, "rules": 1, "personal": 2, "user": 3, "terms": 4, "imports": 5, "extra": 6}
 # The passes of a scan outside the rule list, as sources of their own. Each runs where its phase says: the password
 # export before every rule (a cell is a value as a whole), the personal-data rules (maisecrets/personal.py) and the
 # cleaned copy of a tool result after every built-in rule and before the rules of your own, the extra matchers last.
 # The cleaned copy has no rule of its own: it runs every rule again on a cleaned text. The terms (names, case numbers
 # and customer names from your own lists, maisecrets/terms.py) run after the rules of your own: a listed name never
 # cuts a value that a rule takes, and a term that a rule found too (an email address) claims the whole span.
-PASSES = {"export": PHASES["export"], "personal": PHASES["personal"], "terms": PHASES["terms"]}
+# The imported values (maisecrets/values.py, values from your own tools) run after the terms: an import only adds
+# masking where no rule, no term and no stored value masks, and never changes how those are masked or resolved.
+PASSES = {"export": PHASES["export"], "personal": PHASES["personal"], "terms": PHASES["terms"],
+          "imports": PHASES["imports"]}
 # the channels a source runs in. Every rule of the rule list runs in both; the literal rules judge a value by the
 # channel (detect._pw_literal_ok: a tool result takes a password without evidence of chance), which is a rule of
 # their own, not a channel switch
 CHANNEL = {source: "both" for source in BANDS}
 VENDORED = frozenset({"detect-secrets", "betterleaks", "presidio"})   # synced from upstream by scripts/sync_*.py
-OWN_SPECIAL = {"fallback": "fallback", "user": "user", "terms": "term"}
+OWN_SPECIAL = {"fallback": "fallback", "user": "user", "terms": "term", "imports": "import"}
 
 # a label rule finds a value by its label alone; a keyword rule is a label rule with no `=` or `:` of its own. Until
 # the registry these were id prefixes (detect.LABEL_RULES, detect.KEYWORD_RULES), and a stored kind still is one
@@ -122,6 +126,8 @@ def matcher_of(rule_id: str, source: str = "") -> str:
     password label, judged by detect._judge_literal), `seed` (a BIP39 seed phrase by its checksum)."""
     if source == "terms":
         return "term"      # one index of every list (maisecrets/terms.py), not a regex per term
+    if source == "imports":
+        return "import"    # one index of every import (maisecrets/values.py), not a regex per value
     if rule_id.startswith("curl-"):
         return "curl"
     if rule_id == "label-secret-list":
@@ -149,6 +155,8 @@ def rule_class(source: str, rule_id: str, type_: str) -> str:
         return "user"
     if source == "terms":
         return "term"
+    if source == "imports":
+        return "import"
     if source == "literal":
         return "label:literal"
     if form == "keyword":

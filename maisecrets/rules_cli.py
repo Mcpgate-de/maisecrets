@@ -57,6 +57,11 @@ def show() -> int:
         print(f"  {f.source} · {f.entities} term(s) · hash {f.digest}")
     for r in tl.refused:
         print(f"  left out: {r.source}" + (f" line {r.line}" if r.line else "") + f" · {r.reason}")
+    from . import value_files
+    if value_files.present():
+        from . import values as imports
+        line = imports.summary_line()
+        print(f"\n{line[0].upper()}{line[1:]}; /maisecrets:list shows each import")
     print(f"\nAllow list: {len(values)} exact value(s), {len(ids)} rule id(s) switched off"
           + (f" ({', '.join(sorted(ids))})" if ids else ""))
     print("\nAdd a folder: /maisecrets:settings rule_dirs add DIR (type it as your own prompt)\n"

@@ -23,6 +23,18 @@ def _age(ts: float) -> str:
 
 def cmd_list(_: list[str]) -> int:
     """What is stored, masked: the same view a person gets from /maisecrets:list. No value."""
+    rc = _list_values()
+    from . import value_files
+    if value_files.present():
+        from . import values
+        try:
+            _print_imports(values.rows())
+        except values.ValuesError as exc:
+            print(f"\nImported values: {exc}")
+    return rc
+
+
+def _list_values() -> int:
     v = Vault()
     rows = v.list()
     if not rows:
@@ -302,6 +314,49 @@ def cmd_rules(args: list[str]) -> int:
     return rules_cli.main(args)
 
 
+def cmd_values(args: list[str]) -> int:
+    """Values from your own tools (maisecrets/values.py): `values import FILE` and `values` (the imports). Prints
+    counts, ids and line numbers, never a value and never the file name: the output reaches the model when the agent
+    runs it. No command removes an import: only the person's typed prompt does."""
+    from . import values
+    if not args or args[0] in ("list", "show"):
+        _print_imports(values.rows(), always=True)
+        return 0
+    if args[0] == "import" and len(args) == 2:
+        try:
+            result = values.import_file(args[1])
+        except ValueError as exc:
+            print(f"maisecrets: the file is not imported: {exc}. Nothing was changed.")
+            return 1
+        print("maisecrets: " + values.summary(result))
+        if result.added:
+            print("From now on these values are masked in every prompt and tool result. Mask only: a placeholder of "
+                  "an imported value is never put back into a command or a file.")
+        return 0
+    if args[0] in ("remove", "forget", "delete"):
+        print("maisecrets: no command removes an import; only the person does, as their own prompt: "
+              "/maisecrets:forget import:ID (in Codex: maisecrets: forget import:ID).")
+        return 1
+    print("usage: maisecrets values [import FILE]", file=sys.stderr)
+    return 2
+
+
+def _print_imports(rows: list, always: bool = False) -> None:
+    """The imports: id, count, types, age, origin. Never a value."""
+    if not rows:
+        if always:
+            print("No values are imported. A tool of yours writes JSON lines ({\"value\": ..., \"type\": ...}); "
+                  "`values import FILE` or the setting value_files adds them.")
+        return
+    from .values import type_text
+    print(f"\nImported values (mask only): {sum(r['count'] for r in rows)} in {len(rows)} import(s)")
+    for r in rows:
+        origin = {"file": "a value file", "run": "a command", "damaged": "DAMAGED"}.get(r["origin"], r["origin"])
+        age = _age(r["at"]) if r["at"] else "?"
+        print(f"  import:{r['id']} · {r['count']} value(s) ({type_text(r['types']) or '-'}) · {age} · from {origin}")
+    print("  To remove one: type /maisecrets:forget import:ID as your own prompt.")
+
+
 def cmd_terms(args: list[str]) -> int:
     """The term lists (maisecrets/terms_cli.py): counts, and `suggest FILE`."""
     from . import terms_cli
@@ -319,7 +374,7 @@ def cmd_settings(args: list[str]) -> int:
     from . import settings
     rest = [a for a in args if a != "--all"]
     # KEY, KEY VALUE, or for the host list KEY add|remove HOST (field report on 0.6.6: the list's own form exited 1)
-    folder = rest[0].lower() in ("rule_dirs", "clean_dirs") if rest else False     # a folder can hold spaces
+    folder = rest[0].lower() in ("rule_dirs", "clean_dirs", "value_files") if rest else False   # a path holds spaces
     list_form = (len(rest) >= 3 and (folder or rest[0].lower() == "ssh_autonomous_hosts")
                  and rest[1].lower() in ("add", "remove") and (len(rest) == 3 or folder))
     if rest and (len(rest) <= 2 or list_form) and rest[0].lower() in settings.TITLE:
@@ -378,6 +433,10 @@ def cmd_status(_: list[str]) -> int:
           f"{sum(not q.kept for q in own.quarantined)} left out; /maisecrets:rules shows them")
     from . import terms
     print(terms.summary())
+    from . import value_files
+    if value_files.present():
+        from . import values
+        print(values.summary_line())
     active = detect.active_regions()
     print(f"regions: {', '.join(active.regions)} ({active.source}); "
           f"label languages: {', '.join(active.languages)}")
@@ -389,9 +448,17 @@ def cmd_status(_: list[str]) -> int:
         except OSError:
             n = 0
         print(f"{name}: {n} lines")
-    from . import vault_refs
+    from . import codex_vault, vault_refs
     for line in vault_refs.status_lines(v.cfg, v.backend):
         print(line)
+    if codex_vault.config_path().is_file():
+        # the command does not know which client started it: the Codex profile gets its own lines when it exists
+        vault_refs.use_client("codex")
+        try:
+            for line in vault_refs.status_lines(v.cfg, v.backend):
+                print(line)
+        finally:
+            vault_refs.use_client("claude")
     from . import incidents
     groups, damaged = incidents.load()
     markers = incidents.unfolded_markers()
@@ -823,7 +890,7 @@ COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_res
             "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
             "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut,
             "forget": cmd_forget, "guard": cmd_guard, "settings": cmd_settings,
-            "consent-report": cmd_consent_report, "rules": cmd_rules, "terms": cmd_terms}
+            "consent-report": cmd_consent_report, "rules": cmd_rules, "terms": cmd_terms, "values": cmd_values}
 
 
 def _stdin_words() -> list[str]:
@@ -846,7 +913,7 @@ def main(argv: list[str] | None = None) -> int:
               " | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>\n"
               "           | consent-report ssh [--last 30d|N] [--json] [--excerpts FILE]\n"
               "           | rules [check [DIR] | test [text] | init DIR | import FILE.toml]\n"
-              "           | terms [suggest FILE]")
+              "           | terms [suggest FILE] | values [import FILE]")
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])

@@ -1,0 +1,10 @@
+# c27-codex-a-layer-that-renames-tools-counts: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-layer-that-renames-tools-counts"
+control = "C27"
+statement = "A Codex project layer that sets non_prefixed_mcp_tool_names counts as one with servers: it changes the tool names the hook maps."
+runner = ["tests/test_codex_vault.py::ToolNames::test_a_layer_that_renames_the_tools_counts_as_one_with_servers"]
+
+[proof]
+file = "maisecrets/codex_helper.py"
+find = '''_SERVER_KEYS = ("mcp_servers", "non_prefixed_mcp_tool_names")'''
+replace = '''_SERVER_KEYS = ("mcp_servers",)'''

@@ -24,7 +24,7 @@ import time
 import sys
 from typing import Any
 
-from . import check_value, detect, incidents, rehydration, term_files
+from . import check_value, detect, incidents, rehydration, term_files, value_files
 from .placeholder import KEY_RE, find_refs
 from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config
@@ -123,8 +123,9 @@ def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str 
     or a file, where a word after a label is stored weak (vault.is_weak)."""
     ordered = sorted(matches, key=lambda x: x.start)
     # a term (terms.py) goes into the store as its entity id: every spelling gets the entity's one placeholder, and
-    # the store never holds the term
-    entries = vault.put_many([(term_files.store_value(m.kind) if term_files.is_term_kind(m.kind) else m.value,
+    # the store never holds the term. An imported value (values.py) goes in as its import id and value id
+    entries = vault.put_many([(term_files.store_value(m.kind) if term_files.is_term_kind(m.kind)
+                               else value_files.store_value(m.kind) if value_files.is_import_kind(m.kind) else m.value,
                                m.type, m.kind) for m in ordered], session=session, tool=tool)
     out = text
     for m, e in sorted(zip(ordered, entries), key=lambda me: me[0].start, reverse=True):
@@ -773,7 +774,7 @@ def _longest_wins(text: str, matches: list, vault, session: str | None, resolved
     inside a stored value is dropped: the exact redaction takes the value whole (a listed name inside a stored
     password split it, and the rest stayed in clear). A hit that holds a stored value, or that overlaps one, takes
     the whole union: a resolved value inside a ghp_ token cut the shape, and the rest of the token went out."""
-    if not matches or vault is None or not any(term_files.is_term_kind(m.kind) for m in matches):
+    if not matches or vault is None or not any(value_files.is_mask_only(m.kind) for m in matches):
         # without a term hit the detector's spans are taken first, as before the terms, and the exact redaction
         # runs on the rest: no second pass over the text (the hook time without terms stays what it was)
         return matches
@@ -784,6 +785,12 @@ def _longest_wins(text: str, matches: list, vault, session: str | None, resolved
     absorbed: list = []
     for m in matches:
         cover = [(a, b) for a, b in spans if a < m.end and m.start < b]
+        if cover and value_files.is_import_kind(m.kind):
+            # an import only adds masking: a stored value keeps its own placeholder, so one that resolves still
+            # resolves (an import must not turn it into a mask-only one, as a term does). The parts of the imported
+            # value outside the stored ones stay hits of the import
+            out += _import_rest(text, m, cover)
+            continue
         inside = [(a, b) for a, b in cover if a <= m.start and m.end <= b]
         if inside and not (term_files.is_term_kind(m.kind) and not any(
                 _WORD_CHAR_RE.search(text, a, m.start) or _WORD_CHAR_RE.search(text, m.end, b) for a, b in inside)):
@@ -808,6 +815,21 @@ def _longest_wins(text: str, matches: list, vault, session: str | None, resolved
         # the secret in a union with a term is stored as its own entry, so a later output that holds it alone is
         # masked by the exact match (Gate B, round 2)
         vault.put_many([(x.value, x.type, x.kind) for x in absorbed], session=session, tool=not prompt)
+    return out
+
+
+def _import_rest(text: str, m, cover: list) -> list:
+    """The parts of an import hit outside the stored spans `cover`, each a hit of the import when it holds a word
+    character (as detect._term_rest for a span that a rule took)."""
+    out, pos = [], m.start
+    for a, b in sorted(cover) + [(m.end, m.end)]:
+        words = [w.span() for w in _WORD_CHAR_RE.finditer(text, pos, min(a, m.end))]
+        if words:
+            # from its first to its last word character: the separators next to a stored value stay, so the
+            # exact redaction after this still finds the stored value as a token of its own
+            lo, hi = words[0][0], words[-1][1]
+            out.append(dataclasses.replace(m, value=text[lo:hi], start=lo, end=hi))
+        pos = max(pos, b)
     return out
 
 
@@ -989,7 +1011,13 @@ def rewrite_prompt(payload: dict) -> dict:
     if "<task-notification>" in prompt:
         return {}
     # /maisecrets:term add|remove carries a name: the hook answers it, and the mod must not rewrite the name first
-    if term_files.parse_command(prompt):
+    if term_files.parse_command(prompt) or value_files.parse_removal(prompt):
+        return {}
+    # a settings prompt and the ssh grant sentence are the person's controls: the hook reads them before the detector,
+    # and the mod must not rewrite a word of them first (an imported or listed value would break the control; Gate A
+    # and Gate B of #19 part 3)
+    from . import settings as settings_mod
+    if settings_mod.parse_prompt(prompt) or _GRANT_RE.match(prompt):
         return {}
     # the hook blocks an @file mention before it stores anything; without a working directory a relative
     # mention cannot be checked, so any mention goes to the hook
@@ -1170,6 +1198,24 @@ def user_prompt(payload: dict) -> dict:
     if term_cmd:
         # a subagent's prompt is no prompt of the person (as for the marker below)
         return _term_command(payload, term_cmd, typed and not payload.get("agent_id"), cfg)
+    # /maisecrets:forget import:ID (Codex: maisecrets: forget import:ID): the only way an import of values is removed
+    # (C26). It makes detection weaker, so only the person's typed prompt counts, and a tool call that carries it is
+    # refused (_pre_bash). Before the detector: an imported value never masks the prompt that removes it
+    removal = value_files.parse_removal(prompt)
+    if removal:
+        if typed and not payload.get("agent_id"):
+            from . import values
+            try:
+                reason = values.remove_typed(removal)
+            except Exception as exc:  # noqa: BLE001 - the answer says it failed; nothing else depends on it
+                reason = f"maisecrets: the import could not be removed ({type(exc).__name__}); nothing was changed."
+        else:
+            reason = ("maisecrets: the removal of an import counts only when you type it as your prompt; this one came "
+                      f"from the client ({payload.get('source')}), so nothing was removed.")
+        if client_of(payload) == "codex":
+            return {"decision": "block", "reason": reason}
+        return {"decision": "block", "reason": reason,
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
     if typed and not payload.get("agent_id"):
         # {{Jan Kowalski}} in a prompt the person typed: the name is masked from now on (terms.take_markers)
         try:
@@ -2650,17 +2696,18 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
     from . import vault_refs
     # a token a server minted and a server result noted (vault_refs.py): it takes the same way as a stored value
-    server = [] if client_of(payload) == "codex" else [
-        (k, a, b) for k, a, b in vault_refs.find_noted(command, cfg, payload.get("session_id")) if ctxs[a] != "comment"]
+    server = [(k, a, b) for k, a, b in vault_refs.find_noted(command, cfg, payload.get("session_id"))
+              if ctxs[a] != "comment"]
     refs = sorted(refs + server, key=lambda r: r[1])
     server_keys = list(dict.fromkeys(k for k, _a, _b in server))
-    elsewhere = [] if client_of(payload) == "codex" else vault_refs.noted_elsewhere(command, cfg,
-                                                                                   payload.get("session_id"))
+    elsewhere = vault_refs.noted_elsewhere(command, cfg, payload.get("session_id"))
     if elsewhere:
         return _deny(_elsewhere_reason(elsewhere) + " The command did not run.")
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
+    if value_files.removal_in_command(command):
+        return _deny(value_files.IN_A_COMMAND)
     # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line
     if cfg.get("ssh_consent") and re.search(r"maisecrets:\s*allow\s+ssh\s+\S|allow\s+ssh\s+\S+\s+\d{6}", command,
                                            re.I):
@@ -2964,6 +3011,9 @@ def _holds_a_guarded_folder(value: str) -> bool:
     spellings = {str(HOME), os.path.realpath(str(HOME)), config_dir, os.path.realpath(config_dir),
                  *vault_refs.config_files(), os.path.join(home, ".ssh"), "~/.ssh", "~/.claude", "~/.maisecrets",
                  "$HOME/.ssh", "${HOME}/.ssh", "$HOME/.claude", "${HOME}/.claude"}
+    # the Codex config and its folder: the helper line and the hooks of Codex live there
+    codex_home = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
+    spellings |= {codex_home, os.path.realpath(codex_home), "~/.codex", "$HOME/.codex", "${HOME}/.codex"}
     return any(sp and sp in value for sp in spellings)
 
 
@@ -2976,8 +3026,9 @@ def _a_guarded_path(v: str, cwd: str) -> bool:
         real = os.path.realpath(os.path.expanduser(full))
         config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
         folder = os.path.realpath(config_dir)
+        codex = os.path.realpath(os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex"))
         return real in {os.path.realpath(f) for f in vault_refs.config_files()} or real == folder \
-            or real.startswith(folder + os.sep)
+            or real.startswith(folder + os.sep) or real == codex or real.startswith(codex + os.sep)
     except (OSError, ValueError):
         return True                             # a path we cannot judge is refused, not served
 
@@ -3338,7 +3389,10 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
             return _deny("maisecrets: this apply_patch call carries no patch in `command`. Nothing was written.")
         headers = _patch_headers(patch)
         paths = [path for _line, path in headers]
-        in_header = [k for line, _path in headers for k, _a, _b in find_refs(line)]
+        from . import vault_refs
+        # a server token in a file name too: the server would choose the file (C27)
+        in_header = [k for line, _path in headers for k, _a, _b in
+                     find_refs(line) + vault_refs.find_noted(line, cfg, payload.get("session_id"))]
         if in_header:
             return _deny(f"maisecrets: ⟦{in_header[0]}⟧ is in a file name of the patch, where it is not resolved. "
                          "Nothing was written. Put the placeholder into the content, not into a path.")
@@ -3366,16 +3420,14 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     server: list[str] = []
 
     def collect_server(v: str) -> str:
-        if client_of(payload) != "codex":         # Codex gets no header in this version, so no server value either
-            server.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
+        server.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
         return v
     _walk_strings(target, collect_server)
     server = list(dict.fromkeys(server))
     elsewhere: list[str] = []
 
     def collect_elsewhere(v: str) -> str:
-        if client_of(payload) != "codex":
-            elsewhere.extend(vault_refs.noted_elsewhere(v, cfg, payload.get("session_id")))
+        elsewhere.extend(vault_refs.noted_elsewhere(v, cfg, payload.get("session_id")))
         return v
     _walk_strings(target, collect_elsewhere)
     if elsewhere:
@@ -3385,8 +3437,7 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     outside: list[str] = []
 
     def collect_outside(v: str) -> str:
-        if client_of(payload) != "codex":
-            outside.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
+        outside.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
         return v
     _walk_strings({k: v for k, v in target.items() if k not in _CONTENT_FIELDS}, collect_outside)
     if outside:
@@ -3494,6 +3545,8 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
+    if value_files.removal_in_command(command):
+        return _deny(value_files.IN_A_COMMAND)
     if _HOOK_ENTRY_TEXT_RE.search(command):
         # PowerShell has no word parser here: any mention of a hook entry with its event is refused
         return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "
@@ -3534,13 +3587,14 @@ def _hide_pair(tool_input) -> tuple | None:
 
 
 def _term_keys() -> set:
-    """The keys of the term entries in the index, purged ones too: such a key never resolves, at any age."""
+    """The keys of the term and import entries in the index, purged ones too: such a key never resolves, at any
+    age."""
     from .vault import INDEX
     try:
         entries = json.loads(INDEX.read_text(encoding="utf-8")).get("entries", {})
     except (OSError, ValueError, AttributeError):
         return set()
-    return {k for k, m in entries.items() if isinstance(m, dict) and term_files.is_term_kind(m.get("kind"))}
+    return {k for k, m in entries.items() if isinstance(m, dict) and value_files.is_mask_only(m.get("kind"))}
 
 
 def pre_tool(payload: dict) -> dict:
@@ -4202,6 +4256,11 @@ def post_tool(payload: dict) -> dict:
     if term_refs:
         note = (f"{note} {', '.join(term_refs)} stand for names from the person's term list: maisecrets never puts "
                 "the name back, also not in a command or a file. Write them as they are.").strip()
+    import_refs = list(dict.fromkeys(e.ref for e in entries if value_files.is_import_kind(getattr(e, "kind", ""))))
+    if import_refs:
+        note = (f"{note} {', '.join(import_refs)} stand for values the person imported from their own tools: "
+                "maisecrets never puts the value back, also not in a command or a file. Write them as they are."
+                ).strip()
     refs = [e.ref for e in entries]
     if client_of(payload) == "codex":
         # Codex has no updatedToolOutput. A "block" replaces the model-visible result with the
@@ -4346,10 +4405,14 @@ def _post_tool_guarded(payload: dict) -> dict:
         if str(payload.get("tool_name") or "").startswith("mcp__"):     # no config read for any other tool
             from . import vault_refs
             cfg = load_config()
-            # before the redaction, from the result as the server sent it; the result itself does not change. Codex
-            # gets no header in this version, so its results start no discovery
-            backend = None if client_of(payload) == "codex" else Vault(cfg).backend
-            _count, notice = vault_refs.note_result(payload, cfg, backend)
+            noted_payload = payload
+            if client_of(payload) == "codex":
+                # Codex names the tool only: the user entry comes from its name rule, and only when no project layer
+                # of the session folder can give that name another server (codex_vault.mcp_server_of)
+                from . import codex_vault
+                noted_payload = {**payload, "mcp_server": codex_vault.mcp_server_of(payload) or {}}
+            # before the redaction, from the result as the server sent it; the result itself does not change
+            _count, notice = vault_refs.note_result(noted_payload, cfg, Vault(cfg).backend)
     except Exception as exc:  # noqa: BLE001 - a token not noted stays text; the output must not be withheld for it
         _debug(f"post-tool vault-refs: {type(exc).__name__}")
     result = _post_tool_guarded_rest(payload)
@@ -4819,6 +4882,12 @@ def main(argv: list[str]) -> int:
         incidents.write_marker_bounded("hook.payload")       # it answers before the timer: a marker, bounded
         return 0
     import threading
+    try:
+        from . import vault_refs
+        # vault references read the client config of this payload's client (Claude Code or Codex)
+        vault_refs.use_client(client_of(payload))
+    except Exception as exc:  # noqa: BLE001 - without it a server token stays text
+        _debug(f"vault-refs client: {type(exc).__name__}")
     started = time.time()
     clock = time.perf_counter()
     lock = threading.Lock()

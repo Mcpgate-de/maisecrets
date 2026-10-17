@@ -1,0 +1,10 @@
+# c27-codex-a-tool-name-of-two-entries-is-no-sighting: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-tool-name-of-two-entries-is-no-sighting"
+control = "C27"
+statement = "A Codex tool name that two user entries could make (`a` and `a__b`) maps to no entry, so its tokens stay text."
+runner = ["tests/test_codex_vault.py::ToolNames::test_every_server_codex_knows_takes_part_in_the_name_rule"]
+
+[proof]
+file = "maisecrets/codex_vault.py"
+find = '''    if len(hits) != 1 or hits[0] not in servers'''
+replace = '''    if not hits or hits[0] not in servers'''

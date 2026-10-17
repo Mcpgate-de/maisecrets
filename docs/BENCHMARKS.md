@@ -155,6 +155,46 @@ and splits the time into interpreter, import, rule list, regex compilation and s
 The forms and the new checks compile their regexes at their first use. One review round measured a long line of
 hits: every new rule stays linear from 70 KB to 560 KB on one line (ratio 7 to 9 for 8 times the text).
 
+## Values from your own tools, 2026-10-16
+
+The imports of part 3 of #19 (`maisecrets/values.py`, the registry pass `imports`), measured on the branch of the merge
+request against `next` at `fcd2535`.
+
+**Without an import, nothing changes.** `scripts/detection_fingerprint.py --creddata` gives byte-identical files for
+`next` and the branch: 50,387 inputs, 503,871 lines, 290,822 hits; and 771 typed prompts as samples, 7,711 lines.
+Without an import, no hook imports `maisecrets/values.py` or `maisecrets/terms.py`; the only new module on the hook path
+is `maisecrets/value_files.py` (one `scandir`, below 1 ms).
+
+**Hook time.** CPU time (user + system) of one hook call, a new process each, the median of 21 calls after one
+warm-up, the configurations called in turn. The payloads of `scripts/profile_hook.py`, with no imported value in them.
+Each tree had fresh byte code (a stale `__pycache__` of an edited `hooks.py` cost 45 ms per call in a first run and
+looked like a regression). The imports are invented NER output (55 % full names, 25 % e-mail addresses, the rest
+surnames, company names and case numbers). Load average 12 (Python 3.14) and 32 (Python 3.9).
+
+| Payload | next | branch, no import | 10 values | 1,000 values | 100,000 values |
+|---|---|---|---|---|---|
+| Python 3.14, typed prompt, 1 KB | 194.0 ms | 194.0 ms | 202.6 ms | 207.2 ms | 210.6 ms |
+| Python 3.14, Bash result, 20 KB | 263.3 ms | 263.0 ms | 276.4 ms | 275.9 ms | 282.6 ms |
+| Python 3.14, Read result, 70 KB | 295.3 ms | 267.4 ms | 317.1 ms | 306.1 ms | 282.8 ms |
+| Python 3.9, typed prompt, 1 KB | 224.3 ms | 224.8 ms | 235.8 ms | 234.5 ms | 244.0 ms |
+| Python 3.9, Bash result, 20 KB | 304.4 ms | 308.3 ms | 318.9 ms | 319.3 ms | 324.8 ms |
+| Python 3.9, Read result, 70 KB | 492.7 ms | 494.1 ms | 519.8 ms | 519.3 ms | 531.6 ms |
+
+The row of the 70 KB Read on Python 3.14 is noisy (its spread is larger than the differences). With an import a hook
+pays about 10 to 20 ms (the import of the term matcher and one pass over the text), and 100,000 values cost a few ms
+more than 10: one index, looked up once per word, never a regex per value.
+
+**The index per size**, in separate processes, at load 95 to 105 (read the ratios, not the levels): the import and
+the build took 0.4 s for 10 and for 1,000 values, and 10 s (Python 3.9) to 19 s (Python 3.14) for 100,000; the cache
+`.values-cache` is 16.4 MB for 100,000 values and loads in 8 to 27 ms; the steady pass over 70 KB takes 16 to 35 ms for
+10, 1,000 and 100,000 values alike. maisecrets builds the index after an import and at session start, so a tool hook
+only loads it.
+
+**False hits.** An import of 1,000 invented values (above) on 2,464 developer texts (tool channel), 771 typed prompts
+(prompt channel) and the 1,649 NO_HIT snippets of the three fp corpora (both channels): 0 texts with an import hit. All
+1,000 values were masked in a probe text (745 by the import pass, the rest by a rule that found them first: the
+e-mail addresses). `tests/test_values_corpora.py` holds the corpus part with 400 values.
+
 ## Terms, 2026-10-16
 
 The terms of part 2 of #19 (`maisecrets/terms.py`, the registry pass `terms`), measured on the branch of the merge

@@ -344,6 +344,9 @@ MATRIX: dict[str, list[tuple[list[str], str, dict]]] = {
     "rules": [([], "", _ALL0), (["check"], "", _ALL0), (["nonsense"], "", _ALL2)],
     # the term lists are read without the store; suggest of a missing file exits 1 (tests/test_terms_hooks.py)
     "terms": [([], "", _ALL0), (["suggest", "/nonexistent/notes.txt"], "", _ALL1), (["nonsense"], "", _ALL2)],
+    # the imports are read without the store; an import of a missing file and any removal exit 1 (tests/test_values.py)
+    "values": [([], "", _ALL0), (["import", "/nonexistent/values.jsonl"], "", _ALL1),
+               (["remove", "v1234abcd"], "", _ALL1), (["nonsense"], "", _ALL2)],
 }
 
 _BASES: dict[str, Sandbox] = {}

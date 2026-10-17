@@ -1,0 +1,10 @@
+# c27-codex-a-failed-first-run-never-makes-a-later-first: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-failed-first-run-never-makes-a-later-first"
+control = "C27"
+statement = "A Codex helper run with no record of its process counts as the first run only while the process is young: a first run that failed never lets a later run in another folder give the header."
+runner = ["tests/test_codex_vault.py::Helper::test_an_old_process_without_a_record_gets_no_header"]
+
+[proof]
+file = "maisecrets/codex_helper.py"
+find = '''            ok = fresh and 0 <= age < FIRST_WINDOW'''
+replace = '''            ok = fresh'''

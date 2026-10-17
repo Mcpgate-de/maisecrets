@@ -1,0 +1,10 @@
+# c26-a-command-import-never-takes-a-value-files-place: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-command-import-never-takes-a-value-files-place"
+control = "C26"
+statement = "A command's import of the path of a value file is an import of its own, so it cannot fill that value file's import."
+runner = ["tests/test_values.py::ReviewRoundOne::test_a_command_import_of_a_value_file_is_an_import_of_its_own"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "    key = (\"file:\" if origin == \"file\" else \"run:\") + key\n"
+replace = "    key = key\n"

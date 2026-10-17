@@ -112,6 +112,35 @@ value only to a key that the vault announced when the person logged in.
   it over the original. It does not change a file that is not valid JSON, and
   it keeps a backup. The person can turn this off (`client_header: false`).
   The vault then removes its own header.
+- Codex (measured on codex-cli 0.162.0): a project layer (`<dir>/.codex/config.toml`)
+  merges deeply over the user's `config.toml` and can set another `url` on a
+  user entry. A static `http_headers` header of that entry then goes to the
+  project's URL, also for a project that Codex trusted on its own. So the vault
+  writes no static header there. It writes `http_headers_helper` on the user
+  entry: a command that Codex runs at connect time in the session folder. Its
+  JSON output becomes headers on every request to the origin of the URL, the
+  `authorization_code` token request included, never the browser leg. The
+  helper prints the header only when its state file names this entry and URL,
+  the user's file still has them, no profile can change them, and no project
+  layer of the session folder has `mcp_servers`; else `{}`. Codex keeps the
+  server URLs of the folder a session began in and runs the helper again after
+  a change of the folder or a 401, so a later run of one Codex process gives
+  the header only when the first run gave it, in the same folder; a run with no
+  record counts as the first only while the process is younger than two minutes
+  (deny by default). The hook notes a result only in the folder that SessionStart
+  recorded for its session, and only when that start saw no project layer or
+  profile file with servers (a layer deleted later does not move the server
+  back). A project layer that sets `features.non_prefixed_mcp_tool_names` counts
+  as one with servers. The helper reads `client_header` itself at each run (the
+  policy file wins), so the opt-out works at the next connection. Its command ends in
+  `|| echo '{}'`, because a helper that fails stops Codex from connecting. The
+  PostToolUse payload of Codex names the tool only (`mcp__<server>__<tool>`,
+  each character outside `[A-Za-z0-9_]` as `_`). The vault maps it to a user
+  entry by that rule, and notes nothing when another server (a stdio or
+  switched-off entry, a plugin server) could make the name, when the tool part
+  holds `__`, when a project layer has servers, or when the session began in
+  another folder. The vault never writes a `config.toml` that lies
+  in a git work tree.
 - `K` never travels on the MCP connection. It goes only to the resolve
   endpoint (§4.4).
 
