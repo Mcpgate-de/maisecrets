@@ -5,7 +5,7 @@ limits are in their own section. "Repeat this measurement" has the commands.
 
 | Snapshot | |
 |---|---|
-| Date | 2026-10-14; the 0.6.24, 0.6.25 and 0.6.26 rows and sections: 2026-10-16 |
+| Date | 2026-10-14; the 0.6.24, 0.6.25 and 0.6.26 rows and sections: 2026-10-16; "Personal data after its label in more forms": 2026-10-17 |
 | maisecrets | v0.6.17 (tag `v0.6.17`); earlier releases from their tags; the CredData rows of 0.6.18 to 0.6.21 and the holdout section: 2026-10-15; 0.6.24, 0.6.25 and 0.6.26 from their release branches, 2026-10-16 |
 | Data | Samsung CredData, commit `0b1940e171725ad8937311120b191602608a4801` (2026-09-29); four labelled PII datasets, pinned in "Labelled PII datasets" (2026-10-15) |
 | Machine | Apple M5, 10 cores, macOS 27.0 |
@@ -529,6 +529,104 @@ inputs): in the space form, a value that starts with a sign, a run of English wo
 weak password (Sommer2024!, Hunter2!) stay text; such a value needs a `:` or a copula. Still a hit after a password
 word and a space: a band (WLAN-5GHz), a room number (Raum3.12), a rule word with a number (2FA-Pflicht). A token in a
 URL query or after `Bearer` keeps a final dot, as in 0.6.28: these are no label rules.
+
+### Personal data after its label in more forms, 2026-10-17
+
+`origin/next` at `fcd2535` (the detection of 0.6.31) against the branch of seven rules, each its own commit. The
+rules come from the gap analysis of 2026-10-16 on half D of Nemotron-PII and Gretel; the numbers below are half C
+(the samples whose first 8 hex digits of sha256 of `<dataset>/<id>` are odd), counted after the rules were fixed. All
+seven rules run in the tool channel only. A typed prompt takes no personal-data rule (0.6.21: a person who types a
+name means to send it), so the prompt numbers below show that nothing changes there. Each rule was measured alone (the
+branch with the other six switched off) and all seven together. `--locale de_DE`, by-language regions.
+
+1. **Bold label.** The cleaned copy of a tool result drops the stars around a Markdown bold label (`**Label:** value`,
+   `**Label**: value`, `__Label:__ value`), so every label rule reads the value. Only the stars go: each character
+   keeps its own offset, and the opening stars inside a line become one space, so a value ends before the next bold
+   label.
+2. **ID after a health, tax or national label** (`_ID_RE`): medical record number, health plan beneficiary number,
+   beneficiary ID, national ID, tax ID number, taxpayer identification number, TIN, social security number.
+3. **Passport and driving licence labels** of de, fr, es, it, nl, pt, sv and pl, and "driving licence".
+4. **Phone number after a phone word** (`phone-after-phone-word`): a national form after a phone label in the label
+   languages; a North American 3-3-4 number also after a phone verb, with region `us` or `ca` only (as
+   `phone-us-national`); the `(312) 846-…` form stays with `phone-us-national`.
+5. **One name word after a first or last name label** (`name-single-after-label`), in the label languages.
+6. **Street line after an address label or a verb of residence** (`address-street-after-label`), with the company
+   check of the address rules.
+7. **Person columns of a Markdown table** (`md-table-personal-column`): the CSV rule for `|` tables.
+
+Gain, tool channel, half C. TP before → after (values in half C); FP is a hit on no gold span of any kind (an upper
+bound: both datasets leave real values unlabelled).
+
+| Rule alone | Nemotron-PII, half C | Gretel, half C | Mendeley | PIILO |
+|---|---|---|---|---|
+| 1 bold label | NAME +2,673, BIRTH_DATE +1,281, ID_NUMBER +451, SECRET +315, US_BANK_NUMBER +210, ADDRESS +61; FP ID 8 → 14, NAME 3 → 14, ADDRESS 1 → 2 | NAME +41, ADDRESS +4, BIRTH_DATE +4, ID_NUMBER +3; FP SECRET 53 → 55 | 0 | 0 |
+| 2 health, tax, national ID | ID_NUMBER +5,187 (FP 8 → 10) | US_SSN +4; FP ID_NUMBER 52 → 54 | 0 | 0 |
+| 3 EU passport and licence | 0 | ID_NUMBER +98 (FP 52 → 54) | 0 | 0 |
+| 4 phone after a phone word | PHONE +7,059 (FP 10 → 22) | PHONE +214 (FP 180 → 225) | 0 | 0 |
+| 5 one name word | NAME +6,523 (FP 3 → 3) | NAME +283 (FP 22 → 51) | 0 | 0 |
+| 6 street line | ADDRESS +2,049 (FP 1 → 1) | ADDRESS +318 (FP 199 → 246) | ADDRESS +241 (FP 0 → 13) | 0 |
+| 7 Markdown table | NAME +138, ID_NUMBER +73, BIRTH_DATE +59, ADDRESS +12, PHONE +12 | NAME +7, ADDRESS +5 | 0 | 0 |
+
+All seven together, half C, TP and recall:
+
+| Dataset, type | Values | Before | After | R before → after | FP before → after |
+|---|---|---|---|---|---|
+| Nemotron PHONE | 15,348 | 4,024 | 11,662 | 0.262 → 0.760 | 10 → 23 |
+| Nemotron ID_NUMBER | 14,516 | 4,504 | 11,093 | 0.310 → 0.764 | 8 → 18 |
+| Nemotron NAME | 71,970 | 2,335 | 14,206 | 0.032 → 0.197 | 3 → 14 |
+| Nemotron ADDRESS | 8,448 | 477 | 3,070 | 0.056 → 0.363 | 1 → 3 |
+| Nemotron BIRTH_DATE | 9,123 | 2,700 | 4,040 | 0.296 → 0.443 | 0 → 0 |
+| Nemotron SECRET | 5,793 | 1,599 | 1,914 | 0.276 → 0.330 | 10 → 10 |
+| Nemotron US_BANK_NUMBER | 5,848 | 5,035 | 5,245 | 0.861 → 0.897 | 56 → 56 |
+| Gretel PHONE | 2,305 | 1,377 | 1,593 | 0.597 → 0.691 | 180 → 225 |
+| Gretel ID_NUMBER | 1,122 | 544 | 645 | 0.485 → 0.575 | 52 → 57 |
+| Gretel NAME | 38,616 | 2,974 | 3,306 | 0.077 → 0.086 | 22 → 51 |
+| Gretel ADDRESS | 15,615 | 3,060 | 3,392 | 0.196 → 0.217 | 199 → 246 |
+| Mendeley ADDRESS | 23,062 | 0 | 241 | 0 → 0.010 | 0 → 13 |
+
+Half D moves by the same amounts (Nemotron PHONE +7,542, ID_NUMBER +6,536, NAME +11,165, ADDRESS +2,634, BIRTH_DATE
++1,283). The prompt channel of all four datasets does not change. PIILO does not change.
+
+The new dataset FP, read by their context (4 word tokens before, the shape of the value, no value printed): in Gretel
+most are personal values the labels miss, such as the last name after `Efternamn:` when only the first name carries a
+label, the address after `John Doe … Address:`, and a phone after `Telefon:`; a few are company phones and company
+addresses (a Swedish company phone, an address after a company name with `AB`). In Mendeley, all 13 are a person's
+street after "residing at" or "billing address on file is", which the labels cover only in part. In Nemotron, the bold
+label shows the plain-label behaviour of `name-after-label` to more values: a campaign, challenge or product name of
+two invented capitalised words after `**Campaign Name:**` (`Campaign Name:` in plain text gives the same hit).
+
+- **Developer texts and prompts:** 0 new hits and 0 lost hits on the 2,464 developer texts (tool channel) and the 771
+  typed prompts, for each rule alone and for all seven. The same on the 1,114 NO_HIT texts of `tests/fp_corpus.py`,
+  the 367 texts of the PII corpus and the 218 texts of the forms corpus (168 before; the branch adds 50 Markdown and
+  form negatives first), in both channels.
+- **Holdout values** (v2 to v7): half D does not change. Half C: 219 → 217 (`us uk in`) and 241 → 237 (`de`): rule 5
+  closes 2 names in each region set, rules 2 and 6 one ID and one address in `de`. False alarms on the 215 clean
+  samples: 7 → 7 and 1 → 1.
+- **CredData** (four runs: both channels, `--regions de` and `us`): tool channel +1 credential (a password after a
+  label that the bold stage now reads), 0 false alarms; the prompt channel does not change.
+- **`scripts/detection_fingerprint.py`** (503,870 lines, the same inputs in both trees): 19 lines change, all new hits.
+  The CredData line above in all 5 region sets (`ds-keyword-colon`). One positive of the PII corpus (a German street
+  after `Anschrift:`) gets the span of the street rule too (regions `none` and `us`). In the recorded test scans,
+  the same German street, and five German passport numbers after `Reisepass` or `Reisepassnummer`, now hit in the
+  regions `none` and `us`: the EU labels are generic, as the English passport label is.
+- **Rule classes** (`scripts/measure_rule_classes.py`): the classes `pii:address`, `pii:column`, `pii:name` and
+  `pii:phone` each get one rule; no class masks a new false hit. Holdout values masked in the tool channel: 1,182 →
+  1,186.
+- **Time:** one hook call, CPU time, median of 21 calls (`scripts/profile_hook.py`, load 4 to 5): typed prompt of 1 KB
+  85.6 → 87.6 ms, Bash result of 20 KB 119.3 → 122.4 ms, Read result of 70 KB 193.8 → 195.5 ms. Long adversarial
+  lines of 70 KB (repeated labels, stars, underscores, bars, digit groups, street words) take 0.08 to 0.21 s, and
+  0.51 to 0.84 s at 280 KB (linear). A text dense with bold labels takes about twice the time of 0.6.31, because a
+  bold label sends the text through the cleaned copy, as an HTML entity does.
+
+Review: Gate A (codex, gpt-5.6-sol, read-only) and Gate B (Fable), two rounds each. They found false hits on a Markdown
+table of servers, on the label words of i18n files (`"first_name": "Vorname"`), on a timestamp and a count after a
+phone word, on "the server lives at", on "Beneficiary: VENDOR …", and on a build line after "Mobile"; and misses for
+`123 5th Avenue`, `Numer prawa jazdy`, Vietnamese names, a table without outer bars, and a person's address with "bank
+account" on the line before. Each is a test now. Left out after review: a street line in lower case (the address rules
+of 0.6.21 also need capitals); a list of ports or screen sizes after a phone word (`tel 80 443 8080 8443`); a famous
+example address after `address:` (`1 Infinite Loop`); a date after `medical record #`; a Polish licence number with
+slashes (the value of `_ID_RE` ends at `/`); the label words of a language that the list of `_NAME_LABEL_VALUES` does
+not hold, when the file holds no listed label word. Not built: "born on" with a year (rule 11 of the gap analysis).
 
 ## Labelled PII datasets, 2026-10-15
 
