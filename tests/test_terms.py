@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+from _timing import SLACK, cpu_best  # noqa: E402
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
@@ -145,17 +146,34 @@ class TeamFloorTests(unittest.TestCase):
         # Gate A, review of the rebase: each *stem* entry walked the whole stop list, so a 4 MB team list of *…*
         # entries cost seconds before the cap of 50 left them out. A stop list of 20,000 words makes a walk per
         # entry take far longer than the bound; the table of substrings is built once
+        # The walks over the stop list are counted: a fixed 3 s of CPU failed on a loaded machine (2026-10-16), and
+        # 30 s only catches a hang
         import random
         rnd = random.Random(5)
-        big = frozenset("".join(rnd.choice("abcdefghijklmnop") for _ in range(9)) for _ in range(20000))
-        with mock.patch.object(terms, "_STOP", [big]), mock.patch.object(terms, "_INSIDE", []):
+
+        class Walked(frozenset):
+            walks = 0
+
+            def __iter__(self):
+                type(self).walks += 1
+                return super().__iter__()
+        class WalkedList(list):
+            def __iter__(self):
+                Walked.walks += 1
+                return super().__iter__()
+        big = Walked("".join(rnd.choice("abcdefghijklmnop") for _ in range(9)) for _ in range(20000))
+        # the sorted forms of the stop list count their walks too: a walk over them is as slow (belief replay)
+        ordered = (WalkedList(sorted(big)), WalkedList(sorted(w[::-1] for w in big)))
+        with mock.patch.object(terms, "_STOP", [big, ordered]), mock.patch.object(terms, "_INSIDE", []):
             for stem in ("abcde", sorted(big)[7][2:8], "zzzzz"):
                 self.assertEqual(terms._common_stem(stem, terms.INSIDE), sum(1 for w in big if stem in w))
             text = "".join(f"N{i:05d}  *qqqq{i:05d}*\n" for i in range(5000))
+            Walked.walks = 0
             start = time.process_time()
             ents, _refused = terms.parse(text, "team/x.terms", strict=False, floor=big)
             self.assertEqual(len(ents), 5000)
-            self.assertLess(time.process_time() - start, 3.0)
+            self.assertLessEqual(Walked.walks, 2, "one walk for the table, not one per entry")
+            self.assertLess(time.process_time() - start, 30.0)
 
     def test_a_team_affix_needs_a_long_stem_that_common_words_do_not_share(self):
         text = ("A_1  *ing\nA_2  fil*\nA_3  *tion*\nA_4  ret*\nA_5  con*\nA_6  of the\nA_7  count*\nA_8  *thing\n"
@@ -288,11 +306,15 @@ class GateReviewMatchTests(unittest.TestCase):
         self.assertEqual(runs(m, "jan_kowalski_report.pdf"), [], "`_` is no boundary: one word, not the name")
 
     def test_one_lookup_per_stem_length_not_a_walk_over_a_bucket(self):
-        m = terms.Matcher([Entity(f"C{i}", (Variant(f"abc{i:06d}", terms.STARTS),), i) for i in range(100000)])
+        # 16 s before: each word walked 100,000 candidates. The time must not grow with the entries: 100 times the
+        # entries, the fastest of three scans each. A fixed 1.0 s failed on a loaded machine (2026-10-16)
         words = " ".join(f"abc{i:07d}x" for i in range(1000))
-        t = time.perf_counter()
-        self.assertEqual(len(m.find(words)), 1000)
-        self.assertLess(time.perf_counter() - t, 1.0, "16 s before: each word walked 100,000 candidates")
+        times = []
+        for n in (1000, 100000):
+            m = terms.Matcher([Entity(f"C{i}", (Variant(f"abc{i:06d}", terms.STARTS),), i) for i in range(n)])
+            self.assertEqual(len(m.find(words)), 1000)
+            times.append(cpu_best(m.find, words))
+        self.assertLess(times[1], 5 * times[0] + SLACK, f"{times[0] * 1000:.1f} ms, then {times[1] * 1000:.1f} ms")
 
     def test_the_id_holds_the_variants(self):
         a = terms.parse("NAME_1  Jan Kowalski\n")[0][0]
@@ -394,7 +416,10 @@ class LoadTests(unittest.TestCase):
         terms.PERSONAL.write_bytes("PERSON_A  Łukasz\n".encode("utf-16"))
         with self.assertRaises(TermsError) as cm:
             terms._personal()
-        self.assertNotIn("0x", str(cm.exception))
+        # the path is the temp home of the run, with a random name: "0x" stood in one (bse_w90x, 2026-10-16)
+        said = str(cm.exception).replace(str(terms.PERSONAL), "<file>")
+        self.assertIn("<file>", said)
+        self.assertNotIn("0x", said)
 
 
 class CacheTests(unittest.TestCase):
@@ -625,6 +650,7 @@ sys.path.insert(0, sys.argv[1])
 from maisecrets import cli, vault
 real = vault.atomic_write
 def slow(*a, **k):
+    print("writing", flush=True)   # under the terms lock: the parent starts its wipe now
     time.sleep(1.0)           # the proposal is written while a wipe runs
     return real(*a, **k)
 vault.atomic_write = slow
@@ -643,8 +669,11 @@ class WipeTests(unittest.TestCase):
         doc = tmp / "letter.txt"
         doc.write_text("Sehr geehrter Herr Zbigniew Testowski,\n", encoding="utf-8")
         child = subprocess.Popen([sys.executable, "-c", _SLOW_SUGGEST, str(ROOT), str(doc)],
-                                 stdout=subprocess.DEVNULL, env=dict(os.environ))
-        time.sleep(0.5)               # the child holds the terms lock and sleeps before its write
+                                 stdout=subprocess.PIPE, text=True, env=dict(os.environ))
+        self.addCleanup(child.stdout.close)
+        # the child says when it holds the terms lock and sleeps before its write. A fixed 0.5 s was too short for
+        # the start of the child on a loaded machine: the wipe ran first, and the proposal came back (2026-10-16)
+        self.assertEqual(child.stdout.readline().strip(), "writing")
         vault_mod.wipe_everything(load_config())
         self.assertEqual(child.wait(timeout=60), 0)
         self.assertFalse(terms.SUGGESTED.exists(), "the wipe waited for the proposal and deleted it")
@@ -656,7 +685,7 @@ sys.path.insert(0, sys.argv[1])
 from maisecrets import terms
 with terms._lock():
     print("held", flush=True)
-    time.sleep(3)
+    time.sleep(60)            # killed by the test once its wipe is done: a fixed 3 s ran out on a loaded machine
 """
 
 
@@ -672,7 +701,9 @@ class WipeLockTests(unittest.TestCase):
         self.addCleanup(lambda: terms.MARKED.unlink() if terms.MARKED.exists() else None)
         child = subprocess.Popen([sys.executable, "-c", _HOLD_LOCK, str(ROOT)], stdout=subprocess.PIPE, text=True,
                                  env=dict(os.environ))
+        self.addCleanup(child.stdout.close)
         self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
         self.assertEqual(child.stdout.readline().strip(), "held")
         out = io.StringIO()
         with mock.patch.object(vault_mod._Lock, "LOCK_DEADLINE", 0.3), contextlib.redirect_stdout(out):

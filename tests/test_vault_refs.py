@@ -30,6 +30,7 @@ import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
 from maisecrets import hooks, vault_refs  # noqa: E402
 from maisecrets.vault import HOME, Vault, load_config  # noqa: E402
+import _hygiene  # noqa: E402
 from _hygiene import CLAUDE  # noqa: E402
 
 OPEN, CLOSE = "\u27e6", "\u27e7"
@@ -54,10 +55,21 @@ def tok(key: str, display: str = "") -> str:
     return f"{OPEN}{key}{':' + display if display else ''}{CLOSE}"
 
 
+def tearDownModule():  # noqa: N802 - unittest hook
+    # the children of this module are checked per class (Base.tearDownClass); a check of every serving child of the
+    # process here would name the children of the modules before this one
+    _hygiene.assert_pristine()
+
+
 class Base(unittest.TestCase):
     """A clean vault home with a jsonfile store, and a client profile of its own."""
 
+    @classmethod
+    def tearDownClass(cls) -> None:
+        _hygiene.assert_children_ended()
+
     def setUp(self) -> None:
+        _hygiene.watch_children(self)      # every child it starts is kept, every value it left waiting is taken back
         HOME.mkdir(parents=True, exist_ok=True)
         for name in ("vault-refs", "index.json", "vault.json", "audit.log"):
             p = HOME / name

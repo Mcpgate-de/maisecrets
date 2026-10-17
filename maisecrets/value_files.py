@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 
+from .detect import _LazyRx      # compiled at first use: a hook imports this module on every call
 from .vault import HOME
 
 IMPORTS = HOME / "imports"
@@ -21,7 +22,7 @@ CACHE_FILE = HOME / ".values-cache"
 STATE_FILE = HOME / ".values-state"     # what the last session start said about the imports
 KIND_PREFIX = "import:"
 STORE_PREFIX = "maisecrets-import:"     # the store value of an import hit: its ids, never the value
-ID_RE = re.compile(r"v[0-9a-f]{8}")
+ID_RE = _LazyRx(r"v[0-9a-f]{8}")
 
 
 def _any_import() -> bool:
@@ -79,7 +80,7 @@ def import_of(kind: str) -> str:
 
 # the person's prompt that removes imports: /maisecrets:forget import:ID [import:ID ...], in Codex
 # `maisecrets: forget import:ID`. The whole prompt, nothing else
-_REMOVAL_RE = re.compile(r"\A\s*(?:/maisecrets:forget|maisecrets:[ \t]*forget)\s+((?:import:\S+\s*)+)\Z", re.I)
+_REMOVAL_RE = _LazyRx(r"\A\s*(?:/maisecrets:forget|maisecrets:[ \t]*forget)\s+((?:import:\S+\s*)+)\Z", re.I)
 
 
 def parse_removal(prompt) -> list | None:
@@ -98,7 +99,7 @@ def parse_removal(prompt) -> list | None:
 # out: a shell joins `"/maisecrets:forget "'import:v1'`, `"…forget "import:v1`, a backslash or backtick line end and a
 # printf into the removal prompt (Gate B, round 3). A command that only names both is refused too: acceptable
 _FORGET = r"(?:/maisecrets:forget|maisecrets:\s*forget)"
-IN_A_COMMAND_RE = re.compile(
+IN_A_COMMAND_RE = _LazyRx(
     _FORGET + r"[\s\S]*?import:|import:[\s\S]*?" + _FORGET
     + r"|\bvalues[\s\"']+(?:remove|forget|delete)\b"
     r"|\b(?:remove_typed|_remove_import|_import_bytes)\b", re.I)
@@ -111,9 +112,9 @@ IN_A_COMMAND_RE = re.compile(
 # - both, with the line ends of a continuation taken out first: the shell joins the pieces again (Gate B, round 5).
 # A form built at run time (brace expansion, an empty variable inside a word, a character code, -join) is not seen:
 # the text-match limit of C22, named in README "Values from your own tools".
-_JOINED_FORMS = (re.compile(r"\\\r?\n|`\r?\n|[\"']"),                # round 3
-                 re.compile(r"[\"'\\`]|\s*\+\s*"),                        # round 4: keeps the line break of a
-                 re.compile(r"\\\r?\n|`\r?\n|[\"'\\`]|\s*\+\s*"))     # continuation; round 5 drops it
+_JOINED_FORMS = (_LazyRx(r"\\\r?\n|`\r?\n|[\"']"),                # round 3
+                 _LazyRx(r"[\"'\\`]|\s*\+\s*"),                        # round 4: keeps the line break of a
+                 _LazyRx(r"\\\r?\n|`\r?\n|[\"'\\`]|\s*\+\s*"))     # continuation; round 5 drops it
 
 
 def removal_in_command(command: str) -> bool:

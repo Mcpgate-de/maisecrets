@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402  first: a temp vault home, never the real one
+from _timing import assert_linear  # noqa: E402
 Path(_isolate.HOME).mkdir(parents=True, exist_ok=True)
 Path(_isolate.HOME, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
@@ -50,9 +51,15 @@ def aws_secret() -> str:
 
 
 def took(text: str, ids) -> float:
-    t = time.perf_counter()
+    t = time.process_time()
     detect.scan(text, enabled=set(ids))
-    return time.perf_counter() - t
+    return time.process_time() - t
+
+
+def linear(case: unittest.TestCase, make, ids, n: int) -> None:
+    """tests/_timing.py: the scan of 8 times the text takes at most 16 times the CPU time. A fixed 1.0 s of wall time
+    failed on a loaded machine (2026-10-16); the released code of each case took seconds at n (quadratic)."""
+    assert_linear(case, lambda text: detect.scan(text, enabled=set(ids)), make, n)
 
 
 class AwsSecretAfterKeyIdTests(unittest.TestCase):
@@ -79,10 +86,9 @@ class AwsSecretAfterKeyIdTests(unittest.TestCase):
         self.assertEqual(self.values(f"{kid} {'x ' * 150} {sk}"), [sk])
         self.assertEqual(self.values(f"{kid} {'x ' * 220} {sk}"), [])
 
-    def test_a_line_of_64k_of_key_ids_scans_in_under_a_second(self):
+    def test_a_line_of_64k_of_key_ids_scans_in_linear_time(self):
         # released code: 32K took 2.3 s, 256K took 97 s in the hook (client timeout 20 s, then the output passes)
-        text = " ".join(akid() for _ in range(64000 // 21))
-        self.assertLess(took(text, [AWS]), 1.0)
+        linear(self, lambda n: " ".join(akid() for _ in range(n // 21)), [AWS], 64000)
 
 
 class CurlRuleTests(unittest.TestCase):
@@ -146,20 +152,21 @@ class CurlRuleTests(unittest.TestCase):
                     misses.append((rule.id, len(text)))
         self.assertEqual(misses[:5], [])
 
-    def test_a_line_of_many_curl_words_scans_in_under_a_second(self):
+    def test_a_line_of_many_curl_words_scans_in_linear_time(self):
         # released code: 32K characters of "curl " took 16.6 s for the two curl rules and the AWS rule
         for tok in ("curl ", "curl -u ", "curl -H 'Authorization: Bearer "):
             with self.subTest(tok):
-                self.assertLess(took((tok * 7000)[:32000], CURL), 1.0)
+                linear(self, lambda n, tok=tok: (tok * (n // 4))[:n], CURL, 32000)
 
 
 class LabelRuleTests(unittest.TestCase):
-    def test_a_long_line_of_a_command_word_scans_in_under_a_second(self):
+    def test_a_long_line_of_a_command_word_scans_in_linear_time(self):
         # `mysql … -p` and `redis-cli … -a` looked for the option over the rest of the line from each command word:
         # 32K characters took 0.35 s, 256K about 22 s (Gate A of 0.6.15); bounded to 400 characters as the AWS rule
         for tok in ("mysql -u root ", "redis-cli -h cache "):
             with self.subTest(tok):
-                self.assertLess(took((tok * 8000)[:96000], ("label-mysql-p", "label-redis-cli-a")), 1.0)
+                linear(self, lambda n, tok=tok: (tok * (n // 10))[:n], ("label-mysql-p", "label-redis-cli-a"),
+                              96000)
 
     def test_the_option_400_characters_after_the_command_is_still_found(self):
         pw = rnd(10) + "#7"
@@ -175,18 +182,18 @@ class KeywordLabelTailTests(unittest.TestCase):
     def rules(self, languages=("en",)):
         return [r for r in detect._load_detect_secrets(languages) if r.id.startswith("ds-keyword")]
 
-    def test_a_long_run_of_letters_after_a_label_scans_in_under_a_second(self):
+    def test_a_long_run_of_letters_after_a_label_scans_in_linear_time(self):
         run = "".join(_R.choice("bcdfghjkmnpqrstvwxz") for _ in range(320000))
-        self.assertLess(took("password=" + run, [r.id for r in detect.rules() if r.id.startswith("ds-keyword")]), 1.0)
-        self.assertLess(took("password=" + "pwd" * 100000, [r.id for r in detect.rules()
-                                                              if r.id.startswith("ds-keyword")]), 1.0)
+        ids = [r.id for r in detect.rules() if r.id.startswith("ds-keyword")]
+        linear(self, lambda n: "password=" + run[:n], ids, 320000)
+        linear(self, lambda n: "password=" + "pwd" * (n // 3), ids, 300000)
 
     def test_a_megabyte_of_label_chains_scans_in_linear_time(self):
         # `pw=pw=…` started a label at each `pw` and each value ran 300 characters to fail at the line end: 1 MB took
         # 5.5 s (Gate B of 0.6.16, 0.6.15: 1.1 s). A label never starts after `=` now
         lit = [d["id"] for d in detect.LITERAL_RULES]
-        self.assertLess(took("pw=" * 340000, lit), 1.0)
-        self.assertLess(took("password: " * 100000, lit), 1.0)
+        linear(self, lambda n: "pw=" * (n // 3), lit, 1020000)
+        linear(self, lambda n: "password: " * (n // 10), lit, 1000000)
 
     def test_one_long_word_does_not_slow_the_rest_of_the_text(self):
         # codex verification of 0.6.16: one unrelated word of 200 characters sent a whole 270 KB text of password

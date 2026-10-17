@@ -11,7 +11,6 @@ import os
 import random
 import string
 import sys
-import time
 import unittest
 from pathlib import Path
 
@@ -19,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+from _timing import assert_linear  # noqa: E402
 
 from maisecrets import detect  # noqa: E402
 
@@ -139,11 +139,13 @@ class Round4Tests(unittest.TestCase):
 
 class SpeedTests(unittest.TestCase):
     def test_one_long_word_and_long_runs_stay_fast(self):
+        # each text of 8 times the size takes at most 16 times the CPU time (tests/_timing.py); a fixed 3.0 s of CPU
+        # for both scans held only on an idle machine
         rec = "password: ${DB_PASSWORD}\nmot de passe : voir le coffre\n"
-        started = time.process_time()
-        detect.scan(rec * 2000 + "x" * 300)
-        detect.scan("password=" + "".join(RNG.choice("bcdfghjkmnpqrstvwxz") for _ in range(320000)))
-        self.assertLess(time.process_time() - started, 3.0)
+        assert_linear(self, detect.scan, lambda n: rec * (n // len(rec)) + "x" * 300, 2000 * len(rec),
+                      hang=7.0, wall=20.0)
+        run = "".join(RNG.choice("bcdfghjkmnpqrstvwxz") for _ in range(320000))
+        assert_linear(self, detect.scan, lambda n: "password=" + run[:n], 320000, hang=7.0, wall=20.0)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
+from _timing import SLACK, cpu_best, cpu_per_call  # noqa: E402
 
 from maisecrets import consent_store, hooks, ssh_consent  # noqa: E402
 from maisecrets.vault import HOME  # noqa: E402
@@ -292,20 +293,23 @@ class ClassifierMatrixTests(unittest.TestCase):
         self.assertEqual(counted, 328, "a row was added or lost: update the count")
 
     def test_a_long_command_is_answered_in_time(self):
-        # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3)
-        import time as _t
+        # the client's 10 s timeout lets a command run: an answer that comes later fails open (opus round 3). The
+        # growth from an eighth of the longest command that is read to the whole is the check (linear: 8 times,
+        # quadratic: 64 times), the best of three calls each. A fixed 2 s failed under load (2026-10-16); 3 s of CPU
+        # catches a hang or a fixed cost
         n = ssh_consent.MAX_READ - 100
-        for command in ("ssh web1 'x'; : " + "A" * n, "ssh web1 x; " + ".ss" * (n // 3), "ssh web1 x " + ">" * n,
-                        "ssh web1 '" + "dd " * (n // 3) + "'", "ssh -o " + "a" * n + " web1 x",
-                        "cat " + "a" * n + ".ssh/b"):
-            with self.subTest(command[:20]):
-                t = _t.time()
-                kind(command)
-                self.assertLess(_t.time() - t, 2.0)
+        shapes = (lambda m: "ssh web1 'x'; : " + "A" * m, lambda m: "ssh web1 x; " + ".ss" * (m // 3),
+                  lambda m: "ssh web1 x " + ">" * m, lambda m: "ssh web1 '" + "dd " * (m // 3) + "'",
+                  lambda m: "ssh -o " + "a" * m + " web1 x", lambda m: "cat " + "a" * m + ".ssh/b")
+        for shape in shapes:
+            with self.subTest(shape(8)):
+                small, whole = cpu_per_call(kind, shape(n // 8)), cpu_best(kind, shape(n))
+                self.assertLess(whole, 16 * small + SLACK, f"{small * 1000:.1f} ms, then {whole * 1000:.1f} ms")
+                self.assertLess(whole, 3.0)
         big = "ssh web1 'mkfs.ext4 /dev/sda'; : " + "A" * 100_000
-        t = _t.time()
         self.assertEqual(kind(big), "unknown", "over the cap a command that names ssh is not read")
-        self.assertLess(_t.time() - t, 1.0)
+        # over the cap nothing is read: 12 times the text, about the same time
+        self.assertLess(cpu_best(kind, big), 4 * cpu_per_call(kind, big[:n]) + SLACK)
         self.assertEqual(kind("ls " + "A" * 100_000), "none")
 
     def test_the_approval_key_carries_user_and_port(self):
