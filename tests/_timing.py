@@ -31,11 +31,35 @@ def cpu_best(fn, *args, runs: int = 3) -> float:
     return best
 
 
+def cpu_per_call(fn, *args, runs: int = 3, batch: float = 0.05, most: int = 256) -> float:
+    """The CPU time of one call of fn(*args), from batches of calls that each take at least `batch` seconds (or `most`
+    calls): the least of `runs` batches. On Windows the CPU clock moves in steps of about 15.6 ms, so one short call
+    read 0.0 ms, and the large input then failed the check of the growth at 62 ms (GitHub windows-latest,
+    2026-10-17)."""
+    calls = 1
+    while True:
+        t = time.process_time()
+        for _ in range(calls):
+            fn(*args)
+        took = time.process_time() - t
+        if took >= batch or calls >= most:
+            break
+        calls *= 4
+    best = took / calls
+    for _ in range(runs - 1):
+        t = time.process_time()
+        for _ in range(calls):
+            fn(*args)
+        best = min(best, (time.process_time() - t) / calls)
+    return best
+
+
 def assert_linear(case, run, make, n: int, *, hang: float = 3.0, wall: float = 7.0, slack: float = SLACK) -> tuple:
-    """run(make(n // 8)), the fastest of three, then run(make(n)), the faster of two: at most 16 times plus the slack
-    (linear is 8 times, quadratic 64 times), and below `hang` seconds. The inputs are made before the clock starts, and
-    one call of run(make(64)) before the first measurement compiles what a first call compiles. One call of the large
-    input once took 17 times its usual time (a first allocation of that size): so two. Returns (small, big)."""
+    """run(make(n // 8)), the fastest of three batches (cpu_per_call), then run(make(n)), the faster of two: at most
+    16 times plus the slack (linear is 8 times, quadratic 64 times), and below `hang` seconds. The inputs are made
+    before the clock starts, and one call of run(make(64)) before the first measurement compiles what a first call
+    compiles. One call of the large input once took 17 times its usual time (a first allocation of that size): so
+    two. Returns (small, big)."""
     # CPU time does not see a wait (a sleep, a lock, blocking I/O): each call here, the first one included, stays below
     # `wall` seconds of wall time, the 7 s watchdog of a hook by default (Gate A review, rounds 2 and 3: a sum over two
     # calls let one wait of 13 s pass, and a wait in the first call only was never measured). The few calls that take
@@ -50,7 +74,7 @@ def assert_linear(case, run, make, n: int, *, hang: float = 3.0, wall: float = 7
 
     timed(make(64))
     small_input, big_input = make(n // 8), make(n)
-    small = cpu_best(timed, small_input)
+    small = cpu_per_call(timed, small_input)
     big = cpu_best(timed, big_input, runs=2)
     case.assertLess(slowest[0], wall, "a call waited, not only computed")
     case.assertLess(big, 16 * small + slack, f"{small * 1000:.1f} ms, then {big * 1000:.1f} ms for 8 times the input")

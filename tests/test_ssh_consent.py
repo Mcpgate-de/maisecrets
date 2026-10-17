@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
-from _timing import SLACK, cpu_best  # noqa: E402
+from _timing import SLACK, cpu_best, cpu_per_call  # noqa: E402
 
 from maisecrets import consent_store, hooks, ssh_consent  # noqa: E402
 from maisecrets.vault import HOME  # noqa: E402
@@ -303,13 +303,13 @@ class ClassifierMatrixTests(unittest.TestCase):
                   lambda m: "ssh -o " + "a" * m + " web1 x", lambda m: "cat " + "a" * m + ".ssh/b")
         for shape in shapes:
             with self.subTest(shape(8)):
-                small, whole = (cpu_best(kind, shape(m)) for m in (n // 8, n))
+                small, whole = cpu_per_call(kind, shape(n // 8)), cpu_best(kind, shape(n))
                 self.assertLess(whole, 16 * small + SLACK, f"{small * 1000:.1f} ms, then {whole * 1000:.1f} ms")
                 self.assertLess(whole, 3.0)
         big = "ssh web1 'mkfs.ext4 /dev/sda'; : " + "A" * 100_000
         self.assertEqual(kind(big), "unknown", "over the cap a command that names ssh is not read")
         # over the cap nothing is read: 12 times the text, about the same time
-        self.assertLess(cpu_best(kind, big), 4 * cpu_best(kind, big[:n]) + SLACK)
+        self.assertLess(cpu_best(kind, big), 4 * cpu_per_call(kind, big[:n]) + SLACK)
         self.assertEqual(kind("ls " + "A" * 100_000), "none")
 
     def test_the_approval_key_carries_user_and_port(self):
