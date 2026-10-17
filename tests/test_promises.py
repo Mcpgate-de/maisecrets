@@ -214,7 +214,8 @@ class LauncherProbeHoldsNothingTests(unittest.TestCase):
         p = subprocess.Popen([BASH, str(self.hooks / "run.sh"), event], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, text=True, env=env, start_new_session=True,
                              # a client can start its hooks with a signal ignored; the shell cannot trap that one
-                             preexec_fn=(lambda: [signal.signal(s, signal.SIG_IGN) for s in ignored]) if ignored else None)
+                             preexec_fn=(lambda: [signal.signal(s, signal.SIG_IGN) for s in ignored])
+                             if ignored else None)
         try:
             out, err = p.communicate(payload, timeout=60)
         finally:
