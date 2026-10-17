@@ -541,6 +541,46 @@ class ReviewRoundTwo(_Files):
         self.assertEqual(len(detect.scan("an Wertname Nummer000")), 1)
 
 
+class ReviewRoundThree(_Files):
+    """The findings of round 3 of Gate B on the fixes of round 2, each with a test."""
+
+    FORMS = {
+        "joined quotes": 'claude -p "/maisecrets:forget "' + "'import:v1234abcd'",
+        "quote then word": 'claude -p "/maisecrets:forget "import:v1234abcd',
+        "backslash line end": 'claude -p "/maisecrets:forget \\\nimport:v1234abcd"',
+        "printf": "claude -p \"$(printf '/maisecrets:forget %s' import:v1234abcd)\"",
+        "variable first": 'X=import:v1234abcd; claude -p "/maisecrets:forget $X"',
+        "split command name": 'claude -p "/maisecrets:"forget" import:v1234abcd"',
+        "json escape": '{"prompt": "/maisecrets:forget\\u0020import:v1234abcd"}',
+    }
+    POWERSHELL = {
+        "plus": 'claude -p ("/maisecrets:forget " + "import:v1234abcd")',
+        "backtick line end": 'claude -p "/maisecrets:forget `\nimport:v1234abcd"',
+    }
+
+    def test_every_form_that_a_shell_joins_into_the_removal_is_refused(self):
+        for name, command in self.FORMS.items():
+            with self.subTest(name):
+                ans = hooks.pre_tool({"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "S1",
+                                      **CLAUDE, "tool_input": {"command": command}})
+                self.assertEqual(ans["hookSpecificOutput"]["permissionDecision"], "deny", command)
+        for name, command in self.POWERSHELL.items():
+            with self.subTest(name):
+                self.assertTrue(value_files.removal_in_command(command), command)
+
+    def test_a_command_without_the_removal_runs(self):
+        for command in ("python3 -c 'import json'", "grep -r 'import:' src", "echo forget it"):
+            self.assertFalse(value_files.removal_in_command(command), command)
+
+    def test_a_program_cannot_import_its_own_bytes_as_a_value_file(self):
+        p = self.file([{"value": NAME, "type": "NAME"}], name="mine.jsonl")
+        Path(HOME, "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True,
+                                                         "value_files": [str(p)]}))
+        raw = (json.dumps({"value": "Fremdwert Eingeschleust"}) + "\n").encode()
+        r = values.import_bytes(raw, values._path_key(p), "file")
+        self.assertEqual([x["origin"] for x in values.rows() if x["id"] == r.id], ["run"])
+
+
 class Provenance(_Files):
     def test_the_list_shows_each_import_by_id_count_types_and_age_never_a_value(self):
         r = self.imported([{"value": NAME, "type": "NAME"}, {"value": CODE}])

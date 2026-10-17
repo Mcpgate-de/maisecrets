@@ -2707,7 +2707,7 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
-    if value_files.IN_A_COMMAND_RE.search(command):
+    if value_files.removal_in_command(command):
         return _deny(value_files.IN_A_COMMAND)
     # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line
     if cfg.get("ssh_consent") and re.search(r"maisecrets:\s*allow\s+ssh\s+\S|allow\s+ssh\s+\S+\s+\d{6}", command,
@@ -3542,7 +3542,7 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
-    if value_files.IN_A_COMMAND_RE.search(command):
+    if value_files.removal_in_command(command):
         return _deny(value_files.IN_A_COMMAND)
     if _HOOK_ENTRY_TEXT_RE.search(command):
         # PowerShell has no word parser here: any mention of a hook entry with its event is refused

@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 12 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 295 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 298 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1979,7 +1979,7 @@ make detection stricter, never weaker.
 own prompt (in Codex: `maisecrets: forget import:ID`). maisecrets does not
 send that prompt to the model. A prompt from a scheduled task, a subagent or
 a program that started the client removes nothing. A tool call that carries
-the removal is refused, and `values remove` in a terminal only names the
+the removal is refused, also when quotes or line continuations split it, and `values remove` in a terminal only names the
 prompt. If you remove the import of a value file, the next session start
 imports the file again as it is now (also when you removed it in another
 session). So to drop a few values from a value file, edit the file, then

@@ -1,0 +1,10 @@
+# c26-a-program-cannot-claim-a-value-files-place: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-program-cannot-claim-a-value-files-place"
+control = "C26"
+statement = "import_bytes ignores a caller's origin: only the session start imports a value file, with the bytes it read."
+runner = ["tests/test_values.py::ReviewRoundThree::test_a_program_cannot_import_its_own_bytes_as_a_value_file"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "    return _import_bytes(raw, key, \"run\", build)\n"
+replace = "    return _import_bytes(raw, key, origin, build)\n"

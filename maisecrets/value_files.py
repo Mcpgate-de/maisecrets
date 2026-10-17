@@ -93,11 +93,22 @@ def parse_removal(prompt) -> list | None:
 
 
 # the same removal in a tool call: the prompt typed by a nested client, the CLI form, or the remover called by name.
-# A text match (the C22 class): a name built at run time is not seen, which README "Values from your own tools" says
+# A text match (the C22 class): a name built at run time is not seen, which README "Values from your own tools" says.
+# The command name and `import:` in either order, at any distance, after quotes and line continuations are taken
+# out: a shell joins `"/maisecrets:forget "'import:v1'`, `"…forget "import:v1`, a backslash or backtick line end and a
+# printf into the removal prompt (Gate B, round 3). A command that only names both is refused too: acceptable
+_FORGET = r"(?:/maisecrets:forget|maisecrets:\s*forget)"
 IN_A_COMMAND_RE = re.compile(
-    r"(?:/maisecrets:forget|maisecrets:\s*forget)\s+import:"
-    r"|\bvalues[\s\"']+(?:remove|forget|delete)\b"
-    r"|\b(?:remove_typed|_remove_import)\b", re.I)
+    _FORGET + r"[\s\S]*?import:|import:[\s\S]*?" + _FORGET
+    + r"|\bvalues[\s\"']+(?:remove|forget|delete)\b"
+    r"|\b(?:remove_typed|_remove_import|_import_bytes)\b", re.I)
+_JOINED_RE = re.compile(r"[\"']|\\\r?\n|`\r?\n")
+
+
+def removal_in_command(command: str) -> bool:
+    """Whether a tool call's command text carries the removal of an import (IN_A_COMMAND_RE), also when quotes or
+    line continuations split its words."""
+    return bool(IN_A_COMMAND_RE.search(command) or IN_A_COMMAND_RE.search(_JOINED_RE.sub("", command)))
 IN_A_COMMAND = ("maisecrets: this command removes an import of values, which makes detection weaker; only the person "
                 "removes one, as their own prompt (/maisecrets:forget import:ID, in Codex: maisecrets: forget "
                 "import:ID). The command did not run. Tell the user the prompt to send.")

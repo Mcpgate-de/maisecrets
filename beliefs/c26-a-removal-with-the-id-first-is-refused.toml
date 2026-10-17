@@ -1,0 +1,10 @@
+# c26-a-removal-with-the-id-first-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-removal-with-the-id-first-is-refused"
+control = "C26"
+statement = "A tool call that names import: before the removal command (a variable set first) is refused."
+runner = ["tests/test_values.py::ReviewRoundThree::test_every_form_that_a_shell_joins_into_the_removal_is_refused"]
+
+[proof]
+file = "maisecrets/value_files.py"
+find = "    _FORGET + r\"[\\s\\S]*?import:|import:[\\s\\S]*?\" + _FORGET\n"
+replace = "    _FORGET + r\"[\\s\\S]*?import:\"\n"

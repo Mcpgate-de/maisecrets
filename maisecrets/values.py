@@ -351,9 +351,16 @@ def _line_bytes(value: str, type_: str) -> int:
 
 
 def import_bytes(raw: bytes, key: str, origin: str = "run", build: bool = True) -> Result:
-    """Add the values of one file to its import (the import of `key`, or a new one). Raises ValueError with a
-    message for the person when the file itself cannot be used. Never removes a value. build: build the index now
-    (a session start builds it once, after all value files)."""
+    """Add the values of one file to an import of a command (the import of `key`, or a new one). Raises ValueError
+    with a message for the person when the file itself cannot be used. Never removes a value. Only the session start
+    imports a value file (_import_bytes from _sync): a caller's `origin` is ignored, so a program that calls this
+    with the key of a value file and bytes of its own cannot take the places of the value files (Gate B, round 3)."""
+    return _import_bytes(raw, key, "run", build)
+
+
+def _import_bytes(raw: bytes, key: str, origin: str = "run", build: bool = True) -> Result:
+    """import_bytes for _sync: origin "file" counts only for a file of the setting `value_files` (_configured), whose
+    bytes _sync read itself. build: build the index now (a session start builds it once, after all value files)."""
     if origin == "file" and not _configured(key):
         origin = "run"
     try:
@@ -437,7 +444,8 @@ def import_bytes(raw: bytes, key: str, origin: str = "run", build: bool = True) 
 
 def import_file(path, origin: str = "run") -> Result:
     path = Path(os.path.expanduser(str(path)))
-    return import_bytes(read_source(path), _path_key(path), origin)
+    # origin "file" counts here: the bytes are the ones of that path, and _configured checks that the person set it
+    return _import_bytes(read_source(path), _path_key(path), origin)
 
 
 def _log(result: Result, origin: str) -> None:
@@ -668,7 +676,7 @@ def _sync(cfg: dict, deadline: float) -> list:
         if rec.get("digest") == digest and (rec.get("empty") or _has_import("file:" + slot)):
             continue
         try:
-            result = import_bytes(raw, slot, "file", build=False)
+            result = _import_bytes(raw, slot, "file", build=False)
         except ValueError as exc:
             notes.append(f"{label}: {exc}")
             continue
