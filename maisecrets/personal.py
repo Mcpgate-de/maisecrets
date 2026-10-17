@@ -924,6 +924,19 @@ _VCARD_ADR_RE = _lazy(_VCARD_LINE + r"ADR" + _VCARD_PARAMS + _VCARD_VALUE)
 _VCARD_N_RE = _lazy(_VCARD_LINE + r"N" + _VCARD_PARAMS + _VCARD_VALUE)
 _VCARD_BDAY_RE = _lazy(_VCARD_LINE + r"BDAY" + _VCARD_PARAMS + r":(\d{8})(?:T[\dZ:+-]{1,20})?(?![\w-])")
 _VCARD_FORMS = ("address-vcard-fields", "name-vcard-n", "birth-date-vcard-compact")
+# a vCard property on a line of its own, without its BEGIN:VCARD: grep output (contacts.vcf:12:ADR;TYPE=home:…) or a
+# line copied from a card. After a .vcf file name the line is a vCard line. Without one it needs the structure that
+# no other format writes: ADR in capitals with an empty box and extended field, N in capitals with its five fields and
+# a title or nothing as the prefix, BDAY with a parameter (BDAY:20240101 alone is no card)
+_VCARD_KIND = {"ADR": "address-vcard-fields", "N": "name-vcard-n", "BDAY": "birth-date-vcard-compact"}
+_VCARD_BDAY_VALUE_RE = re.compile(r"(\d{8})(?:T[\dZ:+-]{1,20})?(?![\w-])")
+_VCARD_BARE_RE = _lazy(r"(?im)^(?:([^\s:]{1,200}):(?:\d{1,9}[:-])?|\d{1,9}[:-])?[ \t]*(?:[a-z0-9-]{1,64}\.)?"
+                       r"(ADR|N|BDAY)(" + _VCARD_PARAMS + r")" + _VCARD_VALUE)
+# the cheap check before _VCARD_BARE_RE: a property name before its parameters or its colon at the start of a line
+_VCARD_BARE_HINT_RE = re.compile(r"(?im)(?:^|:)[ \t]*(?:[a-z0-9-]{1,64}\.)?(?:ADR|N|BDAY)[;:]")
+_VCARD_TITLE_RE = re.compile(r"(?i)(?:dr|prof|mr|mrs|ms|mx|miss|sir|herr|frau|mme|mlle|m|sr|sra|sig|dott|ing|mag)\.?"
+                             r"(?:[ ,]+(?:dr|prof|med|rer|nat|phil|ing)\.?){0,3}")
+_VCARD_SUFFIX_RE = re.compile(r"(?i)(?:jr|sr|ii|iii|iv|phd|md|esq|msc|bsc|mba)\.?")
 
 
 def _vcard_fields(value: str, start: int) -> list:
@@ -955,11 +968,31 @@ def _vcard_spans(text: str) -> list:
     return out
 
 
+def _vcard_bare(text: str, m, val) -> bool:
+    """A line outside a vCard that is one of its properties (see _VCARD_BARE_RE)."""
+    if m.group(1) and m.group(1).lower().endswith(".vcf"):
+        return True
+    prop = m.group(2)
+    if prop != prop.upper():
+        return False
+    if prop.upper() == "BDAY":
+        return bool(m.group(3))
+    fields = _vcard_fields(m.group(4), m.start(4))
+    if prop.upper() == "ADR":
+        return (len(fields) == 7 and not val(fields[0]) and not val(fields[1])
+                and bool(re.search(r"\d", val(fields[2])) and re.search(r"[^\W\d_]{3}", val(fields[2])))
+                and bool(re.search(r"[^\W\d_]", val(fields[3]))) and bool(val(fields[5]) or val(fields[6])))
+    if len(fields) != 5:
+        return False
+    extra, title, suffix = (val(f) for f in fields[2:])
+    return ((not extra or bool(re.fullmatch(r"[^\W\d_][^\W\d_'’-]{0,30}\.?", extra)))
+            and (not title or bool(_VCARD_TITLE_RE.fullmatch(title)))
+            and (not suffix or bool(_VCARD_SUFFIX_RE.fullmatch(suffix))))
+
+
 def _vcard_hits(text: str, want) -> list:
-    out = []
+    out: list = []
     spans = _vcard_spans(text)
-    if not spans:
-        return out
     import bisect   # here: the hooks pay for every module at import
     starts = [a for a, _ in spans]
 
@@ -969,32 +1002,41 @@ def _vcard_hits(text: str, want) -> list:
 
     def val(f) -> str:
         return text[f[0]:f[1]].strip()
-    if "address-vcard-fields" in want:
-        for m in _VCARD_ADR_RE.finditer(text):
-            if not inside(m.start()):
-                continue
-            fields = _vcard_fields(m.group(1), m.start(1))
+
+    # (property, start and end of its value): the lines of each vCard, then the vCard lines outside one
+    lines: list = []
+    if spans:
+        for prop, rx in (("ADR", _VCARD_ADR_RE), ("N", _VCARD_N_RE)):
+            if _VCARD_KIND[prop] in want:
+                lines += [(prop, m.start(1), m.end(1)) for m in rx.finditer(text) if inside(m.start())]
+        if "birth-date-vcard-compact" in want:
+            lines += [("BDAY", m.start(1), m.end(1)) for m in _VCARD_BDAY_RE.finditer(text) if inside(m.start())]
+    if ";" in text or ".vcf" in text.lower():
+        for m in _VCARD_BARE_RE.finditer(text):
+            prop = m.group(2).upper()
+            if _VCARD_KIND[prop] in want and not inside(m.start(2)) and _vcard_bare(text, m, val):
+                lines.append((prop, m.start(4), m.end(4)))
+    for prop, a, b in lines:
+        if prop == "ADR":
+            fields = _vcard_fields(text[a:b], a)
             filled = [f for f in fields if val(f)]
             if len(fields) != 7 or len(filled) < 2:
                 continue   # a vCard address has seven fields
             # a number in the box, the extended or the street field, or a postal code: Rose Cottage;Dunmore;Y35 X2K
             if any(re.search(r"\d", val(f)) for f in fields[:3]) or val(fields[5]):
                 out.append((filled[0][0], filled[-1][1], "address-vcard-fields", ADDRESS))
-    if "name-vcard-n" in want:
-        for m in _VCARD_N_RE.finditer(text):
-            if not inside(m.start()):
-                continue
-            fields = _vcard_fields(m.group(1), m.start(1))
+        elif prop == "N":
+            fields = _vcard_fields(text[a:b], a)
             if len(fields) < 2:
                 continue   # vCard 2.1 may write family;given alone
             family, given = val(fields[0]), val(fields[1])
             if family and given and _name_ok(given + " " + family) and not _reads_as_words(given + " " + family):
                 end = fields[2][1] if len(fields) > 2 and val(fields[2]) else fields[1][1]   # a middle name
                 out.append((fields[0][0], end, "name-vcard-n", NAME))
-    if "birth-date-vcard-compact" in want:
-        for m in _VCARD_BDAY_RE.finditer(text):
-            v = m.group(1)
-            if inside(m.start()) and _a_date(v) and _past_year(v[:4]) and not _placeholder_digits(v, dates=True):
+        else:
+            m = _VCARD_BDAY_VALUE_RE.match(text, a, b)
+            v = m.group(1) if m else ""
+            if v and _a_date(v) and _past_year(v[:4]) and not _placeholder_digits(v, dates=True):
                 out.append((m.start(1), m.end(1), "birth-date-vcard-compact", BIRTH_DATE))
     return out
 
@@ -1129,7 +1171,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     out.append((s0, s0 + len(v), "address-after-label", ADDRESS))
                 else:
                     _company_window(text, line, s0, s0 + len(v), "address-after-label", company)
-    if any(f in want for f in _VCARD_FORMS) and "VCARD" in text.upper():
+    if any(f in want for f in _VCARD_FORMS) and ("VCARD" in text.upper() or (
+            ("ADR" in text or "N:" in text or "N;" in text or "BDAY" in text) and _VCARD_BARE_HINT_RE.search(text))):
         out += _vcard_hits(text, want)
     if "address-in-form" in want and "in" in regions:
         for m in _IN_ADDRESS_RE.finditer(text):
