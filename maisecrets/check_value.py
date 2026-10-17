@@ -88,6 +88,8 @@ def hit_label(type_: str, kind: str, stored: bool = False) -> str:
     """One hit as the person reads it: the type and the rule id. A term names no entity, a stored value no key."""
     if stored:
         return f"{type_} (stored value)"
+    if kind.startswith("import:"):
+        return f"{type_} (import:{kind.split(':')[1]})"
     if kind.startswith("term:"):
         return f"{type_} (term)"
     return f"{type_} ({kind})"

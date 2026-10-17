@@ -1,0 +1,10 @@
+# c26-all-imports-have-a-cap: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-all-imports-have-a-cap"
+control = "C26"
+statement = "All imports together hold at most MAX_VALUES values."
+runner = ["tests/test_values.py::Caps::test_the_cap_of_all_imports_holds"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "            elif total >= MAX_VALUES:\n"
+replace = "            elif False:\n"

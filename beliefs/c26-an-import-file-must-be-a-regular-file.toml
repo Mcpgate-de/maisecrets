@@ -1,0 +1,10 @@
+# c26-an-import-file-must-be-a-regular-file: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-import-file-must-be-a-regular-file"
+control = "C26"
+statement = "A FIFO, a device or a folder in place of an import file is refused on the opened descriptor, without waiting for a writer."
+runner = ["tests/test_values.py::FileChecks::test_a_fifo_is_refused_without_waiting_for_a_writer"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "        if not stat.S_ISREG(st.st_mode):\n            raise ValueError(\"not a regular file\")\n"
+replace = "        if False:\n            raise ValueError(\"not a regular file\")\n"

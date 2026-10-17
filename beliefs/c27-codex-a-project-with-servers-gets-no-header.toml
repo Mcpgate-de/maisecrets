@@ -1,0 +1,12 @@
+# c27-codex-a-project-with-servers-gets-no-header: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-project-with-servers-gets-no-header"
+control = "C27"
+statement = "A Codex project layer of the session folder that has MCP servers turns the header off there: the helper prints no header, and no token of that folder is noted (a project can give a user entry another URL, measured on codex-cli 0.162.0)."
+runner = ["tests/test_codex_vault.py::CodexHooks::test_a_repository_that_brings_servers_starts_nothing", "tests/test_codex_vault.py::Helper::test_no_header_where_a_project_brings_servers", "tests/test_codex_vault.py::ToolNames::test_a_project_layer_with_servers_names_nothing"]
+
+[proof]
+file = "maisecrets/codex_helper.py"
+find = '''        data = load(path)
+        if data is None or _mentions_servers(data):'''
+replace = '''        data = load(path)
+        if data is None:'''

@@ -50,6 +50,8 @@ MAX_TEXT_CHARS = 32 * 1024
 MAX_RSS_BYTES = 512 * 1024 * 1024
 MAX_AS_BYTES = 1024 * 1024 * 1024
 POLL_SECONDS = 0.05
+ERR_KEEP_BYTES = 4096       # the end of pdftotext's messages that _cause reads
+DIAGNOSE_SECONDS = 2.0      # the second run that reads them: 6 s + 2 s stay well inside the 16 s watchdog
 # 25 characters that are not white space per page, on average: below that a PDF is a scan with page numbers or a
 # header line at most (the rule of the ai-gateway's document review). A scan of 3 pages with only page numbers had 45
 MIN_CHARS_PER_PAGE = 25
@@ -995,6 +997,87 @@ def _cut(text: str) -> str:
     return cut
 
 
+LOCKED = "the PDF is locked by a password"
+
+
+def _cause(code: int, err: bytes) -> str:
+    """The reason of a failed pdftotext, from its exit code and the last line of its messages (poppler 26.10.0,
+    measured 2026-10-17): a user password (RC4, AES-128 or AES-256) ends the run with `Command Line Error: Incorrect
+    password` and exit 1. Exit 3 is poppler's documented permission error; poppler 26.10.0 converts a PDF that forbids
+    copying (measured), so this reason is for older versions. Any other failure is a damaged file or no PDF."""
+    lines = [ln.strip() for ln in err.splitlines() if ln.strip()]
+    if code == 1 and lines and lines[-1] == b"Command Line Error: Incorrect password":
+        return LOCKED
+    if code == 3:
+        return "the PDF does not allow its text to be copied; pdftotext exit 3"
+    return f"the file is damaged or no PDF; pdftotext exit {code}"
+
+
+def _start(args: list, stdout, stderr):
+    """pdftotext started in its own process group (a stop ends it and anything it started, so nobody holds a pipe
+    open), without the loader variables, under the memory limit, and known to kill_running."""
+    import subprocess
+    child = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
+                             env=_child_env(), **({} if os.name == "nt" else {"start_new_session": True}))
+    _RUNNING.add(child.pid)
+    _limit_memory(child.pid)
+    return child
+
+
+def _diagnose(tool: str, path: str) -> bytes:
+    """The end of pdftotext's messages, for a run that failed: a second run without -q, of page 1 only, with the text
+    to the null device. The conversion itself runs with -q: a PDF can make poppler print a warning per operator, and
+    writing them took a 35 KB PDF from 0.8 s past the 6 s limit (Gate B). Bounded like the conversion; b"" when it
+    cannot run or takes too long."""
+    import subprocess
+    import threading
+    import time
+    if not _no_other_writer(tool):
+        return b""
+    try:
+        child = _start([tool, "-enc", "UTF-8", "-f", "1", "-l", "1", path, os.devnull], subprocess.DEVNULL,
+                       subprocess.PIPE)
+    except OSError:
+        return b""
+    err = bytearray()
+    fd = child.stderr.fileno()
+
+    def drain() -> None:
+        # read all of it, so that a full pipe never blocks pdftotext; keep the end, where the message that ends the
+        # run stands
+        try:
+            while True:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    return
+                err.extend(chunk)
+                del err[:-ERR_KEEP_BYTES]
+        except (OSError, ValueError):
+            return
+    drainer = threading.Thread(target=drain, daemon=True)
+    try:
+        drainer.start()
+        deadline = time.monotonic() + DIAGNOSE_SECONDS
+        while drainer.is_alive() and time.monotonic() < deadline:
+            _wait(drainer, POLL_SECONDS)
+            used = _rss(child.pid) if child.poll() is None else 0
+            if used is None or used > MAX_RSS_BYTES:
+                return b""        # the memory limit of the conversion, without its message
+        if drainer.is_alive():
+            return b""
+        try:
+            child.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            return b""
+    finally:
+        _stop(child)
+        _RUNNING.discard(child.pid)
+        drainer.join(0.5)
+        if not drainer.is_alive():
+            child.stderr.close()
+    return bytes(err)
+
+
 def extract(path: str, pages=None, cwd: str = "") -> tuple[str | None, str]:
     """(text, "") or (None, why). Every failure is a refusal: nothing of the PDF passes when the text is missing."""
     tool = pdftotext(cwd)
@@ -1020,13 +1103,9 @@ def extract(path: str, pages=None, cwd: str = "") -> tuple[str | None, str]:
     import subprocess   # here, not at the top: this module loads on every PostToolUse
     import threading
     try:
-        # its own process group: a stop ends pdftotext and anything it started, so nobody holds the pipe open
-        child = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                 env=_child_env(), **({} if os.name == "nt" else {"start_new_session": True}))
+        child = _start(args, subprocess.PIPE, subprocess.DEVNULL)
     except OSError as exc:
         return None, f"pdftotext did not start ({type(exc).__name__})"
-    _RUNNING.add(child.pid)
-    _limit_memory(child.pid)
     cap = MAX_TEXT_CHARS * 4          # UTF-8 bytes: at most 4 for one character
     buf = bytearray()
 
@@ -1080,7 +1159,7 @@ def extract(path: str, pages=None, cwd: str = "") -> tuple[str | None, str]:
         return None, (f"pdftotext stopped with signal {-child.returncode}; the PDF may be built to use up memory, or "
                       "it is damaged")
     if not full and child.returncode != 0:
-        return None, f"pdftotext failed (exit {child.returncode}); the file may be damaged or protected by a password"
+        return None, _cause(child.returncode, _diagnose(tool, path))
     text = bytes(buf).decode("utf-8", errors="replace")
     # pdftotext ends each page with a form feed; a text that reached the cap is no scan
     pages = max(text.count("\f"), 1)
@@ -1127,6 +1206,10 @@ def refusal(kind: str, why: str, codex: bool) -> str:
         return (f"maisecrets: this {noun} was not read; the setting {key} is ask, and the file is larger than "
                 f"{BIND_MAX_BYTES // (1024 * 1024)} MB or cannot be read, so maisecrets cannot check that you would "
                 f"get the very file the user allowed. Tell the user; they can choose allow with {change} allow.")
+    if why == LOCKED:
+        return (f"maisecrets: this PDF was not converted to text: {LOCKED}, so nothing of it reached you. Do not "
+                "try to read it another way, and do not ask the user for the password. Tell the user; they can save "
+                "a copy without the password and ask you to read that copy.")
     return (f"maisecrets: this PDF was not converted to text ({why}), so nothing of it reached you. Do not try "
             f"to read it another way. Tell the user; they can choose another mode with {change}.")
 

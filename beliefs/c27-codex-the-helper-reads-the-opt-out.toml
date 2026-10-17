@@ -1,0 +1,10 @@
+# c27-codex-the-helper-reads-the-opt-out: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-the-helper-reads-the-opt-out"
+control = "C27"
+statement = "The Codex helper reads client_header itself at each run, so the opt-out works at the next connection, before any hook of that start ran."
+runner = ["tests/test_codex_vault.py::Helper::test_no_header_once_client_header_is_false"]
+
+[proof]
+file = "maisecrets/codex_helper.py"
+find = '''    if switched_off(os.path.dirname(os.path.dirname(state_file))):'''
+replace = '''    if False:'''

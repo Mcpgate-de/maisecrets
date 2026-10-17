@@ -1,0 +1,10 @@
+# c27-codex-a-helper-of-someone-else-stays: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-helper-of-someone-else-stays"
+control = "C27"
+statement = "An http_headers_helper that maisecrets did not write is never replaced or removed."
+runner = ["tests/test_codex_vault.py::LineEdit::test_the_line_plan_never_replaces_a_helper_of_someone_else"]
+
+[proof]
+file = "maisecrets/codex_vault.py"
+find = '''            return None                    # a helper someone else wrote stays'''
+replace = '''            pass'''

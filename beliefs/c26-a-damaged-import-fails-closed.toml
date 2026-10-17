@@ -1,0 +1,10 @@
+# c26-a-damaged-import-fails-closed: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-damaged-import-fails-closed"
+control = "C26"
+statement = "A damaged import stops every hook (fail closed): its values would otherwise pass unmasked."
+runner = ["tests/test_values.py::SessionStart::test_a_damaged_import_stops_the_hooks"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "        raise _CACHE[0]\n"
+replace = "        return terms.Matcher()\n"

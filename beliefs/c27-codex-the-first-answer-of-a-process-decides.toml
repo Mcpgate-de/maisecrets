@@ -1,0 +1,10 @@
+# c27-codex-the-first-answer-of-a-process-decides: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-the-first-answer-of-a-process-decides"
+control = "C27"
+statement = "The Codex helper gives the header in a later run only when the first run of that Codex process gave it, in the same folder: Codex keeps the server URLs of the start of a session and runs the helper again after a change of the folder or a 401."
+runner = ["tests/test_codex_vault.py::Helper::test_a_later_run_in_another_folder_gets_no_header", "tests/test_codex_vault.py::Helper::test_a_first_no_stays_for_the_process"]
+
+[proof]
+file = "maisecrets/codex_helper.py"
+find = '''            ok = bool(rec.get("ok")) and rec.get("cwd") == folder and fresh'''
+replace = '''            ok = fresh'''

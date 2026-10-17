@@ -5,6 +5,6 @@ statement = "The forms of a template ({{ Title }} with spaces inside the braces,
 runner = ["tests/test_terms.py::MarkerTests::test_the_forms_of_a_template_stay_text"]
 
 [proof]
-file = "maisecrets/terms.py"
+file = "maisecrets/term_files.py"
 find = "        if len(words) == 1 and (inner != inner.strip() or any(a.islower() and b.isupper()\n"
 replace = "        if False and (inner != inner.strip() or any(a.islower() and b.isupper()\n"

@@ -123,7 +123,8 @@ class EveryShownCommandWorks(unittest.TestCase):
         text += settings.render(show_all=True)      # the commands a card shows only in another state
         shown = sorted(set(_re.findall(r"(/maisecrets:settings [^\n(]+?)\s*(?:\(|$)", text, _re.M)))
         commands = [c.replace("HOST", "ops2").replace("KEY default", "ssh_consent default")
-                    .replace(" DIR", " " + str(Path(_isolate.TMP, "team-rules").resolve())).strip() for c in shown]
+                    .replace(" DIR", " " + str(Path(_isolate.TMP, "team-rules").resolve()))
+                    .replace(" FILE", " " + str(Path(_isolate.TMP, "values.jsonl").resolve())).strip() for c in shown]
         self.assertGreater(len(commands), 10, commands)
         for must in ("/maisecrets:settings secret_destinations observe", "/maisecrets:settings ssh_consent off",
                      "/maisecrets:settings ssh_autonomous_hosts add ops2"):

@@ -30,6 +30,7 @@ import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
 from maisecrets import hooks, vault_refs  # noqa: E402
 from maisecrets.vault import HOME, Vault, load_config  # noqa: E402
+import _hygiene  # noqa: E402
 from _hygiene import CLAUDE  # noqa: E402
 
 OPEN, CLOSE = "\u27e6", "\u27e7"
@@ -54,10 +55,21 @@ def tok(key: str, display: str = "") -> str:
     return f"{OPEN}{key}{':' + display if display else ''}{CLOSE}"
 
 
+def tearDownModule():  # noqa: N802 - unittest hook
+    # the children of this module are checked per class (Base.tearDownClass); a check of every serving child of the
+    # process here would name the children of the modules before this one
+    _hygiene.assert_pristine()
+
+
 class Base(unittest.TestCase):
     """A clean vault home with a jsonfile store, and a client profile of its own."""
 
+    @classmethod
+    def tearDownClass(cls) -> None:
+        _hygiene.assert_children_ended()
+
     def setUp(self) -> None:
+        _hygiene.watch_children(self)      # every child it starts is kept, every value it left waiting is taken back
         HOME.mkdir(parents=True, exist_ok=True)
         for name in ("vault-refs", "index.json", "vault.json", "audit.log"):
             p = HOME / name
@@ -669,10 +681,16 @@ class Online(Base):
         Vault().repair()
         self.assertIn((VALUES[1], tok("NAME_2")), vault_refs.released(Vault().backend, "s1"))
 
-    def test_codex_gets_no_server_value(self):
+    def test_a_note_of_claude_code_is_no_note_in_codex(self):
+        """The notes are per client profile: a token that a Claude Code session noted stays text in Codex, whose
+        profile is its own config.toml (codex_vault.py)."""
         self.ready()
-        out = hooks.pre_tool({"tool_name": "Write", "session_id": "s1", "turn_id": "t", "cwd": str(self.work),
-                              "tool_input": {"file_path": str(self.work / "o.csv"), "content": tok("EMAIL_1")}})
+        codex_home = Path(tempfile.mkdtemp(prefix="vault-refs-codex-home-"))
+        with mock.patch.dict(os.environ, {"CODEX_HOME": str(codex_home)}):
+            vault_refs.use_client("codex")
+            self.addCleanup(vault_refs.use_client, "claude")
+            out = hooks.pre_tool({"tool_name": "Write", "session_id": "s1", "turn_id": "t", "cwd": str(self.work),
+                                  "tool_input": {"file_path": str(self.work / "o.csv"), "content": tok("EMAIL_1")}})
         self.assertEqual(out, {})
 
     @unittest.skipUnless(BASH and os.name != "nt", "bash on POSIX")

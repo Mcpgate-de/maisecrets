@@ -29,7 +29,7 @@ import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 Path(os.environ["MAISECRETS_HOME"]).mkdir(parents=True, exist_ok=True)
 Path(os.environ["MAISECRETS_HOME"], "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
 
-from maisecrets import cli, detect, hooks, incidents, settings, terms  # noqa: E402
+from maisecrets import cli, detect, hooks, incidents, settings, term_files, terms  # noqa: E402
 from maisecrets.placeholder import CLOSE, OPEN  # noqa: E402
 from maisecrets.vault import HOME  # noqa: E402
 import _hygiene  # noqa: E402
@@ -669,6 +669,37 @@ class MarkerHookTests(_Base):
         r = subprocess.run([sys.executable, "-c", code.replace("Jan wrote", "Testowski wrote")], capture_output=True,
                            text=True, env=dict(os.environ), timeout=60)
         self.assertEqual(r.stdout.strip(), "True", r.stderr[-400:])
+
+    def test_a_template_without_any_list_does_not_load_the_terms_module(self):
+        # a `{{` of a template is no marker: without a list the prompt hook and the mod do not import terms.py (3 to 7
+        # ms per prompt). A marker does, and it marks the name (the control)
+        code = ("import json, sys; sys.path.insert(0, %r); from maisecrets import hooks; p = json.loads(sys.argv[1]); "
+                "hooks._clipboard = lambda t: True; hooks.user_prompt(p); "
+                "hooks.rewrite_prompt({**p, 'origin': 'composer'}); "
+                "print('maisecrets.terms' in sys.modules)" % str(ROOT))
+
+        def loads(prompt: str) -> str:
+            payload = {"hook_event_name": "UserPromptSubmit", "prompt": prompt, "session_id": "S1",
+                       "transcript_path": "", "source": "user", **CLAUDE}
+            r = subprocess.run([sys.executable, "-c", code, json.dumps(payload)], capture_output=True, text=True,
+                               env=dict(os.environ), timeout=60)
+            return r.stdout.strip() or r.stderr[-400:]
+        self.assertEqual(loads("set {{ .Values.image.tag }}, {{ item }}, {{FirstName}}, {{x}} and {{a b c d e f}}"),
+                         "False")
+        self.assertFalse(terms.MARKED.exists())
+        self.assertEqual(loads(f"letter to {{{{{NAME}}}}}"), "True")
+        self.assertTrue(terms.MARKED.exists(), "the marker marked the name")
+
+    def test_the_form_check_and_the_markers_agree(self):
+        # term_files.marker_forms decides whether terms.py loads; terms.markers adds only the stoplist to it
+        for text in ("{{Jan Kowalski}}", "{{ .Values.x }}", "{{ item }}", "{{FirstName}}", "{{ Title }}", "{{A}}",
+                     "{{The}}", "{{Anna-Lena MacLeod}}", "{{a b}}", "{{Jan 2}}", "{{" + "Ab " * 6 + "}}"):
+            with self.subTest(text):
+                forms = [(a, b, " ".join(w)) for a, b, w in term_files.marker_forms(f"see {text} now")]
+                found = terms.markers(f"see {text} now")
+                self.assertTrue(set(found) <= set(forms))
+                if text != "{{The}}":
+                    self.assertEqual(found, forms)
 
     def test_the_mod_takes_the_marker_out(self):
         mod = hooks.rewrite_prompt({"prompt": f"letter to {{{{{NAME}}}}}", "session_id": "S1", "cwd": "",

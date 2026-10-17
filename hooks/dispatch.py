@@ -116,7 +116,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "pending":
 
 if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put", "status", "list", "audit", "expire", "config",
                                           "wipe", "repair", "scan", "get", "shortcut", "forget", "guard",
-                                          "settings", "consent-report", "rules", "terms"):
+                                          "settings", "consent-report", "rules", "terms", "values"):
     from maisecrets.cli import main as cli_main  # noqa: E402
     sys.exit(cli_main(sys.argv[1:]))
 
@@ -138,7 +138,10 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         path = str(payload.get("transcript_path") or "")
         home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
         if path:
-            return os.path.abspath(path).startswith(os.path.abspath(home) + os.sep)
+            # Codex resolves CODEX_HOME (a canonical path), so compare resolved paths: /var against /private/var on
+            # macOS took a Codex start for Claude Code, and the folder of the session was never recorded
+            return any(a.startswith(b + os.sep) for a in (os.path.abspath(path), os.path.realpath(path))
+                       for b in (os.path.abspath(home), os.path.realpath(home)))
         if os.environ.get("CLAUDECODE") == "1":
             return False
         return any(k.startswith("CODEX_") for k in os.environ)
@@ -258,6 +261,17 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         note = None
     if note:
         out["systemMessage"] = out.get("systemMessage", "") + " " + note
+    # the imported values (maisecrets/values.py): the value files that changed are imported, and a new import is named
+    try:
+        from maisecrets import value_files  # noqa: E402
+        note = None
+        if value_files.start_note_due(cfg):   # without an import or a value file the values module is not loaded
+            from maisecrets.values import session_note as values_note  # noqa: E402
+            note = values_note(cfg)
+    except Exception:  # noqa: BLE001 - an import never stops a session start; a damaged one stops the next hook
+        note = None
+    if note:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + note
     # ms:(…) in Codex: named once here, not in a block notice, where the person must only read paste and send
     # (Claude Code names it under the first blocked or rewritten prompt with a value, hooks._check_tip)
     if codex:
@@ -292,16 +306,23 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
                     out["systemMessage"] = out.get("systemMessage", "") + " " + note
             else:
                 guard_off_by_policy()
-    # vault references: the key header on the user-scope MCP servers of this profile (maisecrets/vault_refs.py)
-    if not codex:
-        try:
-            from maisecrets import vault_refs  # noqa: E402
-            vault_refs.prune_released(v.backend)   # the values a server gave leave the store after their hour
-            note = vault_refs.ensure_headers(cfg, v.backend)
-        except Exception:  # noqa: BLE001 - never stops a session start; without the header no value comes back
-            note = None
-        if note:
-            out["systemMessage"] = out.get("systemMessage", "") + " " + note
+    # vault references: the key header on the user-scope MCP servers of this profile (maisecrets/vault_refs.py); in
+    # Codex the helper line of codex_vault.py
+    try:
+        from maisecrets import vault_refs  # noqa: E402
+        vault_refs.use_client("codex" if codex else "claude")
+        vault_refs.prune_released(v.backend)   # the values a server gave leave the store after their hour
+        if codex:
+            from maisecrets import codex_vault  # noqa: E402
+            if codex_vault.available():
+                codex_vault.note_session(payload)  # the folder whose project layers Codex uses for this session
+                if codex_vault.STATE.exists():
+                    codex_vault.place_helper()     # an update of the plugin brings a new helper
+        note = vault_refs.ensure_headers(cfg, v.backend)
+    except Exception:  # noqa: BLE001 - never stops a session start; without the header no value comes back
+        note = None
+    if note:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + note
     # the model reads what a placeholder is once per session, before it meets one
     out["hookSpecificOutput"] = {"hookEventName": "SessionStart",
                                  "additionalContext": primer(cfg, "codex" if codex else "claude")}

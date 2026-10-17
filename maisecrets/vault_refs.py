@@ -18,6 +18,7 @@ keyed by the origin of that entry's URL. A token that was never noted stays text
 from __future__ import annotations
 
 import base64
+import contextlib
 import copy
 import hashlib
 import json
@@ -28,7 +29,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .vault import _DEFAULT_HOME, HOME, _lock_for, atomic_write
+from .vault import _DEFAULT_HOME, HOME, LockTimeout, _lock_for, atomic_write
 
 OPEN, CLOSE = "⟦", "⟧"
 # the server range: no `c`, a counter from 1 (PROTOCOL.md section 1); the display part is for humans only
@@ -58,6 +59,10 @@ RELEASE_WINDOW = 3600                 # a value a server gave is hunted in tool 
 MAX_SESSIONS_PER_NOTE = 20
 KEYS = DIR / "keys.json"              # profile -> origin -> {"kid", "created", "entries": [[name, url]]}; never K
 DISCOVERY_BUDGET = 4.0                # the one metadata request of the post-tool hook (watchdog 16 s, lock wait 5 s)
+# the whole work of the post-tool hook here: every lock wait, the metadata request and the header write. Each lock
+# waited up to its own 6 s before, one after the other: more than 16 s in the worst case, and then the watchdog
+# withheld the output of the tool (L1, 2026-10-16). The rest of the hook (the redaction) keeps the other 8 s
+NOTE_BUDGET = 8.0
 ENDPOINTS = DIR / "endpoints.json"    # origin + path -> {"endpoint", "t"}
 
 
@@ -88,6 +93,19 @@ def _now_iso(t: float | None = None) -> str:
 
 
 # ---------------------------------------------------------- client config --
+_CLIENT = {"name": "claude"}
+
+
+def use_client(client: str) -> None:
+    """The client of this hook run: "codex" takes the client config of Codex (codex_vault.py), any other value the one
+    of Claude Code. One hook process serves one payload, so this is set once at its start."""
+    _CLIENT["name"] = "codex" if client == "codex" else "claude"
+
+
+def is_codex() -> bool:
+    return _CLIENT["name"] == "codex"
+
+
 def global_file() -> Path:
     """`<CLAUDE_CONFIG_DIR or home>/.claude<suffix>.json`: the client's default global config (Claude Code 2.1.301,
     function `b`). The suffix is `-custom-oauth` when CLAUDE_CODE_CUSTOM_OAUTH_URL is set; a public build has no
@@ -140,6 +158,9 @@ def profile() -> str:
     """The id of this client profile: the global file, also when the client uses `.config.json`. It stays the same
     when the client changes the file, so the key of an origin stays the same (with no custom OAuth URL, it is the id
     that 0.6.29 and 0.6.30 used)."""
+    if is_codex():
+        from . import codex_vault
+        return codex_vault.profile()
     return str(global_file().resolve())
 
 
@@ -173,6 +194,9 @@ def _read_json(path: Path) -> dict | None:
 def user_servers(config: dict | None = None) -> dict[str, str]:
     """name -> URL of each user-scope server (top-level `mcpServers`) with an https URL. None with an empty
     CLAUDE_CONFIG_DIR: the client then reads `.config.json` in its own working folder, which a hook cannot know."""
+    if is_codex():
+        from . import codex_vault
+        return codex_vault.user_servers(config)
     if config is None and os.environ.get("CLAUDE_CONFIG_DIR") == "":
         return {}
     data = config if config is not None else (_read_json(claude_json()) or {})
@@ -184,6 +208,38 @@ def user_servers(config: dict | None = None) -> dict[str, str]:
 
 
 # ------------------------------------------------------------------- the key --
+@contextlib.contextmanager
+def _bounded(lock, deadline: float | None):
+    """`with lock`, with a wait that ends at the deadline (time.monotonic) of the step at the latest: the lock's own
+    wait (6 s) is longer than the budget of a hook step. A lock this process holds already is entered at once.
+    Raises LockTimeout as the lock does. Without a deadline, the lock as it is."""
+    if deadline is None or lock.depth > 0:
+        with lock:
+            yield lock
+        return
+    lock.LOCK_DEADLINE = max(0.0, min(type(lock).LOCK_DEADLINE, deadline - time.monotonic()))
+    try:
+        lock.__enter__()
+    finally:
+        del lock.LOCK_DEADLINE               # the wait of every other step stays the lock's own
+    try:
+        yield lock
+    finally:
+        lock.__exit__(None, None, None)
+
+
+def _own_lock(deadline: float | None = None):
+    return _bounded(_lock_for(DIR / ".lock"), deadline)
+
+
+def _store_lock(deadline: float | None):
+    """The lock of the store (vault.py, `HOME/.lock`), taken first with the bounded wait: the store's own take of the
+    same lock object is then a re-entry. Without a deadline nothing is taken here."""
+    if deadline is None:
+        return contextlib.nullcontext()
+    return _bounded(_lock_for(HOME / ".lock"), deadline)
+
+
 def _store_name(origin: str) -> str:
     return "_maisecrets_vref_" + hashlib.sha256(f"{profile()}\0{origin}".encode()).hexdigest()[:24]
 
@@ -200,7 +256,12 @@ def bearer_of(k: bytes) -> str:
     return base64.urlsafe_b64encode(k).decode().rstrip("=")
 
 
-def _key(backend, origin: str, create: bool) -> bytes | None:
+def _key(backend, origin: str, create: bool, deadline: float | None = None) -> bytes | None:
+    with _store_lock(deadline):
+        return _key_locked(backend, origin, create)
+
+
+def _key_locked(backend, origin: str, create: bool) -> bytes | None:
     raw = backend.get(_store_name(origin))
     if raw:
         try:
@@ -237,8 +298,8 @@ def _is_enabled(name: str, url: str) -> bool:
     return (name, url) in _enabled().get(origin_of(url) or "", [])
 
 
-def _remember_key(origin: str, kid: str, entry: tuple[str, str] | None = None) -> None:
-    with _lock_for(DIR / ".lock"):
+def _remember_key(origin: str, kid: str, entry: tuple[str, str] | None = None, deadline: float | None = None) -> None:
+    with _own_lock(deadline):
         data = _read_json(KEYS) or {}
         mine = data.setdefault(profile(), {})
         rec = mine.get(origin)
@@ -345,6 +406,9 @@ def _may_change_config() -> bool:
     CLAUDE_CONFIG_DIR of a real profile is refused (Gate A review of the trigger). Both the file and its target must
     lie there: the lock and the backup go beside the file. An empty CLAUDE_CONFIG_DIR is refused: the client then
     takes `.config.json` relative to its working directory, which a hook cannot know."""
+    if is_codex():
+        from . import codex_vault
+        return codex_vault.may_change_config()
     if os.environ.get("CLAUDE_CONFIG_DIR") == "":
         return False
     if os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
@@ -370,16 +434,20 @@ def ensure_headers(cfg: dict, backend) -> str | None:
         # a header that a busy client lock kept from the post-tool hook: its notice comes now (Gate B review)
         parts.extend(_notice(n).rstrip(".") for n in added)
     if removed:
-        parts.append(f"maisecrets removed its {HEADER} header from {len(removed)} MCP server(s) in {path}")
+        parts.append(f"maisecrets removed its {HEADER} {'helper' if is_codex() else 'header'} from {len(removed)} "
+                     f"MCP server(s) in {path}")
     if not parts:
         return None
     return "; ".join(parts) + f" (backup until the next start: {backup.name}; client_header false turns it off)."
 
 
-def _apply_config(cfg: dict, backend, lock_wait: float = 5.0) -> tuple[list[str], list[str], Path, Path]:
+def _apply_config(cfg: dict, backend, lock_wait: float = 5.0,
+                  deadline: float | None = None) -> tuple[list[str], list[str], Path, Path]:
     """The headers of the client config as they should be: ours on each enabled URL, none of ours elsewhere. Only
     `mcpServers.<name>.headers` changes, under the client's own lock, with a backup first; a file that is not valid JSON
     is not touched. Returns (added, removed, path, backup)."""
+    if is_codex():
+        return _apply_codex_config(cfg, backend, lock_wait, deadline)
     # the path as the client names it: its lock is `<that path>.lock` (proper-lockfile with an explicit lockfilePath,
     # 2.1.301), also when the file is a link; the backup lies beside it, not beside a link's target (a dotfiles folder)
     path = claude_json()
@@ -390,7 +458,7 @@ def _apply_config(cfg: dict, backend, lock_wait: float = 5.0) -> tuple[list[str]
     keys: dict[str, bytes] = {}
     urls = _enabled() if cfg.get("client_header", True) is not False else {}
     for origin in urls:
-        k = _key(backend, origin, create=False)
+        k = _key(backend, origin, create=False, deadline=deadline)
         if k is not None:
             keys[origin] = k
     ours = {v.get("kid") for v in _known_keys().values() if isinstance(v, dict)} | {kid_of(k) for k in keys.values()}
@@ -403,6 +471,8 @@ def _apply_config(cfg: dict, backend, lock_wait: float = 5.0) -> tuple[list[str]
         except OSError:
             pass
         return [], [], path, backup
+    if deadline is not None:
+        lock_wait = max(0.0, min(lock_wait, deadline - time.monotonic()))
     with _ConfigLock(path, wait=lock_wait):
         # the client may have changed its file between the choice and the lock (a new .config.json): then nothing is
         # written now, and the next start writes the file the client uses then (Gate A and Gate B review)
@@ -418,7 +488,27 @@ def _apply_config(cfg: dict, backend, lock_wait: float = 5.0) -> tuple[list[str]
     return added, removed, path, backup
 
 
-def enable(cfg: dict, backend, name: str, url: str) -> str | None:
+def _apply_codex_config(cfg: dict, backend, lock_wait: float,
+                        deadline: float | None = None) -> tuple[list[str], list[str], Path, Path]:
+    """Codex: one `http_headers_helper` line on each enabled user entry, and the helper's state file
+    (codex_vault.py: a static header there would go to any URL a repository names for the entry)."""
+    from . import codex_vault
+    wanted: dict[str, tuple[str, str]] = {}
+    if cfg.get("client_header", True) is not False:
+        for origin, entries in _enabled().items():
+            k = _key(backend, origin, create=False, deadline=deadline)
+            if k is None:
+                continue
+            for name, url in entries:
+                wanted[name] = (url, header_value(k))
+        if wanted:
+            codex_vault.place_helper()
+    if deadline is not None:
+        lock_wait = max(0.0, min(lock_wait, deadline - time.monotonic()))   # the post-tool budget (L1)
+    return codex_vault.apply_config(wanted, lock_wait=lock_wait)
+
+
+def enable(cfg: dict, backend, name: str, url: str, deadline: float | None = None) -> str | None:
     """The server of this user-scope entry sent a token and named a vault endpoint: a key for its origin, and the
     header on this entry only. Returns the notice for the person once, when the header was added, or None."""
     if not _may_change_config() or cfg.get("client_header", True) is False:
@@ -428,18 +518,21 @@ def enable(cfg: dict, backend, name: str, url: str) -> str | None:
         return None
     # one step under maisecrets' own lock: two calls at once made two keys, and the header could name the one the store
     # lost (Fable review, round 3)
-    with _lock_for(DIR / ".lock"):
-        k = _key(backend, origin, create=True)
+    with _own_lock(deadline):
+        k = _key(backend, origin, create=True, deadline=deadline)
         _remember_key(origin, kid_of(k), (name, url))
     try:
         # a short wait inside the post-tool hook: a busy client lock leaves the write to the next session start
-        added, _removed, _path, _backup_path = _apply_config(cfg, backend, lock_wait=1.0)
+        added, _removed, _path, _backup_path = _apply_config(cfg, backend, lock_wait=1.0, deadline=deadline)
     except TimeoutError:
         return None
     return _notice(name) if name in added else None
 
 
 def _notice(name: str) -> str:
+    if is_codex():
+        from . import codex_vault
+        return codex_vault.notice(name)
     return (f"maisecrets: the MCP server {name} supports {HEADER}. From the next start of Claude Code, maisecrets puts "
             "this server's values into your local files and commands; the AI still sees only tokens. To turn it off: "
             "/maisecrets:settings client_header false. More: README, section \"Vault references\".")
@@ -483,7 +576,7 @@ def _off(cfg: dict | None) -> bool:
     return cfg is not None and cfg.get("client_header", True) is False
 
 
-def note_result(payload: dict, cfg: dict, backend=None) -> tuple[int, str | None]:
+def note_result(payload: dict, cfg: dict, backend=None, deadline: float | None = None) -> tuple[int, str | None]:
     """PostToolUse: note each server-range token of an MCP result from a user-scope server. The first token of a server
     that is not enabled yet is the only trigger for a network request: one metadata request to that server, and the
     header on its entry when it names a vault endpoint (enable). The result stays as it is. Returns (the number of
@@ -527,7 +620,10 @@ def note_result(payload: dict, cfg: dict, backend=None) -> tuple[int, str | None
         return count, notice
     now = time.time()
     seen = _now_iso(now)
-    with _lock_for(DIR / ".lock"):
+    # every wait from here on ends at this deadline: a busy lock raises LockTimeout, and the post-tool hook then
+    # leaves the token as text and redacts the output as it does without vault references
+    deadline = deadline if deadline is not None else time.monotonic() + NOTE_BUDGET
+    with _own_lock(deadline):
         # a key that the model sent to this origin, in any call of any session in the last NOTE_TTL, is never noted
         # later: a server that stores text and shows it again ("notes: ⟦EMAIL_9⟧") would give a planted key a new
         # sighting (Gate B review, round 2). Recorded for every user-scope entry, also one that is not enabled yet:
@@ -552,12 +648,12 @@ def note_result(payload: dict, cfg: dict, backend=None) -> tuple[int, str | None
         # not enabled: a token of this result that the model did not send is the trigger
         if backend is None or not _may_change_config():
             return count, notice
-        if not endpoint(cfg, url, time.monotonic() + DISCOVERY_BUDGET):
+        if not endpoint(cfg, url, min(deadline, time.monotonic() + DISCOVERY_BUDGET)):
             return count, notice            # no field: unsupported, cached; no answer: asked again next time
-        notice = enable(cfg, backend, server["name"], url)
+        notice = enable(cfg, backend, server["name"], url, deadline)
         if not _is_enabled(server["name"], url):
             return count, notice
-    with _lock_for(DIR / ".lock"):
+    with _own_lock(deadline):
         data = _read_json(NOTES) or {}
         mine = data.setdefault(profile(), {}).setdefault(origin, {})
         for key, (type_, displays) in found.items():
@@ -657,9 +753,9 @@ def noted_elsewhere(text: str, cfg: dict | None, session: str | None) -> list[st
             and any(isinstance(notes, dict) and isinstance(notes.get(k), dict) for notes in mine.values())]
 
 
-def forget(keys: list[str], origin: str, url: str) -> None:
+def forget(keys: list[str], origin: str, url: str, deadline: float | None = None) -> None:
     """The notes of these keys from this server URL go: the server said they are older than its data."""
-    with _lock_for(DIR / ".lock"):
+    with _own_lock(deadline):
         data = _read_json(NOTES) or {}
         mine = (data.get(profile()) or {}).get(origin)
         if not isinstance(mine, dict):
@@ -786,10 +882,13 @@ def endpoint(cfg: dict, url: str, deadline: float) -> str | None:
             found = candidate
     except (ValueError, RecursionError) + _net_errors():
         return None                             # not cached: the next call asks again (deep JSON: RecursionError)
-    with _lock_for(DIR / ".lock"):
-        cache = _read_json(ENDPOINTS) or {}
-        cache[cache_key] = {"endpoint": found, "t": time.time()}
-        atomic_write(ENDPOINTS, json.dumps(cache, indent=1))
+    try:
+        with _own_lock(deadline):
+            cache = _read_json(ENDPOINTS) or {}
+            cache[cache_key] = {"endpoint": found, "t": time.time()}
+            atomic_write(ENDPOINTS, json.dumps(cache, indent=1))
+    except LockTimeout:
+        pass                                    # the answer holds; a busy lock only costs the next call one request
     return found
 
 
@@ -851,7 +950,7 @@ def resolve(cfg: dict, backend, keys: list[str], session: str | None,
             raise Refused(f"⟦{k}⟧ was not seen in a result of an MCP server")
         origin, url = next(iter(where_from[k]))
         if url in (notes[origin][k].get("conflict") or []):
-            forget([k], origin, url)
+            forget([k], origin, url, deadline)
             raise Refused(f"the server sent ⟦{k}⟧ for two different values, so it may name another person now; "
                           "call the server's tool again and use the new tokens")
         groups.setdefault((origin, url), []).append(k)
@@ -863,7 +962,7 @@ def resolve(cfg: dict, backend, keys: list[str], session: str | None,
             raise Refused(f"{len(mine)} tokens of {host} in one call; at most {MAX_REFS} go in one call")
         if url not in current or origin_of(url) != origin:
             raise Refused(f"{host} is no longer a user-scope MCP server of this client")
-        k = _key(backend, origin, create=False)
+        k = _key(backend, origin, create=False, deadline=deadline)
         if k is None:
             raise Refused(f"this computer has no key for {host}; the next token of that server sets it up again")
         where = endpoint(cfg, url, deadline)
@@ -896,7 +995,7 @@ def resolve(cfg: dict, backend, keys: list[str], session: str | None,
         code = answer.get("error") if answer is not None else None
         code = code if (status, code) in _CODES else None
         if code == "expired":
-            forget(mine, origin, url)           # a fresh sighting starts the time again (contract)
+            forget(mine, origin, url, deadline)     # a fresh sighting starts the time again (contract)
         raise Refused(_why(origin, status, code, answer or {}, headers, mine))
     return out
 
@@ -1031,15 +1130,25 @@ def status_lines(cfg: dict, backend, check: bool = True) -> list[str]:
     """One line per user-scope server of this profile."""
     if cfg.get("client_header", True) is False:
         return ["vault references: off (client_header false)"]
-    if HOME != _DEFAULT_HOME and not os.environ.get("CLAUDE_CONFIG_DIR"):
-        return ["vault references: off, because this maisecrets home is not the default one and CLAUDE_CONFIG_DIR "
-                "is not set"]
-    chosen = claude_json()
-    others = [str(f) for f in (legacy_file(), global_file()) if f != chosen and f.exists()]
-    if os.environ.get("CLAUDE_CONFIG_DIR") == "":
-        return ["vault references: off, because CLAUDE_CONFIG_DIR is set but empty (the client then reads a file in "
-                "its working folder)"]
-    lines = [f"vault references: client config {chosen}" + (f" ({others[0]} is not read)" if others else "")]
+    if is_codex():
+        from . import codex_vault
+        if not codex_vault.available():
+            return ["vault references in Codex: off (they need Python 3.11 or later, and Windows is not supported "
+                    "yet)"]
+        if HOME != _DEFAULT_HOME and not os.environ.get("CODEX_HOME"):
+            return ["vault references: off, because this maisecrets home is not the default one and CODEX_HOME is "
+                    "not set"]
+        lines = [f"vault references: client config {codex_vault.profile()} (Codex)"]
+    else:
+        if HOME != _DEFAULT_HOME and not os.environ.get("CLAUDE_CONFIG_DIR"):
+            return ["vault references: off, because this maisecrets home is not the default one and CLAUDE_CONFIG_DIR "
+                    "is not set"]
+        chosen = claude_json()
+        others = [str(f) for f in (legacy_file(), global_file()) if f != chosen and f.exists()]
+        if os.environ.get("CLAUDE_CONFIG_DIR") == "":
+            return ["vault references: off, because CLAUDE_CONFIG_DIR is set but empty (the client then reads a file "
+                    "in its working folder)"]
+        lines = [f"vault references: client config {chosen}" + (f" ({others[0]} is not read)" if others else "")]
     servers = user_servers()
     if not servers:
         return lines + ["vault references: no user-scope MCP server with an https URL"]

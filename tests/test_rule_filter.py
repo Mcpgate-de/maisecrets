@@ -53,6 +53,30 @@ class FilterReaderTests(unittest.TestCase):
                                            "generic-username"])
         rule_filter.compile_filter(VENDORED["filter"])
 
+    def test_each_loaded_rule_drops_what_its_own_filter_and_the_global_one_drop(self):
+        # rules() reads each filter text once and the rules with the same text share it: the shared one must judge
+        # as the filter of the rule's own text, and a rule whose filter cannot be read stays out
+        by_id = {r["id"]: r for r in VENDORED["rules"]}
+        loaded = detect._load_betterleaks()
+        ids = [r.id for r in loaded]
+        self.assertTrue({"generic-api-key", "generic-password"}.isdisjoint(ids))
+        self.assertEqual(len(ids), len([r for r in VENDORED["rules"] if "regex" in r and not r.get("skipReport")
+                                        and r["id"] not in ("generic-api-key", "generic-credential-uri",
+                                                            "generic-password", "generic-username")]))
+        glob = rule_filter.compile_filter(VENDORED["filter"])
+        samples = [env(v, line) for v in ("aaaaaaaaaaaaaaaa", tok(24), tok(40, string.hexdigits.lower()),
+                                          "example-" + tok(12), "${API_TOKEN}", "true")
+                   for line in ("", "token = x", "password: test")]
+        differ = 0
+        for rule in loaded:
+            src = by_id[rule.id].get("filter")
+            own = rule_filter.compile_filter(src) if src else None
+            for e in samples:
+                want = bool((own is not None and own(e)) or glob(e))
+                self.assertEqual(bool(rule.drop(e)), want, rule.id)
+            differ += own is not None and any(own(e) != glob(e) for e in samples)
+        self.assertGreater(differ, 20, "the samples tell the filters apart")
+
     def test_the_operators_and_functions_read_like_expr(self):
         f = rule_filter.compile_filter('entropy(finding["secret"]) < 3.0 || '
                                        'matchesAny(finding["secret"], [`^x+$`, `(?i)^TEST`]) && '

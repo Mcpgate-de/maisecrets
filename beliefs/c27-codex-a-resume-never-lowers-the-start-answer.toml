@@ -1,0 +1,10 @@
+# c27-codex-a-resume-never-lowers-the-start-answer: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-a-resume-never-lowers-the-start-answer"
+control = "C27"
+statement = "A later SessionStart of a Codex session can only raise the answer that a project layer or profile file had servers, never lower it: a resume merges the layers again."
+runner = ["tests/test_codex_vault.py::ToolNames::test_a_resumed_session_keeps_the_worse_answer"]
+
+[proof]
+file = "maisecrets/codex_vault.py"
+find = '''            raised = rec.get("moved") is not False or bool(moved) or rec["cwd"] != cwd'''
+replace = '''            raised = rec.get("moved") is not False'''

@@ -1,0 +1,10 @@
+# c26-a-removal-joined-by-the-shell-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-removal-joined-by-the-shell-is-refused"
+control = "C26"
+statement = "A tool call whose quotes or line continuations a shell joins into the removal of an import is refused."
+runner = ["tests/test_values.py::ReviewRoundThree::test_every_form_that_a_shell_joins_into_the_removal_is_refused"]
+
+[proof]
+file = "maisecrets/value_files.py"
+find = "                or any(IN_A_COMMAND_RE.search(form.sub(\"\", command)) for form in _JOINED_FORMS))\n"
+replace = "                or False)\n"
