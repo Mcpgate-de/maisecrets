@@ -2696,12 +2696,11 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
     from . import vault_refs
     # a token a server minted and a server result noted (vault_refs.py): it takes the same way as a stored value
-    server = [] if client_of(payload) == "codex" else [
-        (k, a, b) for k, a, b in vault_refs.find_noted(command, cfg, payload.get("session_id")) if ctxs[a] != "comment"]
+    server = [(k, a, b) for k, a, b in vault_refs.find_noted(command, cfg, payload.get("session_id"))
+              if ctxs[a] != "comment"]
     refs = sorted(refs + server, key=lambda r: r[1])
     server_keys = list(dict.fromkeys(k for k, _a, _b in server))
-    elsewhere = [] if client_of(payload) == "codex" else vault_refs.noted_elsewhere(command, cfg,
-                                                                                   payload.get("session_id"))
+    elsewhere = vault_refs.noted_elsewhere(command, cfg, payload.get("session_id"))
     if elsewhere:
         return _deny(_elsewhere_reason(elsewhere) + " The command did not run.")
     from . import settings as settings_mod
@@ -3012,6 +3011,9 @@ def _holds_a_guarded_folder(value: str) -> bool:
     spellings = {str(HOME), os.path.realpath(str(HOME)), config_dir, os.path.realpath(config_dir),
                  *vault_refs.config_files(), os.path.join(home, ".ssh"), "~/.ssh", "~/.claude", "~/.maisecrets",
                  "$HOME/.ssh", "${HOME}/.ssh", "$HOME/.claude", "${HOME}/.claude"}
+    # the Codex config and its folder: the helper line and the hooks of Codex live there
+    codex_home = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
+    spellings |= {codex_home, os.path.realpath(codex_home), "~/.codex", "$HOME/.codex", "${HOME}/.codex"}
     return any(sp and sp in value for sp in spellings)
 
 
@@ -3024,8 +3026,9 @@ def _a_guarded_path(v: str, cwd: str) -> bool:
         real = os.path.realpath(os.path.expanduser(full))
         config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
         folder = os.path.realpath(config_dir)
+        codex = os.path.realpath(os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex"))
         return real in {os.path.realpath(f) for f in vault_refs.config_files()} or real == folder \
-            or real.startswith(folder + os.sep)
+            or real.startswith(folder + os.sep) or real == codex or real.startswith(codex + os.sep)
     except (OSError, ValueError):
         return True                             # a path we cannot judge is refused, not served
 
@@ -3386,7 +3389,10 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
             return _deny("maisecrets: this apply_patch call carries no patch in `command`. Nothing was written.")
         headers = _patch_headers(patch)
         paths = [path for _line, path in headers]
-        in_header = [k for line, _path in headers for k, _a, _b in find_refs(line)]
+        from . import vault_refs
+        # a server token in a file name too: the server would choose the file (C27)
+        in_header = [k for line, _path in headers for k, _a, _b in
+                     find_refs(line) + vault_refs.find_noted(line, cfg, payload.get("session_id"))]
         if in_header:
             return _deny(f"maisecrets: ⟦{in_header[0]}⟧ is in a file name of the patch, where it is not resolved. "
                          "Nothing was written. Put the placeholder into the content, not into a path.")
@@ -3414,16 +3420,14 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     server: list[str] = []
 
     def collect_server(v: str) -> str:
-        if client_of(payload) != "codex":         # Codex gets no header in this version, so no server value either
-            server.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
+        server.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
         return v
     _walk_strings(target, collect_server)
     server = list(dict.fromkeys(server))
     elsewhere: list[str] = []
 
     def collect_elsewhere(v: str) -> str:
-        if client_of(payload) != "codex":
-            elsewhere.extend(vault_refs.noted_elsewhere(v, cfg, payload.get("session_id")))
+        elsewhere.extend(vault_refs.noted_elsewhere(v, cfg, payload.get("session_id")))
         return v
     _walk_strings(target, collect_elsewhere)
     if elsewhere:
@@ -3433,8 +3437,7 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     outside: list[str] = []
 
     def collect_outside(v: str) -> str:
-        if client_of(payload) != "codex":
-            outside.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
+        outside.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
         return v
     _walk_strings({k: v for k, v in target.items() if k not in _CONTENT_FIELDS}, collect_outside)
     if outside:
@@ -4402,10 +4405,14 @@ def _post_tool_guarded(payload: dict) -> dict:
         if str(payload.get("tool_name") or "").startswith("mcp__"):     # no config read for any other tool
             from . import vault_refs
             cfg = load_config()
-            # before the redaction, from the result as the server sent it; the result itself does not change. Codex
-            # gets no header in this version, so its results start no discovery
-            backend = None if client_of(payload) == "codex" else Vault(cfg).backend
-            _count, notice = vault_refs.note_result(payload, cfg, backend)
+            noted_payload = payload
+            if client_of(payload) == "codex":
+                # Codex names the tool only: the user entry comes from its name rule, and only when no project layer
+                # of the session folder can give that name another server (codex_vault.mcp_server_of)
+                from . import codex_vault
+                noted_payload = {**payload, "mcp_server": codex_vault.mcp_server_of(payload) or {}}
+            # before the redaction, from the result as the server sent it; the result itself does not change
+            _count, notice = vault_refs.note_result(noted_payload, cfg, Vault(cfg).backend)
     except Exception as exc:  # noqa: BLE001 - a token not noted stays text; the output must not be withheld for it
         _debug(f"post-tool vault-refs: {type(exc).__name__}")
     result = _post_tool_guarded_rest(payload)
@@ -4875,6 +4882,12 @@ def main(argv: list[str]) -> int:
         incidents.write_marker_bounded("hook.payload")       # it answers before the timer: a marker, bounded
         return 0
     import threading
+    try:
+        from . import vault_refs
+        # vault references read the client config of this payload's client (Claude Code or Codex)
+        vault_refs.use_client(client_of(payload))
+    except Exception as exc:  # noqa: BLE001 - without it a server token stays text
+        _debug(f"vault-refs client: {type(exc).__name__}")
     started = time.time()
     clock = time.perf_counter()
     lock = threading.Lock()

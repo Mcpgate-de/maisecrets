@@ -280,8 +280,8 @@ For development:
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
-python3 harness/codex.py [--real]                      # 12 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 300 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 harness/codex.py [--real]                      # 13 scenarios through codex exec (five need --real)
+python3 scripts/replay_can_fail.py                     # 323 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -408,7 +408,9 @@ run".
   redacted); one
   `Client-Vault` header per user-scope MCP server in the config file the
   client uses (`~/.claude/.config.json` when it is not empty, else
-  `~/.claude.json`), with a backup beside it ("Vault references"); the value FIFOs in the per-user runtime or temp
+  `~/.claude.json`), with a backup beside it ("Vault references"); in Codex one `http_headers_helper` line per such server in
+  `~/.codex/config.toml` instead, with the helper `~/.maisecrets/bin/codex-vault-helper.py` and its state file
+  `vault-refs/codex-helper.json`; the value FIFOs in the per-user runtime or temp
   directory; the vault backend; on a blocked prompt the clipboard. With
   `scrub_transcript` on, it masks the raw value inside the client's transcript
   file named in the hook payload, in place, because the client writes the
@@ -2082,10 +2084,37 @@ How it works (`docs/PROTOCOL.md` section 4):
    values or none; if the server refuses, the call is denied with the reason.
 
 `/maisecrets:status` shows the link state of each server. `client_header:
-false` (`/maisecrets:settings client_header false`) turns it off and removes
+false` (`/maisecrets:settings client_header false`) turns it off (in Codex at
+the next connection to the server) and removes
 the header again. A server behind a
-certificate authority of your own needs `client_vault_cafile`. Codex gets no
-header in this version, and on Windows a Bash command gets no server value.
+certificate authority of your own needs `client_vault_cafile`. On Windows a
+Bash command gets no server value.
+
+**In Codex** (measured with codex-cli 0.162.0 and 0.155.1) the same steps
+hold, with three differences:
+
+- maisecrets writes no header into `~/.codex/config.toml` (or
+  `$CODEX_HOME/config.toml`). A repository's `.codex/config.toml` can give
+  your server entry another URL: Codex merges it over your file, and it trusts
+  a project on its own when its sandbox may write there. A fixed header would
+  then go to that URL. So maisecrets adds one line, `http_headers_helper`, to
+  that one entry. Codex runs this command when it connects to the server. It
+  prints the header only when no `.codex/config.toml` of the folder you work
+  in, or of a folder above it, names MCP servers, and only in the first folder
+  of that Codex process, within two minutes of its start; else it prints
+  nothing. The server needs the header only once, to link your key, so this
+  limit costs little: in the desktop app a later chat in another folder sends
+  no header until the app starts again.
+  maisecrets changes no other byte of the file, does not touch a file that
+  does not parse or that lies in a git repository, and keeps a backup in its
+  own folder (`~/.maisecrets/vault-refs/`) until the next start that changes
+  nothing.
+- The values come from the next start of Codex. Codex shows the notice as a
+  warning of the hook in its terminal UI; `codex exec` does not print it.
+- In a repository that brings its own MCP servers, maisecrets notes no token
+  and sends no header. Codex vault references need Python 3.11 or later
+  (`tomllib`), and they are off on Windows in this version. `apply_patch` and
+  Bash (macOS, Linux) get the values.
 
 The limit: an AI agent that runs as your user can read the key from the
 store, as it can read any stored value. The server's cap, its audit and the

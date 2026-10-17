@@ -88,6 +88,19 @@ def _now_iso(t: float | None = None) -> str:
 
 
 # ---------------------------------------------------------- client config --
+_CLIENT = {"name": "claude"}
+
+
+def use_client(client: str) -> None:
+    """The client of this hook run: "codex" takes the client config of Codex (codex_vault.py), any other value the one
+    of Claude Code. One hook process serves one payload, so this is set once at its start."""
+    _CLIENT["name"] = "codex" if client == "codex" else "claude"
+
+
+def is_codex() -> bool:
+    return _CLIENT["name"] == "codex"
+
+
 def global_file() -> Path:
     """`<CLAUDE_CONFIG_DIR or home>/.claude<suffix>.json`: the client's default global config (Claude Code 2.1.301,
     function `b`). The suffix is `-custom-oauth` when CLAUDE_CODE_CUSTOM_OAUTH_URL is set; a public build has no
@@ -140,6 +153,9 @@ def profile() -> str:
     """The id of this client profile: the global file, also when the client uses `.config.json`. It stays the same
     when the client changes the file, so the key of an origin stays the same (with no custom OAuth URL, it is the id
     that 0.6.29 and 0.6.30 used)."""
+    if is_codex():
+        from . import codex_vault
+        return codex_vault.profile()
     return str(global_file().resolve())
 
 
@@ -173,6 +189,9 @@ def _read_json(path: Path) -> dict | None:
 def user_servers(config: dict | None = None) -> dict[str, str]:
     """name -> URL of each user-scope server (top-level `mcpServers`) with an https URL. None with an empty
     CLAUDE_CONFIG_DIR: the client then reads `.config.json` in its own working folder, which a hook cannot know."""
+    if is_codex():
+        from . import codex_vault
+        return codex_vault.user_servers(config)
     if config is None and os.environ.get("CLAUDE_CONFIG_DIR") == "":
         return {}
     data = config if config is not None else (_read_json(claude_json()) or {})
@@ -345,6 +364,9 @@ def _may_change_config() -> bool:
     CLAUDE_CONFIG_DIR of a real profile is refused (Gate A review of the trigger). Both the file and its target must
     lie there: the lock and the backup go beside the file. An empty CLAUDE_CONFIG_DIR is refused: the client then
     takes `.config.json` relative to its working directory, which a hook cannot know."""
+    if is_codex():
+        from . import codex_vault
+        return codex_vault.may_change_config()
     if os.environ.get("CLAUDE_CONFIG_DIR") == "":
         return False
     if os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
@@ -370,7 +392,8 @@ def ensure_headers(cfg: dict, backend) -> str | None:
         # a header that a busy client lock kept from the post-tool hook: its notice comes now (Gate B review)
         parts.extend(_notice(n).rstrip(".") for n in added)
     if removed:
-        parts.append(f"maisecrets removed its {HEADER} header from {len(removed)} MCP server(s) in {path}")
+        parts.append(f"maisecrets removed its {HEADER} {'helper' if is_codex() else 'header'} from {len(removed)} "
+                     f"MCP server(s) in {path}")
     if not parts:
         return None
     return "; ".join(parts) + f" (backup until the next start: {backup.name}; client_header false turns it off)."
@@ -380,6 +403,8 @@ def _apply_config(cfg: dict, backend, lock_wait: float = 5.0) -> tuple[list[str]
     """The headers of the client config as they should be: ours on each enabled URL, none of ours elsewhere. Only
     `mcpServers.<name>.headers` changes, under the client's own lock, with a backup first; a file that is not valid JSON
     is not touched. Returns (added, removed, path, backup)."""
+    if is_codex():
+        return _apply_codex_config(cfg, backend, lock_wait)
     # the path as the client names it: its lock is `<that path>.lock` (proper-lockfile with an explicit lockfilePath,
     # 2.1.301), also when the file is a link; the backup lies beside it, not beside a link's target (a dotfiles folder)
     path = claude_json()
@@ -418,6 +443,23 @@ def _apply_config(cfg: dict, backend, lock_wait: float = 5.0) -> tuple[list[str]
     return added, removed, path, backup
 
 
+def _apply_codex_config(cfg: dict, backend, lock_wait: float) -> tuple[list[str], list[str], Path, Path]:
+    """Codex: one `http_headers_helper` line on each enabled user entry, and the helper's state file
+    (codex_vault.py: a static header there would go to any URL a repository names for the entry)."""
+    from . import codex_vault
+    wanted: dict[str, tuple[str, str]] = {}
+    if cfg.get("client_header", True) is not False:
+        for origin, entries in _enabled().items():
+            k = _key(backend, origin, create=False)
+            if k is None:
+                continue
+            for name, url in entries:
+                wanted[name] = (url, header_value(k))
+        if wanted:
+            codex_vault.place_helper()
+    return codex_vault.apply_config(wanted, lock_wait=lock_wait)
+
+
 def enable(cfg: dict, backend, name: str, url: str) -> str | None:
     """The server of this user-scope entry sent a token and named a vault endpoint: a key for its origin, and the
     header on this entry only. Returns the notice for the person once, when the header was added, or None."""
@@ -440,6 +482,9 @@ def enable(cfg: dict, backend, name: str, url: str) -> str | None:
 
 
 def _notice(name: str) -> str:
+    if is_codex():
+        from . import codex_vault
+        return codex_vault.notice(name)
     return (f"maisecrets: the MCP server {name} supports {HEADER}. From the next start of Claude Code, maisecrets puts "
             "this server's values into your local files and commands; the AI still sees only tokens. To turn it off: "
             "/maisecrets:settings client_header false. More: README, section \"Vault references\".")
@@ -1031,15 +1076,25 @@ def status_lines(cfg: dict, backend, check: bool = True) -> list[str]:
     """One line per user-scope server of this profile."""
     if cfg.get("client_header", True) is False:
         return ["vault references: off (client_header false)"]
-    if HOME != _DEFAULT_HOME and not os.environ.get("CLAUDE_CONFIG_DIR"):
-        return ["vault references: off, because this maisecrets home is not the default one and CLAUDE_CONFIG_DIR "
-                "is not set"]
-    chosen = claude_json()
-    others = [str(f) for f in (legacy_file(), global_file()) if f != chosen and f.exists()]
-    if os.environ.get("CLAUDE_CONFIG_DIR") == "":
-        return ["vault references: off, because CLAUDE_CONFIG_DIR is set but empty (the client then reads a file in "
-                "its working folder)"]
-    lines = [f"vault references: client config {chosen}" + (f" ({others[0]} is not read)" if others else "")]
+    if is_codex():
+        from . import codex_vault
+        if not codex_vault.available():
+            return ["vault references in Codex: off (they need Python 3.11 or later, and Windows is not supported "
+                    "yet)"]
+        if HOME != _DEFAULT_HOME and not os.environ.get("CODEX_HOME"):
+            return ["vault references: off, because this maisecrets home is not the default one and CODEX_HOME is "
+                    "not set"]
+        lines = [f"vault references: client config {codex_vault.profile()} (Codex)"]
+    else:
+        if HOME != _DEFAULT_HOME and not os.environ.get("CLAUDE_CONFIG_DIR"):
+            return ["vault references: off, because this maisecrets home is not the default one and CLAUDE_CONFIG_DIR "
+                    "is not set"]
+        chosen = claude_json()
+        others = [str(f) for f in (legacy_file(), global_file()) if f != chosen and f.exists()]
+        if os.environ.get("CLAUDE_CONFIG_DIR") == "":
+            return ["vault references: off, because CLAUDE_CONFIG_DIR is set but empty (the client then reads a file "
+                    "in its working folder)"]
+        lines = [f"vault references: client config {chosen}" + (f" ({others[0]} is not read)" if others else "")]
     servers = user_servers()
     if not servers:
         return lines + ["vault references: no user-scope MCP server with an https URL"]
