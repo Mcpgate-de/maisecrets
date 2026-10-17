@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [0.6.36] - 2026-10-17
+
+### Features
+
+- the notice, the status and a refused call name the server's state and your next step (71028a9)
+
+### Fixes
+
+- a failed key change puts the old key back, and a late answer changes no state of a new key (fd443f5)
+- a new key only for a key this computer holds, and state answers kept under the lock (cb39c27)
+
 ## [0.6.35] - 2026-10-17
 
 ### Features
