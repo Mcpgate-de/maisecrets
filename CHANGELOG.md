@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+## [0.6.33] - 2026-10-17
+
+### Features
+
+- mask the values that your own tools found, also as a phrase of several words (814d942)
+- Codex puts the values of a server's tokens into your files and commands (4cdaf8e)
+
+### Fixes
+
+- the marker patterns compile at the first prompt with "{{" (248e5a8)
+- a PDF locked by a password is refused with that cause (f8b425e)
+- a prompt with a template no longer loads the term matcher (4871bb5)
+- a line continuation inside a word of an import removal is refused again (aee83ba)
+- compile the patterns of the literal forms and of the keyword window at first use (406bf80)
+- end every lock wait of a hook step at the step's deadline (8cdcc0d)
+- read a long remote command in linear time (fc6dceb)
+- search each rule keyword once per text (08523b4)
+- read each vendored filter text once (8953366)
+- leave out the CJK class when a text has no CJK letter (c81cc42)
+- compile a module regex at its first use, not at import (69f4509)
+- a removal of an import hidden by an escape inside a word is refused (d94bf79)
+- a resumed Codex session never loses the answer of its start (655498d)
+- a Codex session keeps the answer of its start, and the opt-out works at once (93f483d)
+- a removal of an import that the shell joins from quotes or line ends is refused (d7f1fc8)
+- a value file that is a symbolic link is refused on Windows too (77e1e22)
+- an imported value in the text of a placeholder is masked, and only your setting makes a value file (6756514)
+- a failed first run never lets the Codex header out later (22f9722)
+- your value files keep their places, and no import can break a placeholder or a settings prompt (a604f30)
+- the Codex header follows the folder the session began in (a867bba)
+
 ## [0.6.32] - 2026-10-17
 
 ### Features
