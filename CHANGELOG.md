@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [0.6.37] - 2026-10-17
+
+### Fixes
+
+- a person glued to a company's name keeps the postcode and VAT ID masked (dc42866)
+- a config row stays text, and a folded END:VCARD does not end the card (e57a0e0)
+- a person near a company keeps the postcode and VAT ID masked in the new forms (7822529)
+- a company's postcode and VAT ID stay text in three more address forms (a405ecd)
+- masks a vCard address, name or birth date in a line without its card (69fc9da)
+- a vCard property folded over two lines is masked in both parts (469dafd)
+
 ## [0.6.36] - 2026-10-17
 
 ### Features
