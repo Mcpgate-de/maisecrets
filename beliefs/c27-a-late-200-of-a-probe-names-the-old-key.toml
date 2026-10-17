@@ -1,0 +1,10 @@
+# c27-a-late-200-of-a-probe-names-the-old-key: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-late-200-of-a-probe-names-the-old-key"
+control = "C27"
+statement = "The status probe records its 200 for the kid of the key it sent: when a new key came while the answer was on its way, the new key does not become active."
+runner = ["tests/test_vault_states.py::States::test_a_late_200_of_a_probe_does_not_make_the_new_key_active"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''        return _set_state(origin, "active", deadline=deadline, kid=kid_of(k)), None'''
+replace = '''        return _set_state(origin, "active", deadline=deadline), None'''
