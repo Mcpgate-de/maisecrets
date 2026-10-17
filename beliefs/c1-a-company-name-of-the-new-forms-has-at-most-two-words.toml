@@ -1,0 +1,10 @@
+# c1-a-company-name-of-the-new-forms-has-at-most-two-words: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-company-name-of-the-new-forms-has-at-most-two-words"
+control = "C1"
+statement = "In the two-line form and after a Kunde: or Customer: key, the company's name before the legal form has at most two words; a person and a company without a separator (Lena Brückner Lindner GmbH) keep the postcode and the VAT ID masked."
+runner = ["tests/test_company_numbers_more_forms.py::CompanyFormTests::test_a_person_glued_to_the_company_name_keeps_the_mask"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''_COMPANY_NAME = r"\w[\w.'’-]{0,40}(?:[ ](?:(?:&|\+|und|and)[ ])?\w[\w.'’-]{0,40})?[ ]"'''
+replace = '''_COMPANY_NAME = r"\w[\w.'’-]{0,40}(?:[ ]\w[\w&.'’-]{0,40}){0,4}[ ]"'''

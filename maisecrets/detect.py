@@ -3965,7 +3965,7 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
                and not (off and c[4] in off)]
     if company:
         _free_company_numbers(text, found, taken_starts, taken_ends, company,
-                              [s for s, _, _, t in every if t == personal.NAME])
+                              [(s, e) for s, e, _, t in every if t == personal.NAME])
     for start, end, kind, typ in every:
         if enabled is not None and kind not in enabled and "personal:" + kind not in enabled:
             continue
@@ -4015,6 +4015,7 @@ _VAT_GAP_RE = _LazyRx(r"(?i)" + _SEP + r"(?:(?:deutschland|germany)" + _SEP + r"
                          r"(?:ust|vat|umsatzsteuer|uid|mwst)(?:[ ._-]?(?:id|identifikationsnummer|identification"
                          r"|nummer|number|no|nr)\.?){0,2}[\"']?[ ]?[:#=]?" + _SEP + r")?")
 _COMPANY_REACH = 800
+_CUSTOMER_VALUE_RE = _LazyRx(r"(?i)(?<![\w-])(?:kunde|customer)[\"']?[ \t]{0,3}[:=][ \t\"']{0,3}$")
 COMPANY_NUMBER_TYPES = frozenset({"DE_PLZ", "DE_VAT_ID"})
 
 
@@ -4027,7 +4028,8 @@ def _free_company_numbers(text: str, found: list, taken_starts: list, taken_ends
     the street of the same address in the clear, and that half mask protected nothing (field report, 2026-10-16: an
     invoice to a GmbH). Each entry of `company` is (lo, legal form, address start, address end, address rule).
     A name of a person (a personal NAME hit) in the paragraph up to 160 characters before the legal form, or between
-    it and the value, keeps the value masked (tests/test_company_address_window.py). A sole trader has no legal form,
+    it and the value, keeps the value masked (tests/test_company_address_window.py); a NAME hit that ends right
+    before the legal form is the company's name (Kunde: Beispiel GmbH). A sole trader has no legal form,
     so the postcode and the VAT ID of a sole trader stay masked."""
     drop = set()
     company = sorted(company, key=lambda c: c[2])
@@ -4048,8 +4050,13 @@ def _free_company_numbers(text: str, found: list, taken_starts: list, taken_ends
                 continue
             para = text.rfind("\n\n", max(0, form - 160), form)
             g = max(0, form - 160) if para < 0 else para
-            k = bisect.bisect_left(names, g)
-            if not (k < len(names) and names[k] < f.end):
+            k = bisect.bisect_left(names, (g,))
+            # a name that ends right before the legal form, as the value of a customer key, is the company's own
+            # (Kunde: Beispiel GmbH)
+            while k < len(names) and names[k][0] < f.end and not text[names[k][1]:form].strip(" \t") \
+                    and _CUSTOMER_VALUE_RE.search(text, max(0, names[k][0] - 16), names[k][0]):
+                k += 1
+            if not (k < len(names) and names[k][0] < f.end):
                 drop.add(id(f))
             break
     if not drop:

@@ -5,7 +5,7 @@ limits are in their own section. "Repeat this measurement" has the commands.
 
 | Snapshot | |
 |---|---|
-| Date | 2026-10-14; the 0.6.24, 0.6.25 and 0.6.26 rows and sections: 2026-10-16; "Personal data after its label in more forms": 2026-10-17 |
+| Date | 2026-10-14; the 0.6.24, 0.6.25 and 0.6.26 rows and sections: 2026-10-16; "Personal data after its label in more forms" and "vCard lines and company addresses in more forms": 2026-10-17 |
 | maisecrets | v0.6.17 (tag `v0.6.17`); earlier releases from their tags; the CredData rows of 0.6.18 to 0.6.21 and the holdout section: 2026-10-15; 0.6.24, 0.6.25 and 0.6.26 from their release branches, 2026-10-16 |
 | Data | Samsung CredData, commit `0b1940e171725ad8937311120b191602608a4801` (2026-09-29); four labelled PII datasets, pinned in "Labelled PII datasets" (2026-10-15) |
 | Machine | Apple M5, 10 cores, macOS 27.0 |
@@ -667,6 +667,59 @@ of 0.6.21 also need capitals); a list of ports or screen sizes after a phone wor
 example address after `address:` (`1 Infinite Loop`); a date after `medical record #`; a Polish licence number with
 slashes (the value of `_ID_RE` ends at `/`); the label words of a language that the list of `_NAME_LABEL_VALUES` does
 not hold, when the file holds no listed label word. Not built: "born on" with a year (rule 11 of the gap analysis).
+
+### vCard lines and company addresses in more forms, 2026-10-17
+
+`origin/next` at `07e56ff` against the branch of three gaps that 0.6.25 and 0.6.26 left out (six commits, the last at
+`dc42866`). Tool channel only; a typed prompt does not change. `--locale de_DE`.
+
+1. **A folded vCard property.** RFC 6350 folds a line with a line break and one space or tab. A new stage of the cleaned
+   copy (`unfold`, `maisecrets/normalise.py`) joins the parts inside `BEGIN:VCARD` to `END:VCARD`, and the mask covers
+   both parts in the true text. The indent of `BEGIN:VCARD` counts as part of each line; a binary property (`PHOTO`,
+   `KEY`, `ENCODING=b`) stays folded; a folded line that starts with `END:VCARD` does not end the card.
+2. **A vCard line without its card.** `ADR`, `N` and `BDAY` (TEL, EMAIL and FN were found already) after a `.vcf` file
+   name (grep output, also a Windows path), or in the structure of the property: `ADR` in capitals with a parameter of
+   a card and an empty box and extended field, `N` in capitals with five fields and a title or nothing as the prefix,
+   `BDAY` with a parameter of a card.
+3. **A company's postcode and VAT ID in three more forms** of the company decision of 0.6.26: the street and the
+   postcode on two lines after the company's name, a department of a closed list between them, and a `Kunde:` or
+   `Customer:` key whose value is the company's name. In these forms the company's name has at most two words.
+
+Before the change, the developer texts, the prompts, CredData and the forms corpora held no line in the shape of a bare
+`ADR`, `N` or `BDAY` property (a count over all of them, any case, with and without a grep prefix): 0 candidates. In
+the 11,565 files of CredData, one `n;…:` line has a `;` after the property, and it is no vCard.
+
+- Holdout values (v2 to v7, both halves, regions `us uk in` and `de`): no value changes. Leaked in half D / C: 196 / 217
+  and 229 / 237. False alarms on the clean samples: no change.
+- CredData (four runs: both channels, `--regions de` and `us`): 0 rows changed. `scripts/detection_fingerprint.py`
+  (504,920 lines): byte-identical.
+- Labelled PII datasets (`scripts/measure_datasets.py run`): the prompt channel does not change. In the tool channel
+  only Gretel changes: three postcodes of a GmbH in the two-line form (two delivery addresses after `Lieferadresse:`
+  and the address of a GmbH in a transfer notice) are text now. DE_PLZ FP 266 → 264; ADDRESS TP 6,842 → 6,841, because
+  Gretel labels the third company address as ADDRESS and its postcode was the only part that `origin/next` masked. No
+  address of a person changes. Nemotron-PII, Mendeley and PIILO do not change.
+- 0 new hits and 0 lost hits on the 2,464 developer texts, the 771 typed prompts, the 1,114 NO_HIT texts of
+  `tests/fp_corpus.py`, the 367 texts of the PII corpus (its positives: +0, -0) and the forms corpus, in both
+  channels.
+- Rule classes (`scripts/measure_rule_classes.py`): no class changes.
+- Time, CPU, best of three on a loaded machine (load 11 to 15): a `.vcf` of 300 folded cards (939 KB) 1.95 → 3.82 s,
+  because each folded line sends its window through the cleaned copy, as a bold label does; 3,000 bare `ADR` lines
+  (159 KB) 0.35 → 0.40 s; 3,000 grep lines with a prefix of 190 characters (651 KB) 1.39 → 1.58 s; a 70 KB log
+  0.173 → 0.175 s. Each is linear in the text.
+
+Review: Gate A (codex, gpt-5.6-sol, read-only) and Gate B (Opus), two rounds each. They found a person's name in the
+department slot (`Abteilung <name>`), a person on the company's line or on the line above it in the two-line form, a
+salutation or a longer key before the company (`Kunde: Frau …`, `customer_name:`), a person's name glued to the
+company's name, a config row as an address (`ADR:;;Cache 2;Primary;;8080;prod`, also with `TYPE=cache`), a folded
+line that starts with `END:VCARD`, `BEGIN:VCARD` in a sentence, and a belief whose mutation could not reach its test.
+Each is a test now. The fixes of round 2 had no third round.
+
+Left out after review: a department line between the company's name and a street and postcode on one line (the address
+rule masks that address whole, so there is no half mask); a company's name of more than two words in the new forms (a
+person's name glued to it reads the same, so the values stay masked); a grep context line (`file.vcf-12-`); a property
+in lower case folded more than 2,048 characters after its `BEGIN:VCARD` (the window of the cleaned copy does not reach
+the card's start). On one line after a company word, a person's name glued to the company's name frees the values as
+in 0.6.26.
 
 ## Labelled PII datasets, 2026-10-15
 

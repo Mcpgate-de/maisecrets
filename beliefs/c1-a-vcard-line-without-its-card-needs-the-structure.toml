@@ -1,0 +1,10 @@
+# c1-a-vcard-line-without-its-card-needs-the-structure: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-vcard-line-without-its-card-needs-the-structure"
+control = "C1"
+statement = "Outside a vCard and without a .vcf file name, a line in lower or mixed case (adr:, n:), with a filled box field, with other fields than the property has, or BDAY without a parameter stays text."
+runner = ["tests/test_vcard_bare_lines.py::BareLineTests::test_shapes_that_are_no_vcard_line_stay_text"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''    if prop != prop.upper():'''
+replace = '''    if False:'''

@@ -140,6 +140,11 @@ _POSTCODES = {
 _EN_STREET = (r"\b\d{1,5}[A-Za-z]?(?:/\d{1,4})?,? (?:[A-Z][\w'.-]{0,30} ){1,4}" + _STREET
               + r"\.?,[^\n\"';|]{2,40}?(?:{codes})")
 _CITY = r"[A-ZÄÖÜÉ][\wäöüßéèàç-]{1,40}"
+# street and postcode on two lines (Hafenweg 3\n12345 Ort). No address rule masks it; after a company's name it feeds
+# the company decision alone, so its postcode and VAT ID follow the street, which stays text
+_DE_TWO_LINES_RE = re.compile(r"\b[A-ZÄÖÜ][\wäöüß-]{0,40}(?:straße|strasse|str\.|weg|gasse|platz|allee|ring|damm) "
+                              r"\d{1,4}[a-z]?[ \t]*\r?\n[ \t]*\d{4,5} (" + _CITY + ")")
+_DEPARTMENT_LINE_RE = re.compile(r"(?i)[ \t]*(?:abteilung|abt\.|department|dept\.?|division|bereich)[ \t]")
 _ADDRESS_FORMS = tuple(
     (frozenset({r}), re.compile(_EN_STREET.replace("{codes}", code))) for r, code in _POSTCODES.items()) + (
     (frozenset({"de", "at", "ch"}),
@@ -170,9 +175,19 @@ _NOT_A_HOME_RE = re.compile(
 _LEGAL_FORM_RE = re.compile(r"(?i)(?<![a-z])(?:" + _LEGAL_FORMS + r")(?![a-z])")
 # Before a legal form: a word of the company's name (Beispiel GmbH, Muster & Co. KG)
 _NAME_BEFORE_FORM_RE = re.compile(r"\w[\w&.'’-]{0,40}[ ]$")
-# between the company's name and its address: separators and at most one label of the company's own address. A label
-# that names another party (recipient_address, Lieferadresse, ship to) or a home keeps the mask
+# between the company's name and its address: separators, at most one department of one or two words (Abteilung Einkauf,
+# on its line or before a comma) and at most one label of the company's own address. A label that names another party
+# (recipient_address, Lieferadresse, ship to) or a home keeps the mask
+# the name of a department: a closed list, so a person's name in the slot (Abteilung Mara Winter) keeps the mask
+_DEPARTMENTS = (r"einkauf|beschaffung|buchhaltung|finanzbuchhaltung|kreditorenbuchhaltung|debitorenbuchhaltung"
+                r"|kreditoren|debitoren|rechnungswesen|rechnungseingang|finanzen|controlling|personal|vertrieb"
+                r"|verkauf|marketing|logistik|versand|lager|recht|rechtsabteilung|it|edv|verwaltung|kundenservice"
+                r"|accounting|accounts|payable|receivable|purchasing|procurement|finance|sales|hr|human|resources"
+                r"|legal|billing|operations|shipping|support|administration")
 _FORM_TO_ADDRESS_RE = re.compile(r"[\s,;:|·\"'()]{0,12}"
+                                 r"(?:(?i:abteilung|abt\.|department|dept\.?|division|bereich)[ \t]"
+                                 r"(?i:" + _DEPARTMENTS + r")(?:[ ](?:(?:und|and|&)[ ])?(?i:" + _DEPARTMENTS + r"))?"
+                                 r"[ \t]*(?:,[ \t]*|\r?\n[ \t]*))?"
                                  r"(?:(?i:(?:rechnungs|firmen|geschäfts|post|haupt)?(?:adresse|anschrift)"
                                  r"|(?:(?:company|business|billing|postal|registered|office)[ _-]?)?address|sitz|adr)"
                                  r"[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?)?")
@@ -196,7 +211,8 @@ def _company_window(text: str, lo: int, a_start: int, a_end: int, kind: str, com
       label that names a home (home_address, Wohnadresse);
     - an employer label before the company's name (employer, Arbeitgeber), the company in parentheses after a
       person (Max Muster (Beispiel GmbH)), or a key of a person's record (name,
-      resident, customer, Kunde) in the paragraph up to 160 characters before it: the address is a person's."""
+      resident, customer, Kunde) in the paragraph up to 160 characters before it: the address is a person's. A
+      customer key whose value is the company's name (Kunde: Beispiel GmbH) names the company."""
     if company is None:
         return
     f = None
@@ -223,8 +239,10 @@ def _company_window(text: str, lo: int, a_start: int, a_end: int, kind: str, com
     key_lo = max(0, f.start() - 160) if para < 0 else para
     # a key ends in : or =; without one the long alternation need not run (a line of many company addresses)
     if (text.find(":", key_lo, a_start) >= 0 or text.find("=", key_lo, a_start) >= 0) \
-            and _PERSON_KEY_RE.search(text, key_lo, a_start):
-        return
+            and any(not (_CUSTOMER_KEY_RE.fullmatch(k.group())
+                         and _COMPANY_AFTER_KEY_RE.fullmatch(text, k.end(), f.start()))
+                    for k in _PERSON_KEY_RE.finditer(text, key_lo, a_start)):
+        return   # Kunde: Beispiel GmbH, Customer: Beispiel GmbH: the customer is the company, not a person
     company.append((lo, f.start(), a_start, a_end, kind))
 
 
@@ -234,6 +252,21 @@ _UP, _LO = "A-ZÀ-ÖØ-ÞĀ-ſ", "a-zà-öø-ÿĀ-ſ"
 _NAME_WORD = r"(?:[" + _UP + r"][" + _LO + r"'’-]{1,30}|[A-Z]\.)"
 _NAME_PARTICLE = r"(?:van|von|de|da|del|der|al|bin|di|du|la|le)"
 _NAME_VALUE = (r"((?:[" + _UP + r"][" + _LO + r"'’-]{1,30})(?:[ ](?:" + _NAME_WORD + "|" + _NAME_PARTICLE + r")){1,3})")
+# the value of a customer key up to the legal form: the company's name alone, on the key's line
+# at most two words, and & or und between them: a person and a company without a separator
+# (Kunde: Lena Brückner Lindner GmbH) cannot be told from a longer company name, so a longer name keeps the mask
+_COMPANY_NAME = r"\w[\w.'’-]{0,40}(?:[ ](?:(?:&|\+|und|and)[ ])?\w[\w.'’-]{0,40})?[ ]"
+_COMPANY_AFTER_KEY_RE = re.compile(r"[ \t\"']{0,3}(?!(?i:frau|herrn?|mrs?|ms|mx|dr|prof)\b)" + _COMPANY_NAME)
+# the key itself, not a longer one (customer_name: is a person's)
+_CUSTOMER_KEY_RE = re.compile(r"(?i)(?:kunde|customer)[\"']?[ \t]{0,3}[:=]")
+# before the company's name on its line, in the two-line form: the start of the text, a blank line or a heading of the
+# address. Another line there may be a person (Frau Lena Brückner\nBeispiel GmbH\nHafenweg 3\n12345 Ort)
+_ADDRESS_HEADING_RE = re.compile(r"(?i)[ \t]*(?:(?:rechnungs|liefer)?(?:adresse|anschrift)|rechnungsempfänger"
+                                 r"|empfänger|billing address|invoice address|bill to|invoice to|sold to|an|to)"
+                                 r"[ \t]*:?[ \t]*\r?")
+# the company's line in the two-line form: the company's name alone, or after a Kunde: or Customer: key
+_COMPANY_LINE_RE = re.compile(r"[ \t]*(?:(?i:kunde|customer)[ \t]*:[ \t]*)?(?!(?i:frau|herrn?|mrs?|ms|mx|dr|prof)\b)"
+                              + _COMPANY_NAME)
 # a label that names a person and nothing else
 _PERSON_LABELS = (r"full[ _-]?name|customer[ _-]?name|first[ _-]?name|last[ _-]?name|given[ _-]?name|family[ _-]?name"
                   r"|patient(?:[ _-]?name)?|employee(?:[ _-]?name)?|student(?:[ _-]?name)?|contact[ _-]?person"
@@ -924,6 +957,26 @@ _VCARD_ADR_RE = _lazy(_VCARD_LINE + r"ADR" + _VCARD_PARAMS + _VCARD_VALUE)
 _VCARD_N_RE = _lazy(_VCARD_LINE + r"N" + _VCARD_PARAMS + _VCARD_VALUE)
 _VCARD_BDAY_RE = _lazy(_VCARD_LINE + r"BDAY" + _VCARD_PARAMS + r":(\d{8})(?:T[\dZ:+-]{1,20})?(?![\w-])")
 _VCARD_FORMS = ("address-vcard-fields", "name-vcard-n", "birth-date-vcard-compact")
+# a vCard property on a line of its own, without its BEGIN:VCARD: grep output (contacts.vcf:12:ADR;TYPE=home:…) or a
+# line copied from a card. After a .vcf file name the line is a vCard line. Without one it needs the structure that
+# no other format writes: ADR in capitals with a parameter of a card (TYPE, PREF, HOME) and an empty box and extended
+# field, N in capitals with its five fields and a title or nothing as the prefix, BDAY with a parameter of a card
+# (BDAY:20240101 alone is no card)
+_VCARD_KIND = {"ADR": "address-vcard-fields", "N": "name-vcard-n", "BDAY": "birth-date-vcard-compact"}
+_VCARD_BDAY_VALUE_RE = re.compile(r"(\d{8})(?:T[\dZ:+-]{1,20})?(?![\w-])")
+_VCARD_BARE_RE = _lazy(r"(?im)^(?:((?:[a-z]:\\)?[^\s:]{1,200}):(?:\d{1,9}[:-])?|\d{1,9}[:-])?[ \t]*"
+                       r"(?:[a-z0-9-]{1,64}\.)?"
+                       r"(ADR|N|BDAY)(" + _VCARD_PARAMS + r")" + _VCARD_VALUE)
+# the cheap check before _VCARD_BARE_RE: a property name before its parameters or its colon at the start of a line
+_VCARD_BARE_HINT_RE = re.compile(r"(?im)(?:^|:)[ \t]*(?:[a-z0-9-]{1,64}\.)?(?:ADR|N|BDAY)[;:]")
+# a parameter of a card; TYPE with a type of an address or a date (TYPE=cache is a config key)
+_VCARD_PARAM_NAME_RE = re.compile(r"(?i);(?:type=\"?(?:home|work|pref|postal|parcel|dom|intl|other)(?![\w-])"
+                                  r"|pref|label|charset|language|value|altid|pid|calscale|home|work|postal|parcel"
+                                  r"|dom|intl)(?![\w-])")
+_VCARD_BARE_WORDS_RE = re.compile(r"(?i)adr|n[:;]|bday")
+_VCARD_TITLE_RE = re.compile(r"(?i)(?:dr|prof|mr|mrs|ms|mx|miss|sir|herr|frau|mme|mlle|m|sr|sra|sig|dott|ing|mag)\.?"
+                             r"(?:[ ,]+(?:dr|prof|med|rer|nat|phil|ing)\.?){0,3}")
+_VCARD_SUFFIX_RE = re.compile(r"(?i)(?:jr|sr|ii|iii|iv|phd|md|esq|msc|bsc|mba)\.?")
 
 
 def _vcard_fields(value: str, start: int) -> list:
@@ -941,25 +994,53 @@ def _vcard_fields(value: str, start: int) -> list:
     return out
 
 
+# BEGIN:VCARD at the start of a line, after an escaped \n or after a quote (a card in a JSON string): in a sentence
+# (the markers are BEGIN:VCARD and END:VCARD) it starts no card
+_VCARD_BEGIN_LINE_RE = re.compile(r"(?m)(?:^[ \t]*|(?<=\\N)[ \t]*|(?<=[\"'>]))BEGIN:VCARD")
+_VCARD_END_LINE_RE = re.compile(r"(?im)(?:^|(?<=\\n))[ \t]*END:VCARD")
+
+
 def _vcard_spans(text: str) -> list:
     """(start, end) of each vCard: from BEGIN:VCARD to its END:VCARD or the end of the text. A line counts only
     inside one: `ADR: 0012;Accepted;Use Postgres 16;…` in the docs and `N:Europe;Asia;…` in a config are no vCard
     (review of 0.6.25)."""
     up = text.upper()
     out = []
-    for m in re.finditer("BEGIN:VCARD", up):
+    for m in _VCARD_BEGIN_LINE_RE.finditer(up):
         if out and m.start() < out[-1][1]:
             continue
-        end = up.find("END:VCARD", m.end())
-        out.append((m.start(), len(text) if end < 0 else end))
+        e = _VCARD_END_LINE_RE.search(text, m.end())   # at the start of a line: NOTE:… END:VCARD … is a value
+        out.append((m.start(), len(text) if e is None else e.start()))
     return out
 
 
+def _vcard_bare(text: str, m, val) -> bool:
+    """A line outside a vCard that is one of its properties (see _VCARD_BARE_RE)."""
+    if m.group(1) and m.group(1).lower().endswith(".vcf"):
+        return True
+    prop = m.group(2)
+    if prop != prop.upper():
+        return False
+    if prop.upper() != "N" and not _VCARD_PARAM_NAME_RE.search(m.group(3)):
+        return False   # ADR:;;Cache 2;Primary;;8080;prod is a config row: ADR and BDAY need a parameter of a card
+    if prop.upper() == "BDAY":
+        return True
+    fields = _vcard_fields(m.group(4), m.start(4))
+    if prop.upper() == "ADR":
+        return (len(fields) == 7 and not val(fields[0]) and not val(fields[1])
+                and bool(re.search(r"\d", val(fields[2])) and re.search(r"[^\W\d_]{3}", val(fields[2])))
+                and bool(re.search(r"[^\W\d_]", val(fields[3]))) and bool(val(fields[5]) or val(fields[6])))
+    if len(fields) != 5:
+        return False
+    extra, title, suffix = (val(f) for f in fields[2:])
+    return ((not extra or bool(re.fullmatch(r"[^\W\d_][^\W\d_'’-]{0,30}\.?", extra)))
+            and (not title or bool(_VCARD_TITLE_RE.fullmatch(title)))
+            and (not suffix or bool(_VCARD_SUFFIX_RE.fullmatch(suffix))))
+
+
 def _vcard_hits(text: str, want) -> list:
-    out = []
+    out: list = []
     spans = _vcard_spans(text)
-    if not spans:
-        return out
     import bisect   # here: the hooks pay for every module at import
     starts = [a for a, _ in spans]
 
@@ -969,32 +1050,41 @@ def _vcard_hits(text: str, want) -> list:
 
     def val(f) -> str:
         return text[f[0]:f[1]].strip()
-    if "address-vcard-fields" in want:
-        for m in _VCARD_ADR_RE.finditer(text):
-            if not inside(m.start()):
-                continue
-            fields = _vcard_fields(m.group(1), m.start(1))
+
+    # (property, start and end of its value): the lines of each vCard, then the vCard lines outside one
+    lines: list = []
+    if spans:
+        for prop, rx in (("ADR", _VCARD_ADR_RE), ("N", _VCARD_N_RE)):
+            if _VCARD_KIND[prop] in want:
+                lines += [(prop, m.start(1), m.end(1)) for m in rx.finditer(text) if inside(m.start())]
+        if "birth-date-vcard-compact" in want:
+            lines += [("BDAY", m.start(1), m.end(1)) for m in _VCARD_BDAY_RE.finditer(text) if inside(m.start())]
+    if ";" in text or ".vcf" in text.lower():
+        for m in _VCARD_BARE_RE.finditer(text):
+            prop = m.group(2).upper()
+            if _VCARD_KIND[prop] in want and not inside(m.start(2)) and _vcard_bare(text, m, val):
+                lines.append((prop, m.start(4), m.end(4)))
+    for prop, a, b in lines:
+        if prop == "ADR":
+            fields = _vcard_fields(text[a:b], a)
             filled = [f for f in fields if val(f)]
             if len(fields) != 7 or len(filled) < 2:
                 continue   # a vCard address has seven fields
             # a number in the box, the extended or the street field, or a postal code: Rose Cottage;Dunmore;Y35 X2K
             if any(re.search(r"\d", val(f)) for f in fields[:3]) or val(fields[5]):
                 out.append((filled[0][0], filled[-1][1], "address-vcard-fields", ADDRESS))
-    if "name-vcard-n" in want:
-        for m in _VCARD_N_RE.finditer(text):
-            if not inside(m.start()):
-                continue
-            fields = _vcard_fields(m.group(1), m.start(1))
+        elif prop == "N":
+            fields = _vcard_fields(text[a:b], a)
             if len(fields) < 2:
                 continue   # vCard 2.1 may write family;given alone
             family, given = val(fields[0]), val(fields[1])
             if family and given and _name_ok(given + " " + family) and not _reads_as_words(given + " " + family):
                 end = fields[2][1] if len(fields) > 2 and val(fields[2]) else fields[1][1]   # a middle name
                 out.append((fields[0][0], end, "name-vcard-n", NAME))
-    if "birth-date-vcard-compact" in want:
-        for m in _VCARD_BDAY_RE.finditer(text):
-            v = m.group(1)
-            if inside(m.start()) and _a_date(v) and _past_year(v[:4]) and not _placeholder_digits(v, dates=True):
+        else:
+            m = _VCARD_BDAY_VALUE_RE.match(text, a, b)
+            v = m.group(1) if m else ""
+            if v and _a_date(v) and _past_year(v[:4]) and not _placeholder_digits(v, dates=True):
                 out.append((m.start(1), m.end(1), "birth-date-vcard-compact", BIRTH_DATE))
     return out
 
@@ -1129,7 +1219,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                     out.append((s0, s0 + len(v), "address-after-label", ADDRESS))
                 else:
                     _company_window(text, line, s0, s0 + len(v), "address-after-label", company)
-    if any(f in want for f in _VCARD_FORMS) and "VCARD" in text.upper():
+    if any(f in want for f in _VCARD_FORMS) and ("VCARD" in text.upper() or (
+            _VCARD_BARE_WORDS_RE.search(text) and _VCARD_BARE_HINT_RE.search(text))):
         out += _vcard_hits(text, want)
     if "address-in-form" in want and "in" in regions:
         for m in _IN_ADDRESS_RE.finditer(text):
@@ -1335,6 +1426,21 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                     _company_window(text, lo, m.start(), end, "street-address", company)
                     continue
                 out.append((m.start(), end, "street-address", ADDRESS))
+        if company is not None and {"de", "at", "ch"}.intersection(regions) and "\n" in text:
+            for m in _DE_TWO_LINES_RE.finditer(text):
+                line = text.rfind("\n", 0, m.start()) + 1
+                if not line or text[line:m.start()].strip():
+                    continue   # the street starts its line, after the line of the company's name
+                lo = text.rfind("\n", 0, line - 1) + 1
+                if lo and _DEPARTMENT_LINE_RE.match(text, lo):
+                    lo = text.rfind("\n", 0, lo - 1) + 1   # Beispiel GmbH\nAbteilung Einkauf\nHafenweg 3
+                f = _LEGAL_FORM_RE.search(text, lo, line)
+                if f is None or not _COMPANY_LINE_RE.fullmatch(text, lo, f.start()):
+                    continue   # Lena Brückner, Beispiel GmbH: a person on the company's line
+                above = text.rfind("\n", 0, lo - 1) + 1 if lo else -1
+                if above >= 0 and text[above:lo].strip() and not _ADDRESS_HEADING_RE.fullmatch(text, above, lo - 1):
+                    continue   # the line above the company's name may be a person's
+                _company_window(text, lo, m.start(), m.end(1), "street-address", company)
     if "name-after-label" in want and (":" in text or "=" in text):
         for m in _NAME_LABEL_RE.finditer(text):
             v = m.group(3).rstrip("'’")   # tenant: 'Jonas Wendler': the closing quote is no part of the name

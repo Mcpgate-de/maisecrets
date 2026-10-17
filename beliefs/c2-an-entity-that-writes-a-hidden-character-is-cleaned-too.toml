@@ -6,5 +6,5 @@ runner = ["tests/test_tool_channel_normaliser.py::DisguiseTests::test_each_disgu
 
 [proof]
 file = "maisecrets/normalise.py"
-find = '''STAGES = ("entity", "ansi", "invisible", "fullwidth", "emphasis", "decode")'''
-replace = '''STAGES = ("ansi", "invisible", "entity", "fullwidth", "emphasis", "decode")'''
+find = '''STAGES = ("unfold", "entity", "ansi", "invisible", "fullwidth", "emphasis", "decode")'''
+replace = '''STAGES = ("unfold", "ansi", "invisible", "entity", "fullwidth", "emphasis", "decode")'''

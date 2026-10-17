@@ -1,0 +1,13 @@
+# c1-a-vcard-line-without-its-card-is-a-hit: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-vcard-line-without-its-card-is-a-hit"
+control = "C1"
+statement = "An ADR, N or BDAY line of a vCard without its BEGIN:VCARD is a hit in a tool result after a .vcf file name (grep output) or in the structure of the property (ADR with an empty box and extended field, N with five fields, BDAY with a parameter)."
+runner = ["tests/test_vcard_bare_lines.py::BareLineTests::test_grep_output_of_a_contact_export", "tests/test_vcard_bare_lines.py::BareLineTests::test_a_line_of_a_card_without_a_file_name"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''    """A line outside a vCard that is one of its properties (see _VCARD_BARE_RE)."""
+'''
+replace = '''    """A line outside a vCard that is one of its properties (see _VCARD_BARE_RE)."""
+    return False
+'''
