@@ -1,0 +1,10 @@
+# c28-a-locked-pdf-is-refused-with-its-cause: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c28-a-locked-pdf-is-refused-with-its-cause"
+control = "C28"
+statement = "Under read_pdf convert a PDF that pdftotext cannot open is replaced by a refusal text, never passed as bytes, and the refusal names the cause: a PDF locked by a password (the last message of pdftotext and exit 1, also after many warnings), a damaged file, or, on a poppler that returns its documented exit 3, a copy restriction."
+runner = ["tests/test_file_reads.py::LockedOrDamaged::test_the_cause_comes_from_pdftotext"]
+
+[proof]
+file = "maisecrets/file_reads.py"
+find = "    if code == 1 and lines and lines[-1] == b\"Command Line Error: Incorrect password\":\n        return LOCKED\n"
+replace = ""
