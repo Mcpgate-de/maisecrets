@@ -965,11 +965,24 @@ def _check_value(payload: dict, groups: list) -> dict:
     entries: list = []
     values: list = []
     lines: list = []
+    seen: dict = {}
     for value, exact in groups:
+        if value in seen:                  # the same value again: the same line, and it is stored once
+            lines.append(lines[seen[value]])
+            continue
+        seen[value] = len(lines)
         got, taken, line = _check_one(payload, cfg, session, value, exact)
         entries += got
         values += taken
         lines.append(line)
+    # a value no rule caught is stored after every group has its verdict: a group never sees what a check before it
+    # in the same prompt stored, so each verdict is the one its normal prompt gets alone
+    stored: dict = {}
+    for i, line in enumerate(lines):
+        if isinstance(line, tuple):
+            if line[1] not in stored:
+                stored[line[1]] = _store_unseen(payload, cfg, *line[1:])
+            lines[i] = stored[line[1]]
     if len(lines) == 1:
         reason = lines[0] + "\n\n" + check_value.NOT_SENT
     else:
@@ -990,7 +1003,8 @@ def _check_value(payload: dict, groups: list) -> dict:
 
 def _check_one(payload: dict, cfg: dict, session: str | None, value: str, exact: bool) -> tuple:
     """(entries, values taken out, verdict line) of one group of a check. The line ends without the sentence that the
-    prompt was not sent: _check_value adds it once."""
+    prompt was not sent: _check_value adds it once. For a value no rule caught, the line is a tuple that names the
+    store step, which _check_value runs after the verdicts of all groups."""
     if not value.strip():
         return [], [], check_value.USAGE_LINE
     if check_value.only_placeholders(value, find_refs(value)):
@@ -1000,7 +1014,7 @@ def _check_one(payload: dict, cfg: dict, session: str | None, value: str, exact:
         labels = [check_value.hit_label(m.type, m.kind) for m in matches]
         labels += [check_value.hit_label(e.type, e.kind, stored=True) for e in entries[len(matches):]]
         return entries, values, check_value.caught_line(labels)
-    return entries, values, _store_unseen(payload, cfg, value, session, exact)
+    return entries, values, ("store", value, session, exact)     # _check_value stores it after the last verdict
 
 
 def rewrite_prompt(payload: dict) -> dict:

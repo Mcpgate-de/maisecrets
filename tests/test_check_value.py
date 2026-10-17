@@ -43,7 +43,10 @@ PHRASE = "Tr0ub4dor& " + "7horses! b4tt3ry"         # a passphrase: each word ha
 ORDINARY_TEXTS = ("Apfel Birne", "correct horse battery staple", "Call me at 5 tomorrow!",
                   "e3b0c44298fc1c14" + "9afbf4c8996fb924  file.txt", "3f2504e0-4f89-11d3-" + "9a0c-0305e82c3301",
                   "passlib>=1.7,<2", "git log --oneline -n 20", "Wartungsfenster", "密码：至少8位（含1个大写字母）",
-                  "wJalrXUtnFEMI/K7MDENG/" + "bPxRfiCYEXAMPLEKEY", "release-notes-2026:")
+                  "wJalrXUtnFEMI/K7MDENG/" + "bPxRfiCYEXAMPLEKEY", "release-notes-2026:", "npm-github:",
+                  "2026-10-17T12:30:00Z", "v1.2.3-rc.4", "ai-gateway#1191", "IMG_20261017_123045.jpg",
+                  "0x7ffe" + "efbff5c8", "DB_HOST=db1.local", "keyring~=24.3", "Tr0ub4dor& horse battery",
+                  "e-mail, x-ray, t-shirt")
 STATE = ("index.json", "vault.json", "audit.log", "hooks.log", "events.log", "terms.txt", "terms.marked.json",
          ".terms-state", ".terms-cache", "allow.txt", "hints.json")
 # the files that hold a value by design: the plaintext test store, the term list and the allow list
@@ -147,6 +150,11 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(check_value.parse_all("ms:(a)b)"), [("a)b", True)])
         # a later group stores only when the first one may (a near form at the start stores nothing)
         self.assertEqual(check_value.parse_all("ms: (a) ms:(b)"), [("a", False), ("b", False)])
+        # the text after the last `)` of a group is no part of it, as after the last group
+        self.assertEqual(check_value.parse_all("ms:(a1) und ms:(b2)"), [("a1", True), ("b2", True)])
+        # a near form starts a new group too
+        self.assertEqual(check_value.parse_all("ms:(a) ms: (b) MS\uff1a\uff08c"), [("a", True), ("b", True),
+                                                                                   ("c", True)])
         # `ms:(` glued to a word is no new group
         self.assertEqual(check_value.parse_all("ms:(xms:(y)"), [("xms:(y", True)])
         self.assertEqual(check_value.parse("ms:(A B) ms:(x)"), "A B")
@@ -297,6 +305,26 @@ class SameVerdictTests(_Base):
                             self.assertNotIn("gitlab-pat", line, "the hit of the other group stays in its line")
                         self.assertTrue(out["reason"].endswith(check_value.NOT_SENT))
 
+    def test_a_group_does_not_see_what_a_group_before_it_stored(self):
+        # the same unseen value twice: both lines say what the normal prompt says, and it is stored once
+        out = _prompt(f"ms:({UNSEEN}) ms:({UNSEEN})")
+        lines = out["reason"].split("\n\n")[0].split("\n")
+        self.assertEqual([x.split(": ", 1)[1] for x in lines][0], [x.split(": ", 1)[1] for x in lines][1])
+        self.assertIn("It is now stored", lines[1])
+        # a later group that holds the value of an earlier one: its verdict comes from the state before the prompt
+        _clean()
+        out = _prompt(f"ms:({UNSEEN}) ms:(see {UNSEEN} here)")
+        self.assertNotIn("stored value", out["reason"])
+        self.assertEqual(len(json.loads(Path(HOME, "index.json").read_text())["entries"]), 1)
+
+    def test_a_failed_check_with_several_groups_loses_each_value(self):
+        prompt = f"ms:( {UNSEEN}) ms:({PASSWORD}"
+        with tempfile.TemporaryDirectory() as d:
+            t = Path(d, "t.jsonl")
+            t.write_text(json.dumps({"type": "user", "message": {"content": PASSWORD}}) + "\n", encoding="utf-8")
+            hooks._scrub_failed_prompt_now(prompt, str(t))
+            self.assertNotIn(PASSWORD, t.read_text(encoding="utf-8"), "the value of the second group alone")
+
     def test_the_text_ms_bracket_is_never_a_hit(self):
         # the live finding: `ms:(A B) ms:(x)` read "A B) ms:(x" as one value; now each group is its own value
         out = _prompt("ms:(Apfel Birne) ms:(x)")
@@ -429,7 +457,9 @@ class StoreTests(_Base):
         self.assertFalse(Path(HOME, "index.json").exists())
 
     def test_a_credential_without_a_shape_is_still_stored(self):
-        for value in (UNSEEN, PASSWORD, "Sommer" + "2026!x", "K7#mQ2" + "vL9pZ"):
+        # signs that code uses too ($ = < > ...) and letters only at random are credentials (Gate A and Gate B, round 1)
+        for value in (UNSEEN, PASSWORD, "Sommer" + "2026!x", "K7#mQ2" + "vL9pZ", "aB3$kL9" + "!mQ2z",
+                      "Kx7=pLm2" + "#zR9", "q<Vx7Lm" + "9Kp3", "qzmxnplkjh" + "gfdsavwbyc", "x9!Lq 7#mZ " + "4$kP"):
             with self.subTest(value[:3]):
                 self.assertTrue(check_value.looks_like_a_credential(value), value[:3])
         self.assertIn("It is now stored", _prompt(f"ms:({PASSWORD})")["reason"])

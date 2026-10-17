@@ -694,16 +694,19 @@ This prompt was not sent. The value did not reach the AI.
   One blank on each side is dropped, so `ms:( value )` and a key on its own
   lines between `ms:(` and `)` both work.
 - **Several values** in one prompt: `ms:(first) ms:(second)`. Each value
-  ends where blanks and the next `ms:(` start, and each gets its own line
-  (`Value 1: …`, `Value 2: …`). The prompt is not sent.
+  ends at its last `)` before the next `ms:(` (text after that `)` is not
+  part of it), and each gets its own line (`Value 1: …`, `Value 2: …`). Each
+  verdict is the one that value gets alone: a value is stored only after
+  every value has its verdict. The prompt is not sent.
 - **The verdict** is the one a normal prompt with that value gets: the
   detection rules, your rules of your own, your terms, the values already
   stored, the allow list and your regions. The answer names the type and the
   rule of each hit, never the value; a value that is caught is stored, as for
   a normal prompt.
 - **Not caught:** when the value looks like a credential (no blanks, 8
-  characters or more, and a mix of letters, digits and signs or the
-  randomness of a key, no word and no hex id), maisecrets stores it as
+  characters or more, a mix of letters, digits and signs or the randomness
+  of a key; no word, no hex value, no id in capitals and digits, no date,
+  version, file name or `name=value`), maisecrets stores it as
   `/maisecrets:put` does (type SECRET) and names its placeholder, so it is masked from then on wherever it
   stands as a word of its own (glued to other letters, it is not found). A
   passphrase with spaces is stored only when each word has a letter and a

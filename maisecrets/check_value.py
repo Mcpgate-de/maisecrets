@@ -12,6 +12,18 @@ from __future__ import annotations
 
 import re
 
+class _Lazy:
+    """A pattern compiled on its first use: the hook start compiles only what a prompt needs (tests/test_hook_start)."""
+
+    def __init__(self, pattern: str, flags: int = 0) -> None:
+        self._args, self._rx = (pattern, flags), None
+
+    def __getattr__(self, name: str):
+        if self._rx is None:
+            self._rx = re.compile(*self._args)
+        return getattr(self._rx, name)
+
+
 # `Ms:(` too: a phone keyboard in Remote Control writes the first letter in capitals, and that prompt would go out.
 # The near forms of the same trigger count too, because a miss sends a value without a shape to the model: blanks
 # around the colon (`ms: (`), and the full-width colon and bracket of an input method (`ms：（`). Before it, every
@@ -42,17 +54,18 @@ def exact(prompt) -> bool:
     return isinstance(prompt, str) and EXACT_RE.match(prompt) is not None
 
 
-# the next group of a prompt with several checks: blanks and `ms:(` (any case). One `)` before the blanks closes the
-# group before it; without it the group ends there all the same, so a group never holds the start of the next one
-_NEXT_RE = re.compile(r"[\s\ufeff\u200b-\u200d\u2060]+ms:\(", re.I)
+# the next group of a prompt with several checks: blanks and `ms:(` in any of the forms of the first one (`ms: (`,
+# `ms：（`). The group before it ends at its last `)`, as the last group does; without a `)` it ends at the blanks, so a
+# group never holds the start of the next one
+_NEXT_RE = _Lazy(r"[\s\ufeff\u200b-\u200d\u2060]+ms" + _BLANK + "[:\uff1a]" + _BLANK + "[(\uff08]", re.I)
 
 
 def parse_all(prompt) -> list | None:
     """The groups of a check prompt as (value, exact) pairs, or None when the prompt is no check. `ms:(a) ms:(b)` holds
-    two groups. A group ends at the blanks before the next `ms:(`, without one `)` there; the last group ends at the
-    last `)`, or at the end when there is none. So a `)` inside a value works in each group, and no value holds the
-    `ms:(` of the next group. exact: the prompt starts with `ms:(` as the README writes it (only then a group stores a
-    value)."""
+    two groups. Each group ends at its last `)` before the next `ms:(` (the last one: before the end), or, without a
+    `)`, at the blanks before the next `ms:(` (the last one: at the end). So a `)` inside a value works in each group,
+    and no value holds the `ms:(` of the next group. exact: the prompt starts with `ms:(` as the README writes it (only
+    then a group stores a value)."""
     if not isinstance(prompt, str):
         return None
     m = TRIGGER_RE.match(prompt)
@@ -68,9 +81,8 @@ def parse_all(prompt) -> list | None:
             groups.append((_trim(rest[:close] if close >= 0 else rest), is_exact))
             return groups
         raw = prompt[start:nxt.start()]
-        if raw.endswith((")", "\uff09")):
-            raw = raw[:-1]
-        groups.append((_trim(raw), is_exact))
+        close = max(raw.rfind(")"), raw.rfind("\uff09"))
+        groups.append((_trim(raw[:close] if close >= 0 else raw), is_exact))
         start = nxt.end()       # a later group stores only when the first one may: `MS: (Teams) ms:(…)` stores nothing
 
 
@@ -153,30 +165,49 @@ def stored_text(ref: str, alone: bool, in_text: bool) -> str:
 _AROUND = "\"'`()[]{}<>.,;:!?"
 # code, not a passphrase: quotes, brackets, an assignment, a redirection
 _CODE_SIGNS = frozenset("\"'`()[]{}<>=")
-# a label or a name: letters joined by - _ . (`npm-github:`, `Wartungsfenster`)
-_NAME_RE = re.compile(r"[^\W\d_]+(?:[-_.][^\W\d_]+)*")
-# a digest, an id or an address in hex: a sha256 sum, `sha256:…`, a UUID, a MAC address, a colour (#0f0f0f)
-_HEX_ID_RE = re.compile(r"#?(?:(?i:sha\d*|md5|blake\w*)[-:])?[0-9a-fA-F]+(?:[-:][0-9a-fA-F]+)*")
+# a digest, an id or an address in hex: a sha256 sum, `sha256:…`, a UUID, a MAC address, a colour (#0f0f0f), 0x7ffe…
+_HEX_ID_RE = _Lazy(r"#?(?:(?i:sha\d*|md5|blake\w*)[-:]|0x)?[0-9a-fA-F]+(?:[-:][0-9a-fA-F]+)*")
+# a version with its pre-release and build parts (v1.2.3-rc.4, 2.0.0+build.7)
+_SEMVER_RE = _Lazy(r"v?\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?")
+# the name before a colon: letters joined by - _ .
+_LABEL_RE = _Lazy(r"[^\W\d_]+(?:[-_.][^\W\d_]+)*")
+# an assignment or a flag with its value (`DB_HOST=db1`, `--level=3`, `path.to=x`): a name of small letters, of
+# capitals, or with _ . - in it. A random password with `=` inside (Kx7=pLm2#zR9) stays a value
+_ASSIGNMENT_RE = _Lazy(r"-{0,2}(?:[a-z]{3,}|[A-Z]{3,}|[A-Za-z][A-Za-z0-9]*[_.-][\w.-]*)=.*")
+# a version pin of a package (`keyring~=24.3`, `passlib>=1.7,<2`)
+_PIN_RE = _Lazy(r"[A-Za-z][\w.\-\[\]]*(?:[~=!<>]=|[<>])\d.*")
+# a word that says it is no value: the word parts of detect._LITERAL_PLACEHOLDER_RE, not its signs ($x, <x>, ...),
+# which a random password holds as often as any other sign
+_PLACEHOLDER_WORD_RE = _Lazy(r"(?i)x{4,}|\*{3,}|your[_-]|example|sample|dummy|placeholder|changeme|change_me|"
+                                  r"redacted|lorem|foobar|secret_here")
+# a date and a time (2026-10-17T12:30:00Z), an issue (ai-gateway#1191), a file with its type (IMG_2026.jpg)
+_DATE_ID_FILE_RE = _Lazy(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
+                              r"|[\w.-]+#\d+|[\w.-]+\.(?i:jpe?g|png|gif|svg|pdf|txt|md|py|js|ts|json|ya?ml|toml|zip|gz|"
+                              r"tar|csv|log|html?|sh|go|rs|java|kt|swift)")
 # an id in capitals and digits: a key id, a serial number, a licence, a ticket (AKIA…, SN4711X9). A secret of this
 # alphabet has a rule of its own (the access key id has none: it names a key)
-_CAPS_ID_RE = re.compile(r"[A-Z0-9]+")
+_CAPS_ID_RE = _Lazy(r"[A-Z0-9]+")
 # the scripts of East Asia and the full-width signs: a sentence there needs no blank (密码：至少8位)
-_WIDE_RE = re.compile("[\\u3000-\\u9fff\\uac00-\\ud7af\\uff00-\\uffef]")
+_WIDE_RE = _Lazy("[\\u3000-\\u9fff\\uac00-\\ud7af\\uff00-\\uffef]")
 
 
 def _credential_word(v: str) -> bool:
     """One value without blanks reads as a credential by the checks the detector already has: the value of a password
     label (detect._pw_literal_ok: no word after undoing leet with evidence of chance, or a word, a number and a sign),
     or a key above the entropy floor of its alphabet (0.6.24) that reads as no word. A digest or an id in hex, an
-    assignment or a version pin (`=` inside), an id in capitals and digits, a name, a placeholder and a sentence of East
-    Asia are no credential."""
+    assignment, a version pin, an id in capitals and digits, a date, an issue, a file name, a version, a word of a
+    language (detect.reads_as_word), a placeholder word and a sentence of East Asia are no credential."""
     from . import detect
-    if len(v) < 8 or any(c.isspace() for c in v) or "=" in v.rstrip("="):
+    if len(v) < 8 or any(c.isspace() for c in v) or _ASSIGNMENT_RE.fullmatch(v) or _PIN_RE.fullmatch(v):
         return False
     core = v.strip(_AROUND)
-    if _NAME_RE.fullmatch(core) or _HEX_ID_RE.fullmatch(core) or _CAPS_ID_RE.fullmatch(core) or _WIDE_RE.search(v):
+    if _HEX_ID_RE.fullmatch(core) or _CAPS_ID_RE.fullmatch(core) or _WIDE_RE.search(v):
         return False
-    if detect._LITERAL_PLACEHOLDER_RE.search(v) or detect._names_itself(v):
+    if v.endswith(":") and _LABEL_RE.fullmatch(core):
+        return False   # a label of YAML or of a list (`npm-github:`)
+    if _DATE_ID_FILE_RE.fullmatch(core) or _SEMVER_RE.fullmatch(core) or detect.reads_as_word(core):
+        return False   # a date, an issue, a file, a version; a name or a label (`npm-github:`, `Wartungsfenster`)
+    if _PLACEHOLDER_WORD_RE.search(v) or detect._names_itself(v):
         return False
     if detect._pw_literal_ok(v):
         return True
