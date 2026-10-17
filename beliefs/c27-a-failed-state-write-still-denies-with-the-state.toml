@@ -2,7 +2,7 @@
 belief = "c27-a-failed-state-write-still-denies-with-the-state"
 control = "C27"
 statement = "A state record that cannot be written leaves the deny as it is: the reason still names the state."
-runner = ["tests/test_vault_states.py::States::test_a_busy_lock_still_denies_with_the_state"]
+runner = ["tests/test_vault_states.py::States::test_a_failed_state_write_still_denies_with_the_state"]
 
 [proof]
 file = "maisecrets/vault_refs.py"

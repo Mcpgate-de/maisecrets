@@ -320,7 +320,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 13 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 336 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 343 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -2151,11 +2151,11 @@ How it works (`docs/PROTOCOL.md` section 4):
    names the state of the server and your next step (the table below).
 
 `/maisecrets:status` shows the state of each server, with the time of the
-last answer. It asks each server once (an empty request that can return no
-value), and only a server that has the header. At a session start
-maisecrets asks the same question once per server, within 5.5 s for all
-servers, and tells you in one line when a state changed since you last saw
-it. The deny reason of a Write, Edit or Bash call uses the same words:
+last answer. It asks once per server origin that has a key on this
+computer (an empty request that can return no value); two entries on one
+origin share the key and the answer. At a session start maisecrets asks the
+same question once per such origin, within 5.5 s for all, and tells you in
+one line when a state changed since you last saw it. The deny reason of a Write, Edit or Bash call uses the same words:
 
 | State | What you do (Claude Code) | In Codex |
 |---|---|---|

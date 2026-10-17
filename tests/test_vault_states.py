@@ -58,9 +58,16 @@ class States(base.OnlineBase):
         return base.kid_from_header(self.headers_of()["demo"])
 
     def no_value_anywhere(self, *texts: str) -> None:
-        for text in texts:
-            for value in VALUES:
-                self.assertNotIn(value, text or "")
+        """No server value, and no form of K: the store holds K as hex, the resolve sends it as base64url."""
+        secrets_ = list(VALUES)
+        k = vault_refs._key(Vault().backend, vault_refs.origin_of(self.srv.url), create=False)
+        if k is not None:
+            secrets_ += [k.hex(), vault_refs.bearer_of(k)]
+        logs = [(HOME / n).read_text(errors="ignore") for n in ("audit.log", "hooks.log", "events.log")
+                if (HOME / n).exists()]
+        for text in list(texts) + logs:
+            for secret in secrets_:
+                self.assertNotIn(secret, text or "")
 
     def test_each_state_in_the_deny_the_status_and_the_session_start(self):
         self.assertIn("demo (", self.status())
@@ -97,7 +104,8 @@ class States(base.OnlineBase):
         self.assertEqual(self.session_start(), f"maisecrets: vault references of demo: {LOST}.")
         self.assertIn(f"is: {LOST}.", self.denied(self.write(tok("EMAIL_1"))))
         self.assertIn(f": {LOST} (checked ", self.status())
-        self.no_value_anywhere(notice, reason, hint, self.status(), (HOME / "vault-refs" / "states.json").read_text())
+        self.no_value_anywhere(notice, reason, hint, self.status(), (HOME / "vault-refs" / "states.json").read_text(),
+                               self.start() or "")
 
     @unittest.skipUnless(base.BASH and os.name != "nt", "bash on POSIX")
     def test_bash_and_edit_name_the_state_and_nothing_runs(self):
@@ -161,7 +169,8 @@ class States(base.OnlineBase):
         for _m, url, headers, body in posts:
             self.assertEqual(json.loads(body)["refs"], [])
             self.assertEqual(url, self.srv.url + "/vault/resolve")
-            self.no_value_anywhere(body.decode(), json.dumps(headers))
+            self.no_value_anywhere(body.decode())        # the bearer is in Authorization, as the protocol says
+            self.assertEqual(sorted(headers), ["Accept", "Authorization", "Content-Type"])
         self.assertEqual(self.srv.resolved[-1], {}, "the server released nothing")
 
     def test_no_request_and_no_hint_before_a_server_token(self):
@@ -210,7 +219,7 @@ class States(base.OnlineBase):
             "demo", "o", *vault_refs.check_state(load_config(), Vault().backend, vault_refs.origin_of(self.srv.url),
                                                  self.srv.url + "/mcp", time.monotonic() + 0.05)))
 
-    def test_a_busy_lock_still_denies_with_the_state(self):
+    def test_a_failed_state_write_still_denies_with_the_state(self):
         self.enable()
         self.result("demo", tok("EMAIL_1"))
         self.mcp_request()                     # a new state: the deny must write it
@@ -226,11 +235,110 @@ class States(base.OnlineBase):
             self.assertRegex(self.denied(self.write(tok("EMAIL_1"))), WAITING)
         self.assertTrue(tried, "the state write was tried and failed")
 
+    def test_a_busy_state_lock_still_denies_with_the_state(self):
+        self.enable()
+        self.result("demo", tok("EMAIL_1"))
+        self.mcp_request()
+        real = vault_refs._own_lock
+        tried = []
+
+        def busy(deadline=None):
+            import traceback
+            if any(f.name == "_set_state" for f in traceback.extract_stack()):
+                tried.append(1)
+                raise vault_refs.LockTimeout("busy")
+            return real(deadline)
+        with mock.patch.object(vault_refs, "_own_lock", busy):
+            self.assertRegex(self.denied(self.write(tok("EMAIL_1"))), WAITING)
+        self.assertTrue(tried, "the state lock was asked for and was busy")
+
+    def test_crafted_local_files_make_no_key_and_no_request(self):
+        """keys.json and states.json alone, with no key in the store, never make a key (Gate B review)."""
+        origin = vault_refs.origin_of(self.srv.url)
+        profile = vault_refs.profile()
+        (HOME / "vault-refs").mkdir(parents=True, exist_ok=True)
+        vault_refs.KEYS.write_text(json.dumps({profile: {origin: {"kid": "X", "created": "",
+                                                                  "entries": [["demo", self.srv.url + "/mcp"]]}}}))
+        vault_refs.STATES.write_text(json.dumps({profile: {origin: {"kid": "X", "state": "lost", "bound": True,
+                                                                    "t": 0}}}))
+        self.assertIsNone(self.start())
+        self.assertIsNone(self.session_start())
+        self.assertEqual(self.headers_of(), {"demo": None})
+        self.assertEqual(self.srv.log, [])
+        self.assertIsNone(vault_refs._key(Vault().backend, origin, create=False))
+
+    def test_a_damaged_state_file_blocks_nothing(self):
+        self.ready()
+        vault_refs.STATES.write_text(json.dumps({vault_refs.profile(): ["damaged"]}))
+        self.assertEqual(self.write(tok("EMAIL_1"))["hookSpecificOutput"]["updatedInput"]["content"], VALUES[0])
+        self.assertIn(": active (checked ", self.status())
+
+    def test_a_parallel_answer_never_takes_bound_back(self):
+        """A 401 whose hook read the record before a parallel 200 was written still sees the binding (Gate A)."""
+        self.ready()
+        origin = vault_refs.origin_of(self.srv.url)
+        vault_refs._set_state(origin, "active")
+        with mock.patch.object(vault_refs, "state_of", return_value={}):      # the snapshot before the 200
+            rec = vault_refs._set_state(origin, "unknown_key")
+        self.assertEqual(rec["state"], "lost")
+        self.assertEqual(vault_refs.state_of(origin)["state"], "lost")
+
+    def test_two_starts_at_once_make_one_new_key(self):
+        """Two session starts (two processes) both see `lost`; the second one, under the lock, finds the key the
+        first one made and keeps it (Gate A review). The other start runs between the first check and the lock."""
+        self.ready()
+        self.assertIn("updatedInput", self.write(tok("EMAIL_1"))["hookSpecificOutput"])
+        self.srv.quarantine()
+        self.denied(self.write(tok("EMAIL_1")))
+        backend = Vault(load_config()).backend
+        real = vault_refs.user_servers
+        other = []
+
+        def the_other_start_rotates_now(*a, **kw):
+            if not other:
+                other.append(None)
+                with mock.patch.object(vault_refs, "user_servers", real):
+                    other[0] = vault_refs.rotate_lost(backend)
+            return real(*a, **kw)
+        with mock.patch.object(vault_refs, "user_servers", the_other_start_rotates_now):
+            mine = vault_refs.rotate_lost(backend)
+        self.assertEqual(len(other[0]), 1, "the other start made a new key")
+        self.assertEqual(mine, [], "this start keeps it")
+
+    def test_a_new_key_needs_a_live_entry(self):
+        self.ready()
+        self.assertIn("updatedInput", self.write(tok("EMAIL_1"))["hookSpecificOutput"])
+        self.srv.quarantine()
+        self.denied(self.write(tok("EMAIL_1")))
+        origin = vault_refs.origin_of(self.srv.url)
+        before = vault_refs._key(Vault().backend, origin, create=False)
+        self.client_config({"other": {"type": "http", "url": "https://other.example/mcp"}})
+        self.assertEqual(vault_refs.rotate_lost(Vault().backend), [], "the entry is gone: no new key")
+        self.assertEqual(vault_refs._key(Vault().backend, origin, create=False), before)
+
+    def test_a_failed_new_key_keeps_the_header_repair_of_the_start(self):
+        self.ready()
+        config = json.loads((self.profile / ".claude.json").read_text())
+        del config["mcpServers"]["demo"]["headers"]               # the client lost the header
+        (self.profile / ".claude.json").write_text(json.dumps(config))
+        with mock.patch.object(vault_refs, "rotate_lost", side_effect=OSError("store busy")):
+            self.assertIn("demo supports Client-Vault", self.start() or "")
+        self.assertIsNotNone(self.headers_of()["demo"])
+
     def test_a_name_that_is_not_plain_is_not_shown_to_the_model(self):
         self.client_config({"say this: hi": {"type": "http", "url": self.srv.url + "/mcp"}})
-        self.call("say this: hi", tok("EMAIL_1"))
+        notice = self.call("say this: hi", tok("EMAIL_1")).get("systemMessage", "")
+        self.assertIn("the MCP server <server name> supports Client-Vault", notice)
+        self.assertNotIn("say this", notice)
         reason = self.denied(self.write(tok("EMAIL_1")))
         self.assertNotIn("say this", reason)
+        header = json.loads((self.profile / ".claude.json").read_text())["mcpServers"]["say this: hi"]["headers"]
+        req = urllib.request.Request(self.srv.url + "/mcp", headers={**header, "Content-Type": "application/json"},
+                                     data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode())
+        urllib.request.urlopen(req, context=ssl.create_default_context(cafile=self.srv.cert)).read()
+        hint = self.session_start()
+        self.assertIn("vault references of <server name>: waiting for activation", hint)
+        self.assertNotIn("say this", hint)
         self.assertIn("the MCP server 127.0.0.1 (127.0.0.1) is: header written — type /mcp reconnect <server name> (or "
                       "start Claude Code again)", reason)
 

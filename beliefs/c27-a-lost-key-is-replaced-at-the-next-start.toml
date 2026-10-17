@@ -6,5 +6,5 @@ runner = ["tests/test_vault_states.py::States::test_a_quarantined_key_is_replace
 
 [proof]
 file = "maisecrets/vault_refs.py"
-find = '''renewed = rotate_lost(backend) if cfg.get("client_header", True) is not False else []'''
+find = '''renewed = rotate_lost(backend, time.monotonic() + BUDGET)'''
 replace = '''renewed = []'''

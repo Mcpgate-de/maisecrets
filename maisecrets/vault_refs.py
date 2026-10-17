@@ -279,8 +279,14 @@ def _key_locked(backend, origin: str, create: bool) -> bytes | None:
     return k
 
 
+def _mine(path: Path) -> dict:
+    """The part of this profile in a file of the vault-refs folder; {} when the file or its shape is damaged."""
+    mine = (_read_json(path) or {}).get(profile())
+    return mine if isinstance(mine, dict) else {}
+
+
 def _known_keys() -> dict:
-    return (_read_json(KEYS) or {}).get(profile()) or {}
+    return _mine(KEYS)
 
 
 def _enabled() -> dict[str, list[tuple[str, str]]]:
@@ -429,7 +435,12 @@ def ensure_headers(cfg: dict, backend) -> str | None:
     if not _may_change_config():
         return None
     # a key the server no longer accepts (quarantined or revoked) is never used again: a new one, and its header below
-    renewed = rotate_lost(backend) if cfg.get("client_header", True) is not False else []
+    renewed: list[str] = []
+    if cfg.get("client_header", True) is not False:
+        try:
+            renewed = rotate_lost(backend, time.monotonic() + BUDGET)
+        except (LockTimeout, OSError, RuntimeError):
+            renewed = []                        # tried again at the next start; the header repair below still runs
     added, removed, path, backup = _apply_config(cfg, backend)
     parts = []
     if renewed:
@@ -553,10 +564,10 @@ def _notice(name: str) -> str:
         return codex_vault.notice(name)
     # measured on Claude Code 2.1.302: `/mcp reconnect <name>` reads the entry again, its headers included, and every
     # later request carries the new header; no restart is needed
-    return (f"maisecrets: the MCP server {name} supports {HEADER}, and maisecrets wrote its header into the client "
-            f"config. {reconnect_step(name)} Then maisecrets puts this server's values into your local files and "
-            "commands; the AI still sees only tokens. To turn it off: /maisecrets:settings client_header false. More: "
-            "README, section \"Vault references\".")
+    return (f"maisecrets: the MCP server {_say_name(name)} supports {HEADER}, and maisecrets wrote its header into "
+            f"the client config. {reconnect_step(name)} Then maisecrets puts this server's values into your local "
+            "files and commands; the AI still sees only tokens. To turn it off: /maisecrets:settings client_header "
+            "false. More: README, section \"Vault references\".")
 
 
 def reconnect_step(name: str) -> str:
@@ -1053,20 +1064,16 @@ def _kid_now(origin: str) -> str | None:
 
 def state_of(origin: str) -> dict:
     """The record of this origin for the key of this profile now, or {} (no answer yet, or the key changed)."""
-    rec = ((_read_json(STATES) or {}).get(profile()) or {}).get(origin)
-    kid = _kid_now(origin)
+    return _current(_mine(STATES).get(origin), _kid_now(origin))
+
+
+def _current(rec: object, kid: str | None) -> dict:
     if not isinstance(rec, dict) or not kid or rec.get("kid") != kid or rec.get("state") not in STATE_WORDS:
         return {}
     return rec
 
 
-def _set_state(origin: str, answer: str, activates_at: str | None = None, told: str | None = None,
-               deadline: float | None = None) -> dict:
-    """Record a server answer (`active`, `pending`, `disabled`, `unknown_key`) or a told state. Returns the record.
-    `unknown_key` is `lost` when this key was bound once, else `header`. A busy lock keeps the old record on disk;
-    the record is returned all the same, so the reason of a deny still names the state."""
-    kid = _kid_now(origin)
-    old = state_of(origin)
+def _next_state(old: dict, kid: str | None, answer: str, activates_at: object, told: str | None) -> dict:
     bound = bool(old.get("bound"))
     state = ("lost" if bound else "header") if answer == "unknown_key" else answer
     if state in ("active", "pending"):
@@ -1077,16 +1084,34 @@ def _set_state(origin: str, answer: str, activates_at: str | None = None, told: 
     if state == "pending" and when:
         rec["activates_at"] = when
     rec["told"] = told if told is not None else old.get("told")
-    if not kid:
-        return rec
-    if told is None and {k: old.get(k) for k in ("state", "activates_at")} == \
-            {k: rec.get(k) for k in ("state", "activates_at")} and isinstance(old.get("t"), (int, float)) \
-            and time.time() - old["t"] < 60:
-        return old                      # the same answer within a minute: no write in a resolve
+    return rec
+
+
+def _same(old: dict, rec: dict) -> bool:
+    """The same answer within a minute: no write in a resolve."""
+    return {k: old.get(k) for k in ("state", "activates_at")} == {k: rec.get(k) for k in ("state", "activates_at")} \
+        and isinstance(old.get("t"), (int, float)) and 0 <= time.time() - old["t"] < 60
+
+
+def _set_state(origin: str, answer: str, activates_at: str | None = None, told: str | None = None,
+               deadline: float | None = None) -> dict:
+    """Record a server answer (`active`, `pending`, `disabled`, `unknown_key`) or a told state. Returns the record.
+    `unknown_key` is `lost` when this key was bound once, else `header`. The old record is read again under the lock,
+    so a parallel answer never takes `bound` back (Gate A review). A busy lock or a failed write keeps the old record
+    on disk; the record is returned all the same, so the reason of a deny still names the state."""
+    kid = _kid_now(origin)
+    old = state_of(origin)
+    rec = _next_state(old, kid, answer, activates_at, told)
+    if not kid or (told is None and _same(old, rec)):
+        return old if kid and old else rec
     try:
         with _own_lock(deadline):
             data = _read_json(STATES) or {}
-            data.setdefault(profile(), {})[origin] = rec
+            mine = data.get(profile())
+            if not isinstance(mine, dict):
+                mine = data[profile()] = {}         # a damaged part is written new, not a reason to fail
+            rec = _next_state(_current(mine.get(origin), kid), kid, answer, activates_at, told)
+            mine[origin] = rec
             atomic_write(STATES, json.dumps(data, indent=1))
     except (LockTimeout, OSError):
         pass
@@ -1197,7 +1222,8 @@ def session_check(cfg: dict, backend) -> str | None:
         state = rec.get("state")
         if why or not state or state == rec.get("told"):
             continue
-        lines.append(f"maisecrets: vault references of {name}: {describe(state, name, rec.get('activates_at'))}.")
+        lines.append(f"maisecrets: vault references of {_say_name(name)}: "
+                     f"{describe(state, name, rec.get('activates_at'))}.")
         _mark_told(origin, state, deadline)
     return " ".join(lines) or None
 
@@ -1205,22 +1231,35 @@ def session_check(cfg: dict, backend) -> str | None:
 def rotate_lost(backend, deadline: float | None = None) -> list[str]:
     """At a session start: a new K for each origin whose server no longer accepts its key (quarantined or revoked). A
     vault must not use that K again (SPEC 6.4). The entries stay enabled, so the header write that follows puts the
-    new kid on them. Returns the origins."""
+    new kid on them. Only a key this computer holds, whose kid keys.json and the `lost` record both name, and an entry
+    that the client config still has: local files alone never make a key, so no request goes out before a server
+    token (Gate B review). The check runs again under the locks: two starts at once make one new key (Gate A review).
+    Returns the origins."""
     out = []
-    for origin in list(_enabled()):
+    servers = None
+    for origin, entries in _enabled().items():
         if state_of(origin).get("state") != "lost":
             continue
+        servers = user_servers() if servers is None else servers
+        if not any(servers.get(n) == u for n, u in entries):
+            continue
         import secrets
-        k = secrets.token_bytes(32)
         with _own_lock(deadline):
             with _store_lock(deadline):
+                old = _key_locked(backend, origin, create=False)
+                kid = _kid_now(origin)
+                if old is None or kid_of(old) != kid or state_of(origin).get("state") != "lost":
+                    continue
+                k = secrets.token_bytes(32)
                 backend.put(_store_name(origin), k.hex(), label="maisecrets vault reference key",
                             comment="maisecrets: the key that gets values back from a server; not a placeholder "
                                     "value.")
             data = _read_json(KEYS) or {}
-            rec = data.setdefault(profile(), {}).get(origin)
+            mine = data.get(profile()) if isinstance(data.get(profile()), dict) else {}
+            rec = mine.get(origin)
             entries = rec.get("entries") if isinstance(rec, dict) and isinstance(rec.get("entries"), list) else []
-            data[profile()][origin] = {"kid": kid_of(k), "created": _now_iso(), "entries": entries}
+            mine[origin] = {"kid": kid_of(k), "created": _now_iso(), "entries": entries}
+            data[profile()] = mine
             atomic_write(KEYS, json.dumps(data, indent=1))
         out.append(origin)
     return out
