@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 13 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 323 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 325 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1650,7 +1650,12 @@ is no such folder, so `convert` refuses there. Without pdftotext, maisecrets
 refuses every PDF and says so; it never lets the PDF through.
 
 A PDF that pdftotext cannot read in 6 seconds, that makes pdftotext use more
-than 512 MB of memory, or that is damaged, is refused. A crafted PDF of a few
+than 512 MB of memory, or that is damaged, is refused. A PDF locked by a
+password is refused too, and the AI is told that cause and not to ask you
+for the password; save a copy without the password and give the AI that
+copy. A PDF with only an owner password (it opens without one and limits
+printing or copying) converts, AES-256 included (measured with poppler
+26.10.0). A crafted PDF of a few
 MB can make pdftotext take 1.5 GB in 2.4 seconds: maisecrets watches the
 memory of pdftotext every 50 ms while it waits and stops it there (macOS does not
 enforce a memory limit on a process, measured; on Linux the kernel limits
