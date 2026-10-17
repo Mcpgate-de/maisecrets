@@ -1,0 +1,10 @@
+# c26-an-import-keeps-a-stored-value-resolvable: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-import-keeps-a-stored-value-resolvable"
+control = "C26"
+statement = "An imported value that the store holds already keeps the stored placeholder, its type and its kind: an import never turns a resolvable value into a mask-only one."
+runner = ["tests/test_values.py::Hooks::test_a_stored_resolvable_value_keeps_its_placeholder_and_its_entry", "tests/test_values.py::Hooks::test_a_stored_value_inside_an_imported_phrase_keeps_its_placeholder"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        if cover and value_files.is_import_kind(m.kind):\n"
+replace = "        if False:\n"

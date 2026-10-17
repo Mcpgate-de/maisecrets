@@ -1,0 +1,10 @@
+# c26-the-number-of-imports-has-a-cap: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-the-number-of-imports-has-a-cap"
+control = "C26"
+statement = "maisecrets holds at most MAX_IMPORTS imports; a new one past it is refused with the prompt that removes one."
+runner = ["tests/test_values.py::Caps::test_the_number_of_imports_is_capped"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "            if len(every) >= MAX_IMPORTS:\n"
+replace = "            if False:\n"

@@ -1,0 +1,10 @@
+# c26-an-agents-import-leaves-room-for-value-files: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-agents-import-leaves-room-for-value-files"
+control = "C26"
+statement = "The imports that no value file names hold at most MAX_RUN_VALUES values, so the person's value files keep room."
+runner = ["tests/test_values.py::Caps::test_the_imports_of_commands_leave_room_for_the_value_files"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "            elif not file_origin and runs >= MAX_RUN_VALUES:\n"
+replace = "            elif False:\n"

@@ -116,7 +116,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "pending":
 
 if len(sys.argv) >= 2 and sys.argv[1] in ("report", "put", "status", "list", "audit", "expire", "config",
                                           "wipe", "repair", "scan", "get", "shortcut", "forget", "guard",
-                                          "settings", "consent-report", "rules", "terms"):
+                                          "settings", "consent-report", "rules", "terms", "values"):
     from maisecrets.cli import main as cli_main  # noqa: E402
     sys.exit(cli_main(sys.argv[1:]))
 
@@ -258,6 +258,17 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
             from maisecrets.terms import session_note as terms_note  # noqa: E402
             note = terms_note()
     except Exception:  # noqa: BLE001 - terms never stop a session start; a bad terms.txt stops the next hook
+        note = None
+    if note:
+        out["systemMessage"] = out.get("systemMessage", "") + " " + note
+    # the imported values (maisecrets/values.py): the value files that changed are imported, and a new import is named
+    try:
+        from maisecrets import value_files  # noqa: E402
+        note = None
+        if value_files.start_note_due(cfg):   # without an import or a value file the values module is not loaded
+            from maisecrets.values import session_note as values_note  # noqa: E402
+            note = values_note(cfg)
+    except Exception:  # noqa: BLE001 - an import never stops a session start; a damaged one stops the next hook
         note = None
     if note:
         out["systemMessage"] = out.get("systemMessage", "") + " " + note

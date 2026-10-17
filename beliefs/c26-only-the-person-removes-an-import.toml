@@ -1,0 +1,10 @@
+# c26-only-the-person-removes-an-import: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-only-the-person-removes-an-import"
+control = "C26"
+statement = "Only the person's typed prompt removes an import: a prompt from a scheduled task or a subagent removes nothing."
+runner = ["tests/test_values.py::Removal::test_only_the_persons_typed_prompt_removes_an_import"]
+
+[proof]
+file = "maisecrets/hooks.py"
+find = "        if typed and not payload.get(\"agent_id\"):\n            from . import values\n"
+replace = "        if True:\n            from . import values\n"

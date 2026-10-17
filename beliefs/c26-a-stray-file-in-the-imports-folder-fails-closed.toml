@@ -1,0 +1,10 @@
+# c26-a-stray-file-in-the-imports-folder-fails-closed: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-a-stray-file-in-the-imports-folder-fails-closed"
+control = "C26"
+statement = "A *.jsonl file in the imports folder that no import id names stops every hook (fail closed)."
+runner = ["tests/test_values.py::ReviewRoundOne::test_a_file_in_the_imports_folder_that_is_no_import_fails_closed"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "    if bad:\n"
+replace = "    names = [n for n in names if n not in bad]\n    if False:\n"

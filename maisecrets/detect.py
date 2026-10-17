@@ -2532,10 +2532,10 @@ def reset_rules() -> None:
         times.clear()
     from . import user_rules
     user_rules.reset()
-    for name in ("terms", "term_files"):     # the term lists are read again too, without importing them
-        loaded = sys.modules.get(__name__.rsplit(".", 1)[0] + "." + name)
+    for name in ("terms", "term_files", "values", "value_files"):   # term lists and imports are read again too,
+        loaded = sys.modules.get(__name__.rsplit(".", 1)[0] + "." + name)   # without importing them
         if loaded is not None:
-            (loaded.reset if name == "terms" else loaded.forget)()
+            (loaded.reset if name in ("terms", "values") else loaded.forget)()
 
 
 # Matchers of other kinds than a regex rule (a list of names, a value import): each is a callable text -> list[Match],
@@ -2641,6 +2641,54 @@ def _term_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: 
             take(m, True)
         else:
             _claim(m, text, found, taken_starts, taken_ends)
+
+
+def _import_matches(text: str) -> list:
+    """The imported values (maisecrets/values.py). A damaged import raises values.ValuesError, a ConfigError: the
+    hook fails closed. Without any import the values module is never imported: maisecrets/value_files.py says
+    whether one is there."""
+    try:
+        from . import value_files
+    except ImportError:   # the standalone skill ships detect.py alone: no imports
+        return []
+    if not value_files.present():
+        return []
+    from . import values
+    return values.matches(text)
+
+
+IMPORT_RULE = "import"                 # the pass of the imported values in maisecrets/registry.py (phase "imports")
+IMPORT_KEY = "imports:" + IMPORT_RULE  # its key; `enabled` takes either, or the kind `import:<id>:<value id>`
+
+
+def _import_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: list, overlaps, take) -> None:
+    """The imports pass (registry phase "imports"): after the terms, before the extra matchers. An import only adds
+    masking: a span that a rule or a term took keeps its kind and its placeholder (a rule hit stays resolvable), and
+    only the parts of the imported value outside every taken span are hits of the import (_term_rest)."""
+    if enabled is not None and IMPORT_RULE not in enabled and IMPORT_KEY not in enabled and not any(
+            str(k).startswith("import:") for k in enabled):
+        return
+    found_here = _import_matches(text)
+    refs: list = []
+    if found_here and "\u27e6" in text:
+        # a placeholder stays whole: an import hit inside its brackets would turn a resolvable placeholder into a
+        # masked one (Gate B, round 1). The floor refuses a key as a value too
+        from .placeholder import find_refs
+        for _k, a, b in find_refs(text):
+            # the bracket and the key only: a display text inside a placeholder (`:Jan Kowalski`) is text, and an
+            # imported value in it is masked (Gate B, round 2)
+            colon = text.find(":", a, b)
+            refs += [(a, colon if colon >= 0 else b - 1), (b - 1, b)]
+    for m in sorted(found_here, key=lambda x: x.start):
+        if not ((enabled is None or IMPORT_RULE in enabled or IMPORT_KEY in enabled or m.kind in enabled)
+                and m.end > m.start):
+            continue
+        if refs and any(a < m.end and m.start < b for a, b in refs):
+            continue
+        if not overlaps(m.start, m.end):
+            take(m, True)
+        else:
+            _term_rest(m, text, found, taken_starts, taken_ends)
 
 
 def active_regions():
@@ -3662,6 +3710,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         if rule is _TERMS:
             _term_hits(text, enabled, found, taken_starts, taken_ends, overlaps, take)
             continue
+        if rule is _IMPORTS:
+            _import_hits(text, enabled, found, taken_starts, taken_ends, overlaps, take)
+            continue
         if enabled is not None and rule.id not in enabled and rule.key not in enabled:
             continue
         if rule.keywords and not _any_keyword(rule.keywords, low, keywords_in):
@@ -3877,6 +3928,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
 
 _PERSONAL = object()             # the place of _personal_hits in the scan order
 _TERMS = object()                # the place of _term_hits: registry phase "terms", after the rules of your own
+_IMPORTS = object()              # the place of _import_hits: registry phase "imports", after the terms
 _ORDER: list = [None, ()]        # a rule list and its scan order
 
 
@@ -3888,10 +3940,11 @@ def _runs_after_personal(rule: Rule) -> bool:
 
 def _in_scan_order(every: list) -> tuple:
     """The rules of a list in scan order: the built-in ones, then the personal-data step and the cleaned copy, then the
-    rules of your own (ids with `user:`), then the terms. Kept per list, so a scan pays for it once."""
+    rules of your own (ids with `user:`), then the terms, then the imported values. Kept per list, so a scan pays for
+    it once."""
     if _ORDER[0] is not every:
         _ORDER[:] = [every, tuple(r for r in every if not _runs_after_personal(r)) + (_PERSONAL,)
-                     + tuple(r for r in every if _runs_after_personal(r)) + (_TERMS,)]
+                     + tuple(r for r in every if _runs_after_personal(r)) + (_TERMS, _IMPORTS)]
     return _ORDER[1]
 
 

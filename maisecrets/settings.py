@@ -23,7 +23,7 @@ DISCOVERABLE = ("ssh_consent", "ssh_autonomous_hosts", "secret_destinations", "r
 ADVANCED = ("ssh_host_groups", "ssh_approval", "resolve_in_files", "ssh_via_sandbox", "block_at_mentions",
             "rewrite_prompts", "scrub_transcript", "strip_hidden_characters", "regions", "ttl_seconds",
             "renew_on_use", "tips", "shortcut", "guard", "pass_agent_reports", "gateway_servers", "client_header",
-            "max_keys_per_session", "max_resolves_per_hour", "rule_dirs", "clean_dirs")
+            "max_keys_per_session", "max_resolves_per_hour", "rule_dirs", "clean_dirs", "value_files")
 INTERNAL = ("backend", "allow_plaintext_store", "report_url", "max_ttl_seconds", "max_new_entries_per_result",
             "keep_purged_days", "audit_max_lines", "pii_regions", "client_vault_cafile")
 
@@ -39,6 +39,7 @@ TITLE = {
     "shortcut": "/ms shortcut", "guard": "Update guard", "pass_agent_reports": "Subagent reports",
     "gateway_servers": "Gateway servers", "client_header": "Vault references", "rule_dirs": "Rule folders",
     "read_pdf": "PDFs the AI reads", "read_image": "Images the AI reads", "clean_dirs": "Folders with clean files",
+    "value_files": "Value files",
     "max_keys_per_session": "Values per session and hour", "max_resolves_per_hour": "Uses per hour",
 }
 MEANING = {
@@ -59,6 +60,8 @@ MEANING = {
     "read_image": "maisecrets cannot look inside an image. What happens when the AI reads one.",
     "clean_dirs": "Folders of clean PDFs and images: a file that was there before the session is allowed.",
     "rule_dirs": "Folders with detection rules of your own or of your team, read with ~/.maisecrets/rules.d.",
+    "value_files": "Files of values from your own tools (JSON lines), imported at session start when they change. "
+                   "An import only adds; your prompt /maisecrets:forget import:ID removes one.",
     "ttl_seconds": "How long a stored value lives.",
     "renew_on_use": "A use of a value extends its life.",
     "tips": "A short tip at session start, and a hint when a setting first matters.",
@@ -91,7 +94,7 @@ ADVANCED_GROUPS = (("Stored values", ("ttl_seconds", "renew_on_use", "resolve_in
                    ("ssh", ("ssh_host_groups", "ssh_approval", "ssh_via_sandbox")),
                    ("Prompts and tool output", ("block_at_mentions", "rewrite_prompts", "scrub_transcript",
                                                 "strip_hidden_characters", "regions", "rule_dirs",
-                                                "clean_dirs", "pass_agent_reports")),
+                                                "clean_dirs", "value_files", "pass_agent_reports")),
                    ("Help and updates", ("tips", "shortcut", "guard")))
 
 # what a prompt may set; any other key is edited in config.json by hand
@@ -115,8 +118,12 @@ _RULE_DIRS_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+r
 # the clean folders: the same form (file_reads.py)
 _CLEAN_DIRS_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+clean_dirs\s+(add|remove)\s+"
                             r"(\S(?:.*\S)?)\s*\Z", re.I)
-_LIST_KEYS = ("ssh_autonomous_hosts", "rule_dirs", "clean_dirs")
+# the value files (maisecrets/values.py): the same form, one file per prompt
+_VALUE_FILES_RE = re.compile(r"\A\s*(?:/maisecrets:settings|maisecrets:\s*set)\s+value_files\s+(add|remove)\s+"
+                             r"(\S(?:.*\S)?)\s*\Z", re.I)
+_LIST_KEYS = ("ssh_autonomous_hosts", "rule_dirs", "clean_dirs", "value_files")
 _FOLDER_KEYS = ("rule_dirs", "clean_dirs")
+_PATH_KEYS = _FOLDER_KEYS + ("value_files",)
 _HINTS_RESET_RE = re.compile(r"\A\s*(?:/maisecrets:settings\s+hints\s+reset|maisecrets:\s*reset\s+hints)\s*\Z", re.I)
 # the same sentence anywhere in a tool call: a nested client (`codex exec 'maisecrets: set …'`, `claude -p`) would
 # type it for the model, and the writer called by name would skip the prompt (review of C22). A text match: a
@@ -215,6 +222,11 @@ def _card(key: str, cfg: dict) -> list[str]:
             lines.append(f"    Remove: /maisecrets:settings rule_dirs remove {value[0]}")
         if cfg.get("policy_rule_dirs"):
             lines.append(f"    From the machine policy, always read: {', '.join(cfg['policy_rule_dirs'])}")
+    elif key == "value_files":
+        lines.append("    Add: /maisecrets:settings value_files add FILE   (a full path or ~/…)")
+        if value:
+            lines.append(f"    Remove: /maisecrets:settings value_files remove {value[0]}   (its import stays; "
+                         "/maisecrets:forget import:ID removes that)")
     elif key == "clean_dirs":
         lines.append("    Add: /maisecrets:settings clean_dirs add DIR   (a full path or ~/…)")
         if value:
@@ -294,6 +306,9 @@ def parse_prompt(prompt) -> tuple[str, str] | None:
     m = _CLEAN_DIRS_RE.match(prompt)
     if m:
         return ("clean_dirs", m.group(1).lower() + ":" + m.group(2))
+    m = _VALUE_FILES_RE.match(prompt)
+    if m:
+        return ("value_files", m.group(1).lower() + ":" + m.group(2))
     m = _PROMPT_RE.match(prompt)
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
@@ -353,6 +368,8 @@ def loosens(key: str, before, after) -> bool:
         return bool(same(after) - same(before))     # a new clean folder: its files pass
     if key == "rule_dirs":
         return bool(same(before) - same(after))     # a folder taken off: its rules no longer run
+    # value_files: neither way loosens. A file added imports more values; a file taken off keeps its import, which
+    # only the person's prompt /maisecrets:forget import:ID removes (values.remove_typed records that)
     return False
 
 
@@ -382,6 +399,9 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
         if key == "clean_dirs":
             return False, ("maisecrets: send /maisecrets:settings clean_dirs add DIR (or remove DIR), "
                            "or in Codex: maisecrets: set clean_dirs add DIR.")
+        if key == "value_files":
+            return False, ("maisecrets: send /maisecrets:settings value_files add FILE (or remove FILE), "
+                           "or in Codex: maisecrets: set value_files add FILE.")
         if key in MEANING:
             return False, f"maisecrets: {key} is not changed by a prompt; edit {CONFIG} by hand."
         return False, f"maisecrets: {key} is no setting this command changes. /maisecrets:settings --all lists them."
@@ -403,6 +423,20 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
         from .file_reads import INSTALL, pdftotext
         if not pdftotext():
             note = f" pdftotext is not installed, so maisecrets refuses every PDF until it is. Install it: {INSTALL}."
+    if key == "value_files" and word.startswith("add:"):
+        from .user_rules import expand
+        path = expand(word[4:])
+        if not path.is_absolute():
+            return False, "maisecrets: the file is not added (not an absolute path). Nothing was changed."
+        if not os.path.lexists(path):
+            note = " The file does not exist yet; maisecrets imports it at a session start once it does."
+        else:
+            from .values import read_source
+            try:
+                read_source(path)
+            except ValueError as exc:
+                return False, f"maisecrets: the file is not added ({exc}). Nothing was changed."
+            note = " maisecrets imports it at the next session start."
     if key in _FOLDER_KEYS and word.startswith("add:"):
         from .user_rules import expand, refused_folder
         why = refused_folder(expand(word[4:]))
@@ -445,7 +479,7 @@ def apply_typed(key: str, word: str, route: str = "typed prompt", cwd: str = "")
                 user.pop(key, None)
             elif hosts_change:
                 verb, host = word.split(":", 1)
-                if key in _FOLDER_KEYS:
+                if key in _PATH_KEYS:
                     # ~/team and the same folder written in full are one folder
                     from .user_rules import expand
                     hosts = [h for h in user.get(key, []) if not isinstance(h, str) or expand(h) != expand(host)]

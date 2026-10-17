@@ -1,0 +1,10 @@
+# c26-an-import-file-is-read-once-to-a-bound: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-import-file-is-read-once-to-a-bound"
+control = "C26"
+statement = "An import file is read once, up to the byte bound: a file that grows while it is read stops at the bound."
+runner = ["tests/test_values.py::FileChecks::test_a_file_over_the_bound_is_refused_and_read_only_to_the_bound"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "            chunk = os.read(fd, min(1 << 20, MAX_FILE_BYTES + 1 - size))\n"
+replace = "            chunk = os.read(fd, 1 << 20)\n"

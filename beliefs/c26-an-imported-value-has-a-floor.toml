@@ -1,0 +1,10 @@
+# c26-an-imported-value-has-a-floor: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-imported-value-has-a-floor"
+control = "C26"
+statement = "An imported value that is too short, an ordinary word, only common words, a short number or text of maisecrets itself is refused with its line number, never with its text."
+runner = ["tests/test_values.py::Floor::test_a_value_that_is_short_common_or_of_maisecrets_itself_is_refused"]
+
+[proof]
+file = "maisecrets/values.py"
+find = "        why = _reason(value)\n"
+replace = "        why = \"\"\n"
