@@ -102,7 +102,9 @@ IN_A_COMMAND_RE = re.compile(
     _FORGET + r"[\s\S]*?import:|import:[\s\S]*?" + _FORGET
     + r"|\bvalues[\s\"']+(?:remove|forget|delete)\b"
     r"|\b(?:remove_typed|_remove_import|_import_bytes)\b", re.I)
-_JOINED_RE = re.compile(r"[\"']|\\\r?\n|`\r?\n")
+# quotes, every backslash and backtick (an escape or a line end inside a word: imp\ort, imp`ort), and a PowerShell `+`
+# with the space around it ('…imp' + 'ort:v1'): the shell joins the pieces again (Gate B, round 4)
+_JOINED_RE = re.compile(r"[\"'\\`]|\s*\+\s*")
 
 
 def removal_in_command(command: str) -> bool:

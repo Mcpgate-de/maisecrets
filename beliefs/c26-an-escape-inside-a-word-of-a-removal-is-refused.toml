@@ -1,0 +1,10 @@
+# c26-an-escape-inside-a-word-of-a-removal-is-refused: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c26-an-escape-inside-a-word-of-a-removal-is-refused"
+control = "C26"
+statement = "A tool call that hides the removal of an import with a backslash or backtick escape inside a word, or a PowerShell + split, is refused."
+runner = ["tests/test_values.py::ReviewRoundThree::test_an_escape_or_a_split_inside_a_word_is_refused"]
+
+[proof]
+file = "maisecrets/value_files.py"
+find = "_JOINED_RE = re.compile(r\"[\\\"'\\\\`]|\\s*\\+\\s*\")\n"
+replace = "_JOINED_RE = re.compile(r\"[\\\"']\")\n"

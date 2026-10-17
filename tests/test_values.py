@@ -568,6 +568,21 @@ class ReviewRoundThree(_Files):
             with self.subTest(name):
                 self.assertTrue(value_files.removal_in_command(command), command)
 
+    ESCAPED = {
+        "bash escape in a word": "claude -p /maisecrets:forget\\ imp\\ort:v1234abcd",
+        "bash escaped colon": 'claude -p "/maisecrets\\:forget import:v1234abcd"',
+        "powershell backtick in a word": 'claude -p "/maisecrets:forget imp`ort:v1234abcd"',
+        "powershell plus inside a word": "claude -p ('/maisecrets:forget imp' + 'ort:v1234abcd')",
+    }
+
+    def test_an_escape_or_a_split_inside_a_word_is_refused(self):
+        for name, command in self.ESCAPED.items():
+            for tool in ("Bash", "PowerShell"):
+                with self.subTest(name, tool=tool):
+                    ans = hooks.pre_tool({"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": "S1",
+                                          **CLAUDE, "tool_input": {"command": command}})
+                    self.assertEqual(ans["hookSpecificOutput"]["permissionDecision"], "deny", command)
+
     def test_a_command_without_the_removal_runs(self):
         for command in ("python3 -c 'import json'", "grep -r 'import:' src", "echo forget it"):
             self.assertFalse(value_files.removal_in_command(command), command)
