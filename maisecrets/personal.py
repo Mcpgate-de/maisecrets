@@ -140,6 +140,11 @@ _POSTCODES = {
 _EN_STREET = (r"\b\d{1,5}[A-Za-z]?(?:/\d{1,4})?,? (?:[A-Z][\w'.-]{0,30} ){1,4}" + _STREET
               + r"\.?,[^\n\"';|]{2,40}?(?:{codes})")
 _CITY = r"[A-ZÄÖÜÉ][\wäöüßéèàç-]{1,40}"
+# street and postcode on two lines (Hafenweg 3\n12345 Ort). No address rule masks it; after a company's name it feeds
+# the company decision alone, so its postcode and VAT ID follow the street, which stays text
+_DE_TWO_LINES_RE = re.compile(r"\b[A-ZÄÖÜ][\wäöüß-]{0,40}(?:straße|strasse|str\.|weg|gasse|platz|allee|ring|damm) "
+                              r"\d{1,4}[a-z]?[ \t]*\r?\n[ \t]*\d{4,5} (" + _CITY + ")")
+_DEPARTMENT_LINE_RE = re.compile(r"(?i)[ \t]*(?:abteilung|abt\.|department|dept\.?|division|bereich)[ \t]")
 _ADDRESS_FORMS = tuple(
     (frozenset({r}), re.compile(_EN_STREET.replace("{codes}", code))) for r, code in _POSTCODES.items()) + (
     (frozenset({"de", "at", "ch"}),
@@ -170,9 +175,13 @@ _NOT_A_HOME_RE = re.compile(
 _LEGAL_FORM_RE = re.compile(r"(?i)(?<![a-z])(?:" + _LEGAL_FORMS + r")(?![a-z])")
 # Before a legal form: a word of the company's name (Beispiel GmbH, Muster & Co. KG)
 _NAME_BEFORE_FORM_RE = re.compile(r"\w[\w&.'’-]{0,40}[ ]$")
-# between the company's name and its address: separators and at most one label of the company's own address. A label
-# that names another party (recipient_address, Lieferadresse, ship to) or a home keeps the mask
+# between the company's name and its address: separators, at most one department of one or two words (Abteilung Einkauf,
+# on its line or before a comma) and at most one label of the company's own address. A label that names another party
+# (recipient_address, Lieferadresse, ship to) or a home keeps the mask
 _FORM_TO_ADDRESS_RE = re.compile(r"[\s,;:|·\"'()]{0,12}"
+                                 r"(?:(?i:abteilung|abt\.|department|dept\.?|division|bereich)"
+                                 r"[ \t][^\W\d_][\w&/.-]{0,30}(?:[ ][\w&/.-]{1,30})?"
+                                 r"[ \t]*(?:,[ \t]*|\r?\n[ \t]*))?"
                                  r"(?:(?i:(?:rechnungs|firmen|geschäfts|post|haupt)?(?:adresse|anschrift)"
                                  r"|(?:(?:company|business|billing|postal|registered|office)[ _-]?)?address|sitz|adr)"
                                  r"[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?)?")
@@ -196,7 +205,8 @@ def _company_window(text: str, lo: int, a_start: int, a_end: int, kind: str, com
       label that names a home (home_address, Wohnadresse);
     - an employer label before the company's name (employer, Arbeitgeber), the company in parentheses after a
       person (Max Muster (Beispiel GmbH)), or a key of a person's record (name,
-      resident, customer, Kunde) in the paragraph up to 160 characters before it: the address is a person's."""
+      resident, customer, Kunde) in the paragraph up to 160 characters before it: the address is a person's. A
+      customer key whose value is the company's name (Kunde: Beispiel GmbH) names the company."""
     if company is None:
         return
     f = None
@@ -223,8 +233,10 @@ def _company_window(text: str, lo: int, a_start: int, a_end: int, kind: str, com
     key_lo = max(0, f.start() - 160) if para < 0 else para
     # a key ends in : or =; without one the long alternation need not run (a line of many company addresses)
     if (text.find(":", key_lo, a_start) >= 0 or text.find("=", key_lo, a_start) >= 0) \
-            and _PERSON_KEY_RE.search(text, key_lo, a_start):
-        return
+            and any(not (k.group().lower().startswith(("kunde", "customer"))
+                         and _COMPANY_AFTER_KEY_RE.fullmatch(text, k.end(), f.start()))
+                    for k in _PERSON_KEY_RE.finditer(text, key_lo, a_start)):
+        return   # Kunde: Beispiel GmbH, Customer: Beispiel GmbH: the customer is the company, not a person
     company.append((lo, f.start(), a_start, a_end, kind))
 
 
@@ -234,6 +246,8 @@ _UP, _LO = "A-ZÀ-ÖØ-ÞĀ-ſ", "a-zà-öø-ÿĀ-ſ"
 _NAME_WORD = r"(?:[" + _UP + r"][" + _LO + r"'’-]{1,30}|[A-Z]\.)"
 _NAME_PARTICLE = r"(?:van|von|de|da|del|der|al|bin|di|du|la|le)"
 _NAME_VALUE = (r"((?:[" + _UP + r"][" + _LO + r"'’-]{1,30})(?:[ ](?:" + _NAME_WORD + "|" + _NAME_PARTICLE + r")){1,3})")
+# the value of a customer key up to the legal form: the company's name alone, on the key's line
+_COMPANY_AFTER_KEY_RE = re.compile(r"[ \t\"']{0,3}\w[\w&.'’-]{0,40}(?:[ ][\w&.'’-]{1,40}){0,4}[ ]")
 # a label that names a person and nothing else
 _PERSON_LABELS = (r"full[ _-]?name|customer[ _-]?name|first[ _-]?name|last[ _-]?name|given[ _-]?name|family[ _-]?name"
                   r"|patient(?:[ _-]?name)?|employee(?:[ _-]?name)?|student(?:[ _-]?name)?|contact[ _-]?person"
@@ -1378,6 +1392,16 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                     _company_window(text, lo, m.start(), end, "street-address", company)
                     continue
                 out.append((m.start(), end, "street-address", ADDRESS))
+        if company is not None and {"de", "at", "ch"}.intersection(regions) and "\n" in text:
+            for m in _DE_TWO_LINES_RE.finditer(text):
+                line = text.rfind("\n", 0, m.start()) + 1
+                if not line or text[line:m.start()].strip():
+                    continue   # the street starts its line, after the line of the company's name
+                lo = text.rfind("\n", 0, line - 1) + 1
+                if lo and _DEPARTMENT_LINE_RE.match(text, lo):
+                    lo = text.rfind("\n", 0, lo - 1) + 1   # Beispiel GmbH\nAbteilung Einkauf\nHafenweg 3
+                if _LEGAL_FORM_RE.search(text, lo, line):
+                    _company_window(text, lo, m.start(), m.end(1), "street-address", company)
     if "name-after-label" in want and (":" in text or "=" in text):
         for m in _NAME_LABEL_RE.finditer(text):
             v = m.group(3).rstrip("'’")   # tenant: 'Jonas Wendler': the closing quote is no part of the name

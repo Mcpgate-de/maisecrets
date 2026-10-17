@@ -6,5 +6,5 @@ runner = ["tests/test_company_numbers_follow_the_address.py::CompanyNumberTests:
 
 [proof]
 file = "maisecrets/personal.py"
-find = '''            and _PERSON_KEY_RE.search(text, key_lo, a_start):'''
-replace = '''            and False:'''
+find = '''            and any(not (k.group().lower().startswith(("kunde", "customer"))'''
+replace = '''            and False and any(not (k.group().lower().startswith(("kunde", "customer"))'''

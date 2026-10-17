@@ -1,0 +1,10 @@
+# c1-a-companys-two-line-address-follows-the-company: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-companys-two-line-address-follows-the-company"
+control = "C1"
+statement = "A company's postcode and German VAT ID stay text with the street when the street and the postcode stand on two lines, after a department line or a Kunde: or Customer: label before the company; a person or no legal form keeps them masked."
+runner = ["tests/test_company_numbers_more_forms.py::CompanyFormTests::test_street_and_postcode_on_two_lines", "tests/test_company_numbers_more_forms.py::CompanyFormTests::test_a_department_between_the_company_and_its_address"]
+
+[proof]
+file = "maisecrets/personal.py"
+find = '''if company is not None and {"de", "at", "ch"}.intersection(regions) and "\n" in text:'''
+replace = '''if False:'''
