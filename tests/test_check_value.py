@@ -46,7 +46,7 @@ ORDINARY_TEXTS = ("Apfel Birne", "correct horse battery staple", "Call me at 5 t
                   "wJalrXUtnFEMI/K7MDENG/" + "bPxRfiCYEXAMPLEKEY", "release-notes-2026:", "npm-github:",
                   "2026-10-17T12:30:00Z", "v1.2.3-rc.4", "ai-gateway#1191", "IMG_20261017_123045.jpg",
                   "0x7ffe" + "efbff5c8", "DB_HOST=db1.local", "keyring~=24.3", "Tr0ub4dor& horse battery",
-                  "e-mail, x-ray, t-shirt")
+                  "e-mail, x-ray, t-shirt", "db=prod123!", "--x=value123!", "V1.2.3-rc.4", "version-1.2.3")
 STATE = ("index.json", "vault.json", "audit.log", "hooks.log", "events.log", "terms.txt", "terms.marked.json",
          ".terms-state", ".terms-cache", "allow.txt", "hints.json")
 # the files that hold a value by design: the plaintext test store, the term list and the allow list
@@ -155,6 +155,8 @@ class ParseTests(unittest.TestCase):
         # a near form starts a new group too
         self.assertEqual(check_value.parse_all("ms:(a) ms: (b) MS\uff1a\uff08c"), [("a", True), ("b", True),
                                                                                    ("c", True)])
+        # a `)` glued to the next `ms:(` ends the group too
+        self.assertEqual(check_value.parse_all("ms:(a)ms:(b)"), [("a", True), ("b", True)])
         # `ms:(` glued to a word is no new group
         self.assertEqual(check_value.parse_all("ms:(xms:(y)"), [("xms:(y", True)])
         self.assertEqual(check_value.parse("ms:(A B) ms:(x)"), "A B")
@@ -317,6 +319,11 @@ class SameVerdictTests(_Base):
         self.assertNotIn("stored value", out["reason"])
         self.assertEqual(len(json.loads(Path(HOME, "index.json").read_text())["entries"]), 1)
 
+    def test_random_letters_that_a_check_stores_are_scrubbed_alone(self):
+        letters = "qzmxnplkjh" + "gfdsavwbyc"
+        self.assertIn(letters, check_value.scrub_forms(f"ms:({letters}) ms:(x)", [letters, "x"]))
+        self.assertNotIn("permissionMode", check_value.scrub_forms("ms:(permissionMode)", ["permissionMode"]))
+
     def test_a_failed_check_with_several_groups_loses_each_value(self):
         prompt = f"ms:( {UNSEEN}) ms:({PASSWORD}"
         with tempfile.TemporaryDirectory() as d:
@@ -459,7 +466,8 @@ class StoreTests(_Base):
     def test_a_credential_without_a_shape_is_still_stored(self):
         # signs that code uses too ($ = < > ...) and letters only at random are credentials (Gate A and Gate B, round 1)
         for value in (UNSEEN, PASSWORD, "Sommer" + "2026!x", "K7#mQ2" + "vL9pZ", "aB3$kL9" + "!mQ2z",
-                      "Kx7=pLm2" + "#zR9", "q<Vx7Lm" + "9Kp3", "qzmxnplkjh" + "gfdsavwbyc", "x9!Lq 7#mZ " + "4$kP"):
+                      "Kx7=pLm2" + "#zR9", "q<Vx7Lm" + "9Kp3", "qzmxnplkjh" + "gfdsavwbyc", "x9!Lq 7#mZ " + "4$kP",
+                      "Sommer2026" + "#1", "Hamburg" + "#2026", "Kq9>4mPq" + "!zLx", "Zq>=7mP" + "!2"):
             with self.subTest(value[:3]):
                 self.assertTrue(check_value.looks_like_a_credential(value), value[:3])
         self.assertIn("It is now stored", _prompt(f"ms:({PASSWORD})")["reason"])

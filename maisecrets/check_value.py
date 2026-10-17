@@ -57,7 +57,8 @@ def exact(prompt) -> bool:
 # the next group of a prompt with several checks: blanks and `ms:(` in any of the forms of the first one (`ms: (`,
 # `ms：（`). The group before it ends at its last `)`, as the last group does; without a `)` it ends at the blanks, so a
 # group never holds the start of the next one
-_NEXT_RE = _Lazy(r"[\s\ufeff\u200b-\u200d\u2060]+ms" + _BLANK + "[:\uff1a]" + _BLANK + "[(\uff08]", re.I)
+_NEXT_RE = _Lazy(r"(?:[\s\ufeff\u200b-\u200d\u2060]+|(?<=[)\uff09]))ms" + _BLANK + "[:\uff1a]" + _BLANK
+                 + "[(\uff08]", re.I)
 
 
 def parse_all(prompt) -> list | None:
@@ -112,10 +113,10 @@ def scrub_forms(prompt: str, values) -> list[str]:
     """The texts of a check to mask in the transcript: the prompt as typed and without its outer blanks, and each value
     alone. A value alone only from 8 characters on and when it is not letters only: a short value or a word such as
     `true` or `content` would be masked in every record and break the JSON of the transcript (Gate B, round 1); the
-    prompt as typed covers it."""
+    prompt as typed covers it. Random letters that a check stores (looks_like_a_credential) are masked alone too."""
     forms = [prompt, prompt.strip()]
     for value in [values] if isinstance(values, str) else values:
-        if len(value) >= 8 and not _KEY_LIKE_RE.fullmatch(value):
+        if len(value) >= 8 and (not _KEY_LIKE_RE.fullmatch(value) or looks_like_a_credential(value)):
             forms.append(value)
     return [f for f in dict.fromkeys(forms) if f]
 
@@ -168,21 +169,25 @@ _CODE_SIGNS = frozenset("\"'`()[]{}<>=")
 # a digest, an id or an address in hex: a sha256 sum, `sha256:…`, a UUID, a MAC address, a colour (#0f0f0f), 0x7ffe…
 _HEX_ID_RE = _Lazy(r"#?(?:(?i:sha\d*|md5|blake\w*)[-:]|0x)?[0-9a-fA-F]+(?:[-:][0-9a-fA-F]+)*")
 # a version with its pre-release and build parts (v1.2.3-rc.4, 2.0.0+build.7)
-_SEMVER_RE = _Lazy(r"v?\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?")
+_SEMVER_RE = _Lazy(r"(?i:v|version[-_]?v?)?\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?")
 # the name before a colon: letters joined by - _ .
 _LABEL_RE = _Lazy(r"[^\W\d_]+(?:[-_.][^\W\d_]+)*")
-# an assignment or a flag with its value (`DB_HOST=db1`, `--level=3`, `path.to=x`): a name of small letters, of
-# capitals, or with _ . - in it. A random password with `=` inside (Kx7=pLm2#zR9) stays a value
-_ASSIGNMENT_RE = _Lazy(r"-{0,2}(?:[a-z]{3,}|[A-Z]{3,}|[A-Za-z][A-Za-z0-9]*[_.-][\w.-]*)=.*")
-# a version pin of a package (`keyring~=24.3`, `passlib>=1.7,<2`)
-_PIN_RE = _Lazy(r"[A-Za-z][\w.\-\[\]]*(?:[~=!<>]=|[<>])\d.*")
+# an assignment or a flag with its value (`DB_HOST=db1`, `db=x`, `--level=3`, `path.to=x`): a flag, or a name of
+# small letters or of capitals, also with _ . - in it. A random password with `=` inside (Kx7=pLm2#zR9) stays a value
+_ASSIGNMENT_RE = _Lazy(r"(?:-{1,2}[A-Za-z][\w-]*|[a-z]{2,}|[A-Z]{2,}|[a-z][a-z0-9]*(?:[_.-][a-z0-9]+)+"
+                       r"|[A-Z][A-Z0-9]*(?:[_.-][A-Z0-9]+)+)=.*")
+# a version pin of a package (`keyring~=24.3`, `passlib>=1.7,<2`, `x==2`): a version after the operator, so a
+# password with `>` or `<` before a digit (Kq9>4mPq!zLx) stays a value
+_PIN_RE = _Lazy(r"[A-Za-z][\w.\-\[\]]*(?:(?:[~=!<>]=|[<>])\d+(?:\.\d+)+|[~=!]=\d+)"
+                r"(?:,(?:[~=!<>]=|[<>])\d+(?:\.\d+)*)*")
 # a word that says it is no value: the word parts of detect._LITERAL_PLACEHOLDER_RE, not its signs ($x, <x>, ...),
 # which a random password holds as often as any other sign
 _PLACEHOLDER_WORD_RE = _Lazy(r"(?i)x{4,}|\*{3,}|your[_-]|example|sample|dummy|placeholder|changeme|change_me|"
                                   r"redacted|lorem|foobar|secret_here")
-# a date and a time (2026-10-17T12:30:00Z), an issue (ai-gateway#1191), a file with its type (IMG_2026.jpg)
+# a date and a time (2026-10-17T12:30:00Z), an issue of small letters (ai-gateway#1191; Hamburg#2026 and
+# Sommer2026#1 stay values), a file with its type (IMG_2026.jpg)
 _DATE_ID_FILE_RE = _Lazy(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
-                              r"|[\w.-]+#\d+|[\w.-]+\.(?i:jpe?g|png|gif|svg|pdf|txt|md|py|js|ts|json|ya?ml|toml|zip|gz|"
+                              r"|[a-z][a-z0-9]*(?:[-/][a-z0-9]+)*#\d{1,7}|[\w.-]+\.(?i:jpe?g|png|gif|svg|pdf|txt|md|py|js|ts|json|ya?ml|toml|zip|gz|"
                               r"tar|csv|log|html?|sh|go|rs|java|kt|swift)")
 # an id in capitals and digits: a key id, a serial number, a licence, a ticket (AKIA…, SN4711X9). A secret of this
 # alphabet has a rule of its own (the access key id has none: it names a key)
