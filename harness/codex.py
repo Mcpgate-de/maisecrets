@@ -184,6 +184,10 @@ SCENARIOS = {
         "expect_file": ("used.txt", "<missing>"),
         "expect_text": "Codex cannot ask",
     },
+    # vault references in Codex, three sessions against harness/vault_server.py (run_vault_refs)
+    "vault_refs": {
+        "custom": True,
+    },
 }
 
 
@@ -376,12 +380,160 @@ def run_scenario(name: str, sc: dict) -> list[str]:
     return fails
 
 
+VAULT_VALUES = ("vault-codex-person@example.com", "Vault Codex Person")
+
+
+def _codex_vault_session(work: Path, env: dict, cwd: Path, turns: list, tag: str,
+                         json_events: bool = False) -> tuple[str, str, str]:
+    """One `codex exec` against the fake upstream: (codex output, request bodies, rollouts)."""
+    import time
+    import urllib.request
+    out = work / f"out-{tag}"
+    out.mkdir()
+    (out / "scenario.json").write_text(json.dumps({"turns": turns}))
+    srv = subprocess.Popen([sys.executable, str(ROOT / "harness" / "fake_openai.py"), str(out / "scenario.json"),
+                            str(out), str(PORT)])
+    for _ in range(50):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{PORT}/", timeout=0.2)
+            break
+        except Exception:
+            time.sleep(0.1)
+    try:
+        # --json for the measure of the notice: codex-cli 0.162.0 puts a hook's systemMessage in neither output
+        r = subprocess.run(["codex", "exec", "--dangerously-bypass-hook-trust", "--skip-git-repo-check", "-C",
+                            str(cwd), *(["--json"] if json_events else []), "List the customers."], env=env,
+                           capture_output=True, text=True, timeout=180, stdin=subprocess.DEVNULL)
+    finally:
+        srv.terminate()
+    text = r.stdout + "\n--- stderr ---\n" + r.stderr
+    (work / f"codex_out-{tag}.txt").write_text(text)
+    bodies = "".join(p.read_text(errors="ignore") for p in out.glob("request_*.json"))
+    rollouts = "".join(p.read_text(errors="ignore") for p in (Path(env["CODEX_HOME"]) / "sessions").rglob("*.jsonl"))
+    return text, bodies, rollouts
+
+
+def run_vault_refs() -> list[str]:
+    """Vault references in Codex, end to end (maisecrets/codex_vault.py; docs/PROTOCOL.md section 4).
+
+    1. A first session calls the MCP tool of a user entry; its token makes maisecrets read the metadata and write
+       ONE line on that entry, `http_headers_helper`, with a notice. No header goes out in this session.
+    2. A second session: Codex runs the helper, the header reaches the server, the server binds the kid. The model
+       writes the tokens with apply_patch and with a shell command: the files hold the values; no request body,
+       rollout or final message does.
+    3. A third session in a repository whose `.codex/config.toml` moves the entry to another server: that server gets
+       no header, and its token stays text in the file.
+    """
+    sys.path.insert(0, str(ROOT / "harness"))
+    from vault_server import VaultServer, kid_from_header
+    if shutil.which("openssl") is None:
+        print("[SKIP] vault_refs  needs openssl")
+        return []
+    fails: list[str] = []
+    work = Path(tempfile.mkdtemp(prefix="maisecrets-codex-vault_refs-"))
+    proj, repo, home, codex_home = work / "proj", work / "repo", work / "vaulthome", work / "codex_home"
+    for d in (proj, repo / ".codex", home, codex_home):
+        d.mkdir(parents=True)
+    email, name = VAULT_VALUES
+    with VaultServer() as srv, VaultServer(cert=None) as other:
+        srv.auto_bind = True
+        other.auto_bind = True
+        srv.mint("EMAIL_1", email)
+        srv.mint("NAME_2", name)
+        other.mint("EMAIL_1", "other-server@example.com")
+        bundle = work / "ca.pem"
+        bundle.write_text(Path(srv.cert).read_text() + Path(other.cert).read_text())
+        (home / "config.json").write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True,
+                                                      "client_vault_cafile": str(bundle)}))
+        env = dict(os.environ, CODEX_HOME=str(codex_home), MAISECRETS_HOME=str(home), CODEX_CA_CERTIFICATE=str(bundle),
+                   FAKE_OPENAI_KEY="sk-dummy-maisecrets-harness-key-0000000000")
+        sandbox = os.environ.get("MAISECRETS_CODEX_SANDBOX", "workspace-write")
+        cfg = (f'model = "{MODEL}"\nmodel_reasoning_effort = "low"\napproval_policy = "never"\n'
+               f'sandbox_mode = "{sandbox}"\nmcp_oauth_credentials_store = "file"\nmodel_provider = "fake"\n'
+               '# the person\'s own comment: it stays\n'
+               f'[mcp_servers.demo]\nurl = "{srv.url}/mcp"\ndefault_tools_approval_mode = "approve"\n\n'
+               f'[model_providers.fake]\nname = "maisecrets fake"\nbase_url = "http://127.0.0.1:{PORT}/v1"\n'
+               'wire_api = "responses"\nenv_key = "FAKE_OPENAI_KEY"\nsupports_websockets = false\n')
+        (codex_home / "config.toml").write_text(cfg)
+        for cmd in (["codex", "plugin", "marketplace", "add", str(ROOT)],
+                    ["codex", "plugin", "add", "maisecrets@maisecrets"]):
+            r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=120)
+            if r.returncode != 0:
+                return [f"plugin install: {(r.stderr or r.stdout).strip()[:300]}"]
+        before = (codex_home / "config.toml").read_text()
+        call = {"exec": "const r = await tools.mcp__demo__customers({}); text(JSON.stringify(r));"}
+
+        # 1: the trigger
+        out1, _b, _r = _codex_vault_session(work, env, proj, [call, {"text": "done"}], "1", json_events=True)
+        after = (codex_home / "config.toml").read_text()
+        # Codex writes the trust of the session folder into the same file itself (`[projects."…"]` and its
+        # `trust_level`, codex-cli 0.155.1): only the other new lines are the work of maisecrets
+        added = [ln for ln in after.splitlines() if ln not in before.splitlines()
+                 and not ln.startswith("[projects.") and not ln.startswith("trust_level = ") and ln.strip()]
+        if len(added) != 1 or not added[0].startswith("http_headers_helper = "):
+            fails.append(f"session 1 changed config.toml in {len(added)} line(s), not one helper line")
+        if any(ln not in after.splitlines() for ln in before.splitlines()):
+            fails.append("session 1 removed or changed a line of config.toml")
+        if any(e.get("client_vault") for e in srv.log):
+            fails.append("a header went out before the helper existed")
+        # the notice is the hook's systemMessage; codex exec shows it in neither its text nor its --json output
+        # (codex-cli 0.162.0: a warning entry of the hook run, shown by the TUI). tests/test_vault_refs.py checks the
+        # answer of the hook itself
+        print("[MEASURE] vault_refs: the notice reaches the codex exec output: "
+              f"{'From the next start of Codex' in out1}")
+
+        # 2: the header, the binding, the values in the files
+        tokens = "⟦EMAIL_1⟧,⟦NAME_2⟧"
+        patch = f"*** Begin Patch\n*** Add File: customers.csv\n+email,name\n+{tokens}\n*** End Patch\n"
+        turns = [call, {"exec": f"const r = await tools.apply_patch({json.dumps(patch)}); text(JSON.stringify(r));"},
+                 {"exec": _js("printf '%s\\n' '⟦NAME_2⟧' > name.txt")}, {"text": "done"}]
+        n = len(srv.log)
+        _out2, bodies, rollouts = _codex_vault_session(work, env, proj, turns, "2")
+        sent = [e["client_vault"] for e in srv.log[n:] if e["path"] == "/mcp" and e.get("client_vault")]
+        kid = kid_from_header(sent[0]) if sent else None
+        if not sent:
+            fails.append("session 2 sent no Client-Vault header")
+        elif kid not in srv.bindings:
+            fails.append("the server did not bind the kid of the header")
+        want = {"customers.csv": f"email,name\n{email},{name}\n", "name.txt": f"{name}\n"}
+        for fname, content in want.items():
+            got = (proj / fname).read_text() if (proj / fname).exists() else "<missing>"
+            if got != content:
+                fails.append(f"{fname} holds {got.replace(email, '<EMAIL>').replace(name, '<NAME>')!r}")
+        if "⟦EMAIL_1" not in bodies + rollouts:
+            fails.append("the token never reached the model (did the MCP tool run?)")
+        # the request bodies and the rollout are what the model reads and what stays on disk. The text output of
+        # `codex exec` shows the person the diff of the patch it applied, values included, as for a stored value
+        for value in (email, name):
+            if value in bodies + rollouts:
+                fails.append(f"LEAK: {value[:6]}… is in a request body or the rollout")
+
+        # 3: a repository moves the entry to another server: no header there, and its token stays text
+        (repo / ".codex" / "config.toml").write_text(f'[mcp_servers.demo]\nurl = "{other.url}/mcp"\n')
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        patch3 = "*** Begin Patch\n*** Add File: other.txt\n+⟦EMAIL_1⟧\n*** End Patch\n"
+        turns3 = [call, {"exec": f"const r = await tools.apply_patch({json.dumps(patch3)}); text(JSON.stringify(r));"},
+                  {"text": "done"}]
+        _out3, _b3, _r3 = _codex_vault_session(work, env, repo, turns3, "3")
+        if not any(e["path"] == "/mcp" for e in other.log):
+            fails.append("session 3 did not reach the repository's server (the measurement no longer holds)")
+        if any(e.get("client_vault") for e in other.log):
+            fails.append("LEAK: the repository's server got the Client-Vault header")
+        got = (repo / "other.txt").read_text() if (repo / "other.txt").exists() else "<missing>"
+        if "other-server@example.com" in got or email in got:
+            fails.append("a token from the repository's server was resolved")
+    print(f"[{'OK ' if not fails else 'FAIL'}] vault_refs  work={work}")
+    for f in fails:
+        print("     -", f)
+    return fails
+
+
 def main() -> int:
     if shutil.which("codex") is None:
         print("codex not on PATH")
         return 2
     names = [a for a in sys.argv[1:] if not a.startswith("--")] or list(SCENARIOS)
-    total = sum(len(run_scenario(n, SCENARIOS[n])) for n in names)
+    total = sum(len(run_vault_refs() if SCENARIOS[n].get("custom") else run_scenario(n, SCENARIOS[n])) for n in names)
     print("\nfailures:", total)
     return 1 if total else 0
 

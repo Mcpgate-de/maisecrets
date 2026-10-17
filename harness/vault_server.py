@@ -33,12 +33,28 @@ OPEN, CLOSE = "⟦", "⟧"
 
 
 def make_cert(folder: str) -> tuple[str, str]:
-    """A self-signed certificate for 127.0.0.1 and localhost: (cert file, key file). The cert is its own CA."""
+    """A test CA and a certificate for 127.0.0.1 and localhost signed by it: (cert file, key file). The cert file holds
+    the leaf and then the CA, so it is both the server's chain and the CA file of a client. Codex (rustls) refuses a
+    self-signed CA certificate as the server's own certificate, and Python 3.13+ needs the key identifiers."""
     cert, key = os.path.join(folder, "cert.pem"), os.path.join(folder, "key.pem")
-    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=localhost",
-                    "-addext", "subjectAltName=IP:127.0.0.1,DNS:localhost",
-                    "-addext", "basicConstraints=critical,CA:TRUE",
-                    "-keyout", key, "-out", cert], check=True, capture_output=True)
+    ca, ca_key = os.path.join(folder, "ca.pem"), os.path.join(folder, "ca-key.pem")
+    csr, ext = os.path.join(folder, "leaf.csr"), os.path.join(folder, "leaf.ext")
+    leaf = os.path.join(folder, "leaf.pem")
+
+    def run(*args: str) -> None:
+        subprocess.run(list(args), check=True, capture_output=True)
+    run("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=maisecrets test CA",
+        "-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+        "-keyout", ca_key, "-out", ca)
+    run("openssl", "req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost", "-keyout", key, "-out", csr)
+    with open(ext, "w") as f:
+        f.write("subjectAltName=IP:127.0.0.1,DNS:localhost\nbasicConstraints=critical,CA:FALSE\n"
+                "extendedKeyUsage=serverAuth\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
+                "authorityKeyIdentifier=keyid\nsubjectKeyIdentifier=hash\n")
+    run("openssl", "x509", "-req", "-in", csr, "-CA", ca, "-CAkey", ca_key, "-CAcreateserial", "-days", "1",
+        "-extfile", ext, "-out", leaf)
+    with open(cert, "w") as f, open(leaf) as a, open(ca) as b:
+        f.write(a.read() + b.read())
     return cert, key
 
 

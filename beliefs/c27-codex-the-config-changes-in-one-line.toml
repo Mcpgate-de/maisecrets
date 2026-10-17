@@ -1,0 +1,10 @@
+# c27-codex-the-config-changes-in-one-line: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-codex-the-config-changes-in-one-line"
+control = "C27"
+statement = "maisecrets changes the Codex config.toml only when a parse before and after differs in its one helper key of one entry; every other byte stays."
+runner = ["tests/test_codex_vault.py::LineEdit::test_a_header_line_inside_a_multiline_string_is_no_header"]
+
+[proof]
+file = "maisecrets/codex_vault.py"
+find = '''    return new if _parse(new) == _expected(data, name, value) else None'''
+replace = '''    return new'''

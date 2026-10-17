@@ -681,10 +681,16 @@ class Online(Base):
         Vault().repair()
         self.assertIn((VALUES[1], tok("NAME_2")), vault_refs.released(Vault().backend, "s1"))
 
-    def test_codex_gets_no_server_value(self):
+    def test_a_note_of_claude_code_is_no_note_in_codex(self):
+        """The notes are per client profile: a token that a Claude Code session noted stays text in Codex, whose
+        profile is its own config.toml (codex_vault.py)."""
         self.ready()
-        out = hooks.pre_tool({"tool_name": "Write", "session_id": "s1", "turn_id": "t", "cwd": str(self.work),
-                              "tool_input": {"file_path": str(self.work / "o.csv"), "content": tok("EMAIL_1")}})
+        codex_home = Path(tempfile.mkdtemp(prefix="vault-refs-codex-home-"))
+        with mock.patch.dict(os.environ, {"CODEX_HOME": str(codex_home)}):
+            vault_refs.use_client("codex")
+            self.addCleanup(vault_refs.use_client, "claude")
+            out = hooks.pre_tool({"tool_name": "Write", "session_id": "s1", "turn_id": "t", "cwd": str(self.work),
+                                  "tool_input": {"file_path": str(self.work / "o.csv"), "content": tok("EMAIL_1")}})
         self.assertEqual(out, {})
 
     @unittest.skipUnless(BASH and os.name != "nt", "bash on POSIX")
