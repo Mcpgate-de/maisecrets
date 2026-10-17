@@ -34,7 +34,7 @@ STAGES = ("unfold", "entity", "ansi", "invisible", "fullwidth", "emphasis", "dec
 # indent of BEGIN:VCARD (a vCard in YAML or a heredoc) is part of each line. A binary property (PHOTO, LOGO, SOUND,
 # KEY, ENCODING=b) stays folded: its base64 holds no field, and joined it is one more run to decode
 _VCARD_BEGIN_RE = re.compile(r"(?im)^([ \t]*)BEGIN:VCARD[ \t]*\r?$")
-_VCARD_END_RE = re.compile(r"(?im)^[ \t]*END:VCARD")
+_VCARD_END_RE = re.compile(r"(?im)^([ \t]*)END:VCARD[ \t]*\r?$")
 _BINARY_PROP_RE = re.compile(r"(?i)[ \t]*(?:[a-z0-9-]{1,64}\.)?(?:PHOTO|LOGO|SOUND|KEY)[;:]"
                              r"|[^:\n]{0,200};ENCODING=(?:b|base64)[;:]")
 
@@ -154,7 +154,8 @@ def _unfold(text: str):
             continue
         indent = b.group(1)
         k = len(indent)
-        e = _VCARD_END_RE.search(text, b.end())
+        # the END:VCARD at the indent of its BEGIN: a folded line that starts with END:VCARD continues a value
+        e = next((x for x in _VCARD_END_RE.finditer(text, b.end()) if x.group(1) == indent), None)
         done = e.start() if e else len(text)
         binary = False
         nl = text.find("\n", b.end(), done)

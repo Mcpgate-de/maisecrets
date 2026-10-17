@@ -77,6 +77,12 @@ class FoldedLineTests(unittest.TestCase):
             with self.subTest(part=part):
                 self.assertNotIn(part, out)
 
+    def test_a_folded_line_that_starts_with_end_vcard_does_not_end_the_card(self):
+        for cont in (" END:VCARD reminder", " END:VCARD"):
+            with self.subTest(cont=cont):
+                out = redact(card("NOTE:x", cont, "BDAY:" + BIRTH[:4], " " + BIRTH[4:]))
+                self.assertNotIn(BIRTH[4:], out)
+
     def test_an_indented_vcard_with_a_folded_line(self):
         text = ("contacts:\n  - |\n    BEGIN:VCARD\n    ADR:;;" + STREET + ";" + CITY + ";;\n     " + PLZ
                 + ";Germany\n    END:VCARD\n")

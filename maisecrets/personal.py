@@ -957,14 +957,19 @@ _VCARD_BDAY_RE = _lazy(_VCARD_LINE + r"BDAY" + _VCARD_PARAMS + r":(\d{8})(?:T[\d
 _VCARD_FORMS = ("address-vcard-fields", "name-vcard-n", "birth-date-vcard-compact")
 # a vCard property on a line of its own, without its BEGIN:VCARD: grep output (contacts.vcf:12:ADR;TYPE=home:…) or a
 # line copied from a card. After a .vcf file name the line is a vCard line. Without one it needs the structure that
-# no other format writes: ADR in capitals with an empty box and extended field, N in capitals with its five fields and
-# a title or nothing as the prefix, BDAY with a parameter (BDAY:20240101 alone is no card)
+# no other format writes: ADR in capitals with a parameter of a card (TYPE, PREF, HOME) and an empty box and extended
+# field, N in capitals with its five fields and a title or nothing as the prefix, BDAY with a parameter of a card
+# (BDAY:20240101 alone is no card)
 _VCARD_KIND = {"ADR": "address-vcard-fields", "N": "name-vcard-n", "BDAY": "birth-date-vcard-compact"}
 _VCARD_BDAY_VALUE_RE = re.compile(r"(\d{8})(?:T[\dZ:+-]{1,20})?(?![\w-])")
-_VCARD_BARE_RE = _lazy(r"(?im)^(?:([^\s:]{1,200}):(?:\d{1,9}[:-])?|\d{1,9}[:-])?[ \t]*(?:[a-z0-9-]{1,64}\.)?"
+_VCARD_BARE_RE = _lazy(r"(?im)^(?:((?:[a-z]:\\)?[^\s:]{1,200}):(?:\d{1,9}[:-])?|\d{1,9}[:-])?[ \t]*"
+                       r"(?:[a-z0-9-]{1,64}\.)?"
                        r"(ADR|N|BDAY)(" + _VCARD_PARAMS + r")" + _VCARD_VALUE)
 # the cheap check before _VCARD_BARE_RE: a property name before its parameters or its colon at the start of a line
 _VCARD_BARE_HINT_RE = re.compile(r"(?im)(?:^|:)[ \t]*(?:[a-z0-9-]{1,64}\.)?(?:ADR|N|BDAY)[;:]")
+_VCARD_PARAM_NAME_RE = re.compile(r"(?i);(?:type|pref|label|charset|language|value|altid|pid|calscale|home|work"
+                                  r"|postal|parcel|dom|intl)(?![\w-])")
+_VCARD_BARE_WORDS_RE = re.compile(r"(?i)adr|n[:;]|bday")
 _VCARD_TITLE_RE = re.compile(r"(?i)(?:dr|prof|mr|mrs|ms|mx|miss|sir|herr|frau|mme|mlle|m|sr|sra|sig|dott|ing|mag)\.?"
                              r"(?:[ ,]+(?:dr|prof|med|rer|nat|phil|ing)\.?){0,3}")
 _VCARD_SUFFIX_RE = re.compile(r"(?i)(?:jr|sr|ii|iii|iv|phd|md|esq|msc|bsc|mba)\.?")
@@ -985,6 +990,9 @@ def _vcard_fields(value: str, start: int) -> list:
     return out
 
 
+_VCARD_END_LINE_RE = re.compile(r"(?im)(?:^|(?<=\\n))[ \t]*END:VCARD")
+
+
 def _vcard_spans(text: str) -> list:
     """(start, end) of each vCard: from BEGIN:VCARD to its END:VCARD or the end of the text. A line counts only
     inside one: `ADR: 0012;Accepted;Use Postgres 16;…` in the docs and `N:Europe;Asia;…` in a config are no vCard
@@ -994,8 +1002,8 @@ def _vcard_spans(text: str) -> list:
     for m in re.finditer("BEGIN:VCARD", up):
         if out and m.start() < out[-1][1]:
             continue
-        end = up.find("END:VCARD", m.end())
-        out.append((m.start(), len(text) if end < 0 else end))
+        e = _VCARD_END_LINE_RE.search(text, m.end())   # at the start of a line: NOTE:… END:VCARD … is a value
+        out.append((m.start(), len(text) if e is None else e.start()))
     return out
 
 
@@ -1006,8 +1014,10 @@ def _vcard_bare(text: str, m, val) -> bool:
     prop = m.group(2)
     if prop != prop.upper():
         return False
+    if prop.upper() != "N" and not _VCARD_PARAM_NAME_RE.search(m.group(3)):
+        return False   # ADR:;;Cache 2;Primary;;8080;prod is a config row: ADR and BDAY need a parameter of a card
     if prop.upper() == "BDAY":
-        return bool(m.group(3))
+        return True
     fields = _vcard_fields(m.group(4), m.start(4))
     if prop.upper() == "ADR":
         return (len(fields) == 7 and not val(fields[0]) and not val(fields[1])
@@ -1203,7 +1213,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                 else:
                     _company_window(text, line, s0, s0 + len(v), "address-after-label", company)
     if any(f in want for f in _VCARD_FORMS) and ("VCARD" in text.upper() or (
-            ("ADR" in text or "N:" in text or "N;" in text or "BDAY" in text) and _VCARD_BARE_HINT_RE.search(text))):
+            _VCARD_BARE_WORDS_RE.search(text) and _VCARD_BARE_HINT_RE.search(text))):
         out += _vcard_hits(text, want)
     if "address-in-form" in want and "in" in regions:
         for m in _IN_ADDRESS_RE.finditer(text):
