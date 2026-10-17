@@ -6,5 +6,5 @@ runner = ["tests/test_personal_after_its_label.py::BoldLabelTests::test_a_value_
 
 [proof]
 file = "maisecrets/normalise.py"
-find = '''STAGES = ("entity", "ansi", "invisible", "fullwidth", "emphasis", "decode")'''
-replace = '''STAGES = ("entity", "ansi", "invisible", "fullwidth", "decode")'''
+find = '''STAGES = ("unfold", "entity", "ansi", "invisible", "fullwidth", "emphasis", "decode")'''
+replace = '''STAGES = ("unfold", "entity", "ansi", "invisible", "fullwidth", "decode")'''

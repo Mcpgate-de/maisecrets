@@ -1,0 +1,10 @@
+# c1-a-folded-vcard-line-is-read-whole: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c1-a-folded-vcard-line-is-read-whole"
+control = "C1"
+statement = "A vCard property folded over two lines (RFC 6350: a line break and one space or tab) is read whole in a tool result: the address, the name, the phone number and the birth date are masked in both parts."
+runner = ["tests/test_vcard_folded_lines.py::FoldedLineTests::test_a_folded_address_is_masked_in_both_parts", "tests/test_vcard_folded_lines.py::FoldedLineTests::test_a_folded_name_phone_mail_and_birth_date_are_masked_in_both_parts"]
+
+[proof]
+file = "maisecrets/normalise.py"
+find = '''STAGES = ("unfold", "entity",'''
+replace = '''STAGES = ("entity",'''

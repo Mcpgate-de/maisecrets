@@ -320,7 +320,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 13 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 345 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 360 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -2260,13 +2260,21 @@ a to-do.
   `FN;CHARSET=UTF-8:`; 0.6.24), not after `name:` or `owner:`,
   which also name products and languages. A street address without a postcode or an address label, or in a form of a
   region that is not active, passes too. Inside a vCard (after `BEGIN:VCARD`), an `ADR` in its fields, an `N`
-  and a `BDAY` of eight digits are masked in a tool result, with or without parameters (0.6.25); a property folded over
-  two lines, or a vCard line without its `BEGIN:VCARD`, is not. The check for a
+  and a `BDAY` of eight digits are masked in a tool result, with or without parameters (0.6.25), also when the property
+  is folded over two lines. A vCard line without its `BEGIN:VCARD` is masked after a `.vcf` file name (grep output) or
+  in the structure of its property: `ADR` in capitals with a parameter of a card (`TYPE=home`, `PREF`) and an empty box
+  and extended field, `N` in capitals with its five fields, `BDAY` with a parameter of a card. `adr:`, `n:`, a `BDAY:`
+  date alone, a grep context line (`file.vcf-12-`) and a property in lower case folded more than 2,048 characters after
+  its `BEGIN:VCARD` are not. The check for a
   company before an address label reads 120 characters of the line: in minified JSON a company address with its
   company word farther back is masked, and a person's address with an employer or a hotel within that reach passes.
   Its postcode stays masked when an employer label, a person's name or a key of a person's record stands near the
-  company's name. The other way round, a company's postcode and VAT ID stay masked when a line such as a department
-  stands between the company's name and its address, or when a `Kunde:` label stands before the company (0.6.26).
+  company's name. The other way round, a company's postcode and VAT ID stay masked when a department line stands
+  between the company's name and a street and postcode on one line (the address rule then masks the whole address),
+  when the department is not a word of the list (Einkauf, Buchhaltung, Accounts Payable), and, in the street and
+  postcode on two lines or after `Kunde:`, when the company's name has more than two words: a person's name glued to
+  it (`Lena Brückner Lindner GmbH`) reads the same. On one line, after a company word, such a name frees the values
+  as in 0.6.26.
   A wider reach was measured and left out, because it lets more home addresses pass (0.6.25).
 - **The forms of 0.6.24 act on tool results only.** An ID after `member`, `record` or `account`, an address after
   `Address:`, a FHIR identifier, a `::add-mask::` value, a `SharedAccessKey=`, a Postman variable with a secret name and

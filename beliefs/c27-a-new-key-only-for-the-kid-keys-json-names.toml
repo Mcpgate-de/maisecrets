@@ -1,0 +1,10 @@
+# c27-a-new-key-only-for-the-kid-keys-json-names: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c27-a-new-key-only-for-the-kid-keys-json-names"
+control = "C27"
+statement = "A session start replaces a lost key only when the key in the store has the kid that keys.json and the lost record name; another key in the store stays."
+runner = ["tests/test_vault_states.py::States::test_a_store_key_that_keys_json_does_not_name_is_not_replaced"]
+
+[proof]
+file = "maisecrets/vault_refs.py"
+find = '''if old is None or kid_of(old) != kid or state_of(origin).get("state") != "lost":'''
+replace = '''if old is None or state_of(origin).get("state") != "lost":'''
