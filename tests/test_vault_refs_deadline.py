@@ -93,6 +93,18 @@ class PostToolTests(Base):
         self.assertLess(time.monotonic() - started, 0.3 + 2.0, "the wait ends near the deadline of 0.3 s")
 
 
+    def test_the_codex_config_waits_until_the_deadline_only(self):
+        # Codex writes its helper line, not a header: that path takes the key of each enabled origin from the store
+        # too, inside the budget of the post-tool hook
+        self.hold(HOME / ".lock")
+        backend = Vault(load_config()).backend
+        with mock.patch.object(vault_refs, "is_codex", return_value=True), \
+                mock.patch.object(vault_refs, "_enabled", return_value={ORIGIN: [("srv", URL)]}):
+            started = time.monotonic()
+            with self.assertRaises(LockTimeout):
+                vault_refs._apply_config(load_config(), backend, lock_wait=1.0, deadline=time.monotonic() + 0.3)
+        self.assertLess(time.monotonic() - started, 0.3 + 2.0, "the wait ends near the deadline of 0.3 s")
+
 class ResolveTests(Base):
     def test_forget_and_the_key_wait_until_the_deadline_only(self):
         self.hold(vault_refs.DIR / ".lock")
