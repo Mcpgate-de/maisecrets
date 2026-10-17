@@ -56,11 +56,35 @@ _BIRTH_RE = re.compile(r"(?i)(?:\bd\.?o\.?b\b|date of birth|birth[ _-]?date|\bbd
                        r"(" + _DATE + r")(?!\d)")
 
 # --------------------------------------------------------------------------------- ID number after a label --
+# the labels of health, tax and national numbers: the number of a health plan's beneficiary, a medical record, a
+# national ID card, a tax ID and a social security number (Nemotron-PII writes them in its forms and notes, 2026-10-16)
+# "beneficiary" and "social security" alone name a payee and a benefit (Beneficiary: VENDOR 00042)
+_HEALTH_ID_LABELS = (r"|health[ _-]?plan[ _-]?beneficiary(?:[ _-]?(?:number|no\.?|id|#))?"
+                     r"|beneficiary[ _-]?(?:number|no\.?|id|#)"
+                     r"|medical[ _-]?record(?:[ _-]?(?:number|no\.?|#))?"
+                     r"|national[ _-]?id(?:entification|entity)?(?:[ _-]?(?:number|no\.?|card))?"
+                     r"|tax(?:payer)?[ _-]?id(?:entification)?(?:[ _-]?(?:number|no\.?))?|tin"
+                     r"|social[ _-]?security[ _-]?(?:number|no\.?|#)")
+# passport and driving licence in the label languages of the EU (Gretel writes them in its forms, 2026-10-16), and the
+# English "driving licence": de, fr, es, it, nl, pt, sv, pl. "pass" alone is a password, "patente" alone a patent
+_TRAVEL_ID_LABELS = (r"|driving[ _-]?licen[cs]e(?:[ _-]?(?:no|number))?"
+                     r"|reisepass(?:[ _-]?(?:nummer|nr\.?))?|pass(?:nummer|[ _-]nr\.?)"
+                     r"|f(?:ü|ue)hrerschein(?:[ _-]?(?:nummer|nr\.?))?"
+                     r"|(?:num[ée]ro (?:de |du )?)?(?:passeport|permis de conduire)"
+                     r"|(?:n[úu]mero (?:de |del |do )?)?(?:pasaporte|passaporte"
+                     r"|(?:carn[ée]t|permiso|licencia) de conducir"
+                     r"|carta de condu[çc][ãa]o|carteira de (?:motorista|habilita[çc][ãa]o))"
+                     r"|(?:numero (?:di |del |della )?)?passaporto|numero (?:di |della )?patente|patente di guida"
+                     r"|paspoort(?:nummer)?|rijbewijs(?:nummer)?|k[öo]rkort(?:snummer)?"
+                     r"|(?:numer )?paszportu?|(?:numer )?praw[oa] jazdy")
 _ID_RE = re.compile(r"(?i)(?<![a-z])(?:mrn|member[ -]?id|passport(?:[ _-]?(?:no|number))?|driver'?s? licen[cs]e"
                     r"(?:[ _-]?(?:no|number))?|dl[ _-]?(?:no|number|#)|(?-i:DL)(?=\s{0,3}[:#])|sin|tfn|nir|tax[ _-]?id"
                     r"|insurance (?:member )?id"
-                    r"|account (?:number|no\.?)|patient[ -]?id|id on file)(?![a-z])[\"']?"
-                    r"(?:\s{0,3}(?:on file|is|number|no\.?|#))?\s{0,3}[:=#]?\s{0,3}[\"']?"
+                    r"|account (?:number|no\.?)|patient[ -]?id|id on file" + _HEALTH_ID_LABELS
+                    + _TRAVEL_ID_LABELS + r")(?![a-z])[\"']?"
+                    r"(?:\s{0,3}(?:on file|is|number|no\.?|#|n\.?[º°o]\.?|nr\.?|num[ée]ro|n[úu]mero|numero"
+                    r"|nummer|numer))?"
+                    r"\s{0,3}[:=#]?\s{0,3}[\"']?"
                     r"((?-i:[A-Z0-9](?:[A-Z0-9]|[ -](?=[A-Z0-9])){4,24}))(?![A-Za-z0-9])")
 
 # ------------------------------------------------------------------------------------- user in a URL or path --
@@ -345,6 +369,8 @@ _NOT_A_CELL = frozenset({"", "null", "none", "n/a", "na", "-", "true", "false", 
 
 
 _DATE_CELL_RE = re.compile(_DATE)
+_ADDRESS_WORD_RE = re.compile(r"[^\W\d_]{3}")
+_HOST_PORT_RE = re.compile(r":\d{2,5}(?!\d)|://|\b\d{1,3}(?:\.\d{1,3}){3}\b|\.(?:com|net|org|io|local|internal)\b")
 _NAME_CELL_RE = re.compile(_NAME_VALUE)
 
 
@@ -370,7 +396,10 @@ def _cell_ok(v: str, typ: str) -> bool:
     if typ == BIRTH_DATE:
         return bool(_DATE_CELL_RE.fullmatch(v)) and not _placeholder_digits(v, dates=True) and _past_year(v)
     if typ == ADDRESS:
-        return digits >= 1 and len(v) >= 8 and not _NOT_A_HOME_RE.search(v)
+        # two words, one of three letters, and no host, port or URL: 127.0.0.1:8080 and node1.acme.dev in a table of
+        # servers are no address
+        return digits >= 1 and len(v) >= 8 and " " in v.strip() and not _NOT_A_HOME_RE.search(v) \
+            and bool(_ADDRESS_WORD_RE.search(v)) and not _HOST_PORT_RE.search(v)
     if typ == NAME:
         return bool(_NAME_CELL_RE.fullmatch(v)) and _name_ok(v) and not _reads_as_words(v)
     if typ == USERNAME:
@@ -428,6 +457,79 @@ def _csv_hits(text: str) -> list:
     return out
 
 
+# ------------------------------------------------------------------------------------ Markdown table columns --
+# the CSV rule for a Markdown table: a header row of `|` cells, a row of dashes, then rows. Its column names hold
+# spaces (Date of Birth, Phone Number), so a name is folded to the CSV form (date_of_birth) and a few longer names map
+# to a column of the CSV rule. The same person check: a strong column, and a row that also names a person
+_MD_SEP_RE = re.compile(r"[ \t]*(?:\|[ \t]*)?:?-{3,}:?(?:[ \t]*\|[ \t]*:?-{3,}:?)*[ \t]*(?:\|[ \t]*)?")
+_MD_ALIASES = {"telephone_number": "telephone", "mobile_number": "mobile", "cell_phone": "cell",
+               "contact_number": "phone", "phone_no": "phone", "social_security_number": "ssn",
+               "national_id_number": "national_id", "tax_id_number": "tax_id", "medical_record_number": "mrn",
+               "passport_no": "passport_number", "home_address": "home_address", "street_address": "street_address",
+               "patient": "patient", "date_of_birth_dob": "date_of_birth", "dob_date_of_birth": "date_of_birth"}
+
+
+def _md_column(cell: str) -> str:
+    name = re.sub(r"[\s/.-]+", "_", cell.strip().strip("*_`'\" ").strip().lower()).strip("_")
+    name = re.sub(r"_?\(.*\)$", "", name)   # Date of Birth (YYYY-MM-DD)
+    return _MD_ALIASES.get(name, name)
+
+
+def _md_cells(line: str) -> list:
+    """(start, end) of each cell's text in a table row; the outer bars open and close the row."""
+    out = []
+    a = line.find("|") + 1 if line.lstrip().startswith("|") else 0
+    while a <= len(line):
+        b = line.find("|", a)
+        while b > 0 and line[b - 1] == "\\":
+            b = line.find("|", b + 1)
+        if b < 0:
+            if line[a:].strip():
+                out.append((a, len(line)))
+            break
+        out.append((a, b))
+        a = b + 1
+    return out
+
+
+def _md_table_hits(text: str) -> list:
+    out = []
+    lines = text.split("\n")
+    pos = [0]
+    for ln in lines:
+        pos.append(pos[-1] + len(ln) + 1)
+    li = 0
+    while li < len(lines) - 2:
+        hdr = lines[li]
+        if "|" not in hdr or len(hdr) > 2000 or len(lines[li + 1]) > 2000 \
+                or not _MD_SEP_RE.fullmatch(lines[li + 1]):
+            li += 1
+            continue
+        names = [_md_column(hdr[a:b]) for a, b in _md_cells(hdr)]
+        strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
+        cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
+        li += 2
+        rows = 0
+        while li < len(lines) and rows < _CSV_ROWS and "|" in lines[li] and lines[li].strip():
+            line = lines[li]
+            row: list = []
+            if cols:
+                for col, (a, b) in enumerate(_md_cells(line)):
+                    if col not in cols:
+                        continue
+                    v = line[a:b].strip().strip("*`")
+                    typ = _column_type(names[col])
+                    if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ):
+                        s0 = a + line[a:b].index(v)
+                        row.append((pos[li] + s0, pos[li] + s0 + len(v), "md-table-personal-column", typ, col))
+            # a date alone names no person in a table of releases (| Name | Birthday | Version |): a name or an id
+            if any(c in strong for *_, c in row) and any(h[3] in (NAME, ID_NUMBER) for h in row):
+                out += [h[:4] for h in row]
+            li += 1
+            rows += 1
+    return out
+
+
 class _lazy:
     """A regex compiled at its first use: a hook pays every millisecond of import, and most texts need no form."""
     __slots__ = ("_args", "_rx")
@@ -472,6 +574,10 @@ FORMS = {
     "address-vcard-fields": (ADDRESS, "tool", "generic", "form"),
     "name-vcard-n": (NAME, "tool", "generic", "form"),
     "birth-date-vcard-compact": (BIRTH_DATE, "tool", "generic", "form"),
+    "phone-after-phone-word": (PHONE, "tool", "generic", "label"),
+    "name-single-after-label": (NAME, "tool", "generic", "label"),
+    "address-street-after-label": (ADDRESS, "tool", "generic", "label"),
+    "md-table-personal-column": ("COLUMN", "tool", "generic", "label"),
 }
 # a value that only names one: a variable, a template, an elision, a path
 _NOT_A_VALUE_START = ("$", "%", "{", "<", "(", "[", "*", "#", "/", ".")
@@ -589,6 +695,133 @@ _HOUSE_RE = _lazy(r"\b\d{1,5}[A-Za-z]?(?:/\d{1,4})?,? [A-ZÀ-Þ][a-zà-ÿ]{2,}\b
                        r"|[A-ZÀ-Þ][a-zà-ÿ]{2,} \d{1,5}[A-Za-z]?,")
 _NOT_AN_ADDRESS_RE = _lazy(r"(?i)\b(?:rack|row|slot|zone|version|build|schema|width|height|signal|size|page"
                                 r"|step|round|score|accepted|proposed|rejected|field|line|port|http|status|max|min)\b|0x")
+# one name word after a label that names a first or a last name (Nemotron-PII, 2026-10-16: `first name: Dana`). The
+# name rule needs two words; a first or a last name alone is one. The word must not read as an English word or noun
+# (`first_name: String`, `last name: Required`), and a second capitalised word leaves the value to the name rule
+_SINGLE_NAME_LABELS = (r"first[ _-]?name|last[ _-]?name|given[ _-]?name|family[ _-]?name|middle[ _-]?name|surname"
+                       r"|forename|vorname|nachname|familienname|rufname|pr[ée]nom|nom de famille|apellidos?"
+                       r"|nombre de pila|cognome|sobrenome|voornaam|achternaam|f[öo]rnamn|efternamn")
+_SINGLE_NAME_RE = _lazy(r"(?i:(?<![a-z_./-])(?:" + _SINGLE_NAME_LABELS + r"))[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?"
+                        r"[ \t]{0,3}([" + _UP + "\u1e00-\u1eff" + r"]"
+                        r"[" + _LO + "\u1e00-\u1eff\u0300-\u036f" + r"'’-]{1,30})"
+                        r"(?![\w'’-])"   # Nguyễn, Ạnh, and a combining accent
+                        r"(?![ \t]{1,2}[" + _UP + r"])")
+# the value of an i18n file or a form schema, not a name: the label in another language (first_name: Vorname) and the
+# words of a type, a case or an option
+# the translations of a name label: a text whose name fields hold these is an i18n file or a form schema
+_NAME_LABEL_TRANSLATIONS = frozenset({
+    "firstname", "lastname", "surname", "forename", "givenname", "familyname", "middlename", "name", "vorname",
+    "nachname", "familienname", "rufname", "prénom", "prenom", "nom", "nombre", "apellido", "apellidos", "nome",
+    "cognome", "prenome", "sobrenome", "voornaam", "achternaam", "förnamn", "fornamn", "efternamn", "imię", "imie",
+    "nazwisko", "etunimi", "sukunimi", "fornavn", "etternavn", "efternavn", "jméno", "jmeno", "příjmení", "prijmeni",
+    "keresztnév", "vezetéknév", "ad", "soyad", "soyadı", "patronymic"})
+# a word that starts a validation message or a changelog line after a name label
+_NAME_SENTENCE_START = frozenset({"too", "may", "was", "renamed", "must", "should", "cannot", "is", "not"})
+# a lower-case word right after the value on the same line: the value starts a sentence
+_WORD_AFTER_RE = _lazy(r"[ \t]+[a-zäöüßàâçéèêëîïôûùüÿñ]{2,}")
+_NAME_LABEL_VALUES = frozenset({
+    "firstname", "lastname", "surname", "forename", "givenname", "familyname", "middlename", "name", "vorname",
+    "nachname", "familienname", "rufname", "prénom", "prenom", "nom", "nombre", "apellido", "apellidos", "nome",
+    "cognome", "prenome", "sobrenome", "voornaam", "achternaam", "förnamn", "fornamn", "efternamn", "imię", "imie",
+    "nazwisko", "etunimi", "sukunimi", "fornavn", "etternavn", "efternavn", "jméno", "jmeno", "příjmení", "prijmeni",
+    "keresztnév", "vezetéknév", "ad", "soyad", "soyadı", "unicode", "lowercase", "uppercase", "titlecase", "asc",
+    "desc", "latin", "validator", "sanitizer", "enum", "alphanumeric", "alpha", "patronymic", "untitled", "pydantic",
+    "joi", "yup", "zod", "deprecated", "removed", "normalized", "normalised", "translated", "pseudonymized",
+    "pseudonymised", "capitalized", "capitalised", "trimmed", "hidden", "visible", "editable", "default", "string",
+    "text", "unknown", "anonymous", "texte", "zeichenfolge", "zeichenkette", "chaîne", "chaine", "cadena", "testo",
+    "tekst", "sträng", "strang", "ciąg", "teksto", "zahl", "número", "numero", "nummer", "liczba", "erforderlich",
+    "obligatoire", "requis", "facultatif", "optionnel", "opcional", "obbligatorio", "facoltativo", "verplicht",
+    "optioneel", "wymagane", "opcjonalne", "obligatorisk", "valfri", "vazio", "vacío", "vide", "leer", "pusty",
+    "prenume", "nume", "ime", "prezime", "priimek", "vardas", "pavardė", "pavarde", "vārds", "vards", "uzvārds",
+    "uzvards", "eesnimi", "perekonnanimi", "fornafn", "eftirnafn", "cognoms", "nom de pila", "nama", "meno",
+    "priezvisko", "jina", "input", "textfield", "textbox", "textarea", "attribute", "multiline", "nvarchar",
+    "lowercased", "uppercased", "confidential", "pii", "sensitive", "label", "placeholder", "field", "value"})
+# the surnames and given names of documentation, which the name rule finds as a pair
+_PLACEHOLDER_NAME_WORDS = frozenset({"doe", "roe", "mustermann", "musterfrau", "muster", "bloggs", "normalverbraucher",
+                                     "john", "jane", "max", "erika", "alice", "bob", "foo", "bar", "baz", "qux"})
+# a street line after an address label or a verb of residence, without a city or a postcode (Nemotron-PII,
+# 2026-10-16: "street address: 4821 Maple Ridge Drive", "resides at 77 Harbour Lane"). The company check of the
+# address label holds: a company, an office or a public place on the line keeps the address text
+# a street name word: a capital word or an ordinal (123 5th Avenue)
+_STREET_LINE = (r"(?:\d{1,6}[A-Za-z]?(?:-\d{1,4})? (?:(?:[A-Z][A-Za-z'.-]{0,30}|\d{1,3}(?:st|nd|rd|th)) ){1,4}"
+                r"(?:" + _STREET[3:-1]
+                + r"|Circle|Cir|Parkway|Pkwy|Trail|Trl|Loop|Pike|Alley|Grove|Gardens|Heights|Mews)\.?"
+                r"(?:,? (?:Apt|Apartment|Suite|Unit|Flat|#)\.? ?[A-Za-z0-9-]{1,6})?"
+                r"|[A-ZÄÖÜ][\wäöüß-]{1,40}(?:straße|strasse|str\.|weg|gasse|platz|allee|ring|damm) \d{1,4}[a-z]?"
+                r"|(?:Calle|Avenida|Via|Viale|Piazza|Rua|Carrer) (?:[A-ZÀ-Þ][\wà-ÿ'’-]{1,30} |d[aeio]l?l?[aeo]? |de "
+                r"|das? |dos? ){1,5}?\d{1,5}[A-Za-z]?)(?![\w-])")
+_STREET_LABEL_RE = _lazy(
+    r"(?i)(?<![a-z_])(?:(?:street|home|residential|mailing|postal|billing|shipping|delivery|permanent|current)[ _-]?"
+    r"address|address(?: on file)?|anschrift|wohnadresse|wohnanschrift|adresse|domicilio|direcci[oó]n|indirizzo"
+    r"|endere[cç]o|adres)[\"']?[ \t]{0,3}(?:is[ \t]{1,3}|[:=][ \t]{0,3})[\"']?[ \t]{0,2}(?-i:(" + _STREET_LINE + "))"
+    r"|(?<![a-z])(?:resides?|residing|reside|lives?|living|domiciled|wohnt|wohnhaft)"
+    r"(?: (?:at|in|on|im|am|in der|an der))?[ \t]{1,3}(?-i:(" + _STREET_LINE + "))")
+
+
+# the state of a form field after its label, not a name: the word list holds the stems only (require, mandate)
+_FIELD_STATES = frozenset({"required", "optional", "mandatory", "nullable", "readonly", "redacted", "masked",
+                           "anonymized", "anonymised", "withheld", "missing", "blank", "empty", "varchar", "str", "int",
+                           "char", "pflicht", "pflichtfeld", "leer", "obligatoire", "obligatorio", "obbligatorio"})
+
+
+def _no_marks(w: str) -> str:
+    """w without its accents (Ạnh: Anh), so the vowel check of _reads_as_words sees the vowels of Vietnamese."""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", w) if not unicodedata.combining(c))
+
+
+def _inflected_word(w: str) -> bool:
+    """An English word in an inflected form (required, hashed, encrypted, nullable) or the state of a field."""
+    from .detect import _word_set
+    words = _word_set()
+    if w in _FIELD_STATES:
+        return True
+    for end, back in (("ied", "y"), ("ed", ""), ("ed", "e"), ("able", ""), ("able", "e"), ("ly", ""), ("ing", "")):
+        if w.endswith(end) and len(w) - len(end) >= 3 and w[:-len(end)] + back in words:
+            return True
+    return False
+
+
+# the address of a business partner, not of a person (Gretel, 2026-10-16: "Employer address:", "Industries\nAddress:")
+_BUSINESS_RE = _lazy(r"(?i)(?<![a-z])(?:employer|industries|enterprises?|holdings?|vendor|supplier|business"
+                     r"|organi[sz]ation|agency|institution|clinic|practice|pharmacy|lender|insurer|warehouse|depot|factory"
+                     r"|distribution|fulfil?ment"
+                     r"|bank(?![ _-]?(?:account|details|statement|transfer|card|code|holiday|balance|info)))(?![a-z])")
+_BANK_ACCOUNT_RE = _lazy(r"(?i)bank[ _-]?(?:account|details|statement|transfer|card|code|holiday|balance|info)")
+
+
+def _not_a_home(text: str, a: int, b: int) -> bool:
+    """A company, office or public place word in text[a:b]; "bank account" names a person's account, not a bank."""
+    for m in _NOT_A_HOME_RE.finditer(text, a, b):
+        if not (m.group().lower() == "bank" and _BANK_ACCOUNT_RE.match(text, m.start())):
+            return True
+    return False
+
+
+# an address of a machine, a mail box or a wallet, not a street (IP address: 10 Network Drive)
+_NOT_A_STREET_LABEL_RE = _lazy(r"(?i)(?<![a-z])(?:ip|ipv[46]|mac|e-?mail|server|listen|bind|remote|local|web|wallet"
+                               r"|contract|memory|base|host|proxy|gateway|broadcast|multicast|network|bitcoin"
+                               r"|ethereum|ens)[ _-]?$")
+# a placeholder street of docs, seed files and fixtures (123 Main Street, 1 Infinite Loop, Musterstraße 1)
+_PLACEHOLDER_STREET_RE = _lazy(r"(?i)^\s*(?:123\s+main\s+st(?:reet|\.)?\b|1\s+infinite\s+loop\b"
+                                r"|[\w-]*(?:muster|beispiel)[\w-]*\s*\d*\b)")
+# the parent key of a YAML or TOML block names a machine (server:\n  address: …): its address is no street
+_PARENT_NOT_A_STREET_RE = _lazy(r"(?i)(?<![a-z])(?:server|servers|host|hosts|listen|bind|network|proxy|gateway|upstream"
+                                r"|backend|endpoint|node|peer|cluster|smtp|mail|dns|ldap)[\w-]*[ \t]*:[ \t]*\r?\n"
+                                r"(?:[ \t]+[\w-]+[ \t]*:[^\n]*\r?\n){0,3}[ \t]+$")
+# a thing that "lives at" a place in prose about code (the server lives at, the function lives in)
+# the thing word stands right before the verb: "Dana, our office manager, lives at" is a person
+_THING_SUBJECT_RE = _lazy(r"(?i)(?<![a-z])(?:server|service|function|file|files|code|class|module|config|repo"
+                          r"|repository|package|bucket|app|process|daemon|component|method|helper|store"
+                          r"|shop|office|company|business|logic|variable|api|database|db|endpoint|library|sdk|docs"
+                          r"|documentation"
+                          r"|site|website|page|bot|script|binary|image|container|cluster|host|shard|handler|worker|job|task)"
+                          r"[ \t]{1,3}$")
+_HOME_LABEL_RE = _lazy(r"(?i)home|residential|permanent|wohn|resid|liv|domicil")
+_STREET_LABEL_WORDS = ("address", "anschrift", "adresse", "domicilio", "direcci", "indirizzo", "endere", "adres",
+                       "resid", "live", "living", "domiciled", "wohn")
+_PHONE_WORDS = ("phone", "tel", "mobil", "cell", "fax", "handy", "portable", "rufnummer", "whatsapp", "hotline",
+                "contact", "call", "reach", "text")
 _ADDRESS_WORDS = ("address", "adr", "ship", "property", "lives", "endere", "direcci", "adresse", "location")
 _IN_ADDRESS_RE = _lazy(r"\b\d{1,4}(?:/\d{1,4})?, [^\n]{10,90}?, [A-Z][a-z]+ \d{6}\b")
 _NONLATIN = "Ͱ-ϿЀ-ӿ֐-׿؀-ۿऀ-ॿঀ-৿"
@@ -604,6 +837,70 @@ _AUTONYMS = frozenset({"русский", "українська", "беларус
                        "עברית", "العربية", "فارسی", "اردو", "हिन्दी", "বাংলা", "中文", "简体中文", "繁體中文", "日本語",
                        "한국어", "русский язык", "қазақ тілі"})
 _PHONE_URL_RE = _lazy(r"(?i)(?<![a-z])(?:phone|tel|mobile|msisdn|cell)[\w-]{0,10}=(%2B\d{7,15})(?!\d)")
+# a phone number in its national form after a phone word (Nemotron-PII and Gretel, 2026-10-16: 999-999-9999 after
+# "phone number:", 99 9999 9999 after "telefoonnummer:"). A label (phone, Telefon, téléphone, + number, then `:`, `=`
+# or "is") takes any national form; a verb (call, reach … at, contact … at) and a label with words between them take a
+# North American number only, whose shape is rare outside a phone number
+_PHONE_LABEL_WORDS = (r"phone|telephone|tel|mobile?|mobil(?:e|nummer|telefon)?|cell(?:ular|phone)?|fax|handy"
+                      r"|telefon(?:nummer|o)?|t[ée]l[ée]phone|tel[ée]fono|telefoon(?:nummer)?|telefone|portable"
+                      r"|cellulare|rufnummer|whatsapp|hotline|contact[ _-]?(?:number|no)")
+_PHONE_NUMBER_WORD = r"(?:[ _-]?(?:number|no\.?|nr\.?|nummer|num[ée]ro|n[úu]mero|numero|#))?"
+_PHONE_TIGHT_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r")" + _PHONE_NUMBER_WORD + r"(?![\w-])\.?[\"']?"
+                        r"(?:[ \t]{0,3}(?:is|ist|est|es|è|é|:|=|-|–)[ \t]{0,3}|[ \t]{1,3})[\"']?[ \t]{0,2}"
+                        r"(\+?(?:\(\d{1,8}\)|\d{1,8})(?:[ .\-/]{1,2}(?:\(\d{1,8}\)|\d{1,8})){0,5})(?![\w+]|[.,/:-]\d)")
+_PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed)?|reach(?:ed)?(?: \w{1,12}){0,2} at"
+                        r"|contact(?:ed)?(?: \w{1,12}){0,2} at|text(?:ed)?)(?![\w-])[^\n\d+]{0,30}?(?<![\w+.-])"
+                        r"((?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4})(?![\w-]|[.,:]\d)")
+_PHONE_DATE_RE = _lazy(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|\d{1,2}:\d{2}")
+_ISO_DATE_RE = _lazy(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
+# a North American number (3-3-4); it needs region us or ca, as phone-us-national (0.6.24)
+_NANP_SHAPE_RE = _lazy(r"(?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4}")
+# a count with a space between thousands (3 412 908 users, 1 000 000) and a list of small numbers (4 8 15 16 23 42)
+# fullmatch on a value of _PHONE_TIGHT_RE only (6 groups at most): the last branch is quadratic on a long text
+_COUNT_RE = _lazy(r"\d{1,2}(?: \d{3})+|\d{1,3}(?: \d{3})* 000(?: \d{3})*"
+                  r"|[1-9]\d*(?:[ .\-/]+\d+)*[ .\-/]\d(?:[ .\-/]\d+)*")
+# the words between a phone label and a number that end in a colon: a phone word or its number word ends them
+_GAP_SEP_RE = _lazy(r"[:=]| [-–] ")
+_PAREN_END_RE = _lazy(r"[ \t]*\([^()\n]{0,15}\)[ \t]*$")   # Phone (work): 938-274-6157
+_PHONE_GAP_END_RE = _lazy(r"(?i)(?:" + _PHONE_LABEL_WORDS + r"|number|no\.?|nr\.?|#|num[ée]ro|n[úu]mero|nummer)$")
+
+
+def _national_phone_ok(v: str) -> bool:
+    """7 to 15 digits in groups: not a date, a time, a version, an IP address, a range of years or a placeholder. A
+    single run needs 10 to 12 digits, a pair of groups 9 or more; dots only in the North American 3.3.4 or in pairs."""
+    d = re.sub(r"\D", "", v)
+    groups = re.findall(r"\d+", v)
+    if not 7 <= len(d) <= 15 or _placeholder_digits(v) or _PHONE_DATE_RE.fullmatch(v.strip("+()")):
+        return False
+    if _ISO_DATE_RE.search(v) or (not v.startswith("+") and _COUNT_RE.fullmatch(v)):
+        return False
+    if len(groups) == 1 and not 10 <= len(d) <= 12:
+        return False
+    if len(groups) >= 3 and all(len(g) == 4 for g in groups) and not v.startswith(("+", "0")):
+        return False   # Telefon 2024 2025 2026, Cell 1024 2048 4096: years and sizes (review, 2026-10-17)
+    if len(groups) == 2 and len(d) < 9:
+        return False
+    if len(groups[-1]) >= 4 and _placeholder_digits(groups[-1]):
+        return False   # 0151 1111111, 030 12345678: a subscriber number of one digit or of a run is a placeholder
+    if "." in v and not (re.fullmatch(r"\(?\d{3}\)?\.\d{3}\.\d{4}", v)
+                         or all(len(g) == 2 for g in groups[1:])):
+        return False
+    return _nanp_ok(v)
+
+
+def _nanp_ok(v: str) -> bool:
+    """A North American number (ten digits, or 1 and ten): the area code and the exchange start with 2 to 9, and the
+    fictional 555-0100 to 555-0199 is an example."""
+    d = re.sub(r"\D", "", v)
+    if len(d) == 11 and d[0] == "1":
+        d = d[1:]
+    elif len(d) != 10 or v.lstrip("(").startswith("0") or v.startswith("+"):
+        return True   # not North American: its own country's rules
+    if len(re.findall(r"\d+", v)) == 2 and not v.startswith("("):
+        return True   # 99 9999 9999 and the like: a national form of another country
+    return d[0] not in "01" and d[3] not in "01" and not (d[3:6] == "555" and d[6:8] == "01")
+
+
 _PHONE_WRAP_RE = _lazy(r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?\d{2,5}(?:[ \-]\d{2,5}){0,2}-\n[ \t]{0,4}\d{2,5}"
                             r"(?:[ \-]\d{2,5}){0,3}(?![\w.]\d|\w)")
 
@@ -848,6 +1145,65 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
             d = m.group(1)[3:]
             if 8 <= len(d) <= 15 and len(set(d)) > 2:
                 out.append((m.start(1), m.end(1), "phone-url-encoded", PHONE))
+    if "phone-after-phone-word" in want and any(w in low for w in _PHONE_WORDS):
+        us = bool(_US_PHONE_REGIONS.intersection(regions))
+        for rx in (_PHONE_TIGHT_RE, _PHONE_LOOSE_RE):
+            for m in rx.finditer(text):
+                v = m.group(1).rstrip(" .-/")
+                if _US_PHONE_RE.fullmatch(v) or (_NANP_SHAPE_RE.fullmatch(v) and not us):
+                    continue   # (312) 846-2291 is phone-us-national's; a North American number needs us or ca
+                gap = text[m.start():m.start(1)]
+                sep = [x.start() for x in _GAP_SEP_RE.finditer(gap)] if rx is _PHONE_LOOSE_RE else ()
+                if sep and not _PHONE_GAP_END_RE.search(_PAREN_END_RE.sub("", gap[:sep[-1]]).rstrip(" )\"'")):
+                    continue   # Mobile build artifact: 938-274-6157: the words before the colon name no phone
+                if (_national_phone_ok(v) if rx is _PHONE_TIGHT_RE else _nanp_ok(v)):
+                    out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
+    if "name-single-after-label" in want and ("name" in low or "nom" in low or "apellido" in low or "cognome" in low
+                                              or "voornaam" in low or "achternaam" in low or "namn" in low):
+        found = []
+        for m in _SINGLE_NAME_RE.finditer(text):
+            v = m.group(1)
+            low_v = v.lower().strip("'’-")
+            if low_v in _NAME_LABEL_TRANSLATIONS:
+                # a label translation as a value: an i18n file or a form schema, whose other values are labels too
+                # (first_name: Prenume, last_name: Nume): no single name of this text is a person's
+                found = []
+                break
+            if low_v in _NAME_LABEL_VALUES:
+                continue   # a type or state word (Unknown, Default, String): this value only, a real record keeps
+                # its other names (review, 2026-10-17)
+            if v.lower() in _NAME_SENTENCE_START or _WORD_AFTER_RE.match(text, m.end(1)):
+                continue   # first_name: Too long (maximum…), Renamed to given_name: a sentence, not a name
+            if low_v in _PLACEHOLDER_NAME_WORDS or low_v in PLACEHOLDER_NAMES \
+                    or low_v in _NOT_A_NAME_START or low_v in _NOT_A_NAME_WORD or low_v in _SHORT_EN \
+                    or len(low_v) < 2 or _reads_as_words(_no_marks(v)) or _inflected_word(low_v):
+                continue
+            found.append((m.start(1), m.end(1), "name-single-after-label", NAME))
+        out += found
+    if "address-street-after-label" in want and any(w in low for w in _STREET_LABEL_WORDS):
+        for m in _STREET_LABEL_RE.finditer(text):
+            g = 1 if m.group(1) is not None else 2
+            v = m.group(g)
+            if _NOT_AN_ADDRESS_RE.search(v) or _GERUND_STREET_RE.search(v) or v.startswith("0") \
+                    or _PLACEHOLDER_STREET_RE.match(v) \
+                    or _PARENT_NOT_A_STREET_RE.search(text, max(0, m.start() - 60), m.start()) \
+                    or _NOT_A_STREET_LABEL_RE.search(text, max(0, m.start() - 12), m.start()) \
+                    or (g == 2 and _THING_SUBJECT_RE.search(text, max(0, m.start() - 40), m.start())):
+                continue
+            # the company's name often stands on the line before its address label (Acme Inc.\nAddress: ...): the
+            # window holds that line too, as for street-address, at most 160 characters back
+            line = _line_back(text, m.start(), 160)
+            if line > 0 and text[line - 1] == "\n":
+                line = _line_back(text, line - 1, max(1, 160 - (m.start() - line)))
+            # a label that names a home (home address, Wohnadresse) or a verb of residence is a person's: no company
+            # word nearby turns it into a company's address (an employer on the line before)
+            home = _HOME_LABEL_RE.search(text, m.start(), m.start(g))
+            if home or (not _not_a_home(text, line, m.end()) and not _BUSINESS_RE.search(text, line, m.start())):
+                out.append((m.start(g), m.end(g), "address-street-after-label", ADDRESS))
+            else:
+                _company_window(text, line, m.start(g), m.end(g), "address-street-after-label", company)
+    if "md-table-personal-column" in want and "|" in text and "---" in text:
+        out += _md_table_hits(text)
     if "phone-wrapped-line" in want and "-\n" in text:
         for m in _PHONE_WRAP_RE.finditer(text):
             d = re.sub(r"\D", "", m.group())
@@ -863,7 +1219,10 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
 _BIRTH_WORDS = ("dob", "d.o.b", "birth", "bday", "geb", "n\u00e9", "ne le", "nee le", "naissance", "nacimiento", "naci",
                 "nac\u00ed", "nascimento", "nascita", "nato")
 _ID_WORDS = ("mrn", "member", "passport", "licen", "dl", "sin", "tfn", "nir", "tax", "insurance", "account",
-             "patient", "id on file")
+             "patient", "id on file", "beneficiary", "medical", "national", "tin", "social",
+             "reisepass", "passnummer", "pass-nr", "pass nr", "hrerschein", "passeport", "permis", "pasaporte",
+             "passaporte", "conducir", "condu", "carteira", "passaporto", "patente", "paspoort", "rijbewijs",
+             "körkort", "korkort", "paszport", "prawo jazdy", "prawa jazdy", "driving")
 RULE_IDS = ("phone-one-digit-groups", "phone-us-national", "birth-date-after-label", "id-number-after-label",
             "user-in-url", "user-in-home-path", "street-address", "name-after-label", "name-before-email",
             "csv-personal-column") + tuple(FORMS)
