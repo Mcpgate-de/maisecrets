@@ -1,0 +1,10 @@
+# c13-a-python-probe-that-never-answers-is-stopped: the test owns the rule; this file names it and the mutation that must turn it red.
+belief = "c13-a-python-probe-that-never-answers-is-stopped"
+control = "C13"
+statement = "All Python probes of run.sh together get 2 s; then the probe that runs is stopped and every hook event refuses in the form of its client, before the client's timeout lets the call through."
+runner = ["tests/test_promises.py::LauncherProbeHoldsNothingTests::test_a_probe_that_never_answers_is_stopped_and_the_hook_refuses"]
+
+[proof]
+file = "hooks/run.sh"
+find = '''trap 'EXPIRED=1; [ -n "$PROBE_PID" ] && kill -9 "$PROBE_PID"' USR1'''
+replace = '''trap 'EXPIRED=1' USR1'''

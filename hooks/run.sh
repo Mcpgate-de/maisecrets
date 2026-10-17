@@ -11,14 +11,65 @@ set -u
 export PYTHONUTF8=1
 HERE="$(cd "$(dirname "$0")" && pwd)"
 FOUND=""
-for PY in python3 python "py -3" python3.14 python3.13 python3.12 python3.11 python3.10 python3.9 \
-          /opt/homebrew/bin/python3 /usr/local/bin/python3 \
-          /Library/Frameworks/Python.framework/Versions/Current/bin/python3; do
-  if $PY -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" >/dev/null 2>&1; then
-    exec $PY "$HERE/dispatch.py" "$@"
-  fi
-  V="$($PY -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>/dev/null)" && FOUND="${FOUND:+$FOUND, }$PY is $V"
-done
+# One probe per candidate. It answers by its exit code only: 0 for 3.9 or newer, 60 + minor for an older 3, 50 + minor
+# for a 2 (codes clear of 126 and 127 of the shell, 128 + n of a signal, and 9009 % 256 of a Windows store alias). A probe gets no descriptor of the hook: stdin, stdout and stderr are /dev/null, so a wrapper (a shim, a
+# script that starts a job in the background) cannot eat the payload or hold the pipe that the client reads. Codex
+# reads a hook until its stdout closes, and both clients let the call through when a hook runs past their timeout
+# (measured on Claude Code 2.1.302 and codex-cli 0.162.0, docs/THREAT-MODEL.md, C13).
+PROBE='import sys; v = sys.version_info; sys.exit(0 if v >= (3, 9) else 60 + v[1] if v[0] == 3 else 50 + v[1] if v[0] == 2 else 1)'
+# All probes together get BUDGET seconds. Then a timer stops the probe that runs, and the launcher refuses: the hook's
+# own watchdog (7 s) must still answer before the client's shortest timeout (10 s). A normal probe takes 0.05 s.
+BUDGET=2
+PROBE_PID=""
+EXPIRED=""
+trap 'EXPIRED=1; [ -n "$PROBE_PID" ] && kill -9 "$PROBE_PID"' USR1
+find_python() {
+  # the timer sends USR1 to this shell after a sleep that ran to its end; on TERM it stops the sleep, so it leaves no
+  # process behind. A client can give its hooks a PATH without sleep: then the fixed paths, and without any the
+  # timer does nothing (no bound) instead of refusing every call
+  (
+    trap 'kill "$s"; exit 0' TERM
+    for z in sleep /bin/sleep /usr/bin/sleep ""; do command -v "$z" >/dev/null && break; done
+    [ -n "$z" ] || exit 0
+    "$z" "$BUDGET" & s=$!
+    wait "$s" && kill -USR1 $$
+  ) </dev/null >/dev/null 2>&1 &
+  TIMER=$!
+  for PY in python3 python "py -3" python3.14 python3.13 python3.12 python3.11 python3.10 python3.9 \
+            /opt/homebrew/bin/python3 /usr/local/bin/python3 \
+            /Library/Frameworks/Python.framework/Versions/Current/bin/python3; do
+    $PY -c "$PROBE" </dev/null >/dev/null 2>&1 &
+    PROBE_PID=$!
+    wait "$PROBE_PID"
+    RC=$?
+    # a USR1 ends the wait early; the probe that the timer stopped is reaped here, so its end is not reported later
+    [ -n "$EXPIRED" ] && wait "$PROBE_PID"
+    PROBE_PID=""
+    if [ "$RC" -eq 0 ]; then
+      OK="$PY"
+      break
+    fi
+    if [ -n "$EXPIRED" ]; then
+      FOUND="${FOUND:+$FOUND, }$PY gave no answer in $BUDGET s"
+      break
+    fi
+    if [ "$RC" -ge 60 ] && [ "$RC" -le 68 ]; then
+      FOUND="${FOUND:+$FOUND, }$PY is 3.$((RC - 60))"
+    elif [ "$RC" -ge 50 ] && [ "$RC" -le 59 ]; then
+      FOUND="${FOUND:+$FOUND, }$PY is 2.$((RC - 50))"
+    fi
+  done
+  # no USR1 can arrive after this wait: the exec below must not get one, its default action ends the process
+  kill "$TIMER"
+  wait "$TIMER"
+}
+OK=""
+# 2>/dev/null: the shell reports a probe that the timer stopped ("Killed: 9") on its stderr
+find_python 2>/dev/null
+trap - USR1
+if [ -n "$OK" ]; then
+  exec $OK "$HERE/dispatch.py" "$@"
+fi
 # an incident marker for /maisecrets:report incident (docs/DIAGNOSTICS.md, section 3): after the answer, one mkdir
 # in a home that exists and is no link; it never fails the launcher
 mark() {

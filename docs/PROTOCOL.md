@@ -301,6 +301,10 @@ The client side is tested against a fake server with both endpoints
 ## 5. Failure rules
 
 - A hook that cannot decide fails closed and says why.
-- A timeout is fail-open in Claude Code; the detector must stay a regex in
-  milliseconds.
+- A timeout is fail-open in Claude Code and in Codex: the prompt goes to the model, the tool runs, the
+  output goes to the model as it is (Claude Code 2.1.302 and codex-cli 0.162.0, measured 2026-10-17). The
+  detector must stay a regex in milliseconds.
+- Codex reads a hook until its stdout closes; Claude Code reads it when the process ends. A child process
+  that keeps the hook's stdout open makes the hook time out in Codex after it answered. The launcher
+  (`hooks/run.sh`) gives its Python probes no descriptor of the hook and 2 s in total.
 - Nothing a hook prints contains a value. Reasons name keys and counts.

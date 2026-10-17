@@ -125,7 +125,10 @@ comment, runs `hooks/run.cmd`. Codex on Windows runs the `commandWindows`
 entry of each hook through `cmd.exe`, which starts `hooks/run.cmd` too. Both
 launchers run the same `dispatch.py`. Without a Python
 3.9+ the launcher blocks every prompt and every tool call and withholds every
-tool result, and its message names what to install: fail closed, with a cause.
+tool result, and its message names what to install: fail closed, with a cause. No probe of a
+candidate gets the hook's stdin, stdout or stderr, and all probes together get 2 s: a
+candidate that gives no answer in that time (a wrapper that hangs) is stopped, and the launcher
+refuses in the same way and names it.
 
 Proven with the harness on macOS (Claude Code 2.1.283) and on Debian 13
 (2.1.223), the scenarios of `harness/run.py`, on every push in CI; Windows through the GitHub
@@ -281,7 +284,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 13 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 323 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 325 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push

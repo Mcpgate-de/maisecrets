@@ -39,12 +39,11 @@ EVENTS = ("user-prompt", "pre-tool", "post-tool-failure", "post-tool", "session-
 ABSOLUTE_PYTHONS = ("/opt/homebrew/bin/python3", "/usr/local/bin/python3",
                     "/Library/Frameworks/Python.framework/Versions/Current/bin/python3")
 
-# a python3 that says it is 3.8: it fails the version probe, prints 3.8 for the version query,
-# and records any other call (a run of dispatch.py) in the tripwire
+# a python3 that says it is 3.8: the probe of run.sh gets 60 + minor, as from a real 3.8, and any other call
+# (a run of dispatch.py) is recorded in the tripwire
 _PY38 = """#!/bin/sh
 case "$2" in
-  *"version_info >= (3, 9)"*) exit 1 ;;
-  *"print('%d.%d'"*) echo 3.8; exit 0 ;;
+  *"sys.exit(0 if v >= (3, 9) else 60 + v[1]"*) exit 68 ;;
 esac
 echo "python3 $*" >> "$MS_TEST_TRIPWIRE"
 exit 0
@@ -152,6 +151,103 @@ class LauncherFailsClosedTests(unittest.TestCase):
         fake.write_text(_PY38, encoding="utf-8")
         fake.chmod(0o700)
         self.check_all_events("python3 is 3.8")
+
+
+# python3 candidates in front of a working Python. Each one fails or stalls its probe in another way; a probe must
+# hold no descriptor of the hook, and all probes together get 2 s (hooks/run.sh, BUDGET)
+_STALLING_PYTHONS = {
+    # a wrapper that never answers
+    "hangs": "#!/bin/sh\nexec sleep 30\n",
+    # a wrapper that fails and leaves a job in the background on the descriptors it got (a shim, a version manager)
+    "leaves_a_job_on_its_stdout": "#!/bin/sh\n( sleep 30 ) &\nexit 1\n",
+    "leaves_a_job_on_its_stderr": "#!/bin/sh\n( sleep 30 >/dev/null ) &\nexit 1\n",
+    # a wrapper that reads its stdin: the payload is the hook's stdin
+    "reads_stdin": "#!/bin/sh\ncat >/dev/null\nexit 1\n",
+    # a wrapper that prints a wrong version and fails
+    "prints_a_wrong_version": "#!/bin/sh\necho 3.12\nexit 1\n",
+}
+# the stand-in for dispatch.py: it shows that the launcher started it and that the payload reached it whole
+_DISPATCH_ECHO = ("import json, sys\nprint(json.dumps({'decision': 'block', 'reason': 'dispatch ran', "
+                  "'payload': sys.stdin.read()}))\n")
+
+
+@unittest.skipIf(BASH is None or os.name == "nt", "the probes of run.sh, POSIX (Git Bash has no fake shell scripts)")
+class LauncherProbeHoldsNothingTests(unittest.TestCase):
+    """A python candidate whose probe hangs or leaves a job on the hook's stdout kept run.sh waiting (30 s and more,
+    measured): past the client's timeout, and both clients let the call through then (Claude Code 2.1.302 and
+    codex-cli 0.162.0, measured 2026-10-17). Codex also waits until the hook's stdout closes. The launcher must
+    finish within its bound, with the verdict of the working Python or a refusal, and hold no descriptor open."""
+    LIMIT = 8.0   # the budget of 2 s plus a loaded machine; a held descriptor holds the hook for 30 s
+
+    def setUp(self):
+        self.sb = Sandbox(JSONFILE, backend="jsonfile")
+        self.addCleanup(self.sb.remove)
+        text = RUN_SH.read_text(encoding="utf-8")
+        for p in ABSOLUTE_PYTHONS:
+            text = text.replace(p, str(self.sb.root / "abs" / p.lstrip("/")))
+        self.hooks = self.sb.root / "hooks"
+        self.hooks.mkdir()
+        (self.hooks / "run.sh").write_text(text, encoding="utf-8")
+        (self.hooks / "dispatch.py").write_text(_DISPATCH_ECHO, encoding="utf-8")
+        self.fake = self.sb.root / "fake"
+        self.fake.mkdir()
+        # the working Python is the second candidate, `python`; sleep is on the PATH as on every client
+        self.tools = self.sb.root / "tools"
+        self.tools.mkdir()
+        os.symlink(sys.executable, self.tools / "python")
+        for tool in ("dirname", "mkdir", "cat", "sleep"):
+            os.symlink(shutil.which(tool), self.tools / tool)
+
+    def launch(self, body: str | None, event: str = "pre-tool") -> tuple[subprocess.CompletedProcess, float]:
+        for old in self.fake.iterdir():
+            old.unlink()
+        if body is not None:
+            (self.fake / "python3").write_text(body, encoding="utf-8")
+            (self.fake / "python3").chmod(0o700)
+        env = self.sb.env()
+        env["PATH"] = os.pathsep.join((str(self.fake), str(self.sb.bin), str(self.tools)))
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "echo probe-payload"}})
+        t0 = time.monotonic()
+        # capture_output reads until both pipes close, as Codex does: a descriptor that a probe's job holds shows here
+        p = subprocess.Popen([BASH, str(self.hooks / "run.sh"), event], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
+        try:
+            out, err = p.communicate(payload, timeout=60)
+        finally:
+            # the jobs the fakes left: only the group this test started
+            try:
+                os.killpg(p.pid, 9)
+            except (ProcessLookupError, PermissionError):
+                pass
+        return subprocess.CompletedProcess(p.args, p.returncode, out, err), time.monotonic() - t0
+
+    def test_a_probe_that_fails_or_holds_a_descriptor_does_not_hold_the_hook(self):
+        for case in ("leaves_a_job_on_its_stdout", "leaves_a_job_on_its_stderr", "reads_stdin",
+                     "prints_a_wrong_version"):
+            with self.subTest(case):
+                r, took = self.launch(_STALLING_PYTHONS[case])
+                self.assertLess(took, self.LIMIT, f"run.sh took {took:.1f} s: a probe held the hook")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                out = json.loads(r.stdout)
+                self.assertEqual(out["reason"], "dispatch ran", "the working Python must answer")
+                self.assertIn("probe-payload", out["payload"], "the payload must reach dispatch.py whole")
+                self.assertEqual(r.stderr, "")
+
+    def test_a_probe_that_never_answers_is_stopped_and_the_hook_refuses(self):
+        for event in EVENTS:
+            with self.subTest(event):
+                r, took = self.launch(_STALLING_PYTHONS["hangs"], event)
+                self.assertLess(took, self.LIMIT, f"run.sh took {took:.1f} s past its budget")
+                self.assertGreaterEqual(took, 1.5, "the budget is 2 s: a refusal before it is a false block")
+                self.assertIn("(found: python3 gave no answer in 2 s)", r.stdout)
+                self.assertNotIn("dispatch ran", r.stdout)
+                self.assertEqual(r.stderr, "", "the end of the stopped probe is not reported")
+                assert_refuses(self, event, r)
+
+    def test_without_a_stalling_candidate_the_first_python_answers(self):
+        r, took = self.launch(None)
+        self.assertEqual(json.loads(r.stdout)["reason"], "dispatch ran")
+        self.assertLess(took, self.LIMIT)
 
 
 _NO_POSIX_SH = shutil.which("sh") is None or os.name == "nt"
