@@ -281,7 +281,7 @@ claude --plugin-dir /path/to/maisecrets                 # one session, straight 
 python3 -m unittest discover -s tests -v               # about 30 seconds
 python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
 python3 harness/codex.py [--real]                      # 13 scenarios through codex exec (five need --real)
-python3 scripts/replay_can_fail.py                     # 282 proofs: each control's test, and each path of the seven invariants, goes red without its guard
+python3 scripts/replay_can_fail.py                     # 285 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -1940,7 +1940,8 @@ How it works (`docs/PROTOCOL.md` section 4):
    values or none; if the server refuses, the call is denied with the reason.
 
 `/maisecrets:status` shows the link state of each server. `client_header:
-false` (`/maisecrets:settings client_header false`) turns it off and removes
+false` (`/maisecrets:settings client_header false`) turns it off (in Codex at
+the next connection to the server) and removes
 the header again. A server behind a
 certificate authority of your own needs `client_vault_cafile`. On Windows a
 Bash command gets no server value.

@@ -311,6 +311,24 @@ class ToolNames(Base):
         (plug / ".codex-plugin" / "plugin.json").write_text(json.dumps({"mcpServers": "../../../../../x.json"}))
         self.assertIsNone(codex_vault.mcp_server_of(self.payload(proj)), "a path outside the plugin: not trusted")
 
+    def test_a_layer_deleted_during_the_session_still_names_nothing(self) -> None:
+        """Codex merged the project layer at the start; deleting it later does not move the server back, so the
+        answer of the start stays (Fable review: review94/r94_toctou.py)."""
+        self.write()
+        repo = self.tmp / "repo"
+        (repo / ".codex").mkdir(parents=True)
+        layer = repo / ".codex" / "config.toml"
+        layer.write_text('[mcp_servers.demo]\nurl = "https://b.example.net/mcp"\n')
+        codex_vault.note_session({"session_id": "s-del", "cwd": str(repo)})
+        layer.unlink()
+        self.assertIsNone(codex_vault.mcp_server_of(self.payload(repo, "s-del")))
+
+    def test_a_layer_that_renames_the_tools_counts_as_one_with_servers(self) -> None:
+        proj = self.tmp / "proj"
+        (proj / ".codex").mkdir(parents=True)
+        (proj / ".codex" / "config.toml").write_text("[features]\nnon_prefixed_mcp_tool_names = true\n")
+        self.assertTrue(codex_helper.project_brings_servers(str(proj), str(self.home)))
+
     def test_a_session_that_began_in_another_folder_names_nothing(self) -> None:
         """Codex keeps the server URLs of the folder a session began in; a later turn elsewhere keeps them (Gate B)."""
         self.write()
@@ -341,12 +359,12 @@ class ToolNames(Base):
                   '[mcp_servers.unrelated]\nurl = "https://x.example.net/mcp"\n',
                   '[profiles.p.mcp_servers.demo]\nurl = "https://evil.example.net/mcp"\n',
                   'this is not toml [\n')
-        for layer in layers:
+        for i, layer in enumerate(layers):
             with self.subTest(layer=layer):
                 (self.tmp / "repo" / ".codex" / "config.toml").write_text(layer)
-                self.assertIsNone(codex_vault.mcp_server_of(self.payload(proj)))
+                self.assertIsNone(codex_vault.mcp_server_of(self.payload(proj, f"s-{i}")))
         (self.tmp / "repo" / ".codex" / "config.toml").write_text('model = "x"\n')
-        self.assertIsNotNone(codex_vault.mcp_server_of(self.payload(proj)))
+        self.assertIsNotNone(codex_vault.mcp_server_of(self.payload(proj, "s-clean")))
 
     def test_the_user_layer_is_no_project_layer(self) -> None:
         """A session in the folder above CODEX_HOME (CODEX_HOME = <dir>/.codex) is no project override."""
@@ -402,8 +420,13 @@ class Helper(Base):
         if getattr(self, "driver", None) is None:
             self.driver = subprocess.Popen([sys.executable, "-c", self.DRIVER], stdin=subprocess.PIPE,
                                            stdout=subprocess.PIPE, text=True)
-            self.addCleanup(self.driver.wait)
-            self.addCleanup(self.driver.stdin.close)
+            driver = self.driver
+
+            def stop() -> None:
+                driver.stdin.close()
+                driver.wait(timeout=30)
+                driver.stdout.close()
+            self.addCleanup(stop)
         env = {"PATH": os.environ.get("PATH", ""), "HOME": str(self.tmp)}
         self.driver.stdin.write(json.dumps({"cmd": command, "cwd": str(cwd), "env": env}) + "\n")
         self.driver.stdin.flush()
@@ -460,6 +483,16 @@ class Helper(Base):
         (self.proj / ".codex" / "config.toml").write_text('[mcp_servers.demo]\nurl = "https://b.example.net/mcp"\n')
         self.assertEqual(self.run_helper(self.proj), {})
 
+    def test_no_header_once_client_header_is_false(self) -> None:
+        """The helper reads the setting itself: the opt-out works at the next connection, before a hook ran."""
+        config = HOME / "config.json"
+        before = config.read_text() if config.exists() else None
+        self.addCleanup(lambda: config.write_text(before) if before is not None else config.unlink())
+        config.write_text(json.dumps({"backend": "jsonfile", "allow_plaintext_store": True, "client_header": False}))
+        self.assertEqual(self.run_helper(self.proj), {})
+        config.write_text("{not json")
+        self.assertTrue(codex_helper.switched_off(str(HOME)), "a config that does not parse counts as off")
+
     def test_no_header_after_the_state_takes_it_back(self) -> None:
         command = self.entry()["http_headers_helper"]
         codex_vault.write_state({})
@@ -511,6 +544,11 @@ VALUES = ("vault-codex-test@example.com", "Vault Codex Test")
 @unittest.skipUnless(HAS_OPENSSL and os.name != "nt", "openssl on POSIX")
 class CodexHooks(Base):
     """The real hooks with Codex payloads against the fake server of harness/vault_server.py."""
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        import _hygiene
+        _hygiene.assert_children_ended()      # the serving children that watch_children kept have ended
 
     def setUp(self) -> None:
         import _hygiene

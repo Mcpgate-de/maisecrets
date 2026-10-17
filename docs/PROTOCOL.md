@@ -128,7 +128,11 @@ value only to a key that the vault announced when the person logged in.
   the header only when the first run gave it, in the same folder; a run with no
   record counts as the first only while the process is younger than two minutes
   (deny by default). The hook notes a result only in the folder that SessionStart
-  recorded for its session. Its command ends in
+  recorded for its session, and only when that start saw no project layer or
+  profile file with servers (a layer deleted later does not move the server
+  back). A project layer that sets `features.non_prefixed_mcp_tool_names` counts
+  as one with servers. The helper reads `client_header` itself at each run (the
+  policy file wins), so the opt-out works at the next connection. Its command ends in
   `|| echo '{}'`, because a helper that fails stops Codex from connecting. The
   PostToolUse payload of Codex names the tool only (`mcp__<server>__<tool>`,
   each character outside `[A-Za-z0-9_]` as `_`). The vault maps it to a user

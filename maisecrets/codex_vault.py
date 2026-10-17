@@ -78,21 +78,29 @@ def note_session(payload: dict) -> None:
     a later turn in another folder keeps them (Gate B review)."""
     session, cwd = payload.get("session_id"), payload.get("cwd")
     if isinstance(session, str) and session and isinstance(cwd, str) and cwd:
-        _first_folder(session, cwd)
+        # what Codex merged at this start: a project layer or a profile file with servers. A layer the agent deletes
+        # later does not change the URLs of this session, so the record keeps the answer of the start (Fable review)
+        home = str(codex_home())
+        moved = codex_helper.project_brings_servers(cwd, home) or codex_helper.profile_files_bring_servers(home)
+        _first_folder(session, cwd, moved)
 
 
 def _session_folder(session: str) -> str | None:
-    """The folder recorded at the SessionStart of this session, or None. Only SessionStart records one: a result
-    without it notes nothing, also when the record failed or expired (Gate A and Gate B review, round 2)."""
+    """The folder recorded at the SessionStart of this session, when the start saw no project layer or profile file
+    with servers; else None. Only SessionStart records one: a result without it notes nothing, also when the record
+    failed or expired (Gate A and Gate B review, round 2), and a record without the answer of the start counts as
+    one that saw servers."""
     try:
         data = json.loads(SESSIONS.read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
         return None
     rec = data.get(session) if isinstance(data, dict) else None
-    return rec["cwd"] if isinstance(rec, dict) and isinstance(rec.get("cwd"), str) else None
+    if not isinstance(rec, dict) or not isinstance(rec.get("cwd"), str) or rec.get("moved") is not False:
+        return None
+    return rec["cwd"]
 
 
-def _first_folder(session: str, cwd: str) -> str | None:
+def _first_folder(session: str, cwd: str, moved: bool = True) -> str | None:
     """The first folder recorded for this session; this cwd when there is none yet. None when the file is damaged."""
     SESSIONS.parent.mkdir(mode=0o700, parents=True, exist_ok=True)     # a first start: the folder is not there yet
     with _lock_for(SESSIONS.parent / ".lock"):
@@ -109,7 +117,7 @@ def _first_folder(session: str, cwd: str) -> str | None:
         now = time.time()
         data = {k: v for k, v in data.items() if isinstance(v, dict) and isinstance(v.get("t"), (int, float))
                 and now - v["t"] < SESSION_TTL}
-        data[session] = {"cwd": cwd, "t": now}
+        data[session] = {"cwd": cwd, "t": now, "moved": bool(moved)}
         atomic_write(SESSIONS, json.dumps(data, indent=1))
         return cwd
 

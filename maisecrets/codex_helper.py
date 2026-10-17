@@ -70,12 +70,16 @@ def load(path: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+_SERVER_KEYS = ("mcp_servers", "non_prefixed_mcp_tool_names")
+
+
 def _mentions_servers(node: object, depth: int = 0) -> bool:
-    """Any key `mcp_servers` at any depth: a project layer can also carry servers inside a profile table."""
+    """Any key `mcp_servers` at any depth: a project layer can also carry servers inside a profile table. The feature
+    `non_prefixed_mcp_tool_names` changes the tool names of servers, so it counts the same (Fable review)."""
     if depth > 64:
         return True
     if isinstance(node, dict):
-        return any(k == "mcp_servers" or _mentions_servers(v, depth + 1) for k, v in node.items())
+        return any(k in _SERVER_KEYS or _mentions_servers(v, depth + 1) for k, v in node.items())
     if isinstance(node, list):
         return any(_mentions_servers(v, depth + 1) for v in node)
     return False
@@ -259,8 +263,33 @@ def first_answer(runs_file: str, proc: str, folder: str, fresh: bool, age: float
             pass
 
 
+POLICY_FILES = {"darwin": "/Library/Application Support/maisecrets/policy.json", "linux": "/etc/maisecrets/policy.json"}
+
+
+def switched_off(home: str) -> bool:
+    """`client_header` false in the machine policy (it wins) or in the maisecrets config.json, read at each run: the
+    opt-out works at the next connection, before any hook of that start ran (Fable review). A file that exists and
+    cannot be read or parsed counts as off."""
+    policy = POLICY_FILES.get(sys.platform if sys.platform != "linux2" else "linux")
+    for path in (policy, os.path.join(home, "config.json")):
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError, RecursionError):
+            return True
+        if not isinstance(data, dict):
+            return True
+        if "client_header" in data:
+            return data["client_header"] is False
+    return False
+
+
 def entry_header(state_file: str, codex_home: str, name: str, url: str, folder: str) -> str | None:
     """The header value when every check of this run holds, without the record of the process; or None."""
+    if switched_off(os.path.dirname(os.path.dirname(state_file))):
+        return None
     try:
         with open(state_file, encoding="utf-8") as f:
             state = json.load(f)
