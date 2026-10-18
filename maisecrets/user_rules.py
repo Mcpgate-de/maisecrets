@@ -371,7 +371,7 @@ def check_regex(rx: str, keywords: tuple = (), allowlist: bool = False):
         return "no regex", None, ()
     if len(rx) > MAX_REGEX:
         return f"a regex longer than {MAX_REGEX} characters", None, ()
-    rx = detect._re2_to_python(rx)
+    rx = detect.re2_to_python(rx)
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -655,8 +655,8 @@ def _hash(*parts) -> str:
 
 
 # ------------------------------------------------------------------- rules --
-def _lazy(pattern: str) -> "detect._Lazy":
-    return detect._Lazy(pattern, 0)
+def _lazy(pattern: str) -> "detect.LazyRegex":
+    return detect.LazyRegex(pattern, 0)
 
 
 def _allowlists(lists, dropped) -> tuple[list, list, str]:
@@ -682,7 +682,7 @@ def _allowlists(lists, dropped) -> tuple[list, list, str]:
             awhy, _, _ = check_regex(arx, allowlist=True)
             if awhy:
                 return [], [], "in an allowlist: " + awhy
-            allow.append((detect._re2_to_python(arx), target))
+            allow.append((detect.re2_to_python(arx), target))
         stop += [s.lower() for s in words if isinstance(s, str)]
     return allow, stop, ""
 
@@ -730,7 +730,7 @@ def _json_rule(r: dict, place: str, kept, refuse, dropped, cache: dict) -> None:
     if verdict.get("why"):
         refuse(place, str(verdict["why"]))
         return
-    pattern = detect._re2_to_python(r["regex"])
+    pattern = detect.re2_to_python(r["regex"])
     rule = detect.Rule(id=ID_PREFIX + rid, type=type_, regex=_lazy(pattern), keywords=tuple(verdict["kw"]),
                        entropy=entropy, secret_group=group,
                        allow_regexes=tuple((_lazy(p), t) for p, t in allow), stopwords=tuple(stop))
@@ -780,7 +780,7 @@ def _prefix_rules(text: str, kept, refuse, cache: dict) -> None:
             if verdict.get("why"):
                 refuse(place, str(verdict["why"]))
                 continue
-            pattern = detect._re2_to_python(rx)
+            pattern = detect.re2_to_python(rx)
             kept(rid, detect.Rule(id=ID_PREFIX + rid, type="SECRET", regex=_lazy(pattern),
                                   keywords=tuple(verdict["kw"])), place, key, pattern, ())
         except Exception:  # noqa: BLE001 - one odd line never costs the others
