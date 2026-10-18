@@ -2756,7 +2756,8 @@ _GIVEN_SOURCES: list = []   # the sources a caller gave (use_sources); empty: th
 def use_sources(given) -> None:
     """The sources of every later scan of this process: a Sources object, or None for the plugin's readers of the home
     folder (maisecrets/sources.py). What the old sources gave is dropped: the rule list, the allow list, and the time
-    their rules of your own spent (a rule of the new sources with the same id starts at zero)."""
+    their rules of your own spent (a rule of the new sources with the same id starts at zero). Call it between scans,
+    never while one runs in another thread: a running scan would write the time of an old rule back."""
     global _RULES
     _GIVEN_SOURCES[:] = [] if given is None else [given]
     _RULES = None

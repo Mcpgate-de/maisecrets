@@ -373,6 +373,7 @@ class SourcesTests(unittest.TestCase):
         self.assertIn("user:probe", detect._REGEX_TIME, "the premise: the old rule's time is counted")
         detect._REGEX_TIME["user:probe"] = detect.USER_RULE_BUDGET * 10    # the old rule ran over its budget
         new = detect.Rule(id="user:probe", type="SECRET", regex=detect.LazyRegex(r"probe-[0-9]{6}", 0))
+        slow.clear()   # a slow old rule under load is not this test's question
         detect.use_sources(Given(new))
         self.assertIsNone(detect.slowest_user_rule())
         self.assertIn("user:probe", [m.kind for m in detect.scan("probe-654321", channel="tool")])
