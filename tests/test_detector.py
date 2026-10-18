@@ -35,6 +35,11 @@ TEXTS = {
 }
 
 
+# a label and its value as two arguments: only the pass of the label and literal values finds it (_literal_hits)
+LITERAL = 'f("Kennwort", "' + VALUE + '")'
+REF_LITERAL = "sec" "ret: #ref-" + REF_KEY + "#"
+
+
 class Names(detect.Sources):
     """A term list of one name."""
 
@@ -96,12 +101,79 @@ class TwoDetectorsTests(unittest.TestCase):
         self.assertNotEqual({r.id for r in a.rules()}, {r.id for r in b.rules()}, "the regions give other rules")
 
     def test_one_text_object_scanned_by_two_detectors_gets_the_result_of_each(self):
-        # the per-text index of a thread keeps the label hits of a text; the label words follow the languages, so a
-        # second detector that scans the same str object must not get the hits of the first one
+        # the per-text index of a thread keeps the label hits of a text (_literal_hits, the only pass that finds
+        # this form); the label words follow the languages, so a second detector that scans the same str object
+        # must not get the hits of the first one
         a, b = detector_a(), detector_b()
-        text = TEXTS["languages"]
+        text = LITERAL
         self.assertEqual((kinds(a, text), kinds(b, text), kinds(a, text)),
-                         (["ds-keyword-colon"], [], ["ds-keyword-colon"]))
+                         (["label-pw-literal"], [], ["label-pw-literal"]))
+
+    def test_one_text_object_follows_a_change_of_the_default_detector(self):
+        self.addCleanup(detect.use_regions, None)
+        self.addCleanup(detect.use_references, None)
+        text = LITERAL
+        detect.use_regions(regions.Active(regions=("generic",), languages=("en",), source="test"))
+        self.assertEqual([m.kind for m in detect.scan(text, channel="tool")], [])
+        detect.use_regions(DE)
+        self.assertEqual([m.kind for m in detect.scan(text, channel="tool")], ["label-pw-literal"], "new languages")
+        # the reference form decides whether a value after a label is a key (_ds_value_ok). A keyword rule takes
+        # this span before the label pass, so the cache itself is asked: first the form that makes the value a key
+        # (no label hit), then no form (a label hit)
+        ref = REF_LITERAL
+        detect.use_references(Hashes())
+        self.assertEqual(detect._literal_hits(ref, "tool"), [])
+        detect.use_references(detect.NO_REFERENCES)
+        self.assertEqual([h[0] for h in detect._literal_hits(ref, "tool")], ["label-secret-literal"], "a new form")
+
+    def test_two_curl_rules_of_one_id_keep_their_own_patterns(self):
+        head = r"\bcurl\b(?:.*?|.*?(?:[\r\n]{1,2}.*?){1,5})"   # a head that the curl matcher splits off
+        user = detect.Rule(id="curl-probe", type="SECRET", regex=detect.LazyRegex(head + r"\s-u\s+(\S+)"),
+                           secret_group=1)
+        token = detect.Rule(id="curl-probe", type="SECRET", regex=detect.LazyRegex(head + r"\s--tok\s+(\S+)"),
+                            secret_group=1)
+        text = "cu" "rl -" "u " + "ab:cd" + " --tok " + "zzzz" + " https://x.test"
+        got = [[m.value for m in detect.scan(text, channel="tool", rule_list=[r])] for r in (user, token, user)]
+        self.assertEqual(got, [["ab:cd"], ["zzzz"], ["ab:cd"]])
+
+    def test_one_detector_in_two_threads_counts_the_steps_of_both(self):
+        entered = {"one": threading.Event(), "two": threading.Event()}
+        release = threading.Event()
+
+        class Waits:
+            """A pattern whose step waits while its word is in the text: a rule of your own inside its regex."""
+            flags, groups = 0, 0
+
+            def __init__(self, word):
+                self.pattern, self.word = word, word
+
+            def finditer(self, text):
+                if self.word in text:
+                    entered[self.word].set()
+                    release.wait(30)
+                yield from ()
+
+            def search(self, text):
+                return None
+
+        class TwoRules(detect.Sources):
+            def user_rules(self):
+                return [detect.Rule(id="user:" + w, type="SECRET", regex=Waits(w)) for w in ("one", "two")]
+        d = detect.Detector(regions=DE, sources=TwoRules())
+        d.rules()
+        threads = [threading.Thread(target=d.scan, args=(w,), kwargs={"channel": "tool"}) for w in ("one", "two")]
+        for t in threads:
+            t.start()
+        try:
+            self.assertTrue(entered["one"].wait(30) and entered["two"].wait(30), "the premise: both steps run")
+            self.assertEqual(sorted(rule.id for rule, _ in d._running.values()), ["user:one", "user:two"],
+                             "a step of one thread hid the step of the other")
+        finally:
+            release.set()
+            for t in threads:
+                t.join(timeout=60)
+        self.assertEqual(d._running, {})
+        self.assertEqual(d._regex_chars, {"user:one": 6, "user:two": 6}, "each scan adds its characters once")
 
     def test_two_detectors_in_two_threads_keep_their_own_results(self):
         a, b = detector_a(), detector_b()

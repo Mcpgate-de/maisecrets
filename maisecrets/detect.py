@@ -1286,9 +1286,11 @@ def _judge_literal(label: str, v: str, quoted: bool = True, channel: str = "prom
 
 def _literal_hits(text: str, channel: str = "prompt") -> list:
     """(rule id, start of the label, start and end of the value) of each label and literal value of `text`, computed
-    once per text and detector for all the rules that read them: the label words follow the detector's languages."""
+    once per text and configuration for all the rules that read them: the label words follow the detector's
+    languages, and its reference form decides which values are keys."""
     cache = _text_index(text)
-    key = ("literal", channel, _det())
+    d = _det()
+    key = ("literal", channel, d, d._generation, d._pw_last_on)
     if key not in cache:
         hits = []
         pos = 0
@@ -2526,12 +2528,12 @@ def slowest_user_rule():
     runs now included; None when no rule of your own ran."""
     best = None
     d = _det()
-    running = d._running[0]
+    with d._lock:
+        running = list(d._running.values())
+        times = dict(d._regex_time)
+        rules_by_id = dict(d._regex_rule)
     now = time.perf_counter()
-    times = dict(d._regex_time)
-    rules_by_id = dict(d._regex_rule)
-    if running is not None:
-        rule, since = running
+    for rule, since in running:
         times[rule.id] = times.get(rule.id, 0.0) + (now - since)
         rules_by_id[rule.id] = rule
     for rid, took in times.items():
@@ -2545,30 +2547,36 @@ def _timed(rule: Rule, found, chars: int):
     budget, the rule is left out of this process and, by the state file, of the next ones. The sums belong to the
     detector of the scan."""
     d = _det()
-    times, running = d._regex_time, d._running
-    d._regex_rule[rule.id] = rule
-    d._regex_chars[rule.id] = d._regex_chars.get(rule.id, 0) + chars
+    times, chars_of, running, lock = d._regex_time, d._regex_chars, d._running, d._lock
+    me = threading.get_ident()
+    with lock:
+        d._regex_rule[rule.id] = rule
+        chars_of[rule.id] = chars_of.get(rule.id, 0) + chars
     try:
         while True:
             t = time.perf_counter()
-            running[0] = (rule, t)
+            running[me] = (rule, t)
             try:
                 m = next(found)
             except StopIteration:
                 break
             finally:
-                running[0] = None
-                times[rule.id] = times.get(rule.id, 0.0) + (time.perf_counter() - t)
+                took = time.perf_counter() - t
+                with lock:
+                    running.pop(me, None)
+                    times[rule.id] = times.get(rule.id, 0.0) + took
             yield m
     finally:
-        took = times.get(rule.id, 0.0)
-        if took > USER_RULE_BUDGET + USER_RULE_BUDGET_PER_MB * d._regex_chars.get(rule.id, 0) / 1e6:
+        with lock:
+            took, ran_over = times.get(rule.id, 0.0), chars_of.get(rule.id, 0)
+        if took > USER_RULE_BUDGET + USER_RULE_BUDGET_PER_MB * ran_over / 1e6:
             _too_slow(d, rule, took)
 
 
 def _too_slow(d: "Detector", rule: Rule, spent: float) -> None:
-    if d._rules is not None:
-        d._rules = [r for r in d._rules if r is not rule]
+    with d._lock:
+        if d._rules is not None:
+            d._rules = [r for r in d._rules if r is not rule]
     try:
         d._sources_now().note_slow(rule, spent * 1000)
     except Exception:  # noqa: BLE001 - the rule is out of this process either way
@@ -2698,8 +2706,8 @@ def use_sources(given) -> None:
     """The sources of every later scan of this process: a Sources object, or None for the plugin's readers of the home
     folder (maisecrets/sources.py). What the old sources gave is dropped: the rule list, the allow list, and the time
     their rules of your own spent (a rule of the new sources with the same id starts at zero). Call it between scans,
-    never while one runs in another thread: a running scan would write the time of an old rule back. It configures the
-    default detector."""
+    never while one runs in another thread: a running scan adds the time of an old rule to the old sums, which the
+    new sources no longer read. It configures the default detector."""
     _DEFAULT._given_sources = given
     _DEFAULT._forget(allow=True, times=True)
 
@@ -2754,6 +2762,7 @@ def use_references(given) -> None:
     """The reference form of every later scan of the default detector: a References object, or None for the plugin's
     (maisecrets/placeholder.py). Call it between scans."""
     _DEFAULT._given_references = given
+    _DEFAULT._generation += 1   # a cache of the label hits read the old form
 
 
 def _references() -> References:
@@ -2781,6 +2790,7 @@ class Detector:
         self._given_regions = regions
         self._given_sources = sources
         self._given_references = references
+        self._generation = 0                # one more at each change of the configuration (_forget)
         self._rules = None                  # the rule list (rules())
         self._loaded_for = (None, ())       # the rule list and the regions it was loaded for
         self._allow = None                  # (exact values, rule ids) of the allow list
@@ -2791,9 +2801,11 @@ class Detector:
         self._regex_time = {}               # the time each rule of your own spent inside its regex (seconds),
         self._regex_chars = {}              # the characters it ran over,
         self._regex_rule = {}               # and the rule of each id
-        self._running = [None]              # (rule, perf_counter at the start) while a step of one runs, else None
+        self._running = {}                  # thread id -> (rule, perf_counter at the start) while a step runs
+        self._lock = threading.Lock()       # the sums and the running steps of several threads
 
     def _forget(self, allow: bool = False, times: bool = False) -> None:
+        self._generation += 1
         self._rules = None
         self._shape_ids = None
         if allow:
@@ -3372,7 +3384,8 @@ def _curl_parts(rule: Rule):
     for a curl rule whose regex a sync changed (it then runs as it is: correct, only slower)."""
     if not rule.id.startswith("curl-"):
         return None
-    if rule.id not in _CURL_PARTS:
+    key = (rule.id, rule.regex.pattern, rule.regex.flags)
+    if key not in _CURL_PARTS:
         p = rule.regex.pattern
         flags = "(?i)" if p.startswith("(?i)") else ""
         body = p[len(flags):]
@@ -3382,8 +3395,8 @@ def _curl_parts(rule: Rule):
             # the space after a credential was part of the match, so finditer skipped a credential that started
             # right after it: `-u a:x --user b:y` lost b:y (Gate B of 0.6.15); a lookahead keeps it
             tail = tail[:-len(r"(?:\s|\Z)")] + r"(?=\s|\Z)"
-        _CURL_PARTS[rule.id] = None if head is None else (re.compile(flags + r"\bcurl\b"), re.compile(flags + tail))
-    return _CURL_PARTS[rule.id]
+        _CURL_PARTS[key] = None if head is None else (re.compile(flags + r"\bcurl\b"), re.compile(flags + tail))
+    return _CURL_PARTS[key]
 
 
 def _curl_matches(parts, text: str):
