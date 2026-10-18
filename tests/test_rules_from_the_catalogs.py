@@ -339,7 +339,8 @@ class Base64PemTests(unittest.TestCase):
         prose = "not key material, only a banner in a document " * 8   # long enough to pass the length check
         fake = J([dashes, "BEGIN PRIVATE KEY", dashes, "\n", prose, "\n", dashes, "END PRIVATE KEY", dashes, "\n"])
         v = base64.b64encode(fake.encode()).decode()
-        # the prompt channel: in the tool channel the decoder of 0.6.18 (maisecrets/normalise.py) hands the decoded
+        # the prompt channel: in the tool channel the decoder of 0.6.18 (maisecrets/detection/normalise.py) hands the
+        # decoded
         # banner to the vendored private-key rule
         self.assertEqual(kinds_over(f"tls.key: {v}\n", v, "prompt"), [])
 

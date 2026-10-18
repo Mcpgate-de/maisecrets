@@ -674,7 +674,7 @@ not hold, when the file holds no listed label word. Not built: "born on" with a 
 `dc42866`). Tool channel only; a typed prompt does not change. `--locale de_DE`.
 
 1. **A folded vCard property.** RFC 6350 folds a line with a line break and one space or tab. A new stage of the cleaned
-   copy (`unfold`, `maisecrets/normalise.py`) joins the parts inside `BEGIN:VCARD` to `END:VCARD`, and the mask covers
+   copy (`unfold`, `maisecrets/detection/normalise.py`) joins the parts inside `BEGIN:VCARD` to `END:VCARD`, and the mask covers
    both parts in the true text. The indent of `BEGIN:VCARD` counts as part of each line; a binary property (`PHOTO`,
    `KEY`, `ENCODING=b`) stays folded; a folded line that starts with `END:VCARD` does not end the card.
 2. **A vCard line without its card.** `ADR`, `N` and `BDAY` (TEL, EMAIL and FN were found already) after a `.vcf` file
@@ -743,7 +743,7 @@ counts values ("Method and limits", "Scoring"). "R, own type" counts a value as 
 type; "R, covered" only when the detections cover all of it. "R raw" is the recall over the labels before the
 cleaning, at their original offsets. A type with no labelled values has a row when it has detections. "F1 0.6.20" is
 the same row for tag `v0.6.20`. The types NAME, ADDRESS, BIRTH_DATE, ID_NUMBER and USERNAME (tier "personal") have
-rules from 0.6.21, in the tool channel only (`maisecrets/personal.py`); 0.6.20 has none.
+rules from 0.6.21, in the tool channel only (`maisecrets/detection/personal.py`); 0.6.20 has none.
 
 
 ### Gretel
@@ -1059,7 +1059,7 @@ release branch. Mendeley and PIILO changed in no type. Source: `scripts/measure_
 | Nemotron-PII | SECRET | prompt | 2,841 → 2,840 | 33 → 33 | 0.988 → 0.988 | 0.244 → 0.244 |
 | Nemotron-PII | US_NPI | prompt | 0 → 0 | 10 → 0 | 0.000 → – | – → – |
 
-The new detections by rule, tool channel (`maisecrets/personal.py`, `FORMS`): `address-after-label` 5,372
+The new detections by rule, tool channel (`maisecrets/detection/personal.py`, `FORMS`): `address-after-label` 5,372
 detections on labelled Gretel addresses and 276 on no labelled value (most of these are addresses of a company named in
 the line before the label, or addresses Gretel did not label), 709 on Nemotron-PII addresses;
 `id-number-after-record-label` 4,269 detections on labelled Nemotron-PII ID numbers. Gretel ID_NUMBER +20 false alarms: account numbers after `account` and `account number` that Gretel did not
@@ -1096,7 +1096,7 @@ A dataset label maps to the maisecrets type below; every other label is `OUT_OF_
 What each class of rules adds at the margin, 0.6.24 against 0.6.23: the script switches one class off and scans every
 input again (`scripts/measure_rule_classes.py`, regions `de`, `--locale de_DE`). When a class is off, another rule
 can still take the span, so a number counts what only that class catches. The classes come from the rule registry
-(`maisecrets/registry.py`, `coarse_class`): a token class per source, one class per label rule, a PII class per
+(`maisecrets/detection/registry.py`, `coarse_class`): a token class per source, one class per label rule, a PII class per
 type and region, and one class per secret form of 0.6.24 (`form:`). `maisecrets rules list` shows the class, the
 channel, the region and what a rule needs (a label or a form) for each rule.
 

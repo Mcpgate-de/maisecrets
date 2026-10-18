@@ -1002,7 +1002,7 @@ class BetterleaksJsonTests(unittest.TestCase):
     @unittest.skipIf(sys.version_info < (3, 11), "tomllib is Python 3.11+")
     def test_the_json_rules_equal_the_vendored_toml(self):
         import tomllib
-        rules = Path(__file__).resolve().parent.parent / "maisecrets" / "rules"
+        rules = Path(__file__).resolve().parent.parent / "maisecrets" / "detection" / "rules"
         self.assertEqual(json.loads((rules / "betterleaks.json").read_text(encoding="utf-8")),
                          tomllib.loads((rules / "betterleaks.toml").read_text(encoding="utf-8")),
                          "run scripts/sync_betterleaks.py: it writes both")

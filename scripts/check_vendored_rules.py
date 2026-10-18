@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the files the sync scripts write to maisecrets/rules/, as data, without running any of them.
+"""Check the files the sync scripts write to maisecrets/detection/rules/, as data, without running any of them.
 
 Usage: scripts/check_vendored_rules.py
 

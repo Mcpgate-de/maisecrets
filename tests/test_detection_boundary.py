@@ -28,8 +28,11 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
-CORE = frozenset({"__init__", "detect", "checksums", "lazy_regex", "normalise", "regions", "registry", "rulespec",
-                  "rule_filter", "personal"})
+# the modules of the detection core (maisecrets/detection/) and the names of maisecrets.* that are the same module
+# objects (maisecrets/detect.py and the others: compatibility names)
+CORE_MODULES = ("checksums", "lazy_regex", "normalise", "regions", "registry", "rulespec", "rule_filter", "personal")
+CORE = frozenset({"__init__", "detect", "detection", "detection.core", *CORE_MODULES,
+                  *(f"detection.{m}" for m in CORE_MODULES)})
 # the modules of the plugin that a plain scan still imports. Each is a later step: the config read for the regions
 # (home, through active_regions), the rules of your own and the allow list (user_rules), and the probes for a term
 # list or an import (term_files, value_files). Remove a name when the scan no longer imports it; never add one. The
@@ -54,14 +57,19 @@ def private_uses(source: str) -> list[tuple[int, str]]:
     names = {"detect"}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            names |= {a.asname for a in node.names if a.asname and a.name.split(".")[-1] == "detect"}
+            names |= {a.asname for a in node.names if a.asname and (
+                a.name.split(".")[-1] == "detect" or a.name.endswith("detection.core"))}
         elif isinstance(node, ast.ImportFrom):
-            names |= {a.asname or a.name for a in node.names if a.name == "detect"}
+            names |= {a.asname or a.name for a in node.names if a.name == "detect" or (
+                a.name == "core" and (node.module or "").split(".")[-1] == "detection")}
 
     def is_module(e) -> bool:
         return (isinstance(e, ast.Name) and e.id in names) or (
             isinstance(e, ast.Attribute) and e.attr == "detect" and isinstance(e.value, ast.Name)
-            and e.value.id == "maisecrets")
+            and e.value.id == "maisecrets") or (
+            isinstance(e, ast.Attribute) and e.attr == "core" and isinstance(e.value, ast.Attribute)
+            and e.value.attr == "detection" and isinstance(e.value.value, ast.Name)
+            and e.value.value.id == "maisecrets")
 
     for _ in range(3):   # d = detect, then e = d
         for node in ast.walk(tree):
@@ -76,17 +84,19 @@ def private_uses(source: str) -> list[tuple[int, str]]:
                 and len(node.args) >= 2 and is_module(node.args[0]) and isinstance(node.args[1], ast.Constant) \
                 and str(node.args[1].value).startswith("_"):
             out.append((node.lineno, node.args[1].value))
-        elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[-1] == "detect":
+        elif isinstance(node, ast.ImportFrom) and ((node.module or "").split(".")[-1] == "detect"
+                                                   or (node.module or "").endswith("detection.core")):
             out += [(node.lineno, a.name) for a in node.names if a.name.startswith("_")]
         elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith(
-                ("detect._", "maisecrets.detect._")):
+                ("detect._", "maisecrets.detect._", "detection.core._", "maisecrets.detection.core._")):
             out.append((node.lineno, node.value))   # a string such as an annotation: "detect._Lazy"
     return sorted(set(out))
 
 
 def outside_the_core() -> list[Path]:
-    return sorted([p for p in (ROOT / "maisecrets").rglob("*.py") if not (p.parent.name == "maisecrets"
-                                                                          and p.stem in CORE)]
+    detection = ROOT / "maisecrets" / "detection"
+    return sorted([p for p in (ROOT / "maisecrets").rglob("*.py") if not (
+        (p.parent.name == "maisecrets" and p.stem in CORE) or detection in p.parents)]
                   + list((ROOT / "hooks").rglob("*.py")))
 
 
@@ -113,6 +123,15 @@ class DetectionBoundaryTests(unittest.TestCase):
                          [(1, "maisecrets.detect._Lazy")])
         self.assertEqual(private_uses("from . import other\nother.detect._x\nd = other.detect\nd._y\n"), [],
                          "the detect of another object is not this module")
+        # the core under its package name (maisecrets/detection/core.py): the same module, the same boundary
+        self.assertEqual(private_uses("from .detection import core\ncore._ranked(1)\n"), [(2, "_ranked")])
+        self.assertEqual(private_uses("from maisecrets.detection import core as c\nc._det()\n"), [(2, "_det")])
+        self.assertEqual(private_uses("from .detection.core import _word_set\n"), [(1, "_word_set")])
+        self.assertEqual(private_uses("import maisecrets.detection.core as c\nc._scan('x')\n"), [(2, "_scan")])
+        self.assertEqual(private_uses("import maisecrets.detection.core\nmaisecrets.detection.core._det()\n"),
+                         [(2, "_det")])
+        self.assertEqual(private_uses('def f() -> "detection.core._Lazy":\n    pass\n'), [(1, "detection.core._Lazy")])
+        self.assertEqual(private_uses("from .other import core\ncore._x\n"), [], "another package's core")
 
     def test_no_module_outside_the_core_uses_a_private_name_of_detect(self):
         files = outside_the_core()
@@ -126,7 +145,8 @@ class DetectionBoundaryTests(unittest.TestCase):
     def test_every_core_module_exists(self):
         for name in sorted(CORE | NOT_YET_OUT):
             with self.subTest(name):
-                self.assertTrue((ROOT / "maisecrets" / f"{name}.py").is_file(), "a renamed module: update the list")
+                rel = "detection/__init__" if name == "detection" else name.replace(".", "/")
+                self.assertTrue((ROOT / "maisecrets" / f"{rel}.py").is_file(), "a renamed module: update the list")
 
     def test_a_name_that_left_the_core_keeps_its_old_import_where_the_core_can_give_it(self):
         # LazyRx moved to its own core module; a caller of detect.LazyRx gets the same class
@@ -186,7 +206,7 @@ class DetectionBoundaryTests(unittest.TestCase):
         r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, env=env, timeout=120)
         self.assertEqual(r.returncode, 0, r.stderr)
         loaded = {m.split(".", 1)[1] for m in json.loads(r.stdout)}
-        self.assertTrue({"detect", "personal", "registry"} <= loaded, loaded)
+        self.assertTrue({"detect", "detection.personal", "detection.registry"} <= loaded, loaded)
         beyond = loaded - CORE
         self.assertFalse(loaded & NEVER, f"{call}() imports {sorted(loaded & NEVER)}")
         self.assertFalse(beyond - NOT_YET_OUT, f"{call}() now imports {sorted(beyond - NOT_YET_OUT)}")
@@ -503,7 +523,7 @@ class ReferencesTests(unittest.TestCase):
     def test_detect_py_holds_no_part_of_the_plugin_reference_form(self):
         # the brackets, their escapes, the c-key pattern, and an import of placeholder.py: each is the plugin's form,
         # which detect.py must ask References about, never know
-        src = (ROOT / "maisecrets" / "detect.py").read_text(encoding="utf-8")
+        src = (ROOT / "maisecrets" / "detection" / "core.py").read_text(encoding="utf-8")
         # a ratchet of the spellings an ordinary change writes, not a proof against one that hides
         forms = {"open bracket": _OPEN, "close bracket": _CLOSE, "open escape": "\\u27e6",
                  "close escape": "\\u27e7", "open code point": "0x27e6", "close code point": "0x27e7",

@@ -65,7 +65,7 @@ DEFAULT_CONFIG = {
     "rewrite_prompts": True,
     "gateway_servers": [],           # MCP servers that resolve placeholders themselves; read by nothing yet
     # country codes for the PII rules and the label languages; "auto" is the country of the system
-    # setting (maisecrets/regions.py). pii_regions is the old name and still read.
+    # setting (maisecrets/detection/regions.py). pii_regions is the old name and still read.
     "regions": ["auto"],
     "max_new_entries_per_result": 100,   # above this, a tool result is masked without storing more values
     "resolve_in_files": True,        # Write/Edit content resolves a placeholder like an MCP argument
@@ -504,7 +504,8 @@ def load_config() -> dict:
 
 
 def regions_from_config():
-    """The regions and label languages that the config of this computer names (maisecrets/regions.py). A config that
+    """The regions and label languages that the config of this computer names (maisecrets/detection/regions.py). A
+    config that
     cannot be read counts as none: a bad one is reported by the vault."""
     from . import regions
     try:

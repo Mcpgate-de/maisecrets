@@ -1,4 +1,5 @@
-"""The forms of 0.6.24 (maisecrets/personal.py, FORMS): each finds its synthetic value, and none of them fires on the
+"""The forms of 0.6.24 (maisecrets/detection/personal.py, FORMS): each finds its synthetic value, and none of them
+fires on the
 developer text of tests/fp_corpus_forms.py, which holds exactly their shapes without a value.
 
 Run: python3 -m unittest tests.test_fp_corpus_forms -v
