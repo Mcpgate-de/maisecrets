@@ -33,11 +33,12 @@ CORE = frozenset({"__init__", "detect", "checksums", "normalise", "regions", "re
 # (home, through active_regions), the rules of your own and the allow list (user_rules), and the probes for a term
 # list or an import (term_files, value_files). Remove a name when the scan no longer imports it; never add one. The
 # exceptions so far: home.py took the file and config helpers out of vault.py (2026-10-18), and with it vault and
-# placeholder left the scan; sources.py holds the plugin's readers that detect.py had (the default sources). A scan
-# that is given its regions and its sources imports none of these (SourcesTests).
-NOT_YET_OUT = frozenset({"home", "sources", "term_files", "user_rules", "value_files"})
+# placeholder left the scan; sources.py holds the plugin's readers that detect.py had (the default sources);
+# placeholder.py came back as the default reference form (2026-10-18), which detect.py no longer knows itself. A
+# scan that is given its regions, its sources and its references imports none of these (ReferencesTests).
+NOT_YET_OUT = frozenset({"home", "placeholder", "sources", "term_files", "user_rules", "value_files"})
 # a scan never imports the store or the placeholder form, also with a term list and an import of values in place
-NEVER = frozenset({"vault", "placeholder", "rehydration", "vault_refs", "hooks", "settings"})
+NEVER = frozenset({"vault", "rehydration", "vault_refs", "hooks", "settings"})
 
 
 def private_uses(source: str) -> list[tuple[int, str]]:
@@ -265,6 +266,16 @@ class GivenRegionsTests(unittest.TestCase):
             hooks.main(["dispatch.py", "pre-tool"])
         given.assert_called_once_with(sources.PLUGIN_SOURCES)
 
+    def test_the_hook_entry_gives_the_plugin_reference_form(self):
+        from maisecrets import hooks, placeholder
+        with mock.patch.object(self.detect, "use_references") as given, \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps({
+                    "hook_event_name": "PreToolUse", "session_id": "references", "tool_name": "Grep",
+                    "tool_input": {"pattern": "x", "path": "."}}))), \
+                mock.patch.object(sys, "stdout", io.StringIO()):
+            hooks.main(["dispatch.py", "pre-tool"])
+        given.assert_called_once_with(placeholder.REFERENCES)
+
     def test_given_regions_need_no_home_module(self):
         code = (f"import json, sys\nsys.path.insert(0, {str(ROOT)!r})\n"
                 "from maisecrets import detect, regions\n"
@@ -293,6 +304,7 @@ class Given(detect.Sources):
 
 detect.use_regions(regions.resolve({"regions": ["de"]}))
 detect.use_sources(Given())
+detect.use_references(detect.NO_REFERENCES)
 text = NAME + " wrote to anna.probe" + "@" + "beispiel-firma.de"
 kinds = sorted(m.kind for m in detect.scan(text, channel="tool")) + sorted(m.kind for m in detect.findings(text))
 print(json.dumps([kinds, sorted(m for m in sys.modules if m.startswith("maisecrets."))]))
@@ -388,6 +400,82 @@ class SourcesTests(unittest.TestCase):
         self.detect.use_sources(Counting())
         self.detect.reset_rules()
         self.assertEqual(asked, [1])
+
+
+_OPEN, _CLOSE = chr(0x27E6), chr(0x27E7)
+_PLUGIN_REF = _OPEN + "SECRET" + "_c7" + _CLOSE   # the plugin's form, built here: never as a literal in a test file
+
+_SCAN_WITH_A_FOREIGN_REFERENCE_FORM = """
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from maisecrets import detect, regions
+
+
+class Hashes(detect.References):
+    # a foreign reference form: #ref-<key>#
+    def hit_is_a_reference(self, text, start, secret):
+        return secret.startswith("#ref-") and secret.endswith("#")
+
+    def names_a_key(self, low):
+        return low.startswith("#ref-")
+
+
+detect.use_regions(regions.resolve({"regions": ["de"]}))
+detect.use_sources(detect.NO_SOURCES)
+detect.use_references(Hashes())
+plugin_ref = chr(0x27E6) + "SECRET" + "_c7" + chr(0x27E7)
+foreign = [m.kind for m in detect.scan('db_pass' 'word = "#ref-Qx7Kp2Lm9Vw4#"', channel="tool", path="/tmp/a.txt")]
+plain = [m.kind for m in detect.scan('db_pass' 'word = "Qx7Kp2Lm9Vw4"', channel="tool", path="/tmp/a.txt")]
+plugin = [m.kind for m in detect.scan('cu' 'rl -u "app:' + plugin_ref + '" https://x.test', channel="tool")]
+print(json.dumps([foreign, plain, plugin, sorted(m for m in sys.modules if m.startswith("maisecrets."))]))
+"""
+
+
+class ReferencesTests(unittest.TestCase):
+    """The detector asks a References object about the reference form (detect.use_references); the plugin's form
+    (placeholder.REFERENCES) is the default. detect.py itself holds no part of that form."""
+
+    def setUp(self):
+        from maisecrets import detect, placeholder
+        self.detect, self.placeholder = detect, placeholder
+        self.addCleanup(detect.use_references, None)
+
+    def test_a_foreign_reference_form_with_given_regions_sources_and_context_imports_no_plugin_module(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX"))}
+        r = subprocess.run([sys.executable, "-I", "-c", _SCAN_WITH_A_FOREIGN_REFERENCE_FORM, str(ROOT)],
+                           capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        foreign, plain, plugin, mods = json.loads(r.stdout)
+        self.assertTrue(plain, "the premise: the same value without the foreign form is a hit")
+        self.assertEqual(foreign, [], "the foreign form is a reference: no hit")
+        self.assertEqual(plugin, ["curl-auth-user"], "the plugin's form is plain text to this caller")
+        loaded = {m.split(".", 1)[1] for m in mods}
+        self.assertEqual(loaded - CORE, set(), f"only core modules: {sorted(loaded - CORE)}")
+        self.assertNotIn("placeholder", loaded)
+
+    def test_the_plugin_form_is_the_default_and_a_caller_can_drop_it(self):
+        flag = "-" + "u"   # split: the tree scan reads a curl user flag in a line as a value
+        text = 'cu' + 'rl ' + flag + ' "app:' + _PLUGIN_REF + '" https://x.test'
+        self.assertIs(self.detect._references(), self.placeholder.REFERENCES)
+        self.assertEqual(self.detect.findings(text, channel="tool"), [], "the plugin's form is never a hit")
+        self.detect.use_references(self.detect.NO_REFERENCES)
+        self.assertEqual([m.kind for m in self.detect.findings(text, channel="tool")], ["curl-auth-user"])
+        self.detect.use_references(None)
+        self.assertEqual(self.detect.findings(text, channel="tool"), [])
+
+    def test_detect_py_holds_no_part_of_the_plugin_reference_form(self):
+        # the brackets, their escapes, the c-key pattern, and an import of placeholder.py: each is the plugin's form,
+        # which detect.py must ask References about, never know
+        src = (ROOT / "maisecrets" / "detect.py").read_text(encoding="utf-8")
+        forms = {"open bracket": _OPEN, "close bracket": _CLOSE, "open escape": "\\u27e6",
+                 "close escape": "\\u27e7", "key pattern": "_c\\d"}
+        self.assertEqual({name for name, form in forms.items() if form.lower() in src.lower()}, set())
+        # placeholder.py is loaded in one place only: as the default form when no caller gives one (_references)
+        importers = {f.name for f in ast.parse(src).body if isinstance(f, ast.FunctionDef)
+                     for n in ast.walk(f) if isinstance(n, ast.ImportFrom) and (n.module or "") == "placeholder"}
+        self.assertEqual(importers, {"_references"})
+        plugin = (ROOT / "maisecrets" / "placeholder.py").read_text(encoding="utf-8")
+        self.assertIn("_c\\d", plugin, "the premise: the checker's key pattern is the one the form uses")
 
 
 if __name__ == "__main__":

@@ -616,8 +616,8 @@ def _ds_value_ok(v: str, min_len: int = 8) -> bool:
         return False
     if all(ord(low[i + 1]) - ord(low[i]) == 1 for i in range(len(low) - 1)):
         return False
-    if low.startswith(("\u27e6", "<")) and "_c" in low:
-        return False
+    if _references().names_a_key(low):
+        return False   # a reference of the caller's form, not a value
     return True
 
 
@@ -2669,16 +2669,9 @@ def _import_hits(text: str, enabled, found: list, taken_starts: list, taken_ends
             str(k).startswith("import:") for k in enabled):
         return
     found_here = _import_matches(text)
-    refs: list = []
-    if found_here and "\u27e6" in text:
-        # a placeholder stays whole: an import hit inside its brackets would turn a resolvable placeholder into a
-        # masked one (Gate B, round 1). The floor refuses a key as a value too
-        from .placeholder import find_refs
-        for _k, a, b in find_refs(text):
-            # the bracket and the key only: a display text inside a placeholder (`:Jan Kowalski`) is text, and an
-            # imported value in it is masked (Gate B, round 2)
-            colon = text.find(":", a, b)
-            refs += [(a, colon if colon >= 0 else b - 1), (b - 1, b)]
+    # a reference stays whole: an import hit inside its key would turn a resolvable reference into a masked one
+    # (Gate B, round 1); a display text inside a reference is text, and an imported value in it is masked (round 2)
+    refs: list = _references().key_spans(text) if found_here else []
     for m in sorted(found_here, key=lambda x: x.start):
         if not ((enabled is None or IMPORT_RULE in enabled or IMPORT_KEY in enabled or m.kind in enabled)
                 and m.end > m.start):
@@ -2774,6 +2767,57 @@ def _sources() -> Sources:
     except ImportError:   # the standalone skill ships the detector without the plugin: no sources, as before
         return NO_SOURCES
     return PLUGIN_SOURCES
+
+
+class References:
+    """How the caller writes a reference into text, as far as a scan must know it: a reference is never a finding, and
+    an import never cuts its key. Each method is one question a scan asks; this base knows no reference form. The
+    plugin's form is maisecrets/placeholder.py (REFERENCES), the default when no caller gives its own
+    (use_references)."""
+
+    def names_a_key(self, low: str) -> bool:
+        """A lower-case value after a label that is a reference key: no value."""
+        return False
+
+    def key_spans(self, text: str) -> list:
+        """(start, end) of each part of a reference that an import hit must not cut."""
+        return []
+
+    def cell_spans(self, text: str, a: int, b: int) -> list:
+        """(start, end) of each complete reference inside text[a:b], in order: no export cell value."""
+        return []
+
+    def inside(self, text: str, pos: int) -> bool:
+        """Whether pos lies inside a reference that is open there."""
+        return False
+
+    def hit_is_a_reference(self, text: str, start: int, secret: str) -> bool:
+        """Whether a hit at start with this secret is a reference or holds one."""
+        return False
+
+    def has_marks(self, value: str) -> bool:
+        """Whether a personal-data value holds a mark of a reference."""
+        return False
+
+
+NO_REFERENCES = References()
+_GIVEN_REFERENCES: list = []   # the reference form a caller gave (use_references); empty: the plugin's, if there
+
+
+def use_references(given) -> None:
+    """The reference form of every later scan of this process: a References object, or None for the plugin's
+    (maisecrets/placeholder.py). Call it between scans."""
+    _GIVEN_REFERENCES[:] = [] if given is None else [given]
+
+
+def _references() -> References:
+    if _GIVEN_REFERENCES:
+        return _GIVEN_REFERENCES[0]
+    try:
+        from .placeholder import REFERENCES
+    except ImportError:   # a copy of the detector without placeholder.py: no reference form
+        return NO_REFERENCES
+    return REFERENCES
 
 
 def switched_off(rule_id: str, ids: frozenset) -> bool:
@@ -3628,7 +3672,6 @@ def _csv_cells(text: str, pos: int, delim: str):
         return cells, i
 
 
-_PLACEHOLDER_IN_CELL_RE = _LazyRx("\u27e6[A-Z][A-Z_]*_c\\d+(?::[^\u27e7\n]*)?\u27e7")
 # what a cell of a schema, a form or a masked export holds instead of a password
 _NOT_A_CELL_VALUE = frozenset({"true", "false", "null", "none", "nil", "undefined", "string", "str", "text", "int",
                                "integer", "bool", "boolean", "varchar", "yes", "no", "n/a", "na", "-", "--", "*",
@@ -3637,11 +3680,12 @@ _NOT_A_CELL_VALUE = frozenset({"true", "false", "null", "none", "nil", "undefine
 
 
 def _outside_placeholders(text: str, a: int, b: int) -> list:
-    """The parts of text[a:b] outside complete maisecrets placeholders, each trimmed: a placeholder is no value."""
+    """The parts of text[a:b] outside complete references (References.cell_spans), each trimmed: a reference is no
+    value."""
     parts, pos = [], a
-    for m in _PLACEHOLDER_IN_CELL_RE.finditer(text, a, b):
-        parts.append((pos, m.start()))
-        pos = m.end()
+    for ra, rb in _references().cell_spans(text, a, b):
+        parts.append((pos, ra))
+        pos = rb
     parts.append((pos, b))
     out = []
     for pa, pb in parts:
@@ -3920,7 +3964,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             if rule.validator:
                 try:
                     if (rule.validator == "ds_value" and 0 < start and text[start - 1] in ":="
-                            and text.rfind("⟦", 0, start) <= text.rfind("⟧", 0, start)):   # not inside ⟦…⟧
+                            and not _references().inside(text, start)):   # not inside a reference
                         # a value glued to its label, with no space after the colon, is typed on purpose: 6 characters
                         # count. With a space between them 8 stay the floor, against prose such as
                         # "password: string" (field report, 2026-09-27: a 7-letter password passed)
@@ -3960,11 +4004,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     continue
             if _allowed(rule, text, m, secret):
                 continue
-            # our own placeholders are never a hit, alone or inside a larger span such as the
-            # user:pass of `curl -u "app:⟦SECRET_c1⟧"` (the README example was flagged, 2026-09-26)
-            if text[max(0, start - 1):start] in ("<", "\u27e6") and re.match(r"[A-Z][A-Z_]*_c\d+", secret):
-                continue
-            if "\u27e6" in secret or re.search(r"<[A-Z][A-Z_]*_c\d+>", secret):
+            # a reference is never a hit, alone or inside a larger span such as the user:pass of a curl command
+            # around one (the README example was flagged, 2026-09-26)
+            if _references().hit_is_a_reference(text, start, secret):
                 continue
             if rule.type == "SECRET":
                 # a fixed-length shape (betterleaks: glpat-[\w-]{20}) stops inside a longer token and
@@ -4053,7 +4095,7 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
         if value in allowed or (off and kind in off):
             continue   # the allow list holds for these rules too: an exact value, or `rule: <id>`
         low = value.lower()
-        if "\u27e6" in value or "\u27e7" in value or "example" in low or low in personal.PLACEHOLDER_NAMES \
+        if _references().has_marks(value) or "example" in low or low in personal.PLACEHOLDER_NAMES \
                 or looks_like_placeholder(value) or is_public_test_value(value, typ):
             continue
         if overlaps(start, end):

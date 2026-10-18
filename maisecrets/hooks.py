@@ -4909,6 +4909,8 @@ def main(argv: list[str]) -> int:
     detect.use_regions(regions_from_config)
     from .sources import PLUGIN_SOURCES
     detect.use_sources(PLUGIN_SOURCES)
+    from .placeholder import REFERENCES
+    detect.use_references(REFERENCES)
     try:
         from . import vault_refs
         # vault references read the client config of this payload's client (Claude Code or Codex)
