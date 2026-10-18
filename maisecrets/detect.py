@@ -1265,7 +1265,8 @@ def reads_as_word(value: str) -> bool:
 
 
 def english_words() -> frozenset:
-    """The English word list of the detector (rules/words_en.txt): empty when it is missing or no list of words."""
+    """The word list of the detector: rules/words_en.txt and the built-in developer, code and German words
+    (_EXTRA_WORDS). Empty when the file is missing or holds no list of words."""
     words = _word_set()
     return words if words and _WORDS_OK[0] else frozenset()
 
@@ -3543,9 +3544,10 @@ def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt", pa
          rule_list: list[Rule] | None = None) -> list[Match]:
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins. channel "tool" (a tool
     result or a file) takes a password after a password label without evidence of chance, and the cells of a
-    password export (path: the file the text came from, if any). `rule_list` scans with those rules alone, without
-    the allow list and the sources (`maisecrets rules check`). `enabled` names rules by id or by key
-    (maisecrets/registry.py): an id that two rules share enables both, a key one of them."""
+    password export (path: the file the text came from, if any). `rule_list` scans with those rules and the password
+    export of a tool result, without the allow list and the sources (`maisecrets rules check`).
+    `enabled` names rules by id or by key (maisecrets/registry.py): an id that two rules share enables both, a key one
+    of them."""
     # the channel and the path travel as arguments: a nested scan (is_fixture) or a scan in another thread has its own
     return _scan(text, enabled, rule_list=rule_list, channel="tool" if channel == "tool" else "prompt", path=path or "")
 

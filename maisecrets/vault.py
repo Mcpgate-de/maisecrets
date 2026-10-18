@@ -170,7 +170,7 @@ def code_word_spellings() -> list[str]:
 
 def is_weak(kind: str, value: str, tool: bool = False) -> bool:
     """A value that only a label rule found and that is a known default word (DEFAULT_WORDS), or, in a tool result or
-    a file (tool), an English word (detect.is_dictionary_word): replaced where it was found, never hunted in other
+    a file (tool), an English word (is_dictionary_word): replaced where it was found, never hunted in other
     texts. A word the person gives in a prompt is a chosen password and stays hunted (is_quiet)."""
     from .registry import is_label
     if not is_label(kind):
@@ -658,7 +658,7 @@ class Vault:
     @_mutating
     def weaken_quiet_words(self) -> int:
         """Mark weak the live quiet entries (a label rule took them in a tool result) that are English words
-        (detect.is_dictionary_word). Before 0.6.38 such a word was hunted in every later tool result for a day. Reads
+        (is_dictionary_word). Before 0.6.38 such a word was hunted in every later tool result for a day. Reads
         the value of each such entry once; a store that refuses the read leaves it as it is. Returns the count."""
         todo = [k for k, m in self._index["entries"].items()
                 if m.get("quiet") and not m.get("weak") and not m.get("purged")]

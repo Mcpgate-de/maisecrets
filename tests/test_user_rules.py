@@ -73,8 +73,9 @@ def kinds(text: str) -> list[str]:
 @contextlib.contextmanager
 def later_pass(matcher):
     """A pass after the rules that finds what `matcher` returns and keeps the spans the rules took: the import pass of
-    the plugin's sources with these hits added. It replaces detect.extra_matchers, which had no caller outside the
-    tests; the sources are the one boundary for such a pass."""
+    the plugin's sources with these hits added. The tests of detect.extra_matchers (removed: no caller outside the
+    tests) use it; the sources are the one boundary for such a pass. Unlike the old loop, the import pass keeps the
+    parts of a hit outside a taken span (_term_rest)."""
     from maisecrets.sources import PluginSources
 
     class WithHits(PluginSources):
@@ -310,12 +311,15 @@ class NameType(unittest.TestCase):
         self.assertEqual(placeholder.key_of(ref), "NAME_c3")
 
 
-class ExtraMatchers(Base):
+class LaterPasses(Base):
     def test_a_later_pass_runs_after_the_rules_and_keeps_their_spans(self):
         address = ADDRESS
         text = f"Ada Lovelace wrote to {address}"
 
+        calls = []
+
         def names(t: str) -> list:
+            calls.append(t)
             out = [detect.Match("term:person", "NAME", "Ada Lovelace", 0, 12)]
             at = t.index(address)
             out.append(detect.Match("term:person", "NAME", address, at, at + len(address)))   # taken by email
@@ -324,7 +328,12 @@ class ExtraMatchers(Base):
         with later_pass(names):
             found = detect.scan(text)
             self.assertEqual([(m.kind, m.value) for m in found], [("term:person", "Ada Lovelace"), ("email", address)])
-            self.assertEqual(detect.scan(text, enabled={"email"})[0].kind, "email", "enabled holds for them too")
+            calls.clear()
+            self.assertEqual([m.kind for m in detect.scan(text, enabled={"email", "import:probe"})], ["email"],
+                             "enabled holds for them too")
+            self.assertTrue(calls, "the pass ran and enabled dropped its hit")
+            self.assertEqual([m.kind for m in detect.scan(text, enabled={"email", "import"})], ["term:person", "email"],
+                             "the pass enabled as a whole keeps its hit")
             ALLOW.write_text("Ada Lovelace\n", encoding="utf-8")
             detect.reset_rules()
             self.assertEqual([m.kind for m in detect.scan(text)], ["email"], "the allow list holds for them too")
