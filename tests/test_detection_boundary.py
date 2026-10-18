@@ -354,6 +354,30 @@ class SourcesTests(unittest.TestCase):
         self.assertIn("user:probe", kinds)
         self.assertIn("import:given:1", kinds)
 
+    def test_a_rule_of_new_sources_does_not_inherit_the_time_of_an_old_rule_with_its_id(self):
+        detect = self.detect
+        slow = []
+
+        class Given(detect.Sources):
+            def __init__(self, rule):
+                self.rule = rule
+
+            def user_rules(self):
+                return [self.rule]
+
+            def note_slow(self, rule, ms):
+                slow.append(rule.id)
+        old = detect.Rule(id="user:probe", type="SECRET", regex=detect.LazyRegex(r"probe-[0-9]{6}", 0))
+        detect.use_sources(Given(old))
+        detect.scan("probe-123456", channel="tool")
+        self.assertIn("user:probe", detect._REGEX_TIME, "the premise: the old rule's time is counted")
+        detect._REGEX_TIME["user:probe"] = detect.USER_RULE_BUDGET * 10    # the old rule ran over its budget
+        new = detect.Rule(id="user:probe", type="SECRET", regex=detect.LazyRegex(r"probe-[0-9]{6}", 0))
+        detect.use_sources(Given(new))
+        self.assertIsNone(detect.slowest_user_rule())
+        self.assertIn("user:probe", [m.kind for m in detect.scan("probe-654321", channel="tool")])
+        self.assertEqual(slow, [], "the new rule was taken out for the time of the old one")
+
     def test_reset_rules_asks_the_sources_to_read_again(self):
         asked = []
 
