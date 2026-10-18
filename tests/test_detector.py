@@ -130,6 +130,34 @@ class TwoDetectorsTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(wrong, [], "a detector read the configuration of the other one")
 
+    def test_one_detector_in_four_threads_compiles_its_rules_without_a_crash(self):
+        # a rule compiles at its first use; a thread that came second read a half-made keyword rule
+        # (_KeywordTail: `_tail` was None after `_any` was set) and raised AttributeError
+        text = TEXTS["languages"] + "\n" + TEXTS["references"]
+        errors = []
+        interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            for _ in range(15):
+                d = detector_b()
+                d.rules()
+                gate = threading.Barrier(4)
+
+                def run():
+                    try:
+                        gate.wait()
+                        kinds(d, text)
+                    except Exception as e:  # noqa: BLE001 - reported below
+                        errors.append(repr(e))
+                threads = [threading.Thread(target=run) for _ in range(4)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join(timeout=300)
+        finally:
+            sys.setswitchinterval(interval)
+        self.assertEqual(errors, [])
+
     def test_a_scan_of_one_detector_inside_a_scan_of_the_other_keeps_both_results(self):
         b = detector_b()
         inner = []

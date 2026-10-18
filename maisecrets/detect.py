@@ -2109,17 +2109,18 @@ class _KeywordTail:
         if self._any is not None:
             return
         tail = self.pattern[len(self._prefix) + len("\\w*"):]
+        any_ = re.compile(self._prefix, self.flags)
+        groups = any_.groups
+        # the alternatives that can match a character outside a word (mot de passe): only they can start inside a
+        # word run and end past it. Every other one ends inside the run, at the run's end once \w* has run
+        cross = [a for a in self._alts if _CROSS_CHARS_RE.search(_LOOKAROUND_RE.sub("", a))]
         self._rx = re.compile(self.pattern, self.flags)
-        self._any = re.compile(self._prefix, self.flags)
-        groups = self._any.groups
         # one head per alternative, in the regex's order; the others never match but keep their group numbers
         self._heads = [re.compile("(?<!mai)(" + "|".join(a if j == i else "(?!)" + a for j, a in enumerate(self._alts))
                                   + ")", self.flags) for i in range(len(self._alts))]
         self._tail = re.compile("()" * groups + tail, self.flags)   # empty groups keep the numbers of backreferences
-        # the alternatives that can match a character outside a word (mot de passe): only they can start inside a
-        # word run and end past it. Every other one ends inside the run, at the run's end once \w* has run
-        cross = [a for a in self._alts if _CROSS_CHARS_RE.search(_LOOKAROUND_RE.sub("", a))]
         self._cross = re.compile("(?<!mai)(?:" + "|".join(cross) + ")", self.flags) if cross else None
+        self._any = any_   # last: another thread takes a set _any for a complete rule
 
     def finditer(self, text: str):
         self._compile()
