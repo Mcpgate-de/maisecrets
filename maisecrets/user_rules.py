@@ -14,7 +14,7 @@ A folder is data that a hook reads in every call, so each rule passes checks at 
 QUARANTINED: it is left out, and /maisecrets:rules, the status and events.log name it with its reason. A refused rule
 is named by its place (`rule 3`, `line 7`), never by a text of its own: a refused line can be a pasted value. A broken
 rule file or folder never stops a hook and never costs the rules of another folder. A broken machine policy still
-does (vault.load_config).
+does (home.load_config).
 
 The checks: a literal of 4 characters; at most 300 characters of regex; no shape that backtracks (a repeat inside a
 repeat, a repeat of something that can be empty, branches that start alike inside a repeat, two repeats in a row that
@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import detect
-from .vault import HOME
+from .home import HOME
 
 try:   # the regex parser of the standard library: re._parser from 3.11, sre_parse before
     from re import _parser as _sre
@@ -642,7 +642,7 @@ def _read_state() -> dict:
 
 def _write_state(state: dict) -> bool:
     try:
-        from .vault import atomic_write
+        from .home import atomic_write
         atomic_write(STATE_FILE, json.dumps(state, sort_keys=True) + "\n")
         return True
     except (OSError, TypeError, ValueError):
@@ -993,7 +993,7 @@ def folders(cfg: dict) -> list[tuple[str, Path, str]]:
 
 
 def _config() -> dict:
-    from .vault import load_config
+    from .home import load_config
     try:
         return load_config()
     except Exception:  # noqa: BLE001 - a broken policy fails closed in the hook itself; here it means no folder

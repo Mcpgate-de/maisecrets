@@ -14,7 +14,7 @@ import os
 import re
 
 from .detect import LazyRx as _LazyRx      # compiled at first use: a hook imports this module on every call
-from .vault import HOME
+from .home import HOME
 
 IMPORTS = HOME / "imports"
 SUFFIX = ".jsonl"
