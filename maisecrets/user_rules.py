@@ -1165,9 +1165,7 @@ def allow_list(cfg: dict | None = None) -> tuple[frozenset, frozenset]:
     return _allow_lines(own + policy)
 
 
-def switched_off(rule_id: str, ids: frozenset) -> bool:
-    """A rule id on the allow list, also with the `#n` of one of several patterns of a Presidio rule."""
-    return rule_id in ids or rule_id.split("#", 1)[0] in ids
+switched_off = detect.switched_off   # a rule id on the allow list; the detector owns the rule (rules_cli uses it here)
 
 
 def reset() -> None:

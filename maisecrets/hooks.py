@@ -4907,6 +4907,8 @@ def main(argv: list[str]) -> int:
     from .home import regions_from_config
     # the plugin gives the config reader; the mod's rewrite_prompt (dispatch.py) still reads the config in detect
     detect.use_regions(regions_from_config)
+    from .sources import PLUGIN_SOURCES
+    detect.use_sources(PLUGIN_SOURCES)
     try:
         from . import vault_refs
         # vault references read the client config of this payload's client (Claude Code or Codex)

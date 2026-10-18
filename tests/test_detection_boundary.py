@@ -32,9 +32,10 @@ CORE = frozenset({"__init__", "detect", "checksums", "normalise", "regions", "re
 # the modules of the plugin that a plain scan still imports. Each is a later step: the config read for the regions
 # (home, through active_regions), the rules of your own and the allow list (user_rules), and the probes for a term
 # list or an import (term_files, value_files). Remove a name when the scan no longer imports it; never add one. The
-# one exception so far: home.py took the file and config helpers out of vault.py (2026-10-18), and with it vault and
-# placeholder left the scan.
-NOT_YET_OUT = frozenset({"home", "term_files", "user_rules", "value_files"})
+# exceptions so far: home.py took the file and config helpers out of vault.py (2026-10-18), and with it vault and
+# placeholder left the scan; sources.py holds the plugin's readers that detect.py had (the default sources). A scan
+# that is given its regions and its sources imports none of these (SourcesTests).
+NOT_YET_OUT = frozenset({"home", "sources", "term_files", "user_rules", "value_files"})
 # a scan never imports the store or the placeholder form, also with a term list and an import of values in place
 NEVER = frozenset({"vault", "placeholder", "rehydration", "vault_refs", "hooks", "settings"})
 
@@ -254,6 +255,16 @@ class GivenRegionsTests(unittest.TestCase):
             hooks.main(["dispatch.py", "pre-tool"])
         given.assert_called_once_with(self.home.regions_from_config)
 
+    def test_the_hook_entry_gives_the_plugin_sources(self):
+        from maisecrets import hooks, sources
+        with mock.patch.object(self.detect, "use_sources") as given, \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps({
+                    "hook_event_name": "PreToolUse", "session_id": "sources", "tool_name": "Grep",
+                    "tool_input": {"pattern": "x", "path": "."}}))), \
+                mock.patch.object(sys, "stdout", io.StringIO()):
+            hooks.main(["dispatch.py", "pre-tool"])
+        given.assert_called_once_with(sources.PLUGIN_SOURCES)
+
     def test_given_regions_need_no_home_module(self):
         code = (f"import json, sys\nsys.path.insert(0, {str(ROOT)!r})\n"
                 "from maisecrets import detect, regions\n"
@@ -264,6 +275,119 @@ class GivenRegionsTests(unittest.TestCase):
         r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, env=env, timeout=120)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(r.stdout), [["generic", "us"], False])
+
+
+_SCAN_WITH_GIVEN_SOURCES = """
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from maisecrets import detect, regions
+
+NAME = "Annabell " + "Quarzfeld"
+
+
+class Given(detect.Sources):
+    def term_matches(self, text):
+        at = text.find(NAME)
+        return [] if at < 0 else [detect.Match("term:given", "NAME", NAME, at, at + len(NAME))]
+
+
+detect.use_regions(regions.resolve({"regions": ["de"]}))
+detect.use_sources(Given())
+text = NAME + " wrote to anna.probe" + "@" + "beispiel-firma.de"
+kinds = sorted(m.kind for m in detect.scan(text, channel="tool")) + sorted(m.kind for m in detect.findings(text))
+print(json.dumps([kinds, sorted(m for m in sys.modules if m.startswith("maisecrets."))]))
+"""
+
+
+class SourcesTests(unittest.TestCase):
+    """One source boundary: a caller gives the rules of your own, the allow list, the term lists and the imported values
+    as one object (detect.use_sources); the plugin's readers of the home folder are the default (sources.py)."""
+
+    def setUp(self):
+        from maisecrets import detect, regions
+        self.detect, self.regions = detect, regions
+        self.addCleanup(detect.reset_rules)
+        self.addCleanup(detect.use_sources, None)
+        self.addCleanup(detect.use_regions, None)
+
+    def test_a_scan_with_given_regions_and_sources_imports_no_home(self):
+        # the boundary of the core: input, rules and context in, findings out; no home folder, no plugin module
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX"))}
+        r = subprocess.run([sys.executable, "-I", "-c", _SCAN_WITH_GIVEN_SOURCES, str(ROOT)], capture_output=True,
+                           text=True, env=env, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        kinds, mods = json.loads(r.stdout)
+        self.assertEqual(kinds.count("term:given"), 2, f"the premise: the given term source ran ({kinds})")
+        self.assertIn("email", kinds, "the built-in rules ran")
+        loaded = {m.split(".", 1)[1] for m in mods}
+        plugin = {"home", "sources", "user_rules", "term_files", "terms", "value_files", "values", "events",
+                  "settings", "vault", "placeholder", "hooks"}
+        self.assertEqual(sorted(loaded & plugin), [])
+        self.assertEqual(loaded - CORE, set(), f"only core modules: {sorted(loaded - CORE)}")
+
+    def test_given_sources_replace_the_plugin_ones_and_drop_what_those_gave(self):
+        detect = self.detect
+        text = "write to anna.probe" + "@" + "beispiel-firma.de"
+        self.assertIn("email", [m.kind for m in detect.scan(text)], "the premise: the plugin sources allow it")
+
+        class Off(detect.Sources):
+            def allow_list(self):
+                return frozenset(), frozenset({"email"})
+        detect.use_sources(Off())
+        self.assertNotIn("email", [m.kind for m in detect.scan(text)], "the given allow list switches the rule off")
+        detect.use_sources(detect.NO_SOURCES)
+        self.assertIn("email", [m.kind for m in detect.scan(text)], "a switch of sources drops the old allow list")
+
+    def test_a_given_rule_of_your_own_and_a_given_import_are_scanned(self):
+        detect = self.detect
+        rule = detect.Rule(id="user:probe", type="SECRET", regex=detect.LazyRegex(r"probe-[0-9]{6}", 0))
+
+        class Given(detect.Sources):
+            def user_rules(self):
+                return [rule]
+
+            def import_matches(self, text):
+                at = text.find("Ottilie")
+                return [] if at < 0 else [detect.Match("import:given:1", "NAME", "Ottilie", at, at + 7)]
+        detect.use_sources(Given())
+        kinds = [m.kind for m in detect.scan("code probe-123456 for Ottilie", channel="tool")]
+        self.assertIn("user:probe", kinds)
+        self.assertIn("import:given:1", kinds)
+
+    def test_a_rule_of_new_sources_does_not_inherit_the_time_of_an_old_rule_with_its_id(self):
+        detect = self.detect
+        slow = []
+
+        class Given(detect.Sources):
+            def __init__(self, rule):
+                self.rule = rule
+
+            def user_rules(self):
+                return [self.rule]
+
+            def note_slow(self, rule, ms):
+                slow.append(rule.id)
+        old = detect.Rule(id="user:probe", type="SECRET", regex=detect.LazyRegex(r"probe-[0-9]{6}", 0))
+        detect.use_sources(Given(old))
+        detect.scan("probe-123456", channel="tool")
+        self.assertIn("user:probe", detect._REGEX_TIME, "the premise: the old rule's time is counted")
+        detect._REGEX_TIME["user:probe"] = detect.USER_RULE_BUDGET * 10    # the old rule ran over its budget
+        new = detect.Rule(id="user:probe", type="SECRET", regex=detect.LazyRegex(r"probe-[0-9]{6}", 0))
+        slow.clear()   # a slow old rule under load is not this test's question
+        detect.use_sources(Given(new))
+        self.assertIsNone(detect.slowest_user_rule())
+        self.assertIn("user:probe", [m.kind for m in detect.scan("probe-654321", channel="tool")])
+        self.assertEqual(slow, [], "the new rule was taken out for the time of the old one")
+
+    def test_reset_rules_asks_the_sources_to_read_again(self):
+        asked = []
+
+        class Counting(self.detect.Sources):
+            def reset(self):
+                asked.append(1)
+        self.detect.use_sources(Counting())
+        self.detect.reset_rules()
+        self.assertEqual(asked, [1])
 
 
 if __name__ == "__main__":
