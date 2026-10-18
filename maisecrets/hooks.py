@@ -4904,6 +4904,8 @@ def main(argv: list[str]) -> int:
         incidents.write_marker_bounded("hook.payload")       # it answers before the timer: a marker, bounded
         return 0
     import threading
+    from .home import regions_from_config
+    detect.use_regions(regions_from_config)   # the detector reads no config; the plugin gives the reader
     try:
         from . import vault_refs
         # vault references read the client config of this payload's client (Claude Code or Codex)

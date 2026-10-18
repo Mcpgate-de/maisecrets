@@ -17,8 +17,10 @@ import os
 import subprocess
 import sys
 import tempfile
+import io
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -178,6 +180,70 @@ class DetectionBoundaryTests(unittest.TestCase):
         self.assertFalse(beyond - NOT_YET_OUT, f"{call}() now imports {sorted(beyond - NOT_YET_OUT)}")
         self.assertFalse(NOT_YET_OUT - beyond, f"no longer imported: remove {sorted(NOT_YET_OUT - beyond)} "
                                                "from NOT_YET_OUT")
+
+
+class GivenRegionsTests(unittest.TestCase):
+    """A caller gives the regions of the scans (detect.use_regions); the detector then reads no config for them. The
+    plugin gives its config reader in hooks.main, so a hook gets the regions of today."""
+
+    def setUp(self):
+        from maisecrets import detect, home, regions
+        self.detect, self.home, self.regions = detect, home, regions
+        self.addCleanup(detect.reset_rules)
+        self.addCleanup(detect.use_regions, None)
+
+    def ids(self, region: str) -> set:
+        self.detect.use_regions(self.regions.resolve({"regions": [region]}))
+        return {r.id for r in self.detect.rules()}
+
+    def test_given_regions_decide_the_rules_and_no_config_is_read(self):
+        with mock.patch.object(self.home, "load_config", side_effect=AssertionError("the detector read the config")):
+            us, de = self.ids("us"), self.ids("de")
+            self.assertNotEqual(us, de, "the premise: the two regions load different rules")
+            given = self.regions.resolve({"regions": ["us"]})
+            self.detect.use_regions(given)
+            self.assertIs(self.detect.active_regions(), given)
+            self.detect.scan("call +1 202 555 0143 today", channel="tool")
+            self.assertEqual(self.detect._pii_regions_cached(), ("generic", "us"))
+
+    def test_a_given_reader_is_asked_at_each_use_not_when_it_is_given(self):
+        asked = []
+
+        def reader():
+            asked.append(1)
+            return self.regions.resolve({"regions": ["de"]})
+        self.detect.use_regions(reader)
+        self.assertEqual(asked, [])
+        self.assertEqual(self.detect.active_regions().regions, ("generic", "de"))
+        self.assertEqual(len(asked), 1)
+
+    def test_without_given_regions_the_config_of_this_computer_decides(self):
+        self.detect.use_regions(None)
+        with mock.patch.object(self.home, "load_config", return_value={"regions": ["us"]}):
+            self.assertEqual(self.detect.active_regions().regions, ("generic", "us"))
+        with mock.patch.object(self.home, "load_config", side_effect=RuntimeError("broken")):
+            self.assertEqual(self.detect.active_regions().regions, ("generic", "de"), "a bad config counts as none")
+
+    def test_the_hook_entry_gives_the_config_reader(self):
+        from maisecrets import hooks
+        with mock.patch.object(self.detect, "use_regions") as given, \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps({
+                    "hook_event_name": "PreToolUse", "session_id": "regions", "tool_name": "Grep",
+                    "tool_input": {"pattern": "x", "path": "."}}))), \
+                mock.patch.object(sys, "stdout", io.StringIO()):
+            hooks.main(["dispatch.py", "pre-tool"])
+        given.assert_called_once_with(self.home.regions_from_config)
+
+    def test_given_regions_need_no_home_module(self):
+        code = (f"import json, sys\nsys.path.insert(0, {str(ROOT)!r})\n"
+                "from maisecrets import detect, regions\n"
+                "detect.use_regions(regions.resolve({'regions': ['us']}))\n"
+                "a = detect.active_regions()\n"
+                "print(json.dumps([list(a.regions), 'maisecrets.home' in sys.modules]))\n")
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX"))}
+        r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), [["generic", "us"], False])
 
 
 if __name__ == "__main__":

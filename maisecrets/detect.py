@@ -2715,15 +2715,30 @@ def _import_hits(text: str, enabled, found: list, taken_starts: list, taken_ends
             _term_rest(m, text, found, taken_starts, taken_ends)
 
 
+_GIVEN: list = []   # the regions a caller gave (use_regions); empty: the config of this computer decides
+
+
+def use_regions(given) -> None:
+    """Where every later scan of this process takes its regions and label languages from: a regions.Active, a function
+    that returns one (asked at each use, as the config is read without it), or None for the config of this computer
+    (home.regions_from_config). The plugin gives its config reader here (hooks.main), so the detector itself reads no
+    config; a caller without a config gives the regions it wants. The rule list of other regions is dropped."""
+    global _RULES
+    _GIVEN[:] = [] if given is None else [given]
+    _RULES = None
+
+
 def active_regions():
-    """The regions and label languages of the config (maisecrets/regions.py)."""
-    from . import regions
+    """The regions and label languages of the scans (maisecrets/regions.py): what the caller gave (use_regions), else
+    the config of this computer."""
+    if _GIVEN:
+        return _GIVEN[0]() if callable(_GIVEN[0]) else _GIVEN[0]
     try:
-        from .home import load_config
-        cfg = load_config()
-    except Exception:  # noqa: BLE001 - config is optional; a bad one is reported by the vault
-        cfg = {}
-    return regions.resolve(cfg)
+        from .home import regions_from_config
+    except ImportError:   # the standalone skill ships the detector without home.py: no config, as before
+        from . import regions
+        return regions.resolve({})
+    return regions_from_config()
 
 
 def _pii_regions() -> tuple[str, ...]:
