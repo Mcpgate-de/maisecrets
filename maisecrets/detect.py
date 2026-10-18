@@ -4223,3 +4223,51 @@ def _term_rest(m: Match, text: str, found: list, starts: list, ends: list) -> No
 
 def contains_secret(text: str) -> bool:
     return any(m.type in SECRET_TYPES for m in scan(text))
+
+
+# ------------------------------------------------------------------------------------------------- facade --
+# What a module outside the detection core may use besides scan(), is_fixture(), Match, rules() and the other names
+# without an underscore. The plugin (hooks, the value check, the rules of your own) called private names of this
+# module; a test (tests/test_detection_boundary.py) now refuses that, so the core can change its inside without a
+# caller noticing. Each name below is the private object itself or a function of the same steps: no behaviour moves.
+LazyRx = _LazyRx            # a regex compiled at its first use
+LazyRegex = _Lazy           # a compiled rule pattern with a time budget (the rules of your own)
+re2_to_python = _re2_to_python   # a pattern in RE2 syntax, as Python's re reads it
+
+
+def findings(text: str, channel: str = "prompt", path: str = "") -> list[Match]:
+    """The hits of scan() without the fixtures of a pasted test (is_fixture). is_fixture runs after the scan, with the
+    channel of the caller, as each caller did."""
+    return [m for m in scan(text, channel=channel, path=path) if not is_fixture(m, text, path)]
+
+
+def explain_allowed(value: str) -> str | None:
+    """Why the allow list lets this value through, or None. Only for a value no rule caught: the scan with every rule,
+    without the allow list, shows whether the list took a hit out (`rule: <id>` or an exact value)."""
+    from .user_rules import switched_off
+    values, ids = allow_list()
+    if not values and not ids:
+        return None
+    if value in values or value.strip() in values:
+        return "your allow list allows this exact value"
+    every = [r for _, r in _ranked(active_regions())]
+    for m in scan(value, rule_list=every):
+        if m.value in values or m.value.strip() in values:
+            return "your allow list allows this exact value"
+        if switched_off(m.kind, ids):
+            return f"your allow list switches off the rule {m.kind}"
+    return None
+
+
+def bare_value_is_a_credential(v: str) -> bool:
+    """The evidence of chance that makes a value without a label a credential, after the caller's own checks of form
+    (maisecrets/check_value.py): no value that names itself; a password literal; else entropy for its alphabet, no
+    base64 of a text, no word, and no leetspeak word."""
+    if _names_itself(v):
+        return False
+    if _pw_literal_ok(v):
+        return True
+    return (shannon_entropy(v) >= ENTROPY_BY_ALPHABET[alphabet_of(v)]
+            and not _base64_of_text(v) and not reads_as_word(v)
+            and _wordlike(_deleet(v)) < 0.3 and _ds_value_ok(v))
+
