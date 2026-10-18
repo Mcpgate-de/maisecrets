@@ -2,9 +2,11 @@
 
 The core is the modules the standalone skill ships (scripts/build_skill_zip.py) plus personal.py: detect, checksums,
 normalise, regions, registry, rulespec, rule_filter. The plugin called private names of detect.py from hooks, the
-value check and the rules of your own; a refactor of the core then broke a caller it could not see. These tests hold
-the line: a module outside the core uses detect only by its public names (the facade at the end of detect.py), and a
-plain detect.scan() imports no module of the plugin beyond the ones it imports today. That list may only get shorter.
+value check and the rules of your own, so a change inside the core could break a caller it does not know. These tests
+hold the line: a module outside the core uses detect only by its public names (the facade at the end of detect.py), as
+far as the AST shows a name (an alias and a literal getattr included, a name built at run time not), and a plain
+detect.scan() or findings() imports no module of the plugin beyond the ones it imports today. That list may only get
+shorter.
 
 Run: python3 -m unittest tests.test_detection_boundary -v
 """
@@ -33,22 +35,44 @@ NOT_YET_OUT = frozenset({"placeholder", "term_files", "user_rules", "value_files
 
 
 def private_uses(source: str) -> list[tuple[int, str]]:
-    """(line, name) of every private name of detect that a module uses: detect._x, or `from .detect import _x`."""
+    """(line, name) of every private name of detect that a module uses by a name the AST shows: an attribute of any
+    name bound to the module (`detect`, `import maisecrets.detect as d`, `from . import detect as d`, `d = detect`),
+    a literal `getattr(d, "_x")`, `from .detect import _x`, and a string annotation `"detect._x"`. A name built at run
+    time (`getattr(d, name)`) is out of its reach."""
+    tree = ast.parse(source)
+    names = {"detect"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names |= {a.asname for a in node.names if a.asname and a.name.split(".")[-1] == "detect"}
+        elif isinstance(node, ast.ImportFrom):
+            names |= {a.asname or a.name for a in node.names if a.name == "detect"}
+    for _ in range(3):   # d = detect, then e = d
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name) and node.value.id in names:
+                names |= {t.id for t in node.targets if isinstance(t, ast.Name)}
     out = []
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "detect" \
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in names \
                 and node.attr.startswith("_"):
             out.append((node.lineno, node.attr))
+        elif isinstance(node, ast.Attribute) and node.attr.startswith("_") and isinstance(node.value, ast.Attribute) \
+                and node.value.attr == "detect":
+            out.append((node.lineno, node.attr))   # maisecrets.detect._x
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "getattr" \
+                and len(node.args) >= 2 and isinstance(node.args[0], ast.Name) and node.args[0].id in names \
+                and isinstance(node.args[1], ast.Constant) and str(node.args[1].value).startswith("_"):
+            out.append((node.lineno, node.args[1].value))
         elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[-1] == "detect":
             out += [(node.lineno, a.name) for a in node.names if a.name.startswith("_")]
         elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith("detect._"):
             out.append((node.lineno, node.value))   # a string annotation: "detect._Lazy"
-    return out
+    return sorted(set(out))
 
 
 def outside_the_core() -> list[Path]:
-    return sorted([p for p in (ROOT / "maisecrets").glob("*.py") if p.stem not in CORE]
-                  + list((ROOT / "hooks").glob("*.py")))
+    return sorted([p for p in (ROOT / "maisecrets").rglob("*.py") if not (p.parent.name == "maisecrets"
+                                                                          and p.stem in CORE)]
+                  + list((ROOT / "hooks").rglob("*.py")))
 
 
 class DetectionBoundaryTests(unittest.TestCase):
@@ -58,7 +82,13 @@ class DetectionBoundaryTests(unittest.TestCase):
         self.assertEqual(private_uses("from .detect import _LazyRx\n"), [(1, "_LazyRx")])
         self.assertEqual(private_uses("from maisecrets.detect import Match, _word_set\n"), [(1, "_word_set")])
         self.assertEqual(private_uses('def f() -> "detect._Lazy":\n    pass\n'), [(1, "detect._Lazy")])
+        self.assertEqual(private_uses("import maisecrets.detect as d\nd._scan('x')\n"), [(2, "_scan")])
+        self.assertEqual(private_uses("from . import detect as d\nd._ranked(1)\n"), [(2, "_ranked")])
+        self.assertEqual(private_uses("from . import detect\nd = detect\ne = d\ne._lower('x')\n"), [(4, "_lower")])
+        self.assertEqual(private_uses("import maisecrets.detect\nmaisecrets.detect._RULES\n"), [(2, "_RULES")])
+        self.assertEqual(private_uses("from . import detect\ngetattr(detect, '_word_set')()\n"), [(2, "_word_set")])
         self.assertEqual(private_uses("from .detect import LazyRx as _LazyRx\nx = detect.findings('a')\n"), [])
+        self.assertEqual(private_uses("from . import vault as v\nv._index\n"), [], "another module's private name")
 
     def test_no_module_outside_the_core_uses_a_private_name_of_detect(self):
         files = outside_the_core()
@@ -75,6 +105,13 @@ class DetectionBoundaryTests(unittest.TestCase):
                 self.assertTrue((ROOT / "maisecrets" / f"{name}.py").is_file(), "a renamed module: update the list")
 
     def test_a_plain_scan_imports_no_new_module_of_the_plugin(self):
+        self.assert_imports("scan")
+
+    def test_findings_import_no_new_module_of_the_plugin(self):
+        self.assert_imports("findings")
+
+    def assert_imports(self, call: str):
+        """Each call in a process of its own: a module that only findings() imports must not count for scan()."""
         home = Path(tempfile.mkdtemp(prefix="detect-boundary-", dir=_isolate.HOME))
         (home / "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
         code = (
@@ -83,8 +120,7 @@ class DetectionBoundaryTests(unittest.TestCase):
             "from maisecrets import detect\n"
             "text = 'pass' + 'word: hunter2x9\\nmail me at someone@example.org, +49 30 1234567\\n'\n"
             "for ch in ('prompt', 'tool'):\n"
-            "    assert detect.scan(text, channel=ch), ch\n"
-            "    detect.findings(text, channel=ch)\n"
+            f"    assert detect.{call}(text, channel=ch), ch\n"
             "print(json.dumps(sorted(m for m in sys.modules if m.startswith('maisecrets.'))))\n")
         env = {k: v for k, v in os.environ.items() if not k.startswith(("MAISECRETS_", "CLAUDE", "CODEX"))}
         env["MAISECRETS_HOME"] = str(home)
@@ -93,7 +129,7 @@ class DetectionBoundaryTests(unittest.TestCase):
         loaded = {m.split(".", 1)[1] for m in json.loads(r.stdout)}
         self.assertTrue({"detect", "personal", "registry"} <= loaded, loaded)
         beyond = loaded - CORE
-        self.assertFalse(beyond - NOT_YET_OUT, f"a plain scan now imports {sorted(beyond - NOT_YET_OUT)}")
+        self.assertFalse(beyond - NOT_YET_OUT, f"{call}() now imports {sorted(beyond - NOT_YET_OUT)}")
         self.assertFalse(NOT_YET_OUT - beyond, f"no longer imported: remove {sorted(NOT_YET_OUT - beyond)} "
                                                "from NOT_YET_OUT")
 

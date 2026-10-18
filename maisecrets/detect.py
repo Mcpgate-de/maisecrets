@@ -4228,8 +4228,9 @@ def contains_secret(text: str) -> bool:
 # ------------------------------------------------------------------------------------------------- facade --
 # What a module outside the detection core may use besides scan(), is_fixture(), Match, rules() and the other names
 # without an underscore. The plugin (hooks, the value check, the rules of your own) called private names of this
-# module; a test (tests/test_detection_boundary.py) now refuses that, so the core can change its inside without a
-# caller noticing. Each name below is the private object itself or a function of the same steps: no behaviour moves.
+# module; a test (tests/test_detection_boundary.py) now refuses each such use the AST shows, so the core can change
+# its inside without breaking a caller. Each name below is the private object itself or a function of the same
+# steps: no behaviour moves.
 LazyRx = _LazyRx            # a regex compiled at its first use
 LazyRegex = _Lazy           # a compiled rule pattern with a time budget (the rules of your own)
 re2_to_python = _re2_to_python   # a pattern in RE2 syntax, as Python's re reads it
