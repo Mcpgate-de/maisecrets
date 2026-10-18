@@ -512,6 +512,8 @@ class SkillZipTests(unittest.TestCase):
                 self.assertIn("secret-hygiene/scripts/maisecrets/detect.py", names)
                 self.assertIn("secret-hygiene/scripts/maisecrets/detection/rules/betterleaks.json", names)
                 self.assertIn("secret-hygiene/scripts/maisecrets/detection/core.py", names)
+                # without it the folder loads as a namespace package: the scripts run, the API is gone
+                self.assertIn("secret-hygiene/scripts/maisecrets/detection/__init__.py", names)
                 self.assertIn("secret-hygiene/scripts/maisecrets/rule_filter.py", names)
                 self.assertIn("secret-hygiene/scripts/maisecrets/placeholder.py", names, "the reference form")
                 self.assertFalse([n for n in names if "vault" in n or "hooks" in n or "__pycache__" in n], names)

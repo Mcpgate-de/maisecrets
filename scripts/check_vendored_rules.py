@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-RULES = "maisecrets/rules"
+RULES = "maisecrets/detection/rules"
 GENERATED = ("BETTERLEAKS_VERSION", "betterleaks.toml", "betterleaks.json", "LICENSE-betterleaks",
              "own_secret_rules.json", "LICENSE-gitleaks",
              "DETECT_SECRETS_VERSION", "detect_secrets.json", "LICENSE-detect-secrets",
