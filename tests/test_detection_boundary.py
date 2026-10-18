@@ -221,9 +221,10 @@ class GivenRegionsTests(unittest.TestCase):
     def test_new_regions_drop_the_shape_rules_of_the_old_ones(self):
         self.ids("de")
         self.detect._shape_rule_ids()
-        self.assertTrue(self.detect._SHAPE_IDS, "the premise: the cache is filled")
+        self.assertTrue(self.detect._DEFAULT._shape_ids, "the premise: the cache is filled")
         self.detect.use_regions(self.regions.resolve({"regions": ["us"]}))
-        self.assertEqual(self.detect._SHAPE_IDS, [], "is_fixture would judge with the shape rules of the old regions")
+        self.assertIsNone(self.detect._DEFAULT._shape_ids,
+                          "is_fixture would judge with the shape rules of the old regions")
         form_of = self.detect._registry.form_of
         self.assertEqual(self.detect._shape_rule_ids(),
                          {r.id for r in self.detect.rules() if (r.form or form_of(r.id)) == "shape"})
@@ -392,8 +393,8 @@ class SourcesTests(unittest.TestCase):
         old = detect.Rule(id="user:probe", type="SECRET", regex=detect.LazyRegex(r"probe-[0-9]{6}", 0))
         detect.use_sources(Given(old))
         detect.scan("probe-123456", channel="tool")
-        self.assertIn("user:probe", detect._REGEX_TIME, "the premise: the old rule's time is counted")
-        detect._REGEX_TIME["user:probe"] = detect.USER_RULE_BUDGET * 10    # the old rule ran over its budget
+        self.assertIn("user:probe", detect._DEFAULT._regex_time, "the premise: the old rule's time is counted")
+        detect._DEFAULT._regex_time["user:probe"] = detect.USER_RULE_BUDGET * 10    # the old rule ran over its budget
         new = detect.Rule(id="user:probe", type="SECRET", regex=detect.LazyRegex(r"probe-[0-9]{6}", 0))
         slow.clear()   # a slow old rule under load is not this test's question
         detect.use_sources(Given(new))

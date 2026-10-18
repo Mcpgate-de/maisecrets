@@ -197,14 +197,9 @@ class DetectorTests(unittest.TestCase):
     """What the prompt hook finds follows the label languages."""
 
     def found(self, text: str, languages: tuple[str, ...]) -> list[str]:
-        saved = detect._RULES
         active = regions.Active(regions=("generic",), languages=languages, source="test")
-        try:
-            detect._RULES = None
-            with mock.patch.object(detect, "active_regions", return_value=active):
-                return [text[m.start:m.end] for m in detect.scan(text) if m.type == "SECRET"]
-        finally:
-            detect._RULES = saved
+        with detect.Detector(regions=active).activate():
+            return [text[m.start:m.end] for m in detect.scan(text) if m.type == "SECRET"]
 
     def test_a_german_label_is_a_label_only_with_german_on(self):
         value = fake_value()

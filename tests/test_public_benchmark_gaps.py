@@ -27,14 +27,9 @@ RNG = random.Random(17)
 
 
 def found(text: str, region: tuple[str, ...] = ()) -> list[tuple[str, str]]:
-    saved = detect._RULES
     active = regions.Active(regions=("generic", *region), languages=("en",), source="test")
-    try:
-        detect._RULES = None
-        with mock.patch.object(detect, "active_regions", return_value=active):
-            return [(m.type, m.value) for m in detect.scan(text)]
-    finally:
-        detect._RULES = saved
+    with detect.Detector(regions=active).activate():
+        return [(m.type, m.value) for m in detect.scan(text)]
 
 
 def luhn_complete(prefix: str, length: int) -> str:

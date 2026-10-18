@@ -25,14 +25,9 @@ ALL_REGIONS = ("us", "uk", "in", "de", "fr", "es", "it", "pt", "ca", "au")
 
 
 def scan(text: str, channel: str = "tool", region: tuple = ALL_REGIONS):
-    saved = detect._RULES
     active = regions.Active(regions=("generic", *region), languages=("en",), source="test")
-    try:
-        detect._RULES = None
-        with mock.patch.object(detect, "active_regions", return_value=active):
-            return detect.scan(text, channel=channel)
-    finally:
-        detect._RULES = saved
+    with detect.Detector(regions=active).activate():
+        return detect.scan(text, channel=channel)
 
 
 def masked(text: str, value: str, channel: str = "tool", region: tuple = ALL_REGIONS) -> bool:

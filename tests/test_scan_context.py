@@ -115,14 +115,14 @@ class ScanContextTests(unittest.TestCase):
         self.assertEqual(wrong, [], "a scan read the channel, the path or the text index of another scan")
 
 
-# the module-level names that the functions of a scan still write: caches of the process, each a later step or a
-# cache whose content does not depend on the scan that fills it, except the timing of the rules of your own (_REGEX_*,
-# _RUNNING), which two threads still share. A new name here is new scan state; remove a name when no function of a
-# scan writes it any more. _CHANNEL, _PATH and _INDEX left this list (2026-10-18); the per-text index is now one per
-# thread (THREAD_LOCAL_STATE).
-KNOWN_SCAN_STATE = frozenset({"_ALLOW", "_COVER_CACHE", "_CTX_CACHE", "_CURL_PARTS", "_LABEL_CLASS", "_ORDER",
-                              "_PUBLIC_TEST_VALUES", "_PW_LAST_ON", "_REGEX_CHARS", "_REGEX_RULE", "_REGEX_TIME",
-                              "_REGIONS", "_RULES", "_RUNNING", "_WORDS", "_WORDS_OK"})
+# the module-level names that the functions of a scan still write: caches of the process whose content depends on
+# no configuration (the word list, the public test values, the regexes of context words and of curl rules, the word
+# cover of a run). A new name here is new scan state; remove a name when no function of a scan writes it any more.
+# _CHANNEL, _PATH and _INDEX left this list (2026-10-18); the per-text index is now one per thread
+# (THREAD_LOCAL_STATE). The caches that follow from the configuration (_RULES, _ALLOW, _REGIONS, _ORDER,
+# _LABEL_CLASS, _PW_LAST_ON, _REGEX_*, _RUNNING) left it for the Detector, which owns them (tests/test_detector.py).
+KNOWN_SCAN_STATE = frozenset({"_COVER_CACHE", "_CTX_CACHE", "_CURL_PARTS", "_PUBLIC_TEST_VALUES", "_WORDS",
+                              "_WORDS_OK"})
 # module-level objects a scan writes that are one per thread (threading.local): no thread reads another's
 THREAD_LOCAL_STATE = frozenset({"_TEXT_INDEX"})
 
