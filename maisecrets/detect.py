@@ -2597,7 +2597,7 @@ def _timed(rule: Rule, found, chars: int):
 
 
 def _too_slow(d: "Detector", rule: Rule, spent: float) -> None:
-    with d._lock:
+    with d._load_lock:   # the rule list belongs to the load: a reset in another thread must not get it back
         if d._rules is not None:
             d._rules = [r for r in d._rules if r is not rule]
     try:
