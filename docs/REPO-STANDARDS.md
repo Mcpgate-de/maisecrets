@@ -160,6 +160,8 @@ and OpenAI plugin directories.
   so the tag pipeline's `notify_marketplace` job sends the signed push event
   itself (`scripts/notify_marketplace.py`, variables
   `MAISECRETS_CLAUDE_MARKETPLACE_URL` and `MAISECRETS_CLAUDE_WEBHOOK_SECRET`).
+  Each further organisation adds the same pair with the suffix `_2`, `_3` and so
+  on, and its own read-only project token; every pair gets the event.
 
 ## Remotes (now)
 

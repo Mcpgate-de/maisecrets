@@ -428,6 +428,46 @@ class NotifyMarketplaceTests(unittest.TestCase):
                 self.assertEqual((rc, sent), (1, []))
                 self.assertIn("missing on the canonical project", out)
 
+    def test_each_further_organisation_gets_the_event_signed_with_its_own_secret(self):
+        raw2 = bytes(range(32, 64))
+        env = dict(self.env, MAISECRETS_CLAUDE_MARKETPLACE_URL_2="https://hooks.example.invalid/m/2",
+                   MAISECRETS_CLAUDE_WEBHOOK_SECRET_2="whsec_" + base64.b64encode(raw2).decode())
+        rc, out, sent = self._notify(env, b'{"published": true}')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual([r.full_url for r in sent], ["https://hooks.example.invalid/m/1",
+                                                      "https://hooks.example.invalid/m/2"])
+        for req, raw in zip(sent, (self.SECRET_RAW, raw2)):
+            h = {k.lower(): v for k, v in req.header_items()}
+            want = base64.b64encode(hmac.new(raw, f"{h['webhook-id']}.{h['webhook-timestamp']}."
+                                             f"{req.data.decode()}".encode(), hashlib.sha256).digest()).decode()
+            self.assertEqual(h["webhook-signature"], "v1," + want)
+
+    def test_a_half_set_further_organisation_is_red_and_the_others_are_still_notified(self):
+        for half in ({"MAISECRETS_CLAUDE_MARKETPLACE_URL_2": "https://hooks.example.invalid/m/2"},
+                     {"MAISECRETS_CLAUDE_WEBHOOK_SECRET_2": "whsec_" + base64.b64encode(b"k" * 32).decode()}):
+            with self.subTest(sorted(half)):
+                rc, out, sent = self._notify(dict(self.env, **half), b'{"published": true}')
+                self.assertEqual(rc, 1, out)
+                self.assertIn("org 2: URL or secret missing", out)
+                self.assertEqual([r.full_url for r in sent], ["https://hooks.example.invalid/m/1"])
+
+    def test_one_failed_delivery_is_red_and_does_not_stop_the_next(self):
+        env = dict(self.env, MAISECRETS_CLAUDE_MARKETPLACE_URL_2="https://hooks.example.invalid/m/2",
+                   MAISECRETS_CLAUDE_WEBHOOK_SECRET_2="whsec_" + base64.b64encode(b"k" * 32).decode())
+        answers = iter([b'{"published": false}', b'{"published": true}'])
+        sent = []
+
+        def fake_urlopen(req, timeout=30):
+            sent.append(req)
+            return _Resp(next(answers))
+        clean = {k: v for k, v in os.environ.items() if not k.startswith(("MAISECRETS_CLAUDE_", "CI_"))}
+        buf = io.StringIO()
+        with mock.patch.dict(os.environ, dict(clean, **env), clear=True), \
+                mock.patch.object(self.n.urllib.request, "urlopen", fake_urlopen), redirect_stdout(buf):
+            rc = self.n.main()
+        self.assertEqual(rc, 1, buf.getvalue())
+        self.assertEqual(len(sent), 2)
+
     def _http_403(self) -> urllib.error.HTTPError:
         err = urllib.error.HTTPError("u", 403, "x", {}, io.BytesIO(b"Missing sig"))
         self.addCleanup(err.close)
