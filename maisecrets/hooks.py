@@ -25,7 +25,7 @@ import sys
 from typing import Any
 
 from . import check_value, detect, incidents, rehydration, term_files, value_files
-from .detect import LazyRx as _LazyRx
+from .lazy_regex import LazyRx as _LazyRx
 from .placeholder import KEY_RE, find_refs
 from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config

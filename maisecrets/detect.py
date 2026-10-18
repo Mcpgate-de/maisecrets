@@ -50,6 +50,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import checksums
+from .lazy_regex import LazyRx as _LazyRx
 from . import registry as _registry
 
 RULES_DIR = Path(__file__).resolve().parent / "rules"
@@ -62,28 +63,6 @@ class Match:
     value: str     # the exact text to replace
     start: int
     end: int
-
-
-class _LazyRx:
-    """A module-level regex compiled at its first use, with every method of a pattern: a hook process paid each
-    compilation at import, and most texts never reach most of these checks (0.6.24). After the first use the methods
-    of the compiled pattern sit in the instance, so a call costs one attribute lookup, as on the pattern itself."""
-    _METHODS = ("search", "match", "fullmatch", "finditer", "findall", "sub", "subn", "split", "scanner")
-
-    def __init__(self, *args) -> None:
-        self._args = args
-
-    @property
-    def pattern(self):
-        return self._args[0]      # the source, without a compilation: a regex built from another one at import
-
-    def __getattr__(self, name: str):
-        rx = self.__dict__.get("_rx")
-        if rx is None:
-            rx = self.__dict__["_rx"] = re.compile(*self._args)
-            for method in self._METHODS:
-                self.__dict__[method] = getattr(rx, method)
-        return getattr(rx, name)
 
 
 class _Lazy:
@@ -1285,28 +1264,10 @@ def reads_as_word(value: str) -> bool:
     return sum(q not in common for q in pairs) <= 0.1 * len(pairs)
 
 
-_DICT_PART_RE = _LazyRx(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
-
-
-def is_dictionary_word(value: str) -> bool:
-    """Whether every part of a value (split at _ - . and at a change to capitals) is an English word of the word list
-    or of the developer words of rules/term_stoplist.txt, also with a plural s. credential, response and
-    passwordLastChanged are; ppsmohsyeeub, Wartungsfenster and Kx7QpZr9 are not. A label rule that took such a word in
-    a tool result stores it weak (vault.is_weak): one session masked a few ordinary words thousands of times a day in
-    code and prose, and a codex review prompt with one of them was refused (field report, 2026-10-17)."""
-    v = value.strip()
-    if not v or len(v) > 60 or not v.isascii() or not reads_as_word(v):
-        return False
+def english_words() -> frozenset:
+    """The English word list of the detector (rules/words_en.txt): empty when it is missing or no list of words."""
     words = _word_set()
-    if not words or not _WORDS_OK[0]:
-        return False   # no word list: hunt the value, as before
-    from .terms import stoplist
-    known = words | stoplist()
-    parts = [w.lower() for p in re.split(r"[_.-]+", v) if p for w in _DICT_PART_RE.findall(p)]
-    if not parts or "".join(parts) != re.sub(r"[_.-]+", "", v).lower():
-        return False
-    return all(len(w) >= 2 and (w in known or (w.endswith("s") and w[:-1] in known)
-                                or (w.endswith("es") and w[:-2] in known)) for w in parts)
+    return words if words and _WORDS_OK[0] else frozenset()
 
 
 def _judge_literal(label: str, v: str, quoted: bool = True, channel: str = "prompt") -> str:
@@ -2552,9 +2513,6 @@ def reset_rules() -> None:
     _sources().reset()
 
 
-# Matchers of other kinds than a regex rule (a list of names, a value import): each is a callable text -> list[Match],
-# run in scan() after the rules. A span a rule took stays taken, and the allow list holds for them too.
-extra_matchers: list = []
 
 # The time each rule of your own spent inside its regex in this process (seconds), and the characters it ran over.
 # Only the regex counts, around each step of its finditer: the work on each hit is no time of the rule (Opus review,
@@ -2635,7 +2593,7 @@ TERM_KEY = "terms:" + TERM_RULE    # its key; `enabled` takes either, or the kin
 
 
 def _term_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: list, overlaps, take) -> None:
-    """The terms pass (registry phase "terms"): after the rules of your own, before the extra matchers. A term that
+    """The terms pass (registry phase "terms"): after the rules of your own. A term that
     a rule found too (an email address, a token-shaped case number) claims the span (_claim)."""
     if enabled is not None and TERM_RULE not in enabled and TERM_KEY not in enabled and not any(
             str(k).startswith("term:") for k in enabled):
@@ -2662,7 +2620,7 @@ IMPORT_KEY = "imports:" + IMPORT_RULE  # its key; `enabled` takes either, or the
 
 
 def _import_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: list, overlaps, take) -> None:
-    """The imports pass (registry phase "imports"): after the terms, before the extra matchers. An import only adds
+    """The imports pass (registry phase "imports"): after the terms. An import only adds
     masking: a span that a rule or a term took keeps its kind and its placeholder (a rule hit stays resolvable), and
     only the parts of the imported value outside every taken span are hits of the import (_term_rest)."""
     if enabled is not None and IMPORT_RULE not in enabled and IMPORT_KEY not in enabled and not any(
@@ -3096,11 +3054,9 @@ def is_code_word(value: str) -> bool:
     return w in _CODE_WORDS or w in _MESSAGE_WORDS
 
 
-def code_word_spellings() -> list[str]:
-    """The spellings of such a word that a keyword rule stored before 0.5.15. The vault finds a stored one by its
-    fingerprint and reads no value (Vault.drop_code_words)."""
-    return [s for w in sorted(_CODE_WORDS | _MESSAGE_WORDS) for b in (w, w.capitalize(), w.upper())
-            for s in (b, b + ";")]
+def code_words() -> frozenset:
+    """The statement keywords and the words of error messages that a keyword rule never takes as a value."""
+    return _CODE_WORDS | _MESSAGE_WORDS
 
 
 _NL_RE = _LazyRx("\n")
@@ -3588,7 +3544,7 @@ def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt", pa
     """Return non-overlapping matches, leftmost first; the first rule to claim a span wins. channel "tool" (a tool
     result or a file) takes a password after a password label without evidence of chance, and the cells of a
     password export (path: the file the text came from, if any). `rule_list` scans with those rules alone, without
-    the allow list and the extra matchers (`maisecrets rules check`). `enabled` names rules by id or by key
+    the allow list and the sources (`maisecrets rules check`). `enabled` names rules by id or by key
     (maisecrets/registry.py): an id that two rules share enables both, a key one of them."""
     # the channel and the path travel as arguments: a nested scan (is_fixture) or a scan in another thread has its own
     return _scan(text, enabled, rule_list=rule_list, channel="tool" if channel == "tool" else "prompt", path=path or "")
@@ -4039,10 +3995,6 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 end -= len(secret) - cut
                 secret = secret[:cut]
             take(Match(rule.id, rule.type, secret, start, end), own)
-    for matcher in (extra_matchers if rule_list is None else ()):
-        for m in sorted(matcher(text), key=lambda x: x.start):
-            if (enabled is None or m.kind in enabled) and m.end > m.start and not overlaps(m.start, m.end):
-                take(m, True)
     found.sort(key=lambda x: x.start)
     return found
 

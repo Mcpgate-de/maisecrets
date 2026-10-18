@@ -1,10 +1,11 @@
 """Rules of your own (maisecrets/user_rules.py, C25): rule folders with static checks and a quarantine, the allow
 list of exact values and rule ids, the rule_dirs setting that only a typed prompt changes, the NAME type, the extension
-point detect.extra_matchers, and `maisecrets rules`.
+point of the sources (detect.use_sources), and `maisecrets rules`.
 
 Every value is made up and built from parts at run time, so scripts/scan_tree.py finds no shape in this file."""
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -66,6 +67,24 @@ def write_rules(folder: Path, rules: list, name: str = "team.json") -> None:
 def kinds(text: str) -> list[str]:
     return [m.kind for m in detect.scan(text)]
 
+
+
+
+@contextlib.contextmanager
+def later_pass(matcher):
+    """A pass after the rules that finds what `matcher` returns and keeps the spans the rules took: the import pass of
+    the plugin's sources with these hits added. It replaces detect.extra_matchers, which had no caller outside the
+    tests; the sources are the one boundary for such a pass."""
+    from maisecrets.sources import PluginSources
+
+    class WithHits(PluginSources):
+        def import_matches(self, text):
+            return list(super().import_matches(text)) + list(matcher(text))
+    detect.use_sources(WithHits())
+    try:
+        yield
+    finally:
+        detect.use_sources(None)
 
 class Base(unittest.TestCase):
     def setUp(self):
@@ -221,7 +240,7 @@ class AllowList(Base):
         def first_name(t: str) -> list:      # a later matcher that finds a part of the allowed address
             at = t.find(address)
             return [detect.Match("term:person", "NAME", "ada", at, at + 3)] if at >= 0 else []
-        with mock.patch.object(detect, "extra_matchers", [first_name]):
+        with later_pass(first_name):
             self.assertEqual(kinds(f"mail {address} today"), [])
 
     def test_a_rule_id_switches_the_rule_off(self):
@@ -292,7 +311,7 @@ class NameType(unittest.TestCase):
 
 
 class ExtraMatchers(Base):
-    def test_an_extra_matcher_runs_after_the_rules_and_keeps_their_spans(self):
+    def test_a_later_pass_runs_after_the_rules_and_keeps_their_spans(self):
         address = ADDRESS
         text = f"Ada Lovelace wrote to {address}"
 
@@ -301,8 +320,8 @@ class ExtraMatchers(Base):
             at = t.index(address)
             out.append(detect.Match("term:person", "NAME", address, at, at + len(address)))   # taken by email
             return out
-        self.assertEqual(detect.extra_matchers, [], "empty in block 1")
-        with mock.patch.object(detect, "extra_matchers", [names]):
+        self.assertFalse(hasattr(detect, "extra_matchers"), "a later pass comes from the sources now")
+        with later_pass(names):
             found = detect.scan(text)
             self.assertEqual([(m.kind, m.value) for m in found], [("term:person", "Ada Lovelace"), ("email", address)])
             self.assertEqual(detect.scan(text, enabled={"email"})[0].kind, "email", "enabled holds for them too")
@@ -320,9 +339,8 @@ class ExtraMatchers(Base):
             return [detect.Match("term:person", "NAME", "Ada Lovelace", 0, 12),
                     detect.Match("term:person", "NAME", address, at, at + len(address))]   # taken by email
         from maisecrets import registry
-        self.assertEqual(detect.extra_matchers, [], "the terms are no extra matcher")
+        self.assertFalse(hasattr(detect, "extra_matchers"), "the terms are a pass of the sources")
         self.assertGreater(registry.PHASES["terms"], registry.PHASES["user"])
-        self.assertLess(registry.PHASES["terms"], registry.PHASES["extra"])
         with mock.patch.object(detect, "_term_matches", names):
             # a term that a rule took keeps the rule's span and type, and becomes the term: the store keeps the
             # entity id, and the placeholder is never resolved (C26)
@@ -774,7 +792,7 @@ class OrderAndAllow(Base):
         def part(t: str) -> list:          # a later matcher that finds a part of the allowed token
             at = t.find(TAIL)
             return [detect.Match("term:x", "NAME", TAIL[:8], at, at + 8)] if at >= 0 else []
-        with mock.patch.object(detect, "extra_matchers", [part]):
+        with later_pass(part):
             self.assertEqual(kinds(f"use {token()} here"), ["term:x"])
 
     def test_an_allowed_value_never_hides_a_longer_built_in_hit(self):
