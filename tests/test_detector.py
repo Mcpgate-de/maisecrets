@@ -187,6 +187,18 @@ class TwoDetectorsTests(unittest.TestCase):
                                             if (r.form or detect._registry.form_of(r.id)) == "shape"})
         self.assertNotEqual(a._shape_ids, b._shape_ids, "the regions give other shape rules")
 
+    def test_the_allow_list_belongs_to_its_detector(self):
+        text = TEXTS["regions us"]
+
+        class AllowsTheRule(detect.Sources):
+            def allow_list(self):
+                return frozenset(), frozenset({"us-ssn"})
+        off = detect.Detector(regions=US, sources=AllowsTheRule())
+        on = detector_b()
+        self.assertEqual((kinds(off, text), kinds(on, text), kinds(off, text)), ([], ["us-ssn#2"], []))
+        self.assertEqual(off.allow_list()[1], frozenset({"us-ssn"}))
+        self.assertEqual(on.allow_list(), (frozenset(), frozenset()))
+
     def test_a_scan_adds_no_state_to_a_detector_that_its_constructor_did_not_make(self):
         made = set(vars(detector_a()))
         a = detector_a()
@@ -217,6 +229,14 @@ class TwoDetectorsTests(unittest.TestCase):
         for name, text in TEXTS.items():
             self.assertEqual(kinds(a, text), self.want[name][0], name)
             self.assertEqual([m.kind for m in detect.scan(text, channel="tool")], self.want[name][1], name)
+
+    def test_a_setter_inside_activate_configures_the_default_detector_not_the_active_one(self):
+        a = detector_a()
+        self.addCleanup(detect.use_regions, None)
+        with a.activate():
+            detect.use_regions(US)
+            self.assertEqual(kinds(a, TEXTS["regions de"]), ["street-address"], "A keeps its regions")
+        self.assertEqual([m.kind for m in detect.scan(TEXTS["regions us"], channel="tool")], ["us-ssn#2"])
 
     def test_activate_routes_the_functions_of_the_module_to_a_detector_and_restores_the_default(self):
         a, b = detector_a(), detector_b()

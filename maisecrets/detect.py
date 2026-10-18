@@ -2833,6 +2833,10 @@ class Detector:
         """The regions and label languages this detector scans with (a regions.Active)."""
         return self._run(active_regions)
 
+    def allow_list(self) -> tuple:
+        """(exact values, rule ids) of the allow list of this detector (detect.allow_list)."""
+        return self._run(allow_list)
+
     def explain_allowed(self, value: str) -> str | None:
         """Why the allow list of this detector lets this value through, or None (detect.explain_allowed)."""
         return self._run(explain_allowed, value)
