@@ -1,4 +1,4 @@
-"""A scan carries its channel and its path itself; the detector keeps no scan state at module level.
+"""A scan carries its channel and its path itself; the detector keeps no process-shared scan context.
 
 scan() used to put its channel and path into two module globals (_CHANNEL, _PATH) and read them deep inside the
 rules. Two scans at the same time in two threads then read each other's channel and path: a tool result scanned next
@@ -49,27 +49,38 @@ class ScanContextTests(unittest.TestCase):
 
     def test_the_text_index_of_one_thread_is_not_the_index_of_another(self):
         # the order of the race, made fixed: thread A indexes its text, thread B indexes another one, then A asks
-        # again. With one index for the process A got B's line breaks (and its literal hits)
+        # again. With one index for the process, B's text replaced A's index object between A's two questions; in a
+        # scan, A then read line breaks and literal hits that another thread had just put there
         a_text, b_text = "a\nb\nc\n", "only one line"
         a_ready, b_done = threading.Event(), threading.Event()
         seen: dict = {}
+        errors: list = []
 
         def thread_a():
-            first = detect._text_index(a_text)
-            a_ready.set()
-            b_done.wait(timeout=60)
-            seen["a"] = (detect._text_index(a_text) is first, detect._newlines(a_text))
+            try:
+                first = detect._text_index(a_text)
+                a_ready.set()
+                seen["b done"] = b_done.wait(timeout=60)
+                seen["a"] = (detect._text_index(a_text) is first, detect._newlines(a_text))
+            except BaseException as exc:  # noqa: BLE001 - a worker's exception must fail the test
+                errors.append(repr(exc))
 
         def thread_b():
-            a_ready.wait(timeout=60)
-            detect._text_index(b_text)
-            b_done.set()
-        threads = [threading.Thread(target=thread_a), threading.Thread(target=thread_b)]
+            try:
+                seen["a ready"] = a_ready.wait(timeout=60)
+                detect._text_index(b_text)
+                b_done.set()
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(repr(exc))
+        threads = [threading.Thread(target=thread_a, daemon=True), threading.Thread(target=thread_b, daemon=True)]
         for t in threads:
             t.start()
         for t in threads:
             t.join(timeout=60)
-        self.assertEqual(seen.get("a"), (True, [1, 3, 5]))
+        self.assertFalse([t for t in threads if t.is_alive()], "a thread did not end")
+        self.assertEqual(errors, [])
+        self.assertEqual((seen.get("a ready"), seen.get("b done")), (True, True), "the fixed order did not happen")
+        self.assertEqual(seen.get("a"), (True, [1, 3, 5]), "B's text replaced the index of A")
 
     def test_two_scans_at_once_keep_their_own_channel_and_path(self):
         # the cases hold two texts and both channels: a scan must read neither the channel, nor the path, nor the
@@ -108,10 +119,12 @@ class ScanContextTests(unittest.TestCase):
 # cache whose content does not depend on the scan that fills it, except the timing of the rules of your own (_REGEX_*,
 # _RUNNING), which two threads still share. A new name here is new scan state; remove a name when no function of a
 # scan writes it any more. _CHANNEL, _PATH and _INDEX left this list (2026-10-18); the per-text index is now one per
-# thread (_TEXT_INDEX, a threading.local).
+# thread (THREAD_LOCAL_STATE).
 KNOWN_SCAN_STATE = frozenset({"_ALLOW", "_COVER_CACHE", "_CTX_CACHE", "_CURL_PARTS", "_LABEL_CLASS", "_ORDER",
                               "_PUBLIC_TEST_VALUES", "_PW_LAST_ON", "_REGEX_CHARS", "_REGEX_RULE", "_REGEX_TIME",
                               "_REGIONS", "_RULES", "_RUNNING", "_WORDS", "_WORDS_OK"})
+# module-level objects a scan writes that are one per thread (threading.local): no thread reads another's
+THREAD_LOCAL_STATE = frozenset({"_TEXT_INDEX"})
 
 
 def _module_names(tree: ast.Module) -> set:
@@ -131,7 +144,15 @@ def _base(e):
 def module_writes(func: ast.AST, names: set) -> set:
     """The module-level names a function writes: a global statement, an assignment, augmented assignment or del of an
     item or attribute of the name (also deeper: S[0].x = 1), a mutating method call on the name or on a part of it
-    (S.append, S[0].clear), and setattr on it."""
+    (S.append, S[0].clear), and setattr on it; also through a local name bound to it (t = S; t.x = 1, also chained).
+    A name bound through a call or a return value is out of its reach."""
+    alias = {n: n for n in names}
+    for _ in range(3):
+        for node in ast.walk(func):
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name) and node.value.id in alias:
+                for t in node.targets:
+                    if isinstance(t, ast.Name) and t.id not in names:
+                        alias[t.id] = alias[node.value.id]
     out = set()
     mutators = {"append", "extend", "insert", "pop", "popitem", "clear", "update", "setdefault", "add", "remove",
                 "discard", "sort", "reverse", "__setitem__", "__delitem__"}
@@ -146,16 +167,16 @@ def module_writes(func: ast.AST, names: set) -> set:
         for t in targets:
             for e in (t.elts if isinstance(t, (ast.Tuple, ast.List)) else [t]):
                 base = _base(e)
-                if isinstance(base, ast.Name) and base.id in names and base is not e:
-                    out.add(base.id)
+                if isinstance(base, ast.Name) and base.id in alias and base is not e:
+                    out.add(alias[base.id])
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in mutators:
             base = _base(node.func.value)
-            if isinstance(base, ast.Name) and base.id in names:
-                out.add(base.id)
+            if isinstance(base, ast.Name) and base.id in alias:
+                out.add(alias[base.id])
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "setattr" and node.args:
             base = _base(node.args[0])
-            if isinstance(base, ast.Name) and base.id in names:
-                out.add(base.id)
+            if isinstance(base, ast.Name) and base.id in alias:
+                out.add(alias[base.id])
     return out
 
 
@@ -180,13 +201,13 @@ class NoModuleScanStateTests(unittest.TestCase):
         self.names = _module_names(self.tree)
 
     def test_the_checker_sees_each_form_of_a_module_write(self):
-        src = ("S = [1]\nD = {}\nT = [[]]\nU = []\nV = {}\nW = []\nX = 0\nY = []\n"
+        src = ("S = [1]\nD = {}\nT = [[]]\nU = []\nV = {}\nW = []\nX = 0\nY = []\nZ = object()\n"
                "def f(c):\n    global X\n    S[0] = c\n    D['k'] = c\n    T[0].append(c)\n    del U[0]\n"
                "    setattr(V, 'a', c)\n    W[0] += 1\n    a, Y[0] = 1, c\n    local = [c]\n    local[0] = 2\n"
-               "    local.append(S[0])\n")
+               "    local.append(S[0])\n    t = Z\n    u = t\n    u.x = c\n")
         tree = ast.parse(src)
         func = [n for n in tree.body if isinstance(n, ast.FunctionDef)][0]
-        self.assertEqual(module_writes(func, _module_names(tree)), {"S", "D", "T", "U", "V", "W", "X", "Y"})
+        self.assertEqual(module_writes(func, _module_names(tree)), {"S", "D", "T", "U", "V", "W", "X", "Y", "Z"})
 
     def test_the_call_graph_reaches_the_helpers_of_a_scan(self):
         graph = reachable(self.tree, "scan")
@@ -198,8 +219,16 @@ class NoModuleScanStateTests(unittest.TestCase):
         graph = reachable(self.tree, "scan")
         written = set().union(*(module_writes(f, self.names) for f in graph.values()))
         self.assertFalse(written & {"_CHANNEL", "_PATH", "_INDEX"}, "the scan context is back in module state")
-        self.assertEqual(written - KNOWN_SCAN_STATE, set(), "a scan writes new module state: pass it as an argument")
-        self.assertEqual(KNOWN_SCAN_STATE - written, set(), "no longer written: remove it from KNOWN_SCAN_STATE")
+        self.assertEqual(written - KNOWN_SCAN_STATE - THREAD_LOCAL_STATE, set(),
+                         "a scan writes new module state: pass it as an argument")
+        self.assertEqual((KNOWN_SCAN_STATE | THREAD_LOCAL_STATE) - written, set(),
+                         "no longer written: remove it from KNOWN_SCAN_STATE")
+
+    def test_the_thread_local_state_is_a_threading_local(self):
+        made = {n.targets[0].id: ast.unparse(n.value) for n in self.tree.body
+                if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)}
+        for name in THREAD_LOCAL_STATE:
+            self.assertEqual(made.get(name), "threading.local()", name)
 
 
 if __name__ == "__main__":
