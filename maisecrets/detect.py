@@ -42,6 +42,7 @@ import ipaddress
 import json
 import math
 import re
+import threading
 import time
 import warnings
 from collections import Counter
@@ -201,12 +202,12 @@ def _base64_of_text(v: str) -> bool:
     return bool(raw) and all(32 <= b < 127 for b in raw)
 
 
-def _entropy_ok(rule: Rule, secret: str) -> bool:
+def _entropy_ok(rule: Rule, secret: str, channel: str = "prompt") -> bool:
     if rule.id in ENTROPY_BY_ALPHABET_RULES:
         e = shannon_entropy(secret)
         if e >= 3.5:
             return True    # the old floor: a value it took stays a hit
-        if _CHANNEL[0] != "tool":
+        if channel != "tool":
             return False   # a typed prompt keeps 3.5: an identifier with a digit there is blocked, not masked
         return e >= ENTROPY_BY_ALPHABET[alphabet_of(secret)] and not _base64_of_text(secret)
     return not rule.entropy or shannon_entropy(secret) >= rule.entropy
@@ -888,7 +889,6 @@ def _word_set() -> frozenset:
 
 
 _WORDS_OK: list = [True]
-_CHANNEL: list = ["prompt"]
 
 
 _COVER_CACHE: dict = {}
@@ -1071,7 +1071,7 @@ def _pw_strong_evidence(v: str) -> bool:
     return len(v) >= 8 and classes >= 3
 
 
-def _pw_literal_ok(v: str) -> bool:
+def _pw_literal_ok(v: str, channel: str = "prompt") -> bool:
     """A password value: 4 to 64 characters, no word after undoing leet (or a word with a number and a sign), not
     digits only, 3 distinct characters or more, no run such as abcd, no placeholder, no space, no dotted reference, no
     fixture word (testpass), no version."""
@@ -1090,7 +1090,7 @@ def _pw_literal_ok(v: str) -> bool:
     if _wordlike(_deleet(v)) < 0.3:
         if not _WORDS_OK[0] and v.isalpha():
             return False   # without a word list, a value of letters only may be any word
-        if _CHANNEL[0] == "tool":
+        if channel == "tool":
             return _random_evidence(v, tool=True)   # a false hit in a tool result masks a value, it blocks no prompt
         return _random_evidence(v)
     # a password made of a word, a number and a sign: Sommer2024!, Herbst2025#, Welcome1! (the form people choose).
@@ -1309,10 +1309,10 @@ def is_dictionary_word(value: str) -> bool:
                                 or (w.endswith("es") and w[:-2] in known)) for w in parts)
 
 
-def _judge_literal(label: str, v: str, quoted: bool = True) -> str:
+def _judge_literal(label: str, v: str, quoted: bool = True, channel: str = "prompt") -> str:
     """The rule a label and its literal value fall under, or ""."""
     pw, secret, weak, otp, last = _label_class(label)
-    if pw and _pw_literal_ok(v) and (last.rstrip("0123456789") != "pass" or _pw_strong_evidence(v)):
+    if pw and _pw_literal_ok(v, channel) and (last.rstrip("0123456789") != "pass" or _pw_strong_evidence(v)):
         return "label-pw-literal"
     if secret and _key_literal_ok(v, 8, 200, 0.3, 0.8):
         return "label-secret-literal"
@@ -1324,12 +1324,11 @@ def _judge_literal(label: str, v: str, quoted: bool = True) -> str:
     return ""
 
 
-def _literal_hits(text: str) -> list:
+def _literal_hits(text: str, channel: str = "prompt") -> list:
     """(rule id, start of the label, start and end of the value) of each label and literal value of `text`, computed
     once per text for all the rules that read them."""
-    _newlines(text)
-    cache = _INDEX[1]
-    if ("literal", _CHANNEL[0]) not in cache:
+    cache = _text_index(text)
+    if ("literal", channel) not in cache:
         hits = []
         pos = 0
         while True:
@@ -1350,14 +1349,14 @@ def _literal_hits(text: str) -> list:
             pos = end + 1 if closed else max(end, a)
             if closed and re.match(r"[ \t]*\+", text[end + 1:end + 40]):
                 continue   # a string that + continues is an expression
-            rid = _judge_literal(m.group(1), _unquote(raw, q, True, tick), quoted=True)
+            rid = _judge_literal(m.group(1), _unquote(raw, q, True, tick), quoted=True, channel=channel)
             if rid:
                 hits.append((rid, m.start(), a, end))
             else:
                 pos = a   # a literal that is no value may be a label itself: f("password", "…"), or hold a JSON text
         for n, (rx, gl, gv) in enumerate(_LIT_FORMS):
             for m in rx.finditer(text):
-                rid = _judge_literal(m.group(gl), m.group(gv), quoted=n != 0)
+                rid = _judge_literal(m.group(gl), m.group(gv), quoted=n != 0, channel=channel)
                 if rid:
                     hits.append((rid, m.start(), m.start(gv), m.end(gv)))
         for rx, backslash in ((_LIT_SQL, True), (_LIT_PS, False)):
@@ -1365,11 +1364,11 @@ def _literal_hits(text: str) -> list:
                 q = m.group(1)
                 tick = not backslash and q == '"'
                 end, _closed = _read_quoted(text, m.end(), q, backslash=backslash, backtick=tick)
-                if _pw_literal_ok(_unquote(text[m.end():end], q, backslash, tick)):
+                if _pw_literal_ok(_unquote(text[m.end():end], q, backslash, tick), channel):
                     hits.append(("label-pw-literal", m.start(), m.end(), end))
         hits.sort(key=lambda h: h[2])
-        cache["literal", _CHANNEL[0]] = hits   # the tool channel takes more values
-    return cache["literal", _CHANNEL[0]]
+        cache["literal", channel] = hits   # the tool channel takes more values
+    return cache["literal", channel]
 
 
 class _Literal:
@@ -1390,8 +1389,8 @@ class _Literal:
         return self._e
 
 
-def _literal_matches(rule_id: str, text: str):
-    for rid, a, s, e in _literal_hits(text):
+def _literal_matches(rule_id: str, text: str, channel: str = "prompt"):
+    for rid, a, s, e in _literal_hits(text, channel):
         if rid == rule_id:
             yield _Literal(text, a, s, e)
 
@@ -3061,16 +3060,24 @@ def code_word_spellings() -> list[str]:
 
 
 _NL_RE = _LazyRx("\n")
-_INDEX: list = [None, None]   # the last text and its line index: scan() and is_fixture() ask about one text
+# the last text and its index (line breaks, lines, positions, literal hits), one per thread: scan() and is_fixture()
+# ask about one text, and two scans in two threads must not read the index of each other's text
+_TEXT_INDEX = threading.local()
+
+
+def _text_index(text: str) -> dict:
+    """The index of `text` in this thread, made at the first question about it."""
+    t = _TEXT_INDEX
+    if getattr(t, "text", None) is not text:
+        t.text, t.cache = text, {"nl": [m.start() for m in _NL_RE.finditer(text)]}
+    return t.cache
 
 
 def _newlines(text: str) -> list:
     """The offsets of the line breaks of `text`, computed once per text. A search for the start or the end of a line
     at each keyword hit was one pass over the line, and a one-line text of 2 MB took 14.5 s (review of 3e5d53e,
     2026-09-30)."""
-    if _INDEX[0] is not text:
-        _INDEX[0], _INDEX[1] = text, {"nl": [m.start() for m in _NL_RE.finditer(text)]}
-    return _INDEX[1]["nl"]
+    return _text_index(text)["nl"]
 
 
 def _line_start(text: str, pos: int) -> int:
@@ -3088,8 +3095,7 @@ def _line_end(text: str, pos: int) -> int:
 def _split_lines(text: str) -> tuple:
     """The lines of `text` and of its lower-case form, split once per text: the seven keyword rules each split a
     megabyte again (review of 3e5d53e, 2026-09-30)."""
-    _newlines(text)
-    cache = _INDEX[1]
+    cache = _text_index(text)
     if "lines" not in cache:
         cache["lines"] = (text.split("\n"), _lower(text).split("\n"))
     return cache["lines"]
@@ -3097,8 +3103,7 @@ def _split_lines(text: str) -> tuple:
 
 def _positions(text: str, name: str, rx: re.Pattern) -> list:
     """The start offsets of the matches of `rx` in `text`, computed once per text (see _newlines)."""
-    _newlines(text)
-    cache = _INDEX[1]
+    cache = _text_index(text)
     if name not in cache:
         cache[name] = [m.start() for m in rx.finditer(text)]
     return cache[name]
@@ -3206,7 +3211,7 @@ _SEED_CONTEXT_RE = _LazyRx(r"(?i)(?<![a-z])(?:seed|mnemonic|bip-?39|recovery|wal
                               r"|token|wiederherstellung)(?![a-z])")   # a whole word: not tokenization, keyboard
 
 
-def _matches(rule: Rule, text: str):
+def _matches(rule: Rule, text: str, channel: str = "prompt"):
     """detect-secrets keyword rules are line rules: run them per line, keep absolute offsets.
 
     A label that ends its line (``passwort:`` and the value on the next line, as a console
@@ -3221,7 +3226,7 @@ def _matches(rule: Rule, text: str):
         yield from _list_matches(rule, text)
         return
     if matcher == "literal":
-        yield from _literal_matches(rule.id, text)
+        yield from _literal_matches(rule.id, text, channel)
         return
     if matcher == "seed":
         for a, b, words in checksums.bip39_spans(text):
@@ -3541,16 +3546,10 @@ def scan(text: str, enabled: set[str] | None = None, channel: str = "prompt", pa
     password export (path: the file the text came from, if any). `rule_list` scans with those rules alone, without
     the allow list and the extra matchers (`maisecrets rules check`). `enabled` names rules by id or by key
     (maisecrets/registry.py): an id that two rules share enables both, a key one of them."""
-    outer, _CHANNEL[0] = _CHANNEL[0], channel if channel == "tool" else "prompt"
-    outer_path, _PATH[0] = _PATH[0], path or ""
-    try:
-        return _scan(text, enabled, rule_list=rule_list)
-    finally:
-        _CHANNEL[0] = outer   # the channel of an outer scan comes back after a nested one (is_fixture)
-        _PATH[0] = outer_path
+    # the channel and the path travel as arguments: a nested scan (is_fixture) or a scan in another thread has its own
+    return _scan(text, enabled, rule_list=rule_list, channel="tool" if channel == "tool" else "prompt", path=path or "")
 
 
-_PATH: list = [""]
 # a label rule (LABEL_RULES): its header labels the cell, so a word in it is stored quiet and a fixture in test code
 # is dropped, as after `password:`
 EXPORT_RULE = "label-password-export"
@@ -3668,14 +3667,14 @@ _NAME_RE = _LazyRx(r"\"?[A-Za-z][\w.-]*\"?")
 _EXPORT_HINT_RE = _LazyRx(r"pass|pwd|kennw|totp|otp|secret|apikey|api_key|private_?key|access_?token")
 
 
-def _export_hits(text: str, low: str) -> list:
+def _export_hits(text: str, low: str, path: str = "") -> list:
     """The values in the password, TOTP and secret columns of a password export: a table whose header row names a
     secret column and an entry column (url, username, name, title, ...), or a secret column alone when the file name
     is an export's (passwords.csv, bitwarden_export.csv, ...). No rule finds a bare password in a cell: an export read
     whole put every password in front of the model."""
     if not _EXPORT_HINT_RE.search(low):
         return []
-    by_name = bool(_PATH[0]) and _EXPORT_NAME_RE.search(_PATH[0]) is not None
+    by_name = bool(path) and _EXPORT_NAME_RE.search(path) is not None
     out = []
     pos = 0
     n = len(text)
@@ -3741,7 +3740,7 @@ def _any_keyword(keywords: tuple, low: str, known: dict) -> bool:
 
 
 def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
-          rule_list: list[Rule] | None = None) -> list[Match]:
+          rule_list: list[Rule] | None = None, channel: str = "prompt", path: str = "") -> list[Match]:
     """_copy: the text is the normaliser's cleaned copy of a tool result, which is not cleaned again."""
     if not text:
         return []
@@ -3773,9 +3772,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         taken_starts.insert(i, m.start)
         taken_ends.insert(i, m.end)
         found.append(m)
-    if _CHANNEL[0] == "tool" and not _copy and (enabled is None or EXPORT_RULE in enabled or EXPORT_KEY in enabled):
+    if channel == "tool" and not _copy and (enabled is None or EXPORT_RULE in enabled or EXPORT_KEY in enabled):
         # first: a cell of a password export is a value as a whole, and no other rule claims a part of it
-        for m in _export_hits(text, low):
+        for m in _export_hits(text, low, path):
             take(m)
     keywords_in: dict = {}      # keyword -> whether the text holds it: the 652 keywords of the rules are 519 texts
     for rule in (_in_scan_order(rules()) if rule_list is None else rule_list):
@@ -3783,9 +3782,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
             # the personal data of 0.6.21 and the cleaned copy of the tool channel run after every built-in rule and
             # before the rules of your own: a rule of your own never takes a span that a built-in step would have
             # found (review of the rebase on 0.6.21: a user rule cut an address that the copy saw whole)
-            _personal_hits(text, enabled, found, taken_starts, taken_ends, overlaps)
-            if _CHANNEL[0] == "tool" and not _copy:
-                _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends)
+            _personal_hits(text, enabled, found, taken_starts, taken_ends, overlaps, channel)
+            if channel == "tool" and not _copy:
+                _scan_cleaned_copy(text, enabled, found, taken_starts, taken_ends, channel, path)
             continue
         if rule is _TERMS:
             _term_hits(text, enabled, found, taken_starts, taken_ends, overlaps, take)
@@ -3798,7 +3797,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         if rule.keywords and not _any_keyword(rule.keywords, low, keywords_in):
             continue
         # a rule that cannot fire without a context word need not run its regex without one
-        alone = _CHANNEL[0] == "tool" and rule.id in CARD_ALONE_IN_TOOL
+        alone = channel == "tool" and rule.id in CARD_ALONE_IN_TOOL
         if (rule.context and (rule.require_context or rule.score < 0.5) and not alone
                 and not _has_context_word(low, rule.context)):
             continue
@@ -3806,7 +3805,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
         form = rule.form or _registry.form_of(rule.id)    # a rule list a caller built has no form set
         keyword = form == "keyword"
         filters = rule.filters if rule.filters is not None else _registry.filters_of(rule.id)
-        hits = _matches(rule, text)
+        hits = _matches(rule, text, channel)
         for m in (_timed(rule, hits, len(text)) if own and rule_list is None else hits):
             ngroups = rule.regex.groups or 0
             if rule.whole_match:
@@ -3913,7 +3912,7 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 continue   # a section number: RFC 6749 4.1.2.1, OIDC Core 3.1.2.1, section 7.1.2.3
             if overlaps(start, end):
                 continue
-            if rule.entropy and not _entropy_ok(rule, secret):
+            if rule.entropy and not _entropy_ok(rule, secret, channel):
                 continue
             if rule.drop is not None and rule.drop({"secret": secret, "match": m.group(0), "path": "",
                                                     "line": text[_line_start(text, start):_line_end(text, end)]}):
@@ -4028,7 +4027,8 @@ def _in_scan_order(every: list) -> tuple:
     return _ORDER[1]
 
 
-def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: list, overlaps) -> None:
+def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: list, overlaps,
+                   channel: str = "prompt") -> None:
     """Personal data after a label or in a fixed form (maisecrets/personal.py), after every other rule: a span that
     another rule took stays its own, and a placeholder or a documentation value is no hit."""
     try:
@@ -4038,7 +4038,7 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
     allowed, off = allow_list()
     by_start, gone = None, set()
     company: list = []
-    every = sorted(personal.hits(text, _CHANNEL[0], _pii_regions_cached(), company))
+    every = sorted(personal.hits(text, channel, _pii_regions_cached(), company))
     # the decision belongs to an address rule that runs: a rule that `enabled` or the allow list turns off decides
     # nothing (Gate B of this change)
     company = [c for c in company if (enabled is None or c[4] in enabled or "personal:" + c[4] in enabled)
@@ -4152,7 +4152,7 @@ _WINDOW_BEFORE = 2048  # context a rule may read before a value: a label 200, a 
 _WINDOW_AFTER = 512    # four lines of 400 before its secret (aws-secret-after-access-key); after it: a context word 40
 
 
-def _changed_windows_scan(text: str, norm, enabled) -> list:
+def _changed_windows_scan(text: str, norm, enabled, channel: str = "prompt", path: str = "") -> list:
     """The hits of the cleaned copy, scanned only around its changed lines: each changed line with the whole lines
     that hold the _WINDOW_BEFORE characters before it and the _WINDOW_AFTER characters after it, windows that touch
     merged. A line the stages left alone holds the hits the raw scan already has, and a rescan of the whole text
@@ -4179,12 +4179,13 @@ def _changed_windows_scan(text: str, norm, enabled) -> list:
         a = b + 1
     out = []
     for wa, wb in windows:
-        for m in _scan(copy[wa:wb], enabled, _copy=True):
+        for m in _scan(copy[wa:wb], enabled, _copy=True, channel=channel, path=path):
             out.append(Match(m.kind, m.type, m.value, m.start + wa, m.end + wa))
     return out
 
 
-def _scan_cleaned_copy(text: str, enabled, found: list, taken_starts: list, taken_ends: list) -> None:
+def _scan_cleaned_copy(text: str, enabled, found: list, taken_starts: list, taken_ends: list,
+                       channel: str = "prompt", path: str = "") -> None:
     """The tool channel also scans a copy of the text without terminal and encoding disguises (ANSI codes, zero-width
     characters, HTML entities, fullwidth letters, base64 and hex runs: maisecrets/normalise.py). A hit of the copy
     redacts its original range, hidden characters included. The raw text's own hits came first and keep their spans,
@@ -4197,10 +4198,10 @@ def _scan_cleaned_copy(text: str, enabled, found: list, taken_starts: list, take
     if norm.text is text:
         return
     by_start = {f.start: f for f in found}   # the taken spans never overlap, so a start names one
-    copy_hits = _changed_windows_scan(text, norm, enabled)
+    copy_hits = _changed_windows_scan(text, norm, enabled, channel, path)
     if enabled is None or EXPORT_RULE in enabled or EXPORT_KEY in enabled:
         # a header in colour or in entities: the table is read whole in the copy, not only around changed lines
-        copy_hits = _export_hits(norm.text, _lower(norm.text)) + copy_hits
+        copy_hits = _export_hits(norm.text, _lower(norm.text), path) + copy_hits
     for m in copy_hits:
         start, end = norm.span(m.start, m.end)
         lo = bisect.bisect_left(taken_starts, start)
@@ -4293,8 +4294,8 @@ re2_to_python = _re2_to_python   # a pattern in RE2 syntax, as Python's re reads
 
 
 def findings(text: str, channel: str = "prompt", path: str = "") -> list[Match]:
-    """The hits of scan() without the fixtures of a pasted test (is_fixture). is_fixture runs after the scan, with the
-    channel of the caller, as each caller did."""
+    """The hits of scan() without the fixtures of a pasted test (is_fixture). The scan runs in the channel of the
+    caller; is_fixture runs after it, and its own check of a value scans in the prompt channel, as before."""
     return [m for m in scan(text, channel=channel, path=path) if not is_fixture(m, text, path)]
 
 

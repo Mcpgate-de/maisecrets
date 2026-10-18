@@ -261,8 +261,8 @@ def _child_classes(tree: str, name: str) -> int:
     clock = _Clock()
     orig_matches = detect._matches
 
-    def matches(rule, t):
-        return _wrap_gen(clock, "rule|" + rule.id + "|" + _class_of(detect, rule), orig_matches(rule, t))
+    def matches(rule, t, *a, **k):     # the channel of the scan passes on (detect._matches(rule, text, channel))
+        return _wrap_gen(clock, "rule|" + rule.id + "|" + _class_of(detect, rule), orig_matches(rule, t, *a, **k))
     detect._matches = matches
     for fn, label in (("_personal_hits", "pass|personal data"), ("_scan_cleaned_copy", "pass|cleaned copy"),
                       ("_export_hits", "pass|export cells")):
