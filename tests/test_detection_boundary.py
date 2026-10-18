@@ -1,12 +1,11 @@
 """The boundary of the detection core: what the rest of maisecrets may use of detect.py, and what a plain scan imports.
 
-The core is the modules the standalone skill ships (scripts/build_skill_zip.py) plus personal.py: detect, checksums,
-normalise, regions, registry, rulespec, rule_filter. The plugin called private names of detect.py from hooks, the
-value check and the rules of your own, so a change inside the core could break a caller it does not know. These tests
-hold the line: a module outside the core uses detect only by its public names (the facade at the end of detect.py), as
-far as the AST shows a name (an alias and a literal getattr included, a name built at run time not), and a plain
-detect.scan() or findings() imports no module of the plugin beyond the ones it imports today. That list may only get
-shorter.
+The core is the modules the standalone skill ships (scripts/build_skill_zip.py) plus personal.py: __init__, detect,
+checksums, normalise, regions, registry, rulespec, rule_filter. The plugin called private names of detect.py from
+hooks, the value check and the rules of your own, so a change inside the core could break a caller it does not know.
+These tests hold the line: a module outside the core uses detect only by its public names (the facade at the end of
+detect.py), in the forms that private_uses() names, and a plain detect.scan() or findings() imports no module of the
+plugin beyond the ones it imports today. That list may only get shorter.
 
 Run: python3 -m unittest tests.test_detection_boundary -v
 """
@@ -36,11 +35,13 @@ NOT_YET_OUT = frozenset({"placeholder", "term_files", "user_rules", "value_files
 
 
 def private_uses(source: str) -> list[tuple[int, str]]:
-    """(line, name) of every private name of detect that a module uses in one of these forms: an attribute of a name
-    bound to the module (`detect`; `import maisecrets.detect as d`; `from . import detect as d`; `d = detect`,
-    `d: T = detect` and `d = maisecrets.detect`, also chained), `maisecrets.detect._x`, a literal `getattr(d, "_x")`,
-    `from .detect import _x`, and a string that starts with `detect._` (an annotation). Other forms, such as a name
-    built at run time (`getattr(d, name)`) or a binding through a function call, are out of its reach."""
+    """(line, name) of every private name of detect that a module uses in one of these forms. A module expression is
+    a name bound to detect (`detect`; `import maisecrets.detect as d`; `from . import detect as d`; `d = <module
+    expression>` or `d: T = <module expression>`, also chained) or `maisecrets.detect`. A use is an attribute
+    `<module expression>._x`, a literal `getattr(<module expression>, "_x")`, `from .detect import _x`, or a string
+    that starts with `detect._` or `maisecrets.detect._` (an annotation). Other forms, such as a name built at run time
+    (`getattr(d, name)`) or a binding through a function call, are out of its reach: the test guards against an
+    ordinary use, not against one that hides."""
     tree = ast.parse(source)
     names = {"detect"}
     for node in ast.walk(tree):
@@ -48,30 +49,29 @@ def private_uses(source: str) -> list[tuple[int, str]]:
             names |= {a.asname for a in node.names if a.asname and a.name.split(".")[-1] == "detect"}
         elif isinstance(node, ast.ImportFrom):
             names |= {a.asname or a.name for a in node.names if a.name == "detect"}
+
+    def is_module(e) -> bool:
+        return (isinstance(e, ast.Name) and e.id in names) or (
+            isinstance(e, ast.Attribute) and e.attr == "detect" and isinstance(e.value, ast.Name)
+            and e.value.id == "maisecrets")
+
     for _ in range(3):   # d = detect, then e = d
         for node in ast.walk(tree):
-            value = getattr(node, "value", None)
-            if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not (
-                    (isinstance(value, ast.Name) and value.id in names)
-                    or (isinstance(value, ast.Attribute) and value.attr == "detect")):
-                continue
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            names |= {t.id for t in targets if isinstance(t, ast.Name)}
+            if isinstance(node, (ast.Assign, ast.AnnAssign)) and is_module(node.value):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                names |= {t.id for t in targets if isinstance(t, ast.Name)}
     out = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in names \
-                and node.attr.startswith("_"):
+        if isinstance(node, ast.Attribute) and node.attr.startswith("_") and is_module(node.value):
             out.append((node.lineno, node.attr))
-        elif isinstance(node, ast.Attribute) and node.attr.startswith("_") and isinstance(node.value, ast.Attribute) \
-                and node.value.attr == "detect":
-            out.append((node.lineno, node.attr))   # maisecrets.detect._x
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "getattr" \
-                and len(node.args) >= 2 and isinstance(node.args[0], ast.Name) and node.args[0].id in names \
-                and isinstance(node.args[1], ast.Constant) and str(node.args[1].value).startswith("_"):
+                and len(node.args) >= 2 and is_module(node.args[0]) and isinstance(node.args[1], ast.Constant) \
+                and str(node.args[1].value).startswith("_"):
             out.append((node.lineno, node.args[1].value))
         elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[-1] == "detect":
             out += [(node.lineno, a.name) for a in node.names if a.name.startswith("_")]
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith("detect._"):
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith(
+                ("detect._", "maisecrets.detect._")):
             out.append((node.lineno, node.value))   # a string such as an annotation: "detect._Lazy"
     return sorted(set(out))
 
@@ -99,6 +99,12 @@ class DetectionBoundaryTests(unittest.TestCase):
         self.assertEqual(private_uses("from . import detect\nd: object = detect\nd._word_set()\n"), [(3, "_word_set")])
         self.assertEqual(private_uses("import maisecrets.detect\nd = maisecrets.detect\nd._word_set()\n"),
                          [(3, "_word_set")])
+        self.assertEqual(private_uses("import maisecrets.detect\ngetattr(maisecrets.detect, '_word_set')()\n"),
+                         [(2, "_word_set")])
+        self.assertEqual(private_uses('def f(x: "maisecrets.detect._Lazy"):\n    pass\n'),
+                         [(1, "maisecrets.detect._Lazy")])
+        self.assertEqual(private_uses("from . import other\nother.detect._x\nd = other.detect\nd._y\n"), [],
+                         "the detect of another object is not this module")
 
     def test_no_module_outside_the_core_uses_a_private_name_of_detect(self):
         files = outside_the_core()
