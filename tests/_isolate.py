@@ -53,9 +53,9 @@ if not os.environ.get(_MINE) or os.environ.get(_MINE) != os.environ.get("MAISECR
     os.environ["MAISECRETS_HOME"] = home
     os.environ[_MINE] = home
 
-# a runner that imported the vault before this module (detect.rules() loads the config) bound the vault to the real
-# ~/.maisecrets, and the resets of the suite deleted the real index, vault file and key (a fork's runner, 2026-10-12).
-# HOME lives in maisecrets.home, which a scan imports without the vault; the vault takes it from there
+# a runner that imported maisecrets.home before this module (detect.rules() loads the config through it) bound HOME
+# to the real home, and the resets of the suite deleted the real index, vault file and key (a fork's runner,
+# 2026-10-12, then through the vault). The vault takes HOME from maisecrets.home, so both are checked
 for _name in ("maisecrets.home", "maisecrets.vault"):
     _mod = sys.modules.get(_name)
     if _mod is not None and os.path.realpath(str(getattr(_mod, "HOME", ""))) != os.path.realpath(
