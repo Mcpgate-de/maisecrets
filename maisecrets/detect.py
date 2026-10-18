@@ -2291,9 +2291,8 @@ def _load_prefixes() -> list[Rule]:
 
 
 def _load_literal(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
-    d = _det()
-    d._label_class.clear()   # the password label words depend on the languages
-    d._pw_last_on = _pw_words_of(languages)
+    # the label words of the languages belong to the detector's snapshot: rules() sets them, not each list built
+    # here (rule_specs and explain_allowed build one too)
     return [Rule(id=d["id"], type="SECRET", regex=_Lazy(r"(?!)()"), secret_group=1, keywords=d["keywords"])
             for d in LITERAL_RULES]
 
@@ -2505,6 +2504,8 @@ def rules() -> list[Rule]:
         d._rules = every
         d._active = active
         d._loaded_for = (every, active.regions)
+        d._label_class.clear()   # the password label words depend on the languages
+        d._pw_last_on = _pw_words_of(active.languages)
     return d._rules
 
 
@@ -3406,6 +3407,8 @@ def _curl_parts(rule: Rule):
     if not rule.id.startswith("curl-"):
         return None
     key = (rule.id, rule.regex.pattern, rule.regex.flags)
+    if key not in _CURL_PARTS and (rule.regex.flags or 0) & re.DOTALL:
+        _CURL_PARTS[key] = None   # the split bounds the lines between curl and its flag; a dot over every line has none
     if key not in _CURL_PARTS:
         p = rule.regex.pattern
         flags = "(?i)" if p.startswith("(?i)") else ""

@@ -147,6 +147,22 @@ class TwoDetectorsTests(unittest.TestCase):
         self.assertEqual(d.regions(), US)
         self.assertEqual(kinds(d, TEXTS["regions us"]), ["us-ssn#2"])
 
+    def test_the_rule_specs_change_nothing_of_the_loaded_snapshot(self):
+        given = [DE]
+        d = detect.Detector(regions=lambda: given[0], sources=detect.NO_SOURCES)
+        self.assertEqual(kinds(d, LITERAL), ["label-pw-literal"])
+        given[0] = US
+        d._run(detect.rule_specs)          # builds the rule list of the reader's new answer
+        d.explain_allowed(VALUE)
+        self.assertEqual(d.regions(), DE)
+        self.assertEqual(kinds(d, "".join([LITERAL])), ["label-pw-literal"], "the label words of the loaded list")
+        # the rules load, then the reader changes before the first scan: the scan keeps the loaded languages
+        given[0] = DE
+        fresh = detect.Detector(regions=lambda: given[0], sources=detect.NO_SOURCES)
+        fresh.rules()
+        given[0] = US
+        self.assertEqual(kinds(fresh, "".join([LITERAL])), ["label-pw-literal"])
+
     def test_a_first_scan_with_a_rule_list_takes_the_label_words_of_the_detector(self):
         literal = [r for r in detector_a().rules() if r.id == "label-pw-literal"]
         self.assertEqual(len(literal), 1, "the premise: the rule of the label pass")
@@ -167,6 +183,14 @@ class TwoDetectorsTests(unittest.TestCase):
         rule = detect.Rule(id="curl-probe", type="SECRET", regex=detect.LazyRegex(head + r"\s-u\s+(\S+)", re.I),
                            secret_group=1)
         text = "CU" "RL -" "U " + "ab:cd" + " https://x.test"
+        self.assertEqual([m.value for m in detect.scan(text, channel="tool", rule_list=[rule])], ["ab:cd"])
+
+    def test_a_curl_rule_whose_dot_crosses_every_line_runs_as_it_is(self):
+        import re
+        head = r"\bcurl\b(?:.*?|.*?(?:[\r\n]{1,2}.*?){1,5})"
+        rule = detect.Rule(id="curl-probe", type="SECRET",
+                           regex=detect.LazyRegex(head + r"\s-u\s+(\S+)", re.I | re.S), secret_group=1)
+        text = "cu" "rl https://x.test" + " \\\n" * 11 + " -" "U " + "ab:cd"
         self.assertEqual([m.value for m in detect.scan(text, channel="tool", rule_list=[rule])], ["ab:cd"])
 
     def test_one_detector_in_two_threads_counts_the_steps_of_both(self):
