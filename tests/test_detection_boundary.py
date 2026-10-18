@@ -206,6 +206,26 @@ class GivenRegionsTests(unittest.TestCase):
             self.detect.scan("call +1 202 555 0143 today", channel="tool")
             self.assertEqual(self.detect._pii_regions_cached(), ("generic", "us"))
 
+    def test_new_regions_drop_the_shape_rules_of_the_old_ones(self):
+        self.ids("de")
+        self.detect._shape_rule_ids()
+        self.assertTrue(self.detect._SHAPE_IDS, "the premise: the cache is filled")
+        self.detect.use_regions(self.regions.resolve({"regions": ["us"]}))
+        self.assertEqual(self.detect._SHAPE_IDS, [], "is_fixture would judge with the shape rules of the old regions")
+        form_of = self.detect._registry.form_of
+        self.assertEqual(self.detect._shape_rule_ids(),
+                         {r.id for r in self.detect.rules() if (r.form or form_of(r.id)) == "shape"})
+
+    def test_a_home_module_that_cannot_load_counts_as_no_config(self):
+        self.detect.use_regions(None)
+        real = __import__
+        def failing(name, *a, **k):
+            if name in ("home", "maisecrets.home"):    # `from .home import …` in detect asks for "home", level 1
+                raise RuntimeError("no home directory")
+            return real(name, *a, **k)
+        with mock.patch("builtins.__import__", failing):
+            self.assertEqual(self.detect.active_regions().regions, ("generic", "de"))
+
     def test_a_given_reader_is_asked_at_each_use_not_when_it_is_given(self):
         asked = []
 
