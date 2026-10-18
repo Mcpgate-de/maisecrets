@@ -6,5 +6,5 @@ runner = ["tests/test_terms_hooks.py::TermHookTests::test_every_spelling_of_an_e
 
 [proof]
 file = "maisecrets/detect.py"
-find = "                     + tuple(r for r in every if _runs_after_personal(r)) + (_TERMS, _IMPORTS)]"
-replace = "                     + tuple(r for r in every if _runs_after_personal(r)) + (_IMPORTS,)]"
+find = "                    + tuple(r for r in every if _runs_after_personal(r)) + (_TERMS, _IMPORTS))"
+replace = "                    + tuple(r for r in every if _runs_after_personal(r)) + (_IMPORTS,))"
