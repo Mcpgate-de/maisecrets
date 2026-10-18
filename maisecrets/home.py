@@ -501,3 +501,14 @@ def load_config() -> dict:
         # the plaintext store is for tests and the harness, which say so in their own config
         raise ConfigError("backend jsonfile is the TEST store; set allow_plaintext_store to use it")
     return cfg
+
+
+def regions_from_config():
+    """The regions and label languages that the config of this computer names (maisecrets/regions.py). A config that
+    cannot be read counts as none: a bad one is reported by the vault."""
+    from . import regions
+    try:
+        cfg = load_config()
+    except Exception:  # noqa: BLE001 - config is optional; a bad one is reported by the vault
+        cfg = {}
+    return regions.resolve(cfg)
