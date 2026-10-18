@@ -1,4 +1,4 @@
-"""Regions and label languages (maisecrets/regions.py): the system setting, the config, the old
+"""Regions and label languages (maisecrets/detection/regions.py): the system setting, the config, the old
 pii_regions key, the label files, and what the detector finds with each language on or off.
 
 Run: python3 -m unittest tests.test_regions -v

@@ -1,4 +1,5 @@
-"""Personal data after a label or in a fixed form (maisecrets/personal.py), and three token forms with a shorter tail
+"""Personal data after a label or in a fixed form (maisecrets/detection/personal.py), and three token forms with a
+shorter tail
 (0.6.21). Each rule is checked on a hit, on the ordinary developer text next to it, and on its channel and region.
 
 Run: python3 -m unittest tests.test_personal_data -v

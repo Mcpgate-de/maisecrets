@@ -488,6 +488,7 @@ class SkillZipTests(unittest.TestCase):
                 self.assertIn("SKILL.md", names, "the ChatGPT upload reads SKILL.md at the zip root")
                 self.assertIn("scripts/", names, "directory entries are written")
                 self.assertIn("scripts/maisecrets/detect.py", names)
+                self.assertIn("scripts/maisecrets/detection/core.py", names)
                 # the default ZipInfo mode is 0600 without the directory bit: unzip made folders
                 # nobody could enter (found in a Codex test, 2026-09-27)
                 import stat
@@ -500,7 +501,8 @@ class SkillZipTests(unittest.TestCase):
                             self.assertTrue(stat.S_ISREG(mode) and mode & 0o644 == 0o644, oct(mode))
             if shutil.which("unzip"):
                 subprocess.run(["unzip", "-q", str(flat), "-d", str(work / "unzipped")], check=True)
-                self.assertTrue((work / "unzipped" / "scripts" / "maisecrets" / "rules" / "betterleaks.json").is_file())
+                self.assertTrue((work / "unzipped" / "scripts" / "maisecrets" / "detection" / "rules"
+                                 / "betterleaks.json").is_file())
             out = mod.build(work / "secret-hygiene.zip")
             with zipfile.ZipFile(out) as z:
                 names = z.namelist()
@@ -508,7 +510,10 @@ class SkillZipTests(unittest.TestCase):
                 self.assertIn("secret-hygiene/", names)
                 self.assertIn("secret-hygiene/SKILL.md", names)
                 self.assertIn("secret-hygiene/scripts/maisecrets/detect.py", names)
-                self.assertIn("secret-hygiene/scripts/maisecrets/rules/betterleaks.json", names)
+                self.assertIn("secret-hygiene/scripts/maisecrets/detection/rules/betterleaks.json", names)
+                self.assertIn("secret-hygiene/scripts/maisecrets/detection/core.py", names)
+                # without it the folder loads as a namespace package: the scripts run, the API is gone
+                self.assertIn("secret-hygiene/scripts/maisecrets/detection/__init__.py", names)
                 self.assertIn("secret-hygiene/scripts/maisecrets/rule_filter.py", names)
                 self.assertIn("secret-hygiene/scripts/maisecrets/placeholder.py", names, "the reference form")
                 self.assertFalse([n for n in names if "vault" in n or "hooks" in n or "__pycache__" in n], names)

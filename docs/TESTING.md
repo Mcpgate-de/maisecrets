@@ -20,7 +20,7 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 | detector identity | `python3 scripts/detection_fingerprint.py --out FILE [--creddata DIR]` | by hand before and after a refactor of the rules: the full hit list on fixed inputs, compared with `cmp` (section "A refactor of the rules") |
 | Windows end to end | `GITLAB_COM_TOKEN=… python3 scripts/windows_e2e.py [--rev REV]` | by hand before a release that touches the hooks, the launchers or the harness: GitLab-hosted Windows runners of a separate project, in three shapes (PowerShell 7, Windows PowerShell 5.1, Git Bash). Each job runs `harness/windows/shell_probe.py` (which shell runs a hook, and the `hooks.json` command in each shell) and `harness/run.py` with the shell tool the client offers (`MAISECRETS_HARNESS_SHELL_TOOL`) |
 
-2362 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
+2370 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. The GitHub matrix runs on
 Windows and macOS in two places. In a merge request, the GitLab job `windows_macos` pushes the commit
 that `main` would get to the CI repository `Mcpgate-de/maisecrets-ci` and fails with the names of the
 failing tests. On `main`, it runs on the tested commit of a release (branch `ci`), unless a green run
@@ -78,7 +78,7 @@ on the same git tree exists (the release then reuses it). A merge without a rele
   ids replaced). The Codex file row first used Claude Code's `Write`; Codex sends `apply_patch`, and
   every cell was green while real Codex edits resolved nothing.
 - **Generated inputs with known answers.** `tests/detection_matrix.py` builds 2,500 cases from
-  labels (the denylist and `maisecrets/rules/labels/*.txt`), separators, value shapes and
+  labels (the denylist and `maisecrets/detection/rules/labels/*.txt`), separators, value shapes and
   context; the gate compares the full result per case. The matrix takes the label files of the
   active languages (English and German under the pinned test locale). `tests/test_label_languages.py`
   runs each other label file the same way with its language on, and checks prose with each word.
@@ -117,7 +117,7 @@ The inputs:
 - CredData (`--creddata`): every unique labelled line.
 - `tests/fp_corpus.py`, and `tests/fp_corpus_pii.py` when the tree has it.
 - The token lists of `tests/test_rules_from_the_catalogs.py` and `tests/test_rules_from_other_detectors.py`.
-- Probes: one or more texts for each matcher and each named filter of `maisecrets/registry.py`, and a password
+- Probes: one or more texts for each matcher and each named filter of `maisecrets/detection/registry.py`, and a password
   export with its file name.
 - The recorded scans of the detector tests: the script runs those test modules with `detect.scan` wrapped, and
   replays each call with its path and its `enabled` set (`--no-recorded` leaves them out, `--record FILE` and
