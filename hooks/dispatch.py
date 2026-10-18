@@ -163,6 +163,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "session-start":
         v.expire(limit=None)
         quieted = v.quiet_code_words()
         v.mark_weak_entries()
+        v.weaken_quiet_words()
     except RuntimeError as exc:
         # a damaged index: the message names `maisecrets repair`; a traceback here gave the
         # client no JSON and the person no hint

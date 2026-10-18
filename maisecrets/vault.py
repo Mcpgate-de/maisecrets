@@ -616,11 +616,17 @@ DEFAULT_WORDS = frozenset({
     "geheim", "kennwort"})
 
 
-def is_weak(kind: str, value: str) -> bool:
-    """A value that only a label rule found and that is a known default word (DEFAULT_WORDS): replaced where it was
-    found, never hunted in other texts."""
+def is_weak(kind: str, value: str, tool: bool = False) -> bool:
+    """A value that only a label rule found and that is a known default word (DEFAULT_WORDS), or, in a tool result or
+    a file (tool), an English word (detect.is_dictionary_word): replaced where it was found, never hunted in other
+    texts. A word the person gives in a prompt is a chosen password and stays hunted (is_quiet)."""
     from .registry import is_label
-    return is_label(kind) and value.strip().lower() in DEFAULT_WORDS
+    if not is_label(kind):
+        return False
+    if value.strip().lower() in DEFAULT_WORDS:
+        return True
+    from .detect import is_dictionary_word
+    return tool and is_dictionary_word(value)
 
 
 def is_quiet(kind: str, value: str, tool: bool) -> bool:
@@ -1099,6 +1105,27 @@ class Vault:
                 if not m.get("purged") and not m.get("weak") and not (prompt and m.get("quiet"))}
 
     @_mutating
+    def weaken_quiet_words(self) -> int:
+        """Mark weak the live quiet entries (a label rule took them in a tool result) that are English words
+        (detect.is_dictionary_word). Before 0.6.38 such a word was hunted in every later tool result for a day. Reads
+        the value of each such entry once; a store that refuses the read leaves it as it is. Returns the count."""
+        from .detect import is_dictionary_word
+        todo = [k for k, m in self._index["entries"].items()
+                if m.get("quiet") and not m.get("weak") and not m.get("purged")]
+        n = 0
+        for key in todo:
+            try:
+                value = self.backend.get(key)
+            except RuntimeError as exc:
+                from . import incidents
+                incidents.note("store.mark-weak", exc)
+                continue
+            if value is not None and is_dictionary_word(value):
+                self._index["entries"][key]["weak"] = True
+                n += 1
+        return n
+
+    @_mutating
     def mark_weak_entries(self) -> int:
         """Mark the weak entries a version before 0.5.15 stored without the mark (see Entry.weak). Reads the value of
         each unmarked label-rule entry once; a store that refuses the read leaves the entry unmarked for the next
@@ -1154,7 +1181,7 @@ class Vault:
                   created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
                   session=session, uses=0, sessions=[session] if session else [],
-                  weak=is_weak(kind, value), quiet=is_quiet(kind, value, tool))
+                  weak=is_weak(kind, value, tool), quiet=is_quiet(kind, value, tool))
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
         self.backend.put(
             key, value,

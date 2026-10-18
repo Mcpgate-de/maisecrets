@@ -1286,6 +1286,30 @@ def reads_as_word(value: str) -> bool:
     return sum(q not in common for q in pairs) <= 0.1 * len(pairs)
 
 
+_DICT_PART_RE = _LazyRx(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
+
+
+def is_dictionary_word(value: str) -> bool:
+    """Whether every part of a value (split at _ - . and at a change to capitals) is an English word of the word list
+    or of the developer words of rules/term_stoplist.txt, also with a plural s. credential, response and
+    passwordLastChanged are; ppsmohsyeeub, Wartungsfenster and Kx7QpZr9 are not. A label rule that took such a word in
+    a tool result stores it weak (vault.is_weak): one session masked a few ordinary words thousands of times a day in
+    code and prose, and a codex review prompt with one of them was refused (field report, 2026-10-17)."""
+    v = value.strip()
+    if not v or len(v) > 60 or not v.isascii() or not reads_as_word(v):
+        return False
+    words = _word_set()
+    if not words or not _WORDS_OK[0]:
+        return False   # no word list: hunt the value, as before
+    from .terms import stoplist
+    known = words | stoplist()
+    parts = [w.lower() for p in re.split(r"[_.-]+", v) if p for w in _DICT_PART_RE.findall(p)]
+    if not parts or "".join(parts) != re.sub(r"[_.-]+", "", v).lower():
+        return False
+    return all(len(w) >= 2 and (w in known or (w.endswith("s") and w[:-1] in known)
+                                or (w.endswith("es") and w[:-2] in known)) for w in parts)
+
+
 def _judge_literal(label: str, v: str, quoted: bool = True) -> str:
     """The rule a label and its literal value fall under, or ""."""
     pw, secret, weak, otp, last = _label_class(label)
