@@ -1,7 +1,8 @@
 """The boundary of the detection core: what the rest of maisecrets may use of detect.py, and what a plain scan imports.
 
-The core is the modules the standalone skill ships (scripts/build_skill_zip.py) plus personal.py: __init__, detect,
-checksums, normalise, regions, registry, rulespec, rule_filter. The plugin called private names of detect.py from
+The core is the form-independent detector: __init__, detect, checksums, normalise, regions, registry, rulespec,
+rule_filter and personal. The standalone skill (scripts/build_skill_zip.py) ships it without personal.py and with
+placeholder.py, the plugin's reference form. The plugin called private names of detect.py from
 hooks, the value check and the rules of your own, so a change inside the core could break a caller it does not know.
 These tests hold the line: a module outside the core uses detect only by its public names (the facade at the end of
 detect.py), in the forms that private_uses() names, and a plain detect.scan() or findings() imports no module of the
@@ -37,7 +38,7 @@ CORE = frozenset({"__init__", "detect", "checksums", "normalise", "regions", "re
 # placeholder.py came back as the default reference form (2026-10-18), which detect.py no longer knows itself. A
 # scan that is given its regions, its sources and its references imports none of these (ReferencesTests).
 NOT_YET_OUT = frozenset({"home", "placeholder", "sources", "term_files", "user_rules", "value_files"})
-# a scan never imports the store or the placeholder form, also with a term list and an import of values in place
+# a scan never imports the store, also with a term list and an import of values in place
 NEVER = frozenset({"vault", "rehydration", "vault_refs", "hooks", "settings"})
 
 
@@ -493,12 +494,25 @@ class ReferencesTests(unittest.TestCase):
         # the brackets, their escapes, the c-key pattern, and an import of placeholder.py: each is the plugin's form,
         # which detect.py must ask References about, never know
         src = (ROOT / "maisecrets" / "detect.py").read_text(encoding="utf-8")
+        # a ratchet of the spellings an ordinary change writes, not a proof against one that hides
         forms = {"open bracket": _OPEN, "close bracket": _CLOSE, "open escape": "\\u27e6",
-                 "close escape": "\\u27e7", "key pattern": "_c\\d"}
+                 "close escape": "\\u27e7", "open code point": "0x27e6", "close code point": "0x27e7",
+                 "named open": "white square bracket", "key pattern": "_c\\d", "key class": "_c[0-9]"}
         self.assertEqual({name for name, form in forms.items() if form.lower() in src.lower()}, set())
-        # placeholder.py is loaded in one place only: as the default form when no caller gives one (_references)
-        importers = {f.name for f in ast.parse(src).body if isinstance(f, ast.FunctionDef)
-                     for n in ast.walk(f) if isinstance(n, ast.ImportFrom) and (n.module or "") == "placeholder"}
+        # placeholder.py is loaded in one place only, in any import form: as the default form (_references)
+        tree = ast.parse(src)
+        importers = set()
+        for f in tree.body:
+            for n in ast.walk(f):
+                names = []
+                if isinstance(n, ast.ImportFrom):
+                    names = [n.module or ""] + [(n.module or "") + "." + a.name for a in n.names]
+                elif isinstance(n, ast.Import):
+                    names = [a.name for a in n.names]
+                elif isinstance(n, ast.Constant) and isinstance(n.value, str) and "." in n.value:
+                    names = [n.value]   # importlib.import_module("maisecrets.placeholder"); the word alone is a value
+                if any(x.split(".")[-1] == "placeholder" for x in names if x):
+                    importers.add(f.name if isinstance(f, ast.FunctionDef) else "<module>")
         self.assertEqual(importers, {"_references"})
         plugin = (ROOT / "maisecrets" / "placeholder.py").read_text(encoding="utf-8")
         self.assertIn("_c\\d", plugin, "the premise: the checker's key pattern is the one the form uses")
