@@ -23,6 +23,7 @@ import time
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
+from .lazy_regex import LazyRx
 from .placeholder import display_for
 
 # the home folder and the configuration live in home.py; these names stay importable from here
@@ -135,16 +136,47 @@ DEFAULT_WORDS = frozenset({
     "geheim", "kennwort"})
 
 
+_DICT_PART_RE = LazyRx(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
+
+
+def is_dictionary_word(value: str) -> bool:
+    """Whether every part of a value (split at _ - . and at a change to capitals) is an English word of the word list
+    or of the developer words of rules/term_stoplist.txt, also with a plural s. credential, response and
+    passwordLastChanged are; ppsmohsyeeub, Wartungsfenster and Kx7QpZr9 are not. A label rule that took such a word in
+    a tool result stores it weak (is_weak): one session masked a few ordinary words thousands of times a day in
+    code and prose, and a codex review prompt with one of them was refused (field report, 2026-10-17)."""
+    from .detect import english_words, reads_as_word
+    v = value.strip()
+    if not v or len(v) > 60 or not v.isascii() or not reads_as_word(v):
+        return False
+    words = english_words()
+    if not words:
+        return False   # no word list: hunt the value, as before
+    from .terms import stoplist
+    known = words | stoplist()
+    parts = [w.lower() for p in re.split(r"[_.-]+", v) if p for w in _DICT_PART_RE.findall(p)]
+    if not parts or "".join(parts) != re.sub(r"[_.-]+", "", v).lower():
+        return False
+    return all(len(w) >= 2 and (w in known or (w.endswith("s") and w[:-1] in known)
+                                or (w.endswith("es") and w[:-2] in known)) for w in parts)
+
+
+def code_word_spellings() -> list[str]:
+    """The spellings of a code word (detect.code_words) that a keyword rule stored before 0.5.15. The vault finds a
+    stored one by its fingerprint and reads no value (Vault.quiet_code_words)."""
+    from .detect import code_words
+    return [s for w in sorted(code_words()) for b in (w, w.capitalize(), w.upper()) for s in (b, b + ";")]
+
+
 def is_weak(kind: str, value: str, tool: bool = False) -> bool:
     """A value that only a label rule found and that is a known default word (DEFAULT_WORDS), or, in a tool result or
-    a file (tool), an English word (detect.is_dictionary_word): replaced where it was found, never hunted in other
+    a file (tool), an English word (is_dictionary_word): replaced where it was found, never hunted in other
     texts. A word the person gives in a prompt is a chosen password and stays hunted (is_quiet)."""
     from .registry import is_label
     if not is_label(kind):
         return False
     if value.strip().lower() in DEFAULT_WORDS:
         return True
-    from .detect import is_dictionary_word
     return tool and is_dictionary_word(value)
 
 
@@ -626,9 +658,8 @@ class Vault:
     @_mutating
     def weaken_quiet_words(self) -> int:
         """Mark weak the live quiet entries (a label rule took them in a tool result) that are English words
-        (detect.is_dictionary_word). Before 0.6.38 such a word was hunted in every later tool result for a day. Reads
+        (is_dictionary_word). Before 0.6.38 such a word was hunted in every later tool result for a day. Reads
         the value of each such entry once; a store that refuses the read leaves it as it is. Returns the count."""
-        from .detect import is_dictionary_word
         todo = [k for k, m in self._index["entries"].items()
                 if m.get("quiet") and not m.get("weak") and not m.get("purged")]
         n = 0
@@ -1071,7 +1102,6 @@ class Vault:
         if not any(str(m.get("kind", "")).startswith("ds-keyword") and not m.get("purged") and not m.get("weak")
                    for m in entries.values()):
             return []   # no fingerprint key is made for a store that has no such entry
-        from .detect import code_word_spellings
         quieted = []
         for word in code_word_spellings():
             key = self._index["by_fingerprint"].get(self.fingerprint(word))

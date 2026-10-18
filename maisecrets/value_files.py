@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import re
 
-from .detect import LazyRx as _LazyRx      # compiled at first use: a hook imports this module on every call
+from .lazy_regex import LazyRx as _LazyRx      # compiled at first use: a hook imports this module on every call
 from .home import HOME
 
 IMPORTS = HOME / "imports"

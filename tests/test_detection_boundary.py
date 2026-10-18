@@ -1,8 +1,8 @@
 """The boundary of the detection core: what the rest of maisecrets may use of detect.py, and what a plain scan imports.
 
-The core is the form-independent detector: __init__, detect, checksums, normalise, regions, registry, rulespec,
-rule_filter and personal. The standalone skill (scripts/build_skill_zip.py) ships it without personal.py and with
-placeholder.py, the plugin's reference form. The plugin called private names of detect.py from
+The core is the form-independent detector: __init__, detect, checksums, lazy_regex, normalise, regions, registry,
+rulespec, rule_filter and personal. The standalone skill (scripts/build_skill_zip.py) ships it without personal.py
+and with placeholder.py, the plugin's reference form. The plugin called private names of detect.py from
 hooks, the value check and the rules of your own, so a change inside the core could break a caller it does not know.
 These tests hold the line: a module outside the core uses detect only by its public names (the facade at the end of
 detect.py), in the forms that private_uses() names, and a plain detect.scan() or findings() imports no module of the
@@ -28,8 +28,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
-CORE = frozenset({"__init__", "detect", "checksums", "normalise", "regions", "registry", "rulespec", "rule_filter",
-                  "personal"})
+CORE = frozenset({"__init__", "detect", "checksums", "lazy_regex", "normalise", "regions", "registry", "rulespec",
+                  "rule_filter", "personal"})
 # the modules of the plugin that a plain scan still imports. Each is a later step: the config read for the regions
 # (home, through active_regions), the rules of your own and the allow list (user_rules), and the probes for a term
 # list or an import (term_files, value_files). Remove a name when the scan no longer imports it; never add one. The
@@ -127,6 +127,15 @@ class DetectionBoundaryTests(unittest.TestCase):
         for name in sorted(CORE | NOT_YET_OUT):
             with self.subTest(name):
                 self.assertTrue((ROOT / "maisecrets" / f"{name}.py").is_file(), "a renamed module: update the list")
+
+    def test_a_name_that_left_the_core_keeps_its_old_import_where_the_core_can_give_it(self):
+        # LazyRx moved to its own core module; a caller of detect.LazyRx gets the same class
+        from maisecrets import detect, lazy_regex
+        self.assertIs(detect.LazyRx, lazy_regex.LazyRx)
+        # the two store helpers moved to the vault, which the core never imports: there is no re-export
+        from maisecrets import vault
+        self.assertTrue(callable(vault.is_dictionary_word) and callable(vault.code_word_spellings))
+        self.assertFalse(hasattr(detect, "is_dictionary_word") or hasattr(detect, "code_word_spellings"))
 
     def test_a_plain_scan_imports_no_new_module_of_the_plugin(self):
         self.assert_imports("scan")
