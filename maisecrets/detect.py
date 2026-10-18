@@ -42,7 +42,6 @@ import ipaddress
 import json
 import math
 import re
-import sys
 import time
 import warnings
 from collections import Counter
@@ -2386,8 +2385,7 @@ def _user_rules() -> list[Rule]:
     """The rules of the person's folders (maisecrets/user_rules.py). A rule that fails a check is quarantined there;
     anything else that fails leaves them out, never the built-in rules."""
     try:
-        from . import user_rules
-        return list(user_rules.load().rules)
+        return list(_sources().user_rules())
     except Exception:  # noqa: BLE001 - rules of your own are an addition; they never stop a hook
         return []
 
@@ -2508,8 +2506,7 @@ def _upstream_rules() -> dict:
 def allow_list() -> tuple[frozenset, frozenset]:
     if not _ALLOW:
         try:
-            from . import user_rules
-            _ALLOW.append(user_rules.allow_list())
+            _ALLOW.append(_sources().allow_list())
         except Exception:  # noqa: BLE001 - an allow list that cannot be read allows nothing
             _ALLOW.append((frozenset(), frozenset()))
     return _ALLOW[0]
@@ -2529,7 +2526,6 @@ def rules() -> list[Rule]:
         _RULES = [r for _, r in _ranked(active)]
         off = allow_list()[1]
         if off:
-            from .user_rules import switched_off
             _RULES = [r for r in _RULES if not switched_off(r.id, off)]
         _REGIONS[:] = [_RULES, active.regions]
     return _RULES
@@ -2554,12 +2550,7 @@ def reset_rules() -> None:
     _SHAPE_IDS.clear()
     for times in (_REGEX_TIME, _REGEX_CHARS, _REGEX_RULE):
         times.clear()
-    from . import user_rules
-    user_rules.reset()
-    for name in ("terms", "term_files", "values", "value_files"):   # term lists and imports are read again too,
-        loaded = sys.modules.get(__name__.rsplit(".", 1)[0] + "." + name)   # without importing them
-        if loaded is not None:
-            (loaded.reset if name in ("terms", "values") else loaded.forget)()
+    _sources().reset()
 
 
 # Matchers of other kinds than a regex rule (a list of names, a value import): each is a callable text -> list[Match],
@@ -2627,8 +2618,7 @@ def _too_slow(rule: Rule, spent: float) -> None:
     if _RULES is not None:
         _RULES = [r for r in _RULES if r is not rule]
     try:
-        from . import user_rules
-        user_rules.note_slow(rule, spent * 1000)
+        _sources().note_slow(rule, spent * 1000)
     except Exception:  # noqa: BLE001 - the rule is out of this process either way
         pass
 
@@ -2636,15 +2626,9 @@ def _too_slow(rule: Rule, spent: float) -> None:
 def _term_matches(text: str) -> list:
     """The terms (maisecrets/terms.py): names, case numbers, customer names. A bad terms.txt raises
     terms.TermsError, a ConfigError: the hook fails closed. Without any list the terms module is never imported (it
-    costs about 13 ms, and each hook call is a new process): maisecrets/term_files.py says whether one is there."""
-    try:
-        from . import term_files
-    except ImportError:   # the standalone skill ships detect.py alone (scripts/build_skill_zip.py): no terms
-        return []
-    if not term_files.present():
-        return []
-    from . import terms
-    return terms.matches(text)
+    costs about 13 ms, and each hook call is a new process): maisecrets/term_files.py says whether one is there.
+    The sources of the scan give them (Sources.term_matches)."""
+    return _sources().term_matches(text)
 
 
 TERM_RULE = "term"                 # the pass of the terms in maisecrets/registry.py (phase "terms")
@@ -2670,15 +2654,8 @@ def _term_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: 
 def _import_matches(text: str) -> list:
     """The imported values (maisecrets/values.py). A damaged import raises values.ValuesError, a ConfigError: the
     hook fails closed. Without any import the values module is never imported: maisecrets/value_files.py says
-    whether one is there."""
-    try:
-        from . import value_files
-    except ImportError:   # the standalone skill ships detect.py alone: no imports
-        return []
-    if not value_files.present():
-        return []
-    from . import values
-    return values.matches(text)
+    whether one is there. The sources of the scan give them (Sources.import_matches)."""
+    return _sources().import_matches(text)
 
 
 IMPORT_RULE = "import"                 # the pass of the imported values in maisecrets/registry.py (phase "imports")
@@ -2741,6 +2718,64 @@ def active_regions():
         from . import regions
         return regions.resolve({})
     return regions_from_config()
+
+
+class Sources:
+    """What a scan takes besides its built-in rules: the rules of your own and the allow list, the term lists and the
+    imported values. A caller gives one object for all of them (use_sources). This base has none of them; the
+    plugin's readers of the home folder are maisecrets/sources.py, the default when no caller gives its own. The
+    rules of your own and the allow list are asked once per rule load, the terms and the imports for each text."""
+
+    def user_rules(self) -> list:
+        """The rules of your own (Rule objects)."""
+        return []
+
+    def allow_list(self) -> tuple:
+        """(values, rule ids) that the allow list lets through."""
+        return frozenset(), frozenset()
+
+    def term_matches(self, text: str) -> list:
+        """The Match of each listed term in the text."""
+        return []
+
+    def import_matches(self, text: str) -> list:
+        """The Match of each imported value in the text."""
+        return []
+
+    def note_slow(self, rule, ms: float) -> None:
+        """A rule of your own took too long and is out of this process."""
+
+    def reset(self) -> None:
+        """Forget what was read; the next scan reads again (reset_rules)."""
+
+
+NO_SOURCES = Sources()
+_GIVEN_SOURCES: list = []   # the sources a caller gave (use_sources); empty: the plugin's, if they are there
+
+
+def use_sources(given) -> None:
+    """The sources of every later scan of this process: a Sources object, or None for the plugin's readers of the home
+    folder (maisecrets/sources.py). What the old sources gave is dropped: the rule list and the allow list."""
+    global _RULES
+    _GIVEN_SOURCES[:] = [] if given is None else [given]
+    _RULES = None
+    _ALLOW.clear()
+    _SHAPE_IDS.clear()
+
+
+def _sources() -> Sources:
+    if _GIVEN_SOURCES:
+        return _GIVEN_SOURCES[0]
+    try:
+        from .sources import PLUGIN_SOURCES
+    except ImportError:   # the standalone skill ships the detector without the plugin: no sources, as before
+        return NO_SOURCES
+    return PLUGIN_SOURCES
+
+
+def switched_off(rule_id: str, ids: frozenset) -> bool:
+    """A rule id on the allow list, also with the `#n` of one of several patterns of a Presidio rule."""
+    return rule_id in ids or rule_id.split("#", 1)[0] in ids
 
 
 def _pii_regions() -> tuple[str, ...]:
@@ -4262,7 +4297,6 @@ def findings(text: str, channel: str = "prompt", path: str = "") -> list[Match]:
 def explain_allowed(value: str) -> str | None:
     """Why the allow list lets this value through, or None. Only for a value no rule caught: the scan with every rule,
     without the allow list, shows whether the list took a hit out (`rule: <id>` or an exact value)."""
-    from .user_rules import switched_off
     values, ids = allow_list()
     if not values and not ids:
         return None
