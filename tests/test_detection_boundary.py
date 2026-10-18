@@ -26,7 +26,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
-CORE = frozenset({"detect", "checksums", "normalise", "regions", "registry", "rulespec", "rule_filter", "personal"})
+CORE = frozenset({"__init__", "detect", "checksums", "normalise", "regions", "registry", "rulespec", "rule_filter",
+                  "personal"})
 # the modules of the plugin that a plain scan still imports (measured 2026-10-18 on next c4c1c456). Each is a later
 # step: the config read for the regions (vault, through active_regions), the rules of your own and the allow list
 # (user_rules), the probes for a term list or an import (term_files, value_files), and the placeholder form that
@@ -35,10 +36,11 @@ NOT_YET_OUT = frozenset({"placeholder", "term_files", "user_rules", "value_files
 
 
 def private_uses(source: str) -> list[tuple[int, str]]:
-    """(line, name) of every private name of detect that a module uses by a name the AST shows: an attribute of any
-    name bound to the module (`detect`, `import maisecrets.detect as d`, `from . import detect as d`, `d = detect`),
-    a literal `getattr(d, "_x")`, `from .detect import _x`, and a string annotation `"detect._x"`. A name built at run
-    time (`getattr(d, name)`) is out of its reach."""
+    """(line, name) of every private name of detect that a module uses in one of these forms: an attribute of a name
+    bound to the module (`detect`; `import maisecrets.detect as d`; `from . import detect as d`; `d = detect`,
+    `d: T = detect` and `d = maisecrets.detect`, also chained), `maisecrets.detect._x`, a literal `getattr(d, "_x")`,
+    `from .detect import _x`, and a string that starts with `detect._` (an annotation). Other forms, such as a name
+    built at run time (`getattr(d, name)`) or a binding through a function call, are out of its reach."""
     tree = ast.parse(source)
     names = {"detect"}
     for node in ast.walk(tree):
@@ -48,8 +50,13 @@ def private_uses(source: str) -> list[tuple[int, str]]:
             names |= {a.asname or a.name for a in node.names if a.name == "detect"}
     for _ in range(3):   # d = detect, then e = d
         for node in ast.walk(tree):
-            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name) and node.value.id in names:
-                names |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+            value = getattr(node, "value", None)
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not (
+                    (isinstance(value, ast.Name) and value.id in names)
+                    or (isinstance(value, ast.Attribute) and value.attr == "detect")):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names |= {t.id for t in targets if isinstance(t, ast.Name)}
     out = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in names \
@@ -65,7 +72,7 @@ def private_uses(source: str) -> list[tuple[int, str]]:
         elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[-1] == "detect":
             out += [(node.lineno, a.name) for a in node.names if a.name.startswith("_")]
         elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith("detect._"):
-            out.append((node.lineno, node.value))   # a string annotation: "detect._Lazy"
+            out.append((node.lineno, node.value))   # a string such as an annotation: "detect._Lazy"
     return sorted(set(out))
 
 
@@ -89,6 +96,9 @@ class DetectionBoundaryTests(unittest.TestCase):
         self.assertEqual(private_uses("from . import detect\ngetattr(detect, '_word_set')()\n"), [(2, "_word_set")])
         self.assertEqual(private_uses("from .detect import LazyRx as _LazyRx\nx = detect.findings('a')\n"), [])
         self.assertEqual(private_uses("from . import vault as v\nv._index\n"), [], "another module's private name")
+        self.assertEqual(private_uses("from . import detect\nd: object = detect\nd._word_set()\n"), [(3, "_word_set")])
+        self.assertEqual(private_uses("import maisecrets.detect\nd = maisecrets.detect\nd._word_set()\n"),
+                         [(3, "_word_set")])
 
     def test_no_module_outside_the_core_uses_a_private_name_of_detect(self):
         files = outside_the_core()
