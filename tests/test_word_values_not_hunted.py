@@ -27,7 +27,8 @@ from _hygiene import CLAUDE  # noqa: E402
 CFG = '{"backend": "jsonfile", "allow_plaintext_store": true}'
 WORD = "Wartungs" + "fenster"          # German: maintenance window
 FOREIGN = "Lieblings" + "farbe"       # German: favourite colour, an answer field only the tool channel takes
-RANDOM = "xqzv" + "bnmq"               # random small letters (Codex review, 2026-09-29): a secret wherever it shows up
+ENGLISH = "fall" + "back"              # an English word of the word list
+RANDOM = "xqzv" + "bnmq"              # random small letters (Codex review, 2026-09-29): a secret wherever it shows up
 RANDOM_TOOL = "pozk" + "emva"          # random small letters only the tool channel takes; 8 letters, because a later
 #                                        text of another session hunts a value of 8 characters and more (0.6.16 too)
 
@@ -122,6 +123,32 @@ class WordValuesNotHuntedTests(unittest.TestCase):
         self.assertEqual(self.bash("connected to database app\n", "s2"), "connected to database app\n",
                          "weak wins over quiet: not hunted in a later tool result either (final codex review, LOW)")
         self.assertFalse(self.blocked("create the database first", "s3"))
+
+    def test_an_english_word_from_a_tool_result_is_masked_only_where_it_was_found(self):
+        # field report, 2026-10-17: ordinary words after a label in code were masked thousands of times a day
+        self.assertNotIn(ENGLISH, self.bash(f"password: {ENGLISH}\n", "s1"), "masked where it was found")
+        self.assertEqual(self.bash(f"use the {ENGLISH} path\n", "s2"), f"use the {ENGLISH} path\n")
+        self.assertFalse(self.blocked(f"rename the {ENGLISH} option", "s3"))
+        self.assertNotIn(WORD, self.bash(f"password: {WORD}\n", "s4"))
+        self.assertNotIn(WORD, self.bash(f"Das {WORD} ist morgen.\n", "s5"), "a word outside the list stays hunted")
+
+    def test_an_english_word_the_person_gives_after_a_label_stays_hunted(self):
+        self.assertTrue(self.blocked(f"password: {ENGLISH}", "s1"), "a chosen word is a password")
+        self.assertNotIn(ENGLISH, self.bash(f"use the {ENGLISH} path\n", "s2"))
+
+    def test_a_quiet_english_word_an_older_version_stored_is_weak_after_the_next_start(self):
+        for value in (ENGLISH, WORD):
+            self.bash(f"password: {value}\n", "s1")
+        index = Path(self.home, "index.json")
+        idx = json.loads(index.read_text())
+        for meta in idx["entries"].values():     # as 0.6.37 stored them: quiet, not weak
+            self.assertTrue(meta["quiet"])
+            meta["weak"] = False
+        index.write_text(json.dumps(idx))
+        self.assertNotIn(ENGLISH, self.bash(f"use the {ENGLISH} path\n", "s2"), "hunted before the start")
+        self.hook("session-start", {"session_id": "s3", **CLAUDE})
+        self.assertEqual(self.bash(f"use the {ENGLISH} path\n", "s3"), f"use the {ENGLISH} path\n")
+        self.assertNotIn(WORD, self.bash(f"Das {WORD} ist morgen.\n", "s3"), "a word outside the list stays hunted")
 
     def test_a_tool_result_after_a_failed_command_takes_the_tool_rule_too(self):
         out = self.hook("post-tool-failure", {"tool_name": "Bash", "session_id": "s1", **CLAUDE,

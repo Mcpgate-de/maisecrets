@@ -11,6 +11,8 @@ answered {"status": "published", "published": true} to it.
 Environment:
   MAISECRETS_CLAUDE_MARKETPLACE_URL     the endpoint claude.ai shows under "Configure webhook"
   MAISECRETS_CLAUDE_WEBHOOK_SECRET      its secret (whsec_…), a masked CI variable
+  MAISECRETS_CLAUDE_MARKETPLACE_URL_<n>, MAISECRETS_CLAUDE_WEBHOOK_SECRET_<n> (n = 2, 3, …)
+                                        one more organisation each; every pair gets the event
   CI_COMMIT_SHA, CI_PROJECT_PATH, CI_PROJECT_URL, CI_DEFAULT_BRANCH (GitLab CI)
 
 Without the two MAISECRETS_* variables the script exits 0 and says so: a fork has no
@@ -33,6 +35,24 @@ import uuid
 CANONICAL_PROJECTS = {"Sprinterli/maisecrets", "mcpgate/maisecrets"}
 
 
+def _targets() -> tuple[list[tuple[str, str, str]], list[str]]:
+    """The (label, url, secret) of each organisation, and the labels of half-set pairs."""
+    targets, half = [], []
+    n = 1
+    while True:
+        sfx = "" if n == 1 else f"_{n}"
+        url = os.environ.get("MAISECRETS_CLAUDE_MARKETPLACE_URL" + sfx, "").strip()
+        secret = os.environ.get("MAISECRETS_CLAUDE_WEBHOOK_SECRET" + sfx, "").strip()
+        if n > 1 and not url and not secret:
+            break
+        if url and secret:
+            targets.append((f"org {n}", url, secret))
+        elif n > 1:
+            half.append(f"org {n}")
+        n += 1
+    return targets, half
+
+
 def main() -> int:
     url = os.environ.get("MAISECRETS_CLAUDE_MARKETPLACE_URL", "").strip()
     secret = os.environ.get("MAISECRETS_CLAUDE_WEBHOOK_SECRET", "").strip()
@@ -46,6 +66,18 @@ def main() -> int:
             return 1
         print("notify_marketplace: no marketplace URL/secret configured, nothing to notify")
         return 0
+    targets, half = _targets()
+    rc = 0
+    for label in half:
+        print(f"notify_marketplace: {label}: URL or secret missing, not notified")
+        rc = 1
+    for label, url, secret in targets:
+        print(f"notify_marketplace: {label}")
+        rc |= _send(url, secret)
+    return rc
+
+
+def _send(url: str, secret: str) -> int:
     if secret.startswith("whsec_"):
         secret = secret[len("whsec_"):]
     key = base64.b64decode(secret)
