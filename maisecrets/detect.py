@@ -964,7 +964,7 @@ def _pw_label(toks: list) -> bool:
     if not toks:
         return False
     last = toks[-1].rstrip("0123456789") or toks[-1]
-    if last not in _det()._pw_last_on:
+    if last not in _pw_words(_det()):
         return False
     if last in ("pass", "pw") and len(toks) > 1 and toks[-2] in _PASS_NEG_PREV:
         return False
@@ -1202,6 +1202,19 @@ def _key_literal_ok(v: str, lo: int, hi: int, words: float, entropy: float) -> b
     return _norm_entropy(v) >= entropy and _ds_value_ok(v, 4) and _wordlike(_deleet(v)) < words
 
 
+def _pw_words_of(languages) -> frozenset:
+    return _PW_LAST.union(*(_PW_LAST_OF.get(lang, ()) for lang in languages))
+
+
+def _pw_words(d: "Detector") -> frozenset:
+    """The password label words of the detector's languages; a scan with a rule list of its own, before the
+    detector's rules loaded, needs them too."""
+    if d._pw_last_on is None:
+        d._label_class.clear()
+        d._pw_last_on = _pw_words_of(active_regions().languages)
+    return d._pw_last_on
+
+
 def _label_class(label: str) -> tuple:
     """(password label, secret label, weak label, OTP label, last word) of a label, computed once per label: a list of
     70,000 words reads each word as the label of the next one."""
@@ -1290,7 +1303,7 @@ def _literal_hits(text: str, channel: str = "prompt") -> list:
     languages, and its reference form decides which values are keys."""
     cache = _text_index(text)
     d = _det()
-    key = ("literal", channel, d, d._generation, d._pw_last_on)
+    key = ("literal", channel, d, d._generation, _pw_words(d))
     if key not in cache:
         hits = []
         pos = 0
@@ -2280,7 +2293,7 @@ def _load_prefixes() -> list[Rule]:
 def _load_literal(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
     d = _det()
     d._label_class.clear()   # the password label words depend on the languages
-    d._pw_last_on = _PW_LAST.union(*(_PW_LAST_OF.get(lang, ()) for lang in languages))
+    d._pw_last_on = _pw_words_of(languages)
     return [Rule(id=d["id"], type="SECRET", regex=_Lazy(r"(?!)()"), secret_group=1, keywords=d["keywords"])
             for d in LITERAL_RULES]
 
@@ -2490,6 +2503,7 @@ def rules() -> list[Rule]:
         if off:
             every = [r for r in every if not switched_off(r.id, off)]
         d._rules = every
+        d._active = active
         d._loaded_for = (every, active.regions)
     return d._rules
 
@@ -2499,7 +2513,7 @@ def _pii_regions_cached() -> tuple:
     d = _det()
     current = rules()
     if d._loaded_for[0] is not current:
-        d._loaded_for = (current, active_regions().regions)
+        d._loaded_for = (current, (d._active or active_regions()).regions)   # a list a caller set: the reader
     return d._loaded_for[1]
 
 
@@ -2647,7 +2661,8 @@ def _import_hits(text: str, enabled, found: list, taken_starts: list, taken_ends
 
 def use_regions(given) -> None:
     """Where every later scan of this process takes its regions and label languages from: a regions.Active, a function
-    that returns one (asked at each use, as the config is read without it), or None for the config of this computer
+    that returns one (asked when the rules load: the first scan and each reset_rules(), as the config is read
+    without it), or None for the config of this computer
     (home.regions_from_config). The hook entry of the plugin (hooks.main) gives its config reader here; a caller
     without a config gives the regions it wants. The rule list of other regions, and the rule ids taken from it, are
     dropped. It configures the default detector, which detect.scan() and the other functions of this module use; a
@@ -2778,7 +2793,8 @@ def _references() -> References:
 
 class Detector:
     """A detector with its own configuration: the regions and label languages (a regions.Active, or a function that
-    returns one, asked at each use), the sources (a Sources object) and the reference form (a References object).
+    returns one, asked when the rules load: the first scan and each reset()), the sources (a Sources object) and
+    the reference form (a References object).
     None takes the default of each: the config of this computer, the plugin's readers of the home folder, the
     plugin's placeholder form, each when it is there. A detector loads its rule list, its allow list and the caches
     that follow from them once, and keeps them for itself: two detectors in one process, also in two threads or one
@@ -2797,7 +2813,8 @@ class Detector:
         self._shape_ids = None              # the ids of the shape rules of the list (is_fixture)
         self._order = (None, ())            # a rule list and its scan order (_in_scan_order)
         self._label_class = {}              # the class of each label, under the label words of the languages
-        self._pw_last_on = _PW_LAST         # the password label words of the languages
+        self._pw_last_on = None             # the password label words of the languages (_pw_words)
+        self._active = None                 # the regions and languages the rule list was loaded for
         self._regex_time = {}               # the time each rule of your own spent inside its regex (seconds),
         self._regex_chars = {}              # the characters it ran over,
         self._regex_rule = {}               # and the rule of each id
@@ -2807,6 +2824,7 @@ class Detector:
     def _forget(self, allow: bool = False, times: bool = False) -> None:
         self._generation += 1
         self._rules = None
+        self._pw_last_on = None
         self._shape_ids = None
         if allow:
             self._allow = None
@@ -2842,8 +2860,11 @@ class Detector:
         return self._run(rules)
 
     def regions(self):
-        """The regions and label languages this detector scans with (a regions.Active)."""
-        return self._run(active_regions)
+        """The regions and label languages this detector scans with (a regions.Active): those its rule list was
+        loaded for. A function given as regions is asked when the rules load (the first scan, and after reset()), so
+        a changed config takes effect at reset()."""
+        self.rules()
+        return self._active
 
     def allow_list(self) -> tuple:
         """(exact values, rule ids) of the allow list of this detector (detect.allow_list)."""
@@ -3395,7 +3416,9 @@ def _curl_parts(rule: Rule):
             # the space after a credential was part of the match, so finditer skipped a credential that started
             # right after it: `-u a:x --user b:y` lost b:y (Gate B of 0.6.15); a lookahead keeps it
             tail = tail[:-len(r"(?:\s|\Z)")] + r"(?=\s|\Z)"
-        _CURL_PARTS[key] = None if head is None else (re.compile(flags + r"\bcurl\b"), re.compile(flags + tail))
+        own = rule.regex.flags or 0
+        _CURL_PARTS[key] = None if head is None else (re.compile(flags + r"\bcurl\b", own),
+                                                      re.compile(flags + tail, own))
     return _CURL_PARTS[key]
 
 

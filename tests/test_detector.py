@@ -136,6 +136,39 @@ class TwoDetectorsTests(unittest.TestCase):
         got = [[m.value for m in detect.scan(text, channel="tool", rule_list=[r])] for r in (user, token, user)]
         self.assertEqual(got, [["ab:cd"], ["zzzz"], ["ab:cd"]])
 
+    def test_a_changed_region_reader_takes_effect_at_reset_and_regions_names_the_loaded_ones(self):
+        given = [DE]
+        d = detect.Detector(regions=lambda: given[0], sources=detect.NO_SOURCES)
+        self.assertEqual(kinds(d, TEXTS["regions us"]), [])
+        given[0] = US
+        self.assertEqual(d.regions(), DE, "the rule list is still the one of the first answer")
+        self.assertEqual(kinds(d, TEXTS["regions us"]), [], "a scan keeps one configuration until reset()")
+        d.reset()
+        self.assertEqual(d.regions(), US)
+        self.assertEqual(kinds(d, TEXTS["regions us"]), ["us-ssn#2"])
+
+    def test_a_first_scan_with_a_rule_list_takes_the_label_words_of_the_detector(self):
+        literal = [r for r in detector_a().rules() if r.id == "label-pw-literal"]
+        self.assertEqual(len(literal), 1, "the premise: the rule of the label pass")
+        fresh = detect.Detector(regions=DE, sources=detect.NO_SOURCES)
+        self.assertEqual([m.kind for m in fresh.scan(LITERAL, channel="tool", rule_list=literal)], ["label-pw-literal"])
+        english = detect.Detector(regions=US, sources=detect.NO_SOURCES)
+        self.assertEqual([m.kind for m in english.scan(LITERAL, channel="tool", rule_list=literal)], [])
+        # new regions on the default detector drop the label words of the old ones, before its rules load again
+        self.addCleanup(detect.use_regions, None)
+        detect.use_regions(DE)
+        detect.rules()
+        detect.use_regions(US)
+        self.assertEqual([m.kind for m in detect.scan(LITERAL, channel="tool", rule_list=literal)], [])
+
+    def test_a_curl_rule_keeps_its_own_flags(self):
+        import re
+        head = r"\bcurl\b(?:.*?|.*?(?:[\r\n]{1,2}.*?){1,5})"
+        rule = detect.Rule(id="curl-probe", type="SECRET", regex=detect.LazyRegex(head + r"\s-u\s+(\S+)", re.I),
+                           secret_group=1)
+        text = "CU" "RL -" "U " + "ab:cd" + " https://x.test"
+        self.assertEqual([m.value for m in detect.scan(text, channel="tool", rule_list=[rule])], ["ab:cd"])
+
     def test_one_detector_in_two_threads_counts_the_steps_of_both(self):
         entered = {"one": threading.Event(), "two": threading.Event()}
         release = threading.Event()
