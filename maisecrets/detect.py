@@ -1209,10 +1209,14 @@ def _pw_words_of(languages) -> frozenset:
 def _pw_words(d: "Detector") -> frozenset:
     """The password label words of the detector's languages; a scan with a rule list of its own, before the
     detector's rules loaded, needs them too."""
-    if d._pw_last_on is None:
-        d._label_class.clear()
-        d._pw_last_on = _pw_words_of(active_regions().languages)
-    return d._pw_last_on
+    words = d._pw_last_on
+    if words is None:
+        with d._load_lock:
+            if d._pw_last_on is None:
+                d._label_class.clear()
+                d._pw_last_on = _pw_words_of(active_regions().languages)
+            words = d._pw_last_on
+    return words
 
 
 def _label_class(label: str) -> tuple:
@@ -2495,18 +2499,22 @@ def rules() -> list[Rule]:
     the clear (Opus review of block 1). A user rule runs in both channels. A rule id on the allow list is switched
     off. Each detector loads its own list once."""
     d = _det()
-    if d._rules is None:
-        active = active_regions()
-        every = [r for _, r in _ranked(active)]
-        off = allow_list()[1]
-        if off:
-            every = [r for r in every if not switched_off(r.id, off)]
-        d._rules = every
-        d._active = active
-        d._loaded_for = (every, active.regions)
-        d._label_class.clear()   # the password label words depend on the languages
-        d._pw_last_on = _pw_words_of(active.languages)
-    return d._rules
+    rules_now = d._rules
+    if rules_now is not None:
+        return rules_now
+    with d._load_lock:   # one load at a time: a second thread waits for the first one's snapshot
+        if d._rules is None:
+            active = active_regions()
+            every = [r for _, r in _ranked(active)]
+            off = allow_list()[1]
+            if off:
+                every = [r for r in every if not switched_off(r.id, off)]
+            d._active = active
+            d._loaded_for = (every, active.regions)
+            d._label_class.clear()   # the password label words depend on the languages
+            d._pw_last_on = _pw_words_of(active.languages)
+            d._rules = every         # last: a set rule list marks a complete snapshot
+        return d._rules
 
 
 def _pii_regions_cached() -> tuple:
@@ -2821,16 +2829,18 @@ class Detector:
         self._regex_rule = {}               # and the rule of each id
         self._running = {}                  # thread id -> (rule, perf_counter at the start) while a step runs
         self._lock = threading.Lock()       # the sums and the running steps of several threads
+        self._load_lock = threading.RLock()  # one rule load at a time, and a reset not inside one
 
     def _forget(self, allow: bool = False, times: bool = False) -> None:
-        self._generation += 1
-        self._rules = None
-        self._pw_last_on = None
-        self._shape_ids = None
-        if allow:
-            self._allow = None
-        if times:
-            self._regex_time, self._regex_chars, self._regex_rule = {}, {}, {}
+        with self._load_lock:
+            self._generation += 1
+            self._rules = None
+            self._pw_last_on = None
+            self._shape_ids = None
+            if allow:
+                self._allow = None
+            if times:
+                self._regex_time, self._regex_chars, self._regex_rule = {}, {}, {}
 
     def _sources_now(self) -> Sources:
         return _plugin_sources() if self._given_sources is None else self._given_sources

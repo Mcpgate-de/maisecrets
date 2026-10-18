@@ -193,6 +193,36 @@ class TwoDetectorsTests(unittest.TestCase):
         text = "cu" "rl https://x.test" + " \\\n" * 11 + " -" "U " + "ab:cd"
         self.assertEqual([m.value for m in detect.scan(text, channel="tool", rule_list=[rule])], ["ab:cd"])
 
+    def test_two_first_scans_of_one_detector_load_one_snapshot(self):
+        # the first scan of A's thread loads the rules and waits inside its reader; a second thread's first scan
+        # must wait for that snapshot, not load its own (a second answer of the reader made a hybrid one)
+        asked, entered, release = [], threading.Event(), threading.Event()
+
+        def reader():
+            asked.append(threading.current_thread().name)
+            if threading.current_thread().name == "first":
+                entered.set()
+                release.wait(5)
+                return DE
+            return US
+        d = detect.Detector(regions=reader, sources=detect.NO_SOURCES)
+        got = {}
+
+        def run(name):
+            got[name] = [kinds(d, "".join([t])) for t in (LITERAL, TEXTS["regions us"])]
+        first = threading.Thread(target=run, args=("first",), name="first")
+        second = threading.Thread(target=run, args=("second",), name="second")
+        first.start()
+        self.assertTrue(entered.wait(30), "the premise: the first load is inside its reader")
+        second.start()
+        second.join(timeout=0.5)        # the second scan waits for the first load (or, without a lock, loads)
+        release.set()
+        first.join(timeout=60)
+        second.join(timeout=60)
+        self.assertEqual(asked, ["first"], "one load, one answer of the reader")
+        self.assertEqual(got["first"], got["second"])
+        self.assertEqual(got["first"], [["label-pw-literal"], []], "the snapshot of the first answer")
+
     def test_one_detector_in_two_threads_counts_the_steps_of_both(self):
         entered = {"one": threading.Event(), "two": threading.Event()}
         release = threading.Event()
