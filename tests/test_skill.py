@@ -510,6 +510,7 @@ class SkillZipTests(unittest.TestCase):
                 self.assertIn("secret-hygiene/scripts/maisecrets/detect.py", names)
                 self.assertIn("secret-hygiene/scripts/maisecrets/rules/betterleaks.json", names)
                 self.assertIn("secret-hygiene/scripts/maisecrets/rule_filter.py", names)
+                self.assertIn("secret-hygiene/scripts/maisecrets/placeholder.py", names, "the reference form")
                 self.assertFalse([n for n in names if "vault" in n or "hooks" in n or "__pycache__" in n], names)
                 z.extractall(work / "x")
             repo = work / "repo"
@@ -517,9 +518,17 @@ class SkillZipTests(unittest.TestCase):
             _git(repo, "init", "-q")
             token = _token()
             (repo / "config.ini").write_text(f"token = {token}\n", encoding="utf-8")
+            # a placeholder of the plugin is no finding of the zipped scanner either (it ships placeholder.py); the
+            # same line with a value is one
+            ref = chr(0x27E6) + "SECRET" + "_c7" + chr(0x27E7)
+            flag = "-" + "u"
+            (repo / "run.sh").write_text('cu' + f'rl {flag} "app:{ref}" https://x.test\n', encoding="utf-8")
+            (repo / "run2.sh").write_text('cu' + f'rl {flag} "app:Qx7Kp2Lm9Vw4" https://x.test\n', encoding="utf-8")
             r = _run(work / "x" / "secret-hygiene" / "scripts" / "scan_secrets.py", ".", cwd=repo)
             self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
             self.assertIn("config.ini:1", r.stdout)
+            self.assertIn("run2.sh:1", r.stdout, "the premise: the line with a value is a finding")
+            self.assertNotIn("run.sh:1", r.stdout, "the placeholder is no finding")
             self.assertNotIn(token, r.stdout + r.stderr)
         finally:
             shutil.rmtree(work, ignore_errors=True)
