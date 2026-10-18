@@ -9,7 +9,6 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -63,14 +62,9 @@ OWNER = {
 
 
 def scan(text: str, channel: str, region: tuple = ALL) -> list:
-    saved = detect._RULES
     active = regions.Active(regions=("generic", *region), languages=("en", "de"), source="test")
-    try:
-        detect._RULES = None
-        with mock.patch.object(detect, "active_regions", return_value=active):
-            return detect.scan(text, channel=channel)
-    finally:
-        detect._RULES = saved
+    with detect.Detector(regions=active).activate():
+        return detect.scan(text, channel=channel)
 
 
 def masked(text: str, found: list) -> str:

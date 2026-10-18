@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import base64 as _b64
 import bisect
+import contextvars
 import itertools
 import hashlib
 import ipaddress
@@ -944,7 +945,6 @@ _PW_LAST = frozenset({"password", "passwd", "passphrase", "passwort", "pwd", "us
 # the label words of a language that is on (regions.py): Kennwort is a label only with German on, as for the keyword
 # rules; passwort counts always, as the English `pass` label allows letters after it
 _PW_LAST_OF = {"de": frozenset({"kennwort"})}
-_PW_LAST_ON: list = [_PW_LAST]
 _PASS_NEG_PREV = frozenset({"two", "one", "single", "multi", "first", "second", "third", "by", "no", "skip", "sur",
                             "over", "under", "compass", "render", "shader", "high", "low", "band", "all", "each",
                             "next", "last", "test", "tests"})
@@ -964,7 +964,7 @@ def _pw_label(toks: list) -> bool:
     if not toks:
         return False
     last = toks[-1].rstrip("0123456789") or toks[-1]
-    if last not in _PW_LAST_ON[0]:
+    if last not in _det()._pw_last_on:
         return False
     if last in ("pass", "pw") and len(toks) > 1 and toks[-2] in _PASS_NEG_PREV:
         return False
@@ -1202,13 +1202,11 @@ def _key_literal_ok(v: str, lo: int, hi: int, words: float, entropy: float) -> b
     return _norm_entropy(v) >= entropy and _ds_value_ok(v, 4) and _wordlike(_deleet(v)) < words
 
 
-_LABEL_CLASS: dict = {}
-
-
 def _label_class(label: str) -> tuple:
     """(password label, secret label, weak label, OTP label, last word) of a label, computed once per label: a list of
     70,000 words reads each word as the label of the next one."""
-    got = _LABEL_CLASS.get(label)
+    cache = _det()._label_class
+    got = cache.get(label)
     if got is None:
         toks = _norm_label(label)
         full = "_".join(toks)
@@ -1223,9 +1221,9 @@ def _label_class(label: str) -> tuple:
         weak = named and bool(_WEAK_TAIL_RE.search(full)) and not other
         otp = named and bool(set(toks) & _OTP_WORDS)
         got = (_pw_label(toks), secret, weak, otp, toks[-1] if toks else "")
-        if len(_LABEL_CLASS) > 50000:
-            _LABEL_CLASS.clear()
-        _LABEL_CLASS[label] = got
+        if len(cache) > 50000:
+            cache.clear()
+        cache[label] = got
     return got
 
 
@@ -1288,9 +1286,10 @@ def _judge_literal(label: str, v: str, quoted: bool = True, channel: str = "prom
 
 def _literal_hits(text: str, channel: str = "prompt") -> list:
     """(rule id, start of the label, start and end of the value) of each label and literal value of `text`, computed
-    once per text for all the rules that read them."""
+    once per text and detector for all the rules that read them: the label words follow the detector's languages."""
     cache = _text_index(text)
-    if ("literal", channel) not in cache:
+    key = ("literal", channel, _det())
+    if key not in cache:
         hits = []
         pos = 0
         while True:
@@ -1329,8 +1328,8 @@ def _literal_hits(text: str, channel: str = "prompt") -> list:
                 if _pw_literal_ok(_unquote(text[m.end():end], q, backslash, tick), channel):
                     hits.append(("label-pw-literal", m.start(), m.end(), end))
         hits.sort(key=lambda h: h[2])
-        cache["literal", channel] = hits   # the tool channel takes more values
-    return cache["literal", channel]
+        cache[key] = hits   # the tool channel takes more values
+    return cache[key]
 
 
 class _Literal:
@@ -2276,8 +2275,9 @@ def _load_prefixes() -> list[Rule]:
 
 
 def _load_literal(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
-    _LABEL_CLASS.clear()   # the password label words depend on the languages
-    _PW_LAST_ON[0] = _PW_LAST.union(*(_PW_LAST_OF.get(lang, ()) for lang in languages))
+    d = _det()
+    d._label_class.clear()   # the password label words depend on the languages
+    d._pw_last_on = _PW_LAST.union(*(_PW_LAST_OF.get(lang, ()) for lang in languages))
     return [Rule(id=d["id"], type="SECRET", regex=_Lazy(r"(?!)()"), secret_group=1, keywords=d["keywords"])
             for d in LITERAL_RULES]
 
@@ -2336,10 +2336,6 @@ def _load_own(languages: tuple = ("en",)) -> list[Rule]:
                  secret_group=d.get("secret_group", 0), validator=d.get("validator"),
                  context=tuple(d.get("context", ())), require_context=d.get("require_context", False))
             for d in OWN_RULES] + _load_prefixes()
-
-
-_RULES: list[Rule] | None = None
-_ALLOW: list = []   # (exact values, rule ids) of the allow list, read once per process
 
 
 def _user_rules() -> list[Rule]:
@@ -2465,12 +2461,14 @@ def _upstream_rules() -> dict:
 
 
 def allow_list() -> tuple[frozenset, frozenset]:
-    if not _ALLOW:
+    """(exact values, rule ids) of the allow list of the detector, read once per detector."""
+    d = _det()
+    if d._allow is None:
         try:
-            _ALLOW.append(_sources().allow_list())
+            d._allow = d._sources_now().allow_list()
         except Exception:  # noqa: BLE001 - an allow list that cannot be read allows nothing
-            _ALLOW.append((frozenset(), frozenset()))
-    return _ALLOW[0]
+            d._allow = (frozenset(), frozenset())
+    return d._allow
 
 
 def rules() -> list[Rule]:
@@ -2480,38 +2478,34 @@ def rules() -> list[Rule]:
     own. A scan runs the personal-data step (_personal_hits) before the rules of your own (_in_scan_order). A user rule
     never takes a span before a built-in rule: a NAME rule that took a part of an e-mail address left the rest of it in
     the clear (Opus review of block 1). A user rule runs in both channels. A rule id on the allow list is switched
-    off."""
-    global _RULES
-    if _RULES is None:
+    off. Each detector loads its own list once."""
+    d = _det()
+    if d._rules is None:
         active = active_regions()
-        _RULES = [r for _, r in _ranked(active)]
+        every = [r for _, r in _ranked(active)]
         off = allow_list()[1]
         if off:
-            _RULES = [r for r in _RULES if not switched_off(r.id, off)]
-        _REGIONS[:] = [_RULES, active.regions]
-    return _RULES
-
-
-_REGIONS: list = [None, ()]   # the rule list and the regions it was loaded for (rules())
+            every = [r for r in every if not switched_off(r.id, off)]
+        d._rules = every
+        d._loaded_for = (every, active.regions)
+    return d._rules
 
 
 def _pii_regions_cached() -> tuple:
-    """The regions of the loaded rules. A test that swaps detect._RULES back gets the regions of that list."""
+    """The regions of the loaded rules. A rule list that a slow rule of your own left changes them not."""
+    d = _det()
     current = rules()
-    if _REGIONS[0] is not current:
-        _REGIONS[:] = [current, active_regions().regions]
-    return _REGIONS[1]
+    if d._loaded_for[0] is not current:
+        d._loaded_for = (current, active_regions().regions)
+    return d._loaded_for[1]
 
 
 def reset_rules() -> None:
-    """Read every rule and the allow list again at the next scan (tests, and a CLI run after a change)."""
-    global _RULES
-    _RULES = None
-    _ALLOW.clear()
-    _SHAPE_IDS.clear()
-    for times in (_REGEX_TIME, _REGEX_CHARS, _REGEX_RULE):
-        times.clear()
-    _sources().reset()
+    """Read every rule and the allow list again at the next scan of the detector (tests, and a CLI run after a
+    change)."""
+    d = _det()
+    d._forget(allow=True, times=True)
+    d._sources_now().reset()
 
 
 
@@ -2519,11 +2513,7 @@ def reset_rules() -> None:
 # Only the regex counts, around each step of its finditer: the work on each hit is no time of the rule (Opus review,
 # round 3: a correct rule with 170k hits was taken out by the wall time of its loop). The sum runs over every scan of
 # the process, so a slow text split over many strings of one tool result adds up (same review).
-_REGEX_TIME: dict = {}
-_REGEX_CHARS: dict = {}
-_REGEX_RULE: dict = {}
-# (rule, perf_counter at the start of the step) while a step of a rule of your own runs, else None
-_RUNNING: list = [None]
+# The detector keeps these sums (_regex_time, _regex_chars, _regex_rule) and the step that runs now (_running).
 # A rule of your own may spend this long in its regex in one process (seconds, plus USER_RULE_BUDGET_PER_MB for each
 # MB of text it ran over); a rule that spends more is left out from then on (maisecrets/user_rules.py, note_slow)
 USER_RULE_BUDGET = 0.5
@@ -2534,10 +2524,11 @@ def slowest_user_rule():
     """(rule, seconds) of the rule of your own with the most time inside its regex in this process, the step that
     runs now included; None when no rule of your own ran."""
     best = None
-    running = _RUNNING[0]
+    d = _det()
+    running = d._running[0]
     now = time.perf_counter()
-    times = dict(_REGEX_TIME)
-    rules_by_id = dict(_REGEX_RULE)
+    times = dict(d._regex_time)
+    rules_by_id = dict(d._regex_rule)
     if running is not None:
         rule, since = running
         times[rule.id] = times.get(rule.id, 0.0) + (now - since)
@@ -2550,33 +2541,35 @@ def slowest_user_rule():
 
 def _timed(rule: Rule, found, chars: int):
     """The matches of a rule of your own; the time inside its regex adds to the rule's sum for the process. Over the
-    budget, the rule is left out of this process and, by the state file, of the next ones."""
-    _REGEX_RULE[rule.id] = rule
-    _REGEX_CHARS[rule.id] = _REGEX_CHARS.get(rule.id, 0) + chars
+    budget, the rule is left out of this process and, by the state file, of the next ones. The sums belong to the
+    detector of the scan."""
+    d = _det()
+    times, running = d._regex_time, d._running
+    d._regex_rule[rule.id] = rule
+    d._regex_chars[rule.id] = d._regex_chars.get(rule.id, 0) + chars
     try:
         while True:
             t = time.perf_counter()
-            _RUNNING[0] = (rule, t)
+            running[0] = (rule, t)
             try:
                 m = next(found)
             except StopIteration:
                 break
             finally:
-                _RUNNING[0] = None
-                _REGEX_TIME[rule.id] = _REGEX_TIME.get(rule.id, 0.0) + (time.perf_counter() - t)
+                running[0] = None
+                times[rule.id] = times.get(rule.id, 0.0) + (time.perf_counter() - t)
             yield m
     finally:
-        took = _REGEX_TIME.get(rule.id, 0.0)
-        if took > USER_RULE_BUDGET + USER_RULE_BUDGET_PER_MB * _REGEX_CHARS[rule.id] / 1e6:
-            _too_slow(rule, took)
+        took = times.get(rule.id, 0.0)
+        if took > USER_RULE_BUDGET + USER_RULE_BUDGET_PER_MB * d._regex_chars.get(rule.id, 0) / 1e6:
+            _too_slow(d, rule, took)
 
 
-def _too_slow(rule: Rule, spent: float) -> None:
-    global _RULES
-    if _RULES is not None:
-        _RULES = [r for r in _RULES if r is not rule]
+def _too_slow(d: "Detector", rule: Rule, spent: float) -> None:
+    if d._rules is not None:
+        d._rules = [r for r in d._rules if r is not rule]
     try:
-        _sources().note_slow(rule, spent * 1000)
+        d._sources_now().note_slow(rule, spent * 1000)
     except Exception:  # noqa: BLE001 - the rule is out of this process either way
         pass
 
@@ -2643,26 +2636,23 @@ def _import_hits(text: str, enabled, found: list, taken_starts: list, taken_ends
             _term_rest(m, text, found, taken_starts, taken_ends)
 
 
-_GIVEN: list = []   # the regions a caller gave (use_regions); empty: the config of this computer decides
-
-
 def use_regions(given) -> None:
     """Where every later scan of this process takes its regions and label languages from: a regions.Active, a function
     that returns one (asked at each use, as the config is read without it), or None for the config of this computer
     (home.regions_from_config). The hook entry of the plugin (hooks.main) gives its config reader here; a caller
     without a config gives the regions it wants. The rule list of other regions, and the rule ids taken from it, are
-    dropped."""
-    global _RULES
-    _GIVEN[:] = [] if given is None else [given]
-    _RULES = None
-    _SHAPE_IDS.clear()   # the shape rules of the old list (is_fixture)
+    dropped. It configures the default detector, which detect.scan() and the other functions of this module use; a
+    Detector of its own takes its regions when it is made."""
+    _DEFAULT._given_regions = given
+    _DEFAULT._forget()   # the rules and the shape rules of the old list (is_fixture)
 
 
 def active_regions():
-    """The regions and label languages of the scans (maisecrets/regions.py): what the caller gave (use_regions), else
-    the config of this computer."""
-    if _GIVEN:
-        return _GIVEN[0]() if callable(_GIVEN[0]) else _GIVEN[0]
+    """The regions and label languages of the scans of the detector (maisecrets/regions.py): what its caller gave,
+    else the config of this computer."""
+    given = _det()._given_regions
+    if given is not None:
+        return given() if callable(given) else given
     try:
         from .home import regions_from_config
     except Exception:  # noqa: BLE001 - no home.py (the standalone skill) or one that cannot load: no config, as before
@@ -2701,26 +2691,23 @@ class Sources:
 
 
 NO_SOURCES = Sources()
-_GIVEN_SOURCES: list = []   # the sources a caller gave (use_sources); empty: the plugin's, if they are there
 
 
 def use_sources(given) -> None:
     """The sources of every later scan of this process: a Sources object, or None for the plugin's readers of the home
     folder (maisecrets/sources.py). What the old sources gave is dropped: the rule list, the allow list, and the time
     their rules of your own spent (a rule of the new sources with the same id starts at zero). Call it between scans,
-    never while one runs in another thread: a running scan would write the time of an old rule back."""
-    global _RULES
-    _GIVEN_SOURCES[:] = [] if given is None else [given]
-    _RULES = None
-    _ALLOW.clear()
-    _SHAPE_IDS.clear()
-    for times in (_REGEX_TIME, _REGEX_CHARS, _REGEX_RULE):
-        times.clear()
+    never while one runs in another thread: a running scan would write the time of an old rule back. It configures the
+    default detector."""
+    _DEFAULT._given_sources = given
+    _DEFAULT._forget(allow=True, times=True)
 
 
 def _sources() -> Sources:
-    if _GIVEN_SOURCES:
-        return _GIVEN_SOURCES[0]
+    return _det()._sources_now()
+
+
+def _plugin_sources() -> Sources:
     try:
         from .sources import PLUGIN_SOURCES
     except ImportError:   # the standalone skill ships the detector without the plugin: no sources, as before
@@ -2760,23 +2747,124 @@ class References:
 
 
 NO_REFERENCES = References()
-_GIVEN_REFERENCES: list = []   # the reference form a caller gave (use_references); empty: the plugin's, if there
 
 
 def use_references(given) -> None:
-    """The reference form of every later scan of this process: a References object, or None for the plugin's
+    """The reference form of every later scan of the default detector: a References object, or None for the plugin's
     (maisecrets/placeholder.py). Call it between scans."""
-    _GIVEN_REFERENCES[:] = [] if given is None else [given]
+    _DEFAULT._given_references = given
 
 
 def _references() -> References:
-    if _GIVEN_REFERENCES:
-        return _GIVEN_REFERENCES[0]
+    given = _det()._given_references
+    if given is not None:
+        return given
     try:
         from .placeholder import REFERENCES
     except ImportError:   # a copy of the detector without placeholder.py: no reference form
         return NO_REFERENCES
     return REFERENCES
+
+
+class Detector:
+    """A detector with its own configuration: the regions and label languages (a regions.Active, or a function that
+    returns one, asked at each use), the sources (a Sources object) and the reference form (a References object).
+    None takes the default of each: the config of this computer, the plugin's readers of the home folder, the
+    plugin's placeholder form, each when it is there. A detector loads its rule list, its allow list and the caches
+    that follow from them once, and keeps them for itself: two detectors in one process, also in two threads or one
+    inside a scan of the other, never see each other's configuration. The functions of this module (scan, findings,
+    rules, ...) use the detector of the scan that runs, else the default detector (use_regions, use_sources and
+    use_references configure it)."""
+
+    def __init__(self, regions=None, sources=None, references=None):
+        self._given_regions = regions
+        self._given_sources = sources
+        self._given_references = references
+        self._rules = None                  # the rule list (rules())
+        self._loaded_for = (None, ())       # the rule list and the regions it was loaded for
+        self._allow = None                  # (exact values, rule ids) of the allow list
+        self._shape_ids = None              # the ids of the shape rules of the list (is_fixture)
+        self._order = (None, ())            # a rule list and its scan order (_in_scan_order)
+        self._label_class = {}              # the class of each label, under the label words of the languages
+        self._pw_last_on = _PW_LAST         # the password label words of the languages
+        self._regex_time = {}               # the time each rule of your own spent inside its regex (seconds),
+        self._regex_chars = {}              # the characters it ran over,
+        self._regex_rule = {}               # and the rule of each id
+        self._running = [None]              # (rule, perf_counter at the start) while a step of one runs, else None
+
+    def _forget(self, allow: bool = False, times: bool = False) -> None:
+        self._rules = None
+        self._shape_ids = None
+        if allow:
+            self._allow = None
+        if times:
+            self._regex_time, self._regex_chars, self._regex_rule = {}, {}, {}
+
+    def _sources_now(self) -> Sources:
+        return _plugin_sources() if self._given_sources is None else self._given_sources
+
+    def _run(self, fn, *args, **kwargs):
+        token = _CURRENT.set(self)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _CURRENT.reset(token)
+
+    def activate(self) -> "_Activation":
+        """A context manager: in its block, every scan of this thread (detect.scan and each function of this module,
+        also from a caller such as a hook) uses this detector."""
+        return _Activation(self)
+
+    def scan(self, text: str, enabled: set[str] | None = None, channel: str = "prompt", path: str = "",
+             rule_list: list[Rule] | None = None) -> list[Match]:
+        """The matches of the text under this detector's configuration (detect.scan)."""
+        return self._run(scan, text, enabled, channel, path, rule_list)
+
+    def findings(self, text: str, channel: str = "prompt", path: str = "") -> list[Match]:
+        """The matches without the fixtures of a pasted test (detect.findings)."""
+        return self._run(findings, text, channel, path)
+
+    def rules(self) -> list[Rule]:
+        """The rule list of this detector, sorted by rank (detect.rules)."""
+        return self._run(rules)
+
+    def regions(self):
+        """The regions and label languages this detector scans with (a regions.Active)."""
+        return self._run(active_regions)
+
+    def explain_allowed(self, value: str) -> str | None:
+        """Why the allow list of this detector lets this value through, or None (detect.explain_allowed)."""
+        return self._run(explain_allowed, value)
+
+    def reset(self) -> None:
+        """Read the rules and the allow list again at the next scan (detect.reset_rules)."""
+        self._run(reset_rules)
+
+    def slowest_user_rule(self):
+        """(rule, seconds) of the rule of your own of this detector with the most time in its regex, or None."""
+        return self._run(slowest_user_rule)
+
+
+class _Activation:
+    def __init__(self, detector: Detector):
+        self._detector, self._tokens = detector, []
+
+    def __enter__(self) -> Detector:
+        self._tokens.append(_CURRENT.set(self._detector))
+        return self._detector
+
+    def __exit__(self, *exc) -> None:
+        _CURRENT.reset(self._tokens.pop())
+
+
+_CURRENT: contextvars.ContextVar = contextvars.ContextVar("maisecrets_detector", default=None)
+_DEFAULT = Detector()   # the detector of the functions of this module; it reads nothing before its first scan
+
+
+def _det() -> Detector:
+    """The detector of the scan that runs in this thread (Detector.scan), else the default detector."""
+    d = _CURRENT.get()
+    return _DEFAULT if d is None else d
 
 
 def switched_off(rule_id: str, ids: frozenset) -> bool:
@@ -3000,13 +3088,11 @@ def is_fixture(m: "Match", text: str, path: str = "") -> bool:
     return not scan(m.value, enabled=_shape_rule_ids())
 
 
-_SHAPE_IDS: list = []
-
-
 def _shape_rule_ids() -> set:
-    if not _SHAPE_IDS:
-        _SHAPE_IDS.append({r.id for r in rules() if (r.form or _registry.form_of(r.id)) == "shape"})
-    return _SHAPE_IDS[0]
+    d = _det()
+    if d._shape_ids is None:
+        d._shape_ids = {r.id for r in rules() if (r.form or _registry.form_of(r.id)) == "shape"}
+    return d._shape_ids
 
 
 # ------------------------------------------------------------------ scanner --
@@ -4004,7 +4090,6 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
 _PERSONAL = object()             # the place of _personal_hits in the scan order
 _TERMS = object()                # the place of _term_hits: registry phase "terms", after the rules of your own
 _IMPORTS = object()              # the place of _import_hits: registry phase "imports", after the terms
-_ORDER: list = [None, ()]        # a rule list and its scan order
 
 
 def _runs_after_personal(rule: Rule) -> bool:
@@ -4017,10 +4102,11 @@ def _in_scan_order(every: list) -> tuple:
     """The rules of a list in scan order: the built-in ones, then the personal-data step and the cleaned copy, then the
     rules of your own (ids with `user:`), then the terms, then the imported values. Kept per list, so a scan pays for
     it once."""
-    if _ORDER[0] is not every:
-        _ORDER[:] = [every, tuple(r for r in every if not _runs_after_personal(r)) + (_PERSONAL,)
-                     + tuple(r for r in every if _runs_after_personal(r)) + (_TERMS, _IMPORTS)]
-    return _ORDER[1]
+    d = _det()
+    if d._order[0] is not every:
+        d._order = (every, tuple(r for r in every if not _runs_after_personal(r)) + (_PERSONAL,)
+                    + tuple(r for r in every if _runs_after_personal(r)) + (_TERMS, _IMPORTS))
+    return d._order[1]
 
 
 def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_ends: list, overlaps,

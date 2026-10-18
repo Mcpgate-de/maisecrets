@@ -176,16 +176,12 @@ class BetterleaksRuleTests(unittest.TestCase):
         self.assertEqual(sorted(r.id for r in kept), sorted(samples), "the premise: one sample per kept rule")
         full = detect.rules()
         alone = [r for r in full if r.id not in samples]
-        saved = detect._RULES
-        try:
-            for rid, text in samples.items():
-                with self.subTest(rid):
-                    detect._RULES = alone
-                    self.assertEqual([m.kind for m in detect.scan(text + "\n")], [], "betterleaks finds it alone")
-                    detect._RULES = full
-                    self.assertIn(rid, [m.kind for m in detect.scan(text + "\n")])
-        finally:
-            detect._RULES = saved
+        without = detect.Detector()
+        without._rules = alone   # the default rule list without the samples' rules, as a detector of its own
+        for rid, text in samples.items():
+            with self.subTest(rid):
+                self.assertEqual([m.kind for m in without.scan(text + "\n")], [], "betterleaks finds it alone")
+                self.assertIn(rid, [m.kind for m in detect.scan(text + "\n")])
 
     def test_the_rule_filter_drops_a_low_entropy_value(self):
         value = "ddp_" + "ab" * 18                 # entropy 1.x: the rule's filter drops it
