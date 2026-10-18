@@ -111,12 +111,14 @@ def label_languages_available() -> list[str]:
     return sorted(p.stem for p in LABELS_DIR.glob("*.txt"))
 
 
-def resolve(cfg: dict) -> Active:
+def resolve(cfg: dict, locale: str | None = None) -> Active:
+    """The regions and label languages of a config. `auto` and the label language of the system come from `locale`
+    ("de_DE"), else from this computer's setting (system_locale)."""
     raw = cfg.get("regions")
     source = cfg.get("regions_from", "config")
     if raw is None:
         raw, source = list(DEFAULT_REGIONS), "default"
-    lang, country = parse_locale(system_locale())
+    lang, country = parse_locale(system_locale() if locale is None else locale)
     regions: list[str] = []
     for r in raw:
         r = str(r).strip().lower()

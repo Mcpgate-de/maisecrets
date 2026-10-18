@@ -149,7 +149,7 @@ class HomeUserTests(unittest.TestCase):
                      "/home/user1/x", "/home/airflow/dags/x.py", "File /home/oai/share/project/main.py, line 42"):
             with self.subTest(text=text):
                 self.assertEqual(values(text), [])
-        with mock.patch.object(personal.getpass, "getuser", return_value="tkellermann"):
+        with mock.patch("getpass.getuser", return_value="tkellermann"):
             self.assertEqual(values("/home/tkellermann/src/app.py"), [])
 
 
