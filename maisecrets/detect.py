@@ -2719,7 +2719,7 @@ def active_regions():
     """The regions and label languages of the config (maisecrets/regions.py)."""
     from . import regions
     try:
-        from .vault import load_config
+        from .home import load_config
         cfg = load_config()
     except Exception:  # noqa: BLE001 - config is optional; a bad one is reported by the vault
         cfg = {}

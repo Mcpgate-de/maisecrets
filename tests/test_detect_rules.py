@@ -194,11 +194,11 @@ class RuleLoaderTests(unittest.TestCase):
 
     def test_a_broken_config_falls_back_to_the_default_regions(self):
         # the tests pin MAISECRETS_LOCALE=de_DE (tests/_isolate.py), so "auto" is de
-        with mock.patch("maisecrets.vault.load_config", side_effect=RuntimeError("broken")):
+        with mock.patch("maisecrets.home.load_config", side_effect=RuntimeError("broken")):
             self.assertEqual(detect._pii_regions(), ("generic", "de"))
-        with mock.patch("maisecrets.vault.load_config", return_value={"regions": ["us"]}):
+        with mock.patch("maisecrets.home.load_config", return_value={"regions": ["us"]}):
             self.assertEqual(detect._pii_regions(), ("generic", "us"))
-        with mock.patch("maisecrets.vault.load_config", return_value={"regions": []}):
+        with mock.patch("maisecrets.home.load_config", return_value={"regions": []}):
             self.assertEqual(detect._pii_regions(), ("generic",))
 
     def test_shannon_entropy(self):

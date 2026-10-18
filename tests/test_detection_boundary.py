@@ -27,11 +27,14 @@ import _isolate  # noqa: E402,F401  first: a temp vault home, never the real one
 
 CORE = frozenset({"__init__", "detect", "checksums", "normalise", "regions", "registry", "rulespec", "rule_filter",
                   "personal"})
-# the modules of the plugin that a plain scan still imports (measured 2026-10-18 on next c4c1c456). Each is a later
-# step: the config read for the regions (vault, through active_regions), the rules of your own and the allow list
-# (user_rules), the probes for a term list or an import (term_files, value_files), and the placeholder form that
-# vault imports. Remove a name when the scan no longer imports it; never add one.
-NOT_YET_OUT = frozenset({"placeholder", "term_files", "user_rules", "value_files", "vault"})
+# the modules of the plugin that a plain scan still imports. Each is a later step: the config read for the regions
+# (home, through active_regions), the rules of your own and the allow list (user_rules), and the probes for a term
+# list or an import (term_files, value_files). Remove a name when the scan no longer imports it; never add one. The
+# one exception so far: home.py took the file and config helpers out of vault.py (2026-10-18), and with it vault and
+# placeholder left the scan.
+NOT_YET_OUT = frozenset({"home", "term_files", "user_rules", "value_files"})
+# a scan never imports the store or the placeholder form, also with a term list and an import of values in place
+NEVER = frozenset({"vault", "placeholder", "rehydration", "vault_refs", "hooks", "settings"})
 
 
 def private_uses(source: str) -> list[tuple[int, str]]:
@@ -126,6 +129,32 @@ class DetectionBoundaryTests(unittest.TestCase):
     def test_findings_import_no_new_module_of_the_plugin(self):
         self.assert_imports("findings")
 
+    def test_a_scan_with_a_term_list_and_an_import_imports_no_store(self):
+        home = Path(tempfile.mkdtemp(prefix="detect-boundary-", dir=_isolate.HOME))
+        (home / "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}')
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("MAISECRETS_", "CLAUDE", "CODEX"))}
+        env["MAISECRETS_HOME"] = str(home)
+        name, other = "Annabell " + "Quarzfeld", "Ottilie " + "Brennwald"
+        line = json.dumps({"value": other, "type": "NAME"}) + "\n"
+        setup = (f"import sys\nsys.path.insert(0, {str(ROOT)!r})\n"
+                 "from maisecrets import terms, values\n"
+                 f"assert terms.add_typed({name!r})[0]\n"
+                 f"assert values.import_bytes({line.encode()!r}, 'probe').new\n")
+        r = subprocess.run([sys.executable, "-I", "-c", setup], capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        code = (f"import json, sys\nsys.path.insert(0, {str(ROOT)!r})\n"
+                "from maisecrets import detect\n"
+                f"kinds = [m.kind for m in detect.scan({name + ' and ' + other + ' met.'!r}, channel='tool')]\n"
+                "print(json.dumps([kinds, sorted(m for m in sys.modules if m.startswith('maisecrets.'))]))\n")
+        r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        kinds, mods = json.loads(r.stdout)
+        self.assertTrue(any(k.startswith("term:") for k in kinds) and any(k.startswith("import:") for k in kinds),
+                        f"the premise: both sources ran ({kinds})")
+        loaded = {m.split(".", 1)[1] for m in mods}
+        self.assertTrue({"terms", "values"} <= loaded, loaded)
+        self.assertFalse(loaded & NEVER, f"a scan imports {sorted(loaded & NEVER)}")
+
     def assert_imports(self, call: str):
         """Each call in a process of its own: a module that only findings() imports must not count for scan()."""
         home = Path(tempfile.mkdtemp(prefix="detect-boundary-", dir=_isolate.HOME))
@@ -145,6 +174,7 @@ class DetectionBoundaryTests(unittest.TestCase):
         loaded = {m.split(".", 1)[1] for m in json.loads(r.stdout)}
         self.assertTrue({"detect", "personal", "registry"} <= loaded, loaded)
         beyond = loaded - CORE
+        self.assertFalse(loaded & NEVER, f"{call}() imports {sorted(loaded & NEVER)}")
         self.assertFalse(beyond - NOT_YET_OUT, f"{call}() now imports {sorted(beyond - NOT_YET_OUT)}")
         self.assertFalse(NOT_YET_OUT - beyond, f"no longer imported: remove {sorted(NOT_YET_OUT - beyond)} "
                                                "from NOT_YET_OUT")
