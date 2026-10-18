@@ -463,6 +463,32 @@ class ReferencesTests(unittest.TestCase):
         self.detect.use_references(None)
         self.assertEqual(self.detect.findings(text, channel="tool"), [])
 
+    def kinds_with(self, refs, text: str) -> list:
+        self.detect.use_references(refs)
+        return sorted((m.kind, m.value) for ch in ("tool", "prompt") for m in self.detect.scan(text, channel=ch))
+
+    def test_a_personal_value_with_a_reference_mark_is_left_to_the_other_rules(self):
+        plugin = self.placeholder.REFERENCES
+
+        class NoMarks(type(plugin)):
+            def has_marks(self, value):
+                return False
+        text = "Adresse: Hauptstraße 5" + _CLOSE + ", 10115 Berlin"
+        with_marks, without = self.kinds_with(plugin, text), self.kinds_with(NoMarks(), text)
+        self.assertNotEqual(with_marks, without, "the premise: the question decides this text")
+        self.assertFalse([v for _k, v in with_marks if _CLOSE in v], "a value with a mark is no personal-data hit")
+        self.assertTrue([v for _k, v in without if _CLOSE in v])
+
+    def test_a_value_glued_to_its_label_inside_an_open_reference_needs_the_longer_floor(self):
+        plugin = self.placeholder.REFERENCES
+
+        class NoInside(type(plugin)):
+            def inside(self, text, pos):
+                return False
+        text = _OPEN + "pw" + "d=k3Y9xq"
+        self.assertEqual(self.kinds_with(plugin, text), [], "inside an open reference the 6-character floor is off")
+        self.assertTrue(self.kinds_with(NoInside(), text), "the premise: the question decides this text")
+
     def test_detect_py_holds_no_part_of_the_plugin_reference_form(self):
         # the brackets, their escapes, the c-key pattern, and an import of placeholder.py: each is the plugin's form,
         # which detect.py must ask References about, never know

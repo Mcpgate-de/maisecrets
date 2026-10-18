@@ -79,9 +79,18 @@ def display_for(type_: str, value: str, level: str = "standard") -> str | None:
 
 # ------------------------------------------------------------------------------------------- the detector --
 # What the detector must know of this form (detect.References): the bodies are the ones detect.py had.
-_CELL_REF_RE = re.compile(f"{OPEN}[A-Z][A-Z_]*_c\\d+(?::[^{CLOSE}\n]*)?{CLOSE}")
-_KEY_AFTER_OPEN_RE = re.compile(r"[A-Z][A-Z_]*_c\d+")
-_LEGACY_IN_VALUE_RE = re.compile(r"<[A-Z][A-Z_]*_c\d+>")
+_DETECTOR_PATTERNS = {   # compiled at first use: a hook imports this module on every call (tests/test_hook_start.py)
+    "cell": f"{OPEN}[A-Z][A-Z_]*_c\\d+(?::[^{CLOSE}\n]*)?{CLOSE}",
+    "key after open": r"[A-Z][A-Z_]*_c\d+",
+    "legacy in value": r"<[A-Z][A-Z_]*_c\d+>",
+}
+_COMPILED: dict = {}
+
+
+def _rx(name: str) -> re.Pattern:
+    if name not in _COMPILED:
+        _COMPILED[name] = re.compile(_DETECTOR_PATTERNS[name])
+    return _COMPILED[name]
 
 
 class MaisecretsReferences:
@@ -100,15 +109,15 @@ class MaisecretsReferences:
         return spans
 
     def cell_spans(self, text: str, a: int, b: int) -> list:
-        return [(m.start(), m.end()) for m in _CELL_REF_RE.finditer(text, a, b)]
+        return [(m.start(), m.end()) for m in _rx("cell").finditer(text, a, b)]
 
     def inside(self, text: str, pos: int) -> bool:
         return text.rfind(OPEN, 0, pos) > text.rfind(CLOSE, 0, pos)
 
     def hit_is_a_reference(self, text: str, start: int, secret: str) -> bool:
-        if text[max(0, start - 1):start] in ("<", OPEN) and _KEY_AFTER_OPEN_RE.match(secret):
+        if text[max(0, start - 1):start] in ("<", OPEN) and _rx("key after open").match(secret):
             return True
-        return OPEN in secret or _LEGACY_IN_VALUE_RE.search(secret) is not None
+        return OPEN in secret or _rx("legacy in value").search(secret) is not None
 
     def has_marks(self, value: str) -> bool:
         return OPEN in value or CLOSE in value
