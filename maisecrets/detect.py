@@ -2800,18 +2800,46 @@ def _references() -> References:
     return REFERENCES
 
 
+class Host:
+    """What a scan reads of the computer it runs on: the person's own user name (their home path is no personal
+    data: the client names the working directory anyway) and the year (a birth date lies before it). A value left
+    None is read from this computer at each use; a caller that wants a scan independent of the host gives both."""
+
+    __slots__ = ("user", "year")
+
+    def __init__(self, user: str | None = None, year: int | None = None):
+        self.user, self.year = user, year
+
+    def user_name(self) -> str:
+        if self.user is not None:
+            return self.user.lower()
+        import getpass
+        try:
+            return getpass.getuser().lower()
+        except Exception:  # noqa: BLE001 - no user name (a container without a passwd entry)
+            return ""
+
+    def this_year(self) -> int:
+        return self.year if self.year is not None else time.gmtime().tm_year
+
+
+THIS_COMPUTER = Host()
+
+
 class Detector:
     """A detector with its own configuration: the regions and label languages (a regions.Active, or a function that
     returns one, asked when the rules load: the first scan and each reset()), the sources (a Sources object) and
     the reference form (a References object).
     None takes the default of each: the config of this computer, the plugin's readers of the home folder, the
-    plugin's placeholder form, each when it is there. A detector loads its rule list, its allow list and the caches
+    plugin's placeholder form, each when it is there. `host` (a Host) says what a scan reads of its computer;
+    None reads this computer's user name and year. A detector loads its rule list, its allow list and the caches
     that follow from them once, and keeps them for itself: two detectors in one process, also in two threads or one
     inside a scan of the other, never see each other's configuration. The functions of this module (scan, findings,
     rules, ...) use the detector of the scan that runs, else the default detector (use_regions, use_sources and
     use_references configure it)."""
 
-    def __init__(self, regions=None, sources=None, references=None):
+    def __init__(self, regions=None, sources=None, references=None, host=None):
+        self.host = THIS_COMPUTER if host is None else host
         self._given_regions = regions
         self._given_sources = sources
         self._given_references = references

@@ -18,9 +18,7 @@ Every check is bounded: each regex has bounded repeats, and a CSV header is read
 """
 from __future__ import annotations
 
-import getpass
 import re
-import time
 
 # ---------------------------------------------------------------------------------------------------- types --
 NAME, ADDRESS, BIRTH_DATE, ID_NUMBER, USERNAME, PHONE = "NAME", "ADDRESS", "BIRTH_DATE", "ID_NUMBER", "USERNAME", \
@@ -1346,14 +1344,17 @@ def _placeholder_digits(v: str, dates: bool = False) -> bool:
 def _past_year(date: str) -> bool:
     """A birth date lies before this year: a date of this year or later is an event, a release, a deadline."""
     years = re.findall(r"(?<!\d)(\d{4})(?!\d)", date)
-    return not years or int(years[-1]) < time.gmtime().tm_year
+    return not years or int(years[-1]) < _host().this_year()
 
 
 def _own_user() -> str:
-    try:
-        return getpass.getuser().lower()
-    except Exception:  # noqa: BLE001 - no user name (a container without a passwd entry)
-        return ""
+    return _host().user_name()
+
+
+def _host():
+    """What the scan that runs reads of its computer (detect.Host): the host of its detector."""
+    from . import detect
+    return detect._det().host
 
 
 def hits(text: str, channel: str, regions: tuple, company: list | None = None) -> list:
