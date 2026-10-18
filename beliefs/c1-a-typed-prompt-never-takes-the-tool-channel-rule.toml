@@ -27,7 +27,7 @@ replace = "    return detect.findings(prompt, channel=\"tool\")\n"
 path = "the cache of a tool scan answers a later prompt scan of the same text"
 file = "maisecrets/detect.py"
 find = "    return cache[key]"
-replace = "    return cache.get((\"literal\", \"tool\", _det())) or cache[key]"
+replace = "    return cache.get((\"literal\", \"tool\") + key[2:]) or cache[key]"
 
 [[proof]]
 path = "the tool hook scans with the prompt rule"
