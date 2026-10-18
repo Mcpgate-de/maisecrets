@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.6.38] - 2026-10-18
+
+### Fixes
+
+- an English word after a label in a tool result is masked only where it was found (c9128e1)
+
 ## [0.6.37] - 2026-10-17
 
 ### Fixes
