@@ -64,6 +64,9 @@ class MeasureTests(unittest.TestCase):
         (d / "src" / ".gitignore").write_text("*.log\n")
         if os.name != "nt":   # Windows writes a link as a file (core.symlinks=false), which the bank refuses
             os.symlink("missing.md", d / "src" / "link.md")   # a link without a target, as in detect-secrets
+            (d / "src" / "data").mkdir()
+            (d / "src" / "data" / "blob.bin").write_bytes(b"x")
+            os.symlink("data", d / "src" / "data-link")   # a link to a directory
         (d / "src" / "skip.bin").write_text(PROBE)
         (d / "outside.md").write_text(f"{PROBE} {IP}\n")
         git(d, "init", "-q")

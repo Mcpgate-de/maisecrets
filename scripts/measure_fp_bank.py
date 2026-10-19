@@ -56,7 +56,7 @@ def blobs_on_disk(d: Path, sub: str) -> dict:
     out = {}
     for dp, dn, fn in os.walk(d / sub if sub else d):
         dn[:] = [x for x in dn if not (Path(dp) == d and x == ".git")]
-        for f in fn:
+        for f in fn + [x for x in dn if Path(dp, x).is_symlink()]:   # walk lists a link to a directory in dn
             p = Path(dp, f)
             if p.is_symlink():
                 kinds = {"link:" + blob_id(os.readlink(p).encode())}
