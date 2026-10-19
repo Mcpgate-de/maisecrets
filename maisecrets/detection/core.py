@@ -4191,8 +4191,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     continue
                 if rule.id in PRESIDIO_NO_DATE and _yyyymmdd(secret):
                     continue
-                if rule.id in PRESIDIO_WHOLE_DIGIT_RUN and (re.match(r"-[A-Za-z0-9]", text[end:end + 2])
-                                                            or re.search(r"[A-Za-z0-9]-$", text[max(0, start - 2):start])):
+                if rule.id in PRESIDIO_WHOLE_DIGIT_RUN and (
+                        re.match(r"-[A-Za-z0-9]", text[end:end + 2])
+                        or re.search(r"[A-Za-z0-9]-$", text[max(0, start - 2):start])):
                     continue
                 label_window = PRESIDIO_LABEL_BEFORE.get(rule.id)
                 if label_window:
