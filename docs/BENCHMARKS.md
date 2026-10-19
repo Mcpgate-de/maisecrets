@@ -94,10 +94,13 @@ credits), so the last reading is the author's own probes.
 
   A takes real card and account numbers that only `us-bank` finds today (no card word near them), so B is the change.
   The next step is a card rule that finds those numbers; then the window of A costs no card.
-- **All sources, both changes of this section against 0.6.39:** bank dev 81 → 87 full, 0 false positives; Nemotron
-  166,039 → 168,846 full, 910 → 913 false positives; Gretel 28,820 → 28,900 full, 7,016 → 5,605 false positives;
-  Mendeley, PIILO, catalogs, bank val unchanged; holdout unchanged (84 of 96, 0 false positives); false-alarm bank +0;
-  recorded test inputs unchanged.
+- **The birth date that B lost** (Gretel dev split, `Date of Birth: YYYYMMDD`) was masked only by chance, by
+  `us-bank`. `birth-date-after-label` now reads the compact form after its label when it is a real past day: Gretel
+  birth dates 1,196 (0.6.39) → 1,195 (B) → 1,199, false positives 5,605 → 5,606; nothing else changes.
+- **All sources, all changes of this section against 0.6.39:** bank dev 81 → 87 full, 0 false positives; Nemotron
+  166,039 → 168,846 full, 910 → 913 false positives; Gretel 28,820 → 28,904 full, 7,016 → 5,606 false positives;
+  Mendeley, PIILO, catalogs, bank val unchanged; holdout unchanged before the birth date change (84 of 96, 0 false
+  positives; not run after it, see "Splits"); false-alarm bank +0; recorded test inputs unchanged.
 
 ## CredData, results per release
 
