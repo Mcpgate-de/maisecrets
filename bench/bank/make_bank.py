@@ -49,17 +49,23 @@ def iban_de(r):
 
 
 def de_tax_id(r):
+    """A German tax id (IdNr, § 139b AO), written from the rules here and not taken from the detector: eleven digits,
+    the first never 0; in the first ten one digit twice or three times and every other digit once at most; a digit
+    three times never at three places in a row; the eleventh the check digit, ISO 7064 MOD 11,10 (10 becomes 0)."""
     while True:
         digits = [r.randint(1, 9)] + [r.randint(0, 9) for _ in range(9)]
-        counts = sorted((digits.count(d) for d in set(digits)), reverse=True)
-        if counts[0] in (2, 3) and counts.count(counts[0]) == 1:
-            break
+        counts = [digits.count(d) for d in set(digits)]
+        if sorted(counts, reverse=True)[0] not in (2, 3) or sum(1 for n in counts if n > 1) != 1:
+            continue
+        if any(digits[i] == digits[i + 1] == digits[i + 2] for i in range(8)):
+            continue
+        break
     product = 10
     for d in digits:
         s = (d + product) % 10 or 10
         product = (s * 2) % 11
-    check = (11 - product) % 10
-    return "".join(map(str, digits)) + str(check)
+    check = 11 - product
+    return "".join(map(str, digits)) + str(0 if check == 10 else check)
 
 
 FIRST = ("Jonas", "Lea", "Mehmet", "Sofia", "Lukas", "Anna", "Elias", "Mia", "Noah", "Emilia")

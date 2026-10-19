@@ -5,6 +5,9 @@ write rules (docs/BENCHMARK-V1.md, "Splits"). A row names the scanner, its versi
 holds no case and no value. Many rows between two releases are a warning sign: each run tells a little about the
 holdout.
 
+On 2026-10-19 the generator of German tax ids was fixed (its values failed the IdNr rules): the four tax ids of the
+holdout changed, and so did `bench/holdout.manifest`. Rows from before that commit measured the old values.
+
 | Date | Scanner | Source | Cases | Recall, strict | Precision | FP |
 |---|---|---|---|---|---|---|
 | 2026-10-19 | maisecrets 0.6.39 a6846dc35417147451e75bb8920ba3b2d9927b48 | holdout | 80 | 0.8333 | 1.0 | 0 |

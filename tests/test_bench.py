@@ -72,6 +72,23 @@ class MarkTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(built[name], on_disk[name])
 
+    def test_every_value_with_a_checksum_in_the_bank_passes_it(self):
+        # 2026-10-19: the first generator wrote German tax ids that failed the IdNr rules, so a correct detector was
+        # scored as missing them
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import measure_datasets as md
+        from maisecrets.detection.core import _de_tax_id_ok
+        check = {"pii.tax_id": _de_tax_id_ok, "pii.iban": lambda v: md.iban_ok(v.replace(" ", "")),
+                 "pii.card": md.luhn_ok}
+        n = 0
+        for c in cases.load_bank(ROOT / "bench" / "bank"):
+            for sp in c["spans"]:
+                if sp["class"] in check:
+                    n += 1
+                    with self.subTest(case=c["id"], cls=sp["class"]):
+                        self.assertTrue(check[sp["class"]](c["text"][sp["start"]:sp["end"]]))
+        self.assertGreaterEqual(n, 12)
+
     def test_two_cases_with_one_id_are_an_error(self):
         with tempfile.TemporaryDirectory() as d:
             line = json.dumps(case("«a@b»", [{"class": "pii.email"}]))
