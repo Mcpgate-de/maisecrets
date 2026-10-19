@@ -1982,6 +1982,11 @@ PRESIDIO_EXTRA_CONTEXT = {
                     "pan", "cardnumber", "ccnum", "ccnumber", "karty", "kortnummer", "kaartnummer", "korttinumero",
                     "kreditkort", "kortnr"),
 }
+# A bare run of 8 to 17 digits with "account" or "bank" nearby (us-bank) also takes the dates of a finance document,
+# written YYYYMMDD: Benchmark V1, Gretel, 1,435 of its false alarms. A window of 30 characters before the number took
+# 3,447, but lost 681 card and 251 account numbers that only this rule found (Mendeley, Nemotron), so only the date
+# goes (docs/BENCHMARKS.md, "Rule changes measured with Benchmark V1")
+PRESIDIO_NO_DATE = frozenset({"us-bank"})
 # Presidio tags every US/UK/IN/AU/… recognizer as language "en", so language is the wrong
 # switch: an Indian PAN rule produced 290 false positives in one German transcript. The
 # switch is the REGION, derived from the recognizer id; "generic" is always on.
@@ -3636,6 +3641,11 @@ _DERIVED_LABEL_RE = _LazyRx(
     r"|(?:secret|password|token)Name)\\?[\"']?\s*(?::=|=>|[:=])\s*\\?[\"'`]?$")
 
 
+def _yyyymmdd(v: str) -> bool:
+    """An 8-digit date of the years 1900 to 2099: 20231015."""
+    return len(v) == 8 and v.isdigit() and v[:2] in ("19", "20") and "01" <= v[4:6] <= "12" and "01" <= v[6:] <= "31"
+
+
 def _label_before(text: str, start: int) -> str:
     """The label of the value at `start`: `TTL_REFRESH_TOKEN` in `TTL_REFRESH_TOKEN = 15552000`."""
     m = _LABEL_TAIL_RE.search(_before_value(text, start))
@@ -4149,6 +4159,8 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 if rule.require_context and not has_context:
                     continue
                 if rule.score < 0.5 and not has_context:
+                    continue
+                if rule.id in PRESIDIO_NO_DATE and _yyyymmdd(secret):
                     continue
             if _allowed(rule, text, m, secret):
                 continue
