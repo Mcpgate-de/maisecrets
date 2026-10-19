@@ -159,19 +159,19 @@ class CodexTrustStatusTests(unittest.TestCase):
 
     def test_trusted_for_these_contents(self):
         self.config({self.KEY: {"trusted_hash": FIXTURE_DECLARATION,
-                                "trusted_content_hash": codex_trust.content_hash(self.root)}})
+                                "trusted_content_hash": codex_trust.content_hash(self.root, windows=False)}})
         self.assertEqual(self.lines(), "codex hooks: trusted (1 of 1)")
 
     def test_a_file_written_into_the_folder_is_a_change_codex_skips_the_hooks_for(self):
         self.config({self.KEY: {"trusted_hash": FIXTURE_DECLARATION,
-                                "trusted_content_hash": codex_trust.content_hash(self.root)}})
+                                "trusted_content_hash": codex_trust.content_hash(self.root, windows=False)}})
         (self.root / "hooks" / "last-start.txt").write_text("x")
         self.assertIn("trusted for other contents", self.lines())
         self.assertIn("open /hooks", self.lines())
 
     def test_bytecode_is_no_change(self):
         self.config({self.KEY: {"trusted_hash": FIXTURE_DECLARATION,
-                                "trusted_content_hash": codex_trust.content_hash(self.root)}})
+                                "trusted_content_hash": codex_trust.content_hash(self.root, windows=False)}})
         (self.root / "hooks" / "__pycache__").mkdir()
         (self.root / "hooks" / "__pycache__" / "x.cpython-312.pyc").write_text("x")
         self.assertEqual(self.lines(), "codex hooks: trusted (1 of 1)")
@@ -202,7 +202,7 @@ class CodexTrustStatusTests(unittest.TestCase):
         for part in (os.fsencode(os.path.realpath(self.home / "config.toml")), b"fx@fxm"):
             h.update(struct.pack("<Q", len(part)) + part)
         (self.home / ".hook-trust").mkdir()
-        (self.home / ".hook-trust" / h.hexdigest()).write_text(codex_trust.content_hash(self.root))
+        (self.home / ".hook-trust" / h.hexdigest()).write_text(codex_trust.content_hash(self.root, windows=False))
         self.assertEqual(self.lines(), "codex hooks: trusted (1 of 1)")
         (self.root / "B.txt").write_text("changed")
         self.assertIn("trusted for other contents", self.lines())
