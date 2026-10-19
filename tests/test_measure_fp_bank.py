@@ -59,6 +59,9 @@ class MeasureTests(unittest.TestCase):
         d = self.source = base / "source"
         (d / "src").mkdir(parents=True)
         (d / "src" / "notes.md").write_text(f"{PROBE}\nthe host is {IP} today\n")
+        (d / "src" / "run.bat").write_text("@echo off\n")   # a checkout writes it with CRLF
+        (d / ".gitattributes").write_text("*.bat text eol=crlf\n")
+        (d / "src" / ".gitignore").write_text("*.log\n")
         (d / "src" / "skip.bin").write_text(PROBE)
         (d / "outside.md").write_text(f"{PROBE} {IP}\n")
         git(d, "init", "-q")
@@ -98,7 +101,7 @@ class MeasureTests(unittest.TestCase):
         with mock.patch.object(fb, "git", spy):
             self.fetch()
         mine = {a for cwd, a in calls if cwd == self.cache / "tiny"}
-        self.assertEqual(mine, {"rev-parse", "status"})
+        self.assertEqual(mine, {"rev-parse", "ls-tree"})
         shutil.rmtree(self.cache / "tiny")
         with mock.patch.object(fb, "git", spy):
             self.fetch()
@@ -124,16 +127,25 @@ class MeasureTests(unittest.TestCase):
 
     def test_a_changed_clone_is_refused(self):
         notes = self.cache / "tiny" / "src" / "notes.md"
-        for change in ("added", "deleted"):
+        for change in ("added", "changed", "deleted", "ignored", "skipped"):
             with self.subTest(change):
                 if change == "added":
                     (notes.parent / "extra.md").write_text("x\n")
+                elif change == "changed":
+                    notes.write_text("other text\n")
+                elif change == "ignored":   # git status does not list it, the walk reads it
+                    (notes.parent / "extra.log").write_text("x\n")
+                elif change == "skipped":   # git status does not miss it
+                    git(self.cache / "tiny", "update-index", "--skip-worktree", "src/notes.md")
+                    notes.unlink()
                 else:
                     notes.unlink()
                 with self.assertRaises(SystemExit):
                     self.run_bank()
+                git(self.cache / "tiny", "update-index", "--no-skip-worktree", "src/notes.md")
                 git(self.cache / "tiny", "checkout", "-q", "--", ".")
-                (notes.parent / "extra.md").unlink(missing_ok=True)
+                for name in ("extra.md", "extra.log"):
+                    (notes.parent / name).unlink(missing_ok=True)
         self.assertEqual(self.run_bank()["trees"]["tiny"]["files"], 1, "the restored clone is measured again")
 
     def test_a_tree_at_its_commit_is_counted_in_its_subdirectory_only(self):

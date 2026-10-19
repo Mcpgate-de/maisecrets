@@ -14,7 +14,9 @@ read: fetch makes each one new, and measure counts only a clean clone at its com
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -42,19 +44,52 @@ def git(cwd: Path, *args: str) -> str:
                           capture_output=True, text=True).stdout.strip()
 
 
+def blob_id(data: bytes) -> str:
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def blobs_on_disk(d: Path, sub: str) -> dict:
+    """path -> the git blob ids that each file under the subdirectory can stand for: as it is on disk (a symlink as its
+    target), and with CRLF read as LF, because a checkout writes a file with the attribute eol=crlf that way."""
+    out = {}
+    for dp, dn, fn in os.walk(d / sub if sub else d):
+        dn[:] = [x for x in dn if not (Path(dp) == d and x == ".git")]
+        for f in fn:
+            p = Path(dp, f)
+            data = os.readlink(p).encode() if p.is_symlink() else p.read_bytes()
+            out[p.relative_to(d).as_posix()] = {blob_id(data), blob_id(data.replace(b"\r\n", b"\n"))}
+    return out
+
+
+def blobs_of_commit(d: Path, commit: str, sub: str) -> dict:
+    """path -> blob id of each file under the subdirectory in the commit."""
+    out = {}
+    for entry in git(d, "ls-tree", "-r", "-z", commit, "--", sub or ".").split("\0"):
+        if entry:
+            meta, path = entry.split("\t", 1)
+            if meta.split()[1] == "blob":
+                out[path] = meta.split()[2]
+    return out
+
+
 def at_commit(d: Path, commit: str, sub: str) -> bool:
-    """A clean clone at the commit: HEAD is the commit, the subdirectory exists, and no file is changed, deleted or
-    added. A tree that is only partly there would give lower counts that look like an improvement."""
+    """A clean clone at the commit: HEAD is the commit, and the files under the subdirectory are exactly the files of
+    the commit, byte for byte. A tree that is only partly there would give lower counts that look like an
+    improvement. The check does not ask the index or `git status`: those can be told to skip a file, and a status may
+    write the index, which runs a hook of the repository. rev-parse and ls-tree only read refs and objects."""
     if not (d / ".git").is_dir() or not (d / sub if sub else d).is_dir():
         return False
-    return git(d, "rev-parse", "HEAD") == commit and git(d, "status", "--porcelain", "--untracked-files=all") == ""
+    if git(d, "rev-parse", "HEAD") != commit:
+        return False
+    disk, tree = blobs_on_disk(d, sub), blobs_of_commit(d, commit, sub)
+    return disk.keys() == tree.keys() and all(tree[p] in disk[p] for p in tree)
 
 
 def fetch(cache: Path) -> None:
     """A shallow clone of each tree at its commit, with only its subdirectory checked out. Each clone is made in a new
-    directory and moved into place when it is complete, so no git command runs in a repository that this script did
-    not make. A clean clone at the commit is kept; any other directory with the name stops the fetch and stays as it
-    is."""
+    directory and moved into place when it is complete. In a directory that this script did not make, it only reads
+    (rev-parse, ls-tree, see at_commit), so no hook or filter of that repository runs. A clean clone at the commit is
+    kept; any other directory with the name stops the fetch and stays as it is."""
     cache.mkdir(parents=True, exist_ok=True)
     for commit, name, url, sub in TREES:
         d = cache / name
