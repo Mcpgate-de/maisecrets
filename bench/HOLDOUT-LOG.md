@@ -12,3 +12,4 @@ holdout changed, and so did `bench/holdout.manifest`. Rows from before that comm
 |---|---|---|---|---|---|---|
 | 2026-10-19 | maisecrets 0.6.39 a6846dc35417147451e75bb8920ba3b2d9927b48 | holdout | 80 | 0.8333 | 1.0 | 0 |
 | 2026-10-19 | maisecrets 0.6.30 3b29d0593d69906a305d00d92dde50a81a9c2ceb | holdout | 80 | 0.8333 | 1.0 | 0 |
+| 2026-10-19 | maisecrets 0.6.39 a6846dc35417147451e75bb8920ba3b2d9927b48 | holdout | 80 | 0.875 | 1.0 | 0 |
