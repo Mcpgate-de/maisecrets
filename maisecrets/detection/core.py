@@ -1996,6 +1996,10 @@ PRESIDIO_NO_DATE = frozenset({"us-bank"})
 # lines took 948 false alarms back for 25. It needs the card fix: before it, 681 Mendeley card numbers were found only
 # by this rule (docs/BENCHMARKS.md, "Rule changes measured with Benchmark V1")
 PRESIDIO_LABEL_BEFORE = {"us-bank": 60}
+# A us-bank match is the whole number or nothing: `\b[0-9]{8,17}\b` took the ten digits after the hyphen of an account
+# number written 482-3917265104, and that shorter hit won the overlap against the label rule that had the whole number,
+# so three digits reached the model. Benchmark V1, Nemotron: 2,197 account numbers found only in part
+PRESIDIO_WHOLE_DIGIT_RUN = frozenset({"us-bank"})
 # Presidio tags every US/UK/IN/AU/… recognizer as language "en", so language is the wrong
 # switch: an Indian PAN rule produced 290 false positives in one German transcript. The
 # switch is the REGION, derived from the recognizer id; "generic" is always on.
@@ -4182,6 +4186,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 if rule.score < 0.5 and not has_context:
                     continue
                 if rule.id in PRESIDIO_NO_DATE and _yyyymmdd(secret):
+                    continue
+                if rule.id in PRESIDIO_WHOLE_DIGIT_RUN and (re.match(r"-\d", text[end:end + 2])
+                                                            or re.search(r"\d-$", text[max(0, start - 2):start])):
                     continue
                 label_window = PRESIDIO_LABEL_BEFORE.get(rule.id)
                 if label_window:
