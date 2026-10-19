@@ -10,7 +10,6 @@ import importlib.util
 import io
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -51,10 +50,13 @@ class PinTests(unittest.TestCase):
 
 
 class MeasureTests(unittest.TestCase):
+    """A local repository stands in for the public tree, so fetch and measure run without the network."""
+
     def setUp(self):
-        self.cache = Path(tempfile.mkdtemp(prefix="fpbank-test-"))
-        self.addCleanup(shutil.rmtree, self.cache, True)
-        d = self.cache / "tiny"
+        base = Path(tempfile.mkdtemp(prefix="fpbank-test-"))
+        self.addCleanup(shutil.rmtree, base, True)
+        self.cache = base / "cache"
+        d = self.source = base / "source"
         (d / "src").mkdir(parents=True)
         (d / "src" / "notes.md").write_text(f"{PROBE}\nthe host is {IP} today\n")
         (d / "src" / "skip.bin").write_text(PROBE)
@@ -63,13 +65,79 @@ class MeasureTests(unittest.TestCase):
         git(d, "add", "-A")
         git(d, "commit", "-q", "-m", "tiny")
         self.commit = git(d, "rev-parse", "HEAD")
+        self.fetch()
 
-    def run_bank(self, commit):
-        with mock.patch.object(fb, "TREES", ((commit, "tiny", "https://github.com/x/tiny.git", "src"),)):
+    def trees(self, commit=None):
+        return mock.patch.object(fb, "TREES", ((commit or self.commit, "tiny", str(self.source), "src"),))
+
+    def fetch(self, commit=None):
+        with self.trees(commit), contextlib.redirect_stdout(io.StringIO()) as out:
+            fb.fetch(self.cache)
+        return out.getvalue()
+
+    def run_bank(self, commit=None):
+        with self.trees(commit):
             return fb.measure(self.cache, detect)
 
+    def test_fetch_makes_a_clone_at_the_commit_and_keeps_it_the_second_time(self):
+        clone = self.cache / "tiny"
+        self.assertEqual(git(clone, "rev-parse", "HEAD"), self.commit)
+        self.assertTrue((clone / "src" / "notes.md").is_file())
+        self.assertEqual([p.name for p in self.cache.iterdir()], ["tiny"], "no temp directory is left")
+        self.assertIn("tiny: at", self.fetch())
+
+    def test_fetch_only_reads_a_directory_it_did_not_make(self):
+        # a checkout or a fetch could run a hook or a filter of that repository; rev-parse and status run neither
+        calls = []
+        real = fb.git
+
+        def spy(cwd, *args):
+            calls.append((Path(cwd), args[0]))
+            return real(cwd, *args)
+
+        with mock.patch.object(fb, "git", spy):
+            self.fetch()
+        mine = {a for cwd, a in calls if cwd == self.cache / "tiny"}
+        self.assertEqual(mine, {"rev-parse", "status"})
+        shutil.rmtree(self.cache / "tiny")
+        with mock.patch.object(fb, "git", spy):
+            self.fetch()
+        made = {a for cwd, a in calls if cwd.parent == self.cache and cwd.name.startswith(".tiny-")}
+        self.assertTrue({"init", "fetch", "checkout"} <= made, "the premise: a new clone is made in a new directory")
+        shutil.rmtree(self.cache / "tiny")
+        (self.cache / "tiny").mkdir()
+        (self.cache / "tiny" / "keep.txt").write_text("mine")
+        with self.assertRaises(SystemExit) as cm:
+            self.fetch()
+        self.assertIn("remove it and fetch again", str(cm.exception))
+        self.assertEqual((self.cache / "tiny" / "keep.txt").read_text(), "mine", "the directory stays as it is")
+
+    def test_a_failed_or_empty_fetch_leaves_nothing_behind(self):
+        shutil.rmtree(self.cache / "tiny")
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.fetch("0" * 40)   # a commit the source does not have
+        with mock.patch.object(fb, "TREES", ((self.commit, "tiny", str(self.source), "no-such-dir"),)):
+            with self.assertRaises(SystemExit) as cm:   # a clean clone without the subdirectory would count nothing
+                fb.fetch(self.cache)
+        self.assertIn("not a clean tree", str(cm.exception))
+        self.assertEqual(list(self.cache.iterdir()), [], "no clone and no temp directory")
+
+    def test_a_changed_clone_is_refused(self):
+        notes = self.cache / "tiny" / "src" / "notes.md"
+        for change in ("added", "deleted"):
+            with self.subTest(change):
+                if change == "added":
+                    (notes.parent / "extra.md").write_text("x\n")
+                else:
+                    notes.unlink()
+                with self.assertRaises(SystemExit):
+                    self.run_bank()
+                git(self.cache / "tiny", "checkout", "-q", "--", ".")
+                (notes.parent / "extra.md").unlink(missing_ok=True)
+        self.assertEqual(self.run_bank()["trees"]["tiny"]["files"], 1, "the restored clone is measured again")
+
     def test_a_tree_at_its_commit_is_counted_in_its_subdirectory_only(self):
-        result = self.run_bank(self.commit)
+        result = self.run_bank()
         tree = result["trees"]["tiny"]
         self.assertEqual(tree["commit"], self.commit)
         self.assertEqual(tree["files"], 1, "src/notes.md only: no .bin, and outside.md is not in src")
@@ -80,7 +148,7 @@ class MeasureTests(unittest.TestCase):
         self.assertEqual(tree["rules"], {"other|IP|ip": [1, 1]}, "one address, in src only")
 
     def test_the_result_holds_no_text_of_the_tree(self):
-        text = json.dumps(self.run_bank(self.commit))
+        text = json.dumps(self.run_bank())
         for part in (PROBE, IP, "notes.md"):
             self.assertNotIn(part, text)
 
@@ -116,8 +184,9 @@ class CompareTests(unittest.TestCase):
     def test_a_new_rule_counts_and_a_moved_commit_is_not_compared(self):
         self.assertEqual(self.compare(bank(), bank(tests__SECRET__jwt=[1, 1]))[0], 1)
         code, out = self.compare(bank(other__IP__ip=[1, 1]), bank("d" * 40, other__IP__ip=[9, 9]))
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2, "two runs on different input are no result, not a pass")
         self.assertIn("not comparable", out)
+        self.assertEqual(self.compare(bank(), {"maisecrets": "m" * 40, "trees": {}})[0], 2, "a tree is missing")
 
     def test_the_totals_split_test_code_from_the_rest(self):
         tree = bank(other__IP__ip=[5, 4], tests__IP__ip=[3, 1])["trees"]["t"]
@@ -131,8 +200,9 @@ class FalseAlarmScriptTests(unittest.TestCase):
         (d / "a.md").write_text(f"the host is {IP} today\n")
         out = subprocess.run([sys.executable, str(ROOT / "scripts" / "measure_false_alarms.py"), str(d)],
                              capture_output=True, text=True, check=True).stdout
-        self.assertTrue(out.startswith("1 files, 0.0 MB\nwhere  type"), out)
-        self.assertTrue(re.search(r"^other\s+IP\s+ip\s+1\s+1$", out, re.M), out)
+        self.assertEqual(out, "1 files, 0.0 MB\n"
+                              "where  type               rule                                       hits  acted\n"
+                              "other  IP                 ip                                            1      1\n")
 
 
 if __name__ == "__main__":

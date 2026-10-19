@@ -7,15 +7,18 @@ instrument for a detector change: run it before and after, and compare.
 
 The trees hold no real secrets that we know of; what the detector finds there is a false alarm or a test value of
 the project. The output holds no value and no line: per tree and rule, the hits and the hits a Read would act on
-(`acted`, after the test-code rule). `compare` prints each rule whose acted count changed and exits 1 when the total
-of acted hits rose, so a change that adds false alarms shows up as a failure. It is a measurement, not a CI gate:
-the fetch needs the network. The clones are only read, never run.
+(`acted`, after the test-code rule). `compare` prints each rule whose acted count changed. It exits 2 when a tree is
+missing on one side or at another commit, 1 when the total of acted hits rose, else 0, so a change that adds false
+alarms shows up as a failure. It is a measurement, not a CI gate: the fetch needs the network. The clones are only
+read: fetch makes each one new, and measure counts only a clean clone at its commit.
 """
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -34,28 +37,45 @@ TREES = (
 
 
 def git(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True).stdout.strip()
+    # core.fsmonitor names a command in the repository config; a clone of ours never sets it, and we never run one
+    return subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(cwd), *args], check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def at_commit(d: Path, commit: str, sub: str) -> bool:
+    """A clean clone at the commit: HEAD is the commit, the subdirectory exists, and no file is changed, deleted or
+    added. A tree that is only partly there would give lower counts that look like an improvement."""
+    if not (d / ".git").is_dir() or not (d / sub if sub else d).is_dir():
+        return False
+    return git(d, "rev-parse", "HEAD") == commit and git(d, "status", "--porcelain", "--untracked-files=all") == ""
 
 
 def fetch(cache: Path) -> None:
-    """A shallow clone of each tree at its commit, with only its subdirectory checked out. A clone that is already at
-    the commit is kept."""
+    """A shallow clone of each tree at its commit, with only its subdirectory checked out. Each clone is made in a new
+    directory and moved into place when it is complete, so no git command runs in a repository that this script did
+    not make. A clean clone at the commit is kept; any other directory with the name stops the fetch and stays as it
+    is."""
     cache.mkdir(parents=True, exist_ok=True)
     for commit, name, url, sub in TREES:
         d = cache / name
-        if (d / ".git").is_dir() and git(d, "rev-parse", "HEAD") == commit:
-            print(f"{name}: at {commit[:8]}")
-            continue
-        d.mkdir(exist_ok=True)
-        git(d, "init", "-q")
-        if not git(d, "remote"):
-            git(d, "remote", "add", "origin", url)
-        if sub:
-            git(d, "sparse-checkout", "set", sub)
-        git(d, "fetch", "-q", "--depth", "1", "origin", commit)
-        git(d, "checkout", "-q", "--detach", "FETCH_HEAD")
-        if git(d, "rev-parse", "HEAD") != commit:
-            raise SystemExit(f"{name}: HEAD is not {commit}")
+        if d.exists():
+            if at_commit(d, commit, sub):
+                print(f"{name}: at {commit[:8]}")
+                continue
+            raise SystemExit(f"{name}: {d} is not a clean clone at {commit[:8]}; remove it and fetch again")
+        new = Path(tempfile.mkdtemp(prefix=f".{name}-", dir=cache))
+        try:
+            git(new, "init", "-q")
+            git(new, "remote", "add", "origin", url)
+            if sub:
+                git(new, "sparse-checkout", "set", sub)
+            git(new, "fetch", "-q", "--depth", "1", "origin", commit)
+            git(new, "checkout", "-q", "--detach", "FETCH_HEAD")
+            if not at_commit(new, commit, sub):
+                raise SystemExit(f"{name}: the new clone is not a clean tree at {commit[:8]}")
+            new.rename(d)
+        finally:
+            shutil.rmtree(new, ignore_errors=True)
         print(f"{name}: fetched {commit[:8]}")
 
 
@@ -64,8 +84,8 @@ def measure(cache: Path, detect) -> dict:
     out = {"maisecrets": git(ROOT, "rev-parse", "HEAD"), "trees": {}}
     for commit, name, _url, sub in TREES:
         d = cache / name
-        if not (d / ".git").is_dir() or git(d, "rev-parse", "HEAD") != commit:
-            raise SystemExit(f"{name}: not at {commit[:8]} in {cache}; run fetch first")
+        if not at_commit(d, commit, sub):
+            raise SystemExit(f"{name}: no clean clone at {commit[:8]} in {cache}; run fetch first")
         r = mfa.measure(d / sub if sub else d, detect)
         out["trees"][name] = {
             "commit": commit, "files": r["files"], "chars": r["size"],
@@ -90,19 +110,24 @@ def report(result: dict) -> None:
 
 
 def compare(before: dict, after: dict) -> int:
-    """Each rule whose acted count changed, per tree; 1 when the total of acted hits rose."""
+    """Each rule whose acted count changed, per tree. 2 when a tree is missing on one side or at another commit (the
+    two runs do not measure the same input), else 1 when the total of acted hits rose, else 0."""
     rose = 0
+    apart = []
     for name in sorted(set(before["trees"]) | set(after["trees"])):
         b, a = before["trees"].get(name), after["trees"].get(name)
         if b is None or a is None or b["commit"] != a["commit"]:
-            print(f"{name}: not comparable (tree or commit differs)")
+            apart.append(name)
+            print(f"{name}: not comparable (missing on one side, or at another commit)")
             continue
         for key in sorted(set(b["rules"]) | set(a["rules"])):
             x, y = b["rules"].get(key, [0, 0])[1], a["rules"].get(key, [0, 0])[1]
             if x != y:
                 print(f"{name:16} {key:60} {x:6} -> {y:6}")
         rose += totals(a)[1] - totals(b)[1]
-    print(f"acted hits, all trees: {'+' if rose >= 0 else ''}{rose}")
+    print(f"acted hits, compared trees: {'+' if rose >= 0 else ''}{rose}")
+    if apart:
+        return 2
     return 1 if rose > 0 else 0
 
 
