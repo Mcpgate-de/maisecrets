@@ -1231,6 +1231,8 @@ _PW_REFERENCE_RE = _lazy(r"(?i)(?<![\w-])(?:password|passwd|passphrase|pwd)s?"
                          r"[ \t]+[\"'`]?([^\s\"'`]{6,64})")
 _PW_WITH_SIGN_RE = _lazy(r"(?=.*[A-Za-z])(?=.*\d)(?=.*[@#$!%&*?])[A-Za-z0-9@#$!%&*?._+=~^-]{6,64}")
 _EMAIL_SHAPE_RE = _lazy(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
+# a reference after the word: a pull request or issue (#PR-1234, #4711), a ticket (OPS-1234)
+_PW_REFERENCE_VALUE_RE = _lazy(r"#?[A-Z][A-Z0-9]{0,9}-\d{1,7}|#\d{1,7}")
 
 
 def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> list:
@@ -1239,6 +1241,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
         for m in _PW_REFERENCE_RE.finditer(text):
             v = m.group(1).rstrip(".,;:)")   # a stop of the sentence; `!` and `?` end many passwords and stay
             if len(v) >= 6 and _PW_WITH_SIGN_RE.fullmatch(v) and not _EMAIL_SHAPE_RE.fullmatch(v) \
+                    and not _PW_REFERENCE_VALUE_RE.fullmatch(v) \
                     and not v.startswith(("$", "%", "{", "<", "*")):
                 out.append((m.start(1), m.start(1) + len(v), "secret-password-with-sign", "SECRET"))
     if "secret-add-mask" in want and "::add-mask::" in text:

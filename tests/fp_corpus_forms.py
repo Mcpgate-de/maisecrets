@@ -324,6 +324,7 @@ FORMS_NO_HIT = [
     ("password word and an address", "send the password to it-help1@mail.invalid"),
     ("password word and a rule", "the password must be 12+ chars"),
     ("password word and a mask", "password ****1234! shown in the log"),
+    ("password word and a pull request", "the password #PR-1234 merged, see #4711"),
 ]
 
 FORMS_HIT = [
@@ -341,6 +342,7 @@ FORMS_HIT = [
     ("password after such as", "Choose a password such as " + "Tarn" + "wick#77" + ".", ["Tarn" + "wick#77"]),
     ("password after and password", "Sign in as lea.v and password " + "Bramble" + "wood@19", ["Bramble" + "wood@19"]),
     ("password that ends with a bang", "Use the password " + "Quill" + "ary99!" + " for the wifi.", ["Quill" + "ary99!"]),
+    ("password that starts with a hash", "use the password " + "#Sec" + "ure123" + " here", ["#Sec" + "ure123"]),
     ("username of two dictionary words", "username: " + "hunter" + ".king42", ["hunter" + ".king42"]),
     ("username after an unrelated example key", "example: ignored\nusername: " + "lvo" + "gel2026", ["lvo" + "gel2026"]),
     ("username in json", '{"id": 4711, "username": "' + "lea" + ".vogel87" + '", "active": true}', ["lea" + ".vogel87"]),
