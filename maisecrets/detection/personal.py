@@ -1237,7 +1237,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
     out = []
     if "secret-password-with-sign" in want and ("pass" in text.lower() or "pwd" in text.lower()):
         for m in _PW_REFERENCE_RE.finditer(text):
-            v = m.group(1).rstrip(".,;:)!?")
+            v = m.group(1).rstrip(".,;:)")   # a stop of the sentence; `!` and `?` end many passwords and stay
             if len(v) >= 6 and _PW_WITH_SIGN_RE.fullmatch(v) and not _EMAIL_SHAPE_RE.fullmatch(v) \
                     and not v.startswith(("$", "%", "{", "<", "*")):
                 out.append((m.start(1), m.start(1) + len(v), "secret-password-with-sign", "SECRET"))
