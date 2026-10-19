@@ -1974,6 +1974,8 @@ PRESIDIO_PATTERN_CONTEXT = {"de-vat-id#0"}
 # statement reached the model. The number must still pass Luhn. A short word that means something else in a
 # neighbour language (kort: short in Danish and Dutch) stays out
 PRESIDIO_EXTRA_CONTEXT = {
+    # 2026-10-19, Benchmark V1: a CSV or JSON key `steuer_id` over a valid tax id; the checksum still decides
+    "de-tax-id": ("steuer_id", "steuer_identifikationsnummer", "steuer-identifikationsnummer", "steuer_idnr"),
     "credit-card": ("karte", "kreditkarte", "kartennummer", "kartennr", "debitkarte", "bankkarte", "ec-karte",
                     "girocard", "carte", "cartes", "carta", "tarjeta", "creditcard", "kaart", "cart\u00e3o", "karta",
                     # 0.6.24, review: the PAN of a payment log, a camelCase key, and the Nordic and Polish words
@@ -1991,7 +1993,8 @@ DEFAULT_PII_REGIONS = ("generic",)   # without a config: the rules of no country
 # with require_context needs one of its context words within 80 characters before or 40 after the value.
 _DE_TAX_ID_CONTEXT = ("steueridentifikationsnummer", "steuer-id", "steuerid", "steuerliche identifikationsnummer",
                       "steuerliche identifikation", "persönliche identifikationsnummer", "steuer identifikation",
-                      "idnr", "steuer-idnr", "identifikationsnummer", "bzst")
+                      "idnr", "steuer-idnr", "identifikationsnummer", "bzst",
+                      "steuer_id", "steuer_identifikationsnummer", "steuer-identifikationsnummer", "steuer_idnr")
 _DE_ID_CARD_CONTEXT = ("personalausweis", "ausweis", "personalausweisnummer", "ausweisnummer", "ausweis-nr",
                        "ausweisnr", "personalausweisnr", "dokumentennummer", "ausweisdokument", "npa",
                        "neuer personalausweis", "bundespersonalausweis", "identity card", "id card", "id-card",

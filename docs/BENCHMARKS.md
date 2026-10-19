@@ -37,6 +37,44 @@ detect-secrets, ferret-scan, Preserve, starter-workflows, awesome-compose and tl
 
 Not shown here: an overall rank. The tools have different aims (a secret scanner, a PII anonymiser, a guard of model
 input), and the classes with fewer than 30 spans have no rate.
+## Rule changes measured with Benchmark V1
+
+### A user name after its label, and a tax id under `steuer_id`, 2026-10-19
+
+The first rule change measured with Benchmark V1 (`docs/BENCHMARK-V1.md`) against the baseline of 0.6.39 (tag
+`v0.6.39`); the same cases (the same case hash) on both sides.
+
+- **Gap seen:** the bank's dev split (`bank/tool/user-record`, `bank/tool/csv-customers`): a user name after
+  `"username":` and a German tax id under a CSV column `steuer_id` were missed. Nemotron-PII labels 15,800 user names;
+  0.6.39 found 51 of them whole.
+- **Cause:** user names had rules only in a URL, a home path and a table column; the tax id rule (`de-tax-id`, with
+  its checksum) knew `steuer-id` and `steuerid` as context words, not `steuer_id`.
+- **Fix:** the tool-channel rule `username-after-label` (`maisecrets/detection/personal.py`) reads the whole value after
+  a label that names a user name and masks it whole or not at all; a service account, a placeholder, a schema word, a
+  Kubernetes principal, a field or role name of dictionary words, code, and a value inside an `example:` stay. The
+  tax id rule takes `steuer_id` and close spellings as context words; the checksum still decides. A CSV column for
+  the social insurance, identity card or tax identification number (long names only) makes a table personal.
+- **Inspiration:** the label bridge of pii-anon (the label gives the type); Presidio has no user name recognizer.
+
+| Measure | 0.6.39 | This change |
+|---|---|---|
+| Bank, dev: full spans / false positives | 81 / 0 | 87 / 0 (tax id 0 → 3, user name 0 → 3) |
+| Bank, val | 36 / 0 | 36 / 0 |
+| Nemotron-PII (100,000 documents): user names found whole | 51 of 15,800 | 2,849 |
+| Nemotron-PII: false positives, precision | 910, 0.9946 | 919, 0.9946 |
+| Gretel (41,932 documents): user names found whole | 57 of 725 | 125 |
+| Gretel: false positives, precision | 7,016, 0.8213 | 7,040, 0.8212 |
+| Mendeley, PIILO, rule examples of six catalogs | – | no change in full spans or false positives |
+| Private frozen holdout (80 cases) | R 0.875, 0 FP | no change (`bench/HOLDOUT-LOG.md`) |
+| False-alarm bank, seven trees (`compare`) | – | +0 acted hits |
+| Recorded test inputs (`scripts/detection_fingerprint.py` calls, 21,656) | – | 0 changed |
+| Time per Nemotron document (1 in 10, three alternating runs) | 1.83 / 2.06 / 2.30 ms median | 1.93 / 2.23 / 2.60 ms median: −0.5 % and +2.6 % against the neighbouring runs of 0.6.39, within the drift of the machine during the runs |
+
+Limits kept on purpose: prose that names a user name (`Use username: octavia77 in the walkthrough`) is masked like a
+record; a value that is an e-mail address plus more (`a@b.net/tenant`) goes to the e-mail rule; a user name that is one
+dictionary word (`porter2026`) stays unmasked; an `example:` key more than 40 lines above the label is not seen.
+Review: codex Gate A (gpt-5.6-sol) rounds 1 to 3, each finding fixed; round 4 could not run (the workspace had no
+credits), so the last reading is the author's own probes.
 
 ## CredData, results per release
 
