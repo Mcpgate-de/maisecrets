@@ -48,6 +48,10 @@ def holdout_cases(directory: Path) -> list:
     return out
 
 
+def in_sample(case_id: str, every: int) -> bool:
+    return every <= 1 or int(hashlib.sha256(case_id.encode()).hexdigest()[:8], 16) % every == 0
+
+
 def _commit() -> str:
     try:
         return subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True,
@@ -75,6 +79,8 @@ def main(argv=None) -> int:
     ap.add_argument("--catalogs", type=Path)
     ap.add_argument("--holdout", type=Path, help="the private bank (source holdout)")
     ap.add_argument("--limit", type=int, default=0, help="read at most N records of a dataset (a quick run)")
+    ap.add_argument("--every", type=int, default=1, help="a fixed sample: keep a case when sha256 of its id is a "
+                    "multiple of N (the same cases for every scanner)")
     ap.add_argument("--out", type=Path)
     a = ap.parse_args(argv)
 
@@ -85,7 +91,7 @@ def main(argv=None) -> int:
         selected, a.split = holdout_cases(a.holdout), "holdout"
     else:
         selected = [c for c in sources.load(a.source, a.data, a.catalogs, a.limit, stats)
-                    if a.split == "all" or c["split"] == a.split]
+                    if (a.split == "all" or c["split"] == a.split) and in_sample(c["id"], a.every)]
     adapter = importlib.import_module(f"bench.adapters.{a.scanner}")
     if a.scanner == "maisecrets":
         desc = adapter.describe(a.maisecrets.resolve(), a.regions)
@@ -97,7 +103,7 @@ def main(argv=None) -> int:
     holdout = a.split == "holdout"
     out = {
         "date": datetime.date.today().isoformat(), "bench_commit": _commit(), "scanner": desc,
-        "source": a.source, "split": a.split, "limit": a.limit, "cases": len(selected),
+        "source": a.source, "split": a.split, "limit": a.limit, "every": a.every, "cases": len(selected),
         "dataset_stats": dict(stats),
         "metrics": score.aggregate(results),
         "by_region": score.aggregate(results, lambda c, s: f"{c.get('region', '-')}/{s['class']}"),

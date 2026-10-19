@@ -26,11 +26,12 @@ def main(argv) -> int:
     runs = [json.loads(Path(p).read_text(encoding="utf-8")) for p in argv]
     groups = collections.defaultdict(list)
     for r in runs:
-        groups[(r["source"], r["split"])].append(r)
+        groups[(r["source"], r["split"], r.get("every", 1))].append(r)
     out = []
-    for (source, split), rs in sorted(groups.items()):
+    for (source, split, every), rs in sorted(groups.items()):
         n = rs[0]["cases"]
-        out.append(f"## {source}, split {split} ({n} cases)\n")
+        sample = f", sample 1 in {every}" if every > 1 else ""
+        out.append(f"## {source}, split {split}{sample} ({n} cases)\n")
         for fam in ("secret", "pii"):
             rows = [r for r in rs if claims(r["scanner"].get("scope", []), fam) and r["metrics"].get(fam)]
             if not rows:

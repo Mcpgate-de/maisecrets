@@ -227,12 +227,12 @@ python3 scripts/measure_datasets.py fetch
 # the bank is in the repository; check that it matches its templates
 python3 bench/bank/make_bank.py --check
 
-# one run per scanner, source and split; maisecrets of another checkout with --maisecrets DIR
-for s in maisecrets detect_secrets secret_scan pii_anon preserve; do
-  python3 bench/run.py --scanner $s --source bank --split dev --out results/bank-dev-$s.json
-done
-python3 bench/run.py --scanner maisecrets --source nemotron --split dev --out results/nemotron-dev-maisecrets.json
-python3 bench/run.py --scanner maisecrets --source catalogs --catalogs DIR --split dev --out results/cat-dev-ms.json
+# every scanner on every source it can take, and the report; maisecrets of another checkout as the second argument
+BENCH_PYTHON=<python 3.11+ with PyYAML> BENCH_CATALOGS=<catalog clones> bench/run_all.sh results/ [<checkout>]
+
+# one run by hand: --every N keeps the cases whose sha256 of the id is a multiple of N (a fixed sample, the same
+# for every scanner); run_all.sh uses N=50 on the PII datasets for the comparison and runs maisecrets also in full
+python3 bench/run.py --scanner preserve --source nemotron --split all --every 50 --out results/n.json
 python3 bench/report.py results/*.json > report.md
 
 # the frozen holdout (maintainer only; the directory is private and must match bench/holdout.manifest)
