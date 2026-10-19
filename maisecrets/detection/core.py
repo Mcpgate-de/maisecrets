@@ -1936,9 +1936,10 @@ PRESIDIO_ALWAYS_CONTEXT = {"de-tax-id", "de-tax-number", "de-bsnr", "de-lanr", "
 # (danszymkowiak/maisecrets 795b411, d5807ea, Apache-2.0)
 CARD_ALONE_IN_TOOL = frozenset({"credit-card"})
 # issuer prefixes and lengths (ISO/IEC 7812 IIN ranges of the networks): Visa, Mastercard, American Express, Discover,
-# JCB, Diners Club, UnionPay
+# JCB (also its 15-digit 2131 and 1800), Diners Club, UnionPay
 _CARD_ISSUERS = _LazyRx(r"4\d{15}|5[1-5]\d{14}|2(?:2[2-9]|[3-6]\d|7[01])\d{13}|2720\d{12}|3[47]\d{13}"
-                           r"|6(?:011|5\d\d|4[4-9]\d)\d{12}|35(?:2[89]|[3-8]\d)\d{12}|3(?:0[0-5]|[68]\d)\d{11}|62\d{14}")
+                           r"|6(?:011|5\d\d|4[4-9]\d)\d{12}|35(?:2[89]|[3-8]\d)\d{12}|3(?:0[0-5]|[68]\d)\d{11}|62\d{14}"
+                           r"|(?:2131|1800)\d{11}")
 _CARD_GROUPS = _LazyRx(r"\d{4}([ -])\d{4}\1\d{4}\1\d{4}|\d{4}([ -])\d{6}\2\d{5}|\d{4}([ -])\d{6}\3\d{4}")
 
 
@@ -2076,10 +2077,21 @@ _IBAN_LEFT = "(?<![A-Z0-9])"
 PRESIDIO_LEFT_SUBFIELD = {"iban": "(?:(?<![A-Z0-9])|(?<=\\?[0-9]{2}))"}
 
 
+# Presidio's card pattern takes the first digits 1, 3, 4, 5 and 6, so a Mastercard of the 2-series (2221 to 2720,
+# issued since 2017) and a 15-digit JCB (2131) never reached the Luhn check. Benchmark V1, Mendeley: 681 such card
+# numbers, all Luhn-valid, were covered only by chance, by the us-bank rule (2026-10-19). The first group takes those
+# two ranges too; the correction applies only to the upstream text it expects.
+_CARD_FIRST_UPSTREAM = r"((4\d{3})|(5[0-5]\d{2})|"
+PRESIDIO_CARD_FIRST = {"credit-card": r"((4\d{3})|(5[0-5]\d{2})|(2(?:22[1-9]|2[3-9]\d|[3-6]\d\d|7[01]\d|720))|(2131)|"}
+
+
 def _presidio_regex(rec_id: str, regex: str) -> str:
     left = PRESIDIO_LEFT_SUBFIELD.get(rec_id)
     if left and regex.startswith(_IBAN_LEFT):
         return left + regex[len(_IBAN_LEFT):]
+    first = PRESIDIO_CARD_FIRST.get(rec_id)
+    if first and regex.count(_CARD_FIRST_UPSTREAM) == 1:
+        return regex.replace(_CARD_FIRST_UPSTREAM, first)
     return regex
 
 
