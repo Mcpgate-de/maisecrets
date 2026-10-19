@@ -348,7 +348,8 @@ class PopulationTests(unittest.TestCase):
         with_path = sorted(n for n, t in codex_tools.items() if t["class"] in ("edits-path", "reads-path"))
         self.assertIn("apply_patch", with_path)
         missing = [t for t in with_path if not any(re.fullmatch(m, t) for m in matchers)]
-        self.assertEqual(missing, [], "a Codex tool reached only through an alias meets no guard where the alias is missing")
+        self.assertEqual(missing, [],
+                         "a Codex tool reached only through an alias meets no guard where the alias is missing")
 
     def test_a_codex_patch_never_touches_the_store(self):
         codex_tools = INVENTORY["codex"]["tools"]

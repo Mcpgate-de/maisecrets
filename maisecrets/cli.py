@@ -459,6 +459,9 @@ def cmd_status(_: list[str]) -> int:
                 print(line)
         finally:
             vault_refs.use_client("claude")
+    from . import codex_trust
+    for line in codex_trust.status_lines(root, codex_vault.codex_home()):
+        print(line)
     from . import incidents
     groups, damaged = incidents.load()
     markers = incidents.unfolded_markers()
