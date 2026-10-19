@@ -12,6 +12,32 @@ limits are in their own section. "Repeat this measurement" has the commands.
 | Python | 3.14.8 (CredData runs); 3.14.8 and 3.9.6 (timing) |
 | Scripts | `scripts/measure_creddata.py`, `scripts/measure_scan_time.py`, `scripts/measure_datasets.py`, `tests/test_fp_corpus.py` |
 
+## Benchmark V1 baseline, 0.6.39 (2026-10-19)
+
+`docs/BENCHMARK-V1.md` defines the method; `bench/results/2026-10-19-v0.6.39.md` holds every table. maisecrets
+`v0.6.39` against detect-secrets 1.5.0, secret-scan 0.4.2 (7d8b5c1), pii-anon 1.7.0rc1 (2171ace) and Preserve 0.6.1
+(01dbd77), each only on the classes it claims. Strict recall counts a span only when it is masked whole; precision
+counts a finding as right when it lies on sensitive text.
+
+| Source | Family | maisecrets 0.6.39 | Others (same cases) | What it says |
+|---|---|---|---|---|
+| Bank, dev (75 cases) | secret | R 0.94, P 1.00, 0 FP | secret-scan R 0.77, P 0.86; Preserve R 0.71, P 0.87; detect-secrets R 0.35, P 1.00 | the forms maisecrets sees: written by this project, so a regression check, not a fair ranking |
+| Rule examples of six catalogs (11,902 cases) | secret | R 0.59 | detect-secrets 0.24, secret-scan 0.07, Preserve 0.06 | provider token formats bare and after `token = `; no negatives, so no precision |
+| Nemotron-PII, 1 in 50 (1,921 documents) | pii | R 0.48, P 0.996 | Preserve R 0.67, P 0.84; pii-anon R 0.75, P 0.29 | maisecrets finds no names or street addresses by design (README); the others find more and mask much ordinary text |
+| Nemotron-PII, 1 in 50 | secret | R 0.32, P 1.00 | secret-scan 0.17, Preserve 0.10, detect-secrets 0.03 | passwords and keys in prose, mostly after a label |
+| Gretel finance, 1 in 50 (837 documents) | pii | R 0.23, P 0.85 | Preserve R 0.44, P 0.22; pii-anon R 0.42, P 0.22 | the precision of maisecrets is lowest here; its false alarms are the next thing to read (dev split only) |
+| Mendeley financial, 1 in 50 (872 documents) | pii | R 0.48, P 1.00 | Preserve R 0.65, P 0.76; pii-anon R 0.59, P 0.50 | |
+| PIILO, full (6,807 essays) | pii | R 0.08, P 0.96 | – (the sample of 1 in 50 has 15 spans: too few for a rate) | names of students: maisecrets does not detect names |
+| Private frozen holdout (80 cases) | both | R 0.83, P 1.00, 0 FP | not run for the others | `bench/HOLDOUT-LOG.md` |
+
+Time per case, median: maisecrets 0.25 to 6.8 ms, detect-secrets 0.3 to 3.7 ms, secret-scan 0.1 to 0.4 ms, pii-anon 0.3
+to 9.5 ms, Preserve 25 to 390 ms (the same machine, one process each). The false-alarm bank (seven trees,
+`scripts/measure_fp_bank.py`) gives 0.6.39: 1,325 / 85 / 1,143 / 119 / 4 / 25 / 24 acted hits on CPython `Lib/`,
+detect-secrets, ferret-scan, Preserve, starter-workflows, awesome-compose and tldr pages.
+
+Not shown here: an overall rank. The tools have different aims (a secret scanner, a PII anonymiser, a guard of model
+input), and the classes with fewer than 30 spans have no rate.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
