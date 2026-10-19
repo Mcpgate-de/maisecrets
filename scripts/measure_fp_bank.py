@@ -49,26 +49,33 @@ def blob_id(data: bytes) -> str:
 
 
 def blobs_on_disk(d: Path, sub: str) -> dict:
-    """path -> the git blob ids that each file under the subdirectory can stand for: as it is on disk (a symlink as its
-    target), and with CRLF read as LF, because a checkout writes a file with the attribute eol=crlf that way."""
+    """path -> what each entry under the subdirectory can stand for, as `link:<blob>` or `file:<blob>`. A symlink is
+    its target. A regular file is its bytes, or its bytes with CRLF read as LF, because a checkout writes a file with
+    the attribute eol=crlf that way. The kind counts: the measurement skips a broken symlink and reads a file, so a
+    checkout that writes a symlink as a file (core.symlinks=false) is other input."""
     out = {}
     for dp, dn, fn in os.walk(d / sub if sub else d):
         dn[:] = [x for x in dn if not (Path(dp) == d and x == ".git")]
         for f in fn:
             p = Path(dp, f)
-            data = os.readlink(p).encode() if p.is_symlink() else p.read_bytes()
-            out[p.relative_to(d).as_posix()] = {blob_id(data), blob_id(data.replace(b"\r\n", b"\n"))}
+            if p.is_symlink():
+                kinds = {"link:" + blob_id(os.readlink(p).encode())}
+            else:
+                data = p.read_bytes()
+                kinds = {"file:" + blob_id(data), "file:" + blob_id(data.replace(b"\r\n", b"\n"))}
+            out[p.relative_to(d).as_posix()] = kinds
     return out
 
 
 def blobs_of_commit(d: Path, commit: str, sub: str) -> dict:
-    """path -> blob id of each file under the subdirectory in the commit."""
+    """path -> `link:<blob>` or `file:<blob>` of each entry under the subdirectory in the commit."""
     out = {}
     for entry in git(d, "ls-tree", "-r", "-z", commit, "--", sub or ".").split("\0"):
         if entry:
             meta, path = entry.split("\t", 1)
-            if meta.split()[1] == "blob":
-                out[path] = meta.split()[2]
+            mode, kind, blob = meta.split()
+            if kind == "blob":
+                out[path] = ("link:" if mode == "120000" else "file:") + blob
     return out
 
 

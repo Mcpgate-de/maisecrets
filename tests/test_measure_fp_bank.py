@@ -62,6 +62,8 @@ class MeasureTests(unittest.TestCase):
         (d / "src" / "run.bat").write_text("@echo off\n")   # a checkout writes it with CRLF
         (d / ".gitattributes").write_text("*.bat text eol=crlf\n")
         (d / "src" / ".gitignore").write_text("*.log\n")
+        if os.name != "nt":   # Windows writes a link as a file (core.symlinks=false), which the bank refuses
+            os.symlink("missing.md", d / "src" / "link.md")   # a link without a target, as in detect-secrets
         (d / "src" / "skip.bin").write_text(PROBE)
         (d / "outside.md").write_text(f"{PROBE} {IP}\n")
         git(d, "init", "-q")
@@ -127,12 +129,16 @@ class MeasureTests(unittest.TestCase):
 
     def test_a_changed_clone_is_refused(self):
         notes = self.cache / "tiny" / "src" / "notes.md"
-        for change in ("added", "changed", "deleted", "ignored", "skipped"):
+        changes = ("added", "changed", "deleted", "ignored", "skipped") + (("link as file",) if os.name != "nt" else ())
+        for change in changes:
             with self.subTest(change):
                 if change == "added":
                     (notes.parent / "extra.md").write_text("x\n")
                 elif change == "changed":
                     notes.write_text("other text\n")
+                elif change == "link as file":   # what a checkout with core.symlinks=false writes
+                    (notes.parent / "link.md").unlink()
+                    (notes.parent / "link.md").write_text("missing.md")
                 elif change == "ignored":   # git status does not list it, the walk reads it
                     (notes.parent / "extra.log").write_text("x\n")
                 elif change == "skipped":   # git status does not miss it
