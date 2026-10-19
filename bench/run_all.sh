@@ -24,6 +24,7 @@ if [ -n "${BENCH_DETECT_SECRETS_PYTHON:-}" ]; then scanners="$scanners detect_se
 if [ -n "${BENCH_SECRET_SCAN_PYTHON:-}" ]; then scanners="$scanners secret_scan"; fi
 if [ -n "${BENCH_PII_ANON_PYTHON:-}" ]; then scanners="$scanners pii_anon"; fi
 if [ -n "${BENCH_PRESERVE_PYTHON:-}" ]; then scanners="$scanners preserve"; fi
+if [ -n "${BENCH_PRESIDIO_PYTHON:-}" ]; then scanners="$scanners presidio"; fi
 
 for s in $scanners; do
   for split in dev val; do

@@ -353,5 +353,34 @@ class AdapterOutputTests(unittest.TestCase):
         self.assertEqual(_proc.check("x", cs, [[[0, 2, "secret", "r"]], []]), [[(0, 2, "secret", "r")], []])
 
 
+class AdapterInventoryTests(unittest.TestCase):
+    """Each foreign scanner is pinned (a requirements file with every distribution at an exact version or commit) and
+    maps its findings only to classes of Benchmark V1 (docs/BENCHMARK-V2.md, reproducible scanner configurations)."""
+
+    def test_every_foreign_adapter_has_a_pinned_requirements_file(self):
+        import importlib
+        from bench import run
+        for name in run.ADAPTERS:
+            if name == "maisecrets":
+                continue
+            with self.subTest(adapter=name):
+                mod = importlib.import_module(f"bench.adapters.{name}")
+                for attr in ("NAME", "SCOPE", "describe", "scan"):
+                    self.assertTrue(hasattr(mod, attr), attr)
+                req = ROOT / "bench" / "adapters" / "requirements" / f"{mod.NAME}.txt"
+                lines = [ln for ln in req.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#")]
+                self.assertTrue(lines)
+                for ln in lines:
+                    self.assertRegex(ln, r"==|@ (git\+)?https://", f"{req.name}: {ln} is not pinned")
+
+    def test_presidio_maps_only_to_benchmark_classes(self):
+        import re
+        from bench import cases
+        from bench.adapters import presidio
+        named = set(re.findall(r'"(pii\.[a-z_]+)"', presidio._WORKER))
+        self.assertTrue(named)
+        self.assertLessEqual(named, set(cases.CLASSES))
+
+
 if __name__ == "__main__":
     unittest.main()
