@@ -33,8 +33,9 @@ IP = ".".join(["52", "14", "7", "9"])  # a public address the ip rule acts on, b
 
 
 def git(cwd, *args):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}   # no GIT_DIR of a calling hook
     return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-C", str(cwd), *args],
-                          check=True, capture_output=True, text=True).stdout.strip()
+                          check=True, capture_output=True, text=True, env=env).stdout.strip()
 
 
 class PinTests(unittest.TestCase):
@@ -118,6 +119,25 @@ class MeasureTests(unittest.TestCase):
             self.fetch()
         self.assertIn("remove it and fetch again", str(cm.exception))
         self.assertEqual((self.cache / "tiny" / "keep.txt").read_text(), "mine", "the directory stays as it is")
+
+    def test_the_git_env_of_a_calling_hook_does_not_reach_the_bank(self):
+        # a hook in a linked worktree exports GIT_DIR and GIT_INDEX_FILE; a sentinel repository stands in for the
+        # real one, so the probe never points git at a repository that matters
+        sentinel = self.source.parent / "sentinel"
+        sentinel.mkdir()
+        git(sentinel, "init", "-q")
+        (sentinel / "a.txt").write_text("a\n")
+        git(sentinel, "add", "a.txt")
+        git(sentinel, "commit", "-q", "-m", "sentinel")
+        before = (git(sentinel, "rev-parse", "HEAD"), (sentinel / ".git" / "config").read_text())
+        fb.remove_tree(self.cache / "tiny")
+        hook_env = {"GIT_DIR": str(sentinel / ".git"), "GIT_INDEX_FILE": str(sentinel / ".git" / "index")}
+        with mock.patch.dict(os.environ, hook_env):
+            self.fetch()
+            self.assertEqual(self.run_bank()["trees"]["tiny"]["files"], 1)
+        self.assertEqual(git(self.cache / "tiny", "rev-parse", "HEAD"), self.commit)
+        self.assertEqual((git(sentinel, "rev-parse", "HEAD"), (sentinel / ".git" / "config").read_text()), before)
+        self.assertEqual(git(sentinel, "status", "--porcelain"), "", "nothing staged or changed in the sentinel")
 
     def test_a_failed_or_empty_fetch_leaves_nothing_behind(self):
         fb.remove_tree(self.cache / "tiny")
