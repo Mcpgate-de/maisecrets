@@ -77,8 +77,9 @@ def _commit() -> str:
 
 def _dirty() -> bool:
     """Whether the benchmark itself (bench/, the scripts it imports) differs from the commit it names."""
+    # bench/HOLDOUT-LOG.md is written by the runner itself: a new row is no change of the benchmark
     return bool(_git("status", "--porcelain", "--", "bench", "scripts/measure_datasets.py",
-                     "scripts/measure_catalog_coverage.py"))
+                     "scripts/measure_catalog_coverage.py", ":(exclude)bench/HOLDOUT-LOG.md"))
 
 
 def source_meta(selected: list) -> dict:
