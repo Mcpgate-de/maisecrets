@@ -297,6 +297,12 @@ def run_scenario(name: str, sc: dict) -> list[str]:
                 break
             except Exception:
                 time.sleep(0.1)
+    # the plugin must not write into its own folder: Codex 0.164 and newer bind the approval of its hooks to the
+    # contents (openai/codex#54619), and a written file switched them off (measured, 2026-10-19)
+    sys.path.insert(0, str(ROOT))
+    from maisecrets.codex_trust import content_hash
+    plugin_roots = [p.parent.parent for p in (codex_home / "plugins" / "cache").rglob("hooks/hooks.json")]
+    contents_before = [content_hash(p) for p in plugin_roots]
     try:
         r = subprocess.run(
             ["codex", "exec", "--dangerously-bypass-hook-trust", "--skip-git-repo-check",
@@ -307,6 +313,10 @@ def run_scenario(name: str, sc: dict) -> list[str]:
         (codex_home / "auth.json").unlink(missing_ok=True)
         if srv:
             srv.terminate()
+    if not plugin_roots:
+        fails.append("no installed plugin folder found under CODEX_HOME/plugins/cache")
+    elif [content_hash(p) for p in plugin_roots] != contents_before:
+        fails.append("the plugin wrote into its own folder: Codex 0.164 and newer switch its hooks off")
     bodies = "".join(p.read_text(errors="ignore") for p in out.glob("request_*.json"))
     # every built-in tool Codex offered must be classified (harness/inventory.py)
     from inventory import offered, unclassified
