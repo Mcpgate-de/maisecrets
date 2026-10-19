@@ -78,7 +78,7 @@ _TRAVEL_ID_LABELS = (r"|driving[ _-]?licen[cs]e(?:[ _-]?(?:no|number))?"
 _ID_RE = re.compile(r"(?i)(?<![a-z])(?:mrn|member[ -]?id|passport(?:[ _-]?(?:no|number))?|driver'?s? licen[cs]e"
                     r"(?:[ _-]?(?:no|number))?|dl[ _-]?(?:no|number|#)|(?-i:DL)(?=\s{0,3}[:#])|sin|tfn|nir|tax[ _-]?id"
                     r"|insurance (?:member )?id"
-                    r"|account (?:number|no\.?)|patient[ -]?id|id on file" + _HEALTH_ID_LABELS
+                    r"|account[ _-]?(?:number|no\.?)|patient[ -]?id|id on file" + _HEALTH_ID_LABELS
                     + _TRAVEL_ID_LABELS + r")(?![a-z])[\"']?"
                     r"(?:\s{0,3}(?:on file|is|number|no\.?|#|n\.?[º°o]\.?|nr\.?|num[ée]ro|n[úu]mero|numero"
                     r"|nummer|numer))?"
@@ -530,6 +530,21 @@ def _md_cells(line: str) -> list:
     return out
 
 
+# a column whose header names an account number holds one on each row, whatever the other columns are: Benchmark V1,
+# Nemotron, 40 of the 73 account numbers that the us-bank label window lost were cells under `Account Number`. Only
+# the names that say number: `account`, `account_id` and `aws_account` hold a cloud account or a user id, and a
+# 12-digit AWS account id in a table of resources is no bank account
+_ACCOUNT_NUMBER_COL_RE = re.compile(r"(?:bank_|mortgage_|savings_|checking_|loan_|customer_|primary_)?"
+                                    r"(?:account|acct)_?(?:number|no|nr|num|#)|kontonummer|iban")
+_ACCOUNT_CELL_RE = re.compile(r"\d{2,17}(?:[ -]\d{2,12}){0,3}")
+
+
+def _account_cell(v: str) -> bool:
+    digits = sum(c.isdigit() for c in v)
+    return bool(_ACCOUNT_CELL_RE.fullmatch(v)) and 8 <= digits <= 20 and not _placeholder_digits(v) \
+        and not _DATE_CELL_RE.fullmatch(v)
+
+
 def _md_table_hits(text: str) -> list:
     out = []
     lines = text.split("\n")
@@ -546,11 +561,18 @@ def _md_table_hits(text: str) -> list:
         names = [_md_column(hdr[a:b]) for a, b in _md_cells(hdr)]
         strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
         cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
+        accounts = {i for i, h in enumerate(names) if _ACCOUNT_NUMBER_COL_RE.fullmatch(h)}
         li += 2
         rows = 0
         while li < len(lines) and rows < _CSV_ROWS and "|" in lines[li] and lines[li].strip():
             line = lines[li]
             row: list = []
+            for col, (a, b) in enumerate(_md_cells(line)):
+                if col in accounts:
+                    v = line[a:b].strip().strip("*`")
+                    if _account_cell(v):
+                        s0 = a + line[a:b].index(v)
+                        out.append((pos[li] + s0, pos[li] + s0 + len(v), "md-table-personal-column", ID_NUMBER))
             if cols:
                 for col, (a, b) in enumerate(_md_cells(line)):
                     if col not in cols:

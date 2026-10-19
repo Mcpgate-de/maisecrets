@@ -127,6 +127,31 @@ credits), so the last reading is the author's own probes.
 | False-alarm bank, seven trees (`compare`) | – | +2 (card test values of a card scanner's tests) | +0 against fix 1 |
 | Recorded test inputs (`scripts/detection_fingerprint.py` calls, 21,656) | – | – | 0 changed |
 
+### Account numbers whole: a hyphen, and a column named account number, 2026-10-19
+
+- **Gap seen:** Nemotron, after the change above: 8,978 of 12,503 account numbers found whole, 2,197 in part. The
+  most frequent shape of a miss was `999-9999999999` (1,541), after "account number" on the same line.
+- **Cause:** `us-bank` (`\b[0-9]{8,17}\b`) took the digits after the hyphen; that shorter hit won the overlap against
+  `id-number-after-label`, which had the whole number, so the first digits reached the model. The label rule also
+  missed `account_number` and `accountNumber`.
+- **Fix 1:** `us-bank` takes no part of a hyphenated number (`PRESIDIO_WHOLE_DIGIT_RUN`); the label takes
+  `account_number`, `account-number`, `accountnumber`.
+- **Fix 2, tables** (the review asked for this after the 73 numbers that the label window lost; 40 of the 49 table
+  cases among them sat under a column `Account Number`): a Markdown table column whose header names an account
+  number (`account number`, `acct no`, `bank account number`, `mortgage account number`, `kontonummer`, `iban`;
+  not `account`, `account id` or `aws account`) masks a cell of 8 to 20 digits that is no date and no placeholder.
+
+| Measure | Before (`next`, 7aaa0033) | Fix 1 | Fix 1 and 2 |
+|---|---|---|---|
+| Nemotron: account numbers whole / in part | 8,978 / 2,197 | 10,858 / 37 | 11,266 / 37 |
+| Nemotron: false positives, F1 | 873, 0.6537 | 872, 0.6586 | 893, 0.6596 |
+| Gretel: false positives, precision | 3,687, 0.898 | 3,704, 0.897 | 3,716, 0.897 |
+| Mendeley, PIILO, bank dev and val | – | no change | no change |
+| False-alarm bank, seven trees (`compare`) | – | +0 | +0 |
+
+The table rule brings back 408 account numbers, more than the 73 that the label window lost: it was written from the
+column names, not from those cases. Its negative cases are in `tests/test_bank_and_company_numbers.py`.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
