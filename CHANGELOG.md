@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.6.39] - 2026-10-19
+
+### Fixes
+
+- detects the legacy Microsoft Teams webhook URL on outlook.office.com (e1914c0)
+- a Microsoft Teams webhook URL is masked whole, not only 17 of its 204 characters (7dd7817)
+
 ## [0.6.38] - 2026-10-18
 
 ### Fixes
