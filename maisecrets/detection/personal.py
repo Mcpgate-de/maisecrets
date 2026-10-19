@@ -80,9 +80,10 @@ _TRAVEL_ID_LABELS = (r"|driving[ _-]?licen[cs]e(?:[ _-]?(?:no|number))?"
 _ID_RE = re.compile(r"(?i)(?<![a-z])(?:mrn|member[ -]?id|passport(?:[ _-]?(?:no|number))?|driver'?s? licen[cs]e"
                     r"(?:[ _-]?(?:no|number))?|dl[ _-]?(?:no|number|#)|(?-i:DL)(?=\s{0,3}[:#])|sin|tfn|nir|tax[ _-]?id"
                     r"|insurance (?:member )?id"
-                    r"|account[ _-]?(?:number|no\.?)|patient[ -]?id|id on file" + _HEALTH_ID_LABELS
+                    r"|account[ _-]?(?:number|no\.?)|(?:certificate[ _-]?)?licen[cs]e[ _-]?(?:number|no\.?)"
+                    r"|patient[ -]?id|id on file" + _HEALTH_ID_LABELS
                     + _TRAVEL_ID_LABELS + r")(?![a-z])[\"']?"
-                    r"(?:\s{0,3}(?:on file|is|number|no\.?|#|n\.?[º°o]\.?|nr\.?|num[ée]ro|n[úu]mero|numero"
+                    r"(?:\s{0,3}(?:on file|is|of|number|no\.?|#|n\.?[º°o]\.?|nr\.?|num[ée]ro|n[úu]mero|numero"
                     r"|nummer|numer))?"
                     r"\s{0,3}[:=#]?\s{0,3}[\"']?"
                     r"((?-i:[A-Z0-9](?:[A-Z0-9]|[ -](?=[A-Z0-9])){4,24}))(?![A-Za-z0-9])")

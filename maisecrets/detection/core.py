@@ -2001,8 +2001,9 @@ PRESIDIO_NO_DATE = frozenset({"us-bank"})
 PRESIDIO_LABEL_BEFORE = {"us-bank": 60}
 # A us-bank match is the whole number or nothing: `\b[0-9]{8,17}\b` took the ten digits after the hyphen of an account
 # number written 482-3917265104, and that shorter hit won the overlap against the label rule that had the whole number,
-# so three digits reached the model. Benchmark V1, Nemotron: 2,197 account numbers found only in part
-PRESIDIO_WHOLE_DIGIT_RUN = frozenset({"us-bank"})
+# so three digits reached the model. Benchmark V1, Nemotron: 2,197 account numbers found only in part. The same for the
+# digits of a driver license after a letter prefix (CL-4882019): the label rule had the whole certificate number
+PRESIDIO_WHOLE_DIGIT_RUN = frozenset({"us-bank", "us-license#1"})
 # Presidio tags every US/UK/IN/AU/… recognizer as language "en", so language is the wrong
 # switch: an Indian PAN rule produced 290 false positives in one German transcript. The
 # switch is the REGION, derived from the recognizer id; "generic" is always on.
@@ -4190,8 +4191,9 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     continue
                 if rule.id in PRESIDIO_NO_DATE and _yyyymmdd(secret):
                     continue
-                if rule.id in PRESIDIO_WHOLE_DIGIT_RUN and (re.match(r"-\d", text[end:end + 2])
-                                                            or re.search(r"\d-$", text[max(0, start - 2):start])):
+                if rule.id in PRESIDIO_WHOLE_DIGIT_RUN and (
+                        re.match(r"-[A-Za-z0-9]", text[end:end + 2])
+                        or re.search(r"[A-Za-z0-9]-$", text[max(0, start - 2):start])):
                     continue
                 label_window = PRESIDIO_LABEL_BEFORE.get(rule.id)
                 if label_window:
