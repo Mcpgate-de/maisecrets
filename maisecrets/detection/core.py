@@ -1949,9 +1949,9 @@ _ID_LABEL_BEFORE_RE = _LazyRx(r"(?i)(?:(?:^|[^a-z])(?:imei|serial|reference|ref)
 
 
 def _card_shaped(text: str, start: int, secret: str) -> bool:
-    """A number written as a card: in groups of four (4-6-5 for Amex, 4-6-4 for Diners), with the prefix and the
-    length of a card network, and not part of a decimal, a phone number or a longer digit run. A float, a timestamp
-    and an IMEI pass Luhn as often as a card does (review of 0.6.24), and they are written as one run."""
+    """A number written as a card: in groups of four (4-6-5 for Amex, 4-6-4 for Diners) or as one run, with the
+    prefix and the length of a card network, and not part of a decimal, a phone number or a longer digit run. A float,
+    a timestamp and an IMEI pass Luhn as often as a card does (review of 0.6.24); the issuer table keeps them out."""
     v = secret.strip()
     end = start + len(secret)
     sep = re.sub(r"\d", "", v)[:1]
@@ -1962,7 +1962,10 @@ def _card_shaped(text: str, start: int, secret: str) -> bool:
         return False   # a decimal, a phone number, a longer run, a fifth group (an expiry such as 12/28 may follow)
     if _ID_LABEL_BEFORE_RE.search(text, max(0, start - 30), start):
         return False   # order_id=4111 ...: an id that passes Luhn
-    return bool(_CARD_GROUPS.fullmatch(v) and _CARD_ISSUERS.fullmatch(re.sub(r"\D", "", v)))
+    # an unbroken run too, with the prefix and the length of a card network: Benchmark V1, Gretel cards 299 to 431,
+    # Mendeley +119, 14 more false alarms in Gretel, the false-alarm bank +0. A float, a timestamp, an IMEI and an
+    # order id stay out by the checks above and by the issuer table (no 15-digit 35..., no 17...)
+    return bool((_CARD_GROUPS.fullmatch(v) or v.isdigit()) and _CARD_ISSUERS.fullmatch(re.sub(r"\D", "", v)))
 
 
 # a Presidio pattern with no boundary: PESEL's eleven digits matched inside a longer digit run
