@@ -31,6 +31,7 @@ L = string.ascii_lowercase
 U = string.ascii_uppercase
 AN = string.ascii_letters + D
 HEXL = "0123456789abcdef"
+HEXU = "0123456789ABCDEF"
 B64U = AN + "_-"
 
 
@@ -131,6 +132,12 @@ TOKENS = {
     "gitlab-pipeline-trigger-token-any": lambda r: (gitlab_routable(r, J(["gl", "ptt-"])),
                                                     J(["gl", "ptt-"]) + rd(r, 12, AN)),
     "gitlab-ci-job-token-any": lambda r: (J(["gl", "cbt-"]) + rd(r, 24, AN), J(["gl", "cbt-"]) + rd(r, 12, AN)),
+    # the legacy Office 365 connector URL of Microsoft Teams; the look-alike lacks the last id
+    "microsoft-teams-webhook-legacy": lambda r: (
+        J(["https://outlook.of", "fice.com/webhook/"]) + _uuid(r) + "@" + _uuid(r) + "/IncomingWebhook/"
+        + rd(r, 32, HEXL) + "/" + _uuid(r),
+        J(["https://outlook.of", "fice.com/webhook/"]) + _uuid(r) + "@" + _uuid(r) + "/IncomingWebhook/"
+        + rd(r, 32, HEXL)),
 }
 
 PREFIX_IDS_BEFORE = {"gitlab-runner-token", "gitlab-deploy-token-any", "webhook-signing-secret",
@@ -488,6 +495,22 @@ class BetterleaksPatchTests(unittest.TestCase):
         for miss in ("x" + url, url + "a", url + "_", not_hex):
             with self.subTest(miss=miss[-3:]):
                 self.assertNotIn("microsoft-teams-webhook", [k for k, _t, _v in found(f"see {miss} there")])
+
+    def test_a_legacy_teams_webhook_takes_hex_in_capitals_and_needs_the_uuid_form(self):
+        # codex Gate A of 0.6.39: the first rule took [0-9a-f-]{36}, so a hyphen anywhere passed and a capital did not
+        r = random.Random(43)
+
+        def guid(digits=HEXL):
+            return "-".join(rd(r, n, digits) for n in (8, 4, 4, 4, 12))
+        rule = "microsoft-teams-webhook-legacy"
+        start = J(["https://outlook.of", "fice.com/webhook/"])
+        upper = start + guid(HEXU) + "@" + guid(HEXU) + "/IncomingWebhook/" + rd(r, 32, HEXU) + "/" + guid(HEXU)
+        self.assertIn((rule, "SECRET", upper), found(f"see {upper} there"))
+        bad = rd(r, 32, HEXL) + "----"
+        for miss in (start + bad + "@" + guid() + "/IncomingWebhook/" + rd(r, 32, HEXL) + "/" + guid(),
+                     start + guid() + "@" + guid() + "/IncomingWebhook/" + rd(r, 32, HEXL) + "/" + bad):
+            with self.subTest(miss=miss[-8:]):
+                self.assertNotIn(rule, [k for k, _t, _v in found(f"see {miss} there")])
 
 
 # ------------------------------------------------------- forms of a session measurement --
