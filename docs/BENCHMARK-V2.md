@@ -1,70 +1,77 @@
-# Benchmark V2: a draft, not frozen
+# Benchmark V2
 
-Status: **draft** (2026-10-19). V2 keeps everything of `docs/BENCHMARK-V1.md` that is not named here. It is frozen by a
-commit that changes the status line above to "frozen" and names the commit of the scoring code; only after that is the
-private Holdout V2 written and sealed. A change to a frozen part needs a V3.
+Status: **frozen** (2026-10-20), scoring code `bench/score.py` at commit `e19ef7a78f83133410e1804178f63d1cdb938d23`.
+V2 keeps everything of `docs/BENCHMARK-V1.md` that is not named here. A change to a frozen part needs a V3.
 
 ## What V2 freezes from V1
 
-- **Sources and their pins:** the four PII datasets (Nemotron-PII, Gretel, Mendeley, PIILO, pinned by sha256 in
-  `bench/sources.py`), the six secret catalogs at their commits, and the public bank (`bench/bank/`).
-- **The case format, the classes and the scope of each scanner** (`bench/cases.py`, V1 "Classes" and "Scope of a
-  scanner").
 - **Scoring** (`bench/score.py`): a span is `full`, `partial` or `missed`; precision counts a finding as right when it
-  lies on sensitive text; `too wide`; a rate is "-" under 30 spans. The commit of `bench/score.py` is named at the
-  freeze.
+  lies on sensitive text; `too wide`; a rate is "-" under 30 spans.
+- **The case format, the classes and the scope of each scanner** (V1 "Classes", "Scope of a scanner").
 - **The split rule:** `sha256(source + "/" + record)`, the first 8 hex digits modulo 10: 0 to 5 `dev`, 6 to 7 `val`,
   8 to 9 `holdout`.
+- **The sources and their pins**, with the label cleaning of `scripts/measure_datasets.py`.
 
-## What V2 adds
+## Which data is what
 
-### Separate results by split
+| Data | Role in V2 | Why |
+|---|---|---|
+| Nemotron-PII, Gretel, Mendeley, PIILO, all splits | **development** | The rule round of 2026-10-19 read their cases on `--split all`, the public holdout split included. A new salt would not make them unseen again. The split names stay in the files; for these four sets they mean dev and val only. |
+| The public bank `bench/bank/` (dev, val) | development | written by the maintainer, public |
+| The secret catalogs (six) | development | the rule examples of other tools, read during coverage work |
+| **Privy** (`beki/privy`, test-small, all splits) | **independent evaluation** | added 2026-10-20; nobody had read it for tuning. Its mapping was fixed from the dataset card and the label inventory before the first run of any scanner. Its cases are never read for a rule: only totals and per-class counts are looked at. |
+| **Holdout V2** (private) | **independent evaluation** | see below; the honest number for a release |
+| Holdout V1 (private, 80 cases) | development (`val`) | its last run was on the 0.6.41 candidate; it is no test any more |
 
-A rule round reads cases only from `dev`. It decides on `val` and on the false-alarm bank. A result on `all` may be
-reported, but never next to a holdout number as if it were one. `bench/run.py --split all` writes the case ids of every
-split; a run for analysis uses `--split dev`.
+A rule round reads cases only from the development data, decides on its `val` split and the false-alarm bank, and
+reports `dev` and `val` apart. `bench/run.py --split all` writes the case ids of every split; an analysis run uses
+`--split dev`.
 
-### Reproducible scanner configurations
+## Scanners and their configurations
 
-Each scanner runs with the configuration its result file names (`scanner.configuration`) and nothing tuned per source:
-maisecrets with regions `generic,de,us`, sources and references off; the other scanners in their own environments from
-`bench/requirements/` with every distribution pinned. A result whose checkout or package is not the named one is
-refused (V1 "Adapters").
+Each scanner runs with the configuration its result file names and nothing tuned per source. Every distribution is
+pinned in `bench/adapters/requirements/` (a test checks that each foreign adapter has such a file).
 
-### A report per class
+| Scanner | Configuration |
+|---|---|
+| maisecrets | regions `generic,de,us`, sources and references off; tool channel |
+| detect-secrets | its default plugins (V1) |
+| secret-scan | V1 |
+| pii-anon | the README profile (V1) |
+| preserve | V1 |
+| **Presidio** 2.2.364 | `AnalyzerEngine().analyze(text, language="en")`, the default recognizers and spaCy `en_core_web_lg` 3.8.0, no score threshold. DATE_TIME, NRP, URL and CRYPTO are left out: they have no class here and would count against every birth date and address. The version is the one maisecrets vendors its recognizers from (`maisecrets/detection/rules/PRESIDIO_VERSION`). |
 
-`bench/report.py` writes, per source and split, one row per class: spans, full, partial, missed, recall (full), and per
-family the false positives and precision. Aggregate F1 is a secondary line. A comparison of two scanners or two
-commits is read per class first: a gain in one class and a loss in another must both be visible.
+## The report
 
-### Limitations that a reader must know
+`bench/report.py` writes, per source and split, one table per family (spans, full, partial, missed, recall strict and
+lenient, char recall, false positives, precision, F1, too wide, false positives per 1,000 negative cases, median time)
+and one table per class (full / partial / missed per scanner). A comparison is read per class first: a gain in one
+class and a loss in another must both be visible. Aggregate F1 is a secondary number.
 
-- The public datasets are synthetic and mostly English. Their labels are not always ours: Nemotron labels some policy
-  and loan numbers as bank accounts, and documentation example passwords as passwords.
-- Names and addresses are most of the missed spans (Nemotron 116,000 names). maisecrets has no named-entity model; its
-  recall there is a known limit, not a measurement error.
-- maisecrets runs in the tool channel on every case; a typed prompt is a different channel with stricter rules.
+## Limitations
+
+- The datasets are synthetic and mostly English. Their labels are not always ours: Nemotron labels some policy and
+  loan numbers as bank accounts, and documentation example passwords as passwords.
+- Privy's label names are Presidio's entity types, and its test split has no e-mail, phone, IP, IBAN or SSN labels.
+  Its classes are names, national ids, passwords, cards and bank numbers; a comparison with Presidio on Privy may
+  favour Presidio's taxonomy.
+- Names and addresses are most of the missed spans. maisecrets has no named-entity model; Presidio has one.
+- maisecrets runs in the tool channel on every case; a typed prompt is a stricter channel.
 - PIILO is small (1,496 spans). A rate under 30 spans is not printed.
 
 ## Holdout V2
 
 1. **The templates are written before any case is generated, and not from maisecrets' misses.** Their source is a
-   list of real-world formats per class (public format specifications, issuer ranges, documented label words), written
-   down and committed first. Nobody who wrote the templates looks at a list of maisecrets misses for them.
+   list of real-world formats per class (public format specifications, issuer ranges, documented label words),
+   committed first. Nobody who writes the templates looks at a list of maisecrets misses for them.
 2. A seeded generator writes the cases into a private directory. The manifest (`bench/holdout.manifest`: number of
    cases, sha256 of each file) is committed before the first run.
-3. The holdout runs only on a release candidate. Each run writes one line to `bench/HOLDOUT-LOG.md`, with totals only.
-4. No rule is changed because of a holdout result. A set that was read for tuning becomes `dev`, and the log says so.
-5. The V1 holdout (80 cases) gets its last run on the next release candidate and then becomes `val`.
+3. The holdout runs only on a release candidate. Each run writes one line to `bench/HOLDOUT-LOG.md`, totals only.
+4. No rule is changed because of a holdout result. **Whoever sees the totals of a holdout run does not derive a new
+   case form or a new rule from them.** A set that was read for tuning becomes development data, and the log says so.
 
-## Open decisions before the freeze
+## Decisions taken at the freeze (2026-10-20)
 
-1. **The public holdout split of the rule round of 2026-10-19.** The analyses of that round ran on `--split all` and
-   read the cases of the public holdout split too (shapes, context words, table headers of missed spans). By V1 rule 6
-   that split is no longer a test. Options: (a) count the public holdout split as `dev` from now on and take the honest
-   number only from the private Holdout V2; (b) a new salt for the split rule, which does not help, since every record
-   was read. The draft proposes (a).
-2. **More sources.** A public set that nobody has read for tuning would give a second independent number besides the
-   private holdout. Which set, and who checks that it was not read?
-3. **Which foreign scanners** take part in V2 (V1: detect-secrets, secret-scan, pii-anon, preserve) and whether
-   Presidio itself runs as a scanner.
+1. The public holdout split of the four read datasets is development data (no new salt).
+2. Privy is the second independent number, chosen and mapped before any result.
+3. The scanners are the four of V1 and Presidio.
