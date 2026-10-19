@@ -1,6 +1,8 @@
 """Benchmark V1 (docs/BENCHMARK-V1.md): the case format, the marks of the bank and the span metric."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sys
@@ -273,6 +275,28 @@ class RoundFourTests(unittest.TestCase):
             self.assertRegex(run._commit(), r"^[0-9a-f]{40}$")     # GIT_DIR of a caller is ignored
         with mock.patch.object(run, "ROOT", Path(tempfile.mkdtemp())), self.assertRaises(SystemExit):
             run._commit()
+
+    def test_allow_dirty_never_lets_an_unknown_state_through(self):
+        sys.path.insert(0, str(ROOT / "bench"))
+        import report
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d, "r.json")
+            base = {"bench_commit": "a" * 40, "source": "bank", "split": "dev", "cases": 0, "metrics": {}}
+            for extra, want in (({"bench_dirty": None, "scanner": {"scanner": "x", "scope": []}}, 2),
+                                ({"bench_dirty": False, "scanner": {"scanner": "x", "scope": [], "dirty": None}}, 2),
+                                ({"bench_dirty": True, "scanner": {"scanner": "x", "scope": []}}, 0)):
+                p.write_text(json.dumps({**base, **extra}), encoding="utf-8")
+                with self.subTest(extra=extra), contextlib.redirect_stdout(io.StringIO()), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(report.main(["--allow-dirty", str(p)]), want)
+
+    def test_a_maisecrets_copy_without_git_has_an_unknown_state(self):
+        from bench.adapters import maisecrets
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, ".claude-plugin").mkdir()
+            Path(d, ".claude-plugin", "plugin.json").write_text('{"version": "0.0.1"}', encoding="utf-8")
+            desc = maisecrets.describe(Path(d), "de")
+        self.assertEqual((desc["commit"], desc["dirty"]), (None, None))
 
     def test_a_result_without_a_commit_or_a_dirty_flag_is_refused(self):
         sys.path.insert(0, str(ROOT / "bench"))

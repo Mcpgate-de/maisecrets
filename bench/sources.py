@@ -83,11 +83,12 @@ CATALOGS = {
 def _catalog_state(root: Path) -> tuple:
     import subprocess
     env = {k: v for k, v in __import__("os").environ.items() if not k.startswith("GIT_")}
-    head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True,
-                          env=env).stdout.strip()
-    dirty = subprocess.run(["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True,
-                           env=env).stdout.strip()
-    return head, bool(dirty)
+    head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, env=env)
+    status = subprocess.run(["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True,
+                            env=env)
+    if head.returncode or status.returncode:
+        raise SystemExit(f"catalog {root.name}: git cannot read its commit or its state")
+    return head.stdout.strip(), bool(status.stdout.strip())
 
 
 def catalog_cases(catalogs: Path, max_examples: int = 6):

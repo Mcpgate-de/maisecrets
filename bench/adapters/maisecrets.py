@@ -29,19 +29,24 @@ def cls_of(placeholder_type: str) -> str:
     return "pii.national_id"
 
 
-def _git(root: Path, *args) -> str:
+def _git(root: Path, *args):
+    """git in the checkout, without the GIT_* of a caller; None when git cannot answer (no repository, no git)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
-        return subprocess.run(["git", "-C", str(root), "-c", "core.fsmonitor=false", *args], capture_output=True,
-                              text=True, env=env, timeout=30).stdout.strip()
+        p = subprocess.run(["git", "-C", str(root), "-c", "core.fsmonitor=false", *args], capture_output=True,
+                           text=True, env=env, timeout=30)
     except (OSError, subprocess.SubprocessError):
-        return ""
+        return None
+    return p.stdout.strip() if p.returncode == 0 else None
 
 
 def describe(root: Path, regions: str) -> dict:
     manifest = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    return {"scanner": NAME, "version": manifest.get("version"), "commit": _git(root, "rev-parse", "HEAD") or None,
-            "dirty": bool(_git(root, "status", "--porcelain", "--untracked-files=no")),
+    commit = _git(root, "rev-parse", "HEAD")
+    status = _git(root, "status", "--porcelain", "--untracked-files=no") if commit else None
+    # dirty is None when the state is unknown (a copy without git): the report refuses it like a modified tree
+    return {"scanner": NAME, "version": manifest.get("version"), "commit": commit,
+            "dirty": None if status is None else bool(status),
             "configuration": {"regions": ["generic"] + regions.split(","), "sources": "none", "references": "none",
                               "host": "fixed user, year 2026"},
             "detectors": "all built-in rules", "network": False, "dependencies": "Python standard library",
