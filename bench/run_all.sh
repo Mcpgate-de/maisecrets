@@ -31,7 +31,7 @@ for s in $scanners; do
     run --scanner "$s" --source bank --split "$split" --out "$out/bank-$split-$s.json"
   done
   # every scanner on every dataset: its scope decides what counts (Gretel and Nemotron also label passwords and keys)
-  for d in nemotron gretel mendeley piilo; do
+  for d in nemotron gretel mendeley piilo privy; do
     run --scanner "$s" --source "$d" --split all --every "$every" --out "$out/$d-all-every$every-$s.json"
     if [ "$s" = maisecrets ]; then run --scanner "$s" --source "$d" --split all --out "$out/$d-all-$s.json"; fi
   done
