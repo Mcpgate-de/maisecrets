@@ -1988,6 +1988,13 @@ PRESIDIO_EXTRA_CONTEXT = {
 # 3,447, but lost 681 card and 251 account numbers that only this rule found (Mendeley, Nemotron), so only the date
 # goes (docs/BENCHMARKS.md, "Rule changes measured with Benchmark V1")
 PRESIDIO_NO_DATE = frozenset({"us-bank"})
+# The label of a us-bank number stands before it, on its own line, within 60 characters ("the account number associated
+# with this loan is ..."). Presidio's window (80 before, 40 after, across lines) also took a bare number whose line
+# named no account: Benchmark V1, Gretel, 1,920 of its false alarms (5,607 to 3,687). It costs 73 of 9,051 account
+# numbers in Nemotron, mostly table rows whose label is the header line above. 30 characters lost 251 there; across
+# lines took 948 false alarms back for 25. It needs the card fix: before it, 681 Mendeley card numbers were found only
+# by this rule (docs/BENCHMARKS.md, "Rule changes measured with Benchmark V1")
+PRESIDIO_LABEL_BEFORE = {"us-bank": 60}
 # Presidio tags every US/UK/IN/AU/… recognizer as language "en", so language is the wrong
 # switch: an Indian PAN rule produced 290 false positives in one German transcript. The
 # switch is the REGION, derived from the recognizer id; "generic" is always on.
@@ -4175,6 +4182,11 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                     continue
                 if rule.id in PRESIDIO_NO_DATE and _yyyymmdd(secret):
                     continue
+                label_window = PRESIDIO_LABEL_BEFORE.get(rule.id)
+                if label_window:
+                    line_start = text.rfind("\n", 0, start) + 1
+                    if not _has_context_word(_lower(text[max(line_start, start - label_window):start]), rule.context):
+                        continue
             if _allowed(rule, text, m, secret):
                 continue
             # a reference is never a hit, alone or inside a larger span such as the user:pass of a curl command
