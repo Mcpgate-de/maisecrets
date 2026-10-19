@@ -1985,8 +1985,9 @@ PRESIDIO_EXTRA_CONTEXT = {
 }
 # A bare run of 8 to 17 digits with "account" or "bank" nearby (us-bank) also takes the dates of a finance document,
 # written YYYYMMDD: Benchmark V1, Gretel, 1,435 of its false alarms. A window of 30 characters before the number took
-# 3,447, but lost 681 card and 251 account numbers that only this rule found (Mendeley, Nemotron), so only the date
-# goes (docs/BENCHMARKS.md, "Rule changes measured with Benchmark V1")
+# 3,447, but lost 681 card and 251 account numbers that only this rule found (Mendeley, Nemotron), so first only the
+# date went; the label window below came after the card fix (docs/BENCHMARKS.md, "Rule changes measured with
+# Benchmark V1")
 PRESIDIO_NO_DATE = frozenset({"us-bank"})
 # The label of a us-bank number stands before it, on its own line, within 60 characters ("the account number associated
 # with this loan is ..."). Presidio's window (80 before, 40 after, across lines) also took a bare number whose line

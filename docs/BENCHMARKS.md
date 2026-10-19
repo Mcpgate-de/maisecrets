@@ -102,6 +102,31 @@ credits), so the last reading is the author's own probes.
   Mendeley, PIILO, catalogs, bank val unchanged; holdout unchanged before the birth date change (84 of 96, 0 false
   positives; not run after it, see "Splits"); false-alarm bank +0; recorded test inputs unchanged.
 
+### Mastercard of the 2-series, 15-digit JCB, and the label window of `us-bank`, 2026-10-19
+
+- **Gap seen:** the label window of A above lost 681 Mendeley card numbers. All 681 pass Luhn and start with 2:
+  388 Mastercard numbers of the 2-series (2221 to 2720, 16 digits) and 293 JCB numbers of 15 digits (2131).
+- **Cause:** Presidio's card pattern takes the first digits 1, 3, 4, 5 and 6, so these numbers never reached the Luhn
+  check. Only `us-bank` covered them, by chance.
+- **Fix 1, cards:** the first group of the card pattern takes both ranges (`PRESIDIO_CARD_FIRST`, applied only to the
+  upstream text it expects), and the issuer table knows the 15-digit JCB.
+- **Fix 2, `us-bank`:** the label must stand before the number on its own line, within 60 characters
+  (`PRESIDIO_LABEL_BEFORE`). Presidio's window is 80 characters before and 40 after, across lines. 30 characters lost
+  251 Nemotron account numbers ("the account number associated with this loan is ..."); across lines took 948 false
+  alarms back for 25 numbers.
+
+| Measure | Before (`next`, 31e1676e) | Fix 1: cards | Fix 1 and 2 |
+|---|---|---|---|
+| Mendeley: full spans, F1 | 123,987, 0.6477 | 127,725, 0.6608 (cards 31,687 → 35,425) | 128,890, 0.6648 (phone +1,165) |
+| Gretel: false positives, precision, F1 | 5,606, 0.852, 0.3471 | 5,607, 0.853, 0.3477 (cards 238 → 305) | 3,687, 0.898, 0.3509 |
+| Gretel: full spans lost by fix 2 | – | – | account −6, card −6, id −10, name −19, phone −3, birth date −1 |
+| Nemotron: account numbers found whole, F1 | 9,051, 0.6538 | 9,051, 0.6538 | 8,978, 0.6537 |
+| Nemotron: false positives | 913 | 913 | 873 |
+| PIILO: full spans, false positives | 127, 5 | 127, 5 | 125, 4 |
+| Bank dev, bank val | 87 / 0, 36 / 0 | no change | no change |
+| False-alarm bank, seven trees (`compare`) | – | +2 (card test values of a card scanner's tests) | +0 against fix 1 |
+| Recorded test inputs (`scripts/detection_fingerprint.py` calls, 21,656) | – | – | 0 changed |
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
