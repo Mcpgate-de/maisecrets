@@ -43,7 +43,8 @@ def _git(root: Path, *args):
 def describe(root: Path, regions: str) -> dict:
     manifest = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     commit = _git(root, "rev-parse", "HEAD")
-    status = _git(root, "status", "--porcelain", "--untracked-files=no") if commit else None
+    # untracked files count: the worker imports from this checkout (ignored files such as __pycache__ do not)
+    status = _git(root, "status", "--porcelain", "--untracked-files=all") if commit else None
     # dirty is None when the state is unknown (a copy without git): the report refuses it like a modified tree
     return {"scanner": NAME, "version": manifest.get("version"), "commit": commit,
             "dirty": None if status is None else bool(status),

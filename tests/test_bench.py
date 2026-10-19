@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -298,6 +299,19 @@ class RoundFourTests(unittest.TestCase):
             Path(d, ".claude-plugin", "plugin.json").write_text('{"version": "0.0.1"}', encoding="utf-8")
             desc = maisecrets.describe(Path(d), "de")
         self.assertEqual((desc["commit"], desc["dirty"]), (None, None))
+
+    def test_an_untracked_file_in_the_maisecrets_checkout_makes_it_dirty(self):
+        from bench.adapters import maisecrets
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, ".claude-plugin").mkdir()
+            Path(d, ".claude-plugin", "plugin.json").write_text('{"version": "0.0.1"}', encoding="utf-8")
+            for cmd in (["init", "-q"], ["add", "."], ["-c", "user.name=t", "-c", "user.email=t@example.com",
+                                                        "commit", "-q", "-m", "x"]):
+                subprocess.run(["git", "-C", d, *cmd], check=True, env=env, capture_output=True)
+            self.assertIs(maisecrets.describe(Path(d), "de")["dirty"], False)
+            Path(d, "maisecrets.py").write_text("x = 1\n", encoding="utf-8")
+            self.assertIs(maisecrets.describe(Path(d), "de")["dirty"], True)
 
     def test_a_result_without_a_commit_or_a_dirty_flag_is_refused(self):
         sys.path.insert(0, str(ROOT / "bench"))
