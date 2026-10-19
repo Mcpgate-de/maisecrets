@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## [0.6.40] - 2026-10-19
+
+### Features
+
+- /maisecrets:status says whether Codex runs the maisecrets hooks of the installed version (b2df799)
+
+### Fixes
+
+- Codex users keep the hook trust they gave: apply_patch gets a PreToolUse group of its own (7cc1874)
+- Codex 0.164 no longer switches the maisecrets hooks off after their first start on Windows (4d5d9f5)
+- Codex apply_patch reaches the guard by its own name, also where a Codex build maps no alias (833ed2d)
+- a birth date written YYYYMMDD after its label is masked (31e1676)
+- an 8-digit date (YYYYMMDD) in a finance document is no US bank account number (af36b94)
+- masks a user name after a username label, and a German tax id under a steuer_id key, in tool results (604d896)
+
 ## [0.6.39] - 2026-10-19
 
 ### Fixes
