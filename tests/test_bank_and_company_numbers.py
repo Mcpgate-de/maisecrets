@@ -137,5 +137,30 @@ class GermanCompanyNumberTests(unittest.TestCase):
                 self.assertEqual(both(text), [])
 
 
+class UsBankLabelWindowTests(unittest.TestCase):
+    """A us-bank number (8 to 17 digits) is a hit when its label stands before it on its own line, within 60
+    characters (core.PRESIDIO_LABEL_BEFORE). Benchmark V1: Gretel lost 1,920 false alarms, Nemotron 73 of 9,051
+    account numbers."""
+    NUMBER = "".join(["4071", "8653", "29"])               # 10 digits, no date and no card shape
+
+    def us(self, text: str) -> set:
+        active = regions.Active(regions=("generic", "us"), languages=("en",), source="test")
+        with detect.Detector(regions=active).activate():
+            return {m.kind for m in detect.scan(text, channel="tool")}
+
+    def test_a_label_within_60_characters_before_the_number_is_a_hit(self):
+        for text in ("account number: " + self.NUMBER,
+                     "The account number associated with this agreement is " + self.NUMBER + "."):
+            with self.subTest(text=text[:30]):
+                self.assertIn("us-bank", self.us(text))
+
+    def test_a_number_whose_line_names_no_account_is_no_hit(self):
+        for text in ("order " + self.NUMBER + " shipped, see the bank holiday notice",
+                     "The account was opened in March.\nreference " + self.NUMBER,
+                     "account " + "x" * 70 + " " + self.NUMBER):
+            with self.subTest(text=text[:30]):
+                self.assertNotIn("us-bank", self.us(text))
+
+
 if __name__ == "__main__":
     unittest.main()
