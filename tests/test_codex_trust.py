@@ -22,6 +22,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from maisecrets import codex_trust
 
@@ -103,6 +104,16 @@ class CodexTrustTests(unittest.TestCase):
         if os.name != "nt":          # Codex hashes the relative path as the OS spells it: measured on macOS only
             self.assertEqual(codex_trust.content_hash(root), FIXTURE_CONTENTS)
 
+    def test_a_python_without_tomllib_says_unknown(self):
+        # runs on every Python: the 3.9 and 3.10 the plugin supports have no tomllib
+        home = Path(tempfile.mkdtemp(prefix="maisecrets-codex-home-"))
+        self.addCleanup(shutil.rmtree, home, True)
+        root = home / "plugins" / "cache" / "fxm" / "fx" / "1.0.0"
+        write_fixture(root)
+        with mock.patch.object(codex_trust, "_load_toml", return_value=None):
+            self.assertEqual(codex_trust.status_lines(root, home),
+                             ["codex hooks: unknown (needs Python 3.11 or newer to read Codex's config.toml)"])
+
 
 class CodexTrustStatusTests(unittest.TestCase):
     """/maisecrets:status reads Codex's config.toml and says whether Codex runs the hooks of this folder."""
@@ -111,7 +122,7 @@ class CodexTrustStatusTests(unittest.TestCase):
         try:
             import tomllib  # noqa: F401
         except ImportError:
-            self.skipTest("reading config.toml needs tomllib (Python 3.11 or newer)")
+            self.skipTest("tomllib is Python 3.11+")
         self.home = Path(tempfile.mkdtemp(prefix="maisecrets-codex-home-"))
         self.addCleanup(shutil.rmtree, self.home, True)
         self.root = self.home / "plugins" / "cache" / "fxm" / "fx" / "1.0.0"
