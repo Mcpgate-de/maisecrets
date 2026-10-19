@@ -1,5 +1,5 @@
 # The upstream rule each correction in maisecrets/detection/core.py (BETTERLEAKS_PATCHES) was written against: the
-# sha256 of the rule as canonical JSON (maisecrets/detection/registry.py, canonical_sha256), then <source>:<rule id>.
+# sha256 of the rule as canonical JSON (maisecrets/detection/rulespec.py, canonical_sha256), then <source>:<rule id>.
 # After a sync that changes such a rule, tests/test_registry.py goes red: check the correction against the new rule.
 35c0bc63529a91019981e4e38667dc8270d63dbb5daac04653572933ee334bd2  betterleaks:resend-api-key.1
 025c586b57e343dbf024141c94a3425add779df4d5958304ee412044c42e00fb  betterleaks:ionic-personal-access-token

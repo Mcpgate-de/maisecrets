@@ -55,16 +55,45 @@ def private_uses(source: str) -> list[tuple[int, str]]:
     ordinary use, not against one that hides."""
     tree = ast.parse(source)
     names = {"detect"}
-    packages: set = set()   # names bound to the package maisecrets.detection, whose `.core` is the core
+    packages: set = (
+        set()
+    )  # names bound to the package maisecrets.detection, whose `.core` is the core
+
+    def ours(node, sub: str) -> bool:
+        """An import from maisecrets.<sub>: absolute, or relative inside the plugin (`from .<sub>`, `from . import`)."""
+        module = node.module or ""
+        return module == ("maisecrets." + sub).rstrip(".") or (
+            node.level >= 1 and module == sub
+        )
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            names |= {a.asname for a in node.names if a.asname and (
-                a.name.split(".")[-1] == "detect" or a.name.endswith("detection.core"))}
-            packages |= {a.asname for a in node.names if a.asname and a.name.endswith("detection")}
+            names |= {
+                a.asname
+                for a in node.names
+                if a.asname
+                and a.name in ("maisecrets.detect", "maisecrets.detection.core")
+            }
+            packages |= {
+                a.asname
+                for a in node.names
+                if a.asname and a.name == "maisecrets.detection"
+            }
         elif isinstance(node, ast.ImportFrom):
-            names |= {a.asname or a.name for a in node.names if a.name == "detect" or (
-                a.name == "core" and (node.module or "").split(".")[-1] == "detection")}
-            packages |= {a.asname or a.name for a in node.names if a.name == "detection"}
+            names |= {
+                a.asname or a.name
+                for a in node.names
+                if (a.name == "detect" and ours(node, ""))
+                or (a.name == "core" and ours(node, "detection"))
+            }
+            packages |= {
+                a.asname or a.name
+                for a in node.names
+                if a.name == "detection" and ours(node, "")
+            }
+    names -= (
+        packages  # one name, one identity: a package alias named detect is the package
+    )
 
     def is_package(e) -> bool:
         return (isinstance(e, ast.Name) and e.id in packages) or (
@@ -79,10 +108,18 @@ def private_uses(source: str) -> list[tuple[int, str]]:
 
     for _ in range(3):   # d = detect, then e = d (also p = detection, then c = p.core)
         for node in ast.walk(tree):
-            if isinstance(node, (ast.Assign, ast.AnnAssign)) and (is_module(node.value) or is_package(node.value)):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                (names if is_module(node.value) else packages).update(
-                    t.id for t in targets if isinstance(t, ast.Name))
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                bound = {t.id for t in targets if isinstance(t, ast.Name)}
+                if is_package(
+                    node.value
+                ):  # the package first: its name may also be `detect`
+                    packages |= bound
+                    names -= bound
+                elif is_module(node.value):
+                    names |= bound
     out = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and node.attr.startswith("_") and is_module(node.value):
@@ -91,8 +128,9 @@ def private_uses(source: str) -> list[tuple[int, str]]:
                 and len(node.args) >= 2 and is_module(node.args[0]) and isinstance(node.args[1], ast.Constant) \
                 and str(node.args[1].value).startswith("_"):
             out.append((node.lineno, node.args[1].value))
-        elif isinstance(node, ast.ImportFrom) and ((node.module or "").split(".")[-1] == "detect"
-                                                   or (node.module or "").endswith("detection.core")):
+        elif isinstance(node, ast.ImportFrom) and (
+            ours(node, "detect") or ours(node, "detection.core")
+        ):
             out += [(node.lineno, a.name) for a in node.names if a.name.startswith("_")]
         elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith(
                 ("detect._", "maisecrets.detect._", "detection.core._", "maisecrets.detection.core._")):
@@ -140,14 +178,55 @@ class DetectionBoundaryTests(unittest.TestCase):
         self.assertEqual(private_uses('def f() -> "detection.core._Lazy":\n    pass\n'), [(1, "detection.core._Lazy")])
         self.assertEqual(private_uses("from .other import core\ncore._x\n"), [], "another package's core")
         # the core through a name of the package (Gate A after the merge of !122)
-        self.assertEqual(private_uses("from maisecrets import detection\ndetection.core._det()\n"), [(2, "_det")])
-        self.assertEqual(private_uses("import maisecrets.detection as d\nd.core._det()\n"), [(2, "_det")])
-        self.assertEqual(private_uses("from . import detection as p\nq = p\nc = q.core\nc._ranked(1)\n"),
-                         [(4, "_ranked")])
-        self.assertEqual(private_uses("import maisecrets.detection\nmaisecrets.detection.core._scan('x')\n"),
-                         [(2, "_scan")])
-        self.assertEqual(private_uses("from maisecrets import detection\ndetection.Detector()\n"), [],
-                         "a public name of the package")
+        self.assertEqual(
+            private_uses("from maisecrets import detection\ndetection.core._det()\n"),
+            [(2, "_det")],
+        )
+        self.assertEqual(
+            private_uses("import maisecrets.detection as d\nd.core._det()\n"),
+            [(2, "_det")],
+        )
+        self.assertEqual(
+            private_uses(
+                "from . import detection as p\nq = p\nc = q.core\nc._ranked(1)\n"
+            ),
+            [(4, "_ranked")],
+        )
+        self.assertEqual(
+            private_uses(
+                "import maisecrets.detection\nmaisecrets.detection.core._scan('x')\n"
+            ),
+            [(2, "_scan")],
+        )
+        self.assertEqual(
+            private_uses("from maisecrets import detection\ndetection.Detector()\n"),
+            [],
+            "a public name of the package",
+        )
+        self.assertEqual(
+            private_uses(
+                "from maisecrets import detection as detect\np = detect\np.core._det()\n"
+            ),
+            [(3, "_det")],
+            "a package alias named detect stays the package (Gate A round 2)",
+        )
+        self.assertEqual(
+            private_uses("from other import detection\ndetection.core._det()\n"),
+            [],
+            "the detection package of another project",
+        )
+        self.assertEqual(
+            private_uses("import other.detection as d\nd.core._det()\n"), []
+        )
+        self.assertEqual(
+            private_uses("from other.detection import core\ncore._det()\n"), []
+        )
+        self.assertEqual(private_uses("from other.detection.core import _det\n"), [])
+        self.assertEqual(
+            private_uses("from ..detect import _det\n"),
+            [(1, "_det")],
+            "from a subpackage of the plugin",
+        )
 
     def test_no_module_outside_the_core_uses_a_private_name_of_detect(self):
         files = outside_the_core()
