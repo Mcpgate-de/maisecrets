@@ -1,0 +1,78 @@
+"""The maisecrets adapter: scans a checkout (--maisecrets DIR) in a new process with a fresh temp home."""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+NAME = "maisecrets"
+SCOPE = ("secret.", "pii.")
+WORKER = Path(__file__).with_name("maisecrets_worker.py")
+_HOME_VAR = "MAISECRETS" + "_HOME"
+_PII = {"EMAIL": "pii.email", "PHONE": "pii.phone", "IBAN": "pii.iban", "CARD": "pii.card", "IP": "pii.ip",
+        "NAME": "pii.name", "ADDRESS": "pii.address", "BIRTH_DATE": "pii.birth_date", "USERNAME": "pii.username"}
+
+
+def cls_of(placeholder_type: str) -> str:
+    if placeholder_type == "SECRET":
+        return "secret"
+    if placeholder_type in _PII:
+        return _PII[placeholder_type]
+    if placeholder_type.endswith(("_TAX_ID", "_UID")):
+        return "pii.tax_id"
+    return "pii.national_id"
+
+
+def _git(root: Path, *args) -> str:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        return subprocess.run(["git", "-C", str(root), "-c", "core.fsmonitor=false", *args], capture_output=True,
+                              text=True, env=env, timeout=30).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def describe(root: Path, regions: str) -> dict:
+    manifest = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    return {"scanner": NAME, "version": manifest.get("version"), "commit": _git(root, "rev-parse", "HEAD") or None,
+            "dirty": bool(_git(root, "status", "--porcelain", "--untracked-files=no")),
+            "configuration": {"regions": ["generic"] + regions.split(","), "sources": "none", "references": "none",
+                              "host": "fixed user, year 2026"},
+            "detectors": "all built-in rules", "network": False, "dependencies": "Python standard library",
+            "scope": list(SCOPE)}
+
+
+def _clean_env(home: str) -> dict:
+    keep = ("PATH", "LANG", "LC_ALL", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP")
+    env = {k: v for k, v in os.environ.items() if k in keep}
+    env[_HOME_VAR] = home
+    env["HOME"] = home
+    return env
+
+
+def scan(cases, root: Path, regions: str = "de,us", python: str = sys.executable):
+    """One list of (start, end, cls, rule) per case, and the timing of the worker."""
+    tmp = tempfile.mkdtemp(prefix="bench-ms-")
+    try:
+        home = os.path.join(tmp, "home")
+        os.mkdir(home)
+        Path(home, "config.json").write_text('{"backend": "jsonfile", "allow_plaintext_store": true}',
+                                             encoding="utf-8")
+        inp, out = os.path.join(tmp, "in.jsonl"), os.path.join(tmp, "out.jsonl")
+        with open(inp, "w", encoding="utf-8") as f:
+            for c in cases:
+                f.write(json.dumps({"text": c["text"], "channel": c["channel"], "path": c.get("path")}) + "\n")
+        p = subprocess.run([python, "-I", str(WORKER), "--root", str(root), "--regions", regions, inp, out],
+                           capture_output=True, text=True, env=_clean_env(home), cwd=tmp)
+        if p.returncode:
+            raise RuntimeError(f"maisecrets worker failed: {p.stderr[-2000:]}")
+        timing = json.loads(p.stdout)
+        with open(out, encoding="utf-8") as f:
+            found = [[(s, e, cls_of(t), k) for s, e, t, k in json.loads(line)] for line in f]
+        return found, timing
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
