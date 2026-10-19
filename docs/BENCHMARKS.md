@@ -166,6 +166,25 @@ baseline after the account changes, as the review asked.
 | Nemotron, PIILO, bank dev and val | – | no change |
 | False-alarm bank, seven trees (`compare`) | – | +0 |
 
+### A password with a sign after the password word, in a tool result, 2026-10-19
+
+- **Gap seen:** Nemotron, 4,500 passwords missed. 1,440 stood after "use the password", "a password such as",
+  "and password" and the like, with a letter, a digit and a sign (`Word@2024`, `Word99!`).
+- **Cause:** after the password word and only a space, `label-password-after-space` takes no value that reads like
+  English words (`_wordlike`), to keep "password iPhone15" and "Passwort SHA256-Hash" as prose; `Word@2024` reads like
+  a word.
+- **Fix:** the tool-channel form `secret-password-with-sign` (`maisecrets/detection/personal.py`): a value after the
+  password word and a space or a short connector (`such as`, `like`, `e.g.`, `for example`, `of`, `set to`, `to`)
+  that holds a letter, a digit and one of `@ # $ ! % & * ?`. An e-mail address and a variable (`$NAME`, `%NAME%`) stay
+  text; a `!` or `?` at the end stays part of the value. A typed prompt is never blocked by it.
+
+| Measure | Before (`next`, 161e2a62) | This change and the card run above |
+|---|---|---|
+| Nemotron: passwords whole, false positives, F1 | 2,485, 893, 0.6596 | 3,918, 893, 0.6634 |
+| Gretel: passwords whole, false positives, F1 | 152, 3,716, 0.3509 | 168, 3,730, 0.3523 (cards +132) |
+| Mendeley, PIILO, bank dev and val, secret catalogs (11,902 examples) | – | no change except Mendeley cards +119 |
+| False-alarm bank, seven trees (`compare`) | – | +0 |
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
