@@ -152,6 +152,20 @@ credits), so the last reading is the author's own probes.
 The table rule brings back 408 account numbers, more than the 73 that the label window lost: it was written from the
 column names, not from those cases. Its negative cases are in `tests/test_bank_and_company_numbers.py`.
 
+### A card number written as one run of digits, 2026-10-19
+
+The review of 0.6.24 kept a card number without a card word only when it is written in groups: a float, a timestamp
+and an IMEI pass Luhn as often as a card does. With the issuer table (the prefix and the length of a card network),
+the checks for a decimal, a longer run and an id label before it, a run of digits is safe enough: re-measured on the
+baseline after the account changes, as the review asked.
+
+| Measure | Before (`next`, 161e2a62) | One run of digits |
+|---|---|---|
+| Gretel: card numbers whole, false positives, F1 | 299, 3,716, 0.3509 | 431, 3,730, 0.3522 |
+| Mendeley: card numbers whole, F1 | 35,425, 0.6648 | 35,544, 0.6652 |
+| Nemotron, PIILO, bank dev and val | – | no change |
+| False-alarm bank, seven trees (`compare`) | – | +0 |
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
