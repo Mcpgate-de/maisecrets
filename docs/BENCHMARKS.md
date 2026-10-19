@@ -76,6 +76,29 @@ dictionary word (`porter2026`) stays unmasked; an `example:` key more than 40 li
 Review: codex Gate A (gpt-5.6-sol) rounds 1 to 3, each finding fixed; round 4 could not run (the workspace had no
 credits), so the last reading is the author's own probes.
 
+### An 8-digit date is no US bank account number, 2026-10-19
+
+- **Gap seen:** Gretel, dev split, maisecrets with `us`: 2,730 of 4,148 false alarms came from `us-bank` (Presidio's
+  `\b[0-9]{8,17}\b` with `account`, `bank`, `debit` … anywhere in 120 characters). In English text: 1,935 false alarms
+  against 145 account numbers. The most frequent lengths were 8 and 10 digits.
+- **Two fixes measured:** (A) the context word in the 30 characters before the number on its line, and no 8-digit
+  date; (B) no 8-digit date only. Against the user-name change above, same cases:
+
+| Measure | Before | A: label window and date | B: date only (merged) |
+|---|---|---|---|
+| Gretel: false positives, precision | 7,040, 0.821 | 3,593, 0.900 | 5,605, 0.852 |
+| Gretel: full spans | 28,901 | 28,843 (bank −11, card −11, id −11, name −19) | 28,900 (birth date −1) |
+| Nemotron: account numbers found whole | 9,051 of 12,503 | 8,800 | 9,051 |
+| Mendeley: card numbers found whole | 31,687 of 39,060 | 31,006 | 31,687 |
+| Nemotron, Mendeley: false positives | 919, 24 | 861, 24 | 913, 24 |
+
+  A takes real card and account numbers that only `us-bank` finds today (no card word near them), so B is the change.
+  The next step is a card rule that finds those numbers; then the window of A costs no card.
+- **All sources, both changes of this section against 0.6.39:** bank dev 81 → 87 full, 0 false positives; Nemotron
+  166,039 → 168,846 full, 910 → 913 false positives; Gretel 28,820 → 28,900 full, 7,016 → 5,605 false positives;
+  Mendeley, PIILO, catalogs, bank val unchanged; holdout unchanged (84 of 96, 0 false positives); false-alarm bank +0;
+  recorded test inputs unchanged.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
