@@ -311,6 +311,8 @@ FORMS_NO_HIT = [
     ("csv of versions", "produkt;sv_nummer\nZorvik;812345\nOrvex;923456\n"),
     ("username camelcase attribute", "username: authn.userPrincipalName"),
     ("bank statement date", "Account summary for the checking account: statement date 20231015, value date 20231017"),
+    ("compact date of birth field that is no date", "date of birth: 20231399 (invalid test input)"),
+    ("compact birth date in the future", "birth_date: 20991231 is rejected by the form"),
     ("username deep yaml example", "example:\n  account:\n    username: octavia77"),
     ("username json examples list", '{"examples": [{"username": "octavia77"}]}'),
 ]
@@ -325,6 +327,7 @@ FORMS_HIT = [
     ("username with an umlaut", "Benutzername: " + "jö" + "rg_k", ["jö" + "rg_k"]),
     ("username short with digits", "username: " + "js" + "42", ["js" + "42"]),
     ("us bank account number", "Checking account number: " + "4839" + "2017563", ["4839" + "2017563"]),
+    ("compact birth date after its label", "Customer: Canada\n  Date of Birth: " + "1984" + "0312", ["1984" + "0312"]),
     ("username of two dictionary words", "username: " + "hunter" + ".king42", ["hunter" + ".king42"]),
     ("username after an unrelated example key", "example: ignored\nusername: " + "lvo" + "gel2026", ["lvo" + "gel2026"]),
     ("username in json", '{"id": 4711, "username": "' + "lea" + ".vogel87" + '", "active": true}', ["lea" + ".vogel87"]),

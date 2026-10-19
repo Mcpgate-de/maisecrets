@@ -51,7 +51,7 @@ _BIRTH_RE = re.compile(r"(?i)(?:\bd\.?o\.?b\b|date of birth|birth[ _-]?date|\bbd
                        + r"|\bgeb(?:\.|oren am|urtsdatum)"
                        r"|n[ée]\(?e?\)? le|date de naissance|fecha de nacimiento|\bnac[ií](?:d[oa])? el"
                        r"|data de nascimento|data di nascita|\bnato il)[\"'\]]?\s{0,3}[:=]?\s{0,3}[\"'(]?\s{0,3}"
-                       r"(" + _DATE + r")(?!\d)")
+                       r"(" + _DATE + r"|(?:19|20)\d{6})(?!\d)")   # and YYYYMMDD after the label (Gretel, 2026-10-19)
 
 # --------------------------------------------------------------------------------- ID number after a label --
 # the labels of health, tax and national numbers: the number of a health plan's beneficiary, a medical record, a
@@ -1446,6 +1446,16 @@ def _placeholder_digits(v: str, dates: bool = False) -> bool:
     return len(set(d)) <= 1 or d in "01234567890" or d in "98765432109"
 
 
+def _compact_birth_date(v: str) -> bool:
+    """YYYYMMDD after a birth label: a real day of the calendar, in a year before this one."""
+    import datetime
+    try:
+        day = datetime.date(int(v[:4]), int(v[4:6]), int(v[6:]))
+    except ValueError:
+        return False
+    return day.year < _host().this_year()
+
+
 def _past_year(date: str) -> bool:
     """A birth date lies before this year: a date of this year or later is an event, a release, a deadline."""
     years = re.findall(r"(?<!\d)(\d{4})(?!\d)", date)
@@ -1489,6 +1499,9 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
     if "birth-date-after-label" in want and any(k in low for k in _BIRTH_WORDS):
         for m in _BIRTH_RE.finditer(text):
             if _placeholder_digits(m.group(1), dates=True) or not _past_year(m.group(1)):
+                continue
+            # YYYYMMDD: a real past day; after a vCard BDAY it stays with birth-date-vcard-compact (its rule id)
+            if m.group(1).isdigit() and (not _compact_birth_date(m.group(1)) or "bday" in m.group(0).lower()):
                 continue
             out.append((m.start(1), m.end(1), "birth-date-after-label", BIRTH_DATE))
     if "id-number-after-label" in want and any(k in low for k in _ID_WORDS):

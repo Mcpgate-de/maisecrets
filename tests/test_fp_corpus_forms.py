@@ -67,6 +67,7 @@ OWNER = {
     "username with an umlaut": "username-after-label", "username short with digits": "username-after-label",
     "username after an unrelated example key": "username-after-label",
     "username of two dictionary words": "username-after-label", "us bank account number": "us-bank",
+    "compact birth date after its label": "birth-date-after-label",
 }
 
 
