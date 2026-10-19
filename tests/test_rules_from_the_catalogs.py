@@ -461,6 +461,34 @@ class BetterleaksPatchTests(unittest.TestCase):
         tok = J(["wak", "a_"]) + _uuid(r)
         self.assertIn(("wakatime-api-key.2", "SECRET", tok), found(f"use {tok} here\n"))
 
+    def test_a_teams_webhook_is_masked_whole(self):
+        # the vendored regex had its ids as capturing groups, so the hit was one group, 17 of 204 characters (#11)
+        r = random.Random(42)
+
+        def guid():
+            return "-".join(rd(r, n, HEXL) for n in (8, 4, 4, 4, 12))
+        url = ("https://" + rd(r, 8, HEXL) + ".webhook.office.com/webhookb2/" + guid() + "@" + guid()
+               + "/IncomingWebhook/" + rd(r, 32, HEXL) + "/" + guid())
+        self.assertEqual(len(url), 205)
+        for text in (url, f"webhook: {url}\n", '{{"url": "{u}"}}'.format(u=url)):
+            with self.subTest(text=text[:10]):
+                self.assertIn(("microsoft-teams-webhook", "SECRET", url), found(text))
+        # a URL without the last id or on another host is no Teams webhook
+        for miss in (url[:url.rindex("/")], url.replace(".webhook.office.com/", ".webhook.example.com/")):
+            with self.subTest(miss=miss[-12:]):
+                self.assertNotIn("microsoft-teams-webhook", [k for k, _t, _v in found(f"see {miss} there")])
+        # codex Gate A of 0.6.39: hex in capitals, a further path part, a word glued before, one character too many
+        head, ids = url.split("/webhookb2/")
+        upper = head + "/webhookb2/" + ids.upper().replace("/INCOMINGWEBHOOK/", "/IncomingWebhook/")
+        longer = url + "/" + rd(r, 30, AN)
+        for want in (upper, longer):
+            with self.subTest(want=want[-6:]):
+                self.assertIn(("microsoft-teams-webhook", "SECRET", want), found(f"see {want} there"))
+        not_hex = head + "/webhookb2/" + ids.replace(ids[:8], "Z" * 8, 1)    # a capital that is no hex digit
+        for miss in ("x" + url, url + "a", url + "_", not_hex):
+            with self.subTest(miss=miss[-3:]):
+                self.assertNotIn("microsoft-teams-webhook", [k for k, _t, _v in found(f"see {miss} there")])
+
 
 # ------------------------------------------------------- forms of a session measurement --
 class SessionFormTests(unittest.TestCase):

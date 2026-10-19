@@ -1794,6 +1794,20 @@ BETTERLEAKS_PATCHES = {
     "resend-api-key.1": {"add_keywords": ("re_",)},
     "ionic-personal-access-token": {"add_keywords": ("ion_",)},
     "airtable-personnal-access-token": {"add_keywords": ("pat",)},
+    "microsoft-teams-webhook": {
+        "expect": r"https://[a-z0-9]+\.webhook\.office\.com/"
+                  r"webhookb2/[a-z0-9]{8}-([a-z0-9]{4}-){3}[a-z0-9]{12}@"
+                  r"[a-z0-9]{8}-([a-z0-9]{4}-){3}[a-z0-9]{12}/"
+                  r"IncomingWebhook/[a-z0-9]{32}/[a-z0-9]{8}-([a-z0-9]{4}-){3}[a-z0-9]{12}",
+        # the ids also in capital hex (the vendored [a-z0-9] stays, so no old hit is lost), a word boundary on both
+        # sides, and a further path part after the last id stays in the hit (codex Gate A of 0.6.39)
+        "regex": r"https(?:(?<![A-Za-z0-9]https)|(?<=\\[nrt]https))://[a-z0-9]+\.webhook\.office\.com/"
+                 r"webhookb2/[0-9a-zA-F]{8}-(?:[0-9a-zA-F]{4}-){3}[0-9a-zA-F]{12}@"
+                 r"[0-9a-zA-F]{8}-(?:[0-9a-zA-F]{4}-){3}[0-9a-zA-F]{12}/"
+                 r"IncomingWebhook/[0-9a-zA-F]{32}/[0-9a-zA-F]{8}-(?:[0-9a-zA-F]{4}-){3}[0-9a-zA-F]{12}"
+                 r"(?:/[0-9A-Za-z_-]{20,})?(?![0-9A-Za-z_-])",
+        "reason": "the ids were capturing groups, so a hit masked 17 of 204 characters; the whole URL is the "
+                  "credential (0.6.39, #11)"},
     "wakatime-api-key.2": {
         "expect": r"""(?i)\b(waka_[a-z0-9]{36,64})(?:\\?['"\x60]|[\s;]|\\[nr]|$)""",
         "regex": r"""(?i)\b(waka_(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-z0-9]{36,64}))"""
