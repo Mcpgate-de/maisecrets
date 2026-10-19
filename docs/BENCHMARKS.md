@@ -107,6 +107,22 @@ Typed prompts from the maintainers' own sessions, through the hook: 0 new blocks
 Source: the 0.6.17 release measurement, 2026-10-14. The prompts are not published, so this number cannot be
 repeated outside the maintainers' machines.
 
+### Four public trees on fixed commits, 2026-10-19
+
+`scripts/measure_fp_bank.py` on `next` 9f5d2506. The trees hold the test values of their projects and no secret that
+we know of, so each hit a Read would act on is a false alarm or a test value. `acted` counts the hits after the
+test-code rule; the last column is the part outside test code.
+
+| Tree | Commit | Files | MB | Hits | Acted | Acted, not in test code |
+|---|---|---|---|---|---|---|
+| CPython `Lib/` (3.14.0) | ebf955df | 2,069 | 36.3 | 1,328 | 1,325 | 195 |
+| Yelp/detect-secrets | 5e141933 | 201 | 0.6 | 117 | 85 | 26 |
+| awslabs/ferret-scan | e8c6fe24 | 1,488 | 14.3 | 1,352 | 1,143 | 295 |
+| thirtysix/Preserve | 01dbd771 | 90 | 0.8 | 124 | 119 | 51 |
+
+A second run on the same commit gives the same counts (`compare`: +0). The run takes about 85 seconds on an
+M-series laptop. A detector change measures the bank before and after and reports the result of `compare`.
+
 ## Coverage against other catalogs
 
 The built-in examples of six other secret catalogs, scanned by maisecrets. Per rule with examples, up to 6
