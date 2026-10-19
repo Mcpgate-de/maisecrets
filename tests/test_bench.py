@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -178,6 +179,41 @@ class SpanMetricTests(unittest.TestCase):
         m = score.aggregate([(c, score.score_case(c, [(0, 5, "pii")], ("pii.",)))])
         self.assertTrue(m["pii.iban"]["too_few"])
         self.assertNotIn("recall_strict", m["pii.iban"])
+
+
+class RoundTwoTests(unittest.TestCase):
+    """codex Gate A, round 2 on the benchmark."""
+
+    def test_an_alt_range_makes_the_span_full_but_not_its_core_covered(self):
+        c = case("k" * 10, [{"class": "secret.generic", "start": 0, "end": 10, "core": [0, 4], "alt": [[6, 10]]}])
+        sc = score.score_case(c, [(6, 10, "secret")], ("secret.",))
+        self.assertEqual((sc["spans"][0]["outcome"], sc["spans"][0]["covered"]), ("full", 0))
+
+    def test_an_empty_or_outside_core_or_alt_range_is_an_error(self):
+        for extra in ({"alt": [[3, 3]]}, {"core": [0, 0]}, {"alt": [[0, 9]]}, {"core": [True, 2]}):
+            with self.subTest(extra=extra), self.assertRaises(cases.CaseError):
+                cases.bank_case(case("x «abcd» y", [{"class": "secret.generic", **extra}]), "x")
+        cases.bank_case(case("x «abcd» y", [{"class": "secret.generic", "core": [3, 5], "alt": [[2, 6]]}]), "x")
+
+    def test_a_case_path_must_stay_below_its_folder(self):
+        for bad in ("/etc/x", "../x", "a/../../x", "c:/x", "\\\\host\\x", ""):
+            with self.subTest(path=bad), self.assertRaises(cases.CaseError):
+                cases.bank_case(case("«a@b»", [{"class": "pii.email"}], path=bad), "x")
+        self.assertTrue(cases.safe_path("tests/fixtures/app.env"))
+
+    def test_the_case_hash_changes_with_the_text_not_only_the_id(self):
+        sys.path.insert(0, str(ROOT / "bench"))
+        import run
+        a = [case("one", [])]
+        b = [case("two", [])]
+        self.assertNotEqual(run.cases_hash(a), run.cases_hash(b))
+        self.assertEqual(run.cases_hash(a), run.cases_hash([case("one", [])]))
+
+    def test_a_worker_that_hangs_ends_with_an_error(self):
+        from bench.adapters import _proc
+        with self.assertRaises(_proc.AdapterError):
+            _proc.run([sys.executable, "-c", "import time; time.sleep(30)"], "slow", env=dict(os.environ),
+                      cwd=str(ROOT), timeout=1)
 
 
 class AdapterOutputTests(unittest.TestCase):

@@ -6,10 +6,14 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 
+from bench.cases import safe_path
+
 KEEP_ENV = ("PATH", "LANG", "LC_ALL", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP")
+TIMEOUT = int(os.environ.get("BENCH_TIMEOUT", "7200"))   # seconds for one worker; a hung scanner ends the run
 
 # the installed distributions of the scanner's Python, for the result file (no lock file can be trusted more)
 _FREEZE = ("import json, importlib.metadata as m; print(json.dumps(sorted({d.metadata['Name'] + '==' + d.version "
@@ -30,11 +34,29 @@ def minimal_env(home: str, extra: dict | None = None) -> dict:
 def installed(python: str) -> list:
     tmp = tempfile.mkdtemp(prefix="bench-freeze-")
     try:
-        p = subprocess.run([python, "-I", "-c", _FREEZE], capture_output=True, text=True, env=minimal_env(tmp),
-                           cwd=tmp)
-        return json.loads(p.stdout) if p.returncode == 0 else []
+        p = run([python, "-I", "-c", _FREEZE], "inventory", env=minimal_env(tmp), cwd=tmp, timeout=120)
+        if p.returncode:
+            raise AdapterError(f"the package inventory of {python} failed with exit code {p.returncode}")
+        return json.loads(p.stdout)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def run(cmd: list, name: str, env: dict, cwd: str, timeout: int = 0) -> subprocess.CompletedProcess:
+    """subprocess.run in a session of its own: on a timeout the whole process group ends, and the error names only
+    the scanner."""
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, cwd=cwd,
+                         start_new_session=os.name != "nt")
+    try:
+        out, err = p.communicate(timeout=timeout or TIMEOUT)
+    except subprocess.TimeoutExpired:
+        if os.name != "nt":
+            os.killpg(p.pid, signal.SIGKILL)
+        else:
+            p.kill()
+        p.communicate()
+        raise AdapterError(f"{name}: no result after {timeout or TIMEOUT} s (BENCH_TIMEOUT)") from None
+    return subprocess.CompletedProcess(cmd, p.returncode, out, err)
 
 
 def check(name: str, cases: list, found: list) -> list:
@@ -67,9 +89,10 @@ def run_worker(name: str, python: str, worker_src: str, cases: list, fields=("te
             f.write(worker_src)
         with open(inp, "w", encoding="utf-8") as f:
             for c in cases:
+                if not safe_path(c.get("path")):
+                    raise AdapterError(f"{name}: a case path is absolute or leaves its folder")
                 f.write(json.dumps({k: c.get(k) for k in fields}) + "\n")
-        p = subprocess.run([python, "-I", worker, inp, out, *argv], capture_output=True, text=True, cwd=tmp,
-                           env=minimal_env(home, extra_env))
+        p = run([python, "-I", worker, inp, out, *argv], name, env=minimal_env(home, extra_env), cwd=tmp)
         if p.returncode:
             raise AdapterError(f"{name}: the worker failed with exit code {p.returncode} (its stderr is not shown: "
                                f"it can hold a case value)")

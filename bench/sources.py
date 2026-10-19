@@ -66,6 +66,30 @@ def dataset_cases(name: str, data: Path, stats: collections.Counter, limit: int 
             return
 
 
+# the catalogs at the commits their numbers were taken on (docs/BENCHMARK-V1.md, "Repeat a measurement")
+CATALOGS = {
+    "noseyparker": ("2e6e7f36ce36619852532bbe698d8cb7a26d2da7", "https://github.com/praetorian-inc/noseyparker",
+                    "Apache-2.0"),
+    "kingfisher": ("82d050530cdef9af070b8f9a75701c9c27a948c3", "https://github.com/mongodb/kingfisher", "Apache-2.0"),
+    "gitleaks": ("b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b", "https://github.com/gitleaks/gitleaks", "MIT"),
+    "betterleaks": ("c613797a684337a014168063577bb6fa6e3b6296", "https://github.com/betterleaks/betterleaks", "MIT"),
+    "trufflehog": ("048de9ff07098d943136cd5231a0e93fbb3ea443", "https://github.com/trufflesecurity/trufflehog",
+                   "AGPL-3.0 (read as data at run time, never copied)"),
+    "gitlab": ("cae5670b0d83aaea0ff37c085119e82ff394f283",
+               "https://gitlab.com/gitlab-org/security-products/secret-detection/secret-detection-rules", "MIT"),
+}
+
+
+def _catalog_state(root: Path) -> tuple:
+    import subprocess
+    env = {k: v for k, v in __import__("os").environ.items() if not k.startswith("GIT_")}
+    head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True,
+                          env=env).stdout.strip()
+    dirty = subprocess.run(["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True,
+                           env=env).stdout.strip()
+    return head, bool(dirty)
+
+
 def catalog_cases(catalogs: Path, max_examples: int = 6):
     """Each example of a secret catalog twice: the secret alone and after `token = `, as
     scripts/measure_catalog_coverage.py probes it. The expected span is the catalog's secret."""
@@ -75,14 +99,18 @@ def catalog_cases(catalogs: Path, max_examples: int = 6):
         root = Path(catalogs) / cat
         if not root.is_dir():
             continue
-        commit = mcc.commit_of(root)
+        commit, dirty = _catalog_state(root)
+        want, url, licence = CATALOGS[cat]
+        if commit != want or dirty:
+            raise SystemExit(f"catalog {cat}: at {commit[:12] or '?'}{' with changes' if dirty else ''}, "
+                             f"pinned {want[:12]}")
         for r in mcc.load_catalog(cat, root):
             rule = r["rule"]
             for i, ex in enumerate(r["pos"][:max_examples]):
-                yield from _catalog_forms(cat, commit, rule, i, ex["secret"])
+                yield from _catalog_forms(cat, commit, rule, i, ex["secret"], url, licence)
 
 
-def _catalog_forms(cat: str, commit: str, rule: str, i: int, secret: str):
+def _catalog_forms(cat: str, commit: str, rule: str, i: int, secret: str, url: str = "", licence: str = ""):
     if secret:
         for form, body in (("bare", secret), ("label", "token = " + secret)):
             start = body.index(secret)
@@ -91,7 +119,8 @@ def _catalog_forms(cat: str, commit: str, rule: str, i: int, secret: str):
             yield {"id": f"catalogs/{record}", "text": body, "channel": "tool", "context": "prose",
                    "spans": [{"start": start, "end": start + len(secret), "class": cls}],
                    "split": cases.split_of("catalogs", f"{cat}/{rule}"), "tags": [f"catalog:{cat}", f"form:{form}"],
-                   "source": {"name": cat, "commit": commit, "record": f"{rule}/{i}"}}
+                   "source": {"name": cat, "commit": commit, "url": url, "licence": licence,
+                              "record": f"{rule}/{i}"}}
 
 
 def load(name: str, data: Path | None = None, catalogs: Path | None = None, limit: int = 0,

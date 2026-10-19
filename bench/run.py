@@ -73,11 +73,16 @@ def _dirty() -> bool:
 def source_meta(selected: list) -> dict:
     """The provenance the cases carry (name, url, commit or revision, licence), the same for every case of a source."""
     metas = {json.dumps({k: v for k, v in c["source"].items() if k != "record"}, sort_keys=True) for c in selected}
-    return {"provenance": sorted(json.loads(m) for m in metas)[:8], "provenances": len(metas)}
+    return {"provenance": [json.loads(m) for m in sorted(metas)], "provenances": len(metas)}
 
 
 def cases_hash(selected: list) -> str:
-    return hashlib.sha256("\n".join(c["id"] for c in selected).encode()).hexdigest()
+    """The sha256 of what every scanner sees and is scored on: id, text, channel, context, path and spans, in order."""
+    h = hashlib.sha256()
+    for c in selected:
+        h.update(json.dumps([c["id"], c["text"], c["channel"], c["context"], c.get("path"), c["spans"]],
+                            sort_keys=True, ensure_ascii=False).encode("utf-8") + b"\n")
+    return h.hexdigest()
 
 
 def timing_summary(timing: dict, n_bytes: int) -> dict:

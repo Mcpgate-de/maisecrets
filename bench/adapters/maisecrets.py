@@ -45,7 +45,8 @@ def describe(root: Path, regions: str) -> dict:
             "configuration": {"regions": ["generic"] + regions.split(","), "sources": "none", "references": "none",
                               "host": "fixed user, year 2026"},
             "detectors": "all built-in rules", "network": False, "dependencies": "Python standard library",
-            "scope": list(SCOPE)}
+            "scope": list(SCOPE), "python": sys.executable, "python_version": sys.version.split()[0],
+            "installed": _proc.installed(sys.executable)}
 
 
 def _clean_env(home: str) -> dict:
@@ -64,8 +65,8 @@ def scan(cases, root: Path, regions: str = "de,us", python: str = sys.executable
         with open(inp, "w", encoding="utf-8") as f:
             for c in cases:
                 f.write(json.dumps({"text": c["text"], "channel": c["channel"], "path": c.get("path")}) + "\n")
-        p = subprocess.run([python, "-I", str(WORKER), "--root", str(root), "--regions", regions, inp, out],
-                           capture_output=True, text=True, env=_clean_env(home), cwd=tmp)
+        p = _proc.run([python, "-I", str(WORKER), "--root", str(root), "--regions", regions, inp, out], "maisecrets",
+                      env=_clean_env(home), cwd=tmp)
         if p.returncode:
             raise _proc.AdapterError(f"maisecrets: the worker failed with exit code {p.returncode} (its stderr is "
                                      f"not shown: it can hold a case value)")

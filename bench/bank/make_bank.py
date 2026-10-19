@@ -246,7 +246,7 @@ def build() -> dict:
             text, classes = render(r, template)
             case = {"id": f"bank/{tid}-{i}", "channel": channel, "context": context, "text": text,
                     "spans": [{"class": c} for c in classes], "split": split, "difficulty": difficulty,
-                    "tags": tags, "region": "de",
+                    "tags": tags, "region": "de" if "lang:de" in tags else "intl",
                     "source": {"name": "maisecrets bank", "license": "Apache-2.0", "record": f"{tid}-{i}"}}
             files.setdefault(f"{split}/{group}.jsonl", []).append(json.dumps(case, ensure_ascii=False))
     return {name: "\n".join(lines) + "\n" for name, lines in sorted(files.items())}
@@ -257,7 +257,13 @@ def main(argv=None) -> int:
     ap.add_argument("--check", action="store_true")
     a = ap.parse_args(argv)
     bad = 0
-    for name, body in build().items():
+    built = build()
+    if a.check:
+        for path in sorted(HERE.rglob("*.jsonl")):
+            if path.relative_to(HERE).as_posix() not in built:
+                print(f"{path.relative_to(HERE)}: no template gives it")
+                bad += 1
+    for name, body in built.items():
         path = HERE / name
         if a.check:
             if not path.exists() or path.read_text(encoding="utf-8") != body:

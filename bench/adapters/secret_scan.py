@@ -1,7 +1,7 @@
 """The secret-scan adapter (harshahemanth/secret-scan, MIT). It runs in a new process of the Python that
 BENCH_SECRET_SCAN_PYTHON names (an environment with secret-scan installed from the pinned commit).
 
-Each case is written to a file of its own (named as its path, else input.txt); `secret_scanner.scan_directory` scans
+Each case is written to a file at its path (else input.txt); `secret_scanner.scan_directory` scans
 the folder with its defaults (its named patterns, entropy off, as the CLI without --entropy), and with redact=False so
 the match keeps its offsets. A finding is a match: line and column give the offset. Its patterns find secrets, so its
 scope is `secret.`."""
@@ -30,9 +30,9 @@ with open(sys.argv[1], encoding="utf-8") as fin, open(sys.argv[2], "w", encoding
         case = json.loads(line)
         text = case["text"]
         d = work / str(n)
-        d.mkdir(parents=True)
-        name = os.path.basename(case.get("path") or "") or "input.txt"
-        (d / name).write_text(text, encoding="utf-8")
+        f = d / (case.get("path") or "input.txt")
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text, encoding="utf-8")
         t = time.perf_counter()
         matches = scan_directory(d, output_path=None, redact=False)
         times.append(time.perf_counter() - t)

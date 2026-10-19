@@ -167,13 +167,13 @@ The holdout rules:
 |---|---|---|---|---|
 | maisecrets bank (`bench/bank/`) | secret, pii | prompts, tool results, logs, JSON, configs, shell, code, docs; hard negatives | Apache-2.0 (this repository) | new in V1 |
 | Rule examples of six secret catalogs (Nosey Parker, Kingfisher, gitleaks, Betterleaks, TruffleHog, GitLab) | `secret.token`, `secret.webhook` | the value bare and after a label | Apache-2.0, MIT; TruffleHog is AGPL-3.0, so its examples are read at run time and never copied | `scripts/measure_catalog_coverage.py`, a source of the runner in V1 |
-| Samsung CredData | secret | one line of source code; `ValueStart`/`ValueEnd` give the span | each file under the licence of its project (the dataset filters for licences that allow it) | `scripts/measure_creddata.py`; a source in V1 |
+| Samsung CredData | secret | one line of source code; `ValueStart`/`ValueEnd` give the span | each file under the licence of its project (the dataset filters for licences that allow it) | outside the V1 runner: `scripts/measure_creddata.py` (maisecrets only); an adapter source is planned for V2 |
 | NVIDIA Nemotron-PII | pii | synthetic documents with spans | CC BY 4.0 | `scripts/measure_datasets.py`; a source in V1 |
 | Gretel synthetic_pii_finance_multilingual | pii, some secret | synthetic finance documents, 7 languages | Apache-2.0 | as above |
 | Mendeley financial documents (doi 10.17632/tzrjx692jy.1) | pii | synthetic documents | CC BY 4.0 | as above |
 | PIILO | pii (names, user names, URLs) | student essays | CC BY 4.0 | as above |
-| False-alarm bank (CPython `Lib/`, detect-secrets, ferret-scan, Preserve, fixed commits) | none: every finding is a false alarm or a test value | whole files | PSF, Apache-2.0, Apache-2.0, see the repository | `scripts/measure_fp_bank.py`; FP per MB |
-| Cloakroom holdouts v2 to v7 | secret, pii | planted values without offsets | Apache-2.0 | `dev` only (seen before) |
+| False-alarm bank (CPython `Lib/`, detect-secrets, ferret-scan, Preserve, GitHub starter workflows, awesome-compose, tldr pages; fixed commits) | none: every finding is a false alarm or a test value | whole files | PSF, Apache-2.0, Apache-2.0, MIT, MIT, CC0, CC BY 4.0 | outside the V1 runner: `scripts/measure_fp_bank.py` (maisecrets only, acted hits per tree and rule); a whole-file source with FP per MB for every adapter is planned for V2 |
+| Cloakroom holdouts v2 to v7 | secret, pii | planted values without offsets | Apache-2.0 | outside the V1 runner: `scripts/measure_holdouts.py` (maisecrets only); `dev` only, seen before |
 
 Left out, with the reason:
 
@@ -232,6 +232,7 @@ python3 -m venv /tmp/venv-pr && /tmp/venv-pr/bin/pip install /tmp/preserve
 export BENCH_DETECT_SECRETS_PYTHON=/tmp/venv-ds/bin/python BENCH_SECRET_SCAN_PYTHON=/tmp/venv-ss/bin/python
 export BENCH_PII_ANON_PYTHON=/tmp/venv-pa/bin/python BENCH_PRESERVE_PYTHON=/tmp/venv-pr/bin/python
 
+python3 -m venv /tmp/venv-yaml && /tmp/venv-yaml/bin/pip install pyyaml==6.0.3   # Python 3.11 or later
 # the data: the PII datasets (pinned by sha256) and the six catalogs (see scripts/measure_catalog_coverage.py);
 # the catalog source needs PyYAML and Python 3.11 or later (tomllib)
 python3 scripts/measure_datasets.py fetch
@@ -250,7 +251,9 @@ cd -
 python3 bench/bank/make_bank.py --check
 
 # every scanner on every source it can take, and the report; maisecrets of another checkout as the second argument
-BENCH_PYTHON=<python 3.11+ with PyYAML> BENCH_CATALOGS=<catalog clones> bench/run_all.sh results/ [<checkout>]
+BENCH_PYTHON=/tmp/venv-yaml/bin/python BENCH_CATALOGS=/tmp/catalogs bench/run_all.sh results
+# maisecrets of another checkout: its path as the second argument
+BENCH_PYTHON=/tmp/venv-yaml/bin/python BENCH_CATALOGS=/tmp/catalogs bench/run_all.sh results /tmp/maisecrets-0.6.39
 
 # one run by hand: --every N keeps the cases whose sha256 of the id is a multiple of N (a fixed sample, the same
 # for every scanner); run_all.sh uses N=50 on the PII datasets for the comparison and runs maisecrets also in full

@@ -63,6 +63,8 @@ def bank_case(obj: dict, where: str) -> dict:
             raise CaseError(f"{where}: no {key}")
     if obj["channel"] not in CHANNELS or obj["context"] not in CONTEXTS or obj["split"] not in SPLITS:
         raise CaseError(f"{where}: channel, context or split is not one of the known values")
+    if not safe_path(obj.get("path")):
+        raise CaseError(f"{where}: the path is absolute or leaves its folder")
     text, marks = unmark(obj["text"])
     if len(marks) != len(obj["spans"]):
         raise CaseError(f"{where}: {len(marks)} marked spans, {len(obj['spans'])} in spans")
@@ -72,6 +74,10 @@ def bank_case(obj: dict, where: str) -> dict:
             raise CaseError(f"{where}: unknown class {sp.get('class')!r}")
         if e <= s:
             raise CaseError(f"{where}: an empty span")
+        for rng in ([sp["core"]] if "core" in sp else []) + list(sp.get("alt", [])):
+            if not (isinstance(rng, (list, tuple)) and len(rng) == 2
+                    and all(isinstance(x, int) and not isinstance(x, bool) for x in rng) and s <= rng[0] < rng[1] <= e):
+                raise CaseError(f"{where}: a core or alt range is not a non-empty range inside its span")
         spans.append({**sp, "start": s, "end": e})
     return {**obj, "text": text, "spans": spans}
 
@@ -90,6 +96,14 @@ def load_bank(directory: Path, split: str | None = None) -> list[dict]:
             if split is None or case["split"] == split:
                 cases.append(case)
     return sorted(cases, key=lambda c: c["id"])
+
+
+def safe_path(path) -> bool:
+    """A case path is relative and stays below its folder: a file scanner writes the case there."""
+    if path is None:
+        return True
+    parts = str(path).replace("\\", "/").split("/")
+    return bool(path) and not str(path).startswith(("/", "\\")) and ":" not in str(path) and ".." not in parts
 
 
 def family(cls: str) -> str:

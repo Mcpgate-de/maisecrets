@@ -49,7 +49,7 @@ def score_case(case: dict, findings, scope) -> dict:
         full, got, n = _full(cover, sp)
         same = [(s, e) for s, e, c in found if family(c) == family(sp["class"])]
         outcomes.append({"class": sp["class"], "outcome": "full" if full else "partial" if got else "missed",
-                         "chars": n, "covered": n if full else got, "family_right": full and _full(same, sp)[0]})
+                         "chars": n, "covered": got, "family_right": full and _full(same, sp)[0]})
     allowed = [(_label_start(case["text"], s["start"]), s["end"]) for s in case["spans"]]
     fp, too_wide = 0, 0
     on_target, fp_family = collections.Counter(), collections.Counter()
