@@ -3642,7 +3642,8 @@ _DERIVED_LABEL_RE = _LazyRx(
 
 
 def _yyyymmdd(v: str) -> bool:
-    """An 8-digit date of the years 1900 to 2099: 20231015."""
+    """An 8-digit number in the shape of a date of the years 1900 to 2099: 20231015. On purpose the shape, not the
+    calendar: 20230231 is no day, but next to "account" it reads as a date field, not as an account number."""
     return len(v) == 8 and v.isdigit() and v[:2] in ("19", "20") and "01" <= v[4:6] <= "12" and "01" <= v[6:] <= "31"
 
 

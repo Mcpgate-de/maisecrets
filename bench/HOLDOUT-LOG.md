@@ -8,6 +8,9 @@ holdout.
 On 2026-10-19 the generator of German tax ids was fixed (its values failed the IdNr rules): the four tax ids of the
 holdout changed, and so did `bench/holdout.manifest`. Rows from before that commit measured the old values.
 
+From now on the holdout runs only on a release candidate (docs/BENCHMARK-V1.md, "Splits"); the rows below were taken
+while V1 was set up. A holdout V2 will be written and sealed after the current round of rule changes.
+
 | Date | Scanner | Source | Cases | Recall, strict | Precision | FP |
 |---|---|---|---|---|---|---|
 | 2026-10-19 | maisecrets 0.6.39 a6846dc35417147451e75bb8920ba3b2d9927b48 | holdout | 80 | 0.8333 | 1.0 | 0 |

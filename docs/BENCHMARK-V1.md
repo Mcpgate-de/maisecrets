@@ -158,7 +158,12 @@ The holdout rules:
 3. The private bank has a manifest in the repository (`bench/holdout.manifest`): the number of cases and the sha256 of
    each file. The runner refuses a holdout directory whose files do not match it, so the holdout cannot change without
    a commit that says so.
-4. A set that was used for tuning becomes `dev`, and the log says so. The Cloakroom holdouts v2 to v7 are such sets:
+4. The holdout runs only on a release candidate (a merge request from `next` to `main`), not after each rule change:
+   "recall stayed the same" is already information about it. Rule changes are measured on `dev`, `val`, the public
+   datasets and the false-alarm bank. (Decided 2026-10-19, after six runs during the setup of V1.)
+5. After the current round of rule changes, a holdout V2 is written from new templates and sealed (its manifest
+   committed before any run); V1 then becomes `val`.
+6. A set that was used for tuning becomes `dev`, and the log says so. The Cloakroom holdouts v2 to v7 are such sets:
    0.6.21 was written from half D (`docs/BENCHMARKS.md`).
 
 ## Sources
