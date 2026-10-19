@@ -76,8 +76,8 @@ replace = "    m = None"
 [[proof]]
 path = "a reading tool the matcher does not reach (ReadMcpResourceTool out of the matcher)"
 file = "hooks/hooks.json"
-find = "\"Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|apply_patch|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceTool|ReadMcpResourceDirTool|mcp__.*\""
-replace = "\"Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|apply_patch|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceDirTool|mcp__.*\""
+find = "\"Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceTool|ReadMcpResourceDirTool|mcp__.*\""
+replace = "\"Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceDirTool|mcp__.*\""
 
 [[proof]]
 path = "a tool the hooks handle that this invariant does not list"

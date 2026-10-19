@@ -31,20 +31,18 @@ ROOT = Path(__file__).resolve().parent.parent
 # harness/codex.py passed with it in hooks.json), so they carry no trust
 NOT_IN_CODEX = {"PostToolUseFailure"}
 
-# the hashes of the hooks as they are now. pre_tool_use changed in 0.6.40: apply_patch joined the matcher, because
-# Codex 0.163.0-alpha on Windows maps it to no alias of the matcher (field report, 2026-10-19). Before: posix
-# 6b1daad7... and windows 0faee6bb..., trusted from 0.5.16 (posix) and 0.5.15 (windows) to 0.6.39.
+# the hashes Codex stored when people trusted the hooks of 0.5.16 to 0.5.23 (posix) and 0.5.15 to 0.5.23 (windows)
 TRUSTED = {
     "posix": {
         "session_start": "sha256:192782bd8413e5789b44fe8980e1170ce3bc76606dd1163ad8db243154c22447",
         "user_prompt_submit": "sha256:db3cb30fdc83870f43e5452b1abca1ddd76833eb0637c3ee44ee3cea6baf0626",
-        "pre_tool_use": "sha256:ff999450732cd2e94d42ecfdc02f2a6da8707df05391d6fcecf13e0ac62a9afc",
+        "pre_tool_use": "sha256:6b1daad7c27b49db322e7fadcf59993a29e8c38ba6a691e300616719b73ba6e6",
         "post_tool_use": "sha256:da89673d4eba379ff9959005f328f139f446bc5ce2af4b1aada695bae906bc3d",
     },
     "windows": {
         "session_start": "sha256:5c887c5fb89ef7438e8c3b8b8aa61ad7f6a58d474d59e0aacfba6d01e16229e7",
         "user_prompt_submit": "sha256:0ce6f3cc3c1893e7ef41d95931a6fbad9ef960afdef7f8647a71316ed02e689e",
-        "pre_tool_use": "sha256:10335103060e704b856861edbe7985101d8efa2cc68ca05352e9a425e67b1ecd",
+        "pre_tool_use": "sha256:0faee6bbf9d8d04cc2a426b28bded5badcda126dddfe189c0c9f8e97a38b22ad",
         "post_tool_use": "sha256:752908c82411d878240a3044702b5508118d7e9cb29028632a18ed8693031505",
     },
 }
@@ -65,6 +63,14 @@ FIXTURE = {
 FIXTURE_DECLARATION = "sha256:e730d6c05679736eaccc5349f8aa92ec34ebd81c0a29da55459ab65ebced4952"
 FIXTURE_CONTENTS = "sha256:da1aaf212af5a401d5f881a2064ae182309936af54f0fd6069ce23e2eee3d477"
 
+# hook groups added after the trust above: Codex treats each as a new hook that needs its own trust, while the groups
+# above keep theirs (an added group changes no hash of another). apply_patch by its own name (0.6.40): Codex
+# 0.163.0-alpha on Windows maps it to no alias of the first group (field report, 2026-10-19). A group of its own and
+# not a change of the first matcher: that would make the whole PreToolUse hook "Modified" on Codex 0.163 and older, and
+# it would protect no tool until the person trusts it again. Where Codex maps apply_patch to Write or Edit, both groups
+# run on it (measured on codex-cli 0.163.0, macOS: two equal rewrites, two audit lines).
+ADDED_GROUPS = {("PreToolUse", "apply_patch")}
+
 
 def codex_hashes(platform: str) -> dict:
     hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
@@ -73,6 +79,8 @@ def codex_hashes(platform: str) -> dict:
         if event in NOT_IN_CODEX:
             continue
         for g in groups:
+            if (event, g.get("matcher")) in ADDED_GROUPS:
+                continue
             out[codex_trust.EVENTS[event]] = codex_trust.declaration_hash(event, g, g["hooks"][0],
                                                                           platform == "windows")
     return out
@@ -87,6 +95,11 @@ def write_fixture(root: Path) -> None:
 
 
 class CodexTrustTests(unittest.TestCase):
+    def test_an_added_group_is_still_in_hooks_json(self):
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+        groups = {(e, g.get("matcher")) for e, gs in hooks.items() for g in gs}
+        self.assertLessEqual(ADDED_GROUPS, groups, "an added group named here is gone from hooks.json")
+
     def test_the_hook_commands_keep_the_trust_codex_users_gave(self):
         for platform, want in TRUSTED.items():
             with self.subTest(platform):
@@ -163,6 +176,13 @@ class CodexTrustStatusTests(unittest.TestCase):
         self.assertIn("1 of 1 not trusted", self.lines())
         self.config({self.KEY: {"trusted_hash": "sha256:" + "0" * 64}})
         self.assertIn("1 of 1 not trusted", self.lines())
+
+    def test_on_windows_the_contents_are_unknown_never_trusted(self):
+        # the path spelling of Codex's content hash is not measured on Windows: no green answer from a guess
+        self.config({self.KEY: {"trusted_hash": FIXTURE_DECLARATION, "trusted_content_hash": "sha256:" + "1" * 64}})
+        lines = "\n".join(codex_trust.status_lines(self.root, self.home, windows=True))
+        self.assertNotIn("trusted (", lines)
+        self.assertIn("unknown on Windows", lines)
 
     def test_an_old_approval_is_trusted_until_codex_pins_it(self):
         self.config({self.KEY: {"trusted_hash": FIXTURE_DECLARATION}})

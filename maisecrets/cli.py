@@ -618,6 +618,10 @@ def _without_guard(hooks: dict) -> dict:
     return out
 
 
+# hook groups only Codex has a tool for: the guard watches Claude Code, which has no apply_patch
+CODEX_ONLY_MATCHERS = {"apply_patch"}
+
+
 def _guard_entries() -> dict:
     """The entries the guard needs now: the plugin's own events and matchers, with GUARD_COMMAND."""
     from pathlib import Path as _P
@@ -626,6 +630,8 @@ def _guard_entries() -> dict:
     hooks: dict = {}
     for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
         for entry in plugin_hooks.get(event, []):
+            if entry.get("matcher") in CODEX_ONLY_MATCHERS:
+                continue
             new = {"hooks": [{"type": "command", "command": GUARD_COMMAND, "timeout": GUARD_TIMEOUTS[event]}]}
             hooks.setdefault(event, []).append({"matcher": entry["matcher"], **new} if entry.get("matcher") else new)
     return hooks
