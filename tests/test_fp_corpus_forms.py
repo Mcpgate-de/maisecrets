@@ -68,6 +68,8 @@ OWNER = {
     "username after an unrelated example key": "username-after-label",
     "username of two dictionary words": "username-after-label", "us bank account number": "us-bank",
     "compact birth date after its label": "birth-date-after-label",
+    "password after use the": "secret-password-with-sign", "password after such as": "secret-password-with-sign",
+    "password after and password": "secret-password-with-sign",
 }
 
 
