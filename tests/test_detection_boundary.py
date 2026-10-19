@@ -91,9 +91,8 @@ def private_uses(source: str) -> list[tuple[int, str]]:
                 for a in node.names
                 if a.name == "detection" and ours(node, "")
             }
-    names -= (
-        packages  # one name, one identity: a package alias named detect is the package
-    )
+    # no `names -= packages`: the walk does not see scopes, so a name bound to both (`d` as the module at the top, as
+    # the package in a function) stays in both, and each of its uses is checked in both forms
 
     def is_package(e) -> bool:
         return (isinstance(e, ast.Name) and e.id in packages) or (
@@ -113,12 +112,9 @@ def private_uses(source: str) -> list[tuple[int, str]]:
                     node.targets if isinstance(node, ast.Assign) else [node.target]
                 )
                 bound = {t.id for t in targets if isinstance(t, ast.Name)}
-                if is_package(
-                    node.value
-                ):  # the package first: its name may also be `detect`
+                if is_package(node.value):
                     packages |= bound
-                    names -= bound
-                elif is_module(node.value):
+                if is_module(node.value):
                     names |= bound
     out = []
     for node in ast.walk(tree):
@@ -227,6 +223,10 @@ class DetectionBoundaryTests(unittest.TestCase):
             [(1, "_det")],
             "from a subpackage of the plugin",
         )
+        self.assertEqual(
+            private_uses("import maisecrets.detect as d\n"
+                         "def f():\n    from maisecrets import detection as d\nd._scan()\n"),
+            [(4, "_scan")], "a package alias in a function does not hide the module alias at the top")
 
     def test_no_module_outside_the_core_uses_a_private_name_of_detect(self):
         files = outside_the_core()
