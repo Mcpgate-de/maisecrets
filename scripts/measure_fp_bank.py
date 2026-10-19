@@ -40,9 +40,12 @@ TREES = (
 
 
 def git(cwd: Path, *args: str) -> str:
-    # core.fsmonitor names a command in the repository config; a clone of ours never sets it, and we never run one
+    # core.fsmonitor names a command in the repository config; a clone of ours never sets it, and we never run one.
+    # No GIT_* of a calling hook: with GIT_DIR or GIT_INDEX_FILE set, git -C <clone> works on the repository of the
+    # hook, and an init or a fetch would change it (tests/test_skill.py, 2026-09-27)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     return subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(cwd), *args], check=True,
-                          capture_output=True, text=True).stdout.strip()
+                          capture_output=True, text=True, env=env).stdout.strip()
 
 
 def blob_id(data: bytes) -> str:
