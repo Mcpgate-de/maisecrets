@@ -10,7 +10,6 @@ import importlib.util
 import io
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -54,7 +53,7 @@ class MeasureTests(unittest.TestCase):
 
     def setUp(self):
         base = Path(tempfile.mkdtemp(prefix="fpbank-test-"))
-        self.addCleanup(shutil.rmtree, base, True)
+        self.addCleanup(fb.remove_tree, base)
         self.cache = base / "cache"
         d = self.source = base / "source"
         (d / "src").mkdir(parents=True)
@@ -107,12 +106,12 @@ class MeasureTests(unittest.TestCase):
             self.fetch()
         mine = {a for cwd, a in calls if cwd == self.cache / "tiny"}
         self.assertEqual(mine, {"rev-parse", "ls-tree"})
-        shutil.rmtree(self.cache / "tiny")
+        fb.remove_tree(self.cache / "tiny")
         with mock.patch.object(fb, "git", spy):
             self.fetch()
         made = {a for cwd, a in calls if cwd.parent == self.cache and cwd.name.startswith(".tiny-")}
         self.assertTrue({"init", "fetch", "checkout"} <= made, "the premise: a new clone is made in a new directory")
-        shutil.rmtree(self.cache / "tiny")
+        fb.remove_tree(self.cache / "tiny")
         (self.cache / "tiny").mkdir()
         (self.cache / "tiny" / "keep.txt").write_text("mine")
         with self.assertRaises(SystemExit) as cm:
@@ -121,7 +120,7 @@ class MeasureTests(unittest.TestCase):
         self.assertEqual((self.cache / "tiny" / "keep.txt").read_text(), "mine", "the directory stays as it is")
 
     def test_a_failed_or_empty_fetch_leaves_nothing_behind(self):
-        shutil.rmtree(self.cache / "tiny")
+        fb.remove_tree(self.cache / "tiny")
         with self.assertRaises(subprocess.CalledProcessError):
             self.fetch("0" * 40)   # a commit the source does not have
         with mock.patch.object(fb, "TREES", ((self.commit, "tiny", str(self.source), "no-such-dir"),)):
@@ -217,7 +216,7 @@ class CompareTests(unittest.TestCase):
 class FalseAlarmScriptTests(unittest.TestCase):
     def test_the_script_prints_the_same_table_as_before_the_split(self):
         d = Path(tempfile.mkdtemp(prefix="fpbank-mfa-"))
-        self.addCleanup(shutil.rmtree, d, True)
+        self.addCleanup(fb.remove_tree, d)
         (d / "a.md").write_text(f"the host is {IP} today\n")
         out = subprocess.run([sys.executable, str(ROOT / "scripts" / "measure_false_alarms.py"), str(d)],
                              capture_output=True, text=True, check=True).stdout

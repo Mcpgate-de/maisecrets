@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -79,6 +80,19 @@ def blobs_of_commit(d: Path, commit: str, sub: str) -> dict:
     return out
 
 
+def remove_tree(path: Path) -> None:
+    """shutil.rmtree that also removes read-only files: git writes its objects read-only, and Windows refuses to delete
+    such a file."""
+    def writable(func, p, _exc):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=writable)
+    else:
+        shutil.rmtree(path, onerror=writable)
+
+
 def at_commit(d: Path, commit: str, sub: str) -> bool:
     """A clean clone at the commit: HEAD is the commit, and the files under the subdirectory are exactly the files of
     the commit, byte for byte. A tree that is only partly there would give lower counts that look like an
@@ -117,7 +131,8 @@ def fetch(cache: Path) -> None:
                 raise SystemExit(f"{name}: the new clone is not a clean tree at {commit[:8]}")
             new.rename(d)
         finally:
-            shutil.rmtree(new, ignore_errors=True)
+            if new.exists():
+                remove_tree(new)
         print(f"{name}: fetched {commit[:8]}")
 
 
