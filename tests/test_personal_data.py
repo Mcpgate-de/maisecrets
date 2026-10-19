@@ -313,5 +313,35 @@ class TwilioTests(unittest.TestCase):
         self.assertEqual(scan("account_sid " + counted, "prompt"), [])
 
 
+class IdAfterLabelWholeTests(unittest.TestCase):
+    """An id after its label is masked whole: after `of`, after a certificate or license number label, and with a letter
+    prefix that a digit rule (us-license, us-bank) used to cut off (Benchmark V1, Nemotron dev: national ids whole
+    15,713 to 17,123, partial 1,213 to 220)."""
+    MRN = J(["MRN", "-48", "2913", "7"])
+    CERT = J(["CL", "-48820", "19"])
+    ACCT = J(["ACC", "-4071", "8653", "29"])
+    SUFFIX = J(["4071", "8653", "-XY"])                     # a letter suffix after the digits
+
+    def test_the_whole_id_after_its_label(self):
+        for text, v in (("a medical record number of " + self.MRN, self.MRN),
+                        ("The certificate license number is " + self.CERT + ".", self.CERT),
+                        ("certificate license number " + self.CERT, self.CERT),
+                        ("account number " + self.ACCT, self.ACCT)):
+            with self.subTest(text=text[:20]):
+                self.assertIn(("id-number-after-label", v), [(m.kind, m.value) for m in scan(text)])
+
+    def test_a_digit_rule_takes_no_part_of_a_hyphenated_id(self):
+        for text in ("The certificate license number is " + self.CERT, "account number " + self.ACCT,
+                     "account number " + self.SUFFIX):
+            with self.subTest(text=text[:20]):
+                kinds = {m.kind for m in scan(text)}
+                self.assertFalse(kinds & {"us-license#1", "us-bank"}, kinds)
+
+    def test_words_after_the_labels_stay_text(self):
+        for text in ("record number of rows: 12", "license number 2 applies (MIT)", "driver's license is required"):
+            with self.subTest(text=text):
+                self.assertEqual(values(text), [])
+
+
 if __name__ == "__main__":
     unittest.main()
