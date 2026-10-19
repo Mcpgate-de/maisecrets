@@ -69,7 +69,7 @@ def score_case(case: dict, findings, scope) -> dict:
             fp += 1
             fp_family[family(c)] += 1
     return {"spans": outcomes, "fp": fp, "fp_family": dict(fp_family), "on_target": dict(on_target),
-            "too_wide": too_wide, "negative": not removed and not spans,
+            "too_wide": too_wide, "negative": not spans,   # no span to find after scope and neutral removal
             "bytes": len(case["text"].encode("utf-8")), "lines": case["text"].count("\n") + 1}
 
 

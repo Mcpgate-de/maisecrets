@@ -15,6 +15,8 @@ import datetime
 import hashlib
 import importlib
 import json
+import os
+import re
 import statistics
 import subprocess
 import sys
@@ -53,15 +55,24 @@ def in_sample(case_id: str, every: int) -> bool:
 
 
 def _git(*args) -> str:
+    """git in this checkout, without the GIT_* of a caller (GIT_DIR would point it elsewhere); a failure ends the run,
+    so a result never names a commit or a clean tree it could not read."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
-        return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True,
-                              timeout=30).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return ""
+        p = subprocess.run(["git", "-C", str(ROOT), "-c", "core.fsmonitor=false", *args], capture_output=True,
+                           text=True, timeout=30, env=env)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise SystemExit(f"git failed: {type(e).__name__}") from None
+    if p.returncode:
+        raise SystemExit(f"git {args[0]} failed with exit code {p.returncode}")
+    return p.stdout.strip()
 
 
 def _commit() -> str:
-    return _git("rev-parse", "HEAD")
+    c = _git("rev-parse", "HEAD")
+    if not re.fullmatch(r"[0-9a-f]{40}", c):
+        raise SystemExit("the benchmark checkout has no commit")
+    return c
 
 
 def _dirty() -> bool:

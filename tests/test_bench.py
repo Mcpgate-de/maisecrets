@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -254,6 +255,35 @@ class RoundThreeTests(unittest.TestCase):
             _proc.identity(sys.executable, "pip", version="0.0.1")
         with self.assertRaises(_proc.AdapterError):
             _proc.identity(sys.executable, "pip", commit="0" * 40)
+
+
+class RoundFourTests(unittest.TestCase):
+    def test_a_case_with_only_scoped_out_or_neutral_spans_is_a_negative_case(self):
+        for sp in ({"class": "pii.email", "start": 0, "end": 5}, {"class": "secret.token", "start": 0, "end": 5,
+                                                                  "neutral": True}):
+            c = case("a" * 5 + " " + "b" * 20, [sp])
+            m = score.aggregate([(c, score.score_case(c, [(8, 20, "secret")], ("secret.",)))])
+            with self.subTest(span=sp):
+                self.assertEqual((m["all"]["negative_cases"], m["all"]["fp_per_1000_negative"]), (1, 1000.0))
+
+    def test_a_run_without_a_readable_commit_ends(self):
+        sys.path.insert(0, str(ROOT / "bench"))
+        import run
+        with mock.patch.dict(os.environ, {"GIT_DIR": "/definitely/not/a/repository"}):
+            self.assertRegex(run._commit(), r"^[0-9a-f]{40}$")     # GIT_DIR of a caller is ignored
+        with mock.patch.object(run, "ROOT", Path(tempfile.mkdtemp())), self.assertRaises(SystemExit):
+            run._commit()
+
+    def test_a_result_without_a_commit_or_a_dirty_flag_is_refused(self):
+        sys.path.insert(0, str(ROOT / "bench"))
+        import report
+        with tempfile.TemporaryDirectory() as d:
+            for extra in ({"bench_commit": ""}, {"bench_commit": "a" * 40}):
+                p = Path(d, "r.json")
+                p.write_text(json.dumps({**extra, "scanner": {"scanner": "x", "scope": []}, "source": "bank",
+                                         "split": "dev", "cases": 0, "metrics": {}}), encoding="utf-8")
+                with self.subTest(extra=extra):
+                    self.assertEqual(report.main([str(p)]), 2)
 
 
 class AdapterOutputTests(unittest.TestCase):
