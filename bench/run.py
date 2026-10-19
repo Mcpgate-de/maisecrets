@@ -52,12 +52,32 @@ def in_sample(case_id: str, every: int) -> bool:
     return every <= 1 or int(hashlib.sha256(case_id.encode()).hexdigest()[:8], 16) % every == 0
 
 
-def _commit() -> str:
+def _git(*args) -> str:
     try:
-        return subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True,
+        return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True,
                               timeout=30).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return ""
+
+
+def _commit() -> str:
+    return _git("rev-parse", "HEAD")
+
+
+def _dirty() -> bool:
+    """Whether the benchmark itself (bench/, the scripts it imports) differs from the commit it names."""
+    return bool(_git("status", "--porcelain", "--", "bench", "scripts/measure_datasets.py",
+                     "scripts/measure_catalog_coverage.py"))
+
+
+def source_meta(selected: list) -> dict:
+    """The provenance the cases carry (name, url, commit or revision, licence), the same for every case of a source."""
+    metas = {json.dumps({k: v for k, v in c["source"].items() if k != "record"}, sort_keys=True) for c in selected}
+    return {"provenance": sorted(json.loads(m) for m in metas)[:8], "provenances": len(metas)}
+
+
+def cases_hash(selected: list) -> str:
+    return hashlib.sha256("\n".join(c["id"] for c in selected).encode()).hexdigest()
 
 
 def timing_summary(timing: dict, n_bytes: int) -> dict:
@@ -102,7 +122,8 @@ def main(argv=None) -> int:
     results = [(c, score.score_case(c, [f[:3] for f in fs], adapter.SCOPE)) for c, fs in zip(selected, found)]
     holdout = a.split == "holdout"
     out = {
-        "date": datetime.date.today().isoformat(), "bench_commit": _commit(), "scanner": desc,
+        "date": datetime.date.today().isoformat(), "bench_commit": _commit(), "bench_dirty": _dirty(),
+        "scanner": desc, "source_meta": source_meta(selected), "cases_sha256": cases_hash(selected),
         "source": a.source, "split": a.split, "limit": a.limit, "every": a.every, "cases": len(selected),
         "dataset_stats": dict(stats),
         "metrics": score.aggregate(results),

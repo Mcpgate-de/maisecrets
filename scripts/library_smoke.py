@@ -7,6 +7,7 @@ Copies only maisecrets/__init__.py and maisecrets/detection/ into a new director
 (no site packages), points HOME at a directory that does not exist, and in a process started with -I imports the
 package, builds a Detector with all four arguments given, and scans a text. Prints the files copied, the import time,
 the modules of the plugin that got imported (must be none), and the hits by rule id (no value)."""
+import atexit
 import json
 import shutil
 import subprocess
@@ -17,6 +18,7 @@ from pathlib import Path
 
 src = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent).resolve()
 work = Path(tempfile.mkdtemp(prefix="ms-lib-"))
+atexit.register(shutil.rmtree, work, True)   # also when a copy or the venv fails
 pkg = work / "site" / "maisecrets"
 shutil.copytree(src / "maisecrets" / "detection", pkg / "detection",
                 ignore=shutil.ignore_patterns("__pycache__"))
@@ -53,7 +55,6 @@ print("exit", p.returncode)
 print(p.stdout.strip() or p.stderr[-3000:])
 home = (work / "no-such-home").exists()
 print("home created:", home)
-shutil.rmtree(work)
 res = json.loads(p.stdout) if p.returncode == 0 else {}
 kinds = {k for k, _t in res.get("hits", [])}
 ok = p.returncode == 0 and not res["plugin_modules"] and not home and {"email", "github-pat", "iban"} <= kinds

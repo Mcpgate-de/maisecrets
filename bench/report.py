@@ -26,21 +26,25 @@ def main(argv) -> int:
     runs = [json.loads(Path(p).read_text(encoding="utf-8")) for p in argv]
     groups = collections.defaultdict(list)
     for r in runs:
-        groups[(r["source"], r["split"], r.get("every", 1))].append(r)
+        # only runs on the same cases with the same benchmark share a table
+        groups[(r["source"], r["split"], r.get("every", 1), r.get("cases_sha256", "?"), r.get("bench_commit", "?"))
+               ].append(r)
     out = []
-    for (source, split, every), rs in sorted(groups.items()):
+    for (source, split, every, chash, commit), rs in sorted(groups.items()):
         n = rs[0]["cases"]
         sample = f", sample 1 in {every}" if every > 1 else ""
+        dirty = " (benchmark tree modified)" if any(r.get("bench_dirty") for r in rs) else ""
         out.append(f"## {source}, split {split}{sample} ({n} cases)\n")
+        out.append(f"Cases sha256 `{chash[:12]}`, benchmark commit `{commit[:8]}`{dirty}.\n")
         for fam in ("secret", "pii"):
             rows = [r for r in rs if claims(r["scanner"].get("scope", []), fam) and r["metrics"].get(fam)]
             if not rows:
                 continue
             out.append(f"### {fam}\n")
             out.append("| Scanner | Version | Spans | Full | Partial | Missed | Recall strict | Recall lenient | "
-                       "Char recall | FP | Precision (all findings) | F1 | Too wide | FP / 1000 negative | "
+                       "Char recall | Family right | FP | Precision | F1 | Too wide (all) | FP / 1000 negative (all) | "
                        "Median ms |")
-            out.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+            out.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
             for r in sorted(rows, key=lambda r: r["scanner"]["scanner"]):
                 m, a, s = r["metrics"][fam], r["metrics"]["all"], r["scanner"]
                 ver = s.get("version") or ""
@@ -48,8 +52,9 @@ def main(argv) -> int:
                     ver += f" ({s['commit'][:8]})"
                 out.append(f"| {s['scanner']} | {ver} | {m.get('spans', 0)} | {m.get('full', 0)} | "
                            f"{m.get('partial', 0)} | {m.get('missed', 0)} | {_f(m.get('recall_strict'))} | "
-                           f"{_f(m.get('recall_lenient'))} | {_f(m.get('char_recall'))} | {m.get('fp', 0)} | "
-                           f"{_f(a.get('precision'))} | {_f(a.get('f1'))} | {a.get('too_wide', 0)} | "
+                           f"{_f(m.get('recall_lenient'))} | {_f(m.get('char_recall'))} | "
+                           f"{_f(m.get('family_right_rate'))} | {m.get('fp', 0)} | {_f(m.get('precision'))} | "
+                           f"{_f(m.get('f1'))} | {a.get('too_wide', 0)} | "
                            f"{_f(a.get('fp_per_1000_negative'), 1)} | {_f(r['timing'].get('median_ms'), 2)} |")
             out.append("")
             classes = sorted({k for r in rows for k in r["metrics"] if k.startswith(fam + ".")})

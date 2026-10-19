@@ -3,16 +3,16 @@ BENCH_DETECT_SECRETS_PYTHON names (an environment with `pip install detect-secre
 
 Each case is written to a file of its own (named as its path, else input.txt) and scanned with
 `SecretsCollection.scan_file` under the default settings (all plugins, the default filters), as `detect-secrets scan`
-does. A finding is a secret value it reports; its offset is the first place of that value in its line. Every
+does. A finding is a secret value it reports; its offset is the place of that value in its line
+(a value reported twice goes to its first and its second place). Every
 plugin of detect-secrets finds secrets, so its scope is `secret.`."""
 from __future__ import annotations
 
-import json
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
+
+from bench.adapters import _proc
 
 NAME = "detect-secrets"
 SCOPE = ("secret.",)
@@ -48,12 +48,16 @@ with default_settings() as settings, open(sys.argv[1], encoding="utf-8") as fin,
         starts = [0]
         for ln in lines:
             starts.append(starts[-1] + len(ln) + 1)
-        out = []
-        for _f, secret in sc:
+        out, used = [], {}
+        for _f, secret in sorted(sc, key=lambda fs: (fs[1].line_number, fs[1].type)):
             v, i = secret.secret_value, secret.line_number - 1
             if v and 0 <= i < len(lines):
-                at = lines[i].find(v)
+                # a value reported again on its line goes to its next place there, not to the first one again
+                at = lines[i].find(v, used.get((i, v), 0))
+                if at < 0:
+                    at = lines[i].find(v)
                 if at >= 0:
+                    used[(i, v)] = at + 1
                     out.append([starts[i] + at, starts[i] + at + len(v), "secret", secret.type])
         fout.write(json.dumps(out) + "\n")
 json.dump({"api": "SecretsCollection.scan_file", "version": VERSION, "plugins": plugins, "cold_start_s": first,
@@ -72,24 +76,8 @@ def describe() -> dict:
             "configuration": "default settings (all plugins, default filters), SecretsCollection.scan_file per case",
             "detectors": "all plugins of the release", "network": False,
             "dependencies": "detect-secrets and its requirements (pyyaml, requests)", "region": "none",
-            "scope": list(SCOPE), "python": _python()}
+            "scope": list(SCOPE), "python": _python(), "installed": _proc.installed(_python())}
 
 
 def scan(cases):
-    tmp = tempfile.mkdtemp(prefix="bench-ds-")
-    try:
-        inp, out, worker = (os.path.join(tmp, n) for n in ("in.jsonl", "out.jsonl", "worker.py"))
-        with open(worker, "w", encoding="utf-8") as f:
-            f.write(_WORKER)
-        with open(inp, "w", encoding="utf-8") as f:
-            for c in cases:
-                f.write(json.dumps({"text": c["text"], "path": c.get("path")}) + "\n")
-        p = subprocess.run([_python(), "-I", worker, inp, out], capture_output=True, text=True, cwd=tmp)
-        if p.returncode:
-            raise RuntimeError(f"detect-secrets worker failed: {p.stderr[-2000:]}")
-        timing = json.loads(p.stdout)
-        with open(out, encoding="utf-8") as f:
-            found = [[tuple(x) for x in json.loads(line)] for line in f]
-        return found, timing
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+    return _proc.run_worker("detect-secrets", _python(), _WORKER, cases, fields=("text", "path"))

@@ -38,7 +38,10 @@ class MarkTests(unittest.TestCase):
         self.assertEqual(c["spans"][0]["start"], 5)
 
     def test_the_split_of_a_record_is_fixed_and_about_60_20_20(self):
-        self.assertEqual(cases.split_of("nemotron", "us:1"), cases.split_of("nemotron", "us:1"))
+        # golden values: a rewrite that moves records between splits fails here, not only one that breaks 60/20/20
+        golden = {("nemotron", "us:1"): "dev", ("bank", "x"): "holdout", ("catalogs", "np.aws.1"): "dev",
+                  ("gretel", "test:7"): "val", ("piilo", "42"): "dev"}
+        self.assertEqual({k: cases.split_of(*k) for k in golden}, golden)
         counts = {s: 0 for s in cases.SPLITS}
         for i in range(10000):
             counts[cases.split_of("src", str(i))] += 1
@@ -52,6 +55,17 @@ class MarkTests(unittest.TestCase):
             self.assertNotIn(cases.SPLIT_MARK, c["text"])
             self.assertNotIn(cases.OPEN, c["text"])
             self.assertNotIn(cases.CLOSE, c["text"])
+
+    def test_the_bank_files_are_what_the_templates_give(self):
+        sys.path.insert(0, str(ROOT / "bench" / "bank"))
+        import make_bank
+        built = make_bank.build()
+        on_disk = {p.relative_to(ROOT / "bench" / "bank").as_posix(): p.read_text(encoding="utf-8")
+                   for p in sorted((ROOT / "bench" / "bank").rglob("*.jsonl"))}
+        self.assertEqual(sorted(built), sorted(on_disk))
+        for name in built:
+            with self.subTest(name=name):
+                self.assertEqual(built[name], on_disk[name])
 
     def test_two_cases_with_one_id_are_an_error(self):
         with tempfile.TemporaryDirectory() as d:
@@ -120,11 +134,61 @@ class SpanMetricTests(unittest.TestCase):
         self.assertEqual(m["all"]["precision"], round(35 / 36, 4))
         self.assertEqual(m["all"]["fp_per_1000_negative"], 1000.0)
 
+    def test_precision_and_f1_are_per_family(self):
+        # codex Gate A: a scanner that finds every secret and no personal data had the overall F1 in both rows
+        res = []
+        for i in range(30):
+            sec = case("x" * 10, [{"class": "secret.token", "start": 0, "end": 10}])
+            res.append((sec, score.score_case(sec, [(0, 10, "secret")], ("secret.", "pii."))))
+            per = case("y" * 10, [{"class": "pii.email", "start": 0, "end": 10}])
+            res.append((per, score.score_case(per, [], ("secret.", "pii."))))
+        m = score.aggregate(res)
+        self.assertEqual((m["secret"]["precision"], m["secret"]["f1"]), (1.0, 1.0))
+        self.assertEqual(m["pii"]["recall_strict"], 0.0)
+        self.assertEqual(m["all"]["f1"], round(2 * 1.0 * 0.5 / 1.5, 4))
+
+    def test_f1_is_zero_when_nothing_is_found_whole(self):
+        res = []
+        for _ in range(30):
+            c = case("z" * 6, [{"class": "secret.token", "start": 0, "end": 6}])
+            res.append((c, score.score_case(c, [(0, 1, "secret")], ("secret.",))))
+        m = score.aggregate(res)
+        self.assertEqual((m["all"]["precision"], m["all"]["recall_strict"], m["all"]["f1"]), (1.0, 0.0, 0.0))
+
+    def test_a_wide_finding_over_a_neutral_span_is_a_false_positive(self):
+        text = "w" * 100
+        c = case(text, [{"class": "pii.other", "start": 10, "end": 20, "neutral": True}])
+        self.assertEqual(score.score_case(c, [(10, 20, "pii.name")], ("pii.",))["fp"], 0)
+        self.assertEqual(score.score_case(c, [(0, 100, "pii.name")], ("pii.",))["fp"], 1)
+
+    def test_family_right_needs_the_right_family_to_cover_the_span(self):
+        c = case("a@example.com", [{"class": "pii.email", "start": 0, "end": 13}])
+        sc = score.score_case(c, [(0, 13, "secret"), (0, 2, "pii.email")], ("pii.",))
+        self.assertEqual((sc["spans"][0]["outcome"], sc["spans"][0]["family_right"]), ("full", False))
+
+    def test_prose_before_the_label_is_not_the_label(self):
+        text = "x" * 60 + " key: " + "v" * 10
+        start = len(text) - 10
+        c = case(text, [{"class": "secret.generic", "start": start, "end": len(text)}])
+        self.assertEqual(score.score_case(c, [(start - 6, len(text), "secret")], ("secret.",))["too_wide"], 0)
+        self.assertEqual(score.score_case(c, [(0, len(text), "secret")], ("secret.",))["too_wide"], 1)
+
     def test_a_class_with_few_spans_gives_no_rate(self):
         c = case("x" * 5, [{"class": "pii.iban", "start": 0, "end": 5}])
         m = score.aggregate([(c, score.score_case(c, [(0, 5, "pii")], ("pii.",)))])
         self.assertTrue(m["pii.iban"]["too_few"])
         self.assertNotIn("recall_strict", m["pii.iban"])
+
+
+class AdapterOutputTests(unittest.TestCase):
+    def test_a_missing_result_or_a_finding_outside_the_text_is_an_error(self):
+        from bench.adapters import _proc
+        cs = [case("abc", []), case("def", [])]
+        with self.assertRaises(_proc.AdapterError):
+            _proc.check("x", cs, [[]])
+        with self.assertRaises(_proc.AdapterError):
+            _proc.check("x", cs, [[[0, 9, "secret", "r"]], []])
+        self.assertEqual(_proc.check("x", cs, [[[0, 2, "secret", "r"]], []]), [[(0, 2, "secret", "r")], []])
 
 
 if __name__ == "__main__":

@@ -56,7 +56,9 @@ The public bank is not written by hand. `bench/bank/make_bank.py` renders it fro
 a template is a random value of that kind (with the checksum its type needs: IBAN, Luhn, the German tax id) and an
 expected span of that class; a slot `{kind}` is a value that is no span (a git commit id in a hard negative). The seed
 is fixed, so the files are the same on each run, and `make_bank.py --check` fails when a file differs from its
-templates. Each template gives three cases.
+templates. Each template gives three cases. The three are variants of one form, not three independent cases: the
+bank is a regression corpus for the forms maisecrets sees, and a count on it is a count of forms times three. The
+evidence for a comparison is the public datasets and the holdout.
 
 A loader test checks that each case has as many mark pairs as spans and that no `«`, `»` or `§` is left in the text.
 
@@ -78,7 +80,8 @@ Each adapter declares the classes its scanner claims (`scope`, a list of class p
 `pii.email`). For a run of scanner S:
 
 - An expected span outside the scope of S is removed from the case. It is no false negative of S.
-- A finding of S that overlaps a removed span is ignored. It is no false positive of S.
+- A finding of S that overlaps a removed span and extends at most 8 characters beyond the spans and their labels is
+  ignored. It is no false positive of S. A wider finding is a false positive: it hides other text.
 - A finding of S that overlaps no expected span is a false positive, whatever class S gives it.
 
 So a PII scanner is not scored on AWS keys, and a secret scanner is not scored on names. A table compares two
@@ -96,16 +99,21 @@ all findings of the case.
 | **partial** | at least one, but not every, `core` character is covered |
 | **missed** | no character is covered |
 
-Only **full** is a true positive. A Teams webhook of which a scanner masks 17 of 204 characters is **partial**: it
-counts as a false negative in the strict recall, and the report shows it in its own column.
+Only **full** counts as found in the strict recall. A Teams webhook of which a scanner masks 17 of 204 characters is
+**partial**: it counts as missed in the strict recall, and the report shows it in its own column.
+
+Recall and precision ask two different questions. Recall asks "is all sensitive text masked?", so a span counts only
+when it is masked whole. Precision asks "is what was masked sensitive?", so a finding is right when it lies on an
+expected span, also when it does not cover all of it: that shortfall is already a miss in the recall. A scanner that
+masks one character of each secret has precision 1 and strict recall 0, so F1 0.
 
 Over-masking: for each finding that overlaps an expected span, `extra` is the number of its characters outside every
-expected span and outside the label of the span (the text from the start of the line or the last separator to the
-span). A finding with `extra` above `max(8, len(span))` is **too wide**. A too-wide finding still masks the span, so
+span of the case and outside the label of each span (the text before the span on its line, at most 40 characters). A
+finding with `extra` above `max(8, len(span))` is **too wide**. A too-wide finding still masks the span, so
 it is no false negative; the report counts it, because it hides text the model needs.
 
-Class accuracy: a full span whose covering finding has a class in the same family counts as "family right". The
-report gives this rate; it does not change precision or recall.
+Class accuracy: a full span counts as "family right" when the findings of its family alone cover it whole. The report
+gives the rate (family right / full); it does not change precision or recall.
 
 ## Metrics
 
@@ -119,9 +127,10 @@ Per scanner, source, split and class (and per family and region where the data a
 | recall, lenient | (full + partial) / spans |
 | character recall | covered core characters / all core characters |
 | findings | findings that overlap an expected span, plus false positives |
-| FP | findings that overlap no expected span and no removed span |
-| precision | (findings − FP) / findings |
-| F1 | 2 P R / (P + R), with the strict recall |
+| FP | findings that overlap no expected span and are not ignored on a removed span |
+| precision | (findings − FP) / findings, per family and in total; a finding counts in the family of the span it lies on, a false positive in the family the scanner gives it |
+| F1 | 2 P R / (P + R), with the strict recall; 0 when P + R is 0 |
+| family right | family right / full |
 | too wide | findings that are too wide |
 | FP per 1,000 negative cases | FP in negative cases × 1,000 / negative cases |
 | FP per MB | for a source of whole files (the false-alarm bank): FP × 2²⁰ / bytes scanned |
@@ -198,10 +207,13 @@ Not yet an adapter:
 
 ## Result files and the report
 
-`bench/run.py` writes one JSON file per scanner, source and split: the `describe()` of the scanner, the commit of the
-benchmark, the source and its version, the split, the metrics per class and family, per region and class, per context
+`bench/run.py` writes one JSON file per scanner, source and split: the `describe()` of the scanner (with the
+distributions installed in its Python, so a run names every transitive version), the commit of the benchmark and
+whether its tree was modified, the provenance of the source (url, commit or revision, licence), the sha256 of the
+ordered case ids, the split, the metrics per class and family, per region and class, per context
 and class, the timing, and the outcome per case id (not for the holdout). The files hold no value and no text.
-`bench/report.py` writes the Markdown tables; a scanner appears in a family table only when it claims that family.
+`bench/report.py` writes the Markdown tables; a scanner appears in a family table only when it claims that family,
+and only runs with the same case ids and the same benchmark commit share a table.
 
 ## Repeat a measurement
 
@@ -214,7 +226,7 @@ python3 -m venv /tmp/venv-ds && /tmp/venv-ds/bin/pip install detect-secrets==1.5
 git clone https://github.com/harshahemanth/secret-scan /tmp/secret-scan && git -C /tmp/secret-scan checkout 7d8b5c1
 python3 -m venv /tmp/venv-ss && /tmp/venv-ss/bin/pip install /tmp/secret-scan
 git clone https://github.com/subhash-holla/pii-anon /tmp/pii-anon && git -C /tmp/pii-anon checkout 2171ace
-python3 -m venv /tmp/venv-pa && /tmp/venv-pa/bin/pip install /tmp/pii-anon numpy
+python3 -m venv /tmp/venv-pa && /tmp/venv-pa/bin/pip install /tmp/pii-anon numpy==2.5.4
 git clone https://github.com/thirtysix/Preserve /tmp/preserve && git -C /tmp/preserve checkout 01dbd77
 python3 -m venv /tmp/venv-pr && /tmp/venv-pr/bin/pip install /tmp/preserve
 export BENCH_DETECT_SECRETS_PYTHON=/tmp/venv-ds/bin/python BENCH_SECRET_SCAN_PYTHON=/tmp/venv-ss/bin/python
@@ -223,6 +235,16 @@ export BENCH_PII_ANON_PYTHON=/tmp/venv-pa/bin/python BENCH_PRESERVE_PYTHON=/tmp/
 # the data: the PII datasets (pinned by sha256) and the six catalogs (see scripts/measure_catalog_coverage.py);
 # the catalog source needs PyYAML and Python 3.11 or later (tomllib)
 python3 scripts/measure_datasets.py fetch
+mkdir -p /tmp/catalogs && cd /tmp/catalogs
+while read -r name commit url; do git clone -q "$url" "$name" && git -C "$name" checkout -q "$commit"; done <<'EOF'
+noseyparker 2e6e7f36ce36619852532bbe698d8cb7a26d2da7 https://github.com/praetorian-inc/noseyparker.git
+kingfisher 82d050530cdef9af070b8f9a75701c9c27a948c3 https://github.com/mongodb/kingfisher.git
+gitleaks b58d3f102cf3a2c84cb7f923d05c25c9b1aed84b https://github.com/gitleaks/gitleaks.git
+betterleaks c613797a684337a014168063577bb6fa6e3b6296 https://github.com/betterleaks/betterleaks.git
+trufflehog 048de9ff07098d943136cd5231a0e93fbb3ea443 https://github.com/trufflesecurity/trufflehog.git
+gitlab cae5670b0d83aaea0ff37c085119e82ff394f283 https://gitlab.com/gitlab-org/security-products/secret-detection/secret-detection-rules.git
+EOF
+cd -
 
 # the bank is in the repository; check that it matches its templates
 python3 bench/bank/make_bank.py --check

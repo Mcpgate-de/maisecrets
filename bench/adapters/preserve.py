@@ -6,12 +6,11 @@ network); a finding is an entry of `result.detections`. Preserve scrubs personal
 families. Its type names are mapped to the classes of the benchmark by their words (KEY, TOKEN, ... is a secret)."""
 from __future__ import annotations
 
-import json
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
+
+from bench.adapters import _proc
 
 NAME = "preserve"
 SCOPE = ("secret.", "pii.")
@@ -69,25 +68,8 @@ def describe() -> dict:
             "normalcy and context scoring of the defaults", "network": False,
             "dependencies": "pydantic, phonenumbers, email-validator, dateparser, names-dataset, wordfreq, openai "
                             "(imported, not called)", "region": "default", "scope": list(SCOPE),
-            "python": _python()}
+            "python": _python(), "installed": _proc.installed(_python())}
 
 
 def scan(cases):
-    tmp = tempfile.mkdtemp(prefix="bench-pr-")
-    try:
-        inp, out, worker = (os.path.join(tmp, n) for n in ("in.jsonl", "out.jsonl", "worker.py"))
-        with open(worker, "w", encoding="utf-8") as f:
-            f.write(_WORKER)
-        with open(inp, "w", encoding="utf-8") as f:
-            for c in cases:
-                f.write(json.dumps({"text": c["text"]}) + "\n")
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("OPENAI", "PRESERVE"))}
-        p = subprocess.run([_python(), "-I", worker, inp, out], capture_output=True, text=True, cwd=tmp, env=env)
-        if p.returncode:
-            raise RuntimeError(f"Preserve worker failed: {p.stderr[-2000:]}")
-        timing = json.loads(p.stdout)
-        with open(out, encoding="utf-8") as f:
-            found = [[tuple(x) for x in json.loads(line)] for line in f]
-        return found, timing
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+    return _proc.run_worker("preserve", _python(), _WORKER, cases, fields=("text",))

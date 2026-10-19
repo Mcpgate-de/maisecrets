@@ -7,12 +7,11 @@ the match keeps its offsets. A finding is a match: line and column give the offs
 scope is `secret.`."""
 from __future__ import annotations
 
-import json
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
+
+from bench.adapters import _proc
 
 NAME = "secret-scan"
 SCOPE = ("secret.",)
@@ -63,24 +62,8 @@ def describe() -> dict:
     return {"scanner": NAME, "version": p.stdout.strip() or None, "commit": COMMIT,
             "configuration": "scan_directory defaults: named patterns, entropy off, redact off (for the offsets)",
             "detectors": "all named patterns of the release", "network": False, "dependencies": "none (stdlib)",
-            "region": "none", "scope": list(SCOPE), "python": _python()}
+            "region": "none", "scope": list(SCOPE), "python": _python(), "installed": _proc.installed(_python())}
 
 
 def scan(cases):
-    tmp = tempfile.mkdtemp(prefix="bench-ss-")
-    try:
-        inp, out, worker = (os.path.join(tmp, n) for n in ("in.jsonl", "out.jsonl", "worker.py"))
-        with open(worker, "w", encoding="utf-8") as f:
-            f.write(_WORKER)
-        with open(inp, "w", encoding="utf-8") as f:
-            for c in cases:
-                f.write(json.dumps({"text": c["text"], "path": c.get("path")}) + "\n")
-        p = subprocess.run([_python(), "-I", worker, inp, out], capture_output=True, text=True, cwd=tmp)
-        if p.returncode:
-            raise RuntimeError(f"secret-scan worker failed: {p.stderr[-2000:]}")
-        timing = json.loads(p.stdout)
-        with open(out, encoding="utf-8") as f:
-            found = [[tuple(x) for x in json.loads(line)] for line in f]
-        return found, timing
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+    return _proc.run_worker("secret-scan", _python(), _WORKER, cases, fields=("text", "path"))

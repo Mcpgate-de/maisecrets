@@ -9,6 +9,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from bench.adapters import _proc
+
 NAME = "maisecrets"
 SCOPE = ("secret.", "pii.")
 WORKER = Path(__file__).with_name("maisecrets_worker.py")
@@ -47,11 +49,7 @@ def describe(root: Path, regions: str) -> dict:
 
 
 def _clean_env(home: str) -> dict:
-    keep = ("PATH", "LANG", "LC_ALL", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP")
-    env = {k: v for k, v in os.environ.items() if k in keep}
-    env[_HOME_VAR] = home
-    env["HOME"] = home
-    return env
+    return _proc.minimal_env(home, {_HOME_VAR: home})
 
 
 def scan(cases, root: Path, regions: str = "de,us", python: str = sys.executable):
@@ -69,10 +67,11 @@ def scan(cases, root: Path, regions: str = "de,us", python: str = sys.executable
         p = subprocess.run([python, "-I", str(WORKER), "--root", str(root), "--regions", regions, inp, out],
                            capture_output=True, text=True, env=_clean_env(home), cwd=tmp)
         if p.returncode:
-            raise RuntimeError(f"maisecrets worker failed: {p.stderr[-2000:]}")
+            raise _proc.AdapterError(f"maisecrets: the worker failed with exit code {p.returncode} (its stderr is "
+                                     f"not shown: it can hold a case value)")
         timing = json.loads(p.stdout)
         with open(out, encoding="utf-8") as f:
             found = [[(s, e, cls_of(t), k) for s, e, t, k in json.loads(line)] for line in f]
-        return found, timing
+        return _proc.check("maisecrets", cases, found), timing
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
