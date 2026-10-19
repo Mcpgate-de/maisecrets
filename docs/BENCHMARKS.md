@@ -185,6 +185,25 @@ baseline after the account changes, as the review asked.
 | Mendeley, PIILO, bank dev and val, secret catalogs (11,902 examples) | – | no change except Mendeley cards +119 |
 | False-alarm bank, seven trees (`compare`) | – | +0 |
 
+### A birth date after "born on", and after a birth label with "is" or "was", 2026-10-20
+
+The first change of the corrected method (`docs/BENCHMARK-V2.md`, draft): the cases were read on the `dev` split
+only, the change was decided on `val` and the false-alarm bank.
+
+- **Gap seen (dev):** Nemotron missed 6,214 birth dates, 6,201 of them ISO dates, after "was born on", "date of birth
+  is", "date of birth" and "<name> born on".
+- **Fix:** `birth-date-after-label` takes `born on`, the spellings `DateOfBirth` and `date_of_birth`, and a copula
+  (`is`, `was`, `as`) after the label. The checks stay: a real past day, no placeholder. Tool channel only. A known
+  limit: "the project was born on <date>" is masked too.
+
+| Measure | Before (`next`, 69d99234) | This change |
+|---|---|---|
+| Nemotron dev: birth dates whole, false positives, F1 | 4,736, 503, 0.6633 | 9,609, 503, 0.6839 |
+| Nemotron val: birth dates whole, false positives, F1 | 1,594, 187, 0.6678 | 3,068, 187, 0.6865 |
+| Gretel dev / val: birth dates whole | 712 / 235 | 746 / 253 (false positives unchanged) |
+| Mendeley, PIILO, bank dev and val | – | no change |
+| False-alarm bank, seven trees (`compare`) | – | +0 |
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
