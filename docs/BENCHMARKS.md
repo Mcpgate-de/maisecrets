@@ -204,6 +204,28 @@ only, the change was decided on `val` and the false-alarm bank.
 | Mendeley, PIILO, bank dev and val | – | no change |
 | False-alarm bank, seven trees (`compare`) | – | +0 |
 
+### An id after its label, whole: `of`, a certificate or license number, a letter prefix, 2026-10-20
+
+Read on the `dev` split, decided on `val` and the false-alarm bank.
+
+- **Gap seen (dev):** Nemotron's national ids (health plan beneficiary, medical record, certificate and license
+  numbers) missed 4,107 and found 1,213 in part, after "plan beneficiary number", "medical record number",
+  "certificate license number", often with `is` or `of`. No checksum rule would reach them: they have no checksum.
+- **Causes:** the id label took no `of` after it; `license number` without "driver's" was no label; and the digit
+  rule `us-license#1` took the digits after a letter prefix (`CL-4882019`), and that shorter hit won the overlap
+  against the label rule's whole id (the same collision as `us-bank` above).
+- **Fix:** `of` after the label; `license number` and `certificate license number` as labels; `us-bank` and
+  `us-license#1` take no part of a token joined by a hyphen to letters or digits.
+
+| Measure | Before (`next`, 113fa044) | This change |
+|---|---|---|
+| Nemotron dev: national ids whole / in part, false positives, F1 | 15,713 / 1,213, 503, 0.6839 | 17,123 / 220, 498, 0.6899 |
+| Nemotron val: national ids whole / in part, false positives, F1 | 5,072 / 386, 187, 0.6865 | 5,490 / 80, 185, 0.6918 |
+| Gretel dev: national ids whole, false positives | 1,023, 2,246 | 1,066, 2,165 |
+| Gretel val: national ids whole, false positives | 333, 764 | 353, 734 |
+| Mendeley, PIILO, bank dev and val | – | no change |
+| False-alarm bank, seven trees (`compare`) | – | +0 |
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
