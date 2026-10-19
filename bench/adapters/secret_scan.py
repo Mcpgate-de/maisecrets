@@ -8,14 +8,13 @@ scope is `secret.`."""
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 
 from bench.adapters import _proc
 
 NAME = "secret-scan"
 SCOPE = ("secret.",)
-COMMIT = "7d8b5c1"
+COMMIT = "7d8b5c1874501c1e2edc99c8b6ec2949decc4fc9"
 
 _WORKER = r'''
 import json, os, sys, time
@@ -57,12 +56,12 @@ def _python() -> str:
 
 
 def describe() -> dict:
-    p = subprocess.run([_python(), "-c", "from importlib.metadata import version; print(version('secret-scan'))"],
-                       capture_output=True, text=True)
-    return {"scanner": NAME, "version": p.stdout.strip() or None, "commit": COMMIT,
+    ident = _proc.identity(_python(), "secret-scan", version="", commit=COMMIT)
+    return {"scanner": NAME, "version": ident["version"], "commit": ident["commit"],
             "configuration": "scan_directory defaults: named patterns, entropy off, redact off (for the offsets)",
             "detectors": "all named patterns of the release", "network": False, "dependencies": "none (stdlib)",
-            "region": "none", "scope": list(SCOPE), "python": _python(), "installed": _proc.installed(_python())}
+            "region": "none", "scope": list(SCOPE), "python": _python(),
+            "python_version": ident["python_version"], "installed": _proc.installed(_python())}
 
 
 def scan(cases):

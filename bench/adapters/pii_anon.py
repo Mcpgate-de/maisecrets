@@ -8,14 +8,13 @@ regex engine (`regex-oss`) runs. pii-anon finds personal data, so its scope is `
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 
 from bench.adapters import _proc
 
 NAME = "pii-anon"
 SCOPE = ("pii.",)
-COMMIT = "2171ace"
+COMMIT = "2171ace5847a0d2add555419c02b41c47155cabe"
 
 _WORKER = r'''
 import json, sys, time
@@ -56,14 +55,14 @@ def _python() -> str:
 
 
 def describe() -> dict:
-    p = subprocess.run([_python(), "-c", "from importlib.metadata import version; print(version('pii-anon'))"],
-                       capture_output=True, text=True)
-    return {"scanner": NAME, "version": p.stdout.strip() or None, "commit": COMMIT,
+    ident = _proc.identity(_python(), "pii-anon", version="", commit=COMMIT)
+    return {"scanner": NAME, "version": ident["version"], "commit": ident["commit"],
             "configuration": "PIIOrchestrator.run, profile default, mode weighted_consensus, language en, "
                              "no segmentation (the README's example)",
             "detectors": "the engines installed: regex-oss only without extras", "network": False,
             "dependencies": "pydantic, numpy (undeclared)", "region": "en", "scope": list(SCOPE),
-            "python": _python(), "installed": _proc.installed(_python())}
+            "python": _python(),
+            "python_version": ident["python_version"], "installed": _proc.installed(_python())}
 
 
 def scan(cases):

@@ -216,6 +216,46 @@ class RoundTwoTests(unittest.TestCase):
                       cwd=str(ROOT), timeout=1)
 
 
+class RoundThreeTests(unittest.TestCase):
+    """codex Gate A, round 3 on the benchmark."""
+
+    def test_the_order_of_overlapping_spans_does_not_move_a_finding_between_families(self):
+        sec = {"class": "secret.token", "start": 0, "end": 20}
+        per = {"class": "pii.email", "start": 10, "end": 30}
+        for f in ((15, 16), (2, 12), (18, 29)):
+            a = score.score_case(case("q" * 30, [sec, per]), [(*f, "secret")], ("secret.", "pii."))
+            b = score.score_case(case("q" * 30, [per, sec]), [(*f, "secret")], ("secret.", "pii."))
+            with self.subTest(finding=f):
+                self.assertEqual(a["on_target"], b["on_target"])
+        self.assertEqual(score.score_case(case("q" * 30, [sec, per]), [(18, 29, "secret")],
+                                          ("secret.", "pii."))["on_target"], {"pii": 1})
+
+    def test_the_catalog_source_needs_all_six_catalogs(self):
+        from bench import sources
+        with tempfile.TemporaryDirectory() as d:
+            os.mkdir(os.path.join(d, "gitleaks"))
+            with self.assertRaises(SystemExit):
+                next(iter(sources.catalog_cases(Path(d))))
+
+    def test_a_result_from_a_modified_tree_is_refused_in_a_report(self):
+        sys.path.insert(0, str(ROOT / "bench"))
+        import report
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d, "r.json")
+            p.write_text(json.dumps({"bench_dirty": True, "scanner": {"scanner": "x", "scope": []}, "source": "bank",
+                                     "split": "dev", "cases": 0, "metrics": {}}), encoding="utf-8")
+            self.assertEqual(report.main([str(p)]), 2)
+
+    def test_a_pinned_version_or_commit_that_does_not_match_is_an_error(self):
+        from bench.adapters import _proc
+        got = _proc.identity(sys.executable, "pip")
+        self.assertIsNone(got["commit"])
+        with self.assertRaises(_proc.AdapterError):
+            _proc.identity(sys.executable, "pip", version="0.0.1")
+        with self.assertRaises(_proc.AdapterError):
+            _proc.identity(sys.executable, "pip", commit="0" * 40)
+
+
 class AdapterOutputTests(unittest.TestCase):
     def test_a_missing_result_or_a_finding_outside_the_text_is_an_error(self):
         from bench.adapters import _proc

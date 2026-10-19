@@ -95,10 +95,11 @@ def catalog_cases(catalogs: Path, max_examples: int = 6):
     scripts/measure_catalog_coverage.py probes it. The expected span is the catalog's secret."""
     sys.path.insert(0, str(ROOT / "scripts"))
     import measure_catalog_coverage as mcc
+    missing = [cat for cat in mcc.CATALOGS if not (Path(catalogs) / cat).is_dir()]
+    if missing:
+        raise SystemExit(f"the catalog source needs all six catalogs; missing: {', '.join(missing)}")
     for cat in mcc.CATALOGS:
         root = Path(catalogs) / cat
-        if not root.is_dir():
-            continue
         commit, dirty = _catalog_state(root)
         want, url, licence = CATALOGS[cat]
         if commit != want or dirty:

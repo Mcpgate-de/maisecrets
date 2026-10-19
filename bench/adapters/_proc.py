@@ -42,6 +42,31 @@ def installed(python: str) -> list:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+_IDENTITY = ("import json, sys, importlib.metadata as m; d = m.distribution(sys.argv[1]); u = d.read_text("
+             "'direct_url.json'); print(json.dumps({'version': d.version, 'python_version': sys.version.split()[0], "
+             "'commit': ((json.loads(u) if u else {}).get('vcs_info') or {}).get('commit_id')}))")
+
+
+def identity(python: str, dist: str, version: str = "", commit: str = "") -> dict:
+    """The version of a scanner's distribution, the commit it was installed from (pip's direct_url.json) and the
+    Python, read in an isolated process. A pinned version or commit that does not match is an error: a result never
+    names a commit it did not check."""
+    tmp = tempfile.mkdtemp(prefix="bench-id-")
+    try:
+        p = run([python, "-I", "-c", _IDENTITY, dist], dist, env=minimal_env(tmp), cwd=tmp, timeout=120)
+        if p.returncode:
+            raise AdapterError(f"{dist}: not installed in {python} (exit code {p.returncode})")
+        got = json.loads(p.stdout)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    if version and got["version"] != version:
+        raise AdapterError(f"{dist}: version {got['version']} installed, {version} pinned")
+    if commit and got["commit"] != commit:
+        raise AdapterError(f"{dist}: installed from {got['commit'] or 'no commit'}, {commit[:12]} pinned "
+                           f"(pip install git+<url>@{commit})")
+    return got
+
+
 def run(cmd: list, name: str, env: dict, cwd: str, timeout: int = 0) -> subprocess.CompletedProcess:
     """subprocess.run in a session of its own: on a timeout the whole process group ends, and the error names only
     the scanner."""

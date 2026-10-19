@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write the Markdown tables of Benchmark V1 from result files of bench/run.py.
 
-    python3 bench/report.py RESULT.json [RESULT.json ...] > report.md
+    python3 bench/report.py [--allow-dirty] RESULT.json [RESULT.json ...] > report.md
 
 One table per source and split and per family: a scanner gets a row in a family table only when its scope claims
 that family, so a PII scanner is not listed under secrets and a secret scanner not under personal data. A rate is "-"
@@ -23,7 +23,14 @@ def claims(scope, family: str) -> bool:
 
 
 def main(argv) -> int:
+    allow_dirty = "--allow-dirty" in argv
+    argv = [a for a in argv if a != "--allow-dirty"]
     runs = [json.loads(Path(p).read_text(encoding="utf-8")) for p in argv]
+    dirty = [p for p, r in zip(argv, runs) if r.get("bench_dirty") or r["scanner"].get("dirty")]
+    if dirty and not allow_dirty:
+        # a modified benchmark or maisecrets tree is not the commit the result names: no comparison from it
+        sys.stderr.write("results from a modified tree (use --allow-dirty for a draft): " + ", ".join(dirty) + "\n")
+        return 2
     groups = collections.defaultdict(list)
     for r in runs:
         # only runs on the same cases with the same benchmark share a table

@@ -7,14 +7,13 @@ families. Its type names are mapped to the classes of the benchmark by their wor
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 
 from bench.adapters import _proc
 
 NAME = "preserve"
 SCOPE = ("secret.", "pii.")
-COMMIT = "01dbd77"
+COMMIT = "01dbd7710de79e21bef851aaa8b6cbfb4b1188ad"
 
 _WORKER = r'''
 import json, sys, time
@@ -61,14 +60,14 @@ def _python() -> str:
 
 
 def describe() -> dict:
-    p = subprocess.run([_python(), "-c", "from importlib.metadata import version; print(version('preserve-pii'))"],
-                       capture_output=True, text=True)
-    return {"scanner": NAME, "version": p.stdout.strip() or None, "commit": COMMIT,
+    ident = _proc.identity(_python(), "preserve-pii", version="", commit=COMMIT)
+    return {"scanner": NAME, "version": ident["version"], "commit": ident["commit"],
             "configuration": "PreserveConfig() defaults (no LLM review)", "detectors": "patterns, validators, "
             "normalcy and context scoring of the defaults", "network": False,
             "dependencies": "pydantic, phonenumbers, email-validator, dateparser, names-dataset, wordfreq, openai "
                             "(imported, not called)", "region": "default", "scope": list(SCOPE),
-            "python": _python(), "installed": _proc.installed(_python())}
+            "python": _python(),
+            "python_version": ident["python_version"], "installed": _proc.installed(_python())}
 
 
 def scan(cases):

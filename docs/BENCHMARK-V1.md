@@ -128,7 +128,7 @@ Per scanner, source, split and class (and per family and region where the data a
 | character recall | covered core characters / all core characters |
 | findings | findings that overlap an expected span, plus false positives |
 | FP | findings that overlap no expected span and are not ignored on a removed span |
-| precision | (findings − FP) / findings, per family and in total; a finding counts in the family of the span it lies on, a false positive in the family the scanner gives it |
+| precision | (findings − FP) / findings, per family and in total; a finding counts in the family of the span it covers most (a tie: the family first in name order), a false positive in the family the scanner gives it |
 | F1 | 2 P R / (P + R), with the strict recall; 0 when P + R is 0 |
 | family right | family right / full |
 | too wide | findings that are too wide |
@@ -186,14 +186,15 @@ Left out, with the reason:
 
 An adapter is a module in `bench/adapters/` with `NAME`, `SCOPE` (the class prefixes it claims), `describe()` (version
 or commit, configuration, detectors, locale, network, dependencies; it goes into each result file) and `scan(cases)`
-(one list of findings `(start, end, class, rule)` per case, and the timing). Each scanner runs in a process of its own,
+(one list of findings `(start, end, class, rule)` per case, and the timing). Each scanner runs in a process of its own (also the probe of its version: `_proc.identity` reads the version and,
+for a git install, the commit from pip's `direct_url.json`, and a mismatch with the pin is an error),
 started with `python -I`, in the Python of its own virtual environment (an environment variable names it), so the
 benchmark needs none of their packages and they need none of each other's.
 
 | Adapter | Version, pinned | Scope | Configuration | Network | Mapping of a finding |
 |---|---|---|---|---|---|
 | `maisecrets` | the checkout under `--maisecrets` (its commit and the version in its manifest) | secret, pii | `Detector` with regions `generic` plus `--regions` (default `de,us`), no sources, no references, a fixed host; before 0.6.39, `detect.scan` in a temp home | no | a match: its offsets; `SECRET` is family secret, the other placeholder types are pii classes |
-| `detect_secrets` | detect-secrets 1.5.0 (PyPI) | secret | `SecretsCollection.scan_file` with the default settings (all plugins, default filters), one file per case | no | a secret value: its first place in its line |
+| `detect_secrets` | detect-secrets 1.5.0 (PyPI) | secret | `detect_secrets.core.scan.scan_file` with the default settings (all plugins, default filters), one file per case at its path; before `SecretsCollection`, so a value on two lines is two findings (one plugin reports a value once per line) | no | a secret value: its place in its line, a repeated report its next place |
 | `secret_scan` | secret-scan 0.4.2, commit 7d8b5c1 | secret | `scan_directory` defaults (named patterns, entropy off), `redact=False` for the offsets | no | a match: line and column |
 | `pii_anon` | pii-anon 1.7.0rc1, commit 2171ace, plus numpy (imported but not declared) | pii | `PIIOrchestrator.run` with the README's profile (weighted consensus, `en`, no segmentation); without extras only its regex engine runs | no | an `ensemble_findings` entry: its span; entity type to class by a table |
 | `preserve` | preserve-pii 0.6.1, commit 01dbd77 | secret, pii | `Scrubber(PreserveConfig())`, the defaults (no LLM review) | no | a detection: its offsets; the type name to class by its words |
@@ -213,7 +214,9 @@ whether its tree was modified, the provenance of the source (url, commit or revi
 ordered case ids, the split, the metrics per class and family, per region and class, per context
 and class, the timing, and the outcome per case id (not for the holdout). The files hold no value and no text.
 `bench/report.py` writes the Markdown tables; a scanner appears in a family table only when it claims that family,
-and only runs with the same case ids and the same benchmark commit share a table.
+and only runs with the same case contents (the sha256 over id, text, channel, context, path and spans) and the same
+benchmark commit share a table. A result from a modified benchmark or maisecrets tree is refused (`--allow-dirty`
+for a draft). The catalog source needs all six catalogs at their pinned commits, with no change.
 
 ## Repeat a measurement
 
@@ -221,16 +224,13 @@ Each command runs from the root of a checkout of this repository. The data of th
 from their own fetch commands and are pinned by sha256 or commit.
 
 ```bash
-# the tools to compare, each in its own environment
-python3 -m venv /tmp/venv-ds && /tmp/venv-ds/bin/pip install detect-secrets==1.5.0
-git clone https://github.com/harshahemanth/secret-scan /tmp/secret-scan && git -C /tmp/secret-scan checkout 7d8b5c1
-python3 -m venv /tmp/venv-ss && /tmp/venv-ss/bin/pip install /tmp/secret-scan
-git clone https://github.com/subhash-holla/pii-anon /tmp/pii-anon && git -C /tmp/pii-anon checkout 2171ace
-python3 -m venv /tmp/venv-pa && /tmp/venv-pa/bin/pip install /tmp/pii-anon numpy==2.5.4
-git clone https://github.com/thirtysix/Preserve /tmp/preserve && git -C /tmp/preserve checkout 01dbd77
-python3 -m venv /tmp/venv-pr && /tmp/venv-pr/bin/pip install /tmp/preserve
-export BENCH_DETECT_SECRETS_PYTHON=/tmp/venv-ds/bin/python BENCH_SECRET_SCAN_PYTHON=/tmp/venv-ss/bin/python
-export BENCH_PII_ANON_PYTHON=/tmp/venv-pa/bin/python BENCH_PRESERVE_PYTHON=/tmp/venv-pr/bin/python
+# the tools to compare, each in its own environment, with every distribution pinned (git installs by full commit);
+# --no-deps keeps pip from resolving anything that is not in the file
+for t in detect-secrets secret-scan pii-anon preserve; do
+  python3 -m venv /tmp/venv-$t && /tmp/venv-$t/bin/pip install --no-deps -r bench/adapters/requirements/$t.txt
+done
+export BENCH_DETECT_SECRETS_PYTHON=/tmp/venv-detect-secrets/bin/python BENCH_SECRET_SCAN_PYTHON=/tmp/venv-secret-scan/bin/python
+export BENCH_PII_ANON_PYTHON=/tmp/venv-pii-anon/bin/python BENCH_PRESERVE_PYTHON=/tmp/venv-preserve/bin/python
 
 python3 -m venv /tmp/venv-yaml && /tmp/venv-yaml/bin/pip install pyyaml==6.0.3   # Python 3.11 or later
 # the data: the PII datasets (pinned by sha256) and the six catalogs (see scripts/measure_catalog_coverage.py);

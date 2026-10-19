@@ -57,7 +57,10 @@ def score_case(case: dict, findings, scope) -> dict:
         hits = [sp for sp in spans if s < sp["end"] and e > sp["start"]]
         extra = (e - s) - _covered(allowed, s, e)
         if hits:
-            on_target[family(hits[0]["class"])] += 1
+            # the span the finding covers most owns it; a tie goes to the family first in name order, so the order
+            # of the annotations never decides
+            owner = max(hits, key=lambda sp: (min(e, sp["end"]) - max(s, sp["start"]), -ord(family(sp["class"])[0])))
+            on_target[family(owner["class"])] += 1
             if extra > max(SLACK, max(sp["end"] - sp["start"] for sp in hits)):
                 too_wide += 1
         elif any(s < sp["end"] and e > sp["start"] for sp in removed) and extra <= SLACK:

@@ -11,7 +11,6 @@ its scope is `secret.`."""
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 
 from bench.adapters import _proc
@@ -19,6 +18,7 @@ from bench.adapters import _proc
 NAME = "detect-secrets"
 SCOPE = ("secret.",)
 VERSION = "1.5.0"
+COMMIT = ""   # from PyPI: the version is pinned and checked
 
 _WORKER = r'''
 import json, os, sys, tempfile, time
@@ -72,13 +72,13 @@ def _python() -> str:
 
 
 def describe() -> dict:
-    p = subprocess.run([_python(), "-c", "from detect_secrets.__version__ import VERSION; print(VERSION)"],
-                       capture_output=True, text=True)
-    return {"scanner": NAME, "version": p.stdout.strip() or None, "commit": None,
+    ident = _proc.identity(_python(), "detect-secrets", version="1.5.0", commit=COMMIT)
+    return {"scanner": NAME, "version": ident["version"], "commit": ident["commit"],
             "configuration": "default settings (all plugins, default filters), core.scan.scan_file per case",
             "detectors": "all plugins of the release", "network": False,
             "dependencies": "detect-secrets and its requirements (pyyaml, requests)", "region": "none",
-            "scope": list(SCOPE), "python": _python(), "installed": _proc.installed(_python())}
+            "scope": list(SCOPE), "python": _python(),
+            "python_version": ident["python_version"], "installed": _proc.installed(_python())}
 
 
 def scan(cases):
