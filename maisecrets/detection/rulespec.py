@@ -102,7 +102,8 @@ def betterleaks_patches(table: dict, upstream: dict) -> dict:
                               _BETTERLEAKS_REASONS["add_keywords"], upstream.get("betterleaks:" + rule_id, "")))
         if patch.get("regex"):
             recs.append(Patch("betterleaks:" + rule_id, "regex", "replace", patch["regex"],
-                              _BETTERLEAKS_REASONS["regex"], upstream.get("betterleaks:" + rule_id, "")))
+                              patch.get("reason") or _BETTERLEAKS_REASONS["regex"],
+                              upstream.get("betterleaks:" + rule_id, "")))
         out[rule_id] = tuple(recs)
     return out
 
