@@ -70,6 +70,7 @@ OWNER = {
     "compact birth date after its label": "birth-date-after-label",
     "password after use the": "secret-password-with-sign", "password after such as": "secret-password-with-sign",
     "password after and password": "secret-password-with-sign",
+    "password that ends with a bang": "secret-password-with-sign",
 }
 
 

@@ -319,7 +319,9 @@ FORMS_NO_HIT = [
     ("password word and a version", "Set the password iPhone15 profile in MDM"),
     ("password word and a hash name", "the password SHA256-Hash is stored, never the password"),
     ("password word and a variable", "password ${DB_PASS1}"),
-    ("password word and an address", "send the password to it-help1@example.com"),
+    ("password word and a shell variable", "export PGPASSWORD; use the password $DB_PASS1 here"),
+    ("password word and a windows variable", "set the password %DB_PASS1% in the job"),
+    ("password word and an address", "send the password to it-help1@mail.invalid"),
     ("password word and a rule", "the password must be 12+ chars"),
     ("password word and a mask", "password ****1234! shown in the log"),
 ]
@@ -338,6 +340,7 @@ FORMS_HIT = [
     ("password after use the", "Please use the password " + "Quill" + "ary@4821" + " to log in.", ["Quill" + "ary@4821"]),
     ("password after such as", "Choose a password such as " + "Tarn" + "wick#77" + ".", ["Tarn" + "wick#77"]),
     ("password after and password", "Sign in as lea.v and password " + "Bramble" + "wood@19", ["Bramble" + "wood@19"]),
+    ("password that ends with a bang", "Use the password " + "Quill" + "ary99!" + " for the wifi.", ["Quill" + "ary99!"]),
     ("username of two dictionary words", "username: " + "hunter" + ".king42", ["hunter" + ".king42"]),
     ("username after an unrelated example key", "example: ignored\nusername: " + "lvo" + "gel2026", ["lvo" + "gel2026"]),
     ("username in json", '{"id": 4711, "username": "' + "lea" + ".vogel87" + '", "active": true}', ["lea" + ".vogel87"]),
