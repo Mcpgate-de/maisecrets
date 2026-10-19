@@ -23,6 +23,13 @@ def claims(scope, family: str) -> bool:
     return any(s == family + "." or s.startswith(family + ".") or s == family for s in scope)
 
 
+def _scanner_dirty(r: dict):
+    """A maisecrets result must name the state of its checkout (a missing field is unknown, not clean); the other
+    scanners are installed packages whose identity the adapter checked."""
+    s = r["scanner"]
+    return s.get("dirty") if s.get("scanner") == "maisecrets" else s.get("dirty", False)
+
+
 def main(argv) -> int:
     allow_dirty = "--allow-dirty" in argv
     argv = [a for a in argv if a != "--allow-dirty"]
@@ -30,11 +37,11 @@ def main(argv) -> int:
     # a result without a benchmark commit or a known state is never compared, not even in a draft
     unknown = [p for p, r in zip(argv, runs)
                if not re.fullmatch(r"[0-9a-f]{40}", str(r.get("bench_commit", "")))
-               or not isinstance(r.get("bench_dirty"), bool) or not isinstance(r["scanner"].get("dirty", False), bool)]
+               or not isinstance(r.get("bench_dirty"), bool) or not isinstance(_scanner_dirty(r), bool)]
     if unknown:
         sys.stderr.write("results without a benchmark commit or a known tree state: " + ", ".join(unknown) + "\n")
         return 2
-    dirty = [p for p, r in zip(argv, runs) if r["bench_dirty"] or r["scanner"].get("dirty", False)]
+    dirty = [p for p, r in zip(argv, runs) if r["bench_dirty"] or _scanner_dirty(r)]
     if dirty and not allow_dirty:
         # a modified benchmark or maisecrets tree is not the commit the result names: no comparison from it
         sys.stderr.write("results from a modified tree or without a benchmark commit (--allow-dirty for a draft): "

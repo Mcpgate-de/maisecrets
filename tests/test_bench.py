@@ -283,6 +283,7 @@ class RoundFourTests(unittest.TestCase):
             p = Path(d, "r.json")
             base = {"bench_commit": "a" * 40, "source": "bank", "split": "dev", "cases": 0, "metrics": {}}
             for extra, want in (({"bench_dirty": None, "scanner": {"scanner": "x", "scope": []}}, 2),
+                                ({"bench_dirty": False, "scanner": {"scanner": "maisecrets", "scope": []}}, 2),
                                 ({"bench_dirty": False, "scanner": {"scanner": "x", "scope": [], "dirty": None}}, 2),
                                 ({"bench_dirty": True, "scanner": {"scanner": "x", "scope": []}}, 0)):
                 p.write_text(json.dumps({**base, **extra}), encoding="utf-8")
