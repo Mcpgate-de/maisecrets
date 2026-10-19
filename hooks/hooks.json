@@ -27,7 +27,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceTool|ReadMcpResourceDirTool|mcp__.*",
+        "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|apply_patch|Read|Grep|Glob|LS|NotebookRead|ReadMcpResourceTool|ReadMcpResourceDirTool|mcp__.*",
         "hooks": [
           {
             "type": "command",

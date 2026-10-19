@@ -59,6 +59,13 @@ def value_in_file(path: Path, value: str) -> bool:
     return False
 
 
+def _patch_js(line: str, fname: str) -> str:
+    """Code mode: one tools.apply_patch call that adds fname with one line."""
+    patch = f"*** Begin Patch\n*** Add File: {fname}\n+{line}\n*** End Patch\n"
+    return (f"const r = await tools.apply_patch({json.dumps(patch)}); "
+            "text(typeof r === 'string' ? r : JSON.stringify(r));")
+
+
 def _js(cmd: str) -> str:
     return (f"const r = await tools.exec_command({{cmd: {json.dumps(cmd)}}}); "
             "text(typeof r === 'string' ? r : JSON.stringify(r));")
@@ -142,6 +149,24 @@ SCENARIOS = {
         "expect_placeholder": "⟦SECRET_c1⟧",
         "expect_file": ("notes.txt", f"key={MARK}\n"),
         "expect_hook": ("pre-tool", "apply_patch", "rewrite"),
+    },
+    # apply_patch nested in code mode (functions.exec -> tools.apply_patch) reaches the hook by its own name: Codex
+    # 0.163.0-alpha on Windows did not map it to the aliases Write and Edit, and a placeholder went into the file
+    # unchecked (field report, 2026-10-19). A known placeholder gets its value; an unknown one is refused. The known
+    # one stands in the prompt, so the session saw it (else the hook answers foreign-session)
+    "exec_apply_patch_known": {
+        "prompt": "Write the file notes.txt with ⟦SECRET_c1⟧",
+        "preload": True,
+        "turns": [{"exec": _patch_js("⟦SECRET_c1⟧", "notes.txt")}, {"text": "done"}],
+        "expect_file": ("notes.txt", f"{MARK}\n"),
+        "expect_hook": ("pre-tool", "apply_patch", "rewrite"),
+    },
+    "exec_apply_patch_unknown": {
+        "prompt": "write the file",
+        "preload": True,
+        "turns": [{"exec": _patch_js("⟦SECRET_c999⟧", "bad.txt")}, {"text": "done"}],
+        "expect_file": ("bad.txt", "<missing>"),
+        "expect_hook": ("pre-tool", "apply_patch", "deny"),
     },
     # a patch against the maisecrets home is refused before Codex applies it (invariant I3, C14)
     "apply_patch_store_refused": {
