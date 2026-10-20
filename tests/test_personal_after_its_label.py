@@ -274,6 +274,22 @@ class NameNextToAPersonCueTests(Base):
             with self.subTest(text=text):
                 self.assertEqual(text.replace(NAME, "•"), masked(text))
 
+    def test_a_full_name_after_a_salutation_is_masked_whole(self):
+        for text in ("Dear " + NAME + ",\nThank you for your application.", "Hello " + NAME + "! Welcome aboard."):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(NAME, "•"), masked(text))
+
+    def test_the_role_words_of_a_salutation_do_not_touch_the_other_cues(self):
+        # the span ratchet found it (2026-10-20): `Participant <name>, born on` was found before the role list
+        text = "Participant Okafor, born on " + BIRTH + ", was seen today."
+        self.assertIn("name-next-to-a-person-cue", {m.kind for m in scan(text)})
+
+    def test_a_role_or_a_placeholder_after_a_salutation_stays_text(self):
+        for text in ("Dear Valued Policyholder,\n", "Dear Hiring Manager,\n", "Dear Customer,\n", "Dear John Doe,\n",
+                     "Hi Team Leads,\n"):
+            with self.subTest(text=text):
+                self.assertNotIn("name-next-to-a-person-cue", {m.kind for m in scan(text)})
+
     def test_a_title_before_words_one_word_or_a_street_stays_text(self):
         for text in ("Open the Ms Word Document first.", "Mr Product Owner will decide.", "Mr John Doe is a sample.",
                      "Visit us at 12 Oak Dr. We are open daily."):

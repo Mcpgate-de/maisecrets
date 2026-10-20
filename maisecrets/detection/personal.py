@@ -395,7 +395,20 @@ _PERSON_CUE_RES = (
     re.compile(_CUE_NAME + r", (?=(?:born on|born in|date of birth|a resident of|residing at|resides at|who resides"
                r"|who lives|currently residing|currently resides)\b)"),
     # a title before a full name (Mr Dana Okafor, Mrs. …); not Dr, which is also a street (… Dr. We are)
-    re.compile(r"(?<![A-Za-z])(?:Mr|Mrs|Ms|Mx|Miss)\.? " + _CUE_NAME + r"(?![\w'’-])"))
+    re.compile(r"(?<![A-Za-z])(?:Mr|Mrs|Ms|Mx|Miss)\.? " + _CUE_NAME + r"(?![\w'’-])"),
+    # a salutation before a full name and its comma or line end (Dear Dana Okafor,)
+    re.compile(r"(?<![A-Za-z])(?:Dear|Hi|Hello|Hey) " + _CUE_NAME + r"(?=[ \t]*[,:!\n])"))
+# the roles a salutation names instead of a person, which the word list lacks (Dear Valued Policyholder): read on the
+# dev split of Gretel and Nemotron-PII, 2026-10-20, with their common relatives
+_ROLE_WORDS = frozenset({
+    "valued", "esteemed", "prospective", "policyholder", "policyholders", "subscriber", "subscribers", "cardholder",
+    "beneficiary", "applicant", "applicants", "customer", "customers", "member", "members", "client", "clients", "team",
+    "committee", "manager", "managers", "sir", "madam", "colleague", "colleagues", "partner", "partners", "patron",
+    "investor", "investors", "shareholder", "shareholders", "stakeholder", "stakeholders", "user", "users",
+    "participant", "participants", "resident", "residents", "homeowner", "homeowners", "tenant", "tenants", "borrower",
+    "insured",
+    "claimant", "account", "holder", "student", "students", "parent", "parents", "guardian", "patient", "patients",
+    "employee", "employees", "friend", "friends", "admissions", "hiring", "selection", "support", "sales", "board"})
 _SERVICE_LOCAL_RE = re.compile(r"(?i)^(?:no-?reply|do-?not-?reply|notifications?|support|info|hello|contact|team"
                                r"|admin|root|git|bot|ci|build|release|deploy|security|alerts?|monitoring|postmaster"
                                r"|webmaster|mailer-daemon|bounces?|github-actions|actions|dependabot|renovate)"
@@ -1950,7 +1963,8 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             if _name_ok(v) and not words_only:
                 out.append((m.start(3), m.start(3) + len(v), "name-after-label", NAME))
     if "name-next-to-a-person-cue" in want and any(w in low for w in ("i, ", "name is", "born", "resid", "lives", "mr",
-                                                                         "ms", "mx", "miss")):
+                                                                         "ms", "mx", "miss", "dear", "hi ", "hello",
+                                                                         "hey ")):
         for rx in _PERSON_CUE_RES:
             for m in rx.finditer(text):
                 words, start = m.group(1).split(" "), m.start(1)
@@ -1961,6 +1975,9 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                 # two name words at least: one word next to the cue is as often a role or a place (The Applicant,
                 # Texas, born on) as a name
                 if not _name_ok(v) or _reads_as_words(v) or words[0].lower() in _PLACEHOLDER_NAME_WORDS:
+                    continue
+                # a salutation also greets a role (Dear Valued Policyholder); the other cues name a person already
+                if rx is _PERSON_CUE_RES[-1] and any(w.lower() in _ROLE_WORDS for w in words):
                     continue
                 out.append((start, start + len(v), "name-next-to-a-person-cue", NAME))
     if "name-before-email" in want and "@" in text:
