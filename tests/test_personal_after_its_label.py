@@ -463,6 +463,44 @@ class JsonAndXmlRecordTests(Base):
                 self.assertNotIn("-personal-field", " ".join(m.kind for m in scan(text, region=("us",))))
 
 
+
+# ------------------------------------------- one field policy: names folded, attributes, one level of nesting --
+class RecordFieldNameTests(Base):
+    def assertBothMasked(self, text: str) -> None:
+        out = masked(text, region=("us",))
+        for v in (NAME, STREET):
+            with self.subTest(v=len(v), text=text[:24]):
+                self.assertNotIn(v, out)
+
+    def test_a_namespace_an_escape_or_another_language_names_the_column(self):
+        for text in ("<fpml:party><fpml:full_name>" + NAME + "</fpml:full_name><fpml:street>" + STREET
+                     + "</fpml:street></fpml:party>",
+                     '"order",first\\_name\\_full,"full\\_name","street\\_address"\n"1","x","' + NAME + '","'
+                     + STREET + '"\n',
+                     "<kund><namn>" + NAME + "</namn><adress>" + STREET + "</adress></kund>",
+                     '{"cognome": "x", "nome": "' + NAME + '", "indirizzo": "' + STREET + '"}'):
+            self.assertBothMasked(text)
+
+    def test_the_attributes_of_an_element_are_a_record(self):
+        # address_line1 is a field name the column policy knows and no label rule does: only the record reads it
+        self.assertBothMasked('<Customer customer_name="' + NAME + '" address_line1="' + STREET + '" tier="gold"/>')
+        self.assertIn(STREET, masked('<Office name="Berlin Office" street="' + STREET + '"/>', region=("us",)))
+
+    def test_a_record_nested_right_in_a_person_record_joins_it(self):
+        self.assertBothMasked("<party id='p1'><name>" + NAME + "</name><postalAddress><streetAddress>" + STREET
+                              + "</streetAddress><city>Springfield</city></postalAddress></party>")
+        self.assertBothMasked('{"customer": {"full_name": "' + NAME + '", "address": {"street": "' + STREET
+                              + '", "city": "Springfield"}}}')
+
+    def test_a_company_with_a_branch_and_a_record_two_levels_down_stay_text(self):
+        for text in ("<company><name>Acme Logistics GmbH</name><branch><street>" + STREET
+                     + "</street></branch></company>",
+                     "<p><name>" + NAME + "</name><contact><postal><street>" + STREET
+                     + "</street></postal></contact></p>"):
+            with self.subTest(text=text[:20]):
+                self.assertIn(STREET, masked(text, region=("us",)))
+
+
 if __name__ == "__main__":
     unittest.main()
 

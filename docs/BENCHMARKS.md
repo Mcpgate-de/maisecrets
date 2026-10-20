@@ -388,6 +388,35 @@ the whole street, nothing stays in the clear. The five new false positives on Gr
 the audit). Most XML misses stay (Gretel dev gained 119 whole spans in all); their cause is not read yet and is part of the
 next step, a common structure for all record formats.
 
+### One personal-field policy for every record format, 2026-10-20
+
+Found by reading a sample of the record misses on Gretel `dev` (20 XML, 20 CSV): field names behind an XML namespace
+(`fpml:name`), behind a Markdown escape (`first\\_name`) or in another language (`Namn`, `cognome`, `indirizzo`),
+attributes instead of child elements, and a person's name and address in two nested records.
+
+- **Refactor first:** CSV and Markdown tables go through the one helper of SQL, HTML, JSON and XML (`_grid_hits`);
+  their differences are parameters. The detection fingerprint stayed byte-identical (27,337 default inputs and 23,729
+  development records and traces).
+- **Then one commit per behaviour,** each measured on Gretel and traces (`dev`, `val`):
+
+| Commit | Gretel dev: whole, partial, FP | Gretel val: whole, partial, FP |
+|---|---|---|
+| field names without namespace and escape, CSV through the same folding | +252, +1, +49 | +69, −1, +35 |
+| field names in German, French, Spanish, Italian, Dutch, Swedish, Portuguese | +131, +9, +16 | +90, +10, +1 |
+| XML attributes as a record | +1, 0, 0 | 0, 0, 0 |
+| a record nested right in a person's record joins it | +191, +1, +46 | +47, +2, +20 |
+| an XML element name with a namespace | +54, 0, 0 | +17, 0, +3 |
+| an XML element that closes itself | 0, 0, 0 | 0, 0, 0 |
+| **all** (`next` d82047d2 → this branch) | **+629, +11, +111** | **+223, +11, +59** |
+
+Nemotron, Mendeley, PIILO, the bank and the false-alarm bank: no change.
+
+**Costs, read on `dev`.** Per span, no outcome got worse: Gretel `dev` 629 spans went from missed to whole and 11 from
+missed to partial (now less in the clear than before); `val` 222 and 12, and one partial to whole. A sample of 30 of
+the new findings in the 61 changed `dev` cases was read: streets of named parties in XML, birth dates in a patient table with a
+patient id, phone numbers, streets and birth dates in customer rows. They are values of persons that Gretel did not
+label, the pattern the V3 audit measured (`docs/BENCHMARK-V3-DRAFT.md`).
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),

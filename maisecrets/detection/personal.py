@@ -463,7 +463,7 @@ def _csv_hits(text: str) -> list:
             pos += len(hdr) + 1
             li += 1
             continue
-        names = [h.strip().strip("\"'").lower() for h in hdr.split(sep)]
+        names = [_md_column(h) for h in hdr.split(sep)]
         strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
         cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
         pos += len(hdr) + 1
@@ -475,26 +475,18 @@ def _csv_hits(text: str) -> list:
             line = lines[li]
             if not line.strip() or (line.count(sep) != hdr.count(sep) and '"' not in line):
                 break
-            j = col = 0
-            row: list = []
+            j = 0
+            cells: list = []
             cell = _CSV_CELL_RE[sep]
             while j <= len(line):
                 m = cell.match(line, j)
                 a, b = m.span()
-                if col in cols:
-                    s2, e2 = (a + 1, b - 1) if line[a:b].startswith('"') and b - a >= 2 else (a, b)
-                    v = line[s2:e2].strip()
-                    typ = _column_type(names[col])
-                    if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ):
-                        lead = len(line[s2:e2]) - len(line[s2:e2].lstrip())
-                        row.append((pos + s2 + lead, pos + s2 + lead + len(v), "csv-personal-column", typ, col))
-                col += 1
+                s2, e2 = (a + 1, b - 1) if line[a:b].startswith('"') and b - a >= 2 else (a, b)
+                cells.append((pos + s2, pos + e2))
                 j = b + 1
-            # a name or a user cell counts only beside a strong cell of the same row that holds what it names, and an
-            # address or a phone only beside a cell that names a person (a name, a birth date, an id): a list of
-            # depots or of stations has addresses and no person
-            if any(c in strong for *_, c in row) and any(h[3] in (NAME, BIRTH_DATE, ID_NUMBER) for h in row):
-                out += [h[:4] for h in row]
+            # in a CSV file a birth date also names the person of its row
+            out += _grid_hits(text, names, [cells], "csv-personal-column", anchors=(NAME, BIRTH_DATE, ID_NUMBER),
+                              accounts_column=False)
             pos += len(line) + 1
             li += 1
             rows += 1
@@ -515,10 +507,26 @@ _MD_ALIASES = {"telephone_number": "telephone", "mobile_number": "mobile", "cell
                # streetaddress) and camel case written as one word
                "address_line1": "street", "address_line_1": "street", "address1": "street", "addressline1": "street",
                "streetaddress": "street_address", "dateofbirth": "date_of_birth", "phonenumber": "phone_number",
-               "mobilephone": "mobile_phone"}
+               "mobilephone": "mobile_phone",
+               # the same columns in the languages of the regions (de, fr, es, it, nl, sv, pt): each maps to a name the
+               # lists above already hold, so the policy stays one
+               "straße": "strasse", "telefonnummer": "telephone", "handynummer": "mobile",
+               "prénom": "first_name", "prenom": "first_name", "nom_de_famille": "last_name",
+               "date_de_naissance": "date_of_birth", "téléphone": "telephone",
+               "apellido": "last_name", "apellidos": "last_name", "fecha_de_nacimiento": "date_of_birth",
+               "teléfono": "telefono", "dirección": "direccion",
+               "cognome": "last_name", "indirizzo": "address", "data_di_nascita": "date_of_birth",
+               "voornaam": "first_name", "achternaam": "last_name", "naam": "name", "adres": "address",
+               "geboortedatum": "date_of_birth", "telefoonnummer": "telephone",
+               "förnamn": "first_name", "efternamn": "last_name", "namn": "name", "adress": "address",
+               "födelsedatum": "date_of_birth",
+               "sobrenome": "last_name", "endereço": "endereco", "data_de_nascimento": "date_of_birth"}
 
 
 def _md_column(cell: str) -> str:
+    """The field name of a column, a key or an element, folded to the names of _STRONG_COLS and _WEAK_COLS: no XML
+    namespace prefix (fpml:name), no Markdown escape (first\\_name), lower case, separators as `_`, then an alias"""
+    cell = re.sub(r"^\s*[A-Za-z][\w.-]{0,40}:(?=[A-Za-z_])", "", cell.replace("\\_", "_"))
     name = re.sub(r"[\s/.-]+", "_", cell.strip().strip("*_`'\" ").strip().lower()).strip("_")
     name = re.sub(r"_?\(.*\)$", "", name)   # Date of Birth (YYYY-MM-DD)
     return _MD_ALIASES.get(name, name)
@@ -570,34 +578,13 @@ def _md_table_hits(text: str) -> list:
             li += 1
             continue
         names = [_md_column(hdr[a:b]) for a, b in _md_cells(hdr)]
-        strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
-        cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
-        accounts = {i for i, h in enumerate(names) if _ACCOUNT_NUMBER_COL_RE.fullmatch(h)}
         li += 2
-        rows = 0
-        while li < len(lines) and rows < _CSV_ROWS and "|" in lines[li] and lines[li].strip():
-            line = lines[li]
-            row: list = []
-            for col, (a, b) in enumerate(_md_cells(line)):
-                if col in accounts:
-                    v = line[a:b].strip().strip("*`")
-                    if _account_cell(v):
-                        s0 = a + line[a:b].index(v)
-                        out.append((pos[li] + s0, pos[li] + s0 + len(v), "md-table-personal-column", ID_NUMBER))
-            if cols:
-                for col, (a, b) in enumerate(_md_cells(line)):
-                    if col not in cols:
-                        continue
-                    v = line[a:b].strip().strip("*`")
-                    typ = _column_type(names[col])
-                    if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ):
-                        s0 = a + line[a:b].index(v)
-                        row.append((pos[li] + s0, pos[li] + s0 + len(v), "md-table-personal-column", typ, col))
-            # a date alone names no person in a table of releases (| Name | Birthday | Version |): a name or an id
-            if any(c in strong for *_, c in row) and any(h[3] in (NAME, ID_NUMBER) for h in row):
-                out += [h[:4] for h in row]
+        rows: list = []
+        while li < len(lines) and len(rows) < _CSV_ROWS and "|" in lines[li] and lines[li].strip():
+            rows.append([(pos[li] + a, pos[li] + b) for a, b in _md_cells(lines[li])])
             li += 1
-            rows += 1
+        # a date alone names no person in a table of releases (| Name | Birthday | Version |): a name or an id
+        out += _grid_hits(text, names, rows, "md-table-personal-column", strip="*`")
     return out
 
 
@@ -614,13 +601,17 @@ class _lazy:
         return getattr(self._rx, name)
 
 
-def _grid_hits(text: str, names: list, rows, kind: str) -> list:
-    """The Markdown table rule for rows whose cells another format delimits: names are the folded column names, each
-    row a list of (start, end) of its cell values in text. The same columns, cell checks and person check."""
+def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER), strip: str = "",
+               accounts_column: bool = True) -> list:
+    """The personal-field policy of every table and record format: names are the column or field names, each row a
+    list of (start, end) of its cell values in text. A strong column (an address, a birth date, a phone, an id) and
+    the weak ones beside it (a name, a user) count only in a row that also holds a value of a person (`anchors`): a
+    list of depots has addresses and no person. A column that names an account number counts on every row.
+    `strip` are the marks a format puts around a value (Markdown bold and code)."""
     out = []
     strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
     cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
-    accounts = {i for i, h in enumerate(names) if _ACCOUNT_NUMBER_COL_RE.fullmatch(h)}
+    accounts = {i for i, h in enumerate(names) if _ACCOUNT_NUMBER_COL_RE.fullmatch(h)} if accounts_column else set()
     if not cols and not accounts:
         return out
     for n, cells in enumerate(rows):
@@ -629,6 +620,8 @@ def _grid_hits(text: str, names: list, rows, kind: str) -> list:
         row: list = []
         for col, (a, b) in enumerate(cells):
             v = text[a:b].strip()
+            if strip:
+                v = v.strip(strip)
             s0 = a + text[a:b].index(v) if v else a
             if col in accounts and _account_cell(v):
                 out.append((s0, s0 + len(v), kind, ID_NUMBER))
@@ -636,7 +629,7 @@ def _grid_hits(text: str, names: list, rows, kind: str) -> list:
                 typ = _column_type(names[col])
                 if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ):
                     row.append((s0, s0 + len(v), kind, typ, col))
-        if any(c in strong for *_, c in row) and any(h[3] in (NAME, ID_NUMBER) for h in row):
+        if any(c in strong for *_, c in row) and any(h[3] in anchors for h in row):
             out += [h[:4] for h in row]
     return out
 
@@ -718,8 +711,21 @@ _JSON_TOKEN_RE = _lazy(r'"((?:[^"\\\n]|\\.){0,512})"|([{}\[\]:,])|(-?[\w.+-]{1,6
 _JSON_RECORDS_MAX = 20000
 
 
+def _record_rows(text: str, pairs: list, nested: list, kind: str) -> list:
+    """The hits of one record: its own pairs, and its pairs joined with those of the records nested right in it. A
+    person named in the record (a name, an id) is the person of its nested address or phone too: <party><name>, then
+    <postalAddress><streetAddress>. One level only, so a list of a company's branches under a person stays apart."""
+    out = _grid_hits(text, [_md_column(k) for k, _ in pairs], [[s for _, s in pairs]], kind) if pairs else []
+    for child in nested:
+        joined = pairs + child
+        if pairs and child:
+            out += _grid_hits(text, [_md_column(k) for k, _ in joined], [[s for _, s in joined]], kind)
+    return out
+
+
 def _json_record_hits(text: str) -> list:
-    """Each object's direct pairs whose value is a string: (key, value span). Nested objects are rows of their own."""
+    """Each object's direct pairs whose value is a string: (key, value span). A nested object is a row of its own and
+    joins the row of the object it sits in (_record_rows)."""
     out, stack, rows = [], [], 0
     key = None
     expect_key = False
@@ -727,15 +733,20 @@ def _json_record_hits(text: str) -> list:
         if m.group(2):
             ch = m.group(2)
             if ch == "{":
-                stack.append([])
+                # a nested object directly under a key of an object (not inside an array) joins that object
+                stack.append({"pairs": [], "nested": [], "joins": key is not None and bool(stack)
+                              and stack[-1] is not None})
                 expect_key, key = True, None
             elif ch == "}":
-                if stack:
-                    pairs = stack.pop()
-                    if pairs and rows < _JSON_RECORDS_MAX:
+                if stack and stack[-1] is not None:
+                    obj = stack.pop()
+                    if rows < _JSON_RECORDS_MAX:
                         rows += 1
-                        out += _grid_hits(text, [_md_column(k) for k, _ in pairs], [[s for _, s in pairs]],
-                                          "json-personal-field")
+                        out += _record_rows(text, obj["pairs"], obj["nested"], "json-personal-field")
+                    if obj["joins"] and stack and stack[-1] is not None:
+                        stack[-1]["nested"].append(obj["pairs"])
+                elif stack:
+                    stack.pop()
                 expect_key, key = False, None
             elif ch == "[":
                 stack.append(None)
@@ -751,14 +762,15 @@ def _json_record_hits(text: str) -> list:
             if expect_key:
                 key, expect_key = m.group(1), False
             elif key is not None and stack and stack[-1] is not None:
-                stack[-1].append((key, m.span(1)))
+                stack[-1]["pairs"].append((key, m.span(1)))
                 key = None
         else:
             key = None
     return out
 
 
-_XML_TAG_RE = _lazy(r"<(/?)([A-Za-z_][\w.-]{0,64})(?:\s[^<>]{0,500})?(/?)>|<[!?][^<>]{0,2000}>")
+_XML_ATTR_RE = _lazy(r"""\s([A-Za-z_][\w.:-]{0,64})\s*=\s*(?:"([^"<>]{0,512})"|'([^'<>]{0,512})')""")
+_XML_TAG_RE = _lazy(r"<(/?)([A-Za-z_][\w.:-]{0,64})(?:\s[^<>]{0,500})?(/?)>|<[!?][^<>]{0,2000}>")
 
 
 def _xml_record_hits(text: str) -> list:
@@ -772,12 +784,21 @@ def _xml_record_hits(text: str) -> list:
         if m.group(2) is None:
             continue    # a comment, a declaration, CDATA
         name, closing, empty = m.group(2), m.group(1), m.group(3)
+        if not closing and rows < _JSON_RECORDS_MAX:
+            # <Admin user_name="…" name="…" street_address="…"/>: the attribute names name the attribute values
+            attrs = [(x.group(1), x.span(2) if x.group(2) is not None else x.span(3))
+                     for x in _XML_ATTR_RE.finditer(text, m.start(), m.end())]
+            if len(attrs) >= 2:
+                rows += 1
+                out += _grid_hits(text, [_md_column(n) for n, _ in attrs], [[s for _, s in attrs]],
+                                  "xml-personal-field")
         if empty:
             continue
         if not closing:
             if stack and between.strip():
                 stack[-1]["mixed"] = True
-            stack.append({"name": name, "start": m.end(), "leaves": [], "children": 0, "mixed": False})
+            stack.append({"name": name, "start": m.end(), "leaves": [], "children": 0, "mixed": False,
+                          "nested": []})
             continue
         if not stack or stack[-1]["name"] != name:
             stack = []          # not well formed: start again at the next element
@@ -792,8 +813,9 @@ def _xml_record_hits(text: str) -> list:
                 stack[-1]["children"] += 1
             if not el["mixed"] and el["leaves"] and rows < _JSON_RECORDS_MAX:
                 rows += 1
-                out += _grid_hits(text, [_md_column(n) for n, _ in el["leaves"]], [[s for _, s in el["leaves"]]],
-                                  "xml-personal-field")
+                out += _record_rows(text, el["leaves"], el["nested"], "xml-personal-field")
+                if stack and not el["nested"] and el["children"] == len(el["leaves"]):
+                    stack[-1]["nested"].append(el["leaves"])   # a record of leaves only joins its parent
     return out
 
 
@@ -1658,7 +1680,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
         out += _html_table_hits(text)
     if "json-personal-field" in want and "{" in text and '":' in text.replace('" :', '":'):
         out += _json_record_hits(text)
-    if "xml-personal-field" in want and "</" in text:
+    if "xml-personal-field" in want and ("</" in text or "/>" in text):
         out += _xml_record_hits(text)
     if "phone-wrapped-line" in want and "-\n" in text:
         for m in _PHONE_WRAP_RE.finditer(text):
