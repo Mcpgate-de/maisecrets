@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## [0.6.41] - 2026-10-20
+
+### Fixes
+
+- an id after its label with of, a certificate or license number, and an id with a letter prefix are masked whole (aaa81bb)
+- the vCard parameters stay with BDAY when born on joins the birth labels (a742b84)
+- a birth date after born on, or after date of birth with is or was, is masked in tool results (0c78760)
+- a pull request or ticket number after the password word stays text (6897f3b)
+- a password that ends with ! or ? is masked whole (197c4f1)
+- a password with a letter, a digit and a sign after the password word is masked in tool results, also when it reads like a word (a7931d7)
+- a card number written as one run of digits is masked in tool results when it has the prefix and length of a card network (49f9a1f)
+- a number in a table column named account number is masked, wherever the table names it (8eeff23)
+- an account number with a hyphen is masked whole, not only the digits after the hyphen (5d433ef)
+- a US bank account number needs its label before it on its line, which removes a third of the false alarms in financial documents (2c134a1)
+- masks Mastercard numbers of the 2-series and 15-digit JCB numbers, which the card rule never checked (27bf5fa)
+- /maisecrets:status checks the Codex hook trust on Windows too, measured against Codex 0.164 (37d3392)
+
 ## [0.6.40] - 2026-10-19
 
 ### Features
