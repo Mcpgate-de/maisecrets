@@ -252,8 +252,7 @@ def _company_window(text: str, lo: int, a_start: int, a_end: int, kind: str, com
 _UP, _LO = "A-ZÀ-ÖØ-ÞĀ-ſ", "a-zà-öø-ÿĀ-ſ"
 # a part after a hyphen may start with a capital: Garcia-Lopez, Al-Rashid, Müller-Lüdenscheidt. The value ended at the
 # hyphen and left the second part in the clear (Benchmark V1, Gretel and Nemotron dev: 896 names found in part)
-# a hyphen at its end stays a part of it, as before the double names: a name broken at the end of a line (Bakker-)
-_NAME_STEM = r"[" + _UP + r"][" + _LO + r"'’]{1,30}(?:-[" + _UP + _LO + r"][" + _LO + r"'’]{1,30}){0,2}-?"
+_NAME_STEM = r"[" + _UP + r"][" + _LO + r"'’]{1,30}(?:-[" + _UP + _LO + r"][" + _LO + r"'’]{1,30}){0,2}"
 _NAME_WORD = r"(?:" + _NAME_STEM + r"|[A-Z]\.)"
 _NAME_PARTICLE = r"(?:van|von|de|da|del|der|al|bin|di|du|la|le)"
 _NAME_VALUE = (r"((?:" + _NAME_STEM + r")(?:[ ](?:" + _NAME_WORD + "|" + _NAME_PARTICLE + r")){1,3})")
