@@ -1001,7 +1001,9 @@ _NOT_AN_ADDRESS_RE = _lazy(r"(?i)\b(?:rack|row|slot|zone|version|build|schema|wi
 _SINGLE_NAME_LABELS = (r"first[ _-]?name|last[ _-]?name|given[ _-]?name|family[ _-]?name|middle[ _-]?name|surname"
                        r"|forename|vorname|nachname|familienname|rufname|pr[ée]nom|nom de famille|apellidos?"
                        r"|nombre de pila|cognome|sobrenome|voornaam|achternaam|f[öo]rnamn|efternamn")
-_SINGLE_NAME_RE = _lazy(r"(?i:(?<![a-z_./-])(?:" + _SINGLE_NAME_LABELS + r"))[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?"
+# the separator: `:`, `=`, or `is` in a sentence (your first name is <name>)
+_SINGLE_NAME_RE = _lazy(r"(?i:(?<![a-z_./-])(?:" + _SINGLE_NAME_LABELS + r"))[\"']?(?:[ \t]{0,3}[:=]|(?i: is))"
+                        r"[ \t]{0,3}[\"']?"
                         r"[ \t]{0,3}([" + _UP + "\u1e00-\u1eff" + r"]"
                         r"[" + _LO + "\u1e00-\u1eff\u0300-\u036f" + r"'’-]{1,30}"
                         # a double surname: a second part with its own capital after the hyphen
