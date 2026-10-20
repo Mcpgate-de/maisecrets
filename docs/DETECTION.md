@@ -58,6 +58,26 @@ for m in d.findings(text, channel="tool", path="notes.txt"):
 
 The rule tables and the helpers of `core.py` are no API: they change with the rules.
 
+## The API: recommendation of 2026-10-20 (not decided yet)
+
+The wheel (`pyproject.toml`) makes the core usable without the plugin, so its names need a promise. The current state
+and the recommendation, for the maintainer to decide:
+
+| Name | Today | Recommendation |
+|---|---|---|
+| `Detector`, `Match` (`kind`, `type`, `value`, `start`, `end`), `Sources`, `NO_SOURCES`, `References`, `NO_REFERENCES`, `Host`, `THIS_COMPUTER`, `Active`, `resolve_regions` | in `__all__` | **stable**: a change that breaks a caller needs the next minor version and a line under "API" in the changelog |
+| `Rule` | in `__all__`; a frozen dataclass with 21 fields, 12 of them set by `rules()` or used by one vendored ruleset only (`key`, `form`, `matcher`, `filters`, `phase`, `drop`, `quote_group`, …) | **keep the class, narrow the promise**: add `user_rule(id, type, pattern, keywords=(), secret_group=0)` as the stable way to make a rule of your own; document only `id`, `type`, `keywords`, `secret_group` as stable fields; the other fields stay internal and can change in any version |
+| `LazyRegex` | in `__all__`; a wrapper that compiles a pattern at its first use | **internal**: `user_rule` takes the pattern string and wraps it; keep `LazyRegex` importable for one minor version, then take it out of `__all__` |
+| `maisecrets.detect` and the other old names | plugin modules, not in the wheel | **not API**: the plugin and its tests use them; a library caller imports `maisecrets.detection` only |
+| The hits themselves | change with each rule round | **not API**: a patch version may find more or fewer values; `docs/BENCHMARKS.md` and `scripts/compare_bench.py` report how |
+
+**Versioning.** The detection API follows the plugin version while it is 0.x: a patch never breaks a stable name, a
+minor version may, and says so. A 1.0 of the wheel would freeze the stable names above.
+
+**Checks that would hold it.** `tests/test_detection_package.py` already pins `__all__`. With the recommendation it
+also pins the signature of `user_rule` and of the stable `Match` fields, and `scripts/wheel_smoke.py` makes one rule of
+its own through `user_rule` in the fresh venv.
+
 ## The old names
 
 `maisecrets.detect` and `maisecrets.checksums`, `lazy_regex`, `normalise`, `regions`, `registry`, `rulespec`,
