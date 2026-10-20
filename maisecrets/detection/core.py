@@ -4326,6 +4326,8 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
         if _references().has_marks(value) or "example" in low or low in personal.PLACEHOLDER_NAMES \
                 or looks_like_placeholder(value) or is_public_test_value(value, typ):
             continue
+        if kind in personal.ONLY_WIDENS and not overlaps(start, end):
+            continue   # a form that only completes a hit another rule made: alone it would mask company addresses
         if overlaps(start, end):
             # an address takes the postcode that a region rule found inside it (de-plz): the whole address is the
             # value. A phone number wrapped over two lines takes the first line that the phone rule found. Any other

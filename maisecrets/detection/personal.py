@@ -1890,6 +1890,10 @@ _STREET_WORD_RE = _lazy(r"(?i)(?:stra(?:ss|ß)e|str\.|weg|gasse|allee|platz|ring
                         r"|carrer|pasadizo|acceso|rua|travessa|largo|straat|laan|plein|gracht|gatan|vägen|gränd)\b")
 _ADDRESS_RULES_WITH_PLACE = frozenset({"address-street-after-label", "street-address", "address-after-label",
                                        "address-street-postcode-city"})
+# The forms that only widen a hit of another rule (core._personal_hits drops them when they overlap none): a street
+# line around a postcode that de-plz found. Alone, the form took company, hospital and venue addresses (Gretel dev,
+# 62 new false positives on 2026-10-20); around a postcode hit it turns a partial address into a whole one
+ONLY_WIDENS = frozenset({"address-street-postcode-city"})
 # Street, number, postcode, city in one line, the European order: Max-Planck-Straße 12, 80333 München; 12 Rue de
 # Rivoli, 75001 Paris. A street word and a house number before the comma, a postcode and a capitalised place after it
 _STREET_POSTCODE_CITY_RE = _lazy(
