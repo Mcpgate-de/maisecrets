@@ -1903,8 +1903,11 @@ def _address_with_its_place(text: str, out: list) -> list:
     if not any(k in _ADDRESS_RULES_WITH_PLACE for _s, _e, k, _t in out):
         return out
     res = []
+    wider = [(s, e) for s, e, _k, typ in out if typ == ADDRESS]
     for s, e, k, typ in out:
-        if typ == ADDRESS and k in _ADDRESS_RULES_WITH_PLACE:
+        # an address hit that another one already holds and runs past stays as it was: that one owns the span
+        if typ == ADDRESS and k in _ADDRESS_RULES_WITH_PLACE \
+                and not any(s2 <= s and e2 > e for s2, e2 in wider):
             m = _PLACE_AFTER_RE.match(text, e)
             if m:
                 e = m.end()
