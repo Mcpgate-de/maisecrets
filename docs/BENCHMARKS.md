@@ -513,6 +513,31 @@ positives of Gretel `dev`, read: each is a double surname after a last name labe
 `Cognome`) in a record whose first name Gretel labelled and whose last name it did not. `scripts/compare_bench.py`:
 no finding.
 
+### A name next to words that say it is a person, 2026-10-20
+
+On dev, cue phrases next to a capitalised name were counted against the gold names, split by whether the name reads
+as words (counts only). Three families were clean, without a label and with almost no match outside a gold name:
+`I, <name>, hereby/am/the undersigned` (Nemotron 2,164 missed names to 1 match without one; Gretel 161 to 0),
+`<name>, born on / a resident of / residing at` (1,947 to 17; 419 to 3) and `my name is <name>` (314 to 0). Three
+were not, and are left out: `Dear <name>` (the matches without a name are roles: `Dear Policyholder`), a title
+(`Dr` is also a street: `… Dr. We`) and a signature after `Best regards,` (often a company).
+
+One rule takes the three clean families: the cue is a short phrase, the value has two name words at least and does
+not read as words, so a role, a place or a field state next to the cue stays text (`The Applicant, born on`,
+`Texas, born on`, `my name is Required`). Registered before the run: about 4,000 on Nemotron `dev`.
+
+| Measure | Before (double surname) | This change |
+|---|---|---|
+| Nemotron dev / val: whole spans, F1 | 111,911, 0.6992 / 37,193, 0.7016 | 118,466, 0.7252 / 39,402, 0.7281 |
+| Nemotron dev / val: name recall | 0.1930 / 0.2002 | 0.2694 / 0.2781 |
+| Gretel dev / val: whole spans, F1 | 20,620, 0.4030 / 6,518, 0.3895 | 21,066, 0.4099 / 6,654, 0.3960 |
+| False positives, all sources; Mendeley, traces, bank, false-alarm bank | – | no change |
+
+Per span: Nemotron dev 6,555 missed to whole, val 2,209 (Nemotron labels the first and the last name apart, so one
+hit makes two spans whole); Gretel dev 446, val 136; PIILO dev 7, val 1; nothing got worse. Read on Gretel `dev`:
+the 7 spans now found in part are a title Gretel counts to the name (`Mr.` stays visible) or a first name that reads
+as a word; the hits over a gold span are a surname Gretel did not label. `scripts/compare_bench.py`: no finding.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
