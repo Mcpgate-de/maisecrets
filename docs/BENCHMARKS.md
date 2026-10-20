@@ -385,8 +385,8 @@ missed spans) and JSON (307 cases, 501 missed spans), mostly names and addresses
 street named after a person, and Gretel's name label runs past the end of the `<Street>` element; the new hit covers
 the whole street, nothing stays in the clear. The five new false positives on Gretel `dev` are streets of `ShipTo`,
 `BillTo` and `Requestor` records next to a labelled name: real addresses without a label (`docs/BENCHMARK-V3-DRAFT.md`,
-the audit). Most XML misses stay: Gretel's records often name a person in one field and the address in a sibling
-element, which the person check of a row does not join.
+the audit). Most XML misses stay (1,553 before, about 1,430 after); their cause is not read yet and is part of the
+next step, a common structure for all record formats.
 
 ## CredData, results per release
 
