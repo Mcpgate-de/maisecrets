@@ -467,6 +467,30 @@ spans still worse than in 0.6.41 are two company names (`… Inc.`), which the n
 French address after `Adresse:` with its postcode after the street, and one name broken at the end of the text whose
 hyphen alone stays in the clear (read on `dev`).
 
+### A street keeps its direction and its unit, 2026-10-20
+
+On 0.7.1, 309 address spans of Nemotron-PII `dev` were found in part, all by `address-street-after-label` and all
+with the rest at the end. The rest is not a house number: 129 are a unit number without a unit word (`… St 999`), 103 a
+direction after the street type (`… St SW`, `… St North`), 31 a unit letter (`… St C`, `… St 99A`), 11 a unit word
+(`… St Ste A`), 10 a direction and a unit. In a sample of 60 (by the hash of case and start), 55 are a person's home,
+3 a rented property, 1 the place of an incident, 1 a property in a loan; no company, no label error.
+
+The change widens the existing hit only: after the street type the value goes on over a direction and a unit, also
+without a unit word, where the value ends right after it (a comma, `;`, `|`, the end of the line, a dot before a space,
+`**`, ` in `, ` and `). The label, the house number and the street type stay required. A number or a direction that
+goes on in the sentence (`… Street 3 days a week`, `… Street West of the river`) stays text. Registered before the
+run: about 280 of the 309, no change in the number of hits.
+
+| Measure | 0.7.1 | This change |
+|---|---|---|
+| Nemotron dev: whole, partial, false positives, F1 | 111,448, 485, 502, 0.6973 | 111,732, 201, 502, 0.6984 |
+| Nemotron val: whole, partial, false positives, F1 | 37,026, 180, 186, 0.6995 | 37,112, 94, 186, 0.7006 |
+| Nemotron address recall, dev / val | 0.3392 / 0.3299 | 0.3672 / 0.3555 |
+| Gretel, Mendeley, PIILO, traces, bank, false-alarm bank | – | no change |
+
+Per span: dev 284 partial to whole, val 86; nothing got worse, too wide unchanged. `scripts/compare_bench.py`: no
+finding. Left open: a unit before a direction (`… St 999 North`, 7) and 13 other forms.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
