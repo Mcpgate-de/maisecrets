@@ -261,6 +261,8 @@ characters in the clear. Hyphenated licenses are a real format (Wisconsin `A123-
 | Gretel val: national ids whole / in part | 353 / 30 | 381 / 2 |
 | Nemotron dev / val: national ids in part | 220 / 80 | 208 / 76 |
 | False positives on every source | – | no change |
+| False-alarm bank, seven trees (`compare`) | – | +0 |
+
 ### A double name with a hyphen, masked whole, 2026-10-20
 
 Found by the partial-detection audit of the dev splits (the largest cluster: 896 names whose part after the hyphen
@@ -276,6 +278,23 @@ stayed in the clear). Decided on `val` and the false-alarm bank.
 | Nemotron dev / val: names whole / in part | 16,266 / 103; 5,554 / 36 | 16,382 / 5; 5,591 / 1 |
 | Mendeley, PIILO, bank dev and val | – | no change |
 | False-alarm bank, seven trees (`compare`) | – | +0 |
+
+### An address keeps its unit after `Ste.` or `Apt.`, 2026-10-20
+
+Found by the partial-detection audit of the dev splits (Gretel, 682 addresses after a label with the unit number in the
+clear). Decided on `val` and the false-alarm bank.
+
+- **Cause:** the value after an address label ended at a dot and a space, so `1200 Harbor Road, Ste. 300` ended at `Ste`.
+- **Fix:** a dot ends the value only when no digit follows, or when the word before it is not a unit or a short street
+  name (`Ste`, `Apt`, `Rm`, `Fl`, `Bldg`, `No`, `Nr`, `…str`).
+
+| Measure | Before (`next`, 40e638ef) | This change |
+|---|---|---|
+| Gretel dev: addresses whole / in part, false positives, F1 | 3,141 / 1,052, 2,170, 0.3760 | 3,763 / 389, 2,163, 0.3857 |
+| Gretel val: addresses whole / in part, false positives, F1 | 1,008 / 290, 734, 0.3654 | 1,177 / 110, 732, 0.3736 |
+| Nemotron dev / val: addresses whole / in part | 3,420 / 313; 1,103 / 108 | 3,435 / 313; 1,108 / 107 |
+| Mendeley, PIILO, bank dev and val | – | no change |
+| False-alarm bank, seven trees (`scripts/compare_bench.py`) | – | 0 findings |
 
 ## CredData, results per release
 
