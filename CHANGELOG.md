@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## [0.7.0] - 2026-10-20
+
+### Features
+
+- a library caller makes a rule of its own through user_rule, and LazyRegex is deprecated (52379f9)
+
+### Fixes
+
+- a street line under a hotel or company name stays text, and a small word starts no street (602360c)
+- a European street line only widens a postcode another rule found, so a company address stays text (b9331c9)
+- an address that a wider address hit already holds keeps that hit's rule (d01efc8)
+- an address keeps the postcode, the city and the country after its street, and a European street line with postcode and city is masked whole (ae26485)
+- an XML element that closes itself is read for its attributes too (aedd606)
+- an XML element with a namespace prefix (fpml:party) is read as a record (3ebdbbd)
+- an address or phone in a record nested right in a record that names a person is masked with it (51854a4)
+- the attributes of an XML element (name, street_address) are read as a record like its child elements (87300e0)
+- column and field names in German, French, Spanish, Italian, Dutch, Swedish and Portuguese name their values like the English ones (813553b)
+- a column or field name with an XML namespace or a Markdown escape (fpml:name, first\_name) names its values like the plain name (8e42f33)
+- personal fields of a JSON object and of an XML record are masked by the same column policy as a table (7419d4c)
+
 ## [0.6.44] - 2026-10-20
 
 ### Fixes
