@@ -341,6 +341,13 @@ person, as a customer record does: the column rules keep an address without a pe
 - **Fix:** `sql-insert-personal-column` reads the column list of an `INSERT … VALUES` statement, and
   `html-table-personal-column` the `<th>` cells of a table's first row. Both use the columns, cell checks and person
   check of the Markdown table rule.
+- **Cells:** a value in SQL quotes or bare (`NULL` is no value); an HTML cell whose one text run sits in inline tags
+  (`<a>`, `<b>`, `<span>`). A cell with two text runs, a nested table, a row with another number of cells, a tuple
+  without its end and a table without `<th>` name no cell.
+- **Business tables stay text** (tests): offices, companies, venues, depots, branches, warehouses and stores, also with
+  a `name` and an `address` column. The person check needs a name that reads as a person's or an id in the row.
+- **Known limit:** a name with an apostrophe (`O'Brien`) fails the name check of every column rule, and with it its
+  row. That is a limit of the name rule, not of these two formats.
 
 | Measure | Before (`next`, 898a95c2) | This change |
 |---|---|---|
