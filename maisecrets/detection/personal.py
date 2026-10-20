@@ -1126,10 +1126,19 @@ _PLACEHOLDER_NAME_WORDS = frozenset({"doe", "roe", "mustermann", "musterfrau", "
 # 2026-10-16: "street address: 4821 Maple Ridge Drive", "resides at 77 Harbour Lane"). The company check of the
 # address label holds: a company, an office or a public place on the line keeps the address text
 # a street name word: a capital word or an ordinal (123 5th Avenue)
+_STREET_DIRECTION = r"(?:N|S|E|W|NE|NW|SE|SW|North|South|East|West|Northeast|Northwest|Southeast|Southwest)"
+# the end of a street value: a separator, the end of the line or of a sentence, Markdown bold, or the place after it
+_STREET_VALUE_END = r"[ \t]*(?:$|[,;|\n)]|\.(?:\s|$)|\*\*| (?:in|and)\b)"
 _STREET_LINE = (r"(?:\d{1,6}[A-Za-z]?(?:-\d{1,4})? (?:(?:[A-Z][A-Za-z'.-]{0,30}|\d{1,3}(?:st|nd|rd|th)) ){1,4}"
                 r"(?:" + _STREET[3:-1]
                 + r"|Circle|Cir|Parkway|Pkwy|Trail|Trl|Loop|Pike|Alley|Grove|Gardens|Heights|Mews)\.?"
-                r"(?:,? (?:Apt|Apartment|Suite|Unit|Flat|#)\.? ?[A-Za-z0-9-]{1,6})?"
+                # a direction after the street type and a unit, also without a unit word (Main St SW, Oak Ave 12B,
+                # Elm Rd N Ste A): only where the value ends right after it, so a number of the sentence stays out
+                r"(?:(?: " + _STREET_DIRECTION + r")?"
+                r"(?:,? (?:Apt|Apartment|Suite|Ste|Unit|Flat|#)\.? ?[A-Za-z0-9-]{1,6}"
+                r"| (?:\d{1,5}[A-Z]?|[A-Z]\d{0,4}))(?=" + _STREET_VALUE_END + r")"
+                r"| " + _STREET_DIRECTION + r"(?=" + _STREET_VALUE_END + r")"
+                r"|,? (?:Apt|Apartment|Suite|Unit|Flat|#)\.? ?[A-Za-z0-9-]{1,6})?"
                 r"|[A-ZÄÖÜ][\wäöüß-]{1,40}(?:straße|strasse|str\.|weg|gasse|platz|allee|ring|damm) \d{1,4}[a-z]?"
                 r"|(?:Calle|Avenida|Via|Viale|Piazza|Rua|Carrer) (?:[A-ZÀ-Þ][\wà-ÿ'’-]{1,30} |d[aeio]l?l?[aeo]? |de "
                 r"|das? |dos? ){1,5}?\d{1,5}[A-Za-z]?)(?![\w-])")
