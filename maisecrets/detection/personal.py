@@ -1885,10 +1885,14 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             v = m.group(3).rstrip("'’")   # tenant: 'Jonas Wendler': the closing quote is no part of the name
             # after a person label (patient, full_name) a surname may be a word (Sarah Park): only a value of words
             # alone (Product Owner) is no name. After a weak label (name, owner) one word is enough
-            # the part after a hyphen is the second surname of a double name (Bakker-Hope): it never makes the name read
-            # as words. Judged with it, a name found up to its hyphen before 0.6.42 was found no more (Gretel dev, 25)
+            # a double name is judged with and without the parts after its hyphens, and is words only when both read as
+            # words: with them, a second surname with a noun ending (Bakker-Fleming) made the name words (25 names lost
+            # in 0.6.42); without them, a first surname that is a word alone (Llanos) did
             plain = re.sub(r"-[^\s]*", "", v)
-            words_only = _reads_as_words(plain, every=True) if m.group(1) else _reads_as_words(plain)
+            if m.group(1):
+                words_only = _reads_as_words(v, every=True) and _reads_as_words(plain, every=True)
+            else:
+                words_only = _reads_as_words(v) and _reads_as_words(plain)
             if _name_ok(v) and not words_only:
                 out.append((m.start(3), m.start(3) + len(v), "name-after-label", NAME))
     if "name-before-email" in want and "@" in text:
