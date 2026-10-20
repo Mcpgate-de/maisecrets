@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.6.44] - 2026-10-20
+
+### Fixes
+
+- an HTML table cell that wraps its text in a link or a span is read like a plain cell (dcb618b)
+- personal columns of an SQL INSERT and of an HTML table are masked like those of a CSV file (7192858)
+
 ## [0.6.43] - 2026-10-20
 
 ### Fixes
