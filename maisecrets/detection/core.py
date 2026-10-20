@@ -2010,6 +2010,10 @@ _HYPHEN_DIGITS_TAIL_RE = _LazyRx(r"(?:-\d{1,5}){1,4}(?![\w-])")
 # so three digits reached the model. Benchmark V1, Nemotron: 2,197 account numbers found only in part. The same for the
 # digits of a driver license after a letter prefix (CL-4882019): the label rule had the whole certificate number
 PRESIDIO_WHOLE_DIGIT_RUN = frozenset({"us-bank", "us-license#1"})
+# A DEA certificate number has no word boundary in Presidio's pattern: it matched two letters and seven digits inside a
+# longer license number and left the letters before and the digits after in the clear (Benchmark V2, Nemotron dev: 121
+# medical licenses found in part). A validated hit takes the whole token of letters and digits around it
+PRESIDIO_WHOLE_TOKEN = frozenset({"medical-license"})
 # Presidio tags every US/UK/IN/AU/… recognizer as language "en", so language is the wrong
 # switch: an Indian PAN rule produced 290 false positives in one German transcript. The
 # switch is the REGION, derived from the recognizer id; "generic" is always on.
@@ -4206,6 +4210,12 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                         re.match(r"-[A-Za-z0-9]", text[end:end + 2])
                         or re.search(r"[A-Za-z0-9]-$", text[max(0, start - 2):start])):
                     continue
+                if rule.id in PRESIDIO_WHOLE_TOKEN:
+                    while start > 0 and text[start - 1].isascii() and text[start - 1].isalnum():
+                        start -= 1
+                    while end < len(text) and text[end].isascii() and text[end].isalnum():
+                        end += 1
+                    secret = text[start:end]
                 label_window = PRESIDIO_LABEL_BEFORE.get(rule.id)
                 if label_window:
                     line_start = text.rfind("\n", 0, start) + 1
