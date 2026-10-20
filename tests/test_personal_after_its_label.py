@@ -223,6 +223,28 @@ class StreetLineTests(Base):
         self.assertMasked("Employer: Acme Inc.\nHome address: 12 Harbour Lane", "12 Harbour Lane")
         self.assertMasked("Name: " + NAME + "\nAddress: " + STREET, STREET)
 
+    def test_a_direction_and_a_unit_after_the_street_type_are_masked_with_the_street(self):
+        # masked() puts one mark where a hit was: the whole value goes, and nothing after it
+        for text, value in (
+                ("Street Address: 12 Oak " + "Street SW\nCity: Springfield", "12 Oak " + "Street SW"),
+                ("I live at 12 Oak " + "Street 99, in Springfield.", "12 Oak " + "Street 99"),
+                ("Address: 12 Oak " + "Street N Ste A | Phone: none", "12 Oak " + "Street N Ste A"),
+                ("She resides at 12 Oak " + "Avenue 9E, in Springfield", "12 Oak " + "Avenue 9E"),
+                ("- **Street Address:** 12 Oak " + "Road NE C\n- **City:** Springfield", "12 Oak " + "Road NE C"),
+                ("He lives at 12 Oak " + "Street B999.", "12 Oak " + "Street B999"),
+                ("I reside at 12 Oak " + "Lane Southwest and work from home.", "12 Oak " + "Lane Southwest")):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(value, "•"), masked(text))
+
+    def test_a_number_or_a_direction_that_goes_on_in_the_sentence_stays_text(self):
+        for text, value, rest in (
+                ("I live at 12 Oak " + "Street 3 days a week.", "12 Oak " + "Street", " 3 days"),
+                ("Address: 12 Oak " + "Street West of the river", "12 Oak " + "Street", " West of"),
+                ("He lives at 12 Oak " + "Street 5 more", "12 Oak " + "Street", " 5 more")):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(value, "•"), masked(text))
+                self.assertIn(rest, masked(text))
+
     def test_a_companys_address_takes_the_company_decision(self):
         company: list = []
         from maisecrets import personal
