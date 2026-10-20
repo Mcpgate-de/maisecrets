@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.7.1] - 2026-10-20
+
+### Fixes
+
+- a double name that runs on into the next label is masked up to its surname (192d9b9)
+- a double name is words only when it reads as words with and without its second surname (58d6ac6)
+- a double name whose second part is a word and an address with a template after its unit are masked again (8011e44)
+
 ## [0.7.0] - 2026-10-20
 
 ### Features
