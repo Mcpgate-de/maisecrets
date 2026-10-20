@@ -607,6 +607,17 @@ Per span against the change before it (measured on its first form): Nemotron dev
 dev 6, val 2; nothing got worse; false positives Nemotron dev +1; the false-alarm bank unchanged.
 `scripts/compare_bench.py`: no finding.
 
+### An ID after its label and a comma, 2026-10-20
+
+Of the IDs missed on Nemotron-PII `dev` after a health label (`medical record number`, `health plan beneficiary
+number`), 520 had a real value after a comma (`your health plan beneficiary number, <id>, to medical professionals`)
+and 671 had placeholder digits, which stay text on purpose. The ID label rule now takes a comma as a separator too;
+the value still needs five digits and no placeholder digits. Registered before the run: about 520 on Nemotron `dev`.
+
+Per span against the table change (measured on its first form): Nemotron dev 621 missed to whole, val 217 (the comma
+helps after other ID labels too); Gretel dev 4, val 2; nothing got worse; false positives and the false-alarm bank
+unchanged. `scripts/compare_bench.py`: no finding.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
