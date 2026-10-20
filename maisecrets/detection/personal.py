@@ -770,7 +770,7 @@ def _json_record_hits(text: str) -> list:
 
 
 _XML_ATTR_RE = _lazy(r"""\s([A-Za-z_][\w.:-]{0,64})\s*=\s*(?:"([^"<>]{0,512})"|'([^'<>]{0,512})')""")
-_XML_TAG_RE = _lazy(r"<(/?)([A-Za-z_][\w.-]{0,64})(?:\s[^<>]{0,500})?(/?)>|<[!?][^<>]{0,2000}>")
+_XML_TAG_RE = _lazy(r"<(/?)([A-Za-z_][\w.:-]{0,64})(?:\s[^<>]{0,500})?(/?)>|<[!?][^<>]{0,2000}>")
 
 
 def _xml_record_hits(text: str) -> list:
