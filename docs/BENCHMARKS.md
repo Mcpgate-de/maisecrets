@@ -349,7 +349,7 @@ person, as a customer record does: the column rules keep an address without a pe
 | Nemotron, Gretel, Mendeley, PIILO, bank dev and val | – | no change |
 | False-alarm bank, seven trees (`scripts/compare_bench.py`) | – | 0 findings |
 
-Both splits of `traces` come from the same generator, which the maintainer wrote: its `val` checks the rule on unseen
+Both splits of `traces` come from the same generator, written in this project: its `val` checks the rule on unseen
 records, not on unseen formats.
 
 ## CredData, results per release
