@@ -412,8 +412,8 @@ attributes instead of child elements, and a person's name and address in two nes
 Nemotron, Mendeley, PIILO, the bank and the false-alarm bank: no change.
 
 **Costs, read on `dev`.** Per span, no outcome got worse: Gretel `dev` 629 spans went from missed to whole and 11 from
-missed to partial (now less in the clear than before); `val` 222 and 12, and one partial to whole. The new false
-positives were read in the 61 changed cases: streets of named parties in XML, birth dates in a patient table with a
+missed to partial (now less in the clear than before); `val` 222 and 12, and one partial to whole. A sample of 30 of
+the new findings in the 61 changed `dev` cases was read: streets of named parties in XML, birth dates in a patient table with a
 patient id, phone numbers, streets and birth dates in customer rows. They are values of persons that Gretel did not
 label, the pattern the V3 audit measured (`docs/BENCHMARK-V3-DRAFT.md`).
 
