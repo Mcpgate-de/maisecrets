@@ -59,6 +59,7 @@ OWNER = {
     "phone after a phone word": "phone-after-phone-word", "phone national after a label": "phone-after-phone-word",
     "one first name": "name-single-after-label", "street line after a label": "address-street-after-label",
     "markdown table of persons": "md-table-personal-column",
+    "street postcode city": "address-street-postcode-city",
     "sql insert of persons": "sql-insert-personal-column", "html table of persons": "html-table-personal-column",
     "json record of a person": "json-personal-field", "xml record of a person": "xml-personal-field",
     "username in json": "username-after-label", "user_name in yaml": "username-after-label",

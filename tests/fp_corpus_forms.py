@@ -31,6 +31,7 @@ T1, T2 = _hex("token-one"), _hex("token-two")
 S1 = _sid("fixture-sid")
 
 FORMS_NO_HIT = [
+    ("version and year after a number", "Release notes version 12, 2024 Edition"),
     # ---------------------------------------------------------------- tables of places, not of persons
     ("sql insert of offices", "INSERT INTO offices (name, street, phone) VALUES ('Berlin Office', '4821 Maple Street', '(415) 382-0174');"),
     ("html table of venues", "<table><tr><th>name</th><th>address</th></tr><tr><td>Riverside Arena</td><td>12 Oak Lane, Springfield</td></tr></table>"),
@@ -365,6 +366,7 @@ FORMS_HIT = [
     ("userName in a log", "2026-10-19 login ok userName=" + "s.yilmaz" + " ip=10.0.0.7", ["s.yilmaz"]),
     ("benutzername", "Benutzername: " + "jbrandt" + "_berlin", ["jbrandt" + "_berlin"]),
     ("markdown table of persons", "| Name | Date of Birth |\n|---|---|\n| " + "Dana Oka" + "for | " + "1984-03-" + "12 |", ["Dana Oka" + "for", "1984-03-" + "12"]),
+    ("street postcode city", "Bitte liefern an: Max-Planck-Straße " + "12, 80333 München", ["Max-Planck-Straße " + "12, 80333 München"]),
     ("sql insert of persons", "INSERT INTO customers (full_name, street) VALUES ('" + "Dana Oka" + "for', '" + "4821 Maple " + "Street');", ["Dana Oka" + "for", "4821 Maple " + "Street"]),
     ("html table of persons", "<table><tr><th>full_name</th><th>date_of_birth</th></tr><tr><td>" + "Dana Oka" + "for</td><td>" + "1984-03-" + "12</td></tr></table>", ["Dana Oka" + "for", "1984-03-" + "12"]),
     ("json record of a person", '{"customer_name": "' + "Dana Oka" + 'for", "address_line1": "' + "4821 Maple " + 'Street", "status": "active"}', ["Dana Oka" + "for", "4821 Maple " + "Street"]),

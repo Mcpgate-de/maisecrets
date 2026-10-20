@@ -501,6 +501,32 @@ class RecordFieldNameTests(Base):
                 self.assertIn(STREET, masked(text, region=("us",)))
 
 
+# ------------------------------------------------------------ the place after a street belongs to the address --
+class AddressWithItsPlaceTests(Base):
+    def assertWhole(self, text: str, value: str) -> None:
+        s = text.index(value)
+        out = masked(text, region=("us", "de"))
+        self.assertTrue(out.startswith(text[:s]) and out.endswith(text[s + len(value):]), "masked too much")
+        self.assertFalse(any(c.isalnum() for c in out[s:len(out) - len(text) + s + len(value)]), "a part stays")
+
+    def test_the_postcode_the_city_and_the_country_after_a_street_are_masked_with_it(self):
+        for text, value in (
+                ("Address: 12 Via " + "Roma, 00184 Roma\n", "12 Via " + "Roma, 00184 Roma"),
+                ("Street address: " + STREET + ", Springfield, IL 62704, USA\n",
+                 STREET + ", Springfield, IL 62704, USA"),
+                ("Kunde: Max-Planck-Straße " + "12, 80333 München, Deutschland\n",
+                 "Max-Planck-Straße " + "12, 80333 München, Deutschland"),
+                ("Lieferadresse 99 Rue de " + "Rivoli, 75001 Paris\n", "99 Rue de " + "Rivoli, 75001 Paris")):
+            with self.subTest(text=text[:16]):
+                self.assertWhole(text, value)
+
+    def test_a_number_and_a_postcode_without_a_street_word_stay_text(self):
+        for text in ("Release notes version 12, 2024 Edition\n", "Order 12, 80333 Units shipped\n",
+                     "Chapter 4, 1999 Edition\n"):
+            with self.subTest(text=text[:16]):
+                self.assertText(text, region=("us", "de"))
+
+
 if __name__ == "__main__":
     unittest.main()
 
