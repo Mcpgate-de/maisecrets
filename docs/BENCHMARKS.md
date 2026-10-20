@@ -648,6 +648,23 @@ suffix that the dataset counts to the name (`Mr.`, `DDS`, `Jr`). `scripts/compar
 positives of Mendeley and PIILO (above 1 % of a small base); no span finding; the false-alarm bank is
 unchanged.
 
+### A full name after a salutation, 2026-10-20
+
+On `dev`, `Dear`, `Hi`, `Hello` or `Hey` before two name words that do not read as words was counted against the
+gold names: Nemotron 541 missed names to 7 matches without one, Gretel 250 to 20, Mendeley 5,516 to 0. Read: the
+matches without a name were roles the word list lacks (`Dear Valued Policyholder`). A list of such role words, from
+those read and their common relatives, refuses 24 of the 27 and no gold name (Nemotron 541 to 3, Gretel 250 to 0). The
+salutation is the fifth cue of the person-cue rule; the role list applies to it only. Registered before the run: about
+5,500 on Mendeley `dev`, 540 on Nemotron, 250 on Gretel.
+
+A first form applied the role list to every cue: the span ratchet reported one span of Nemotron `dev` whole to
+missed (`Participant <name>, born on`, found before as `Participant <name>`). The role list is the salutation's
+alone now, and that case is a test.
+
+Per span against the title change: Mendeley dev 5,422 missed to whole, val 1,787; Nemotron dev 1,130, val 382; Gretel
+dev 406 and 2 to partial, val 123 and 2; nothing got worse (second form, measured on the head of the chain).
+False positives: Mendeley dev +8, val +2; Nemotron dev +1: names in a salutation the dataset did not label.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
