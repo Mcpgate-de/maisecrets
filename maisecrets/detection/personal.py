@@ -672,7 +672,21 @@ def _sql_insert_hits(text: str) -> list:
 # an HTML table: the <th> cells of its first row name the <td> cells of each row after it
 _HTML_TABLE_RE = _lazy(r"(?is)<table\b[^>]{0,500}>(.{0,200000}?)</table>")
 _HTML_ROW_RE = _lazy(r"(?is)<tr\b[^>]{0,500}>(.*?)</tr>")
-_HTML_CELL_RE = _lazy(r"(?is)<(t[hd])\b[^>]{0,500}>([^<]{0,512})</t[hd]>")
+_HTML_CELL_RE = _lazy(r"(?is)<(t[hd])\b[^>]{0,500}>(.{0,2048}?)</t[hd]>")
+_HTML_TAG_RE = _lazy(r"<[^<>]{0,500}>")
+
+
+def _html_cell_text(text: str, a: int, b: int) -> tuple:
+    """The span of a cell's text: the one text run between its inline tags (<b>, <a href>, <span>). A cell with two
+    runs (a name and a note) or a nested table gives an empty span, so its row is no row of this rule"""
+    runs, pos = [], a
+    for m in _HTML_TAG_RE.finditer(text, a, b):
+        runs.append((pos, m.start()))
+        pos = m.end()
+    runs = [r for r in runs + [(pos, b)] if text[r[0]:r[1]].strip()]
+    if len(runs) != 1 or "<table" in text[a:b].lower():
+        return (a, a)
+    return runs[0]
 
 
 def _html_table_hits(text: str) -> list:
@@ -684,10 +698,10 @@ def _html_table_hits(text: str) -> list:
             if names is None:
                 if not cells or any(c.group(1).lower() != "th" for c in cells):
                     break
-                names = [_md_column(c.group(2)) for c in cells]
+                names = [_md_column(text[slice(*_html_cell_text(text, *c.span(2)))]) for c in cells]
                 continue
             if len(cells) == len(names) and all(c.group(1).lower() == "td" for c in cells):
-                rows.append([c.span(2) for c in cells])
+                rows.append([_html_cell_text(text, *c.span(2)) for c in cells])
         if names:
             out += _grid_hits(text, names, rows, "html-table-personal-column")
     return out
