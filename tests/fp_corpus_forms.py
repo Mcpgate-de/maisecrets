@@ -34,6 +34,7 @@ FORMS_NO_HIT = [
     # ---------------------------------------------------------------- tables of places, not of persons
     ("sql insert of offices", "INSERT INTO offices (name, street, phone) VALUES ('Berlin Office', '4821 Maple Street', '(415) 382-0174');"),
     ("html table of venues", "<table><tr><th>name</th><th>address</th></tr><tr><td>Riverside Arena</td><td>12 Oak Lane, Springfield</td></tr></table>"),
+    ("json record of an office", '{"name": "Berlin Office", "street": "4821 Maple Street", "phone": "(415) 382-0174"}'),
     # ---------------------------------------------------------------- ID-like labels in developer text
     ("member id count", "Fetched 48213 rows; member id column has 48213 distinct values."),
     ("member_id variable", "member_id = request.args.get('member_id')\nif not member_id:\n    abort(400)"),
@@ -366,6 +367,8 @@ FORMS_HIT = [
     ("markdown table of persons", "| Name | Date of Birth |\n|---|---|\n| " + "Dana Oka" + "for | " + "1984-03-" + "12 |", ["Dana Oka" + "for", "1984-03-" + "12"]),
     ("sql insert of persons", "INSERT INTO customers (full_name, street) VALUES ('" + "Dana Oka" + "for', '" + "4821 Maple " + "Street');", ["Dana Oka" + "for", "4821 Maple " + "Street"]),
     ("html table of persons", "<table><tr><th>full_name</th><th>date_of_birth</th></tr><tr><td>" + "Dana Oka" + "for</td><td>" + "1984-03-" + "12</td></tr></table>", ["Dana Oka" + "for", "1984-03-" + "12"]),
+    ("json record of a person", '{"customer_name": "' + "Dana Oka" + 'for", "address_line1": "' + "4821 Maple " + 'Street", "status": "active"}', ["Dana Oka" + "for", "4821 Maple " + "Street"]),
+    ("xml record of a person", "<customer><full_name>" + "Dana Oka" + "for</full_name><street>" + "4821 Maple " + "Street</street></customer>", ["Dana Oka" + "for", "4821 Maple " + "Street"]),
     ("street line after a label", "Street address: 4821 Maple " + "Ridge Drive", ["4821 Maple " + "Ridge Drive"]),
     ("one first name", '{"first_name": "' + "Da" + "na" + '", "age": 41}', ["Da" + "na"]),
     ("phone after a phone word", "You can reach the tenant at " + "415-382-" + "9174" + " after 6 pm.", ["415-382-" + "9174"]),
