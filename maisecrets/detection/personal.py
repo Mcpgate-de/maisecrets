@@ -507,7 +507,20 @@ _MD_ALIASES = {"telephone_number": "telephone", "mobile_number": "mobile", "cell
                # streetaddress) and camel case written as one word
                "address_line1": "street", "address_line_1": "street", "address1": "street", "addressline1": "street",
                "streetaddress": "street_address", "dateofbirth": "date_of_birth", "phonenumber": "phone_number",
-               "mobilephone": "mobile_phone"}
+               "mobilephone": "mobile_phone",
+               # the same columns in the languages of the regions (de, fr, es, it, nl, sv, pt): each maps to a name the
+               # lists above already hold, so the policy stays one
+               "straße": "strasse", "telefonnummer": "telephone", "handynummer": "mobile",
+               "prénom": "first_name", "prenom": "first_name", "nom_de_famille": "last_name",
+               "date_de_naissance": "date_of_birth", "téléphone": "telephone",
+               "apellido": "last_name", "apellidos": "last_name", "fecha_de_nacimiento": "date_of_birth",
+               "teléfono": "telefono", "dirección": "direccion",
+               "cognome": "last_name", "indirizzo": "address", "data_di_nascita": "date_of_birth",
+               "voornaam": "first_name", "achternaam": "last_name", "naam": "name", "adres": "address",
+               "geboortedatum": "date_of_birth", "telefoonnummer": "telephone",
+               "förnamn": "first_name", "efternamn": "last_name", "namn": "name", "adress": "address",
+               "födelsedatum": "date_of_birth",
+               "sobrenome": "last_name", "endereço": "endereco", "data_de_nascimento": "date_of_birth"}
 
 
 def _md_column(cell: str) -> str:
