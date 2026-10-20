@@ -350,6 +350,22 @@ class StreetLineTests(Base):
 
 # ----------------------------------------------------------------------- person columns of a Markdown table --
 class MarkdownTableTests(Base):
+    def test_a_table_of_fields_and_values_is_one_record(self):
+        street = "12 Oak Lane, Springfield"
+        for text in ("| Field | Value |\n|---|---|\n| Full Name | " + NAME + " |\n| Date of Birth | " + BIRTH
+                     + " |\n| Street Address | " + street + " |\n",
+                     "| **Full Name** | " + NAME + " |\n|---|---|\n| **Date of Birth** | " + BIRTH + " |\n"):
+            with self.subTest(text=text):
+                expected = text.replace(NAME, "•").replace(BIRTH, "•").replace(street, "•")
+                self.assertEqual(expected, masked(text))
+
+    def test_a_table_of_fields_without_a_person_stays_text(self):
+        for text in ("| Name | Value |\n|---|---|\n| Product Name | Widget Pro |\n| Version | 2.1 |\n",
+                     "| Setting | Value |\n|---|---|\n| Name | build-runner |\n"
+                     "| Address | 10 Oak Lane, Springfield |\n"):
+            with self.subTest(text=text):
+                self.assertNotIn("md-table-personal-column", {m.kind for m in scan(text)})
+
     TABLE = ("| Name | Date of Birth | Phone Number |\n|------|---------------|--------------|\n"
              "| " + NAME + " | " + BIRTH + " | " + US + " |\n")
 
