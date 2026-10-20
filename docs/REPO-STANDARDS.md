@@ -124,7 +124,9 @@ and OpenAI plugin directories.
   middle or first number moves only with the owner's approval: the CI variable
   `MAISECRETS_RELEASE_BUMP=minor` or `=major` on that one pipeline. A breaking
   change is the `!` or a footer line `BREAKING CHANGE: …`, never the words in
-  a sentence. It writes
+  a sentence. A change of the library API (a new stable name, a deprecation,
+  a removal) gets a footer line `API: <what changed>`; the notes list it under
+  "API", whatever the type of its commit. It writes
   the version into the three manifests and a generated section into
   `CHANGELOG.md`.
 - The GitHub branch `release` holds only the runtime files of each release
