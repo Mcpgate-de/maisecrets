@@ -434,6 +434,20 @@ class CompareBenchTests(unittest.TestCase):
         found = self.run_compare(base, new, {"email": 3}, {"email": 4})
         self.assertEqual(len(found), 3, found)
 
+    def test_runs_on_different_cases_are_not_compared(self):
+        import tempfile
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import compare_bench
+        with tempfile.TemporaryDirectory() as d:
+            a, b = Path(d) / "a", Path(d) / "b"
+            for p, h, full in ((a, "x" * 64, 500), (b, "y" * 64, 100)):
+                p.mkdir()
+                (p / "gretel-val-maisecrets.json").write_text(json.dumps(
+                    {"cases_sha256": h, "metrics": {"pii.name": {"spans": 1000, "full": full}}}), encoding="utf-8")
+            found = compare_bench.compare(a, b)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("the cases differ", found[0])
+
     def test_small_changes_inside_the_lines_are_no_finding(self):
         base = {"all": {"fp": 1000}, "pii.name": {"spans": 1000, "full": 500, "partial": 10}}
         new = {"all": {"fp": 1005}, "pii.name": {"spans": 1000, "full": 497, "partial": 9}}

@@ -22,13 +22,16 @@ WHOLE_DROP_SHARE = 0.005      # or more than this share of its spans
 FP_RISE_SHARE = 0.01          # false positives of a source and split rising by more than 1 %
 
 
-def _load(d: Path) -> dict:
+def _load(d: Path, hashes: dict | None = None) -> dict:
     out = {}
     for f in sorted(d.glob("*-maisecrets.json")):
         try:
-            out[f.name] = json.loads(f.read_text(encoding="utf-8"))["metrics"]
+            data = json.loads(f.read_text(encoding="utf-8"))
+            out[f.name] = data["metrics"]
         except (OSError, ValueError, KeyError):
             continue
+        if hashes is not None:
+            hashes[f.name] = data.get("cases_sha256")
     return out
 
 
@@ -47,8 +50,16 @@ def _fpbank(d: Path) -> dict:
 
 def compare(base: Path, new: Path) -> list[str]:
     findings = []
-    a, b = _load(base), _load(new)
+    ha: dict = {}
+    hb: dict = {}
+    a, b = _load(base, ha), _load(new, hb)
     for name in sorted(set(a) & set(b)):
+        # two runs on different cases (another generator, another dataset revision, another sample) are not compared:
+        # each difference would be the cases, not the change
+        if ha.get(name) != hb.get(name):
+            findings.append(f"{name}: the cases differ (sha256 {str(ha.get(name))[:12]} vs {str(hb.get(name))[:12]}),"
+                            " not compared")
+            continue
         split = name.rsplit("-", 2)[-2]
         ma, mb = a[name], b[name]
         fa, fb = ma.get("all", {}).get("fp") or 0, mb.get("all", {}).get("fp") or 0

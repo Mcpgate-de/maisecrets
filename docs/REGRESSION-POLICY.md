@@ -19,6 +19,7 @@ python3 scripts/compare_bench.py RESULTS_OF_THE_BASE RESULTS_OF_THE_CHANGE      
 | Whole spans on `val` | a class loses more than 5 spans or more than 0.5 % of its spans | the us-bank label window lost 6 accounts, 18 names, 7 ids and 3 phone numbers on Gretel; each such loss was real, and small ones are where a reason is still cheap |
 | Partial spans | any class has more spans found in part | a partial hit leaves part of a value in the clear: the worst outcome for this tool (2,197 accounts and 896 names were found in part before their fixes) |
 | False positives per source and split | more than 1 % more | the phone experiment raised Gretel's by 5 % (118) and was not merged |
+| Same cases | the two runs of a file scored different cases (`cases_sha256`) | the file is not compared and the finding says so: another generator, dataset revision or sample would read as a change of the rules |
 | Time per case | never judged from two single runs | see below |
 
 The counts are deterministic: the same code on the same cases gives the same numbers, so every difference is real and
