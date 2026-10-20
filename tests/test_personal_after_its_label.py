@@ -331,6 +331,30 @@ class AddressUnitAfterADotTests(Base):
                 self.assertMaskedExactly(text, value)
 
 
+
+# ------------------------------------------------------------------------------- a phone extension after the number --
+class PhoneExtensionTests(Base):
+    US = "(212) 846-" + "2291"
+    INTL = "+1 212 846 " + "2291"
+
+    def assertWholeAndNoMore(self, text: str, value: str) -> None:
+        s = text.index(value)
+        out = masked(text, region=("us",))
+        self.assertTrue(out.startswith(text[:s]) and out.endswith(text[s + len(value):]), "masked too much")
+        self.assertFalse(any(c.isalnum() for c in out[s:len(out) - len(text) + s + len(value)]), "a part stays")
+
+    def test_the_extension_is_masked_with_the_number(self):
+        for text, value in (("Phone: " + self.US + "x204 today", self.US + "x204"),
+                            ("Phone: " + self.INTL + " ext. 31 today", self.INTL + " ext. 31"),
+                            ("phone: 212.846." + "2291 x1234 done", "212.846." + "2291 x1234")):
+            with self.subTest(text=len(text)):
+                self.assertWholeAndNoMore(text, value)
+
+    def test_a_word_after_the_number_and_a_hex_like_token_stay_text(self):
+        self.assertWholeAndNoMore("Phone: " + self.US + " extra", self.US)
+        self.assertText("build 1234x5678", region=("us",))
+
+
 if __name__ == "__main__":
     unittest.main()
 

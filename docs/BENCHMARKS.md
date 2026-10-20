@@ -313,6 +313,24 @@ and the false-alarm bank.
 | False positives and too-wide spans, every source | – | no change |
 | False-alarm bank, seven trees (`scripts/compare_bench.py`) | – | 0 findings |
 
+### A phone extension, masked with its number, 2026-10-20
+
+Found by the partial-detection audit of the dev splits (Gretel, 61 phone numbers whose extension stayed in the clear).
+Decided on `val` and the false-alarm bank.
+
+- **Cause:** each phone rule ended before an extension (`x204`, `ext. 31`). The international rule also refused a
+  number followed by a letter and a digit, so it stepped back one group and left its last digits in the clear too.
+- **Fix:** a phone hit takes an extension right after it (`x`, `ext.`, `extension`, up to six digits). The
+  international rule no longer refuses a number followed by `x` and a digit.
+
+| Measure | Before (`next`, 8b11dedf) | This change |
+|---|---|---|
+| Gretel dev: phone numbers whole / in part, false positives, F1 | 1,865 / 86, 2,163, 0.3857 | 1,900 / 51, 2,164, 0.3862 |
+| Gretel val: phone numbers whole / in part, false positives, F1 | 587 / 20, 732, 0.3736 | 597 / 10, 732, 0.3741 |
+| PIILO dev: phone numbers whole / in part | 0 / 3 | 3 / 0 |
+| Nemotron, Mendeley, bank dev and val | – | no change |
+| False-alarm bank, seven trees (`scripts/compare_bench.py`) | – | 0 findings |
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
