@@ -432,13 +432,14 @@ alone in the middle of `Max-Planck-Straße 12, 80333 München, Deutschland`. The
 
 | Measure | Before (`next` d82047d2) | This change |
 |---|---|---|
-| Gretel dev: addresses whole / in part, false positives, F1 | 3,842 / 386, 2,169, 0.3882 | 4,048 / 182, 2,166, 0.3914 |
-| Gretel val: addresses whole / in part, false positives, F1 | 1,197 / 110, 732, 0.3755 | 1,242 / 65, 732, 0.3777 |
+| Gretel dev: addresses whole / in part, false positives, F1 | 3,842 / 386, 2,169, 0.3882 | 4,044 / 186, 2,166, 0.3913 |
+| Gretel val: addresses whole / in part, false positives, F1 | 1,197 / 110, 732, 0.3755 | 1,240 / 67, 732, 0.3776 |
 | Nemotron dev: addresses in part | 313 | 311 |
 | traces, Mendeley, PIILO, bank, false-alarm bank | – | no change |
 
-Per span, no outcome got worse: Gretel `dev` 204 from partial to whole and 4 from missed to whole; `val` 45 from
-partial to whole. `scripts/compare_bench.py`: no finding.
+Per span, no outcome got worse: Gretel `dev` 200 from partial to whole and 4 from missed to whole; `val` 43 from
+partial to whole. The street line stays text under a hotel, office or company name in the two lines above it, and a
+small word (`Die Adresse ist`) starts no street name; both were found by the existing tests of company addresses. `scripts/compare_bench.py`: no finding.
 
 ## CredData, results per release
 
