@@ -618,6 +618,20 @@ Per span against the table change (measured on its first form): Nemotron dev 621
 helps after other ID labels too); Gretel dev 4, val 2; nothing got worse; false positives and the false-alarm bank
 unchanged. `scripts/compare_bench.py`: no finding.
 
+### A Visa card number of 19 digits, 2026-10-20
+
+All 2,081 cards missed on Mendeley `dev` had 19 digits, began with 4, passed the Luhn check and had a card word in the
+80 characters before them. Presidio's card pattern ends at 17 digits; ISO/IEC 7812 gives Visa 13, 16 and 19. The
+pattern now takes a 19-digit Visa number too. It keeps the card word and the Luhn check; alone in a tool result the
+issuer check still takes 16 digits. Registered before the run: about 2,081 on Mendeley `dev`.
+
+Per span against the call-word change (the chain between them adds the table and the ID comma changes): Mendeley dev
+2,081 missed to whole, val 695; nothing got worse on any source. The false-alarm bank has one more card hit: a
+19-digit Luhn-valid number in the test file of a card validator (`ferret-scan`), counted with the test fixtures; the
+hits outside tests are unchanged. A first comparison against the ID comma run showed 59 phone spans worse: that run
+still had the first form of the call-word change, whose wider `contact` had found them; the comparison mixed two
+changes, not this one.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
