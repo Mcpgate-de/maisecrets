@@ -463,7 +463,7 @@ def _csv_hits(text: str) -> list:
             pos += len(hdr) + 1
             li += 1
             continue
-        names = [h.strip().strip("\"'").lower() for h in hdr.split(sep)]
+        names = [_md_column(h) for h in hdr.split(sep)]
         strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
         cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
         pos += len(hdr) + 1
@@ -511,6 +511,9 @@ _MD_ALIASES = {"telephone_number": "telephone", "mobile_number": "mobile", "cell
 
 
 def _md_column(cell: str) -> str:
+    """The field name of a column, a key or an element, folded to the names of _STRONG_COLS and _WEAK_COLS: no XML
+    namespace prefix (fpml:name), no Markdown escape (first\\_name), lower case, separators as `_`, then an alias"""
+    cell = re.sub(r"^\s*[A-Za-z][\w.-]{0,40}:(?=[A-Za-z_])", "", cell.replace("\\_", "_"))
     name = re.sub(r"[\s/.-]+", "_", cell.strip().strip("*_`'\" ").strip().lower()).strip("_")
     name = re.sub(r"_?\(.*\)$", "", name)   # Date of Birth (YYYY-MM-DD)
     return _MD_ALIASES.get(name, name)
