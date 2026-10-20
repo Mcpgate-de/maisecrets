@@ -102,6 +102,29 @@ US = "415-382-" + "9174"
 
 
 class PhoneAfterWordTests(Base):
+    def test_a_north_american_number_after_calling_dial_or_contact_is_masked_whole(self):
+        for text in ("Please contact the report coordinator at " + US + " or visit the site.",
+                     "You can reach us by calling " + US + ".", "Please contact " + US + " for help.",
+                     "Dial " + US + " now."):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(US, "•"), masked(text, region=("us",)))
+
+    def test_a_number_found_before_the_wider_call_words_stays_found(self):
+        # the span ratchet found these (2026-10-20): a first try matched from `contact` and swallowed the later cue
+        mail = "dana.ok" + "afor@posteo.de"
+        for text in ("Please contact " + NAME + " at " + mail + " or " + US + ".",
+                     "**Contact Roadside Assistance**: Call " + US + " for immediate help.",
+                     "Or contact support at " + mail + " or " + US + "."):
+            with self.subTest(text=text):
+                self.assertIn("phone-after-phone-word", {m.kind for m in scan(text, region=("us",))})
+                self.assertNotIn(US, masked(text, region=("us",)))
+
+    def test_no_phone_shape_after_contact_stays_text(self):
+        for text in ("contact us about ticket 415-382-9174-2 later", "contact version 2.415.382 build",
+                     "Build 415-382-9174 of the contact list"):
+            with self.subTest(text=text):
+                self.assertNotIn("phone-after-phone-word", {m.kind for m in scan(text, region=("us",))})
+
     def test_a_national_number_after_a_phone_word_is_masked(self):
         for text, value in (
                 ("Phone number: " + US, US),
