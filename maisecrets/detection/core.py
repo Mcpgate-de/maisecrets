@@ -1560,7 +1560,7 @@ OWN_RULES: list[dict] = [
     {"id": "phone", "type": "PHONE",
      # a CJK letter before or after the number is a boundary, as in the e-mail rule
      "regex": r"(?:(?<=[" + _CJK + r"])|(?<!\w))(?<!\+)\+(?!0)\d{1,3}[ \-]?(?:\(?\d{1,5}\)?[ \-]?)\d{2,5}"
-              r"(?:[ \-]?\d{2,5}){1,4}(?![\w.]\d|" + _NOT_CJK_WORD + r")"},
+              r"(?:[ \-]?\d{2,5}){1,4}(?![\w.](?<![xX])\d|" + _NOT_CJK_WORD + r")"},
     # bare token prefixes newer than the vendored rulesets live in rules/prefixes.txt (see _load_prefixes)
     {"id": "auth-scheme", "type": "SECRET", "secret_group": 3,
      "regex": r"(?<![\w-])(Bearer|Basic)([ \t]+)([A-Za-z0-9._~+/=-]{16,})"},
@@ -4257,12 +4257,20 @@ def _scan(text: str, enabled: set[str] | None = None, _copy: bool = False,
                 cut = len(secret) if secret.endswith("..") else len(secret) - 1
                 end -= len(secret) - cut
                 secret = secret[:cut]
+            if rule.type == "PHONE":
+                ext = _PHONE_EXTENSION_RE.match(text, end)
+                if ext:
+                    end = ext.end()
+                    secret = text[start:end]
             take(Match(rule.id, rule.type, secret, start, end), own)
     found.sort(key=lambda x: x.start)
     return found
 
 
 _PERSONAL = object()             # the place of _personal_hits in the scan order
+# the extension right after a phone number is part of it: (212) 555-0143x204, +1 212 555 0143 ext. 31. A phone hit
+# that stopped before it left the extension in the clear (Benchmark V2, Gretel dev: 61 numbers found in part)
+_PHONE_EXTENSION_RE = _LazyRx(r"(?i)[ ]?(?:x|ext\.?|extension)[ ]?\d{1,6}(?![\w.]?\d)")
 _TERMS = object()                # the place of _term_hits: registry phase "terms", after the rules of your own
 _IMPORTS = object()              # the place of _import_hits: registry phase "imports", after the terms
 
@@ -4307,6 +4315,10 @@ def _personal_hits(text: str, enabled, found: list, taken_starts: list, taken_en
     for start, end, kind, typ in every:
         if enabled is not None and kind not in enabled and "personal:" + kind not in enabled:
             continue
+        if typ == personal.PHONE:
+            ext = _PHONE_EXTENSION_RE.match(text, end)
+            if ext:
+                end = ext.end()
         value = text[start:end]
         if value in allowed or (off and kind in off):
             continue   # the allow list holds for these rules too: an exact value, or `rule: <id>`
