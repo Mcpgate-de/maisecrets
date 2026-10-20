@@ -4563,7 +4563,7 @@ LazyRx = _LazyRx            # a regex compiled at its first use
 LazyRegex = _Lazy           # a compiled rule pattern with a time budget (the rules of your own)
 
 
-_USER_TYPE_RE = re.compile(r"[A-Z][A-Z0-9_]{0,40}")
+_USER_TYPE_RE = _LazyRx(r"[A-Z][A-Z0-9_]{0,40}")
 
 
 def user_rule(id: str, type: str, pattern: str, keywords=(), secret_group: int = 0) -> Rule:
