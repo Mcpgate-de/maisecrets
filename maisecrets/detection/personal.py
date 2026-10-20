@@ -475,26 +475,18 @@ def _csv_hits(text: str) -> list:
             line = lines[li]
             if not line.strip() or (line.count(sep) != hdr.count(sep) and '"' not in line):
                 break
-            j = col = 0
-            row: list = []
+            j = 0
+            cells: list = []
             cell = _CSV_CELL_RE[sep]
             while j <= len(line):
                 m = cell.match(line, j)
                 a, b = m.span()
-                if col in cols:
-                    s2, e2 = (a + 1, b - 1) if line[a:b].startswith('"') and b - a >= 2 else (a, b)
-                    v = line[s2:e2].strip()
-                    typ = _column_type(names[col])
-                    if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ):
-                        lead = len(line[s2:e2]) - len(line[s2:e2].lstrip())
-                        row.append((pos + s2 + lead, pos + s2 + lead + len(v), "csv-personal-column", typ, col))
-                col += 1
+                s2, e2 = (a + 1, b - 1) if line[a:b].startswith('"') and b - a >= 2 else (a, b)
+                cells.append((pos + s2, pos + e2))
                 j = b + 1
-            # a name or a user cell counts only beside a strong cell of the same row that holds what it names, and an
-            # address or a phone only beside a cell that names a person (a name, a birth date, an id): a list of
-            # depots or of stations has addresses and no person
-            if any(c in strong for *_, c in row) and any(h[3] in (NAME, BIRTH_DATE, ID_NUMBER) for h in row):
-                out += [h[:4] for h in row]
+            # in a CSV file a birth date also names the person of its row
+            out += _grid_hits(text, names, [cells], "csv-personal-column", anchors=(NAME, BIRTH_DATE, ID_NUMBER),
+                              accounts_column=False)
             pos += len(line) + 1
             li += 1
             rows += 1
@@ -570,34 +562,13 @@ def _md_table_hits(text: str) -> list:
             li += 1
             continue
         names = [_md_column(hdr[a:b]) for a, b in _md_cells(hdr)]
-        strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
-        cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
-        accounts = {i for i, h in enumerate(names) if _ACCOUNT_NUMBER_COL_RE.fullmatch(h)}
         li += 2
-        rows = 0
-        while li < len(lines) and rows < _CSV_ROWS and "|" in lines[li] and lines[li].strip():
-            line = lines[li]
-            row: list = []
-            for col, (a, b) in enumerate(_md_cells(line)):
-                if col in accounts:
-                    v = line[a:b].strip().strip("*`")
-                    if _account_cell(v):
-                        s0 = a + line[a:b].index(v)
-                        out.append((pos[li] + s0, pos[li] + s0 + len(v), "md-table-personal-column", ID_NUMBER))
-            if cols:
-                for col, (a, b) in enumerate(_md_cells(line)):
-                    if col not in cols:
-                        continue
-                    v = line[a:b].strip().strip("*`")
-                    typ = _column_type(names[col])
-                    if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ):
-                        s0 = a + line[a:b].index(v)
-                        row.append((pos[li] + s0, pos[li] + s0 + len(v), "md-table-personal-column", typ, col))
-            # a date alone names no person in a table of releases (| Name | Birthday | Version |): a name or an id
-            if any(c in strong for *_, c in row) and any(h[3] in (NAME, ID_NUMBER) for h in row):
-                out += [h[:4] for h in row]
+        rows: list = []
+        while li < len(lines) and len(rows) < _CSV_ROWS and "|" in lines[li] and lines[li].strip():
+            rows.append([(pos[li] + a, pos[li] + b) for a, b in _md_cells(lines[li])])
             li += 1
-            rows += 1
+        # a date alone names no person in a table of releases (| Name | Birthday | Version |): a name or an id
+        out += _grid_hits(text, names, rows, "md-table-personal-column", strip="*`")
     return out
 
 
@@ -614,13 +585,17 @@ class _lazy:
         return getattr(self._rx, name)
 
 
-def _grid_hits(text: str, names: list, rows, kind: str) -> list:
-    """The Markdown table rule for rows whose cells another format delimits: names are the folded column names, each
-    row a list of (start, end) of its cell values in text. The same columns, cell checks and person check."""
+def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER), strip: str = "",
+               accounts_column: bool = True) -> list:
+    """The personal-field policy of every table and record format: names are the column or field names, each row a
+    list of (start, end) of its cell values in text. A strong column (an address, a birth date, a phone, an id) and
+    the weak ones beside it (a name, a user) count only in a row that also holds a value of a person (`anchors`): a
+    list of depots has addresses and no person. A column that names an account number counts on every row.
+    `strip` are the marks a format puts around a value (Markdown bold and code)."""
     out = []
     strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
     cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
-    accounts = {i for i, h in enumerate(names) if _ACCOUNT_NUMBER_COL_RE.fullmatch(h)}
+    accounts = {i for i, h in enumerate(names) if _ACCOUNT_NUMBER_COL_RE.fullmatch(h)} if accounts_column else set()
     if not cols and not accounts:
         return out
     for n, cells in enumerate(rows):
@@ -629,6 +604,8 @@ def _grid_hits(text: str, names: list, rows, kind: str) -> list:
         row: list = []
         for col, (a, b) in enumerate(cells):
             v = text[a:b].strip()
+            if strip:
+                v = v.strip(strip)
             s0 = a + text[a:b].index(v) if v else a
             if col in accounts and _account_cell(v):
                 out.append((s0, s0 + len(v), kind, ID_NUMBER))
@@ -636,7 +613,7 @@ def _grid_hits(text: str, names: list, rows, kind: str) -> list:
                 typ = _column_type(names[col])
                 if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ):
                     row.append((s0, s0 + len(v), kind, typ, col))
-        if any(c in strong for *_, c in row) and any(h[3] in (NAME, ID_NUMBER) for h in row):
+        if any(c in strong for *_, c in row) and any(h[3] in anchors for h in row):
             out += [h[:4] for h in row]
     return out
 
