@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [0.7.2] - 2026-10-20
+
+### Fixes
+
+- a name after "first name is" or "last name is" in a sentence is masked (fffe655)
+- a name in a declaration, a self-introduction or before its birth date is masked (I, <name>, hereby) (a7919ac)
+- a double surname after a first or last name label is masked whole (Last Name: Okafor-Brandt) (7cacc49)
+- a street after an address label is masked with its direction and unit (Main St SW, Oak Ave 12B) (8ee2e7f)
+
 ## [0.7.1] - 2026-10-20
 
 ### Fixes
