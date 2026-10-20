@@ -1680,7 +1680,7 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
         out += _html_table_hits(text)
     if "json-personal-field" in want and "{" in text and '":' in text.replace('" :', '":'):
         out += _json_record_hits(text)
-    if "xml-personal-field" in want and "</" in text:
+    if "xml-personal-field" in want and ("</" in text or "/>" in text):
         out += _xml_record_hits(text)
     if "phone-wrapped-line" in want and "-\n" in text:
         for m in _PHONE_WRAP_RE.finditer(text):
