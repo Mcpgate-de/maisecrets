@@ -137,6 +137,34 @@ which texts, so that a model, if one comes, runs only where it pays.
   interval; the same split by text type and length. The result decides no rule by itself; it decides whether and
   where a model layer is worth a prototype.
 
+### The prose result (read 2026-10-20, after the registration)
+
+One reader, codes from the masked context; the codes per row are kept with the results.
+
+| Stratum (dev) | deterministic | structure | label-error | ner | unclear | deterministic + structure, 95 % Wilson |
+|---|---|---|---|---|---|---|
+| Gretel addresses | 24 | 8 | 16 | 1 | 1 | 0.64 [0.50, 0.76] |
+| Gretel names | 14 | 10 | 16 | 10 | 0 | 0.48 [0.35, 0.61] |
+| Nemotron addresses | 38 | 3 | 6 | 0 | 3 | 0.82 [0.69, 0.90] |
+| Nemotron names | 25 | 0 | 0 | 25 | 0 | 0.50 [0.37, 0.63] |
+| **All** | **101** | **21** | **38** | **36** | **4** | **0.61 [0.54, 0.67]** |
+
+By text type: forms 45 (35 deterministic, 1 ner), documents 115 (51 deterministic, 32 ner), e-mails 23 (13
+deterministic, 2 ner), EDI, SWIFT and CSV inside prose 14 (all structure). By length: under 500 characters 43 (12
+ner), 500 to 2,000 139 (19 ner), 2,000 to 8,000 18 (5 ner).
+
+- **A model of language is needed for 18 % of the sample**, nearly all of it names in running documents. Addresses
+  almost never need one: they stand after `located at`, `residing at`, `Street Address:`, `Wohnhaft:`, `domicile`,
+  and are missed because their shape is not the street shape the rules expect (the number last, no street word).
+- **Deterministic forms seen:** a label the rules do not read (`Street Address:` before a value without a comma,
+  `Adresse` without a colon), verbs of residence and place (`residing at`, `located at`, `con dirección en`), a
+  salutation or a signature (`Dear X,`, `Sincerely, X`), the oath form (`I, X Y, hereby`), an apposition with a role
+  or a residence (`X, a resident of`, `X, born on`).
+- **Label errors** (19 %): company and institution addresses, template placeholders, role titles and words labelled
+  as names. They count against recall in V2 and are no misses.
+- **Where a model would pay:** documents with names in running text. Forms, e-mails and records are deterministic
+  ground. A model layer, if one comes, would run on prose documents only, after the deterministic scan.
+
 ## What V3 keeps
 
 The split rule, the span outcomes (`full`, `partial`, `missed`), `too wide`, the classes, the scanners and their
