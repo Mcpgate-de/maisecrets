@@ -393,7 +393,9 @@ _PERSON_CUE_RES = (
                r"|being|declare|certify|of legal age)\b)"),
     re.compile(r"(?<![\w])(?i:my (?:full )?name is) " + _CUE_NAME + r"(?![\w'’-])"),
     re.compile(_CUE_NAME + r", (?=(?:born on|born in|date of birth|a resident of|residing at|resides at|who resides"
-               r"|who lives|currently residing|currently resides)\b)"))
+               r"|who lives|currently residing|currently resides)\b)"),
+    # a title before a full name (Mr Dana Okafor, Mrs. …); not Dr, which is also a street (… Dr. We are)
+    re.compile(r"(?<![A-Za-z])(?:Mr|Mrs|Ms|Mx|Miss)\.? " + _CUE_NAME + r"(?![\w'’-])"))
 _SERVICE_LOCAL_RE = re.compile(r"(?i)^(?:no-?reply|do-?not-?reply|notifications?|support|info|hello|contact|team"
                                r"|admin|root|git|bot|ci|build|release|deploy|security|alerts?|monitoring|postmaster"
                                r"|webmaster|mailer-daemon|bounces?|github-actions|actions|dependabot|renovate)"
@@ -1947,7 +1949,8 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                     v, words_only = cut, False
             if _name_ok(v) and not words_only:
                 out.append((m.start(3), m.start(3) + len(v), "name-after-label", NAME))
-    if "name-next-to-a-person-cue" in want and any(w in low for w in ("i, ", "name is", "born", "resid", "lives")):
+    if "name-next-to-a-person-cue" in want and any(w in low for w in ("i, ", "name is", "born", "resid", "lives", "mr",
+                                                                         "ms", "mx", "miss")):
         for rx in _PERSON_CUE_RES:
             for m in rx.finditer(text):
                 words, start = m.group(1).split(" "), m.start(1)

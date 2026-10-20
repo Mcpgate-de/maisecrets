@@ -631,6 +631,22 @@ Per span against the call-word change (the chain between them adds the table and
 hits outside tests are unchanged. A first comparison against the ID comma run showed 59 phone spans worse: that run
 still had the first form of the call-word change, whose wider `contact` had found them; the comparison mixed two
 changes, not this one.
+### A full name after a title, 2026-10-20
+
+On `dev`, a title before two name words that do not read as words was counted against the gold names: `Mr`, `Mrs`,
+`Ms`, `Mx` or `Miss` before a full name gave Mendeley 3,845 missed names to 99 matches without one, Gretel 123 to 0,
+Nemotron 12 to 0. `Dr` is left out (it is also a street: `… Oak Dr. We are`), and so is a title before one word.
+The title is a fourth cue of the person-cue rule. Registered before the run: about 3,845 on Mendeley `dev`, Gretel
+about 120, and up to about 100 more false positives on Mendeley, read as real names without a label.
+
+Per span against the ID comma change: Mendeley dev 3,402 missed to whole and 360 to partial, val 1,208 and 104;
+Gretel dev 59 and 63, val 18 and 19; Nemotron dev 21, val 6; PIILO 1 and 1; nothing got worse. False positives:
+Mendeley dev 16 to 124, val 5 to 30; PIILO dev 2 to 8. Read on `dev`: each new false positive is a person's name
+the dataset did not label (Mendeley, in sentences where it labels the same form elsewhere; PIILO, which labels the
+names of students only, a lecturer and a company founder). The spans now partial keep visible only a title or a
+suffix that the dataset counts to the name (`Mr.`, `DDS`, `Jr`). `scripts/compare_bench.py` reports the false
+positives of Mendeley and PIILO (above 1 % of a small base); no span finding; the false-alarm bank is
+unchanged.
 
 ## CredData, results per release
 

@@ -268,6 +268,18 @@ class NameNextToAPersonCueTests(Base):
                 # the birth date has its own rule
                 self.assertEqual(text.replace(NAME, "•", 1).replace(BIRTH, "•"), masked(text).replace(BIRTH, "•"))
 
+    def test_a_full_name_after_a_title_is_masked_whole(self):
+        for text in ("Dear Mr " + NAME + ", we have received your application.",
+                     "The claim was initiated by Mrs. " + NAME + " for her son."):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(NAME, "•"), masked(text))
+
+    def test_a_title_before_words_one_word_or_a_street_stays_text(self):
+        for text in ("Open the Ms Word Document first.", "Mr Product Owner will decide.", "Mr John Doe is a sample.",
+                     "Visit us at 12 Oak Dr. We are open daily."):
+            with self.subTest(text=text):
+                self.assertNotIn("name-next-to-a-person-cue", {m.kind for m in scan(text)})
+
     def test_one_word_words_a_role_or_a_placeholder_next_to_a_cue_stay_text(self):
         for text in ("The Applicant, born on the date given above, signs here.", "Texas, born on paper, grew.",
                      "my name is Required Field in this schema", "I, John Doe, hereby confirm the template.",
