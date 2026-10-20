@@ -577,6 +577,23 @@ positives dev +10, val +7; too wide dev +32, val +11. Read on `dev`: the hits ov
 the city that Gretel left out of the span (`…, 999 99 Stockholm`; the policy since 0.7.0); the new false positives are
 unlabelled addresses of persons (`User's Street Address`, a shipper), of companies (`Org.nr`, `IVA`) and one template
 (`[Città]`), none a value that is no address. `scripts/compare_bench.py`: no finding.
+### A North American number after calling, dial or contact, 2026-10-20
+
+Of 4,225 phone numbers missed on Nemotron-PII `dev`, 1,954 had the North American shape; 1,207 of them had a call
+word before them that the loose phone rule did not take: `by calling`, `dial`, `please contact <number>`, and
+`contact the report coordinator at` (more than two words before `at`). The rule now takes `calling`, `dial`, up to
+four words in `contact … at`, and `contact` alone right before the number. The number keeps its North American shape
+and check. Registered before the run: about 1,200 on Nemotron `dev`.
+
+A first form let `contact` alone start a match anywhere: the span ratchet reported 16 spans of `dev` and 6 of `val`
+whole to missed, all real numbers 0.7.2 finds (`contact <name> at <mail> or <number>`, `**Contact …**: Call
+<number>`). The wider start swallowed the later cue, and a match the colon check then refused hid the number. Each of
+them is a test now, and `contact` alone counts only right before the number.
+
+Per span against the address change: Nemotron dev 506 missed to whole, val 155; Gretel dev 9, val 2; nothing got
+worse. Nemotron false positives dev +4, val +1: read on `dev`, each the number of an organisation (an election
+board, a support team, a car maker's service line), not labelled. The rest of the 1,207 stays text by the checks
+after the cue (a colon in the gap, the shape check). `scripts/compare_bench.py`: no finding.
 
 ## CredData, results per release
 
