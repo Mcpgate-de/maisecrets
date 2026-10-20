@@ -543,7 +543,9 @@ class NoValueLostAgainTests(Base):
     def test_a_double_name_whose_second_part_is_a_word_is_masked(self):
         # a second surname with the ending of a noun (Fleming, Waters) made the whole value read as words
         for text, value in (("Name: Jasmijn Bakker-" + "Fleming, Passport Number: X\n", "Jasmijn Bakker-" + "Fleming"),
-                            ("- Name: Dana Okafor-" + "Waters\n- Street Address: x\n", "Dana Okafor-" + "Waters")):
+                            ("- Name: Dana Okafor-" + "Waters\n- Street Address: x\n", "Dana Okafor-" + "Waters"),
+                            # and the other way round: a first surname that is a word alone (llano)
+                            ("Name: Leonor Llanos-" + "Pacheco\n", "Leonor Llanos-" + "Pacheco")):
             with self.subTest(text=text[:12]):
                 self.assertMasked(text, value)
 
