@@ -34,7 +34,7 @@ FORMS_NO_HIT = [
     # ---------------------------------------------------------------- tables of places, not of persons
     ("sql insert of offices", "INSERT INTO offices (name, street, phone) VALUES ('Berlin Office', '4821 Maple Street', '(415) 382-0174');"),
     ("html table of venues", "<table><tr><th>name</th><th>address</th></tr><tr><td>Riverside Arena</td><td>12 Oak Lane, Springfield</td></tr></table>"),
-    ("json record of an office", '{"name": "Berlin Office", "street": "4821 Maple Street", "phone": "(415) 382-0174"}'),
+    ("json record of an office", '{"name": "Berlin Office", "street": "4821 Maple Street", "status": "open"}'),
     # ---------------------------------------------------------------- ID-like labels in developer text
     ("member id count", "Fetched 48213 rows; member id column has 48213 distinct values."),
     ("member_id variable", "member_id = request.args.get('member_id')\nif not member_id:\n    abort(400)"),
