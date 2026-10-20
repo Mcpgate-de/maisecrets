@@ -751,6 +751,7 @@ def _json_record_hits(text: str) -> list:
     return out
 
 
+_XML_ATTR_RE = _lazy(r"""\s([A-Za-z_][\w.:-]{0,64})\s*=\s*(?:"([^"<>]{0,512})"|'([^'<>]{0,512})')""")
 _XML_TAG_RE = _lazy(r"<(/?)([A-Za-z_][\w.-]{0,64})(?:\s[^<>]{0,500})?(/?)>|<[!?][^<>]{0,2000}>")
 
 
@@ -765,6 +766,14 @@ def _xml_record_hits(text: str) -> list:
         if m.group(2) is None:
             continue    # a comment, a declaration, CDATA
         name, closing, empty = m.group(2), m.group(1), m.group(3)
+        if not closing and rows < _JSON_RECORDS_MAX:
+            # <Admin user_name="…" name="…" street_address="…"/>: the attribute names name the attribute values
+            attrs = [(x.group(1), x.span(2) if x.group(2) is not None else x.span(3))
+                     for x in _XML_ATTR_RE.finditer(text, m.start(), m.end())]
+            if len(attrs) >= 2:
+                rows += 1
+                out += _grid_hits(text, [_md_column(n) for n, _ in attrs], [[s for _, s in attrs]],
+                                  "xml-personal-field")
         if empty:
             continue
         if not closing:
