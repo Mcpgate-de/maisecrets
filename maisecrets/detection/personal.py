@@ -250,9 +250,12 @@ def _company_window(text: str, lo: int, a_start: int, a_end: int, kind: str, com
 # --------------------------------------------------------------------------------- name after a name label --
 # a letter of Latin Extended-A (Ł, ś, ř, ğ) is a letter of a name too: Łukasz Wiśniewski, Dvořák (holdout, 2026-10-15)
 _UP, _LO = "A-ZÀ-ÖØ-ÞĀ-ſ", "a-zà-öø-ÿĀ-ſ"
-_NAME_WORD = r"(?:[" + _UP + r"][" + _LO + r"'’-]{1,30}|[A-Z]\.)"
+# a part after a hyphen may start with a capital: Garcia-Lopez, Al-Rashid, Müller-Lüdenscheidt. The value ended at the
+# hyphen and left the second part in the clear (Benchmark V1, Gretel and Nemotron dev: 896 names found in part)
+_NAME_STEM = r"[" + _UP + r"][" + _LO + r"'’]{1,30}(?:-[" + _UP + _LO + r"][" + _LO + r"'’]{1,30}){0,2}"
+_NAME_WORD = r"(?:" + _NAME_STEM + r"|[A-Z]\.)"
 _NAME_PARTICLE = r"(?:van|von|de|da|del|der|al|bin|di|du|la|le)"
-_NAME_VALUE = (r"((?:[" + _UP + r"][" + _LO + r"'’-]{1,30})(?:[ ](?:" + _NAME_WORD + "|" + _NAME_PARTICLE + r")){1,3})")
+_NAME_VALUE = (r"((?:" + _NAME_STEM + r")(?:[ ](?:" + _NAME_WORD + "|" + _NAME_PARTICLE + r")){1,3})")
 # the value of a customer key up to the legal form: the company's name alone, on the key's line
 # at most two words, and & or und between them: a person and a company without a separator
 # (Kunde: Lena Brückner Lindner GmbH) cannot be told from a longer company name, so a longer name keeps the mask
