@@ -665,6 +665,30 @@ Per span against the title change: Mendeley dev 5,422 missed to whole, val 1,787
 dev 406 and 2 to partial, val 123 and 2; nothing got worse (second form, measured on the head of the chain).
 False positives: Mendeley dev +8, val +2; Nemotron dev +1: names in a salutation the dataset did not label.
 
+### A US postal address on two lines, 2026-10-21
+
+All 27,427 addresses missed on Mendeley `dev` were US postal addresses on two lines: a house number and a street, then
+a city, a state code and a ZIP code (`1234 Harbor Mission Apt. 5` / `Springfield, IL 62704`), and the military form
+(`PSC 1234, Box 5678` / `APO AE 09876`). Every street rule took one line. The new form takes the two lines: the second
+line, with a valid state code and a ZIP code, is the strong part, so the street line needs no street word (Faker writes
+many suffixes the street list lacks). Its house number must start the line or follow a separator, an opening
+parenthesis, or a word of place (`at`, `to`, `is`, `in`, `on`, `from`, `address`), so a heading with a number
+(`Release 2 Notes` over a city line) stays text; a company, an office or a public place above it keeps the address
+text, as for the one-line forms. Registered before the run: up to 27,427 on Mendeley `dev`.
+
+The first form took a number at the line start or after a separator or `at`/`to`/`is`/`in`/`on`/`from`: Mendeley dev
+11,811 missed to whole. Read per case, 10,566 of the rest stood after `address` or right after an opening parenthesis
+(`your home address (…)`), and the second form takes those too.
+
+Per span against the head of the chain (the salutation change): Mendeley dev 17,768 missed to whole and 196 partial to
+whole, val 5,992 and 73; Gretel dev 56, val 14; Nemotron dev 12, val 7; nothing got worse; the false-alarm bank is
+unchanged. False positives: Mendeley dev 132 to 1,150, val 32 to 338; Gretel dev +13, val +5. Read on `dev`, spread
+over the list: each new false positive of Mendeley is a person's address in the same form (`your home address (…)`,
+`billing address …`, `associated with the address …`) the dataset did not label there. Of the about 9,500 still missed, the samples read stand
+after a company, an asset or a facility (`assets located at`, `our facility located at`), which keeps an address text
+on purpose; they were not counted one by one.
+`scripts/compare_bench.py` reports the false positives of Mendeley (above 1 % of a small base); no span finding.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
