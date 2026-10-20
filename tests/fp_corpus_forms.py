@@ -32,6 +32,9 @@ S1 = _sid("fixture-sid")
 
 FORMS_NO_HIT = [
     ("version and year after a number", "Release notes version 12, 2024 Edition"),
+    ("a heading over a city line", "Release 2 Notes\nAustin, TX 78701 office hours"),
+    ("a company block over a two-line address", "Acme Corporation\nHeadquarters\n4821 Harbor Mission Apt. 5\n"
+     "Springfield, IL 62704"),
     # ---------------------------------------------------------------- a person cue next to no name
     ("cue next to a role", "The Applicant, born on the date given above, signs here."),
     ("cue next to a place", "New York City, a resident of the state, may apply."),
@@ -427,6 +430,8 @@ FORMS_HIT = [
     ("vcard adr fields", "BEGIN:VCARD\nADR;TYPE=home:;;" + "7 Rosemount Gardens;Dunmore;Wexford;4471;Ireland" + "\nEND:VCARD",
      ["7 Rosemount Gardens;Dunmore;Wexford;4471;Ireland"]),
     ("vcard n fields", "BEGIN:VCARD\nN;CHARSET=UTF-8:" + "Okafor;Dana" + ";;;\nEND:VCARD", ["Okafor;Dana"]),
+    ("us address on two lines", "Please send it to 4821 Harbor " + "Mission Apt. 5\nSpringfield, IL 62704 by Friday.",
+     ["4821 Harbor " + "Mission Apt. 5\nSpringfield, IL 62704"]),
     ("name in a declaration", "I, " + "Dana Okafor" + ", hereby declare that the above is true.", ["Dana Okafor"]),
     ("name before born on", "Patient " + "Dana Okafor" + ", born on 1984-03-12, was seen today.", ["Dana Okafor"]),
     ("name after my name is", "Hello, my name is " + "Dana Okafor" + " and I am writing about my claim.", ["Dana Okafor"]),

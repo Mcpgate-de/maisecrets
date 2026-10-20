@@ -258,6 +258,26 @@ class AddressLabelsInMoreLanguagesTests(Base):
                 self.assertText(text)
 
 
+class UsAddressOnTwoLinesTests(Base):
+    STREET = "4821 Harbor " + "Mission Apt. 5\nSpringfield, IL 62704"
+    MILITARY = "PSC 1234, Box " + "5678\nAPO AE 09876"
+
+    def test_a_us_address_on_two_lines_is_masked_whole(self):
+        for text, value in (("I live at " + self.STREET + " and work nearby.", self.STREET),
+                            ("Mail it to:\n" + self.MILITARY + "\n", self.MILITARY),
+                            (self.STREET + "\n", self.STREET),
+                            ("your home address (" + self.STREET + "), email", self.STREET),
+                            ("update my home address " + self.STREET + " please", self.STREET)):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(value, "•"), masked(text, region=("us",)))
+
+    def test_a_heading_or_a_company_over_a_city_line_stays_text(self):
+        for text in ("Release 2 Notes\nAustin, TX 78701 office", "Chapter 12 Summary\nSee Page, IL 60601",
+                     "Acme Corporation\nHeadquarters\n" + self.STREET + "\n"):
+            with self.subTest(text=text):
+                self.assertNotIn("address-us-two-lines", {m.kind for m in scan(text, region=("us",))})
+
+
 class NameNextToAPersonCueTests(Base):
     def test_a_name_in_a_declaration_a_self_introduction_or_before_its_birth_is_masked_whole(self):
         for text in ("I, " + NAME + ", hereby declare that the above is true.",

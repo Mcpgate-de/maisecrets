@@ -146,6 +146,22 @@ _CITY = r"[A-ZÄÖÜÉ][\wäöüßéèàç-]{1,40}"
 # the company decision alone, so its postcode and VAT ID follow the street, which stays text
 _DE_TWO_LINES_RE = re.compile(r"\b[A-ZÄÖÜ][\wäöüß-]{0,40}(?:straße|strasse|str\.|weg|gasse|platz|allee|ring|damm) "
                               r"\d{1,4}[a-z]?[ \t]*\r?\n[ \t]*\d{4,5} (" + _CITY + ")")
+# a US postal address on two lines (1234 Harbor Mission Apt. 5\nSpringfield, IL 62704), and the military one (PSC 1234,
+# Box 5678\nAPO AE 09876): the second line, a city, a state code and a ZIP code, is the strong part, so the street line
+# needs no street word (Mendeley, 2026-10-20: 27,427 such addresses, all on two lines, were missed)
+_US_STATES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
+              "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|PR|GU|VI|AS|MP")
+_US_TWO_LINES_RE = re.compile(
+    # the house number starts the line or follows a separator or a word of place (at, to, is): `Release 2 Notes` has
+    # its number inside a heading
+    r"(?:(?<=^)|(?<=\n)|(?<=[:;,(\"'] )|(?<=\()|(?<=\bat )|(?<=\bto )|(?<=\bis )|(?<=\bin )|(?<=\bon )"
+    r"|(?<=\bfrom )|(?<=\baddress ))"
+    r"(?:\d{1,6} (?:[A-Z][a-z'.-]{1,30} ){1,4}"
+    r"[A-Z][a-z'.-]{1,30}\.?"
+    r"(?:,? (?:Apt|Apartment|Suite|Ste|Unit|#)\.? ?[A-Za-z0-9-]{1,6})?"
+    r"[ \t]*\r?\n[ \t]*(?:[A-Z][a-z'.-]{1,30} ){0,3}[A-Z][a-z'.-]{1,30}, (?:" + _US_STATES + r") \d{5}(?:-\d{4})?"
+    r"|(?:PSC \d{3,5}, Box \d{3,5}|Unit \d{3,5} Box \d{3,5}|US(?:NS|NV|CGC|S) [A-Z][a-z]{1,30})"
+    r"[ \t]*\r?\n[ \t]*(?:APO|FPO|DPO) (?:AA|AE|AP) \d{5})(?![\w-])")
 _DEPARTMENT_LINE_RE = re.compile(r"(?i)[ \t]*(?:abteilung|abt\.|department|dept\.?|division|bereich)[ \t]")
 _ADDRESS_FORMS = tuple(
     (frozenset({r}), re.compile(_EN_STREET.replace("{codes}", code))) for r, code in _POSTCODES.items()) + (
@@ -889,6 +905,7 @@ FORMS = {
     "name-next-to-a-person-cue": (NAME, "tool", "generic", "label"),
     "address-street-after-label": (ADDRESS, "tool", "generic", "label"),
     "address-street-postcode-city": (ADDRESS, "tool", "generic", "form"),
+    "address-us-two-lines": (ADDRESS, "tool", "us", "form"),
     "md-table-personal-column": ("COLUMN", "tool", "generic", "label"),
     "sql-insert-personal-column": ("COLUMN", "tool", "generic", "label"),
     "html-table-personal-column": ("COLUMN", "tool", "generic", "label"),
@@ -1906,6 +1923,15 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             if _service_user(u) or u == own:
                 continue
             out.append((m.start(1), m.end(1), "user-in-home-path", USERNAME))
+    if "address-us-two-lines" in want and "\n" in text and "us" in regions:
+        for m in _US_TWO_LINES_RE.finditer(text):
+            line = text.rfind("\n", 0, m.start()) + 1
+            lo = max(_block_back(text, line), m.start() - 160)
+            # a company, an office or a public place on the lines above or before it keeps the address text
+            if _NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start()):
+                _company_window(text, lo, m.start(), m.end(), "address-us-two-lines", company)
+            else:
+                out.append((m.start(), m.end(), "address-us-two-lines", ADDRESS))
     if "street-address" in want:
         for regs, rx in _ADDRESS_FORMS:
             if not regs.intersection(regions):
