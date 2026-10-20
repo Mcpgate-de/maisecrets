@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.6.42] - 2026-10-20
+
+### Fixes
+
+- a double name with a hyphen is masked whole after its label, not only the part before the hyphen (4d8f40f)
+- a driver license written in hyphenated groups is masked whole, not only its first four characters (25e65c9)
+- a user name after the user name label in a sentence is masked in tool results, when it has a digit, a dot or an underscore (fe16811)
+
 ## [0.6.41] - 2026-10-20
 
 ### Fixes
