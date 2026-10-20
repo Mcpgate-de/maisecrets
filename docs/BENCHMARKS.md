@@ -538,6 +538,18 @@ hit makes two spans whole); Gretel dev 446, val 136; PIILO dev 7, val 1; nothing
 the 7 spans now found in part are a title Gretel counts to the name (`Mr.` stays visible) or a first name that reads
 as a word; the hits over a gold span are a surname Gretel did not label. `scripts/compare_bench.py`: no finding.
 
+### A name after "first name is" in a sentence, 2026-10-20
+
+Of the names missed after a name label (above), 1,060 stood after `first name is`, `last name is` or `my name is`;
+the person-cue rule takes `my name is`. The one-word name after a first or last name label now also takes `is` as its
+separator. The value still needs a capital, a field state or a type (`Required`, `Optional`, `String`) stays text,
+and so does a name that a lowercase word follows (`… is Dana and …`), as after a colon. Registered before the run:
+about 690 on Nemotron `dev`. 479 were found; the rest stays text by the guards above (a lowercase word after the name, a name that reads as a word), not counted one by one.
+
+Per span against the person-cue change: Nemotron dev 479 missed to whole, val 155; Gretel dev 4; PIILO val 1;
+nothing got worse; false positives, Mendeley, traces, bank and the false-alarm bank unchanged.
+`scripts/compare_bench.py`: no finding.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),

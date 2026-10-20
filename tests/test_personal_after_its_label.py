@@ -186,6 +186,19 @@ class SingleNameTests(Base):
             with self.subTest(text=text):
                 self.assertEqual(text.replace(double, "•"), masked(text))
 
+    def test_a_name_after_first_or_last_name_is_in_a_sentence_is_masked(self):
+        for text in ("My last name is " + FAMILY + ".", "The patient's last name is " + FAMILY + ".",
+                     "Your first name is " + GIVEN + ", and your date of birth follows."):
+            with self.subTest(text=text):
+                value = FAMILY if FAMILY in text else GIVEN
+                self.assertEqual(text.replace(value, "•"), masked(text))
+
+    def test_a_state_or_a_type_after_name_is_stays_text(self):
+        for text in ("The first name is required.", "First name is Required", "The last name is Optional here",
+                     "first name is String", "The last name is Unknown."):
+            with self.subTest(text=text):
+                self.assertNotIn("name-single-after-label", {m.kind for m in scan(text)})
+
     def test_a_hyphenated_value_of_words_stays_text(self):
         for text in ("Last Name: Self-Employed\n", "Last Name: Non-Applicable\n",
                      "last_name: Auto-Generated\n"):
