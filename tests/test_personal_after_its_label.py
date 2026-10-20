@@ -193,6 +193,24 @@ class SingleNameTests(Base):
                 self.assertNotIn("name-single-after-label", {m.kind for m in scan(text)})
 
 
+class NameNextToAPersonCueTests(Base):
+    def test_a_name_in_a_declaration_a_self_introduction_or_before_its_birth_is_masked_whole(self):
+        for text in ("I, " + NAME + ", hereby declare that the above is true.",
+                     "Hello, my name is " + NAME + " and I am writing about my claim.",
+                     "Patient " + NAME + ", born on " + BIRTH + ", was seen today.",
+                     "The policyholder, " + NAME + ", a resident of Springfield, signed."):
+            with self.subTest(text=text):
+                # the birth date has its own rule
+                self.assertEqual(text.replace(NAME, "•", 1).replace(BIRTH, "•"), masked(text).replace(BIRTH, "•"))
+
+    def test_one_word_words_a_role_or_a_placeholder_next_to_a_cue_stay_text(self):
+        for text in ("The Applicant, born on the date given above, signs here.", "Texas, born on paper, grew.",
+                     "my name is Required Field in this schema", "I, John Doe, hereby confirm the template.",
+                     "I, Product Owner, am responsible for the backlog."):
+            with self.subTest(text=text):
+                self.assertNotIn("name-next-to-a-person-cue", {m.kind for m in scan(text)})
+
+
 # ------------------------------------------------------------------- a street line after an address label --
 STREET = "4821 Maple " + "Ridge Drive"
 

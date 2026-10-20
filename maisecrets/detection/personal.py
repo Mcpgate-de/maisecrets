@@ -383,6 +383,16 @@ def _name_ok(v: str) -> bool:
 # name before it. A service mailbox (noreply, a bot) names no person
 _NAME_MAIL_RE = re.compile(r"((?:[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'’-]{1,30})(?: (?:[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'’-]{1,30}|[A-Z]\.)){1,3})"
                            r"[ \t]{0,2}[<(\[]([\w.%+-]{1,64})@([\w-]{1,63}(?:\.[\w-]{1,63}){0,8})")
+# a name next to words that say it is a person (Nemotron-PII and Gretel, 2026-10-20): a declaration (I, <name>, hereby),
+# a self-introduction (my name is <name>), and a person's birth or residence right after the name (<name>, born on).
+# One primitive for the three: the cue is a short phrase, the value has the shape of a name and does not read as words
+_CUE_NAME = r"((?:" + _NAME_STEM + r")(?: (?:" + _NAME_STEM + r")){0,3})"
+_PERSON_CUE_RES = (
+    re.compile(r"(?<![\w,])I, " + _CUE_NAME + r", (?=(?:hereby|am|the undersigned|residing|currently|born|a resident"
+               r"|being|declare|certify|of legal age)\b)"),
+    re.compile(r"(?<![\w])(?i:my (?:full )?name is) " + _CUE_NAME + r"(?![\w'’-])"),
+    re.compile(_CUE_NAME + r", (?=(?:born on|born in|date of birth|a resident of|residing at|resides at|who resides"
+               r"|who lives|currently residing|currently resides)\b)"))
 _SERVICE_LOCAL_RE = re.compile(r"(?i)^(?:no-?reply|do-?not-?reply|notifications?|support|info|hello|contact|team"
                                r"|admin|root|git|bot|ci|build|release|deploy|security|alerts?|monitoring|postmaster"
                                r"|webmaster|mailer-daemon|bounces?|github-actions|actions|dependabot|renovate)"
@@ -851,6 +861,7 @@ FORMS = {
     "birth-date-vcard-compact": (BIRTH_DATE, "tool", "generic", "form"),
     "phone-after-phone-word": (PHONE, "tool", "generic", "label"),
     "name-single-after-label": (NAME, "tool", "generic", "label"),
+    "name-next-to-a-person-cue": (NAME, "tool", "generic", "label"),
     "address-street-after-label": (ADDRESS, "tool", "generic", "label"),
     "address-street-postcode-city": (ADDRESS, "tool", "generic", "form"),
     "md-table-personal-column": ("COLUMN", "tool", "generic", "label"),
@@ -1917,6 +1928,19 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                     v, words_only = cut, False
             if _name_ok(v) and not words_only:
                 out.append((m.start(3), m.start(3) + len(v), "name-after-label", NAME))
+    if "name-next-to-a-person-cue" in want and any(w in low for w in ("i, ", "name is", "born", "resid", "lives")):
+        for rx in _PERSON_CUE_RES:
+            for m in rx.finditer(text):
+                words, start = m.group(1).split(" "), m.start(1)
+                # a word before the name that is no part of it (Patient Dana Okafor, born on): drop it
+                while len(words) > 1 and _reads_as_words(words[0]) and words[0].lower() not in _GIVEN_NAME_WORDS:
+                    start += len(words.pop(0)) + 1
+                v = " ".join(words)
+                # two name words at least: one word next to the cue is as often a role or a place (The Applicant,
+                # Texas, born on) as a name
+                if not _name_ok(v) or _reads_as_words(v) or words[0].lower() in _PLACEHOLDER_NAME_WORDS:
+                    continue
+                out.append((start, start + len(v), "name-next-to-a-person-cue", NAME))
     if "name-before-email" in want and "@" in text:
         for m in _NAME_MAIL_RE.finditer(text):
             if _SERVICE_LOCAL_RE.match(m.group(2)) or not _name_ok(m.group(1)) or _reads_as_words(m.group(1)):
