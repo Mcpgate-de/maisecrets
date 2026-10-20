@@ -296,6 +296,23 @@ clear). Decided on `val` and the false-alarm bank.
 | Mendeley, PIILO, bank dev and val | – | no change |
 | False-alarm bank, seven trees (`scripts/compare_bench.py`) | – | 0 findings |
 
+### A medical license, masked whole around its DEA-shaped part, 2026-10-20
+
+Found by the partial-detection audit of the dev splits (Nemotron, 121 medical licenses found in part). Decided on `val`
+and the false-alarm bank.
+
+- **Cause:** Presidio's DEA pattern (two letters, seven digits) has no word boundary. It matched inside a longer license
+  number and left the letters before it and the digits after it in the clear.
+- **Fix:** a validated `medical-license` hit takes the whole token of letters and digits around it.
+
+| Measure | Before (`next`, 40e638ef) | This change |
+|---|---|---|
+| Nemotron dev: national ids whole / in part, F1 | 17,135 / 208, 0.6967 | 17,244 / 99, 0.6971 |
+| Nemotron val: national ids whole / in part, F1 | 5,494 / 76, 0.6990 | 5,529 / 41, 0.6995 |
+| Gretel dev / val: national ids whole / in part | 1,180 / 4; 381 / 2 | 1,181 / 3; 383 / 0 |
+| False positives and too-wide spans, every source | – | no change |
+| False-alarm bank, seven trees (`scripts/compare_bench.py`) | – | 0 findings |
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
