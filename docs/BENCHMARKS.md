@@ -463,8 +463,9 @@ Found by the per-span line of `scripts/compare_bench.py` (`docs/REGRESSION-POLIC
 | Spans worse than in 0.7.0 / than in 0.6.41 (Gretel dev) | – | 0 / 4 |
 
 Per span against 0.7.0: dev 80 missed to whole and 2 missed to partial, val 18 and 1; nothing got worse. The four
-spans still worse than in 0.6.41 are company names (`… Inc.`, `… Consulting`), which the name rule leaves as text on
-purpose, and a name whose label line holds a second label in the same sentence.
+spans still worse than in 0.6.41 are two company names (`… Inc.`), which the name rule leaves as text on purpose, one
+French address after `Adresse:` with its postcode after the street, and one name broken at the end of the text whose
+hyphen alone stays in the clear (read on `dev`).
 
 ## CredData, results per release
 
