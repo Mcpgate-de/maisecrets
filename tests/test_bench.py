@@ -555,5 +555,27 @@ class HoldoutV2Tests(unittest.TestCase):
         subprocess.run(["git", "-C", str(repo), "tag", "v9.9.9"], check=True, env=env, capture_output=True)
         self.assertTrue(run.release_candidate(repo))
 
+
+class ReleaseCompareTests(unittest.TestCase):
+    """scripts/release_compare.py: both releases per source and split, the change, gains and regressions by class."""
+
+    def test_the_report_names_the_change_the_gain_and_the_regression(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import release_compare
+        with tempfile.TemporaryDirectory() as d:
+            a, b = Path(d) / "a", Path(d) / "b"
+            for p, full, partial, fp in ((a, 100, 5, 10), (b, 120, 7, 10)):
+                p.mkdir()
+                metrics = {"all": {"full": full, "partial": partial, "fp": fp, "f1": 0.5},
+                           "pii.name": {"spans": 200, "full": full, "partial": partial}}
+                (p / "gretel-val-maisecrets.json").write_text(json.dumps(
+                    {"metrics": metrics, "timing": {"median_ms": 1.0}}), encoding="utf-8")
+            text = release_compare.report(a, b, "v1", "v2")
+        self.assertIn("| full | 100 | 120 | +20 |", text)
+        self.assertIn("gretel-val: pii.name full 100 → 120", text.split("## Largest gains")[1].split("##")[0])
+        self.assertIn("gretel-val: pii.name partial 5 → 7", text.split("## Largest regressions")[1].split("##")[0])
+        self.assertIn("partial spans 5 -> 7", text.split("compare_bench.py")[1])
+
+
 if __name__ == "__main__":
     unittest.main()
