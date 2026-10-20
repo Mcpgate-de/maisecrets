@@ -52,6 +52,34 @@ are an upper bound of the missing labels, and a sample must be read before a num
    is reported as a lower bound with the sample's result.
 4. **The same rules for every scanner.** The scope is a property of the dataset, never of a scanner.
 
+## Privy stays unread
+
+Privy is the one independent public set. Its cases are not read, also not for an audit and not by a separate
+person. Its precision is reported as **observed precision under incomplete annotation**, a conservative lower bound.
+`out_of_scope` is counted for Privy only where the source label types and the finding's type decide it, without a
+case text. A calibrated Privy precision would need its own audit procedure, frozen before the first case is read
+(seed, sample size, scheme, an independent reader); there is none now.
+
+## The false-positive audit on development data (registered before the first case is read)
+
+Registered 2026-10-20 in this commit, before any case of the sample was read.
+
+- **Population:** the false positives of maisecrets `next` 898a95c2 (regions `generic,de,us`, tool channel) on the
+  `dev` split, in four strata: Nemotron `us-ssn` (254), Nemotron all other rules (247), Gretel `us-bank` (762),
+  Gretel all other rules (1,402).
+- **Sample:** 40 per stratum, 160 in all. Order the false positives of a stratum by
+  `sha256("v3-audit-20261020/" + case_id + "/" + start)` and take the first 40. The script is
+  `scripts/fp_audit_sample.py`; it prints each finding's class, rule and context with the value replaced by its
+  shape (letters and digits counted, no character of the value).
+- **Scheme**, one code per finding, decided from the context and the shape:
+  - `real-same`: a real value of the finding's class that the dataset did not label;
+  - `real-other`: a real sensitive value of another class (the finding's type is wrong, the masking is right);
+  - `not-sensitive`: no sensitive value (an id of a thing, a placeholder, a version, a count);
+  - `unclear`: the context does not decide it.
+- **Report:** per stratum, the count of each code and the share of `real-same` + `real-other` with a 95 % Wilson
+  interval. The stratum totals scale the shares to an estimate of true false positives per dataset. The result
+  changes no rule; it changes how V3 reports precision.
+
 ## What V3 keeps
 
 The split rule, the span outcomes (`full`, `partial`, `missed`), `too wide`, the classes, the scanners and their
