@@ -410,5 +410,35 @@ class ReproducibilityTests(unittest.TestCase):
         self.assertEqual(rows[0]["full"], "2")
 
 
+class CompareBenchTests(unittest.TestCase):
+    """scripts/compare_bench.py lists what a reviewer must explain (docs/REGRESSION-POLICY.md)."""
+
+    def run_compare(self, base: dict, new: dict, fp_base=None, fp_new=None) -> list:
+        import tempfile
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import compare_bench
+        with tempfile.TemporaryDirectory() as d:
+            a, b = Path(d) / "a", Path(d) / "b"
+            for p, metrics, fp in ((a, base, fp_base), (b, new, fp_new)):
+                p.mkdir()
+                (p / "gretel-val-maisecrets.json").write_text(json.dumps({"metrics": metrics}), encoding="utf-8")
+                if fp is not None:
+                    (p / "fpbank-7trees.json").write_text(json.dumps(
+                        {"trees": {"t": {"rules": {f"tests|X|{r}": [n, n] for r, n in fp.items()}}}}),
+                        encoding="utf-8")
+            return compare_bench.compare(a, b)
+
+    def test_a_loss_on_val_a_new_partial_and_a_new_bank_hit_are_findings(self):
+        base = {"all": {"fp": 100}, "pii.name": {"spans": 1000, "full": 500, "partial": 10}}
+        new = {"all": {"fp": 100}, "pii.name": {"spans": 1000, "full": 490, "partial": 11}}
+        found = self.run_compare(base, new, {"email": 3}, {"email": 4})
+        self.assertEqual(len(found), 3, found)
+
+    def test_small_changes_inside_the_lines_are_no_finding(self):
+        base = {"all": {"fp": 1000}, "pii.name": {"spans": 1000, "full": 500, "partial": 10}}
+        new = {"all": {"fp": 1005}, "pii.name": {"spans": 1000, "full": 497, "partial": 9}}
+        self.assertEqual(self.run_compare(base, new, {"email": 3}, {"email": 3}), [])
+
+
 if __name__ == "__main__":
     unittest.main()
