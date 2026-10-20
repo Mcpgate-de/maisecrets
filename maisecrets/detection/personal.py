@@ -85,7 +85,8 @@ _ID_RE = re.compile(r"(?i)(?<![a-z])(?:mrn|member[ -]?id|passport(?:[ _-]?(?:no|
                     + _TRAVEL_ID_LABELS + r")(?![a-z])[\"']?"
                     r"(?:\s{0,3}(?:on file|is|of|number|no\.?|#|n\.?[º°o]\.?|nr\.?|num[ée]ro|n[úu]mero|numero"
                     r"|nummer|numer))?"
-                    r"\s{0,3}[:=#]?\s{0,3}[\"']?"
+                    # a comma too: `your health plan beneficiary number, <id>, to medical professionals` (Nemotron-PII)
+                    r"\s{0,3}[:=#,]?\s{0,3}[\"']?"
                     r"((?-i:[A-Z0-9](?:[A-Z0-9]|[ -](?=[A-Z0-9])){4,24}))(?![A-Za-z0-9])")
 
 # ------------------------------------------------------------------------------------- user in a URL or path --
