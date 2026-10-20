@@ -400,6 +400,19 @@ class MarkdownTableTests(Base):
 
 # ------------------------------------------------------------------------------- health, tax and national IDs --
 class HealthIdLabelTests(Base):
+    def test_an_id_after_its_label_and_a_comma_is_masked_whole(self):
+        value = "AB-" + "4821930217"
+        for text in ("Provide your health plan beneficiary number, " + value + ", to medical professionals.",
+                     "Have a medical record number, " + value + ", that can be verified."):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(value, "•"), masked(text))
+
+    def test_a_comma_after_an_id_label_and_no_id_stays_text(self):
+        for text in ("Passport, 12 copies attached", "account number, see page 4",
+                     "medical record number, 2024 edition"):
+            with self.subTest(text=text):
+                self.assertNotIn("id-number-after-label", {m.kind for m in scan(text)})
+
     def test_an_id_after_a_health_tax_or_national_label_is_masked(self):
         for text, value in (
                 ("Health plan beneficiary number: " + "4821" + "39771", "4821" + "39771"),
