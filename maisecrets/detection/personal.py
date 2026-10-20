@@ -992,7 +992,9 @@ _SINGLE_NAME_LABELS = (r"first[ _-]?name|last[ _-]?name|given[ _-]?name|family[ 
                        r"|nombre de pila|cognome|sobrenome|voornaam|achternaam|f[öo]rnamn|efternamn")
 _SINGLE_NAME_RE = _lazy(r"(?i:(?<![a-z_./-])(?:" + _SINGLE_NAME_LABELS + r"))[\"']?[ \t]{0,3}[:=][ \t]{0,3}[\"']?"
                         r"[ \t]{0,3}([" + _UP + "\u1e00-\u1eff" + r"]"
-                        r"[" + _LO + "\u1e00-\u1eff\u0300-\u036f" + r"'’-]{1,30})"
+                        r"[" + _LO + "\u1e00-\u1eff\u0300-\u036f" + r"'’-]{1,30}"
+                        # a double surname: a second part with its own capital after the hyphen
+                        r"(?:-[" + _UP + r"][" + _LO + r"\u1e00-\u1eff\u0300-\u036f'’]{1,30})?)"
                         r"(?![\w'’-])"   # Nguyễn, Ạnh, and a combining accent
                         r"(?![ \t]{1,2}[" + _UP + r"])")
 # a user name after a label that names one (`"username": "jdoe42"`, `user_name: jdoe42`): the label of a record, not
@@ -1678,6 +1680,10 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
             if low_v in _PLACEHOLDER_NAME_WORDS or low_v in PLACEHOLDER_NAMES \
                     or low_v in _NOT_A_NAME_START or low_v in _NOT_A_NAME_WORD or low_v in _SHORT_EN \
                     or len(low_v) < 2 or _reads_as_words(_no_marks(v)) or _inflected_word(low_v):
+                continue
+            # a double surname is words when each part is a word (Self-Employed, Non-Applicable), as in name-after-label
+            parts = [w for w in _no_marks(v).split("-") if w]
+            if len(parts) > 1 and all(_reads_as_words(w) or _inflected_word(w.lower()) for w in parts):
                 continue
             found.append((m.start(1), m.end(1), "name-single-after-label", NAME))
         out += found

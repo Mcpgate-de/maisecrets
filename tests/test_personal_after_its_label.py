@@ -179,6 +179,19 @@ class SingleNameTests(Base):
         kinds = {m.kind for m in scan("Last name: " + FAMILY + " Smith")}
         self.assertEqual(kinds, {"name-after-label"})
 
+    def test_a_double_surname_with_two_capitals_is_masked_whole(self):
+        double = "Okafor-" + "Brandt"
+        for text in ("Last Name: " + double + "\nDate of Birth: none", "- **Last Name:** " + double + "\n- **City:** x",
+                     "Nachname: " + double + ", Vorname: none"):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(double, "•"), masked(text))
+
+    def test_a_hyphenated_value_of_words_stays_text(self):
+        for text in ("Last Name: Self-Employed\n", "Last Name: Non-Applicable\n",
+                     "last_name: Auto-Generated\n"):
+            with self.subTest(text=text):
+                self.assertNotIn("name-single-after-label", {m.kind for m in scan(text)})
+
 
 # ------------------------------------------------------------------- a street line after an address label --
 STREET = "4821 Maple " + "Ridge Drive"

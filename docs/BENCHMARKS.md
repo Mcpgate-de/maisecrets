@@ -491,6 +491,28 @@ run: about 280 of the 309, no change in the number of hits.
 Per span: dev 284 partial to whole, val 86; nothing got worse, too wide unchanged. `scripts/compare_bench.py`: no
 finding. Left open: a unit before a direction (`… St 999 North`, 7) and 13 other forms.
 
+### A double surname after a first or last name label, 2026-10-20
+
+On 0.7.1 plus the street change, 3,874 names of Nemotron-PII `dev` right after a name label were missed. Read per
+case, the deciding step: 1,102 one word after `Name:` (left as text on purpose: one word after this weak label is
+often no person), 1,060 after `first name is`, `last name is` or `my name is` (no rule takes `is` as a separator for one word), 542
+refused as words (`Hunter`, `Mason`: on purpose), 176 where the regex did not match a double surname with two
+capitals (`Last Name: Okafor-Brandt`): the value took a hyphen only before a small letter, and 104 with a capital
+inside the name (`McKenzie`), left open. This change takes the double surnames only. A hyphenated value stays text when each part is a word (`Self-Employed`, `Non-Applicable`), as for a
+name of two words. Registered before the run: about 176 on Nemotron `dev`.
+
+| Measure | Before (street change) | This change |
+|---|---|---|
+| Nemotron dev / val: whole spans | 111,732 / 37,112 | 111,911 / 37,193 |
+| Nemotron dev / val: name recall | 0.1909 / 0.1973 | 0.1930 / 0.2002 |
+| Gretel dev / val: whole spans, false positives | 20,561, 2,279 / 6,499, 791 | 20,620, 2,284 / 6,518, 795 |
+| Mendeley, PIILO, traces, bank, false-alarm bank | – | no change |
+
+Per span: Nemotron dev 179 missed to whole, val 81; Gretel dev 59, val 19; nothing got worse. The 5 new false
+positives of Gretel `dev`, read: each is a double surname after a last name label (`Apellidos`, `Nachname`,
+`Cognome`) in a record whose first name Gretel labelled and whose last name it did not. `scripts/compare_bench.py`:
+no finding.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
