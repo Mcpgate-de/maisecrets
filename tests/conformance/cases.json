@@ -1,0 +1,329 @@
+{
+ "format": "maisecrets conformance cases v0 (docs/DETECTION-SPEC-DRAFT.md)",
+ "cases": [
+  {
+   "id": "street-direction-after-label",
+   "kind": "normative",
+   "input": "Street Address: 12 Oak Street SW\nCity: Springfield",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "us"
+   ],
+   "languages": [
+    "en"
+   ],
+   "expected": [
+    {
+     "start": 16,
+     "end": 32,
+     "type": "ADDRESS"
+    }
+   ],
+   "not_expected": [
+    {
+     "start": 33,
+     "end": 50,
+     "type": "ADDRESS"
+    }
+   ],
+   "why": "a direction after the street type belongs to the street (BENCHMARKS.md, 2026-10-20)"
+  },
+  {
+   "id": "street-number-of-the-sentence-stays",
+   "kind": "normative",
+   "input": "I live at 12 Oak Street 3 days a week.",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "us"
+   ],
+   "languages": [
+    "en"
+   ],
+   "expected": [
+    {
+     "start": 10,
+     "end": 23,
+     "type": "ADDRESS"
+    }
+   ],
+   "not_expected": [
+    {
+     "start": 23,
+     "end": 30,
+     "type": "ADDRESS"
+    }
+   ],
+   "why": "a number that goes on in the sentence is no unit"
+  },
+  {
+   "id": "double-surname-after-last-name",
+   "kind": "normative",
+   "input": "Last Name: Okafor-Brandt\nDate of Birth: none",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "us"
+   ],
+   "languages": [
+    "en"
+   ],
+   "expected": [
+    {
+     "start": 11,
+     "end": 24,
+     "type": "NAME"
+    }
+   ],
+   "not_expected": [
+    {
+     "start": 25,
+     "end": 38,
+     "type": "NAME"
+    }
+   ],
+   "why": "a double surname with two capitals is one value"
+  },
+  {
+   "id": "declaration-cue",
+   "kind": "normative",
+   "input": "I, Dana Okafor, hereby declare that the above is true.",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "us"
+   ],
+   "languages": [
+    "en"
+   ],
+   "expected": [
+    {
+     "start": 3,
+     "end": 14,
+     "type": "NAME"
+    }
+   ],
+   "not_expected": [
+    {
+     "start": 16,
+     "end": 30,
+     "type": "NAME"
+    }
+   ],
+   "why": "a name in a declaration is a person's"
+  },
+  {
+   "id": "born-on-cue-drops-a-role-word",
+   "kind": "normative",
+   "input": "Patient Dana Okafor, born on a date given above, was seen.",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "us"
+   ],
+   "languages": [
+    "en"
+   ],
+   "expected": [
+    {
+     "start": 8,
+     "end": 19,
+     "type": "NAME"
+    }
+   ],
+   "not_expected": [
+    {
+     "start": 0,
+     "end": 8,
+     "type": "NAME"
+    }
+   ],
+   "why": "a word before the name that is no part of it stays text"
+  },
+  {
+   "id": "title-cue",
+   "kind": "normative",
+   "input": "The claim was initiated by Mrs. Dana Okafor for her son.",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "us"
+   ],
+   "languages": [
+    "en"
+   ],
+   "expected": [
+    {
+     "start": 32,
+     "end": 43,
+     "type": "NAME"
+    }
+   ],
+   "not_expected": [
+    {
+     "start": 27,
+     "end": 32,
+     "type": "NAME"
+    }
+   ],
+   "why": "a title before a full name; the title stays text"
+  },
+  {
+   "id": "salutation-cue",
+   "kind": "normative",
+   "input": "Dear Dana Okafor,\nThank you for your application.",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "us"
+   ],
+   "languages": [
+    "en"
+   ],
+   "expected": [
+    {
+     "start": 5,
+     "end": 16,
+     "type": "NAME"
+    }
+   ],
+   "not_expected": [
+    {
+     "start": 18,
+     "end": 27,
+     "type": "NAME"
+    }
+   ],
+   "why": "a salutation before a full name"
+  },
+  {
+   "id": "salutation-role-stays",
+   "kind": "normative",
+   "input": "Dear Valued Policyholder,\nThank you.",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "us"
+   ],
+   "languages": [
+    "en"
+   ],
+   "expected": [],
+   "not_expected": [
+    {
+     "start": 5,
+     "end": 24,
+     "type": "NAME"
+    }
+   ],
+   "why": "a salutation that greets a role names no person"
+  },
+  {
+   "id": "first-name-is",
+   "kind": "normative",
+   "input": "My last name is Okafor.",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "us"
+   ],
+   "languages": [
+    "en"
+   ],
+   "expected": [
+    {
+     "start": 16,
+     "end": 22,
+     "type": "NAME"
+    }
+   ],
+   "not_expected": [
+    {
+     "start": 0,
+     "end": 12,
+     "type": "NAME"
+    }
+   ],
+   "why": "`is` separates a one-word name from its label"
+  },
+  {
+   "id": "us-address-two-lines",
+   "kind": "normative",
+   "input": "I live at 4821 Harbor Mission Apt. 5\nSpringfield, IL 62704 and work nearby.",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "us"
+   ],
+   "languages": [
+    "en"
+   ],
+   "expected": [
+    {
+     "start": 10,
+     "end": 58,
+     "type": "ADDRESS"
+    }
+   ],
+   "not_expected": [
+    {
+     "start": 59,
+     "end": 67,
+     "type": "ADDRESS"
+    }
+   ],
+   "why": "a US postal address on two lines is one value"
+  },
+  {
+   "id": "us-address-heading-stays",
+   "kind": "normative",
+   "input": "Release 2 Notes\nAustin, TX 78701 office",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "us"
+   ],
+   "languages": [
+    "en"
+   ],
+   "expected": [],
+   "not_expected": [
+    {
+     "start": 8,
+     "end": 32,
+     "type": "ADDRESS"
+    }
+   ],
+   "why": "a number in a heading starts no street"
+  },
+  {
+   "id": "field-value-table",
+   "kind": "normative",
+   "input": "| Field | Value |\n|---|---|\n| Full Name | Dana Okafor |\n| Date of Birth | 1984-03-12 |\n",
+   "channel": "tool",
+   "regions": [
+    "generic",
+    "us"
+   ],
+   "languages": [
+    "en"
+   ],
+   "expected": [
+    {
+     "start": 42,
+     "end": 53,
+     "type": "NAME"
+    }
+   ],
+   "not_expected": [
+    {
+     "start": 30,
+     "end": 39,
+     "type": "NAME"
+    }
+   ],
+   "why": "a table of fields and values is one record"
+  }
+ ]
+}
