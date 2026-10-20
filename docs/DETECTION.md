@@ -73,7 +73,8 @@ maintainer on 2026-10-20 (merge request !160):
 | The hits themselves | **not API**: a patch version may find more or fewer values; `docs/BENCHMARKS.md` and `scripts/compare_bench.py` report how |
 
 **Changes to a stable name go through a deprecation, also before 1.0:** the old form keeps working with a
-`DeprecationWarning` for at least one minor version, the changelog says so under "API", and only then it goes. A
+`DeprecationWarning` for at least one minor version, the changelog says so under "API" (a commit footer
+`API: …`, `scripts/release.py`), and only then it goes. A
 1.0 of the wheel would freeze the stable names. `region` and `channel` for `user_rule` come only when they are meant
 to be carried as API.
 

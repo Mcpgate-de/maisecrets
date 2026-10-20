@@ -187,6 +187,20 @@ class ReleaseTests(unittest.TestCase):
                 self.r.apply("0.9.0", notes)
                 self.assertIn("- by hand", (self.repo.dir / "CHANGELOG.md").read_text())
 
+    def test_an_api_footer_is_listed_under_api_whatever_the_type(self):
+        """docs/DETECTION.md promises that a change of the library API is named under "API"; 0.7.0 listed the
+        deprecation of LazyRegex under Features. A footer `API: …` puts it there, also from a docs commit."""
+        commits = [("a" * 40, "feat(detect): user_rule",
+                    "Body.\n\nAPI: user_rule is the stable way to a rule of your own"),
+                   ("b" * 40, "docs(detection): note", "API: LazyRegex is deprecated until 0.8"),
+                   ("c" * 40, "fix: a fix", "")]
+        notes = self.r.render_notes("0.9.0", commits)
+        self.assertIn("### API", notes)
+        self.assertIn("- user_rule is the stable way to a rule of your own (aaaaaaa)", notes)
+        self.assertIn("- LazyRegex is deprecated until 0.8 (bbbbbbb)", notes)
+        self.assertLess(notes.index("### API"), notes.index("### Features"))
+        self.assertNotIn("### API", self.r.render_notes("0.9.0", commits[2:]))
+
     def test_apply_writes_every_manifest_and_keeps_the_unreleased_block(self):
         cl = self.repo.dir / "CHANGELOG.md"
         cl.write_text("# Changelog\n\n## Unreleased\n\n- **Hand-written** line.\n\n## [0.4.1] - 2026-09-27\n\n"

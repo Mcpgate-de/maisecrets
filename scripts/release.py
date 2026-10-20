@@ -108,6 +108,9 @@ _REVERT_RE = re.compile(r'^Revert "(?P<inner>.+)"$')
 # git's own subject of a merge commit says nothing a user needs; the merged commits carry the notes
 _MERGE_RE = re.compile(r"^Merge (branch|remote-tracking branch|pull request|tag) ")
 _BREAKING_FOOTER_RE = re.compile(r"^BREAKING[ -]CHANGE: ", re.M)
+# a change of the library API (docs/DETECTION.md, "The API"): a footer line `API: <what changed>`, listed under "API"
+# whatever the type of its commit, so a deprecation or a new stable name is never a line among the fixes
+_API_FOOTER_RE = re.compile(r"^API: (.+)$", re.M)
 
 
 def _unrevert(subject: str) -> str:
@@ -169,12 +172,14 @@ def render_notes(version: str, commits: list[tuple[str, str, str]]) -> str:
         if subject.startswith("chore(release):") or _MERGE_RE.match(subject):
             continue
         typ, text, breaking = classify(subject, body)
+        for api in _API_FOOTER_RE.findall(body):
+            groups.setdefault("API", []).append(f"- {api.strip()} ({sha[:7]})")
         if typ in TYPES_NONE and not breaking:   # `refactor!:` is the reason for its release
             continue
         section = "Breaking" if breaking else SECTION.get(typ, "Other")
         groups.setdefault(section, []).append(f"- {text} ({sha[:7]})")
     lines = [f"## [{version}] - {_dt.date.today().isoformat()}", ""]
-    for section in ("Breaking", "Features", "Fixes", "Security", "Reverts", "Dependencies", "Other"):
+    for section in ("Breaking", "API", "Features", "Fixes", "Security", "Reverts", "Dependencies", "Other"):
         if section in groups:
             lines += [f"### {section}", ""] + groups[section] + [""]
     return "\n".join(lines).rstrip("\n") + "\n"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the detection core as a wheel, install it into a fresh venv and use it from there (docs/DETECTION.md).
 
-    python3 scripts/wheel_smoke.py [--python PY] [--wheel FILE]
+    python3 scripts/wheel_smoke.py [--python PY] [--wheel FILE] [--release]
 
 Without --wheel it builds one with `pip wheel` (pip fetches the pinned hatchling of pyproject.toml). --python picks the
 interpreter of the venv, default this one; run it once with the oldest supported Python too. The installed copy runs
@@ -96,7 +96,9 @@ def main(argv) -> int:
         ("every file of the core and its rule data", got["files"] == expected_files,
          f"missing {sorted(set(expected_files) - set(got['files']))[:5]}, "
          f"extra {sorted(set(got['files']) - set(expected_files))[:5]}"),
-        ("no module of the plugin in the package", got["top"] == ["__init__.py", "detection"], str(got["top"])),
+        # py.typed: a type checker of a caller reads the annotations of the core (PEP 561)
+        ("no module of the plugin in the package", got["top"] == ["__init__.py", "detection", "py.typed"],
+         str(got["top"])),
         ("explicit detector finds the token and the SSN", got["given"] == ["SECRET", "US_SSN"], str(got["given"])),
         ("detector from defaults finds the same", got["defaults"] == got["given"], str(got["defaults"])),
         ("no plugin module loaded", all(m == "maisecrets" or m.startswith("maisecrets.detection")
@@ -104,6 +106,14 @@ def main(argv) -> int:
         ("the empty HOME stays empty", got["home"] == [], str(got["home"])),
         ("a rule of your own through user_rule", got["own"] == [["user:order-ref", "123456"]], str(got["own"])),
     ]
+    # a wheel to hand out is built at the tag of its version: the release commit lands on main only, so a build from
+    # next carries the version of the last release with changes that release lacks
+    at_tag = _run(["git", "-C", str(ROOT), "tag", "--points-at", "HEAD"]).stdout.split()
+    tagged = f"v{expected_version}" in at_tag
+    if "--release" in argv:
+        checks.append(("built at the tag of its version", tagged, f"HEAD has tags {at_tag or 'none'}"))
+    elif not tagged:
+        print(f"note  HEAD is not at v{expected_version}: a test build, not one to hand out (--release checks it)")
     for name, ok, detail in checks:
         print(("ok    " if ok else "FAIL  ") + name + ("" if ok else f": {detail}"))
     return 0 if all(ok for _, ok, _ in checks) else 1
