@@ -594,6 +594,18 @@ Per span against the address change: Nemotron dev 506 missed to whole, val 155; 
 worse. Nemotron false positives dev +4, val +1: read on `dev`, each the number of an organisation (an election
 board, a support team, a car maker's service line), not labelled. The rest of the 1,207 stays text by the checks
 after the cue (a colon in the gap, the shape check). `scripts/compare_bench.py`: no finding.
+### A Markdown table of fields and values, 2026-10-20
+
+On Nemotron-PII `dev`, about 3,200 missed spans stood in a two-column Markdown table whose first cell names a field
+the record layer knows (`| Date of Birth | … |`, one field per row): 1,807 names, 623 birth dates, 386 IDs, 189
+addresses. The table rule took the header row as the field names, so such a table named no column. It is now one
+record: the first cell of each row is the field name, the second its value, judged by the same policy as every table
+(a strong field and a person in the record); a header row that is itself a field counts too. Registered before the
+run: up to about 3,200 on Nemotron `dev`, fewer where a field name is unknown (`Passenger Name`) or no person anchor.
+
+Per span against the change before it (measured on its first form): Nemotron dev 862 missed to whole, val 291; Gretel
+dev 6, val 2; nothing got worse; false positives Nemotron dev +1; the false-alarm bank unchanged.
+`scripts/compare_bench.py`: no finding.
 
 ## CredData, results per release
 
