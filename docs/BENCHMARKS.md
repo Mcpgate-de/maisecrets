@@ -562,6 +562,22 @@ nothing got worse; false positives Gretel dev ±0, val +1; Nemotron, Mendeley, P
 bank unchanged. The 9 partial, read: long Dutch and Swedish names with particles (`van der`) or of more than four
 words, whose last words stay visible. `scripts/compare_bench.py`: no finding.
 
+### An address after an address label in Dutch, Swedish, Italian and German, 2026-10-20
+
+Read per case on Gretel `dev`: of 3,181 addresses missed right after an address label, 999 had a value that passed
+every check of `address-after-label`, and no label regex matched: `adres` (Dutch), `adress` (Swedish), `indirizzo`
+(Italian), `anschrift`, and `street_address` (its underscore failed the look-behind). The record layer knew these
+words as address columns. They join the address labels; the value checks and the company window stay. `Straße:` is
+left out: it names one part of an address, and the samples after it were often templates (`Musterstraße`).
+Registered before the run: 800 to 900 on Gretel `dev`.
+
+Per span against the naam change: Gretel dev 829 missed to whole, 5 partial to whole, 4 missed to partial; val 283,
+3 and 1; nothing got worse; Nemotron, Mendeley, PIILO, traces, bank and the false-alarm bank unchanged. Gretel false
+positives dev +10, val +7; too wide dev +32, val +11. Read on `dev`: the hits over a gold span keep the postcode and
+the city that Gretel left out of the span (`…, 999 99 Stockholm`; the policy since 0.7.0); the new false positives are
+unlabelled addresses of persons (`User's Street Address`, a shipper), of companies (`Org.nr`, `IVA`) and one template
+(`[Città]`), none a value that is no address. `scripts/compare_bench.py`: no finding.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
