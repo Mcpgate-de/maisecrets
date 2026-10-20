@@ -852,6 +852,7 @@ FORMS = {
     "phone-after-phone-word": (PHONE, "tool", "generic", "label"),
     "name-single-after-label": (NAME, "tool", "generic", "label"),
     "address-street-after-label": (ADDRESS, "tool", "generic", "label"),
+    "address-street-postcode-city": (ADDRESS, "tool", "generic", "form"),
     "md-table-personal-column": ("COLUMN", "tool", "generic", "label"),
     "sql-insert-personal-column": ("COLUMN", "tool", "generic", "label"),
     "html-table-personal-column": ("COLUMN", "tool", "generic", "label"),
@@ -1859,4 +1860,53 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             out.append((m.start(1), m.end(1), "name-before-email", NAME))
     if "csv-personal-column" in want and "\n" in text:
         out += _csv_hits(text)
-    return out
+    if "address-street-postcode-city" in want and "," in text:
+        for m in _STREET_POSTCODE_CITY_RE.finditer(text):
+            if not _STREET_WORD_RE.search(m.group(1)):
+                continue
+            line = _line_back(text, m.start())
+            if not _NOT_A_HOME_RE.search(text, line, m.end()):
+                out.append((m.start(), m.end(), "address-street-postcode-city", ADDRESS))
+            else:
+                _company_window(text, line, m.start(), m.end(), "address-street-postcode-city", company)
+    return _address_with_its_place(text, out)
+
+
+# The place after a street on the same line belongs to the address: 12 Via Roma, 00184 Roma; Calle Mayor 5, Madrid,
+# 28013; 4821 Maple Street, Springfield, IL 62704, USA. A street rule stops at the comma, and the postcode and the city
+# stayed in the clear (Benchmark V2, Gretel dev: about 220 addresses found in part). The rest is taken only in these
+# shapes and only when the line ends after it or a separator follows, so a sentence that goes on is not taken
+_PLACE = r"(?:\d{4,5}(?:-\d{3,4})?[ \t]+)?" + r"[A-ZÀ-Þ][\w'’.-]{1,30}(?:[ \t-][A-ZÀ-Þa-zà-ÿ][\w'’.-]{1,30}){0,3}" \
+    + r"(?:[ \t]+\d{4,5}(?:-\d{3,4})?)?(?:[ \t]*\([A-Z]{2}\))?"
+_PLACE_SEGMENT = (r"(?:" + _PLACE + r"|\d{4,5}(?:-\d{3,4})?|[A-Z]{2}[ \t]+\d{5}(?:-\d{4})?"
+                  r"|[A-Z][A-Z0-9]{1,3}[ \t]\d[A-Z]\d)")
+_PLACE_AFTER_RE = _lazy(r"(?:[ \t]*[,–-][ \t]*|[ \t]*\n[ \t]*(?=\d{4,5}[ \t]))" + _PLACE_SEGMENT
+                        + r"(?:[ \t]*,[ \t]*" + _PLACE_SEGMENT + r"){0,3}"
+                        + r"(?=[ \t]*(?:$|\n|[\"|<;)\]]|\.(?:\s|$)))", re.M)
+# a word that names a street in the languages of the regions, as a word or as the end of one (Hauptstraße, Storgatan)
+_STREET_WORD_RE = _lazy(r"(?i)(?:stra(?:ss|ß)e|str\.|weg|gasse|allee|platz|ring|damm|ufer|chaussee|street"
+                        r"|st\.?|road|rd\.?|avenue|ave\.?|lane|drive|dr\.|boulevard|blvd|way|place|court|ct\.?|terrace|highway"
+                        r"|rue|chemin|impasse|via|viale|corso|piazza|vicolo|incrocio|calle|avenida|plaza|paseo|camino"
+                        r"|carrer|pasadizo|acceso|rua|travessa|largo|straat|laan|plein|gracht|gatan|vägen|gränd)\b")
+_ADDRESS_RULES_WITH_PLACE = frozenset({"address-street-after-label", "street-address", "address-after-label",
+                                       "address-street-postcode-city"})
+# Street, number, postcode, city in one line, the European order: Max-Planck-Straße 12, 80333 München; 12 Rue de
+# Rivoli, 75001 Paris. A street word and a house number before the comma, a postcode and a capitalised place after it
+_STREET_POSTCODE_CITY_RE = _lazy(
+    r"(?<![\w-])((?:\d{1,4}[a-z]?[ \t]+[A-ZÀ-Þ][\w'’.-]{1,30}(?:[ \t][A-ZÀ-Þa-zà-ÿ][\w'’.-]{0,30}){0,4}"
+    r"|[A-ZÀ-Þ][\w'’.-]{2,30}(?:[ \t-][A-ZÀ-Þa-zà-ÿ][\w'’.-]{0,30}){0,4}[ \t]+\d{1,4}[a-z]?))"
+    r",[ \t]*\d{4,5}[ \t]*,?[ \t]*[A-ZÀ-Þ][\w'’.-]{1,30}(?:[ \t-][A-ZÀ-Þ][\w'’.-]{1,30}){0,2}")
+
+
+def _address_with_its_place(text: str, out: list) -> list:
+    """Each address hit of a street rule runs on over the place after it on the same line (_PLACE_AFTER_RE)."""
+    if not any(k in _ADDRESS_RULES_WITH_PLACE for _s, _e, k, _t in out):
+        return out
+    res = []
+    for s, e, k, typ in out:
+        if typ == ADDRESS and k in _ADDRESS_RULES_WITH_PLACE:
+            m = _PLACE_AFTER_RE.match(text, e)
+            if m:
+                e = m.end()
+        res.append((s, e, k, typ))
+    return res
