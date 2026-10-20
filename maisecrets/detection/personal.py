@@ -588,6 +588,7 @@ def _md_table_hits(text: str) -> list:
             li += 1
             continue
         names = [_md_column(hdr[a:b]) for a, b in _md_cells(hdr)]
+        hdr_line = li
         li += 2
         rows: list = []
         while li < len(lines) and len(rows) < _CSV_ROWS and "|" in lines[li] and lines[li].strip():
@@ -595,6 +596,14 @@ def _md_table_hits(text: str) -> list:
             li += 1
         # a date alone names no person in a table of releases (| Name | Birthday | Version |): a name or an id
         out += _grid_hits(text, names, rows, "md-table-personal-column", strip="*`")
+        # a table of fields and values (| Passenger Name | … |, one field per row) is one record: the first cell of
+        # each row is the field name, the second its value, judged by the same policy (the header row may be a field)
+        if len(names) == 2:
+            head = [(pos[hdr_line] + a, pos[hdr_line] + b) for a, b in _md_cells(hdr)]
+            kv = [r for r in [head] + rows if len(r) == 2]
+            fields = [_md_column(text[r[0][0]:r[0][1]].strip("*` ")) for r in kv]
+            if sum(f in _STRONG_COLS or f in _WEAK_COLS for f in fields) >= 2:
+                out += _grid_hits(text, fields, [[r[1] for r in kv]], "md-table-personal-column", strip="*`")
     return out
 
 
