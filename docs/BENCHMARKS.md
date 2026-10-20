@@ -417,6 +417,30 @@ the new findings in the 61 changed `dev` cases was read: streets of named partie
 patient id, phone numbers, streets and birth dates in customer rows. They are values of persons that Gretel did not
 label, the pattern the V3 audit measured (`docs/BENCHMARK-V3-DRAFT.md`).
 
+### An address keeps its postcode, city and country, 2026-10-20
+
+Found by clustering the visible rests of the address spans found in part on Gretel `dev` (379): about 220 street hits
+that stopped at the comma before `, 00184 Roma` or `, Springfield, IL 62704, USA`, and 113 German postcodes found
+alone in the middle of `Max-Planck-Straße 12, 80333 München, Deutschland`. The goal was a whole span, not more recall.
+
+- **Fix 1:** an address hit of a street rule runs on over the place after it on the same line: postcode and city,
+  city, city and postcode, state and ZIP, country, a Canadian postcode, up to four parts, and only when the line ends
+  there or a separator follows. A hit that a wider address hit already holds keeps that hit's rule.
+- **Fix 2:** `address-street-postcode-city` reads the European line (street word, house number, comma, postcode,
+  place) but **only widens a hit another rule made** (`personal.ONLY_WIDENS`): alone, it took 62 company, hospital and
+  venue addresses on Gretel `dev` (read on 2026-10-20) and was cut back to completing a postcode hit.
+
+| Measure | Before (`next` d82047d2) | This change |
+|---|---|---|
+| Gretel dev: addresses whole / in part, false positives, F1 | 3,842 / 386, 2,169, 0.3882 | 4,044 / 186, 2,166, 0.3913 |
+| Gretel val: addresses whole / in part, false positives, F1 | 1,197 / 110, 732, 0.3755 | 1,240 / 67, 732, 0.3776 |
+| Nemotron dev: addresses in part | 313 | 311 |
+| traces, Mendeley, PIILO, bank, false-alarm bank | – | no change |
+
+Per span, no outcome got worse: Gretel `dev` 200 from partial to whole and 4 from missed to whole; `val` 43 from
+partial to whole. The street line stays text under a hotel, office or company name in the two lines above it, and a
+small word (`Die Adresse ist`) starts no street name; both were found by the existing tests of company addresses. `scripts/compare_bench.py`: no finding.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),

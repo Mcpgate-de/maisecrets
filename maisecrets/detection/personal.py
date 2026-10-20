@@ -852,6 +852,7 @@ FORMS = {
     "phone-after-phone-word": (PHONE, "tool", "generic", "label"),
     "name-single-after-label": (NAME, "tool", "generic", "label"),
     "address-street-after-label": (ADDRESS, "tool", "generic", "label"),
+    "address-street-postcode-city": (ADDRESS, "tool", "generic", "form"),
     "md-table-personal-column": ("COLUMN", "tool", "generic", "label"),
     "sql-insert-personal-column": ("COLUMN", "tool", "generic", "label"),
     "html-table-personal-column": ("COLUMN", "tool", "generic", "label"),
@@ -1280,6 +1281,18 @@ def _nanp_ok(v: str) -> bool:
 
 _PHONE_WRAP_RE = _lazy(r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?\d{2,5}(?:[ \-]\d{2,5}){0,2}-\n[ \t]{0,4}\d{2,5}"
                             r"(?:[ \-]\d{2,5}){0,3}(?![\w.]\d|\w)")
+
+
+def _block_back(text: str, line: int, lines: int = 2, most: int = 200) -> int:
+    """The start of the block of an address line: the line itself and up to `lines` lines above it, at most `most`
+    characters back, and never past a blank line (a blank line ends the block above)."""
+    lo, pos = max(0, line - most), line
+    for _ in range(lines):
+        if pos <= lo or pos < 2 or text[pos - 2] == "\n":
+            break
+        nl = text.rfind("\n", lo, pos - 1)
+        pos = nl + 1 if nl >= 0 else lo
+    return pos
 
 
 def _line_back(text: str, pos: int, most: int = 120) -> int:
@@ -1859,4 +1872,69 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             out.append((m.start(1), m.end(1), "name-before-email", NAME))
     if "csv-personal-column" in want and "\n" in text:
         out += _csv_hits(text)
-    return out
+    if "address-street-postcode-city" in want and "," in text:
+        for m in _STREET_POSTCODE_CITY_RE.finditer(text):
+            if not _STREET_WORD_RE.search(m.group(1)):
+                continue
+            line = _line_back(text, m.start())
+            # the name of a hotel, an office or a company stands on the lines above an address block, not on its line
+            block = _block_back(text, line)
+            end = m.end()
+            while text[end - 1] in ".,":   # the stop of a sentence is no part of the place (Berlin.)
+                end -= 1
+            if not _not_a_home(text, block, end) and not _BUSINESS_RE.search(text, block, m.start()):
+                out.append((m.start(), end, "address-street-postcode-city", ADDRESS))
+            else:
+                _company_window(text, line, m.start(), end, "address-street-postcode-city", company)
+    return _address_with_its_place(text, out)
+
+
+# The place after a street on the same line belongs to the address: 12 Via Roma, 00184 Roma; Calle Mayor 5, Madrid,
+# 28013; 4821 Maple Street, Springfield, IL 62704, USA. A street rule stops at the comma, and the postcode and the city
+# stayed in the clear (Benchmark V2, Gretel dev: about 220 addresses found in part). The rest is taken only in these
+# shapes and only when the line ends after it or a separator follows, so a sentence that goes on is not taken
+_PLACE = r"(?:\d{4,5}(?:-\d{3,4})?[ \t]+)?" + r"[A-ZÀ-Þ][\w'’.-]{1,30}(?:[ \t-][A-ZÀ-Þa-zà-ÿ][\w'’.-]{1,30}){0,3}" \
+    + r"(?:[ \t]+\d{4,5}(?:-\d{3,4})?)?(?:[ \t]*\([A-Z]{2}\))?"
+_PLACE_SEGMENT = (r"(?:" + _PLACE + r"|\d{4,5}(?:-\d{3,4})?|[A-Z]{2}[ \t]+\d{5}(?:-\d{4})?"
+                  r"|[A-Z][A-Z0-9]{1,3}[ \t]\d[A-Z]\d)")
+_PLACE_AFTER_RE = _lazy(r"(?:[ \t]*[,–-][ \t]*|[ \t]*\n[ \t]*(?=\d{4,5}[ \t]))" + _PLACE_SEGMENT
+                        + r"(?:[ \t]*,[ \t]*" + _PLACE_SEGMENT + r"){0,3}"
+                        + r"(?=[ \t]*(?:$|\n|[\"|<;)\]]|\.(?:\s|$)))", re.M)
+# a word that names a street in the languages of the regions, as a word or as the end of one (Hauptstraße, Storgatan)
+_STREET_WORD_RE = _lazy(r"(?i)(?:stra(?:ss|ß)e|str\.|weg|gasse|allee|platz|ring|damm|ufer|chaussee|street"
+                        r"|st\.?|road|rd\.?|avenue|ave\.?|lane|drive|dr\.|boulevard|blvd|way|place|court|ct\.?|terrace|highway"
+                        r"|rue|chemin|impasse|via|viale|corso|piazza|vicolo|incrocio|calle|avenida|plaza|paseo|camino"
+                        r"|carrer|pasadizo|acceso|rua|travessa|largo|straat|laan|plein|gracht|gatan|vägen|gränd)\b")
+_ADDRESS_RULES_WITH_PLACE = frozenset({"address-street-after-label", "street-address", "address-after-label",
+                                       "address-street-postcode-city"})
+# The forms that only widen a hit of another rule (core._personal_hits drops them when they overlap none): a street
+# line around a postcode that de-plz found. Alone, the form took company, hospital and venue addresses (Gretel dev,
+# 62 new false positives on 2026-10-20); around a postcode hit it turns a partial address into a whole one
+ONLY_WIDENS = frozenset({"address-street-postcode-city"})
+# Street, number, postcode, city in one line, the European order: Max-Planck-Straße 12, 80333 München; 12 Rue de
+# Rivoli, 75001 Paris. A street word and a house number before the comma, a postcode and a capitalised place after it
+# a small word inside a street name: Rue de Rivoli, Via della Stazione, Am Ufer, Calle del Sol. Any other small word
+# starts no street (Die Adresse ist Lindenstraße 42)
+_STREET_PARTICLE = (r"(?:de|del|della|delle|dei|di|da|do|dos|das|du|des|la|le|les|lo|el|los|las|von|van|der|den"
+                    r"|dem|am|an|auf|im|in|zum|zur|y|e|et|und|and|of|the)")
+_STREET_POSTCODE_CITY_RE = _lazy(
+    r"(?<![\w-])((?:\d{1,4}[a-z]?[ \t]+[A-ZÀ-Þ][\w'’.-]{1,30}(?:[ \t][A-ZÀ-Þa-zà-ÿ][\w'’.-]{0,30}){0,4}"
+    r"|[A-ZÀ-Þ][\w'’.-]{2,30}(?:[ \t-](?:[A-ZÀ-Þ][\w'’.-]{0,30}|" + _STREET_PARTICLE + r")){0,4}[ \t]+\d{1,4}[a-z]?))"
+    r",[ \t]*\d{4,5}[ \t]*,?[ \t]*[A-ZÀ-Þ][\w'’.-]{1,30}(?:[ \t-][A-ZÀ-Þ][\w'’.-]{1,30}){0,2}")
+
+
+def _address_with_its_place(text: str, out: list) -> list:
+    """Each address hit of a street rule runs on over the place after it on the same line (_PLACE_AFTER_RE)."""
+    if not any(k in _ADDRESS_RULES_WITH_PLACE for _s, _e, k, _t in out):
+        return out
+    res = []
+    wider = [(s, e) for s, e, _k, typ in out if typ == ADDRESS]
+    for s, e, k, typ in out:
+        # an address hit that another one already holds and runs past stays as it was: that one owns the span
+        if typ == ADDRESS and k in _ADDRESS_RULES_WITH_PLACE \
+                and not any(s2 <= s and e2 > e for s2, e2 in wider):
+            m = _PLACE_AFTER_RE.match(text, e)
+            if m:
+                e = m.end()
+        res.append((s, e, k, typ))
+    return res
