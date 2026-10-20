@@ -1283,6 +1283,18 @@ _PHONE_WRAP_RE = _lazy(r"(?<![\w+])\+(?!0)\d{1,3}[ \-]?\d{2,5}(?:[ \-]\d{2,5}){0
                             r"(?:[ \-]\d{2,5}){0,3}(?![\w.]\d|\w)")
 
 
+def _block_back(text: str, line: int, lines: int = 2, most: int = 200) -> int:
+    """The start of the block of an address line: the line itself and up to `lines` lines above it, at most `most`
+    characters back, and never past a blank line (a blank line ends the block above)."""
+    lo, pos = max(0, line - most), line
+    for _ in range(lines):
+        if pos <= lo or pos < 2 or text[pos - 2] == "\n":
+            break
+        nl = text.rfind("\n", lo, pos - 1)
+        pos = nl + 1 if nl >= 0 else lo
+    return pos
+
+
 def _line_back(text: str, pos: int, most: int = 120) -> int:
     """The start of the line of `pos`, at most `most` characters back: the search itself is bounded, so a long line of
     hits stays linear (review of 0.6.24)."""
@@ -1865,10 +1877,15 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             if not _STREET_WORD_RE.search(m.group(1)):
                 continue
             line = _line_back(text, m.start())
-            if not _NOT_A_HOME_RE.search(text, line, m.end()):
-                out.append((m.start(), m.end(), "address-street-postcode-city", ADDRESS))
+            # the name of a hotel, an office or a company stands on the lines above an address block, not on its line
+            block = _block_back(text, line)
+            end = m.end()
+            while text[end - 1] in ".,":   # the stop of a sentence is no part of the place (Berlin.)
+                end -= 1
+            if not _not_a_home(text, block, end) and not _BUSINESS_RE.search(text, block, m.start()):
+                out.append((m.start(), end, "address-street-postcode-city", ADDRESS))
             else:
-                _company_window(text, line, m.start(), m.end(), "address-street-postcode-city", company)
+                _company_window(text, line, m.start(), end, "address-street-postcode-city", company)
     return _address_with_its_place(text, out)
 
 
@@ -1896,9 +1913,13 @@ _ADDRESS_RULES_WITH_PLACE = frozenset({"address-street-after-label", "street-add
 ONLY_WIDENS = frozenset({"address-street-postcode-city"})
 # Street, number, postcode, city in one line, the European order: Max-Planck-Straße 12, 80333 München; 12 Rue de
 # Rivoli, 75001 Paris. A street word and a house number before the comma, a postcode and a capitalised place after it
+# a small word inside a street name: Rue de Rivoli, Via della Stazione, Am Ufer, Calle del Sol. Any other small word
+# starts no street (Die Adresse ist Lindenstraße 42)
+_STREET_PARTICLE = (r"(?:de|del|della|delle|dei|di|da|do|dos|das|du|des|la|le|les|lo|el|los|las|von|van|der|den"
+                    r"|dem|am|an|auf|im|in|zum|zur|y|e|et|und|and|of|the)")
 _STREET_POSTCODE_CITY_RE = _lazy(
     r"(?<![\w-])((?:\d{1,4}[a-z]?[ \t]+[A-ZÀ-Þ][\w'’.-]{1,30}(?:[ \t][A-ZÀ-Þa-zà-ÿ][\w'’.-]{0,30}){0,4}"
-    r"|[A-ZÀ-Þ][\w'’.-]{2,30}(?:[ \t-][A-ZÀ-Þa-zà-ÿ][\w'’.-]{0,30}){0,4}[ \t]+\d{1,4}[a-z]?))"
+    r"|[A-ZÀ-Þ][\w'’.-]{2,30}(?:[ \t-](?:[A-ZÀ-Þ][\w'’.-]{0,30}|" + _STREET_PARTICLE + r")){0,4}[ \t]+\d{1,4}[a-z]?))"
     r",[ \t]*\d{4,5}[ \t]*,?[ \t]*[A-ZÀ-Þ][\w'’.-]{1,30}(?:[ \t-][A-ZÀ-Þ][\w'’.-]{1,30}){0,2}")
 
 
