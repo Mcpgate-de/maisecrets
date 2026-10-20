@@ -2120,7 +2120,10 @@ def _presidio_regex(rec_id: str, regex: str) -> str:
         return left + regex[len(_IBAN_LEFT):]
     first = PRESIDIO_CARD_FIRST.get(rec_id)
     if first and regex.count(_CARD_FIRST_UPSTREAM) == 1:
-        return regex.replace(_CARD_FIRST_UPSTREAM, first)
+        # a Visa number of 19 digits (ISO/IEC 7812 allows 13, 16 and 19): Presidio's groups end at 17 digits, and
+        # Mendeley's 2,081 such numbers (Luhn-valid, each after a card word) stayed in the clear (2026-10-20). It
+        # keeps the rule's Luhn check and its card word: alone in a tool result the issuer check takes 16 digits only
+        return "(?:" + regex.replace(_CARD_FIRST_UPSTREAM, first) + r")|\b4\d{18}\b"
     return regex
 
 

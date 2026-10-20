@@ -206,6 +206,23 @@ class CardWithoutWordTests(unittest.TestCase):
                 self.assertNotIn("credit-card", kinds(text, channel="tool"))
 
 
+class VisaNineteenDigitsTests(unittest.TestCase):
+    """A Visa number of 19 digits (ISO/IEC 7812): Presidio's groups ended at 17 digits, and 2,081 Luhn-valid numbers
+    of Mendeley stayed in the clear after a card word (2026-10-20). It keeps the card word and the Luhn check."""
+    VISA19 = luhn10(J(["4012", "8812", "3456", "7890", "12"]))   # 19 digits
+
+    def test_a_19_digit_visa_after_a_card_word_is_masked_whole(self):
+        for channel in ("tool", "prompt"):
+            with self.subTest(channel=channel):
+                self.assertIn(("credit-card", self.VISA19),
+                              found("Paid with credit card " + self.VISA19 + " today.", channel=channel))
+
+    def test_a_19_digit_number_without_a_card_word_or_with_a_wrong_check_digit_stays_text(self):
+        wrong = self.VISA19[:-1] + str((int(self.VISA19[-1]) + 1) % 10)
+        self.assertNotIn("credit-card", kinds("Order id " + self.VISA19 + " shipped.", channel="tool"))
+        self.assertNotIn("credit-card", kinds("Paid with credit card " + wrong + " today.", channel="tool"))
+
+
 class CardAsOneRunTests(unittest.TestCase):
     """A card number written as one run of digits is masked alone in a tool result when it has the prefix and the
     length of a card network (Benchmark V1: Gretel cards 299 to 431); a timestamp, an IMEI, an order id, a decimal
