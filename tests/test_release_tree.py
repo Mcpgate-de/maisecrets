@@ -66,7 +66,7 @@ class ReleaseTreeTests(unittest.TestCase):
                          # Codex installs from main; the directory held versions over the image refs in it
                          ".codex-plugin/")
     DEV_ONLY_FILES = {".gitlab-ci.yml", ".gitignore", ".gitattributes", ".ci-known-hosts-github", "CONTRIBUTING.md",
-                      "CLAUDE.md",
+                      "CLAUDE.md", "pyproject.toml",
                       "docs/TESTING.md", "docs/REPO-STANDARDS.md", "docs/DIAGNOSTICS.md", "docs/BENCHMARKS.md",
                       "docs/BENCHMARK-V1.md", "docs/BENCHMARK-V2.md", "docs/REGRESSION-POLICY.md",
                       "renovate.json"}
