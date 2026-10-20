@@ -549,6 +549,13 @@ class NoValueLostAgainTests(Base):
             with self.subTest(text=text[:12]):
                 self.assertMasked(text, value)
 
+    def test_a_double_name_that_runs_on_into_the_next_label_is_masked_up_to_its_surname(self):
+        text = "Name: Ana Ruiz-" + "Diaz Address: 12 Oak Lane\n"
+        out = masked(text, region=("us",))
+        self.assertNotIn("Ruiz", out)
+        self.assertNotIn("Diaz", out)
+        self.assertText("Name: Product Owner-Lead Meeting\n", region=("us",))
+
     def test_an_address_with_a_template_after_its_unit_keeps_the_street_masked(self):
         # street names without a street word (Pine Ridge): only the value after the label finds them
         for text in ("Address: 12345 Pine " + "Ridge, Apt. 999, [City], [State], [Zip Code]\n",

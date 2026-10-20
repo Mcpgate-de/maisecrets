@@ -1893,6 +1893,13 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                 words_only = _reads_as_words(v, every=True) and _reads_as_words(plain, every=True)
             else:
                 words_only = _reads_as_words(v) and _reads_as_words(plain)
+            short = re.match(r"\S+(?: \S+)*?-\S+", v)
+            if words_only and short and short.end() < len(v):
+                # the value ran on into the next word of its line (Name: Ana Ruiz-Diaz Address: …): the name up to the
+                # end of its double surname, as it was found up to the hyphen before 0.6.42
+                cut = short.group(0)
+                if not _reads_as_words(cut) or not _reads_as_words(re.sub(r"-[^\s]*", "", cut)):
+                    v, words_only = cut, False
             if _name_ok(v) and not words_only:
                 out.append((m.start(3), m.start(3) + len(v), "name-after-label", NAME))
     if "name-before-email" in want and "@" in text:
