@@ -261,6 +261,20 @@ characters in the clear. Hyphenated licenses are a real format (Wisconsin `A123-
 | Gretel val: national ids whole / in part | 353 / 30 | 381 / 2 |
 | Nemotron dev / val: national ids in part | 220 / 80 | 208 / 76 |
 | False positives on every source | – | no change |
+### A double name with a hyphen, masked whole, 2026-10-20
+
+Found by the partial-detection audit of the dev splits (the largest cluster: 896 names whose part after the hyphen
+stayed in the clear). Decided on `val` and the false-alarm bank.
+
+- **Cause:** a name word took a small letter after a hyphen only, so `Garcia-Lopez` and `Al-Rashid` ended at the hyphen.
+- **Fix:** a part after a hyphen may start with a capital (two parts at most).
+
+| Measure | Before (`next`, 15c4107c) | This change |
+|---|---|---|
+| Gretel dev: names whole / in part, false positives, F1 | 3,242 / 811, 2,165, 0.3595 | 4,125 / 55, 2,170, 0.3741 |
+| Gretel val: names whole / in part, false positives, F1 | 1,028 / 273, 734, 0.3479 | 1,343 / 9, 734, 0.3640 |
+| Nemotron dev / val: names whole / in part | 16,266 / 103; 5,554 / 36 | 16,382 / 5; 5,591 / 1 |
+| Mendeley, PIILO, bank dev and val | – | no change |
 | False-alarm bank, seven trees (`compare`) | – | +0 |
 
 ## CredData, results per release
