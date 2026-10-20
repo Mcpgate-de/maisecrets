@@ -355,6 +355,33 @@ class PhoneExtensionTests(Base):
         self.assertText("build 1234x5678", region=("us",))
 
 
+
+# ------------------------------------------------------------------- personal columns of SQL and HTML tables --
+class SqlAndHtmlTableTests(Base):
+    LEE = "Lee " + "Kim"
+    OAK = "12 Oak " + "Lane"
+    SQL = ("INSERT INTO customers (order_id, full_name, street, dob) VALUES\n"
+           "  ('1234', '" + NAME + "', '" + STREET + "', '" + BIRTH + "'),\n"
+           "  ('99', '" + LEE + "', '" + OAK + "', '1990-01-" + "02');\n")
+    HTML = ("<table>\n  <tr><th>order_id</th><th>full_name</th><th>street</th></tr>\n"
+            "  <tr><td>1234</td><td>" + NAME + "</td><td>" + STREET + "</td></tr>\n</table>\n")
+
+    def test_the_personal_columns_of_each_row_are_masked(self):
+        for text, values in ((self.SQL, (NAME, STREET, BIRTH, self.LEE, self.OAK)), (self.HTML, (NAME, STREET))):
+            out = masked(text, region=("us",))
+            for v in values:
+                with self.subTest(v=len(v)):
+                    self.assertNotIn(v, out)
+            self.assertIn("1234", out, "an order number stays text")
+
+    def test_a_table_without_a_person_stays_text(self):
+        for text in ("INSERT INTO depots (code, street) VALUES ('A1', '" + STREET + "');",
+                     "<table><tr><th>name</th><th>price</th></tr><tr><td>Desk Lamp</td><td>12.50</td></tr></table>",
+                     "INSERT INTO products (name, sku) VALUES ('Desk Lamp', 'DL-1');"):
+            with self.subTest(text=text[:20]):
+                self.assertText(text, region=("us",))
+
+
 if __name__ == "__main__":
     unittest.main()
 
