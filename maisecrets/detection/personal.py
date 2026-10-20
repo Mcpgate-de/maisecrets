@@ -510,7 +510,12 @@ _MD_ALIASES = {"telephone_number": "telephone", "mobile_number": "mobile", "cell
                "contact_number": "phone", "phone_no": "phone", "social_security_number": "ssn",
                "national_id_number": "national_id", "tax_id_number": "tax_id", "medical_record_number": "mrn",
                "passport_no": "passport_number", "home_address": "home_address", "street_address": "street_address",
-               "patient": "patient", "date_of_birth_dob": "date_of_birth", "dob_date_of_birth": "date_of_birth"}
+               "patient": "patient", "date_of_birth_dob": "date_of_birth", "dob_date_of_birth": "date_of_birth",
+               # the first line of a postal address in common APIs (address_line1, schema.org streetAddress folded to
+               # streetaddress) and camel case written as one word
+               "address_line1": "street", "address_line_1": "street", "address1": "street", "addressline1": "street",
+               "streetaddress": "street_address", "dateofbirth": "date_of_birth", "phonenumber": "phone_number",
+               "mobilephone": "mobile_phone"}
 
 
 def _md_column(cell: str) -> str:
@@ -707,6 +712,91 @@ def _html_table_hits(text: str) -> list:
     return out
 
 
+# a JSON object and an XML record are rows of the same kind: their keys or child element names name each value. Both
+# go through _grid_hits, so the columns, the cell checks and the person check are those of the table rules
+_JSON_TOKEN_RE = _lazy(r'"((?:[^"\\\n]|\\.){0,512})"|([{}\[\]:,])|(-?[\w.+-]{1,64})')
+_JSON_RECORDS_MAX = 20000
+
+
+def _json_record_hits(text: str) -> list:
+    """Each object's direct pairs whose value is a string: (key, value span). Nested objects are rows of their own."""
+    out, stack, rows = [], [], 0
+    key = None
+    expect_key = False
+    for m in _JSON_TOKEN_RE.finditer(text):
+        if m.group(2):
+            ch = m.group(2)
+            if ch == "{":
+                stack.append([])
+                expect_key, key = True, None
+            elif ch == "}":
+                if stack:
+                    pairs = stack.pop()
+                    if pairs and rows < _JSON_RECORDS_MAX:
+                        rows += 1
+                        out += _grid_hits(text, [_md_column(k) for k, _ in pairs], [[s for _, s in pairs]],
+                                          "json-personal-field")
+                expect_key, key = False, None
+            elif ch == "[":
+                stack.append(None)
+                expect_key, key = False, None
+            elif ch == "]":
+                if stack:
+                    stack.pop()
+                expect_key, key = False, None
+            elif ch == ",":
+                expect_key, key = bool(stack) and stack[-1] is not None, None
+            # ":" keeps the key for the value after it
+        elif m.group(1) is not None:
+            if expect_key:
+                key, expect_key = m.group(1), False
+            elif key is not None and stack and stack[-1] is not None:
+                stack[-1].append((key, m.span(1)))
+                key = None
+        else:
+            key = None
+    return out
+
+
+_XML_TAG_RE = _lazy(r"<(/?)([A-Za-z_][\w.-]{0,64})(?:\s[^<>]{0,500})?(/?)>|<[!?][^<>]{0,2000}>")
+
+
+def _xml_record_hits(text: str) -> list:
+    """An element whose children are leaf elements (<street>12 Oak Lane</street>) is a row: the leaf names name the
+    values. An element with text and child elements both, or a leaf that holds markup, is no row."""
+    out, stack, rows = [], [], 0
+    pos = 0
+    for m in _XML_TAG_RE.finditer(text):
+        between = text[pos:m.start()]
+        pos = m.end()
+        if m.group(2) is None:
+            continue    # a comment, a declaration, CDATA
+        name, closing, empty = m.group(2), m.group(1), m.group(3)
+        if empty:
+            continue
+        if not closing:
+            if stack and between.strip():
+                stack[-1]["mixed"] = True
+            stack.append({"name": name, "start": m.end(), "leaves": [], "children": 0, "mixed": False})
+            continue
+        if not stack or stack[-1]["name"] != name:
+            stack = []          # not well formed: start again at the next element
+            continue
+        el = stack.pop()
+        if el["children"] == 0:
+            if stack and "<" not in between:
+                stack[-1]["children"] += 1
+                stack[-1]["leaves"].append((name, (el["start"], m.start())))
+        else:
+            if stack:
+                stack[-1]["children"] += 1
+            if not el["mixed"] and el["leaves"] and rows < _JSON_RECORDS_MAX:
+                rows += 1
+                out += _grid_hits(text, [_md_column(n) for n, _ in el["leaves"]], [[s for _, s in el["leaves"]]],
+                                  "xml-personal-field")
+    return out
+
+
 # ------------------------------------------------------------------------------------------ the forms of 0.6.24 --
 # A value in a fixed form or after a label that names it, from the holdout values that 0.6.21 still leaked
 # (2026-10-15). Each rule declares (type, channel, region, needs): channel "tool" (tool results and files) or "both".
@@ -743,6 +833,8 @@ FORMS = {
     "md-table-personal-column": ("COLUMN", "tool", "generic", "label"),
     "sql-insert-personal-column": ("COLUMN", "tool", "generic", "label"),
     "html-table-personal-column": ("COLUMN", "tool", "generic", "label"),
+    "json-personal-field": ("COLUMN", "tool", "generic", "label"),
+    "xml-personal-field": ("COLUMN", "tool", "generic", "label"),
     "username-after-label": (USERNAME, "tool", "generic", "label"),
     "secret-password-with-sign": ("SECRET", "tool", "generic", "label"),
 }
@@ -1564,6 +1656,10 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
         out += _sql_insert_hits(text)
     if "html-table-personal-column" in want and "<t" in text:
         out += _html_table_hits(text)
+    if "json-personal-field" in want and "{" in text and '":' in text.replace('" :', '":'):
+        out += _json_record_hits(text)
+    if "xml-personal-field" in want and "</" in text:
+        out += _xml_record_hits(text)
     if "phone-wrapped-line" in want and "-\n" in text:
         for m in _PHONE_WRAP_RE.finditer(text):
             d = re.sub(r"\D", "", m.group())

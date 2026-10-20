@@ -429,6 +429,40 @@ class SqlAndHtmlTableTests(Base):
             with self.subTest(text=text[:30]):
                 self.assertNotIn("-personal-column", " ".join(m.kind for m in scan(text, region=("us",))))
 
+
+# --------------------------------------------------------------- personal fields of JSON objects and XML records --
+class JsonAndXmlRecordTests(Base):
+    LEE = "Lee " + "Kim"
+    OAK = "12 Oak " + "Lane"
+
+    def test_the_personal_fields_of_a_record_are_masked(self):
+        for text, values in (
+                ('{"order_id": 1234, "full_name": "' + NAME + '", "address_line1": "' + STREET + '"}', (NAME, STREET)),
+                ('{"data": [{"customer_name": "' + NAME + '", "street": "' + STREET + '"}, {"customer_name": "'
+                 + self.LEE + '", "street": "' + self.OAK + '"}]}', (NAME, STREET, self.LEE, self.OAK)),
+                ('{"fullName": "' + NAME + '", "streetAddress": "' + STREET + '"}', (NAME, STREET)),
+                ('<?xml version="1.0"?><records><record><full_name>' + NAME + "</full_name><street>" + STREET
+                 + "</street></record></records>", (NAME, STREET))):
+            out = masked(text, region=("us",))
+            for v in values:
+                with self.subTest(v=len(v), text=text[:12]):
+                    self.assertNotIn(v, out)
+
+    def test_a_record_of_a_place_or_text_with_markup_stays_text(self):
+        for text in ('{"name": "Berlin Office", "street": "' + STREET + '"}',
+                     "<venues><venue><name>Riverside Arena</name><address>" + STREET + "</address></venue></venues>",
+                     "<p>Hello <full_name>" + NAME + "</full_name> at <street>" + STREET + "</street></p>",
+                     '{"warehouse": "Warehouse 7", "address": "' + STREET + '"}'):
+            with self.subTest(text=text[:20]):
+                self.assertIn(STREET, masked(text, region=("us",)))
+
+    def test_a_broken_record_names_no_field(self):
+        for text in ('{"full_name": "' + NAME + '", "street": "' + STREET,
+                     "<record><full_name>" + NAME + "</full_name><street>" + STREET + "</record>"):
+            with self.subTest(text=text[:20]):
+                self.assertNotIn("-personal-field", " ".join(m.kind for m in scan(text, region=("us",))))
+
+
 if __name__ == "__main__":
     unittest.main()
 
