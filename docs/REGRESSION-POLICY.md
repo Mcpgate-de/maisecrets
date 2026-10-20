@@ -23,6 +23,7 @@ python3 scripts/compare_bench.py RESULTS_OF_THE_BASE RESULTS_OF_THE_CHANGE      
 | False positives per source and split | more than 1 % more | the phone experiment raised Gretel's by 5 % (118) and was not merged |
 | Same cases | the two runs of a file scored different cases (`cases_sha256`) | the file is not compared and the finding says so: another generator, dataset revision or sample would read as a change of the rules |
 | Same spans | the two runs scored a different number of spans in the same case (another scope of the adapter, another scoring code) | the file is not compared: the outcomes would pair by position with the wrong spans, and a loss could read as a gain. 0 such cases in the runs 0.6.41 to 0.7.1 |
+| A span worse on purpose | a span that a decision makes worse (a company name the name rule leaves as text, a span the dataset labels wrongly) | listed in `docs/ratchet-exceptions.json` with the result file, the case, the span index, the reason and the commit, it is no finding; an entry without a reason or a commit is a finding itself. No exception by class or by rule |
 | Time per case | never judged from two single runs | see below |
 
 The counts are deterministic: the same code on the same cases gives the same numbers, so every difference is real and

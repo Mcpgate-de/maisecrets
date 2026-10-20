@@ -39,17 +39,39 @@ def _load(d: Path, hashes: dict | None = None, per_case: dict | None = None) -> 
     return out
 
 
-def worse_spans(a: dict | None, b: dict | None) -> int:
+def worse_spans(a: dict | None, b: dict | None, accepted: frozenset = frozenset()) -> int:
     """The spans whose outcome got worse from a to b (whole -> partial or missed, partial -> missed), case by case.
-    The outcomes of a case are in span order, the false positives after them; two runs on the same cases align."""
+    The outcomes of a case are in span order, the false positives after them; two runs on the same cases align.
+    `accepted` holds (case id, span index) pairs a decision made worse on purpose (docs/ratchet-exceptions.json)."""
     if not a or not b:
         return 0
     n = 0
     for case, ob in b.items():
         oa = [x for x in a.get(case, []) if x != "fp"]
         ob = [x for x in ob if x != "fp"]
-        n += sum(1 for x, y in zip(oa, ob) if RANK.get(y, 0) < RANK.get(x, 0))
+        n += sum(1 for i, (x, y) in enumerate(zip(oa, ob))
+                 if RANK.get(y, 0) < RANK.get(x, 0) and (case, i) not in accepted)
     return n
+
+
+# the spans a decision made worse on purpose: a company name the name rule leaves as text, a span the dataset labels
+# wrongly. Each entry names the result file, the case, the span index, the reason and the commit that decided it; an
+# entry without a reason or a commit is itself a finding, so the list cannot grow into a way around the line
+EXCEPTIONS = Path(__file__).resolve().parent.parent / "docs" / "ratchet-exceptions.json"
+
+
+def accepted_spans(path: Path = EXCEPTIONS) -> tuple[dict, list[str]]:
+    """({result file: frozenset of (case, span index)}, findings about the list itself)."""
+    if not path.is_file():
+        return {}, []
+    out: dict = {}
+    problems = []
+    for n, e in enumerate(json.loads(path.read_text(encoding="utf-8")).get("exceptions", [])):
+        if not str(e.get("reason", "")).strip() or not str(e.get("commit", "")).strip():
+            problems.append(f"ratchet exception {n}: no reason or no commit, not applied")
+            continue
+        out.setdefault(e["file"], set()).add((e["case"], int(e["span"])))
+    return {k: frozenset(v) for k, v in out.items()}, problems
 
 
 def other_span_counts(a: dict | None, b: dict | None) -> int:
@@ -75,8 +97,8 @@ def _fpbank(d: Path) -> dict:
     return out
 
 
-def compare(base: Path, new: Path) -> list[str]:
-    findings = []
+def compare(base: Path, new: Path, exceptions: Path = EXCEPTIONS) -> list[str]:
+    accepted, findings = accepted_spans(exceptions)
     ha: dict = {}
     hb: dict = {}
     pa_: dict = {}
@@ -95,7 +117,7 @@ def compare(base: Path, new: Path) -> list[str]:
             continue
         split = name.rsplit("-", 2)[-2]
         ma, mb = a[name], b[name]
-        worse = worse_spans(pa_.get(name), pb_.get(name))
+        worse = worse_spans(pa_.get(name), pb_.get(name), accepted.get(name, frozenset()))
         if worse:
             findings.append(f"{name}: {worse} spans got worse (whole to partial or missed, partial to missed)")
         fa, fb = ma.get("all", {}).get("fp") or 0, mb.get("all", {}).get("fp") or 0
