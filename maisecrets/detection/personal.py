@@ -711,8 +711,21 @@ _JSON_TOKEN_RE = _lazy(r'"((?:[^"\\\n]|\\.){0,512})"|([{}\[\]:,])|(-?[\w.+-]{1,6
 _JSON_RECORDS_MAX = 20000
 
 
+def _record_rows(text: str, pairs: list, nested: list, kind: str) -> list:
+    """The hits of one record: its own pairs, and its pairs joined with those of the records nested right in it. A
+    person named in the record (a name, an id) is the person of its nested address or phone too: <party><name>, then
+    <postalAddress><streetAddress>. One level only, so a list of a company's branches under a person stays apart."""
+    out = _grid_hits(text, [_md_column(k) for k, _ in pairs], [[s for _, s in pairs]], kind) if pairs else []
+    for child in nested:
+        joined = pairs + child
+        if pairs and child:
+            out += _grid_hits(text, [_md_column(k) for k, _ in joined], [[s for _, s in joined]], kind)
+    return out
+
+
 def _json_record_hits(text: str) -> list:
-    """Each object's direct pairs whose value is a string: (key, value span). Nested objects are rows of their own."""
+    """Each object's direct pairs whose value is a string: (key, value span). A nested object is a row of its own and
+    joins the row of the object it sits in (_record_rows)."""
     out, stack, rows = [], [], 0
     key = None
     expect_key = False
@@ -720,15 +733,20 @@ def _json_record_hits(text: str) -> list:
         if m.group(2):
             ch = m.group(2)
             if ch == "{":
-                stack.append([])
+                # a nested object directly under a key of an object (not inside an array) joins that object
+                stack.append({"pairs": [], "nested": [], "joins": key is not None and bool(stack)
+                              and stack[-1] is not None})
                 expect_key, key = True, None
             elif ch == "}":
-                if stack:
-                    pairs = stack.pop()
-                    if pairs and rows < _JSON_RECORDS_MAX:
+                if stack and stack[-1] is not None:
+                    obj = stack.pop()
+                    if rows < _JSON_RECORDS_MAX:
                         rows += 1
-                        out += _grid_hits(text, [_md_column(k) for k, _ in pairs], [[s for _, s in pairs]],
-                                          "json-personal-field")
+                        out += _record_rows(text, obj["pairs"], obj["nested"], "json-personal-field")
+                    if obj["joins"] and stack and stack[-1] is not None:
+                        stack[-1]["nested"].append(obj["pairs"])
+                elif stack:
+                    stack.pop()
                 expect_key, key = False, None
             elif ch == "[":
                 stack.append(None)
@@ -744,7 +762,7 @@ def _json_record_hits(text: str) -> list:
             if expect_key:
                 key, expect_key = m.group(1), False
             elif key is not None and stack and stack[-1] is not None:
-                stack[-1].append((key, m.span(1)))
+                stack[-1]["pairs"].append((key, m.span(1)))
                 key = None
         else:
             key = None
@@ -779,7 +797,8 @@ def _xml_record_hits(text: str) -> list:
         if not closing:
             if stack and between.strip():
                 stack[-1]["mixed"] = True
-            stack.append({"name": name, "start": m.end(), "leaves": [], "children": 0, "mixed": False})
+            stack.append({"name": name, "start": m.end(), "leaves": [], "children": 0, "mixed": False,
+                          "nested": []})
             continue
         if not stack or stack[-1]["name"] != name:
             stack = []          # not well formed: start again at the next element
@@ -794,8 +813,9 @@ def _xml_record_hits(text: str) -> list:
                 stack[-1]["children"] += 1
             if not el["mixed"] and el["leaves"] and rows < _JSON_RECORDS_MAX:
                 rows += 1
-                out += _grid_hits(text, [_md_column(n) for n, _ in el["leaves"]], [[s for _, s in el["leaves"]]],
-                                  "xml-personal-field")
+                out += _record_rows(text, el["leaves"], el["nested"], "xml-personal-field")
+                if stack and not el["nested"] and el["children"] == len(el["leaves"]):
+                    stack[-1]["nested"].append(el["leaves"])   # a record of leaves only joins its parent
     return out
 
 
