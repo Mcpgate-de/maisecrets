@@ -80,6 +80,35 @@ Registered 2026-10-20 in this commit, before any case of the sample was read.
   interval. The stratum totals scale the shares to an estimate of true false positives per dataset. The result
   changes no rule; it changes how V3 reports precision.
 
+### The audit result (read 2026-10-20, after the registration)
+
+One reader (the maintainer's session that registered it), codes from the masked context. `unclear` counts as a true
+false positive, so the estimate is conservative.
+
+| Stratum | False positives | real-same | real-other | not-sensitive | unclear | real share, 95 % Wilson |
+|---|---|---|---|---|---|---|
+| Nemotron `us-ssn` | 254 | 38 | 0 | 1 | 1 | 0.95 [0.83, 0.99] |
+| Nemotron other rules | 247 | 12 | 2 | 19 | 7 | 0.35 [0.22, 0.50] |
+| Gretel `us-bank` | 762 | 32 | 0 | 4 | 4 | 0.80 [0.65, 0.90] |
+| Gretel other rules | 1,402 | 14 | 5 | 16 | 5 | 0.47 [0.33, 0.63] |
+
+Scaled to the strata, the true false positives on `dev` are about **173** of 501 on Nemotron (interval 126 to 234)
+and about **888** of 2,164 on Gretel (606 to 1,205). The observed precision understates the real one:
+
+| Dataset, dev | Observed precision (V2) | Estimated precision, 95 % |
+|---|---|---|
+| Nemotron | 0.9954 | 0.9984 [0.9978, 0.9988] |
+| Gretel | 0.9024 | 0.958 [0.943, 0.971] |
+
+What the true false positives are: reference numbers in EDI and SWIFT messages and vehicle recalls taken by
+`us-passport` and `us-license`, bank routing codes and policy numbers taken by `us-bank`, company addresses and
+postcodes, gateway addresses of network configurations, and template text after a password word. These are the
+false-positive work for the next rounds; the audit changes no rule by itself.
+
+The bench adapter also puts a `us-bank` hit into the class `pii.national_id` (`cls_of` in
+`bench/adapters/maisecrets.py` does not know `US_BANK_NUMBER`). A false positive is counted the same either way; a
+per-class table is not. To fix with V3.
+
 ## What V3 keeps
 
 The split rule, the span outcomes (`full`, `partial`, `missed`), `too wide`, the classes, the scanners and their
