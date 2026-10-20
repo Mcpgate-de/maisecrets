@@ -109,6 +109,34 @@ The bench adapter also puts a `us-bank` hit into the class `pii.national_id` (`c
 `bench/adapters/maisecrets.py` does not know `US_BANK_NUMBER`). A false positive is counted the same either way; a
 per-class table is not. To fix with V3.
 
+## Prose misses by how they could be found (registered before the first case is read)
+
+Registered 2026-10-20 in this commit, before any case of the sample was read. The question: how many of the names and
+addresses that maisecrets misses in prose could a deterministic rule find, and how many need a model (NER)? And in
+which texts, so that a model, if one comes, runs only where it pays.
+
+- **Population:** the missed spans of `pii.name` and `pii.address` on the `dev` split of Gretel and Nemotron, in
+  cases whose text is prose (the shape test of `scripts/prose_miss_sample.py`: no JSON, XML, HTML, SQL, CSV, table or
+  key-value list), maisecrets `next` at d82047d2, regions `generic,de,us`, tool channel.
+- **Sample:** 50 per dataset and class, 200 in all. Order the spans by `sha256("prose-misses-20261020/" + case_id +
+  "/" + start)` and take the first 50. The script prints the class, the text type hints and the length, and 150
+  characters of context on each side with the value replaced by its shape and every digit written as 9.
+- **Solvability**, one code per span:
+  - `label-error`: the label is wrong or the value is no person's (a company, a product, a place name alone);
+  - `structure`: the value sits in structure that a parser does not read yet (a list `Name: …` inside prose, a
+    signature block, a letter head);
+  - `deterministic`: a rule could find it from what stands next to it (a title, a role word, a verb of residence, a
+    salutation) without an unacceptable false positive;
+  - `ner`: only a model of language finds it (a name in running text with nothing around it that marks it);
+  - `unclear`.
+- **Text type**, one code per span: `chat` (a dialogue turn), `ticket` (a support request or answer), `email`
+  (a letter or a mail with salutation and signature), `log` (log lines with free text), `doc` (Markdown or a report),
+  `form` (a filled form or a contract in prose), `other`.
+- **Length** of the case text: under 500, 500 to 2,000, 2,000 to 8,000, over 8,000 characters.
+- **Report:** the counts per dataset, class and code; the share of `deterministic` + `structure` with a 95 % Wilson
+  interval; the same split by text type and length. The result decides no rule by itself; it decides whether and
+  where a model layer is worth a prototype.
+
 ## What V3 keeps
 
 The split rule, the span outcomes (`full`, `partial`, `missed`), `too wide`, the classes, the scanners and their
