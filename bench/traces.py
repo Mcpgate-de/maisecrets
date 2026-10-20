@@ -43,7 +43,8 @@ STATUSES = ("pending", "shipped", "delivered", "cancelled", "refunded", "process
 DEPARTMENTS = ("Engineering", "Sales", "Support", "Finance", "Marketing", "Operations", "Legal", "Research")
 TITLES = ("Account Manager", "Software Engineer", "Support Specialist", "Data Analyst", "Product Owner")
 AGENTS = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36",
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+          "Version/17.6 Safari/605.1",
           "curl/8.7.1", "python-requests/2.32.3", "okhttp/4.12.0")
 NOTES = ("Customer asked about the delivery date.", "Payment retried after timeout.", "Address verified by courier.",
          "Refund issued for damaged item.", "Ticket escalated to tier 2.", "Duplicate request ignored.")
@@ -100,7 +101,8 @@ def _person(rnd: random.Random) -> dict:
                                 f"{last.lower()}_{first.lower()[:3]}")),
         "password": rnd.choice(("Summer", "Winter", "Falcon", "Tiger", "Orbit", "Maple")) + str(rnd.randint(10, 99))
                     + rnd.choice("!#$%&*") + rnd.choice(("xQ", "Lm", "Rz", "Tk")) + str(rnd.randint(100, 999)),
-        "ip": f"{rnd.choice((73, 98, 174, 24, 67, 108))}.{rnd.randint(1, 254)}.{rnd.randint(0, 254)}.{rnd.randint(1, 254)}",
+        "ip": f"{rnd.choice((73, 98, 174, 24, 67, 108))}.{rnd.randint(1, 254)}.{rnd.randint(0, 254)}."
+              f"{rnd.randint(1, 254)}",
     }
 
 
