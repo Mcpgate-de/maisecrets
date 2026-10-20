@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.6.43] - 2026-10-20
+
+### Fixes
+
+- a phone extension after the number (x204, ext. 31) is masked with it (c72b82a)
+- a medical license number is masked whole, not only the DEA-shaped part inside it (e88476b)
+- an address after its label keeps the unit after Ste. or Apt. and the number after a short street name (1da20c3)
+
 ## [0.6.42] - 2026-10-20
 
 ### Fixes
