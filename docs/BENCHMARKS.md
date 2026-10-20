@@ -416,6 +416,7 @@ missed to partial (now less in the clear than before); `val` 222 and 12, and one
 the new findings in the 61 changed `dev` cases was read: streets of named parties in XML, birth dates in a patient table with a
 patient id, phone numbers, streets and birth dates in customer rows. They are values of persons that Gretel did not
 label, the pattern the V3 audit measured (`docs/BENCHMARK-V3-DRAFT.md`).
+
 ### An address keeps its postcode, city and country, 2026-10-20
 
 Found by clustering the visible rests of the address spans found in part on Gretel `dev` (379): about 220 street hits

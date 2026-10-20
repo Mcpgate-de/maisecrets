@@ -520,6 +520,13 @@ class AddressWithItsPlaceTests(Base):
             with self.subTest(text=text[:16]):
                 self.assertWhole(text, value)
 
+    def test_a_street_line_that_no_other_rule_found_stays_text(self):
+        # the European form only widens a hit of another rule: a company seat or a hospital alone is no person's
+        for text in ("Siège social : 99 Rue de " + "Rivoli, 75001 Paris\n",
+                     "Lieu de destination : Hôpital Saint-Antoine, 184 Rue du " + "Faubourg, 75012 Paris\n"):
+            with self.subTest(text=text[:16]):
+                self.assertText(text, region=("us",))
+
     def test_a_number_and_a_postcode_without_a_street_word_stay_text(self):
         for text in ("Release notes version 12, 2024 Edition\n", "Order 12, 80333 Units shipped\n",
                      "Chapter 4, 1999 Edition\n"):
