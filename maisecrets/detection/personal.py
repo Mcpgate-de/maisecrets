@@ -1229,7 +1229,7 @@ _HOME_LABEL_RE = _lazy(r"(?i)home|residential|permanent|wohn|resid|liv|domicil")
 _STREET_LABEL_WORDS = ("address", "anschrift", "adresse", "domicilio", "direcci", "indirizzo", "endere", "adres",
                        "resid", "live", "living", "domiciled", "wohn")
 _PHONE_WORDS = ("phone", "tel", "mobil", "cell", "fax", "handy", "portable", "rufnummer", "whatsapp", "hotline",
-                "contact", "call", "reach", "text")
+                "contact", "call", "reach", "text", "dial")
 _ADDRESS_WORDS = ("address", "adr", "ship", "property", "lives", "endere", "direcci", "adresse", "location",
                   "indirizzo", "anschrift")
 _IN_ADDRESS_RE = _lazy(r"\b\d{1,4}(?:/\d{1,4})?, [^\n]{10,90}?, [A-Z][a-z]+ \d{6}\b")
@@ -1257,8 +1257,13 @@ _PHONE_NUMBER_WORD = r"(?:[ _-]?(?:number|no\.?|nr\.?|nummer|num[ée]ro|n[úu]me
 _PHONE_TIGHT_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r")" + _PHONE_NUMBER_WORD + r"(?![\w-])\.?[\"']?"
                         r"(?:[ \t]{0,3}(?:is|ist|est|es|è|é|:|=|-|–)[ \t]{0,3}|[ \t]{1,3})[\"']?[ \t]{0,2}"
                         r"(\+?(?:\(\d{1,8}\)|\d{1,8})(?:[ .\-/]{1,2}(?:\(\d{1,8}\)|\d{1,8})){0,5})(?![\w+]|[.,/:-]\d)")
-_PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed)?|reach(?:ed)?(?: \w{1,12}){0,2} at"
-                        r"|contact(?:ed)?(?: \w{1,12}){0,2} at|text(?:ed)?)(?![\w-])[^\n\d+]{0,30}?(?<![\w+.-])"
+# the verbs of a call before a North American number: call, calling, dial, reach … at, contact … at, and contact right
+# before the number (Nemotron-PII, 2026-10-20: `by calling`, `contact the report coordinator at`, `please contact`)
+_PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed|ing)?|dial(?:ed|ing)?"
+                        r"|reach(?:ed)?(?: \w{1,12}){0,2} at|contact(?:ed)?(?: \w{1,15}){0,4} at"
+                        # contact alone only right before the number: an earlier start would swallow a later cue
+                        r"|contact(?:ed)?(?=[ \t]{1,3}[(+]?\d)|text(?:ed)?)(?![\w-])"
+                        r"[^\n\d+]{0,30}?(?<![\w+.-])"
                         r"((?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4})(?![\w-]|[.,:]\d)")
 _PHONE_DATE_RE = _lazy(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|\d{1,2}:\d{2}")
 _ISO_DATE_RE = _lazy(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
