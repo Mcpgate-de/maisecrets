@@ -219,6 +219,22 @@ class DutchAndSwedishNameLabelTests(Base):
                 self.assertNotIn("name-after-label", {m.kind for m in scan(text)})
 
 
+class AddressLabelsInMoreLanguagesTests(Base):
+    def test_an_address_after_adres_adress_indirizzo_anschrift_or_street_address_is_masked_whole(self):
+        for text, value in (("Adres: Kerkstraat 12, 1012 AB Amsterdam\n", "Kerkstraat 12, 1012 AB Amsterdam"),
+                            ("Adress: Storgatan 5, 111 22 Stockholm\n", "Storgatan 5, 111 22 Stockholm"),
+                            ("Indirizzo: Via Roma 12, 00184 Roma\n", "Via Roma 12, 00184 Roma"),
+                            ("Anschrift: Lindenweg 4, 80333 München\n", "Lindenweg 4, 80333 München"),
+                            ("street_address: 12 Oak Street, Springfield\n", "12 Oak Street, Springfield")):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(value, "•"), masked(text))
+
+    def test_a_value_that_is_no_address_after_the_new_labels_stays_text(self):
+        for text in ("Adres: zie hieronder, versie 1.2.3\n", "Indirizzo: vedi sotto\n", "Anschrift: siehe oben\n"):
+            with self.subTest(text=text):
+                self.assertText(text)
+
+
 class NameNextToAPersonCueTests(Base):
     def test_a_name_in_a_declaration_a_self_introduction_or_before_its_birth_is_masked_whole(self):
         for text in ("I, " + NAME + ", hereby declare that the above is true.",

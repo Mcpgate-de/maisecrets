@@ -982,8 +982,9 @@ _JP_COMPANY_RE = _lazy(r"株式会社|有限会社|合同会社|本社|支社|�
 _UNIT_BEFORE_DOT = "".join(f"(?<!\\b{w})" for w in ("ste", "apt", "rm", "fl", "bldg", "no", "nr")) + "(?<!str)"
 _ADDRESS_LABEL_RE = _lazy(
     r"(?i)(?<![a-z_])(address(?: on file)?|home[ _-]?address|adr" + _VCARD_PARAMS
-    + r"|ship[ _-]?to|reship to|property|lives"
-    r"|endere[cç]o|direcci[oó]n|adresse|location)[\"']?\s{0,3}:\s{0,3}[\"']?(;*)([^\n\"|;]{8,100}?)"
+    + r"|ship[ _-]?to|reship to|property|lives|street[ _-]?address"
+    # the labels of the record layer's address columns in Dutch, Swedish, Italian and German (Gretel, 2026-10-20)
+    r"|endere[cç]o|direcci[oó]n|adresse|adress?|indirizzo|anschrift|location)[\"']?\s{0,3}:\s{0,3}[\"']?(;*)([^\n\"|;]{8,100}?)"
     r"(?=[\"\n|]|\s{2}|\.\s(?!\d)|" + _UNIT_BEFORE_DOT + r"\.\s|$)")
 # the end of a value before 0.6.43, at any dot and space: the second pass of address-after-label for a label whose
 # longer value the filters refused (a template with `[City]` after `Apt. 999`, a sentence going on after the unit)
@@ -1229,7 +1230,8 @@ _STREET_LABEL_WORDS = ("address", "anschrift", "adresse", "domicilio", "direcci"
                        "resid", "live", "living", "domiciled", "wohn")
 _PHONE_WORDS = ("phone", "tel", "mobil", "cell", "fax", "handy", "portable", "rufnummer", "whatsapp", "hotline",
                 "contact", "call", "reach", "text")
-_ADDRESS_WORDS = ("address", "adr", "ship", "property", "lives", "endere", "direcci", "adresse", "location")
+_ADDRESS_WORDS = ("address", "adr", "ship", "property", "lives", "endere", "direcci", "adresse", "location",
+                  "indirizzo", "anschrift")
 _IN_ADDRESS_RE = _lazy(r"\b\d{1,4}(?:/\d{1,4})?, [^\n]{10,90}?, [A-Z][a-z]+ \d{6}\b")
 _NONLATIN = "Ͱ-ϿЀ-ӿ֐-׿؀-ۿऀ-ॿঀ-৿"
 _CJK_NAME = "一-鿿가-힯぀-ヿ"
