@@ -382,6 +382,53 @@ class SqlAndHtmlTableTests(Base):
                 self.assertText(text, region=("us",))
 
 
+    def test_inline_tags_a_head_and_a_body_and_quoted_column_names_still_name_the_cells(self):
+        for text, values in (
+                ("<table class='x'><thead><tr><th scope='col'>full_name</th><th>street</th></tr></thead><tbody>"
+                 "<tr><td><a href='/c/7'>" + NAME + "</a></td><td><span>" + STREET + "</span></td></tr></tbody>"
+                 "</table>", (NAME, STREET)),
+                ('INSERT INTO "customers" ("full_name", "street", "dob") VALUES (\'' + NAME + "', '" + STREET
+                 + "', NULL);", (NAME, STREET))):
+            out = masked(text, region=("us",))
+            for v in values:
+                with self.subTest(v=len(v)):
+                    self.assertNotIn(v, out)
+
+    def test_a_business_table_stays_text(self):
+        phone = "(415) 382-" + "9174"
+        for text in ("INSERT INTO offices (name, street, phone) VALUES ('Berlin Office', '" + STREET + "', '"
+                     + phone + "');",
+                     "INSERT INTO companies (name, address) VALUES ('Acme Logistics GmbH', '" + STREET + "');",
+                     "INSERT INTO venues (venue_name, street) VALUES ('Harbor Hall', '" + STREET + "');",
+                     "INSERT INTO depots (name, street, phone) VALUES ('North Depot', '" + STREET + "', '" + phone
+                     + "');",
+                     "INSERT INTO branches (branch, street) VALUES ('Downtown Branch', '" + STREET + "');",
+                     "INSERT INTO warehouses (name, address) VALUES ('Warehouse 7', '" + STREET + "'), "
+                     "('Central Warehouse', '" + self.OAK + "');",
+                     "<table><tr><th>name</th><th>street</th><th>phone</th></tr><tr><td>Berlin Office</td><td>"
+                     + STREET + "</td><td>" + phone + "</td></tr></table>",
+                     "<table><tr><th>company</th><th>address</th></tr><tr><td>Acme Inc.</td><td>" + STREET
+                     + "</td></tr></table>",
+                     "<table><tr><th>name</th><th>address</th></tr><tr><td>Riverside Arena</td><td>" + STREET
+                     + "</td></tr></table>"):
+            with self.subTest(text=text[:30]):
+                self.assertIn(STREET, masked(text, region=("us",)))
+
+    def test_a_malformed_statement_or_table_names_no_cell(self):
+        for text in ("INSERT INTO customers (full_name, street) VALUES ('" + NAME + "', '" + STREET + "'",
+                     "INSERT INTO customers (full_name, street, dob) VALUES ('" + NAME + "', '" + STREET + "');",
+                     "INSERT INTO customers VALUES ('" + NAME + "', '" + STREET + "');",
+                     "<table><tr><td>full_name</td><td>street</td></tr><tr><td>" + NAME + "</td><td>" + STREET
+                     + "</td></tr></table>",
+                     "<table><tr><th>full_name</th><th>street</th></tr><tr><td>" + NAME + "</td><td>" + STREET
+                     + "</td></tr>",
+                     "<table><tr><th>full_name</th><th>street</th></tr><tr><td colspan=2>" + NAME + " " + STREET
+                     + "</td></tr></table>",
+                     "<table><tr><th>full_name</th><th>street</th></tr><tr><td>" + NAME + " <i>VIP</i></td><td>"
+                     + STREET + "</td></tr></table>"):
+            with self.subTest(text=text[:30]):
+                self.assertNotIn("-personal-column", " ".join(m.kind for m in scan(text, region=("us",))))
+
 if __name__ == "__main__":
     unittest.main()
 
