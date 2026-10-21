@@ -286,6 +286,30 @@ the transformers pipeline. The model files and their sha256 are written next to 
 fp32 ONNX is D3: every later number of D3 holds for it. int8 is a different model in effect and is measured on its
 own below.
 
+### B2: accuracy on the V3 data
+
+The salted V3 samples (docs/BENCHMARK-V3.md): `val` and the public holdout split 1 in 25, Privy 1 in 10, maisecrets
+`v0.7.3` with and without the layer, the same cases (`cases_sha256`). `bench/ner/analyze.py` per file; PII precision
+as V3 counts it.
+
+| Data | Names whole: 0.7.3 | + D3 fp32 ONNX | + D3 int8 ONNX | PII precision (V3): 0.7.3 / fp32 / int8 |
+|---|---:|---:|---:|---|
+| Privy, 1 in 10 (796 names) | 35 | 507 | 508 | 0.992 / 0.932 / 0.935 |
+| Nemotron `val` (1,159) | 338 | 1,043 | 1,042 | 0.996 / 0.993 / 0.991 |
+| Gretel `val` (668) | 83 | 313 | 321 | 0.913 / 0.912 / 0.919 |
+| Gretel holdout split (620) | 86 | 251 | 257 | 0.915 / 0.928 / 0.924 |
+| Mendeley `val` (633) | 126 | 605 | 611 | 0.990 / 0.856 / 0.856 |
+| Mendeley holdout split (726) | 120 | 679 | 683 | 0.989 / 0.864 / 0.864 |
+
+- **No span got worse** in any file, with either model.
+- **Privy's PII recall** goes from 0.225 to 0.664 (fp32) and 0.665 (int8). Names whole: 4.4 % to 63.7 %, the same as
+  the full Privy run of the first experiment (63.5 %), on a sample that is independent of its split.
+- **int8 costs no accuracy here:** it finds as many names as fp32 and its precision is within 0.004.
+- **Mendeley:** the layer adds about 330 false positives per split. In the first experiment 738 of D3's 868 such false
+  positives on Mendeley were a PERSON for spaCy too: names the dataset does not label.
+- Nemotron's holdout split: the first runs of both models failed on one document of 528 word pieces (the model reads
+  512). The worker now cuts such a piece (`a5fd1ff3`); the run is repeated.
+
 ### B3: developer text (the false-alarm bank)
 
 `bench/ner/devtext.py` cuts the developer bank (`scripts/measure_fp_bank.py`'s trees and the tickets) into the
@@ -347,9 +371,61 @@ A second environment (no package goes into the plugin folder), measured with a f
 - The environment is about 175 MB, plus 135 MB for the int8 model.
 - Offline: a run with the network blocked in the process made 0 network attempts on 3.9, 3.11 and 3.14.
 
+## The decision (Phase D, 2026-10-21)
+
+### The matrix
+
+Recall and precision: Privy, V3 sample 1 in 10 (B2). Developer FP: added PERSON spans on the developer text of B3
+(about 12 MB); the deterministic core's own false alarms are on another bank (`scripts/measure_fp_bank.py`) and are not
+the same unit. RAM and latency: one model process; the times of the torch models are from the idle machine of
+"Cost", the int8 time from one run of `bench/ner/perf.py` while the benchmark runs loaded the machine.
+
+| Option | Recall (Privy names whole / PII) | Precision (Privy PII, V3) | Developer FP | RAM | Latency per document | Install size | Complexity | Recommendation |
+|---|---|---|---|---|---|---|---|---|
+| Deterministic only (0.7.3) | 4.4 % / 0.225 | 0.992 | – (the rules' own bank) | the hook process | 0.25–9.8 ms | the plugin, standard library | low | the default, unchanged |
+| + D3 (torch) | 63.5 % (full Privy) | – | as fp32 ONNX (the same spans) | 0.7 GB | 33 ms median, 88 ms p95 | about 1.4 GB (torch 587 MB) | high | no: ONNX gives the same spans without torch |
+| + D3 ONNX fp32 | 63.7 % / 0.664 | 0.932 | 235 | not measured quietly | not measured quietly | about 175 MB + 539 MB | medium | no: int8 is as accurate at a quarter of the model |
+| + D3 ONNX int8 | 63.8 % / 0.665 | 0.935 | 228 (5 in logs) | 0.4 GB | 25 ms median (loaded machine), load 0.17 s | about 175 MB + 135 MB | medium | **opt-in prototype** |
+| + GLiNER (high recall) | 96.2 % (full Privy) | – | not measured | 3.5 GB | 152 ms median, 411 ms p95 | about 2 GB | high | not now: 75 times D3's false positives on Privy |
+
+### The answers
+
+1. **Does the core generalise?** Yes, within its scope. The rules of 0.6.40 to 0.7.3 were written from `dev` and hold
+   on `val` and on the public holdout split within two points (docs/BENCHMARK-V3.md). On the independent Holdout V2,
+   0.7.4 has recall 0.626 and precision 0.9955. Its weak classes there: names (5 of 48), connection strings and URL
+   credentials (masked in part), passwords, user names and tax ids (half).
+2. **How reliable is V3?** Reliable for the comparison of releases and of splits: salted samples, a fixed scope per
+   dataset, case hashes, and a holdout written without a miss list. Its limits: samples of 300 to 800 documents per
+   split; the public holdout split was read once (2026-10-19); Privy's labels are not exhaustive; Holdout V2 has one
+   run and is template text.
+3. **D3 on independent data:** Privy names whole from 4.4 % to 63.7 %, PII recall 0.225 to 0.664, precision (V3)
+   0.992 to 0.932. No span got worse.
+4. **Is ONNX/int8 usable?** Yes. fp32 ONNX gives the spans of the torch model; int8 is as accurate on V3 (508 against
+   507 names on Privy) with a 135 MB model and no torch.
+5. **Developer false positives:** about 230 added spans in 12 MB of developer text, most in documentation (comments,
+   identifiers) and author lines; 5 in log lines with int8. Acceptable for a layer a person switches on, not for a
+   default: a capitalised identifier in pasted code would become a placeholder.
+6. **The cost in the real hook:** the layer cannot make a result worse, and a slow, failing or broken service changes
+   nothing (B5). The open cost: a hook call scans about five texts, so a product must ask the service once per call;
+   under load 557 of 1,975 scans ran out of the 300 ms budget. A quiet measurement is open.
+7. **Is a simple local install realistic?** Yes, as an opt-in step: one second environment of about 310 MB (int8),
+   pinned wheels and model sha256, offline after the install, Python 3.9 to 3.14 on macOS arm64, Linux and Windows.
+   Gaps: no onnxruntime 1.31 wheel for Intel Macs and none yet for Python 3.15.
+8. **Reject, experimental, opt-in prototype or high-recall mode?** An **opt-in prototype** with D3 int8. Not on by
+   default; a high-recall mode (GLiNER) is not worth its false positives now.
+9. **The next block:** the opt-in prototype outside the public API: the sidecar of B5 as an installable extra, one
+   request per hook call, an install command with the pinned model, and the quiet cost measurement. The record layer
+   (category C) continues as small measured rule changes beside it.
+10. **The 0.8 decision:** 0.8 makes the detection contract explicit and additive (`docs/DETECTION-CONTRACT-PROPOSAL.md`):
+    a published type vocabulary, an optional `fields` argument for structured context, a JSON entry point with the
+    conformance runner on it, offsets defined as code points, and the announced deprecations. No NER seam in the
+    public API in 0.8: the contract's optional `confidence` and `provenance.layer` already leave room for a model
+    layer, so the prototype of answer 9 needs no API change.
+
 ### Open after this block
 
-- int8 on the V3 datasets (run started 2026-10-21);
+- Nemotron's holdout split with both models, and the full Privy runs again on a clean benchmark tree (the first
+  ones carry `bench_dirty`);
 - B4 on a quiet machine, for fp32 and int8.
 
 ## Repeat
