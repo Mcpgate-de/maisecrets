@@ -338,8 +338,25 @@ The rest are false positives: capitalised identifiers and words in docstrings. i
 ### B4: cost in a service
 
 The layer runs as a service of its own (`bench/ner/sidecar.py`, a Unix socket, the model loaded once); the hook
-asks it over the socket. `bench/ner/perf_service.py` measures one request from the hook side. On a machine under
-the load of the parallel benchmark runs the numbers are not comparable; the quiet measurement is open (below).
+asks it over the socket. `bench/ner/perf_service.py` measures it from the client side on 300 Nemotron documents
+(272 KB). Measured 2026-10-21 at a load average of 4 to 6 on the 10 cores (other benchmark runs), so the times are an
+upper bound of an idle machine:
+
+| | int8 ONNX | fp32 ONNX |
+|---|---:|---:|
+| Start to ready (model files in the page cache), and a restart | 0.23 s, 0.23 s | 0.31 s, 0.36 s |
+| First request | 13 ms | 14 ms |
+| Per document, median / 95th percentile | 22 / 62 ms | 30 / 75 ms |
+| 1,000 short requests in a row, median / 95th | 2.2 / 2.3 ms | 3.8 / 9.7 ms |
+| 2 / 4 / 8 clients at once, median per request | 46 / 105 / 224 ms | 58 / 125 / 268 ms |
+| Throughput with several clients | 37 documents/s | 31 documents/s |
+| A request after 60 s idle | 23 ms | 25 ms |
+| One input of 1 MB | 29 s | 36 s |
+| Memory: after the run / highest seen | 341 / 431 MB | 723 / 1,342 MB |
+
+The service answers one request at a time, so parallel hook calls wait in line; it keeps its speed over 1,000
+requests and after an idle minute. A 1 MB tool result takes half a minute, so a product needs a size limit per hook
+call (the budget of B5 already returns the deterministic result when time runs out).
 
 ### B5: the real hook path
 
@@ -381,14 +398,14 @@ A second environment (no package goes into the plugin folder), measured with a f
 Recall and precision: Privy, V3 sample 1 in 10 (B2). Developer FP: added PERSON spans on the developer text of B3
 (about 12 MB); the deterministic core's own false alarms are on another bank (`scripts/measure_fp_bank.py`) and are not
 the same unit. RAM and latency: one model process; the times of the torch models are from the idle machine of
-"Cost", the int8 time from one run of `bench/ner/perf.py` while the benchmark runs loaded the machine.
+"Cost", the ONNX times from B4 (the service, at a load average of 4 to 6).
 
 | Option | Recall (Privy names whole / PII) | Precision (Privy PII, V3) | Developer FP | RAM | Latency per document | Install size | Complexity | Recommendation |
 |---|---|---|---|---|---|---|---|---|
 | Deterministic only (0.7.3) | 4.4 % / 0.225 | 0.992 | – (the rules' own bank) | the hook process | 0.25–9.8 ms | the plugin, standard library | low | the default, unchanged |
 | + D3 (torch) | 63.5 % (full Privy) | as fp32 ONNX | as fp32 ONNX (the same spans) | 0.7 GB | 33 ms median, 88 ms p95 | about 1.4 GB (torch 587 MB) | high | no: ONNX gives the same spans without torch |
-| + D3 ONNX fp32 | 63.7 % / 0.664 (full: 63.5 % / 0.671) | 0.932 (full: 0.941) | 235 | not measured quietly | not measured quietly | about 175 MB + 539 MB | medium | no: int8 is as accurate at a quarter of the model |
-| + D3 ONNX int8 | 63.8 % / 0.665 (full: 63.6 % / 0.671) | 0.935 (full: 0.952) | 228 (5 in logs) | 0.4 GB | 25 ms median (loaded machine), load 0.17 s | about 175 MB + 135 MB | medium | **opt-in prototype** |
+| + D3 ONNX fp32 | 63.7 % / 0.664 (full: 63.5 % / 0.671) | 0.932 (full: 0.941) | 235 | 1.3 GB peak | 30 ms median, 75 ms p95 | about 175 MB + 539 MB | medium | no: int8 is as accurate at a quarter of the model |
+| + D3 ONNX int8 | 63.8 % / 0.665 (full: 63.6 % / 0.671) | 0.935 (full: 0.952) | 228 (5 in logs) | 0.43 GB peak | 22 ms median, 62 ms p95, start 0.23 s | about 175 MB + 135 MB | medium | **opt-in prototype** |
 | + GLiNER (high recall) | 96.2 % (full Privy) | – | not measured | 3.5 GB | 152 ms median, 411 ms p95 | about 2 GB | high | not now: 75 times D3's false positives on Privy |
 
 ### The answers
@@ -427,7 +444,7 @@ the same unit. RAM and latency: one model process; the times of the torch models
 
 ### Open after this block
 
-- B4 on a quiet machine, for fp32 and int8.
+- B4 on an idle machine (the numbers above are an upper bound) and on Windows and Linux.
 
 ## Repeat
 
