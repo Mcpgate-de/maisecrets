@@ -737,6 +737,40 @@ Per span against v0.7.3 (Benchmark V2 tree, development sources): Nemotron dev 7
 14, val 10; Mendeley, PIILO, the bank and the traces unchanged; nothing got worse; false positives and too-wide
 findings unchanged on every source; the false-alarm bank unchanged. `scripts/compare_bench.py`: 0 findings.
 
+### A first or last name field, and the name column of a role, in a record, 2026-10-21
+
+Benchmark V3 Phase C ranked what 0.7.3 misses in record fields on Nemotron and Gretel `dev` by field name. The largest
+groups: a field-value table or a CSV whose `First Name` or `Last Name` field holds one word (732 and 540 on Nemotron
+`dev`), and a name column of a role (`Candidate Name`, `Player Name`, `Client Name`, `Recipient Name`). Two changes,
+each measured on its own against `next` at `c776c2cc` (`dev` and `val` of every development source, the false-alarm
+bank):
+
+- **C1, a one-word value in a name-part field** (`first_name`, `last_name`, `given_name`, `surname`, `vorname`,
+  `nachname` and their aliases): a capitalised name word counts, so the record's other fields count too. As before, a
+  record counts only with a field only a person has (a birth date, a phone, an address); form words (`Required`,
+  `Optional`, `Unknown`, `N/A`) and placeholder names stay text.
+- **C2, the name column of a role** (`candidate_name`, `client_name`, `player_name`, `recipient_name`,
+  `applicant_name`, `student_name`, `member_name`, `contact_name`, `passenger_name`, `beneficiary_name`,
+  `tenant_name`): a weak column like `customer_name`, so it counts only beside a strong column. A score board of
+  names stays text.
+
+| Measure | C1 against `c776c2cc` | C2 against C1 |
+|---|---|---|
+| Nemotron `dev`: missed to whole | 1,578 (names 1,217, birth dates 251, addresses 60, phones 49) | 159 (names 118) |
+| Nemotron `val`: missed to whole | 463 (names 350, birth dates 69) | 45 (names 32) |
+| Nemotron false positives, `dev` / `val` | 508 / 187, unchanged | unchanged |
+| Gretel `dev` / `val`: missed to whole | 218 / 72 (names 162 / 66) | 6 / 0 |
+| Gretel false positives, `dev` / `val` | 2,307 → 2,567 / 809 → 882 | unchanged |
+| Mendeley, PIILO, the bank, the traces | no change | no change |
+| Spans made worse | 0 | 0 |
+| False-alarm bank, seven trees | the same hits | the same hits |
+
+**The false positives of C1 on Gretel**, read on `dev` by field name and the shape of the value (no value printed):
+all 260 new ones lie in 36 documents, and the 17 with a header of name parts are customer or patient tables
+(`customerid,firstname,lastname,email,phone…`, often with a birth date). Their names and phones are a person's
+data the dataset does not label in these rows, as Mendeley leaves the addresses of its customers unlabelled
+(above). No new false positive is in developer text.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
