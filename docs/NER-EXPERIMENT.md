@@ -292,19 +292,21 @@ own below.
 categories below and counts each PERSON span the layer adds beyond the deterministic result, with a coarse label of
 its context. Counts only; no span is printed. D3 fp32:
 
-| Category | Added spans | Most of them |
-|---|---:|---|
-| Python code (2.2 MB) | 49 | identifiers 16, comments 12, prose 12, author lines 9 |
-| JS/TS code | 16 | author or copyright lines 15 |
-| Tests and examples | 19 | identifiers, paths or literals 19 |
-| Configuration (2.3 MB) | 3 | |
-| Logs (2 MB) | 0 | |
-| Stack traces | 22 | prose of the message 21 |
-| Tickets | 6 | |
-| Technical documentation (2 MB) | 120 | comments 56, identifiers 36, prose 16, handles or URLs 11 |
+| Category | Added spans, fp32 | Added spans, int8 | Most of them (fp32) |
+|---|---:|---:|---|
+| Python code (2.2 MB) | 49 | 45 | identifiers 16, comments 12, prose 12, author lines 9 |
+| JS/TS code | 16 | 17 | author or copyright lines 15 |
+| Tests and examples | 19 | 15 | identifiers, paths or literals 19 |
+| Configuration (2.3 MB) | 3 | 7 | |
+| Logs (2 MB) | 0 | 5 | |
+| Stack traces | 22 | 22 | prose of the message 21 |
+| Tickets | 6 | 6 | |
+| All | 235 | 228 | |
+| Technical documentation (2 MB) | 120 | 111 | comments 56, identifiers 36, prose 16, handles or URLs 11 |
 
 An author or copyright line names a real person, so a mask there is right for the layer and harmless for the code.
-The rest are false positives: capitalised identifiers and words in docstrings. int8: see "Open after this block".
+The rest are false positives: capitalised identifiers and words in docstrings. int8 adds about as many (228 against
+235), but 5 of them in log lines, where fp32 adds none.
 
 ### B4: cost in a service
 
@@ -347,7 +349,7 @@ A second environment (no package goes into the plugin folder), measured with a f
 
 ### Open after this block
 
-- int8 on the developer bank and on the V3 datasets (runs started 2026-10-21);
+- int8 on the V3 datasets (run started 2026-10-21);
 - B4 on a quiet machine, for fp32 and int8.
 
 ## Repeat
