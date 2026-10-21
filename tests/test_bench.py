@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -780,6 +781,8 @@ class BenchmarkV3Tests(unittest.TestCase):
         ssn = "-".join(("536", "22", "8726"))
         self.assertFalse(v3.scored("privy", scope, "pii.email", "a@example.com"))
         self.assertFalse(v3.scored("privy", scope, "pii.national_id", ssn))
+        self.assertFalse(v3.scored("privy", scope, "pii.national_id", "SSN: " + ssn))   # a span with its label
+        self.assertTrue(v3.scored("privy", scope, "pii.national_id", "1" + ssn.replace("-", "") + "9"))
         self.assertTrue(v3.scored("privy", scope, "pii.national_id", "X1234567"))
         self.assertTrue(v3.scored("privy", scope, "secret.token", "abc"))      # Privy labels passwords: secrets count
         self.assertFalse(v3.scored("mendeley", scope, "secret.token", "abc"))  # Mendeley labels no secret
@@ -817,6 +820,32 @@ class BenchmarkV3Tests(unittest.TestCase):
             self.assertIn("per_case", out)
             self.assertIn("v3", out)
             self.assertEqual("", log.read_text(encoding="utf-8"))
+
+    def test_a_sample_without_a_salt_gets_no_v3_block_and_no_v3_report(self):
+        # an unsalted sample of 1 in 25 follows the split hash, so it is no V3 sample (codex Gate A, 2026-10-22)
+        from bench import report_v3, run, sources
+        c = {"id": "nemotron/1", "text": "mail a@example.org", "channel": "tool", "context": "doc", "path": None,
+             "spans": [{"start": 5, "end": 18, "class": "pii.email"}], "split": "val", "source": {"name": "x"}}
+        with tempfile.TemporaryDirectory() as d:
+            for name, salt in (("plain", []), ("salted", ["--sample-salt", "v3/"])):
+                with mock.patch.object(sources, "load", return_value=iter([c])), \
+                        mock.patch.object(run, "in_sample", return_value=True), \
+                        mock.patch("bench.adapters.detect_secrets.scan", return_value=([[]], {"times_s": [0.0]})), \
+                        mock.patch("bench.adapters.detect_secrets.describe", return_value={"scanner": "x"}), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    run.main(["--scanner", "detect_secrets", "--source", "nemotron", "--split", "val", "--every",
+                              "25", *salt, "--out", str(Path(d) / f"{name}.json")])
+            self.assertNotIn("v3", json.loads((Path(d) / "plain.json").read_text(encoding="utf-8")))
+            self.assertIn("v3", json.loads((Path(d) / "salted.json").read_text(encoding="utf-8")))
+            # an older result with a v3 block and no salt is left out of the report
+            old = json.loads((Path(d) / "salted.json").read_text(encoding="utf-8"))
+            old.pop("sample_salt")
+            (Path(d) / "salted.json").write_text(json.dumps(old), encoding="utf-8")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                report_v3.main([d])
+            self.assertIn("Left out", buf.getvalue())
+            self.assertNotIn("## nemotron", buf.getvalue())
 
     def test_the_v3_block_splits_the_false_positives_and_keeps_the_hits(self):
         from bench import v3
@@ -880,6 +909,35 @@ class NerHookLayerTests(unittest.TestCase):
         self.serve(b'{"add": [[1, 2, 0.5]]}\n', delay=1.0)           # slower than the budget
         self.assertEqual(self.det, self.scan())
         self.assertGreaterEqual(self.hl.STATE["timeouts"] + self.hl.STATE["errors"], 2)
+
+    def test_all_scans_of_one_hook_call_share_one_budget_without_the_callers_help(self):
+        # install() wraps the hook entry points; a caller that never calls begin_call() still gets one budget per call
+        # (codex Gate A, 2026-10-22: the experiment called it by hand, so the real hook would wait per scan)
+        import types
+        core = self.hl.core
+        hooks = types.SimpleNamespace(post_tool=lambda p: [core.scan(p, channel="tool") for _ in range(4)])
+        import socket
+        import threading
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)        # accepts every request and never answers
+        srv.bind(self.sock)
+        srv.listen(8)
+        held: list = []
+        self.addCleanup(lambda: [c.close() for c in held] and None)
+        self.addCleanup(srv.close)
+
+        def hold():
+            while True:
+                try:
+                    held.append(srv.accept()[0])
+                except OSError:
+                    return
+        threading.Thread(target=hold, daemon=True).start()
+        self.hl.install(self.sock, budget_ms=300, hooks=hooks)
+        t = time.monotonic()
+        hooks.post_tool(self.text)
+        self.assertLess(time.monotonic() - t, 0.7)                     # four budgets would be 1.2 s
+        self.assertEqual(4, self.hl.STATE["timeouts"])                  # each scan waited, none was refused
+        self.assertNotIn("call_deadline", self.hl.STATE)               # the budget ends with the call
 
     def test_installed_and_switched_off_it_answers_as_without_it(self):
         self.hl.install(self.sock, budget_ms=200, active=False)

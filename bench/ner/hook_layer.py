@@ -84,11 +84,38 @@ def layered_scan(text, enabled=None, channel="prompt", path="", rule_list=None):
     return sorted(found + extra, key=lambda m: m.start) if extra else found
 
 
-def install(socket_path: str, budget_ms: int = 300, active: bool = True) -> None:
+# the hook entry points that redact a tool result or a tool call; each is one hook call with one budget
+HOOK_CALLS = ("user_prompt", "pre_tool", "post_tool", "post_tool_failure")
+_WRAPPED: list = []          # (module, name, original) of each wrapped entry point
+
+
+def _one_budget(fn):
+    def call(*args, **kwargs):
+        begin_call()
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            STATE.pop("call_deadline", None)
+    return call
+
+
+def install(socket_path: str, budget_ms: int = 300, active: bool = True, hooks=None) -> None:
+    """Wrap the detector's scan, and each hook entry point of `hooks` (maisecrets.hooks unless given) so that all scans
+    of one hook call share one budget, without the caller's help."""
     STATE.update(active=active, socket=socket_path, budget_s=budget_ms / 1000, calls=0, asked=0, added=0, timeouts=0,
                  errors=0, ner_s=[])
     core.scan = layered_scan
+    if hooks is None:
+        from maisecrets import hooks
+    for name in HOOK_CALLS:
+        fn = getattr(hooks, name, None)
+        if fn is not None and not any(m is hooks and n == name for m, n, _ in _WRAPPED):
+            _WRAPPED.append((hooks, name, fn))
+            setattr(hooks, name, _one_budget(fn))
 
 
 def uninstall() -> None:
     core.scan = _ORIGINAL
+    for hooks, name, fn in _WRAPPED:
+        setattr(hooks, name, fn)
+    _WRAPPED.clear()

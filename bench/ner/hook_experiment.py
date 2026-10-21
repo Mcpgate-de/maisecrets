@@ -39,9 +39,7 @@ out = []
 for line in open(sys.argv[5], encoding="utf-8"):
     p = json.loads(line)
     t = time.perf_counter()
-    if mode != "off":
-        hook_layer.begin_call()
-    r = hooks.post_tool(p)
+    r = hooks.post_tool(p)            # the layer's install() gives each hook call its one budget
     out.append({"answer": json.dumps(r, sort_keys=True, ensure_ascii=False), "ms": (time.perf_counter() - t) * 1000})
 json.dump({"out": out, "state": {k: v for k, v in hook_layer.STATE.items() if k != "ner_s"},
            "ner_ms": [x * 1000 for x in hook_layer.STATE["ner_s"]]}, open(sys.argv[6], "w"))

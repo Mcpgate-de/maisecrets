@@ -190,9 +190,11 @@ def main(argv=None) -> int:
         "by_context": score.aggregate(results, lambda c, s: f"{c['context']}/{s['class']}"),
         "timing": timing_summary(timing, sum(sc["bytes"] for _, sc in results)),
     }
-    if not holdout:
+    # Benchmark V3: precision only where the source labels it; a sample counts only with a salt (without one a sample
+    # of 1 in 10 or a multiple of it lies in `dev` alone, the fault of V1 and V2)
+    if not holdout and (a.every <= 1 or a.sample_salt):
         from bench import v3
-        out["v3"] = v3.metrics(a.source, results)      # Benchmark V3: precision only where the source labels it
+        out["v3"] = v3.metrics(a.source, results)
     if holdout:
         out.pop("by_region")
         out.pop("by_context")

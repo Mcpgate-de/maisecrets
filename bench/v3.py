@@ -79,8 +79,10 @@ def scored(source: str, scope: dict, cls: str, value: str) -> bool:
         # a secret finding of a dataset that labels some secrets: `secret` is one family there, its labels no class
         if not (_family(cls) == "secret" and any(c.startswith("secret.") for c in entry["scored"])):
             return False
+    # the shape anywhere in the finding, not only as all of it: a scanner that masks `SSN: 123-45-6789` with its label
+    # found the same value as one that masks the digits alone (codex Gate A, 2026-10-22)
     shape = entry["excluded_shapes"].get(cls)
-    return not (shape and re.fullmatch(shape, value.strip()))
+    return not (shape and re.search(r"(?<!\d)(?:" + shape + r")(?!\d)", value))
 
 
 def metrics(source: str, results, scope: dict | None = None) -> dict:

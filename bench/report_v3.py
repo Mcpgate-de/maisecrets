@@ -34,10 +34,10 @@ def main(argv: list) -> int:
     groups = collections.defaultdict(list)
     skipped = []
     for name, r in results:
-        if "v3" not in r:
+        if "v3" not in r or (r.get("every", 1) > 1 and not r.get("sample_salt")):
             skipped.append(name)
             continue
-        sample = f", sample 1 in {r['every']}" if r.get("every", 1) > 1 else ""
+        sample = f", sample 1 in {r['every']} (salt `{r['sample_salt']}`)" if r.get("every", 1) > 1 else ""
         groups[(r["source"], r["split"], sample, r["cases_sha256"])].append(r)
     print("# Benchmark V3 report\n")
     print("Recall as in V1 and V2 (strict: the span masked whole). P(V2): a finding on no labelled span is wrong. "
@@ -45,7 +45,7 @@ def main(argv: list) -> int:
           "out of scope. A class in `lower bound` has labels a read sample showed not exhaustive: its precision is a "
           "lower bound. Privy is never read: its precision is observed under incomplete annotation.\n")
     if skipped:
-        print("Left out, no V3 block (an older run): " + ", ".join(skipped) + "\n")
+        print("Left out, no V3 block or a sample without a salt (an older run): " + ", ".join(skipped) + "\n")
     for (source, split, sample, sha), runs in sorted(groups.items()):
         first = runs[0]
         print(f"## {source}, split {split}{sample} ({first['cases']} cases)\n")
