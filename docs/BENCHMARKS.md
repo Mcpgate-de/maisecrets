@@ -737,6 +737,58 @@ Per span against v0.7.3 (Benchmark V2 tree, development sources): Nemotron dev 7
 14, val 10; Mendeley, PIILO, the bank and the traces unchanged; nothing got worse; false positives and too-wide
 findings unchanged on every source; the false-alarm bank unchanged. `scripts/compare_bench.py`: 0 findings.
 
+### A first or last name field, and the name column of a role, in a record, 2026-10-21
+
+Benchmark V3 Phase C ranked what 0.7.3 misses in record fields on Nemotron and Gretel `dev` by field name. The largest
+groups: a field-value table or a CSV whose `First Name` or `Last Name` field holds one word (732 and 540 on Nemotron
+`dev`), and a name column of a role (`Candidate Name`, `Player Name`, `Client Name`, `Recipient Name`). Two changes,
+each measured on its own against `next` at `c776c2cc` (`dev` and `val` of every development source, the false-alarm
+bank):
+
+- **C1, a one-word value in a name-part field** (`first_name`, `last_name`, `given_name`, `surname`, `vorname`,
+  `nachname` and their aliases, `givenName` and `familyName` too): a capitalised name word counts, so the record's
+  other fields count too. As before, a record counts only with a field only a person has (a birth date, a phone, an
+  address); form words (`Required`, `Optional`, `Unknown`, `N/A`), fixture words (`Foo`, `Bar`, `User`, `Demo`) and
+  a first and a last name that make a placeholder together (`Jane` and `Doe`) stay text.
+- **C2, the name column of a role** (`candidate_name`, `client_name`, `player_name`, `recipient_name`,
+  `applicant_name`, `student_name`, `member_name`, `contact_name`, `passenger_name`, `beneficiary_name`,
+  `tenant_name`, and the same in camel case, `candidateName`): a weak column like `customer_name`, so it counts only
+  beside a strong column. A score board of names stays text.
+
+| Measure | C1 against `c776c2cc` | C2 against C1 |
+|---|---|---|
+| Nemotron `dev`: missed to whole | 1,578 (names 1,217, birth dates 251, addresses 60, phones 49) | 159 (names 118) |
+| Nemotron `val`: missed to whole | 463 (names 350, birth dates 69) | 45 (names 32) |
+| Nemotron false positives, `dev` / `val` | 508 / 187, unchanged | unchanged |
+| Gretel `dev` / `val`: missed to whole | 218 / 72 (names 162 / 66) | 6 / 0 |
+| Gretel false positives, `dev` / `val` | 2,307 → 2,567 / 809 → 882 | unchanged |
+| Mendeley, PIILO, the bank, the traces | no change | no change |
+| Spans made worse | 0 | 0 |
+| False-alarm bank, seven trees | the same hits | the same hits |
+
+**The false positives of C1 on Gretel**, read on `dev` by field name and the shape of the value (no value printed):
+all 260 new ones lie in 36 documents, and the 17 with a header of name parts are customer or patient tables
+(`customerid,firstname,lastname,email,phone…`, often with a birth date). Their names and phones are a person's
+data the dataset does not label in these rows, as Mendeley leaves the addresses of its customers unlabelled
+(above). No new false positive is in developer text.
+
+**Review and the last step.** codex Gate A (gpt-5.6-sol) found: fixture names in seed data and API examples
+(`Foo,Bar`, `Jane`/`Doe`) became names; role columns in camel case were not read; seven of the eleven role names had
+no test. The last commits fix the three. Measured against C2, the fixture rule removes 70 false positives on Gretel
+`dev` and 24 on `val`, and it gives back 43 labelled names: all of them `John` or `Jane` with `Doe` or `Smith` in the
+same row, and one `Max`, which the datasets label and maisecrets treats as a placeholder in every other form. Against
+`c776c2cc` the whole change set makes no span worse:
+
+| Source | Missed to whole | False positives |
+|---|---|---|
+| Nemotron `dev` / `val` | 1,732 / 508 | 508 / 187, unchanged |
+| Gretel `dev` / `val` | 201 / 58 | 2,307 → 2,497 / 809 → 858 |
+| Mendeley, PIILO, the bank, the traces, the false-alarm bank | no change | no change |
+
+Left as they are: a name in a script outside the Latin ranges of the name rules (a Cyrillic or Greek first name)
+stays text in a record, as it does in every other name form of `personal.py`; a single placeholder first name
+beside a birth date (`Jane` alone) is masked, since it is also a real name.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
