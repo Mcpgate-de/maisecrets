@@ -87,6 +87,9 @@ The procedure is `bench/holdout_v2.py` (docs/BENCHMARK-V2.md, "Holdout V2"). On 
 
 ## Results
 
+The raw results of this section: `bench/results/2026-10-21-v3/` (`run/` with `report-v3.md` and `environment.json`,
+`d3fp32/` and `d3int8/` for the PERSON layer, `holdout-v2/` totals only, `ner-analysis/`; `SHA256SUMS` in each).
+
 ### maisecrets 0.7.3 on data no rule was written from (2026-10-21)
 
 `bench/run_all_v3.sh` with maisecrets `v0.7.3` (`eee4b2e0`), benchmark commit `704db2a0`, salted samples 1 in 25.
