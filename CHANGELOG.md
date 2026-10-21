@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## [0.7.3] - 2026-10-21
+
+### Fixes
+
+- a US postal address on two lines is masked (street line, then City, ST 12345) (13bab17)
+- a full name after a salutation is masked (Dear Dana Okafor,) (2d3f10b)
+- a full name after a title is masked (Mr Dana Okafor, Mrs. …) (f07d52c)
+- a Visa card number of 19 digits after a card word is masked (2822238)
+- an ID after its label and a comma is masked (beneficiary number, <id>,) (bed99c3)
+- a Markdown table of fields and values is read as one record (| Full Name | … |, one field per row) (5da6304)
+- a North American phone number after calling, dial or contact is masked (8e4678e)
+- an address after a Dutch, Swedish, Italian or German address label is masked (Adres, Adress, Indirizzo, Anschrift) (ceaaaea)
+- a name after the Dutch and Swedish name labels naam and namn is masked (25ee85f)
+
 ## [0.7.2] - 2026-10-20
 
 ### Fixes
