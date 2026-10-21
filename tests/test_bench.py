@@ -690,6 +690,51 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(1, text.count("## nemotron"))
 
 
+class NerLayerTests(unittest.TestCase):
+    """The PERSON layer of the NER experiment (docs/NER-EXPERIMENT.md): it only adds, and it reads every part."""
+
+    @staticmethod
+    def worker():
+        sys.path.insert(0, str(ROOT / "bench" / "ner"))
+        import person_worker
+        return person_worker
+
+    def test_the_chunks_cover_the_text_in_order_and_none_is_too_long(self):
+        w = self.worker()
+        text = ("word " * 450 + "\n") + "short line\n" + ("x, " * 500)
+        chunks = w._chunks(text)
+        self.assertEqual(0, chunks[0][0])
+        self.assertTrue(all(a < b <= c for (a, b), (c, _) in zip(chunks, chunks[1:])))
+        self.assertTrue(all(len(w.TOKEN.findall(text[a:b])) <= w.GLINER_WORDS for a, b in chunks))
+        self.assertEqual(len(w.TOKEN.findall(text)), sum(len(w.TOKEN.findall(text[a:b])) for a, b in chunks))
+
+    def test_a_span_on_a_deterministic_finding_is_dropped_and_named(self):
+        w = self.worker()
+        text = "Ann Lee met Bo Kim at the office"
+        # 0-7 lies on the finding; 11-18 starts with a space; 12-14 lies on a kept span; 25-26 is only a space
+        keep, conflicts = w.disjoint(text, [(0, 7, 0.9), (11, 18, 0.8), (12, 14, 0.7), (25, 26, 0.5), (19, 21, 0.4)],
+                                     [[0, 3, "pii.email"]])
+        self.assertEqual([[12, 18, 0.8], [19, 21, 0.4]], keep)
+        self.assertEqual(["pii.email"], conflicts)
+
+    def test_the_layer_keeps_every_deterministic_finding_as_it_is(self):
+        from bench.adapters import maisecrets_ner as ner
+        cases = [{"id": "a", "text": "Ann Lee met Bo Kim"}, {"id": "b", "text": "nothing here"}]
+        det_found = [[(0, 7, "pii.name", "rule")], []]
+        out = json.dumps({"add": [[12, 18, 0.9]], "conflicts": []}) + "\n" + json.dumps({"add": [], "conflicts": []})
+
+        def fake_run(cmd, name, env, cwd, timeout=0):
+            Path(cmd[4]).write_text(out + "\n", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, json.dumps({"times_s": [0.1, 0.1], "load_s": 1}), "")
+        with mock.patch.object(ner.det, "scan", return_value=(det_found, {"times_s": [0.2, 0.2]})), \
+                mock.patch.object(ner._proc, "run", side_effect=fake_run), \
+                mock.patch.dict(os.environ, {"BENCH_NER_PYTHON": "py", "BENCH_NER": "spacy:m"}):
+            found, timing = ner.scan(cases, Path("."))
+        self.assertEqual([(0, 7, "pii.name", "rule"), (12, 18, "pii.name", "ner:person")], found[0])
+        self.assertEqual([], found[1])
+        self.assertEqual([0.30000000000000004, 0.30000000000000004], timing["times_s"])
+
+
 class FunnelTests(unittest.TestCase):
     """bench/funnel.py: each missed span gets one bucket by the text around it, and each bucket one category."""
 
