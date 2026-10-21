@@ -3,7 +3,8 @@ in maisecrets, and sees one case per input line: the text and the spans the dete
 
     python -I person_worker.py IN OUT BACKEND
 
-BACKEND is `spacy:<model package>` or `gliner:<model directory>:<threshold>`. The model reads the whole text, so its
+BACKEND is `spacy:<model package>`, `gliner:<model directory>:<threshold>` or `hf:<model directory>` (a token
+classifier, its PER entities). The model reads the whole text, so its
 context is the same as without the layer; a PERSON span it returns is kept only when it overlaps no span of the
 deterministic detector (that span decided the text there; a finding is never made smaller, moved or retyped). OUT gets,
 per case, the kept spans `[start, end, score]` and the types of the deterministic findings a dropped span overlapped.
@@ -19,6 +20,7 @@ import time
 GLINER_WORDS = 200      # tokens per chunk: GLiNER reads 384 words and its encoder 512 pieces, and drops the rest
                         # without a word (a name late in a long text is never seen)
 TOKEN = re.compile(r"\w+(?:[-_]\w+)*|\S")   # how GLiNER splits words
+BERT_WORDS = 100
 
 
 def _chunks(text: str, limit: int = GLINER_WORDS):
@@ -91,6 +93,22 @@ def load(backend: str):
             return spans
         return find, {"library": "gliner", "library_version": gliner.__version__, "torch": torch.__version__,
                       "model": path.rstrip("/").split("/")[-1], "threshold": threshold}
+    if kind == "hf":
+        import torch
+        import transformers
+        torch.set_grad_enabled(False)
+        pipe = transformers.pipeline("token-classification", model=arg, aggregation_strategy="simple", device="cpu")
+
+        def find(text):
+            spans = []
+            # BERT reads 512 word pieces and drops the rest without a word; 100 tokens stay far below that
+            for a, b in _chunks(text, BERT_WORDS):
+                for e in pipe(text[a:b]):
+                    if e["entity_group"] == "PER":
+                        spans.append((a + int(e["start"]), a + int(e["end"]), round(float(e["score"]), 4)))
+            return spans
+        return find, {"library": "transformers", "library_version": transformers.__version__,
+                      "torch": torch.__version__, "model": arg.rstrip("/").split("/")[-1], "threshold": None}
     raise SystemExit(f"unknown backend {kind!r}")
 
 

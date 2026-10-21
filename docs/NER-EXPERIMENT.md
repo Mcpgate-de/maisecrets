@@ -46,6 +46,12 @@ the NVIDIA licence is not Apache-2.0); `urchade/gliner_multi_pii-v1` (2024, the 
 (its PERSON comes from `en_core_web_lg`, which is candidate B; its other recognizers are vendored into maisecrets
 already); Flair and BERT token classifiers (a transformer of the same cost as C with fewer languages).
 
+**Added later, on the maintainer's request (2026-10-21, after the Nemotron sample of B, C and C-high was seen):**
+candidate **D**, DistilBERT, `dslim/distilbert-NER` at `dfa2838a` (Apache-2.0, 250 MB, trained on CoNLL-2003,
+English), run with transformers 5.16.1 and torch 2.14.1 in the GLiNER environment: the `token-classification`
+pipeline with `aggregation_strategy="simple"`, its `PER` entities, no threshold, the text in pieces of 100 tokens. The
+setting was fixed before D's first measurement; nothing else in this section changed.
+
 **Data and splits.** The four PII datasets of Benchmark V1 with the case hashes of the 0.7.3 snapshot: the fixed sample
 of 1 in 50 for every variant, and each dataset in full for the baseline, A and B (C on the sample only: about 0.1 to
 0.5 s per document). The bank and the catalogs are left out (6 and 0 names). No threshold or setting is chosen from a

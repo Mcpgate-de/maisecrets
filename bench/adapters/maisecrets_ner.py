@@ -31,15 +31,17 @@ def _python() -> str:
 
 def _backend() -> str:
     b = os.environ.get("BENCH_NER", "")
-    if not b.startswith(("spacy:", "gliner:")):
-        raise _proc.AdapterError("maisecrets_ner: BENCH_NER must be spacy:<model> or gliner:<dir>:<threshold>")
+    if not b.startswith(("spacy:", "gliner:", "hf:")):
+        raise _proc.AdapterError("maisecrets_ner: BENCH_NER must be spacy:<model>, gliner:<dir>:<threshold> or "
+                                 "hf:<dir>")
     return b
 
 
 def describe(root: Path, regions: str) -> dict:
     d = det.describe(root, regions)
     backend = _backend()
-    shown = backend if backend.startswith("spacy:") else "gliner:" + backend.split(":", 1)[1].split("/")[-1]
+    kind, _, arg = backend.partition(":")
+    shown = backend if kind == "spacy" else f"{kind}:" + arg.split("/snapshots/")[0].split("/")[-1]
     d.update(scanner=NAME, ner={"backend": shown, "python": _python(), "installed": _proc.installed(_python())},
              dependencies="Python standard library; the layer: " + shown)
     return d
