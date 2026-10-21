@@ -267,6 +267,89 @@ optional. Operationally it is not yet acceptable as a feature: the cost inside a
 packaging are open (answer 10). So: experimental, with a product prototype as the next step, if the maintainer
 wants one.
 
+## Product feasibility (Phase B, 2026-10-21)
+
+The questions of answer 9 and 10, measured on D3. Nothing here is in the product: the layer is a bench module
+(`bench/ner/`), and the hook proofs patch a checkout of 0.7.3 in a test process.
+
+### B1: D3 without torch (ONNX, fp32 and int8)
+
+`bench/ner/export_onnx.py` exports D3 at `d421f57d` to ONNX; `bench/ner/person_worker.py` (backend `onnx:<dir>`,
+`onnx:<dir>::int8`) runs it with onnxruntime, tokenizers and numpy and rebuilds the whole-word aggregation (snap) of
+the transformers pipeline. The model files and their sha256 are written next to the export (`SHA256SUMS`).
+
+| | fp32 ONNX | int8 ONNX (dynamic quantisation) |
+|---|---|---|
+| Model on disk | 539 MB | 135 MB |
+| Same PERSON spans as D3 with torch, 300 documents of the samples | 300 of 300 documents | 232 of 300 documents (606 spans the same, 42 lost, 74 new) |
+
+fp32 ONNX is D3: every later number of D3 holds for it. int8 is a different model in effect and is measured on its
+own below.
+
+### B3: developer text (the false-alarm bank)
+
+`bench/ner/devtext.py` cuts the developer bank (`scripts/measure_fp_bank.py`'s trees and the tickets) into the
+categories below and counts each PERSON span the layer adds beyond the deterministic result, with a coarse label of
+its context. Counts only; no span is printed. D3 fp32:
+
+| Category | Added spans | Most of them |
+|---|---:|---|
+| Python code (2.2 MB) | 49 | identifiers 16, comments 12, prose 12, author lines 9 |
+| JS/TS code | 16 | author or copyright lines 15 |
+| Tests and examples | 19 | identifiers, paths or literals 19 |
+| Configuration (2.3 MB) | 3 | |
+| Logs (2 MB) | 0 | |
+| Stack traces | 22 | prose of the message 21 |
+| Tickets | 6 | |
+| Technical documentation (2 MB) | 120 | comments 56, identifiers 36, prose 16, handles or URLs 11 |
+
+An author or copyright line names a real person, so a mask there is right for the layer and harmless for the code.
+The rest are false positives: capitalised identifiers and words in docstrings. int8: see "Open after this block".
+
+### B4: cost in a service
+
+The layer runs as a service of its own (`bench/ner/sidecar.py`, a Unix socket, the model loaded once); the hook
+asks it over the socket. `bench/ner/perf_service.py` measures one request from the hook side. On a machine under
+the load of the parallel benchmark runs the numbers are not comparable; the quiet measurement is open (below).
+
+### B5: the real hook path
+
+`bench/ner/hook_layer.py` wraps the detector of a real checkout (`core.scan`; `detect` is the same module) so that
+the deterministic result comes first and the layer may only add a PERSON span where no finding lies.
+`bench/ner/hook_experiment.py` sends 395 tool results (the bank's dev cases, 200 Nemotron val cases of the V3 sample,
+120 developer texts; 669 KB) through the real PostToolUse hook of 0.7.3, each run in a new temp home. One time budget
+of 300 ms per hook call, not per scan: a hook call scans about five texts (the output, its parts, the name
+check), and a budget per scan let one call wait 1.6 s.
+
+| Proof | Result (int8, under load) |
+|---|---|
+| The layer installed and switched off answers byte for byte as without it | yes, 395 of 395 |
+| The service 2 s slow: every answer as without the layer | 395 of 395; the slowest call 339 ms |
+| The service dies after 20 requests: every answer as without it, no error text | 395 of 395; the slowest call 107 ms |
+| The service answers nonsense | 395 of 395 |
+| The layer on: every placeholder type of the answer without the layer is still there | yes, in all 395 |
+| The layer on: deterministic hits left in the text the model gets, beyond the answer without the layer | 1 (`de-tax-id`); the value is plain text in both answers, so no leak |
+| The layer on: names added | 48, with 557 of 1,975 scans out of time under the load |
+
+So the layer cannot make a finding worse, a slow, failing or broken service changes nothing, and switched off it is
+invisible. The cost multiplier is the number of scans per hook call (about five), which a product would cut to one
+request per call.
+
+### B6: packaging
+
+A second environment (no package goes into the plugin folder), measured with a fresh venv per Python:
+
+- onnxruntime 1.31 needs Python 3.11 or newer; it has wheels for macOS arm64, Linux x86_64 and aarch64 (glibc 2.28)
+  and Windows amd64 and arm64. No 1.31 wheel for macOS x86_64.
+- Python 3.9 gets onnxruntime 1.19.2, which runs the model. Python 3.15 has no wheel yet.
+- The environment is about 175 MB, plus 135 MB for the int8 model.
+- Offline: a run with the network blocked in the process made 0 network attempts on 3.9, 3.11 and 3.14.
+
+### Open after this block
+
+- int8 on the developer bank and on the V3 datasets (runs started 2026-10-21);
+- B4 on a quiet machine, for fp32 and int8.
+
 ## Repeat
 
 ```bash
