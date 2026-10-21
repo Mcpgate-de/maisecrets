@@ -55,6 +55,13 @@ setting was fixed before D's first measurement; nothing else in this section cha
 English. `aggregation_strategy="simple"` returns pieces of words. **D2** is D with `aggregation_strategy="first"`, which
 keeps whole words: a choice made on `dev`, as the rules allow.
 
+**Added after the results above, on the maintainer's question why DistilBERT finds only about half of the names on
+Gretel and Privy (2026-10-21):** candidate **D3**, the model and the setting of the support-copilot's NER layer:
+`Davlan/distilbert-base-multilingual-cased-ner-hrl` at `d421f57d` (licence AFL-3.0, ten languages), aggregation
+`simple`, each span widened to whole words (`hf:<dir>::snap`). Fixed before its first measurement; run on the samples
+and then on Privy (sample and full). Privy results of the other candidates were known when D3 was chosen; it was not
+chosen from them.
+
 **Data and splits.** The four PII datasets of Benchmark V1 with the case hashes of the 0.7.3 snapshot: the fixed sample
 of 1 in 50 for every variant, and each dataset in full for the baseline, A and B (C on the sample only: about 0.1 to
 0.5 s per document). The bank and the catalogs are left out (6 and 0 names). No threshold or setting is chosen from a
@@ -85,7 +92,7 @@ C, C-high, D, D2); the baseline is run again in this tree; in full: the baseline
 Raw results, analysis and every table: `bench/results/2026-10-21-ner/` (`runs/<variant>/`, `privy/<variant>/`,
 `analysis/`; `analysis/tables.md` has all tables of this section and more). The baseline of this tree gives the same
 outcome for every span as the 0.7.3 snapshot on all eight files (the four datasets in full and on the sample); its
-full-run files are therefore not repeated here. All 52 result files name a clean benchmark tree.
+full-run files are therefore not repeated here. All 58 result files name a clean benchmark tree.
 
 **The samples of 1 in 50 are all `dev`**: V1 derives the split and the sample from the same sha256 of the case id, so
 the sample holds no `val` and no holdout case. `val` appears only in the full runs of A and B, as totals.
@@ -93,47 +100,60 @@ the sample holds no `val` and no holdout case. `val` appears only in the full ru
 ### The answers
 
 1. **How much of the name gap closes?** On the development samples the layer turns 72 % (spaCy sm) to 86 % (GLiNER)
-   of the names 0.7.3 leaves partial or missed into whole names (1,206 of 5,604 whole before). On Privy, which nobody
-   read, it is 16 % (spaCy sm), 27 % (spaCy lg), 52 % (DistilBERT, whole words) and 96 % (GLiNER) of the 7,809 names
-   0.7.3 does not mask whole.
-2. **The best trade-off is DistilBERT with whole words (D2).** On Privy it raises whole names from 312 to 4,345 of
-   8,121 for 283 more false positives (PII F1 0.31 → 0.63); spaCy lg reaches 2,439 for 4,744 more, GLiNER 7,812 for
-   31,138 more. On the development samples D2 adds 1,335 false positives for 3,470 more whole names; spaCy lg 3,123
-   for 3,447; GLiNER 6,122 for 3,761. D2 also has the smallest cost of the transformer models: 0.6 GB, 62 ms median
-   per document.
+   of the names 0.7.3 leaves partial or missed into whole names (1,206 of 5,604 whole before); D3 77 %. On Privy,
+   which nobody read, it is 16 % (spaCy sm), 27 % (spaCy lg), 52 % (D2), 62 % (D3) and 96 % (GLiNER) of the 7,809
+   names 0.7.3 does not mask whole.
+2. **The best trade-off is the multilingual DistilBERT with whole words (D3)**, the model of the support-copilot. On
+   Privy it raises whole names from 312 to 5,157 of 8,121 for 413 more false positives (PII F1 0.31 → 0.67); D2 reaches
+   4,345 for 283 more, spaCy lg 2,439 for 4,744 more, GLiNER 7,812 for 31,138 more. On the development samples D3 adds
+   913 false positives for 3,372 more whole names; D2 1,335 for 3,470; spaCy lg 3,123 for 3,447; GLiNER 6,122 for
+   3,761. D3 is also the cheapest transformer: 0.7 GB, 33 ms median and 88 ms p95 per document.
 3. **Recall on the known datasets** (whole names, samples): 21.5 % → 78.0 % (spaCy sm), 83.0 % (spaCy lg), 88.6 %
-   (GLiNER 0.5), 83.4 % (D2). In full, spaCy lg: Nemotron 29.2 % → 91.5 %, Gretel 12.7 % → 58.4 %, Mendeley 19.1 % →
-   95.1 %, PIILO 7.2 % → 80.1 %; on `val` the same as on `dev` (13,463 → 49,724 of 59,339 against 39,726 → 149,952 of
-   178,624).
-4. **Recall on Privy (totals only):** whole names 3.8 % → 19.6 % (A), 30.0 % (B), 96.2 % (C), 53.5 % (D2); on the
-   sample also C-high 99.0 % and D 55.5 %.
+   (GLiNER 0.5), 83.4 % (D2), 81.7 % (D3). In full, spaCy lg: Nemotron 29.2 % → 91.5 %, Gretel 12.7 % → 58.4 %,
+   Mendeley 19.1 % → 95.1 %, PIILO 7.2 % → 80.1 %; on `val` the same as on `dev` (13,463 → 49,724 of 59,339 against
+   39,726 → 149,952 of 178,624).
+4. **Recall on Privy (totals only):** whole names 3.8 % → 19.6 % (A), 30.0 % (B), 96.2 % (C), 53.5 % (D2), 63.5 %
+   (D3); on the sample also C-high 99.0 % and D 55.5 %.
 5. **Real false positives:** the counts above are what the scoring calls a false positive. Part of them are names the
-   datasets do not label: of the D2 false positives in the family "rest" on `dev`, 608 of 1,008 are a PERSON for
-   spaCy lg too. The rest is the price: on English running text (Nemotron) D2 adds 140 false positives for 1,788 more
-   whole names, on Gretel's other languages 361 for 250.
+   datasets do not label: of D3's 868 false positives in the family "rest" on `dev`, 751 are a PERSON for spaCy lg
+   too (738 of the 868 on Mendeley, whose documents name more people than it labels). On English running text
+   (Nemotron) D3 adds 38 false positives for 1,743 more whole names, on Gretel's other languages 44 for 234.
 6. **The false-positive families** (below): GLiNER marks pronouns (1,332) and lower-case role nouns (1,333), words at
    a sentence start (954) and role or title words (570); DistilBERT with `simple` aggregation returns pieces of words
    (1,868); spaCy masks running text in German, Dutch, Italian and Swedish (on Gretel in full 100,345 of spaCy lg's
-   108,953 added false positives), record fields and sentence starts. D2's are mostly capitalised words the other
-   model also calls a person, and sentence starts.
+   108,953 added false positives), record fields and sentence starts. D2's and D3's are mostly capitalised words the
+   other model also calls a person, and sentence starts.
 7. **Is an optional layer sensible?** Technically yes: it never made a span worse (0 in all files), it adds only, and
-   it runs offline in its own process. As a product, only as an opt-in with a clear scope: English running text is
-   where it works (Nemotron, Privy); text in other languages and record fields cost more than they give, and the
-   layer needs 0.6 to 3.5 GB of memory and a second Python environment.
+   it runs offline in its own process. As a product, only as an opt-in with a clear scope (the languages measured,
+   below) and a simple install; record fields stay a weak spot of every model (D3: 14 → 144 of 295).
 8. **Recommendation: keep it experimental now, and make it an optional feature when the open points below are
    closed.** Not on by default. GLiNER only as a later candidate for an explicit high-recall mode: it finds almost
-   every name, at 4.6 times the false positives of D2 on the samples and 110 times on Privy, and 3.5 GB.
+   every name, at 6.7 times the false positives of D3 on the samples and 75 times on Privy, and 3.5 GB.
 9. **What a product would need** (none of it done here; each is the maintainer's decision): a second-layer seam in
    `Detector` (a public API change, approval needed); an installable extra outside the plugin folder, since the plugin
-   installs no package at run time (`docs/REPO-STANDARDS.md`) and torch alone is 587 MB; a pinned model with its sha256
-   and an offline cache; a size limit or chunk budget per hook call (1 MB took 52 s with D2, and 15 to 17 s and 3.4
-   to 4.4 GB of memory with spaCy); and a fail-safe that keeps the deterministic findings when the layer is missing, fails or
-   times out.
+   installs no package at run time (`docs/REPO-STANDARDS.md`) and torch alone is 587 MB (an ONNX runtime with a
+   quantised model may be far smaller; not measured); one install step with a pinned model and its sha256, served
+   from a place a company proxy allows; a size limit or chunk budget per hook call (1 MB took 36 s with D3, and 15
+   to 17 s and 3.4 to 4.4 GB of memory with spaCy); and a fail-safe that keeps the deterministic findings when the
+   layer is missing, fails or times out.
 10. **Open questions:** false positives in developer text (the false-alarm bank of seven code trees was not measured
-    with a layer; it is the text maisecrets sees most); a multilingual model of D2's cost (Gretel's other languages);
-    the cost inside a real hook (the latency budget of a prompt and of a tool result, Windows, memory next to the
-    client); the holdout V2 for a release candidate; and whether names in record fields should stay with the
-    deterministic record layer (category C) instead.
+    with a layer; it is the text maisecrets sees most); languages outside the data (below); why every model masks
+    only about half of Gretel's names in running text (D3: 278 of 730); the cost inside a real hook (the latency
+    budget of a prompt and of a tool result, Windows, memory next to the client); an ONNX build; the holdout V2 for a
+    release candidate; and whether names in record fields should stay with the deterministic record layer
+    (category C) instead.
+
+### Languages
+
+The data covers English (Nemotron, Mendeley, PIILO, most of Gretel) and, in Gretel, German, Spanish, French, Italian,
+Dutch and Swedish; Privy's languages are not known here (its cases are not read). D3 was trained on ten languages
+(its model card: Arabic, German, English, Spanish, French, Italian, Latvian, Dutch, Portuguese, Chinese). Measured
+with it, Gretel sample, whole names and added false positives: English 360 of 547, +37; German 62 of 170, +11;
+Spanish 67 of 139, +6; French 24 of 65, +10; Italian 60 of 132, +5; Dutch 46 of 169, +9; Swedish (not in its training
+data) 55 of 187, +3. Nothing here says how any model does in Polish, Czech, Russian, Turkish, or in Arabic, Chinese or
+Japanese script. A product would name the languages it measured; elsewhere the deterministic core works as today. The
+deterministic core itself is already uneven: emails, IBANs, cards and tokens do not depend on the language, its
+name and address rules do.
 
 ### Names, false positives and precision
 
@@ -148,6 +168,7 @@ Samples of 1 in 50, all `dev`. Cells: whole names (share of the names), false po
 | + C-high GLiNER 0.3 | 2,540 (94.2 %), 2,010, 0.711 | 991 (70.3 %), 1,889, 0.458 | 1,466 (98.7 %), 1,272, 0.779 | 13, 2,766, 0.005 |
 | + D DistilBERT | 2,521 (93.5 %), 329, 0.944 | 702 (49.8 %), 1,681, 0.567 | 1,426 (96.0 %), 749, 0.856 | 6, 91, 0.099 |
 | + D2 DistilBERT, whole words | 2,531 (93.9 %), 140, 0.970 | 713 (50.6 %), 570, 0.728 | 1,426 (96.0 %), 575, 0.882 | 6, 50, 0.138 |
+| + D3 multilingual DistilBERT, whole words | 2,486 (92.2 %), 38, 0.990 | 674 (47.8 %), 81, 0.918 | 1,410 (94.9 %), 746, 0.856 | 8, 48, 0.172 |
 
 PIILO labels only the students' names in essays; every other person in them counts as a false positive, so its
 precision says little. Mendeley marks company names as neutral spans; a PERSON on one is neither right nor wrong.
@@ -158,11 +179,11 @@ and +5,863; Gretel 9,801 → 40,706 and 45,042 of 77,117, +130,444 and +108,953;
 
 **Spans made worse: 0** for every variant on every file. PERSON spans dropped because they overlapped a deterministic
 finding (samples and full runs): A 65,252, B 71,551 (most on a name or an address maisecrets found), C 1,637, C-high
-1,822, D 1,959, D2 1,058.
+1,822, D 1,959, D2 1,058, D3 1,069.
 
 **Running text and record fields** (samples, whole names before → after, of all): running text without a cue
-498 → 2,800 of 3,349 with D2 (B 2,712, C 2,931); after a person cue 315 → 1,059 of 1,134; record fields 14 → 142 of 295
-(C 207).
+498 → 2,800 of 3,349 with D2 (D3 2,737, B 2,712, C 2,931); after a person cue 315 → 1,059 of 1,134; record fields
+14 → 142 of 295 (D3 144, C 207).
 
 **By language** (Gretel sample, whole names before → after, added false positives), D2: English 109 → 383 of 547, 209;
 German 11 → 74 of 170, 82; Spanish 21 → 55 of 139, 38; French 7 → 24 of 65, 45; Italian 17 → 61 of 132, 33; Dutch
@@ -184,6 +205,7 @@ truth; for B it is the same model and says nothing).
 | C-high GLiNER 0.3 | 145 | 77 | 62 | 1,137 | 687 | 5,829 | 0 | 1,680 | 2,013 | 848 | 270 |
 | D DistilBERT | 65 | 3 | 3 | 320 | 0 | 2,459 | 1,868 | 1 | 20 | 497 | 13 |
 | D2 DistilBERT, whole words | 38 | 1 | 0 | 278 | 10 | 1,008 | 28 | 1 | 40 | 608 | 35 |
+| D3 multilingual DistilBERT, whole words | 3 | 0 | 0 | 34 | 8 | 868 | 0 | 0 | 0 | 751 | 31 |
 
 ### Privy, the independent check (totals only)
 
@@ -198,48 +220,49 @@ precision is low for maisecrets alone because Privy does not label several class
 | + B spaCy lg | 2,439 (30.0 %) | 541 | 8,088 (+4,744) | 0.429 | 0.399 | 0.414 |
 | + C GLiNER 0.5 | 7,812 (96.2 %) | 31 | 34,482 (+31,138) | 0.910 | 0.229 | 0.366 |
 | + D2 DistilBERT, whole words | 4,345 (53.5 %) | 137 | 3,627 (+283) | 0.599 | 0.655 | 0.626 |
+| + D3 multilingual DistilBERT, whole words | 5,157 (63.5 %) | 119 | 3,757 (+413) | 0.671 | 0.672 | 0.671 |
 
 On the Privy sample (595 cases, 191 names): C-high 189 names for +1,025 false positives; D 106 for +41; D2 112 for
-+9; B 54 for +99; A 32 for +71; C 187 for +597.
++9; B 54 for +99; A 32 for +71; C 187 for +597; D3 133 for +7.
 
 ### Cost
 
 One process per candidate on an idle machine (Apple M5, CPU only), 300 documents of the samples (319 KB),
 `bench/ner/perf.py`:
 
-| | A spaCy sm | B spaCy lg | C GLiNER 0.5 | D2 DistilBERT |
-|---|---:|---:|---:|---:|
-| Model load | 0.39 s | 0.77 s | 7.0 s | 2.3 s |
-| Cold start to the first result | 0.40 s | 0.78 s | 7.1 s | 2.6 s |
-| Per document, median / 95th percentile | 12 / 38 ms | 14 / 43 ms | 152 / 411 ms | 62 / 263 ms |
-| Throughput | 63 KB/s | 56 KB/s | 5.6 KB/s | 11.6 KB/s |
-| Memory after load / after the documents | 137 / 168 MB | 753 / 779 MB | 3,510 / 3,510 MB | 333 / 614 MB |
-| One input of 1 MB | 15 s, peak 3.4 GB | 17 s, peak 4.4 GB | 204 s | 52 s |
-| 1,000 calls of one short text, median / 95th | 1.7 / 1.8 ms | 1.9 / 2.2 ms | 44 / 50 ms | 9.9 / 13 ms |
-| Model on disk | 15 MB | 428 MB | 1.1 GB | 250 MB |
-| Environment on disk | 587 MB (spaCy, both models) | the same | 928 MB (torch 587 MB) | the same as C |
+| | A spaCy sm | B spaCy lg | C GLiNER 0.5 | D2 DistilBERT | D3 multilingual DistilBERT |
+|---|---:|---:|---:|---:|---:|
+| Model load | 0.39 s | 0.77 s | 7.0 s | 2.3 s | 1.8 s |
+| Cold start to the first result | 0.40 s | 0.78 s | 7.1 s | 2.6 s | 1.8 s |
+| Per document, median / 95th percentile | 12 / 38 ms | 14 / 43 ms | 152 / 411 ms | 62 / 263 ms | 33 / 88 ms |
+| Throughput | 63 KB/s | 56 KB/s | 5.6 KB/s | 11.6 KB/s | 26.2 KB/s |
+| Memory after load / after the documents | 137 / 168 MB | 753 / 779 MB | 3,510 / 3,510 MB | 333 / 614 MB | 351 / 668 MB |
+| One input of 1 MB | 15 s, peak 3.4 GB | 17 s, peak 4.4 GB | 204 s | 52 s | 36 s |
+| 1,000 calls of one short text, median / 95th | 1.7 / 1.8 ms | 1.9 / 2.2 ms | 44 / 50 ms | 9.9 / 13 ms | 5.9 / 6.6 ms |
+| Model on disk | 15 MB | 428 MB | 1.1 GB | 250 MB | 515 MB |
+| Environment on disk | 587 MB (spaCy, both models) | the same | 928 MB (torch 587 MB) | the same as C | the same as C |
 
 The deterministic core alone takes 0.25 to 9.8 ms per case (the snapshot). A reused model keeps its speed and its
 memory over 1,000 calls; spaCy's memory jumps on one large input, so a layer would need a chunk budget.
 
 ### The three modes
 
-| | A: deterministic only (0.7.3) | B: + optional local PERSON layer (D2) | C: high-recall mode (GLiNER) |
+| | A: deterministic only (0.7.3) | B: + optional local PERSON layer (D3) | C: high-recall mode (GLiNER) |
 |---|---|---|---|
-| Names on Privy | 3.8 % whole | 53.5 % | 96.2 % |
-| Names on the samples | 21.5 % | 83.4 % | 88.6 % |
-| Added false positives (Privy / samples) | – | +283 / +1,335 | +31,138 / +6,122 |
-| Time per document | 0.25 to 9.8 ms | + 62 ms median, 263 ms p95 | + 152 ms median, 411 ms p95 |
-| Memory | the hook process | + 0.6 GB | + 3.5 GB |
-| Distribution | the plugin, standard library only | a second environment with torch and a pinned model (about 1.2 GB), installed by choice | the same, 2 GB |
+| Names on Privy | 3.8 % whole | 63.5 % | 96.2 % |
+| Names on the samples | 21.5 % | 81.7 % | 88.6 % |
+| Added false positives (Privy / samples) | – | +413 / +913 | +31,138 / +6,122 |
+| Time per document | 0.25 to 9.8 ms | + 33 ms median, 88 ms p95 | + 152 ms median, 411 ms p95 |
+| Memory | the hook process | + 0.7 GB | + 3.5 GB |
+| Distribution | the plugin, standard library only | a second environment with torch and a pinned model (about 1.4 GB), installed by choice | the same, 2 GB |
 | Data protection | local | local, offline (no network at run time, measured) | local, offline |
 | Offline | yes | yes, after a one-time model download | the same |
 | Maintenance | the rules | plus model and torch updates, a second test matrix | the same, and a threshold to keep |
-| Licence | Apache-2.0 project | Apache-2.0 model, CoNLL-2003 training data (Reuters, research use; to check before shipping) | Apache-2.0 model and encoder |
-| Effect for a user | no names in running text | most English names in prose; slower calls; a larger install | almost every name; many pronouns, role words and sentence starts masked |
+| Licence | Apache-2.0 project | AFL-3.0 model (to check before shipping, as its training data) | Apache-2.0 model and encoder |
+| Effect for a user | no names in running text | most names in prose, in the languages measured; slower calls; a larger install | almost every name; many pronouns, role words and sentence starts masked |
 
-**Decision rule of the task, applied:** D2 reduces the name gap substantially (Privy 3.8 % → 53.5 %), its precision
-cost is small on English text and on Privy, it never changed a deterministic finding, it runs offline and it can stay
+**Decision rule of the task, applied:** D3 reduces the name gap substantially (Privy 3.8 % → 63.5 %), its precision
+cost is small on running text in the measured languages and on Privy, it never changed a deterministic finding, it runs offline and it can stay
 optional. Operationally it is not yet acceptable as a feature: the cost inside a hook, developer text and the
 packaging are open (answer 10). So: experimental, with a product prototype as the next step, if the maintainer
 wants one.
@@ -256,8 +279,10 @@ HF_HOME=hf ner-torch/bin/python -c "from huggingface_hub import snapshot_downloa
 d('urchade/gliner_multi-v2.1', revision='443d26d654e0324125a96bebd8e796c14ff2efe6')
 d('microsoft/mdeberta-v3-base', revision='a0484667b22365f84929a935b5e50a51f71f159d',
   allow_patterns=['config.json', 'spm.model', 'tokenizer_config.json'])
-d('dslim/distilbert-NER', revision='dfa2838a127384aabb82ed7719e16dab84c42a2a')"
+d('dslim/distilbert-NER', revision='dfa2838a127384aabb82ed7719e16dab84c42a2a')
+d('Davlan/distilbert-base-multilingual-cased-ner-hrl', revision='d421f57d5b1d36b375408588669e9340f9b11a89')"
 # one variant on one dataset; BENCH_NER: spacy:en_core_web_sm | spacy:en_core_web_lg | gliner:<dir>:0.5 | hf:<dir>::first
+# | hf:<dir>::snap (D3)
 HF_HOME=hf BENCH_NER_PYTHON=ner-torch/bin/python BENCH_NER=hf:<model dir>::first \
   BENCH_NER_SIDECAR=OUT/nemotron-all-every50-ner.jsonl \
   python3 bench/run.py --scanner maisecrets_ner --maisecrets ../ms-0.7.3 --source nemotron --split all --every 50 \

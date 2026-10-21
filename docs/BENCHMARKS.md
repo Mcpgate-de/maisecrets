@@ -66,10 +66,10 @@ false-alarm risk.
 
 ## An optional PERSON layer, measured as an experiment (2026-10-21)
 
-`docs/NER-EXPERIMENT.md` measures four local NER models as a second layer after the deterministic detector of 0.7.3,
+`docs/NER-EXPERIMENT.md` measures five local NER models as a second layer after the deterministic detector of 0.7.3,
 on the same cases as the snapshot above and on Privy (totals only); nothing of it is in the plugin. On Privy, a
-DistilBERT token classifier with whole words raises whole names from 312 to 4,345 of 8,121 for 283 more false
-positives; GLiNER reaches 7,812 for 31,138 more. No deterministic span got worse. Recommendation: experimental for
+multilingual DistilBERT token classifier with whole words raises whole names from 312 to 5,157 of 8,121 for 413 more
+false positives; GLiNER reaches 7,812 for 31,138 more. No deterministic span got worse. Recommendation: experimental for
 now; the cost inside a hook, developer text and the packaging are open.
 
 ## Rule changes measured with Benchmark V1

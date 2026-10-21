@@ -7,7 +7,7 @@ from pathlib import Path
 
 S = Path(sys.argv[1])
 VARIANTS = [("A", "spaCy sm"), ("B", "spaCy lg"), ("C", "GLiNER 0.5"), ("Chigh", "GLiNER 0.3"), ("D", "DistilBERT"),
-            ("D2", "DistilBERT, whole words")]
+            ("D2", "DistilBERT, whole words"), ("D3", "multilingual DistilBERT, whole words")]
 SRC = ["nemotron", "gretel", "mendeley", "piilo"]
 
 
