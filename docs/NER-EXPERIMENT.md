@@ -296,6 +296,7 @@ as V3 counts it.
 |---|---:|---:|---:|---|
 | Privy, 1 in 10 (796 names) | 35 | 507 | 508 | 0.992 / 0.932 / 0.935 |
 | Nemotron `val` (1,159) | 338 | 1,043 | 1,042 | 0.996 / 0.993 / 0.991 |
+| Nemotron holdout split (1,293) | 353 | 1,201 | 1,207 | 0.996 / 0.991 / 0.993 |
 | Gretel `val` (668) | 83 | 313 | 321 | 0.913 / 0.912 / 0.919 |
 | Gretel holdout split (620) | 86 | 251 | 257 | 0.915 / 0.928 / 0.924 |
 | Mendeley `val` (633) | 126 | 605 | 611 | 0.990 / 0.856 / 0.856 |
@@ -308,7 +309,9 @@ as V3 counts it.
 - **Mendeley:** the layer adds about 330 false positives per split. In the first experiment 738 of D3's 868 such false
   positives on Mendeley were a PERSON for spaCy too: names the dataset does not label.
 - Nemotron's holdout split: the first runs of both models failed on one document of 528 word pieces (the model reads
-  512). The worker now cuts such a piece (`a5fd1ff3`); the run is repeated.
+  512). The worker now cuts such a piece (`a5fd1ff3`), and the row above is the run after the fix.
+- **Privy in full** (8,121 names, totals only): fp32 ONNX 5,157 names whole, the same number as D3 with torch; int8
+  5,161. PII recall 0.671 for both; precision (V3) 0.941 (fp32) and 0.952 (int8), against 0.992 without the layer.
 
 ### B3: developer text (the false-alarm bank)
 
@@ -383,9 +386,9 @@ the same unit. RAM and latency: one model process; the times of the torch models
 | Option | Recall (Privy names whole / PII) | Precision (Privy PII, V3) | Developer FP | RAM | Latency per document | Install size | Complexity | Recommendation |
 |---|---|---|---|---|---|---|---|---|
 | Deterministic only (0.7.3) | 4.4 % / 0.225 | 0.992 | – (the rules' own bank) | the hook process | 0.25–9.8 ms | the plugin, standard library | low | the default, unchanged |
-| + D3 (torch) | 63.5 % (full Privy) | – | as fp32 ONNX (the same spans) | 0.7 GB | 33 ms median, 88 ms p95 | about 1.4 GB (torch 587 MB) | high | no: ONNX gives the same spans without torch |
-| + D3 ONNX fp32 | 63.7 % / 0.664 | 0.932 | 235 | not measured quietly | not measured quietly | about 175 MB + 539 MB | medium | no: int8 is as accurate at a quarter of the model |
-| + D3 ONNX int8 | 63.8 % / 0.665 | 0.935 | 228 (5 in logs) | 0.4 GB | 25 ms median (loaded machine), load 0.17 s | about 175 MB + 135 MB | medium | **opt-in prototype** |
+| + D3 (torch) | 63.5 % (full Privy) | as fp32 ONNX | as fp32 ONNX (the same spans) | 0.7 GB | 33 ms median, 88 ms p95 | about 1.4 GB (torch 587 MB) | high | no: ONNX gives the same spans without torch |
+| + D3 ONNX fp32 | 63.7 % / 0.664 (full: 63.5 % / 0.671) | 0.932 (full: 0.941) | 235 | not measured quietly | not measured quietly | about 175 MB + 539 MB | medium | no: int8 is as accurate at a quarter of the model |
+| + D3 ONNX int8 | 63.8 % / 0.665 (full: 63.6 % / 0.671) | 0.935 (full: 0.952) | 228 (5 in logs) | 0.4 GB | 25 ms median (loaded machine), load 0.17 s | about 175 MB + 135 MB | medium | **opt-in prototype** |
 | + GLiNER (high recall) | 96.2 % (full Privy) | – | not measured | 3.5 GB | 152 ms median, 411 ms p95 | about 2 GB | high | not now: 75 times D3's false positives on Privy |
 
 ### The answers
@@ -424,8 +427,6 @@ the same unit. RAM and latency: one model process; the times of the torch models
 
 ### Open after this block
 
-- Nemotron's holdout split with both models, and the full Privy runs again on a clean benchmark tree (the first
-  ones carry `bench_dirty`);
 - B4 on a quiet machine, for fp32 and int8.
 
 ## Repeat
