@@ -28,7 +28,8 @@ sys.path.insert(0, str(ROOT))
 from bench import cases as casefmt  # noqa: E402
 from bench import score, sources  # noqa: E402
 
-ADAPTERS = ("maisecrets", "detect_secrets", "secret_scan", "pii_anon", "preserve", "presidio", "maisecrets_ner")
+ADAPTERS = ("maisecrets", "detect_secrets", "secret_scan", "pii_anon", "preserve", "presidio", "maisecrets_ner",
+            "ai_gateway")
 HOLDOUT_LOG = ROOT / "bench" / "HOLDOUT-LOG.md"
 MANIFEST = ROOT / "bench" / "holdout.manifest"
 
@@ -67,8 +68,11 @@ def release_candidate(checkout: Path) -> str:
     return head
 
 
-def in_sample(case_id: str, every: int) -> bool:
-    return every <= 1 or int(hashlib.sha256(case_id.encode()).hexdigest()[:8], 16) % every == 0
+def in_sample(case_id: str, every: int, salt: str = "") -> bool:
+    """The fixed sample: sha256 of the id modulo `every`. Without a salt it is the hash of the split rule
+    (bench/cases.py, split_of) taken modulo a multiple of 10, so every sample of V1 and V2 lies in `dev` alone; the
+    salt of Benchmark V3 makes the sample independent of the split (2026-10-21)."""
+    return every <= 1 or int(hashlib.sha256((salt + case_id).encode()).hexdigest()[:8], 16) % every == 0
 
 
 def _git(*args) -> str:
@@ -141,6 +145,8 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=int, default=0, help="read at most N records of a dataset (a quick run)")
     ap.add_argument("--every", type=int, default=1, help="a fixed sample: keep a case when sha256 of its id is a "
                     "multiple of N (the same cases for every scanner)")
+    ap.add_argument("--sample-salt", default="", help="Benchmark V3: a salt for --every, so the sample does not "
+                    "follow the split (V3 uses v3/)")
     ap.add_argument("--out", type=Path)
     a = ap.parse_args(argv)
 
@@ -161,7 +167,7 @@ def main(argv=None) -> int:
             raise SystemExit(f"refused: {e}") from None
     else:
         selected = [c for c in sources.load(a.source, a.data, a.catalogs, a.limit, stats)
-                    if (a.split == "all" or c["split"] == a.split) and in_sample(c["id"], a.every)]
+                    if (a.split == "all" or c["split"] == a.split) and in_sample(c["id"], a.every, a.sample_salt)]
     adapter = importlib.import_module(f"bench.adapters.{a.scanner}")
     if a.scanner in ("maisecrets", "maisecrets_ner"):
         desc = adapter.describe(a.maisecrets.resolve(), a.regions)
@@ -175,12 +181,16 @@ def main(argv=None) -> int:
         "date": datetime.date.today().isoformat(), "bench_commit": _commit(), "bench_dirty": _dirty(),
         "scanner": desc, "source_meta": source_meta(selected), "cases_sha256": cases_hash(selected),
         "source": a.source, "split": a.split, "limit": a.limit, "every": a.every, "cases": len(selected),
+        **({"sample_salt": a.sample_salt} if a.sample_salt else {}),
         "dataset_stats": dict(stats),
         "metrics": score.aggregate(results),
         "by_region": score.aggregate(results, lambda c, s: f"{c.get('region', '-')}/{s['class']}"),
         "by_context": score.aggregate(results, lambda c, s: f"{c['context']}/{s['class']}"),
         "timing": timing_summary(timing, sum(sc["bytes"] for _, sc in results)),
     }
+    if a.split != "holdout":
+        from bench import v3
+        out["v3"] = v3.metrics(a.source, results)      # Benchmark V3: precision only where the source labels it
     if holdout:
         out.pop("by_region")
         out.pop("by_context")

@@ -1,6 +1,7 @@
 """Benchmark V1 (docs/BENCHMARK-V1.md): the case format, the marks of the bank and the span metric."""
 from __future__ import annotations
 
+import collections
 import contextlib
 import io
 import json
@@ -363,7 +364,8 @@ class AdapterInventoryTests(unittest.TestCase):
         for name in run.ADAPTERS:
             # maisecrets_ner is maisecrets plus the NER experiment's layer: its environments are pinned per backend
             # (NerLayerTests)
-            if name in ("maisecrets", "maisecrets_ner"):
+            # ai_gateway is a consumer measured from its own checkout at a commit (bench/adapters/ai_gateway.py)
+            if name in ("maisecrets", "maisecrets_ner", "ai_gateway"):
                 continue
             with self.subTest(adapter=name):
                 mod = importlib.import_module(f"bench.adapters.{name}")
@@ -759,6 +761,50 @@ class NerLayerTests(unittest.TestCase):
         self.assertEqual([(0, 7, "pii.name", "rule"), (12, 18, "pii.name", "ner:person")], found[0])
         self.assertEqual([], found[1])
         self.assertEqual([0.30000000000000004, 0.30000000000000004], timing["times_s"])
+
+
+class BenchmarkV3Tests(unittest.TestCase):
+    """bench/v3.py: precision counts a false positive only where the source labels its class (docs/BENCHMARK-V3.md)."""
+
+    def test_the_committed_scope_is_the_one_the_label_mapping_gives(self):
+        from bench import v3
+        committed = json.loads((ROOT / "bench" / "v3_scope.json").read_text(encoding="utf-8"))
+        self.assertEqual(json.loads(json.dumps(v3.inventory())), committed)
+        self.assertNotIn("pii.email", committed["privy"]["scored"])
+        self.assertNotIn("pii.iban", committed["privy"]["scored"])      # reached only by retyping
+        self.assertIn("pii.name", committed["privy"]["scored"])
+
+    def test_a_false_positive_counts_only_in_a_class_and_shape_the_source_labels(self):
+        from bench import v3
+        scope = v3.inventory()
+        ssn = "-".join(("536", "22", "8726"))
+        self.assertFalse(v3.scored("privy", scope, "pii.email", "a@example.com"))
+        self.assertFalse(v3.scored("privy", scope, "pii.national_id", ssn))
+        self.assertTrue(v3.scored("privy", scope, "pii.national_id", "X1234567"))
+        self.assertTrue(v3.scored("privy", scope, "secret.token", "abc"))      # Privy labels passwords: secrets count
+        self.assertFalse(v3.scored("mendeley", scope, "secret.token", "abc"))  # Mendeley labels no secret
+        self.assertTrue(v3.scored("bank", scope, "pii.email", "a@example.com"))  # written here: every class
+
+    def test_the_v3_sample_does_not_follow_the_split_and_the_old_one_does(self):
+        # V1 and V2 took sha256(id) % 50 and the split takes the same hash % 10: every old sample was `dev` alone
+        from bench import run
+        old, new = collections.Counter(), collections.Counter()
+        for i in range(20000):
+            split = cases.split_of("nemotron", str(i))
+            old[split] += run.in_sample(f"nemotron/{i}", 50)
+            new[split] += run.in_sample(f"nemotron/{i}", 50, "v3/")
+        self.assertEqual(0, old["val"] + old["holdout"])
+        self.assertGreater(old["dev"], 0)
+        self.assertGreater(new["val"], 0)
+        self.assertGreater(new["holdout"], 0)
+
+    def test_the_v3_block_splits_the_false_positives_and_keeps_the_hits(self):
+        from bench import v3
+        text = "mail a@example.com and name Ann Lee"
+        sc = {"on_target": {"pii": 1}, "fp_found": [(5, 18, "pii.email"), (28, 35, "pii.name")]}
+        m = v3.metrics("privy", [({"text": text}, sc)])
+        self.assertEqual({"on_target": 1, "fp": 1, "out_of_scope": {"pii.email": 1}, "precision": 0.5}, m["pii"])
+        self.assertEqual(1, m["all"]["fp"])
 
 
 class FunnelTests(unittest.TestCase):
