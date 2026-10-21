@@ -71,7 +71,7 @@ and 0.7.4 on an independent holdout (Holdout V2, 872 cases). Three corrections t
 
 - **The cross-scanner tables above compared on `dev` only.** The sample "1 in 50 by the sha256 of the case id" and the
   split rule use the same hash, so every sampled case was development data. On `val`, maisecrets has the same numbers
-  as on `dev` within two points (Nemotron PII R 0.597, P 0.995 in full), and the order of the tools stays.
+  as on `dev` within two points (Nemotron PII R 0.597, P 0.995 in full), and maisecrets keeps its place among the tools in recall and in precision on each dataset.
 - **Privy's precision of 0.448 was not maisecrets' precision.** 332 of 334 PII false positives on the V3 sample are
   in classes Privy's test split does not label in that form (e-mail, IP, IBAN); counted only in its labelled classes
   the precision is 0.977 in full.
