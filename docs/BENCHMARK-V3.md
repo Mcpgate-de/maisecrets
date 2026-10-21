@@ -125,6 +125,14 @@ V3 counts it**. Of the 334 PII false positives, 332 are in classes Privy's test 
 The split the rules were written from is at most one point better than the two others: no sign of overfitting to
 `dev`.
 
+### maisecrets 0.7.4, the release, in full (2026-10-22)
+
+The same run on the release `v0.7.4` (`4be44e60`) with the benchmark of `next` at `fbe306a7`, clean
+(`bench/results/2026-10-22-v3-0.7.4/`). Every number of the tables above is the same to three decimals. Per span
+against 0.7.3, in full: Nemotron `dev` 70, `val` 37 and holdout split 32 spans missed to whole, Gretel 14, 10 and 4;
+no span worse, no false positive more, and the other sources, Privy and the catalogs without a change. The
+difference is the phone number written as one run of digits (0.7.4).
+
 ### All scanners on the same salted samples (2026-10-21)
 
 The same run (`bench/run_all_v3.sh`, clean benchmark commits `704db2a0` to `a5fd1ff3`; between them only the NER
