@@ -374,12 +374,14 @@ check), and a budget per scan let one call wait 1.6 s.
 | The service dies after 20 requests: every answer as without it, no error text | 395 of 395; the slowest call 107 ms |
 | The service answers nonsense | 395 of 395 |
 | The layer on: every placeholder type of the answer without the layer is still there | yes, in all 395 |
-| The layer on: deterministic hits left in the text the model gets, beyond the answer without the layer | 1 (`de-tax-id`); the value is plain text in both answers, so no leak |
+| The layer on: a value of a deterministic hit in the text the model gets that the answer without the layer does not show in plain text | 0. A count of hits gave 1 (`de-tax-id`): that tax id is in plain text in both answers (the hook of 0.7.3 leaves it in that test home), and a rule with a context word finds it next to a new placeholder only. The experiment now compares the values, in memory |
 | The layer on: names added | 48, with 557 of 1,975 scans out of time under the load |
 | The same run at a load average of 4 to 5 | 94 names added, no scan out of time; a hook call takes 55 ms median, 210 ms p95, 235 ms at most (7.6 ms median without the layer); the other proofs as above |
 
 So the layer cannot make a finding worse, a slow, failing or broken service changes nothing, and switched off it is
-invisible. The cost multiplier is the number of scans per hook call (about five), which a product would cut to one
+invisible. `bench/ner/hook_experiment.py` exits with 1 when any of these promises fails (codex Gate A asked for it:
+the first version only wrote the numbers). Since codex Gate A, `install()` also gives each real hook call its one
+budget; before, the experiment set it by hand. The cost multiplier is the number of scans per hook call (about five), which a product would cut to one
 request per call.
 
 ### B6: packaging
