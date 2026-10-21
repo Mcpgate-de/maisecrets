@@ -666,6 +666,30 @@ class ReleaseCompareTests(unittest.TestCase):
         self.assertIn("partial spans 5 -> 7", text.split("compare_bench.py")[1])
 
 
+class HistoryTests(unittest.TestCase):
+    """bench/history.py: two runs on the same cases side by side, and runs on other cases left out."""
+
+    def test_the_change_per_class_and_group_and_no_comparison_of_other_cases(self):
+        from bench import history
+        with tempfile.TemporaryDirectory() as d:
+            for side, full, sha in (("a", 10, "x" * 64), ("b", 25, "x" * 64)):
+                p = Path(d) / side
+                p.mkdir()
+                metrics = {"pii": {"spans": 40, "full": full, "missed": 40 - full, "fp": 1, "precision": 0.9},
+                           "pii.name": {"spans": 40, "full": full, "missed": 40 - full}}
+                for name, h in (("nemotron-all-maisecrets.json", sha), ("gretel-all-maisecrets.json", side * 64)):
+                    (p / name).write_text(json.dumps({
+                        "scanner": {"version": side}, "cases_sha256": h, "source": name.split("-")[0], "split": "all",
+                        "every": 1, "cases": 4, "metrics": metrics}), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                history.main([str(Path(d) / "a"), str(Path(d) / "b")])
+        text = out.getvalue()
+        self.assertIn("| pii.name | 40 | 10 → 25 (+15) |", text)
+        self.assertIn("| names | 40 | 10 → 25 (+15) |", text)
+        self.assertIn("gretel-all-maisecrets.json\n\nThe cases differ", text)
+        self.assertEqual(1, text.count("## nemotron"))
+
+
 class FunnelTests(unittest.TestCase):
     """bench/funnel.py: each missed span gets one bucket by the text around it, and each bucket one category."""
 
