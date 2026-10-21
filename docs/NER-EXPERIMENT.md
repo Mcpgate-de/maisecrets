@@ -290,7 +290,7 @@ own below.
 
 `bench/ner/devtext.py` cuts the developer bank (`scripts/measure_fp_bank.py`'s trees and the tickets) into the
 categories below and counts each PERSON span the layer adds beyond the deterministic result, with a coarse label of
-its context. Counts only; no span is printed. D3 fp32:
+its context. Counts only; no span is printed. D3 as fp32 and as int8 ONNX:
 
 | Category | Added spans, fp32 | Added spans, int8 | Most of them (fp32) |
 |---|---:|---:|---|
@@ -301,8 +301,8 @@ its context. Counts only; no span is printed. D3 fp32:
 | Logs (2 MB) | 0 | 5 | |
 | Stack traces | 22 | 22 | prose of the message 21 |
 | Tickets | 6 | 6 | |
-| All | 235 | 228 | |
 | Technical documentation (2 MB) | 120 | 111 | comments 56, identifiers 36, prose 16, handles or URLs 11 |
+| All | 235 | 228 | |
 
 An author or copyright line names a real person, so a mask there is right for the layer and harmless for the code.
 The rest are false positives: capitalised identifiers and words in docstrings. int8 adds about as many (228 against
