@@ -1,0 +1,4 @@
+{
+ "_about": "Spans a decision made worse on purpose (scripts/compare_bench.py, docs/REGRESSION-POLICY.md). Each entry: file (a result file name), case (the case id), span (its index among the scored spans), reason, commit. An entry without a reason or a commit is a finding.",
+ "exceptions": []
+}
