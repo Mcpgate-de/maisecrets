@@ -50,7 +50,10 @@ already); Flair and BERT token classifiers (a transformer of the same cost as C 
 candidate **D**, DistilBERT, `dslim/distilbert-NER` at `dfa2838a` (Apache-2.0, 250 MB, trained on CoNLL-2003,
 English), run with transformers 5.16.1 and torch 2.14.1 in the GLiNER environment: the `token-classification`
 pipeline with `aggregation_strategy="simple"`, its `PER` entities, no threshold, the text in pieces of 100 tokens. The
-setting was fixed before D's first measurement; nothing else in this section changed.
+setting was fixed before D's first measurement; nothing else in this section changed. After D's samples (all `dev`):
+1,868 of its false positives in the family "rest" end inside a word, 1,348 of them on Gretel, the part that is not
+English. `aggregation_strategy="simple"` returns pieces of words. **D2** is D with `aggregation_strategy="first"`, which
+keeps whole words: a choice made on `dev`, as the rules allow.
 
 **Data and splits.** The four PII datasets of Benchmark V1 with the case hashes of the 0.7.3 snapshot: the fixed sample
 of 1 in 50 for every variant, and each dataset in full for the baseline, A and B (C on the sample only: about 0.1 to

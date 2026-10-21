@@ -3,10 +3,11 @@ in maisecrets, and sees one case per input line: the text and the spans the dete
 
     python -I person_worker.py IN OUT BACKEND
 
-BACKEND is `spacy:<model package>`, `gliner:<model directory>:<threshold>` or `hf:<model directory>` (a token
-classifier, its PER entities). The model reads the whole text, so its
-context is the same as without the layer; a PERSON span it returns is kept only when it overlaps no span of the
-deterministic detector (that span decided the text there; a finding is never made smaller, moved or retyped). OUT gets,
+BACKEND is `spacy:<model package>`, `gliner:<model directory>:<threshold>` or `hf:<model directory>[::<aggregation>]`
+(a token classifier, its PER entities; aggregation `simple` by default, `first` keeps whole words). The model reads the
+whole text, so its context is the same as without the layer; a PERSON span it returns is kept only when it overlaps no
+span of the deterministic detector (that span decided the text there; a finding is never made smaller, moved or
+retyped). OUT gets,
 per case, the kept spans `[start, end, score]` and the types of the deterministic findings a dropped span overlapped.
 stdout gets the timing and the memory. No network: the model is a local package or directory."""
 from __future__ import annotations
@@ -97,7 +98,9 @@ def load(backend: str):
         import torch
         import transformers
         torch.set_grad_enabled(False)
-        pipe = transformers.pipeline("token-classification", model=arg, aggregation_strategy="simple", device="cpu")
+        path, _, strategy = arg.partition("::")
+        strategy = strategy or "simple"
+        pipe = transformers.pipeline("token-classification", model=path, aggregation_strategy=strategy, device="cpu")
 
         def find(text):
             spans = []
@@ -108,7 +111,8 @@ def load(backend: str):
                         spans.append((a + int(e["start"]), a + int(e["end"]), round(float(e["score"]), 4)))
             return spans
         return find, {"library": "transformers", "library_version": transformers.__version__,
-                      "torch": torch.__version__, "model": arg.rstrip("/").split("/")[-1], "threshold": None}
+                      "torch": torch.__version__, "model": path.rstrip("/").split("/")[-1], "threshold": None,
+                      "aggregation": strategy}
     raise SystemExit(f"unknown backend {kind!r}")
 
 
