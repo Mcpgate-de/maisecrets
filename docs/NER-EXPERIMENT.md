@@ -376,6 +376,7 @@ check), and a budget per scan let one call wait 1.6 s.
 | The layer on: every placeholder type of the answer without the layer is still there | yes, in all 395 |
 | The layer on: deterministic hits left in the text the model gets, beyond the answer without the layer | 1 (`de-tax-id`); the value is plain text in both answers, so no leak |
 | The layer on: names added | 48, with 557 of 1,975 scans out of time under the load |
+| The same run at a load average of 4 to 5 | 94 names added, no scan out of time; a hook call takes 55 ms median, 210 ms p95, 235 ms at most (7.6 ms median without the layer); the other proofs as above |
 
 So the layer cannot make a finding worse, a slow, failing or broken service changes nothing, and switched off it is
 invisible. The cost multiplier is the number of scans per hook call (about five), which a product would cut to one
@@ -426,8 +427,10 @@ the same unit. RAM and latency: one model process; the times of the torch models
    identifiers) and author lines; 5 in log lines with int8. Acceptable for a layer a person switches on, not for a
    default: a capitalised identifier in pasted code would become a placeholder.
 6. **The cost in the real hook:** the layer cannot make a result worse, and a slow, failing or broken service changes
-   nothing (B5). The open cost: a hook call scans about five texts, so a product must ask the service once per call;
-   under load 557 of 1,975 scans ran out of the 300 ms budget. A quiet measurement is open.
+   nothing (B5). At a moderate load a hook call takes 55 ms median and 210 ms p95 with the layer, against 7.6 ms
+   without it, and no scan runs out of the 300 ms budget; under heavy load 557 of 1,975 scans did, and the hook then
+   answers as without the layer. A hook call scans about five texts, so a product should ask the service once per
+   call.
 7. **Is a simple local install realistic?** Yes, as an opt-in step: one second environment of about 310 MB (int8),
    pinned wheels and model sha256, offline after the install, Python 3.9 to 3.14 on macOS arm64, Linux and Windows.
    Gaps: no onnxruntime 1.31 wheel for Intel Macs and none yet for Python 3.15.
