@@ -10,6 +10,7 @@
 | + GLiNER 0.3 | 2540 (94.2 %) / 2010 / 0.7108 | 991 (70.3 %) / 1889 / 0.4577 | 1466 (98.7 %) / 1272 / 0.7792 | 13 (92.9 %) / 2766 / 0.005 |
 | + DistilBERT | 2521 (93.5 %) / 329 / 0.9436 | 702 (49.8 %) / 1681 / 0.567 | 1426 (96.0 %) / 749 / 0.8562 | 6 (42.9 %) / 91 / 0.099 |
 | + DistilBERT, whole words | 2531 (93.9 %) / 140 / 0.9696 | 713 (50.6 %) / 570 / 0.7276 | 1426 (96.0 %) / 575 / 0.8821 | 6 (42.9 %) / 50 / 0.1379 |
+| + multilingual DistilBERT, whole words | 2486 (92.2 %) / 38 / 0.9895 | 674 (47.8 %) / 81 / 0.918 | 1410 (94.9 %) / 746 / 0.8557 | 8 (57.1 %) / 48 / 0.1724 |
 
 ### Full datasets (all splits)
 
@@ -22,6 +23,7 @@
 | + GLiNER 0.3 | not run | not run | not run | not run |
 | + DistilBERT | not run | not run | not run | not run |
 | + DistilBERT, whole words | not run | not run | not run | not run |
+| + multilingual DistilBERT, whole words | not run | not run | not run | not run |
 
 ### Spans made worse, and PERSON spans dropped on a deterministic finding
 
@@ -33,6 +35,7 @@
 | GLiNER 0.3 | 0 | 1822: pii.name 981, pii.email 693, pii.username 84, pii.national_id 35, secret 21 |
 | DistilBERT | 0 | 1959: pii.name 1301, pii.email 359, pii.address 192, pii.username 105, pii.national_id 1 |
 | DistilBERT, whole words | 0 | 1058: pii.name 883, pii.address 122, pii.email 32, pii.username 19, pii.national_id 1 |
+| multilingual DistilBERT, whole words | 0 | 1069: pii.name 866, pii.address 179, pii.username 9, secret 8, pii.email 7 |
 
 ### Names in running text and in record fields (samples)
 
@@ -44,6 +47,7 @@
 | GLiNER 0.3 | 498 → 2958 (3349) | 315 → 1095 (1134) | 369 → 463 (489) | 14 → 208 (295) |
 | DistilBERT | 498 → 2786 (3349) | 315 → 1059 (1134) | 369 → 434 (489) | 14 → 140 (295) |
 | DistilBERT, whole words | 498 → 2800 (3349) | 315 → 1059 (1134) | 369 → 436 (489) | 14 → 142 (295) |
+| multilingual DistilBERT, whole words | 498 → 2737 (3349) | 315 → 1053 (1134) | 369 → 413 (489) | 14 → 144 (295) |
 
 ### Gretel by language (samples): whole names before → after (of spans), added false positives
 
@@ -55,6 +59,7 @@
 | GLiNER 0.3 | 109 → 481 (547), FP 1171 | 11 → 112 (170), FP 138 | 21 → 96 (139), FP 150 | 7 → 50 (65), FP 100 | 17 → 97 (132), FP 91 | 18 → 75 (169), FP 129 | 6 → 80 (187), FP 110 |
 | DistilBERT | 109 → 379 (547), FP 471 | 11 → 72 (170), FP 232 | 21 → 55 (139), FP 110 | 7 → 24 (65), FP 142 | 17 → 57 (132), FP 102 | 18 → 52 (169), FP 413 | 6 → 63 (187), FP 211 |
 | DistilBERT, whole words | 109 → 383 (547), FP 209 | 11 → 74 (170), FP 82 | 21 → 55 (139), FP 38 | 7 → 24 (65), FP 45 | 17 → 61 (132), FP 33 | 18 → 53 (169), FP 106 | 6 → 63 (187), FP 57 |
+| multilingual DistilBERT, whole words | 109 → 360 (547), FP 37 | 11 → 62 (170), FP 11 | 21 → 67 (139), FP 6 | 7 → 24 (65), FP 10 | 17 → 60 (132), FP 5 | 18 → 46 (169), FP 9 | 6 → 55 (187), FP 3 |
 
 ### Full datasets by split (A and B): whole names before → after (of spans)
 
@@ -71,3 +76,4 @@
 | GLiNER 0.3 | 145 | 77 | 62 | 1137 | 687 | 5829 | 293 |
 | DistilBERT | 65 | 3 | 3 | 320 | 0 | 2459 | 616 |
 | DistilBERT, whole words | 38 | 1 | 0 | 278 | 10 | 1008 | 272 |
+| multilingual DistilBERT, whole words | 3 | 0 | 0 | 34 | 8 | 868 | 207 |
