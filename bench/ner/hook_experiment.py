@@ -115,10 +115,13 @@ def main(argv: list) -> int:
         # least as often as without the layer (the numbers of the placeholders shift when a name comes first), and
         # the answer holds no more deterministic hits than without the layer
         kept = all(all(_types(a)[k] >= n for k, n in _types(b).items() if k != "NAME") for a, b in zip(ans, base))
-        # per answer: deterministic hits in the text the model gets (the rewritten output, or the raw one when the
-        # hook leaves it as it is); the layer may never leave more than the answer without it
-        more = [_residue(a, r) - _residue(b, r) for a, b, r in zip(ans, base, raw)]
+        # per answer: a deterministic hit in the text the model gets with the layer whose value the answer without the
+        # layer does not show in plain text. A count of hits alone is not enough: a rule that needs a context word
+        # can find a value next to a new placeholder that it does not find next to the old text (2026-10-22, a tax id
+        # in plain text in both answers). The values are compared here and never written out.
+        more = [sum(v not in _text(b, r) for v in _residue_values(a, r)) for a, b, r in zip(ans, base, raw)]
         residue = sum(x for x in more if x > 0)
+        residue_at = [i for i, x in enumerate(more) if x > 0]
         # which rule kinds stay in an answer of this run and not in the answer without the layer (kinds only)
         extra_kinds = collections.Counter()
         for a, b, r in zip(ans, base, raw):
@@ -126,7 +129,8 @@ def main(argv: list) -> int:
             extra_kinds.update(ka - kb)
         ms = sorted(o["ms"] for o in res["out"])
         return {"identical_to_off": same, "of": len(ans), "off_placeholders_kept": kept,
-                "more_deterministic_hits_left_than_off": residue, "extra_kinds": dict(extra_kinds),
+                "more_deterministic_hits_left_than_off": residue, "residue_at": residue_at,
+                "extra_kinds": dict(extra_kinds),
                 "state": res["state"],
                 "hook_ms_median": ms[len(ms) // 2], "hook_ms_p95": ms[int(0.95 * (len(ms) - 1))],
                 "hook_ms_max": ms[-1]}
@@ -168,14 +172,18 @@ def _types(answer: str) -> collections.Counter:
     return collections.Counter(m.group(1) for m in re.finditer(r"⟦([A-Z_]+)_c\d+⟧", answer))
 
 
-def _residue(answer: str, raw: str) -> int:
-    """Deterministic hits in the text the model gets: the rewritten stdout of the answer, or the raw one when the hook
-    leaves the output as it is."""
+def _text(answer: str, raw: str) -> str:
+    """The text the model gets: the rewritten stdout of the answer, or the raw one when the hook leaves it as it is."""
+    out = json.loads(answer).get("hookSpecificOutput", {}).get("updatedToolOutput", {})
+    return out.get("stdout", "") if out else raw
+
+
+def _residue_values(answer: str, raw: str) -> list:
+    """The values of the deterministic hits in the text the model gets."""
     sys.path.insert(0, str(_CHECKOUT[0]))
     from maisecrets import detect
     assert Path(detect.__file__).resolve().is_relative_to(_CHECKOUT[0]), detect.__file__
-    out = json.loads(answer).get("hookSpecificOutput", {}).get("updatedToolOutput", {})
-    return len(detect.scan(out.get("stdout", "") if out else raw, channel="tool"))
+    return [m.value for m in detect.scan(_text(answer, raw), channel="tool")]
 
 
 def _residue_kinds(answer: str, raw: str) -> list:

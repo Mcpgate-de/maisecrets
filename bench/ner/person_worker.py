@@ -153,8 +153,19 @@ def _onnx_backend(arg: str):
         or of a script the vocabulary splits finely can exceed it (one of 816 Nemotron holdout documents had 528),
         and onnxruntime then fails where the transformers pipeline cut the piece short."""
         enc = tok.encode(text[a:b])
-        if len(enc.ids) <= 512 or limit < 2:
+        if len(enc.ids) <= 512:
             return [(a, b, enc)]
+        if limit < 2:
+            # one word of more than 512 pieces (a long run of digits or of one letter): cut it by the pieces' offsets
+            # into windows of 500 pieces, the special tokens included
+            ends = [e for (s, e), sp in zip(enc.offsets, enc.special_tokens_mask) if not sp and e > s]
+            out, start = [], 0
+            for i in range(500, len(ends) + 500, 500):
+                end = ends[min(i, len(ends)) - 1]
+                if end > start:
+                    out.append((a + start, a + end, tok.encode(text[a + start:a + end])))
+                start = end
+            return out
         return [x for c, d in _chunks(text[a:b], limit // 2) for x in fit(text, a + c, a + d, limit // 2)]
 
     def find(text):

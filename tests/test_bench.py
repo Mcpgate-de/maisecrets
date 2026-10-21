@@ -951,6 +951,19 @@ class NerHookLayerTests(unittest.TestCase):
         self.assertEqual(4, self.hl.STATE["timeouts"])                  # each scan waited, none was refused
         self.assertNotIn("call_deadline", self.hl.STATE)               # the budget ends with the call
 
+    def test_the_hook_experiment_fails_on_each_broken_promise(self):
+        import hook_experiment
+        ok = {"identical_to_off": 3, "of": 3, "off_placeholders_kept": True, "more_deterministic_hits_left_than_off": 0}
+        report = {"inactive_byte_identical": True, **{k: dict(ok) for k in ("on", "slow", "dies", "nonsense")}}
+        self.assertEqual([], hook_experiment.violations(report))
+        for key, field, bad in (("inactive", "inactive_byte_identical", False), ("on", "off_placeholders_kept", False),
+                                ("dies", "more_deterministic_hits_left_than_off", 1),
+                                ("slow", "identical_to_off", 2), ("nonsense", "identical_to_off", 2)):
+            with self.subTest(key=key, field=field):
+                broken = json.loads(json.dumps(report))
+                (broken if key == "inactive" else broken[key])[field] = bad
+                self.assertEqual(1, len(hook_experiment.violations(broken)))
+
     def test_installed_and_switched_off_it_answers_as_without_it(self):
         self.hl.install(self.sock, budget_ms=200, active=False)
         self.assertEqual(self.det, self.scan())
