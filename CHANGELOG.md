@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.7.4] - 2026-10-21
+
+### Fixes
+
+- a message from another Claude session is rewritten with placeholders instead of being lost in a block (3cc6b07)
+- a phone number written as one run of digits is masked after a phone word (Telefon: 0999…, +49…) (4350e18)
+
 ## [0.7.3] - 2026-10-21
 
 ### Fixes
