@@ -652,5 +652,27 @@ class ReleaseCompareTests(unittest.TestCase):
         self.assertIn("partial spans 5 -> 7", text.split("compare_bench.py")[1])
 
 
+class FunnelTests(unittest.TestCase):
+    """bench/funnel.py: each missed span gets one bucket by the text around it, and each bucket one category."""
+
+    def test_each_bucket_and_its_category(self):
+        from bench import funnel
+        from maisecrets.detection import personal
+        name, street = "Dana " + "Okafor", "12 Oak " + "Street"
+        rows = [("Address: " + street, street, "pii.address", "label-same", "A+B"),
+                ("| Full Name | " + name + " |", name, "pii.name", "record-field", "C"),
+                ("Dear " + name + ",", name, "pii.name", "person-cue", "A+B"),
+                ("We met " + name + " today.", name, "pii.name", "prose", "D"),
+                ("He lives at " + street + ".", street, "pii.address", "prose", "A+B"),
+                ("the pass is hunter2 now", "hunter2", "secret.password", "prose", "D"),
+                ("Ref: " + street, street, "pii.address", "label-other", "F"),
+                ("Name: John Doe", "John Doe", "pii.name", "placeholder", "E")]
+        for text, value, cls, bucket, cat in rows:
+            with self.subTest(bucket=bucket, cls=cls):
+                s = text.index(value)
+                got = funnel.bucket(personal, text, {"start": s, "end": s + len(value), "class": cls})
+                self.assertEqual((bucket, cat), (got, funnel.category(cls, got)))
+
+
 if __name__ == "__main__":
     unittest.main()
