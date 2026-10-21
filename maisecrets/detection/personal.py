@@ -448,7 +448,12 @@ _STRONG_COLS = frozenset({"address", "street", "street_address", "home_address",
 _WEAK_COLS = frozenset({"name", "full_name", "fullname", "first_name", "last_name", "firstname", "lastname",
                         "given_name", "family_name", "surname", "customer", "customer_name", "employee",
                         "employee_name", "emp_name", "patient", "patient_name", "nome", "nombre", "nom", "vorname",
-                        "nachname", "username", "user_name"})
+                        "nachname", "username", "user_name",
+                        # the name of a person in a role (Benchmark V3 Phase C, 2026-10-21: candidate, player, client,
+                        # recipient name columns of Nemotron dev stayed text); weak, so only beside a strong column
+                        "candidate_name", "client_name", "player_name", "recipient_name", "applicant_name",
+                        "student_name", "member_name", "contact_name", "passenger_name", "beneficiary_name",
+                        "tenant_name"})
 _CSV_ROWS = 10000   # rows read under one header; a larger table is read in its first rows only
 _CSV_CELL_RE = {sep: re.compile(r'"[^"\n]{0,512}"|[^' + sep + r'\n]{0,512}') for sep in (",", ";", "\t")}
 _NOT_A_CELL = frozenset({"", "null", "none", "n/a", "na", "-", "true", "false", "nan"})

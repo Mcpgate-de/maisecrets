@@ -437,6 +437,14 @@ class MarkdownTableTests(Base):
         self.assertText("| Field | Value |\n|---|---|\n| First Name | Required |\n| Last Name | Optional |\n"
                         "| Date of Birth | " + BIRTH + " |\n")
 
+    def test_the_name_column_of_a_person_in_a_role_counts_beside_a_strong_column(self):
+        for head in ("Candidate Name", "Player Name", "Client Name", "Recipient Name"):
+            with self.subTest(head=head):
+                self.assertMasked("| " + head + " | Date of Birth |\n|---|---|\n| " + NAME + " | " + BIRTH + " |\n",
+                                  NAME)
+                # without a strong column a list of names is no record (a score board)
+                self.assertText("| " + head + " | Score |\n|---|---|\n| " + NAME + " | 88 |\n")
+
     def test_a_table_of_fields_without_a_person_stays_text(self):
         for text in ("| Name | Value |\n|---|---|\n| Product Name | Widget Pro |\n| Version | 2.1 |\n",
                      "| Setting | Value |\n|---|---|\n| Name | build-runner |\n"
