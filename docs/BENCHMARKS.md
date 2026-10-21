@@ -64,6 +64,20 @@ from 0.234 to 0.240 and precision from 0.441 to 0.448, and names not at all. Of 
 datasets, 48.7 % needs NER or semantics (almost all of it names in running text), 44.6 % is in reach of a rule or a parser, most of it with a
 false-alarm risk.
 
+## Benchmark V3: what holds on data no rule was written from (2026-10-21)
+
+`docs/BENCHMARK-V3.md` measures 0.7.3 on the `val` and holdout splits and in full, every scanner on salted samples,
+and 0.7.4 on an independent holdout (Holdout V2, 872 cases). Three corrections to the sections above:
+
+- **The cross-scanner tables above compared on `dev` only.** The sample "1 in 50 by the sha256 of the case id" and the
+  split rule use the same hash, so every sampled case was development data. On `val`, maisecrets has the same numbers
+  as on `dev` within two points (Nemotron PII R 0.597, P 0.995 in full), and maisecrets keeps its place among the tools in recall and in precision on each dataset.
+- **Privy's precision of 0.448 was not maisecrets' precision.** 332 of 334 PII false positives on the V3 sample are
+  in classes Privy's test split does not label in that form (e-mail, IP, IBAN); counted only in its labelled classes
+  the precision is 0.977 in full.
+- **The private holdout of V1 was optimistic.** Its 80 cases were written by this project (R 0.875); the independent
+  Holdout V2 gives 0.7.4 a recall of 0.626 at a precision of 0.9955.
+
 ## An optional PERSON layer, measured as an experiment (2026-10-21)
 
 `docs/NER-EXPERIMENT.md` measures five local NER models as a second layer after the deterministic detector of 0.7.3,
