@@ -77,6 +77,9 @@ in masked form.
 **Privy**, after all of the above and with nothing changed: totals only, the sample for every variant, in full for
 A and B and, when the time allows, for C. No Privy case is read, before or after.
 
+Fixed before the Privy run, after the development measurements: the variants and their settings stay as above (A, B,
+C, C-high, D, D2); the baseline is run again in this tree; in full: the baseline, A, B, C and D2.
+
 ## Results
 
 Not measured yet.
