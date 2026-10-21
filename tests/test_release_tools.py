@@ -215,6 +215,28 @@ class ListingManifestTests(unittest.TestCase):
                       "git merge-base --is-ancestor HEAD origin/main", "tag and manifest version differ"):
             self.assertIn(check, vr, check)
 
+    def test_the_matrix_runs_in_a_release_merge_request_and_where_a_platform_can_differ(self):
+        """windows_macos runs in every merge request into main and, into next, only when a path changes that can
+        behave differently on Windows or macOS. A pattern that names no file never starts the job, so each one
+        must still name a file; the detection core outside the locale lookup starts none."""
+        ci = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
+        job = ci[ci.index("\nwindows_macos:"):]
+        job = job[:job.index("\n  variables:")]
+        release = job.index('$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"')
+        changes = job.index("changes:")
+        self.assertLess(release, changes, "the release rule must come before the path rule")
+        patterns = [line.strip()[2:] for line in job[changes:].splitlines()[1:] if line.strip().startswith("- ")]
+        self.assertGreaterEqual(len(patterns), 10, "the premise: the rule lists paths")
+        matched = set()
+        for p in patterns:
+            files = {f.relative_to(ROOT).as_posix() for f in ROOT.glob(p) if f.is_file()}
+            self.assertTrue(files, f"{p} names no file, so it never starts the job")
+            matched |= files
+        self.assertIn("maisecrets/detection/regions.py", matched)
+        self.assertIn("hooks/run.sh", matched)
+        core = {f for f in matched if f.startswith("maisecrets/detection/")}
+        self.assertEqual({"maisecrets/detection/regions.py"}, core)
+
     def test_the_codex_manifest_mirrors_the_claude_one(self):
         for key in ("name", "version", "description", "author", "homepage", "repository", "license", "keywords"):
             self.assertEqual(self.claude[key], self.codex[key], key)
