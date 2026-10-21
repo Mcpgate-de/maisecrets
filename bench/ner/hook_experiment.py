@@ -39,6 +39,8 @@ out = []
 for line in open(sys.argv[5], encoding="utf-8"):
     p = json.loads(line)
     t = time.perf_counter()
+    if mode != "off":
+        hook_layer.begin_call()
     r = hooks.post_tool(p)
     out.append({"answer": json.dumps(r, sort_keys=True, ensure_ascii=False), "ms": (time.perf_counter() - t) * 1000})
 json.dump({"out": out, "state": {k: v for k, v in hook_layer.STATE.items() if k != "ner_s"},
@@ -89,6 +91,9 @@ def sidecar(ner_python: str, backend: str, sock: str, *extra: str) -> subprocess
 
 def main(argv: list) -> int:
     checkout, ner_python, backend, out_path = Path(argv[0]).resolve(), argv[1], argv[2], Path(argv[3])
+    _CHECKOUT.append(checkout)
+    sys.path.insert(0, str(checkout))
+    from maisecrets import detect as _d   # noqa: F401  first, so the bench tree's copy never shadows it
     devroot = Path(os.environ["BENCH_DEVROOT"])
     tmp = Path(tempfile.mkdtemp(prefix="ms-hook-exp-"))
     payloads = tmp / "payloads.jsonl"
@@ -106,10 +111,14 @@ def main(argv: list) -> int:
     def compare(res: dict) -> dict:
         ans = [o["answer"] for o in res["out"]]
         same = sum(a == b for a, b in zip(ans, base))
-        # every placeholder of the off run is in the on run's answer: a value masked without the layer stays masked
-        kept = all(all(tok in a for tok in _placeholders(b)) or a == b for a, b in zip(ans, base))
+        # a value masked without the layer stays masked: per answer, each placeholder type other than NAME occurs at
+        # least as often as without the layer (the numbers of the placeholders shift when a name comes first), and
+        # the answer holds no more deterministic hits than without the layer
+        kept = all(all(_types(a)[k] >= n for k, n in _types(b).items() if k != "NAME") for a, b in zip(ans, base))
+        residue = sum(_residue(a) for a in ans) - sum(_residue(b) for b in base)
         ms = sorted(o["ms"] for o in res["out"])
-        return {"identical_to_off": same, "of": len(ans), "off_placeholders_kept": kept, "state": res["state"],
+        return {"identical_to_off": same, "of": len(ans), "off_placeholders_kept": kept,
+                "more_deterministic_hits_left_than_off": residue, "state": res["state"],
                 "hook_ms_median": ms[len(ms) // 2], "hook_ms_p95": ms[int(0.95 * (len(ms) - 1))],
                 "hook_ms_max": ms[-1]}
 
@@ -127,9 +136,21 @@ def main(argv: list) -> int:
     return 0
 
 
-def _placeholders(answer: str) -> set:
+def _types(answer: str) -> collections.Counter:
     import re
-    return set(re.findall(r"⟦[A-Z_]+_c\d+⟧", answer))
+    return collections.Counter(m.group(1) for m in re.finditer(r"⟦([A-Z_]+)_c\d+⟧", answer))
+
+
+def _residue(answer: str) -> int:
+    """Deterministic hits in the text the model gets (the stdout of the answer, or nothing when unchanged)."""
+    sys.path.insert(0, str(_CHECKOUT[0]))
+    from maisecrets import detect
+    assert Path(detect.__file__).resolve().is_relative_to(_CHECKOUT[0]), detect.__file__
+    out = json.loads(answer).get("hookSpecificOutput", {}).get("updatedToolOutput", {})
+    return len(detect.scan(out.get("stdout", ""), channel="tool")) if out else 0
+
+
+_CHECKOUT: list = []
 
 
 if __name__ == "__main__":

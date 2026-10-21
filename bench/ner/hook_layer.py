@@ -22,11 +22,19 @@ STATE = {"active": False, "socket": "", "budget_s": 0.3, "calls": 0, "asked": 0,
 _ORIGINAL = core.scan
 
 
+def begin_call() -> None:
+    """One hook call starts: all of its scans share one budget (a tool result of several strings scans each, and a
+    budget per scan let one call wait 1.6 s against a budget of 0.3 s, 2026-10-21)."""
+    STATE["call_deadline"] = time.monotonic() + STATE["budget_s"]
+
+
 def _ask(text: str, occupied: list) -> list:
-    deadline = time.monotonic() + STATE["budget_s"]
+    deadline = min(time.monotonic() + STATE["budget_s"], STATE.get("call_deadline") or float("inf"))
+    if deadline <= time.monotonic():
+        raise TimeoutError
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        s.settimeout(STATE["budget_s"])
+        s.settimeout(max(0.001, deadline - time.monotonic()))
         s.connect(STATE["socket"])
         s.sendall((json.dumps({"text": text, "occupied": occupied}) + "\n").encode())
         buf = b""
