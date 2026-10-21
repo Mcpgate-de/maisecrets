@@ -116,9 +116,15 @@ def main(argv: list) -> int:
         # the answer holds no more deterministic hits than without the layer
         kept = all(all(_types(a)[k] >= n for k, n in _types(b).items() if k != "NAME") for a, b in zip(ans, base))
         residue = sum(_residue(a) for a in ans) - sum(_residue(b) for b in base)
+        # which rule kinds stay in an answer of this run and not in the answer without the layer (kinds only)
+        extra_kinds = collections.Counter()
+        for a, b in zip(ans, base):
+            ka, kb = collections.Counter(_residue_kinds(a)), collections.Counter(_residue_kinds(b))
+            extra_kinds.update(ka - kb)
         ms = sorted(o["ms"] for o in res["out"])
         return {"identical_to_off": same, "of": len(ans), "off_placeholders_kept": kept,
-                "more_deterministic_hits_left_than_off": residue, "state": res["state"],
+                "more_deterministic_hits_left_than_off": residue, "extra_kinds": dict(extra_kinds),
+                "state": res["state"],
                 "hook_ms_median": ms[len(ms) // 2], "hook_ms_p95": ms[int(0.95 * (len(ms) - 1))],
                 "hook_ms_max": ms[-1]}
 
@@ -148,6 +154,12 @@ def _residue(answer: str) -> int:
     assert Path(detect.__file__).resolve().is_relative_to(_CHECKOUT[0]), detect.__file__
     out = json.loads(answer).get("hookSpecificOutput", {}).get("updatedToolOutput", {})
     return len(detect.scan(out.get("stdout", ""), channel="tool")) if out else 0
+
+
+def _residue_kinds(answer: str) -> list:
+    from maisecrets import detect
+    out = json.loads(answer).get("hookSpecificOutput", {}).get("updatedToolOutput", {})
+    return [m.kind for m in detect.scan(out.get("stdout", ""), channel="tool")] if out else []
 
 
 _CHECKOUT: list = []
