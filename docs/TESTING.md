@@ -30,8 +30,8 @@ What runs, where, and what makes it fail. The history of each finding is in the 
 2564 tests (`tests/test_*.py`), about 35 seconds on an M-series laptop. Without PyYAML, two tests of
 `tests/test_measure_catalog_coverage.py` fail and the belief `manifest-every-frontmatter-parses-as-yaml` is
 skipped; CI installs it. A virtual environment with `pip install pyyaml` gives the full run locally. The GitHub matrix runs on
-Windows and macOS in two places. In a merge request into `main`, and into `next` when a path changes that can
-behave differently there (`.gitlab-ci.yml`, label `public-ci` for any other), the GitLab job `windows_macos` pushes the commit
+Windows and macOS in two places. In a merge request into `main`, and into `next` unless it changes documentation
+alone (`.gitlab-ci.yml`, label `public-ci` for any other), the GitLab job `windows_macos` pushes the commit
 that `main` would get to the CI repository `Mcpgate-de/maisecrets-ci` and fails with the names of the
 failing tests. On `main`, it runs on the tested commit of a release (branch `ci`), unless a green run
 on the same git tree exists (the release then reuses it). A merge without a release runs no matrix on
