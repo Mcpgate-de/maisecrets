@@ -107,6 +107,40 @@ points. Secrets in Nemotron have about 100 spans per split, so their rate moves 
 V3 counts it**. Of the 334 PII false positives, 332 are in classes Privy's test split does not label in this form
 (e-mail 88, national ids of a shape it never labels 79, IBAN 76, IP 66, …). Secrets: R 0.356, P 0.865 (90 spans).
 
+**In full** (every case of each split, maisecrets only), PII recall strict / precision (V3):
+
+| Source | `dev` | `val` | public `holdout` split |
+|---|---|---|---|
+| Nemotron | 0.593 / 0.996 | 0.597 / 0.995 | 0.590 / 0.995 |
+| Gretel finance | 0.287 / 0.911 | 0.277 / 0.901 | 0.275 / 0.911 |
+| Mendeley financial | 0.686 / 0.989 | 0.687 / 0.991 | 0.683 / 0.990 |
+| PIILO | 0.099 / 0.925 | 0.090 / 0.900 | 0.087 / 0.966 |
+| Privy (no splits) | 0.240 / 0.977 (V2 count: 0.448) | | |
+
+The split the rules were written from is at most one point better than the two others: no sign of overfitting to
+`dev`.
+
+### All scanners on the same salted samples (2026-10-21)
+
+The same run (`bench/run_all_v3.sh`, clean benchmark commits `704db2a0` to `a5fd1ff3`; between them only the NER
+experiment and the docs changed, not the scoring), each scanner only on the classes its
+adapter claims; PII recall strict / precision (V3), `val` split, Privy 1 in 10. The other tools at the V1 pins; the
+AI Gateway's detector at ai-gateway `984787cd1` (it claims e-mail, phone, IBAN, card, IP and German ids only).
+
+| Source | maisecrets 0.7.3 | AI Gateway | Presidio 2.2.364 | Preserve 0.6.1 | pii-anon 1.7.0rc1 |
+|---|---|---|---|---|---|
+| Nemotron `val` | 0.587 / 0.996 | 0.553 / 0.995 | 0.722 / 0.928 | 0.660 / 0.825 | 0.766 / 0.297 |
+| Gretel `val` | 0.294 / 0.913 | 0.736 / 0.724 | 0.453 / 0.273 | 0.416 / 0.246 | 0.429 / 0.277 |
+| Mendeley `val` | 0.690 / 0.990 | 0.490 / 1.000 | 0.677 / 0.895 | 0.666 / 0.813 | 0.610 / 0.658 |
+| Privy, 1 in 10 | 0.225 / 0.992 | 0.132 / 1.000 | 0.473 / 0.527 | 0.205 / 0.415 | 0.286 / 0.936 |
+
+Secrets (strict recall): Nemotron `val` maisecrets 0.390, secret-scan 0.119, detect-secrets 0.085, Preserve 0.085;
+the rule examples of six catalogs maisecrets 0.586, detect-secrets 0.235, secret-scan 0.073; Privy (passwords)
+maisecrets 0.356, detect-secrets 0.278, Preserve 0.033. The holdout split gives the same picture (`report-v3.md` of
+the run). maisecrets keeps the highest precision on every dataset; Presidio and pii-anon find more names and so reach
+a higher recall where names dominate, at a precision of 0.27 to 0.93. The AI Gateway's recall on Gretel counts only
+the six classes it claims, so it is not the recall of the whole dataset.
+
 ### Holdout V2 on the release 0.7.4 (2026-10-21)
 
 The first run of the independent holdout (872 cases, written by an agent that saw no miss list; `bench/HOLDOUT-LOG.md`):
