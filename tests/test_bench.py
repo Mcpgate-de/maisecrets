@@ -434,6 +434,20 @@ class CompareBenchTests(unittest.TestCase):
         found = self.run_compare(base, new, {"email": 3}, {"email": 4})
         self.assertEqual(len(found), 3, found)
 
+    def test_a_result_file_in_place_of_its_directory_is_refused_not_compared_as_empty(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import compare_bench
+        with tempfile.TemporaryDirectory() as d:
+            a = Path(d) / "a"
+            a.mkdir()
+            f = a / "gretel-val-maisecrets.json"
+            f.write_text(json.dumps({"metrics": {"all": {"fp": 1}}}), encoding="utf-8")
+            with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(2, compare_bench.main([str(f), str(f)]))
+                self.assertEqual(2, compare_bench.main([str(a), d]))
+                self.assertEqual(0, compare_bench.main([str(a), str(a)]))
+            self.assertIn("0 finding(s)", out.getvalue())
+
     def test_runs_on_different_cases_are_not_compared(self):
         import tempfile
         sys.path.insert(0, str(ROOT / "scripts"))
@@ -650,6 +664,52 @@ class ReleaseCompareTests(unittest.TestCase):
         self.assertIn("gretel-val: pii.name full 100 → 120", text.split("## Largest gains")[1].split("##")[0])
         self.assertIn("gretel-val: pii.name partial 5 → 7", text.split("## Largest regressions")[1].split("##")[0])
         self.assertIn("partial spans 5 -> 7", text.split("compare_bench.py")[1])
+
+
+class HistoryTests(unittest.TestCase):
+    """bench/history.py: two runs on the same cases side by side, and runs on other cases left out."""
+
+    def test_the_change_per_class_and_group_and_no_comparison_of_other_cases(self):
+        from bench import history
+        with tempfile.TemporaryDirectory() as d:
+            for side, full, sha in (("a", 10, "x" * 64), ("b", 25, "x" * 64)):
+                p = Path(d) / side
+                p.mkdir()
+                metrics = {"pii": {"spans": 40, "full": full, "missed": 40 - full, "fp": 1, "precision": 0.9},
+                           "pii.name": {"spans": 40, "full": full, "missed": 40 - full}}
+                for name, h in (("nemotron-all-maisecrets.json", sha), ("gretel-all-maisecrets.json", side * 64)):
+                    (p / name).write_text(json.dumps({
+                        "scanner": {"version": side}, "cases_sha256": h, "source": name.split("-")[0], "split": "all",
+                        "every": 1, "cases": 4, "metrics": metrics}), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                history.main([str(Path(d) / "a"), str(Path(d) / "b")])
+        text = out.getvalue()
+        self.assertIn("| pii.name | 40 | 10 → 25 (+15) |", text)
+        self.assertIn("| names | 40 | 10 → 25 (+15) |", text)
+        self.assertIn("gretel-all-maisecrets.json\n\nThe cases differ", text)
+        self.assertEqual(1, text.count("## nemotron"))
+
+
+class FunnelTests(unittest.TestCase):
+    """bench/funnel.py: each missed span gets one bucket by the text around it, and each bucket one category."""
+
+    def test_each_bucket_and_its_category(self):
+        from bench import funnel
+        from maisecrets.detection import personal
+        name, street = "Dana " + "Okafor", "12 Oak " + "Street"
+        rows = [("Address: " + street, street, "pii.address", "label-same", "A+B"),
+                ("| Full Name | " + name + " |", name, "pii.name", "record-field", "C"),
+                ("Dear " + name + ",", name, "pii.name", "person-cue", "A+B"),
+                ("We met " + name + " today.", name, "pii.name", "prose", "D"),
+                ("He lives at " + street + ".", street, "pii.address", "prose", "A+B"),
+                ("the pass is hunter2 now", "hunter2", "secret.password", "prose", "D"),
+                ("Ref: " + street, street, "pii.address", "label-other", "F"),
+                ("Name: John Doe", "John Doe", "pii.name", "placeholder", "E")]
+        for text, value, cls, bucket, cat in rows:
+            with self.subTest(bucket=bucket, cls=cls):
+                s = text.index(value)
+                got = funnel.bucket(personal, text, {"start": s, "end": s + len(value), "class": cls})
+                self.assertEqual((bucket, cat), (got, funnel.category(cls, got)))
 
 
 if __name__ == "__main__":
