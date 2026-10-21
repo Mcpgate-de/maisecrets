@@ -746,13 +746,14 @@ each measured on its own against `next` at `c776c2cc` (`dev` and `val` of every 
 bank):
 
 - **C1, a one-word value in a name-part field** (`first_name`, `last_name`, `given_name`, `surname`, `vorname`,
-  `nachname` and their aliases): a capitalised name word counts, so the record's other fields count too. As before, a
-  record counts only with a field only a person has (a birth date, a phone, an address); form words (`Required`,
-  `Optional`, `Unknown`, `N/A`) and placeholder names stay text.
+  `nachname` and their aliases, `givenName` and `familyName` too): a capitalised name word counts, so the record's
+  other fields count too. As before, a record counts only with a field only a person has (a birth date, a phone, an
+  address); form words (`Required`, `Optional`, `Unknown`, `N/A`), fixture words (`Foo`, `Bar`, `User`, `Demo`) and
+  a first and a last name that make a placeholder together (`Jane` and `Doe`) stay text.
 - **C2, the name column of a role** (`candidate_name`, `client_name`, `player_name`, `recipient_name`,
   `applicant_name`, `student_name`, `member_name`, `contact_name`, `passenger_name`, `beneficiary_name`,
-  `tenant_name`): a weak column like `customer_name`, so it counts only beside a strong column. A score board of
-  names stays text.
+  `tenant_name`, and the same in camel case, `candidateName`): a weak column like `customer_name`, so it counts only
+  beside a strong column. A score board of names stays text.
 
 | Measure | C1 against `c776c2cc` | C2 against C1 |
 |---|---|---|
@@ -770,6 +771,23 @@ all 260 new ones lie in 36 documents, and the 17 with a header of name parts are
 (`customerid,firstname,lastname,email,phone…`, often with a birth date). Their names and phones are a person's
 data the dataset does not label in these rows, as Mendeley leaves the addresses of its customers unlabelled
 (above). No new false positive is in developer text.
+
+**Review and the last step.** codex Gate A (gpt-5.6-sol) found: fixture names in seed data and API examples
+(`Foo,Bar`, `Jane`/`Doe`) became names; role columns in camel case were not read; seven of the eleven role names had
+no test. The last commits fix the three. Measured against C2, the fixture rule removes 70 false positives on Gretel
+`dev` and 24 on `val`, and it gives back 43 labelled names: all of them `John` or `Jane` with `Doe` or `Smith` in the
+same row, and one `Max`, which the datasets label and maisecrets treats as a placeholder in every other form. Against
+`c776c2cc` the whole change set makes no span worse:
+
+| Source | Missed to whole | False positives |
+|---|---|---|
+| Nemotron `dev` / `val` | 1,732 / 508 | 508 / 187, unchanged |
+| Gretel `dev` / `val` | 201 / 58 | 2,307 → 2,497 / 809 → 858 |
+| Mendeley, PIILO, the bank, the traces, the false-alarm bank | no change | no change |
+
+Left as they are: a name in a script outside the Latin ranges of the name rules (a Cyrillic or Greek first name)
+stays text in a record, as it does in every other name form of `personal.py`; a single placeholder first name
+beside a birth date (`Jane` alone) is masked, since it is also a real name.
 
 ## CredData, results per release
 
