@@ -847,6 +847,18 @@ class BenchmarkV3Tests(unittest.TestCase):
             self.assertIn("Left out", buf.getvalue())
             self.assertNotIn("## nemotron", buf.getvalue())
 
+    def test_the_gateway_adapter_refuses_a_checkout_with_an_untracked_file(self):
+        from bench.adapters import ai_gateway
+        with tempfile.TemporaryDirectory() as d:
+            git = ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@example.com"]
+            subprocess.run(["git", "init", "-q", d], check=True)
+            (Path(d) / "a.py").write_text("x = 1\n", encoding="utf-8")
+            subprocess.run(git + ["add", "a.py"], check=True)
+            subprocess.run(git + ["commit", "-q", "-m", "a"], check=True)
+            self.assertFalse(ai_gateway._dirty(d))
+            (Path(d) / "b.py").write_text("y = 2\n", encoding="utf-8")
+            self.assertTrue(ai_gateway._dirty(d))
+
     def test_the_v3_block_splits_the_false_positives_and_keeps_the_hits(self):
         from bench import v3
         text = "mail a@example.com and name Ann Lee"

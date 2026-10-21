@@ -79,7 +79,8 @@ def _commit(repo: str) -> str:
 
 def _dirty(repo: str) -> bool:
     import subprocess
-    p = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"], capture_output=True,
+    # an untracked file counts: the gateway's modules are imported from this tree (ignored files do not)
+    p = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--untracked-files=all"], capture_output=True,
                        text=True)
     return p.returncode != 0 or bool(p.stdout.strip())
 
