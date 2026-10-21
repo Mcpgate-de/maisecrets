@@ -434,6 +434,20 @@ class CompareBenchTests(unittest.TestCase):
         found = self.run_compare(base, new, {"email": 3}, {"email": 4})
         self.assertEqual(len(found), 3, found)
 
+    def test_a_result_file_in_place_of_its_directory_is_refused_not_compared_as_empty(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import compare_bench
+        with tempfile.TemporaryDirectory() as d:
+            a = Path(d) / "a"
+            a.mkdir()
+            f = a / "gretel-val-maisecrets.json"
+            f.write_text(json.dumps({"metrics": {"all": {"fp": 1}}}), encoding="utf-8")
+            with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(2, compare_bench.main([str(f), str(f)]))
+                self.assertEqual(2, compare_bench.main([str(a), d]))
+                self.assertEqual(0, compare_bench.main([str(a), str(a)]))
+            self.assertIn("0 finding(s)", out.getvalue())
+
     def test_runs_on_different_cases_are_not_compared(self):
         import tempfile
         sys.path.insert(0, str(ROOT / "scripts"))
