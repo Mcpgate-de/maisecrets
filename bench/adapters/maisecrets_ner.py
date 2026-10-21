@@ -55,7 +55,9 @@ def scan(cases, root: Path, regions: str = "de,us"):
         with open(inp, "w", encoding="utf-8") as f:
             for c, fs in zip(cases, found):
                 f.write(json.dumps({"text": c["text"], "occupied": [[s, e, cls] for s, e, cls, _ in fs]}) + "\n")
-        env = _proc.minimal_env(home, {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
+        # offline: the model and the encoder's tokenizer come from the local cache of HF_HOME, never the network
+        env = _proc.minimal_env(home, {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+                                       **({"HF_HOME": os.environ["HF_HOME"]} if os.environ.get("HF_HOME") else {})})
         p = _proc.run([_python(), "-I", str(WORKER), inp, out, _backend()], "maisecrets_ner", env=env, cwd=tmp)
         if p.returncode:
             raise _proc.AdapterError(f"maisecrets_ner: the NER worker failed with exit code {p.returncode}")
