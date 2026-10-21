@@ -376,7 +376,7 @@ check), and a budget per scan let one call wait 1.6 s.
 | The layer on: every placeholder type of the answer without the layer is still there | yes, in all 395 |
 | The layer on: a value of a deterministic hit in the text the model gets that the answer without the layer does not show in plain text | 0. A count of hits gave 1 (`de-tax-id`): that tax id is in plain text in both answers (the hook of 0.7.3 leaves it in that test home), and a rule with a context word finds it next to a new placeholder only. The experiment now compares the values, in memory |
 | The layer on: names added | 48, with 557 of 1,975 scans out of time under the load |
-| The same run at a load average of 4 to 5 | 94 names added, no scan out of time; a hook call takes 55 ms median, 210 ms p95, 235 ms at most (7.6 ms median without the layer); the other proofs as above |
+| The same run at a load average of 2 to 5 | 94 names added, no scan out of time; a hook call takes 39 to 55 ms median, 152 to 210 ms p95, 235 ms at most in two runs (6 to 8 ms median without the layer); the other proofs as above |
 
 So the layer cannot make a finding worse, a slow, failing or broken service changes nothing, and switched off it is
 invisible. `bench/ner/hook_experiment.py` exits with 1 when any of these promises fails (codex Gate A asked for it:
@@ -429,7 +429,7 @@ the same unit. RAM and latency: one model process; the times of the torch models
    identifiers) and author lines; 5 in log lines with int8. Acceptable for a layer a person switches on, not for a
    default: a capitalised identifier in pasted code would become a placeholder.
 6. **The cost in the real hook:** the layer cannot make a result worse, and a slow, failing or broken service changes
-   nothing (B5). At a moderate load a hook call takes 55 ms median and 210 ms p95 with the layer, against 7.6 ms
+   nothing (B5). At a moderate load a hook call takes 39 to 55 ms median and 152 to 210 ms p95 with the layer, against 6 to 8 ms
    without it, and no scan runs out of the 300 ms budget; under heavy load 557 of 1,975 scans did, and the hook then
    answers as without the layer. A hook call scans about five texts, so a product should ask the service once per
    call.
