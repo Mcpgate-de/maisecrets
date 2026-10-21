@@ -562,6 +562,133 @@ nothing got worse; false positives Gretel dev ±0, val +1; Nemotron, Mendeley, P
 bank unchanged. The 9 partial, read: long Dutch and Swedish names with particles (`van der`) or of more than four
 words, whose last words stay visible. `scripts/compare_bench.py`: no finding.
 
+### An address after an address label in Dutch, Swedish, Italian and German, 2026-10-20
+
+Read per case on Gretel `dev`: of 3,181 addresses missed right after an address label, 999 had a value that passed
+every check of `address-after-label`, and no label regex matched: `adres` (Dutch), `adress` (Swedish), `indirizzo`
+(Italian), `anschrift`, and `street_address` (its underscore failed the look-behind). The record layer knew these
+words as address columns. They join the address labels; the value checks and the company window stay. `Straße:` is
+left out: it names one part of an address, and the samples after it were often templates (`Musterstraße`).
+Registered before the run: 800 to 900 on Gretel `dev`.
+
+Per span against the naam change: Gretel dev 829 missed to whole, 5 partial to whole, 4 missed to partial; val 283,
+3 and 1; nothing got worse; Nemotron, Mendeley, PIILO, traces, bank and the false-alarm bank unchanged. Gretel false
+positives dev +10, val +7; too wide dev +32, val +11. Read on `dev`: the hits over a gold span keep the postcode and
+the city that Gretel left out of the span (`…, 999 99 Stockholm`; the policy since 0.7.0); the new false positives are
+unlabelled addresses of persons (`User's Street Address`, a shipper), of companies (`Org.nr`, `IVA`) and one template
+(`[Città]`), none a value that is no address. `scripts/compare_bench.py`: no finding.
+### A North American number after calling, dial or contact, 2026-10-20
+
+Of 4,225 phone numbers missed on Nemotron-PII `dev`, 1,954 had the North American shape; 1,207 of them had a call
+word before them that the loose phone rule did not take: `by calling`, `dial`, `please contact <number>`, and
+`contact the report coordinator at` (more than two words before `at`). The rule now takes `calling`, `dial`, up to
+four words in `contact … at`, and `contact` alone right before the number. The number keeps its North American shape
+and check. Registered before the run: about 1,200 on Nemotron `dev`.
+
+A first form let `contact` alone start a match anywhere: the span ratchet reported 16 spans of `dev` and 6 of `val`
+whole to missed, all real numbers 0.7.2 finds (`contact <name> at <mail> or <number>`, `**Contact …**: Call
+<number>`). The wider start swallowed the later cue, and a match the colon check then refused hid the number. Each of
+them is a test now, and `contact` alone counts only right before the number.
+
+Per span against the address change: Nemotron dev 506 missed to whole, val 155; Gretel dev 9, val 2; nothing got
+worse. Nemotron false positives dev +4, val +1: read on `dev`, each the number of an organisation (an election
+board, a support team, a car maker's service line), not labelled. The rest of the 1,207 stays text by the checks
+after the cue (a colon in the gap, the shape check). `scripts/compare_bench.py`: no finding.
+### A Markdown table of fields and values, 2026-10-20
+
+On Nemotron-PII `dev`, about 3,200 missed spans stood in a two-column Markdown table whose first cell names a field
+the record layer knows (`| Date of Birth | … |`, one field per row): 1,807 names, 623 birth dates, 386 IDs, 189
+addresses. The table rule took the header row as the field names, so such a table named no column. It is now one
+record: the first cell of each row is the field name, the second its value, judged by the same policy as every table
+(a strong field and a person in the record); a header row that is itself a field counts too. Registered before the
+run: up to about 3,200 on Nemotron `dev`, fewer where a field name is unknown (`Passenger Name`) or no person anchor.
+
+Per span against the change before it (measured on its first form): Nemotron dev 862 missed to whole, val 291; Gretel
+dev 6, val 2; nothing got worse; false positives Nemotron dev +1; the false-alarm bank unchanged.
+`scripts/compare_bench.py`: no finding.
+
+### An ID after its label and a comma, 2026-10-20
+
+Of the IDs missed on Nemotron-PII `dev` after a health label (`medical record number`, `health plan beneficiary
+number`), 520 had a real value after a comma (`your health plan beneficiary number, <id>, to medical professionals`)
+and 671 had placeholder digits, which stay text on purpose. The ID label rule now takes a comma as a separator too;
+the value still needs five digits and no placeholder digits. Registered before the run: about 520 on Nemotron `dev`.
+
+Per span against the table change (measured on its first form): Nemotron dev 621 missed to whole, val 217 (the comma
+helps after other ID labels too); Gretel dev 4, val 2; nothing got worse; false positives and the false-alarm bank
+unchanged. `scripts/compare_bench.py`: no finding.
+
+### A Visa card number of 19 digits, 2026-10-20
+
+All 2,081 cards missed on Mendeley `dev` had 19 digits, began with 4, passed the Luhn check and had a card word in the
+80 characters before them. Presidio's card pattern ends at 17 digits; ISO/IEC 7812 gives Visa 13, 16 and 19. The
+pattern now takes a 19-digit Visa number too. It keeps the card word and the Luhn check; alone in a tool result the
+issuer check still takes 16 digits. Registered before the run: about 2,081 on Mendeley `dev`.
+
+Per span against the call-word change (the chain between them adds the table and the ID comma changes): Mendeley dev
+2,081 missed to whole, val 695; nothing got worse on any source. The false-alarm bank has one more card hit: a
+19-digit Luhn-valid number in the test file of a card validator (`ferret-scan`), counted with the test fixtures; the
+hits outside tests are unchanged. A first comparison against the ID comma run showed 59 phone spans worse: that run
+still had the first form of the call-word change, whose wider `contact` had found them; the comparison mixed two
+changes, not this one.
+### A full name after a title, 2026-10-20
+
+On `dev`, a title before two name words that do not read as words was counted against the gold names: `Mr`, `Mrs`,
+`Ms`, `Mx` or `Miss` before a full name gave Mendeley 3,845 missed names to 99 matches without one, Gretel 123 to 0,
+Nemotron 12 to 0. `Dr` is left out (it is also a street: `… Oak Dr. We are`), and so is a title before one word.
+The title is a fourth cue of the person-cue rule. Registered before the run: about 3,845 on Mendeley `dev`, Gretel
+about 120, and up to about 100 more false positives on Mendeley, read as real names without a label.
+
+Per span against the ID comma change: Mendeley dev 3,402 missed to whole and 360 to partial, val 1,208 and 104;
+Gretel dev 59 and 63, val 18 and 19; Nemotron dev 21, val 6; PIILO 1 and 1; nothing got worse. False positives:
+Mendeley dev 16 to 124, val 5 to 30; PIILO dev 2 to 8. Read on `dev`: each new false positive is a person's name
+the dataset did not label (Mendeley, in sentences where it labels the same form elsewhere; PIILO, which labels the
+names of students only, a lecturer and a company founder). The spans now partial keep visible only a title or a
+suffix that the dataset counts to the name (`Mr.`, `DDS`, `Jr`). `scripts/compare_bench.py` reports the false
+positives of Mendeley and PIILO (above 1 % of a small base); no span finding; the false-alarm bank is
+unchanged.
+
+### A full name after a salutation, 2026-10-20
+
+On `dev`, `Dear`, `Hi`, `Hello` or `Hey` before two name words that do not read as words was counted against the
+gold names: Nemotron 541 missed names to 7 matches without one, Gretel 250 to 20, Mendeley 5,516 to 0. Read: the
+matches without a name were roles the word list lacks (`Dear Valued Policyholder`). A list of such role words, from
+those read and their common relatives, refuses 24 of the 27 and no gold name (Nemotron 541 to 3, Gretel 250 to 0). The
+salutation is the fifth cue of the person-cue rule; the role list applies to it only. Registered before the run: about
+5,500 on Mendeley `dev`, 540 on Nemotron, 250 on Gretel.
+
+A first form applied the role list to every cue: the span ratchet reported one span of Nemotron `dev` whole to
+missed (`Participant <name>, born on`, found before as `Participant <name>`). The role list is the salutation's
+alone now, and that case is a test.
+
+Per span against the title change: Mendeley dev 5,422 missed to whole, val 1,787; Nemotron dev 1,130, val 382; Gretel
+dev 406 and 2 to partial, val 123 and 2; nothing got worse (second form, measured on the head of the chain).
+False positives: Mendeley dev +8, val +2; Nemotron dev +1: names in a salutation the dataset did not label.
+
+### A US postal address on two lines, 2026-10-21
+
+All 27,427 addresses missed on Mendeley `dev` were US postal addresses on two lines: a house number and a street, then
+a city, a state code and a ZIP code (`1234 Harbor Mission Apt. 5` / `Springfield, IL 62704`), and the military form
+(`PSC 1234, Box 5678` / `APO AE 09876`). Every street rule took one line. The new form takes the two lines: the second
+line, with a valid state code and a ZIP code, is the strong part, so the street line needs no street word (Faker writes
+many suffixes the street list lacks). Its house number must start the line or follow a separator, an opening
+parenthesis, or a word of place (`at`, `to`, `is`, `in`, `on`, `from`, `address`), so a heading with a number
+(`Release 2 Notes` over a city line) stays text; a company, an office or a public place above it keeps the address
+text, as for the one-line forms. Registered before the run: up to 27,427 on Mendeley `dev`.
+
+The first form took a number at the line start or after a separator or `at`/`to`/`is`/`in`/`on`/`from`: Mendeley dev
+11,811 missed to whole. Read per case, 10,566 of the rest stood after `address` or right after an opening parenthesis
+(`your home address (…)`), and the second form takes those too.
+
+Per span against the head of the chain (the salutation change): Mendeley dev 17,768 missed to whole and 196 partial to
+whole, val 5,992 and 73; Gretel dev 56, val 14; Nemotron dev 12, val 7; nothing got worse; the false-alarm bank is
+unchanged. False positives: Mendeley dev 132 to 1,150, val 32 to 338; Gretel dev +13, val +5. Read on `dev`, spread
+over the list: each new false positive of Mendeley is a person's address in the same form (`your home address (…)`,
+`billing address …`, `associated with the address …`) the dataset did not label there. Of the about 9,500 still missed, the samples read stand
+after a company, an asset or a facility (`assets located at`, `our facility located at`), which keeps an address text
+on purpose; they were not counted one by one.
+`scripts/compare_bench.py` reports the false positives of Mendeley (above 1 % of a small base); no span finding.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),

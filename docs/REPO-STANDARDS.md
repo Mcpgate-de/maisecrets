@@ -39,8 +39,11 @@ and OpenAI plugin directories.
   (Windows, macOS; Linux runs on GitLab) is green for the tested SHA on the public mirror
   (`scripts/wait_for_github_checks.py`, public API, no token). Windows was
   red across four releases on 2026-09-26 because nothing waited for it.
-- Matrix in a merge request: the job `windows_macos` runs in every merge request pipeline, beside the
-  Linux tests (`scripts/github_matrix.py mr`). The git hooks run no tests, so these jobs together are
+- Matrix in a merge request: the job `windows_macos` runs beside the Linux tests
+  (`scripts/github_matrix.py mr`) in every merge request into `main`, and in a merge request into `next` only when
+  a path changes that can behave differently on Windows or macOS (the list in `.gitlab-ci.yml`: hooks, launchers,
+  harness, the store and its backends, the locale lookup `maisecrets/detection/regions.py`, the platform tests).
+  The label `public-ci` runs it in any merge request (from the next pipeline on). The git hooks run no tests, so these jobs together are
   the test gate of a merge request: Linux on GitLab, Windows and macOS on GitHub. It merges the MR head into the current target branch (the
   head alone on a conflict), pushes that commit to the branch `ci-mr/<iid>-<sha12>` of the public CI
   repository `Mcpgate-de/maisecrets-ci`, waits for `.github/workflows/ci.yml` there and prints each
@@ -124,7 +127,9 @@ and OpenAI plugin directories.
   middle or first number moves only with the owner's approval: the CI variable
   `MAISECRETS_RELEASE_BUMP=minor` or `=major` on that one pipeline. A breaking
   change is the `!` or a footer line `BREAKING CHANGE: …`, never the words in
-  a sentence. It writes
+  a sentence. A change of the library API (a new stable name, a deprecation,
+  a removal) gets a footer line `API: <what changed>`; the notes list it under
+  "API", whatever the type of its commit. It writes
   the version into the three manifests and a generated section into
   `CHANGELOG.md`.
 - The GitHub branch `release` holds only the runtime files of each release

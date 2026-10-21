@@ -85,7 +85,8 @@ _ID_RE = re.compile(r"(?i)(?<![a-z])(?:mrn|member[ -]?id|passport(?:[ _-]?(?:no|
                     + _TRAVEL_ID_LABELS + r")(?![a-z])[\"']?"
                     r"(?:\s{0,3}(?:on file|is|of|number|no\.?|#|n\.?[º°o]\.?|nr\.?|num[ée]ro|n[úu]mero|numero"
                     r"|nummer|numer))?"
-                    r"\s{0,3}[:=#]?\s{0,3}[\"']?"
+                    # a comma too: `your health plan beneficiary number, <id>, to medical professionals` (Nemotron-PII)
+                    r"\s{0,3}[:=#,]?\s{0,3}[\"']?"
                     r"((?-i:[A-Z0-9](?:[A-Z0-9]|[ -](?=[A-Z0-9])){4,24}))(?![A-Za-z0-9])")
 
 # ------------------------------------------------------------------------------------- user in a URL or path --
@@ -145,6 +146,22 @@ _CITY = r"[A-ZÄÖÜÉ][\wäöüßéèàç-]{1,40}"
 # the company decision alone, so its postcode and VAT ID follow the street, which stays text
 _DE_TWO_LINES_RE = re.compile(r"\b[A-ZÄÖÜ][\wäöüß-]{0,40}(?:straße|strasse|str\.|weg|gasse|platz|allee|ring|damm) "
                               r"\d{1,4}[a-z]?[ \t]*\r?\n[ \t]*\d{4,5} (" + _CITY + ")")
+# a US postal address on two lines (1234 Harbor Mission Apt. 5\nSpringfield, IL 62704), and the military one (PSC 1234,
+# Box 5678\nAPO AE 09876): the second line, a city, a state code and a ZIP code, is the strong part, so the street line
+# needs no street word (Mendeley, 2026-10-20: 27,427 such addresses, all on two lines, were missed)
+_US_STATES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
+              "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|PR|GU|VI|AS|MP")
+_US_TWO_LINES_RE = re.compile(
+    # the house number starts the line or follows a separator or a word of place (at, to, is): `Release 2 Notes` has
+    # its number inside a heading
+    r"(?:(?<=^)|(?<=\n)|(?<=[:;,(\"'] )|(?<=\()|(?<=\bat )|(?<=\bto )|(?<=\bis )|(?<=\bin )|(?<=\bon )"
+    r"|(?<=\bfrom )|(?<=\baddress ))"
+    r"(?:\d{1,6} (?:[A-Z][a-z'.-]{1,30} ){1,4}"
+    r"[A-Z][a-z'.-]{1,30}\.?"
+    r"(?:,? (?:Apt|Apartment|Suite|Ste|Unit|#)\.? ?[A-Za-z0-9-]{1,6})?"
+    r"[ \t]*\r?\n[ \t]*(?:[A-Z][a-z'.-]{1,30} ){0,3}[A-Z][a-z'.-]{1,30}, (?:" + _US_STATES + r") \d{5}(?:-\d{4})?"
+    r"|(?:PSC \d{3,5}, Box \d{3,5}|Unit \d{3,5} Box \d{3,5}|US(?:NS|NV|CGC|S) [A-Z][a-z]{1,30})"
+    r"[ \t]*\r?\n[ \t]*(?:APO|FPO|DPO) (?:AA|AE|AP) \d{5})(?![\w-])")
 _DEPARTMENT_LINE_RE = re.compile(r"(?i)[ \t]*(?:abteilung|abt\.|department|dept\.?|division|bereich)[ \t]")
 _ADDRESS_FORMS = tuple(
     (frozenset({r}), re.compile(_EN_STREET.replace("{codes}", code))) for r, code in _POSTCODES.items()) + (
@@ -392,7 +409,22 @@ _PERSON_CUE_RES = (
                r"|being|declare|certify|of legal age)\b)"),
     re.compile(r"(?<![\w])(?i:my (?:full )?name is) " + _CUE_NAME + r"(?![\w'’-])"),
     re.compile(_CUE_NAME + r", (?=(?:born on|born in|date of birth|a resident of|residing at|resides at|who resides"
-               r"|who lives|currently residing|currently resides)\b)"))
+               r"|who lives|currently residing|currently resides)\b)"),
+    # a title before a full name (Mr Dana Okafor, Mrs. …); not Dr, which is also a street (… Dr. We are)
+    re.compile(r"(?<![A-Za-z])(?:Mr|Mrs|Ms|Mx|Miss)\.? " + _CUE_NAME + r"(?![\w'’-])"),
+    # a salutation before a full name and its comma or line end (Dear Dana Okafor,)
+    re.compile(r"(?<![A-Za-z])(?:Dear|Hi|Hello|Hey) " + _CUE_NAME + r"(?=[ \t]*[,:!\n])"))
+# the roles a salutation names instead of a person, which the word list lacks (Dear Valued Policyholder): read on the
+# dev split of Gretel and Nemotron-PII, 2026-10-20, with their common relatives
+_ROLE_WORDS = frozenset({
+    "valued", "esteemed", "prospective", "policyholder", "policyholders", "subscriber", "subscribers", "cardholder",
+    "beneficiary", "applicant", "applicants", "customer", "customers", "member", "members", "client", "clients", "team",
+    "committee", "manager", "managers", "sir", "madam", "colleague", "colleagues", "partner", "partners", "patron",
+    "investor", "investors", "shareholder", "shareholders", "stakeholder", "stakeholders", "user", "users",
+    "participant", "participants", "resident", "residents", "homeowner", "homeowners", "tenant", "tenants", "borrower",
+    "insured",
+    "claimant", "account", "holder", "student", "students", "parent", "parents", "guardian", "patient", "patients",
+    "employee", "employees", "friend", "friends", "admissions", "hiring", "selection", "support", "sales", "board"})
 _SERVICE_LOCAL_RE = re.compile(r"(?i)^(?:no-?reply|do-?not-?reply|notifications?|support|info|hello|contact|team"
                                r"|admin|root|git|bot|ci|build|release|deploy|security|alerts?|monitoring|postmaster"
                                r"|webmaster|mailer-daemon|bounces?|github-actions|actions|dependabot|renovate)"
@@ -588,6 +620,7 @@ def _md_table_hits(text: str) -> list:
             li += 1
             continue
         names = [_md_column(hdr[a:b]) for a, b in _md_cells(hdr)]
+        hdr_line = li
         li += 2
         rows: list = []
         while li < len(lines) and len(rows) < _CSV_ROWS and "|" in lines[li] and lines[li].strip():
@@ -595,6 +628,14 @@ def _md_table_hits(text: str) -> list:
             li += 1
         # a date alone names no person in a table of releases (| Name | Birthday | Version |): a name or an id
         out += _grid_hits(text, names, rows, "md-table-personal-column", strip="*`")
+        # a table of fields and values (| Passenger Name | … |, one field per row) is one record: the first cell of
+        # each row is the field name, the second its value, judged by the same policy (the header row may be a field)
+        if len(names) == 2:
+            head = [(pos[hdr_line] + a, pos[hdr_line] + b) for a, b in _md_cells(hdr)]
+            kv = [r for r in [head] + rows if len(r) == 2]
+            fields = [_md_column(text[r[0][0]:r[0][1]].strip("*` ")) for r in kv]
+            if sum(f in _STRONG_COLS or f in _WEAK_COLS for f in fields) >= 2:
+                out += _grid_hits(text, fields, [[r[1] for r in kv]], "md-table-personal-column", strip="*`")
     return out
 
 
@@ -864,6 +905,7 @@ FORMS = {
     "name-next-to-a-person-cue": (NAME, "tool", "generic", "label"),
     "address-street-after-label": (ADDRESS, "tool", "generic", "label"),
     "address-street-postcode-city": (ADDRESS, "tool", "generic", "form"),
+    "address-us-two-lines": (ADDRESS, "tool", "us", "form"),
     "md-table-personal-column": ("COLUMN", "tool", "generic", "label"),
     "sql-insert-personal-column": ("COLUMN", "tool", "generic", "label"),
     "html-table-personal-column": ("COLUMN", "tool", "generic", "label"),
@@ -982,8 +1024,9 @@ _JP_COMPANY_RE = _lazy(r"株式会社|有限会社|合同会社|本社|支社|�
 _UNIT_BEFORE_DOT = "".join(f"(?<!\\b{w})" for w in ("ste", "apt", "rm", "fl", "bldg", "no", "nr")) + "(?<!str)"
 _ADDRESS_LABEL_RE = _lazy(
     r"(?i)(?<![a-z_])(address(?: on file)?|home[ _-]?address|adr" + _VCARD_PARAMS
-    + r"|ship[ _-]?to|reship to|property|lives"
-    r"|endere[cç]o|direcci[oó]n|adresse|location)[\"']?\s{0,3}:\s{0,3}[\"']?(;*)([^\n\"|;]{8,100}?)"
+    + r"|ship[ _-]?to|reship to|property|lives|street[ _-]?address"
+    # the labels of the record layer's address columns in Dutch, Swedish, Italian and German (Gretel, 2026-10-20)
+    r"|endere[cç]o|direcci[oó]n|adresse|adress?|indirizzo|anschrift|location)[\"']?\s{0,3}:\s{0,3}[\"']?(;*)([^\n\"|;]{8,100}?)"
     r"(?=[\"\n|]|\s{2}|\.\s(?!\d)|" + _UNIT_BEFORE_DOT + r"\.\s|$)")
 # the end of a value before 0.6.43, at any dot and space: the second pass of address-after-label for a label whose
 # longer value the filters refused (a template with `[City]` after `Apt. 999`, a sentence going on after the unit)
@@ -1228,8 +1271,9 @@ _HOME_LABEL_RE = _lazy(r"(?i)home|residential|permanent|wohn|resid|liv|domicil")
 _STREET_LABEL_WORDS = ("address", "anschrift", "adresse", "domicilio", "direcci", "indirizzo", "endere", "adres",
                        "resid", "live", "living", "domiciled", "wohn")
 _PHONE_WORDS = ("phone", "tel", "mobil", "cell", "fax", "handy", "portable", "rufnummer", "whatsapp", "hotline",
-                "contact", "call", "reach", "text")
-_ADDRESS_WORDS = ("address", "adr", "ship", "property", "lives", "endere", "direcci", "adresse", "location")
+                "contact", "call", "reach", "text", "dial")
+_ADDRESS_WORDS = ("address", "adr", "ship", "property", "lives", "endere", "direcci", "adresse", "location",
+                  "indirizzo", "anschrift")
 _IN_ADDRESS_RE = _lazy(r"\b\d{1,4}(?:/\d{1,4})?, [^\n]{10,90}?, [A-Z][a-z]+ \d{6}\b")
 _NONLATIN = "Ͱ-ϿЀ-ӿ֐-׿؀-ۿऀ-ॿঀ-৿"
 _CJK_NAME = "一-鿿가-힯぀-ヿ"
@@ -1255,8 +1299,13 @@ _PHONE_NUMBER_WORD = r"(?:[ _-]?(?:number|no\.?|nr\.?|nummer|num[ée]ro|n[úu]me
 _PHONE_TIGHT_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r")" + _PHONE_NUMBER_WORD + r"(?![\w-])\.?[\"']?"
                         r"(?:[ \t]{0,3}(?:is|ist|est|es|è|é|:|=|-|–)[ \t]{0,3}|[ \t]{1,3})[\"']?[ \t]{0,2}"
                         r"(\+?(?:\(\d{1,8}\)|\d{1,8})(?:[ .\-/]{1,2}(?:\(\d{1,8}\)|\d{1,8})){0,5})(?![\w+]|[.,/:-]\d)")
-_PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed)?|reach(?:ed)?(?: \w{1,12}){0,2} at"
-                        r"|contact(?:ed)?(?: \w{1,12}){0,2} at|text(?:ed)?)(?![\w-])[^\n\d+]{0,30}?(?<![\w+.-])"
+# the verbs of a call before a North American number: call, calling, dial, reach … at, contact … at, and contact right
+# before the number (Nemotron-PII, 2026-10-20: `by calling`, `contact the report coordinator at`, `please contact`)
+_PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed|ing)?|dial(?:ed|ing)?"
+                        r"|reach(?:ed)?(?: \w{1,12}){0,2} at|contact(?:ed)?(?: \w{1,15}){0,4} at"
+                        # contact alone only right before the number: an earlier start would swallow a later cue
+                        r"|contact(?:ed)?(?=[ \t]{1,3}[(+]?\d)|text(?:ed)?)(?![\w-])"
+                        r"[^\n\d+]{0,30}?(?<![\w+.-])"
                         r"((?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4})(?![\w-]|[.,:]\d)")
 _PHONE_DATE_RE = _lazy(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|\d{1,2}:\d{2}")
 _ISO_DATE_RE = _lazy(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
@@ -1874,6 +1923,15 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
             if _service_user(u) or u == own:
                 continue
             out.append((m.start(1), m.end(1), "user-in-home-path", USERNAME))
+    if "address-us-two-lines" in want and "\n" in text and "us" in regions:
+        for m in _US_TWO_LINES_RE.finditer(text):
+            line = text.rfind("\n", 0, m.start()) + 1
+            lo = max(_block_back(text, line), m.start() - 160)
+            # a company, an office or a public place on the lines above or before it keeps the address text
+            if _NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start()):
+                _company_window(text, lo, m.start(), m.end(), "address-us-two-lines", company)
+            else:
+                out.append((m.start(), m.end(), "address-us-two-lines", ADDRESS))
     if "street-address" in want:
         for regs, rx in _ADDRESS_FORMS:
             if not regs.intersection(regions):
@@ -1930,7 +1988,9 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                     v, words_only = cut, False
             if _name_ok(v) and not words_only:
                 out.append((m.start(3), m.start(3) + len(v), "name-after-label", NAME))
-    if "name-next-to-a-person-cue" in want and any(w in low for w in ("i, ", "name is", "born", "resid", "lives")):
+    if "name-next-to-a-person-cue" in want and any(w in low for w in ("i, ", "name is", "born", "resid", "lives", "mr",
+                                                                         "ms", "mx", "miss", "dear", "hi ", "hello",
+                                                                         "hey ")):
         for rx in _PERSON_CUE_RES:
             for m in rx.finditer(text):
                 words, start = m.group(1).split(" "), m.start(1)
@@ -1941,6 +2001,9 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                 # two name words at least: one word next to the cue is as often a role or a place (The Applicant,
                 # Texas, born on) as a name
                 if not _name_ok(v) or _reads_as_words(v) or words[0].lower() in _PLACEHOLDER_NAME_WORDS:
+                    continue
+                # a salutation also greets a role (Dear Valued Policyholder); the other cues name a person already
+                if rx is _PERSON_CUE_RES[-1] and any(w.lower() in _ROLE_WORDS for w in words):
                     continue
                 out.append((start, start + len(v), "name-next-to-a-person-cue", NAME))
     if "name-before-email" in want and "@" in text:

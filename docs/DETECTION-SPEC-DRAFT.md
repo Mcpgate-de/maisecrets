@@ -103,7 +103,15 @@ would call them through the conformance cases, not re-derive them from prose.
 | Structure cases (CSV, Markdown, SQL, HTML, JSON, XML) | normative | | one per format and per policy decision |
 | The detection fingerprint (27,337 + 23,729 inputs) | snapshot | about 51,000 | **not** a standard: it records what this implementation does, including its known errors (`docs/rule-limits.json`) |
 
-## 6. Recommendation
+## 6. The first normative cases (2026-10-21)
+
+`tests/conformance/cases.json` holds the first normative cases in this format (`kind: normative`): the boundary
+decisions of the frontier changes of 2026-10-20 (a street with its direction, a double surname, the person cues, the
+title and the salutation with its role words, a US address on two lines and a heading that is none, a table of fields
+and values). `tests/test_conformance_cases.py` runs them on start, end and type, not on the rule id. The offsets are
+computed from the text when a case is written, never typed by hand.
+
+## 7. Recommendation
 
 A spec-v1 block is useful once two things hold. First, the tests that state an exact span are a clear, tagged set
 (`normative`); today exactness is spread over many test files and some tests cannot fail on a partial mask. Second,

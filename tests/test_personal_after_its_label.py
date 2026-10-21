@@ -102,6 +102,29 @@ US = "415-382-" + "9174"
 
 
 class PhoneAfterWordTests(Base):
+    def test_a_north_american_number_after_calling_dial_or_contact_is_masked_whole(self):
+        for text in ("Please contact the report coordinator at " + US + " or visit the site.",
+                     "You can reach us by calling " + US + ".", "Please contact " + US + " for help.",
+                     "Dial " + US + " now."):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(US, "•"), masked(text, region=("us",)))
+
+    def test_a_number_found_before_the_wider_call_words_stays_found(self):
+        # the span ratchet found these (2026-10-20): a first try matched from `contact` and swallowed the later cue
+        mail = "dana.ok" + "afor@posteo.de"
+        for text in ("Please contact " + NAME + " at " + mail + " or " + US + ".",
+                     "**Contact Roadside Assistance**: Call " + US + " for immediate help.",
+                     "Or contact support at " + mail + " or " + US + "."):
+            with self.subTest(text=text):
+                self.assertIn("phone-after-phone-word", {m.kind for m in scan(text, region=("us",))})
+                self.assertNotIn(US, masked(text, region=("us",)))
+
+    def test_no_phone_shape_after_contact_stays_text(self):
+        for text in ("contact us about ticket 415-382-9174-2 later", "contact version 2.415.382 build",
+                     "Build 415-382-9174 of the contact list"):
+            with self.subTest(text=text):
+                self.assertNotIn("phone-after-phone-word", {m.kind for m in scan(text, region=("us",))})
+
     def test_a_national_number_after_a_phone_word_is_masked(self):
         for text, value in (
                 ("Phone number: " + US, US),
@@ -219,6 +242,42 @@ class DutchAndSwedishNameLabelTests(Base):
                 self.assertNotIn("name-after-label", {m.kind for m in scan(text)})
 
 
+class AddressLabelsInMoreLanguagesTests(Base):
+    def test_an_address_after_adres_adress_indirizzo_anschrift_or_street_address_is_masked_whole(self):
+        for text, value in (("Adres: Kerkstraat 12, 1012 AB Amsterdam\n", "Kerkstraat 12, 1012 AB Amsterdam"),
+                            ("Adress: Storgatan 5, 111 22 Stockholm\n", "Storgatan 5, 111 22 Stockholm"),
+                            ("Indirizzo: Via Roma 12, 00184 Roma\n", "Via Roma 12, 00184 Roma"),
+                            ("Anschrift: Lindenweg 4, 80333 München\n", "Lindenweg 4, 80333 München"),
+                            ("street_address: 12 Oak Street, Springfield\n", "12 Oak Street, Springfield")):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(value, "•"), masked(text))
+
+    def test_a_value_that_is_no_address_after_the_new_labels_stays_text(self):
+        for text in ("Adres: zie hieronder, versie 1.2.3\n", "Indirizzo: vedi sotto\n", "Anschrift: siehe oben\n"):
+            with self.subTest(text=text):
+                self.assertText(text)
+
+
+class UsAddressOnTwoLinesTests(Base):
+    STREET = "4821 Harbor " + "Mission Apt. 5\nSpringfield, IL 62704"
+    MILITARY = "PSC 1234, Box " + "5678\nAPO AE 09876"
+
+    def test_a_us_address_on_two_lines_is_masked_whole(self):
+        for text, value in (("I live at " + self.STREET + " and work nearby.", self.STREET),
+                            ("Mail it to:\n" + self.MILITARY + "\n", self.MILITARY),
+                            (self.STREET + "\n", self.STREET),
+                            ("your home address (" + self.STREET + "), email", self.STREET),
+                            ("update my home address " + self.STREET + " please", self.STREET)):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(value, "•"), masked(text, region=("us",)))
+
+    def test_a_heading_or_a_company_over_a_city_line_stays_text(self):
+        for text in ("Release 2 Notes\nAustin, TX 78701 office", "Chapter 12 Summary\nSee Page, IL 60601",
+                     "Acme Corporation\nHeadquarters\n" + self.STREET + "\n"):
+            with self.subTest(text=text):
+                self.assertNotIn("address-us-two-lines", {m.kind for m in scan(text, region=("us",))})
+
+
 class NameNextToAPersonCueTests(Base):
     def test_a_name_in_a_declaration_a_self_introduction_or_before_its_birth_is_masked_whole(self):
         for text in ("I, " + NAME + ", hereby declare that the above is true.",
@@ -228,6 +287,34 @@ class NameNextToAPersonCueTests(Base):
             with self.subTest(text=text):
                 # the birth date has its own rule
                 self.assertEqual(text.replace(NAME, "•", 1).replace(BIRTH, "•"), masked(text).replace(BIRTH, "•"))
+
+    def test_a_full_name_after_a_title_is_masked_whole(self):
+        for text in ("Dear Mr " + NAME + ", we have received your application.",
+                     "The claim was initiated by Mrs. " + NAME + " for her son."):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(NAME, "•"), masked(text))
+
+    def test_a_full_name_after_a_salutation_is_masked_whole(self):
+        for text in ("Dear " + NAME + ",\nThank you for your application.", "Hello " + NAME + "! Welcome aboard."):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(NAME, "•"), masked(text))
+
+    def test_the_role_words_of_a_salutation_do_not_touch_the_other_cues(self):
+        # the span ratchet found it (2026-10-20): `Participant <name>, born on` was found before the role list
+        text = "Participant Okafor, born on " + BIRTH + ", was seen today."
+        self.assertIn("name-next-to-a-person-cue", {m.kind for m in scan(text)})
+
+    def test_a_role_or_a_placeholder_after_a_salutation_stays_text(self):
+        for text in ("Dear Valued Policyholder,\n", "Dear Hiring Manager,\n", "Dear Customer,\n", "Dear John Doe,\n",
+                     "Hi Team Leads,\n"):
+            with self.subTest(text=text):
+                self.assertNotIn("name-next-to-a-person-cue", {m.kind for m in scan(text)})
+
+    def test_a_title_before_words_one_word_or_a_street_stays_text(self):
+        for text in ("Open the Ms Word Document first.", "Mr Product Owner will decide.", "Mr John Doe is a sample.",
+                     "Visit us at 12 Oak Dr. We are open daily."):
+            with self.subTest(text=text):
+                self.assertNotIn("name-next-to-a-person-cue", {m.kind for m in scan(text)})
 
     def test_one_word_words_a_role_or_a_placeholder_next_to_a_cue_stay_text(self):
         for text in ("The Applicant, born on the date given above, signs here.", "Texas, born on paper, grew.",
@@ -311,6 +398,22 @@ class StreetLineTests(Base):
 
 # ----------------------------------------------------------------------- person columns of a Markdown table --
 class MarkdownTableTests(Base):
+    def test_a_table_of_fields_and_values_is_one_record(self):
+        street = "12 Oak Lane, Springfield"
+        for text in ("| Field | Value |\n|---|---|\n| Full Name | " + NAME + " |\n| Date of Birth | " + BIRTH
+                     + " |\n| Street Address | " + street + " |\n",
+                     "| **Full Name** | " + NAME + " |\n|---|---|\n| **Date of Birth** | " + BIRTH + " |\n"):
+            with self.subTest(text=text):
+                expected = text.replace(NAME, "•").replace(BIRTH, "•").replace(street, "•")
+                self.assertEqual(expected, masked(text))
+
+    def test_a_table_of_fields_without_a_person_stays_text(self):
+        for text in ("| Name | Value |\n|---|---|\n| Product Name | Widget Pro |\n| Version | 2.1 |\n",
+                     "| Setting | Value |\n|---|---|\n| Name | build-runner |\n"
+                     "| Address | 10 Oak Lane, Springfield |\n"):
+            with self.subTest(text=text):
+                self.assertNotIn("md-table-personal-column", {m.kind for m in scan(text)})
+
     TABLE = ("| Name | Date of Birth | Phone Number |\n|------|---------------|--------------|\n"
              "| " + NAME + " | " + BIRTH + " | " + US + " |\n")
 
@@ -345,6 +448,19 @@ class MarkdownTableTests(Base):
 
 # ------------------------------------------------------------------------------- health, tax and national IDs --
 class HealthIdLabelTests(Base):
+    def test_an_id_after_its_label_and_a_comma_is_masked_whole(self):
+        value = "AB-" + "4821930217"
+        for text in ("Provide your health plan beneficiary number, " + value + ", to medical professionals.",
+                     "Have a medical record number, " + value + ", that can be verified."):
+            with self.subTest(text=text):
+                self.assertEqual(text.replace(value, "•"), masked(text))
+
+    def test_a_comma_after_an_id_label_and_no_id_stays_text(self):
+        for text in ("Passport, 12 copies attached", "account number, see page 4",
+                     "medical record number, 2024 edition"):
+            with self.subTest(text=text):
+                self.assertNotIn("id-number-after-label", {m.kind for m in scan(text)})
+
     def test_an_id_after_a_health_tax_or_national_label_is_masked(self):
         for text, value in (
                 ("Health plan beneficiary number: " + "4821" + "39771", "4821" + "39771"),

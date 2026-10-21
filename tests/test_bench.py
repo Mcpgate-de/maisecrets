@@ -475,6 +475,28 @@ class CompareBenchTests(unittest.TestCase):
         self.assertEqual(found, ["gretel-dev-maisecrets.json: 1 spans got worse (whole to partial or missed, "
                                  "partial to missed)"])
 
+    def test_a_span_made_worse_on_purpose_is_no_finding_only_with_a_reason_and_a_commit(self):
+        import tempfile
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import compare_bench
+        with tempfile.TemporaryDirectory() as d:
+            a, b = Path(d) / "a", Path(d) / "b"
+            for p, outcomes in ((a, {"c1": ["full", "full"]}), (b, {"c1": ["full", "missed"]})):
+                p.mkdir()
+                (p / "gretel-dev-maisecrets.json").write_text(json.dumps(
+                    {"metrics": {"all": {"fp": 0}}, "per_case": outcomes}), encoding="utf-8")
+            exc = Path(d) / "exceptions.json"
+            entry = {"file": "gretel-dev-maisecrets.json", "case": "c1", "span": 1, "reason": "a company name",
+                     "commit": "abc1234"}
+            exc.write_text(json.dumps({"exceptions": [entry]}), encoding="utf-8")
+            self.assertEqual(compare_bench.compare(a, b, exc), [])
+            exc.write_text(json.dumps({"exceptions": [dict(entry, reason="")]}), encoding="utf-8")
+            found = compare_bench.compare(a, b, exc)
+            self.assertEqual(len(found), 2, found)   # the empty reason, and the span it did not excuse
+            self.assertIn("no reason or no commit", found[0])
+            exc.write_text(json.dumps({"exceptions": [dict(entry, span=0)]}), encoding="utf-8")
+            self.assertEqual(len(compare_bench.compare(a, b, exc)), 1)   # another span: still a finding
+
     def test_runs_that_scored_other_spans_of_the_same_cases_are_not_compared(self):
         # another scope drops the first span: paired by position, missed -> full would read as a gain, silently
         import tempfile

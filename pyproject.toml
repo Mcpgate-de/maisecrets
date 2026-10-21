@@ -25,10 +25,11 @@ path = ".claude-plugin/plugin.json"
 pattern = "\"version\": \"(?P<version>[^\"]+)\""
 
 [tool.hatch.build.targets.wheel]
-only-include = ["maisecrets/__init__.py", "maisecrets/detection"]
+only-include = ["maisecrets/__init__.py", "maisecrets/py.typed", "maisecrets/detection"]
 exclude = ["__pycache__", "*.pyc"]
 
 [tool.hatch.build.targets.sdist]
-only-include = ["maisecrets/__init__.py", "maisecrets/detection", ".claude-plugin/plugin.json", "docs/DETECTION.md",
+only-include = ["maisecrets/__init__.py", "maisecrets/py.typed", "maisecrets/detection", ".claude-plugin/plugin.json",
+                "docs/DETECTION.md",
                 "LICENSE", "NOTICE", "pyproject.toml"]
 exclude = ["__pycache__", "*.pyc"]
