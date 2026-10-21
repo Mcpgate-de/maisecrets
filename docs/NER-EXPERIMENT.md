@@ -55,6 +55,13 @@ setting was fixed before D's first measurement; nothing else in this section cha
 English. `aggregation_strategy="simple"` returns pieces of words. **D2** is D with `aggregation_strategy="first"`, which
 keeps whole words: a choice made on `dev`, as the rules allow.
 
+**Added after the results above, on the maintainer's question why DistilBERT finds only about half of the names on
+Gretel and Privy (2026-10-21):** candidate **D3**, the model and the setting of the support-copilot's NER layer:
+`Davlan/distilbert-base-multilingual-cased-ner-hrl` at `d421f57d` (licence AFL-3.0, ten languages), aggregation
+`simple`, each span widened to whole words (`hf:<dir>::snap`). Fixed before its first measurement; run on the samples
+and then on Privy (sample and full). Privy results of the other candidates were known when D3 was chosen; it was not
+chosen from them.
+
 **Data and splits.** The four PII datasets of Benchmark V1 with the case hashes of the 0.7.3 snapshot: the fixed sample
 of 1 in 50 for every variant, and each dataset in full for the baseline, A and B (C on the sample only: about 0.1 to
 0.5 s per document). The bank and the catalogs are left out (6 and 0 names). No threshold or setting is chosen from a

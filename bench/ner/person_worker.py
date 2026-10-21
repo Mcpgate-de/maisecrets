@@ -4,7 +4,8 @@ in maisecrets, and sees one case per input line: the text and the spans the dete
     python -I person_worker.py IN OUT BACKEND
 
 BACKEND is `spacy:<model package>`, `gliner:<model directory>:<threshold>` or `hf:<model directory>[::<aggregation>]`
-(a token classifier, its PER entities; aggregation `simple` by default, `first` keeps whole words). The model reads the
+(a token classifier, its PER entities; aggregation `simple` by default, `first` keeps whole words,
+`snap` widens the spans of `simple` to whole words). The model reads the
 whole text, so its context is the same as without the layer; a PERSON span it returns is kept only when it overlaps no
 span of the deterministic detector (that span decided the text there; a finding is never made smaller, moved or
 retyped). OUT gets,
@@ -100,7 +101,10 @@ def load(backend: str):
         torch.set_grad_enabled(False)
         path, _, strategy = arg.partition("::")
         strategy = strategy or "simple"
-        pipe = transformers.pipeline("token-classification", model=path, aggregation_strategy=strategy, device="cpu")
+        # `snap`: `simple`, then each span widened to whole words, as the support-copilot's NER layer does
+        snap = strategy == "snap"
+        pipe = transformers.pipeline("token-classification", model=path,
+                                     aggregation_strategy="simple" if snap else strategy, device="cpu")
 
         def find(text):
             spans = []
@@ -108,7 +112,13 @@ def load(backend: str):
             for a, b in _chunks(text, BERT_WORDS):
                 for e in pipe(text[a:b]):
                     if e["entity_group"] == "PER":
-                        spans.append((a + int(e["start"]), a + int(e["end"]), round(float(e["score"]), 4)))
+                        s, t = a + int(e["start"]), a + int(e["end"])
+                        if snap:
+                            while s > 0 and text[s - 1].isalnum():
+                                s -= 1
+                            while t < len(text) and text[t].isalnum():
+                                t += 1
+                        spans.append((s, t, round(float(e["score"]), 4)))
             return spans
         return find, {"library": "transformers", "library_version": transformers.__version__,
                       "torch": torch.__version__, "model": path.rstrip("/").split("/")[-1], "threshold": None,
