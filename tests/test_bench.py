@@ -798,6 +798,26 @@ class BenchmarkV3Tests(unittest.TestCase):
         self.assertGreater(new["val"], 0)
         self.assertGreater(new["holdout"], 0)
 
+    def test_the_public_holdout_split_of_a_dataset_is_no_run_of_the_private_holdout(self):
+        # `--split holdout` on a dataset wrote to the holdout log and dropped the outcomes per case (2026-10-21)
+        from bench import run, sources
+        c = {"id": "nemotron/1", "text": "mail a@example.org", "channel": "tool", "context": "doc", "path": None,
+             "spans": [{"start": 5, "end": 18, "class": "pii.email"}], "split": "holdout", "source": {"name": "x"}}
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "log.md"
+            log.write_text("", encoding="utf-8")
+            with mock.patch.object(sources, "load", return_value=iter([c])), \
+                    mock.patch.object(run, "HOLDOUT_LOG", log), \
+                    mock.patch("bench.adapters.detect_secrets.scan", return_value=([[]], {"times_s": [0.0]})), \
+                    mock.patch("bench.adapters.detect_secrets.describe", return_value={"scanner": "x"}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                run.main(["--scanner", "detect_secrets", "--source", "nemotron", "--split", "holdout",
+                          "--out", str(Path(d) / "r.json")])
+            out = json.loads((Path(d) / "r.json").read_text(encoding="utf-8"))
+            self.assertIn("per_case", out)
+            self.assertIn("v3", out)
+            self.assertEqual("", log.read_text(encoding="utf-8"))
+
     def test_the_v3_block_splits_the_false_positives_and_keeps_the_hits(self):
         from bench import v3
         text = "mail a@example.com and name Ann Lee"

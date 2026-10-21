@@ -176,7 +176,9 @@ def main(argv=None) -> int:
         desc = adapter.describe()
         found, timing = adapter.scan(selected)
     results = [(c, score.score_case(c, [f[:3] for f in fs], adapter.SCOPE)) for c, fs in zip(selected, found)]
-    holdout = a.split == "holdout"
+    # the private holdout (its source), never the public holdout split of a dataset: `--split holdout` on a dataset
+    # wrote rows to bench/HOLDOUT-LOG.md and left out the outcomes per case (found by Benchmark V3, 2026-10-21)
+    holdout = a.source in ("holdout", "holdout-v2")
     out = {
         "date": datetime.date.today().isoformat(), "bench_commit": _commit(), "bench_dirty": _dirty(),
         "scanner": desc, "source_meta": source_meta(selected), "cases_sha256": cases_hash(selected),
@@ -188,7 +190,7 @@ def main(argv=None) -> int:
         "by_context": score.aggregate(results, lambda c, s: f"{c['context']}/{s['class']}"),
         "timing": timing_summary(timing, sum(sc["bytes"] for _, sc in results)),
     }
-    if a.split != "holdout":
+    if not holdout:
         from bench import v3
         out["v3"] = v3.metrics(a.source, results)      # Benchmark V3: precision only where the source labels it
     if holdout:
