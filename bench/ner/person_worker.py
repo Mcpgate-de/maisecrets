@@ -148,11 +148,18 @@ def _onnx_backend(arg: str):
     id2label = {int(k): v for k, v in _json.loads(open(f"{path}/config.json", encoding="utf-8").read())["id2label"]
                 .items()}
 
+    def fit(text, a, b, limit):
+        """Pieces of text[a:b] of at most 512 word pieces, the length of the model's positions: 100 tokens of digits
+        or of a script the vocabulary splits finely can exceed it (one of 816 Nemotron holdout documents had 528),
+        and onnxruntime then fails where the transformers pipeline cut the piece short."""
+        enc = tok.encode(text[a:b])
+        if len(enc.ids) <= 512 or limit < 2:
+            return [(a, b, enc)]
+        return [x for c, d in _chunks(text[a:b], limit // 2) for x in fit(text, a + c, a + d, limit // 2)]
+
     def find(text):
         spans = []
-        for a, b in _chunks(text, BERT_WORDS):
-            piece = text[a:b]
-            enc = tok.encode(piece)
+        for a, b, enc in (x for c, d in _chunks(text, BERT_WORDS) for x in fit(text, c, d, BERT_WORDS)):
             ids = np.array([enc.ids], dtype=np.int64)
             logits = session.run(None, {"input_ids": ids, "attention_mask": np.ones_like(ids)})[0][0]
             probs = np.exp(logits - logits.max(-1, keepdims=True))
