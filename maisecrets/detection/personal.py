@@ -486,7 +486,11 @@ _NAME_PART_COLS = frozenset({"first_name", "last_name", "firstname", "lastname",
 _NAME_PART_RE = re.compile(_NAME_STEM)
 _NOT_A_NAME_PART = frozenset({"required", "optional", "unknown", "none", "redacted", "pending", "mandatory",
                               "string", "text", "varchar", "first", "last", "name", "value", "field", "example",
-                              "sample", "test"})
+                              "sample", "test",
+                              # the words of fixtures and seed data (first_name,last_name / Foo,Bar)
+                              "foo", "bar", "baz", "qux", "quux", "user", "demo", "dummy", "fake", "placeholder",
+                              "lorem", "ipsum", "guest", "anonymous"})
+_FIRST_PART_COLS = frozenset({"first_name", "firstname", "given_name", "vorname"})
 
 
 def _cell_ok(v: str, typ: str, col: str = "") -> bool:
@@ -699,6 +703,12 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
                 typ = _column_type(names[col])
                 if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ, names[col]):
                     row.append((s0, s0 + len(v), kind, typ, col))
+        # a first and a last name that together make a placeholder (Jane, Doe) are a fixture, not a person
+        first = [h for h in row if names[h[4]] in _FIRST_PART_COLS and h[3] == NAME]
+        last = [h for h in row if names[h[4]] in _NAME_PART_COLS - _FIRST_PART_COLS and h[3] == NAME]
+        if first and last and (text[first[0][0]:first[0][1]] + " " + text[last[0][0]:last[0][1]]).lower() \
+                in PLACEHOLDER_NAMES:
+            row = [h for h in row if h not in first and h not in last]
         if any(c in strong for *_, c in row) and any(h[3] in anchors for h in row):
             out += [h[:4] for h in row]
     return out

@@ -437,6 +437,15 @@ class MarkdownTableTests(Base):
         self.assertText("| Field | Value |\n|---|---|\n| First Name | Required |\n| Last Name | Optional |\n"
                         "| Date of Birth | " + BIRTH + " |\n")
 
+    def test_the_names_of_a_fixture_in_name_part_fields_stay_text(self):
+        # seed data and API examples: fixture words, and a first and a last name that make a placeholder together
+        for text in ("first_name,last_name,dob\nFoo,Bar,1999-12-31\nTest,User,2000-01-01\n",
+                     '{"first_name": "Jane", "last_name": "Doe", "date_of_birth": "1990-01-01"}',
+                     "| Field | Value |\n|---|---|\n| First Name | John |\n| Last Name | Doe |\n"
+                     "| Date of Birth | " + BIRTH + " |\n"):
+            with self.subTest(text=text):
+                self.assertNotIn("NAME", {m.type for m in scan(text)})
+
     def test_the_name_column_of_a_person_in_a_role_counts_beside_a_strong_column(self):
         for head in ("Candidate Name", "Player Name", "Client Name", "Recipient Name"):
             with self.subTest(head=head):
