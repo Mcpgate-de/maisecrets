@@ -14,6 +14,7 @@ stdout gets the timing and the memory. No network: the model is a local package 
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -122,7 +123,70 @@ def load(backend: str):
         return find, {"library": "transformers", "library_version": transformers.__version__,
                       "torch": torch.__version__, "model": path.rstrip("/").split("/")[-1], "threshold": None,
                       "aggregation": strategy}
+    if kind == "onnx":
+        return _onnx_backend(arg)
     raise SystemExit(f"unknown backend {kind!r}")
+
+
+def _onnx_backend(arg: str):
+    """A token classifier exported by bench/ner/export_onnx.py, run with onnxruntime and tokenizers alone (no torch,
+    no transformers): `onnx:<dir>` reads model.onnx, `onnx:<dir>::int8` model.int8.onnx. The aggregation is the one of
+    D3, rebuilt: per token the most likely label; a PER token after a PER token of the same entity joins it unless it
+    is a B- tag; the span widened to whole words; the score is the mean of its tokens."""
+    import json as _json
+    import numpy as np
+    import onnxruntime
+    import tokenizers
+    path, _, variant = arg.partition("::")
+    model_file = "model.int8.onnx" if variant == "int8" else "model.onnx"
+    opts = onnxruntime.SessionOptions()
+    opts.intra_op_num_threads = int(os.environ.get("BENCH_NER_THREADS", "0"))   # 0: the runtime decides
+    session = onnxruntime.InferenceSession(f"{path}/{model_file}", opts, providers=["CPUExecutionProvider"])
+    tok = tokenizers.Tokenizer.from_file(f"{path}/tokenizer.json")
+    tok.no_truncation()
+    tok.no_padding()
+    id2label = {int(k): v for k, v in _json.loads(open(f"{path}/config.json", encoding="utf-8").read())["id2label"]
+                .items()}
+
+    def find(text):
+        spans = []
+        for a, b in _chunks(text, BERT_WORDS):
+            piece = text[a:b]
+            enc = tok.encode(piece)
+            ids = np.array([enc.ids], dtype=np.int64)
+            logits = session.run(None, {"input_ids": ids, "attention_mask": np.ones_like(ids)})[0][0]
+            probs = np.exp(logits - logits.max(-1, keepdims=True))
+            probs /= probs.sum(-1, keepdims=True)
+            cur = None
+            for (s, e), special, p in zip(enc.offsets, enc.special_tokens_mask, probs):
+                label = id2label[int(p.argmax())]
+                if special or e <= s:
+                    continue
+                tag, _, ent = label.partition("-")
+                if ent == "PER" and cur is not None and tag != "B":
+                    cur[1], cur[2] = e, cur[2] + [float(p.max())]
+                    continue
+                if cur is not None:
+                    spans.append(cur)
+                    cur = None
+                if ent == "PER":
+                    cur = [s, e, [float(p.max())]]
+            if cur is not None:
+                spans.append(cur)
+            # the chunk's spans, in the text's offsets and widened to whole words
+            spans = [x if isinstance(x, tuple) else _snap(text, a + x[0], a + x[1], round(sum(x[2]) / len(x[2]), 4))
+                     for x in spans]
+        return spans
+    return find, {"library": "onnxruntime", "library_version": onnxruntime.__version__,
+                  "tokenizers": tokenizers.__version__, "model": model_file, "threshold": None, "aggregation": "snap"}
+
+
+def _snap(text: str, s: int, e: int, score: float) -> tuple:
+    while s > 0 and text[s - 1].isalnum():
+        s -= 1
+    while e < len(text) and text[e].isalnum():
+        e += 1
+    return (s, e, score)
 
 
 def main() -> int:
