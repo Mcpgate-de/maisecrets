@@ -724,6 +724,19 @@ after a company, an asset or a facility (`assets located at`, `our facility loca
 on purpose; they were not counted one by one.
 `scripts/compare_bench.py` reports the false positives of Mendeley (above 1 % of a small base); no span finding.
 
+### A phone number written as one run of digits, 2026-10-21
+
+A report from the gateway's own detector: a German mobile number written without a space (`Telefon: 0999…`, in a JSON
+field `telefon` or `phone`) stayed text, because the phone rule read at most eight digits per group. Its probe also
+used numbers whose subscriber part counts up or down (`…2345678`); those stay text on purpose, as specimens (the rule
+since 2026-10-17). Now one run counts after a phone word when it starts with the trunk 0 (10 to 12 digits) or with +
+(11 to 15 digits), and its last seven digits are no repeated or counted run; a run without 0 or + (a timestamp, an
+order) stays text. A national number without a phone word stays text, as in the gateway.
+
+Per span against v0.7.3 (Benchmark V2 tree, development sources): Nemotron dev 70 missed to whole, val 37; Gretel dev
+14, val 10; Mendeley, PIILO, the bank and the traces unchanged; nothing got worse; false positives and too-wide
+findings unchanged on every source; the false-alarm bank unchanged. `scripts/compare_bench.py`: 0 findings.
+
 ## CredData, results per release
 
 CredData line method, without repository `2ba83c6a` (23,667 rows: 10,106 credentials, 13,561 non-secrets),
