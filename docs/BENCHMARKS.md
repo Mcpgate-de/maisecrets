@@ -37,6 +37,33 @@ detect-secrets, ferret-scan, Preserve, starter-workflows, awesome-compose and tl
 
 Not shown here: an overall rank. The tools have different aims (a secret scanner, a PII anonymiser, a guard of model
 input), and the classes with fewer than 30 spans have no rate.
+
+## Benchmark V1 snapshot, 0.7.3 (2026-10-21)
+
+A new measurement point; the baseline above stays as it was. `bench/results/2026-10-21-v0.7.3.md` holds the full
+report (the answers, the historical comparison per class, the other tools, the funnel, the method and the limits);
+`bench/results/2026-10-21-v0.7.3/` the raw results. Benchmark V1 at its commit `93e46e05`, maisecrets `v0.7.3`
+(`eee4b2e0`), the other tools at the V1 pins. All 39 result files have the case hashes of the baseline, and the other
+four tools give the same outcome for every span as on 2026-10-19.
+
+| Source | Family | maisecrets 0.6.39 | maisecrets 0.7.3 | Others (same cases, unchanged) |
+|---|---|---|---|---|
+| Nemotron-PII, 1 in 50 | pii | R 0.48, P 0.996 | R 0.59, P 0.996 | Preserve R 0.67, P 0.84; pii-anon R 0.75, P 0.29 |
+| Nemotron-PII, 1 in 50 | secret | R 0.32 | R 0.44 | secret-scan 0.17, Preserve 0.10, detect-secrets 0.03 |
+| Gretel finance, 1 in 50 | pii | R 0.23, P 0.85 | R 0.30, P 0.93 | Preserve R 0.44, P 0.22; pii-anon R 0.42, P 0.22 |
+| Mendeley financial, 1 in 50 | pii | R 0.48, P 1.00 | R 0.68, P 0.99 | Preserve R 0.65, P 0.76; pii-anon R 0.59, P 0.50 |
+| PIILO, full | pii | R 0.08, P 0.96 | R 0.09, P 0.92 | – |
+| Bank, dev | secret / pii | R 0.94 / 0.79 | R 0.94 / 0.86 | as in the baseline |
+| Rule examples of six catalogs | secret | R 0.59 | R 0.59 | as in the baseline |
+
+On the four datasets in full, whole names went from 0.11 to 0.22, whole addresses from 0.11 to 0.48, structured PII
+from 0.82 to 0.91 and secrets from 0.46 to 0.51. Precision rose on Gretel (0.82 to 0.91) and fell on Mendeley (1.00
+to 0.99: the two-line address rule masks addresses of persons the dataset leaves unlabelled). These datasets are
+development data. On Privy, which no rule was written from (Benchmark V2, totals only), 0.6.41 to 0.7.3 moved recall
+from 0.234 to 0.240 and precision from 0.441 to 0.448, and names not at all. Of what 0.7.3 still misses on the four
+datasets, 48.7 % needs NER or semantics (almost all of it names in running text), 44.6 % is in reach of a rule or a parser, most of it with a
+false-alarm risk.
+
 ## Rule changes measured with Benchmark V1
 
 ### A user name after its label, and a tax id under `steuer_id`, 2026-10-19
