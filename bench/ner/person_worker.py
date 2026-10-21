@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import re
-import resource
 import sys
 import time
 
@@ -143,6 +142,7 @@ def main() -> int:
                 first = time.perf_counter() - t0
             keep, conflicts = disjoint(text, found, occupied)
             fout.write(json.dumps({"add": keep, "conflicts": conflicts}) + "\n")
+    import resource      # here, not at the top: Windows has no resource module, and the tests import this file
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     json.dump({**desc, "load_s": load_s, "cold_start_s": first, "times_s": times,
                "max_rss_mb": round(rss / (1024 * 1024 if sys.platform == "darwin" else 1024), 1)}, sys.stdout)
