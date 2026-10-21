@@ -87,4 +87,60 @@ The procedure is `bench/holdout_v2.py` (docs/BENCHMARK-V2.md, "Holdout V2"). On 
 
 ## Results
 
-Not run yet.
+### maisecrets 0.7.3 on data no rule was written from (2026-10-21)
+
+`bench/run_all_v3.sh` with maisecrets `v0.7.3` (`eee4b2e0`), benchmark commit `704db2a0`, salted samples 1 in 25.
+PII family, strict recall and precision (V3; on these four datasets V2 and V3 precision are the same, no false
+positive fell out of scope):
+
+| Source | V1 snapshot (the `dev` sample) | `val` | public `holdout` split |
+|---|---|---|---|
+| Nemotron | R 0.59, P 0.996 | R 0.587, P 0.996 (2,781 spans) | R 0.576, P 0.996 (2,909) |
+| Gretel finance | R 0.30, P 0.93 | R 0.294, P 0.913 (1,141) | R 0.294, P 0.915 (1,009) |
+| Mendeley financial | R 0.68, P 0.99 | R 0.690, P 0.990 (2,084) | R 0.676, P 0.989 (2,360) |
+| Nemotron, secrets | R 0.44 | R 0.390 (118 spans) | R 0.500 (92) |
+
+The rules of 0.6.40 to 0.7.3 were written from `dev`, and they hold on `val` and on the holdout split within two
+points. Secrets in Nemotron have about 100 spans per split, so their rate moves by ten points between splits.
+
+**Privy, 1 in 10 (2,816 documents, totals only):** PII recall 0.225; precision 0.421 as V2 counts it and **0.992 as
+V3 counts it**. Of the 334 PII false positives, 332 are in classes Privy's test split does not label in this form
+(e-mail 88, national ids of a shape it never labels 79, IBAN 76, IP 66, …). Secrets: R 0.356, P 0.865 (90 spans).
+
+### Holdout V2 on the release 0.7.4 (2026-10-21)
+
+The first run of the independent holdout (872 cases, written by an agent that saw no miss list; `bench/HOLDOUT-LOG.md`):
+
+| | Spans | Recall strict | Recall lenient | Precision | False positives |
+|---|---:|---:|---:|---:|---:|
+| Secrets | 330 | 0.588 | 0.864 | 0.997 | 1 |
+| PII | 498 | 0.651 | 0.703 | 0.995 | 2 |
+| Both | 828 | 0.626 | | 0.9955 | 3 |
+
+Its weak classes (totals of the class only): names 5 of 48 whole, connection strings and URL credentials masked in
+part only (48 of 48 and 37 of 42 partial; the holdout is not read, so which part stays open), tax ids 24 of 42, user
+names 18 of 36, passwords 24 of 48. Tokens and private keys are whole in all 108 spans.
+
+### Which public statements hold
+
+The statements of `docs/BENCHMARKS.md` and the README on `main` at `v0.7.4`, against the V3 numbers above:
+
+| Statement | Where | V3 | Verdict |
+|---|---|---|---|
+| Nemotron PII R 0.59, P 0.996 (0.7.3) | BENCHMARKS, V1 snapshot | `val` 0.587 / 0.996, holdout split 0.576 / 0.996 | confirmed |
+| Gretel PII R 0.30, P 0.93 | the same | 0.294 / 0.913 and 0.294 / 0.915 | confirmed; precision two points lower |
+| Mendeley PII R 0.68, P 0.99 | the same | 0.690 / 0.990 and 0.676 / 0.989 | confirmed |
+| Nemotron secrets R 0.44 | the same | 0.390 and 0.500, about 100 spans each | confirmed within the scatter of a small class |
+| The cross-scanner tables compare on the same cases | BENCHMARKS, V1 baseline and snapshot | the cases were all `dev`, maisecrets' development data | weakened: the comparison was on data the rules were written from; the V3 tables use `val` and the holdout split |
+| Privy precision 0.441 → 0.448 | BENCHMARKS, V1 snapshot | 0.421 (V2 count) and 0.992 (V3) on the sample | refuted as a precision of maisecrets: almost every false positive was a class Privy does not label |
+| Privy recall 0.234 → 0.240, names not at all | the same | 0.225 on the V3 sample | confirmed |
+| Private frozen holdout R 0.83 (0.875 on 0.6.41), P 1.00 | BENCHMARKS, V1 baseline; HOLDOUT-LOG | holdout V2: R 0.626, P 0.9955 | weakened: the V1 holdout had 80 cases written by this project; the independent one gives 0.63 |
+| Rule examples of six catalogs R 0.59 | BENCHMARKS | 0.586 | confirmed |
+| Bank dev R 0.94 / 0.86 | BENCHMARKS, V1 snapshot | 0.941 / 0.929 | not comparable: the bank changed (`3f4ff11a`, case hash `6fe1029b` → `172bdf2e`) |
+| CredData P 0.929, R 0.578 (0.6.17) | README, "Detection rules" | not in V3 | not checkable here |
+| 48.7 % of the misses need NER or semantics | BENCHMARKS, V1 snapshot | the funnel was not run again | not checkable here |
+| A PERSON layer: 5,157 of 8,121 Privy names whole | BENCHMARKS, NER section | see docs/NER-EXPERIMENT.md, Phase B | – |
+
+The faults are in the method, not in the release numbers: the V1 numbers of maisecrets on its development data hold
+on unseen splits, and two statements change their meaning (the comparison sample, Privy precision). The holdout V1
+number was optimistic.
