@@ -361,7 +361,9 @@ class AdapterInventoryTests(unittest.TestCase):
         import importlib
         from bench import run
         for name in run.ADAPTERS:
-            if name == "maisecrets":
+            # maisecrets_ner is maisecrets plus the NER experiment's layer: its environments are pinned per backend
+            # (NerLayerTests)
+            if name in ("maisecrets", "maisecrets_ner"):
                 continue
             with self.subTest(adapter=name):
                 mod = importlib.import_module(f"bench.adapters.{name}")
@@ -716,6 +718,30 @@ class NerLayerTests(unittest.TestCase):
                                      [[0, 3, "pii.email"]])
         self.assertEqual([[12, 18, 0.8], [19, 21, 0.4]], keep)
         self.assertEqual(["pii.email"], conflicts)
+
+    def test_both_environments_of_the_layer_are_pinned(self):
+        for env in ("ner-spacy", "ner-gliner"):
+            req = ROOT / "bench" / "adapters" / "requirements" / f"{env}.txt"
+            lines = [ln for ln in req.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#")]
+            self.assertGreater(len(lines), 10, env)
+            for ln in lines:
+                self.assertRegex(ln, r"==|@ (git\+)?https://\S+#sha256=", f"{req.name}: {ln} is not pinned")
+
+    def test_each_false_positive_family_fixed_before_reading(self):
+        sys.path.insert(0, str(ROOT / "bench" / "ner"))
+        import analyze
+        from bench import funnel
+        from maisecrets.detection import personal
+        rows = [("| Full Name | Ann Lee |", "Ann Lee", "record field"),
+                ("ref usr_42 sent", "usr_42", "technical identifier"),
+                ("paid to Acme Bank yesterday", "Acme Bank", "company word"),
+                ("It rained. Later it", "Later", "one word at a sentence start"),
+                ("ask the Customer Manager now", "Customer Manager", "role or title words"),
+                ("we met Ann Lee there", "Ann Lee", "rest")]
+        for text, value, fam in rows:
+            with self.subTest(fam=fam):
+                s = text.index(value)
+                self.assertEqual(fam, analyze.family(funnel, personal, text, s, s + len(value)))
 
     def test_the_layer_keeps_every_deterministic_finding_as_it_is(self):
         from bench.adapters import maisecrets_ner as ner
