@@ -572,7 +572,12 @@ _MD_ALIASES = {"telephone_number": "telephone", "mobile_number": "mobile", "cell
                # streetaddress) and camel case written as one word
                "address_line1": "street", "address_line_1": "street", "address1": "street", "addressline1": "street",
                "streetaddress": "street_address", "dateofbirth": "date_of_birth", "phonenumber": "phone_number",
-               "mobilephone": "mobile_phone",
+               "mobilephone": "mobile_phone", "givenname": "given_name", "familyname": "family_name",
+               # the name column of a role in camel case (candidateName)
+               "candidatename": "candidate_name", "clientname": "client_name", "playername": "player_name",
+               "recipientname": "recipient_name", "applicantname": "applicant_name", "studentname": "student_name",
+               "membername": "member_name", "contactname": "contact_name", "passengername": "passenger_name",
+               "beneficiaryname": "beneficiary_name", "tenantname": "tenant_name",
                # the same columns in the languages of the regions (de, fr, es, it, nl, sv, pt): each maps to a name the
                # lists above already hold, so the policy stays one
                "straße": "strasse", "telefonnummer": "telephone", "handynummer": "mobile",

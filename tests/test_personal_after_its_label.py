@@ -447,12 +447,16 @@ class MarkdownTableTests(Base):
                 self.assertNotIn("NAME", {m.type for m in scan(text)})
 
     def test_the_name_column_of_a_person_in_a_role_counts_beside_a_strong_column(self):
-        for head in ("Candidate Name", "Player Name", "Client Name", "Recipient Name"):
+        for head in ("Candidate Name", "Client Name", "Player Name", "Recipient Name", "Applicant Name", "Student Name",
+                     "Member Name", "Contact Name", "Passenger Name", "Beneficiary Name", "Tenant Name"):
             with self.subTest(head=head):
                 self.assertMasked("| " + head + " | Date of Birth |\n|---|---|\n| " + NAME + " | " + BIRTH + " |\n",
                                   NAME)
                 # without a strong column a list of names is no record (a score board)
                 self.assertText("| " + head + " | Score |\n|---|---|\n| " + NAME + " | 88 |\n")
+                # the same field in camel case in a JSON record
+                key = head.split()[0].lower() + "Name"
+                self.assertMasked('{"' + key + '": "' + NAME + '", "dateOfBirth": "' + BIRTH + '"}', NAME)
 
     def test_a_table_of_fields_without_a_person_stays_text(self):
         for text in ("| Name | Value |\n|---|---|\n| Product Name | Widget Pro |\n| Version | 2.1 |\n",
