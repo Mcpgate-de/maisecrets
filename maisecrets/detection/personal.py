@@ -474,8 +474,22 @@ def _column_type(col: str) -> str:
     return ID_NUMBER
 
 
-def _cell_ok(v: str, typ: str) -> bool:
+# a field that names one part of a name holds one word (| First Name | X |): a record with a person in it says so
+# (Benchmark V3 Phase C, 2026-10-21: 1,272 first and last names alone in field-value tables of Nemotron dev stayed text)
+_NAME_PART_COLS = frozenset({"first_name", "last_name", "firstname", "lastname", "given_name", "family_name",
+                             "surname", "vorname", "nachname"})
+_NAME_PART_RE = re.compile(_NAME_STEM)
+_NOT_A_NAME_PART = frozenset({"required", "optional", "unknown", "none", "redacted", "pending", "mandatory",
+                              "string", "text", "varchar", "first", "last", "name", "value", "field", "example",
+                              "sample", "test"})
+
+
+def _cell_ok(v: str, typ: str, col: str = "") -> bool:
     """The cell holds what its column names: a desk extension is no phone, `Front Desk` no name."""
+    if typ == NAME and col in _NAME_PART_COLS and " " not in v.strip():
+        w = v.strip()
+        return bool(_NAME_PART_RE.fullmatch(w)) and w.lower() not in _NOT_A_NAME_PART \
+            and w.lower() not in PLACEHOLDER_NAMES and w.lower() not in _NOT_A_NAME_WORD
     digits = sum(c.isdigit() for c in v)
     if typ == PHONE:
         return digits >= 7
@@ -678,7 +692,7 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
                 out.append((s0, s0 + len(v), kind, ID_NUMBER))
             if col in cols:
                 typ = _column_type(names[col])
-                if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ):
+                if v.lower() not in _NOT_A_CELL and len(v) >= 2 and _cell_ok(v, typ, names[col]):
                     row.append((s0, s0 + len(v), kind, typ, col))
         if any(c in strong for *_, c in row) and any(h[3] in anchors for h in row):
             out += [h[:4] for h in row]

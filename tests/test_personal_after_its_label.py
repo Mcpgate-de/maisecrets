@@ -421,6 +421,22 @@ class MarkdownTableTests(Base):
                 expected = text.replace(NAME, "•").replace(BIRTH, "•").replace(street, "•")
                 self.assertEqual(expected, masked(text))
 
+    def test_a_first_or_last_name_field_of_a_record_is_a_name(self):
+        first, last = NAME.split()
+        for text in ("| Field | Value |\n|---|---|\n| First Name | " + first + " |\n| Last Name | " + last
+                     + " |\n| Date of Birth | " + BIRTH + " |\n",
+                     "first_name,last_name,dob\n" + first + "," + last + "," + BIRTH + "\n"):
+            with self.subTest(text=text):
+                self.assertMasked(text, first)
+                self.assertMasked(text, last)
+
+    def test_a_name_part_field_without_a_person_or_with_a_form_word_stays_text(self):
+        first, last = NAME.split()
+        # a first and a last name alone make no record; a form word is no name
+        self.assertText("| Field | Value |\n|---|---|\n| First Name | " + first + " |\n| Last Name | " + last + " |\n")
+        self.assertText("| Field | Value |\n|---|---|\n| First Name | Required |\n| Last Name | Optional |\n"
+                        "| Date of Birth | " + BIRTH + " |\n")
+
     def test_a_table_of_fields_without_a_person_stays_text(self):
         for text in ("| Name | Value |\n|---|---|\n| Product Name | Widget Pro |\n| Version | 2.1 |\n",
                      "| Setting | Value |\n|---|---|\n| Name | build-runner |\n"
