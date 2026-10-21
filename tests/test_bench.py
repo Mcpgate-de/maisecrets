@@ -807,6 +807,66 @@ class BenchmarkV3Tests(unittest.TestCase):
         self.assertEqual(1, m["all"]["fp"])
 
 
+@unittest.skipUnless(hasattr(__import__("socket"), "AF_UNIX"), "the experiment's service uses a Unix socket")
+class NerHookLayerTests(unittest.TestCase):
+    """bench/ner/hook_layer.py: the deterministic findings first and unchanged; the layer only adds, and every failure
+    of its service leaves the deterministic result."""
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "bench" / "ner"))
+        import hook_layer
+        self.hl = hook_layer
+        self.addCleanup(hook_layer.uninstall)
+        self.dir = tempfile.mkdtemp(prefix="ms-ner-sock-")
+        self.addCleanup(__import__("shutil").rmtree, self.dir, True)
+        self.sock = os.path.join(self.dir, "s")
+        self.text = "token " + "glpat-" + "Q7w8E9r0T1y2U3i4O5p6" + " sent by Ann Lee today"
+        self.det = [(m.start, m.end, m.type) for m in self.hl._ORIGINAL(self.text, channel="tool")]
+
+    def serve(self, answer: bytes, delay: float = 0.0):
+        import socket
+        import threading
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(self.sock)
+        srv.listen(1)
+        self.addCleanup(srv.close)
+
+        def once():
+            conn, _ = srv.accept()
+            with conn:
+                conn.recv(65536)
+                __import__("time").sleep(delay)
+                try:
+                    conn.sendall(answer)
+                except OSError:
+                    pass
+        threading.Thread(target=once, daemon=True).start()
+
+    def scan(self):
+        return [(m.start, m.end, m.type) for m in self.hl.layered_scan(self.text, channel="tool")]
+
+    def test_the_layer_adds_only_where_no_finding_lies(self):
+        s = self.text.index("Ann")
+        on_token = [self.det[0][0], self.det[0][1], 0.9]
+        self.serve(json.dumps({"add": [on_token, [s, s + 7, 0.9]]}).encode() + b"\n")
+        self.hl.install(self.sock, budget_ms=2000)
+        got = self.scan()
+        self.assertEqual(self.det, [g for g in got if g[2] != "NAME"])
+        self.assertIn((s, s + 7, "NAME"), got)
+
+    def test_a_slow_dead_or_garbled_service_leaves_the_deterministic_result(self):
+        self.hl.install(self.sock, budget_ms=200)
+        self.assertEqual(self.det, self.scan())                      # no service at all
+        self.serve(b'{"add": [[1, 2, 0.5]]}\n', delay=1.0)           # slower than the budget
+        self.assertEqual(self.det, self.scan())
+        self.assertGreaterEqual(self.hl.STATE["timeouts"] + self.hl.STATE["errors"], 2)
+
+    def test_installed_and_switched_off_it_answers_as_without_it(self):
+        self.hl.install(self.sock, budget_ms=200, active=False)
+        self.assertEqual(self.det, self.scan())
+        self.assertEqual(0, self.hl.STATE["asked"])
+
+
 class FunnelTests(unittest.TestCase):
     """bench/funnel.py: each missed span gets one bucket by the text around it, and each bucket one category."""
 
