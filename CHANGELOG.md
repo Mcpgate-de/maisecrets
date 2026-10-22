@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.7.8] - 2026-10-22
+
+### Fixes
+
+- the plugin ships no text that the Anthropic directory reads as a credential (008abf2)
+
 ## [0.7.7] - 2026-10-22
 
 ### Features
