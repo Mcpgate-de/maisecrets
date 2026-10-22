@@ -174,6 +174,7 @@ _US_ONE_LINE_RE = re.compile(
     r",?[ \t]+(?:[A-Z][a-z'.-]{1,30} ){0,3}[A-Z][a-z'.-]{1,30}, (?:" + _US_STATES + r") \d{5}(?:-\d{4})?"
     r"|(?:PSC \d{3,5}, Box \d{3,5}|Unit \d{3,5} Box \d{3,5}|US(?:NS|NV|CGC|S) [A-Z][a-z]{1,30})"
     r",?[ \t]+(?:APO|FPO|DPO) (?:AA|AE|AP) \d{5})(?![\w-])")
+_NAMED_PLACE_BEFORE_RE = re.compile(r"\bat the (?:[A-Z][\w'&.-]*[ \t]+){0,4}[A-Z][\w'&.-]*,[ \t]*$")
 _DEPARTMENT_LINE_RE = re.compile(r"(?i)[ \t]*(?:abteilung|abt\.|department|dept\.?|division|bereich)[ \t]")
 _ADDRESS_FORMS = tuple(
     (frozenset({r}), re.compile(_EN_STREET.replace("{codes}", code))) for r, code in _POSTCODES.items()) + (
@@ -2059,7 +2060,9 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
         for m in _US_ONE_LINE_RE.finditer(text):
             line = text.rfind("\n", 0, m.start()) + 1
             lo = max(_block_back(text, line), m.start() - 160)
-            if _NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start()):
+            # "at the Harbor View Inn, 12 …": a named place before the address, as a venue's name on the line above
+            if (_NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start())
+                    or _NAMED_PLACE_BEFORE_RE.search(text, max(line, m.start() - 60), m.start())):
                 _company_window(text, lo, m.start(), m.end(), "address-us-one-line", company)
             else:
                 out.append((m.start(), m.end(), "address-us-one-line", ADDRESS))
