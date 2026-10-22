@@ -28,9 +28,9 @@ SOURCES = dict([
     ('1password-service-account-token-bare',
      'ops_eyJ[A-Za-z0-9+/_-]{250,}={0,3}'),
     ('asaas-production-key',
-     '\\$aact_prod_[A-Za-z0-9_\\-+/=:$]{20,200}'),
+     '\\$aact_prod_[A-Za-z0-9_\\-+/=:$]{19,199}[A-Za-z0-9_\\-+/=$]'),
     ('asaas-sandbox-key',
-     '\\$aact_hmlg_[A-Za-z0-9_\\-+/=:$]{20,200}'),
+     '\\$aact_hmlg_[A-Za-z0-9_\\-+/=:$]{19,199}[A-Za-z0-9_\\-+/=$]'),
     ('atlassian-org-admin-scoped-api-key-sibling',
      'ATCTT3xFfG[A-Za-z0-9+/=_-]+=[A-Za-z0-9]{8}'),
     ('aws-bedrock-short-term-api-key',
@@ -170,7 +170,7 @@ SOURCES = dict([
     ('persona-identities-sandbox',
      'persona_sandbox_[a-z0-9_-]{20,80}'),
     ('pinterest-client-credentials-access-token',
-     'pinc[._][A-Za-z0-9_.-]{20,200}'),
+     'pinc[._][A-Za-z0-9_.-]{19,199}[A-Za-z0-9_-]'),
     ('polar-customer-session-token',
      'polar_cst_[A-Za-z0-9]{43}'),
     ('polar-member-session-token-sibling',
@@ -264,31 +264,31 @@ SOURCES = dict([
     ('browserbase-api-key',
      'bb_live_[A-Za-z0-9_-]{20,}'),
     ('buildkite-agent-access-token',
-     'bkaa_[A-Za-z0-9_.-]{38,2048}'),
+     'bkaa_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('buildkite-agent-job-acquisition-token-jwt',
-     'bkjat_[A-Za-z0-9_.-]{38,2048}'),
+     'bkjat_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('buildkite-agent-job-token',
-     'bkaj_[A-Za-z0-9_.-]{38,2048}'),
+     'bkaj_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('buildkite-api-access-token',
-     'bkua_[A-Za-z0-9_.-]{38,2048}'),
+     'bkua_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('buildkite-cluster-queue-token',
-     'bkcqt_[A-Za-z0-9_.-]{38,2048}'),
+     'bkcqt_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('buildkite-oauth-refresh-token',
-     'bkur_[A-Za-z0-9_.-]{38,2048}'),
+     'bkur_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('buildkite-packages-registry-token',
-     'bkrt_[A-Za-z0-9_.-]{38,2048}'),
+     'bkrt_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('buildkite-packages-temporary-token',
-     'bkpt_[A-Za-z0-9_.-]{38,2048}'),
+     'bkpt_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('buildkite-pipeline-access-token',
-     'bkat_[A-Za-z0-9_.-]{38,2048}'),
+     'bkat_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('buildkite-pipeline-trigger-token',
-     'bktr_[A-Za-z0-9_.-]{38,2048}'),
+     'bktr_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('buildkite-portal-secret',
-     'bkps_[A-Za-z0-9_.-]{38,2048}'),
+     'bkps_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('buildkite-portal-token',
-     'bkpat_[A-Za-z0-9_.-]{38,2048}'),
+     'bkpat_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('buildkite-token-exchange',
-     'bktx_[A-Za-z0-9_.-]{38,2048}'),
+     'bktx_[A-Za-z0-9_.-]{37,2047}[A-Za-z0-9_-]'),
     ('cartesia-admin-api-key',
      'sk_car_admin_[A-Za-z0-9]{20,64}'),
     ('cartesia-api-key',
@@ -433,6 +433,14 @@ class ResearchedFormatTests(unittest.TestCase):
                 # after a label, a label rule may take it first (the signature rules run after detect-secrets): whole
                 with self.subTest(rule=rule_id, channel=channel, label=True):
                     self.assertIn(tok, [v for _k, v in kinds(f"export TOKEN_VALUE={tok}\n", channel)])
+
+    def test_sentence_punctuation_after_a_token_is_not_part_of_it(self):
+        # a body that allows "." or ":" took the full stop of "my key is <token>." into the value
+        for rule_id in sorted(SOURCES):
+            tok = token(rule_id)
+            for end in ".,;:)!?":
+                with self.subTest(rule=rule_id, end=end):
+                    self.assertIn((rule_id, tok), kinds(f"my key is {tok}{end} thanks", "prompt"))
 
     def test_half_a_token_is_no_hit_of_its_rule(self):
         # at most 40 characters: half of a 2,000-character Bedrock key is still longer than its shortest form
