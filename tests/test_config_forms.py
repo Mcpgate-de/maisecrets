@@ -99,5 +99,27 @@ class TerraformDefaultTests(unittest.TestCase):
             self.assertEqual([], values(text), text)
 
 
+class UrlPasswordSignsTests(unittest.TestCase):
+    def test_a_url_password_with_a_reserved_sign_is_a_hit_and_the_user_stays(self):
+        for sign in "!$&+,;=*":
+            pw = key(9) + sign + key(3)
+            for url in (f"postgres://app:{pw}@db.internal:5432/orders", f"mysql://app:{pw}@10.0.0.7:3306/app",
+                        f"postgres://app:{pw}@localhost/orders", f"amqp://app:{pw}@rabbit:5672"):
+                got = values(f"DATABASE_URL={url}\n")
+                self.assertIn(pw, got, url)
+                self.assertNotIn("app", got, url)
+
+    def test_an_at_sign_inside_a_password_with_a_sign_stays_in_it(self):
+        pw = key(6) + "+" + key(4) + "@" + key(4)
+        self.assertIn(pw, values(f'url = "postgres://report:{pw}@pg-01.internal:5432/reports"'))
+
+    def test_a_template_a_query_and_a_plain_url_are_no_hit(self):
+        for text in ("postgres://${DB_USER}:${DB_PASSWORD}@db:5432/app",
+                     "postgres://app:$(cat /run/secrets/pw)@db:5432/app",
+                     "https://example.com/a?x=1&y=2@foo",
+                     "git clone https://gitlab.com/group/repo.git"):
+            self.assertEqual([], [k for k, _ in hits(text) if k == "url-password-signs"], text)
+
+
 if __name__ == "__main__":
     unittest.main()

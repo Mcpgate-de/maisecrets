@@ -1844,6 +1844,14 @@ FALLBACK_RULES: list[dict] = [
               r"(?=[A-Za-z0-9_-]{0,200}?[A-Za-z0-9]{16})[A-Za-z0-9_-]{20,}"},
     {"id": "slack-token-relaxed", "type": "SECRET",
      "regex": r"(?<![\w-])(?:xoxb-|xoxp-|xoxa-|xoxr-)\d{2,}-[A-Za-z0-9-]{12,}"},
+    # the password of a URL with a sign that RFC 3986 reserves (! $ & + , ; = *; an @ after it stays in it): a database
+    # URL as people write it, unescaped (postgres://app:<value>@db:5432). ds-basic-auth stops at these signs and the
+    # e-mail rule took `<rest>@host` (Benchmark V3, aparte and llmredactor dev). Only the password, as there: the user
+    # stays text. A template (${DB_PASSWORD}, $(cat …)) fails the value check
+    {"id": "url-password-signs", "type": "SECRET", "secret_group": 1, "validator": "ds_value",
+     "regex": r"(?<![\w+.-])[A-Za-z][A-Za-z0-9+.-]{1,15}://[^\s:/?#\[\]@'\"`<>]{1,64}:"
+              r"(?=[^\s/@'\"`<>]{0,127}[!$&*+,;=])((?:[^\s/@'\"`<>]|@(?=[^\s/@'\"`<>]*@)){3,128})"
+              r"@(?=[A-Za-z0-9\[_])"},
     # a key or a salt of PHP's define() (wp-config.php: AUTH_KEY, NONCE_SALT): the WordPress salts hold ( ) | ` and
     # the literal rules took them for code (Benchmark V3, aparte dev: 16 salts in the clear). Only a name that ends in
     # KEY, SALT, SECRET or TOKEN; a password is label-pw-literal's
