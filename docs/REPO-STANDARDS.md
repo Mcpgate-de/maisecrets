@@ -115,8 +115,16 @@ and OpenAI plugin directories.
   (`*-v3-<version>`); with `--holdout`, Holdout V2 runs too and its recall may not fall. A span the candidate masks
   worse stops the release until it is explained or fixed. A change of the other runtime files (hooks, mod, settings)
   asks for the harness and a live test between two sessions with `--plugin-dir`. Docs, bench and CI need nothing.
-  The gate's report (`OUT/release-gate.md`) goes into the release merge request, and after the release Benchmark V3
-  on the tag goes into `bench/results/` as the next baseline. It runs locally: the datasets are too large for CI.
+  The gate's report (`OUT/release-gate.md`) goes into the release merge request. It runs locally: the datasets are
+  too large for CI.
+- **The gate's measurement is the next baseline.** The release commit changes only the version, so a second run of
+  Benchmark V3 on the tag measures the same code. With `--keep` the gate writes its results to
+  `bench/results/<date>-v3-<next version>`, with `measured.json` (the commit and the git tree of each runtime
+  directory); that directory goes to `next` before the release merge request, so the baseline is in the repository
+  when the release is. After the release, `python3 scripts/release_gate.py --verify-tag v<version>` checks in a second
+  that the runtime directories of the tag are the measured trees. If one differs, the results are no baseline and the
+  gate runs again on the tag. Why: until 0.7.6 the baseline was measured again after the release, 40 minutes for the
+  same code, and the repository had it one release late (2026-10-22).
   Why: 0.7.6 lost a phone number on Nemotron's holdout split that a measurement of `dev` and `val` before the
   merge could not see; Benchmark V3 on the release found it (2026-10-22).
 
