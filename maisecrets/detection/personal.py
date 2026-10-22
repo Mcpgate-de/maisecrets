@@ -444,11 +444,15 @@ _STRONG_COLS = frozenset({"address", "street", "street_address", "home_address",
                           # found by its checksum rule (de-tax-id, region de)
                           # only the long names: `sv_nummer` and `ausweisnummer` also number versions and badges
                           "steueridentifikationsnummer", "steuer_identifikationsnummer", "sozialversicherungsnummer",
-                          "rentenversicherungsnummer", "personalausweisnummer"})
+                          "rentenversicherungsnummer", "personalausweisnummer",
+                          # ids only a person has, as the records of the datasets name them (Benchmark V3 Phase C,
+                          # 2026-10-22: 54 health plan and 26 certificate license numbers in Markdown tables of dev)
+                          "health_plan_beneficiary_number", "beneficiary_number", "certificate_license_number",
+                          "driver_license_number", "patient_id"})
 _WEAK_COLS = frozenset({"name", "full_name", "fullname", "first_name", "last_name", "firstname", "lastname",
                         "given_name", "family_name", "surname", "customer", "customer_name", "employee",
                         "employee_name", "emp_name", "patient", "patient_name", "nome", "nombre", "nom", "vorname",
-                        "nachname", "username", "user_name",
+                        "nachname", "username", "user_name", "user_id", "userid",
                         # the name of a person in a role (Benchmark V3 Phase C, 2026-10-21: candidate, player, client,
                         # recipient name columns of Nemotron dev stayed text); weak, so only beside a strong column
                         "candidate_name", "client_name", "player_name", "recipient_name", "applicant_name",
@@ -573,6 +577,15 @@ _MD_ALIASES = {"telephone_number": "telephone", "mobile_number": "mobile", "cell
                "address_line1": "street", "address_line_1": "street", "address1": "street", "addressline1": "street",
                "streetaddress": "street_address", "dateofbirth": "date_of_birth", "phonenumber": "phone_number",
                "mobilephone": "mobile_phone", "givenname": "given_name", "familyname": "family_name",
+               # the address of a person under its purpose, and the ids of a person written as one word or with "'s"
+               "property_address": "address", "billing_address": "address", "shipping_address": "address",
+               "mailing_address": "address", "residential_address": "address", "postal_address": "address",
+               "permanent_address": "address", "current_address": "address", "propertyaddress": "address",
+               "billingaddress": "address", "shippingaddress": "address", "mailingaddress": "address",
+               "healthplanbeneficiarynumber": "health_plan_beneficiary_number",
+               "medicalrecordnumber": "mrn", "driverlicensenumber": "driver_license_number",
+               "drivers_license_number": "driver_license_number", "driver's_license_number": "driver_license_number",
+               "passportnumber": "passport_number", "patientid": "patient_id",
                # the name column of a role in camel case (candidateName)
                "candidatename": "candidate_name", "clientname": "client_name", "playername": "player_name",
                "recipientname": "recipient_name", "applicantname": "applicant_name", "studentname": "student_name",

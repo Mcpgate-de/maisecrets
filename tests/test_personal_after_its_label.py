@@ -495,6 +495,24 @@ class MarkdownTableTests(Base):
                 key = head.split()[0].lower() + "Name"
                 self.assertMasked('{"' + key + '": "' + NAME + '", "dateOfBirth": "' + BIRTH + '"}', NAME)
 
+    def test_the_fields_of_a_persons_address_and_ids_under_more_names(self):
+        # Benchmark V3 Phase C, 2026-10-22: one lexicon for every record format; a purpose before the address, the
+        # ids of a person and their names in one word
+        ident = "H48" + "2917354"
+        for field in ("Health Plan Beneficiary Number", "HealthPlanBeneficiaryNumber", "Certificate License Number",
+                      "Driver's License Number", "MedicalRecordNumber", "Patient ID"):
+            with self.subTest(field=field):
+                self.assertMasked("| Field | Value |\n|---|---|\n| Full Name | " + NAME + " |\n| " + field + " | "
+                                  + ident + " |\n", ident)
+        # the street rule often finds the address itself, so the column is checked in the lexicon
+        from maisecrets.detection import personal as personal_mod
+        for field in ("Property Address", "Billing Address", "Mailing Address", "shippingAddress"):
+            with self.subTest(field=field):
+                self.assertEqual("address", personal_mod._md_column(field))
+        # a user id is a weak column: alone it stays text (a table of accounts and roles)
+        self.assertIn("user_id", personal_mod._WEAK_COLS)
+        self.assertText("| User ID | Role |\n|---|---|\n| jdoe42 | admin |\n")
+
     def test_a_table_of_fields_without_a_person_stays_text(self):
         for text in ("| Name | Value |\n|---|---|\n| Product Name | Widget Pro |\n| Version | 2.1 |\n",
                      "| Setting | Value |\n|---|---|\n| Name | build-runner |\n"
