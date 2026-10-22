@@ -74,5 +74,30 @@ class PhpDefineTests(unittest.TestCase):
                               if k == "label-php-define-key"])
 
 
+def password() -> str:
+    while True:
+        v = "".join(RNG.choice(string.ascii_letters) for _ in range(7)) + str(RNG.randint(10, 99)) + RNG.choice("$!#")
+        if any(c.isupper() for c in v):
+            return v
+
+
+class TerraformDefaultTests(unittest.TestCase):
+    def test_the_default_of_a_secret_variable_is_a_hit(self):
+        k, pw = key(40), password()
+        text = (f'variable "aws_secret_key" {{\n  default = "{k}"\n}}\n\n'
+                f'variable "vpn_password" {{\n  type    = string\n  description = "the tunnel"\n'
+                f'  default = "{pw}"\n}}\n')
+        got = values(text)
+        self.assertIn(k, got)
+        self.assertIn(pw, got)
+
+    def test_a_variable_that_names_no_secret_or_has_no_value_is_no_hit(self):
+        for text in (f'variable "db_host" {{\n  default = "{key(24)}"\n}}\n',
+                     'variable "api_token" {\n  default = ""\n}\n',
+                     'variable "db_password" {\n  type = string\n  sensitive = true\n}\n'
+                     'variable "region" {\n  default = "eu-central-1"\n}\n'):
+            self.assertEqual([], values(text), text)
+
+
 if __name__ == "__main__":
     unittest.main()

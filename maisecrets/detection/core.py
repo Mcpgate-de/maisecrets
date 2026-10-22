@@ -1129,6 +1129,11 @@ _LIT_FORMS = (
 # ConvertTo-SecureString '…' (single quotes: a doubled quote; double quotes: a doubled quote and the backtick escape)
 _LIT_SQL = _LazyRx(r"(?i)\bidentified[ \t]+(?:with[ \t]+\w+[ \t]+)?by[ \t]*(?:password[ \t]*)?([\"'])")
 _LIT_PS = _LazyRx(r"(?i)ConvertTo-SecureString[ \t]+(?:-String[ \t]+)?([\"'])")
+# a Terraform variable whose name is the label of its default: `variable "aws_secret_key" { default = "…" }`. The
+# label rules saw only `default` (Benchmark V3, llmredactor and aparte dev: 36 keys and passwords in the clear). The
+# block up to its default holds no brace (type, description and sensitive come before it)
+_LIT_TF = _LazyRx(r"(?<![\w-])variable[ \t]+\"([A-Za-z_][\w-]{0,60})\"[ \t]*\{[^{}]{0,400}?"
+                  r"(?<![\w-])default[ \t]*=[ \t]*\"")
 _LIT_BOUND = 300   # a literal longer than this, or one that its line ends, is taken to the bound: never a prefix
 _BACKSLASH_ESCAPE_RE = _LazyRx(r"\\(?:u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))", re.S)
 _ESCAPED_CHAR = {"n": "\n", "t": "\t", "r": "\r", "0": "\0"}
@@ -1368,6 +1373,12 @@ def _literal_hits(text: str, channel: str = "prompt") -> list:
                 rid = _judge_literal(m.group(gl), m.group(gv), quoted=n != 0, channel=channel)
                 if rid:
                     hits.append((rid, m.start(), m.start(gv), m.end(gv)))
+        for m in _LIT_TF.finditer(text):
+            end, closed = _read_quoted(text, m.end(), '"')
+            rid = closed and _judge_literal(m.group(1), _unquote(text[m.end():end], '"', True, False), quoted=True,
+                                            channel=channel)
+            if rid:
+                hits.append((rid, m.start(), m.end(), end))
         for rx, backslash in ((_LIT_SQL, True), (_LIT_PS, False)):
             for m in rx.finditer(text):
                 q = m.group(1)
