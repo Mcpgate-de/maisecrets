@@ -7,6 +7,7 @@ clean.
 """
 from __future__ import annotations
 
+import base64
 import os
 import random
 import string
@@ -119,6 +120,31 @@ class UrlPasswordSignsTests(unittest.TestCase):
                      "https://example.com/a?x=1&y=2@foo",
                      "git clone https://gitlab.com/group/repo.git"):
             self.assertEqual([], [k for k, _ in hits(text) if k == "url-password-signs"], text)
+
+
+def b64_bytes(n: int) -> str:
+    return base64.b64encode(bytes(RNG.randrange(256) for _ in range(n))).decode()
+
+
+class FrameworkAppKeyTests(unittest.TestCase):
+    def test_laravel_app_key_is_a_hit(self):
+        k = "base64:" + b64_bytes(32)
+        text = f"APP_NAME=shop\nAPP_ENV=production\nAPP_KEY={k}\nAPP_DEBUG=false\n"
+        self.assertIn(("label-laravel-app-key", k), hits(text))
+
+    def test_each_key_of_strapi_app_keys_is_a_hit(self):
+        keys = [b64_bytes(16) for _ in range(4)]
+        text = "HOST=0.0.0.0\nPORT=1337\nAPP_KEYS=" + ",".join(keys) + "\nDATABASE_CLIENT=postgres\n"
+        got = hits(text)
+        for k in keys:
+            self.assertIn(("label-env-key-list", k), got)
+
+    def test_placeholders_and_other_names_stay_text(self):
+        for text in ("APP_KEYS=toBeModified1,toBeModified2\n", "APP_KEY=\n", "APP_KEY=base64:\n",
+                     "APP_KEY=base64:" + "A" * 44 + "\n", f"APP_KEYSTORE={b64_bytes(16)}\n",
+                     "# APP_KEYS is a list of keys\n"):
+            self.assertEqual([], [k for k, _ in hits(text)
+                                  if k in ("label-laravel-app-key", "label-env-key-list")], text)
 
 
 if __name__ == "__main__":

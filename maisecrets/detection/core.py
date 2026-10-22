@@ -1427,6 +1427,26 @@ LITERAL_RULES = (
 _LITERAL_IDS = frozenset(d["id"] for d in LITERAL_RULES)
 
 
+def _env_key_ok(v: str) -> bool:
+    """A key of Strapi's APP_KEYS: base64 of 16 bytes or more with an entropy of random bytes; the placeholders of
+    .env.example (toBeModified1) are short and words."""
+    try:
+        raw = _b64.b64decode(v + "=" * (-len(v) % 4), validate=True)
+    except ValueError:   # binascii.Error is a ValueError
+        return False
+    return len(raw) >= 16 and shannon_entropy(v) >= 3.5 and not _word_shaped(v)
+
+
+def _laravel_key_ok(v: str) -> bool:
+    """Laravel's APP_KEY: base64: and the base64 of a 16- or 32-byte key (AES-128 or AES-256), random."""
+    body = v[len("base64:"):] if v.startswith("base64:") else ""
+    try:
+        raw = _b64.b64decode(body, validate=True)
+    except ValueError:
+        return False
+    return len(raw) in (16, 32) and len(set(raw)) > 8
+
+
 def _config_key_value_ok(v: str) -> bool:
     """A key or a salt that a config constant assigns (label-php-define-key, label-terraform-default): the
     WordPress salts of wp-config.php are 64 printable signs, and ( ) | ` < > $ are part of them, so the literal
@@ -1464,6 +1484,7 @@ VALIDATORS = {
     "spaced_value": _spaced_value_ok,
     "prose_key_value": _prose_key_value_ok,
     "config_key_value": _config_key_value_ok,
+    "laravel_key": _laravel_key_ok,
     "de_tax_id": _de_tax_id_ok,
     "de_social_security": _de_social_security_ok,
     "de_social_security_spaced": lambda v: _de_social_security_ok(v.replace("\u00a0", " ")),
@@ -1852,6 +1873,13 @@ FALLBACK_RULES: list[dict] = [
      "regex": r"(?<![\w+.-])[A-Za-z][A-Za-z0-9+.-]{1,15}://[^\s:/?#\[\]@'\"`<>]{1,64}:"
               r"(?=[^\s/@'\"`<>]{0,127}[!$&*+,;=])((?:[^\s/@'\"`<>]|@(?=[^\s/@'\"`<>]*@)){3,128})"
               r"@(?=[A-Za-z0-9\[_])"},
+    # the application keys of two frameworks in an .env file (Benchmark V3, aparte dev: 11 keys in the clear). Laravel's
+    # APP_KEY=base64:<the base64 of 32 bytes>: `key` alone is a weak label, which the literal rules take only quoted.
+    # Strapi's APP_KEYS=<k1>,<k2>,…: each key of the unquoted list (_list_matches reads them)
+    {"id": "label-laravel-app-key", "type": "SECRET", "secret_group": 1, "validator": "laravel_key",
+     "regex": r"(?m)^[ \t]*(?:export[ \t]+)?APP_KEY[ \t]*=[ \t]*[\"']?(base64:[A-Za-z0-9+/]{20,44}={0,2})(?![\w+/=])"},
+    {"id": "label-env-key-list", "type": "SECRET", "secret_group": 2,
+     "regex": r"(?m)^[ \t]*(?:export[ \t]+)?(APP_KEYS)[ \t]*=[ \t]*([\"']?)"},
     # a key or a salt of PHP's define() (wp-config.php: AUTH_KEY, NONCE_SALT): the WordPress salts hold ( ) | ` and
     # the literal rules took them for code (Benchmark V3, aparte dev: 16 salts in the clear). Only a name that ends in
     # KEY, SALT, SECRET or TOKEN; a password is label-pw-literal's
@@ -3663,6 +3691,9 @@ def _curl_matches(parts, text: str):
 # breaks around it: a list written one value per line
 _LIST_ITEM_RE = _LazyRx(r"[ \t]*(?:\r?\n[ \t]*){0,2}([\"'`])([^\"'`\\\n]{1,256})\1"
                            r"[ \t]*(?:\r?\n[ \t]*){0,2}(,|[\]})])")
+# a key of an unquoted list in an .env line (label-env-key-list): base64 and the comma after it
+_ENV_LIST_ITEM_RE = _LazyRx(r"()([A-Za-z0-9+/]{16,88}={0,2})(,|(?![A-Za-z0-9+/=]))")
+
 
 
 def _list_matches(rule: Rule, text: str):
@@ -3672,15 +3703,17 @@ def _list_matches(rule: Rule, text: str):
     bracket or at a value that is not a quoted string, at any length: a cut at 1 MB left the keys after it in the
     clear (codex Gate A of 0.6.16). A label inside a list already read is skipped, so each character is read once."""
     done = -1
+    env = rule.id == "label-env-key-list"
+    item_re, value_ok = (_ENV_LIST_ITEM_RE, _env_key_ok) if env else (_LIST_ITEM_RE, _list_value_ok)
     for lab in rule.regex.finditer(text):
         if lab.start() < done:
             continue
         pos = lab.end()
         while True:
-            it = _LIST_ITEM_RE.match(text, pos)
+            it = item_re.match(text, pos)
             if it is None:
                 break
-            if _list_value_ok(it.group(2)):
+            if value_ok(it.group(2)):
                 yield _Spanned(it, lab.start(), text)
             if it.group(3) != ",":
                 break
