@@ -2,7 +2,7 @@
 
 Run: python3 -m unittest tests.test_researched_formats -v
 SOURCES holds the pattern each format was researched with (0.7.10 adds eight from Trivy, Veles, nuclei and
-titus, and 72 from the providers' own code),
+titus, and 72 from the providers' own code; 0.7.11 adds 47 more),
 a copy kept apart from the rules in maisecrets/detection/rules/prefixes.txt and own_secret_rules.json, so a rule
 that drifts from its format turns red.
 Every token is generated at run time from that pattern, seeded by the rule id; no value sits in the tree.
@@ -401,10 +401,104 @@ SOURCES = dict([
      'wandb_v1_[A-Za-z0-9_]{70,90}'),
     ('zuplo-api-key-consumer',
      'zpka_[A-Za-z0-9]{32,}_[A-Za-z0-9]{6,8}'),
+    ('apify-proxy-password',
+     'apify_proxy_[A-Za-z0-9]{36}'),
+    ('braintree-oauth-access-token-production',
+     'access_token\\$production\\$[A-Za-z0-9_]{1,64}\\$[0-9a-f]{8,64}'),
+    ('braintree-oauth-access-token-sandbox',
+     'access_token\\$sandbox\\$[A-Za-z0-9_]{1,64}\\$[0-9a-f]{8,64}'),
+    ('braintree-oauth-client-secret-production',
+     'client_secret\\$production\\$[A-Za-z0-9_]{8,64}'),
+    ('braintree-oauth-client-secret-sandbox',
+     'client_secret\\$sandbox\\$[A-Za-z0-9_]{8,64}'),
+    ('byteplus-access-key-id',
+     'AKLT[a-zA-Z0-9_-]{16,28}'),
+    ('canva-connect-apps-oauth-client-secret',
+     'cnvca[A-Za-z0-9_-]{20,}'),
+    ('checkout-com-sandbox-secret-key-abc',
+     'sk_test_[A-Za-z0-9_]{8}-[A-Za-z0-9_]{4}-[A-Za-z0-9_]{4}-[A-Za-z0-9_]{4}-[A-Za-z0-9_]{12}'),
+    ('chief-tools-oauth-access-token',
+     'cto_[A-Za-z0-9]{36,248}'),
+    ('chief-tools-oauth-refresh-token',
+     'ctr_[A-Za-z0-9]{36,248}'),
+    ('chief-tools-personal-access-token',
+     'ctp_[A-Za-z0-9]{36,248}'),
+    ('chief-tools-team-access-token',
+     'ctt_[A-Za-z0-9]{36,248}'),
+    ('crates-io-trusted-publishing-token',
+     'cio_tp_[A-Za-z0-9]{32}'),
+    ('databricks-oauth-u2m-refresh-token',
+     'doau[a-zA-Z0-9]{32,40}'),
+    ('duffel-test-access-token',
+     'duffel_test_[A-Za-z0-9_-]{20,128}'),
+    ('fieldguide-user-api-token',
+     'fg_us_[0-9a-f]{32}'),
+    ('gitlab-runner-registration-auth-token',
+     'glrtr-(?:t[0-9a-f]+_)?[A-Za-z0-9_-]{20}|glrtr-[A-Za-z0-9_-]{27,600}\\.01\\.[0-9a-z]{9}'),
+    ('gitlab-session-cookie-bare',
+     '_gitlab_session=[A-Za-z0-9%_-]{32,}'),
+    ('gitlab-workspace-token-gitlab-18-2',
+     'glwt-[A-Za-z0-9_-]{27,600}\\.01\\.[0-9a-z]{9}'),
+    ('google-api-key-bound-to-service-account',
+     'AQ\\.Ab8R[a-zA-Z0-9_-]{46}'),
+    ('google-cloud-storage-hmac-key-access-id',
+     'GOOG(?:[A-Z0-9]{57}|[A-Z0-9]{20})'),
+    ('hex-api-key-hex-pm',
+     'hex_[0-9a-f]{40}'),
+    ('huggingface-organization-api-token-legacy',
+     'api_org_[A-Za-z0-9]{34}'),
+    ('jumpcloud-admin-api-key',
+     'jca_[A-Za-z0-9]{36}'),
+    ('klarna-live-api-key',
+     'klarna_live_api_[A-Za-z0-9]{20,256}'),
+    ('klarna-test-playground-api-key',
+     'klarna_test_api_[A-Za-z0-9]{20,256}'),
+    ('limbar-limrun-organization-api-key',
+     'lim_[A-Za-z0-9]{20,64}'),
+    ('limbar-limrun-scoped-signed-registry-token',
+     'lim_st_[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}'),
+    ('nylas-v3-api-key',
+     'nyk_v0[A-Za-z0-9_]{20,}'),
+    ('persona-production-api-key-bare',
+     'persona_production_[A-Za-z0-9_-]{20,128}'),
+    ('persona-sandbox-api-key',
+     'persona_sandbox_[A-Za-z0-9_-]{20,128}'),
+    ('plaid-assets-token-production',
+     'assets-production-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'),
+    ('plaid-assets-token-sandbox',
+     'assets-sandbox-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'),
+    ('plaid-processor-token-production',
+     'processor-production-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'),
+    ('plaid-processor-token-sandbox',
+     'processor-sandbox-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'),
+    ('plaid-user-token-production',
+     'user-production-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'),
+    ('plaid-user-token-sandbox',
+     'user-sandbox-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'),
+    ('pubnub-secret-key',
+     'sec-c-[A-Za-z0-9+/]{48}'),
+    ('shippo-live-api-token',
+     'shippo_live_[0-9a-f]{32,40}'),
+    ('shippo-test-api-token',
+     'shippo_test_[0-9a-f]{32,40}'),
+    ('slack-rotating-access-token',
+     'xoxe\\.(?:xoxb|xoxp|xapp)-1-[A-Za-z0-9-]{20,}'),
+    ('square-oauth-refresh-token',
+     'EQAA[A-Za-z0-9_-]{60}'),
+    ('stripe-claimable-sandbox-restricted-key',
+     'rkcs_[A-Za-z0-9_]{16,255}'),
+    ('stripe-organization-api-key-bare',
+     'sk_org_[A-Za-z0-9_]{16,255}'),
+    ('wave-senegal-request-signing-secret',
+     'wave_sn_AKS_[A-Za-z0-9]{20,256}'),
+    ('zapier-catch-hook-webhook-url',
+     'hooks\\.zapier\\.com/hooks/catch/[0-9]+/[A-Za-z0-9]+/?'),
+    ('zoho-oauth-token',
+     '1000\\.[0-9a-f]{32}\\.[0-9a-f]{32}'),
 ])
 # formats whose body has no upper length and a short lower one: any cut of a token is again one
 OPEN_ENDED = {"aws-bedrock-short-term-api-key"}
-N_RULES = 188
+N_RULES = 235
 
 
 def token(rule_id: str) -> str:
@@ -447,6 +541,16 @@ class ResearchedFormatTests(unittest.TestCase):
         tok = token("akamai-edgegrid-client-token-access-token")
         self.assertEqual(kinds(f"host: {tok}.luna.akamaiapis.net\n", "tool"), [])
         self.assertIn(("akamai-edgegrid-client-token-access-token", tok), kinds(f"client_token: {tok}.", "tool"))
+
+    def test_a_fly_token_of_several_macaroons_stays_whole(self):
+        # "FlyV1 " and macaroons joined by commas is one token; the bare-macaroon rule took each part alone, so the
+        # whole token was no hit (the release gate's catalog floor caught it, kingfisher.flyio.1)
+        r = random.Random(17)
+        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        part, second = ("fm" + "2_" + "".join(r.choice(alphabet) for _ in range(160)) for _n in range(2))
+        tok = "Fly" + "V1 " + part + "," + second
+        self.assertIn(tok, [v for _k, v in kinds(f"export FLY_API_TOKEN=\"{tok}\"\n", "tool")])
+        self.assertIn(("fly-io-macaroon-token-v2", part), kinds(f"the macaroon is {part} here", "prompt"))
 
     def test_half_a_token_is_no_hit_of_its_rule(self):
         # at most 40 characters: half of a 2,000-character Bedrock key is still longer than its shortest form
