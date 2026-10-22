@@ -1493,6 +1493,9 @@ VALIDATORS = {
     "flag_value": lambda v: _word_value_ok(v, prose_punct=True),
     "glued_value": lambda v: _word_value_ok(v, min_len=6),
     "prose_value": _prose_value_ok,
+    # a "!" at the end belongs to the password ("My password is <value>! (don't judge)") only when the value is one
+    # without it: "The password is Hunter2!" stays the example of a weak password
+    "prose_value_bang": lambda v: _prose_value_ok(v) and _prose_value_ok(v.rstrip("!")),
     "sentence_value": _sentence_value_ok,
     "spaced_value": _spaced_value_ok,
     "prose_key_value": _prose_key_value_ok,
@@ -1701,9 +1704,9 @@ OWN_RULES: list[dict] = [
     # prose: "my password is <value>". Only a value that is no word of a sentence: it holds a capital or a symbol
     # beyond - _ . and a digit or a symbol ("the password is incorrect" stays prose). English only: the German
     # sentence of tests/fp_corpus.py (`Das Passwort ist` and a season and a year) is kept silent
-    {"id": "label-prose-password", "type": "SECRET", "secret_group": 1, "validator": "prose_value",
+    {"id": "label-prose-password", "type": "SECRET", "secret_group": 1, "validator": "prose_value_bang",
      "regex": r"(?i)(?<![\w-])(?:password|passwd|passphrase)[ \t]+(?:is|was)[ \t]*:?[ \t]+"
-              r"[\"'„“]?([^\s\"'“”]{0,255}[^\s\"'“”.,;:!?)])[\"'“”]?(?=[.,;:!?)]*(?:[\s\"'<\\]|$))"},
+              r"[\"'„“]?([^\s\"'“”]{0,255}[^\s\"'“”.,;:!?)]!*)[\"'“”]?(?=[.,;:!?)]*(?:[\s\"'<\\]|$))"},
     # a typed sentence with no `:` or `=` after the password word (field report, 2026-10-16: Codex sent the value of
     # "Passwort <value>." in the clear). The words of each label language that is on (_PW_WORDS_OF). With a copula
     # ("Kennwort ist <value>", "mot de passe est <value>") the value check of the prose rule above: a digit and a
@@ -1730,6 +1733,12 @@ OWN_RULES: list[dict] = [
     {"id": "label-password-for-is", "type": "SECRET", "secret_group": 1, "validator": "sentence_value",
      "regex": r"(?i)(?<![\w-])(?:password|passphrase|passcode)[ \t]+(?:for|of|on|to)[ \t]+(?:[\w.@'-]+[ \t]+){1,5}?"
               r"(?:is|was)[ \t]*:?[ \t]+" + _SENTENCE_VALUE},
+    # the same with other words between the password word and the copula: "the wifi password here is <value>", "the
+    # VPN password I use for it is <value>" (Benchmark V3, aparte dev). One to four words, none of them a copula, and
+    # the value check of a sentence
+    {"id": "label-password-words-is", "type": "SECRET", "secret_group": 1, "validator": "sentence_value",
+     "regex": r"(?i)(?<![\w-])(?:password|passphrase|passcode)[ \t]+(?!(?:for|of|on|to)[ \t])"
+              r"(?:(?!(?:is|was)[ \t])[\w.@'-]+[ \t]+){1,4}?(?:is|was)[ \t]*:?[ \t]+" + _SENTENCE_VALUE},
     {"id": "label-password-use-as", "type": "SECRET", "secret_group": 1, "validator": "spaced_value",
      "regex": r"(?i)(?<![\w-])(?:use|using|enter|type|set|with)[ \t]+(?:\*\*|[\"'`„“])?"
               r"([^\s\"'`“”]{4,255}?)(?:\*\*|[\"'`“”])?[ \t]+as[ \t]+"
@@ -1893,6 +1902,16 @@ FALLBACK_RULES: list[dict] = [
      "regex": r"(?m)^[ \t]*(?:export[ \t]+)?APP_KEY[ \t]*=[ \t]*[\"']?(base64:[A-Za-z0-9+/]{20,44}={0,2})(?![\w+/=])"},
     {"id": "label-env-key-list", "type": "SECRET", "secret_group": 2,
      "regex": r"(?m)^[ \t]*(?:export[ \t]+)?(APP_KEYS)[ \t]*=[ \t]*([\"']?)"},
+    # a key that a sentence owns and names: "my stripe key is <value>", "our google api key for the map widget is
+    # <value>", "the session JWT is <value>" (Benchmark V3, aparte dev). label-prose-key wants the key word right before
+    # the value; here a possessive or an article starts it, up to two words name the service, and up to four words
+    # after for/of/on/in name the use. The value check of label-prose-key: a random shape of 16 characters or more. A
+    # public or publishable key (Stripe's pk_) is no secret
+    {"id": "label-prose-key-owned", "type": "SECRET", "secret_group": 1, "validator": "prose_key_value",
+     "regex": r"(?i)(?<![\w-])(?:my|our|your|the|his|her|their)[ \t]+(?:(?!public|publishable)[\w.-]+[ \t]+){0,2}?"
+              r"(?:key|token|secret|jwt)(?:[ \t]+(?:for|of|on|in)(?:[ \t]+[\w.@'-]+){1,4}?)?[ \t]+(?:is|was)"
+              r"[ \t]*:?[ \t]+[`\"'„“]?(?!pk_)([A-Za-z0-9_+/=.-]{15,511}[A-Za-z0-9_+/=])[`\"'“”]?"
+              r"(?=[.,;:!?)]?(?:\s|$))"},
     # a key or a salt of PHP's define() (wp-config.php: AUTH_KEY, NONCE_SALT): the WordPress salts hold ( ) | ` and
     # the literal rules took them for code (Benchmark V3, aparte dev: 16 salts in the clear). Only a name that ends in
     # KEY, SALT, SECRET or TOKEN; a password is label-pw-literal's
@@ -2437,7 +2456,7 @@ _CAPITALISED_WORD_RE = _LazyRx(r"(?:[A-Z][a-z]+)+")
 _SENTENCE_STOP = ".;"
 # rules whose value check is cheap and refuses most candidates: it runs before the checks of the code around a value
 _VALIDATE_FIRST = frozenset({"label-password-after-word", "label-password-after-space", "label-password-apposition",
-                             "label-password-for-is", "label-password-use-as"})
+                             "label-password-for-is", "label-password-use-as", "label-password-words-is"})
 
 
 def _load_detect_secrets(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
