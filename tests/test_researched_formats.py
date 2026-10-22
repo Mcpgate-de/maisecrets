@@ -442,6 +442,12 @@ class ResearchedFormatTests(unittest.TestCase):
                 with self.subTest(rule=rule_id, end=end):
                     self.assertIn((rule_id, tok), kinds(f"my key is {tok}{end} thanks", "prompt"))
 
+    def test_an_akamai_host_name_is_no_token(self):
+        # an EdgeGrid host is the client token's shape followed by ".luna.akamaiapis.net"
+        tok = token("akamai-edgegrid-client-token-access-token")
+        self.assertEqual(kinds(f"host: {tok}.luna.akamaiapis.net\n", "tool"), [])
+        self.assertIn(("akamai-edgegrid-client-token-access-token", tok), kinds(f"client_token: {tok}.", "tool"))
+
     def test_half_a_token_is_no_hit_of_its_rule(self):
         # at most 40 characters: half of a 2,000-character Bedrock key is still longer than its shortest form
         for rule_id in sorted(set(SOURCES) - OPEN_ENDED):

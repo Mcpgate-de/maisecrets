@@ -269,7 +269,7 @@ retool-workflow-api-key                    retool_wk_(?:(?<![A-Za-z0-9_-]retool_
 slack-app-configuration-access-token       xoxe\.xoxp\-(?:(?<![A-Za-z0-9_-]xoxe\.xoxp\-)|(?<=\\[nrt]xoxe\.xoxp\-))[\d]{1,10}\-[a-zA-Z0-9]{166}(?![A-Za-z0-9_-])
 # 0.7.10, provider code: prefixed formats read from the providers' own published code (SDKs, servers,
 # token libraries) and documentation that no rule above takes
-akamai-edgegrid-client-token-access-token              akab\-(?:(?<![A-Za-z0-9_-]akab\-)|(?<=\\[nrt]akab\-))[a-z0-9]{16}\-[a-z0-9]{16}(?![A-Za-z0-9_-])
+akamai-edgegrid-client-token-access-token              akab\-(?:(?<![A-Za-z0-9_-]akab\-)|(?<=\\[nrt]akab\-))[a-z0-9]{16}\-[a-z0-9]{16}(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9])
 baseten-api-key-2026-format                            b10_(?:(?<![A-Za-z0-9_-]b10_)|(?<=\\[nrt]b10_))[A-Za-z0-9]{8}\.[A-Za-z0-9]{32}(?![A-Za-z0-9_-])
 browserbase-api-key                                    bb_live_(?:(?<![A-Za-z0-9_-]bb_live_)|(?<=\\[nrt]bb_live_))[A-Za-z0-9_\-]{20,}(?![A-Za-z0-9_-])
 buildkite-agent-access-token                           bkaa_(?:(?<![A-Za-z0-9_-]bkaa_)|(?<=\\[nrt]bkaa_))[A-Za-z0-9_.\-]{37,2047}[A-Za-z0-9_\-](?![A-Za-z0-9_-])
