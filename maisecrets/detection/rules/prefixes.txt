@@ -57,3 +57,6 @@ gitlab-pipeline-trigger-token-any glptt-(?:(?<![A-Za-z0-9_-]glptt-)|(?<=\\[nrt]g
 gitlab-ci-job-token-any      glcbt-(?:(?<![A-Za-z0-9_-]glcbt-)|(?<=\\[nrt]glcbt-))[0-9A-Za-z_-]{20,2048}(?:\.[0-9A-Za-z_-]{2,2048}){0,2}(?![0-9A-Za-z_-])(?!\.[0-9A-Za-z_-])
 # 0.6.39: the legacy Office 365 connector URL of Microsoft Teams; the whole URL posts to the channel (#11)
 microsoft-teams-webhook-legacy  https(?:(?<![A-Za-z0-9]https)|(?<=\\[nrt]https))://outlook\.office(?:365)?\.com/webhook/[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}@[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}/IncomingWebhook/[0-9A-Fa-f]{32}/[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}(?:/[0-9A-Za-z_-]{20,})?(?![0-9A-Za-z_-])
+# 0.7.9: a Storyblok personal access token (sb_pat_ and 43 characters), a format newer than every vendored catalog
+# (trufflehog knows only the older Storyblok token, and only after the word storyblok). Field report, 2026-10-22
+storyblok-personal-access-token sb_pat_(?:(?<![A-Za-z0-9_]sb_pat_)|(?<=\\[nrt]sb_pat_))[0-9A-Za-z_]{40,64}(?![0-9A-Za-z_-])
