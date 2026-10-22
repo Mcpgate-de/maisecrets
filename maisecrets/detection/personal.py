@@ -700,6 +700,8 @@ class _lazy:
 
 
 _BIRTH_ANCHOR_COLS = frozenset({"dob", "date_of_birth", "birth_date", "birthdate", "geburtsdatum"})
+_NEW_ID_COLS = frozenset({"health_plan_beneficiary_number", "beneficiary_number", "certificate_license_number",
+                          "driver_license_number", "patient_id"})
 _SOFTWARE_COLS = frozenset({"product", "version", "release", "build", "sku", "package", "app", "application"})
 
 
@@ -728,8 +730,6 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
     # (sku, product, customer_name, dob, ssn) has more personal columns and stays a person's (the traces, 2026-10-22)
     software = any(h in _SOFTWARE_COLS for h in names) and \
         sum(h in _STRONG_COLS or h in _WEAK_COLS for h in names) < 2
-    if software:
-        anchors = tuple(a for a in anchors if a == NAME)
     if not cols and not accounts:
         return out
     for n, cells in enumerate(rows):
@@ -755,8 +755,11 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
             row = [h for h in row if h not in first and h not in last]
         # a date of birth under its own name is a person too (| Date of Birth | Address |): only the names that say
         # birth, not "birthday", which a table of releases has (Benchmark V3 Phase C, 2026-10-22)
-        if any(c in strong for *_, c in row) and any(h[3] in anchors or (not software and _birth_anchor(text, names, h))
-                                                     for h in row):
+        # in a table of software the ids this lexicon took on 2026-10-22 and a date of birth under its name are no
+        # person; the anchors a format had before keep their role (a CSV row's birth date, an SSN)
+        if any(c in strong for *_, c in row) and any(
+                (h[3] in anchors and not (software and names[h[4]] in _NEW_ID_COLS))
+                or (not software and _birth_anchor(text, names, h)) for h in row):
             out += [h[:4] for h in row]
     return out
 
