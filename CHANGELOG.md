@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.7.6] - 2026-10-22
+
+### Fixes
+
+- a company's "we can help you at" and an id after "Contact:" stay text (aee4e79)
+- masks a person's own number in a sentence (reach out to me at, my number is), while a company's line stays text (a77baf1)
+- masks a phone number after a contact label, after "Fax number for notice:" and with four counting digits at its end (5eabe63)
+
 ## [0.7.5] - 2026-10-22
 
 ### Fixes
