@@ -335,10 +335,13 @@ coverage_drift:
     - '[ "$(date +%u)" = 1 ] || { echo "the coverage drift runs on Mondays"; exit 0; }'
     - apt-get update -qq >/dev/null && apt-get install -y -qq git >/dev/null
     - pip install -q pyyaml
-    - python3 scripts/coverage_drift.py /tmp/catalogs --fetch --out coverage-drift.json
+    - status=0; python3 scripts/coverage_drift.py /tmp/catalogs --fetch --out coverage-drift.json || status=$?
+    # loop 2: draft prefix rules for every catalog rule found only after a label, for a person to review
+    - python3 scripts/draft_format_rules.py /tmp/catalogs coverage-drift.json --out format-drafts
+    - exit $status
   artifacts:
     when: always
-    paths: [coverage-drift.json]
+    paths: [coverage-drift.json, format-drafts/]
     expire_in: 30 days
 
 release:

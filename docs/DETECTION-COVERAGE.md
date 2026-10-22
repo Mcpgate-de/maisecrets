@@ -32,7 +32,8 @@ bare, after a label, and in the example's own text. The numbers go to `docs/cove
 `format_watch` (daily, `scripts/watch_formats.py`) compares the GitHub secret scanning types, trufflehog's detectors,
 betterleaks on `main` and Google's Veles plugins with `docs/format-watch.txt` and turns red on a new entry.
 
-A draft for a new entry comes from the generator of 2026-10-22 (`scripts/draft_format_rules.py`): it takes the
+A draft comes from `scripts/draft_format_rules.py` (in the weekly `coverage_drift` job, as the artifact
+`format-drafts/`): it takes the
 catalog's regex, keeps the fixed prefix first (the form of `rules/prefixes.txt`), checks the rule against every
 example of the catalog rule, and writes a test whose oracle is kept apart from the rule (a class template of the
 catalog example). The draft merge request carries the FP bank, the time measurement and the gate. Nothing merges by
