@@ -497,6 +497,10 @@ _NOT_A_NAME_PART = frozenset({"required", "optional", "unknown", "none", "redact
 _FIRST_PART_COLS = frozenset({"first_name", "firstname", "given_name", "vorname"})
 
 
+_FIXTURE_USER_RE = re.compile(r"(?i)(?:^|[^a-z])(?:fixture|mock|sample|dummy|test|example|demo|fake|placeholder)"
+                               r"(?:[^a-z]|s?$|user|account)")
+
+
 def _cell_ok(v: str, typ: str, col: str = "") -> bool:
     """The cell holds what its column names: a desk extension is no phone, `Front Desk` no name."""
     if typ == NAME and col in _NAME_PART_COLS and " " not in v.strip():
@@ -516,7 +520,8 @@ def _cell_ok(v: str, typ: str, col: str = "") -> bool:
     if typ == NAME:
         return bool(_NAME_CELL_RE.fullmatch(v)) and _name_ok(v) and not _reads_as_words(v)
     if typ == USERNAME:
-        return not _service_user(v)
+        # a fixture or a test account (fixture_account, mock-user2): no person's (codex Gate A, 2026-10-22)
+        return not _service_user(v) and not _FIXTURE_USER_RE.search(v)
     return digits >= 5 and not _placeholder_digits(v)
 
 
@@ -586,6 +591,7 @@ _MD_ALIASES = {"telephone_number": "telephone", "mobile_number": "mobile", "cell
                "medicalrecordnumber": "mrn", "driverlicensenumber": "driver_license_number",
                "drivers_license_number": "driver_license_number", "driver's_license_number": "driver_license_number",
                "passportnumber": "passport_number", "patientid": "patient_id",
+               "beneficiarynumber": "beneficiary_number", "certificatelicensenumber": "certificate_license_number",
                # the name column of a role in camel case (candidateName)
                "candidatename": "candidate_name", "clientname": "client_name", "playername": "player_name",
                "recipientname": "recipient_name", "applicantname": "applicant_name", "studentname": "student_name",
@@ -694,6 +700,7 @@ class _lazy:
 
 
 _BIRTH_ANCHOR_COLS = frozenset({"dob", "date_of_birth", "birth_date", "birthdate", "geburtsdatum"})
+_SOFTWARE_COLS = frozenset({"product", "version", "release", "build", "sku", "package", "app", "application"})
 
 
 def _birth_anchor(text: str, names: list, hit: tuple) -> bool:
@@ -716,6 +723,11 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
     strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
     cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
     accounts = {i for i, h in enumerate(names) if _ACCOUNT_NUMBER_COL_RE.fullmatch(h)} if accounts_column else set()
+    # a table of software (| Product | Certificate License Number | Version |): only a name makes a row a person's,
+    # neither an id nor a date of birth column (codex Gate A, 2026-10-22)
+    software = any(h in _SOFTWARE_COLS for h in names)
+    if software:
+        anchors = tuple(a for a in anchors if a == NAME)
     if not cols and not accounts:
         return out
     for n, cells in enumerate(rows):
@@ -741,7 +753,8 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
             row = [h for h in row if h not in first and h not in last]
         # a date of birth under its own name is a person too (| Date of Birth | Address |): only the names that say
         # birth, not "birthday", which a table of releases has (Benchmark V3 Phase C, 2026-10-22)
-        if any(c in strong for *_, c in row) and any(h[3] in anchors or _birth_anchor(text, names, h) for h in row):
+        if any(c in strong for *_, c in row) and any(h[3] in anchors or (not software and _birth_anchor(text, names, h))
+                                                     for h in row):
             out += [h[:4] for h in row]
     return out
 

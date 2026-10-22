@@ -524,6 +524,17 @@ class MarkdownTableTests(Base):
         self.assertText("| Name | Birthday | Version |\n|---|---|---|\n| Atlas | 2019-04-02 | 4.1 |\n")
         self.assertText("| Depot | Address |\n|---|---|\n| North | 12 Harbour Lane, Dunmore |\n")
 
+    def test_a_table_of_software_and_a_fixture_account_are_no_person(self):
+        # codex Gate A, 2026-10-22: a product table names no person by an id or a date column; a test account is none
+        for text in ("| Product | Date of Birth | Version |\n|---|---|---|\n| WidgetOS | 2010-04-02 | 4.1 |\n",
+                     "| Product | Certificate License Number | Version |\n|---|---|---|\n| WidgetSDK | LIC-4821937 | 4.1 |\n"):
+            with self.subTest(text=text):
+                self.assertText(text)
+        self.assertNotIn("USERNAME", {m.type for m in scan("user_id,date_of_birth\nfixture_account," + BIRTH + "\n")})
+        from maisecrets.detection import personal as personal_mod
+        self.assertEqual("beneficiary_number", personal_mod._md_column("beneficiaryNumber"))
+        self.assertEqual("certificate_license_number", personal_mod._md_column("certificateLicenseNumber"))
+
     def test_a_table_of_fields_without_a_person_stays_text(self):
         for text in ("| Name | Value |\n|---|---|\n| Product Name | Widget Pro |\n| Version | 2.1 |\n",
                      "| Setting | Value |\n|---|---|\n| Name | build-runner |\n"
