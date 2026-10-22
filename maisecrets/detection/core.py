@@ -1869,17 +1869,27 @@ BETTERLEAKS_PATCHES = {
 }
 
 
+# The terminator that 336 vendored rules end with takes a quote, a space, ";" or a line end, which is right for an
+# assignment and wrong for a sentence: "the key is <token>." or "(<token>)" lost the whole hit. The terminator now
+# also takes sentence punctuation before a space or the end of the text; a dot before a letter (a host name) is still
+# no end, nor is punctuation next to a quote: `"<value>", "next"` and `<key>: "…"` are code, not a sentence (two
+# false alarms in the FP bank). The terminator is outside the secret group, so no value changes (0.7.11)
+_VENDORED_END = r"""(?:\\?['"\x60]|[\s;]|\\[nr]|$)"""
+_SENTENCE_END = r"""(?:\\?['"\x60]|[\s;]|\\[nr]|$|(?<!['"\x60])[.,:!?)](?=\s|$)(?!\s*['"\x60]))"""
+
+
 def _patched(r: dict) -> dict:
-    """The rule with its BETTERLEAKS_PATCHES entry applied. A regex correction applies only to the regex it expects."""
+    """The rule with its BETTERLEAKS_PATCHES entry applied, then the sentence terminator. A regex correction applies
+    only to the regex it expects."""
     patch = BETTERLEAKS_PATCHES.get(r.get("id"))
-    if not patch:
-        return r
     r = dict(r)
-    if patch.get("add_keywords"):
+    if patch and patch.get("add_keywords"):
         r["keywords"] = list(r.get("keywords") or []) + [k for k in patch["add_keywords"]
                                                         if k not in (r.get("keywords") or [])]
-    if patch.get("regex") and r.get("regex") == patch["expect"]:
+    if patch and patch.get("regex") and r.get("regex") == patch["expect"]:
         r["regex"] = patch["regex"]
+    if r.get("regex", "").endswith(_VENDORED_END):
+        r["regex"] = r["regex"][:-len(_VENDORED_END)] + _SENTENCE_END
     return r
 
 
