@@ -751,6 +751,14 @@ def _keylike(v: str) -> bool:
             and not _WORDS_RUN_RE.fullmatch(v))
 
 
+def _hex_of_text(v: str) -> bool:
+    """Hex of printable text: an encoded name or an encoded token, which the tool channel decodes and judges itself."""
+    if len(v) % 2 or not re.fullmatch(r"[0-9a-fA-F]+", v):
+        return False
+    raw = bytes.fromhex(v)
+    return all(32 <= b < 127 for b in raw)
+
+
 def _prose_key_value_ok(v: str) -> bool:
     """A value after a key word in a sentence (label-prose-key): "Use the API key <value> for the call." The sentence
     says less than `api_key=`, so only a random shape: a UUID, hex with a digit and a letter, or a value of letters
@@ -761,10 +769,10 @@ def _prose_key_value_ok(v: str) -> bool:
         return len(set(v.replace("-", ""))) > 6
     if not any(c.isdigit() for c in v) or not any(c.isalpha() for c in v) or _PATH_SEGMENT_RE.search(v):
         return False
+    if _base64_of_text(v) or _hex_of_text(v):
+        return False   # base64 or hex of text: `id:key` of an Elasticsearch ApiKey in docs, an encoded name
     if re.fullmatch(r"[0-9a-fA-F]+", v):   # 48 hex digits are left to secret-hex48-after-token-word (personal.py)
         return 20 <= len(v) != 48 and len(set(v.lower())) > 6
-    if _base64_of_text(v):
-        return False   # base64 of text: `id:key` of an Elasticsearch ApiKey in docs, an encoded name
     return (_keylike(v) or shannon_entropy(v) >= 3.5) and _wordlike(v) < 0.5   # PaymentsServiceV2Prod is words
 
 
