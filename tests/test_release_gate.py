@@ -113,6 +113,24 @@ class MeasuredBaselineTests(unittest.TestCase):
             self.assertIn({"dir": "maisecrets", "tree": git(r, "rev-parse", "HEAD:maisecrets")}, measured["trees"])
             self.assertIn("measured.json", (dest / "SHA256SUMS").read_text())
 
+    def test_a_windows_path_escaped_inside_json_is_replaced_too(self):
+        # json.dumps writes C:\\Users\\… for C:\Users\…; the first version replaced only the plain form, and the
+        # Windows runner kept the local paths (2026-10-22, release MR !213)
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            r = self.repo(d)
+            out, dest = Path(d) / "out", Path(d) / "dest"
+            out.mkdir()
+            home = "C:\\Users\\tester"
+            run = result({"a": ["full"]})
+            run["scanner"] = {"python": home + "\\venv\\python.exe"}
+            (out / "nemotron-dev-maisecrets-full.json").write_text(json.dumps(run))
+            with mock.patch.object(gate.Path, "home", return_value=Path(home)):
+                gate.keep(out, dest, r, "0.0.2")
+            text = gzip.open(dest / "nemotron-dev-maisecrets-full.json.gz", "rt", encoding="utf-8").read()
+            self.assertNotIn("tester", text)
+            self.assertIn("<home>", text)
+
     def test_a_tag_that_changes_only_the_version_holds_the_measured_code(self):
         with tempfile.TemporaryDirectory() as d:
             r = self.repo(d)

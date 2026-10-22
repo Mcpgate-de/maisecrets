@@ -175,10 +175,13 @@ def keep(out: Path, dest: Path, cand: Path, version: str, python: str = "") -> N
         names.append((str(Path(python).parent.parent), "<python>"))
     names.sort(key=lambda pair: -len(pair[0]))
 
+    def escaped(path: str) -> str:
+        return json.dumps(path)[1:-1]   # a path inside JSON text: C:\\Users\\… on Windows
+
     def clean(text: str) -> str:
         for local, name in names:
-            text = text.replace(local, name)
-        if home in text:
+            text = text.replace(escaped(local), name).replace(local, name)
+        if home in text or escaped(home) in text:
             raise SystemExit("a local path is left in the results: not kept")
         return text
 
