@@ -812,17 +812,20 @@ its colon (`Contact:`, `Contact information:`, `Emergency contact:`) was no phon
 taken for a placeholder. Now a contact label takes a North American number in its strict form; the words after a
 phone word may name its purpose; and only a counting run of six digits or more (`12345678`) is a placeholder. A
 person's own number in a sentence also counts without a phone word (`reach out to me at`, `call him directly at`,
-`my number is`). A company's or an office's number in a sentence (`reach out to us at`, `our support team at`)
+`my number is`); this adds 11 numbers on Nemotron `dev` and 3 on `val`. A company's or an office's number in a sentence (`reach out to us at`, `our support team at`)
 stays text, as in a table of depots: the datasets label these, maisecrets does not by design.
 
-| Measure | Labels and placeholders | A person's own number |
-|---|---|---|
-| Nemotron `dev` / `val`: missed to whole | 326 / 114 | 11 / 3 |
-| Nemotron false positives, `dev` / `val` | 508 → 513 / 187 → 188 | unchanged |
-| Gretel `dev` / `val`: missed to whole | 23 / 14 | 0 / 0 |
-| Gretel false positives, `dev` / `val` | 2,497 → 2,539 / 858 → 870 | unchanged |
-| Mendeley, PIILO, the bank, the traces, the false-alarm bank | no change | no change |
-| Spans made worse | 0 | 0 |
+All changes together against `next` (the same detection code as 0.7.5), after codex Gate A narrowed two of them (a
+company's `we can help you at` and an id after `Contact:` stay text):
+
+| Measure | Result |
+|---|---|
+| Nemotron `dev` / `val`: missed to whole | 327 / 113 |
+| Nemotron false positives, `dev` / `val` | 508 → 512 / 187 → 188 |
+| Gretel `dev` / `val`: missed to whole | 21 / 14 |
+| Gretel false positives, `dev` / `val` | 2,497 → 2,535 / 858 → 869 |
+| Mendeley, PIILO, the bank, the traces, the false-alarm bank | no change |
+| Spans made worse | 0 |
 
 The new false positives on Gretel `dev`, read by rule and shape (no value printed), are phone numbers after
 `Teléfono:`, `phone number` and `contact number` that the dataset does not label.
