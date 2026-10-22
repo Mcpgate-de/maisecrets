@@ -721,6 +721,11 @@ This prompt was not sent. The value did not reach the AI.
 This prompt was not sent. The value did not reach the AI.
 ```
 
+- **Report an unknown format.** When maisecrets did not catch a value and stores it, the answer offers a prefilled
+  issue link with the value's shape only: the fixed start of a token format (such as `sb_pat_`, shown only before a
+  random rest of 16 characters and more), the length of the rest and its kinds of character. You read it before you
+  open the link; if the start is part of your secret, do not send it. The value is never in the link. With
+  `report_url` set to `null` there is no link (docs/DETECTION-COVERAGE.md, loop 4).
 - **Never sent.** A prompt that starts with `ms:(` (any case, blanks before it
   allowed) is always stopped, in Claude Code with and without the mod and in
   Codex, also when the closing `)` is missing. The mod never rewrites it: it
