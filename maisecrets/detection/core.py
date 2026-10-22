@@ -1652,6 +1652,21 @@ OWN_RULES: list[dict] = [
               r"(?:[ \t]*(?:->|=>|\u2192|\u2013|\u2014)[ \t]*|[ \t]+-{1,2}[ \t]+|[ \t]+\(?[ \t]*)"
               + _SENTENCE_VALUE,
      "languages": True},
+    # three more forms of a typed sentence (benchmark V3, Nemotron dev: about 540 passwords in the clear). An
+    # apposition, "the password, <value>, works": the value check after a space, as a list of words follows a comma
+    # too. "the password for <account> is <value>": up to five words between the password word and the copula,
+    # English only. "use <value> as the password": the value before the word, after a verb that hands it over
+    {"id": "label-password-apposition", "type": "SECRET", "secret_group": 1, "validator": "spaced_value",
+     "regex": r"(?i)(?<![\w-])" + _PW_COMPOUND + r"(?:{words})(?![\w-])[ \t]*,[ \t]+" + _SENTENCE_VALUE,
+     "languages": True},
+    {"id": "label-password-for-is", "type": "SECRET", "secret_group": 1, "validator": "sentence_value",
+     "regex": r"(?i)(?<![\w-])(?:password|passphrase|passcode)[ \t]+(?:for|of|on|to)[ \t]+(?:[\w.@'-]+[ \t]+){1,5}?"
+              r"(?:is|was)[ \t]*:?[ \t]+" + _SENTENCE_VALUE},
+    {"id": "label-password-use-as", "type": "SECRET", "secret_group": 1, "validator": "sentence_value",
+     "regex": r"(?i)(?<![\w-])(?:use|using|enter|type|set|with)[ \t]+(?:\*\*|[\"'`„“])?"
+              r"([^\s\"'`“”]{4,255}?)(?:\*\*|[\"'`“”])?[ \t]+as[ \t]+"
+              r"(?:(?:the|your|my|a|an|its|their|our)[ \t]+)?(?:(?:new|temporary|initial|default|admin|root)[ \t]+)?"
+              r"(?:password|passphrase|passcode)(?![\w-])"},
     # each quoted value of a list after a label that names secrets: `"api_keys": ["<v1>", "<v2>"]`,
     # `passwords = ['<v1>']`, Go `Secrets: []string{"<v1>"}`. The label rules took no value that starts with a
     # bracket, so a whole list of keys stayed in the clear. Only a label that names secrets and nothing else: a bare
@@ -2332,7 +2347,8 @@ _CAPITALISED_WORD_RE = _LazyRx(r"(?:[A-Z][a-z]+)+")
 # the stops of a sentence after an unquoted value (the regex never ends a value on a comma)
 _SENTENCE_STOP = ".;"
 # rules whose value check is cheap and refuses most candidates: it runs before the checks of the code around a value
-_VALIDATE_FIRST = frozenset({"label-password-after-word", "label-password-after-space"})
+_VALIDATE_FIRST = frozenset({"label-password-after-word", "label-password-after-space", "label-password-apposition",
+                             "label-password-for-is", "label-password-use-as"})
 
 
 def _load_detect_secrets(languages: tuple[str, ...] = ("en",)) -> list[Rule]:
