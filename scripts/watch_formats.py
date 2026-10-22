@@ -14,8 +14,8 @@ can be in one of them long before it reaches a vendored set, or never (the Story
 - veles: the secret plugins of Google's OSV-SCALIBR, one folder each under veles/secrets (kingfisher imports them)
 
 A new entry is a reason to look, not a rule: whoever looks writes a prefix rule with a test when the format has a
-fixed prefix (maisecrets/detection/rules/prefixes.txt), or adds the entry to the snapshot with `update`. The snapshot is a text file, a `[source]` line and one id per
-line, so no id list reads as a label and its value. The
+fixed prefix (maisecrets/detection/rules/prefixes.txt), or adds the entry to the snapshot with `update`. The
+snapshot is a text file, a `[source]` line and one id per line, so no id list reads as a label and its value. The
 scheduled pipeline runs `check`; a red job is the notice. Standard library only; GITHUB_TOKEN is used when set.
 """
 from __future__ import annotations
@@ -77,7 +77,8 @@ def new_entries(snapshot: dict, current: dict) -> dict:
 
 
 def dump(lists: dict) -> str:
-    return "".join(f"[{name}]\n" + "".join(f"{i}\n" for i in sorted(items)) + "\n" for name, items in sorted(lists.items()))
+    return "".join(f"[{name}]\n" + "".join(f"{i}\n" for i in sorted(items)) + "\n"
+                   for name, items in sorted(lists.items()))
 
 
 def load(text: str) -> dict:
