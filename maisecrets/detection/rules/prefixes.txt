@@ -40,7 +40,7 @@ sonarqube-token              squ_(?:(?<![A-Za-z0-9_]squ_)|(?<=\\[nrt]squ_))[0-9a
 dynatrace-platform-token     dt0s(?:(?<![A-Za-z0-9]dt0s)|(?<=\\[nrt]dt0s))[0-9]{2}\.[A-Z0-9]{8}\.[A-Z0-9]{64}(?![A-Za-z0-9])
 postman-collection-token     PMAT-(?:(?<![A-Za-z0-9]PMAT-)|(?<=\\[nrt]PMAT-))[0-9A-Z]{26}(?![A-Za-z0-9])
 shopify-partner-api-token    prtapi_(?:(?<![A-Za-z0-9_]prtapi_)|(?<=\\[nrt]prtapi_))[a-f0-9]{32}(?![A-Za-z0-9_])
-planetscale-app-secret       pscale_app_secret_(?:(?<![A-Za-z0-9_-]pscale_app_secret_)|(?<=\\[nrt]pscale_app_secret_))[0-9A-Za-z_-]{43}(?![0-9A-Za-z_-])
+planetscale-app-secret       pscale_app_[s]ecret_(?:(?<![A-Za-z0-9_-]pscale_app_[s]ecret_)|(?<=\\[nrt]pscale_app_[s]ecret_))[0-9A-Za-z_-]{43}(?![0-9A-Za-z_-])
 intercom-access-token        dG9rO(?:(?<![A-Za-z0-9+/]dG9rO)|(?<=\\[nrt]dG9rO))(?:[0-9A-Za-z]{55}(?![0-9A-Za-z+/=])|[0-9A-Za-z]{54}=|[0-9A-Za-z]{53}==)
 netlify-personal-token       nfp_(?:(?<![A-Za-z0-9_]nfp_)|(?<=\\[nrt]nfp_))(?=[0-9a-f]{0,47}[g-zA-Z])[A-Za-z0-9]{40,48}(?![A-Za-z0-9_])
 teamcity-access-token        eyJ0eXAi[O]iAiVENWMiJ9\.(?:(?<![A-Za-z0-9_.-]eyJ0eXAi[O]iAiVENWMiJ9\.)|(?<=\\[nrt]eyJ0eXAi[O]iAiVENWMiJ9\.))[A-Za-z0-9_-]{36}\.[A-Za-z0-9_-]{48}(?![A-Za-z0-9_-])
