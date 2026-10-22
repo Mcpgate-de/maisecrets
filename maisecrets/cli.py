@@ -23,6 +23,18 @@ def _age(ts: float) -> str:
 
 def cmd_list(_: list[str]) -> int:
     """What is stored, masked: the same view a person gets from /maisecrets:list. No value."""
+    rc = _list_values()
+    from . import value_files
+    if value_files.present():
+        from . import values
+        try:
+            _print_imports(values.rows())
+        except values.ValuesError as exc:
+            print(f"\nImported values: {exc}")
+    return rc
+
+
+def _list_values() -> int:
     v = Vault()
     rows = v.list()
     if not rows:
@@ -69,6 +81,9 @@ def _destination_lines(rec: dict, shown_before: float) -> list[str]:
     return out
 
 
+_ROUTE = {"v": "cli"}
+
+
 def cmd_forget(args: list[str]) -> int:
     if not args:
         print("usage: maisecrets forget <KEY> [KEY ...]   (keys as /maisecrets:list shows them)", file=sys.stderr)
@@ -76,7 +91,7 @@ def cmd_forget(args: list[str]) -> int:
     v, rc = Vault(), 0
     for raw in args:
         key = raw.strip("⟦⟧").split(":", 1)[0]
-        status = v.forget(key)
+        status = v.forget(key, route=_ROUTE["v"])
         if getattr(v, "destinations_kept", False):
             print(f"{key}: its destination record could not be deleted now; /maisecrets:forget {key} again later.")
         if status == "ok":
@@ -173,13 +188,18 @@ def cmd_put(args: list[str]) -> int:
 def cmd_report(args: list[str]) -> int:
     """`report` lists the last detections; `report last [note]` or `report <n> [note]` prepares a
     false-positive issue for one of them; `report bug <text>` and `report feature <text>` prepare
-    one without an event. It prints the text and a prefilled link, opens the link only on a local
-    desktop, and with --create files the issue through the GitHub CLI. Nothing in it is a value."""
-    from . import events
-    create = "--create" in args
-    args = [a for a in args if a != "--create"]
+    one without an event; `report incident [code/cause | clear]` shows the incident record. It prints the
+    text and a prefilled link, and the person opens the link and decides in GitHub's form: it opens no
+    browser and runs no program (docs/DIAGNOSTICS.md, D1). Nothing in it is a value."""
+    from . import events, incidents
+    if any(a.lower() == "--create" for a in args):
+        print("--create is gone: maisecrets files nothing itself. Open the link and decide in GitHub's form.")
+    args = [a for a in args if a.lower() != "--create"]
+    asked = incidents.form(args)
+    if asked:
+        return _report_incident(*asked)
     if args and args[0] in ("bug", "feature"):
-        return _report_out(events, *events.generic_issue_parts(args[0], " ".join(args[1:])), create=create)
+        return _report_out(events, *events.generic_issue_parts(args[0], " ".join(args[1:])))
     evs = events.load(20)
     if not evs:
         print("(no detection recorded yet)")
@@ -190,22 +210,27 @@ def cmd_report(args: list[str]) -> int:
             hits = ", ".join(f"{h['type']}/{h['kind']}" for h in e.get("hits", []))
             print(f"{i:<3} {e.get('ts', ''):<20} {e.get('hook', ''):<17} {e.get('client', ''):<7} {hits}")
         print("\nmaisecrets report last [note] | report <n> [note] | report bug <text> | report feature <text>"
-              "  (add --create to file it with the GitHub CLI)")
+              " | report incident")
         return 0
     if args[0] == "last":
         # a removal of invisible characters is no detection to report as a false alarm; the list shows it. The
         # whole log is searched: twenty removals pushed a detection out of the last twenty (codex review)
-        real = [e for e in events.load(events.KEEP) if any(h.get("type") != "HIDDEN" for h in e.get("hits", []))]
+        # a quarantined rule of your own (RULE) is no detection either
+        real = [e for e in events.load(events.KEEP)
+                if any(h.get("type") not in ("HIDDEN", "RULE") for h in e.get("hits", []))]
         if not real:
             print("(no detection recorded yet)")
             return 0
         ev = real[-1]
     else:
         ev = evs[int(args[0]) - 1]
-        if not any(h.get("type") != "HIDDEN" for h in ev.get("hits", [])):
-            print("that event only removed invisible characters; there is no detection to report as a false alarm")
+        if not any(h.get("type") not in ("HIDDEN", "RULE") for h in ev.get("hits", [])):
+            what = ("only left out a rule of your own (/maisecrets:rules says why)"
+                    if any(h.get("type") == "RULE" for h in ev.get("hits", []))
+                    else "only removed invisible characters")
+            print(f"that event {what}; there is no detection to report as a false alarm")
             return 0
-    rc = _report_out(events, *events.issue_parts(ev, " ".join(args[1:])), create=create)
+    rc = _report_out(events, *events.issue_parts(ev, " ".join(args[1:])))
     _forget_the_false_positive(ev)
     return rc
 
@@ -227,7 +252,27 @@ def _forget_the_false_positive(ev: dict) -> None:
               + " ".join(f"/maisecrets:forget {k}" for k in keys))
 
 
-def _report_out(events, title: str, body: str, label: str, create: bool) -> int:
+def _report_incident(kind: str, selector: str | None) -> int:
+    """The incident report in a terminal. Only to a terminal: through a pipe (a model's Bash call) it prints one
+    line, so the report does not end up in the model's context by accident. That is no check of a person: a model
+    with a shell can get a pseudo-terminal (docs/DIAGNOSTICS.md, D3)."""
+    from . import incidents
+    if kind == "usage":
+        print(incidents.USAGE)
+        return 0
+    if not sys.stdout.isatty():
+        print("maisecrets: the incident report is shown to a person only: type /maisecrets:report incident in "
+              "Claude Code, or run this command in a terminal.")
+        return 0
+    if kind == "clear":
+        n = incidents.clear()
+        print("the incident record is busy; try again" if n < 0 else f"cleared: {n} incident file(s)")
+        return 0
+    print(incidents.report_text(selector))
+    return 0
+
+
+def _report_out(events, title: str, body: str, label: str) -> int:
     url, broken = events.tracker_or_error()
     if url is None and not broken:
         print("reporting is turned off here (report_url is null in the policy or the config)")
@@ -237,19 +282,9 @@ def _report_out(events, title: str, body: str, label: str, create: bool) -> int:
     if broken:
         print(f"no link and no issue: the configuration cannot be read ({broken}). Copy the text above.")
         return 0
-    if create:
-        made = events.create_with_gh(title, body, label)
-        if made:
-            print(f"created: {made}")
-            return 0
-        why = ("the tracker is not a GitHub repository" if not events.github_repo(events.tracker())
-               else "install gh and run `gh auth login`")
-        print(f"could not create it with the GitHub CLI ({why}); copy the text above or use the link.",
-              file=sys.stderr)
     url = events.link(title, body, label)
-    opened = not create and events.open_in_browser(url)
-    prefilled = bool(events.github_repo(url))
-    print(("opened in the browser: " if opened else "prefilled link: " if prefilled else "tracker: ") + url)
+    print(("prefilled link: " if events.github_repo(url) else "tracker: ") + url)
+    print("maisecrets sent nothing: open the link, check the text in the form, and decide there.")
     return 0
 
 
@@ -273,6 +308,61 @@ def cmd_scan(args: list[str]) -> int:
     return 0
 
 
+def cmd_rules(args: list[str]) -> int:
+    """The rules of your own (maisecrets/rules_cli.py): show, check, test, init, import."""
+    from . import rules_cli
+    return rules_cli.main(args)
+
+
+def cmd_values(args: list[str]) -> int:
+    """Values from your own tools (maisecrets/values.py): `values import FILE` and `values` (the imports). Prints
+    counts, ids and line numbers, never a value and never the file name: the output reaches the model when the agent
+    runs it. No command removes an import: only the person's typed prompt does."""
+    from . import values
+    if not args or args[0] in ("list", "show"):
+        _print_imports(values.rows(), always=True)
+        return 0
+    if args[0] == "import" and len(args) == 2:
+        try:
+            result = values.import_file(args[1])
+        except ValueError as exc:
+            print(f"maisecrets: the file is not imported: {exc}. Nothing was changed.")
+            return 1
+        print("maisecrets: " + values.summary(result))
+        if result.added:
+            print("From now on these values are masked in every prompt and tool result. Mask only: a placeholder of "
+                  "an imported value is never put back into a command or a file.")
+        return 0
+    if args[0] in ("remove", "forget", "delete"):
+        print("maisecrets: no command removes an import; only the person does, as their own prompt: "
+              "/maisecrets:forget import:ID (in Codex: maisecrets: forget import:ID).")
+        return 1
+    print("usage: maisecrets values [import FILE]", file=sys.stderr)
+    return 2
+
+
+def _print_imports(rows: list, always: bool = False) -> None:
+    """The imports: id, count, types, age, origin. Never a value."""
+    if not rows:
+        if always:
+            print("No values are imported. A tool of yours writes JSON lines ({\"value\": ..., \"type\": ...}); "
+                  "`values import FILE` or the setting value_files adds them.")
+        return
+    from .values import type_text
+    print(f"\nImported values (mask only): {sum(r['count'] for r in rows)} in {len(rows)} import(s)")
+    for r in rows:
+        origin = {"file": "a value file", "run": "a command", "damaged": "DAMAGED"}.get(r["origin"], r["origin"])
+        age = _age(r["at"]) if r["at"] else "?"
+        print(f"  import:{r['id']} · {r['count']} value(s) ({type_text(r['types']) or '-'}) · {age} · from {origin}")
+    print("  To remove one: type /maisecrets:forget import:ID as your own prompt.")
+
+
+def cmd_terms(args: list[str]) -> int:
+    """The term lists (maisecrets/terms_cli.py): counts, and `suggest FILE`."""
+    from . import terms_cli
+    return terms_cli.main(args)
+
+
 def cmd_config(_: list[str]) -> int:
     print(json.dumps(load_config(), indent=2))
     return 0
@@ -284,7 +374,9 @@ def cmd_settings(args: list[str]) -> int:
     from . import settings
     rest = [a for a in args if a != "--all"]
     # KEY, KEY VALUE, or for the host list KEY add|remove HOST (field report on 0.6.6: the list's own form exited 1)
-    list_form = len(rest) == 3 and rest[0].lower() == "ssh_autonomous_hosts" and rest[1].lower() in ("add", "remove")
+    folder = rest[0].lower() in ("rule_dirs", "clean_dirs", "value_files") if rest else False   # a path holds spaces
+    list_form = (len(rest) >= 3 and (folder or rest[0].lower() == "ssh_autonomous_hosts")
+                 and rest[1].lower() in ("add", "remove") and (len(rest) == 3 or folder))
     if rest and (len(rest) <= 2 or list_form) and rest[0].lower() in settings.TITLE:
         # after a typed change the prompt hook already wrote it: show the card with the new state
         print(settings.render(only=rest[0].lower()))
@@ -333,8 +425,18 @@ def cmd_status(_: list[str]) -> int:
     from . import detect
     def version(name: str) -> str:
         return (detect.RULES_DIR / f"{name}_VERSION").read_text(encoding="utf-8").strip()
-    print(f"rules: {len(detect.rules())} (gitleaks {version('GITLEAKS')}, presidio {version('PRESIDIO')}, "
+    print(f"rules: {len(detect.rules())} (betterleaks {version('BETTERLEAKS')}, presidio {version('PRESIDIO')}, "
           f"detect-secrets {version('DETECT_SECRETS')})")
+    from . import user_rules
+    own = user_rules.load()
+    print(f"rules of your own: {len(own.rules)} from {sum(f.state == 'ok' for f in own.folders)} folder(s), "
+          f"{sum(not q.kept for q in own.quarantined)} left out; /maisecrets:rules shows them")
+    from . import terms
+    print(terms.summary())
+    from . import value_files
+    if value_files.present():
+        from . import values
+        print(values.summary_line())
     active = detect.active_regions()
     print(f"regions: {', '.join(active.regions)} ({active.source}); "
           f"label languages: {', '.join(active.languages)}")
@@ -346,6 +448,25 @@ def cmd_status(_: list[str]) -> int:
         except OSError:
             n = 0
         print(f"{name}: {n} lines")
+    from . import codex_vault, vault_refs
+    for line in vault_refs.status_lines(v.cfg, v.backend):
+        print(line)
+    if codex_vault.config_path().is_file():
+        # the command does not know which client started it: the Codex profile gets its own lines when it exists
+        vault_refs.use_client("codex")
+        try:
+            for line in vault_refs.status_lines(v.cfg, v.backend):
+                print(line)
+        finally:
+            vault_refs.use_client("claude")
+    from . import codex_trust
+    for line in codex_trust.status_lines(root, codex_vault.codex_home()):
+        print(line)
+    from . import incidents
+    groups, damaged = incidents.load()
+    markers = incidents.unfolded_markers()
+    print(f"incidents: {len(groups)} group(s)" + (f", {len(markers)} not yet folded" if markers else "")
+          + (", the record is damaged" if damaged else "") + "; /maisecrets:report incident shows them")
     return 0
 
 
@@ -497,6 +618,10 @@ def _without_guard(hooks: dict) -> dict:
     return out
 
 
+# hook groups only Codex has a tool for: the guard watches Claude Code, which has no apply_patch
+CODEX_ONLY_MATCHERS = {"apply_patch"}
+
+
 def _guard_entries() -> dict:
     """The entries the guard needs now: the plugin's own events and matchers, with GUARD_COMMAND."""
     from pathlib import Path as _P
@@ -505,6 +630,8 @@ def _guard_entries() -> dict:
     hooks: dict = {}
     for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
         for entry in plugin_hooks.get(event, []):
+            if entry.get("matcher") in CODEX_ONLY_MATCHERS:
+                continue
             new = {"hooks": [{"type": "command", "command": GUARD_COMMAND, "timeout": GUARD_TIMEOUTS[event]}]}
             hooks.setdefault(event, []).append({"matcher": entry["matcher"], **new} if entry.get("matcher") else new)
     return hooks
@@ -558,9 +685,8 @@ def place_guard_script() -> bool:
 
 def _active_account() -> str:
     """<organizationUuid>_<accountUuid> of the account this Claude Code runs as (the guard compares it)."""
-    from pathlib import Path as _P
-    cfg_dir = os.environ.get("CLAUDE_CONFIG_DIR")
-    path = _P(cfg_dir) / ".claude.json" if cfg_dir else _P.home() / ".claude.json"
+    from .vault_refs import claude_json
+    path = claude_json()                        # the file the client uses, as the guard reads it
     try:
         acc = json.loads(path.read_text(encoding="utf-8")).get("oauthAccount") or {}
     except (OSError, ValueError, AttributeError):
@@ -764,10 +890,16 @@ def cmd_repair(_: list[str]) -> int:
     return 0
 
 
+def cmd_consent_report(args: list[str]) -> int:
+    from . import consent_report
+    return consent_report.run(args)
+
+
 COMMANDS = {"list": cmd_list, "get": cmd_get, "put": cmd_put, "resolve": cmd_resolve, "audit": cmd_audit,
             "report": cmd_report, "expire": cmd_expire, "scan": cmd_scan, "config": cmd_config,
             "status": cmd_status, "wipe": cmd_wipe, "repair": cmd_repair, "shortcut": cmd_shortcut,
-            "forget": cmd_forget, "guard": cmd_guard, "settings": cmd_settings}
+            "forget": cmd_forget, "guard": cmd_guard, "settings": cmd_settings,
+            "consent-report": cmd_consent_report, "rules": cmd_rules, "terms": cmd_terms, "values": cmd_values}
 
 
 def _stdin_words() -> list[str]:
@@ -785,11 +917,18 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] in {"-h", "--help"}:
         print("maisecrets status | list | get <KEY> | put [--clipboard] [--type=EMAIL] | audit [n]\n"
-              "           | report [last|n|bug|feature] [text] | expire | scan [text] | config | settings [--all]\n"
-              "           | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>")
+              "           | report [last|n|bug|feature|incident] [text] | expire | scan [text] | config\n"
+              "           | settings [--all]"
+              " | wipe --yes | repair | shortcut [name] | resolve <KEY> --grant <NONCE> | hook <event>\n"
+              "           | consent-report ssh [--last 30d|N] [--json] [--excerpts FILE]\n"
+              "           | rules [check [DIR] | test [text] | init DIR | import FILE.toml]\n"
+              "           | terms [suggest FILE] | values [import FILE]")
         return 0
     if argv[0] == "hook":
         return hook_main(["hook"] + argv[1:])
+    # the route of an action that loosens a protection (events.record_weakening): a slash command passes its
+    # arguments on stdin, a command line is the CLI. Any program can do either, so it is a name, not a proof
+    _ROUTE["v"] = "slash command" if "--args-stdin" in argv[1:] else "cli"
     if "--args-stdin" in argv[1:]:
         # a slash command passes its arguments in a quoted heredoc: spliced into the bash line,
         # `$(…)` or a pipe in a report text ran as code (feedback on 0.5.2, 2026-09-28)

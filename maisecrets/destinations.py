@@ -246,8 +246,9 @@ def pend(call: str, keys: list[str], session: str | None, agent: str | None,
                 calls = dict(sorted(calls.items(), key=lambda kv: kv[1]["t"])[-MAX_PENDING:])
             data["pending_calls"] = calls
             _save(data)
-    except (OSError, LockTimeout, ValueError, TypeError, KeyError):
-        pass
+    except (OSError, LockTimeout, ValueError, TypeError, KeyError) as exc:
+        from . import incidents
+        incidents.note("destinations.pend", exc)
 
 
 def commit(call: str, session: str | None, agent: str | None) -> bool:
@@ -267,7 +268,9 @@ def commit(call: str, session: str | None, agent: str | None) -> bool:
                                          [(k, v) for k, v in c["found"]])
             _save(data)
             return pattern_break
-    except (OSError, LockTimeout, ValueError, TypeError, KeyError):
+    except (OSError, LockTimeout, ValueError, TypeError, KeyError) as exc:
+        from . import incidents
+        incidents.note("destinations.commit", exc)
         return False
 
 

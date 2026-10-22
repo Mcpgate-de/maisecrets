@@ -1,0 +1,59 @@
+# Bare token prefixes that the vendored rulesets (betterleaks, detect-secrets) do not know yet.
+# One rule per line:  <id>  <regex>   - the whole match is the secret; anchor on the prefix.
+# Add a line by pull request when a real token of a service went through undetected. Keep the
+# tail length at the service's minimum so a short look-alike is not a hit. No test values here.
+gitlab-runner-token          glrt-[0-9A-Za-z_.-]{20,}
+gitlab-deploy-token-any      gldt-[0-9A-Za-z_-]{20,}
+webhook-signing-secret       whsec_[A-Za-z0-9+/=_-]{24,}
+cloudflare-user-api-token    cfut_[A-Za-z0-9_-]{30,}
+# 0.6.19, from a survey of other detectors. Each format is a fact from the vendor's documentation where it has one
+# (Tailscale key prefixes, Cloudflare token formats, Doppler token formats, Square OAuth, Mapbox sk/pk, SonarQube
+# Cloud sqco_, the PyPI token and the warehouse source); the rest are formats other detectors know (trufflehog,
+# detect-secrets), each regex written here. A client id (Salesforce 3MVG9, Square sq0idp) is public and has no line.
+google-oauth-access-token    ya29\.[0-9A-Za-z_-]{30,2048}
+tailscale-key                tskey-(?:api|auth|client|scim|webhook)-[0-9A-Za-z]{4,40}-[0-9A-Za-z]{16,64}
+discord-webhook-url          https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/(?:v[0-9]{1,2}/)?webhooks/[0-9]{17,20}/[0-9A-Za-z_-]{60,80}
+salesforce-refresh-token     5(?i:aep861)[0-9A-Za-z._=]{80,400}
+cloudflare-api-token         (?:cfk|cfat)_[0-9A-Za-z]{40,64}
+hubspot-private-app-token    pat-(?:na|eu|ap)[0-9]-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
+new-relic-user-key           NRAK-[0-9A-Z]{27}
+new-relic-insert-key         NRII-[0-9A-Za-z_-]{32}
+new-relic-rest-api-key       NRRA-[0-9a-fA-F]{42}
+new-relic-admin-key          NRAA-[0-9a-fA-F]{27}
+new-relic-query-key          NRIQ-[0-9A-Za-z_-]{32}
+new-relic-pixie-api-key      px-api-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
+anthropic-oauth-token        sk-ant-o(?:at|rt)01-[0-9A-Za-z_-]{40,}
+flutterwave-secret-key       FLWSECK(?:_TEST)?-[0-9A-Za-z]{20,40}-X
+doppler-token                dp\.(?:ct|pt|sa|said|scim|audit|st)\.(?:[a-z0-9_-]{2,35}\.)?[0-9A-Za-z]{40,44}
+square-oauth-secret          (?:sandbox-)?sq0csp-[0-9A-Za-z_-]{43}
+contentful-personal-token    CFPAT-[0-9A-Za-z_-]{43}
+mapbox-secret-token          sk\.eyJ[0-9A-Za-z_-]{20,}\.[0-9A-Za-z_-]{20,}
+kong-konnect-token           (?:kpat|spat)_[0-9A-Za-z]{40,60}
+sonarcloud-org-token         sqco_[0-9A-Za-z]{40,64}
+adafruit-io-key              (?<![0-9A-Za-z_])aio_(?=[A-Za-z]*[0-9])[0-9A-Za-z]{28}
+pypi-test-upload-token       pypi-AgENdGVzdC5weXBpLm9yZw[0-9A-Za-z_-]{50,1000}
+# 0.6.20, from a coverage measurement against other secret catalogs. Each regex is written here from the vendor's
+# documentation (GitHub's ghs_<app id>_<JWT> installation token, Heroku's HRKU- token) or from a catalog under the
+# Apache or MIT license: GitLab's secret detection rules (MIT), Kingfisher and Nosey Parker (Apache-2.0).
+google-oauth-client-secret   GOCSPX-(?:(?<![A-Za-z0-9_-]GOCSPX-)|(?<=\\[nrt]GOCSPX-))[A-Za-z0-9_-]{28}(?![A-Za-z0-9_-])
+sonarqube-token              squ_(?:(?<![A-Za-z0-9_]squ_)|(?<=\\[nrt]squ_))[0-9a-f]{40}(?![A-Za-z0-9_])
+dynatrace-platform-token     dt0s(?:(?<![A-Za-z0-9]dt0s)|(?<=\\[nrt]dt0s))[0-9]{2}\.[A-Z0-9]{8}\.[A-Z0-9]{64}(?![A-Za-z0-9])
+postman-collection-token     PMAT-(?:(?<![A-Za-z0-9]PMAT-)|(?<=\\[nrt]PMAT-))[0-9A-Z]{26}(?![A-Za-z0-9])
+shopify-partner-api-token    prtapi_(?:(?<![A-Za-z0-9_]prtapi_)|(?<=\\[nrt]prtapi_))[a-f0-9]{32}(?![A-Za-z0-9_])
+planetscale-app-secret       pscale_app_secret_(?:(?<![A-Za-z0-9_-]pscale_app_secret_)|(?<=\\[nrt]pscale_app_secret_))[0-9A-Za-z_-]{43}(?![0-9A-Za-z_-])
+intercom-access-token        dG9rO(?:(?<![A-Za-z0-9+/]dG9rO)|(?<=\\[nrt]dG9rO))(?:[0-9A-Za-z]{55}(?![0-9A-Za-z+/=])|[0-9A-Za-z]{54}=|[0-9A-Za-z]{53}==)
+netlify-personal-token       nfp_(?:(?<![A-Za-z0-9_]nfp_)|(?<=\\[nrt]nfp_))(?=[0-9a-f]{0,47}[g-zA-Z])[A-Za-z0-9]{40,48}(?![A-Za-z0-9_])
+teamcity-access-token        eyJ0eXAiOiAiVENWMiJ9\.(?:(?<![A-Za-z0-9_.-]eyJ0eXAiOiAiVENWMiJ9\.)|(?<=\\[nrt]eyJ0eXAiOiAiVENWMiJ9\.))[A-Za-z0-9_-]{36}\.[A-Za-z0-9_-]{48}(?![A-Za-z0-9_-])
+dependency-track-api-key     odt_(?:(?<![A-Za-z0-9_]odt_)|(?<=\\[nrt]odt_))(?=[0-9a-f]{0,254}[g-zA-Z])(?=[A-Za-z]{0,254}[0-9])[A-Za-z0-9]{32,255}(?![A-Za-z0-9_])(?!\.[A-Za-z0-9])
+tavily-api-key               tvly-(?:(?<![A-Za-z0-9_-]tvly-)|(?<=\\[nrt]tvly-))(?:dev-)?[A-Za-z0-9]{32}(?![A-Za-z0-9_-])
+jina-api-key                 jina_(?:(?<![A-Za-z0-9_]jina_)|(?<=\\[nrt]jina_))(?=[A-Za-z]{0,59}[0-9])[A-Za-z0-9]{60}(?![A-Za-z0-9_])
+aws-appsync-api-key          da2-(?:(?<![A-Za-z0-9_-]da2-)|(?<=\\[nrt]da2-))(?=[a-z]{0,25}[0-9])[a-z0-9]{26}(?![A-Za-z0-9_-])
+stackhawk-api-key            hawk\.(?:(?<![A-Za-z0-9_.-]hawk\.)|(?<=\\[nrt]hawk\.))[0-9A-Za-z_-]{20}\.[0-9A-Za-z_-]{20}(?![0-9A-Za-z_-])(?!\.[0-9A-Za-z_-])
+heroku-api-key-uuid          HRKU-(?:(?<![A-Za-z0-9_-]HRKU-)|(?<=\\[nrt]HRKU-))[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(?![0-9A-Za-z_-])
+github-app-installation-jwt  ghs_(?:(?<![A-Za-z0-9_]ghs_)|(?<=\\[nrt]ghs_))[0-9]{1,20}_[A-Za-z0-9_-]{10,2048}\.[A-Za-z0-9_-]{10,2048}\.[A-Za-z0-9_-]{10,2048}(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9_-])
+# GitLab's pipeline trigger and CI job tokens in their newer forms (routable, or a JWT after glcbt-); the vendored rules
+# take glptt- and 40 hex digits, glcbt- with a partition prefix, and claimed the first part of a longer token
+gitlab-pipeline-trigger-token-any glptt-(?:(?<![A-Za-z0-9_-]glptt-)|(?<=\\[nrt]glptt-))[0-9A-Za-z_-]{20,400}(?:\.[0-9a-z]{2}\.[0-9a-z]{9})?(?![0-9A-Za-z_-])
+gitlab-ci-job-token-any      glcbt-(?:(?<![A-Za-z0-9_-]glcbt-)|(?<=\\[nrt]glcbt-))[0-9A-Za-z_-]{20,2048}(?:\.[0-9A-Za-z_-]{2,2048}){0,2}(?![0-9A-Za-z_-])(?!\.[0-9A-Za-z_-])
+# 0.6.39: the legacy Office 365 connector URL of Microsoft Teams; the whole URL posts to the channel (#11)
+microsoft-teams-webhook-legacy  https(?:(?<![A-Za-z0-9]https)|(?<=\\[nrt]https))://outlook\.office(?:365)?\.com/webhook/[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}@[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}/IncomingWebhook/[0-9A-Fa-f]{32}/[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}(?:/[0-9A-Za-z_-]{20,})?(?![0-9A-Za-z_-])

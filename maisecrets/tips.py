@@ -14,6 +14,8 @@ TIPS = [
     "maisecrets: /maisecrets:report prepares a report from the last detection, without the value.",
     "maisecrets: /maisecrets:audit lists every use of a stored value: when, which key, which command.",
     "maisecrets: a bare password in a normal sentence is not detected. Label it, or use /maisecrets:put.",
+    "maisecrets: add detection rules for the tokens of your own services in ~/.maisecrets/rules.d or a team "
+    "folder; /maisecrets:rules shows them, README \"Rules of your own\" says how.",
 ]
 # Codex has no slash commands for plugins: its tips name only what works there
 TIPS_CODEX = [
@@ -21,6 +23,8 @@ TIPS_CODEX = [
     "your vault; the AI gets a short form and can still use it in commands.",
     "maisecrets: a short form works only in a session where you typed it. Paste it into a prompt to use it here.",
     "maisecrets: a bare password in a normal sentence is not detected. Label it with `password:`.",
+    "maisecrets: add detection rules for the tokens of your own services in ~/.maisecrets/rules.d or a team "
+    "folder (`maisecrets: set rule_dirs add DIR` as your own prompt); README \"Rules of your own\" says how.",
 ]
 
 

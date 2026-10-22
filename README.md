@@ -1,6 +1,45 @@
 # maisecrets
 
-[maisecrets.dev](https://maisecrets.dev) · by [mcpgate](https://mcpgate.de) · Apache-2.0 · free
+[![version](https://img.shields.io/github/v/tag/Mcpgate-de/maisecrets?label=version&sort=semver)](CHANGELOG.md)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-d97757)](#install)
+[![Codex](https://img.shields.io/badge/Codex-plugin-10a37f)](#install)
+[![Python](https://img.shields.io/badge/python-3.9%2B%2C%20stdlib%20only-3776ab)](#requirements)
+[![telemetry](https://img.shields.io/badge/telemetry-none-brightgreen)](PRIVACY.md)
+
+Keeps passwords, tokens and personal data out of Claude Code and Codex. A value becomes a placeholder before the
+model sees it, and goes back in on your machine only where a command or a file needs it.
+
+## What it does
+
+- **Blocks or rewrites a prompt** that carries a secret: the model gets a placeholder such as `⟦SECRET_c1⟧`, never
+  the value.
+- **Masks tool output** (files, commands, MCP results) before the model reads it.
+- **Puts the value back locally** when the agent uses the placeholder in a command or a file.
+- **Checks a value first:** `ms:(your value)` tells you whether it would be caught, without sending it.
+- **Your own rules, terms and imports:** team rule folders, `/maisecrets:term add Jan Kowalski`, values from your
+  own NER.
+- **PDFs and images:** a PDF goes to the model as masked text only, or you are asked first.
+- **Local and deterministic:** no model, no network request of its own unless a server you added offers
+  [vault references](#vault-references), no telemetry.
+
+## Quick start
+
+```bash
+claude plugin marketplace add Mcpgate-de/maisecrets
+claude plugin install maisecrets@maisecrets     # then start a new session
+```
+
+```text
+/maisecrets:status        what runs, which version
+ms:(your value)           would this value be caught?
+/maisecrets:settings      the choices you make
+```
+
+Codex and other installs: [Install](#install). More: [How it works](#how-it-works) ·
+[Threat model](docs/THREAT-MODEL.md) · [Benchmarks](docs/BENCHMARKS.md) · [Known gaps](#known-gaps-measured-or-documented).
+
+## How it works
 
 An AI agent sees what you type and what its tools print: passwords, tokens, a
 customer's e-mail address. maisecrets intercepts detected secrets and personal
@@ -10,6 +49,11 @@ maisecrets adds no approval of its own: in Claude Code your permission rules
 decide, as before; in Codex maisecrets answers `allow`, and Codex's sandbox and
 its approval of MCP tools still apply. maisecrets itself sends no
 prompt, value or telemetry to a server.
+
+**What it is for:** maisecrets keeps values out of the model and out of the
+session transcript. It guards against an agent that does not try to evade it.
+It does not contain an agent that deliberately runs code with your rights to
+switch it off ([threat model](docs/THREAT-MODEL.md), C22).
 
 ```bash
 claude plugin marketplace add Mcpgate-de/maisecrets
@@ -52,7 +96,7 @@ Everything a hook runs is readable source in this folder. No download, no
 package install, no dependency outside the Python standard library and the
 system tools it names (`security`, PowerShell, `openssl`, a clipboard tool).
 
-What it does not do: detect names, follow a value through an encoding a
+What it does not do: detect a name without a label (it masks the names on your term list), follow a value through an encoding a
 command applies, or protect against a process that runs as you. "Known gaps"
 below lists every limit that was measured.
 
@@ -262,9 +306,14 @@ codex plugin add maisecrets@maisecrets
 Codex reads `.codex-plugin/plugin.json` (listing texts, icon) and the hooks from
 `hooks/hooks.json`.
 
-Codex skips a plugin's hooks until you review and trust them once: open `/hooks`
+Codex skips a plugin's hooks until you review and trust them: open `/hooks`
 in Codex and trust the maisecrets entries. Until then nothing is protected and
-the plugin cannot tell you so, because no hook of it runs. A workspace admin
+the plugin cannot tell you so, because no hook of it runs. From Codex 0.164 the
+trust also covers the contents of the plugin folder (openai/codex#54619): after
+each maisecrets update, Codex shows the hooks as failed and lets every prompt and
+tool call through until you trust them again in `/hooks`. `/maisecrets:status`
+reads Codex's `config.toml` and says whether Codex runs the hooks of the
+installed version, and whether a second maisecrets is installed. A workspace admin
 can ship the hooks as managed hooks (`requirements.toml`, MDM), which are
 trusted by policy and cannot be disabled. The plain ChatGPT chat, web and
 mobile have no local runtime and no hooks.
@@ -274,9 +323,9 @@ For development:
 ```bash
 claude --plugin-dir /path/to/maisecrets                 # one session, straight from the checkout
 python3 -m unittest discover -s tests -v               # about 30 seconds
-python3 harness/run.py                                 # 30 scenarios against a fake upstream (3 for the PowerShell tool of Windows)
-python3 harness/codex.py [--real]                      # 8 scenarios through codex exec (four need --real)
-python3 scripts/replay_can_fail.py                     # 99 proofs: each control's test, and each path of the four invariants, goes red without its guard
+python3 harness/run.py                                 # 38 scenarios against a fake upstream (4 for the PowerShell tool of Windows)
+python3 harness/codex.py [--real]                      # 15 scenarios through codex exec (five need --real)
+python3 scripts/replay_can_fail.py                     # 360 proofs: each control's test, and each path of the seven invariants, goes red without its guard
 python3 scripts/derived_counts.py                      # the numbers in the docs, measured again
 python3 scripts/lint_plugin.py                         # frontmatter YAML, manifests, hook paths (pre-commit, CI)
 scripts/install-hooks.sh                               # git pre-commit / pre-push
@@ -311,9 +360,9 @@ that lists maisecrets with this repository as its source, or mirror this
 repository into a namespace you control and review each release there before
 your members get it. ChatGPT workspace: Admin > Plugins > Add > Import
 marketplace, with the same `marketplace.json`; the sync runs daily or on
-"Sync now". Codex CLI users trust the hooks once in `/hooks`; a change to
-`hooks/hooks.json` asks again, and until then Codex runs no maisecrets hook and
-says nothing. Managed hooks (`requirements.toml` through MDM) are trusted by
+"Sync now". Codex CLI users trust the hooks in `/hooks`; a change to
+`hooks/hooks.json`, and from Codex 0.164 every maisecrets update, asks again, and
+until then Codex runs no maisecrets hook and lets prompts and tool calls through. Managed hooks (`requirements.toml` through MDM) are trusted by
 policy.
 
 **Updates.** A new version reaches a member when `version` in
@@ -341,6 +390,9 @@ cannot tell what the policy says. A key it does not know is ignored with a
 warning; a key that starts with `_` or `$` is a comment or a schema link. A key
 that looks like a misspelled `rehydration`, `resolve_in_files` or
 `ssh_via_sandbox` blocks rehydration until it is fixed.
+Two keys add to what the user has instead of replacing it: `rule_dirs`, rule
+folders that every user reads and cannot remove, and `allow`, lines of the
+allow list (both lists of strings; see "Rules of your own").
 `/maisecrets:status` names the keys that come from the policy. The plaintext
 `jsonfile` store is refused unless the policy or the user sets
 `allow_plaintext_store`.
@@ -351,6 +403,8 @@ value is deleted after `keep_purged_days` (30). `audit.log` holds one line per
 resolve (time, session, key, tool, the command with placeholders; capped at
 `audit_max_lines`). `events.log` holds the last 200 detections (rule name and
 type). `pending/` holds a blocked prompt with placeholders for 15 minutes.
+`incidents.json` holds maisecrets' own internal failures as closed codes (at most
+50 groups; see "Reporting an internal failure").
 `hooks.log` holds one line per hook run (capped at 2000); the client column names
 the entry point, `claude/local-agent` for a Cowork session. The FIFOs a value
 is delivered through live in `$XDG_RUNTIME_DIR/maisecrets` or
@@ -362,9 +416,9 @@ server: no hook opens a network connection. Two exceptions to state to a data-pr
 officer: the Windows Credential Locker can roam through a Microsoft account on
 a machine that is not domain-joined (set `backend` to `encrypted-file` by
 policy if that matters), and `/maisecrets:report` prints an issue text and a
-link to `report_url`. It opens a browser only on a local desktop, and it files
-the issue only with `--create` through the GitHub CLI. Set `report_url` to your
-tracker, or set it to `null` to turn reporting off.
+link to `report_url`. It opens no browser and files nothing: you open the link
+and decide in GitHub's form. Set `report_url` to your tracker, or set it to
+`null` to turn reporting off.
 
 **Diagnosis.** `/maisecrets:status` prints version, plugin folder, Python,
 store, policy keys and log counts. `/maisecrets:audit` prints the last
@@ -391,7 +445,16 @@ run".
 - Writes: under `~/.maisecrets`: `index.json` (metadata and keyed
   fingerprints, never a value), `audit.log`, `events.log`, `hooks.log`,
   `pending/`, `.announced`, `destinations.json` (where each value went, never a
-  value); the value FIFOs in the per-user runtime or temp
+  value), `incidents.json` and `incident-marker.*` folders (maisecrets' own
+  failures as closed codes), `vault-refs/` (the server tokens seen, the key ids
+  and the endpoint of each server; never a value or a key; the values a server
+  gave stay in the store for one hour, so their echo in a tool result is
+  redacted); one
+  `Client-Vault` header per user-scope MCP server in the config file the
+  client uses (`~/.claude/.config.json` when it is not empty, else
+  `~/.claude.json`), with a backup beside it ("Vault references"); in Codex one `http_headers_helper` line per such server in
+  `~/.codex/config.toml` instead, with the helper `~/.maisecrets/bin/codex-vault-helper.py` and its state file
+  `vault-refs/codex-helper.json`; the value FIFOs in the per-user runtime or temp
   directory; the vault backend; on a blocked prompt the clipboard. With
   `scrub_transcript` on, it masks the raw value inside the client's transcript
   file named in the hook payload, in place, because the client writes the
@@ -401,7 +464,12 @@ run".
   `git log`) and `redact_copy.py` (writes a new file) when the model follows it; neither
   opens a network connection.
 - Sends and fetches: no telemetry and no download. These connections start from
-  a command you run, and nothing else in the plugin opens one:
+  a command you run or a call that needs a value, and nothing else in the plugin
+  opens one:
+  - a Write, Edit or Bash call with a token that one of your own MCP servers
+    sent: one metadata request and one resolve request to that server's own
+    origin, over https, with this computer's key for that server ("Vault
+    references"); `/maisecrets:status` makes the same request with no token;
   - the ssh route of your own ssh command inside the Claude Code sandbox
     (`hooks/proxy_connect.py`, the `ProxyCommand` of that ssh call): one
     CONNECT through Claude Code's local sandbox proxy (localhost only) to the
@@ -412,11 +480,10 @@ run".
     8.8.8.8:53 and 9.9.9.9:443 (the sandbox must refuse them) and one CONNECT with
     a wrong login to the local sandbox proxy. It sends no data, and it runs only
     when `SANDBOX_RUNTIME=1` and a local sandbox proxy are set;
-  - `/maisecrets:report`: on a computer with a desktop it opens your browser on
-    the prefilled issue page at `report_url` (the address carries the issue text,
-    the plugin version, your platform and a rule name, never a value), elsewhere
-    it prints the link; with `--create` it runs the GitHub CLI (`gh`) with your
-    own `gh` login to file the issue.
+  - `/maisecrets:report`: it prints the issue text and a prefilled link to
+    `report_url` (the address carries the issue text, the plugin version, your
+    platform and a rule name, never a value). It opens no browser and runs no
+    program: the connection starts when you open the link.
 - Credentials: the hooks and the mod fetch no credential for a request of
   their own. They read the values you stored, from your operating system's
   store, only to put each one into the tool call you allow, which then goes
@@ -472,7 +539,7 @@ change it. `python3 -m maisecrets.cli status` prints the same at any time.
 ### Settings you decide
 
 `/maisecrets:settings` shows the settings that are yours to decide, grouped
-(Protection, Using stored values), one card each: the value, its state (`not
+(Protection, Using stored values, PDFs and images), one card each: the value, its state (`not
 decided`, `set by you`, `set by a policy`), what it does, and the command for
 the next step:
 
@@ -499,12 +566,29 @@ The prompt hook writes `config.json`. After the slash command it lets the
 command run on, which shows the new card; the sentence form is stopped and
 does not reach the model. maisecrets changes a setting for nothing else: not
 for a prompt the client injected (a scheduled task, a loop wakeup, an SDK
-prompt), not for a subagent's report, and a Bash or PowerShell command that
-carries the change (a nested `codex exec` or `claude -p` that would type it)
-is refused. The AI can tell you about a setting and the prompt to send. A
-setting from a machine policy cannot be changed here. The limit: a program
-that runs as you can write the file itself, and maisecrets sees a command only
-as text (C22 in the threat model).
+prompt), not for a prompt of a client that a program started (`claude -p`
+and the Agent SDKs: its hook sees `CLAUDE_CODE_ENTRYPOINT=sdk-…`), not for a
+subagent's report, and a Bash or PowerShell command that carries the change
+(a nested `codex exec` or `claude -p` that would type it) is refused. The AI
+can tell you about a setting and the prompt to send. A setting from a machine
+policy cannot be changed here. The limit: a program that runs as you can
+write the file itself, and maisecrets sees a command only as text (C22 in the
+threat model).
+
+**You see each loosened protection.** A change that loosens a protection (a
+setting in the looser direction, such as `rehydration automatic`, a higher
+cap or a new autonomous host) and each `/maisecrets:forget` write one line
+in `~/.maisecrets/events.log`: the time, the kind, the key or setting (never
+a value) and the route (typed prompt, slash command, cli). The next session
+start shows you one sentence that lists them, once:
+
+```
+maisecrets: since the last session start, 2 protections were loosened: setting rehydration (typed prompt),
+forget SECRET_c3 (cli). If you did not do this, check /maisecrets:settings and /maisecrets:list.
+```
+
+A program that runs as you can also change that file; the line makes an
+ordinary agent's action visible, it does not stop one that evades.
 
 **Hints.** maisecrets stays quiet until a case comes up that one of these
 settings is about. Then the AI gets one sentence about it, and mentions it
@@ -582,7 +666,9 @@ one-line tip that appears once a day at session start.
 
 `regions`: country codes, for example `["de", "us"]`. Each country adds its
 Presidio rules for personal data, such as a German tax ID or a US social
-security number. The entry `auto` is the country of your system setting (on
+security number. `ch` and `at` add maisecrets' own rules for Switzerland (AHV
+number, company UID) and Austria (social insurance number, UID), for which
+Presidio has none. The entry `auto` is the country of your system setting (on
 macOS and Windows the system setting, not `LANG`). The default is `["auto"]`.
 An empty list keeps the generic rules only. The old key `pii_regions` still
 works.
@@ -590,7 +676,7 @@ works.
 Credential labels come in languages. English labels (`password:`, `pass:`,
 `token:`) are always on. maisecrets adds the labels of your system language
 and of each region, for example `passwort:` and `kennwort:` for German. The
-labels are data files in `maisecrets/rules/labels/`, one file per language.
+labels are data files in `maisecrets/detection/rules/labels/`, one file per language.
 A new language is one new file. Files exist for Czech, Danish, Dutch,
 English, Finnish, French, German, Italian, Korean, Norwegian (Bokmål),
 Polish, Portuguese, Spanish, Swedish, Thai and Turkish. Each word comes from
@@ -608,6 +694,83 @@ other users. None of them stops a process that runs as you: `security`,
 PowerShell or openssl hand the value to any such process without a dialog
 (`docs/THREAT-MODEL.md`). The gates below stand in front of the agent, not in
 front of you.
+
+## Check a value first: ms:(…)
+
+Not sure whether maisecrets knows a password or a token? Send it in brackets
+after `ms:` as your whole prompt:
+
+```
+> ms:(the-value-you-want-to-check)
+✓ maisecrets would mask this: SECRET (gitlab-pat)
+
+This prompt was not sent. The value did not reach the AI.
+```
+
+```
+> ms:(Kx7#another-value)
+⚠ maisecrets would NOT have caught this. It is now stored (⟦SECRET_c4⟧). From now on it is masked wherever it stands as a word of its own.
+
+This prompt was not sent. The value did not reach the AI.
+```
+
+```
+> ms:(two words)
+⚠ maisecrets would NOT have caught this. It looks like ordinary text, so it was not stored. If it is a secret, store it with /maisecrets:put.
+
+This prompt was not sent. The value did not reach the AI.
+```
+
+- **Never sent.** A prompt that starts with `ms:(` (any case, blanks before it
+  allowed) is always stopped, in Claude Code with and without the mod and in
+  Codex, also when the closing `)` is missing. The mod never rewrites it: it
+  drops the prompt and shows the verdict, and when maisecrets gives no verdict
+  in time it drops the prompt all the same. Without the mod (Codex, an older
+  Claude Code) the prompt hook blocks it and shows the verdict. Only you see
+  the verdict. The prompt as you typed it is removed from the session
+  transcript on disk (unless you turned `scrub_transcript` off), also when
+  the prompt hook fails on it. Without the mod, a hook that cannot start at
+  all (a half-updated plugin folder) blocks the prompt but does not clean the
+  transcript. Blanks around the colon (`ms: (`) and the full-width `：（` of an
+  input method count as the same start but store nothing; `ms:` without the
+  bracket is an ordinary prompt.
+- **The value** is the text between `ms:(` and the last `)`, or up to the end.
+  One blank on each side is dropped, so `ms:( value )` and a key on its own
+  lines between `ms:(` and `)` both work.
+- **Several values** in one prompt: `ms:(first) ms:(second)`. Each value
+  ends at its last `)` before the next `ms:(` (text after that `)` is not
+  part of it), and each gets its own line (`Value 1: …`, `Value 2: …`). Each
+  verdict is the one that value gets alone: a value is stored only after
+  every value has its verdict. The prompt is not sent.
+- **The verdict** is the one a normal prompt with that value gets: the
+  detection rules, your rules of your own, your terms, the values already
+  stored, the allow list and your regions. The answer names the type and the
+  rule of each hit, never the value; a value that is caught is stored, as for
+  a normal prompt.
+- **Not caught:** when the value looks like a credential (no blanks, 8
+  characters or more, a mix of letters, digits and signs or the randomness
+  of a key; no word, no hex value, no id in capitals and digits, no date,
+  version, file name or `name=value`), maisecrets stores it as
+  `/maisecrets:put` does (type SECRET) and names its placeholder, so it is masked from then on wherever it
+  stands as a word of its own (glued to other letters, it is not found). A
+  passphrase with spaces is stored only when each word has a letter and a
+  digit or a sign; it is found again alone on a line or after `:` or `=`, not
+  inside a sentence, and the answer says so. It is not stored when the allow list
+  allows it (the answer names the line), when it is shorter than 8
+  characters or has more than one line (maisecrets could not find it again),
+  when it looks like ordinary text (words, a sentence, a hash, an id, a
+  command: the answer says so; store such a password with `/maisecrets:put`),
+  when it holds a placeholder, or when the prompt did not come from you (a
+  scheduled prompt, a subagent, `claude -p`). The client's own list of earlier
+  prompts (the up arrow) may keep the prompt as typed; that is not measured.
+- **Finding it.** Claude Code names `ms:(…)` once, under the first prompt that
+  was blocked or rewritten because it carried a value; Codex names it once at
+  a session start. `/maisecrets:settings` lists it under "Feature hints", and
+  `/maisecrets:settings hints reset` shows it again.
+
+In Remote Control the block notice is not shown (see "Sending a blocked
+prompt" below), so the verdict is not visible there; the value is still not
+sent.
 
 ## Handing a value to Claude on purpose
 
@@ -712,6 +875,40 @@ rule keeps still holds something: one of three states (VS15, VS16, none) after a
 symbol, up to four bits after a character that is not ASCII, and up to one byte after a CJK
 ideograph, where the rule keeps the ideographic selectors that Chinese and Japanese text use.
 
+## Disguised values in tool results
+
+A value can also hide from the shape rules behind what a terminal or a renderer does not show. In a
+tool result or a file (not in a typed prompt), the detector also scans a cleaned copy: without ANSI
+colour codes, without zero-width and direction characters (U+00AD, U+200B to U+200F, U+202A to
+U+202E, U+2060 to U+2064, U+2066 to U+2069, U+FEFF), with HTML entities and fullwidth letters
+written out, and with each base64 or hex run decoded that holds text (gzip inside base64 is opened,
+a run inside the text is decoded once more). A hit in the copy redacts the original span, the hidden
+characters with it; a value in a decoded run takes the whole run, as in a Kubernetes Secret or a
+docker `auth` field. The copy is only scanned around the lines that changed. Bounds: a text over 1
+MB is not cleaned, a run over 16,384 characters (an image) is not decoded, and at most 64 runs,
+64 KB of decoded bytes per text. The bounds count work, not time, so a busy machine decodes the
+same. A text whose every line changes (a log in colour) is scanned twice, which about doubles its
+time. The typed prompt is scanned as it is, so a block there needs the value in the clear.
+
+## Password exports in tool results
+
+A password export holds bare passwords in a column, and no shape or label rule finds a bare password
+in a cell. In a tool result or a file, maisecrets masks every cell of the password, TOTP and secret
+columns of a CSV or TSV table (comma, semicolon or tab) whose header row also names an entry column
+(`url`, `username`, `login`, `name`, `title`, ...) and holds plain column names at the start of its line (a function
+signature, SQL or a sentence is no header: a name of several words counts only quoted,
+and with two columns only names without a space such as `user_name,password`): the exports of Chrome, Edge, Firefox, Safari,
+Bitwarden, 1Password, KeePass(XC) and LastPass have such a header. A table with a password column
+and no entry column counts when the file read (or grepped) is named like an export (`passwords.csv`, `bitwarden_export.csv`,
+`1PasswordExport.csv`, a LastPass or KeePass export). The table ends at an empty line or at a row of
+another width. A column `password_hash` or a flag such as `has_password` is no secret column. A typed
+prompt is scanned as before. Limits, chosen
+against false hits on code and documents: a header name of several words counts only in quotes (an
+unquoted `Login Name` in a TSV is no header); a two-column table without an export file name keeps a
+cell with a space (a passphrase there reaches the model); a test table with a `password` column next
+to a `name` column is masked like an export. The secret-hygiene skill scans a file over 200 KB in
+parts, and a part without the header row is not recognised as an export.
+
 ## Reporting a wrong detection
 
 Every block and every redaction leaves an event in `~/.maisecrets/events.log`
@@ -720,12 +917,32 @@ Every block and every redaction leaves an event in `~/.maisecrets/events.log`
 event; `/maisecrets:report bug <what happened>` and
 `/maisecrets:report feature <what it should do>` prepare one without an event.
 The command prints the text and a prefilled link, so it also works over ssh and
-in Remote Control. It opens a browser only on a local desktop, never in an ssh
-session. Add `--create` to file the issue at once with the GitHub CLI (`gh`,
-logged in). The arguments reach the CLI in a quoted heredoc, so a shell never
-reads a reported command as code.
+in Remote Control. It opens no browser and files nothing: you open the link,
+check the text in GitHub's form and decide there (`--create` is gone; to file
+from a terminal, use `gh issue create` yourself). The arguments reach the CLI in
+a quoted heredoc, so a shell never reads a reported command as code.
 The CLI form is `python3 -m maisecrets.cli report …`. The value is not in the
 event, so it cannot be in the issue; describe its shape in words.
+
+## Reporting an internal failure
+
+When maisecrets itself fails (a locked store, a store call that times out, no
+Python for the hooks), it notes a closed code in `~/.maisecrets/incidents.json`
+on this computer: the code, a cause, the client, the tool class (`Bash`, `MCP`,
+…, never a tool's name), a count, the number of days in the last 30 and the
+plugin version. It never holds an error text, a path, a prompt, a command, a
+tool's input or output, a session id or a value; a field outside its closed
+form drops the entry. Nothing is sent.
+
+In Claude Code, type `/maisecrets:report incident`. The prompt hook shows the
+report to you only; the model sees neither the report nor the link, and it works
+also while the store is damaged. Open the link, check the text in GitHub's form
+and decide there. In Codex and in a terminal, run
+`<plugin folder>/hooks/run.sh report incident` (`hooks\run.cmd` on Windows; a
+refusal names the full path); `report incident clear` deletes the record, and
+`wipe` deletes it too. A refusal caused by maisecrets' own
+failure names this command. The design is in `docs/DIAGNOSTICS.md` of the
+repository.
 
 ## Gates around a resolve
 
@@ -760,7 +977,20 @@ A placeholder turns back into its value only here:
   shape the redaction cannot see. The check reads command words, so
   `python3 script.py ⟦KEY⟧`, `docker run -e T=⟦KEY⟧ img` and a word inside
   quotes or a comment pass. A refused command is refused as a whole: split off
-  the step that needs the value and run it on its own.
+  the step that needs the value and run it on its own. For a value that goes
+  into a document or a generated file (a PDF, a .docx, a page), the refusal of
+  inline code and of a quoted heredoc names the route that works: save the
+  generator as a script file and run it with the placeholder as its argument
+  (`python3 make_pdf.py ⟦KEY⟧`), or put the placeholder into the file content
+  with Write, Edit or apply_patch. The file on disk gets the value; the model
+  keeps the placeholder (harness scenario `document_gets_the_value`, Claude Code
+  and Codex). Where the rehydration setting refuses these routes too, the
+  refusal names none of them. On Windows the argument route does not work
+  where a shell placeholder is refused (Codex, and the PowerShell tool of
+  Claude Code). There the refusal and the primer name the file route only:
+  a text file with the placeholder alone on a line (apply_patch, Write or
+  Edit), which the script reads; then the script runs with no placeholder in
+  the command.
 - **ssh through the Claude Code sandbox.** A value may go to your own servers
   over ssh on one condition: the command runs in Claude Code's Bash sandbox,
   where the operating system forces every connection through Claude Code's
@@ -899,10 +1129,8 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   a program that builds the sentence at run time and feeds it to a nested
   client (Codex does not say who wrote a prompt) can add a host; check the
   list in `/maisecrets:settings`.
-- **A form maisecrets cannot read asks every time.** An ssh word in a nested
-  shell (`bash -c`, `eval`, `xargs`, `find -exec`), a wrapper it does not
-  know (`sshpass`, `setsid`, `flock`), a word built at run time when `ssh`
-  is in its text (`$(which ssh)`, `S=ssh; $S`, `ssh $HOST`), two users or
+- **A form maisecrets cannot read asks every time.** A host built at run
+  time (`ssh $HOST`), two users or
   ports for one connection, `sudo -u` (another user's ssh config), an option that sends the
   connection elsewhere (`-J`, `-W`, `-S`, `-F`, `-o ProxyCommand`, `-o
   HostName`, `-o RemoteCommand`), `GIT_SSH_COMMAND`, `git -c core.sshCommand`,
@@ -914,22 +1142,26 @@ host, `sshfs`, `ssh-copy-id`, `mosh`, `autossh`), also behind `cd …&&`,
   (`rsync`, `tar -C`, `ln -s` …), so only reads are listed (`cat`, `ls`,
   `grep`, `head`, `diff` …), and a redirect into `.ss…` asks too. Write and
   Edit on `~/.ssh` ask as well.
-- **The word ssh in quoted text runs freely, if every part of the line is a
-  text command:** a quoted argument of a command that only prints or searches
-  (`echo "use ssh"`, `grep "ssh" log`; not `rg`, `ag` or `sort`, which can
-  start a program), the quoted text field of a `gh` or `glab` issue, pr, mr
-  or release (`gh issue create --body "… ssh …"`), and the message of
-  `git commit -m` or `git tag -m`. Every part of the line must be one of these
-  commands, written as itself (no path, no variable, no wrapper), and outside
-  quotes the line has no `$`, backtick, parenthesis, brace or redirect (other
-  than `2>&1` or to `/dev/null`); inside double quotes a `$` comes only before
-  a name (`"$HOME"`); `printf` and `test` have no `-v`, which names a variable
-  the shell evaluates. Anywhere else, also unquoted
-  (`grep ssh README.md`) or in a heredoc, the hook cannot tell text from a call,
-  and it asks. A `#` comment is text only when no bracket, brace, parenthesis,
-  backslash or backtick comes before it in the command, and the command has no
-  carriage return: inside `(( ))`, `${ }` or `[[ ]]` the shell reads no comment
-  and runs what follows. The same holds for a heredoc.
+- **An ssh word asks only where a command starts it** (#15): as the command
+  word; after a launcher (`env`, `xargs`, `timeout`, `setsid`, `sshpass`,
+  `tmux` …) or as an argument of its own of any other program, unless it
+  follows an option (`pytest -k ssh`) or the program only searches, shows or
+  looks up (`grep`, `which`, `git`, `gh` …): `uv run ssh`, `gcloud compute
+  ssh`; in quoted code after `-c`, `--run` or `--`; in `find -exec`, `docker exec` or `git rebase --exec`; in the
+  code of `bash -c`, `fish -C` or `eval`, in a shell's heredoc and in the
+  shell code of AppleScript's `do shell script`; as a path (`/usr/bin/ssh`)
+  or after an escape in a string (`printf '…\nssh …'`); in a command
+  substitution, also inside double quotes; in a pipe into a shell; in a file
+  the line writes and then runs; as a URL that `curl` or `docker -H` connects
+  to; as the program of an option (`rg --pre`); in a variable before a
+  command (`BROWSER="ssh …"`); in a write to a startup file (`~/.bashrc`,
+  `.envrc`, `.git/hooks/…`); and in
+  any line that runs a command word it builds at run time (`S=ssh; $S web1`,
+  `…; $_`, `eval`), since no parser can tell which text that runs. A mention
+  that starts nothing does not ask: `grep ssh README.md`, a path such as
+  `~/work/ms-ssh`, a comment, a commit message, a `git clone ssh://…` URL,
+  or the word in Python code. A comment or heredoc whose end the parser cannot
+  be sure of still asks.
 - **A short deny list is always refused:** `mkfs` or `wipefs` on a device,
   `dd` to a device, `rm -rf /`, a fork bomb, anywhere in a command that names
   an ssh-family call (quotes removed; as a command word, not as a file name;
@@ -948,15 +1180,34 @@ always, so most are writes (88 %), and the consent per host carries them. 112
 sessions with ssh, a median of 2 questions per session, 7 at the 90th
 percentile, 48 at most. The script ignores groups and the 8-hour expiry.
 
+The mention rule, on the newest 600 sessions without the maisecrets ones
+(2026-10-10): 0.6.10 asked 69 times, about 10 of them for a real reason;
+0.6.11 asks 10 times, 8 of them for a real reason (labelled by hand).
+
+**Check it on your own sessions.** `python3 -m maisecrets.cli consent-report
+ssh` reads the Claude Code transcripts of the last 30 days on this computer
+(`--last 7d`, or `--last 200` for the newest 200), classifies each command
+that names an ssh-family word, and prints counts per verdict and per reason,
+with no host, command or value. `--json` prints the same as JSON.
+`--excerpts FILE` writes a short window around each question into a new
+file of yours, to look at by hand: the values the detectors find are masked,
+hosts and commands stay in it, so share only what you may share. It runs
+nothing, changes no setting or consent, and sends nothing. Codex sessions are
+not read.
+
 A command name in another case (`SSH`, `Scp`) is the same program on macOS
 and in PowerShell, so it counts too. A command line over 8,192 characters
 that names ssh is not read at all: it asks (on Codex it is refused), so that
 the answer always comes before the client's timeout.
 
-Limits: maisecrets sees only the command text. A script file, an alias, a
-variable that holds `ssh` and was set in an earlier command, or a word built
-without the letters `ssh` in the text is not seen, and neither is a file that a
-heredoc writes and the same command then runs. A program that git or gh starts
+Limits: maisecrets sees only the command text, and checks the ssh-family
+starts that it shows. A program the line starts that starts ssh itself (a
+script, `make`, `npm run`, `python3 -c`, `node -e`), an alias or a variable
+set in an earlier command or in your profile, or a word built without the
+letters `ssh` in the text is not seen. The check is built against an agent
+that starts ssh openly without asking, not against one that tries to evade
+it; consent before any connection needs a network layer (a sandbox with a host
+allowlist). A program that git or gh starts
 from its own configuration (a hook, an editor, a signing program, a browser)
 is not checked; it gets the quoted text only as data. maisecrets reads the
 command with its own small shell parser; other shell syntax that it reads
@@ -1038,6 +1289,12 @@ does not need to look like a real secret, and these forms are never a hit:
   at `.local` or `.internal` (a person's mailbox there is found); IP addresses in
   the documentation ranges `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and
   `2001:db8::/32`, private and loopback addresses.
+- **A test value that vendor documentation publishes,** for its own type only: the payment
+  test cards (Stripe, Braintree), the Stripe API reference keys, the jwt.io example token and
+  the Twilio test numbers (`maisecrets/detection/rules/public_test_values.txt`, as sha256 digests). The
+  same digits under another type stay a hit: an IBAN or a bank account that holds a test
+  card's digits is found. A published key that a label assigns (`PROD_PASSWORD=…`,
+  `api_key: …`, `?token=…`) is used as a credential there and stays a hit.
 - **An AWS key id in a SigV4 credential scope:** `X-Amz-Credential=AKIA…` in a presigned
   URL, `Credential=AKIA…` in an `Authorization` header. The id names the key; it is not
   the secret half. The same id anywhere else is still found.
@@ -1047,39 +1304,185 @@ sends the rule name, never the value.
 
 ## Detection rules
 
-Four sources, one scanner (`maisecrets/detect.py`):
+Four sources, one scanner (`maisecrets/detection/core.py`):
 
-- **gitleaks** ruleset, vendored as data under `maisecrets/rules/` (MIT,
-  version in `GITLEAKS_VERSION`, refresh with `scripts/sync_gitleaks.py vX.Y.Z`):
-  ~220 secret shapes with keywords, entropy thresholds and allowlists. No
-  gitleaks binary is used.
-- **Presidio** pattern recognizers, vendored as data under `maisecrets/rules/`
+- **betterleaks** ruleset, vendored as data under `maisecrets/detection/rules/` (MIT,
+  version in `BETTERLEAKS_VERSION`, refresh with `scripts/sync_betterleaks.py vX.Y.Z`):
+  463 rules, 416 of them loaded. No betterleaks binary is used. betterleaks is the
+  successor of gitleaks by the same maintainers; gitleaks takes security patches
+  only since v8.30.1. Each rule's filter (an Expr expression: entropy limits,
+  pattern lists) is read by `maisecrets/detection/rule_filter.py`; a rule whose filter is a
+  program that module cannot read is left out (`generic-password`,
+  `generic-username`, `generic-credential-uri`), and so are the 43 components that
+  betterleaks never reports alone (`skipReport`). The BPE token ratio filter needs
+  a tokenizer the standard library does not have; maisecrets answers 0 there, as
+  betterleaks does without a tokenizer.
+- **Own secret rules** (`maisecrets/detection/rules/own_secret_rules.json`, patterns
+  derived from gitleaks v8.30.1, MIT): `generic-api-key`, to which the label
+  filters of the detector are tuned, and nine token forms the betterleaks rules
+  miss (Alibaba `LTAI`, Etsy, JFrog twice, a bare Fly.io token, an Atlassian
+  token after a product name, a legacy Vault token, Twilio `SK`, Codecov). They
+  run after betterleaks and only fill its gaps; a test drops each one that a
+  later betterleaks finds itself. gitleaks itself is no longer vendored.
+  Samsung CredData, line by line, without the test-vector repository, regions
+  `de`: v0.6.17 has precision 0.929, recall 0.578 and F1 0.713 on tool results
+  and files. On typed prompts it has 0.924, 0.527 and 0.671. With regions `us`,
+  the US bank-account rule adds 546 false alarms (F1 0.690 and 0.649).
+  `docs/BENCHMARKS.md` has the method, each release, a comparison with other
+  tools and the commands to repeat it.
+- **Presidio** pattern recognizers, vendored as data under `maisecrets/detection/rules/`
   (MIT, version in `PRESIDIO_VERSION`, refresh with `scripts/sync_presidio.py`):
   country-specific PII with scores and context words. The config key
   `regions` selects them (default: the country of the system setting; `de`
   gives Steuer-ID,
   Sozialversicherungsnummer, Personalausweis, Reisepass, USt-ID,
-  Krankenversicherung, PLZ, Kfz, LANR, BSNR, Handelsregister). Checksums for
-  the German types are ported and checked against Presidio
+  Krankenversicherung, PLZ, Kfz, LANR, BSNR). Checksums for
+  the German types, PESEL, the Spanish DNI and NIE, the NHS number, the ABA
+  routing number and the codice fiscale are ported and checked against Presidio
   (`scripts/check_validators_against_presidio.py`). A digit-only shape such as
   a Steuer-ID is reported only with a context word nearby, even when the
-  checksum passes.
+  checksum passes. A USt-ID written `DE` and nine digits also needs a word
+  such as `USt-IdNr` or `VAT` nearby: alone, that shape is often a FIX tag or
+  an XML id. A Handelsregister number is not reported: it names a company, is
+  public and is no personal data. Own rules (`REGIONAL_RULES` in
+  `maisecrets/detection/core.py`) add what Presidio lacks: the Personalausweis and
+  Reisepass number in the 9 characters the card prints (Presidio read the 9th
+  as a check digit, which only the machine-readable zone carries), the
+  Steuer-ID and the Rentenversicherungsnummer with the spaces of their printed
+  form, and the Swiss and Austrian numbers. The Steuer-ID check follows the
+  repeat rule of its issuer (exactly one digit twice or three times, never three
+  in a row; ITZBund, "KONZEPT Steueridentifikationsnummer", version 2.3, 2016).
+- **Crypto wallet secrets**: a BIP39 seed phrase (12 to 24 words of the
+  English list, `maisecrets/detection/rules/bip39_english.txt`, MIT, whose checksum
+  holds), a Bitcoin private key in Wallet Import Format and a BIP32 extended
+  private key (`xprv`, `yprv`, `zprv`, `tprv`, …) are secrets by their checksum,
+  with no label. A phrase of 12 words (a checksum of 4 bits) needs a word such
+  as seed, wallet, recovery or password near it; 15 to 24 words stand alone.
+  Addresses, extended public keys, the BIP39 reference vectors and a run of
+  more than 48 list words (a word list) stay text. Not found yet: a phrase in
+  a numbered list, a JSON array, or capitalised.
 - **detect-secrets** (Yelp, Apache-2.0, version in `DETECT_SECRETS_VERSION`,
   refresh with `scripts/sync_detect_secrets.py vX.Y.Z`): credentials
   recognised by position (`password = …`, `api_key: "…"`, `user:pass@host`),
   with its heuristic filters ported (templated, indirect, sequential values
   are not secrets).
 - **Own rules** for what none of the three covers: email (a
-  bounded regex; the unbounded one took 11 s on an 80 KB dotted run), phone
+  bounded regex; the unbounded one took 11 s on an 80 KB dotted run), an email with its
+  `@` written `%40` where an address is expected (after `=`, `mailto:`, `users/` or a mail
+  word such as `To:`, or in a CSV column whose header names a mail address or its owner, such as
+  `email`, `contact`, `login` or `courriel`), phone
   with a country code, `Bearer …` outside curl, `?api_key=…` in a URL, a
   password with no user in a URL (`redis://:…@host`), the secret half of an AWS
-  key pair within a few lines after its `AKIA…` id, and full-length GitLab
+  key pair within a few lines after its `AKIA…` id (at most 4 lines on, and at most
+  400 characters into its line, so a long line scans in linear time; the `-p` of mysql and
+  the `-a` of redis-cli count only within 400 characters after the command word, for the same
+  reason), and full-length GitLab
   runner and deploy tokens.
+- Keys that a label names in a form the label rules do not read (0.6.16): each key in a list
+  after a label that names secrets and nothing else (`"api_keys": ["…", "…"]`, `passwords =
+  ['…']`, Go `Secrets: []string{"…"}`), to the end of the list; a value there must look like
+  a key, so a name, a word-shaped identifier, a path, a password hash, a typed id (`pm_…`),
+  an address (`0x…`) or a digest stays text, and a list after `tokens`, `code_tokens` or
+  `keys` is not read (tokenizer output, cache keys); the value of an Elasticsearch
+  `Authorization: ApiKey …` header (a header line, `curl -H`, a header object) that decodes
+  from base64 to `id:key`; the scheme in prose stays text. A hex value after any other name
+  stays text: a nonce, a checksum, an etag, a commit id and a key that a hex literal decodes
+  into (`key = unhexlify('…')`, mostly published test vectors) are left out, as developer
+  text is full of them (`tests/fp_corpus.py`).
+- A password label and a literal value that is no word (0.6.16, `label-pw-literal`):
+  `db_password = "…"`, `<password>…</password>`, `IDENTIFIED BY '…'`,
+  `ConvertTo-SecureString '…'`, a value of 4 to 7 characters. The label comes from a frozen
+  list of password words (`password`, `passwd`, `pwd`, `passphrase`, `kennwort`, …) and a list
+  of words that make it name something else (`password_hint`, `passwordPolicy`, `bypass`). The
+  value must be no word after undoing leet (`P4ssw0rd` is a word), no fixture (`testpass`),
+  no mask, template or reference (`${DB_PASSWORD}`, `{{ … }}`, `settings.DB_PASSWORD`). The
+  words come from `maisecrets/detection/rules/words_en.txt`, about 21,000 English words of 4 to 8
+  letters from SCOWL (see `NOTICE`), read only when a password label is in the text. A miss in
+  an English list is no evidence alone: the value needs a letter and a digit or a sign beside
+  it (`_`, `-` and `.` join the words of a name and count as no sign), or (letters only) a
+  mix of cases that no word boundary explains, letters of two scripts with case, or a
+  lowercase run of 9 letters and more with fewer than 15 % vowels. So a word of another
+  language (`senhaAtual`, `senha_atual`, `Pflicht`), a developer abbreviation (`ctxPtr`), a
+  word in another script or with accents (a translated UI string), a path or a reference
+  (`/run/secrets/db`, `./secrets/pw.txt`, `C:\keys\db.pw`, `vault:secret/db#pw`) and a
+  value that is a whole regular expression after a secret label stay text. So do a
+  number, a ratio, a time, a duration and a section (`95.2%`, `118/124`, `12:30`, `~30d`,
+  `P90D`, `§3.2`), a dotted abbreviation and a word with a number (`Seite#3`). After the weak label `pass` (a boarding pass, a test pass) the
+  value needs 8 characters of three classes. A comparison (`==`, `!=`), a label that is the tail
+  of a path or a flag value, and an unquoted label before a comma (`f(password, "…")`) are no
+  label and value. A word
+  with a number and a sign (`Sommer2024!`, `Welcome1!`) is a password too; a word with a number
+  alone (`Winter2023`) is left to the keyword rules. A passphrase of words
+  (`passphrase: correct-horse-battery-staple`) stays text: the rule cannot tell it from a
+  reference such as a Kubernetes secret name. A string that `+` continues, a version and a
+  format template (`{pw}`) stay text too. Word-likeness and the label word classes follow Dan
+  Szymkowiak's backlog ideas.
+- A tool result or a file takes more (0.6.17): there, a value of ASCII letters after a password
+  label is a password when no English word covers it, also without a digit, a sign or a mix of
+  cases (`password = Some("pozkemva")`). A typed prompt keeps the rule above, because a false
+  hit blocks a prompt; in a tool result it masks one value. Measures, durations, abbreviations
+  and words in another script or with accents stay text in both. The secret-hygiene skill scans
+  files, commits and tool results the same way.
+- A word that a label rule takes in a tool result or a file blocks no later prompt (0.6.17): a
+  value of letters only, with no evidence of chance and, in ASCII, at most one rare letter pair in
+  ten (pairs counted in the word list). maisecrets stores it with a quiet mark: it still masks the
+  word in every later tool result (a default word such as `postgres`, and since 0.6.38 an English
+  word of the word list such as `fallback`, only where it was found), but does not look for it in a
+  typed prompt, also when this
+  session used its placeholder in a command. A random value (`xqzvbnmq`) is looked for in prompts
+  too, and so is a word the person gives in a prompt after a label, also when a tool result held
+  it first. Only a value stored new from a tool result gets the mark; a value stored before 0.6.17
+  has no mark and stays looked for. So a word that 0.6.16 stored from a file (field report) blocks
+  prompts until it expires or `/maisecrets:forget` deletes it. A quiet English word that an older
+  version stored is marked weak at the next session start.
+  Limit, a trade for no blocked prompt: a password that is a word, or a random value of small
+  letters that reads like one (about 3 in 100 of 8 letters, 1 in 200 of 12), and that a file or a
+  tool result held first, is not looked for in a later prompt that has it without a label. It is
+  still masked in every tool result.
+- A key after a label that names a secret, in a form the keyword rules do not read (0.6.16):
+  `<clientSecret>…</clientSecret>`, `<AccessToken>…</AccessToken>`, a short value
+  (`label-secret-literal`, 8 characters and more); and a quoted key of 12 characters and more
+  after a weak label (`hmac`, `session`, `cookie`, `psk`, `salt`, `seed`, `otp`, `key`,
+  `appKey("…")`, `<key>…</key>`; `label-weak-key`). The value must have few word letters and a
+  high entropy for its alphabet (a charset-normalised entropy, after Dan Szymkowiak's backlog
+  idea). A key is ASCII. A label that names something else stays text: `public_key`,
+  `cache_key`, `primary_key`, `object_key`, `idempotency_key`, `csrf_token`, a hex value after
+  `key` and any value after `nonce`, `x-amz-signature` or `x-amz-credential` (but not after
+  `x-amz-security-token`).
+- A TOTP or HOTP seed after a one-time-password label (0.6.16, `label-otp-seed`): 16 to 64
+  base32 capitals after a label with `totp`, `hotp`, `otp`, `mfa`, `2fa` or `authenticator`
+  (`TOTP_SEED=…`, `otp_seed: …`). A code of digits, a word, a constant name and a mask stay
+  text.
+- The STS session token of temporary AWS credentials (0.6.16, `label-aws-session-token`): the
+  value of `X-Amz-Security-Token` in a presigned URL (percent-encoded) or a header, 100 to 4096
+  characters. The other `X-Amz-` parameters stay text: the key id in `X-Amz-Credential`, the
+  signature, the date.
+- Four token formats with a public prefix that the vendored rulesets lack (0.6.16): the third
+  NTLMSSP message in base64 (`Authorization: NTLM TlRMTVNTUAAD…`; the negotiate and challenge
+  messages carry no password-derived response and stay text), a NATS nkey seed (`SU…`, 58
+  characters of base32), a PASERK secret, local or wrapped key (`k4.local.…`, `k4.secret.…`)
+  and a PASETO token (`v4.local.…`, `v4.public.…`). A public nkey and a PASERK public key or
+  key id stay text. A PASERK key ends at its last base64url character, never on a period of the
+  sentence around it.
+- Order: the rules that read a label and a literal value (`label-pw-literal`,
+  `label-secret-literal`, `label-weak-key`, `label-otp-seed`) run after every other rule and
+  take only a span no other rule took. The list rule, the four token formats, the
+  Elasticsearch `ApiKey` rule and the AWS session token rule are own secret rules: they take
+  their spans in the secret stage, before detect-secrets and betterleaks.
 - Prefixes newer than the vendored rulesets live in
-  `maisecrets/rules/prefixes.txt`, one line each, extended by pull request
-  (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_` so far, the last
-  two found bare in real prompts on 2026-09-26.
-- A secret shape with a fixed length (gitleaks: `glpat-[\w-]{20}`) is
+  `maisecrets/detection/rules/prefixes.txt`, one line each, extended by pull request
+  (`CONTRIBUTING.md`): `glrt-`, `gldt-`, `whsec_`, `cfut_`, the last two
+  found bare in real prompts on 2026-09-26, and since 0.6.19 Google OAuth
+  access tokens (`ya29.`), Tailscale keys, Discord webhook URLs, Salesforce
+  refresh tokens, Cloudflare `cfk_` and `cfat_`, HubSpot private app tokens,
+  New Relic `NRAK-`, `NRII-`, `NRRA-`, `NRAA-`, `NRIQ-` and `px-api-`, Claude
+  Code OAuth tokens (`sk-ant-oat01-`, `sk-ant-ort01-`), Flutterwave, Doppler,
+  Square `sq0csp-`, Contentful, Mapbox `sk.`, Kong Konnect, SonarQube Cloud
+  `sqco_`, Adafruit IO and TestPyPI tokens. A Telegram bot token, a Mailchimp key and a Discord bot
+  token (its first part must decode to a user id) have no fixed prefix and are
+  own rules. A client id such as Salesforce `3MVG9` or Square `sq0idp-` is
+  public and stays text.
+- A secret shape with a fixed length (betterleaks: `glpat-[\w-]{20}`) is
   extended to the end of the token characters, so a longer token does not
   leave its tail in the clear (found with a 24-char token, 2026-09-26).
   The extension stops at a line break: a token that a line break splits
@@ -1087,13 +1490,733 @@ Four sources, one scanner (`maisecrets/detect.py`):
   Joining the next line was measured on five months of session logs and left
   out: nearly every candidate was the next `.env` line, not the rest of a key.
 
+- Personal data after a label or in a fixed form (0.6.21, `maisecrets/detection/personal.py`), in a tool
+  result or a file only: a name after a name label (`patient:`, `tenant:`, `full_name:`, `FN:`,
+  `Ansprechpartner:`; after the weak labels `name`, `owner` and `author` only a value that does not
+  read as English words or nouns, so `name: Customer Portal` stays text), a name before an e-mail
+  address (`First Last <mail>`, not before a bot or a service mailbox), a date after a birth label
+  (`DOB`, `Geburtsdatum`, `né le`, `fecha de nacimiento`; not after `born`), an ID number of five
+  digits and more after an ID label (`MRN`, `passport no`, `DL`, `SIN`, `TFN`, `NIR`, `tax id`,
+  `account number`), the user in `user:password@host` and in another person's home path
+  (`/home/<user>/`, `C:\Users\<user>\`; service accounts and your own user name stay text), a
+  street address with its postcode in the form of an active region (US, UK, IN; DE, AT, CH; FR,
+  BE, LU; PT, BR, ES, IT; an address next to a company, office or landmark word stays text; when a
+  legal form such as `GmbH`, `AG`, `Ltd` or `Inc` ends the company's name right before the address,
+  its German postcode and a German VAT ID right after it stay text too; a person's name or record
+  key nearby, an employer or job label, a second address, a sender's VAT label or a blank line keeps
+  them masked, and so does a sole trader, who has no legal form), and
+  the cells of a CSV column for personal data (`address`, `dob`, `phone`, `ssn`, and a name or user
+  column beside one of them; an address or a phone cell only in a row that also names a person). A
+  typed prompt takes none of them: a hit blocks a prompt, and a
+  person who types a name means to send it. Documentation names (`Erika Mustermann`, `John Doe`)
+  stay text. `tests/fp_corpus_pii.py` holds 367 developer texts in these shapes that are no
+  personal data (Kubernetes YAML, package authors that are teams, company addresses, dates that
+  are no birth dates); the rules leave all of them alone.
+- A phone number with one-digit groups after the country code (`+1 4 1 5 …`, 0.6.21): in a tool
+  result, and in a typed prompt after a phone word; a US number in the national form
+  `(312) 846-2291` after a phone word with region `us` or `ca`, in a tool result only (an area code
+  and an exchange start with 2 to 9; the fictional 555 exchange stays text).
+- Three token forms with a tail shorter than the vendored rules want (0.6.21): an OpenAI or
+  Anthropic key (`sk-proj-`, `sk-ant-`, `sk-svcacct-`, `sk-admin-`; the tail needs a digit, a capital
+  and a run of 16 letters and digits, so a CSS class such as `sk-admin-sidebar-item2X` stays text),
+  a Slack token (`xoxb-`, `xoxp-`, `xoxa-`, `xoxr-` with digits and a hyphen first), and a Twilio
+  Account SID (`AC` and 32 hex digits) next to its name; a counted fixture (`AC0123456789abcdef…`)
+  stays text.
+
 IBAN, credit card and IP come from Presidio's regexes with our validators
-(mod-97, Luhn, public-range check). A card number without a word like
-"card" or "Kreditkarte" nearby is not reported: Presidio scores the bare
+(mod-97, Luhn, public-range check). An IBAN may have spaces or hyphens
+between its groups; an IBAN in lower case also needs the length of its
+country. A card number without a word like "card", "Karte", "Kreditkarte",
+"carte", "carta" or "tarjeta" nearby is not reported: Presidio scores the bare
 shape low, and a 16-digit number passes Luhn one time in ten.
 
 Measure what the rules would catch on your own recordings, values never
 printed: `scripts/replay_sessions.py --claude --codex`.
+
+## Rules of your own
+
+**For administrators.** To give each machine of a team the same rules:
+
+1. Run `maisecrets rules init DIR` (in the plugin folder: `bash hooks/run.sh
+   rules init DIR`). It makes a team folder with `rules/`, `samples.txt`, a
+   README and CI files for GitHub and GitLab.
+2. Keep the folder in a repository of the company. Its CI runs `maisecrets
+   rules check` on each change.
+3. Put the folder on each machine. A git checkout that a scheduled job updates
+   is one way.
+4. Add the local path to `rule_dirs` in the machine policy ("Settings you can
+   enforce"). A user cannot remove a folder of the policy.
+5. On a machine, run `maisecrets rules check` to see that each folder loads.
+
+maisecrets reads local folders only. It does not fetch or update a folder: how
+the files get to each machine is the company's choice. When a folder of
+`rule_dirs` is missing or cannot be read, each session start says so in one
+sentence. When rules of your own run, the start line counts them: `maisecrets
+0.6.N is on, with 12 rules of your own from 2 folders.`
+
+You can add detection rules for the tokens of your own services, and you can
+let single values through. maisecrets reads the rules from three places:
+
+- `~/.maisecrets/rules.d`, your own folder. The AI cannot write there.
+- each folder of the setting `rule_dirs`, for example a checkout of your
+  team's rule repository. Type the change as your own prompt:
+
+  ```
+  /maisecrets:settings rule_dirs add ~/src/team-rules
+  maisecrets: set rule_dirs add ~/src/team-rules     (the same, and the form for Codex)
+  ```
+
+  `remove` takes a folder off the list. Like every setting, only your typed
+  prompt changes it (C22). When the folder has a subfolder `rules/`, as a
+  team repository from `maisecrets rules init` has, maisecrets reads that
+  subfolder; else it reads the folder itself. A folder with no rule file
+  gets a note when you add it and in `/maisecrets:rules`.
+- each folder of `rule_dirs` in the machine policy. You cannot remove those.
+
+A folder holds three kinds of file, and maisecrets reads nothing else from it
+(no symbolic link, no git metadata):
+
+- `*.json` in the gitleaks form: `{"rules": [{"id": …, "regex": …,
+  "keywords": […], "entropy": …, "secretGroup": …, "allowlists": [{"regexes":
+  […], "regexTarget": "secret|match|line", "stopwords": […]}]}]}`. An optional
+  `"type"` (`SECRET`, the default, or `NAME`, `EMAIL`, `PHONE`, `IBAN`, `CARD`,
+  `IP`) sets the placeholder type. An allowlist with `"condition": "AND"`
+  and more than one part is dropped (the stricter side), and
+  `/maisecrets:rules` says so.
+- `*.prefixes`, one rule per line, `id  regex`, as in
+  `maisecrets/detection/rules/prefixes.txt`. The whole match is the secret.
+- `*.terms`, a team term list with a floor against common words (Terms). Not
+  in `rules.d`: your own list is `~/.maisecrets/terms.txt`.
+
+A hook reads these files in every call, so each rule passes checks when it is
+loaded: a keyword or a literal of at least 4 characters, at most 300
+characters of regex, at most 500 rules, 200 files and 1 MB per folder (the
+first 2000 entries and 2000 rules of a folder are looked at, refused ones
+included), 64 KB per file, and an id that no earlier rule of the same folder
+has. A rule whose id a rule of an earlier folder has runs as `<id>#2`, so one
+folder cannot take a rule of another folder out by its id; `rule: user:<id>`
+in the allow list switches both off. The regex must not backtrack: no repeat
+inside a repeat (`(a+)+`), no repeat of something that can be empty
+(`(a?){25}`), no branches that start alike inside a repeat (`(a|aa)+`), no two
+repeats in a row that take the same characters (`.*.*`, `\w+\d+`), no
+backreference, and no quantifier of variable length at the start (`\w+…`,
+`x?[a-z]+…`). Then maisecrets times each new rule once on test texts that make
+a backtracking regex slow, also on runs of the characters its own repeats take
+and on its literals, those of each branch too, repeated before long runs; a
+rule slower than 50 ms on the texts of one start is left out. A new rule runs
+only after this timed test: when a hook call has no time left for the test,
+the rule waits for the next call, and `maisecrets rules check` times every
+rule at once and keeps the result for the hooks. A rule that is still slow in
+a real scan (more than half a second inside its regex in one hook call) is
+left out from the next call on. When a hook runs out of time, the rule of your
+own with the most regex time is left out, if that time is more than half of
+the call. Each verdict is kept by a hash of the rule in
+`~/.maisecrets/.rules-state`, so a hook pays for the checks once. A changed
+rule is checked again; a rule that a real scan found slow stays out until you
+change it, and `maisecrets rules check DIR` shows it.
+
+A rule that fails a check is left out, with its reason; the rest of the file
+still loads. A refused rule is named by its place (`rule 3`, `line 7`), never
+by its text: a refused line can be a pasted value. A broken file or folder
+never stops a hook and never costs the rules of another folder. The session
+start names a new failure once, and `/maisecrets:rules` shows each folder,
+its rule count, a hash of its files, and each rule that was left out. Your
+rules run after every built-in rule, the personal-data rules too, so a rule
+of your own never cuts a part out of an e-mail address or an IBAN; a hit
+carries the id with `user:` in front (`user:acme-token`).
+
+`maisecrets rules` (in the plugin folder: `bash hooks/run.sh rules …`) does
+the rest:
+
+```
+maisecrets rules list [--json]      every rule in scan order: key, id, origin, rank, channel, region, class, upstream, patches
+maisecrets rules check [DIR]        each rule: ok with its time, slow, or refused with the reason; exit 1 on a problem
+maisecrets rules test [text]        what the rules find in the text or stdin: type, rule, place, length
+maisecrets rules init DIR           a team folder: README.md, rules/, samples.txt, CI for GitHub and GitLab
+maisecrets rules import FILE.toml   a gitleaks or betterleaks config in the JSON form (Python 3.11+)
+```
+
+`rules check` also reads `samples.txt`: a line `hit <rule-id> <text>` must be
+found by that rule, a line `miss <text>` by no rule of the folder. A failure
+names the line, never its text. Without a folder, `rules check` checks every
+folder the hooks read, and a missing folder of the setting or the policy is a
+failure too. The CI files of `rules init` take maisecrets from its newest
+release, so CI runs the checks that the hooks of your team run; for a fixed
+version, write `--branch v0.6.N` there. `rules import` leaves out a rule with a
+filter it cannot read and a rule that fails a check, and says which.
+
+**The allow list.** `~/.maisecrets/allow.txt` lists what is not a hit, one
+entry per line, `#` for a comment:
+
+```
+# my own address in every git log
+name@my-company.example
+rule: phone
+```
+
+A line is one exact value: the value with nothing before or after it is not
+reported, a longer value that contains it still is. An allowed domain does
+not let through the e-mail address that ends in it. `rule: <id>` switches a
+rule off (`rule: user:acme-token`, or a built-in id from
+`maisecrets scan`). An entry is never a pattern. An administrator puts the
+same lines in `allow` of the machine policy. A folder of `rule_dirs` carries
+no allow list: the AI can write a shared checkout, and the AI may only make
+detection stricter. A value that is already stored stays redacted by its
+exact match; `/maisecrets:forget` deletes it.
+
+## PDFs and images
+
+maisecrets cannot look inside an image or a PDF. When the AI reads one, the
+client sends its bytes to the model, and a password or an address in it goes
+along. You decide what happens, per type:
+
+| Setting | `allow` (default) | `ask` | `block` | `convert` |
+|---|---|---|---|---|
+| `read_pdf` | the PDF goes as it is | Claude Code asks you first | refused | only its text goes, masked |
+| `read_image` | the image goes as it is | Claude Code asks you first | refused | (no: maisecrets does no OCR) |
+
+Send one setting as your own prompt, for example:
+
+```
+/maisecrets:settings read_pdf convert
+maisecrets: set read_pdf convert          (the same, and the form for Codex)
+```
+
+Then ask the AI to read a PDF (measured with the Claude Code CLI). With
+`convert`, the program `pdftotext` extracts the text on your computer, the
+normal redaction masks it (as a tool result, so also a password after a
+label and a value in a disguise), and the model gets that text in place of
+the PDF, with placeholders of the form `⟦SECRET_cN⟧`. The PDF itself never
+reaches the model and does not stay in the session transcript. A page range
+(`pages`) works; Claude Code then also writes the pages as JPG files into a
+folder of its own on your disk, and maisecrets does not clean those.
+`convert` needs `pdftotext`: macOS `brew install poppler`, Debian or Ubuntu
+`sudo apt install poppler-utils`.
+
+maisecrets runs `pdftotext` only from the fixed install folders
+(`/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`, `/usr/bin`), never
+from the PATH: a program the AI puts on the PATH must not run inside the
+hook. Every folder from `/` down to the program, and down to each library
+the program loads, must belong to root or to you. No other account may be
+able to write it (also not through an access control list), except a group
+whose members can become root anyway:
+`admin` and `wheel` on macOS, `sudo` on Debian, `sudo` and `admin` on
+Ubuntu, `wheel` on Fedora and its relatives (the default sudoers of each,
+measured 2026-10-14). So a second admin account on a Mac no longer stops
+`convert`. maisecrets reads the libraries itself (33 for Homebrew's
+pdftotext of poppler 26.10.0; `ldd` on Linux), and it does not run a program
+whose libraries it cannot name. It starts pdftotext without `LD_*` and
+`DYLD_*` variables. The Homebrew folder belongs to you, and the AI runs as
+you: it could still replace the pdftotext there or a library, and maisecrets
+cannot tell. maisecrets keeps values out of the model and the transcript; it
+does not contain an agent that works against it on purpose. On Windows there
+is no such folder, so `convert` refuses there. Without pdftotext, maisecrets
+refuses every PDF and says so; it never lets the PDF through.
+
+A PDF that pdftotext cannot read in 6 seconds, that makes pdftotext use more
+than 512 MB of memory, or that is damaged, is refused. A PDF locked by a
+password is refused too, and the AI is told that cause and not to ask you
+for the password; save a copy without the password and give the AI that
+copy. A PDF with only an owner password (it opens without one and limits
+printing or copying) converts, AES-256 included (measured with poppler
+26.10.0). A crafted PDF of a few
+MB can make pdftotext take 1.5 GB in 2.4 seconds: maisecrets watches the
+memory of pdftotext every 50 ms while it waits and stops it there (macOS does not
+enforce a memory limit on a process, measured; on Linux the kernel limits
+it to 1 GB as well). Text after 32K characters is cut, and the AI is told to
+read a smaller page range. A scanned PDF has no text, or only page numbers
+or a header line: below 25 characters of text per page, maisecrets says that
+the PDF looks scanned, and the AI gets nothing of it.
+
+**Measured on 2026-10-14** (Claude Code 2.1.300, poppler 26.10.0, a corpus
+of 24 generated PDFs with 168 planted values): pdftotext found 151 of the
+values, pypdf 136. pypdf failed on text written one character at a time and
+on form fields, has no time limit (one page took 14 s on Python 3.14, 47 s on
+3.9) and needs `typing_extensions` on 3.9, so maisecrets keeps pdftotext; a
+bundled pypdf stays an option for Windows later. pdftotext missed a page
+rotated by 90 degrees (that page counts as scanned) and two values whose
+label stood in the table cell beside them. How a PDF reaches the model: "read x.pdf" and a pasted path go
+through the Read tool, and the hooks see the file; `@x.pdf` gives the model
+only the name and the size, and the model then calls Read itself. No route
+that was measured passes around the hooks. The interactive terminal UI was
+not measured.
+
+Until you decide, the first PDF and the first image the AI reads bring one
+sentence about the setting (`"tips": false` silences it). If `config.json`
+cannot be read (bad JSON, a value of the wrong type), both settings count as
+`block` until you fix the file.
+
+**What `block` stops, and what it does not.** The settings act on the Read
+tool of Claude Code: `block` means "the Read tool does not open this PDF or
+image". They do not stop a shell command that reads the file: `pdftotext
+x.pdf -`, `strings x.pdf` or `cat` give the AI text, and maisecrets redacts
+that text like any other command output (a secret with a known form is
+masked, the rest of the text is not). maisecrets is no file cleaner and does
+not refuse such commands.
+
+**Codex.** Codex has no Read tool, and it gives a hook a command's output as
+plain text without an image flag (measured on codex-cli 0.159.2). So on
+Codex these settings change nothing that was measured: its `view_image` tool
+is not measured, and a command output there is scanned as text, like every
+other output. The typed form `maisecrets: set read_pdf …` still works and
+holds for a later Claude Code session.
+
+`clean_dirs` lists folders whose PDFs and images you know are clean (your own
+screenshots, for example). A read there is allowed:
+`/maisecrets:settings clean_dirs add ~/Pictures/Screenshots`, and `remove` the
+same way. maisecrets resolves links and `..` first, so a link inside a clean
+folder that points out of it does not count. A file counts only if it was in
+the folder before the session began and has no second name (hard link): a
+file that arrives during the session, also one that the AI copies, moves or
+links there, waits for the next session. maisecrets refuses `/`, your home
+folder, a folder that holds the folder the session works in, and a folder
+that is a link or lies under one (add the real folder). The folder itself is
+noted with the session: another folder moved or linked in under its name does
+not count, and neither does a subfolder moved in during the session. The start of
+the session is a note that maisecrets writes at the session start, never
+later; without the note nothing in the folder is clean. A client that the AI
+starts inside its own session (`claude -p` from its shell) trusts no clean
+folder. `clean_dirs` works on macOS and Linux; on Windows no file in it counts
+as clean, because there a moved file keeps its creation time.
+
+With `ask`, a file goes to the AI only after you said yes to that very read: a
+file that was not asked about (it was in a clean folder a moment before, or a
+notebook got an image after the question) is withheld. maisecrets also keeps a
+checksum of the file you allowed (and of a file in a clean folder) and checks
+that the AI gets those very bytes. A file above 64 MB cannot be checked: it is
+never clean, and with `ask` maisecrets refuses it before it asks you. For a
+large image that Claude Code shrinks, a page range of a PDF and a notebook,
+the client sends no copy of the file itself; maisecrets then checks the size
+and the file as it is after the read, which leaves a short window.
+
+A Bash command whose output starts with `data:image/…;base64,` sends an image
+to the model too (Claude Code shows it as one and marks it `isImage`);
+`read_image` decides about it. Only the image itself skips the scan: the
+error output of the same command is redacted as usual. `ask` cannot ask
+after the command ran, so it withholds the output, like `block`.
+
+A notebook (`.ipynb`) whose output cells hold an image: with `ask` Claude
+Code asks you first, and with `block` the AI gets the cells as text and each
+image as a note that it was withheld. The cells are always redacted; the image
+data is not scanned. Claude Code itself drops the outputs of a notebook when
+they are large (measured on 2.1.296: an image of about 8 KB or more): the AI
+then reads only a note to run `cat <notebook> | jq '.cells[0].outputs'` in
+Bash, and that output is text, which maisecrets redacts like any output.
+
+**Not covered:** an image you paste into the prompt (Ctrl+V or drag of an
+image into Claude Code) reaches the model without passing any hook; the
+prompt hook sees only your typed text. maisecrets cannot stop or mask it. An
+image in the result of an MCP tool is not covered either.
+
+## Terms: names, case numbers, customer names
+
+A name has no shape, so no rule finds it. Tell maisecrets the names you keep
+from the AI, and it masks them like a secret. The design is based on the
+personal-terms design by [@danszymkowiak](https://github.com/danszymkowiak):
+his file form, his match modes, and his rule that no message shows a term.
+
+**Add a name.** Type it as your own prompt:
+
+```
+/maisecrets:term add Jan Kowalski
+maisecrets: term add Jan Kowalski          (the same, and the form for Codex)
+```
+
+maisecrets writes the name to `~/.maisecrets/terms.txt` and does not send the
+prompt to the model. From the next tool result on, `Jan Kowalski` becomes a
+placeholder such as `⟦NAME_c3⟧`.
+
+When you add a name of two or more words, maisecrets also adds the last word
+alone and its genitive (`Kowalski | Kowalskis`), if it has 4 letters or more
+and is not a common word. So `Herr Kowalski`, `Kowalskis Bericht`,
+`Kowalski, Jan` and `J. Kowalski` are masked too. It adds them as whole words,
+never as a stem with `*`: `Koch*` would mask `Kochen`, `Lang*` would mask
+`language`. Type a stem yourself when you want one (`Kowalsk*`). A surname that
+is also a word (`Jobs`, `Wolf`) is masked where it stands alone as that word. The joined forms `jan.kowalski`,
+`Jan-Kowalski` and `jan_kowalski` (also in `jan_kowalski.pdf`) are masked as
+one word. The first name alone stays visible: `Jan` is a common word, and
+masking it would hide every other Jan. To mask it anyway, add it as a term
+of its own. The answer to the command says what maisecrets added. A typing
+error such as `/maisecrets:terms add …` or `maisecrets term add …` is not
+sent to the model either: maisecrets shows the correct form.
+
+A name inside a value that maisecrets stores never splits it. A password such
+as `Kowalski#Lato2024` stays one value: it is masked whole, in the prompt and
+in every later tool result, and never as a name with the rest in clear.
+
+`/maisecrets:term remove Jan Kowalski` (or
+`remove ⟦NAME_c3⟧`, the placeholder copied from a result) takes it off.
+`/maisecrets:term` alone shows your lists. Only your typed prompt changes the
+list, as with a setting (C22): a removal in a tool call is refused.
+
+**Mark a name once.** Write `{{Jan Kowalski}}` in a prompt. maisecrets masks
+the name in that prompt and in every tool result until the lifetime of a
+name value ends (`ttl_seconds`, one day by default); it does not write
+`terms.txt`. A marker is 1 to 5 words of letters (a hyphen or an apostrophe
+inside a word), and one word starts with a capital letter. So
+`{{ .Values.image.tag }}` and `{{ item }}` stay text, and so do one letter
+and one common word alone (`{{A}}`, `{{The}}`). One word alone with a space
+inside the braces or with a capital inside it (`{{ Title }}`,
+`{{FirstName}}`) is the form of a template and stays text; mark a one-word
+name such as `{{McDonald}}` with `/maisecrets:term add`. A name of two or
+more words is marked in any of these forms (`{{Ronald McDonald}}`,
+`{{ Jan Kowalski }}`). A marker counts only in a
+prompt that you typed at the composer or over Remote Control, not in one that
+a program or a subagent sent.
+
+**The file.** `~/.maisecrets/terms.txt` holds one entity per line: a label,
+then the variants, separated by `|`. `#` starts a comment.
+
+```
+# label      variants
+PERSON_A     Jan Kowalski | Kowalsk* | Jan
+CLIENT_B     Acme Holding | *acme-0042*
+EMAIL_BOSS   boss at work
+```
+
+| variant | matches | does not match |
+|---|---|---|
+| `Jan` | the whole word: `Jan`, `Jan,`, `(Jan)`, `Jan's` | `January`, `Jan2`, `jan_report` |
+| `Kowalsk*` | a word that starts so: `Kowalski`, `Kowalskiego`, `Kowalski_report` | `Nowakowalski` |
+| `*kowalski` | a word that ends so: `Kowalski`, `JanKowalski` | `Kowalskiego` |
+| `*acme-0042*` | the text and the letters, digits and `_` around it: `xacme-0042b` whole; in `x-acme-0042-b` and `acme-0042@example.com` the part `acme-0042` | none |
+
+- Case does not matter (`ŁÓDŹ` matches `łódź`). A space in a variant matches
+  any run of whitespace, also a line break. Other characters are literal.
+- Composed and decomposed letters match alike (a macOS file name holds
+  `Mu` plus a combining diaeresis for `Mü`), and a soft hyphen or a
+  zero-width character inside a name does not hide it. A spelling with other
+  letters does not match: `MUELLER` is not `Müller`, `GROSSMANN` is not
+  `Großmann`, and fullwidth letters (`Ｍüller`) are not `Müller`. List such a
+  spelling as a variant of its own.
+- Two names that overlap (`Anna Maria` and `Maria Kowalski` in
+  `Anna Maria Kowalski`) become one placeholder.
+- A word is a run of letters, digits and `_`. So `Kowalski_report.pdf` is one
+  word: `Kowalski` does not mask a part of it. Write `*kowalski*` to mask
+  file names too.
+- The longest variant wins: `Jan Kowalski` is one hit, not two.
+- All variants of an entity get the same placeholder. The type is `NAME`,
+  or the type in the label (`EMAIL_BOSS` gives `EMAIL`).
+- A stem before or after a `*` needs 3 letters or digits, a `*…*` variant 4
+  characters. maisecrets uses at most 50 `*…*` variants in all the lists: the
+  51st stops your own list with its line, and a team list leaves it out and
+  names it.
+- The file must be private. If others can read it, maisecrets sets it to
+  `0600`. If a line is wrong, every hook fails closed and the message names
+  the line, never its text. Fix the line, and the next hook works. Only you
+  write this file, so a silent skip would let through exactly the names you
+  listed.
+
+**A team list.** Put a `*.terms` file in a folder of `rule_dirs` (Rules of
+your own; in its subfolder `rules/` when it has one, as for the rules). The AI can write a shared checkout, so a team list has a floor: an
+entry of fewer than 3 characters, an entry of only words of
+`maisecrets/rules/term_stoplist.txt` (1,134 words: the 521 words of the closed
+word classes of English and German, and the words that 8 or more files of
+this repository use, as the common words of a developer session; a small
+list on purpose, not a dictionary), a `*` with a stem of
+fewer than 5 letters (`ret*`, `*ing`), and a stem that 3 or more words of
+that list share (`*ation*`), are left out. A line
+that fails is left out with its reason; the rest of the file loads, and a bad
+team file never stops a hook. The session start says when a team list
+changed. `/maisecrets:rules` and `maisecrets terms` show the counts, the
+files and each line left out, never a term. All the team lists together
+can be up to 4 MB and 150,000 entries. A variant that an earlier entry holds
+(your own list first) is left out, and at most 16 team variants share one
+stem or first word: a list cannot make each word of a text walk thousands
+of entries. These caps count the team lists together, in the order of
+`rule_dirs` (the folders of the machine policy first): a list that the AI
+can write can use them up and push out a list after it, as it can also
+delete lines of its own folder. The lines pushed out are named in
+`/maisecrets:rules`. A `*.terms` file that is a symbolic link is not read.
+
+**Where the terms run.** The terms are a pass of the rule registry, after
+the built-in rules and the rules of your own; `maisecrets rules list` shows
+the pass as `terms:term`, with its own origin and class (`term`). It is one
+index of every list, not a rule per term: its cost does not grow with the
+number of terms. A hit says where it came from: its kind is `term:<id>` in
+`maisecrets scan` and in the store, never the term. So an email address or an IBAN keeps the span its
+rule found. A listed term that a rule finds too (an email address on your
+list) gets the rule's type, but it stays a term: mask only. An exact value on
+your allow list (`~/.maisecrets/allow.txt`) stays allowed, also when a term
+list names it: both are yours, and the allow list is the narrower one.
+
+**Not in a PDF or an image.** The matcher reads text. A name inside a PDF, an
+image or another binary file that a tool reads reaches the model as it is.
+
+**Mask only.** maisecrets never puts a name back. A term placeholder in a
+command, an MCP argument or a file that the AI writes stays as it is: a
+letter that the AI drafts holds `⟦NAME_c3⟧`, and you put in the name. The
+store holds no term: one entry per entity, with an id, so the placeholder
+stays the same across documents and sessions while the entry lives.
+
+**Find the names in a document.** `maisecrets terms suggest FILE` (in the
+plugin folder: `bash hooks/run.sh terms suggest FILE`) proposes lines for
+`terms.txt` from a text or CSV file: names after a salutation, after
+`Name:`, in a name column of a CSV file, and pairs of capitalised words. If
+a surname comes in two or more endings, it proposes the stem
+(`Kowalski | Kowalski*`). It never prints a name, not in a terminal either:
+an AI can open a pseudo-terminal and read it. It writes the proposal to
+`terms.suggested.txt` in the maisecrets folder (mode `0600`; the AI cannot
+read that folder) and prints the count and the path. Open the file yourself,
+and copy the lines you want into `terms.txt`. Nothing is added to your terms.
+
+**Cost.** Without any list, maisecrets does not load the terms code: a hook
+costs what it cost before (measured, `docs/BENCHMARKS.md`, "Terms"). With a
+list, a hook pays a fixed amount for the module and the index, and the cost
+does not grow with the number of terms. maisecrets keeps an index of the
+lists in `~/.maisecrets/.terms-cache`.
+With 100,000 entries a new hook process loads it in about 30 ms and scans
+10 KB in 3 to 10 ms (measured on Python 3.9 and 3.14).
+After you change a list, maisecrets builds the index again at the next
+session start, or right after `/maisecrets:term add` or `remove`, so a tool
+hook only loads it. Measured for 100,000 two-word entries (3.8 MB): 1.4 s on
+Python 3.14, 2.2 s on Python 3.9. If a team list changes while a session
+runs, the next hook builds the index.
+
+## Values from your own tools
+
+Your own tools often know values that maisecrets cannot find by their
+shape: a NER finds the names in your case files, an export lists your
+customers, a script knows the internal account ids. Give maisecrets those
+values, and it masks them wherever they appear.
+
+**The file.** Your tool writes one JSON object per line:
+
+```
+{"value": "Jan Kowalski", "type": "NAME"}
+{"value": "jan.kowalski@example.org", "type": "EMAIL"}
+{"value": "a value without a shape"}
+```
+
+`type` is one of `SECRET`, `NAME`, `EMAIL`, `PHONE`, `IBAN`, `CARD`, `IP`
+(`SECRET` when it is missing). It names the placeholder, nothing else.
+maisecrets reads only `value` and `type`; it ignores every other field.
+
+**Import it.** Two ways:
+
+- In a terminal: `bash hooks/run.sh values import FILE` (in the plugin
+  folder). It prints the id of the import and its counts, and the number and
+  reason of each line it refused. It never prints a value or the file name.
+- As a setting: `/maisecrets:settings value_files add ~/work/ner-out.jsonl`
+  (type it as your own prompt). maisecrets imports the file at each session
+  start when its content changed.
+
+maisecrets copies the accepted values to
+`~/.maisecrets/imports/<id>.jsonl` (mode `0600`; the AI cannot read that
+folder, C8). Each import has an opaque id such as `import:v1a2b3c4d`, never
+the name of the file: a file named like one of its values would show that
+value.
+
+**What is masked.** From the next prompt and tool result on, each value is
+masked in any case and with any spacing, also as a phrase of several words
+across a line break (`Jan\n  KOWALSKI`), in composed or decomposed Unicode,
+and with a soft hyphen or a zero-width character inside it. The match is on
+whole words, as for a term (Terms, above): `Kowalski` does not mask a part of
+`Kowalskiego`. The placeholder has the type of the line, for example `⟦NAME_c3⟧`.
+
+**Where the imports run.** The imports are a pass of the rule registry,
+after the terms (`maisecrets rules list` shows it as `imports:import`, origin
+and class `import`). It is one index of all imports, not one rule per value.
+A hit names its import: its kind is `import:<id>:<value id>` in
+`maisecrets scan` and in the store. The store keeps these ids, never the
+value.
+
+**Mask only.** maisecrets never puts an imported value back. An import
+placeholder in a command, an MCP argument or a file that the AI writes stays
+as it is.
+
+**An import only adds.** maisecrets follows the rule of this epic: the AI can
+make detection stricter, never weaker.
+
+- A new import of the same file adds its new values to the same import. A
+  value that the file no longer lists stays. An edit of a value file that
+  removes lines removes no value. Each import keeps every value it lists,
+  also one that another import holds: the removal of one import leaves a
+  value masked while another import lists it.
+- An import of a file by a command and the import of the same file as a
+  value file are two imports. A command cannot fill the import of your
+  value file.
+- A value that a rule finds (an email address, an IBAN) keeps the span, the
+  type and the placeholder of that rule. A value that the store holds
+  already (a password from `/maisecrets:put`) keeps its own placeholder,
+  its type and its lifetime, and it still resolves into your commands. An
+  import never turns a resolvable value into a masked-only one. Only the
+  parts of an imported phrase outside such a value get the import's
+  placeholder.
+- No field of a line can switch a rule off, allow a value or change a
+  lifetime: maisecrets reads `value` and `type` only.
+
+**Only you remove an import.** Type `/maisecrets:forget import:ID` as your
+own prompt (in Codex: `maisecrets: forget import:ID`). maisecrets does not
+send that prompt to the model. A prompt from a scheduled task, a subagent or
+a program that started the client removes nothing. A tool call that carries
+the removal is refused, also when quotes, escapes, line continuations or a
+PowerShell `+` split it. A removal that a program builds at run time (brace
+expansion, an empty variable or `$()` inside a word, a character code,
+PowerShell `-join`) is not seen:
+the same text-match limit as for a setting (C22), and `values remove` in a terminal only names the
+prompt. If you remove the import of a value file, the next session start
+imports the file again as it is now (also when you removed it in another
+session). So to drop a few values from a value file, edit the file, then
+remove its import.
+
+**What you see.** `/maisecrets:list` shows each import: its id, the number of
+values per type, its age, and whether it came from a value file or a
+command. It never shows a value. The session start names each new import
+once, with its id and count, also an import that the AI ran.
+
+**Who may write the file.** The AI may run `values import`, and it may write
+a value file that lies in a folder it can write (a repository checkout).
+That is allowed, because an import can only add masking. The worst an import
+can do is to mask too much. These limits hold that:
+
+- A value needs at least 4 characters. A value of only digits needs at
+  least 6. maisecrets refuses one word of lower-case letters, a value of only
+  common words (the stop list of the team terms,
+  `maisecrets/rules/term_stoplist.txt`), and a value that holds a placeholder
+  bracket, a placeholder key (`SECRET_c1`), `maisecrets`, `import:` or the
+  name of a setting (`value_files`). So no import can break a placeholder
+  or mask your own controls. Also, maisecrets never rewrites a settings
+  prompt or the ssh grant sentence: the hook reads them first.
+- The floor does not know every ordinary word. A capitalised word such as
+  `Pipeline` passes, and the match ignores case, so an import can mask such
+  a word in every text. That masks too much, never too little; the session
+  start names each new import, and you remove it.
+- One import holds at most 100,000 values, and all imports together at most
+  150,000. The imports that no value file names (the imports of a command,
+  which the AI can run) hold at most 100,000 of them, so your value files
+  always have room. maisecrets holds at most 50 imports, of which at most 30
+  are imports of commands: 20 places stay for your value files. Only a file
+  in your setting `value_files` counts as a value file. One file is read to
+  at most 200,000 lines, and one import file holds at most 24 MB. Past a cap, the import stops, says at which
+  line, and names the prompt that removes an import. A value file in a
+  folder that the AI can write counts as your value file: the AI can fill
+  the caps through it, and push out a value file after it.
+- maisecrets opens the file once, without following a symbolic link and
+  without waiting on it, and checks the opened file: it must be a regular
+  file (not a FIFO or a device), owned by you (or root), and not writable by
+  every user. Then it reads it once, up to 8 MB. So a file that is swapped
+  between a check and the read, a FIFO, and a file that grows while it is
+  read all fail or stop at the limit. Windows has no open without a link:
+  there maisecrets refuses a link one step before the open. A line that a writer has not finished
+  is not valid JSON, so maisecrets refuses that line by its number and
+  imports the rest.
+- A damaged import in the maisecrets folder stops every hook (fail closed),
+  and the message names the prompt that removes it. So does a `*.jsonl`
+  file in `~/.maisecrets/imports` that no import id names.
+
+**Not in a failed tool call.** When a command fails (a non-zero exit code),
+Claude Code sends its output to the model before maisecrets sees it, as for
+every other value (C2). An imported value in that output reaches the model.
+maisecrets masks it in the transcript afterwards. A PDF or an image is not
+read either, as for the terms.
+
+**Cost.** Without an import, maisecrets does not load the import code: a hook
+costs what it cost before (measured, `docs/BENCHMARKS.md`, "Values from your
+own tools"). With an import, a hook loads one index from
+`~/.maisecrets/.values-cache`. maisecrets builds the index after each import
+and at session start, so a tool hook only loads it.
+
+## Vault references
+
+An MCP server can mask a value in its result, for example a customer's e-mail
+address, with a token such as `⟦EMAIL_1:ma•••@example.org⟧` (no `c`: the server
+made it). Without maisecrets, a file that the AI writes from that result holds
+the token. With maisecrets and a server that supports vault references, the
+file holds the real value, and the AI still sees only the token.
+
+How it works (`docs/PROTOCOL.md` section 4):
+
+1. Until an MCP server that you added yourself (user scope, an `https` URL)
+   sends such a token, maisecrets asks no server and writes nothing into
+   the client's config file. Tokens in a Bash output, a file, a web page or from a
+   server in a project's `.mcp.json` start nothing.
+2. With the first token of that server, maisecrets asks it once for its
+   metadata (RFC 9728). Only if the server names a vault endpoint there does
+   maisecrets make a random key for it and write a `Client-Vault` header with
+   a hash of that key into that server's entry in the config file that
+   Claude Code itself uses: `~/.claude/.config.json` when that file is not
+   empty, else `~/.claude.json` (both in `CLAUDE_CONFIG_DIR` when it is set;
+   the rule of 2.1.301). The other file is then an old copy, and maisecrets
+   never reads or writes it. `/maisecrets:status` names the file. It
+   changes nothing else in the file and keeps a backup beside it. You see a
+   notice once, with one step: type `/mcp reconnect <server name>` (or start
+   Claude Code again). The reconnect reads the server entry again, its
+   headers included, and every later request carries the header (measured
+   with 2.1.302). A server without the field gets no header, and maisecrets
+   asks it again at the earliest after an hour.
+3. The server links the hash to you when you log in to it. A link that comes
+   from an existing login waits a day. The server tells you on its own
+   channel; Claude Code does not show a server's notice in the chat
+   (measured with 2.1.302). To use it earlier, activate it on the server's
+   connections page, or sign in to the server again in the browser. You can
+   revoke it there too. After a tool result of that server, maisecrets notes
+   the tokens in it. The result does not change.
+4. When the AI writes such a token into a file or a Bash command, maisecrets
+   asks the server for the values, with the key, and puts them in. It gets all
+   values or none. If the server refuses, the call is denied, and the reason
+   names the state of the server and your next step (the table below).
+
+`/maisecrets:status` shows the state of each server, with the time of the
+last answer. It asks once per server origin that has a key on this
+computer (an empty request that can return no value); two entries on one
+origin share the key and the answer. At a session start maisecrets asks the
+same question once per such origin, within 5.5 s for all, and tells you in
+one line when a state changed since you last saw it. The deny reason of a Write, Edit or Bash call uses the same words:
+
+| State | What you do (Claude Code) | In Codex |
+|---|---|---|
+| not used yet (no server token seen, or the server names no vault endpoint) | nothing | nothing |
+| header written | type `/mcp reconnect <server name>` (or start Claude Code again) | start Codex again |
+| waiting for activation until `<time>` | activate it on the server's connections page, or sign in to the server again in the browser | the same |
+| active | nothing | nothing |
+| this key is quarantined (used by two accounts) or revoked | nothing: maisecrets makes a new key at the next start, and you see the header step again | the same, then start Codex again |
+| the server's operator switch is off | ask the server's operator | the same |
+
+The server gives the same answer for a quarantined key, a revoked key and a
+key it never saw. maisecrets tells them apart only by its own record: a key
+that the server once answered as active or waiting is "quarantined or
+revoked" now, any other key is "header written". A key that a server bound
+and quarantined before maisecrets asked it once reads as "header written".
+A revoke alone makes maisecrets make a new key at the next start. To stop
+the link for good, turn the feature off: `client_header:
+false` (`/maisecrets:settings client_header false`) turns it off (in Codex at
+the next connection to the server) and removes
+the header again. A server behind a
+certificate authority of your own needs `client_vault_cafile`. On Windows a
+Bash command gets no server value.
+
+**In Codex** (measured with codex-cli 0.162.0 and 0.155.1) the same steps
+hold, with three differences:
+
+- maisecrets writes no header into `~/.codex/config.toml` (or
+  `$CODEX_HOME/config.toml`). A repository's `.codex/config.toml` can give
+  your server entry another URL: Codex merges it over your file, and it trusts
+  a project on its own when its sandbox may write there. A fixed header would
+  then go to that URL. So maisecrets adds one line, `http_headers_helper`, to
+  that one entry. Codex runs this command when it connects to the server. It
+  prints the header only when no `.codex/config.toml` of the folder you work
+  in, or of a folder above it, names MCP servers, and only in the first folder
+  of that Codex process, within two minutes of its start; else it prints
+  nothing. The server needs the header only once, to link your key, so this
+  limit costs little: in the desktop app a later chat in another folder sends
+  no header until the app starts again.
+  maisecrets changes no other byte of the file, does not touch a file that
+  does not parse or that lies in a git repository, and keeps a backup in its
+  own folder (`~/.maisecrets/vault-refs/`) until the next start that changes
+  nothing.
+- The values come from the next start of Codex: a new `codex` run sends the
+  header, an open session does not (measured with codex-cli 0.162.0). Codex
+  shows the notice as a warning of the hook in its terminal UI; `codex exec`
+  does not print it.
+- In a repository that brings its own MCP servers, maisecrets notes no token
+  and sends no header. Codex vault references need Python 3.11 or later
+  (`tomllib`), and they are off on Windows in this version. `apply_patch` and
+  Bash (macOS, Linux) get the values.
+
+The limit: an AI agent that runs as your user can read the key from the
+store, as it can read any stored value. The server's cap, its audit and the
+revoke bound that. A value written into a file is plain text there.
 
 ## Known gaps (measured or documented)
 
@@ -1121,13 +2244,72 @@ a to-do.
   block, deny, or withheld output), and a hook that crashes answers the same
   way; Claude Code ignores exit 2 from `PostToolUse`, so the raw output would
   otherwise reach the model. Codex runs the tool anyway when a hook fails, so
-  there the watchdog is the only net. A tool result with more than 100 new
+  there the watchdog is the only net. On Windows the watchdog can come too
+  late: Python has no SIGALRM there, and a detector regex that runs long
+  holds the interpreter until it ends, so a hook past the client's timeout
+  fails open. A tool result with more than 100 new
   values is masked without storing the rest.
 - **Tool output above 50K characters** is spilled to a file by Claude Code
   and is not rewritten.
+- **An image or a PDF that Claude reads** goes to the model as a picture or a
+  document, not as text. maisecrets does not look for shapes in it: a secret
+  in the text of a PDF or in a screenshot reaches the model. Only the exact
+  match of your stored values checks its base64 form, and it finds a value
+  only where the file holds its bytes uncompressed at an offset that is a
+  multiple of 3 (no OCR, no decompression, by design). The same holds for a
+  Bash output that Claude Code sends as an image.
 - **`@file` mentions** inline a file outside the hook pipeline. The prompt
   hook blocks them when the path exists; ask Claude to read the file instead.
-- **Names are not detected.** Regex only, by design.
+- **A name without a label is not detected, unless it is on a term list** (Terms). Regex only, by design: "Emma Johansson" alone looks like any two
+  capitalised words. A name after a name label, before an e-mail address or in a CSV name column is masked
+  in a tool result (0.6.21); in a typed prompt no name is detected. A name in a non-Latin script is masked only after
+  a person label (`full name`, `native name`, `patient_name`, vCard `FN:`, also with parameters such as
+  `FN;CHARSET=UTF-8:`; 0.6.24), not after `name:` or `owner:`,
+  which also name products and languages. A street address without a postcode or an address label, or in a form of a
+  region that is not active, passes too. Inside a vCard (after `BEGIN:VCARD`), an `ADR` in its fields, an `N`
+  and a `BDAY` of eight digits are masked in a tool result, with or without parameters (0.6.25), also when the property
+  is folded over two lines. A vCard line without its `BEGIN:VCARD` is masked after a `.vcf` file name (grep output) or
+  in the structure of its property: `ADR` in capitals with a parameter of a card (`TYPE=home`, `PREF`) and an empty box
+  and extended field, `N` in capitals with its five fields, `BDAY` with a parameter of a card. `adr:`, `n:`, a `BDAY:`
+  date alone, a grep context line (`file.vcf-12-`) and a property in lower case folded more than 2,048 characters after
+  its `BEGIN:VCARD` are not. The check for a
+  company before an address label reads 120 characters of the line: in minified JSON a company address with its
+  company word farther back is masked, and a person's address with an employer or a hotel within that reach passes.
+  Its postcode stays masked when an employer label, a person's name or a key of a person's record stands near the
+  company's name. The other way round, a company's postcode and VAT ID stay masked when a department line stands
+  between the company's name and a street and postcode on one line (the address rule then masks the whole address),
+  when the department is not a word of the list (Einkauf, Buchhaltung, Accounts Payable), and, in the street and
+  postcode on two lines or after `Kunde:`, when the company's name has more than two words: a person's name glued to
+  it (`Lena Brückner Lindner GmbH`) reads the same. On one line, after a company word, such a name frees the values
+  as in 0.6.26.
+  A wider reach was measured and left out, because it lets more home addresses pass (0.6.25).
+- **The forms of 0.6.24 act on tool results only.** An ID after `member`, `record` or `account`, an address after
+  `Address:`, a FHIR identifier, a `::add-mask::` value, a `SharedAccessKey=`, a Postman variable with a secret name and
+  the other forms in `maisecrets rules list` (column "needs": label or form) are masked in a tool result or a file. A
+  typed prompt with the same text is not blocked by them. A card number without a card word is masked in a tool
+  result only when it is written in groups of four with the prefix of a card network; one run of digits needs the
+  word (a float, a timestamp and an IMEI pass the Luhn check as often).
+- **A pasted image is invisible to the hooks.** Claude Code gives the prompt
+  hook only the typed text (measured on 2.1.296). An image or a PDF that the
+  AI reads is in your hands ("PDFs and images"); maisecrets does not scan or
+  clean an image, and does no OCR.
+- **An image in an MCP tool result passes as it is.** `read_image` acts on
+  the Read tool, on a Bash output that Claude Code marks as an image, and on
+  the images of a notebook; not on an MCP result.
+- **`block` stops the Read tool, not a shell read.** `pdftotext x.pdf -` or
+  `strings` give the AI the text of the file; only secrets of a known form in
+  it are masked. On Codex the PDF and image settings act on nothing measured.
+- **A clean folder trusts the files that were there when the session
+  began.** A file you put there yourself during the session waits for the
+  next one. The start of a session is a note that maisecrets writes at the
+  session start (the client sends no start time). The AI's tools may not
+  touch the maisecrets folder, but that guard reads the command text: a
+  command that hides the path (built from pieces, `find … -exec`) can still
+  move the note and make a copied file count as clean. A client started
+  under another program name (an npm install runs as `node`) is not seen as
+  nested. Windows: no file counts as clean.
+- **A term placeholder is never resolved** (Terms, mask only): a command or a
+  file the AI writes keeps the placeholder.
 - **A transformed value can pass.** For a value this session resolved, the
   output is checked as a substring in plain, base64, hex, URL-encoded and
   JSON-escaped form, and a resolving command may not encode it in the first
@@ -1143,13 +2325,18 @@ a to-do.
 - **Every e-mail address, phone number with a country code and public IP
   counts**, also your own and your colleagues'. `git log`, `dig` and `ip addr`
   come back with placeholders. Set `"regions": []` to drop the country
-  identifiers; there is no allow-list for single values yet.
+  identifiers, and list your own values in `~/.maisecrets/allow.txt` (see
+  "Rules of your own").
 - **Placeholders resolve in Bash, MCP tool arguments and the file tools.** In
   WebFetch or a subagent prompt they stay text. A subagent shares its parent's session; a
   headless run (`codex exec`, `claude -p`) is a session of its own, so a
   reference from an earlier run is foreign there.
 - **A reference in a prompt is admitted as typed by a human**, also when the
   prompt was built from an issue body or a log in a headless run.
+- **A slow rule of your own on Windows can outrun the hook's time limit**
+  (see "A hook that exceeds the client's timeout fails open" above). The
+  checks of "Rules of your own" keep a backtracking rule out, and a rule that
+  is slow in one scan is left out from the next one on.
 - **Claude Code on Windows without Git Bash** offers a `PowerShell` tool in
   place of Bash. maisecrets checks it like Bash for the store, in any case
   and with either slash, and refuses a placeholder in it with the reason:
@@ -1159,7 +2346,10 @@ a to-do.
 - **Codex on Windows** runs commands in PowerShell, where the bash quoting
   contexts of the grant rewrite do not apply. The prompt block, the output
   redaction and the inline MCP resolve run through `hooks/run.cmd`; a
-  placeholder in a shell command is denied with a reason. The launcher is
+  placeholder in a shell command is denied with a reason, and the reason
+  names the route that works: apply_patch puts the value into a text file
+  that the script reads, and the script then runs with no placeholder in the
+  command. The launcher is
   proven in the GitHub Actions Windows job in the exact form Codex uses
   (`cmd.exe /C`, block and pass with a UTF-8 payload), not yet in a live
   Codex session.

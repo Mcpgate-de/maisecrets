@@ -2,6 +2,611 @@
 
 ## Unreleased
 
+## [0.7.7] - 2026-10-22
+
+### Features
+
+- masks a US home address written on one line (eabce9d)
+- masks a password in three more sentence forms (8727587)
+- masks an API key or token named in a sentence (b1e277b)
+
+### Fixes
+
+- the release gate replaces a local path also where JSON escapes it (7bf9127)
+- an encoded token after a key word stays to the tool channel's decoder (c896d38)
+- a one-line US address after a named place stays text (57186af)
+- the software table rule holds back only the new anchors, so a birth date in a CSV row with a sku still names its person (4eea0b3)
+- the software table rule applies only with one personal column, so an order record with a customer stays a person's (41a1e65)
+- a phone number named in a sentence after a contact label is masked again (Escalation contact: Contact the coordinator at …) (237020b)
+- a table of software and a test account are no person's record (500ef2e)
+- a date of birth makes a row a person's only when it lies 12 years back, so a release table's date stays text (d5866f2)
+- a row with a date of birth under its own name counts as a person's record, so its user name and address are masked (4c3b4a3)
+- a person's address and ids in a record under more field names (Property Address, Health Plan Beneficiary Number, MedicalRecordNumber, User ID) (f377ca3)
+
+## [0.7.6] - 2026-10-22
+
+### Fixes
+
+- a company's "we can help you at" and an id after "Contact:" stay text (aee4e79)
+- masks a person's own number in a sentence (reach out to me at, my number is), while a company's line stays text (a77baf1)
+- masks a phone number after a contact label, after "Fax number for notice:" and with four counting digits at its end (5eabe63)
+
+## [0.7.5] - 2026-10-22
+
+### Fixes
+
+- a blocked message from another session is recognised as one, so its text never goes into your clipboard (461c44c)
+- a role name or a given and family name written in camel case (candidateName, givenName) counts as its column (b33eb46)
+- fixture names such as Foo Bar or Jane Doe in a first and last name field stay text (c0a0e49)
+- masks the name column of a candidate, client, player or recipient in a table of personal records (271ec63)
+- masks a first or last name in a record field when the record also holds a person's data (0727d95)
+
+### Security
+
+- a placeholder in a message from another session no longer lets this session use its value (024af1c)
+- a message from another Claude session with a secret is blocked again instead of reaching the model (9bc4b68)
+
+## [0.7.4] - 2026-10-21
+
+### Fixes
+
+- a message from another Claude session is rewritten with placeholders instead of being lost in a block (3cc6b07)
+- a phone number written as one run of digits is masked after a phone word (Telefon: 0999…, +49…) (4350e18)
+
+## [0.7.3] - 2026-10-21
+
+### Fixes
+
+- a US postal address on two lines is masked (street line, then City, ST 12345) (13bab17)
+- a full name after a salutation is masked (Dear Dana Okafor,) (2d3f10b)
+- a full name after a title is masked (Mr Dana Okafor, Mrs. …) (f07d52c)
+- a Visa card number of 19 digits after a card word is masked (2822238)
+- an ID after its label and a comma is masked (beneficiary number, <id>,) (bed99c3)
+- a Markdown table of fields and values is read as one record (| Full Name | … |, one field per row) (5da6304)
+- a North American phone number after calling, dial or contact is masked (8e4678e)
+- an address after a Dutch, Swedish, Italian or German address label is masked (Adres, Adress, Indirizzo, Anschrift) (ceaaaea)
+- a name after the Dutch and Swedish name labels naam and namn is masked (25ee85f)
+
+## [0.7.2] - 2026-10-20
+
+### Fixes
+
+- a name after "first name is" or "last name is" in a sentence is masked (fffe655)
+- a name in a declaration, a self-introduction or before its birth date is masked (I, <name>, hereby) (a7919ac)
+- a double surname after a first or last name label is masked whole (Last Name: Okafor-Brandt) (7cacc49)
+- a street after an address label is masked with its direction and unit (Main St SW, Oak Ave 12B) (8ee2e7f)
+
+## [0.7.1] - 2026-10-20
+
+### Fixes
+
+- a double name that runs on into the next label is masked up to its surname (192d9b9)
+- a double name is words only when it reads as words with and without its second surname (58d6ac6)
+- a double name whose second part is a word and an address with a template after its unit are masked again (8011e44)
+
+## [0.7.0] - 2026-10-20
+
+### Features
+
+- a library caller makes a rule of its own through user_rule, and LazyRegex is deprecated (52379f9)
+
+### Fixes
+
+- a street line under a hotel or company name stays text, and a small word starts no street (602360c)
+- a European street line only widens a postcode another rule found, so a company address stays text (b9331c9)
+- an address that a wider address hit already holds keeps that hit's rule (d01efc8)
+- an address keeps the postcode, the city and the country after its street, and a European street line with postcode and city is masked whole (ae26485)
+- an XML element that closes itself is read for its attributes too (aedd606)
+- an XML element with a namespace prefix (fpml:party) is read as a record (3ebdbbd)
+- an address or phone in a record nested right in a record that names a person is masked with it (51854a4)
+- the attributes of an XML element (name, street_address) are read as a record like its child elements (87300e0)
+- column and field names in German, French, Spanish, Italian, Dutch, Swedish and Portuguese name their values like the English ones (813553b)
+- a column or field name with an XML namespace or a Markdown escape (fpml:name, first\_name) names its values like the plain name (8e42f33)
+- personal fields of a JSON object and of an XML record are masked by the same column policy as a table (7419d4c)
+
+## [0.6.44] - 2026-10-20
+
+### Fixes
+
+- an HTML table cell that wraps its text in a link or a span is read like a plain cell (dcb618b)
+- personal columns of an SQL INSERT and of an HTML table are masked like those of a CSV file (7192858)
+
+## [0.6.43] - 2026-10-20
+
+### Fixes
+
+- a phone extension after the number (x204, ext. 31) is masked with it (c72b82a)
+- a medical license number is masked whole, not only the DEA-shaped part inside it (e88476b)
+- an address after its label keeps the unit after Ste. or Apt. and the number after a short street name (1da20c3)
+
+## [0.6.42] - 2026-10-20
+
+### Fixes
+
+- a double name with a hyphen is masked whole after its label, not only the part before the hyphen (4d8f40f)
+- a driver license written in hyphenated groups is masked whole, not only its first four characters (25e65c9)
+- a user name after the user name label in a sentence is masked in tool results, when it has a digit, a dot or an underscore (fe16811)
+
+## [0.6.41] - 2026-10-20
+
+### Fixes
+
+- an id after its label with of, a certificate or license number, and an id with a letter prefix are masked whole (aaa81bb)
+- the vCard parameters stay with BDAY when born on joins the birth labels (a742b84)
+- a birth date after born on, or after date of birth with is or was, is masked in tool results (0c78760)
+- a pull request or ticket number after the password word stays text (6897f3b)
+- a password that ends with ! or ? is masked whole (197c4f1)
+- a password with a letter, a digit and a sign after the password word is masked in tool results, also when it reads like a word (a7931d7)
+- a card number written as one run of digits is masked in tool results when it has the prefix and length of a card network (49f9a1f)
+- a number in a table column named account number is masked, wherever the table names it (8eeff23)
+- an account number with a hyphen is masked whole, not only the digits after the hyphen (5d433ef)
+- a US bank account number needs its label before it on its line, which removes a third of the false alarms in financial documents (2c134a1)
+- masks Mastercard numbers of the 2-series and 15-digit JCB numbers, which the card rule never checked (27bf5fa)
+- /maisecrets:status checks the Codex hook trust on Windows too, measured against Codex 0.164 (37d3392)
+
+## [0.6.40] - 2026-10-19
+
+### Features
+
+- /maisecrets:status says whether Codex runs the maisecrets hooks of the installed version (b2df799)
+
+### Fixes
+
+- Codex users keep the hook trust they gave: apply_patch gets a PreToolUse group of its own (7cc1874)
+- Codex 0.164 no longer switches the maisecrets hooks off after their first start on Windows (4d5d9f5)
+- Codex apply_patch reaches the guard by its own name, also where a Codex build maps no alias (833ed2d)
+- a birth date written YYYYMMDD after its label is masked (31e1676)
+- an 8-digit date (YYYYMMDD) in a finance document is no US bank account number (af36b94)
+- masks a user name after a username label, and a German tax id under a steuer_id key, in tool results (604d896)
+
+## [0.6.39] - 2026-10-19
+
+### Fixes
+
+- detects the legacy Microsoft Teams webhook URL on outlook.office.com (e1914c0)
+- a Microsoft Teams webhook URL is masked whole, not only 17 of its 204 characters (7dd7817)
+
+## [0.6.38] - 2026-10-18
+
+### Fixes
+
+- an English word after a label in a tool result is masked only where it was found (c9128e1)
+
+## [0.6.37] - 2026-10-17
+
+### Fixes
+
+- a person glued to a company's name keeps the postcode and VAT ID masked (dc42866)
+- a config row stays text, and a folded END:VCARD does not end the card (e57a0e0)
+- a person near a company keeps the postcode and VAT ID masked in the new forms (7822529)
+- a company's postcode and VAT ID stay text in three more address forms (a405ecd)
+- masks a vCard address, name or birth date in a line without its card (69fc9da)
+- a vCard property folded over two lines is masked in both parts (469dafd)
+
+## [0.6.36] - 2026-10-17
+
+### Features
+
+- the notice, the status and a refused call name the server's state and your next step (71028a9)
+
+### Fixes
+
+- a failed key change puts the old key back, and a late answer changes no state of a new key (fd443f5)
+- a new key only for a key this computer holds, and state answers kept under the lock (cb39c27)
+
+## [0.6.35] - 2026-10-17
+
+### Features
+
+- finds personal data in the person columns of a Markdown table (aa5384e)
+- finds a street line after an address label or "resides at" (3d4b6e1)
+- finds a first name or a last name alone after its label (e3374c1)
+- finds a phone number in its national form after a phone word (af27a10)
+- finds a passport or driving licence number after its label in eight EU languages (2f70512)
+- finds an ID number after a health, tax or national label (e6d3a49)
+- finds personal data and passwords after a label in Markdown bold (40ca2d9)
+
+### Fixes
+
+- placeholder streets, sentences after a name label and four-digit groups stay text (a1b76fd)
+- the probe timer takes /bin/sleep before a sleep on the PATH (ce1f272)
+- the probe bound holds when the client ignores a signal (ae7b354)
+- a Python that hangs or holds the hook's output can no longer let a call through (54e799d)
+
+## [0.6.34] - 2026-10-17
+
+### Fixes
+
+- ms:(…) keeps passwords with # < > as credentials and scrubs random letters alone (1453166)
+- ms:(…) also stores random passwords with $, = or < in them, and judges each value alone (1ea083f)
+- ms:(…) stores only a value that looks like a credential, and checks several values one by one (ef30391)
+
+## [0.6.33] - 2026-10-17
+
+### Features
+
+- mask the values that your own tools found, also as a phrase of several words (814d942)
+- Codex puts the values of a server's tokens into your files and commands (4cdaf8e)
+
+### Fixes
+
+- the marker patterns compile at the first prompt with "{{" (248e5a8)
+- a PDF locked by a password is refused with that cause (f8b425e)
+- a prompt with a template no longer loads the term matcher (4871bb5)
+- a line continuation inside a word of an import removal is refused again (aee83ba)
+- compile the patterns of the literal forms and of the keyword window at first use (406bf80)
+- end every lock wait of a hook step at the step's deadline (8cdcc0d)
+- read a long remote command in linear time (fc6dceb)
+- search each rule keyword once per text (08523b4)
+- read each vendored filter text once (8953366)
+- leave out the CJK class when a text has no CJK letter (c81cc42)
+- compile a module regex at its first use, not at import (69f4509)
+- a removal of an import hidden by an escape inside a word is refused (d94bf79)
+- a resumed Codex session never loses the answer of its start (655498d)
+- a Codex session keeps the answer of its start, and the opt-out works at once (93f483d)
+- a removal of an import that the shell joins from quotes or line ends is refused (d7f1fc8)
+- a value file that is a symbolic link is refused on Windows too (77e1e22)
+- an imported value in the text of a placeholder is masked, and only your setting makes a value file (6756514)
+- a failed first run never lets the Codex header out later (22f9722)
+- your value files keep their places, and no import can break a placeholder or a settings prompt (a604f30)
+- the Codex header follows the folder the session began in (a867bba)
+
+## [0.6.32] - 2026-10-17
+
+### Features
+
+- check a value with ms:(…) before you send it (0b3dde1)
+
+### Fixes
+
+- keep backups that maisecrets cannot prove it wrote (d7438f7)
+- follow the client's file choice in the edge cases too (5521abb)
+- use the config file that Claude Code itself reads (6cf98da)
+
+## [0.6.31] - 2026-10-16
+
+### Fixes
+
+- a password after its word and a space is redacted, without the stop of the sentence (5096239)
+
+## [0.6.30] - 2026-10-16
+
+### Fixes
+
+- on Windows the route for a document puts the value into a text file that the script reads (fa362f1)
+- on Windows a refusal names the route that puts a value into a document (5dc8af7)
+
+## [0.6.29] - 2026-10-16
+
+### Features
+
+- write the key header only for a server that sent a token and supports it (48ca94b)
+- get a value back from the MCP server that masked it (42afa85)
+
+### Fixes
+
+- a token that the model sent before the server was in use is no sighting and no trigger (28fdfff)
+- the header goes on the entry that sent the token, by name and URL (6ab449d)
+- close the gaps that the fourth review found (538d4c6)
+- close the gaps that the third review found (4e32659)
+- a token seen again after 24 hours resolves again (d0f52cb)
+- send the first sighting, so an old token never gets another person's value (87df6b0)
+- close the gaps that the verification review found (f61ab37)
+- close the gaps that the second review found (4b09970)
+- close the gaps that the first review found (e7a66f5)
+
+## [0.6.28] - 2026-10-16
+
+### Fixes
+
+- the document route of a deno refusal says deno run (fdb82d7)
+- a refusal names the document route only where the rehydration setting lets it through (f3b9814)
+- the skill tells the model how a placeholder goes into a document or a file (86c5ae4)
+- when inline code cannot take a value, the refusal names the route to a document (dbabb47)
+
+## [0.6.27] - 2026-10-16
+
+### Features
+
+- mask the names, case numbers and customer names on your own term list (1699c9d)
+
+### Fixes
+
+- review round 2 of the rebase: a listed value stored before stays a term, team lists are read with a bound (2f42ac3)
+- review round 1 of the rebase: a union with a term stays a term, template braces mark no name (50a8b47)
+- a wipe that cannot take the terms lock says what is left and how to finish (b21a092)
+- a damaged marked-name record stops the hooks, and a wipe removes a proposal written at the same time (3c9bc9a)
+- terms suggest never prints a name; it writes a private proposal file (41b9078)
+- a team list cannot slow every hook with one stem repeated many times (ee0655b)
+- a listed email address or token-shaped case number stays a term and is never resolved (a8ccc9b)
+- term changes at the same time all hold; a damaged marked-name file stops the hooks; expired marks leave the disk (dd908a0)
+- the refusal of an add without a source names the rule it broke in plain words (06229fa)
+- term add masks the surname as a whole word, never as a stem; Codex adds follow your own rules (ebdd1e9)
+- a token that holds a value you resolved is taken out whole again (88ad84c)
+- the session start parses the term lists once (25bea54)
+- an add from a prompt without a source gets the floor of a team list (ead02e6)
+- a private-use character in a file the AI writes stays as it is (e5705e0)
+- term add also masks the surname alone and joined names; typos and other origins change nothing (f1756ab)
+- build the term index at session start and after a typed change, not inside a tool hook (27a1547)
+- mask spaced *…* terms, overlapping names, NFD text, joined names and team lists safely (2a82c69)
+- a listed name inside a stored password no longer leaves the rest of the password in clear (3f7c361)
+
+## [0.6.26] - 2026-10-16
+
+### Fixes
+
+- a company's postcode and VAT ID stay text with its street (4cd8b0d)
+
+## [0.6.25] - 2026-10-16
+
+### Fixes
+
+- masks a vCard address, name and birth date written in their fields, as contact exports write them (da3af5a)
+- masks an encoded e-mail address in a CSV column named contact, login, username, recipient, courriel or correo (6e17722)
+- masks the address, the name and the birth date of a vCard property with parameters, such as ADR;TYPE=home: (7af5ed4)
+
+## [0.6.24] - 2026-10-16
+
+### Features
+
+- masks a card number written in groups in a tool result without a card word nearby, and knows more card words (cea3b1f)
+- before reading a password export, a .har, a .vcf or an .ics file, the skill offers a masked copy and reads only that (94eb12e)
+- judges a generic API key in a tool result by the entropy floor of its alphabet, which finds 8 more CredData credentials (d663062)
+- finds personal data and secrets in 18 more fixed forms in tool results, such as an ID after "member", an address after "Address:", a FHIR identifier and a GitHub Actions ::add-mask:: value (44e2169)
+
+### Fixes
+
+- a busy machine no longer lets an encoded key through in a tool result (0f6c60f)
+- after a password label, the name of a constant, a time such as 0:default, the word after "passed:" and a table cell of prose are no longer masked (07312aa)
+- finds the counterparty IBAN in an MT940 bank statement export, right after its subfield code ?31 (c1215d3)
+- a UK postcode alone is no longer masked, and a US NPI, a Swedish organisation number and a UK number plate need their check digit (1e6e78b)
+- finds an e-mail address or a phone number written right next to Chinese, Japanese or Korean text (0889bbf)
+
+## [0.6.23] - 2026-10-15
+
+### Features
+
+- decide what happens when the AI reads a PDF or an image, and send a PDF as masked text only (d599b5d)
+
+### Fixes
+
+- no hit in a converted PDF counts as a test fixture, also by its content, and a dangling rpath link counts twice (f13f774)
+- a converted PDF under a tests folder keeps its labelled passwords masked (5a979a7)
+- a missing rpath folder counts by the folder above it, and a converted PDF of one endless line says so (31c32aa)
+- an inherited ACL entry on macOS and an rpath folder searched first also stop read_pdf convert (4569e77)
+- read_pdf convert stops a PDF that eats memory, refuses a scan with page numbers, and runs a Homebrew pdftotext on a Mac with two admins (1d20371)
+
+## [0.6.22] - 2026-10-15
+
+### Features
+
+- the session start counts your rules of your own and names a rule folder that is missing (d8c6993)
+- add detection rules of your own from folders, and an allow list for single values (0f782bb)
+
+### Fixes
+
+- a rule of your own runs after the cleaned copy of a tool result, and the allow list holds for the personal-data rules (e0481e2)
+- a rule of your own runs after the personal-data rules of 0.6.21 too, so it never cuts a name or an address (42f6cfd)
+- a correct rule with several keywords is no longer timed out, and `rules check` makes a folder run at the next call (20c4a18)
+- the folder limits also hold for refused, duplicate and oversized rules, and a slow branch is timed (0d3f4b0)
+- a rule folder can no longer take out another folder's rule, run an untested rule, or stall a hook with many files (79a9dd4)
+- a slow rule of your own is found by its own regex time, also over many strings (de45baa)
+- a large output can no longer take a correct rule of your own out (4cc626a)
+- rule folders keep slow, broken and linked rules out, and never print a refused line (923d3b2)
+- a rule of your own no longer cuts an e-mail address, IBAN or phone number short (3772d16)
+- a rule of your own that holds a hook until the watchdog answers is left out from the next call on (150e699)
+
+## [0.6.21] - 2026-10-15
+
+### Features
+
+- the next session start names each protection that was loosened (e76fd95)
+- a Twilio Account SID next to its name (TWILIO_ACCOUNT_SID, sid) is found (75adb3b)
+- a Slack token with a shorter tail (xoxb-, xoxp-, xoxa-, …) is found (5c5be4b)
+- an OpenAI or Anthropic key with a shorter tail (sk-proj-, sk-ant-, sk-svcacct-, sk-admin-) is found (bf4e532)
+- the cells of a CSV column for personal data (address, dob, phone, ssn and a name beside them) are masked in a tool result (ecbb533)
+- a name before an e-mail address ("First Last <mail>") is masked in a tool result (ba9f8e4)
+- a name after a name label (patient, tenant, full_name, FN, Ansprechpartner) is masked in a tool result (d62d930)
+- a street address with its postcode is masked in a tool result (US, UK, IN, DE, FR, PT, ES, IT forms by region) (e3adb4a)
+- the user name in a home path of another person (/home/<user>/, C:\Users\<user>\) is masked in a tool result (d3acd12)
+- the user name in user:password@host is masked in a tool result (7a83ec4)
+- an ID number after its label (MRN, passport no, DL, SIN, TFN, NIR, tax id, account number) is masked in a tool result (91aaef0)
+- a date after a birth label (DOB, Geburtsdatum, né le, fecha de nacimiento) is masked in a tool result (3c56393)
+
+### Fixes
+
+- a phone number with one-digit groups (+1 4 1 5 …) and a US number (312) 846-2291 after a phone word are masked (c2be01c)
+
+### Security
+
+- a prompt from a client that a program started changes no setting (0e50f95)
+
+## [0.6.20] - 2026-10-15
+
+### Features
+
+- OpenAI and Anthropic keys of newer lengths (OpenAI: 8 to 400 characters around `T3BlbkFJ`; Anthropic: 60 to 140 before `AA`), GitLab trigger and CI job tokens in their newer forms are found without a label (18f35f1)
+- 23 more token formats are found without a label (Google OAuth client secret, SonarQube, Dynatrace, NuGet, crates.io, Dropbox, GitHub App JWT, …) (7194cc0)
+- a PEM private key in base64 is found and masked whole (Kubernetes Secret tls.key, ssh-privatekey) (c47bb41)
+
+### Fixes
+
+- a certificate bundle with a legacy encrypted private key in base64 is found (50742db)
+- a base64 PEM key needs a key body, ends at its END line, and GitLab job tokens are taken whole (436069a)
+- a routable GitLab token with a long routing payload is masked whole, not only its first part (98b4f30)
+- Resend, Ionic, Airtable and WakaTime tokens are found without the provider's name beside them (768989d)
+
+## [0.6.19] - 2026-10-15
+
+### Features
+
+- 25 more token formats are found without a label (Google OAuth, Claude Code OAuth, Tailscale, Discord, Telegram, …) (2787122)
+- a crypto wallet seed phrase, private key or extended private key is a secret (9f54dea)
+- Swiss and Austrian numbers with regions ch and at (AHV number, UID, social insurance number) (77fcc27)
+
+### Fixes
+
+- a PESEL, Spanish DNI or NIE, NHS, ABA routing number or codice fiscale with a wrong check digit is no longer a hit (a264b69)
+- a Steuer-ID is checked by the tax office's own repeat rule and found with its spaces (88b80f4)
+- a German ID card or passport number is found as the card prints it (f7a4868)
+
+## [0.6.18] - 2026-10-14
+
+### Features
+
+- a password export in a tool result or a file is read without its passwords (589688b)
+- tool results and files are also scanned without terminal and encoding disguises (56506c1)
+- an IBAN written with hyphens or in lower case is found (28993c1)
+- a card number next to "Karte", "carte", "carta" or "tarjeta" is found, not only next to "card" (8f256a8)
+
+### Fixes
+
+- a German VAT ID without a VAT word and a company register number are no longer masked (c6184b4)
+
+### Other
+
+- Merge branch 'feat/rules-from-the-fork' into 'main' (b0b681d)
+- Merge branch 'docs/benchmarks-anyone-can-repeat' into 'main' (456c96b)
+
+## [0.6.17] - 2026-10-14
+
+### Fixes
+
+- the word for "password" in another language stays text as a locale value in a tool result (af47b7e)
+- the secret-hygiene scan reads files, commits and tool results as the tool hook does (0dbca9b)
+- a word after a label in a tool result or a file no longer blocks later prompts; later tool results still mask it (945de68)
+- a password of letters after a password label is redacted in tool results and files; a typed prompt keeps the rule of 0.6.16 (e0ee60c)
+
+### Other
+
+- Merge branch 'test/the-word-hunt-tests-use-the-fake-clipboard' into 'main' (3ea7c7b)
+- Merge branch 'fix/tool-results-take-more-passwords' into 'main' (575827a)
+
+## [0.6.16] - 2026-10-14
+
+### Fixes
+
+- the STS session token in X-Amz-Security-Token is redacted, also in a presigned URL (f3670a7)
+- a password label before a long run of letters scans in linear time, 320 KB in 0.7 s instead of 10 s (721306e)
+- a TOTP or HOTP seed after an otp, mfa or 2fa label is redacted (a46e38e)
+- a key after a secret label is redacted in XML elements, calls and short values, also after hmac, session, cookie and psk (3da6b7a)
+- the NTLM authenticate message, NATS nkey seeds, PASERK secret keys and PASETO tokens are redacted (9f2045d)
+- a password after a password label is redacted when it looks random, also in XML, SQL and PowerShell; words, paths, references and measures stay text (74b851d)
+- an Elasticsearch API key in an Authorization: ApiKey header is redacted (140c52c)
+- each key in a list after a secret label is redacted, such as "api_keys": ["…", "…"] (ea4d655)
+
+### Other
+
+- Merge branch 'fix/more-labelled-keys-and-url-credentials' into 'main' (fe741d3)
+
+## [0.6.15] - 2026-10-13
+
+### Fixes
+
+- one unusual betterleaks filter string can no longer switch off the whole ruleset (5237ca8)
+- no helper tool can hold the session open, and an image output is checked to its last byte (8917315)
+- a second curl -u or --user in the same command is redacted too (b6cee56)
+- a tool result with stored values is redacted faster (d52521e)
+- reading an image or a PDF is fast, and the shape check no longer damages the file (28b8137)
+- on macOS and Linux a slow check now blocks the output instead of letting it through (f2c7b8e)
+- a long line of AWS key ids or curl commands no longer stalls the check (1fa4fbc)
+- finds passwords and tokens in a JSON object inside a string, such as {\"password\":\"…\"} (d159fb7)
+- finds more passwords in commands and text: --password, mysql -p, Redis AUTH, .netrc and "my password is …" (32a729c)
+- text with umlauts is judged by the betterleaks filters as betterleaks does (b95e8b4)
+
+### Other
+
+- Merge branch 'fix/0.6.15-detector-and-hook-time' into 'main' (85d7ca4)
+- Merge branch 'refactor/the-kept-rules-are-maisecrets-own-rules' into 'main' (2d0b7d6)
+
+## [0.6.14] - 2026-10-12
+
+### Fixes
+
+- faster scans: only the gitleaks rules that betterleaks lacks stay (7083dac)
+
+### Other
+
+- Merge branch 'fix/only-the-gitleaks-rules-betterleaks-lacks-stay' into 'main' (b3c7473)
+
+## [0.6.13] - 2026-10-12
+
+### Features
+
+- secrets of about 200 more services, from betterleaks instead of gitleaks (baf8e64)
+
+### Other
+
+- Merge branch 'feat/18-the-detector-uses-the-betterleaks-rules' into 'main' (4859e60)
+
+## [0.6.12] - 2026-10-12
+
+### Fixes
+
+- the review of the #16 change: pipes, paths after a run verb, values after an option (ae39418)
+- the consent check reads the low findings left from #15 (bea15d5)
+- a test value hides only its own type, and %40 needs an address context (fb771c3)
+- a test value counts only for its own type, and %40 only where an address is expected (b16d6e6)
+- documented test values, percent-encoded emails and invalid SSNs (6432d2c)
+
+### Other
+
+- Merge branch 'fix/detector-gaps-from-public-benchmark' into 'main' (b7806b2)
+
+## [0.6.11] - 2026-10-10
+
+### Features
+
+- consent-report shows what the ssh consent check would ask on your own sessions (2ea0184)
+
+### Fixes
+
+- the consent check reads a package manager's exec, long xargs options and a find -exec clause (f757dc6)
+- the consent check reads a here-string into a shell, a trap's code and env -S (c018436)
+- the consent check reads a session name, a -- and a URL option where they stand, and fish code glued to its option (c5f7d22)
+- the consent check finds a container's program by its place and a program path by its directory (8d6dc0e)
+- the consent check reads a shell's arguments, a container's inner command and a launcher's program (a16f23f)
+- the consent check reads a container command, a continued argument list and AppleScript the way the shell does (60f58c3)
+- the consent check sees ssh as a path, after an escape and in fish or AppleScript code, and no longer after a substitution in an argument (291ce37)
+- consent-report names no host in a reason, and the check reads a few more launchers and lookups (034c520)
+- the consent check reads launchers past their flags and stops asking for a daemon, a package or a file named like ssh (d822281)
+- the consent check asks for a launcher or a subcommand it does not know, and no longer for git's option words in a message (7da266c)
+- the ssh consent check asks where a command starts ssh, not where a command mentions it (9a04d72)
+
+### Other
+
+- Merge branch 'fix/c21-asks-on-visible-executable-intent' into 'main' (b06ab19)
+
+## [0.6.10] - 2026-10-09
+
+### Breaking
+
+- no report form opens a browser or runs gh; the person files the issue in GitHub's form (4c91c53)
+
+### Features
+
+- every failure site records its code, and the launchers and the guard leave markers (4703c64)
+- /maisecrets:report incident shows the report to the person, also with a damaged store (327ef52)
+- hooks record their failures after the answer, and the hook always ends in time (5a53a88)
+- a local incident record with closed values, markers that follow nothing, and a report that sends nothing (3f908c0)
+
+### Fixes
+
+- without Python, run.cmd refuses every hook event in JSON with exit 0, so Codex no longer runs the tool (7e98099)
+- clear returns the plugin marker it removed also when the home cannot be listed (dd5e7b7)
+- run.cmd leaves its marker in its own hooks folder, with no child and no touch of the home (dc8d7b5)
+- run.cmd makes its marker in a detached child, so a stalled home cannot hold the hook (38fb21c)
+- code review round 1 - a winning watchdog writes no heartbeat before its exit, and markers never hold a hook (4f07b23)
+- one layer against a symlinked record, so its test can fail (c5617e8)
+
+### Security
+
+- a home the hook cannot search no longer lets a prompt through on Python 3.9 (e45ab0a)
+
+### Other
+
+- Merge branch 'feat/local-diagnostics-build' into 'main' (5c79d73)
+
 ## [0.6.9] - 2026-10-08
 
 ### Features

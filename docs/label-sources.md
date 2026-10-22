@@ -1,6 +1,6 @@
 # Sources of the credential label words
 
-Each word in `maisecrets/rules/labels/<language>.txt` (except `en.txt` and `de.txt`) comes from a
+Each word in `maisecrets/detection/rules/labels/<language>.txt` (except `en.txt` and `de.txt`) comes from a
 reviewed translation in a large open-source project. The table names the file and the string
 (msgid, key or English source string) that the word translates. A word with no source row is not
 in a file. The label files add the spellings people type for the same word: without diacritics
@@ -116,7 +116,7 @@ A label word that is also an ordinary word in running text gives false positives
 
 | Language | Word | Why |
 |---|---|---|
-| es | clave | An ordinary word: palabra clave (keyword), la clave del éxito. Only clave de acceso, clave secreta and clave de la API are labels. |
+| es | clave | An ordinary word: palabra clave (keyword), la clave del éxito. Only clave de acceso, clave secreta and clave de la API are labels. Measured again on 2026-10-16 with a value in the shape of a password after `clave:`: it stays out, because clave is also a code or an id (Mexico: `clave: CURP-ABCD010101`, `clave: LOTE-2024-001`, `clave: B2B-Ventas`), and a false hit blocks a typed prompt. |
 | es | secreto, cliente secreto | secreto alone is prose; cliente secreto (Nextcloud, Client secret) reads as a secret customer. |
 | it | chiave, segreto | Ordinary words: parola chiave (keyword). Only the labels of two or more words. |
 | it | parola d'ordine | No source uses it; Italian interfaces write password. |

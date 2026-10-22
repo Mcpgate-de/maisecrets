@@ -23,416 +23,22 @@ import time
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
+from .lazy_regex import LazyRx
 from .placeholder import display_for
 
-HOME = Path(os.environ.get("MAISECRETS_HOME", Path.home() / ".maisecrets"))
+# the home folder and the configuration live in home.py; these names stay importable from here
+from .home import (  # noqa: F401
+    CONFIG, CodedError, ConfigError, DEFAULT_CONFIG, HOME, LockTimeout, POLICY_PATHS, WrongHome, _CONFIG_CHOICES,
+    _CONFIG_TYPES, _DEFAULT_HOME, _LOCKS, _Lock, _SAFETY_KEYS, _STRICTNESS, _check_home, _check_types,
+    _keep_the_stricter, _lock_for, _looks_misspelled, _note_user_config, _old_region_key, _read_fallback,
+    _within_default_home, atomic_write, load_config, read_text_retry, windows_user_mismatch
+)
 INDEX = HOME / "index.json"
-CONFIG = HOME / "config.json"
 # The keychain namespace is per service name, not per vault home. A second home
 # (tests, the harness, a latency run) minted SECRET_c1 too and a cleanup deleted
 # the real SECRET_c1 (2026-09-26). So every home other than the default gets its
 # own service name.
-_DEFAULT_HOME = Path.home() / ".maisecrets"
 SERVICE = "maisecrets" if HOME == _DEFAULT_HOME else "maisecrets@" + hashlib.sha256(str(HOME).encode()).hexdigest()[:8]
-
-DEFAULT_CONFIG = {
-    "backend": "keychain",          # keychain (macOS) | windows-vault | encrypted-file (Linux) | jsonfile (test)
-    "report_url": "https://github.com/Mcpgate-de/maisecrets/issues",   # shown in the block notice
-    "ttl_seconds": {"default": 86400, "CARD": 3600},
-    "max_ttl_seconds": 30 * 86400,
-    "renew_on_use": True,
-    "scrub_transcript": True,
-    "block_at_mentions": True,
-    # README "Invisible characters": tag characters, variation-selector runs and bidi controls leave tool results
-    "strip_hidden_characters": True,
-    # Claude Code with mods (the mod): a prompt with a value goes through with placeholders; false blocks it
-    "rewrite_prompts": True,
-    "gateway_servers": [],           # MCP servers that resolve placeholders themselves (PROTOCOL §4); none by default
-    # country codes for the PII rules and the label languages; "auto" is the country of the system
-    # setting (maisecrets/regions.py). pii_regions is the old name and still read.
-    "regions": ["auto"],
-    "max_new_entries_per_result": 100,   # above this, a tool result is masked without storing more values
-    "resolve_in_files": True,        # Write/Edit content resolves a placeholder like an MCP argument
-    "shortcut": True,                # the first SessionStart names /maisecrets:shortcut once; it installs nothing
-    "ssh_via_sandbox": True,         # a value may go to ssh on stdin inside the Claude Code sandbox
-    "ssh_approval": "per-command",   # under rehydration "confirm": "per-session" is one confirm per value and session
-    "ssh_consent": False,            # every ssh-family command: a read runs, a write asks once per host (#8)
-    "ssh_host_groups": {},           # {"group": ["host", …]}: one ssh consent covers the whole group
-    "ssh_autonomous_hosts": [],      # hosts (or group names) where the AI writes over ssh without asking, always
-    "secret_destinations": "observe",  # observe: note where each stored secret is sent (destinations.py); off
-    "rehydration": "automatic",      # automatic | confirm | block: does maisecrets add a confirm (rehydration.py)
-    "guard": True,                   # a synced install registers the guard outside its folder (hooks/guard.py)
-    "pass_agent_reports": True,      # the report of a subagent of this session is model text: not blocked (hooks.py)
-    "tips": True,                    # a tip at session start, and a hint when a case for a setting first comes up
-    # the limiter (C7): a brake for a session that sends its own values out in bulk; the session rule (C4) keeps the
-    # rest of the store closed anyway. Replayed over five months of sessions, the busiest hour needed 67 values and
-    # 118 resolves; 25 and 60 would have stopped 3 of 178 sessions that used values (0.6.9)
-    "max_keys_per_session": 200,     # distinct values one session resolves in an hour
-    "max_resolves_per_hour": 1000,   # resolves in an hour, all sessions
-    "keep_purged_days": 30,          # metadata of an expired entry is deleted after this many days
-    "audit_max_lines": 2000,
-}
-
-# a machine-wide policy the administrator writes; its keys win over the user file and the
-# environment and cannot be changed from ~/.maisecrets (operator review, 2026-09-26)
-POLICY_PATHS = {
-    "Darwin": Path("/Library/Application Support/maisecrets/policy.json"),
-    "Windows": Path(os.environ.get("ProgramData", r"C:\\ProgramData")) / "maisecrets" / "policy.json",
-    "Linux": Path("/etc/maisecrets/policy.json"),
-}
-_CONFIG_TYPES = {
-    "backend": str, "report_url": (str, type(None)), "ttl_seconds": dict, "max_ttl_seconds": int,
-    "renew_on_use": bool, "scrub_transcript": bool, "block_at_mentions": bool, "rewrite_prompts": bool,
-    "strip_hidden_characters": bool,
-    "gateway_servers": list,
-    "regions": list, "pii_regions": list, "max_keys_per_session": int, "max_resolves_per_hour": int, "tips": bool,
-    "max_new_entries_per_result": int, "keep_purged_days": int, "audit_max_lines": int,
-    "allow_plaintext_store": bool, "resolve_in_files": bool, "shortcut": bool, "ssh_via_sandbox": bool,
-    "ssh_consent": bool, "ssh_host_groups": dict, "ssh_autonomous_hosts": list, "secret_destinations": str,
-    "ssh_approval": str, "rehydration": str, "guard": bool, "pass_agent_reports": bool,
-}
-
-
-def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
-    """Write via a per-process temp file and an atomic rename. A shared temp name
-    (``index.tmp``) let two hook processes running at once replace each other's file; the
-    second one then failed with FileNotFoundError and the hook blocked the tool call
-    (Codex with two plugin copies, 2026-09-26)."""
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        # Windows refuses to replace a file another process has open for reading (WinError 5
-        # in the 12-process test on windows-latest, 2026-09-26); a reader holds it for
-        # milliseconds, so retry briefly instead of failing the hook
-        for attempt in range(40):
-            try:
-                os.replace(tmp, path)
-                break
-            except PermissionError:
-                if attempt == 39:
-                    raise
-                time.sleep(0.05)
-    finally:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-
-
-def read_text_retry(path: Path, attempts: int = 40) -> str:
-    """Read a file that another hook process may be replacing right now. Windows raises
-    PermissionError for the reader while os.replace runs on the same name (the 12-process test
-    on windows-latest, 2026-09-27; the writer side got its retry on 2026-09-26). The window is
-    milliseconds, so retry briefly; the last attempt raises."""
-    for attempt in range(attempts):
-        try:
-            return path.read_text(encoding="utf-8")
-        except PermissionError:
-            if attempt == attempts - 1:
-                raise
-            time.sleep(0.05)
-    raise AssertionError("unreachable")
-
-
-def windows_user_mismatch() -> tuple[str, str] | None:
-    """(account the process runs as, account the environment names) when they differ on Windows, else None.
-
-    The Codex app runs a slash command as its sandbox user with the person's environment, so the store path points
-    into the person's profile. There such a command left the store folder with rights for the sandbox users and an
-    index.json the person could no longer read, and every later hook of the person failed (2026-10-01..05). A run
-    with an explicit MAISECRETS_HOME chose its store on purpose and is not checked."""
-    if os.name != "nt" or os.environ.get("MAISECRETS_HOME"):
-        return None
-    named = os.environ.get("USERNAME") or ""
-    try:
-        import ctypes
-        from ctypes import wintypes
-        size = wintypes.DWORD(257)
-        buf = ctypes.create_unicode_buffer(257)
-        if not ctypes.windll.advapi32.GetUserNameW(buf, ctypes.byref(size)):
-            return None
-        real = buf.value
-    except (OSError, AttributeError, ImportError):
-        return None
-    if named and real and real.lower() != named.lower():
-        return real, named
-    return None
-
-
-_LOCKS: dict = {}
-
-
-def _lock_for(path: Path) -> "_Lock":
-    """One lock object per path and process, shared by every Vault in the process: a second
-    flock on a second descriptor would wait for the first (measured: two Vault objects in one
-    process deadlocked)."""
-    key = str(path)
-    if key not in _LOCKS:
-        _LOCKS[key] = _Lock(path)
-    return _LOCKS[key]
-
-
-class LockTimeout(RuntimeError):
-    pass
-
-
-class _Lock:
-    """An exclusive lock per vault home, taken around each read-modify-write of the index and
-    released right after. Not held for a process's lifetime: a long-lived holder starved every
-    hook, and a Codex hook that times out is fail-OPEN (measured 2026-09-26). Re-entrant within
-    the process. A lock that cannot be taken within ``LOCK_DEADLINE`` raises, so the hook fails
-    closed with a reason instead of hanging into the client's timeout, which fails open."""
-    LOCK_DEADLINE = 6.0
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.fd = None
-        self.depth = 0
-
-    def __enter__(self):
-        self.depth += 1
-        if self.depth > 1:
-            return self
-        try:
-            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
-        except BaseException:
-            self.depth -= 1                  # no lock was taken: a later enter must try again (codex review)
-            raise
-        deadline = time.time() + self.LOCK_DEADLINE
-        try:
-            while True:
-                try:
-                    try:
-                        import fcntl
-                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    except ImportError:
-                        import msvcrt
-                        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-                    break
-                except OSError:
-                    if time.time() > deadline:
-                        raise LockTimeout(f"vault lock busy for {self.LOCK_DEADLINE:.0f}s ({self.path})")
-                    time.sleep(0.02)
-        except BaseException:
-            os.close(fd)
-            self.depth -= 1
-            raise
-        self.fd = fd
-        return self
-
-    def __exit__(self, *exc) -> None:
-        self.depth -= 1
-        if self.depth > 0 or self.fd is None:
-            return
-        try:
-            try:
-                import fcntl
-                fcntl.flock(self.fd, fcntl.LOCK_UN)
-            except ImportError:
-                import msvcrt
-                msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
-        except OSError:
-            pass
-        finally:
-            os.close(self.fd)
-            self.fd = None
-
-
-class ConfigError(RuntimeError):
-    """A config value of the wrong type; the message names the key, never a value."""
-
-
-_CONFIG_CHOICES = {"secret_destinations": ("observe", "off")}
-
-
-def _check_types(cfg: dict, source: str) -> None:
-    for key, want in _CONFIG_TYPES.items():
-        if key in cfg and (not isinstance(cfg[key], want) or (want is int and isinstance(cfg[key], bool))):
-            raise ConfigError(f"{source}: {key} has the wrong type")
-    for key, choices in _CONFIG_CHOICES.items():
-        # "obesrve" read as "not observe" and silently stopped the record (codex review of 0.6.7)
-        if key in cfg and cfg[key] not in choices:
-            raise ConfigError(f"{source}: {key} must be one of {', '.join(choices)}")
-    ttl = cfg.get("ttl_seconds")
-    if isinstance(ttl, dict) and not all(isinstance(v, int) for v in ttl.values()):
-        raise ConfigError(f"{source}: ttl_seconds values must be integers")
-
-
-def _old_region_key(layer: dict) -> dict:
-    """pii_regions (up to 0.4) named the Presidio regions with "generic" in the list. A layer that
-    sets it and not `regions` sets `regions` to the same countries."""
-    if "pii_regions" in layer and "regions" not in layer:
-        layer = dict(layer)
-        layer["regions"] = [r for r in layer["pii_regions"] if str(r).lower() != "generic"]
-    layer = {k: v for k, v in layer.items() if k != "pii_regions"}
-    return layer
-
-
-_STRICTNESS = {"automatic": 0, "confirm": 1, "block": 2}
-_SAFETY_KEYS = ("rehydration", "resolve_in_files", "ssh_via_sandbox", "ssh_consent")
-
-
-def _looks_misspelled(key: str) -> bool:
-    """A near miss of a safety key ("rehydraton"), not a longer key of a newer version that starts with
-    one ("rehydration_mcp"): an older plugin reading a newer policy only warns about that (review round 4)."""
-    import difflib
-    if any(key.startswith(k + "_") for k in _SAFETY_KEYS):
-        return False
-    return bool(difflib.get_close_matches(key, list(_SAFETY_KEYS), n=1, cutoff=0.8))
-
-
-def _keep_the_stricter(cfg: dict, parsed: dict) -> None:
-    """A user file ignored for a wrong type still said what it wanted: a stricter rehydration policy,
-    or a route switched off, stays; a looser one is the default anyway. A rehydration value that is
-    no policy is block (review, 2026-09-29: the fallback turned block into confirm); a list or an
-    object there raised TypeError and locked the client (review round 2)."""
-    want = parsed.get("rehydration", cfg["rehydration"])
-    if not isinstance(want, str) or want not in _STRICTNESS:
-        want = "block"
-        cfg["rehydration_fallback"] = True     # the setting is ours, not the file's: the refusal says so
-    if _STRICTNESS[want] > _STRICTNESS.get(cfg["rehydration"], 2):
-        cfg["rehydration"] = want
-    for key in ("resolve_in_files", "ssh_via_sandbox"):
-        if parsed.get(key) is False:
-            cfg[key] = False
-    if parsed.get("ssh_consent") is True:
-        cfg["ssh_consent"] = True
-
-
-def load_config() -> dict:
-    """Defaults, then ~/.maisecrets/config.json, then CLAUDE_PLUGIN_OPTION_<KEY> if a client passes
-    plugin options that way, then the machine policy file, whose keys win. The manifest declares
-    no `userConfig`: Claude Code 2.1.223 rejects a manifest with that key as invalid and then
-    loads NO hook at all (measured on Debian, 2026-09-26), and a guard that silently vanishes
-    on an older client is worse than a guard without a settings dialog. A wrong type raises
-    ConfigError with the key name: a silent AttributeError later locked the user out with no
-    hint at the config (review, 2026-09-26)."""
-    import copy
-    import platform as _platform
-    cfg = copy.deepcopy(DEFAULT_CONFIG)
-    cfg["config_warning"] = ""
-    try:
-        user = json.loads(CONFIG.read_text(encoding="utf-8"))
-        if not isinstance(user, dict):
-            raise ConfigError(f"{CONFIG.name} must hold one JSON object")
-        _check_types(user, CONFIG.name)
-    except FileNotFoundError:
-        user = {}
-    except OSError as exc:
-        # a file that exists and cannot be read may say block: it loosens nothing (review, 2026-09-29)
-        user = {}
-        cfg["config_warning"] = f"{CONFIG.name} cannot be read ({type(exc).__name__}) and was ignored"
-        cfg["rehydration"] = "block"
-        cfg["rehydration_fallback"] = True
-    except ValueError:
-        # the user file is advisory: a typo must not lock the user out of the client (review,
-        # 2026-09-26). The defaults are the strict values, so the fallback loosens nothing; the
-        # warning is shown at session start and in the block notice.
-        user = {}
-        cfg["config_warning"] = f"{CONFIG.name} is not valid JSON and was ignored"
-        # the file may have set block: an ignored file loosens nothing, so nothing is rehydrated until it is fixed
-        cfg["rehydration"] = "block"
-        cfg["rehydration_fallback"] = True
-    except ConfigError as exc:
-        cfg["config_warning"] = f"{exc}; the file was ignored"
-        if isinstance(user, dict):
-            _keep_the_stricter(cfg, user)
-            # the file still says what the person decided: no hint asks about a key they wrote (settings.py)
-            cfg["user_keys_ignored"] = sorted(k for k in user if k in _CONFIG_TYPES)
-        else:
-            # JSON that is no object cannot be read either (it may wrap a block): the same as invalid JSON
-            cfg["rehydration"] = "block"
-            cfg["rehydration_fallback"] = True
-        user = {}
-    unknown = sorted(k for k in user if k not in _CONFIG_TYPES)
-    if unknown:
-        # a key is named only when it is a typo of a real one: a value pasted into the file as a
-        # key went into the session-start message (invariant I1, 2026-09-28), and a value can have
-        # the shape of a key name
-        import difflib
-        named = [k for k in unknown if difflib.get_close_matches(k, list(_CONFIG_TYPES), n=1, cutoff=0.8)]
-        other = len(unknown) - len(named)
-        what = ", ".join(named + ([f"{other} more that are not near a known key"] if other else []))
-        cfg["config_warning"] = (cfg["config_warning"] + "; " if cfg["config_warning"] else "") + \
-            f"{CONFIG.name}: unknown key(s) {what} ignored"
-        user = {k: v for k, v in user.items() if k in _CONFIG_TYPES}
-        if any(_looks_misspelled(k) for k in named):
-            # "rehydraton": "block" is a stricter wish spelled wrong: dropping it would loosen. The file's
-            # own rehydration key must not undo it (review round 3: "resolve_in_file": false next to it)
-            user.pop("rehydration", None)
-            cfg["rehydration"] = "block"
-            cfg["rehydration_fallback"] = True
-    user = _old_region_key(user)
-    cfg.update(user)
-    # a key the user wrote is a decision, a missing one is not (maisecrets/settings.py): both read the same value
-    cfg["user_keys"] = sorted(set(user) | set(cfg.pop("user_keys_ignored", [])))
-    cfg["regions_from"] = "config.json" if "regions" in user else "default"
-    env = os.environ
-    backend = env.get("CLAUDE_PLUGIN_OPTION_BACKEND", "").strip()
-    if backend and backend != "auto":
-        cfg["backend"] = backend
-    regions = env.get("CLAUDE_PLUGIN_OPTION_PII_REGIONS", "").strip()
-    if regions:
-        cfg["regions"] = [r.strip().lower() for r in regions.split(",") if r.strip() and r.strip().lower() != "generic"]
-        cfg["regions_from"] = "plugin option"
-    ttl = env.get("CLAUDE_PLUGIN_OPTION_TTL_HOURS", "").strip()
-    if ttl:
-        try:
-            cfg.setdefault("ttl_seconds", {})["default"] = int(float(ttl) * 3600)
-        except ValueError:
-            pass
-    if env.get("CLAUDE_PLUGIN_OPTION_REPORT_URL", "").strip():
-        cfg["report_url"] = env["CLAUDE_PLUGIN_OPTION_REPORT_URL"].strip()
-    policy_path = POLICY_PATHS.get(_platform.system())
-    cfg["policy_keys"] = []
-    if policy_path is not None:
-        try:
-            policy = json.loads(policy_path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            policy = {}
-        except OSError as exc:
-            # an administrator's file that exists and cannot be read is not "no policy": it fails closed
-            # like a policy that is not valid JSON (review, 2026-09-29)
-            raise ConfigError(f"{policy_path} cannot be read ({type(exc).__name__})") from exc
-        except ValueError as exc:
-            raise ConfigError(f"{policy_path} is not valid JSON") from exc
-        if not isinstance(policy, dict):
-            # valid JSON of another shape was skipped silently: no policy applied at all
-            raise ConfigError(f"{policy_path} must hold one JSON object")
-        _check_types(policy, policy_path.name)
-        import difflib
-        unknown_policy = sorted(k for k in policy if k not in _CONFIG_TYPES and not k.startswith(("_", "$")))
-        policy = {k: v for k, v in policy.items() if k in _CONFIG_TYPES}
-        typo = [k for k in unknown_policy if _looks_misspelled(k)]
-        if unknown_policy:
-            # a key of a newer version or a management tool is ignored with a warning; "_" and "$" keys
-            # are comments and schema links
-            cfg["config_warning"] = (cfg["config_warning"] + "; " if cfg["config_warning"] else "") + \
-                f"{policy_path.name}: {len(unknown_policy)} unknown key(s) ignored" + \
-                ("; a safety key looks misspelled, rehydration is blocked until fixed" if typo else "")
-        if typo:
-            # an administrator's "rehydraton": "block" dropped silently would loosen; its intent is unknown
-            policy["rehydration"] = "block"
-            cfg["rehydration_fallback"] = True
-        elif "rehydration" in policy:
-            cfg["rehydration_fallback"] = False   # the administrator's setting, not our fallback
-        policy_keys = sorted(policy)
-        policy = _old_region_key(policy)
-        cfg.update(policy)
-        cfg["policy_keys"] = policy_keys
-        if "regions" in policy:
-            cfg["regions_from"] = "machine policy"
-    cfg["max_ttl_seconds"] = min(int(cfg.get("max_ttl_seconds", 30 * 86400)), 30 * 86400)
-    if cfg.get("backend") == "jsonfile" and not cfg.get("allow_plaintext_store", False):
-        # the plaintext store is for tests and the harness, which say so in their own config
-        raise ConfigError("backend jsonfile is the TEST store; set allow_plaintext_store to use it")
-    return cfg
 
 
 def describe_backend(backend) -> str:
@@ -493,6 +99,9 @@ class Entry:
     sessions: list = field(default_factory=list)  # sessions allowed to resolve the entry (see Vault.get)
     # a word that only a label rule found (letters only): replaced where it was found, never hunted in other texts
     weak: bool = False
+    # a word that a label rule took in a tool result or a file: hunted in later tool results, never in a typed prompt,
+    # where it would block every prompt that uses the word (field report on 0.6.16). Only a new entry gets it
+    quiet: bool = False
     # no purged_at field: from_meta drops it, so the proof below can remove the filter and
     # the owning test sees the TypeError of the field report again
 
@@ -527,11 +136,59 @@ DEFAULT_WORDS = frozenset({
     "geheim", "kennwort"})
 
 
-def is_weak(kind: str, value: str) -> bool:
-    """A value that only a label rule found and that is a known default word (DEFAULT_WORDS): replaced where it was
-    found, never hunted in other texts."""
-    from .detect import LABEL_RULES
-    return str(kind).startswith(LABEL_RULES) and value.strip().lower() in DEFAULT_WORDS
+_DICT_PART_RE = LazyRx(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
+
+
+def is_dictionary_word(value: str) -> bool:
+    """Whether every part of a value (split at _ - . and at a change to capitals) is an English word of the word list
+    or of the developer words of rules/term_stoplist.txt, also with a plural s. credential, response and
+    passwordLastChanged are; ppsmohsyeeub, Wartungsfenster and Kx7QpZr9 are not. A label rule that took such a word in
+    a tool result stores it weak (is_weak): one session masked a few ordinary words thousands of times a day in
+    code and prose, and a codex review prompt with one of them was refused (field report, 2026-10-17)."""
+    from .detect import english_words, reads_as_word
+    v = value.strip()
+    if not v or len(v) > 60 or not v.isascii() or not reads_as_word(v):
+        return False
+    words = english_words()
+    if not words:
+        return False   # no word list: hunt the value, as before
+    from .terms import stoplist
+    known = words | stoplist()
+    parts = [w.lower() for p in re.split(r"[_.-]+", v) if p for w in _DICT_PART_RE.findall(p)]
+    if not parts or "".join(parts) != re.sub(r"[_.-]+", "", v).lower():
+        return False
+    return all(len(w) >= 2 and (w in known or (w.endswith("s") and w[:-1] in known)
+                                or (w.endswith("es") and w[:-2] in known)) for w in parts)
+
+
+def code_word_spellings() -> list[str]:
+    """The spellings of a code word (detect.code_words) that a keyword rule stored before 0.5.15. The vault finds a
+    stored one by its fingerprint and reads no value (Vault.quiet_code_words)."""
+    from .detect import code_words
+    return [s for w in sorted(code_words()) for b in (w, w.capitalize(), w.upper()) for s in (b, b + ";")]
+
+
+def is_weak(kind: str, value: str, tool: bool = False) -> bool:
+    """A value that only a label rule found and that is a known default word (DEFAULT_WORDS), or, in a tool result or
+    a file (tool), an English word (is_dictionary_word): replaced where it was found, never hunted in other
+    texts. A word the person gives in a prompt is a chosen password and stays hunted (is_quiet)."""
+    from .registry import is_label
+    if not is_label(kind):
+        return False
+    if value.strip().lower() in DEFAULT_WORDS:
+        return True
+    return tool and is_dictionary_word(value)
+
+
+def is_quiet(kind: str, value: str, tool: bool) -> bool:
+    """A word of some language (detect.reads_as_word) that a label rule took in a tool result or a file: hunted in
+    later tool results as before (a weak default word is not hunted at all, as in 0.6.16), never in a typed prompt.
+    A word the person gives in a prompt stays hunted everywhere: a chosen word is a password there (review,
+    2026-09-29). A random value that reads like a word (about 3 in 100 of 8 small letters) is then not looked for in
+    a prompt that types it bare; it is still masked in every tool result. Only a new entry gets the mark."""
+    from .detect import reads_as_word
+    from .registry import is_label
+    return tool and is_label(kind) and reads_as_word(value.strip())
 
 
 # ---------------------------------------------------------------- backends --
@@ -548,7 +205,7 @@ class JsonFileBackend:
             return {}
         except ValueError:
             if for_write:
-                raise RuntimeError("vault store file unreadable; not overwritten")
+                raise CodedError("vault store file unreadable; not overwritten", "store.file-read", "parse")
             return {}
 
     def _save(self, data: dict) -> None:
@@ -588,14 +245,24 @@ def parse_keychain_dump(text: str, service: str) -> list[str]:
     return out
 
 
+_TIMEOUT_CODES = {"keychain": "store.timeout-keychain", "openssl": "store.timeout-openssl",
+                  "Credential Locker": "store.timeout-locker"}
+
+
 def _run_store(what: str, args: list[str], **kw) -> subprocess.CompletedProcess:
     """subprocess.run for a store call. A call that hits its timeout raised TimeoutExpired, which
     passed every `except RuntimeError` of the sweep, forget and wipe, and whose text lists the
     argv, the value included on the keychain's long-value path (CLI test agent, 2026-09-27)."""
+    if not kw.get("capture_output"):
+        # a store tool must never write to the hook's own stdout or stderr: the client reads the hook's answer there,
+        # and a child that keeps them open holds the client (Gate A of 0.6.15)
+        kw.setdefault("stdout", subprocess.PIPE)
+        kw.setdefault("stderr", subprocess.PIPE)
     try:
         return subprocess.run(args, **kw)
     except subprocess.TimeoutExpired:
-        raise RuntimeError(f"{what} call timed out") from None
+        raise CodedError(f"{what} call timed out", _TIMEOUT_CODES.get(what, "store.timeout-keychain"),
+                         "timeout") from None
 
 
 class KeychainBackend:
@@ -646,9 +313,9 @@ class KeychainBackend:
                                 "-w", stored] + (["-j", comment] if comment else []),
                                capture_output=True, timeout=5)
         if r.returncode != 0:
-            raise RuntimeError(f"keychain add failed (rc {r.returncode})")
+            raise CodedError(f"keychain add failed (rc {r.returncode})", "store.keychain-add", "rc", r.returncode)
         if self.get(key) != value:
-            raise RuntimeError("keychain add failed (read-back differs)")
+            raise CodedError("keychain add failed (read-back differs)", "store.keychain-readback", "shape")
 
     def get(self, key: str) -> str | None:
         r = _run_store(
@@ -730,7 +397,8 @@ class EncryptedFileBackend:
         r = _run_store("openssl", ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "100000", "-salt",
                             "-pass", f"file:{self.key_file}", *args], input=data, capture_output=True, timeout=5)
         if r.returncode != 0:
-            raise RuntimeError("openssl failed: " + r.stderr.decode(errors="ignore")[:200])
+            raise CodedError("openssl failed: " + r.stderr.decode(errors="ignore")[:200], "store.openssl", "rc",
+                             r.returncode)
         return r.stdout
 
     def _tag(self, blob: bytes) -> str:
@@ -746,7 +414,7 @@ class EncryptedFileBackend:
             # a damaged vault file must not be replaced by one with a single new entry: every
             # other value would be lost without a message (review, 2026-09-26)
             if for_write:
-                raise RuntimeError("vault store file unreadable; not overwritten")
+                raise CodedError("vault store file unreadable; not overwritten", "store.file-read", "parse")
             return {}
 
     def _save(self, data: dict) -> None:
@@ -786,7 +454,9 @@ class EncryptedFileBackend:
             return None   # tampered or foreign key: fail closed
         try:
             return self._openssl(["-d"], blob).decode()
-        except RuntimeError:
+        except RuntimeError as exc:
+            from . import incidents
+            incidents.note("store.decrypt", exc)
             return None
 
     def delete(self, key: str) -> None:
@@ -820,7 +490,7 @@ class WindowsVaultBackend:
                      f"$v.Add((New-Object Windows.Security.Credentials.PasswordCredential('{SERVICE}', '{key}', $p)))",
                      stdin=b64)
         if r.returncode != 0:
-            raise RuntimeError(f"PasswordVault add failed (rc {r.returncode})")
+            raise CodedError(f"PasswordVault add failed (rc {r.returncode})", "store.locker-add", "rc", r.returncode)
 
     def get(self, key: str) -> str | None:
         import base64
@@ -873,6 +543,7 @@ class WindowsVaultBackend:
 
 def make_backend(cfg: dict):
     """keychain on macOS; an openssl-encrypted file elsewhere; jsonfile only when asked (test mode)."""
+    _check_home()
     backend = cfg.get("backend", "keychain")
     if backend == "jsonfile":
         return JsonFileBackend()
@@ -946,10 +617,11 @@ class Vault:
             # next put would overwrite SECRET_c1 in the store. The file stays in place, so every
             # later call raises too (moving it away made the guard last one call; review,
             # 2026-09-26). `maisecrets repair` rebuilds the counters from the store.
-            raise RuntimeError(f"vault index unreadable ({INDEX.name}); nothing is stored or resolved until "
-                               f"`maisecrets repair` ran or the file was fixed by hand") from exc
+            raise CodedError(f"vault index unreadable ({INDEX.name}); nothing is stored or resolved until "
+                             f"`maisecrets repair` ran or the file was fixed by hand",
+                             "store.index-read", "parse") from exc
         if not isinstance(data, dict) or "entries" not in data:
-            raise RuntimeError("vault index has an unexpected shape")
+            raise CodedError("vault index has an unexpected shape", "store.index-shape", "shape")
         return data
 
     def _save_index(self) -> None:
@@ -975,26 +647,49 @@ class Vault:
     def fingerprint(self, value: str) -> str:
         return fingerprint(value, self.fp_key())
 
-    def live_fingerprints(self) -> dict[str, str]:
+    def live_fingerprints(self, prompt: bool = False) -> dict[str, str]:
         """fingerprint -> key for every entry whose value is still stored and may be hunted in any text. A weak entry
         is not: `DB_PASSWORD=postgres` stored `postgres`, and every later text with the word was redacted and every
-        prompt with it blocked, in every session, for a day (review, 2026-09-29)."""
+        prompt with it blocked, in every session, for a day (review, 2026-09-29). In a typed prompt (prompt=True) a
+        quiet entry is not hunted either (Entry.quiet)."""
         return {m["fingerprint"]: k for k, m in self._index["entries"].items()
-                if not m.get("purged") and not m.get("weak")}
+                if not m.get("purged") and not m.get("weak") and not (prompt and m.get("quiet"))}
+
+    @_mutating
+    def weaken_quiet_words(self) -> int:
+        """Mark weak the live quiet entries (a label rule took them in a tool result) that are English words
+        (is_dictionary_word). Before 0.6.38 such a word was hunted in every later tool result for a day. Reads
+        the value of each such entry once; a store that refuses the read leaves it as it is. Returns the count."""
+        todo = [k for k, m in self._index["entries"].items()
+                if m.get("quiet") and not m.get("weak") and not m.get("purged")]
+        n = 0
+        for key in todo:
+            try:
+                value = self.backend.get(key)
+            except RuntimeError as exc:
+                from . import incidents
+                incidents.note("store.mark-weak", exc)
+                continue
+            if value is not None and is_dictionary_word(value):
+                self._index["entries"][key]["weak"] = True
+                n += 1
+        return n
 
     @_mutating
     def mark_weak_entries(self) -> int:
         """Mark the weak entries a version before 0.5.15 stored without the mark (see Entry.weak). Reads the value of
         each unmarked label-rule entry once; a store that refuses the read leaves the entry unmarked for the next
         start. Returns the count marked weak."""
-        from .detect import LABEL_RULES
+        from .registry import is_label
         todo = [k for k, m in self._index["entries"].items()
-                if "weak" not in m and not m.get("purged") and str(m.get("kind", "")).startswith(LABEL_RULES)]
+                if "weak" not in m and not m.get("purged") and is_label(m.get("kind", ""))]
         n = 0
         for key in todo:
             try:
                 value = self.backend.get(key)
-            except RuntimeError:
+            except RuntimeError as exc:
+                from . import incidents
+                incidents.note("store.mark-weak", exc)
                 continue
             if value is None:
                 continue
@@ -1015,13 +710,15 @@ class Vault:
             e = Entry.from_meta(self._index["entries"][existing])
             if session and session not in e.sessions:
                 e.sessions.append(session)
+            e.quiet = False             # a value given outside a tool result: hunted in prompts again
             self._touch(e)
             return e
         e = self._put_new(value, type_, kind, session, ttl)
         self._save_index()
         return e
 
-    def _put_new(self, value: str, type_: str, kind: str, session: str | None, ttl: int | None) -> "Entry":
+    def _put_new(self, value: str, type_: str, kind: str, session: str | None, ttl: int | None,
+                 tool: bool = False) -> "Entry":
         fp = self.fingerprint(value)
         n = self._index["counters"].get(type_, 0) + 1
         self._index["counters"][type_] = n
@@ -1029,9 +726,12 @@ class Vault:
         now = time.time()
         ttl = min(ttl or self._ttl_for(type_), int(self.cfg.get("max_ttl_seconds", 30 * 86400)))
         e = Entry(key=key, type=type_, kind=kind, fingerprint=fp,
-                  display=display_for(type_, value), created=now, last_used=now,
+                  # a term (terms.py) stores its entity id, not the term: a display of that would mean nothing
+                  display=None if kind.startswith(("term:", "import:")) else display_for(type_, value),
+                  created=now, last_used=now,
                   expires=now + ttl, max_expires=now + int(self.cfg.get("max_ttl_seconds", 30 * 86400)),
-                  session=session, uses=0, sessions=[session] if session else [], weak=is_weak(kind, value))
+                  session=session, uses=0, sessions=[session] if session else [],
+                  weak=is_weak(kind, value, tool), quiet=is_quiet(kind, value, tool))
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
         self.backend.put(
             key, value,
@@ -1044,7 +744,8 @@ class Vault:
         return e
 
     @_mutating
-    def put_many(self, items: list[tuple[str, str, str]], session: str | None = None) -> list["Entry | None"]:
+    def put_many(self, items: list[tuple[str, str, str]], session: str | None = None,
+                 tool: bool = False) -> list["Entry | None"]:
         """Store many values in one lock, one sweep and one index save; a tool result with
         hundreds of addresses called put() per value and rewrote the growing index each time
         (measured: 1000 e-mails 8.7 s, above the watchdog; review, 2026-09-26). Above
@@ -1062,6 +763,11 @@ class Vault:
                 e = Entry.from_meta(self._index["entries"][existing])
                 if session and session not in e.sessions:
                     e.sessions.append(session)
+                if not tool:
+                    e.quiet = False     # a value the person gives in a prompt is hunted in prompts again
+                # a tool result keeps the mark of an existing entry. An entry without one (stored by an older version,
+                # or a mark an older process dropped) reads as quiet=False and stays hunted: its origin is unknown,
+                # and only a new entry from a tool result is known to come from one (final codex review of 0.6.17)
                 self._touch(e, save=False)
                 dirty = True
                 out.append(e)
@@ -1069,7 +775,7 @@ class Vault:
             if new >= cap:
                 out.append(None)
                 continue
-            out.append(self._put_new(value, type_, kind, session, None))
+            out.append(self._put_new(value, type_, kind, session, None, tool))
             new += 1
             dirty = True
             if new % 10 == 0:
@@ -1111,6 +817,20 @@ class Vault:
             return
         meta.setdefault("sessions", []).append(session)
         self._save_index()
+
+    def admit_many(self, keys, session: str | None) -> None:
+        """admit() for every key one text brought in, in one hold of the lock and one index write; nothing at all
+        when the session holds each key already. A hit in a tool result admitted its key alone, and each admit
+        re-read and rewrote the whole index: five stored names in one result cost 1.6 s on Python 3.9 with 6,000
+        values in the vault (measured 2026-10-12)."""
+        keys = [k for k in dict.fromkeys(keys) if k in self._index["entries"]]
+        if not session or all(session in (self._index["entries"][k].get("sessions") or []) for k in keys):
+            return
+        with self._exclusive():
+            for key in keys:
+                meta = self._index["entries"].get(key)
+                if meta is not None and session not in meta.get("sessions", []):
+                    meta.setdefault("sessions", []).append(session)
 
     @_mutating
     def get(self, key: str, session: str | None = None, human: bool = False) -> tuple[str | None, str]:
@@ -1250,6 +970,19 @@ class Vault:
             pass
 
     @_mutating
+    def record_server(self, keys: list[str], session: str | None, tool: str, context: str) -> str:
+        """Values a server gave (vault_refs.py), named `KEY@host`: the limiter for all of them together, then one
+        audit line each. They have no entry, so the session rule of the store does not apply; vault_refs does it."""
+        failed = self._limit_all(keys, session)
+        if failed:
+            return failed[0]
+        for key in dict.fromkeys(keys):
+            if not self._record(key, session, tool, context):
+                return "audit log not writable"
+        self._save_index()
+        return "ok"
+
+    @_mutating
     def record_resolve(self, key: str, session: str | None, tool: str, context: str) -> str:
         """For tools that need the value inline (MCP arguments): session rule + limiter + audit."""
         st = self.status(key, session)
@@ -1279,10 +1012,11 @@ class Vault:
         return [Entry.from_meta(m) for m in self._index["entries"].values()]
 
     @_mutating
-    def forget(self, key: str) -> str:
+    def forget(self, key: str, route: str = "cli") -> str:
         """Delete one entry at the user's request: the value from the store and the metadata
         from the index, fingerprint included. "ok", "unknown", or "store" when the store refused
-        (the entry then stays, so nothing looks deleted that is not)."""
+        (the entry then stays, so nothing looks deleted that is not). A deletion writes one
+        events.log line with the route that asked for it; the next session start names it."""
         meta = self._index["entries"].get(key)
         if meta is None:
             from . import destinations
@@ -1298,6 +1032,8 @@ class Vault:
         if fp and self._index["by_fingerprint"].get(fp) == key:
             del self._index["by_fingerprint"][fp]
         self._save_index()
+        from . import events
+        events.record_weakening("forget", key, route)      # the value is gone: a later text with it is not redacted
         from . import destinations
         # where a forgotten secret went is the person's to delete too; a record that could not be written is said
         self.destinations_kept = not destinations.forget([key])
@@ -1324,7 +1060,9 @@ class Vault:
                 tried += 1       # a refused delete costs time too, so it counts against the cap
                 try:
                     self.backend.delete(key)
-                except RuntimeError:
+                except RuntimeError as exc:
+                    from . import incidents
+                    incidents.note("store.expire", exc)
                     # one item that refuses to go (a locked keychain over SSH) must not block
                     # every hook; the entry stays unpurged and the next sweep tries again. It is
                     # not counted as purged: the value is still in the store.
@@ -1364,7 +1102,6 @@ class Vault:
         if not any(str(m.get("kind", "")).startswith("ds-keyword") and not m.get("purged") and not m.get("weak")
                    for m in entries.values()):
             return []   # no fingerprint key is made for a store that has no such entry
-        from .detect import code_word_spellings
         quieted = []
         for word in code_word_spellings():
             key = self._index["by_fingerprint"].get(self.fingerprint(word))
@@ -1410,7 +1147,9 @@ class Vault:
             pass
         deleted = 0
         for key in keys:
-            if key != FP_KEY_ENTRY:
+            # the fingerprint key and the vault reference keys (vault_refs.py) are no values: a new key would unlink
+            # every server
+            if key != FP_KEY_ENTRY and not key.startswith(("_maisecrets_vref_", "_maisecrets_vrel_")):
                 try:
                     self.backend.delete(key)
                     deleted += 1
@@ -1449,14 +1188,32 @@ def wipe_everything(cfg: dict, run_dir: str | None = None) -> tuple[int, list[st
         from . import destinations
         if not destinations.wipe():        # under its lock: a writer holding it would write the record back
             problems.append("destinations.json not deleted")
-        for name in ("index.json", "audit.log", "events.log", "hooks.log", ".announced"):
-            try:
-                (HOME / name).unlink()
-            except FileNotFoundError:
-                pass
-            except OSError:
-                problems.append(f"{name} not deleted")
-        dirs = [HOME / "pending", HOME / "run"] + ([Path(run_dir)] if run_dir else [])
+        from . import incidents
+        incidents.clear(HOME)              # the incident record, its aside, lock and temp files, the markers
+        # the names marked with {{…}} and the term index (terms.py); terms.txt is the person's list and stays
+        # under the terms lock too (order: this lock, then the terms lock; a terms writer never takes this one): a
+        # proposal or a mark written at the same time came back after the wipe (codex verification of block 2)
+        def unlink(names: tuple) -> None:
+            for name in names:
+                try:
+                    (HOME / name).unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    problems.append(f"{name} not deleted")
+        # the index of the imports (values.py) is built again from them; the imports are the person's, as terms.txt
+        unlink(("index.json", "audit.log", "events.log", "hooks.log", ".announced", ".values-cache"))
+        term_files = ("terms.marked.json", ".terms-cache", "terms.suggested.txt")
+        try:
+            with _lock_for(HOME / ".terms.lock"):
+                unlink(term_files)
+        except LockTimeout:
+            # another maisecrets process held the terms lock: say what is left and how to finish, never success
+            problems.append(f"{', '.join(term_files)} not deleted (another maisecrets process held the terms lock; "
+                            "run the wipe again)")
+        # vault-refs: the server tokens seen and sent, the key ids and the endpoints (vault_refs.py); its keys
+        # are in the store
+        dirs = [HOME / "pending", HOME / "run", HOME / "vault-refs"] + ([Path(run_dir)] if run_dir else [])
         for d in dirs:
             if d.is_dir():
                 for f in d.iterdir():

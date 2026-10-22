@@ -15,7 +15,7 @@ def load():
     if sys.version_info < (3, 9):
         raise SystemExit("secret-hygiene needs Python 3.9 or newer.")
     for base in (HERE, *list(HERE.parents)[:3]):
-        if (base / "maisecrets" / "detect.py").is_file():
+        if (base / "maisecrets" / "detection" / "core.py").is_file():
             if str(base) not in sys.path:
                 sys.path.insert(0, str(base))
             from maisecrets import detect  # noqa: E402
@@ -47,15 +47,17 @@ CHUNK_OVERLAP = 60     # longer than a PEM key block, so a match on a chunk bord
 SMALL = 200_000
 
 
-def scan_text(detect, text: str, enabled: set | None = None) -> list:
+def scan_text(detect, text: str, enabled: set | None = None, channel: str = "tool") -> list:
     """detect.scan for text of any size. The detector runs a rule only when one of its keywords
     occurs in the text; in a 28 MB history nearly every keyword occurs somewhere, so nearly all
     267 rules ran over everything (71 s for 217 commits, 2026-09-27). Scanned in overlapping line
     chunks, a rule runs only where its keyword is near: three times faster, and on 6 MB of real
     history the same secrets (only three postcodes, whose context word sat outside the chunk,
-    were lost; this skill reports secrets unless --pii is given)."""
+    were lost; this skill reports secrets unless --pii is given). channel "tool": a file, a commit or a
+    tool result, where a password of letters after a password label counts (detect.scan); "prompt" for a typed
+    prompt."""
     if len(text) < SMALL:
-        return detect.scan(text, enabled)
+        return detect.scan(text, enabled, channel)
     import dataclasses
     lines = text.split("\n")
     starts = [0]
@@ -67,7 +69,7 @@ def scan_text(detect, text: str, enabled: set | None = None) -> list:
         j = min(len(lines), i + CHUNK_LINES)
         a = starts[i]
         piece = text[a:starts[j] - 1] if j < len(lines) else text[a:]
-        for m in detect.scan(piece, enabled):
+        for m in detect.scan(piece, enabled, channel):
             key = (m.start + a, m.end + a)
             if key not in seen:
                 seen[key] = dataclasses.replace(m, start=m.start + a, end=m.end + a)

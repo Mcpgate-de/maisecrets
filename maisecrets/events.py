@@ -1,17 +1,19 @@
 """Detection events for bug reports: what was found (kind, type, length), where (hook,
 client), under which version. Never a value, never a display. ``maisecrets report`` turns
-the last event into a prefilled GitHub issue URL."""
+the last event into a prefilled GitHub issue URL. The same file holds one line per protection
+that was loosened, which the next session start names to the person."""
 from __future__ import annotations
 
 import json
 import os
 import platform
+import re
 import sys
 import time
 import urllib.parse
 from pathlib import Path
 
-from .vault import HOME
+from .home import HOME
 
 EVENTS = HOME / "events.log"
 KEEP = 200
@@ -38,42 +40,126 @@ def record(hook: str, client: str, entries: list, outcome: str = "") -> None:
             "hits": [{"key": e.key, "type": e.type, "kind": e.kind} for e in entries],
             **({"outcome": outcome} if outcome else {}),
         })
-        old: list[str] = []
-        if EVENTS.exists():
-            old = EVENTS.read_text(encoding="utf-8").splitlines()
-        lines = old + [line]
-
-        def removal_only(text: str) -> bool:
-            try:
-                obj = json.loads(text)
-            except ValueError:
-                return False
-            hits = obj.get("hits") if isinstance(obj, dict) else None
-            # a line of another shape is kept and never breaks the record (Opus review, 2026-10-06)
-            return (isinstance(hits, list) and bool(hits)
-                    and all(isinstance(h, dict) and h.get("type") == "HIDDEN" for h in hits))
-        # removals of invisible characters go first, the new one too, so they never push a detection out
-        while len(lines) > KEEP:
-            del lines[next((i for i, x in enumerate(lines) if removal_only(x)), 0)]
-        fd = os.open(EVENTS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
+        _append(line)
     except OSError:
         pass
 
 
-def load(n: int = 20) -> list[dict]:
+def _parsed(text: str) -> dict:
     try:
-        lines = EVENTS.read_text(encoding="utf-8").splitlines()[-n:]
+        obj = json.loads(text)
+    except ValueError:
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def _append(line: str) -> None:
+    old: list[str] = []
+    if EVENTS.exists():
+        # a broken byte in the log must not stop the record (Gate B of 0.6.21)
+        old = EVENTS.read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = old + [line]
+
+    def removal_only(text: str) -> bool:
+        hits = _parsed(text).get("hits")
+        # a line of another shape is kept and never breaks the record (Opus review, 2026-10-06)
+        return (isinstance(hits, list) and bool(hits)
+                and all(isinstance(h, dict) and h.get("type") == "HIDDEN" for h in hits))
+    # removals of invisible characters go first, the new one too, so they never push a detection out; a loosened
+    # protection goes last, so the next session start can still name it
+    while len(lines) > KEEP:
+        drop = next((i for i, x in enumerate(lines) if removal_only(x)), None)
+        if drop is None:
+            drop = next((i for i, x in enumerate(lines) if "weakened" not in _parsed(x)), 0)
+        del lines[drop]
+    fd = os.open(EVENTS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def load(n: int = 20) -> list[dict]:
+    """The last n detection events; a line about a loosened protection is not one."""
+    try:
+        lines = EVENTS.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return []
     out = []
     for ln in lines:
         try:
-            out.append(json.loads(ln))
+            obj = json.loads(ln)
         except ValueError:
             continue
-    return out
+        if isinstance(obj, dict) and "weakened" not in obj:
+            out.append(obj)
+    return out[-n:] if n > 0 else []
+
+
+# ------------------------------------------------------------ weakenings --
+# Each action that loosens a protection writes one line: a setting changed in the looser direction, a value
+# forgotten. A wipe deletes events.log with the rest (offboarding). The line names the time, the kind, the key or
+# setting (never a value) and the route that asked for it. The next session start names them to the person in one
+# sentence and marks them as shown. Any
+# process of the user can change the file too (docs/THREAT-MODEL.md, C22): it makes an ordinary agent's action
+# visible, it does not stop one that evades.
+ROUTES = ("typed prompt", "slash command", "cli")
+_SHOWN = HOME / ".weakenings-shown"
+_NAME_RE = re.compile(r"[^A-Za-z0-9_.:@-]")
+
+
+def record_weakening(kind: str, name: str, route: str) -> None:
+    """One events.log line for an action that loosened a protection. Never raises: the action is done already."""
+    try:
+        HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            old = [_parsed(x) for x in EVENTS.read_text(encoding="utf-8", errors="replace").splitlines()]
+        except FileNotFoundError:
+            old = []
+        last = max((e["t"] for e in old if "weakened" in e and isinstance(e.get("t"), int)), default=0)
+        _append(json.dumps({
+            # a number that only grows: two lines in one clock tick must not share it, or the mark of the first
+            # hides the second
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()), "t": max(time.time_ns(), last + 1),
+            "weakened": kind, "name": _NAME_RE.sub("", str(name))[:64],
+            "route": route if route in ROUTES else "other", "version": plugin_version(),
+        }))
+    except (OSError, ValueError):
+        pass
+
+
+def _label(e: dict) -> str:
+    kind, name = e.get("weakened"), e.get("name", "?")
+    if kind == "setting":
+        return f"setting {name}"
+    if kind == "forget":
+        return f"forget {name}"
+    return f"{kind} {name}"
+
+
+def weakenings_since_last_start() -> str | None:
+    """One sentence for the person that lists the protections loosened since the last session start, or None.
+    The lines it names are marked as shown; a mark that cannot be written names them again next time."""
+    try:
+        shown = int(_SHOWN.read_text(encoding="utf-8").strip() or 0)
+    except (OSError, ValueError):
+        shown = 0
+    try:
+        lines = EVENTS.read_text(encoding="utf-8", errors="replace").splitlines()
+    except (OSError, ValueError):
+        return None
+    new = [e for e in map(_parsed, lines) if e.get("weakened") and isinstance(e.get("t"), int) and e["t"] > shown]
+    if not new:
+        return None
+    try:
+        atomic = _SHOWN.with_name(_SHOWN.name + ".tmp")
+        atomic.write_text(repr(max(e["t"] for e in new)) + "\n", encoding="utf-8")
+        os.replace(atomic, _SHOWN)
+    except OSError:
+        pass
+    named = ", ".join(f"{_label(e)} ({e.get('route', 'other')})" for e in new[:5])
+    more = f", and {len(new) - 5} more in {EVENTS.name}" if len(new) > 5 else ""
+    was = "protection was" if len(new) == 1 else "protections were"
+    return (f"maisecrets: since the last session start, {len(new)} {was} loosened: {named}{more}. If you did not "
+            "do this, check /maisecrets:settings and /maisecrets:list.")
 
 
 def issue_url(event: dict, note: str = "") -> str:
@@ -87,7 +173,7 @@ def generic_issue_url(kind: str, text: str) -> str:
 def tracker() -> str | None:
     """The configured `report_url`: a policy can point it to its own tracker, or set null to turn
     reporting off. The report ignored it and always used ISSUES_URL (found 2026-09-28)."""
-    from .vault import load_config
+    from .home import load_config
     url = load_config().get("report_url", ISSUES_URL)
     return url.strip() or None if isinstance(url, str) else None
 
@@ -161,56 +247,3 @@ def generic_issue_parts(kind: str, text: str) -> tuple[str, str, str]:
         "_Prepared by `maisecrets report`; it carries no value._",
     ])
     return title, body, label
-
-
-def create_with_gh(title: str, body: str, label: str) -> str | None:
-    """Create the issue with the GitHub CLI when it is installed and logged in; the URL of the new
-    issue, or None. Arguments as a list and the body on stdin: no shell reads the text."""
-    import shutil
-    import subprocess
-    gh = shutil.which("gh")
-    repo = github_repo(tracker())
-    if not gh or not repo:
-        return None
-    # the host and the repository come from report_url alone: GH_HOST or GH_REPO in the environment
-    # sent the issue to another host (Codex review, 2026-09-28)
-    env = {k: v for k, v in os.environ.items() if k not in ("GH_HOST", "GH_REPO")} | {"GH_HOST": "github.com"}
-    base = [gh, "issue", "create", "-R", f"github.com/{repo}", "--title", title, "--body-file", "-"]
-    for argv in (base + ["--label", label], base):   # the label may not exist in the repo
-        try:
-            r = subprocess.run(argv, input=body, capture_output=True, text=True, timeout=60, env=env)
-        except (OSError, subprocess.TimeoutExpired):
-            return None
-        if r.returncode == 0 and r.stdout.strip():
-            return r.stdout.strip().splitlines()[-1]
-    return None
-
-
-def has_local_browser(env=None) -> bool:
-    """A browser opens where the person sits only on a local desktop. Over ssh, `open` or
-    `xdg-open` start it on the remote machine, and without a display xdg-open fell back to w3m,
-    which took over the Claude Code terminal (feedback on 0.5.2, 2026-09-28)."""
-    env = os.environ if env is None else env
-    if any(env.get(k) for k in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")):
-        return False
-    if platform.system() in ("Darwin", "Windows"):
-        return True
-    return bool(env.get("DISPLAY") or env.get("WAYLAND_DISPLAY"))
-
-
-def open_in_browser(url: str) -> bool:
-    import subprocess
-    if not has_local_browser():
-        return False
-    # no terminal for the opener: a text browser it picks cannot take over the session
-    quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
-    try:
-        if platform.system() == "Darwin":
-            subprocess.run(["open", url], check=True, timeout=5, **quiet)
-        elif platform.system() == "Windows":
-            os.startfile(url)  # type: ignore[attr-defined]
-        else:
-            subprocess.run(["xdg-open", url], check=True, timeout=5, **quiet)
-        return True
-    except Exception:  # noqa: BLE001 - any failure just means "print the link"
-        return False

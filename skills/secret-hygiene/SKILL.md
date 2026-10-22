@@ -1,6 +1,6 @@
 ---
 name: secret-hygiene
-description: Protect secrets from the AI and clean up those that already leaked. Use when the user wants to protect passwords, keys or personal data from the AI or to install maisecrets; when the user asks whether a repository, its git history, a file or their past AI agent sessions contain passwords, API keys, tokens or private keys; when the user says a key or password was pasted into a chat, committed, pushed, logged or shared; or when the user wants a log, config or stack trace made safe to post in an issue, ticket or chat. Never shows a secret value.
+description: Protect secrets from the AI and clean up those that already leaked. Use when the user wants to protect passwords, keys or personal data from the AI or to install maisecrets; when the user asks whether a repository, its git history, a file or their past AI agent sessions contain passwords, API keys, tokens or private keys; when the user says a key or password was pasted into a chat, committed, pushed, logged or shared; when the user wants a log, config or stack trace made safe to post in an issue, ticket or chat; or when you are about to read a file full of secrets, such as a password export, a .har recording, a .vcf or an .ics file; or when a placeholder such as ⟦EMAIL_c1⟧ must go into a document or a file. Never shows a secret value.
 ---
 
 # Secret hygiene
@@ -63,6 +63,28 @@ default prompt of this skill is not a yes: make the offer and wait. Then:
 - The scripts need Python 3.9 or newer (the stock python3 of macOS works). They live in `scripts/` next to this file; in
   Claude Code that folder is `${CLAUDE_SKILL_DIR}/scripts`.
 
+## Put a placeholder into a document or a file
+
+A placeholder such as `⟦EMAIL_c1⟧` stands for a value that maisecrets keeps on this computer.
+When the user asks for that value in a PDF, a .docx, a page or another file, put the value in
+through the placeholder. Do not ask the user to type the value in.
+
+1. Write the generator as a script file, for example `make_pdf.py`.
+2. Give the placeholder to the script as an argument, and run it: `python3 make_pdf.py ⟦EMAIL_c1⟧`.
+   The shell reads the value when the command runs. The script reads it from `sys.argv[1]`.
+3. Or put the placeholder into the content of the file: Write or Edit in Claude Code, apply_patch
+   in Codex. The file on disk gets the value.
+
+On Windows, step 2 does not work in a PowerShell command or in any shell command of Codex:
+there a placeholder is refused. (The Bash tool of Claude Code in Git Bash takes it.) Use step 3 there: write a text file with the placeholder alone
+on a line (for example `value.txt`), let the script read the value from that file, and then
+run the script with no placeholder in the command. A value in program code is parsed as code,
+so put the placeholder into the script itself only where a quote or a backslash cannot break it.
+
+Inline code (`python3 -c`, `node -e`) and a quoted heredoc (`<<'EOF'`) cannot take a value:
+maisecrets stops the command and names this route. You keep seeing the placeholder, also when
+you read the file again.
+
 ## Check a repository
 
 1. Scan the files first: `python3 scripts/scan_secrets.py <repo>`. Add `--pii` when the user
@@ -91,7 +113,7 @@ default prompt of this skill is not a yes: make the offer and wait. Then:
      (`git filter-repo`) is a second step; it needs a force push and every collaborator must
      clone again.
    - The value is a test fixture or a placeholder: say so, and suggest a clearly fake value.
-6. Suggest a guard against the next leak: a pre-commit secret scan (for example gitleaks),
+6. Suggest a guard against the next leak: a pre-commit secret scan (for example betterleaks, the successor of gitleaks),
    and the maisecrets plugin for the agent itself.
 
 ## Check what the AI agents already received
@@ -135,6 +157,32 @@ screenshot. It needs no shell, so it also works in a chat without tools.
 8. Then clean up, each step only after the user's yes: remove the value from the file or
    the history (see "Check a repository"), ask the chat or ticket owner to delete the
    message, and update every place that uses the new value.
+
+## Before you read a file full of secrets
+
+Some files hold secrets by their nature: a password export (`passwords.csv`, `logins.csv`,
+a Bitwarden, KeePass, 1Password or LastPass export), a browser recording (`.har`: cookies
+and login tokens), a contact or calendar export (`.vcf`, `.ics`), a key file. If you read
+one, every value in it goes to the AI provider. The hooks replace only what their rules find.
+
+When the user asks you to read such a file, or a file turns out to be one (its name, its
+header row, or a first look that shows passwords, tokens or many personal records):
+
+1. Do not open it, and do not read more of it. Stop and offer a masked copy:
+
+   > This looks like a <password export / HAR recording / contact list>. If I read it, every
+   > value in it goes to the AI provider. I can make a masked copy first and read only that.
+   > Shall I?
+
+2. If the user says yes, run `python3 scripts/redact_copy.py <file>`. It writes
+   `<name>.redacted<ext>` next to the original. It reads a password export by its header
+   row and its file name, and every cookie and credential header of a HAR recording.
+3. Read only the copy, never the original. Tell the user the path of the copy, and pass on
+   what the script says it does NOT replace.
+4. If the user says no, do not read the file. Ask what they need from it.
+
+If you already read part of such a file, say so. Treat what you read as received by the
+provider (see "Contain a leak").
 
 ## Make a file safe to share
 

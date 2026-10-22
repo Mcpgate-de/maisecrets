@@ -12,6 +12,8 @@ Events:
 """
 from __future__ import annotations
 
+import dataclasses
+import functools
 import html
 import json
 import os
@@ -22,12 +24,14 @@ import time
 import sys
 from typing import Any
 
-from . import detect, rehydration
+from . import check_value, detect, incidents, rehydration, term_files, value_files
+from .lazy_regex import LazyRx as _LazyRx
 from .placeholder import KEY_RE, find_refs
+from . import vault as vault_mod
 from .vault import ConfigError, Vault, load_config
 
 # a Windows path carries a drive letter and backslashes: @C:\Users\x\.env
-AT_MENTION_RE = re.compile(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
+AT_MENTION_RE = _LazyRx(r"(?<![\w@])@(?P<path>[\w./~\\:-]+)")
 
 
 # ---------------------------------------------------------------- helpers --
@@ -80,9 +84,16 @@ def _clipboard(text: str) -> bool:
             cmd, data = ["clip"], text.encode("utf-16-le")
         else:
             cmd = ["xclip", "-selection", "clipboard"]
-        subprocess.run(cmd, input=data, check=True, timeout=_CLIPBOARD_TIMEOUT)
+        # xclip stays in the background to serve the selection: with the hook's stdout and stderr it held the
+        # client's pipe open after the hook ended (Gate A of 0.6.15). A child of the hook never gets those streams
+        subprocess.run(cmd, input=data, check=True, timeout=_CLIPBOARD_TIMEOUT,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        # a missing tool and an SSH session are normal (a headless Linux, a remote shell): no incident
+        if not isinstance(exc, FileNotFoundError) and not any(
+                os.environ.get(k) for k in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")):
+            incidents.note("prompt.clipboard", exc)
         return False
 
 
@@ -105,12 +116,18 @@ def _clipboard_read() -> str:
         return ""
 
 
-def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str | None) -> tuple[str, list]:
+def _replace(text: str, matches: list[detect.Match], vault: Vault, session: str | None,
+             tool: bool = False) -> tuple[str, list]:
     """Replace every match with its reference, right to left so offsets hold. Keys are minted in
     text order, in one vault transaction; above the per-result cap a value is masked as
-    ⟦TYPE⟧ without a key (it is not stored and cannot be resolved)."""
+    ⟦TYPE⟧ without a key (it is not stored and cannot be resolved). tool: the text is a tool result
+    or a file, where a word after a label is stored weak (vault.is_weak)."""
     ordered = sorted(matches, key=lambda x: x.start)
-    entries = vault.put_many([(m.value, m.type, m.kind) for m in ordered], session=session)
+    # a term (terms.py) goes into the store as its entity id: every spelling gets the entity's one placeholder, and
+    # the store never holds the term. An imported value (values.py) goes in as its import id and value id
+    entries = vault.put_many([(term_files.store_value(m.kind) if term_files.is_term_kind(m.kind)
+                               else value_files.store_value(m.kind) if value_files.is_import_kind(m.kind) else m.value,
+                               m.type, m.kind) for m in ordered], session=session, tool=tool)
     out = text
     for m, e in sorted(zip(ordered, entries), key=lambda me: me[0].start, reverse=True):
         out = out[: m.start] + (e.ref if e is not None else f"⟦{m.type}⟧") + out[m.end:]
@@ -221,8 +238,9 @@ def _scrub_transcript_later(path: str, values: list[str], refs: list[str], secon
                                       "bases": bases, "session": session or "", "hidden": hidden}).encode())
         child.stdin.close()
         return child          # the tests wait for it; the hooks never do
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
         _debug("scrub-later: could not start")
+        incidents.note("scrub.start", exc)
     return None
 
 
@@ -378,8 +396,8 @@ def _scrub_transcript(path: str, values: list[str], refs: list[str]) -> bool:
         return False
 
 
-_SESSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
-_KEY_RE = re.compile(KEY_RE)
+_SESSION_ID_RE = _LazyRx(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+_KEY_RE = _LazyRx(KEY_RE)
 
 
 def _pending_path(session: str | None):
@@ -399,8 +417,8 @@ def _save_pending(rewritten: str, session: str | None) -> None:
         fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(rewritten)
-    except OSError:
-        pass
+    except OSError as exc:
+        incidents.note("prompt.pending", exc)
 
 
 def take_pending(session: str | None = None) -> str | None:
@@ -431,7 +449,7 @@ def take_pending(session: str | None = None) -> str | None:
     return text
 
 
-PRIMER = (
+_PRIMER_HEAD = (
     # Written as what to do, not as a list of what is refused: a primer of prohibitions next to an
     # ordinary ops request (base64, sudo) read like an attempt to get around a control, and a model
     # safeguard paused the session (field report on 0.5.8, 2026-09-28)
@@ -440,23 +458,63 @@ PRIMER = (
     "value in when the call runs. In an MCP tool argument and in the content of Write, Edit, MultiEdit or "
     "NotebookEdit it goes in at call time; WebFetch and a subagent prompt keep it as plain text. In Bash, "
     "give it as a plain argument, inside '…' or \"…\", or in an unquoted heredoc; the shell reads the value "
-    "when the command runs. For awk, pass it as V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. To give a value to a "
-    "remote host, pipe it on stdin to the command that reads it, for example "
-    "printf '%s' ⟦KEY⟧ | ssh host 'sudo zgrep -F -f - /var/log/app.log' (inside the Claude Code sandbox, "
-    "one host per command). A form that would run the value as code or change it "
-    "(a nested shell, eval, backticks, $'…', a quoted heredoc, an encoder, a slice, set -x) gets an answer "
-    "that names a form that works. The value stays with the user: to use it, use the placeholder; the user "
-    "manages the stored values and the settings. When the user asks for the value in a file or a command, "
-    "put the placeholder there as they asked. In test data, write values that name themselves (testpass, "
-    "my-test-token), addresses at example.com and placeholders such as <your-token>: maisecrets leaves them "
-    "alone, and a password in a test file is taken for a fixture."
+    "when the command runs. For awk, pass it as V=⟦KEY⟧ awk '… ENVIRON[\"V\"] …'. "
 )
+# the document route: on POSIX and in Git Bash the shell reads the value for a script argument
+_PRIMER_DOCUMENT = (
+    "To put a value into a document or a generated file (a PDF, a .docx, a page), save the generator as a "
+    "script file and run it with the placeholder as its argument, for example python3 make_pdf.py ⟦KEY⟧, "
+    "or put the placeholder into the file content with Write, Edit or apply_patch; the file on disk gets "
+    "the value, and you keep the placeholder. "
+)
+# on Windows a placeholder in a PowerShell command, and in every shell command of Codex, is refused, so the
+# argument route cannot work there; the file tools take the value (field report, Codex on Windows, 2026-10-16).
+# A text file first: a value in program code is parsed as code, the reason inline code is refused (Gate B)
+_PRIMER_DOCUMENT_WINDOWS = (
+    "To put a value into a document or a generated file (a PDF, a .docx, a page), write a text file with the "
+    "placeholder alone on a line (for example value.txt) with Write, Edit or apply_patch, and let the generator "
+    "script read the value from that file; the file on disk gets the value, and you keep the placeholder. Then "
+    "run the script with no placeholder in the command. Put the placeholder into program code only where a "
+    "quote or a backslash in the value cannot change the code. "
+)
+_PRIMER_TAIL = (
+    "To give a value to a remote host, pipe it on stdin to the command that reads it, for example printf "
+    "'%s' ⟦KEY⟧ | ssh host 'sudo zgrep -F -f - /var/log/app.log' (inside the Claude Code sandbox, one "
+    "host per command). A form that would run the value as code or change it (a nested shell, eval, "
+    "backticks, $'…', a quoted heredoc, an encoder, a slice, set -x) gets an answer that names a form "
+    "that works. The value stays with the user: to use it, use the placeholder; the user manages the "
+    "stored values and the settings. When the user asks for the value in a file or a command, put the "
+    "placeholder there as they asked. In test data, write values that name themselves (testpass, "
+    "my-test-token), addresses at example.com and placeholders such as <your-token>: maisecrets leaves "
+    "them alone, and a password in a test file is taken for a fixture."
+)
+PRIMER = _PRIMER_HEAD + _PRIMER_DOCUMENT + _PRIMER_TAIL
+# on Windows a shell command takes a value only in the Bash tool of Claude Code (Git Bash)
+_PRIMER_HEAD_WINDOWS = _PRIMER_HEAD.replace(
+    "In Bash, give it as a plain argument",
+    "On Windows, a placeholder in a PowerShell command, and in any shell command of Codex, is refused. In the "
+    "Bash tool of Claude Code (Git Bash), give it as a plain argument").replace("For awk, pass it", "For awk "
+                                                                                "in Git Bash, pass it")
+_PRIMER_TAIL_WINDOWS = _PRIMER_TAIL.replace("To give a value to a remote host", "In Git Bash, to give a value "
+                                                                              "to a remote host")
+PRIMER_WINDOWS = _PRIMER_HEAD_WINDOWS + _PRIMER_DOCUMENT_WINDOWS + _PRIMER_TAIL_WINDOWS
+
+
+def primer(cfg: dict | None = None, client: str = "claude") -> str:
+    """The primer for this system. On Windows it names the file route for a document, not the script argument,
+    and it names that route only where the rehydration setting lets the file tool through (Gate B, 2026-10-16)."""
+    if platform.system() != "Windows":
+        return PRIMER
+    if cfg is not None and rehydration.outcome(client, rehydration.policy(cfg, "file")) == "deny":
+        return _PRIMER_HEAD_WINDOWS + _PRIMER_TAIL_WINDOWS
+    return PRIMER_WINDOWS
 
 
 # --------------------------------------------------------- UserPromptSubmit --
 TYPE_WORDS = {"SECRET": ("secret", "secrets"), "EMAIL": ("e-mail address", "e-mail addresses"),
               "IBAN": ("IBAN", "IBANs"), "CARD": ("card number", "card numbers"),
-              "PHONE": ("phone number", "phone numbers"), "IP": ("IP address", "IP addresses")}
+              "PHONE": ("phone number", "phone numbers"), "IP": ("IP address", "IP addresses"),
+              "NAME": ("name", "names")}
 STORE_NAMES = {"KeychainBackend": "the macOS Keychain", "WindowsVaultBackend": "the Windows Credential Locker",
                "EncryptedFileBackend": "an encrypted file in ~/.maisecrets",
                "JsonFileBackend": "a PLAIN TEXT test file"}
@@ -503,6 +561,19 @@ def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: 
     return lines
 
 
+def peer_notice(entries: list, sender: str) -> list[str]:
+    """What the person reads when a message of another Claude session was blocked (the mod rewrites it where it runs):
+    who sent it, that the model did not get it, and what helps. Nothing to paste: the person did not write it."""
+    kinds = {e.type for e in entries}
+    secret = "SECRET" in kinds or not kinds
+    personal = bool(kinds - {"SECRET"})
+    what = ("a secret and personal data" if secret and personal else "a secret" if secret else "personal data")
+    return [f"maisecrets: a message from the Claude session {sender} held {what}. It was kept from the AI here, and "
+            "the AI did not get the message.", "",
+            "    The values are stored. Ask that session to send them as placeholders (⟦…⟧) or as shapes.", "",
+            "Something wrong? /maisecrets:report · maisecrets by mcpgate.de"]
+
+
 # A subagent's report reaches the session as a prompt (<task-notification>), and a prompt hook can only
 # block or pass it: a report that quoted a value of the right shape stopped the session until the person
 # pasted it again (2026-09-29, twice in one review). The text was written by a model of this session, so
@@ -512,7 +583,7 @@ def block_notice(entries: list, rewritten: str, copied: bool, codex: bool, cfg: 
 # session's subagents folder, and a result equal to that subagent's last answer. A typed or pasted text,
 # a background command, a monitor event: none of them passes, and no value outside the result passes
 # (docs/THREAT-MODEL.md C19).
-_NOTIFICATION_RE = re.compile(r"<task-notification>\n(?P<body>.*?)\n</task-notification>", re.S)
+_NOTIFICATION_RE = _LazyRx(r"<task-notification>\n(?P<body>.*?)\n</task-notification>", re.S)
 _AGENT_TOOLS = ("Agent", "Task", "SendMessage")
 
 
@@ -617,7 +688,7 @@ def agent_report(payload: dict, prompt: str) -> bool:
     rest = _report_rest(payload, prompt)
     if rest is None:
         return False
-    if _has_live(load_config()) and _inserted_values(rest, Vault(load_config())):
+    if _has_live(load_config()) and _inserted_values(rest, Vault(load_config()), prompt=True):
         return False
     return True
 
@@ -688,23 +759,263 @@ def _mention_prefix_exists(prompt: str, cwd: str, cfg: dict) -> bool:
 def _prompt_hits(prompt: str) -> list:
     """The detected values of a prompt, without the fixtures of a pasted test (C1); the hook and the mod both
     take these out."""
-    return [m for m in detect.scan(prompt) if not detect.is_fixture(m, prompt)]
+    return detect.findings(prompt)
+
+
+def _exact_spans(text: str, vault, session: str | None, resolved: list | None, prompt: bool = False) -> list:
+    """The spans of `text` that the exact redaction replaces (stored and resolved values), longest first, no
+    overlap. A dry run: its count, entries and values are thrown away. prompt: as _exact_redact (a typed prompt does
+    not hunt a quiet entry, so its span must not drop a hit either)."""
+    found: list = []
+    _exact_redact(text, vault, session, {"n": 0}, [], resolved, found, prompt=prompt)
+    spans: list = []
+    for raw in sorted(set(found), key=len, reverse=True):
+        at = text.find(raw) if raw else -1
+        while at >= 0:
+            end = at + len(raw)
+            if not any(a < end and at < b for a, b in spans):
+                spans.append((at, end))
+            at = text.find(raw, at + 1)
+    return spans
+
+
+_WORD_CHAR_RE = _LazyRx(r"\w")
+
+
+def _longest_wins(text: str, matches: list, vault, session: str | None, resolved: list | None,
+                  prompt: bool = False) -> list:
+    """The detector hits after the rule that the longest span wins against a stored or resolved value (C2, C26). A hit
+    inside a stored value is dropped: the exact redaction takes the value whole (a listed name inside a stored
+    password split it, and the rest stayed in clear). A hit that holds a stored value, or that overlaps one, takes
+    the whole union: a resolved value inside a ghp_ token cut the shape, and the rest of the token went out."""
+    if not matches or vault is None or not any(value_files.is_mask_only(m.kind) for m in matches):
+        # without a term hit the detector's spans are taken first, as before the terms, and the exact redaction
+        # runs on the rest: no second pass over the text (the hook time without terms stays what it was)
+        return matches
+    spans = _exact_spans(text, vault, session, resolved, prompt)
+    if not spans:
+        return matches
+    out: list = []
+    absorbed: list = []
+    for m in matches:
+        cover = [(a, b) for a, b in spans if a < m.end and m.start < b]
+        if cover and value_files.is_import_kind(m.kind):
+            # an import only adds masking: a stored value keeps its own placeholder, so one that resolves still
+            # resolves (an import must not turn it into a mask-only one, as a term does). The parts of the imported
+            # value outside the stored ones stay hits of the import
+            out += _import_rest(text, m, cover)
+            continue
+        inside = [(a, b) for a, b in cover if a <= m.start and m.end <= b]
+        if inside and not (term_files.is_term_kind(m.kind) and not any(
+                _WORD_CHAR_RE.search(text, a, m.start) or _WORD_CHAR_RE.search(text, m.end, b) for a, b in inside)):
+            # a hit inside a longer stored value: the exact redaction takes the value whole. A term that a stored
+            # value only equals stays a term: an address stored before the list named it kept its resolvable
+            # placeholder (Gate A, round 2)
+            continue
+        a = min([m.start] + [x[0] for x in cover])
+        b = max([m.end] + [x[1] for x in cover])
+        if out and a < out[-1].end:          # two hits that a value joins become one
+            last = out.pop()
+            a, b = min(a, last.start), max(b, last.end)
+            # the union keeps the term's kind when one of them is a term: else the store kept the name in a value
+            # that can be resolved into a command (Gate A and Gate B, review of the rebase)
+            m = m if term_files.is_term_kind(m.kind) and not term_files.is_term_kind(last.kind) else last
+        out.append(m if (a, b) == (m.start, m.end) else dataclasses.replace(m, value=text[a:b], start=a, end=b))
+    for u in out:
+        if term_files.is_term_kind(u.kind):
+            absorbed += [x for x in matches if not term_files.is_term_kind(x.kind) and u.start <= x.start
+                         and x.end <= u.end]
+    if absorbed:
+        # the secret in a union with a term is stored as its own entry, so a later output that holds it alone is
+        # masked by the exact match (Gate B, round 2)
+        vault.put_many([(x.value, x.type, x.kind) for x in absorbed], session=session, tool=not prompt)
+    return out
+
+
+def _import_rest(text: str, m, cover: list) -> list:
+    """The parts of an import hit outside the stored spans `cover`, each a hit of the import when it holds a word
+    character (as detect._term_rest for a span that a rule took)."""
+    out, pos = [], m.start
+    for a, b in sorted(cover) + [(m.end, m.end)]:
+        words = [w.span() for w in _WORD_CHAR_RE.finditer(text, pos, min(a, m.end))]
+        if words:
+            # from its first to its last word character: the separators next to a stored value stay, so the
+            # exact redaction after this still finds the stored value as a token of its own
+            lo, hi = words[0][0], words[-1][1]
+            out.append(dataclasses.replace(m, value=text[lo:hi], start=lo, end=hi))
+        pos = max(pos, b)
+    return out
 
 
 def _take_values_out(prompt: str, matches: list, cfg: dict, vault, session: str | None) -> tuple:
-    """(rewritten, entries, values, stored): the prompt with a placeholder for each detected value and
-    for each value the store already holds; the hook and the mod share it, so both take out the same."""
-    rewritten, entries = _replace(prompt, matches, vault, session) if matches else (prompt, [])
-    values = [m.value for m in matches]
+    """(rewritten, entries, values, stored, matches): the prompt with a placeholder for each detected value and
+    for each value the store already holds; the hook and the mod share it, so both take out the same. `matches` are
+    the detector hits as taken out, after the longest-span rule."""
     stored = {"n": 0}
+    resolved = None
     if vault is not None and _has_live(cfg):
         # a value the store already holds has a known shape: its fingerprint. Without this a stored
         # password typed again, or a value without a detector shape next to a detected one, went to
         # the model (invariant I1, 2026-09-28). Values this session resolved match as substrings
         # from 8 characters; a shorter one would block ordinary words in a prompt.
-        resolved = [(v, r) for v, r in _resolved_values(vault, session) if len(v) >= _EXACT_MIN_LEN]
-        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values)
-    return rewritten, entries, values, stored
+        resolved = [(v, r) for v, r in _resolved_values(vault, session, prompt=True) if len(v) >= _EXACT_MIN_LEN]
+        matches = _longest_wins(prompt, matches, vault, session, resolved, prompt=True)    # (C26)
+    rewritten, entries = _replace(prompt, matches, vault, session) if matches else (prompt, [])
+    values = [m.value for m in matches]
+    if resolved is not None:
+        rewritten = _exact_redact(rewritten, vault, session, stored, entries, resolved, values, prompt=True)
+    return rewritten, entries, values, stored, matches
+
+
+def _run_sh() -> str:
+    """The absolute path of this plugin's launcher for this OS, for a line the person runs in a terminal (run.sh does
+    not run in cmd or PowerShell)."""
+    name = "run.cmd" if os.name == "nt" else "run.sh"
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks", name)
+
+
+def _incident_answer(kind: str, selector: str | None) -> dict:
+    """The incident report as a block reason: shown to the person, never to the model, and no tool call runs, so a
+    damaged store or config cannot withhold it (docs/DIAGNOSTICS.md, section 7). Reads only."""
+    if kind == "show":
+        text = incidents.report_text(selector)
+    elif kind == "clear":
+        text = f"maisecrets: clear the incident record in a terminal: {_run_sh()} report incident clear"
+    else:
+        text = incidents.USAGE
+    return {"decision": "block", "reason": text,
+            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+
+
+def _check_tip(cfg: dict) -> str | None:
+    """The line that names ms:(…), once: when a prompt of Claude Code was blocked or rewritten because it carried a
+    value. The hint state of settings.py holds it (`hints reset` brings it back, `tips: false` keeps it off)."""
+    from . import settings as settings_mod
+    try:
+        if settings_mod.hint_due("check_value", cfg) and settings_mod.claim_hint("check_value"):
+            return check_value.TIP_CLAUDE
+    except Exception as exc:  # noqa: BLE001 - a tip never stops a prompt or its block
+        incidents.note("prompt.tip", exc)
+    return None
+
+
+def _verdict(text: str, cfg: dict, session: str | None, vault=None) -> tuple:
+    """The decision of the prompt path for `text` (user_prompt and rewrite_prompt make it with the same two calls):
+    (entries, matches, stored count, values taken out). A store opens only as user_prompt opens it."""
+    matches = _prompt_hits(text)
+    if vault is None and (matches or _has_live(cfg)):
+        vault = Vault(cfg)
+    _rewritten, entries, values, stored, matches = _take_values_out(text, matches, cfg, vault, session)
+    return entries, matches, stored["n"], values
+
+
+def _allowed_by_the_list(value: str) -> str | None:
+    """Why the allow list lets this value through, or None. Only for a value no rule caught: the scan with every rule,
+    without the allow list, shows whether the list took a hit out (`rule: <id>` or an exact value)."""
+    return detect.explain_allowed(value)
+
+
+def _store_unseen(payload: dict, cfg: dict, value: str, session: str | None, exact: bool) -> str:
+    """No rule and no stored value caught `value`: store it as /maisecrets:put does, so that it is masked from now
+    on, and say where maisecrets finds it again. Each case where storing is not allowed or would not help says so."""
+    from . import settings as settings_mod
+    allowed = _allowed_by_the_list(value)
+    if allowed:
+        return check_value.not_caught(f"maisecrets lets it through: {allowed}. It was not stored. Remove that line "
+                                      "from the allow list to protect it.")
+    if not exact:
+        return check_value.not_caught("It was not stored, because the prompt does not start with ms:( exactly. Send "
+                                      "it again as ms:(…) to store it.")
+    # the mod names who sent the prompt: only the person at the terminal or in Remote Control stores (an `sdk` turn can
+    # come from a program, as for a settings change)
+    if not settings_mod.typed_by_the_person(payload) or payload.get("agent_id") or \
+            payload.get("origin") not in (None, "composer", "bridge"):
+        return check_value.not_caught("It was not stored: maisecrets stores a value only from a prompt that you "
+                                      "type yourself.")
+    if find_refs(value):
+        return check_value.not_caught("It holds a maisecrets placeholder, so it was not stored. Check the value "
+                                      "without the placeholder.")
+    if "\n" in value or "\r" in value:
+        return check_value.not_caught("It has more than one line, and maisecrets finds a stored value only on one "
+                                      "line. It was not stored.")
+    if len(value) < _EXACT_MIN_LEN:
+        return check_value.not_caught(f"maisecrets finds a stored value only from {_EXACT_MIN_LEN} characters on, "
+                                      "so it was not stored.")
+    if not check_value.looks_like_a_credential(value):
+        # a check of ordinary words stored them for good, and every later prompt with them was blocked (field report,
+        # 0.6.32): only a value that the credential checks of the detector take is stored here
+        return check_value.not_caught(check_value.ORDINARY)
+    try:
+        e = Vault(cfg).put(value, "SECRET", "manual", session=session)
+    except Exception as exc:  # noqa: BLE001 - the answer says it; the prompt stays blocked
+        incidents.note("prompt.check-store", exc)
+        return check_value.not_caught(f"It could not be stored ({type(exc).__name__}).")
+    _live_cache.clear()        # the store holds a value now: the checks below must look for it
+    alone = any(_verdict(value, cfg, session)[1:3])
+    in_text = any(_verdict(f"see {value} here", cfg, session)[1:3])
+    return check_value.stored_text(e.ref, alone, in_text)
+
+
+def _check_value(payload: dict, groups: list) -> dict:
+    """The answer to ms:(…): always a block, whatever the verdict. Each group of the prompt (check_value.parse_all)
+    gets its own verdict, from the same calls as a normal prompt with that value. The reason goes to the person and
+    names types and rule ids, never the value; the transcript loses the prompt as typed."""
+    cfg = load_config()
+    session = payload.get("session_id")
+    codex = client_of(payload) == "codex"
+    entries: list = []
+    values: list = []
+    lines: list = []
+    seen: dict = {}
+    for value, exact in groups:
+        if value in seen:                  # the same value again: the same line, and it is stored once
+            lines.append(lines[seen[value]])
+            continue
+        seen[value] = len(lines)
+        got, taken, line = _check_one(payload, cfg, session, value, exact)
+        entries += got
+        values += taken
+        lines.append(line)
+    # a value no rule caught is stored after every group has its verdict: a group never sees what a check before it
+    # in the same prompt stored, so each verdict is the one its normal prompt gets alone
+    stored: dict = {}
+    for i, line in enumerate(lines):
+        if isinstance(line, tuple):
+            if line[1] not in stored:
+                stored[line[1]] = _store_unseen(payload, cfg, *line[1:])
+            lines[i] = stored[line[1]]
+    if len(lines) == 1:
+        reason = lines[0] + "\n\n" + check_value.NOT_SENT
+    else:
+        reason = "\n".join(f"Value {i}: {line}" for i, line in enumerate(lines, 1)) + "\n\n" + check_value.NOT_SENT
+    if cfg.get("scrub_transcript", True):
+        raw = payload.get("prompt") if isinstance(payload.get("prompt"), str) else ""
+        forms = check_value.scrub_forms(raw, [v for v, _exact in groups])
+        scrub = [x for x in dict.fromkeys(forms + list(values)) if x]
+        _scrub_transcript(payload.get("transcript_path", ""), scrub, [])
+        _scrub_transcript_later(payload.get("transcript_path", ""), scrub, [], session=session)
+    from . import events
+    events.record("UserPromptSubmit", client_of(payload), entries, outcome="ms:( check")   # key, type, rule: no value
+    if codex:
+        return {"decision": "block", "reason": reason}
+    return {"decision": "block", "reason": reason,
+            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+
+
+def _check_one(payload: dict, cfg: dict, session: str | None, value: str, exact: bool) -> tuple:
+    """(entries, values taken out, verdict line) of one group of a check. The line ends without the sentence that the
+    prompt was not sent: _check_value adds it once. For a value no rule caught, the line is a tuple that names the
+    store step, which _check_value runs after the verdicts of all groups."""
+    if not value.strip():
+        return [], [], check_value.USAGE_LINE
+    if check_value.only_placeholders(value, find_refs(value)):
+        return [], [], check_value.A_PLACEHOLDER_LINE
+    entries, matches, n_stored, values = _verdict(value, cfg, session)
+    if matches or n_stored:
+        labels = [check_value.hit_label(m.type, m.kind) for m in matches]
+        labels += [check_value.hit_label(e.type, e.kind, stored=True) for e in entries[len(matches):]]
+        return entries, values, check_value.caught_line(labels)
+    return entries, values, ("store", value, session, exact)     # _check_value stores it after the last verdict
 
 
 def rewrite_prompt(payload: dict) -> dict:
@@ -713,6 +1024,16 @@ def rewrite_prompt(payload: dict) -> dict:
     the prompt as it is, and the settings hook, which runs after the mod on what the mod passes on,
     decides it as without the mod: a clean prompt, an @file mention, a subagent report, a setting
     that turns the rewrite off. The answer carries placeholders, never a value."""
+    if incidents.recognize(payload.get("prompt"), client_of(payload)):
+        return {}            # the prompt hook answers it, before the config and the store (docs/DIAGNOSTICS.md, 7)
+    groups = check_value.parse_all(payload.get("prompt"))
+    if groups is not None:
+        # ms:(…) is never sent: the mod drops it with this verdict, and drops it with its own sentence when no answer
+        # comes, so a hook that hangs or cannot start cannot let it through (Gate A, round 2). The transcript is found
+        # by the session id, as for a rewrite
+        out = _check_value({**payload, "prompt_id": "mod", "transcript_path": ""}, groups)
+        # one line: `claude -p` prints the line breaks of a drop as replacement characters (measured on 2.1.301)
+        return {"drop": " ".join(out["reason"].split())}
     cfg = load_config()
     if not cfg.get("rewrite_prompts", True):
         return {}
@@ -724,12 +1045,28 @@ def rewrite_prompt(payload: dict) -> dict:
     # a subagent's report is the hook's to judge (C19); a model wrote it, so nothing of it is stored
     if "<task-notification>" in prompt:
         return {}
+    # /maisecrets:term add|remove carries a name: the hook answers it, and the mod must not rewrite the name first
+    if term_files.parse_command(prompt) or value_files.parse_removal(prompt):
+        return {}
+    # a settings prompt and the ssh grant sentence are the person's controls: the hook reads them before the detector,
+    # and the mod must not rewrite a word of them first (an imported or listed value would break the control; Gate A
+    # and Gate B of #19 part 3)
+    from . import settings as settings_mod
+    if settings_mod.parse_prompt(prompt) or _GRANT_RE.match(prompt):
+        return {}
     # the hook blocks an @file mention before it stores anything; without a working directory a relative
     # mention cannot be checked, so any mention goes to the hook
     cwd = payload.get("cwd")
     if _blocking_mention(prompt, cwd if isinstance(cwd, str) else "", cfg) or (
             not cwd and cfg.get("block_at_mentions", True) and AT_MENTION_RE.search(prompt)):
         return {}
+    # {{Jan Kowalski}}: only from a prompt the person typed (the mod sends the origin); an `sdk` prompt can come from
+    # a program a tool started, and the hook leaves its marker as text too
+    if payload.get("origin") in ("composer", "bridge"):
+        try:
+            prompt, _marked = term_files.take_markers(prompt, _name_ttl(cfg))
+        except OSError:
+            return {}           # the hook answers it, and blocks when it cannot record the name either
     matches = _prompt_hits(prompt)
     if not matches and not _has_live(cfg):
         return {}
@@ -739,7 +1076,7 @@ def rewrite_prompt(payload: dict) -> dict:
     if _mention_prefix_exists(prompt, cwd if isinstance(cwd, str) else "", cfg):
         return {}
     vault = Vault(cfg)
-    rewritten, entries, values, stored = _take_values_out(prompt, matches, cfg, vault, session)
+    rewritten, entries, values, stored, matches = _take_values_out(prompt, matches, cfg, vault, session)
     if not matches and not stored["n"]:
         return {}
     if _blocking_mention(rewritten, cwd if isinstance(cwd, str) else "", cfg):
@@ -753,10 +1090,77 @@ def rewrite_prompt(payload: dict) -> dict:
     from . import events
     events.record("UserPromptSubmit", "claude", entries, outcome="rewritten by the mod")
     # what the person reads: each value taken out, a detected one per place and a stored one per place
-    return {"text": rewritten, "count": len(matches) + stored["n"]}
+    answer = {"text": rewritten, "count": len(matches) + stored["n"]}
+    tip = _check_tip(cfg)
+    if tip:
+        answer["tip"] = tip         # the mod shows it next to its line, once (check_value.py)
+    return answer
+
+
+def _name_ttl(cfg: dict) -> int:
+    """The lifetime of a NAME value: how long a name marked with {{…}} in a prompt stays masked."""
+    ttls = cfg.get("ttl_seconds") if isinstance(cfg.get("ttl_seconds"), dict) else {}
+    try:
+        ttl = int(ttls.get("NAME", ttls.get("default", 86400)))
+        return max(60, min(ttl, int(cfg.get("max_ttl_seconds", 30 * 86400))))
+    except (TypeError, ValueError):
+        return 86400
+
+
+def _term_command(payload: dict, cmd: tuple, typed: bool, cfg: dict) -> dict:
+    """The answer to /maisecrets:term add|remove (Codex: maisecrets: term add …): always a block, because the prompt
+    carries the name. Only the person's typed prompt changes the list (as a setting, C22); the name is masked in the
+    transcript, and the answer names a label and a line, never the name."""
+    from . import terms
+    verb, words = cmd
+    # the name in every form the transcript can hold it: the whole prompt as typed (two spaces, a tab, a line break,
+    # a name under 4 characters that the scrub skips alone), the words, and the variants (gate review, M2)
+    raw = payload.get("prompt") if isinstance(payload.get("prompt"), str) else ""
+    extra = [raw, raw.strip()] + [w for w in re.findall(r"[^\s|*]+", words or "") if len(w) >= 4]
+    scrub: list = [words] if words else []
+    if verb == "usage":
+        reason = terms.USAGE
+    elif not typed:
+        reason = ("maisecrets: a change of your terms counts only when you type it as your prompt; this one came from "
+                  f"the client ({payload.get('source')}), so nothing was changed.")
+    elif verb == "add":
+        # Claude Code sends a source with every prompt; one without it may not come from the person, so the floor of
+        # a team list holds. Codex never sends a source: its adds follow the person's rules (gate review, round 2)
+        floor = client_of(payload) == "claude" and "source" not in payload
+        _ok, reason, scrub = terms.add_typed(words, floor=floor)
+    else:
+        entity = None
+        refs = find_refs(words)
+        if len(refs) == 1 and refs[0][1] == 0 and refs[0][2] == len(words):
+            # the placeholder the person copied from a tool result: the entity of that key
+            from .vault import INDEX
+            try:
+                meta = json.loads(INDEX.read_text(encoding="utf-8")).get("entries", {}).get(refs[0][0]) or {}
+            except (OSError, ValueError):
+                meta = {}
+            entity = meta.get("kind", "")[5:] if term_files.is_term_kind(meta.get("kind")) else None
+        _ok, reason, scrub = terms.term_remove_typed(words, entity)
+    scrub = list(dict.fromkeys(scrub + [x for x in extra if x]))
+    if cfg.get("scrub_transcript", True) and scrub:
+        path = payload.get("transcript_path", "")
+        _scrub_transcript(path, scrub, [])
+        _scrub_transcript_later(path, scrub, [], session=payload.get("session_id"))
+    if client_of(payload) == "codex":
+        return {"decision": "block", "reason": reason}
+    return {"decision": "block", "reason": reason,
+            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
 
 
 def user_prompt(payload: dict) -> dict:
+    groups = check_value.parse_all(payload.get("prompt"))
+    if groups is not None:
+        # ms:(…): blocked on every path, also without a closing bracket, before anything else reads the prompt
+        return _check_value(payload, groups)
+    asked = incidents.recognize(payload.get("prompt"), client_of(payload))
+    if asked:
+        if asked[0] == "usage":
+            _scrub_failed_prompt("user-prompt", payload)   # free text after the form: the client keeps the prompt
+        return _incident_answer(*asked)
     if os.environ.get("MAISECRETS_TEST_FAULT") == "user-prompt-slow" and os.environ.get("MAISECRETS_TEST_HOME_OWNED"):
         # tests only (tests/_isolate.py sets the second variable): the watchdog answers
         time.sleep(WATCHDOG_SECONDS["user-prompt"] + 3)
@@ -793,7 +1197,7 @@ def user_prompt(payload: dict) -> dict:
     # report never grants. Blocked, so the sentence and its code never reach the model
     # a prompt the client injected (a scheduled task, a loop wakeup) can carry text the model chose: it grants and
     # sets nothing (C21, C22)
-    typed = payload.get("source") in settings_mod.TYPED_SOURCES
+    typed = settings_mod.typed_by_the_person(payload)
     if typed and session and not payload.get("agent_id") and cfg.get("secret_destinations", "observe") == "observe":
         try:
             from . import destinations
@@ -808,9 +1212,13 @@ def user_prompt(payload: dict) -> dict:
     # report pass, so a report never changes one; blocked, so the prompt does not reach the model
     change = settings_mod.parse_prompt(prompt)
     if change:
-        changed, reason = settings_mod.apply_typed(*change) if typed else (False, (
-            "maisecrets: a settings change counts only when you type it as your prompt; this one came from the "
-            f"client ({payload.get('source')}), so nothing was changed."))
+        route = "slash command" if prompt.lstrip().lower().startswith("/maisecrets:settings") else "typed prompt"
+        changed, reason = settings_mod.apply_typed(*change, route=route, cwd=str(payload.get("cwd") or "")) if typed \
+            else (False, settings_mod.not_typed_reason(payload))
+        if changed and change[0] == "clean_dirs" and change[1].startswith("add:"):
+            from . import file_reads
+            from .user_rules import expand
+            file_reads.note_clean_root(session, str(expand(change[1][4:])))   # this session trusts it from now
         if changed and client_of(payload) != "codex" and prompt.lstrip().lower().startswith("/maisecrets:settings"):
             # a success is no refusal: the slash command runs on and shows the new state (a block read as an
             # error, "operation blocked by hook"). The prompt carries no value; the change is already written
@@ -818,6 +1226,40 @@ def user_prompt(payload: dict) -> dict:
         if client_of(payload) == "codex":
             return {"decision": "block", "reason": reason}
         return {"decision": "block", "reason": reason,
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+    # /maisecrets:term add|remove (maisecrets/terms.py): before the detector, which would take the name out first.
+    # Blocked in every case: the prompt carries the name
+    term_cmd = term_files.parse_command(prompt)
+    if term_cmd:
+        # a subagent's prompt is no prompt of the person (as for the marker below)
+        return _term_command(payload, term_cmd, typed and not payload.get("agent_id"), cfg)
+    # /maisecrets:forget import:ID (Codex: maisecrets: forget import:ID): the only way an import of values is removed
+    # (C26). It makes detection weaker, so only the person's typed prompt counts, and a tool call that carries it is
+    # refused (_pre_bash). Before the detector: an imported value never masks the prompt that removes it
+    removal = value_files.parse_removal(prompt)
+    if removal:
+        if typed and not payload.get("agent_id"):
+            from . import values
+            try:
+                reason = values.remove_typed(removal)
+            except Exception as exc:  # noqa: BLE001 - the answer says it failed; nothing else depends on it
+                reason = f"maisecrets: the import could not be removed ({type(exc).__name__}); nothing was changed."
+        else:
+            reason = ("maisecrets: the removal of an import counts only when you type it as your prompt; this one came "
+                      f"from the client ({payload.get('source')}), so nothing was removed.")
+        if client_of(payload) == "codex":
+            return {"decision": "block", "reason": reason}
+        return {"decision": "block", "reason": reason,
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
+    if typed and not payload.get("agent_id"):
+        # {{Jan Kowalski}} in a prompt the person typed: the name is masked from now on (terms.take_markers)
+        try:
+            prompt, _marked = term_files.take_markers(prompt, _name_ttl(cfg))
+        except OSError as exc:
+            return {"decision": "block", "reason": (
+                f"maisecrets: the name you marked with {{{{…}}}} cannot be recorded ({type(exc).__name__}), so it "
+                "would reach the model unmasked. This prompt was not sent; send it again without the marker, or "
+                "write the name as /maisecrets:term add NAME."),
                 "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
     if grant:
         from . import consent_store
@@ -843,24 +1285,30 @@ def user_prompt(payload: dict) -> dict:
         return {"decision": "block", "reason": reason,
                 "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}}
 
-    # 2. references the human typed or pasted: this session may resolve them from now on
+    # 2. references the human typed or pasted: this session may resolve them from now on. A message of another session
+    # or a subagent's prompt admits none: a session another one controls could name a reference it never saw and let
+    # this session resolve it (C4; codex Gate A, 2026-10-22)
     typed = find_refs(prompt)
     matches = _prompt_hits(prompt)
     vault = None
     if typed or matches or _has_live(cfg):
         vault = Vault(cfg)
-        for key, _s, _e in typed:
-            vault.admit(key, session)
-    rewritten, entries, values, stored = _take_values_out(prompt, matches, cfg, vault, session)
+        if settings_mod.peer_sender(prompt) is None and not payload.get("agent_id"):
+            for key, _s, _e in typed:
+                vault.admit(key, session)
+    rewritten, entries, values, stored, matches = _take_values_out(prompt, matches, cfg, vault, session)
     if not matches and not stored["n"]:
         if typed:
             # the model has never seen the bracket syntax; without this it asks the user for the
             # value, and that value is blocked again (agent review, 2026-09-26)
             return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                           "additionalContext": PRIMER}}
+                                           "additionalContext": primer(cfg, client_of(payload))}}
         return {}
-    copied = _clipboard(rewritten)
-    _save_pending(rewritten, session)
+    # a message of another session: nobody here sends it again, so the clipboard and /ms stay the person's own
+    peer = settings_mod.peer_sender(prompt) if client_of(payload) == "claude" else None
+    copied = False if peer else _clipboard(rewritten)
+    if not peer:
+        _save_pending(rewritten, session)
     if cfg.get("scrub_transcript", True):
         refs = [e.ref for e in entries] + [r for v, r in _resolved_values(vault, session) if v in values]
         # the inline scrub can hit an OLDER record of the same value; the record of this prompt
@@ -868,9 +1316,13 @@ def user_prompt(payload: dict) -> dict:
         _scrub_transcript(payload.get("transcript_path", ""), values, refs)
         _scrub_transcript_later(payload.get("transcript_path", ""), values, refs)
     codex = client_of(payload) == "codex"
-    lines = block_notice(entries, rewritten, copied, codex, cfg, vault)
+    lines = peer_notice(entries, peer) if peer else block_notice(entries, rewritten, copied, codex, cfg, vault)
+    tip = None if codex or peer else _check_tip(cfg)      # Codex: the session start names it (hooks/dispatch.py)
+    if tip:
+        lines[-1:-1] = [tip, ""]
     from . import events
-    events.record("UserPromptSubmit", client_of(payload), entries)
+    events.record("UserPromptSubmit", client_of(payload), entries,
+                  **({"outcome": "blocked: a message of another session"} if peer else {}))
     reason = "\n".join(lines)
     if client_of(payload) == "codex":
         return {"decision": "block", "reason": reason}
@@ -912,9 +1364,9 @@ _STORE_READ_PATTERNS: list[tuple[str, str]] = [
     ("a value delivery path", r"maisecrets[/\\]run[/\\]|maisecrets-\d+[/\\]|maisecrets[/\\](?:v-|sealed)|__ms_\d+\b"
                               r"|XDG_RUNTIME_DIR[^\n]*maisecrets"),
 ]
-_STORE_READ_RE = re.compile("|".join(f"(?P<p{i}>{rx})" for i, (_n, rx) in enumerate(_STORE_READ_PATTERNS)))
+_STORE_READ_RE = _LazyRx("|".join(f"(?P<p{i}>{rx})" for i, (_n, rx) in enumerate(_STORE_READ_PATTERNS)))
 # PowerShell on Windows: command names and file names in any case (Get-Content VAULT.ENC.JSON reads the file)
-_STORE_READ_RE_I = re.compile(_STORE_READ_RE.pattern, re.IGNORECASE)
+_STORE_READ_RE_I = _LazyRx(_STORE_READ_RE.pattern, re.IGNORECASE)
 
 
 def _store_read_match(command: str, windows_paths: bool = False) -> str | None:
@@ -938,7 +1390,7 @@ def _store_read_match(command: str, windows_paths: bool = False) -> str | None:
     return "store read"
 
 
-_HEREDOC_RE = re.compile(r"<<(?P<dash>-?)[ \t]*(?P<tag>(?:'[^'\n]*'|\"[^\"\n]*\"|\\[^\s]|[^\s;&|<>()'\"\\])+)")
+_HEREDOC_RE = _LazyRx(r"<<(?P<dash>-?)[ \t]*(?P<tag>(?:'[^'\n]*'|\"[^\"\n]*\"|\\[^\s]|[^\s;&|<>()'\"\\])+)")
 _REFUSED_CONTEXT = {
     "ansi": "inside $'…' the value would need ANSI-C escaping",
     "backtick": "inside `…` the value would be parsed a second time",
@@ -949,15 +1401,15 @@ _REFUSED_CONTEXT = {
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish", "ash", "mksh"}
 INLINE_INTERPRETERS = {"python", "python2", "python3", "perl", "ruby", "node", "nodejs", "php", "lua", "osascript",
                        "deno", "bun"}
-INLINE_CODE_FLAGS = re.compile(r"^-(?:[A-Za-z]*[ceE][A-Za-z]*|-eval|-command|-exec)$")
+INLINE_CODE_FLAGS = _LazyRx(r"^-(?:[A-Za-z]*[ceE][A-Za-z]*|-eval|-command|-exec)$")
 REMOTE_OR_EVAL = {"ssh", "eval", "su", "expect", "script", "sshpass", "plink", "mosh", "screen", "tmux"}
 # commands that run other commands with arguments they build from their input
 ARG_RUNNERS = {"xargs", "parallel", "watch", "flock", "chroot", "nsenter", "unshare", "setsid", "runuser",
                "strace", "ltrace", "gdb", "script", "busybox", "systemd-run", "toybox"}
 # variables that name the ssh command another tool runs
-_SSH_VAR_RE = re.compile(r"(?<![\w])(?:GIT_SSH_COMMAND|GIT_SSH|RSYNC_RSH|CVS_RSH)=")
+_SSH_VAR_RE = _LazyRx(r"(?<![\w])(?:GIT_SSH_COMMAND|GIT_SSH|RSYNC_RSH|CVS_RSH)=")
 # a variable in front of a fixed path is a known command word: "$HOME/bin/tool", ${REPO}/bin/x
-_FIXED_TAIL_RE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z_0-9]*\}?(?:/[^/$`\s]+)+$")
+_FIXED_TAIL_RE = _LazyRx(r"^\$\{?[A-Za-z_][A-Za-z_0-9]*\}?(?:/[^/$`\s]+)+$")
 # arguments that name stdin as the file to run
 _STDIN_FILES = {"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}
 # clients that read statements from stdin when no statement is given
@@ -968,9 +1420,9 @@ SHELL_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "while", "u
 # the options of a wrapper that take the next word as their argument; every other option takes none
 # a part that feeds its input to a later shell, a group closer with a redirection, and trace settings
 # from outside the shell's own words (reviews of 0.5.4, 2026-09-28)
-_EXEC_RE = re.compile(r"^(?:(?:command|builtin)\s+)*exec\b")
-_CLOSER_RE = re.compile(r"^(?:(?:\}|\)|done|fi|esac)(?![A-Za-z0-9_])|\d*<)")   # `( bash )<f` leaves `<f`
-_TRACE_RE = re.compile(
+_EXEC_RE = _LazyRx(r"^(?:(?:command|builtin)\s+)*exec\b")
+_CLOSER_RE = _LazyRx(r"^(?:(?:\}|\)|done|fi|esac)(?![A-Za-z0-9_])|\d*<)")   # `( bash )<f` leaves `<f`
+_TRACE_RE = _LazyRx(
     r"(?:^|[\s;&|(])(?:SHELLOPTS|BASHOPTS)="                                     # an assignment
     r"|(?:^|[\s;&|(])(?:export|declare|typeset|readonly)\b[^;&|\n]*\b(?:SHELLOPTS|BASHOPTS)\b"
     r"|(?:^|[\s;&|(])set\b[^;&|\n]*\s[-+]o\s+(?:xtrace|verbose)\b"             # set … -o xtrace
@@ -1020,15 +1472,15 @@ WRAPPER_ARG_OPTIONS = {
 }
 WRAPPERS = {"env", "genv", "command", "exec", "nice", "time", "nohup", "sudo", "doas", "builtin", "timeout", "stdbuf",
             "caffeinate", "ionice", "chronic"}
-_SLICE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
+_SLICE_RE = _LazyRx(r"\$\{[A-Za-z_][A-Za-z_0-9]*(?::\s*\d|:\s+-\d|\^|,|//|/|#|%)")
 
 
 # before a comment or a heredoc body: the parser's reading is sure only when no bracket, brace, parenthesis,
 # backslash or backtick comes first. Inside (( )), $[ ], [[ ]], ${ }, a zsh pattern or after an escape the shell
 # reads no comment or heredoc there and runs what follows (reviews of 0.6.7, rounds 4 to 6). The parser itself is
 # not changed: a misread comment would flip its quote state and hide the next line.
-_UNSURE_BEFORE_COMMENT = re.compile(r"[()\[\]{}\\`]")
-_UNSURE_BEFORE_HEREDOC = re.compile(r"[(){}\[\\`]")       # ((1<<TAG)) is a shift, no heredoc (codex round 7)
+_UNSURE_BEFORE_COMMENT = _LazyRx(r"[()\[\]{}\\`]")
+_UNSURE_BEFORE_HEREDOC = _LazyRx(r"[(){}\[\\`]")       # ((1<<TAG)) is a shift, no heredoc (codex round 7)
 
 
 def comment_is_sure(command: str, ctxs: list[str], pos: int) -> bool:
@@ -1244,9 +1696,9 @@ def _quote_state(command: str, pos: int) -> str:
     return ctxs[pos] if pos < len(ctxs) else ""
 
 
-_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z_0-9]*=")
+_ASSIGN_RE = _LazyRx(r"^[A-Za-z_][A-Za-z_0-9]*=")
 # a redirection word: group 1 is a target glued to the operator
-_REDIR_RE = re.compile(r"^(?:\d+|&)?(?:<<<|<<-?|<>|<&|>&|>>|>\||<|>)(.*)$")
+_REDIR_RE = _LazyRx(r"^(?:\d+|&)?(?:<<<|<<-?|<>|<&|>&|>>|>\||<|>)(.*)$")
 
 
 def _segments(command: str, ctxs: list[str]) -> list[dict]:
@@ -1345,7 +1797,7 @@ def _segments(command: str, ctxs: list[str]) -> list[dict]:
     return segs
 
 
-_REF_RE = re.compile(r"⟦[^⟦⟧]*⟧")
+_REF_RE = _LazyRx(r"⟦[^⟦⟧]*⟧")
 
 
 def _value_reaches(command: str, ctxs: list[str], segs: list[dict]) -> list[bool]:
@@ -1460,7 +1912,8 @@ def _refusal_for(command: str, ctxs: list[str]) -> str | None:
     # A word that only mentions ssh (ansible -c ssh, a path ending in /rsync) does not count (final
     # review and differential test against 0.5.2, 2026-09-28)
     segs = _segments(command, ctxs)
-    offsets = [a for _k, a, _b in find_refs(command) if ctxs[a] != "comment"]
+    # every token, a server's too (vault_refs.py): offsets of the stored-value form alone missed `scp f h:⟦NAME_2⟧`
+    offsets = [m.start() for m in _REF_RE.finditer(command) if ctxs[m.start()] != "comment"]
     if offsets and _SSH_VAR_RE.search(plain):
         return "a variable that names an ssh command would hand the value to ssh in a form that cannot be checked"
     with_value = {n for n, sg in enumerate(segs) if any(sg["start"] <= a < sg["end"] for a in offsets)}
@@ -1612,10 +2065,10 @@ _JOURNALCTL_STATEFUL = ("--rotate", "--vacuum-size", "--vacuum-files", "--vacuum
 _READ_ONLY_WRAPPERS = {"sudo", "nice", "command"}
 # the only options of sort and uniq the session approval allows: none of them writes a file or runs a
 # program (Codex review, 2026-09-28: `sort --out=FILE`, an abbreviation, wrote the value to a file)
-_SORT_OK = re.compile(r"^(?:-[bdfghinrsuMV]+|-k\S*|-t\S?|--(?:numeric-sort|reverse|unique|ignore-case|"
+_SORT_OK = _LazyRx(r"^(?:-[bdfghinrsuMV]+|-k\S*|-t\S?|--(?:numeric-sort|reverse|unique|ignore-case|"
                       r"human-numeric-sort|version-sort|month-sort|general-numeric-sort|ignore-leading-blanks|"
                       r"dictionary-order|stable))$")
-_UNIQ_OK = re.compile(r"^(?:-[cdiuz]+|-[fsw]\d*|\d+|--(?:count|repeated|unique|ignore-case))$")
+_UNIQ_OK = _LazyRx(r"^(?:-[cdiuz]+|-[fsw]\d*|\d+|--(?:count|repeated|unique|ignore-case))$")
 
 
 def _remote_is_read_only(remote: str) -> bool:
@@ -1871,7 +2324,7 @@ def _run_dir() -> str:
         pass
     st = os.lstat(base)
     if not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or (st.st_mode & 0o077):
-        raise RuntimeError(base)
+        raise vault_mod.CodedError(base, "hook.run-dir", "permission")
     return base
 
 
@@ -1889,7 +2342,7 @@ def _sealed_dir() -> str:
         pass
     st = os.lstat(d)
     if not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
-        raise RuntimeError(d)
+        raise vault_mod.CodedError(d, "hook.sealed-dir", "permission")
     # never readable again once made: a sweep that opened it for a moment let a blind reader list it
     # (Codex review, 2026-09-28). Each serving child removes its own FIFO; wipe clears the rest
     if _stat.S_IMODE(st.st_mode) != 0o300:
@@ -1953,7 +2406,7 @@ def _rehydrated(payload: dict, cfg: dict, path: str, new_input: dict, reason: st
 
 
 _ARGS_END = "MAISECRETS_ARGS_END"
-_ARGS_CALL_RE = re.compile(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" "
+_ARGS_CALL_RE = _LazyRx(r"\Abash \"[^\"\n$`]*/hooks/run\.sh\" "
                            r"(?:audit|forget|guard|put --clipboard|report|settings|shortcut) "
                            r"--args-stdin <<'" + _ARGS_END + r"'\n(.*)\n" + _ARGS_END + r"\n?\Z", re.S)
 
@@ -2003,9 +2456,9 @@ def _store_refusal(command: str, windows_paths: bool = False) -> dict | None:
 _SETTINGS_IN_A_COMMAND = ("maisecrets: this command carries a maisecrets settings change; only the person makes one, "
                           "as their own prompt (/maisecrets:settings KEY VALUE). The command did not run. Tell the "
                           "user the prompt to send.")
-_HOOK_ENTRY_TEXT_RE = re.compile(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
+_HOOK_ENTRY_TEXT_RE = _LazyRx(r"(?:run\.sh|run\.cmd|dispatch\.py)[\"']?\s+[\"']?"
                                  r"(?:session-start|user-prompt|pre-tool|post-tool(?:-failure)?|mod-prompt)\b", re.I)
-_GRANT_RE = re.compile(r"\A\s*maisecrets:\s*allow\s+ssh\s+([\w.@:\[\]-]+)(?:\s+(\d{6}))?\s*\Z")
+_GRANT_RE = _LazyRx(r"\A\s*maisecrets:\s*allow\s+ssh\s+([\w.@:\[\]-]+)(?:\s+(\d{6}))?\s*\Z")
 
 
 _HOOK_ENTRIES = {"session-start", "user-prompt", "pre-tool", "post-tool", "post-tool-failure", "mod-prompt"}
@@ -2207,6 +2660,50 @@ def _is_ssh_config_path(path: str, cwd: str) -> bool:
     return real == home_ssh or real.startswith(home_ssh + os.sep)
 
 
+# the file extension of a script for each interpreter that the inline-code refusal names
+_SCRIPT_EXT = {"python": "py", "python2": "py", "python3": "py", "perl": "pl", "ruby": "rb", "node": "js",
+               "nodejs": "js", "deno": "js", "bun": "js", "php": "php", "lua": "lua", "osascript": "applescript"}
+
+
+def _file_route(payload: dict, cfg: dict, keys: list[str], interpreter: str = "python3") -> str:
+    """The next step for a value that must go into a file or a document, after a refusal of inline code or a
+    quoted heredoc. Without it a model gave up and asked the user to type the value into the document by hand
+    (field report, Codex, 2026-10-16). Only a route that the rehydration policy lets through is named: under
+    block, or confirm on Codex, the policy refuses the script route too and its own refusal names the next step
+    (Gate B, 2026-10-16)."""
+    client = client_of(payload)
+    if rehydration.refusal(cfg, "bash", client, "", "") is not None:
+        return ""
+    tool = "apply_patch" if client == "codex" else "Write or Edit"
+    files = (f" Or write the file with {tool}: the placeholder in the content gets the value."
+             if rehydration.outcome(client, rehydration.policy(cfg, "file")) != "deny" else "")
+    if interpreter not in _SCRIPT_EXT:
+        interpreter = "python3"
+    args = " ".join(f"⟦{k}⟧" for k in dict.fromkeys(keys))
+    run = "deno run" if interpreter == "deno" else interpreter      # deno runs a file only with `run`
+    return (" To put the value into a file or a document, save the program as a script file, "
+            f"then run it with the placeholder as its argument: {run} make_doc.{_SCRIPT_EXT[interpreter]} "
+            f"{args}.{files} Do not ask the user to type the value in.")
+
+
+def _windows_file_route(payload: dict, cfg: dict, keys: str) -> str:
+    """The route for a value that must go into a file or a document where no shell command can take it: Codex on
+    Windows and the PowerShell tool of Claude Code. There a placeholder as a script argument is refused too, so the
+    route of ``_file_route`` (run the script with the placeholder as its argument) cannot work; the model followed it
+    and gave up (field report, Codex in the ChatGPT app on Windows, 2026-10-16). The file tool can take the value on
+    Windows as on the other systems. Empty when the rehydration policy refuses the file tool too."""
+    client = client_of(payload)
+    if rehydration.outcome(client, rehydration.policy(cfg, "file")) == "deny":
+        return ""
+    tool = "apply_patch" if client == "codex" else "Write or Edit"
+    return (f" To put the value into a file or a document, write a text file with {tool} that holds {keys} "
+            "alone on a line (for example value.txt), and let the script read the value from that file: "
+            "maisecrets puts the value in when the file is written. Then run the script with no placeholder in "
+            "the command, for example python make_doc.py. A placeholder as an argument of a PowerShell command, "
+            "or of any shell command of Codex on Windows, does not work. For a call to a service, an MCP tool "
+            "takes the placeholder. Do not ask the user to type the value in.")
+
+
 def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     """Bash: every value is read into a shell variable in the MAIN shell before the command
     runs, and the placeholder becomes that variable in its quoting context. The read fails
@@ -2239,9 +2736,20 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
                      "The command did not run.")
     ctxs = _shell_contexts(command)
     refs = [(k, a, b) for k, a, b in find_refs(command) if ctxs[a] != "comment"]
+    from . import vault_refs
+    # a token a server minted and a server result noted (vault_refs.py): it takes the same way as a stored value
+    server = [(k, a, b) for k, a, b in vault_refs.find_noted(command, cfg, payload.get("session_id"))
+              if ctxs[a] != "comment"]
+    refs = sorted(refs + server, key=lambda r: r[1])
+    server_keys = list(dict.fromkeys(k for k, _a, _b in server))
+    elsewhere = vault_refs.noted_elsewhere(command, cfg, payload.get("session_id"))
+    if elsewhere:
+        return _deny(_elsewhere_reason(elsewhere) + " The command did not run.")
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
+    if value_files.removal_in_command(command):
+        return _deny(value_files.IN_A_COMMAND)
     # ssh consent (#8), before any value is recorded or served: a refusal leaves no audit line
     if cfg.get("ssh_consent") and re.search(r"maisecrets:\s*allow\s+ssh\s+\S|allow\s+ssh\s+\S+\s+\d{6}", command,
                                            re.I):
@@ -2263,16 +2771,21 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
         return _ask(dict(tool_input), _consent_text(consent))
     keys = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(k for k, _a, _b in refs))
     windows = platform.system() == "Windows"
+    if windows and server_keys:
+        return _deny(f"maisecrets: {keys} come from a server, and a value from a server cannot go into a shell "
+                     "command on Windows yet. The command did not run. Write it into a file with Write instead.")
     if windows and client_of(payload) == "codex":
         return _deny(f"maisecrets: {keys} cannot be placed in a shell command on Codex for Windows "
-                     "(PowerShell quoting is not supported). The command did not run. Use the value "
-                     "through an MCP tool, or ask the user to run the command themselves.")
+                     "(PowerShell quoting is not supported). The command did not run."
+                     + (_windows_file_route(payload, cfg, keys)
+                        or " Use the value through an MCP tool, or ask the user to run the command themselves."))
     for k, a, _b in refs:
         why = _REFUSED_CONTEXT.get(ctxs[a])
         if why:
             return _deny(f"maisecrets: ⟦{k}⟧ sits where the value cannot be placed safely: {why}. "
                          "The command did not run. Pass the placeholder as a plain argument of the "
-                         "command that needs it.")
+                         "command that needs it." + (_file_route(payload, cfg, [k for k, _a, _b in refs])
+                                                         if ctxs[a] == "hdq" else ""))
     why = _refusal_for(command, ctxs)
     ssh_plan, ssh_refused = None, False
     if why == "ssh hands the command line to another shell" and not windows and client_of(payload) == "claude" \
@@ -2285,6 +2798,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     if why and ssh_refused:
         return _deny(f"maisecrets: {keys} cannot go to the remote host in this form: {why}. The command did "
                      "not run. " + _ssh_way(why))
+    if why and why.endswith("with inline code would parse the value as program text"):
+        return _deny(f"maisecrets: {keys} cannot be placed in this command: {why}. The command did not run."
+                     + _file_route(payload, cfg, [k for k, _a, _b in refs], why.split(" ", 1)[0]))
     if why:
         return _deny(f"maisecrets: {keys} cannot be placed in this command: {why}. The command did not run. "
                      "Give the placeholder as a plain argument of the tool that needs the value; for a "
@@ -2297,9 +2813,23 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     vault = Vault(cfg)
     session = payload.get("session_id")
     uniq = list(dict.fromkeys(k for k, _a, _b in refs))
-    failed = _precheck(vault, uniq, session)
+    failed = _precheck(vault, [k for k in uniq if k not in server_keys], session,
+                       extra=_server_limit_keys(server_keys, session))
     if failed:
         return _deny(_deny_reason(failed))
+    # before any stored value is recorded: a server that refuses leaves no audit line of ours
+    got, why = _server_fetch(cfg, vault, server_keys, session)
+    if why:
+        return _deny(why + " The command did not run.")
+    guarded = [k for k, (v, _o) in got.items() if _names_a_guarded_file(v, str(payload.get("cwd") or ""))]
+    if guarded:
+        # the check above saw the token, not the path: a server must not choose a file of the store or a config
+        return _deny(f"maisecrets: the value of ⟦{guarded[0]}⟧ names a file of maisecrets, of ssh or of the client "
+                     "configuration, which a value from a server may not choose. The command did not run.")
+    if any("\0" in v for v, _o in got.values()):
+        return _deny(f"maisecrets: a value of {keys} holds a NUL character, which a shell variable cannot carry. "
+                     "The command did not run. Write it into a file with Write instead.")
+    fetched = {k: v for k, (v, _o) in got.items()}
     # automatic: no ask of our own. confirm: an ask per command, or with ssh_approval "per-session" an
     # approved value runs without an ask and a first use asks once and gives its token to the serving
     # child, which confirms it when the approved command reads the value. After phase 1: a key
@@ -2317,6 +2847,9 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
     # phase 2: record (audit line, limiter) and fetch; a failure here has recorded nothing served
     plan: dict[str, tuple[str | None, str | None]] = {}    # key -> (nonce, value)
     for key in uniq:
+        if key in fetched:
+            plan[key] = (None, fetched[key])
+            continue
         if windows:
             nonce, status = vault.grant(key, session, "Bash", command)
             if status != "ok":
@@ -2333,7 +2866,12 @@ def _pre_bash(payload: dict, cfg: dict, tool_input: dict) -> dict:
             plan[key] = (None, value)
     if failed:
         return _deny(_deny_reason(failed))
-    _note_destinations(cfg, payload, "Bash", tool_input, list(plan), ssh_command=command)
+    # the audit line and the limiter record of a server value only after every check and every stored value
+    # passed (Gate A and Gate B review)
+    _released, why = _server_release(vault, got, session, "Bash", command)
+    if why:
+        return _deny(why + " The command did not run.")
+    _note_destinations(cfg, payload, "Bash", tool_input, [k for k in plan if k not in fetched], ssh_command=command)
     # phase 3: serve and rewrite
     prelude: list[str] = []
     var_by_key: dict[str, str] = {}
@@ -2429,12 +2967,118 @@ def shlex_quote(s: str) -> str:
     return shlex.quote(s)
 
 
-def _precheck(vault: Vault, keys: list[str], session: str | None) -> list[str]:
+def _precheck(vault: Vault, keys: list[str], session: str | None, extra: list[str] = ()) -> list[str]:
     """Phase 1 of every resolve: the session rule, then the limiter, for every key, before anything is
     recorded or served. A call with a good key and a bad one wrote the good key's audit line before
-    the refusal on MCP and file tools (review, 2026-09-29); Bash had this order already."""
+    the refusal on MCP and file tools (review, 2026-09-29); Bash had this order already. `extra` are the
+    server keys of the call (`KEY@host`): no session rule of the store, but the same limiter (C7)."""
     failed = [f"{k} ({st})" for k in keys for st in [vault.status(k, session)] if st != "ok"]
-    return failed or vault._limit_all(keys, session)
+    return failed or vault._limit_all(list(keys) + list(extra), session)
+
+
+def _server_limit_keys(keys: list[str], session: str | None) -> list[str]:
+    """The limiter names of server keys: `KEY@host` of the origin that noted the key for this session."""
+    if not keys:
+        return []
+    from urllib.parse import urlsplit
+
+    from . import vault_refs
+    origins = vault_refs.noted(keys, session)
+    return [f"{k}@{urlsplit(origins[k][0]).hostname}" for k in keys if origins.get(k)]
+
+
+def _server_fetch(cfg: dict, vault: Vault, keys: list[str], session: str | None) -> tuple[dict, str | None]:
+    """Vault references (vault_refs.py): the values of server-range tokens, from the server that minted them, all
+    or none. Returns (key -> (value, origin), None) or ({}, the reason without a value). Nothing is recorded yet."""
+    if not keys:
+        return {}, None
+    from . import vault_refs
+    names = ", ".join(f"⟦{k}⟧" for k in keys)
+    try:
+        return vault_refs.resolve(cfg, vault.backend, keys, session), None
+    except vault_refs.Refused as exc:
+        return {}, (f"maisecrets: cannot get the value of {names} from the server that sent it: {exc}. Do not ask "
+                    "the user for the value; tell them this reason.")
+
+
+def _server_release(vault: Vault, got: dict, session: str | None, tool: str, context: str) -> tuple[dict, str | None]:
+    """The limiter record and one audit line per server value (`KEY@host`, rotated like every audit line), then
+    the values are kept for an hour, so an echo in a later tool result is redacted to the server's token.
+    Returns (key -> value, None) or ({}, the reason)."""
+    if not got:
+        return {}, None
+    from urllib.parse import urlsplit
+
+    from . import vault_refs
+    status = vault.record_server([f"{k}@{urlsplit(o).hostname}" for k, (_v, o) in got.items()], session, tool,
+                                 context)
+    if status != "ok":
+        return {}, (f"maisecrets: no value from the server is released ({status}). Tell the user.")
+    vault_refs.remember_released(vault.backend, session, got)
+    return {k: v for k, (v, _origin) in got.items()}, None
+
+
+def _elsewhere_reason(keys: list[str]) -> str:
+    names = ", ".join(f"⟦{k}⟧" for k in keys)
+    return (f"maisecrets: {names} came from a server in another session or more than 24 hours ago, so it does not "
+            "resolve here. Call that server's tool again in this session and use the new tokens.")
+
+
+def _names_a_guarded_file(value: str, cwd: str) -> bool:
+    """A value that, used as a path, names the maisecrets home, a store file, an ssh config, the client config or a
+    file in the client's config folder (its settings hold the hooks). Each piece is a path too: `--config=PATH`,
+    `@PATH`, `file://PATH` (Gate A review)."""
+    if "\0" in value:
+        return False                            # refused on its own below, with its own reason
+    if len(value) > 4096 or _holds_a_guarded_folder(value):
+        return True                             # too long to judge, or a guarded folder anywhere (a path with a space)
+    pieces = {value.strip()}
+    for part in re.split(r"[\s=,;]+", value):
+        part = part.strip("'\"")
+        for lead in ("file://", "@"):
+            if part.startswith(lead):
+                part = part[len(lead):]
+        if part:
+            pieces.add(part)
+    return any(_a_guarded_path(v, cwd) for v in pieces if v)
+
+
+def _holds_a_guarded_folder(value: str) -> bool:
+    """The value holds the spelling of a guarded folder anywhere: a path with a space splits into pieces that each
+    look harmless (Gate A review, round 2)."""
+    from . import vault_refs
+    from .vault import HOME
+    home = os.path.expanduser("~")
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude")
+    spellings = {str(HOME), os.path.realpath(str(HOME)), config_dir, os.path.realpath(config_dir),
+                 *vault_refs.config_files(), os.path.join(home, ".ssh"), "~/.ssh", "~/.claude", "~/.maisecrets",
+                 "$HOME/.ssh", "${HOME}/.ssh", "$HOME/.claude", "${HOME}/.claude"}
+    # the Codex config and its folder: the helper line and the hooks of Codex live there
+    codex_home = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
+    spellings |= {codex_home, os.path.realpath(codex_home), "~/.codex", "$HOME/.codex", "${HOME}/.codex"}
+    return any(sp and sp in value for sp in spellings)
+
+
+def _a_guarded_path(v: str, cwd: str) -> bool:
+    from . import vault_refs
+    try:
+        if _store_read_match(v) or _in_the_home(v, cwd) or _is_ssh_config_path(v, cwd):
+            return True
+        full = v if os.path.isabs(os.path.expanduser(v)) else os.path.join(cwd or os.getcwd(), v)
+        real = os.path.realpath(os.path.expanduser(full))
+        config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+        folder = os.path.realpath(config_dir)
+        codex = os.path.realpath(os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex"))
+        return real in {os.path.realpath(f) for f in vault_refs.config_files()} or real == folder \
+            or real.startswith(folder + os.sep) or real == codex or real.startswith(codex + os.sep)
+    except (OSError, ValueError):
+        return True                             # a path we cannot judge is refused, not served
+
+
+def _all_refs(text: str, values: dict) -> list[tuple[str, int, int]]:
+    """The stored-value placeholders of text, and the server-range tokens that have a value in `values`."""
+    from . import vault_refs
+    return find_refs(text) + [r for r in vault_refs.find(text) if r[0] in values]
 
 
 def _deny_reason(failed: list[str]) -> str:
@@ -2572,6 +3216,8 @@ def _dict_keys(node: Any) -> list[str]:
 
 
 _FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+# the fields of a file tool that hold content; `edits` holds the old and new strings of MultiEdit, `command` the patch
+_CONTENT_FIELDS = ("content", "old_string", "new_string", "edits", "new_source", "command")
 # tools that read files by path; they carry no placeholder, but they could read the store itself
 _READ_TOOLS = ("Read", "Grep", "Glob", "LS", "NotebookRead")
 _PATH_FIELDS = ("file_path", "path", "notebook_path", "directory", "dir", "root", "cwd")
@@ -2785,7 +3431,10 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
             return _deny("maisecrets: this apply_patch call carries no patch in `command`. Nothing was written.")
         headers = _patch_headers(patch)
         paths = [path for _line, path in headers]
-        in_header = [k for line, _path in headers for k, _a, _b in find_refs(line)]
+        from . import vault_refs
+        # a server token in a file name too: the server would choose the file (C27)
+        in_header = [k for line, _path in headers for k, _a, _b in
+                     find_refs(line) + vault_refs.find_noted(line, cfg, payload.get("session_id"))]
         if in_header:
             return _deny(f"maisecrets: ⟦{in_header[0]}⟧ is in a file name of the patch, where it is not resolved. "
                          "Nothing was written. Put the placeholder into the content, not into a path.")
@@ -2809,18 +3458,48 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
     # a Codex patch resolves in its text only; another field keeps a placeholder as text
     target = {"command": tool_input["command"]} if tool == "apply_patch" else tool_input
     _walk_strings(target, collect)
-    if not found:
+    from . import vault_refs
+    server: list[str] = []
+
+    def collect_server(v: str) -> str:
+        server.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
+        return v
+    _walk_strings(target, collect_server)
+    server = list(dict.fromkeys(server))
+    elsewhere: list[str] = []
+
+    def collect_elsewhere(v: str) -> str:
+        elsewhere.extend(vault_refs.noted_elsewhere(v, cfg, payload.get("session_id")))
+        return v
+    _walk_strings(target, collect_elsewhere)
+    if elsewhere:
+        return _deny(_elsewhere_reason(list(dict.fromkeys(elsewhere))) + " Nothing was written.")
+    # a server value goes into the content only: in a path the server would choose the file, after the home check
+    # above saw the token (Codex review, 2026-10-16)
+    outside: list[str] = []
+
+    def collect_outside(v: str) -> str:
+        outside.extend(k for k, _a, _b in vault_refs.find_noted(v, cfg, payload.get("session_id")))
+        return v
+    _walk_strings({k: v for k, v in target.items() if k not in _CONTENT_FIELDS}, collect_outside)
+    if outside:
+        return _deny(f"maisecrets: ⟦{outside[0]}⟧ came from a server and stands outside the content of {tool}, where "
+                     "a server value cannot go. Nothing was written. Put it into the content only.")
+    if not found and not server:
         return {}
-    names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found))
+    names = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(found + server))
     stop = rehydration.refusal(cfg, "file", client_of(payload), names, "Nothing was written.")
     if stop:
         return _deny(stop)
     vault = Vault(cfg)
     session = payload.get("session_id")
     values: dict[str, str] = {}
-    failed = _precheck(vault, list(dict.fromkeys(found)), session)
+    failed = _precheck(vault, list(dict.fromkeys(found)), session, extra=_server_limit_keys(server, session))
     if failed:
         return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
+    got, why = _server_fetch(cfg, vault, server, session)
+    if why:
+        return _deny(why + " Nothing was written.")
     for key in dict.fromkeys(found):
         status = vault.record_resolve(key, session, tool, f"{tool} {path}")
         if status == "ok":
@@ -2831,11 +3510,15 @@ def _pre_file_tool(payload: dict, cfg: dict, tool: str, tool_input: dict, cwd: s
         values[key] = value
     if failed:
         return _deny(_deny_reason(failed).replace("The command did not run.", "Nothing was written."))
+    fetched, why = _server_release(vault, got, session, tool, f"{tool} {path}")
+    if why:
+        return _deny(why + " Nothing was written.")
     _note_destinations(cfg, payload, tool, tool_input, list(values))
+    values.update(fetched)
 
     def substitute(v: str) -> str:
         out = v
-        for key, start, end in sorted(find_refs(v), key=lambda r: r[1], reverse=True):
+        for key, start, end in sorted(_all_refs(v, values), key=lambda r: r[1], reverse=True):
             out = out[:start] + values[key] + out[end:]
         return out
     if cfg.get("scrub_transcript", True):
@@ -2866,7 +3549,7 @@ def _resolve_patch(patch: str, values: dict) -> tuple:
     (None, why)."""
     out = []
     for line in patch.split("\n"):
-        refs = find_refs(line)
+        refs = _all_refs(line, values)
         if not refs:
             out.append(line)
             continue
@@ -2904,6 +3587,8 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
     from . import settings as settings_mod
     if settings_mod.IN_A_COMMAND_RE.search(command):
         return _deny(_SETTINGS_IN_A_COMMAND)
+    if value_files.removal_in_command(command):
+        return _deny(value_files.IN_A_COMMAND)
     if _HOOK_ENTRY_TEXT_RE.search(command):
         # PowerShell has no word parser here: any mention of a hook entry with its event is refused
         return _deny("maisecrets: this command calls a maisecrets hook directly; only the client calls the hooks. "
@@ -2911,9 +3596,10 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
     keys = ", ".join(f"⟦{k}⟧" for k in dict.fromkeys(k for k, _a, _b in find_refs(command)))
     if keys:
         return _deny(f"maisecrets: {keys} cannot be placed in a PowerShell command (maisecrets places values "
-                     "in Bash commands only; PowerShell quoting is not supported). The command did not run. Use "
-                     "the value through an MCP tool or a file tool, or ask the user to run the command "
-                     "themselves. With Git for Windows installed, Claude Code offers Bash instead.")
+                     "in Bash commands only; PowerShell quoting is not supported). The command did not run."
+                     + (_windows_file_route(payload, cfg or {}, keys)
+                        or " Use the value through an MCP tool or a file tool, or ask the user to run the command "
+                        "themselves.") + " With Git for Windows installed, Claude Code offers Bash instead.")
     if (cfg or {}).get("ssh_consent"):
         from . import ssh_consent
         m = ssh_consent._TOKEN_RE.search(command)
@@ -2923,7 +3609,72 @@ def _pre_powershell(payload: dict, tool_input: dict, cfg: dict | None = None) ->
     return {}
 
 
+# a placeholder of a term (terms.py) is never resolved (mask only): it is hidden from the resolvers under two
+# private-use characters that the tool input does not hold, and put back in the answer as it was written
+
+
+class _NoPair(Exception):
+    """No private-use pair is free in the tool input."""
+
+
+def _hide_pair(tool_input) -> tuple | None:
+    """Two private-use characters that no string of the tool input holds: a fixed pair turned a real U+E000 in the
+    content of a Write into the bracket of a placeholder (gate review of block 2)."""
+    used = set(json.dumps(tool_input, ensure_ascii=False))
+    # the private-use area of the first plane, then planes 15 and 16; None when the input holds every one of them
+    gen = (chr(c) for r in ((0xE000, 0xF900), (0xF0000, 0xFFFFE), (0x100000, 0x10FFFE)) for c in range(*r)
+           if chr(c) not in used)
+    free = (next(gen, None), next(gen, None))
+    return None if free[1] is None else free
+
+
+def _term_keys() -> set:
+    """The keys of the term and import entries in the index, purged ones too: such a key never resolves, at any
+    age."""
+    from .vault import INDEX
+    try:
+        entries = json.loads(INDEX.read_text(encoding="utf-8")).get("entries", {})
+    except (OSError, ValueError, AttributeError):
+        return set()
+    return {k for k, m in entries.items() if isinstance(m, dict) and value_files.is_mask_only(m.get("kind"))}
+
+
 def pre_tool(payload: dict) -> dict:
+    """Mask only (README "Terms"): a term placeholder in a command, an argument or a file stays as written. The tool
+    call runs with the placeholder; maisecrets never puts the name back in v1."""
+    tool_input = payload.get("tool_input")
+    keys: list = []
+    pair: list = []
+
+    def hide(s: str) -> str:
+        refs = find_refs(s)
+        if not refs:
+            return s
+        if not keys:
+            keys.append(_term_keys())
+        for key, a, b in sorted(refs, key=lambda r: r[1], reverse=True):
+            if key in keys[0]:
+                if not pair:
+                    free = _hide_pair(tool_input)
+                    if free is None:
+                        raise _NoPair
+                    pair.extend(free)
+                s = s[:a] + pair[0] + s[a + 1:b - 1] + pair[1] + s[b:]
+        return s
+    try:
+        hidden = _walk_strings(tool_input, hide) if isinstance(tool_input, dict) else tool_input
+    except _NoPair:
+        return _deny("maisecrets: this tool call holds every private-use character, so a name placeholder in it "
+                     "cannot be kept apart from the values. Nothing ran; write the content without that run of "
+                     "characters.")
+    if hidden == tool_input:
+        return _pre_tool(payload)
+    out = _pre_tool(dict(payload, tool_input=hidden))
+    from .placeholder import CLOSE, OPEN
+    return _walk_strings(out, lambda s: s.replace(pair[0], OPEN).replace(pair[1], CLOSE)) if pair else out
+
+
+def _pre_tool(payload: dict) -> dict:
     cfg = load_config()
     tool = payload.get("tool_name", "")
     tool_input = payload.get("tool_input") or {}
@@ -2935,21 +3686,24 @@ def pre_tool(payload: dict) -> dict:
         refused = _store_path_refusal(tool, tool_input, str(payload.get("cwd") or ""))
         if refused:
             return refused
+        if tool == "Read":
+            from . import file_reads      # a PDF or an image: the person's read_pdf / read_image (C28)
+            return file_reads.pre_read(payload, cfg, client_of(payload) == "codex")
         if tool in _READ_TOOLS or tool in _MCP_RESOURCE_TOOLS:
             return {}
     if tool in _FILE_TOOLS or tool == "apply_patch":
         return _pre_file_tool(payload, cfg, tool, tool_input, str(payload.get("cwd") or ""))
     if tool.startswith("mcp__"):
-        # Gateway servers too: the deposit path (gateway resolves ⟦REF⟧ itself, PROTOCOL §4) is not
-        # built; until it is, a placeholder that reaches a gateway action is parsed as text
-        # (measured 2026-09-26 with gmail_create_draft: the recipient was split at the colon).
+        # Every server, a gateway too: a placeholder that reaches a gateway action unresolved is parsed as
+        # text (measured 2026-09-26 with gmail_create_draft: the recipient was split at the colon). A token
+        # of the server range stays as it is; it goes back to the server that minted it (PROTOCOL §4).
         return _pre_mcp(payload, cfg, tool, tool_input)
     return {}
 
 
 # -------------------------------------------------------------- PostToolUse --
-_TOKEN_SPLIT_RE = re.compile(r"[\s\"'`<>()\[\]{},;]+")
-_FINE_SPLIT_RE = re.compile(r"[/?&#=:@,;+|\\]")
+_TOKEN_SPLIT_RE = _LazyRx(r"[\s\"'`<>()\[\]{},;]+")
+_FINE_SPLIT_RE = _LazyRx(r"[/?&#=:@,;+|\\]")
 _EXACT_MIN_LEN = 8
 
 
@@ -2990,8 +3744,8 @@ def _candidates(token: str):
     yield from _decoded(token)
 
 
-_HEX_RE = re.compile(r"(?:[0-9a-fA-F]{2}){6,}")
-_B64_RE = re.compile(r"[A-Za-z0-9+/_-]{12,}={0,2}")
+_HEX_RE = _LazyRx(r"(?:[0-9a-fA-F]{2}){6,}")
+_B64_RE = _LazyRx(r"[A-Za-z0-9+/_-]{12,}={0,2}")
 
 
 def _decoded(token: str):
@@ -3042,7 +3796,7 @@ def _derived_forms(value: str) -> list[str]:
     return [f for f in dict.fromkeys(forms) if len(f) >= _EXACT_MIN_LEN]
 
 
-def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]:
+def _resolved_values(vault: Vault, session: str | None, prompt: bool = False) -> list[tuple[str, str]]:
     """(value, reference) for every key this session resolved in the last hour: a value the hook
     itself inserted into a command or an MCP argument is expected back in the output, in any
     position and any encoding, so it is matched as a substring and not by whole token."""
@@ -3050,9 +3804,11 @@ def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]
     keys = [r["key"] for r in vault._index.get("resolves", []) if r.get("session") == session and r["ts"] > now - 3600]
     out: list[tuple[str, str]] = []
     from .vault import Entry
-    # a weak entry is not hunted as a substring either (Vault.live_fingerprints)
+    # a weak entry is not hunted as a substring either, and in a typed prompt (prompt) a quiet one is not
+    # (Vault.live_fingerprints): an agent that used the placeholder of a word made the word block the prompt (Gate A)
     live = [k for k in dict.fromkeys(keys) if vault._index["entries"].get(k)
-            and not vault._index["entries"][k].get("purged") and not vault._index["entries"][k].get("weak")]
+            and not vault._index["entries"][k].get("purged") and not vault._index["entries"][k].get("weak")
+            and not (prompt and vault._index["entries"][k].get("quiet"))]
     if hasattr(vault.backend, "get_many"):
         found = vault.backend.get_many(live)
     else:
@@ -3061,13 +3817,19 @@ def _resolved_values(vault: Vault, session: str | None) -> list[tuple[str, str]]
         value = found.get(key)
         if value:
             out.append((value, Entry.from_meta(vault._index["entries"][key]).ref))
+    from . import vault_refs
+    # the values a server gave this session; a short one or a word would rewrite every output that holds it
+    # ("true" inside "construed"), so those are not hunted (Fable review, round 3)
+    out.extend((v, t) for v, t in vault_refs.released(vault.backend, session)
+               if len(v) >= _EXACT_MIN_LEN and not detect.reads_as_word(v))
     return out
 
 
-def _inserted_values(text: str, vault: Vault) -> list[tuple[str, str]]:
+def _inserted_values(text: str, vault: Vault, prompt: bool = False) -> list[tuple[str, str]]:
     """(value, reference) for every live vault value that appears in ``text``, found by keyed
-    fingerprint of the tokens, so no value is read from the store."""
-    live = vault.live_fingerprints()
+    fingerprint of the tokens, so no value is read from the store. prompt: the text is a typed prompt
+    (Vault.live_fingerprints)."""
+    live = vault.live_fingerprints(prompt)
     if not live:
         return []
     out: list[tuple[str, str]] = []
@@ -3085,7 +3847,8 @@ def _inserted_values(text: str, vault: Vault) -> list[tuple[str, str]]:
 
 
 def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entries: list,
-                  resolved: list[tuple[str, str]] | None = None, values: list[str] | None = None) -> str:
+                  resolved: list[tuple[str, str]] | None = None, values: list[str] | None = None,
+                  prompt: bool = False) -> str:
     """Values without a known shape (a password stored with `put`, a value from a prior
     prompt) come back from a command in plaintext unless they are matched exactly. The
     match is by keyed fingerprint of each token, so no value is read from the store; the
@@ -3114,9 +3877,10 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
                 hit["n"] += n
                 if values is not None and form not in values:
                     values.append(form)
-    live = vault.live_fingerprints()
+    live = vault.live_fingerprints(prompt)   # a typed prompt does not hunt a quiet entry (Entry.quiet)
     if not live:
         return out
+    found: list[str] = []          # admitted together at the end: one index write, not one per hit
     seen: set[str] = set()
     tokens = list(_TOKEN_SPLIT_RE.split(out))
     # a value with spaces or quotes survives no tokenizer; the rest of a KEY=value line does
@@ -3136,7 +3900,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
             key = live.get(vault.fingerprint(cand))
             if key is None:
                 continue
-            vault.admit(key, session)
+            found.append(key)
             from .vault import Entry
             e = Entry.from_meta(vault._index["entries"][key])
             # a URL-decoded or JSON-unescaped candidate is not in the text; its encoded form is
@@ -3147,6 +3911,7 @@ def _exact_redact(text: str, vault: Vault, session: str | None, hit: dict, entri
             entries.append(e)
             if values is not None and raw not in values:
                 values.append(raw)
+    vault.admit_many(found, session)
     return out
 
 
@@ -3171,10 +3936,10 @@ def _raw_form(token: str, cand: str) -> str:
 # Text a model reads and a person does not see (README, "Invisible characters"): Unicode tag characters, each the
 # twin of an ASCII character ("ASCII smuggling"), and variation selectors used as bytes. Bidi controls are not
 # in it: they reorder what a person sees, the model reads the text in its logical order (Opus review, 2026-10-06).
-_TAGS_RE = re.compile("[\U000E0000-\U000E007F]+")
+_TAGS_RE = _LazyRx("[\U000E0000-\U000E007F]+")
 # the three flags of the standard emoji set that are tag sequences: England, Scotland, Wales
 _FLAG_TAGS = {"".join(chr(0xE0000 + ord(c)) for c in name) + "\U000E007F" for name in ("gbeng", "gbsct", "gbwls")}
-_VS_RE = re.compile("[\uFE00-\uFE0F\U000E0100-\U000E01EF]")
+_VS_RE = _LazyRx("[\uFE00-\uFE0F\U000E0100-\U000E01EF]")
 
 
 def _cjk(ch: str) -> bool:
@@ -3237,7 +4002,7 @@ def strip_hidden(text: str) -> tuple[str, int, list[str]]:
 # The byte forms, raw UTF-8 and JSON escape in any case, of what a transcript must not keep: a tag character
 # (U+E0000-U+E007F), an ideographic selector (U+E0100-U+E01EF) and VS1 to VS14 (U+FE00-U+FE0D). VS15 and VS16 stay:
 # emoji need them, and one of them carries one bit.
-_HIDDEN_BYTES_RE = re.compile(
+_HIDDEN_BYTES_RE = _LazyRx(
     rb"\xf3\xa0(?:[\x80\x81\x84-\x86][\x80-\xbf]|\x87[\x80-\xaf])|\xef\xb8[\x80-\x8d]"
     rb"|\\u[dD][bB]40\\u[dD](?:[cC][0-7]|[dD][0-9a-eA-E])[0-9a-fA-F]|\\u[fF][eE]0[0-9a-dA-D]")
 
@@ -3314,11 +4079,85 @@ def _mask_hidden_in_transcript(path: str, start: int = 0) -> int:
         return 0
 
 
+# A Read of an image or a PDF returns the file as base64: tool_response type "image" or "pdf" (file.base64) or
+# "parts" (pages[].base64), and the client gives it to the model as an image or a document block, never as text
+# (tests/client_payloads/claude-read-*-post.json, recorded from Claude Code 2.1.296). A scan of it as text cost
+# 10.9 s for 1 MB and found only chance shapes, and a placeholder inside it would break the image.
+_BINARY_READ_TYPES = ("image", "pdf", "parts")
+_DATA_URI_RE = _LazyRx(r"data:image/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/=\s]*)")
+_IMAGE_MAGIC = {"png": (b"\x89PNG\r\n\x1a\n",), "jpeg": (b"\xff\xd8\xff",), "gif": (b"GIF87a", b"GIF89a"),
+                "webp": (b"RIFF",)}
+
+
+_IMAGE_TRAILER = {"png": b"IEND\xaeB`\x82", "jpeg": b"\xff\xd9", "gif": b";"}
+
+
+def _is_image_data_uri(s: Any) -> bool:
+    """The whole text is a data URI whose whole body decodes as base64 to a file of its image type: the magic number
+    at the start and the end of the format at the end (the IEND chunk of a PNG, the EOI marker of a JPEG, the trailer
+    of a GIF, the RIFF length of a WebP). Claude Code sets `isImage` on a Bash output that starts with `data:image/`
+    (recorded: `printf 'data:image/png;base64,'; base64 < tiny.png`), so the flag alone is a text the agent can print,
+    and a prefix check let an agent switch off the redaction of a whole output (review of the 0.6.15 fixes). A check
+    of the first bytes only let a key glued after the image (`…==AKIA…`, or on the next line) through (Gate A)."""
+    if not isinstance(s, str):
+        return False
+    m = _DATA_URI_RE.fullmatch(s)
+    if not m:
+        return False
+    import base64
+    import binascii
+    try:
+        raw = base64.b64decode("".join(m.group(2).split()), validate=True)
+    except (ValueError, binascii.Error):
+        return False
+    kind = m.group(1)
+    if not raw.startswith(_IMAGE_MAGIC[kind]):
+        return False
+    if kind == "webp":
+        return raw[8:12] == b"WEBP" and int.from_bytes(raw[4:8], "little") + 8 == len(raw)
+    return raw.endswith(_IMAGE_TRAILER[kind])
+
+
+def _binary_paths(payload: dict) -> set:
+    """The places in tool_response that hold a file as base64 and are not scanned as text: the base64 of a Read of an
+    image or a PDF, and the stdout of a Bash output that the client sends as an image (`isImage` true and the
+    whole stdout an image data URI). Every other field is scanned as before; stderr always."""
+    resp = payload.get("tool_response")
+    if not isinstance(resp, dict):
+        return set()
+    tool = payload.get("tool_name")
+    if tool == "Read" and resp.get("type") in _BINARY_READ_TYPES:
+        out = set()
+        if isinstance(resp.get("file"), dict) and isinstance(resp["file"].get("base64"), str):
+            out.add(("file", "base64"))
+        pages = resp.get("pages")
+        for i, page in enumerate(pages if isinstance(pages, list) else []):
+            if isinstance(page, dict) and isinstance(page.get("base64"), str):
+                out.add(("pages", i, "base64"))
+        return out
+    if tool == "Bash" and resp.get("isImage") is True and _is_image_data_uri(resp.get("stdout")):
+        return {("stdout",)}
+    return set()
+
+
 def post_tool(payload: dict) -> dict:
     cfg = load_config()
     response = payload.get("tool_response")
     if response is None:
         return {}
+    # an image or a PDF (C28): it passes as it is, or a text Read takes its place, which the redaction below then
+    # masks. A file that passes goes through the walk below: its base64 gets the exact match only (_binary_paths),
+    # every other field is scanned
+    from . import file_reads
+    swap = file_reads.post_read(payload, cfg, client_of(payload) == "codex")
+    images: list = []
+    if swap and swap[0] == "pass":
+        swap = None
+    elif swap and swap[0] == "hold":
+        response, images = file_reads.hold_images(response)
+        swap = None
+    elif swap:
+        response = swap[1]
     session = payload.get("session_id")
     vault: Vault | None = None
     hit = {"n": 0}
@@ -3328,6 +4167,9 @@ def post_tool(payload: dict) -> dict:
 
     tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")   # a test file keeps its fixtures
+    # the file whose name can name a password export: a Read's, or the path of a Grep or of another client's read
+    scan_path = path or str(tool_input.get("path") or "")
+    # text that stands in for a PDF or an image is no test code: no hit of it is a fixture, by path or by content
     strip = cfg.get("strip_hidden_characters", True)
     hidden = {"n": 0}
     hidden_runs: list[str] = []
@@ -3339,15 +4181,18 @@ def post_tool(payload: dict) -> dict:
             s, gone, runs = strip_hidden(s)
             hidden["n"] += gone
             hidden_runs.extend(runs)
-        matches = [m for m in detect.scan(s) if not detect.is_fixture(m, s, path)]
+        matches = [m for m in detect.scan(s, channel="tool", path=scan_path)
+                   if swap or not detect.is_fixture(m, s, path)]
         if not matches and not _has_live(cfg):
             return s
         if vault is None:
             vault = Vault(cfg)
             resolved = _resolved_values(vault, session)
         out = s
+        if matches and _has_live(cfg):
+            matches = _longest_wins(s, matches, vault, session, resolved)    # (C26)
         if matches:
-            out, ents = _replace(s, matches, vault, session)
+            out, ents = _replace(s, matches, vault, session, tool=True)
             hit["n"] += len(matches)
             values.extend(m.value for m in matches)
             entries.extend(ents)
@@ -3368,12 +4213,27 @@ def post_tool(payload: dict) -> dict:
         hit["n"] += hits
         return cleaned
 
-    def walk(node: Any) -> Any:
+    binary = _binary_paths(payload)
+
+    def redact_binary(s: str) -> str:
+        """A file as base64: no shape scan, but the exact match of the stored values as before (a value this session
+        resolved, written into an uncompressed PDF, can stand in its base64 form; a hit breaks the file)."""
+        nonlocal vault, resolved
+        if not _has_live(cfg):
+            return s
+        if vault is None:
+            vault = Vault(cfg)
+            resolved = _resolved_values(vault, session)
+        return _exact_redact(s, vault, session, hit, entries, resolved, values)
+
+    def walk(node: Any, at: tuple = ()) -> Any:
         # keys too: a tool result's JSON can hide an instruction or a value in a key (Codex review, 2026-10-06)
+        if at in binary and isinstance(node, str):
+            return redact_binary(node)
         if isinstance(node, str):
             return redact(node)
         if isinstance(node, list):
-            return [walk(x) for x in node]
+            return [walk(x, at + (i,)) for i, x in enumerate(node)]
         if isinstance(node, dict):
             pairs = [(clean_key(k) if isinstance(k, str) else k, k, v) for k, v in node.items()]
             # a key that the cleaning did not change keeps its name; a cleaned key that is now alike another gets
@@ -3387,11 +4247,18 @@ def post_tool(payload: dict) -> dict:
                     while f"{nk}<{n}>" in taken or f"{nk}<{n}>" in out:
                         n += 1
                     nk = f"{nk}<{n}>"
-                out[nk] = walk(v)
+                out[nk] = walk(v, at + (k,))
             return out
         return node
 
     new_response = walk(response)
+    if images:
+        file_reads.put_back_images(new_response, images)
+    if swap and not hit["n"] and not hidden["n"]:
+        if client_of(payload) == "codex":
+            return {"decision": "block", "reason": f"[maisecrets: {swap[2]}]\n\n{file_reads.as_text(new_response)}"}
+        return {"systemMessage": swap[2],
+                "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": new_response}}
     if not hit["n"] and not hidden["n"]:
         return {}
     from . import events
@@ -3427,6 +4294,15 @@ def post_tool(payload: dict) -> dict:
             "hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": new_response,
                                    "additionalContext": note},
         }
+    term_refs = list(dict.fromkeys(e.ref for e in entries if term_files.is_term_kind(getattr(e, "kind", ""))))
+    if term_refs:
+        note = (f"{note} {', '.join(term_refs)} stand for names from the person's term list: maisecrets never puts "
+                "the name back, also not in a command or a file. Write them as they are.").strip()
+    import_refs = list(dict.fromkeys(e.ref for e in entries if value_files.is_import_kind(getattr(e, "kind", ""))))
+    if import_refs:
+        note = (f"{note} {', '.join(import_refs)} stand for values the person imported from their own tools: "
+                "maisecrets never puts the value back, also not in a command or a file. Write them as they are."
+                ).strip()
     refs = [e.ref for e in entries]
     if client_of(payload) == "codex":
         # Codex has no updatedToolOutput. A "block" replaces the model-visible result with the
@@ -3437,6 +4313,8 @@ def post_tool(payload: dict) -> dict:
         # (item_completed / CommandExecution), so that file is scrubbed too, with every matched
         # form, not only the detector values (review, 2026-09-26).
         text = new_response if isinstance(new_response, str) else json.dumps(new_response, ensure_ascii=False)
+        if swap:
+            text = file_reads.as_text(new_response)
         if cfg.get("scrub_transcript", True):
             path = payload.get("transcript_path", "")
             _scrub_transcript(path, values, refs)
@@ -3451,7 +4329,8 @@ def post_tool(payload: dict) -> dict:
         # the person sees what was replaced, not only the model (UX review, 2026-09-27)
         "systemMessage": f"maisecrets replaced {hit['n']} value(s) in this {tool} "
                          f"result before the AI saw it: {shown}."
-                         + (f" It also removed {hidden['n']} invisible character(s)." if hidden["n"] else ""),
+                         + (f" It also removed {hidden['n']} invisible character(s)." if hidden["n"] else "")
+                         + (f" {swap[2]}" if swap else ""),
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
             "updatedToolOutput": new_response,
@@ -3480,6 +4359,9 @@ def _has_live(cfg: dict) -> bool:
         except ValueError:
             # a damaged index is not an empty one: the vault opens and fails, the output is withheld
             _live_cache["v"] = True
+        if not _live_cache["v"]:
+            from . import vault_refs
+            _live_cache["v"] = vault_refs.has_released()        # a value a server gave this hour
     return _live_cache["v"]
 
 
@@ -3532,10 +4414,17 @@ def _ssh_hint(payload: dict) -> str | None:
     return settings.HINTS["ssh_consent"]["codex" if client_of(payload) == "codex" else "claude"]
 
 
+def _file_read_hint(payload: dict) -> str | None:
+    from . import file_reads
+    if not file_reads.kind_of_response(payload.get("tool_name") or "", payload.get("tool_response")):
+        return None          # most calls: no config read
+    return file_reads.hint(payload, load_config(), client_of(payload) == "codex")
+
+
 def _with_hint(payload: dict, result: dict) -> dict:
     """Add a hint to the answer of a PostToolUse without changing what the answer does."""
     # both, when both are due: with `or` the destination hint of this call waited for an unrelated later one (codex)
-    hint = "\n\n".join(h for h in (_ssh_hint(payload), _destination_hint(payload)) if h)
+    hint = "\n\n".join(h for h in (_ssh_hint(payload), _destination_hint(payload), _file_read_hint(payload)) if h)
     if not hint:
         return result
     result = dict(result)
@@ -3553,13 +4442,50 @@ def _post_tool_guarded(payload: dict) -> dict:
     """Claude Code ignores exit 2 from PostToolUse: the raw output would reach the model. So a
     failure inside the redaction withholds the output instead (review, 2026-09-26)."""
     _commit_destinations(payload)    # first: the call ran even when the redaction below fails; and before the hint
+    notice = None
+    try:
+        if str(payload.get("tool_name") or "").startswith("mcp__"):     # no config read for any other tool
+            from . import vault_refs
+            cfg = load_config()
+            noted_payload = payload
+            if client_of(payload) == "codex":
+                # Codex names the tool only: the user entry comes from its name rule, and only when no project layer
+                # of the session folder can give that name another server (codex_vault.mcp_server_of)
+                from . import codex_vault
+                noted_payload = {**payload, "mcp_server": codex_vault.mcp_server_of(payload) or {}}
+            # before the redaction, from the result as the server sent it; the result itself does not change
+            _count, notice = vault_refs.note_result(noted_payload, cfg, Vault(cfg).backend)
+    except Exception as exc:  # noqa: BLE001 - a token not noted stays text; the output must not be withheld for it
+        _debug(f"post-tool vault-refs: {type(exc).__name__}")
+    result = _post_tool_guarded_rest(payload)
+    if notice:
+        try:
+            return _with_notice(result, notice)
+        except Exception as exc:  # noqa: BLE001 - a notice that fails must not change the output
+            _debug(f"post-tool notice: {type(exc).__name__}")
+    return result
+
+
+def _with_notice(result: dict, notice: str) -> dict:
+    """The one-time notice of vault references (vault_refs.enable) for the person, next to any message of the hook."""
+    out = dict(result or {})
+    out["systemMessage"] = (out["systemMessage"] + " " + notice) if out.get("systemMessage") else notice
+    return out
+
+
+def _post_tool_guarded_rest(payload: dict) -> dict:
     try:
         result = post_tool(payload)
     except ConfigError as exc:
-        return _fail_closed("post-tool", payload, f"configuration error: {exc}. Fix the file named there.", hint=False)
+        out = _fail_closed("post-tool", payload, f"configuration error: {exc}. Fix the file named there.", hint=False)
+        _record(functools.partial(incidents.queue, "config.policy-invalid", "parse", "fail-closed", "PostToolUse",
+                                  _tool_class(payload), client_of(payload)))
+        return out
     except Exception as exc:  # noqa: BLE001
         _debug(f"post-tool: {type(exc).__name__}")
-        return _failure("post-tool", payload, exc)
+        out = _failure("post-tool", payload, exc)
+        _record(functools.partial(_queue_failure, exc, "post-tool", _tool_class(payload), client_of(payload)))
+        return out
     try:
         return _with_hint(payload, result)
     except Exception as exc:  # noqa: BLE001 - a hint that fails must not withhold the output
@@ -3578,19 +4504,21 @@ def post_tool_failure(payload: dict) -> dict:
         return {}
     cfg = load_config()
     session = payload.get("session_id")
-    matches = [m for m in detect.scan(error) if not detect.is_fixture(m, error, "")]
+    matches = detect.findings(error, channel="tool")
     if not matches and not _has_live(cfg):
         return {}
     vault = Vault(cfg)
     hit = {"n": 0}
     entries: list = []
     values: list[str] = []
+    resolved = _resolved_values(vault, session)
+    matches = _longest_wins(error, matches, vault, session, resolved)     # (C26)
     out = error
     if matches:
-        out, entries = _replace(error, matches, vault, session)
+        out, entries = _replace(error, matches, vault, session, tool=True)
         hit["n"] += len(matches)
         values.extend(m.value for m in matches)
-    _exact_redact(out, vault, session, hit, entries, _resolved_values(vault, session), values)
+    _exact_redact(out, vault, session, hit, entries, resolved, values)
     if not hit["n"]:
         return {}
     refs = list(dict.fromkeys(e.ref for e in entries if getattr(e, "ref", None)))
@@ -3649,9 +4577,60 @@ HANDLERS = {"user-prompt": user_prompt, "pre-tool": pre_tool, "post-tool": _post
             "post-tool-failure": _post_tool_failure_observed}
 
 
+def _record(step) -> None:
+    """One step of the incident recorder; it never raises (docs/DIAGNOSTICS.md, D4)."""
+    try:
+        step()
+    except Exception:  # noqa: BLE001 - recording never changes an answer
+        pass
+
+
+def _queue_failure(exc: BaseException, event: str, tool_class: str, client: str) -> None:
+    """Queue the incident of an exception that ended a hook: its code, cause and exit code; never its message."""
+    code, cause, kind, number = incidents.code_of(exc, event)
+    incidents.queue(code, cause, "fail-closed", _EVENT_NAMES[event], tool_class, client, kind, number)
+
+
+_EVENT_NAMES = {"user-prompt": "UserPromptSubmit", "pre-tool": "PreToolUse", "post-tool": "PostToolUse",
+                "post-tool-failure": "PostToolUseFailure"}
+
+
+def _tool_class(payload: dict) -> str:
+    """The closed tool class of a payload for an incident record; never the tool's own name."""
+    name = payload.get("tool_name")
+    if not isinstance(name, str):
+        return "-"
+    if name in ("Bash", "PowerShell"):
+        return name
+    if name.startswith("mcp__"):
+        return "MCP"
+    if name in ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch"):
+        return "File"
+    return "Other"
+
+
 # under the timeouts hooks/hooks.json gives each event (10 s prompt and pre-tool, 20 s post-tool);
 # a client timeout fails OPEN, so the answer must come first
 WATCHDOG_SECONDS = {"user-prompt": 7.0, "pre-tool": 7.0, "post-tool": 16.0, "post-tool-failure": 16.0}
+
+
+_TEST_WATCHDOG_MAX = 6.0   # below the shortest client timeout (10 s, hooks/hooks.json) with room for the answer
+
+
+def _test_watchdog_seconds(default: float) -> float:
+    """The watchdog time, shortened only for the tests. MAISECRETS_TEST_WATCHDOG counts only when the test marker
+    names the active home (tests/_isolate.py sets both), and only as a finite number above 0 and at most 6 s: an
+    inherited environment cannot move the fail-closed answer past the client's timeout (codex review of 0.6.15)."""
+    raw = os.environ.get("MAISECRETS_TEST_WATCHDOG")
+    owned, home = os.environ.get("MAISECRETS_TEST_HOME_OWNED"), os.environ.get("MAISECRETS_HOME")
+    if not (raw and owned and home) or os.path.realpath(owned) != os.path.realpath(home):
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    import math
+    return value if math.isfinite(value) and 0 < value <= _TEST_WATCHDOG_MAX else default
 
 
 def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict:
@@ -3659,8 +4638,8 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
     deny the tool, withhold the tool output. Never a value, never an exception text (a keychain
     error carried the value in its argument list; Codex review, 2026-09-26). Each text says
     whether the tool ran, so the model does not repeat a push or a deploy (review, 2026-09-26)."""
-    reason = f"maisecrets {event}: {why}"
     codex = client_of(payload) == "codex"
+    reason = f"maisecrets {event}: {why}" + _incident_line(codex)
     if event == "post-tool-failure":
         # the client shows the failed output whatever this answer says: there is nothing to withhold
         return {"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": reason}}
@@ -3681,7 +4660,30 @@ def _fail_closed(event: str, payload: dict, why: str, hint: bool = True) -> dict
             "Do NOT run it again to see the output; tell the user to check the result in their terminal.")
     if codex:
         return {"decision": "block", "reason": reason + tail}
+    response = payload.get("tool_response")
+    if payload.get("tool_name") == "Bash" and isinstance(response, dict) and response.get("isImage") is True:
+        # an image of a Bash result: a string fails open here too; the client's Bash shape with isImage off removes
+        # the image (measured live, review of block 4)
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": {
+            **response, "stdout": f"[{reason}{tail}]", "stderr": "", "isImage": False}}}
+    if payload.get("tool_name") == "Read":
+        # a string fails the shape check of Read and the client sends the original, a PDF or an image too (measured,
+        # harness/probe_file_reads.py): only a text Read withholds it
+        from .file_reads import text_result
+        path = (payload.get("tool_input") or {}).get("file_path") if isinstance(payload.get("tool_input"), dict) else ""
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                       "updatedToolOutput": text_result(str(path or ""), f"[{reason}{tail}]")}}
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": f"[{reason}{tail}]"}}
+
+
+def _incident_line(codex: bool) -> str:
+    """The fixed line of every fail-closed answer: where the person finds a report they can read and send
+    themselves (docs/DIAGNOSTICS.md, section 5). Codex shows no block reason of a typed form yet, so it names the
+    terminal form."""
+    if codex:
+        return (f" maisecrets sent no report. Run {_run_sh()} report incident in a terminal to see one you can read "
+                "and send yourself.")
+    return " maisecrets sent no report. Type /maisecrets:report incident to see one you can read and send yourself."
 
 
 def _decision_of(event: str, obj: dict) -> str:
@@ -3743,7 +4745,13 @@ def _heartbeat(event: str, payload: dict, done: bool = False) -> None:
     from .vault import HOME
     if event not in ("user-prompt", "pre-tool", "post-tool") or client_of(payload) != "claude":
         return
-    if not ((HOME / "guard.json").exists() or _from_a_synced_folder()):
+    try:
+        # before Python 3.12, exists() raises on a home the hook cannot search, and this call runs before
+        # the hook's try: the process exited 1 without an answer, which lets the prompt through
+        installed = (HOME / "guard.json").exists()
+    except OSError:
+        installed = False
+    if not (installed or _from_a_synced_folder()):
         return
     ident = payload.get("prompt_id") if event == "user-prompt" else payload.get("tool_use_id")
     session = payload.get("session_id")
@@ -3780,12 +4788,27 @@ def _scrub_failed_prompt_now(prompt: str, path: str) -> None:
                 return
         except Exception:  # noqa: BLE001 - a config that cannot be read must not stop the scrub
             pass
-        values = [m.value for m in detect.scan(prompt) if not detect.is_fixture(m, prompt)]
+        values = []
+        checked = check_value.parse_all(prompt)
+        if checked is not None:
+            # ms:(…): the value often has no shape, so the detector below finds nothing. The prompt as typed goes
+            # first, and it needs neither the store nor the detector (Gate A and Gate B, round 1)
+            values = check_value.scrub_forms(prompt, [v for v, _exact in checked])
+            _scrub_transcript(path, values, [])
+            # the record comes after the hook answered, and the detector below can outlast this child's 30 s on a
+            # huge paste: the late scrub of the check starts first (Gate B, round 2)
+            _scrub_transcript_later(path, list(values), [])
+        try:
+            values += [m.value for m in detect.findings(prompt)]
+        except Exception:  # noqa: BLE001 - the forms of a check are masked already; the detector failed after them
+            if not values:
+                raise
         if values:
             _scrub_transcript(path, values, [])
             _scrub_transcript_later(path, values, [])
     except Exception:  # noqa: BLE001 - the block stands either way
         _debug("scrub-failed-prompt: could not finish")
+        incidents.write_marker("scrub.write")      # this runs in the scrub child: a marker, not the record
 
 
 def _scrub_failed_prompt(event: str, payload: dict) -> None:
@@ -3834,6 +4857,54 @@ def _scrub_failed_prompt(event: str, payload: dict) -> None:
         _debug("scrub-failed-prompt: could not start")
 
 
+def _arm_alarm(seconds: float, on_timeout, answering: dict):
+    """The second watchdog, in the main thread: a SIGALRM timer whose handler gives the answer of the thread watchdog.
+    A regex search holds the GIL for its whole run, so the thread watchdog cannot run while one backtracks; the
+    client then ends the hook at its timeout, and that timeout lets the action through (measured on 0.6.14: a line
+    of AWS key ids held a PostToolUse hook for 97 s). The `re` engine checks for signals while it runs, so the
+    handler runs inside the search. Windows has no SIGALRM: there the thread watchdog stays alone, and a slow regex
+    can still outrun it. Returns what _disarm_alarm needs, or None."""
+    import signal
+    import threading
+    if not hasattr(signal, "setitimer") or threading.current_thread() is not threading.main_thread():
+        return None
+
+    def on_alarm(signum, frame) -> None:
+        if not answering["v"]:                       # an answer in writing finishes; the thread watchdog stays
+            on_timeout()
+    try:
+        before = signal.signal(signal.SIGALRM, on_alarm)
+        signal.setitimer(signal.ITIMER_REAL, max(0.05, seconds))
+    except (ValueError, OSError):
+        return None
+    return before
+
+
+def _disarm_alarm(before) -> None:
+    if before is None:
+        return
+    import signal
+    try:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, before)
+    except (ValueError, OSError):
+        pass
+
+
+def _quarantine_running_rule(elapsed: float) -> None:
+    """The watchdog answered after `elapsed` seconds. The rule of your own with the most time inside its regex is left
+    out from the next call on, when that time is more than half of `elapsed`: then that rule held the hook. Else the
+    time went to other work, and no rule is blamed: an agent could else take out one correct rule per call with a
+    large output (Fable review, round 2; Opus review, round 3). Never raises."""
+    try:
+        slowest = detect.slowest_user_rule()
+        if slowest is not None and slowest[1] > 0.5 * elapsed:
+            from . import user_rules
+            user_rules.note_slow(slowest[0], slowest[1] * 1000)
+    except Exception:  # noqa: BLE001 - the answer is out; this only spares the next call
+        pass
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[1] not in HANDLERS:
         sys.stderr.write("usage: dispatch.py user-prompt|pre-tool|post-tool|post-tool-failure|session-start\n")
@@ -3850,50 +4921,121 @@ def main(argv: list[str]) -> int:
         # an answer in JSON for every event: exit 2 is ignored after a tool, and Codex runs the tool on
         # exit 2 before one (Codex review, 2026-09-28)
         _out(_fail_closed(event, {}, "got a payload that is not JSON."))
+        incidents.write_marker_bounded("hook.payload")       # it answers before the timer: a marker, bounded
         return 0
-    _heartbeat(event, payload)
     import threading
+    from .home import regions_from_config
+    # the plugin gives the config reader; the mod's rewrite_prompt (dispatch.py) still reads the config in detect
+    detect.use_regions(regions_from_config)
+    from .sources import PLUGIN_SOURCES
+    detect.use_sources(PLUGIN_SOURCES)
+    from .placeholder import REFERENCES
+    detect.use_references(REFERENCES)
+    try:
+        from . import vault_refs
+        # vault references read the client config of this payload's client (Claude Code or Codex)
+        vault_refs.use_client(client_of(payload))
+    except Exception as exc:  # noqa: BLE001 - without it a server token stays text
+        _debug(f"vault-refs client: {type(exc).__name__}")
     started = time.time()
+    clock = time.perf_counter()
     lock = threading.Lock()
     answered = {"v": False}
+    answering = {"v": False}
+    seconds = _test_watchdog_seconds(WATCHDOG_SECONDS[event])
 
-    def answer(obj: dict, how: str) -> None:
-        # exactly one JSON object leaves this process: the watchdog and the handler both call
-        # here, and two concatenated objects fail open (review, 2026-09-26)
-        with lock:
+    def answer(obj: dict, how: str) -> bool:
+        """Write the one answer of this process; True when this call wrote it. Exactly one JSON object leaves the
+        process: the watchdog and the handler both call here, and two concatenated objects fail open (review,
+        2026-09-26). The lock has a limit, so a handler stuck in its own write cannot hold the watchdog
+        (docs/DIAGNOSTICS.md section 10)."""
+        json.dumps(obj)                              # before the claim: an object that cannot be written claims nothing
+        answering["v"] = True                        # the alarm handler leaves an answer in writing alone
+        if not lock.acquire(timeout=1):
+            return False
+        try:
             if answered["v"]:
-                return
+                return False
             answered["v"] = True
             _out(obj)
-            _heartbeat(event, payload, done=True)
+            if how != "watchdog":
+                # the guard waits for it; the watchdog writes it in its bounded thread, so a stalled home cannot
+                # hold the process past the client's timeout (Opus code review, round 1, measured)
+                _heartbeat(event, payload, done=True)
+        finally:
+            lock.release()
         ms = int((time.time() - started) * 1000)
         decision = _decision_of(event, obj)
         _debug(f"{event}: {how} {client_of(payload)} {ms}ms {decision}")
-        _run_log(event, payload, how, decision, ms)
+        if how != "watchdog":                        # the watchdog does no file work before its exit
+            _run_log(event, payload, how, decision, ms)
+        return True
+
+    fired = threading.Lock()
 
     def on_timeout() -> None:
-        answer(_fail_closed(event, payload, f"took longer than {WATCHDOG_SECONDS[event]:.0f}s."), "watchdog")
-        _scrub_failed_prompt(event, payload)
+        if not fired.acquire(blocking=False):
+            return                                   # the other watchdog runs it already, to its end
+        if answer(_fail_closed(event, payload, f"took longer than {seconds:.0f}s."), "watchdog"):
+            def last() -> None:
+                _heartbeat(event, payload, done=True)
+                _quarantine_running_rule(time.perf_counter() - clock)
+                _scrub_failed_prompt(event, payload)
+                incidents.write_marker(f"hook.{event}.watchdog")
+            t = threading.Thread(target=last, daemon=True)
+            t.start()
+            t.join(1.5)
+        # a pdftotext of read_pdf convert runs in its own session: os._exit skips the finally that ends it
+        reader = sys.modules.get("maisecrets.file_reads")
+        if reader is not None:
+            try:
+                reader.kill_running()
+            except Exception:  # noqa: BLE001 - the exit below must come
+                pass
+        # always, also after a lost race: a hook that answered must still end before the client's timeout, which
+        # lets the action through (measured, review round 5)
         os._exit(0)
-    watchdog = threading.Timer(WATCHDOG_SECONDS[event], on_timeout)
+    watchdog = threading.Timer(seconds, on_timeout)
     watchdog.daemon = True
-    watchdog.start()
+    watchdog.start()                                 # first, so no file work runs unguarded
+    alarm = _arm_alarm(seconds - 0.25, on_timeout, answering)
+    _heartbeat(event, payload)
+    won = False
+    tool_class = _tool_class(payload)
+    client = client_of(payload)
+    _record(incidents.discard)
+    _record(functools.partial(incidents.set_context, _EVENT_NAMES[event], tool_class, client))
     try:
-        answer(HANDLERS[event](payload), "ok")
+        won = answer(HANDLERS[event](payload), "ok")
         return 0
     except ConfigError as exc:
         # the policy file is wrong: fail closed, and say which key (its message never carries
         # a value; a bare type name sent the user to "a locked store"; review, 2026-09-26)
-        answer(_fail_closed(event, payload, f"configuration error: {exc}. Fix the file named there.", hint=False),
-               "config-error")
-        _scrub_failed_prompt(event, payload)
+        won = answer(_fail_closed(event, payload, f"configuration error: {exc}. Fix the file named there.",
+                                  hint=False), "config-error")
+        _record(functools.partial(incidents.queue, "config.policy-invalid", "parse", "fail-closed",
+                                  _EVENT_NAMES[event], tool_class, client))
+        if won:
+            _scrub_failed_prompt(event, payload)
         return 0
     except Exception as exc:  # noqa: BLE001 - a guard that fails open is no guard
         # the type only: an exception message may carry a value (subprocess errors list the argv)
-        answer(_failure(event, payload, exc), _how_failed(exc))
-        _scrub_failed_prompt(event, payload)
+        won = answer(_failure(event, payload, exc), _how_failed(exc))
+        _record(functools.partial(_queue_failure, exc, event, tool_class, client))
+        if won:
+            _scrub_failed_prompt(event, payload)
         return 0
     finally:
+        _disarm_alarm(alarm)
+        # the recorder runs after the answer and never raises out of here: an exception would end the process
+        # with exit 1, and a client ignores the JSON answer of a hook that exits 1
+        if won:
+            _record(incidents.flush)                 # still under the watchdog
+        else:
+            _record(incidents.discard)
+            if answered["v"]:
+                watchdog.join()                      # the watchdog answered: its thread ends the process
+        _record(functools.partial(incidents.set_context, None))
         # cancel, then wait: a daemon timer thread that still runs while the interpreter shuts down
         # can crash the process, and one hook ended with signal 11 after its answer on a macOS
         # runner (2026-09-27)

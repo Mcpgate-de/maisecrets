@@ -75,7 +75,9 @@ distribution (Intune, MDM). Not yet measured: whether the sandbox user may start
 
 Measured on codex-cli 0.158.0 with a real model (2026-09-29): Codex edits files with one tool,
 `apply_patch`. A PreToolUse matcher of `Write` or `Edit` reaches it (aliases), but the payload says
-`tool_name: "apply_patch"` and holds the whole patch in `tool_input.command`:
+`tool_name: "apply_patch"` and holds the whole patch in `tool_input.command`. Codex 0.163.0-alpha on Windows maps it
+to no alias (field report, 2026-10-19), so a PreToolUse group of its own names `apply_patch` (0.6.40). Where Codex
+maps the aliases, both groups run on one patch: two equal answers, two audit lines (measured on codex-cli 0.163.0):
 
 ```
 *** Begin Patch
@@ -95,6 +97,46 @@ name exactly the files the checked one named. A context line that reads like a h
 (the safe side), and a value with a carriage return is refused (the format cannot carry it). Codex applies the rewritten patch when the hook answers `allow`.
 The captured payload is `tests/client_payloads/codex-apply-patch.json`; the rehydration matrix
 builds its Codex file row from it.
+
+## Codex: vault references
+
+Measured on codex-cli 0.162.0, and the helper also on 0.155.1 (2026-10-16), with a temp `CODEX_HOME`, a local
+https MCP server with its own CA, and the fake upstream. The harness scenario `vault_refs` of `harness/codex.py`
+repeats it on each pipeline.
+
+- **Config.** `$CODEX_HOME/config.toml` (default `~/.codex`), `[mcp_servers.<name>] url = …`. A streamable-HTTP
+  entry takes `http_headers`, `env_http_headers` and `http_headers_helper` (a command that prints a JSON object of
+  headers). The headers of an entry go to every request to the origin of its URL: initialize, tools/list,
+  tools/call, the OAuth metadata, the client registration and the `authorization_code` token request. The browser
+  leg of the login gets none (the browser makes it), and another origin gets none.
+- **A project moves a user entry.** Codex merges `<dir>/.codex/config.toml` of each folder from the project root
+  down to the session folder over the user's file, deeply. A project file with only `[mcp_servers.demo] url = B`
+  sent the user's `demo` entry, its static header included, to B. "Untrusted" would stop it, but the app server
+  trusts a project on its own when the sandbox may write the folder (the default `workspace-write`) and writes the
+  trust into the user's file. So maisecrets writes no static header in Codex.
+- **The helper.** Codex runs `http_headers_helper` once per connection, in the session folder, with a cleared
+  environment (`HOME`, `PATH`, `USER`, `TMPDIR` and a few more; no `CODEX_HOME`). `{}` gives no header and the
+  server works; a helper that exits with an error stops the connection. maisecrets writes one helper line on the
+  entry; the helper (`maisecrets/codex_helper.py`, copied to `~/.maisecrets/bin/`) prints the header only when no
+  project layer of the folder has `mcp_servers`, and the command ends in `|| echo '{}'`.
+- **When Codex reads the file.** At its start: a header written during a `codex exec` run did not reach the later
+  requests of that run. In the app server (the terminal UI and the desktop app) a new thread loads the config again
+  (`thread/start`); not measured.
+- **The PostToolUse payload** of an MCP call: `session_id, turn_id, cwd, model, permission_mode, tool_name,
+  tool_input, tool_response, tool_use_id, transcript_path`. `tool_name` is `mcp__<server>__<tool>`, with every
+  character outside `[A-Za-z0-9_]` as `_`; there is no server name, URL or scope. maisecrets maps the name to a user
+  entry and notes nothing when two entries could make it.
+- **A hook's `systemMessage`** becomes a warning of the hook run. `codex exec` prints neither it nor the start line
+  of maisecrets, in its text or its `--json` output.
+- **One answer per process.** Codex keeps the server URLs of the folder a session began in and runs the helper
+  again after a change of the folder or a 401 or 403 (`core/src/session/turn_context.rs`,
+  `rmcp-client/src/http_headers.rs`). So the first run of a Codex process decides for each entry, and only within
+  two minutes of the process start; later runs elsewhere print `{}`. The desktop app runs one app server for all its
+  chats, so a later chat in another folder sends no header until the app restarts (not measured). The plugin servers
+  are read from every place codex-rs 0.162.0 reads them (four manifest places, `mcpServers` inline or as a path,
+  `.mcp.json`, `mcp.json`).
+- **Windows** (not measured): the file is `%USERPROFILE%\.codex\config.toml`, and the helper would run under
+  `cmd.exe /C`. Codex vault references are off on Windows in this version.
 
 ## Sessions, subagents and headless runs
 

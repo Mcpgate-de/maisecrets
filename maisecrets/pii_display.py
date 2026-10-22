@@ -42,7 +42,8 @@ def normalise_level(raw: object) -> str:
 
 
 def _mask_email(value: str, level: str, freemail: FrozenSet[str]) -> str:
-    local, sep, domain = value.rpartition("@")
+    # a percent-encoded address (name%40firma.de) has no @: without this it got no display at all
+    local, sep, domain = (value if "@" in value else value.replace("%40", "@")).rpartition("@")
     if not sep or not local:
         return value
     shown = local.rstrip(BULLET)
@@ -117,6 +118,9 @@ _RULES = {
     "iban": lambda v, level, fm: _mask_iban(v),
     "ip_address": lambda v, level, fm: _mask_ipv4(v, level),
     "ip_address_v6": lambda v, level, fm: _mask_ipv6(v, level),
+    # a name (NAME, rules of your own): two letters of a name and its length already narrow it to a few people, so a
+    # display shows nothing of it and the placeholder is the key alone
+    "person": lambda v, level, fm: "",
 }
 
 
