@@ -16,7 +16,7 @@ download, no package install, no dependency outside the Python standard library.
 | Event | What it does |
 |---|---|
 | `SessionStart` | Prints the version and the protections that are on. Notes the start of the session. |
-| `UserPromptSubmit` | Scans your prompt. A prompt with a secret or personal data is blocked, and the cleaned prompt is offered to you with placeholders. |
+| `UserPromptSubmit` | Scans your prompt. When it holds a password, a token or personal data, the hook stops it and offers you the cleaned prompt with placeholders. |
 | `PreToolUse` | Scans the input of a tool call. Puts a stored value into a command or a tool argument right before execution, when your rules allow it, and refuses a form where the value could run as code. |
 | `PostToolUse`, `PostToolUseFailure` | Scans the result of a tool call and replaces each value with its placeholder before the model sees it. |
 
