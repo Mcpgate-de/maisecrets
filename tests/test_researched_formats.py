@@ -1,8 +1,9 @@
 """Token formats researched from the providers' documentation (0.7.9): the providers that GitHub secret scanning names.
 
 Run: python3 -m unittest tests.test_researched_formats -v
-SOURCES holds the pattern each format was researched with, a copy kept apart from the rules in
-maisecrets/detection/rules/prefixes.txt and own_secret_rules.json, so a rule that drifts from its format turns red.
+SOURCES holds the pattern each format was researched with (0.7.10 adds eight from Trivy, Veles, nuclei and titus),
+a copy kept apart from the rules in maisecrets/detection/rules/prefixes.txt and own_secret_rules.json, so a rule
+that drifts from its format turns red.
 Every token is generated at run time from that pattern, seeded by the rule id; no value sits in the tree.
 """
 from __future__ import annotations
@@ -239,10 +240,26 @@ SOURCES = dict([
      'ysc2_[a-zA-Z0-9]{40}[0-9a-f]{8}'),
     ('yandex-translate-api-key-legacy-v1-5',
      'trnsl\\.1\\.1\\.[0-9]{8}T[0-9]{6}Z\\.[a-f0-9]{16}\\.[a-f0-9]{40}'),
+    ('amazon-mws-auth-token',
+     'amzn\\.mws\\.[0-9a-f]{8}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{12}'),
+    ('atlassian-api-token-bare',
+     'ATATT3xFfGF0[a-zA-Z0-9_\\-]{20,200}=[0-9A-F]{8}'),
+    ('facebook-graph-explorer-access-token',
+     'EAACEdEose0cBA[a-zA-Z0-9]+'),
+    ('new-relic-synthetics-private-location-key',
+     'NRSP\\-[a-z]{2}[0-9]{2}[a-f0-9]{31}'),
+    ('notion-refresh-token',
+     'nrt_[A-Z0-9_]{40,55}'),
+    ('openai-service-api-key-legacy',
+     'sk\\-service\\-[A-Za-z0-9\\-]+\\-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}'),
+    ('retool-workflow-api-key',
+     'retool_wk_[0-9a-f]{32}'),
+    ('slack-app-configuration-access-token',
+     'xoxe\\.xoxp\\-[\\d]{1,10}\\-[a-zA-Z0-9]{166}'),
 ])
 # formats whose body has no upper length and a short lower one: any cut of a token is again one
 OPEN_ENDED = {"aws-bedrock-short-term-api-key"}
-N_RULES = 108
+N_RULES = 116
 
 
 def token(rule_id: str) -> str:

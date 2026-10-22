@@ -257,3 +257,13 @@ yandex-cloud-api-key                                       AQVN(?:(?<![A-Za-z0-9
 yandex-refresh-token-sibling                               rt1\.(?:(?<![A-Za-z0-9_-]rt1\.)|(?<=\\[nrt]rt1\.))[A-Z0-9a-z_\-]+={0,2}\.[A-Z0-9a-z_\-]{86}={0,2}(?![A-Za-z0-9_-])
 yandex-smartcaptcha-server-key                             ysc2_(?:(?<![A-Za-z0-9_-]ysc2_)|(?<=\\[nrt]ysc2_))[a-zA-Z0-9]{40}[0-9a-f]{8}(?![A-Za-z0-9_-])
 yandex-translate-api-key-legacy-v1-5                       trnsl\.1\.1\.(?:(?<![A-Za-z0-9_-]trnsl\.1\.1\.)|(?<=\\[nrt]trnsl\.1\.1\.))[0-9]{8}T[0-9]{6}Z\.[a-f0-9]{16}\.[a-f0-9]{40}(?![A-Za-z0-9_-])
+# 0.7.10, more sources: prefixed formats that Trivy (Apache-2.0), Google OSV-SCALIBR Veles (Apache-2.0),
+# nuclei-templates (MIT) and titus (Apache-2.0) know and no rule above takes
+amazon-mws-auth-token                      amzn\.mws\.(?:(?<![A-Za-z0-9_-]amzn\.mws\.)|(?<=\\[nrt]amzn\.mws\.))[0-9a-f]{8}\-[0-9a-f]{4}\-[0-9a-f]{4}\-[0-9a-f]{4}\-[0-9a-f]{12}(?![A-Za-z0-9_-])
+atlassian-api-token-bare                   ATATT3xFfGF0(?:(?<![A-Za-z0-9_-]ATATT3xFfGF0)|(?<=\\[nrt]ATATT3xFfGF0))[a-zA-Z0-9_\-]{20,200}=[0-9A-F]{8}(?![A-Za-z0-9_-])
+facebook-graph-explorer-access-token       EAACEdEose0cBA(?:(?<![A-Za-z0-9_-]EAACEdEose0cBA)|(?<=\\[nrt]EAACEdEose0cBA))[a-zA-Z0-9]+(?![A-Za-z0-9_-])
+new-relic-synthetics-private-location-key  NRSP\-(?:(?<![A-Za-z0-9_-]NRSP\-)|(?<=\\[nrt]NRSP\-))[a-z]{2}[0-9]{2}[a-f0-9]{31}(?![A-Za-z0-9_-])
+notion-refresh-token                       nrt_(?:(?<![A-Za-z0-9_-]nrt_)|(?<=\\[nrt]nrt_))[A-Z0-9_]{40,55}(?![A-Za-z0-9_-])
+openai-service-api-key-legacy              sk\-service\-(?:(?<![A-Za-z0-9_-]sk\-service\-)|(?<=\\[nrt]sk\-service\-))[A-Za-z0-9\-]+\-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}(?![A-Za-z0-9_-])
+retool-workflow-api-key                    retool_wk_(?:(?<![A-Za-z0-9_-]retool_wk_)|(?<=\\[nrt]retool_wk_))[0-9a-f]{32}(?![A-Za-z0-9_-])
+slack-app-configuration-access-token       xoxe\.xoxp\-(?:(?<![A-Za-z0-9_-]xoxe\.xoxp\-)|(?<=\\[nrt]xoxe\.xoxp\-))[\d]{1,10}\-[a-zA-Z0-9]{166}(?![A-Za-z0-9_-])
