@@ -600,7 +600,7 @@ def context_of(text: str) -> str:
         return "code"
     if re.search(r"(?m)^[A-Za-z_][\w.-]*:\s*$", head) and re.search(r"(?m)^ +[\w-]+:", head):
         return "yaml"
-    if re.search(r"(?m)^(?:#.*|\[[^\]]+\]|[A-Za-z_][\w.-]*\s*=.*|Host .*|\s+\w+ .*)$", head) and \
+    if re.search(r"(?m)^(?:#.*|\[[^\]]+\]|[A-Za-z_][\w.-]*\s*[=:].*|Host .*|\s+\w+ .*)$", head) and \
             sum(1 for line in head.splitlines() if re.match(r"\s*(?:#|\[|[A-Za-z_][\w.-]*\s*[=:]|Host |\s)", line)) \
             >= len(head.splitlines()) * 0.6:
         return "config"
