@@ -1819,7 +1819,13 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                 if sep and not _PHONE_GAP_END_RE.search(_PAREN_END_RE.sub("", gap[:sep[-1]]).rstrip(" )\"'")):
                     continue   # Mobile build artifact: 938-274-6157: the words before the colon name no phone
                 if sep and gap.lower().startswith("contact") and gap[sep[-1] + 1:].strip(" \t\"'*_`"):
-                    continue   # Contact: build 938-274-6157: after a contact label's colon the number comes first
+                    # Contact: build 938-274-6157: after a contact label's colon the number comes first, unless the
+                    # words there name it themselves (Escalation contact: Contact the coordinator at …), which the
+                    # label's match would else swallow (0.7.6 lost such a number, Benchmark V3, 2026-10-22)
+                    rest = _PHONE_LOOSE_RE.search(text, m.start() + sep[-1] + 1, m.end())
+                    if not (rest and rest.start(1) == m.start(1)
+                            and not _GAP_SEP_RE.search(text[rest.start():rest.start(1)])):
+                        continue
                 if (_national_phone_ok(v) if rx is _PHONE_TIGHT_RE else _nanp_ok(v)):
                     out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
     if "name-single-after-label" in want and ("name" in low or "nom" in low or "apellido" in low or "cognome" in low

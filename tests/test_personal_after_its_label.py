@@ -131,6 +131,8 @@ class PhoneAfterWordTests(Base):
                     "Fax number for notice: ", "Phone number for payment: ", "Please contact the following number: "):
             with self.subTest(pre=pre):
                 self.assertMasked("Details\n" + pre + US + ". More text.\n", US, region=("us",))
+        # a contact label followed by a sentence that names the number itself (0.7.6 lost it, 2026-10-22)
+        self.assertMasked("| Escalation contact: Contact the coordinator at " + US + " |", US, region=("us",))
         # the contact label takes only the strict North American form
         for text in ("Contact: 2024-10-16", "Contact information: build 4.15.382", "Contact: 12 people"):
             with self.subTest(text=text):
