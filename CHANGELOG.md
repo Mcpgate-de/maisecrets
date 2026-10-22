@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## [0.7.5] - 2026-10-22
+
+### Fixes
+
+- a blocked message from another session is recognised as one, so its text never goes into your clipboard (461c44c)
+- a role name or a given and family name written in camel case (candidateName, givenName) counts as its column (b33eb46)
+- fixture names such as Foo Bar or Jane Doe in a first and last name field stay text (c0a0e49)
+- masks the name column of a candidate, client, player or recipient in a table of personal records (271ec63)
+- masks a first or last name in a record field when the record also holds a person's data (0727d95)
+
+### Security
+
+- a placeholder in a message from another session no longer lets this session use its value (024af1c)
+- a message from another Claude session with a secret is blocked again instead of reaching the model (9bc4b68)
+
 ## [0.7.4] - 2026-10-21
 
 ### Fixes
