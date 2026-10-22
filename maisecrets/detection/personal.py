@@ -1305,7 +1305,10 @@ _HOME_LABEL_RE = _lazy(r"(?i)home|residential|permanent|wohn|resid|liv|domicil")
 _STREET_LABEL_WORDS = ("address", "anschrift", "adresse", "domicilio", "direcci", "indirizzo", "endere", "adres",
                        "resid", "live", "living", "domiciled", "wohn")
 _PHONE_WORDS = ("phone", "tel", "mobil", "cell", "fax", "handy", "portable", "rufnummer", "whatsapp", "hotline",
-                "contact", "call", "reach", "text", "dial")
+                "contact", "call", "reach", "text", "dial",
+                # the personal cues of phone-after-phone-word without a phone word (my number is, … him at)
+                "number is", "line is", "me at", "him at", "her at", "them at", "you at", "directly at", "me on",
+                "him on", "her on", "them on", "you on")
 _ADDRESS_WORDS = ("address", "adr", "ship", "property", "lives", "endere", "direcci", "adresse", "location",
                   "indirizzo", "anschrift")
 _IN_ADDRESS_RE = _lazy(r"\b\d{1,4}(?:/\d{1,4})?, [^\n]{10,90}?, [A-Z][a-z]+ \d{6}\b")
@@ -1342,7 +1345,11 @@ _PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed
                         # a contact label before its colon (Contact information: 312-…), and the number a sentence
                         # names (contact the following number: …); the number stays the strict North American form
                         r"|contact(?:[ _-]?(?:information|info|details|person))?(?=[ \t]*:)"
-                        r"|contact(?: \w{1,15}){0,3} number(?=[ \t]*:))(?![\w-])"
+                        r"|contact(?: \w{1,15}){0,3} number(?=[ \t]*:)"
+                        # a person's own number in a sentence: reach out to me at, call him directly at, my number is.
+                        # A company's or an office's (to us at, our support team at) stays text, as in a table
+                        r"|(?:me|him|her|them|you)(?: directly)? (?:at|on)"
+                        r"|my (?:direct |personal |private |mobile |cell )?(?:number|line) is)(?![\w-])"
                         r"[^\n\d+]{0,30}?(?<![\w+.-])"
                         r"((?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4})(?![\w-]|[.,:]\d)")
 _PHONE_DATE_RE = _lazy(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|\d{1,2}:\d{2}")

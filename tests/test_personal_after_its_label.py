@@ -136,6 +136,18 @@ class PhoneAfterWordTests(Base):
             with self.subTest(text=text):
                 self.assertNotIn("phone-after-phone-word", {m.kind for m in scan(text, region=("us",))})
 
+    def test_a_persons_own_number_in_a_sentence_is_masked_and_a_companys_stays_text(self):
+        # a person's number needs no phone word: reach out to me at, my number is (2026-10-22); a company's line in the
+        # same sentence stays text, as in a table of depots
+        for text in ("Feel free to reach out to me at " + US + ".", "You can reach him directly at " + US + ".",
+                     "Send it to her at " + US + ".", "My number is " + US + ".", "My direct line is " + US + "."):
+            with self.subTest(text=text):
+                self.assertMasked(text, US, region=("us",))
+        for text in ("Feel free to reach out to us at " + US + ".", "Our support team is available at " + US + ".",
+                     "The line is " + US + " long"):
+            with self.subTest(text=text):
+                self.assertNotIn("phone-after-phone-word", {m.kind for m in scan(text, region=("us",))})
+
     def test_four_counting_digits_at_the_end_are_no_placeholder_and_a_long_count_is(self):
         # a real number ends in …4567 once in about 400; a run of six digits or more is a specimen (2026-10-22)
         # a North American number went to its own rule before too; a national one of another country did not
