@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## [0.7.9] - 2026-10-22
+
+### Features
+
+- masks 109 more token formats researched from the providers' own documentation (72e05cd)
+- masks 97 more token formats with a fixed prefix without a label (9833546)
+- masks a Storyblok personal access token without a label (71d376d)
+
+### Fixes
+
+- the release tree builder reads git output as UTF-8 on every platform (4e41130)
+- the directory version ships a short README and the prefix rules as JSON (d2621b2)
+
 ## [0.7.8] - 2026-10-22
 
 ### Fixes
