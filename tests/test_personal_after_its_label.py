@@ -527,7 +527,8 @@ class MarkdownTableTests(Base):
     def test_a_table_of_software_and_a_fixture_account_are_no_person(self):
         # codex Gate A, 2026-10-22: a product table names no person by an id or a date column; a test account is none
         for text in ("| Product | Date of Birth | Version |\n|---|---|---|\n| WidgetOS | 2010-04-02 | 4.1 |\n",
-                     "| Product | Certificate License Number | Version |\n|---|---|---|\n| WidgetSDK | LIC-4821937 | 4.1 |\n"):
+                     "| Product | Certificate License Number | Version |\n|---|---|---|\n"
+                     "| WidgetSDK | LIC-4821937 | 4.1 |\n"):
             with self.subTest(text=text):
                 self.assertText(text)
         self.assertNotIn("USERNAME", {m.type for m in scan("user_id,date_of_birth\nfixture_account," + BIRTH + "\n")})
