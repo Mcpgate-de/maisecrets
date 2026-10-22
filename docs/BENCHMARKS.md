@@ -812,7 +812,8 @@ its colon (`Contact:`, `Contact information:`, `Emergency contact:`) was no phon
 taken for a placeholder. Now a contact label takes a North American number in its strict form; the words after a
 phone word may name its purpose; and only a counting run of six digits or more (`12345678`) is a placeholder. A
 person's own number in a sentence also counts without a phone word (`reach out to me at`, `call him directly at`,
-`my number is`); this adds 11 numbers on Nemotron `dev` and 3 on `val`. A company's or an office's number in a sentence (`reach out to us at`, `our support team at`)
+`my number is`); on the datasets this adds only a few numbers, since most numbers in a sentence there are a
+company's. A company's or an office's number in a sentence (`reach out to us at`, `our support team at`)
 stays text, as in a table of depots: the datasets label these, maisecrets does not by design.
 
 All changes together against `next` (the same detection code as 0.7.5), after codex Gate A narrowed two of them (a
