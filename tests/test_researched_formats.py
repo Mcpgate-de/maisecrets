@@ -552,6 +552,14 @@ class ResearchedFormatTests(unittest.TestCase):
         self.assertIn(tok, [v for _k, v in kinds(f"export FLY_API_TOKEN=\"{tok}\"\n", "tool")])
         self.assertIn(("fly-io-macaroon-token-v2", part), kinds(f"the macaroon is {part} here", "prompt"))
 
+    def test_a_zapier_hook_url_is_found_with_its_scheme(self):
+        # the rule began at "hooks.", so a URL with https:// was no whole hit (kingfisher.zapier.1, release gate)
+        url = token("zapier-catch-hook-webhook-url")
+        for text in (f"ZAPIER_HOOK = https://{url}\n", f"post to https://{url} now", f"see {url} there"):
+            with self.subTest(text=text[:14]):
+                whole = url if "https" not in text else "https://" + url
+                self.assertIn(("zapier-catch-hook-webhook-url", whole), kinds(text, "tool"))
+
     def test_half_a_token_is_no_hit_of_its_rule(self):
         # at most 40 characters: half of a 2,000-character Bedrock key is still longer than its shortest form
         for rule_id in sorted(set(SOURCES) - OPEN_ENDED):

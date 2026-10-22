@@ -387,4 +387,4 @@ square-oauth-refresh-token                  EQAA(?:(?<![A-Za-z0-9_-]EQAA)|(?<=\\
 stripe-claimable-sandbox-restricted-key     rkcs_(?:(?<![A-Za-z0-9_-]rkcs_)|(?<=\\[nrt]rkcs_))[A-Za-z0-9_]{16,255}(?![A-Za-z0-9_-])
 stripe-organization-api-key-bare            sk_org_(?:(?<![A-Za-z0-9_-]sk_org_)|(?<=\\[nrt]sk_org_))[A-Za-z0-9_]{16,255}(?![A-Za-z0-9_-])
 wave-senegal-request-signing-secret         wave_sn_AKS_(?:(?<![A-Za-z0-9_-]wave_sn_AKS_)|(?<=\\[nrt]wave_sn_AKS_))[A-Za-z0-9]{20,256}(?![A-Za-z0-9_-])
-zapier-catch-hook-webhook-url               hooks\.zapier\.com\/hooks\/catch\/(?:(?<![A-Za-z0-9_-]hooks\.zapier\.com\/hooks\/catch\/)|(?<=\\[nrt]hooks\.zapier\.com\/hooks\/catch\/))[0-9]+\/[A-Za-z0-9]+\/?(?![A-Za-z0-9_-])
+zapier-catch-hook-webhook-url               (?<![\w./-])(?:https?://)?hooks\.zapier\.com\/hooks\/catch\/(?:(?<![A-Za-z0-9_-]hooks\.zapier\.com\/hooks\/catch\/)|(?<=\\[nrt]hooks\.zapier\.com\/hooks\/catch\/))[0-9]+\/[A-Za-z0-9]+\/?(?![A-Za-z0-9_-])
