@@ -1307,8 +1307,8 @@ _STREET_LABEL_WORDS = ("address", "anschrift", "adresse", "domicilio", "direcci"
 _PHONE_WORDS = ("phone", "tel", "mobil", "cell", "fax", "handy", "portable", "rufnummer", "whatsapp", "hotline",
                 "contact", "call", "reach", "text", "dial",
                 # the personal cues of phone-after-phone-word without a phone word (my number is, … him at)
-                "number is", "line is", "me at", "him at", "her at", "them at", "you at", "directly at", "me on",
-                "him on", "her on", "them on", "you on")
+                "number is", "line is", "me at", "him at", "her at", "them at", "directly at", "me on",
+                "him on", "her on", "them on", "directly on")
 _ADDRESS_WORDS = ("address", "adr", "ship", "property", "lives", "endere", "direcci", "adresse", "location",
                   "indirizzo", "anschrift")
 _IN_ADDRESS_RE = _lazy(r"\b\d{1,4}(?:/\d{1,4})?, [^\n]{10,90}?, [A-Z][a-z]+ \d{6}\b")
@@ -1348,7 +1348,7 @@ _PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed
                         r"|contact(?: \w{1,15}){0,3} number(?=[ \t]*:)"
                         # a person's own number in a sentence: reach out to me at, call him directly at, my number is.
                         # A company's or an office's (to us at, our support team at) stays text, as in a table
-                        r"|(?:me|him|her|them|you)(?: directly)? (?:at|on)"
+                        r"|(?:me|him|her|them)(?: directly)? (?:at|on)"
                         r"|my (?:direct |personal |private |mobile |cell )?(?:number|line) is)(?![\w-])"
                         r"[^\n\d+]{0,30}?(?<![\w+.-])"
                         r"((?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4})(?![\w-]|[.,:]\d)")
@@ -1778,6 +1778,8 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                 sep = [x.start() for x in _GAP_SEP_RE.finditer(gap)] if rx is _PHONE_LOOSE_RE else ()
                 if sep and not _PHONE_GAP_END_RE.search(_PAREN_END_RE.sub("", gap[:sep[-1]]).rstrip(" )\"'")):
                     continue   # Mobile build artifact: 938-274-6157: the words before the colon name no phone
+                if sep and gap.lower().startswith("contact") and gap[sep[-1] + 1:].strip(" \t\"'*_`"):
+                    continue   # Contact: build 938-274-6157: after a contact label's colon the number comes first
                 if (_national_phone_ok(v) if rx is _PHONE_TIGHT_RE else _nanp_ok(v)):
                     out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
     if "name-single-after-label" in want and ("name" in low or "nom" in low or "apellido" in low or "cognome" in low

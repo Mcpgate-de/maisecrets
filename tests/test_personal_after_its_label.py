@@ -140,11 +140,13 @@ class PhoneAfterWordTests(Base):
         # a person's number needs no phone word: reach out to me at, my number is (2026-10-22); a company's line in the
         # same sentence stays text, as in a table of depots
         for text in ("Feel free to reach out to me at " + US + ".", "You can reach him directly at " + US + ".",
-                     "Send it to her at " + US + ".", "My number is " + US + ".", "My direct line is " + US + "."):
+                     "Send it to her at " + US + ".", "My number is " + US + ".", "My direct line is " + US + ".",
+                     "Get me directly on " + US + ".", "Contact: **" + US + "**"):
             with self.subTest(text=text):
                 self.assertMasked(text, US, region=("us",))
         for text in ("Feel free to reach out to us at " + US + ".", "Our support team is available at " + US + ".",
-                     "The line is " + US + " long"):
+                     "The line is " + US + " long", "We can help you at " + US + ".", "Contact: build " + US,
+                     "Contact information: ticket " + US):
             with self.subTest(text=text):
                 self.assertNotIn("phone-after-phone-word", {m.kind for m in scan(text, region=("us",))})
 
@@ -155,7 +157,8 @@ class PhoneAfterWordTests(Base):
         for value in ("0221 482 " + "4567", "06-" + "4829" + "6543", "0412 739 " + "6789"):
             with self.subTest(value=value):
                 self.assertMasked("Telefon: " + value, value, region=("de",))
-        for text in ("Telefon: 030 " + "12345678", "Mobile: 0151 " + "987654", "Phone: 123-456-" + "7890"):
+        # 0123 456 789 is a valid national form whose only fault is that it counts
+        for text in ("Telefon: 030 " + "12345678", "Mobile: 0151 " + "987654", "Telefon: 0123 456 " + "789"):
             with self.subTest(text=text):
                 self.assertNotIn("phone-after-phone-word", {m.kind for m in scan(text, region=("de", "us"))})
 
