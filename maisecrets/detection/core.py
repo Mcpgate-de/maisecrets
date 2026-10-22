@@ -1655,14 +1655,15 @@ OWN_RULES: list[dict] = [
     # three more forms of a typed sentence (benchmark V3, Nemotron dev: about 540 passwords in the clear). An
     # apposition, "the password, <value>, works": the value check after a space, as a list of words follows a comma
     # too. "the password for <account> is <value>": up to five words between the password word and the copula,
-    # English only. "use <value> as the password": the value before the word, after a verb that hands it over
+    # English only. "use <value> as the password": the value before the word, after a verb that hands it over, with
+    # the check after a space (no ticket id: "use PBE-3403 as the password ticket")
     {"id": "label-password-apposition", "type": "SECRET", "secret_group": 1, "validator": "spaced_value",
      "regex": r"(?i)(?<![\w-])" + _PW_COMPOUND + r"(?:{words})(?![\w-])[ \t]*,[ \t]+" + _SENTENCE_VALUE,
      "languages": True},
     {"id": "label-password-for-is", "type": "SECRET", "secret_group": 1, "validator": "sentence_value",
      "regex": r"(?i)(?<![\w-])(?:password|passphrase|passcode)[ \t]+(?:for|of|on|to)[ \t]+(?:[\w.@'-]+[ \t]+){1,5}?"
               r"(?:is|was)[ \t]*:?[ \t]+" + _SENTENCE_VALUE},
-    {"id": "label-password-use-as", "type": "SECRET", "secret_group": 1, "validator": "sentence_value",
+    {"id": "label-password-use-as", "type": "SECRET", "secret_group": 1, "validator": "spaced_value",
      "regex": r"(?i)(?<![\w-])(?:use|using|enter|type|set|with)[ \t]+(?:\*\*|[\"'`„“])?"
               r"([^\s\"'`“”]{4,255}?)(?:\*\*|[\"'`“”])?[ \t]+as[ \t]+"
               r"(?:(?:the|your|my|a|an|its|their|our)[ \t]+)?(?:(?:new|temporary|initial|default|admin|root)[ \t]+)?"
