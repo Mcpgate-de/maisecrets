@@ -1138,6 +1138,10 @@ _LIT_NOTE = (
     _LazyRx(r"(?:(?<=[\w)}\]]/)|(?<![^\s])-)((?i:pw|pwd|passwd|password))[ \t]*:[ \t]*"
             r"([^\s\"'`,()\[\]{}<>]{3,299}[^\s\"'`,;.()\[\]{}<>])(?=[\s)]|$)"),
 )
+# a Kubernetes or Compose env entry whose name is the label of its value: `- name: DB_PASSWORD` and on the next line
+# `value: "<value>"` (Benchmark V3, aparte dev). The label rules saw only `value`
+_LIT_ENV_ENTRY = _LazyRx(r"(?m)^[ \t]*-[ \t]+name:[ \t]*[\"']?([A-Za-z_][\w.-]{0,60})[\"']?[ \t]*\r?\n"
+                         r"[ \t]+value:[ \t]*([\"'])")
 # a Terraform variable whose name is the label of its default: `variable "aws_secret_key" { default = "…" }`. The
 # label rules saw only `default` (Benchmark V3, llmredactor and aparte dev: 36 keys and passwords in the clear). The
 # block up to its default holds no brace (type, description and sensitive come before it)
@@ -1386,6 +1390,13 @@ def _literal_hits(text: str, channel: str = "prompt") -> list:
             for m in rx.finditer(text):
                 if _judge_literal(m.group(1), m.group(2), quoted=False, channel=channel) == "label-pw-literal":
                     hits.append(("label-pw-literal", m.start(), m.start(2), m.end(2)))
+        for m in _LIT_ENV_ENTRY.finditer(text):
+            q = m.group(2)
+            end, closed = _read_quoted(text, m.end(), q)
+            rid = closed and _judge_literal(m.group(1), _unquote(text[m.end():end], q, True, False), quoted=True,
+                                            channel=channel)
+            if rid:
+                hits.append((rid, m.start(), m.end(), end))
         for m in _LIT_TF.finditer(text):
             end, closed = _read_quoted(text, m.end(), '"')
             rid = closed and _judge_literal(m.group(1), _unquote(text[m.end():end], '"', True, False), quoted=True,
@@ -1470,7 +1481,7 @@ def _config_key_value_ok(v: str) -> bool:
         return False
     if _names_itself(v) or looks_like_placeholder(v) or re.search(r"(?i)your|example|sample|changeme|dummy", v):
         return False
-    return _norm_entropy(v) >= 0.8 and _wordlike(_deleet(v)) < 0.3
+    return _norm_entropy(v) >= 0.8 and _wordlike(_deleet(v)) < 0.5
 
 
 def _random_hex(v: str) -> bool:

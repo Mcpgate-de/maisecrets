@@ -163,5 +163,22 @@ class PasswordNoteTests(unittest.TestCase):
             self.assertEqual([], values(text, "tool"), text)
 
 
+class EnvEntryTests(unittest.TestCase):
+    def test_the_value_of_a_secret_env_entry_is_a_hit(self):
+        pw, k = password(), key(32)
+        text = ("          env:\n            - name: DB_HOST\n              value: db.internal\n"
+                f"            - name: MAIL_PASSWORD\n              value: \"{pw}\"\n"
+                f"            - name: API_TOKEN\n              value: '{k}'\n")
+        got = values(text)
+        self.assertIn(pw, got)
+        self.assertIn(k, got)
+
+    def test_an_entry_that_names_no_secret_or_takes_a_reference_stays_text(self):
+        for text in (f"  - name: DB_HOST\n    value: \"{key(20)}\"\n",
+                     "  - name: DB_PASSWORD\n    valueFrom:\n      secretKeyRef:\n        name: db\n",
+                     "  - name: DB_PASSWORD\n    value: \"${DB_PASSWORD}\"\n"):
+            self.assertEqual([], values(text), text)
+
+
 if __name__ == "__main__":
     unittest.main()
