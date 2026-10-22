@@ -25,8 +25,6 @@ from maisecrets import detect  # noqa: E402
 SOURCES = dict([
     ('1password-service-account-token-bare',
      'ops_eyJ[A-Za-z0-9+/_-]{250,}={0,3}'),
-    ('alibaba-accesskey-id',
-     'LTAI[A-Za-z0-9]{12,21}'),
     ('asaas-production-key',
      '\\$aact_prod_[A-Za-z0-9_\\-+/=:$]{20,200}'),
     ('asaas-sandbox-key',
@@ -244,7 +242,7 @@ SOURCES = dict([
 ])
 # formats whose body has no upper length and a short lower one: any cut of a token is again one
 OPEN_ENDED = {"aws-bedrock-short-term-api-key"}
-N_RULES = 109
+N_RULES = 108
 
 
 def token(rule_id: str) -> str:

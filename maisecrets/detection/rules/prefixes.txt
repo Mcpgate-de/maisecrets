@@ -167,7 +167,6 @@ xata-api-key                                xau_(?:(?<![A-Za-z0-9_-]xau_)|(?<=\\
 # the provider documents none, from a public scanner. Each rule finds a token generated from the researched
 # pattern; public ids, connection strings and prefixes of fewer than four characters stay out
 1password-service-account-token-bare                       ops_eyJ(?:(?<![A-Za-z0-9_-]ops_eyJ)|(?<=\\[nrt]ops_eyJ))[A-Za-z0-9+/_\-]{250,}={0,3}(?![A-Za-z0-9_-])
-alibaba-accesskey-id                                       LTAI(?:(?<![A-Za-z0-9_-]LTAI)|(?<=\\[nrt]LTAI))[A-Za-z0-9]{12,21}(?![A-Za-z0-9_-])
 asaas-production-key                                       \$aact_prod_(?:(?<![A-Za-z0-9_-]\$aact_prod_)|(?<=\\[nrt]\$aact_prod_))[A-Za-z0-9_\-+/=:$]{20,200}(?![A-Za-z0-9_-])
 asaas-sandbox-key                                          \$aact_hmlg_(?:(?<![A-Za-z0-9_-]\$aact_hmlg_)|(?<=\\[nrt]\$aact_hmlg_))[A-Za-z0-9_\-+/=:$]{20,200}(?![A-Za-z0-9_-])
 atlassian-org-admin-scoped-api-key-sibling                 ATCTT3xFfG(?:(?<![A-Za-z0-9_-]ATCTT3xFfG)|(?<=\\[nrt]ATCTT3xFfG))[A-Za-z0-9+/=_\-]+=[A-Za-z0-9]{8}(?![A-Za-z0-9_-])
