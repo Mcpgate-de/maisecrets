@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -59,6 +61,75 @@ class ReleaseGateTests(unittest.TestCase):
             out = gate.compare_dirs(base, run)
             self.assertEqual(1, out["nemotron-dev-maisecrets-full"]["worse"])
             self.assertFalse(out["gretel-dev-maisecrets-full"]["comparable"])
+
+
+
+def git(cwd: Path, *args: str) -> str:
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com", GIT_COMMITTER_NAME="t",
+               GIT_COMMITTER_EMAIL="t@example.com")
+    return subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True, check=True).stdout.strip()
+
+
+class MeasuredBaselineTests(unittest.TestCase):
+    """The measurement of the gate is the next baseline: the release commit changes only the version, so the tag
+    holds the measured code, and --verify-tag shows it by the git trees."""
+
+    def repo(self, d: str) -> Path:
+        r = Path(d) / "repo"
+        (r / "maisecrets").mkdir(parents=True)
+        (r / ".claude-plugin").mkdir()
+        (r / "maisecrets" / "core.py").write_text("x = 1\n")
+        (r / ".claude-plugin" / "plugin.json").write_text('{"version": "0.0.1"}\n')
+        git(r, "init", "-q")
+        git(r, "add", "-A")
+        git(r, "commit", "-qm", "a")
+        return r
+
+    def test_the_next_version_moves_the_last_number(self):
+        self.assertEqual("0.7.7", gate.next_version("v0.7.6"))
+        self.assertEqual("1.0.10", gate.next_version("v1.0.9"))
+
+    def test_kept_results_are_gzip_without_local_paths_and_name_the_measured_trees(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = self.repo(d)
+            out, dest = Path(d) / "out", Path(d) / "dest"
+            out.mkdir()
+            run = result({"a": ["full"]})
+            run["scanner"] = {"python": str(Path.home() / "venv" / "bin" / "python3"), "checkout": str(r)}
+            (out / "nemotron-dev-maisecrets-full.json").write_text(json.dumps(run))
+            (out / "holdout-v2.json").write_text(json.dumps(run))
+            (out / "release-gate.md").write_text("**Gate: passed**\n")
+            gate.keep(out, dest, r, "0.0.2")
+            text = gzip.open(dest / "nemotron-dev-maisecrets-full.json.gz", "rt", encoding="utf-8").read()
+            self.assertNotIn(str(Path.home()), text)
+            self.assertIn("<candidate>", text)
+            self.assertTrue((dest / "holdout-v2" / "holdout-v2-v0.0.2.json.gz").exists())
+            self.assertTrue((dest / "release-gate.md").exists())
+            first = (dest / "nemotron-dev-maisecrets-full.json.gz").read_bytes()
+            gate.keep(out, dest, r, "0.0.2")
+            self.assertEqual(first, (dest / "nemotron-dev-maisecrets-full.json.gz").read_bytes())
+            measured = json.loads((dest / "measured.json").read_text())
+            self.assertEqual(git(r, "rev-parse", "HEAD"), measured["commit"])
+            self.assertIn({"dir": "maisecrets", "tree": git(r, "rev-parse", "HEAD:maisecrets")}, measured["trees"])
+            self.assertIn("measured.json", (dest / "SHA256SUMS").read_text())
+
+    def test_a_tag_that_changes_only_the_version_holds_the_measured_code(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = self.repo(d)
+            res = r / "bench" / "results" / "2026-01-01-v3-0.0.2"
+            res.mkdir(parents=True)
+            trees = [{"dir": k, "tree": v} for k, v in gate.runtime_trees("HEAD", r).items()]
+            (res / "measured.json").write_text(json.dumps({"trees": trees}))
+            (r / ".claude-plugin" / "plugin.json").write_text('{"version": "0.0.2"}\n')
+            git(r, "commit", "-qam", "release")
+            git(r, "tag", "v0.0.2")
+            self.assertEqual([], gate.verify_tag("v0.0.2", r))
+            (r / "maisecrets" / "core.py").write_text("x = 2\n")
+            git(r, "commit", "-qam", "change")
+            git(r, "tag", "v0.0.3")
+            (res.parent / "2026-01-01-v3-0.0.3").mkdir()
+            (res.parent / "2026-01-01-v3-0.0.3" / "measured.json").write_text((res / "measured.json").read_text())
+            self.assertEqual(["maisecrets"], gate.verify_tag("v0.0.3", r))
 
 
 if __name__ == "__main__":
