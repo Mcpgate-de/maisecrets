@@ -44,6 +44,7 @@ made that unclear.
 |---|---|---|
 | Nemotron, Gretel, Mendeley, PIILO | in full, one file per split: `dev` (read for rules), `val` (used to decide), `holdout` (the public holdout split: read once on 2026-10-19 by a split-all analysis, so development data as well, reported apart) | 1 in 25 of `val` and 1 in 25 of `holdout` |
 | Privy (`beki/privy`, test-small) | in full, totals only | 1 in 10, totals only |
+| aparte, LLM-Redactor, CredSweeper (secret datasets, below) | in full, one file per split: `dev`, `val`, `holdout` (not read) | none yet |
 | The bank | `dev` and `val` | the same |
 | The catalogs | all rule examples | the same |
 
@@ -60,7 +61,9 @@ phone, IBAN, card, IP and German ids only).
 Three public sets with labelled secrets. Each one is pinned in `scripts/measure_datasets.py` (`SOURCES`), and
 `python3 scripts/measure_datasets.py fetch --only aparte,llmredactor,credsweeper` writes it into the data directory.
 The fetch of LLM-Redactor needs pyarrow. Their values are fake or test values by their cards. Run them with
-`bench/run.py --source <name> --split dev|val|holdout`. `bench/run_all_v3.sh` does not run them yet.
+`bench/run.py --source <name> --split dev|val|holdout`. `bench/run_all_v3.sh` runs maisecrets on each split, so
+the release gate compares them span by span with the baseline of the last release. A baseline without them shows
+them as not comparable once.
 
 ### aparte (`apartejs/aparte-secrets-gold`)
 
