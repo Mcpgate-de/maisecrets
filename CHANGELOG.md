@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## [0.7.7] - 2026-10-22
+
+### Features
+
+- masks a US home address written on one line (eabce9d)
+- masks a password in three more sentence forms (8727587)
+- masks an API key or token named in a sentence (b1e277b)
+
+### Fixes
+
+- the release gate replaces a local path also where JSON escapes it (7bf9127)
+- an encoded token after a key word stays to the tool channel's decoder (c896d38)
+- a one-line US address after a named place stays text (57186af)
+- the software table rule holds back only the new anchors, so a birth date in a CSV row with a sku still names its person (4eea0b3)
+- the software table rule applies only with one personal column, so an order record with a customer stays a person's (41a1e65)
+- a phone number named in a sentence after a contact label is masked again (Escalation contact: Contact the coordinator at …) (237020b)
+- a table of software and a test account are no person's record (500ef2e)
+- a date of birth makes a row a person's only when it lies 12 years back, so a release table's date stays text (d5866f2)
+- a row with a date of birth under its own name counts as a person's record, so its user name and address are masked (4c3b4a3)
+- a person's address and ids in a record under more field names (Property Address, Health Plan Beneficiary Number, MedicalRecordNumber, User ID) (f377ca3)
+
 ## [0.7.6] - 2026-10-22
 
 ### Fixes
