@@ -30,7 +30,8 @@ bare, after a label, and in the example's own text. The numbers go to `docs/cove
 ### 2. New formats as rule drafts
 
 `format_watch` (daily, `scripts/watch_formats.py`) compares the GitHub secret scanning types, trufflehog's detectors,
-betterleaks on `main` and Google's Veles plugins with `docs/format-watch.txt` and turns red on a new entry.
+betterleaks on `main`, Google's Veles plugins, gitleaks on `master`, Trivy's built-in secret rules, Nosey Parker's
+rule ids and the key templates of nuclei-templates with `docs/format-watch.txt` and turns red on a new entry.
 
 A draft comes from `scripts/draft_format_rules.py` (in the weekly `coverage_drift` job, as the artifact
 `format-drafts/`): it takes the
