@@ -846,10 +846,16 @@ tables and field-value tables, CSV, JSON, XML, SQL):
   `Birthday`) makes a row a person's record when its year lies 12 years back or more, so a release table's date stays
   text.
 
+After codex Gate A, a table of software with one personal column (`| Product | Certificate License Number | Version |`)
+gets no person from the new ids or from a date of birth, and a test account (`fixture_account`) in a user column stays
+text; the anchors the formats had before keep their role.
+
 Against the detection code of 0.7.6 (missed to whole, `dev` / `val`): Nemotron 559 / 154 (ids 325, dates of birth
-112, names 73, addresses 38 on `dev`), Gretel 43 / 15, the traces 164 / 37; no span worse; false positives
+112, names 73, addresses 38 on `dev`), Gretel 43 / 15, the traces 143 / 36; no span worse; false positives
 Nemotron `dev` +1, Gretel `dev` +13 (ids under `driver_license_number` and `patient_id` that the dataset does not
-label there), `val` unchanged; the false-alarm bank unchanged. User names in tables without a field only a person has
+label there), `val` unchanged; the false-alarm bank unchanged. A first version of the software rule held back every
+anchor of such a table and lost 100 spans of the traces (order records with a `sku` and a customer); measured and
+narrowed before this merge. User names in tables without a field only a person has
 (`| User name | Role |`) and in role columns (`Assigned to`, `Author`) stay text: a list of accounts or a task tracker
 in developer text has the same form.
 
