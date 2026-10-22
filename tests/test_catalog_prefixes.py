@@ -241,7 +241,9 @@ _SHAPE = re.compile(r"^(?P<prefix>.+?)\(\?:\(\?<!\[[^\]]+\](?P=prefix)\)\|\(\?<=
 def block() -> list[tuple[str, str]]:
     text = (detect.RULES_DIR / "prefixes.txt").read_text(encoding="utf-8")
     rows = []
-    for line in text.split(MARK, 1)[1].splitlines()[1:]:   # the rest of the marker line is its comment
+    # up to the next block, which tests/test_researched_formats.py owns
+    part = text.split(MARK, 1)[1].split("# 0.7.9, researched", 1)[0]
+    for line in part.splitlines()[1:]:   # the rest of the marker line is its comment
         if line.strip() and not line.startswith("#"):
             rule_id, rx = line.split(None, 1)
             rows.append((rule_id, rx.strip()))
