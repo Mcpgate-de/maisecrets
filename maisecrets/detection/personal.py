@@ -444,11 +444,15 @@ _STRONG_COLS = frozenset({"address", "street", "street_address", "home_address",
                           # found by its checksum rule (de-tax-id, region de)
                           # only the long names: `sv_nummer` and `ausweisnummer` also number versions and badges
                           "steueridentifikationsnummer", "steuer_identifikationsnummer", "sozialversicherungsnummer",
-                          "rentenversicherungsnummer", "personalausweisnummer"})
+                          "rentenversicherungsnummer", "personalausweisnummer",
+                          # ids only a person has, as the records of the datasets name them (Benchmark V3 Phase C,
+                          # 2026-10-22: 54 health plan and 26 certificate license numbers in Markdown tables of dev)
+                          "health_plan_beneficiary_number", "beneficiary_number", "certificate_license_number",
+                          "driver_license_number", "patient_id"})
 _WEAK_COLS = frozenset({"name", "full_name", "fullname", "first_name", "last_name", "firstname", "lastname",
                         "given_name", "family_name", "surname", "customer", "customer_name", "employee",
                         "employee_name", "emp_name", "patient", "patient_name", "nome", "nombre", "nom", "vorname",
-                        "nachname", "username", "user_name",
+                        "nachname", "username", "user_name", "user_id", "userid",
                         # the name of a person in a role (Benchmark V3 Phase C, 2026-10-21: candidate, player, client,
                         # recipient name columns of Nemotron dev stayed text); weak, so only beside a strong column
                         "candidate_name", "client_name", "player_name", "recipient_name", "applicant_name",
@@ -493,6 +497,10 @@ _NOT_A_NAME_PART = frozenset({"required", "optional", "unknown", "none", "redact
 _FIRST_PART_COLS = frozenset({"first_name", "firstname", "given_name", "vorname"})
 
 
+_FIXTURE_USER_RE = re.compile(r"(?i)(?:^|[^a-z])(?:fixture|mock|sample|dummy|test|example|demo|fake|placeholder)"
+                               r"(?:[^a-z]|s?$|user|account)")
+
+
 def _cell_ok(v: str, typ: str, col: str = "") -> bool:
     """The cell holds what its column names: a desk extension is no phone, `Front Desk` no name."""
     if typ == NAME and col in _NAME_PART_COLS and " " not in v.strip():
@@ -512,7 +520,8 @@ def _cell_ok(v: str, typ: str, col: str = "") -> bool:
     if typ == NAME:
         return bool(_NAME_CELL_RE.fullmatch(v)) and _name_ok(v) and not _reads_as_words(v)
     if typ == USERNAME:
-        return not _service_user(v)
+        # a fixture or a test account (fixture_account, mock-user2): no person's (codex Gate A, 2026-10-22)
+        return not _service_user(v) and not _FIXTURE_USER_RE.search(v)
     return digits >= 5 and not _placeholder_digits(v)
 
 
@@ -573,6 +582,16 @@ _MD_ALIASES = {"telephone_number": "telephone", "mobile_number": "mobile", "cell
                "address_line1": "street", "address_line_1": "street", "address1": "street", "addressline1": "street",
                "streetaddress": "street_address", "dateofbirth": "date_of_birth", "phonenumber": "phone_number",
                "mobilephone": "mobile_phone", "givenname": "given_name", "familyname": "family_name",
+               # the address of a person under its purpose, and the ids of a person written as one word or with "'s"
+               "property_address": "address", "billing_address": "address", "shipping_address": "address",
+               "mailing_address": "address", "residential_address": "address", "postal_address": "address",
+               "permanent_address": "address", "current_address": "address", "propertyaddress": "address",
+               "billingaddress": "address", "shippingaddress": "address", "mailingaddress": "address",
+               "healthplanbeneficiarynumber": "health_plan_beneficiary_number",
+               "medicalrecordnumber": "mrn", "driverlicensenumber": "driver_license_number",
+               "drivers_license_number": "driver_license_number", "driver's_license_number": "driver_license_number",
+               "passportnumber": "passport_number", "patientid": "patient_id",
+               "beneficiarynumber": "beneficiary_number", "certificatelicensenumber": "certificate_license_number",
                # the name column of a role in camel case (candidateName)
                "candidatename": "candidate_name", "clientname": "client_name", "playername": "player_name",
                "recipientname": "recipient_name", "applicantname": "applicant_name", "studentname": "student_name",
@@ -680,6 +699,21 @@ class _lazy:
         return getattr(self._rx, name)
 
 
+_BIRTH_ANCHOR_COLS = frozenset({"dob", "date_of_birth", "birth_date", "birthdate", "geburtsdatum"})
+_NEW_ID_COLS = frozenset({"health_plan_beneficiary_number", "beneficiary_number", "certificate_license_number",
+                          "driver_license_number", "patient_id"})
+_SOFTWARE_COLS = frozenset({"product", "version", "release", "build", "sku", "package", "app", "application"})
+
+
+def _birth_anchor(text: str, names: list, hit: tuple) -> bool:
+    """A date of birth makes a row a person's when its column says birth and the year lies 12 years back or more: a
+    release candidate's date (| Name | Date of Birth |, 2024-05-01) is no person's."""
+    if hit[3] != BIRTH_DATE or names[hit[4]] not in _BIRTH_ANCHOR_COLS:
+        return False
+    years = re.findall(r"(?<!\d)(1[89]\d\d|20\d\d)(?!\d)", text[hit[0]:hit[1]])
+    return bool(years) and int(years[-1]) <= _host().this_year() - 12
+
+
 def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER), strip: str = "",
                accounts_column: bool = True) -> list:
     """The personal-field policy of every table and record format: names are the column or field names, each row a
@@ -691,6 +725,11 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
     strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
     cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
     accounts = {i for i, h in enumerate(names) if _ACCOUNT_NUMBER_COL_RE.fullmatch(h)} if accounts_column else set()
+    # a table of software with one personal column (| Product | Certificate License Number | Version |): only a name
+    # makes a row a person's there, neither an id nor a date of birth (codex Gate A, 2026-10-22). A record of an order
+    # (sku, product, customer_name, dob, ssn) has more personal columns and stays a person's (the traces, 2026-10-22)
+    software = any(h in _SOFTWARE_COLS for h in names) and \
+        sum(h in _STRONG_COLS or h in _WEAK_COLS for h in names) < 2
     if not cols and not accounts:
         return out
     for n, cells in enumerate(rows):
@@ -714,7 +753,13 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
         if first and last and (text[first[0][0]:first[0][1]] + " " + text[last[0][0]:last[0][1]]).lower() \
                 in PLACEHOLDER_NAMES:
             row = [h for h in row if h not in first and h not in last]
-        if any(c in strong for *_, c in row) and any(h[3] in anchors for h in row):
+        # a date of birth under its own name is a person too (| Date of Birth | Address |): only the names that say
+        # birth, not "birthday", which a table of releases has (Benchmark V3 Phase C, 2026-10-22)
+        # in a table of software the ids this lexicon took on 2026-10-22 and a date of birth under its name are no
+        # person; the anchors a format had before keep their role (a CSV row's birth date, an SSN)
+        if any(c in strong for *_, c in row) and any(
+                (h[3] in anchors and not (software and names[h[4]] in _NEW_ID_COLS))
+                or (not software and _birth_anchor(text, names, h)) for h in row):
             out += [h[:4] for h in row]
     return out
 
@@ -1779,7 +1824,13 @@ def _form_hits(text: str, channel: str, regions: tuple, want, company=None) -> l
                 if sep and not _PHONE_GAP_END_RE.search(_PAREN_END_RE.sub("", gap[:sep[-1]]).rstrip(" )\"'")):
                     continue   # Mobile build artifact: 938-274-6157: the words before the colon name no phone
                 if sep and gap.lower().startswith("contact") and gap[sep[-1] + 1:].strip(" \t\"'*_`"):
-                    continue   # Contact: build 938-274-6157: after a contact label's colon the number comes first
+                    # Contact: build 938-274-6157: after a contact label's colon the number comes first, unless the
+                    # words there name it themselves (Escalation contact: Contact the coordinator at …), which the
+                    # label's match would else swallow (0.7.6 lost such a number, Benchmark V3, 2026-10-22)
+                    rest = _PHONE_LOOSE_RE.search(text, m.start() + sep[-1] + 1, m.end())
+                    if not (rest and rest.start(1) == m.start(1)
+                            and not _GAP_SEP_RE.search(text[rest.start():rest.start(1)])):
+                        continue
                 if (_national_phone_ok(v) if rx is _PHONE_TIGHT_RE else _nanp_ok(v)):
                     out.append((m.start(1), m.start(1) + len(v), "phone-after-phone-word", PHONE))
     if "name-single-after-label" in want and ("name" in low or "nom" in low or "apellido" in low or "cognome" in low
