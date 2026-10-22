@@ -44,8 +44,9 @@ the patterns of Kingfisher and Nosey Parker (Apache License 2.0; the provider-wo
 gitleaks and betterleaks (MIT License, see LICENSE-gitleaks and LICENSE-betterleaks), GitLab's secret detection rules
 (MIT License), Microsoft's security-utilities (MIT License; the identifiable Azure keys and the Common Annotated
 Security Key), Trivy, Google OSV-SCALIBR (Veles) and titus (Apache License 2.0) and nuclei-templates (MIT License),
-or are written from each provider's own documentation. The regular expressions are rewritten here in
-the form of the files above.
+or are written from each provider's own documentation or its published code (the block "0.7.10, provider
+code": SDKs, servers and token libraries, read for the token format only). The regular expressions are
+rewritten here in the form of the files above.
 
 The remaining rules in maisecrets/detection/core.py (OWN_RULES, REGIONAL_RULES), maisecrets/detection/checksums.py
 and the display rules in maisecrets/pii_display.py are written for this project.
