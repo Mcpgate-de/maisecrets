@@ -1338,7 +1338,11 @@ _PHONE_TIGHT_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r")" + _PHON
 _PHONE_LOOSE_RE = _lazy(r"(?i)(?<![\w-])(?:" + _PHONE_LABEL_WORDS + r"|call(?:ed|ing)?|dial(?:ed|ing)?"
                         r"|reach(?:ed)?(?: \w{1,12}){0,2} at|contact(?:ed)?(?: \w{1,15}){0,4} at"
                         # contact alone only right before the number: an earlier start would swallow a later cue
-                        r"|contact(?:ed)?(?=[ \t]{1,3}[(+]?\d)|text(?:ed)?)(?![\w-])"
+                        r"|contact(?:ed)?(?=[ \t]{1,3}[(+]?\d)|text(?:ed)?"
+                        # a contact label before its colon (Contact information: 312-…), and the number a sentence
+                        # names (contact the following number: …); the number stays the strict North American form
+                        r"|contact(?:[ _-]?(?:information|info|details|person))?(?=[ \t]*:)"
+                        r"|contact(?: \w{1,15}){0,3} number(?=[ \t]*:))(?![\w-])"
                         r"[^\n\d+]{0,30}?(?<![\w+.-])"
                         r"((?:\+?1[-. ]?)?\(?[2-9]\d{2}\)?[-. ]?[2-9]\d{2}[-. ]\d{4})(?![\w-]|[.,:]\d)")
 _PHONE_DATE_RE = _lazy(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|\d{1,2}:\d{2}")
@@ -1352,7 +1356,10 @@ _COUNT_RE = _lazy(r"\d{1,2}(?: \d{3})+|\d{1,3}(?: \d{3})* 000(?: \d{3})*"
 # the words between a phone label and a number that end in a colon: a phone word or its number word ends them
 _GAP_SEP_RE = _lazy(r"[:=]| [-–] ")
 _PAREN_END_RE = _lazy(r"[ \t]*\([^()\n]{0,15}\)[ \t]*$")   # Phone (work): 938-274-6157
-_PHONE_GAP_END_RE = _lazy(r"(?i)(?:" + _PHONE_LABEL_WORDS + r"|number|no\.?|nr\.?|#|num[ée]ro|n[úu]mero|nummer)$")
+# also a contact label (Emergency contact information:) and a phone word with its purpose (Fax number for notice:)
+_PHONE_GAP_END_RE = _lazy(r"(?i)(?:" + _PHONE_LABEL_WORDS + r"|number|no\.?|nr\.?|#|num[ée]ro|n[úu]mero|nummer"
+                          r"|contact(?:[ _-]?(?:information|info|details|person))?"
+                          r"|(?:" + _PHONE_LABEL_WORDS + r")" + _PHONE_NUMBER_WORD + r" for(?: \w{1,15}){1,2})$")
 
 
 def _national_phone_ok(v: str) -> bool:
@@ -1376,8 +1383,11 @@ def _national_phone_ok(v: str) -> bool:
         return False   # Telefon 2024 2025 2026, Cell 1024 2048 4096: years and sizes (review, 2026-10-17)
     if len(groups) == 2 and len(d) < 9:
         return False
-    if len(groups[-1]) >= 4 and _placeholder_digits(groups[-1]):
+    if len(groups[-1]) >= 6 and _placeholder_digits(groups[-1]):
         return False   # 0151 1111111, 030 12345678: a subscriber number of one digit or of a run is a placeholder
+    # four or five digits that count (…-4567) are no sign of a specimen: a real number ends so once in about 400, and
+    # a test file's number counts in all its digits (above) or uses 555 (Benchmark V3, dev, 2026-10-22: 185 numbers
+    # after a phone label stayed text for their last four digits)
     if "." in v and not (re.fullmatch(r"\(?\d{3}\)?\.\d{3}\.\d{4}", v)
                          or all(len(g) == 2 for g in groups[1:])):
         return False
