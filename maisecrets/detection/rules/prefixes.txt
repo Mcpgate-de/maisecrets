@@ -298,7 +298,7 @@ depot-ci-job-token                                     depot_cijob_(?:(?<![A-Za-
 depot-organization-token                               depot_org_(?:(?<![A-Za-z0-9_-]depot_org_)|(?<=\\[nrt]depot_org_))[A-Za-z0-9]{32,64}(?![A-Za-z0-9_-])
 e2b-access-token-legacy-dropped-2026-08                sk_e2b_(?:(?<![A-Za-z0-9_-]sk_e2b_)|(?<=\\[nrt]sk_e2b_))[0-9a-f]{40}(?![A-Za-z0-9_-])
 elastic-cloud-serverless-uiam-credential-api-key       essu_(?:(?<![A-Za-z0-9_-]essu_)|(?<=\\[nrt]essu_))[A-Za-z0-9_=\-]{30,}(?![A-Za-z0-9_-])
-fly-io-macaroon-token-v2                               fm2_(?:(?<![A-Za-z0-9_-]fm2_)|(?<=\\[nrt]fm2_))[A-Za-z0-9+/_\-]{100,}={0,3}(?![A-Za-z0-9_-])
+fly-io-macaroon-token-v2                               fm2_(?:(?<![A-Za-z0-9_-]fm2_)|(?<=\\[nrt]fm2_))(?<!FlyV1 fm2_)(?<!,fm2_)[A-Za-z0-9+/_\-]{100,}={0,3}(?![A-Za-z0-9_-])
 hashicorp-vault-recovery-token                         hvr\.(?:(?<![A-Za-z0-9_-]hvr\.)|(?<=\\[nrt]hvr\.))[A-Za-z0-9_\-]{24,}(?![A-Za-z0-9_-])
 kaggle-api-token-2025-access-token                     KGAT_(?:(?<![A-Za-z0-9_-]KGAT_)|(?<=\\[nrt]KGAT_))[0-9a-f]{32}(?![A-Za-z0-9_-])
 launchdarkly-server-side-sdk-key                       sdk\-(?:(?<![A-Za-z0-9_-]sdk\-)|(?<=\\[nrt]sdk\-))[0-9a-f]{8}\-[0-9a-f]{4}\-[0-9a-f]{4}\-[0-9a-f]{4}\-[0-9a-f]{12}(?![A-Za-z0-9_-])

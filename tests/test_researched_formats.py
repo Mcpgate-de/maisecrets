@@ -542,6 +542,16 @@ class ResearchedFormatTests(unittest.TestCase):
         self.assertEqual(kinds(f"host: {tok}.luna.akamaiapis.net\n", "tool"), [])
         self.assertIn(("akamai-edgegrid-client-token-access-token", tok), kinds(f"client_token: {tok}.", "tool"))
 
+    def test_a_fly_token_of_several_macaroons_stays_whole(self):
+        # "FlyV1 " and macaroons joined by commas is one token; the bare-macaroon rule took each part alone, so the
+        # whole token was no hit (the release gate's catalog floor caught it, kingfisher.flyio.1)
+        r = random.Random(17)
+        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        part, second = ("fm" + "2_" + "".join(r.choice(alphabet) for _ in range(160)) for _n in range(2))
+        tok = "Fly" + "V1 " + part + "," + second
+        self.assertIn(tok, [v for _k, v in kinds(f"export FLY_API_TOKEN=\"{tok}\"\n", "tool")])
+        self.assertIn(("fly-io-macaroon-token-v2", part), kinds(f"the macaroon is {part} here", "prompt"))
+
     def test_half_a_token_is_no_hit_of_its_rule(self):
         # at most 40 characters: half of a 2,000-character Bedrock key is still longer than its shortest form
         for rule_id in sorted(set(SOURCES) - OPEN_ENDED):
