@@ -45,7 +45,10 @@ RUNTIME = (".claude-plugin/", "hooks/", "claude-mod/", "maisecrets/", "commands/
 
 
 def _git(*args: str, env: dict | None = None, text: bool = True) -> str:
-    r = subprocess.run(["git", *args], capture_output=True, text=text, env=env)
+    # UTF-8 both ways: in text mode Windows decodes with its code page, and the release README's placeholder brackets
+    # (U+27E6, U+27E7) came out wrong there (the release tree test on windows-latest, MR !218)
+    r = subprocess.run(["git", *args], capture_output=True, text=text, env=env,
+                       encoding="utf-8" if text else None)
     if r.returncode != 0:
         raise SystemExit(f"git {' '.join(args[:2])} failed: {r.stderr.strip()[:300]}")
     return r.stdout
