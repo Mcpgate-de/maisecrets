@@ -308,7 +308,7 @@ neon-api-key-bare                                      napi_(?:(?<![A-Za-z0-9_-]
 netbird-personal-access-token                          nbp_(?:(?<![A-Za-z0-9_-]nbp_)|(?<=\\[nrt]nbp_))[A-Za-z0-9]{36}(?![A-Za-z0-9_-])
 netbird-proxy-access-token                             nbx_(?:(?<![A-Za-z0-9_-]nbx_)|(?<=\\[nrt]nbx_))[A-Za-z0-9]{36}(?![A-Za-z0-9_-])
 netbird-user-invite-token                              nbi_(?:(?<![A-Za-z0-9_-]nbi_)|(?<=\\[nrt]nbi_))[A-Za-z0-9]{36}(?![A-Za-z0-9_-])
-netlify-personal-access-token                          nfp_(?:(?<![A-Za-z0-9_-]nfp_)|(?<=\\[nrt]nfp_))[A-Za-z0-9]{36,40}(?![A-Za-z0-9_-])
+netlify-personal-access-token                          nfp_(?:(?<![A-Za-z0-9_-]nfp_)|(?<=\\[nrt]nfp_))(?=[0-9a-f]{0,39}[g-zA-Z])[A-Za-z0-9]{36,40}(?![A-Za-z0-9_-])
 notion-dev-environment-pat                             development_ntn_(?:(?<![A-Za-z0-9_-]development_ntn_)|(?<=\\[nrt]development_ntn_))[0-9]{11}[A-Za-z0-9]{35}(?![A-Za-z0-9_-])
 onesignal-app-api-key-v2                               os_v2_app_(?:(?<![A-Za-z0-9_-]os_v2_app_)|(?<=\\[nrt]os_v2_app_))[a-z0-9]{100,120}(?![A-Za-z0-9_-])
 onesignal-organization-api-key-v2                      os_v2_org_(?:(?<![A-Za-z0-9_-]os_v2_org_)|(?<=\\[nrt]os_v2_org_))[a-z0-9]{100,120}(?![A-Za-z0-9_-])
