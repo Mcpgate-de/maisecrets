@@ -1416,6 +1416,19 @@ LITERAL_RULES = (
 _LITERAL_IDS = frozenset(d["id"] for d in LITERAL_RULES)
 
 
+def _config_key_value_ok(v: str) -> bool:
+    """A key or a salt that a config constant assigns (label-php-define-key, label-terraform-default): the
+    WordPress salts of wp-config.php are 64 printable signs, and ( ) | ` < > $ are part of them, so the literal
+    checks (_key_literal_ok, _ds_value_ok) refuse them as code. ASCII with no space, 16 characters or more, a high
+    normalised entropy, no run of words, and no fixture or placeholder: "put your unique phrase here" has spaces."""
+    v = v.strip()
+    if not 16 <= len(v) <= 256 or not v.isascii() or any(c.isspace() for c in v) or "\\" in v:
+        return False
+    if _names_itself(v) or looks_like_placeholder(v) or re.search(r"(?i)your|example|sample|changeme|dummy", v):
+        return False
+    return _norm_entropy(v) >= 0.8 and _wordlike(_deleet(v)) < 0.3
+
+
 def _random_hex(v: str) -> bool:
     """A hex id that is no counted fixture: AC0123456789abcdef… or one repeated digit is a test value."""
     h = v[2:].lower()
@@ -1439,6 +1452,7 @@ VALIDATORS = {
     "sentence_value": _sentence_value_ok,
     "spaced_value": _spaced_value_ok,
     "prose_key_value": _prose_key_value_ok,
+    "config_key_value": _config_key_value_ok,
     "de_tax_id": _de_tax_id_ok,
     "de_social_security": _de_social_security_ok,
     "de_social_security_spaced": lambda v: _de_social_security_ok(v.replace("\u00a0", " ")),
@@ -1819,6 +1833,12 @@ FALLBACK_RULES: list[dict] = [
               r"(?=[A-Za-z0-9_-]{0,200}?[A-Za-z0-9]{16})[A-Za-z0-9_-]{20,}"},
     {"id": "slack-token-relaxed", "type": "SECRET",
      "regex": r"(?<![\w-])(?:xoxb-|xoxp-|xoxa-|xoxr-)\d{2,}-[A-Za-z0-9-]{12,}"},
+    # a key or a salt of PHP's define() (wp-config.php: AUTH_KEY, NONCE_SALT): the WordPress salts hold ( ) | ` and
+    # the literal rules took them for code (Benchmark V3, aparte dev: 16 salts in the clear). Only a name that ends in
+    # KEY, SALT, SECRET or TOKEN; a password is label-pw-literal's
+    {"id": "label-php-define-key", "type": "SECRET", "secret_group": 3, "validator": "config_key_value",
+     "regex": r"(?<![\w$>:])define[ \t]*\([ \t]*(['\"])(?:[A-Z][A-Z0-9]*_)*(?:KEY|SALT|SECRET|TOKEN)\1[ \t]*,[ \t]*"
+              r"(['\"])((?:(?!\2)[^\\\n]){16,256})\2[ \t]*\)"},
     # a key in a sentence: "Use the API key <value> for the call", "the access token is <value>", "the API key,
     # <value>, expires". No `:` or `=` tells that a value follows, so the value must look random (prose_key_value)
     # and have 16 characters at least. A bare `token` is the word of a tokenizer too; its values (a number, a word)
