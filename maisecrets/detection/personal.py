@@ -162,6 +162,18 @@ _US_TWO_LINES_RE = re.compile(
     r"[ \t]*\r?\n[ \t]*(?:[A-Z][a-z'.-]{1,30} ){0,3}[A-Z][a-z'.-]{1,30}, (?:" + _US_STATES + r") \d{5}(?:-\d{4})?"
     r"|(?:PSC \d{3,5}, Box \d{3,5}|Unit \d{3,5} Box \d{3,5}|US(?:NS|NV|CGC|S) [A-Z][a-z]{1,30})"
     r"[ \t]*\r?\n[ \t]*(?:APO|FPO|DPO) (?:AA|AE|AP) \d{5})(?![\w-])")
+# the same address on one line (4821 Harbor Mission Apt. 5 Springfield, IL 62704; PSC 1234, Box 5678, APO AE 09876):
+# the city, the state code and the ZIP code still end it, and the street starts after a separator or a word of place,
+# as on two lines. Benchmark V3, Mendeley dev: about 8,400 such addresses were missed
+_US_ONE_LINE_RE = re.compile(
+    r"(?:(?<=^)|(?<=\n)|(?<=[:;,(\"'] )|(?<=\()|(?<=\bat )|(?<=\bto )|(?<=\bis )|(?<=\bin )|(?<=\bon )"
+    r"|(?<=\bfrom )|(?<=\baddress ))"
+    r"(?:\d{1,6} (?:[A-Z][a-z'.-]{1,30} ){1,4}"
+    r"[A-Z][a-z'.-]{1,30}\.?"
+    r"(?:,? (?:Apt|Apartment|Suite|Ste|Unit|#)\.? ?[A-Za-z0-9-]{1,6})?"
+    r",?[ \t]+(?:[A-Z][a-z'.-]{1,30} ){0,3}[A-Z][a-z'.-]{1,30}, (?:" + _US_STATES + r") \d{5}(?:-\d{4})?"
+    r"|(?:PSC \d{3,5}, Box \d{3,5}|Unit \d{3,5} Box \d{3,5}|US(?:NS|NV|CGC|S) [A-Z][a-z]{1,30})"
+    r",?[ \t]+(?:APO|FPO|DPO) (?:AA|AE|AP) \d{5})(?![\w-])")
 _DEPARTMENT_LINE_RE = re.compile(r"(?i)[ \t]*(?:abteilung|abt\.|department|dept\.?|division|bereich)[ \t]")
 _ADDRESS_FORMS = tuple(
     (frozenset({r}), re.compile(_EN_STREET.replace("{codes}", code))) for r, code in _POSTCODES.items()) + (
@@ -985,6 +997,7 @@ FORMS = {
     "address-street-after-label": (ADDRESS, "tool", "generic", "label"),
     "address-street-postcode-city": (ADDRESS, "tool", "generic", "form"),
     "address-us-two-lines": (ADDRESS, "tool", "us", "form"),
+    "address-us-one-line": (ADDRESS, "tool", "us", "form"),
     "md-table-personal-column": ("COLUMN", "tool", "generic", "label"),
     "sql-insert-personal-column": ("COLUMN", "tool", "generic", "label"),
     "html-table-personal-column": ("COLUMN", "tool", "generic", "label"),
@@ -2042,6 +2055,14 @@ def hits(text: str, channel: str, regions: tuple, company: list | None = None) -
                 _company_window(text, lo, m.start(), m.end(), "address-us-two-lines", company)
             else:
                 out.append((m.start(), m.end(), "address-us-two-lines", ADDRESS))
+    if "address-us-one-line" in want and "us" in regions and ", " in text:
+        for m in _US_ONE_LINE_RE.finditer(text):
+            line = text.rfind("\n", 0, m.start()) + 1
+            lo = max(_block_back(text, line), m.start() - 160)
+            if _NOT_A_HOME_RE.search(text, lo, m.start()) or _BUSINESS_RE.search(text, lo, m.start()):
+                _company_window(text, lo, m.start(), m.end(), "address-us-one-line", company)
+            else:
+                out.append((m.start(), m.end(), "address-us-one-line", ADDRESS))
     if "street-address" in want:
         for regs, rx in _ADDRESS_FORMS:
             if not regs.intersection(regions):
