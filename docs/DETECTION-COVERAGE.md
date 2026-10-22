@@ -50,7 +50,8 @@ turns the lines into drafts. The sweep of 2026-10-22 covered 529 types and gave 
 When `ms:(…)` says that maisecrets would not catch a value, the answer offers to report the format. The report holds
 the fixed prefix (only a short run of letters before a separator, such as `sb_pat_`), the length of the rest and its
 character classes, never the value. It prints an issue text and a prefilled link, as `/maisecrets:report` does; the
-person opens the link. The Storyblok token of 2026-10-22 is the case this loop is for: it was in no catalog.
+person opens the link (built in 0.7.10: `check_value.format_report`). The Storyblok token of 2026-10-22 is the case
+this loop is for: it was in no catalog.
 
 ### 5. Families
 
@@ -60,7 +61,7 @@ Each family has its own number in loop 1 and is closed as one block, with its ow
 |---|---|---|
 | Fixed prefix | `hvs.`, `sb_pat_`, `glpat-` | closed 2026-10-22 for the catalogs and the GitHub types |
 | Signature inside the key | Azure identifiable keys, CASK `JQQJ99` | closed 2026-10-22 for Microsoft's published signatures |
-| Provider word and shape | `datadog … 32 hex` | open: about 360 kingfisher rules; needs a narrow shape and the tool channel only |
+| Provider word and shape | `datadog … 32 hex` | 0.7.10: 16 rules. Of 61 candidates, 45 added nothing: a realistic value after the same words was already a hit; kingfisher's own examples were missed for their low-entropy values, not for a missing rule |
 | Checksum without a prefix | formats whose last characters are a CRC | open |
 | Structured tokens | JWT, PASETO, signed URLs | partly |
 | Encoded values | base64, percent-encoding | partly (the tool channel decodes) |
