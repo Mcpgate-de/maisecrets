@@ -693,6 +693,9 @@ class _lazy:
         return getattr(self._rx, name)
 
 
+_BIRTH_ANCHOR_COLS = frozenset({"dob", "date_of_birth", "birth_date", "birthdate", "geburtsdatum"})
+
+
 def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER), strip: str = "",
                accounts_column: bool = True) -> list:
     """The personal-field policy of every table and record format: names are the column or field names, each row a
@@ -727,7 +730,10 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
         if first and last and (text[first[0][0]:first[0][1]] + " " + text[last[0][0]:last[0][1]]).lower() \
                 in PLACEHOLDER_NAMES:
             row = [h for h in row if h not in first and h not in last]
-        if any(c in strong for *_, c in row) and any(h[3] in anchors for h in row):
+        # a date of birth under its own name is a person too (| Date of Birth | Address |): only the names that say
+        # birth, not "birthday", which a table of releases has (Benchmark V3 Phase C, 2026-10-22)
+        if any(c in strong for *_, c in row) and any(h[3] in anchors or (h[3] == BIRTH_DATE and names[h[4]]
+                                                                          in _BIRTH_ANCHOR_COLS) for h in row):
             out += [h[:4] for h in row]
     return out
 

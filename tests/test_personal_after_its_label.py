@@ -513,6 +513,15 @@ class MarkdownTableTests(Base):
         self.assertIn("user_id", personal_mod._WEAK_COLS)
         self.assertText("| User ID | Role |\n|---|---|\n| jdoe42 | admin |\n")
 
+    def test_a_date_of_birth_under_its_own_name_makes_the_row_a_person(self):
+        # Benchmark V3 Phase C, 2026-10-22: a row with a date of birth and no name cell stayed text
+        self.assertMasked("| User ID | Date of Birth |\n|---|---|\n| jdoe42 | " + BIRTH + " |\n", "jdoe42")
+        self.assertMasked("| Address | DOB |\n|---|---|\n| 12 Oak Lane, Springfield | " + BIRTH + " |\n",
+                          "12 Oak Lane, Springfield")
+        # a birthday of a release is no person, and a depot has an address and no birth date
+        self.assertText("| Name | Birthday | Version |\n|---|---|---|\n| Atlas | 2019-04-02 | 4.1 |\n")
+        self.assertText("| Depot | Address |\n|---|---|\n| North | 12 Harbour Lane, Dunmore |\n")
+
     def test_a_table_of_fields_without_a_person_stays_text(self):
         for text in ("| Name | Value |\n|---|---|\n| Product Name | Widget Pro |\n| Version | 2.1 |\n",
                      "| Setting | Value |\n|---|---|\n| Name | build-runner |\n"
