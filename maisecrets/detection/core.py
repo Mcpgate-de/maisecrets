@@ -1129,6 +1129,15 @@ _LIT_FORMS = (
 # ConvertTo-SecureString '…' (single quotes: a doubled quote; double quotes: a doubled quote and the backtick escape)
 _LIT_SQL = _LazyRx(r"(?i)\bidentified[ \t]+(?:with[ \t]+\w+[ \t]+)?by[ \t]*(?:password[ \t]*)?([\"'])")
 _LIT_PS = _LazyRx(r"(?i)ConvertTo-SecureString[ \t]+(?:-String[ \t]+)?([\"'])")
+# a password label and its value in a note, where a line goes on after them (CredSweeper's doc samples, Benchmark V3
+# dev): `host (pw:<value>)`, `(ID/PW:<value>)`, `<host>/pw:<value>`, `-pwd:<value>`. Only a password label counts
+# here (_literal_hits keeps label-pw-literal alone): a key word in parentheses is code more often
+_LIT_NOTE = (
+    _LazyRx(r"\((?:[A-Za-z]{1,10}[/&])?([A-Za-z_][\w.\-]{0,60})[ \t]*[:=][ \t]*"
+            r"([^\s\"'`,()\[\]{}<>]{3,299}[^\s\"'`,;()\[\]{}<>])[ \t]*\)"),
+    _LazyRx(r"(?:(?<=[\w)}\]]/)|(?<![^\s])-)((?i:pw|pwd|passwd|password))[ \t]*:[ \t]*"
+            r"([^\s\"'`,()\[\]{}<>]{3,299}[^\s\"'`,;.()\[\]{}<>])(?=[\s)]|$)"),
+)
 # a Terraform variable whose name is the label of its default: `variable "aws_secret_key" { default = "…" }`. The
 # label rules saw only `default` (Benchmark V3, llmredactor and aparte dev: 36 keys and passwords in the clear). The
 # block up to its default holds no brace (type, description and sensitive come before it)
@@ -1373,6 +1382,10 @@ def _literal_hits(text: str, channel: str = "prompt") -> list:
                 rid = _judge_literal(m.group(gl), m.group(gv), quoted=n != 0, channel=channel)
                 if rid:
                     hits.append((rid, m.start(), m.start(gv), m.end(gv)))
+        for rx in _LIT_NOTE:
+            for m in rx.finditer(text):
+                if _judge_literal(m.group(1), m.group(2), quoted=False, channel=channel) == "label-pw-literal":
+                    hits.append(("label-pw-literal", m.start(), m.start(2), m.end(2)))
         for m in _LIT_TF.finditer(text):
             end, closed = _read_quoted(text, m.end(), '"')
             rid = closed and _judge_literal(m.group(1), _unquote(text[m.end():end], '"', True, False), quoted=True,

@@ -147,5 +147,21 @@ class FrameworkAppKeyTests(unittest.TestCase):
                                   if k in ("label-laravel-app-key", "label-env-key-list")], text)
 
 
+class PasswordNoteTests(unittest.TestCase):
+    def test_a_password_in_a_note_line_is_a_hit(self):
+        pw = key(8)
+        for text in (f"10.0.0.7(pw:{pw})", f"ssh admin@10.0.0.7 port:22 (password:{pw})",
+                     f"10.0.0.7(ID/PW:{pw})", f"10.0.0.7/pw:{pw}", f"-id:admin port:22 -pwd:{pw}",
+                     f"login with (PWD={pw}) first"):
+            for channel in ("prompt", "tool"):
+                self.assertIn(pw, values(text, channel), (text, channel))
+
+    def test_code_in_parentheses_stays_text(self):
+        for text in ("login(password=self.password)", "f(pass: true)", "call(pw=pw_input)",
+                     "connect(password=os.environ['DB_PASSWORD'])", "run(--password-file=/run/secrets/db)",
+                     "see docs/pw:latest", "(token:abc)"):
+            self.assertEqual([], values(text, "tool"), text)
+
+
 if __name__ == "__main__":
     unittest.main()
