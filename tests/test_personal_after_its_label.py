@@ -471,8 +471,10 @@ class MarkdownTableTests(Base):
         first, last = NAME.split()
         # a first and a last name alone make no record; a form word is no name
         self.assertText("| Field | Value |\n|---|---|\n| First Name | " + first + " |\n| Last Name | " + last + " |\n")
-        self.assertText("| Field | Value |\n|---|---|\n| First Name | Required |\n| Last Name | Optional |\n"
-                        "| Date of Birth | " + BIRTH + " |\n")
+        # (the date of birth there is a person's and is masked; the form words stay text)
+        form = ("| Field | Value |\n|---|---|\n| First Name | Required |\n| Last Name | Optional |\n"
+                "| Date of Birth | " + BIRTH + " |\n")
+        self.assertNotIn("NAME", {m.type for m in scan(form)})
 
     def test_the_names_of_a_fixture_in_name_part_fields_stay_text(self):
         # seed data and API examples: fixture words, and a first and a last name that make a placeholder together

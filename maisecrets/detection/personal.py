@@ -696,6 +696,15 @@ class _lazy:
 _BIRTH_ANCHOR_COLS = frozenset({"dob", "date_of_birth", "birth_date", "birthdate", "geburtsdatum"})
 
 
+def _birth_anchor(text: str, names: list, hit: tuple) -> bool:
+    """A date of birth makes a row a person's when its column says birth and the year lies 12 years back or more: a
+    release candidate's date (| Name | Date of Birth |, 2024-05-01) is no person's."""
+    if hit[3] != BIRTH_DATE or names[hit[4]] not in _BIRTH_ANCHOR_COLS:
+        return False
+    years = re.findall(r"(?<!\d)(1[89]\d\d|20\d\d)(?!\d)", text[hit[0]:hit[1]])
+    return bool(years) and int(years[-1]) <= _host().this_year() - 12
+
+
 def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER), strip: str = "",
                accounts_column: bool = True) -> list:
     """The personal-field policy of every table and record format: names are the column or field names, each row a
@@ -732,8 +741,7 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
             row = [h for h in row if h not in first and h not in last]
         # a date of birth under its own name is a person too (| Date of Birth | Address |): only the names that say
         # birth, not "birthday", which a table of releases has (Benchmark V3 Phase C, 2026-10-22)
-        if any(c in strong for *_, c in row) and any(h[3] in anchors or (h[3] == BIRTH_DATE and names[h[4]]
-                                                                          in _BIRTH_ANCHOR_COLS) for h in row):
+        if any(c in strong for *_, c in row) and any(h[3] in anchors or _birth_anchor(text, names, h) for h in row):
             out += [h[:4] for h in row]
     return out
 
