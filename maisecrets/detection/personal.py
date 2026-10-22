@@ -723,9 +723,11 @@ def _grid_hits(text: str, names: list, rows, kind: str, anchors=(NAME, ID_NUMBER
     strong = {i for i, h in enumerate(names) if h in _STRONG_COLS}
     cols = strong | {i for i, h in enumerate(names) if h in _WEAK_COLS} if strong else set()
     accounts = {i for i, h in enumerate(names) if _ACCOUNT_NUMBER_COL_RE.fullmatch(h)} if accounts_column else set()
-    # a table of software (| Product | Certificate License Number | Version |): only a name makes a row a person's,
-    # neither an id nor a date of birth column (codex Gate A, 2026-10-22)
-    software = any(h in _SOFTWARE_COLS for h in names)
+    # a table of software with one personal column (| Product | Certificate License Number | Version |): only a name
+    # makes a row a person's there, neither an id nor a date of birth (codex Gate A, 2026-10-22). A record of an order
+    # (sku, product, customer_name, dob, ssn) has more personal columns and stays a person's (the traces, 2026-10-22)
+    software = any(h in _SOFTWARE_COLS for h in names) and \
+        sum(h in _STRONG_COLS or h in _WEAK_COLS for h in names) < 2
     if software:
         anchors = tuple(a for a in anchors if a == NAME)
     if not cols and not accounts:
