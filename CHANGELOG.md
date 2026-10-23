@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.7.12] - 2026-10-23
+
+### Fixes
+
+- a link into a hexpm repository no longer gives a Hex key (044d84e)
+
 ## [0.7.11] - 2026-10-23
 
 ### Features
