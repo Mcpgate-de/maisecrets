@@ -130,6 +130,9 @@ and OpenAI plugin directories.
   entry. Whoever looks writes a prefix rule with a test when the format has a fixed prefix, then runs
   `python3 scripts/watch_formats.py update` and commits the snapshot. Why: the Storyblok token `sb_pat_` was in no
   vendored set, and 97 prefixed formats of the other catalogs were found only after a label (2026-10-22).
+  On Mondays the scheduled job `format_intake` (`scripts/format_intake.py`) adds the changed entries (by rule
+  fingerprint, `docs/format-watch-fp.txt`), the open "Token format:" reports and the posts about token formats in
+  `docs/format-feeds.txt` to one queue, its artifact `format-intake/`, and turns red on an item.
 - **The gate's measurement is the next baseline.** The release commit changes only the version, so a second run of
   Benchmark V3 on the tag measures the same code. With `--keep` the gate writes its results to
   `bench/results/<date>-v3-<next version>`, with `measured.json` (the commit and the git tree of each runtime
