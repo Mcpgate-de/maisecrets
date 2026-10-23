@@ -1,0 +1,1640 @@
+{
+ "rules": [
+  {
+   "confidence": "medium",
+   "description": "Detected a Plaid Secret key, risking unauthorized access to financial accounts and sensitive transaction data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "plaid-secret-key",
+   "keywords": [
+    "plaid"
+   ],
+   "regex": "(?i)(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "components": [
+    {
+     "id": "planetscale-id"
+    }
+   ],
+   "confidence": "high",
+   "description": "Identified a PlanetScale API token, potentially compromising database management and operations.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "planetscale-api-token",
+   "keywords": [
+    "pscale_tkn_"
+   ],
+   "regex": "\\b(pscale_tkn_(?i)[\\w=\\.-]{32,64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.planetscale.com/v1/organizations\", {\n    \"Accept\": \"application/json\",\n    \"Authorization\": (components[\"planetscale-id\"]?.secret ?? \"\") + \":\" + finding[\"secret\"]\n  }); r.status == 200 && (r.json?.type ?? \"\") == \"list\" ? {\n    \"result\": \"valid\",\n    \"organization\": r.json?.data?.[0]?.name ?? \"\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a PlanetScale service token ID.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "planetscale-id",
+   "keywords": [
+    "pscale",
+    "planetscale"
+   ],
+   "regex": "(?i)(?:pscale|planetscale)(?:.|[\\n\\r]){0,16}?(?:USER|ID|NAME)(?:.|[\\n\\r]){0,16}?([a-z0-9]{12})",
+   "skipReport": true
+  },
+  {
+   "confidence": "high",
+   "description": "Found a PlanetScale OAuth token, posing a risk to database access control and sensitive data integrity.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "planetscale-oauth-token",
+   "keywords": [
+    "pscale_oauth_"
+   ],
+   "regex": "\\b(pscale_oauth_[\\w=\\.-]{32,64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a PlanetScale password, which could lead to unauthorized database operations and data breaches.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "planetscale-password",
+   "keywords": [
+    "pscale_pw_"
+   ],
+   "regex": "(?i)\\b(pscale_pw_(?i)[\\w=\\.-]{32,64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Plivo Auth ID, used as a component of the Plivo Auth Token composite rule.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 2.8 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "plivo-auth-id",
+   "keywords": [
+    "plivo"
+   ],
+   "regex": "(?i)(?:plivo(?:[_. -]*(?:auth|account))?[_. -]*(?:id|sid))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(MA[A-Z0-9]{18})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "plivo-auth-id"
+    }
+   ],
+   "confidence": "high",
+   "description": "Plivo Auth Token.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "plivo-auth-token",
+   "keywords": [
+    "plivo"
+   ],
+   "regex": "(?i:(?:plivo(?:[_. -]*(?:auth))?[_. -]*(?:secret|token|key))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9_-]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let authID = (components[\"plivo-auth-id\"]?.secret ?? \"\");\nlet r = http.get(\"https://api.plivo.com/v1/Account/\" + authID + \"/\", {\n  \"Authorization\": \"Basic \" + base64.encode(bytes(authID + \":\" + finding[\"secret\"])),\n  \"Accept\": \"application/json\"\n}); r.status == 200 ? {\n  \"result\": \"valid\"\n} : r.status == 403 ? {\n  \"result\": \"valid\",\n  \"reason\": \"Authenticated but account access is restricted\"\n} : r.status == 401 ? {\n  \"result\": \"invalid\",\n  \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Polar OAuth access token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "polar-oauth-access-token",
+   "keywords": [
+    "polar_at_"
+   ],
+   "regex": "\\b(polar_at_[A-Za-z0-9_-]{20,100})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.polar.sh/v1/oauth2/userinfo\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"sub\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but user-info access is restricted\"\n  } : r.status == 401 && (r.json?.error ?? \"\") == \"invalid_token\" ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid token\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Polar organization access token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "polar-organization-access-token",
+   "keywords": [
+    "polar_oat_"
+   ],
+   "regex": "\\b(polar_oat_[A-Za-z0-9_-]{20,100})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.polar.sh/v1/organizations/\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"items\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but organization access is restricted\"\n  } : r.status == 401 && (r.json?.error ?? \"\") == \"invalid_token\" ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid token\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Polar personal access token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "polar-personal-access-token",
+   "keywords": [
+    "polar_pat_"
+   ],
+   "regex": "\\b(polar_pat_[A-Za-z0-9_-]{20,100})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.polar.sh/v1/oauth2/userinfo\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"sub\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but user-info access is restricted\"\n  } : r.status == 401 && (r.json?.error ?? \"\") == \"invalid_token\" ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid token\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Found a Polymarket wallet address, used as a component of authenticated Polymarket API requests.",
+   "id": "polymarket-address",
+   "keywords": [
+    "poly"
+   ],
+   "regex": "(?i:(?:poly.{0,20}address)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(0x[a-fA-F0-9]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "polymarket-api-secret",
+     "within": "20L"
+    },
+    {
+     "id": "polymarket-passphrase",
+     "within": "20L"
+    }
+   ],
+   "confidence": "high",
+   "description": "Identified a Polymarket API key, potentially compromising access to the Polymarket trading platform.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "polymarket-api-key",
+   "keywords": [
+    "poly"
+   ],
+   "regex": "(?i:(?:poly.{0,20}key)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let ts = time.nowUnix(); (let sig = crypto.hmacSha256(\n      base64.decode((components[\"polymarket-api-secret\"]?.secret ?? \"\")),\n      bytes(ts + \"GET\" + \"/data/orders\")\n    ); (let r = http.get(\"https://clob.polymarket.com/data/orders\", {\n        \"POLY_BUILDER_API_KEY\": finding[\"secret\"],\n        \"POLY_BUILDER_PASSPHRASE\": (components[\"polymarket-passphrase\"]?.secret ?? \"\"),\n        \"POLY_BUILDER_TIMESTAMP\": ts,\n        \"POLY_BUILDER_SIGNATURE\": replace(replace(base64.encode(sig), \"+\", \"-\"), \"/\", \"_\")\n      }); r.status == 200 ? {\n        \"result\": \"valid\"\n      } : r.status in [401, 403] ? {\n        \"result\": \"invalid\",\n        \"reason\": \"Unauthorized\"\n      } : validate.unknown(r)))\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Discovered a Polymarket API secret, which could be used to sign authenticated requests to the Polymarket L2 API.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "polymarket-api-secret",
+   "keywords": [
+    "poly"
+   ],
+   "regex": "(?i:(?:poly.{0,20}secret)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-zA-Z0-9+/]{40,}={0,2})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "confidence": "medium",
+   "description": "Found a Polymarket API passphrase, used as a component of authenticated Polymarket API requests.",
+   "id": "polymarket-passphrase",
+   "keywords": [
+    "poly"
+   ],
+   "regex": "(?i:(?:poly.{0,20}passphrase)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-zA-Z0-9_]{8,128})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "confidence": "medium",
+   "description": "Discovered a Polymarket private key, which could allow unauthorized trading and fund transfers.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "polymarket-private-key",
+   "keywords": [
+    "poly"
+   ],
+   "regex": "(?i:(?:poly.{0,20}private.{0,20}key)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(0x[a-fA-F0-9]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a PostHog Personal API Key, which may expose administrative access to PostHog analytics projects.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "posthog-personal-api-key",
+   "keywords": [
+    "phx_"
+   ],
+   "regex": "(?i)\\b(phx_[a-zA-Z0-9_\\-]{41,49})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let us = http.get(\"https://us.posthog.com/api/users/@me/\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); us.status in [200, 403] ? {\n    \"result\": \"valid\",\n    \"region\": \"us\",\n    \"email\": (us.json?.email ?? \"\"),\n    \"organization\": (us.json?.organization?.name ?? \"\")\n  } : (let eu = http.get(\"https://eu.posthog.com/api/users/@me/\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); eu.status in [200, 403] ? {\n    \"result\": \"valid\",\n    \"region\": \"eu\",\n    \"email\": (eu.json?.email ?? \"\"),\n    \"organization\": (eu.json?.organization?.name ?? \"\")\n  } : (us.status == 401 && eu.status == 401) ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(eu))\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a PostHog Project API Key, a public write-only token used to send events to a PostHog project.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "posthog-project-api-key",
+   "keywords": [
+    "phc_"
+   ],
+   "regex": "(?i)\\b(phc_[a-zA-Z0-9_\\-]{41,44})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Postman API token, potentially compromising API testing and development workflows.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "postman-api-token",
+   "keywords": [
+    "pmak-"
+   ],
+   "regex": "\\b(PMAK-(?i)[a-f0-9]{24}\\-[a-f0-9]{34})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Postmark server or account API token, which may allow access to email delivery and account configuration.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "postmark-api-token.1",
+   "keywords": [
+    "postmark"
+   ],
+   "regex": "(?i)(?:postmark)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let server = http.get(\"https://api.postmarkapp.com/server\", {\n    \"X-Postmark-Server-Token\": finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); server.status == 200 && (server.body contains \"\\\"ID\\\"\") ? {\n    \"result\": \"valid\",\n    \"type\": \"server\"\n  } : (let account = http.get(\"https://api.postmarkapp.com/domains?count=1&offset=0\", {\n    \"X-Postmark-Account-Token\": finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); account.status == 200 ? {\n    \"result\": \"valid\",\n    \"type\": \"account\"\n  } : server.status == 401 && account.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(account))\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Prefect API token, risking unauthorized access to workflow management and automation services.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "prefect-api-token",
+   "keywords": [
+    "pnu_"
+   ],
+   "regex": "\\b(pnu_[a-zA-Z0-9]{36})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a Private Key, which may compromise cryptographic security and sensitive data encryption.",
+   "id": "private-key",
+   "keywords": [
+    "-----begin"
+   ],
+   "regex": "(?i)-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----[\\s\\S-]{64,}?KEY(?: BLOCK)?-----"
+  },
+  {
+   "confidence": "medium",
+   "description": "Identified a PrivateAI Token, posing a risk of unauthorized access to AI services and data manipulation.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "privateai-api-token",
+   "keywords": [
+    "privateai",
+    "private_ai",
+    "private-ai"
+   ],
+   "regex": "(?i:(?:private[_-]?ai)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Proof production full-access API key.",
+   "filter": "filter.matchesAny(finding[\"secret\"], [\"^prf_(?:cli_)?test_\"])\n|| entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "proof-full-access-api-key",
+   "keywords": [
+    "prf_"
+   ],
+   "regex": "\\b(prf_(?:cli_)?[A-Za-z0-9_-]{20,80})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.proof.com/v1/transactions\", {\n    \"ApiKey\": finding[\"secret\"],\n    \"Content-Type\": \"application/json\",\n    \"Accept\": \"application/json\"\n  }, \"{}\"); r.status == 422 && (r.body contains \"signer\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Pulumi API token, posing a risk to infrastructure as code services and cloud resource management.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "pulumi-api-token",
+   "keywords": [
+    "pul-"
+   ],
+   "regex": "\\b(pul-[a-f0-9]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a PyPI upload token, potentially compromising Python package distribution and repository integrity.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "pypi-upload-token",
+   "keywords": [
+    "pypi-ageichlwas5vcmc"
+   ],
+   "regex": "pypi-AgEIcHlwaS5vcmc[\\w-]{50,1000}"
+  },
+  {
+   "confidence": "medium",
+   "description": "Rainforest Pay production API key.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "rainforest-pay-production-api-key",
+   "keywords": [
+    "rainforest"
+   ],
+   "regex": "(?i:(?:rainforest(?:[_. -]*pay)?(?:[_. -]*(?:api))?[_. -]*(?:secret|key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(apikey_[a-f0-9]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.rainforestpay.com/v1/merchants?limit=1\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Rainforest-Api-Version\": \"2024-10-16\",\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.json?.status ?? \"\") == \"SUCCESS\" ? {\n    \"result\": \"valid\"\n  } : r.status == 403 && (r.json?.status ?? \"\") == \"ERROR\" ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but merchant access is restricted\"\n  } : r.status == 401 && (r.json?.status ?? \"\") == \"ERROR\" ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Ramp client ID, used as a component of the Ramp client-secret composite rule.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "ramp-client-id",
+   "keywords": [
+    "ramp_id_"
+   ],
+   "regex": "\\b(ramp_id_[A-Za-z0-9]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "ramp-client-id"
+    }
+   ],
+   "confidence": "high",
+   "description": "Ramp OAuth client secret.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "ramp-client-secret",
+   "keywords": [
+    "ramp_sec_"
+   ],
+   "regex": "\\b(ramp_sec_[A-Za-z0-9]{48})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.ramp.com/developer/v1/token\", {\n    \"Authorization\": \"Basic \" + base64.encode(bytes((components[\"ramp-client-id\"]?.secret ?? \"\") + \":\" + finding[\"secret\"])),\n    \"Content-Type\": \"application/x-www-form-urlencoded\",\n    \"Accept\": \"application/json\"\n  }, \"grant_type=client_credentials&scope=betterleaks%3Avalidate\"); r.status == 200\n    && (r.json?.access_token ?? \"\") != \"\" ? {\n    \"result\": \"valid\"\n  } : r.status == 400\n    && (r.json?.error ?? \"\") in [\"invalid_scope\", \"unauthorized_client\"] ? {\n    \"result\": \"valid\"\n  } : r.status == 401 && (r.json?.error_v2?.error_code ?? \"\") == \"5001\" ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid client credentials\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a RapidAPI Access Token, which could lead to unauthorized access to various APIs and data services.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "rapidapi-access-token",
+   "keywords": [
+    "rapidapi"
+   ],
+   "regex": "(?i)(?:rapidapi)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{50})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Razorpay key ID, used as a component of the Razorpay key-secret composite rule.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "razorpay-key-id.1",
+   "keywords": [
+    "rzp_live_",
+    "rzp_test_"
+   ],
+   "regex": "\\b(rzp_(?:live|test)_[A-Za-z0-9]{14})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "razorpay-key-id.1",
+     "within": "5L"
+    }
+   ],
+   "confidence": "high",
+   "description": "Razorpay key secret, which may authorize payment APIs when paired with its key ID.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "razorpay-key-secret.1",
+   "keywords": [
+    "razorpay"
+   ],
+   "regex": "(?i:(?:razorpay[_.-]?(?:(?:api|key)[_.-]?)?(?:secret|private|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9]{24})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.razorpay.com/v1/items?count=1\", {\n    \"Authorization\": \"Basic \" + base64.encode(bytes((components[\"razorpay-key-id.1\"]?.secret ?? \"\") + \":\" + finding[\"secret\"])),\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"items\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid Razorpay key ID or secret\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Readme API token, risking unauthorized documentation management and content exposure.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "readme-api-token",
+   "keywords": [
+    "rdme_"
+   ],
+   "regex": "\\b(rdme_[a-z0-9]{70})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "redirect.pizza API token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "redirect-pizza-api-token.1",
+   "keywords": [
+    "rpa_"
+   ],
+   "regex": "\\b(rpa_[A-Za-z0-9]{30})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://redirect.pizza/api/v1/domains\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status == 401 && (r.json?.message ?? \"\") == \"Unauthenticated.\" ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthenticated\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Render API key, which may expose hosted services and account resources to unauthorized access.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "render-api-key",
+   "keywords": [
+    "rnd_"
+   ],
+   "regex": "\\b(rnd_[A-Za-z0-9]{28})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.render.com/v1/services?limit=1\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  });\nr.status == 200 && (true) ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Replicate API Token, which may expose AI model hosting and inference services to unauthorized access.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "replicate-api-token",
+   "keywords": [
+    "r8_"
+   ],
+   "regex": "(?i)\\b(r8_[A-Za-z0-9]{37})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.replicate.com/v1/account\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains '\"type\"') && (r.body contains '\"username\"') && (r.body contains '\"name\"') ? {\n    \"result\": \"valid\",\n    \"username\": (r.json?.username ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Resend API key, which may allow sending email or managing account resources.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "resend-api-key.1",
+   "keywords": [
+    "resend"
+   ],
+   "regex": "\\b(re_[1-9A-HJ-NP-Za-km-z]{8}_[1-9A-HJ-NP-Za-km-z]{24})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.resend.com/domains\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\",\n    \"User-Agent\": \"betterleaks-secret-validation/1\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status == 401 && (r.body contains \"restricted_api_key\") ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated sending-only API key\"\n  } : r.status == 403 && (r.body contains \"invalid_api_key\") ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid API key\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Retell AI API key, which may allow access to agents, calls, and account configuration.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "retell-api-key.1",
+   "keywords": [
+    "retell"
+   ],
+   "regex": "(?i:(?:retell)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(key_[a-f0-9]{28})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.retellai.com/get-concurrency\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"current_concurrency\\\"\") && (r.body contains \"\\\"concurrency_limit\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 && (r.body contains \"Invalid API Key\") ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid API key\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Rootly API key.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "rootly-api-key.1",
+   "keywords": [
+    "rootly_"
+   ],
+   "regex": "\\b(rootly_[a-f0-9]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.rootly.com/v1/incidents\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status in [200, 404] ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid token\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a Rubygem API token, potentially compromising Ruby library distribution and package management.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "rubygems-api-token",
+   "keywords": [
+    "rubygems_"
+   ],
+   "regex": "\\b(rubygems_[a-f0-9]{48})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "RunPod API key.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "runpod-api-key.1",
+   "keywords": [
+    "rpa_"
+   ],
+   "regex": "\\b(rpa_[A-Z0-9]{40}[A-Za-z0-9]{6})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.runpod.io/graphql\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Content-Type\": \"application/json\",\n    \"Accept\": \"application/json\"\n  }, \"{\\\"query\\\":\\\"{ myself { id } }\\\"}\"); r.status == 200\n    && (r.json?.data?.myself?.id ?? \"\") != \"\" ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "components": [
+    {
+     "id": "salesforce-instance-url.1",
+     "within": "30L"
+    }
+   ],
+   "confidence": "high",
+   "description": "Salesforce access token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.3\n",
+   "id": "salesforce-access-token.1",
+   "keywords": [
+    "salesforce.com"
+   ],
+   "regex": "\\b(00[A-Za-z0-9]{13}![A-Za-z0-9._-]{80,260})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://\" + (components[\"salesforce-instance-url.1\"]?.secret ?? \"\") + \"/services/data/v67.0/limits\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"DailyApiRequests\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 403 && (r.body contains \"\\\"REQUEST_LIMIT_EXCEEDED\\\"\") ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but the organization API request limit is exceeded\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Salesforce instance host, used as a component of the Salesforce access-token rule.",
+   "id": "salesforce-instance-url.1",
+   "keywords": [
+    "salesforce.com"
+   ],
+   "regex": "(?i)(?:^|[^a-z0-9.-])(?:https?://)?((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?){0,4}\\.my\\.salesforce\\.com|[a-z]{2,8}[0-9]{1,4}\\.salesforce\\.com))(?:[^a-z0-9.-]|$)",
+   "skipReport": true
+  },
+  {
+   "confidence": "high",
+   "description": "Samsara API token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "samsara-api-token.1",
+   "keywords": [
+    "samsara_api_"
+   ],
+   "regex": "\\b(samsara_api_[A-Za-z0-9]{26,32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.samsara.com/fleet/vehicles\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but vehicle access is restricted\"\n  } : r.status == 401 && (r.json?.message ?? \"\") == \"invalid token\" ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid token\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a standalone Scaleway Secret Key. This can be used to authenticate API requests.",
+   "id": "scaleway-secret-key",
+   "keywords": [
+    "scaleway",
+    "scw"
+   ],
+   "regex": "(?i)(?:(?:scaleway|scw).{0,20}?(?:secret|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.scaleway.com/instance/v1/zones/fr-par-1/servers\", {\n    \"X-Auth-Token\": secret,\n    \"Accept\": \"application/json\"\n  }); r.status in [200, 403] ? {\n    \"result\": \"valid\",\n    \"permission_status\": r.status == 200 ? \"Active\" : \"Restricted but still valid (403)\",\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Scalingo API token, posing a risk to cloud platform services and application deployment security.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "scalingo-api-token",
+   "keywords": [
+    "tk-us-"
+   ],
+   "regex": "\\b(tk-us-[\\w-]{48})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Scalr API access token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "scalr-api-access-token.1",
+   "keywords": [
+    "scalr"
+   ],
+   "regex": "(?i:(?:scalr(?:[_. -]*(?:api|access))?[_. -]*(?:secret|key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJpc3MiOiJ1c2VyIiwianRpIjoiYXQt[A-Za-z0-9_-]{20,40}\\.[A-Za-z0-9_-]{43})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://scalr.io/api/iacp/v3/accounts\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/vnd.api+json\"\n  }); r.status == 200 && (r.body contains \"\\\"data\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but account access is restricted\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Segment workspace bearer token for the Public API.",
+   "filter": "entropy(finding[\"secret\"]) < 3.3\n",
+   "id": "segment-public-api-token.1",
+   "keywords": [
+    "sgp_"
+   ],
+   "regex": "\\b(sgp_[A-Za-z0-9]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.segmentapis.com/\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Not authorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Sendbird Access ID, which could compromise chat and messaging platform integrations.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.3 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "sendbird-access-id",
+   "keywords": [
+    "sendbird"
+   ],
+   "regex": "(?i)(?:sendbird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Sendbird Access Token, potentially risking unauthorized access to communication services and user data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.3 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "sendbird-access-token",
+   "keywords": [
+    "sendbird"
+   ],
+   "regex": "(?i)(?:sendbird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a SendGrid API token, posing a risk of unauthorized email service operations and data exposure.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "sendgrid-api-token",
+   "keywords": [
+    "sg."
+   ],
+   "regex": "\\b(SG\\.(?i)[a-z0-9=_\\-\\.]{66})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a Brevo (formerly Sendinblue) API token, which may compromise email marketing services and subscriber data privacy.",
+   "filter": "entropy(finding[\"secret\"]) < 3.2\n",
+   "id": "sendinblue-api-token",
+   "keywords": [
+    "xkeysib-"
+   ],
+   "regex": "\\b(xkeysib-[a-fA-F0-9]{64}-[a-zA-Z0-9]{16})\\b",
+   "validate": "let r = http.get(\"https://api.brevo.com/v3/account\", {\n    \"api-key\": finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Found a Sentry.io Access Token (old format), risking unauthorized access to error tracking services and sensitive application data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "sentry-access-token",
+   "keywords": [
+    "sentry"
+   ],
+   "regex": "(?i)(?:sentry)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Sentry.io Organization Token, risking unauthorized access to error tracking services and sensitive application data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 4.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "sentry-org-token",
+   "keywords": [
+    "sntrys_eyjpyxqio"
+   ],
+   "regex": "\\bsntrys_eyJpYXQiO[a-zA-Z0-9+/]{10,200}(?:LCJyZWdpb25fdXJs|InJlZ2lvbl91cmwi|cmVnaW9uX3VybCI6)[a-zA-Z0-9+/]{10,200}={0,2}_[a-zA-Z0-9+/]{43}(?:[^a-zA-Z0-9+/]|\\z)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Sentry.io User Token, risking unauthorized access to error tracking services and sensitive application data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "sentry-user-token",
+   "keywords": [
+    "sntryu_"
+   ],
+   "regex": "\\b(sntryu_[a-f0-9]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Settlemint Application Access Token.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "settlemint-application-access-token",
+   "keywords": [
+    "sm_aat"
+   ],
+   "regex": "\\b(sm_aat_[a-zA-Z0-9]{16})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Settlemint Personal Access Token.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "settlemint-personal-access-token",
+   "keywords": [
+    "sm_pat"
+   ],
+   "regex": "\\b(sm_pat_[a-zA-Z0-9]{16})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Settlemint Service Access Token.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "settlemint-service-access-token",
+   "keywords": [
+    "sm_sat"
+   ],
+   "regex": "\\b(sm_sat_[a-zA-Z0-9]{16})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Shippo API token, potentially compromising shipping services and customer order data.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "shippo-api-token",
+   "keywords": [
+    "shippo_"
+   ],
+   "regex": "\\b(shippo_(?:live|test)_[a-fA-F0-9]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Shopify access token, which could lead to unauthorized e-commerce platform access and data breaches.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "shopify-access-token",
+   "keywords": [
+    "shpat_"
+   ],
+   "regex": "shpat_[a-fA-F0-9]{32}"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Shopify custom access token, potentially compromising custom app integrations and e-commerce data security.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "shopify-custom-access-token",
+   "keywords": [
+    "shpca_"
+   ],
+   "regex": "shpca_[a-fA-F0-9]{32}"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a Shopify private app access token, risking unauthorized access to private app data and store operations.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "shopify-private-app-access-token",
+   "keywords": [
+    "shppa_"
+   ],
+   "regex": "shppa_[a-fA-F0-9]{32}"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Shopify shared secret, posing a risk to application authentication and e-commerce platform security.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "shopify-shared-secret",
+   "keywords": [
+    "shpss_"
+   ],
+   "regex": "shpss_[a-fA-F0-9]{32}"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Sidekiq Secret, which could lead to compromised background job processing and application data breaches.",
+   "id": "sidekiq-secret",
+   "keywords": [
+    "bundle_enterprise__contribsys__com",
+    "bundle_gems__contribsys__com"
+   ],
+   "regex": "(?i)(?:BUNDLE_ENTERPRISE__CONTRIBSYS__COM|BUNDLE_GEMS__CONTRIBSYS__COM)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{8}:[a-f0-9]{8})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Sidekiq Sensitive URL, potentially exposing internal job queues and sensitive operation details.",
+   "id": "sidekiq-sensitive-url",
+   "keywords": [
+    "gems.contribsys.com",
+    "enterprise.contribsys.com"
+   ],
+   "regex": "(?i)\\bhttps?://([a-f0-9]{8}:[a-f0-9]{8})@(?:gems.contribsys.com|enterprise.contribsys.com)(?:[\\/|\\#|\\?|:]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Slack App-level token, risking unauthorized access to Slack applications and workspace data.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "slack-app-token",
+   "keywords": [
+    "xapp"
+   ],
+   "regex": "(?i)xapp-\\d-[A-Z0-9]+-\\d+-[a-z0-9]+"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a Slack Bot token, which may compromise bot integrations and communication channel security.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "slack-bot-token",
+   "keywords": [
+    "xoxb"
+   ],
+   "regex": "xoxb-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Slack Configuration access token, posing a risk to workspace configuration and sensitive data access.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "slack-config-access-token",
+   "keywords": [
+    "xoxe.xoxb-",
+    "xoxe.xoxp-"
+   ],
+   "regex": "(?i)xoxe.xox[bp]-\\d-[A-Z0-9]{163,166}"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Slack Configuration refresh token, potentially allowing prolonged unauthorized access to configuration settings.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "slack-config-refresh-token",
+   "keywords": [
+    "xoxe-"
+   ],
+   "regex": "(?i)xoxe-\\d-[A-Z0-9]{146}"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Slack Legacy bot token, which could lead to compromised legacy bot operations and data exposure.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "slack-legacy-bot-token",
+   "keywords": [
+    "xoxb"
+   ],
+   "regex": "xoxb-[0-9]{8,14}-[a-zA-Z0-9]{18,26}"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Slack Legacy token, risking unauthorized access to older Slack integrations and user data.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "slack-legacy-token",
+   "keywords": [
+    "xoxo",
+    "xoxs"
+   ],
+   "regex": "xox[os]-\\d+-\\d+-\\d+-[a-fA-F\\d]+"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a Slack Legacy Workspace token, potentially compromising access to workspace data and legacy features.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "slack-legacy-workspace-token",
+   "keywords": [
+    "xoxa",
+    "xoxr"
+   ],
+   "regex": "xox[ar]-(?:\\d-)?[0-9a-zA-Z]{8,48}"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Slack session cookie (xoxd-), which authenticates browser and desktop sessions across all of a user's workspaces.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "slack-session-cookie",
+   "keywords": [
+    "xoxd-"
+   ],
+   "regex": "(xoxd-[\\w\\/\\\\+-]{100,}={0,2})(?:[^\\w\\/+=-]|\\z)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Slack client session token (xoxc-), which provides full user-level API access when paired with a session cookie.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "slack-session-token",
+   "keywords": [
+    "xoxc-"
+   ],
+   "regex": "xoxc-\\d{9,15}-\\d{9,15}-\\d{9,15}-[a-f0-9]{64}\\b"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Slack User token, posing a risk of unauthorized user impersonation and data access within Slack workspaces.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "slack-user-token",
+   "keywords": [
+    "xoxp-",
+    "xoxe-"
+   ],
+   "regex": "xox[pe](?:-[0-9]{10,13}){3}-[a-zA-Z0-9-]{28,34}"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Slack Webhook, which could lead to unauthorized message posting and data leakage in Slack channels.",
+   "id": "slack-webhook-url",
+   "keywords": [
+    "hooks.slack.com"
+   ],
+   "regex": "(?:https?://)?hooks.slack.com/(?:services|workflows|triggers)/[A-Za-z0-9+/]{43,56}"
+  },
+  {
+   "confidence": "high",
+   "description": "Snowflake account host, used as a component of the programmatic access-token rule.",
+   "id": "snowflake-account-host.1",
+   "keywords": [
+    "snowflakecomputing.com"
+   ],
+   "regex": "(?i)\\b([a-z0-9_-]+(?:\\.[a-z0-9_-]+)*\\.snowflakecomputing\\.com)\\b",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "snowflake-account-host.1",
+     "within": "30L"
+    }
+   ],
+   "confidence": "high",
+   "description": "Snowflake programmatic access token.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "snowflake-programmatic-access-token.1",
+   "keywords": [
+    "snowflake",
+    "sf_token"
+   ],
+   "regex": "(?i:(?:(?:snowflake[_. -]*(?:programmatic[_. -]*)?(?:access[_. -]*)?token|sf[_. -]*token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9_-]{100,500})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://\" + (components[\"snowflake-account-host.1\"]?.secret ?? \"\") + \"/api/v2/statements\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"X-Snowflake-Authorization-Token-Type\": \"PROGRAMMATIC_ACCESS_TOKEN\",\n    \"Content-Type\": \"application/json\",\n    \"Accept\": \"application/json\"\n  }, \"{\\\"statement\\\":\\\"select 1\\\",\\\"timeout\\\":5}\"); r.status in [200, 202]\n    && ((r.body contains \"\\\"statementHandle\\\"\") || (r.body contains \"\\\"resultSetMetaData\\\"\")) ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Snyk API token, potentially compromising software vulnerability scanning and code security.",
+   "id": "snyk-api-token",
+   "keywords": [
+    "snyk"
+   ],
+   "regex": "(?i)(?:snyk[_.-]?(?:(?:api|oauth)[_.-]?)?(?:key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Sonar API token, potentially compromising software vulnerability scanning and code security.",
+   "id": "sonar-api-token",
+   "keywords": [
+    "sonar"
+   ],
+   "regex": "(?i)(?:sonar[_.-]?(login|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((?:squ_|sqp_|sqa_)?[a-z0-9=_\\-]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "secretGroup": 2
+  },
+  {
+   "confidence": "high",
+   "description": "Sourcegraph is a code search and navigation engine.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "sourcegraph-access-token",
+   "keywords": [
+    "sgp_"
+   ],
+   "regex": "(?i)\\b(sgp_(?:[a-fA-F0-9]{16}|local)_[a-fA-F0-9]{40}|sgp_[a-fA-F0-9]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://sourcegraph.com/.api/graphql\", {\n    \"Authorization\": \"token \" + finding[\"secret\"],\n    \"Content-Type\": \"application/json\"\n  }, \"{\\\"query\\\":\\\"query ValidateToken { site { id } }\\\"}\"); r.status == 200 && (r.json?.data?.site?.id ?? \"\") != \"\" ? {\n    \"result\": \"valid\",\n    \"site_id\": (r.json?.data?.site?.id ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Square Access Token, risking unauthorized payment processing and financial transaction exposure.",
+   "filter": "entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "square-access-token",
+   "keywords": [
+    "sq0atp-",
+    "eaaa"
+   ],
+   "regex": "\\b((?:EAAA|sq0atp-)[\\w-]{22,60})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Identified a Squarespace Access Token, which may compromise website management and content control on Squarespace.",
+   "id": "squarespace-access-token",
+   "keywords": [
+    "squarespace"
+   ],
+   "regex": "(?i)(?:squarespace)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "SSLMate API key.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "sslmate-api-key.1",
+   "keywords": [
+    "sslmate"
+   ],
+   "regex": "(?i:(?:sslmate(?:[_. -]*(?:api))?[_. -]*(?:secret|key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9]{36})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://sslmate.com/api/v2/certs/example.com\", {\n    \"Authorization\": \"Basic \" + base64.encode(bytes(finding[\"secret\"] + \":\")),\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"cn\\\"\")\n    && (r.body contains \"\\\"exists\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 && (r.json?.reason ?? \"\") == \"bad_credentials\" ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Bad credentials\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Detected a Stability AI API Key, which may expose AI image generation services to unauthorized access.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "stability-ai-api-key",
+   "keywords": [
+    "stability"
+   ],
+   "regex": "(?i)(?:stability)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(sk-[A-Za-z0-9]{48})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Stripe Access Token, posing a risk to payment processing services and sensitive financial data.",
+   "filter": "filter.matchesAny(finding[\"secret\"], [\"^sk_live_a2V5Xz\"])\n|| entropy(finding[\"secret\"]) <= 2.0\n",
+   "id": "stripe-access-token",
+   "keywords": [
+    "sk_test",
+    "sk_live",
+    "sk_prod",
+    "rk_test",
+    "rk_live",
+    "rk_prod"
+   ],
+   "regex": "\\b((?:sk|rk)_(?:test|live|prod)_[a-zA-Z0-9]{10,99})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.stripe.com/v1/account\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.json?.object ?? \"\") == \"account\" ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Discovered a SumoLogic Access ID, potentially compromising log management services and data analytics integrity.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "sumologic-access-id",
+   "keywords": [
+    "sumo"
+   ],
+   "regex": "(?i)(?:(?-i:[Ss]umo|SUMO))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((?-i:su)[a-zA-Z0-9]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Uncovered a SumoLogic Access Token, which could lead to unauthorized access to log data and analytics insights.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "sumologic-access-token",
+   "keywords": [
+    "sumo"
+   ],
+   "regex": "(?i)(?:(?-i:[Ss]umo|SUMO))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Supabase Management Token, which may allow unauthorized access to Supabase organizations and projects.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n|| !matchesAny(finding[\"secret\"], [`^sbp_[a-z0-9_-]*[0-9][a-z0-9_-]*[0-9][a-z0-9_-]*$`])\n",
+   "id": "supabase-management-token",
+   "keywords": [
+    "sbp_"
+   ],
+   "regex": "\\b(sbp_[a-z0-9_-]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.supabase.com/v1/organizations\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "components": [
+    {
+     "id": "supabase-project-url"
+    }
+   ],
+   "confidence": "high",
+   "description": "Detected a Supabase Project API Key, which may expose project data through Supabase APIs when paired with a project URL.",
+   "filter": "entropy(finding[\"secret\"]) <= 4.0\n",
+   "id": "supabase-project-api-key",
+   "keywords": [
+    "sb_secret_"
+   ],
+   "regex": "\\b(sb_secret_[A-Za-z0-9_-]{31})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get((components[\"supabase-project-url\"]?.secret ?? \"\") + \"/rest/v1/?select=*\", {\n    \"Apikey\": finding[\"secret\"],\n    \"User-Agent\": \"\"\n  }); r.status == 200 && (r.body contains \"\\\"host\\\":\") ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Supabase project URL, used as a component of the supabase-project-api-key composite rule.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "supabase-project-url",
+   "keywords": [
+    "supabase.co"
+   ],
+   "regex": "\\b(https://[a-z0-9]{16,32}\\.supabase\\.co)\\b",
+   "skipReport": true
+  },
+  {
+   "confidence": "high",
+   "description": "Tableau personal access-token name, used as a component of the token rule.",
+   "id": "tableau-personal-access-token-name.1",
+   "keywords": [
+    "tableau"
+   ],
+   "regex": "(?i:(?:tableau(?:[_. -]*(?:personal[_. -]*access|pat))?[_. -]*(?:token[_. -]*)?name)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z][A-Za-z0-9_-]{2,50})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "tableau-personal-access-token-name.1",
+     "within": "20L"
+    },
+    {
+     "id": "tableau-server-host.1",
+     "within": "20L"
+    }
+   ],
+   "confidence": "high",
+   "description": "Tableau personal access token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "tableau-personal-access-token.1",
+   "keywords": [
+    "tableau"
+   ],
+   "regex": "\\b([A-Za-z0-9+/]{22}==:[A-Za-z0-9]{32})\\b",
+   "validate": "let r = http.post(\"https://\" + (components[\"tableau-server-host.1\"]?.secret ?? \"\") + \"/api/3.26/auth/signin\", {\n    \"Content-Type\": \"application/json\",\n    \"Accept\": \"application/json\"\n  }, \"{\\\"credentials\\\":{\\\"personalAccessTokenName\\\":\\\"\" + (components[\"tableau-personal-access-token-name.1\"]?.secret ?? \"\")\n    + \"\\\",\\\"personalAccessTokenSecret\\\":\\\"\" + finding[\"secret\"] + \"\\\",\\\"site\\\":{}}}\");\n  r.status == 200 && (r.json?.credentials?.token ?? \"\") != \"\" ? {\n    \"result\": \"valid\"\n  } : r.status in [400, 401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid Tableau credentials\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Tableau Online server host, used as a component of the personal access-token rule.",
+   "id": "tableau-server-host.1",
+   "keywords": [
+    "online.tableau.com"
+   ],
+   "regex": "(?i)\\b([a-z0-9-]+\\.online\\.tableau\\.com)\\b",
+   "skipReport": true
+  },
+  {
+   "confidence": "high",
+   "description": "Tailscale API access token.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "tailscale-api-key.1",
+   "keywords": [
+    "tskey-api-"
+   ],
+   "regex": "\\b(tskey-api-[A-Za-z0-9_-]{20,36})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.tailscale.com/api/v2/secret-scanning/verify\", {\n    \"Content-Type\": \"application/x-www-form-urlencoded\",\n    \"Accept\": \"application/json\"\n  }, \"key=\" + finding[\"secret\"]); r.status == 204 ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid API token\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Telegram Bot API Token, risking unauthorized bot operations and message interception on Telegram.",
+   "id": "telegram-bot-api-token",
+   "keywords": [
+    "telegr"
+   ],
+   "regex": "(?i)(?:telegr)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{5,16}:(?-i:A)[a-z0-9_\\-]{34})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Telnyx API v2 key.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "telnyx-api-v2-key.1",
+   "keywords": [
+    "telnyx"
+   ],
+   "regex": "(?i:(?:telnyx(?:[_. -]*(?:api))?[_. -]*(?:secret|key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(KEY[0-9A-Za-z_-]{55})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.telnyx.com/v2/balance\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"balance\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but balance access is restricted\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Authentication failed\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Temporal Cloud API key.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.2\n|| !filter.matchesAny(finding[\"secret\"], [\"^(?:[^0-9]*[0-9]){3}\"])\n",
+   "id": "temporal-cloud-api-key.1",
+   "keywords": [
+    "inrlbxbvcmfslmlv"
+   ],
+   "regex": "\\b(eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]*Y2NvdW50X2lk[A-Za-z0-9_-]*InRlbXBvcmFsLmlv[A-Za-z0-9_-]*(?:ICJrZXlfaWQiOi|a2V5X2lk|rZXlfaWQi)[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{20,})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://saas-api.tmprl.cloud/cloud/current-identity\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && ((r.body contains \"\\\"user\\\"\") || (r.body contains \"\\\"serviceAccount\\\"\")) ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Request not authenticated\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Thunderstore API token.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5\n|| !filter.matchesAny(finding[\"secret\"], [\"^(?:[^0-9]*[0-9]){2}\"])\n",
+   "id": "thunderstore-api-token.1",
+   "keywords": [
+    "tss_"
+   ],
+   "regex": "\\b(tss_[A-Za-z0-9_-]{20,80})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://thunderstore.io/api/experimental/current-user/\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"username\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid Service Account token\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Together.ai API Key, which may expose access to open-source AI models and inference services.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "togetherai-api-key",
+   "keywords": [
+    "tgp_v1_"
+   ],
+   "regex": "(?i)\\b(tgp_v1_[A-Za-z0-9_-]{43})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.together.xyz/v1/models\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains '\"id\"') && (r.body contains '\"object\"') ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Identified a Travis CI Access Token, potentially compromising continuous integration services and codebase security.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "travisci-access-token",
+   "keywords": [
+    "travis"
+   ],
+   "regex": "(?i)(?:travis)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{22})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Twilio API Key, posing a risk to communication services and sensitive customer interaction data.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.0\n",
+   "id": "twilio-api-key",
+   "keywords": [
+    "twilio"
+   ],
+   "regex": "SK[0-9a-fA-F]{32}"
+  },
+  {
+   "confidence": "medium",
+   "description": "Discovered a Twitch API token, which could compromise streaming services and account integrations.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "twitch-api-token",
+   "keywords": [
+    "twitch"
+   ],
+   "regex": "(?i)(?:twitch)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Twitter Access Secret, potentially risking unauthorized Twitter integrations and data breaches.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "twitter-access-secret",
+   "keywords": [
+    "twitter"
+   ],
+   "regex": "(?i)(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{45})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Twitter Access Token, posing a risk of unauthorized account operations and social media data exposure.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "twitter-access-token",
+   "keywords": [
+    "twitter"
+   ],
+   "regex": "(?i)(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{15,25}-[a-zA-Z0-9]{20,40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a Twitter API Key, which may compromise Twitter application integrations and user data security.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "twitter-api-key",
+   "keywords": [
+    "twitter"
+   ],
+   "regex": "(?i)(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{25})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Twitter API Secret, risking the security of Twitter app integrations and sensitive data access.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "twitter-api-secret",
+   "keywords": [
+    "twitter"
+   ],
+   "regex": "(?i)(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{50})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Twitter Bearer Token, potentially compromising API access and data retrieval from Twitter.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.0 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "twitter-bearer-token",
+   "keywords": [
+    "twitter"
+   ],
+   "regex": "(?i)(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(A{22}[a-zA-Z0-9%]{80,100})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Typeform API token, which could lead to unauthorized survey management and data collection.",
+   "id": "typeform-api-token",
+   "keywords": [
+    "tfp_"
+   ],
+   "regex": "(?i)(?:typeform)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(tfp_[a-z0-9\\-_\\.=]{59})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Unkey administrative root key.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5\n|| !filter.matchesAny(finding[\"secret\"], [\"[0-9]\"])\n|| !filter.matchesAny(finding[\"secret\"], [\"[A-Z]\"])\n|| !filter.matchesAny(finding[\"secret\"], [\"[a-z]\"])\n",
+   "id": "unkey-root-key.1",
+   "keywords": [
+    "unkey_"
+   ],
+   "regex": "\\b(unkey_[A-Za-z0-9]{20,32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.unkey.com/v2/keys.verifyKey\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Content-Type\": \"application/json\",\n    \"Accept\": \"application/json\"\n  }, \"{\\\"key\\\":\\\"betterleaks_validation_key\\\"}\"); r.status == 200 && (r.body contains \"\\\"data\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid root key\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified an UpCloud API token, which may expose cloud infrastructure resources to unauthorized access.",
+   "id": "upcloud-api-token",
+   "keywords": [
+    "ucat_"
+   ],
+   "regex": "\\b(ucat_[0-9A-Za-z]{24,32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.upcloud.com/1.3/account\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains '\"account\"') ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Detected an Upstage AI API key, which may expose Solar language models and document AI services to unauthorized access.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "upstage-api-key",
+   "keywords": [
+    "upstage"
+   ],
+   "regex": "(?i)(?:upstage)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9]{40,50})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.upstage.ai/v1/models\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains '\"data\"') ? {\n    \"result\": \"valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "components": [
+    {
+     "id": "upstash-redis-rest-url.1",
+     "within": "5L"
+    }
+   ],
+   "confidence": "high",
+   "description": "Upstash Redis REST token, which may grant read-only or full access to an Upstash database.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "upstash-redis-rest-token.1",
+   "keywords": [
+    "upstash"
+   ],
+   "regex": "(?i:(?:upstash)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((?:[A-Za-z0-9]{32,48}|AYNgAS[A-Za-z0-9+/_-]{26,90}={0,2}))(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let endpoint = (components[\"upstash-redis-rest-url.1\"]?.secret ?? \"\");\nlet r = http.get(endpoint + \"/ping\", {\n  \"Authorization\": \"Bearer \" + finding[\"secret\"],\n  \"Accept\": \"application/json\"\n}); r.status == 200 && (r.body contains \"PONG\") ? {\n  \"result\": \"valid\"\n} : r.status == 401 ? {\n  \"result\": \"invalid\",\n  \"reason\": \"Unauthorized\"\n} : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Upstash Redis REST URL, used as a component of the Upstash REST-token composite rule.",
+   "id": "upstash-redis-rest-url.1",
+   "keywords": [
+    "upstash.io"
+   ],
+   "regex": "(?i)\\b(https://[a-z0-9][a-z0-9-]{2,63}\\.upstash\\.io)(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "confidence": "high",
+   "description": "Val Town API token.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5\n|| !filter.matchesAny(finding[\"secret\"], [\"^(?:[^0-9]*[0-9]){2}\"])\n",
+   "id": "val-town-api-token.1",
+   "keywords": [
+    "vtwn_"
+   ],
+   "regex": "\\b(vtwn_[A-Za-z0-9_-]{20,80})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.val.town/v1/me\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"id\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Vault Batch Token, risking unauthorized access to secret management services and sensitive data.",
+   "filter": "entropy(finding[\"secret\"]) <= 4.0\n",
+   "id": "vault-batch-token",
+   "keywords": [
+    "hvb."
+   ],
+   "regex": "\\b(hvb\\.[\\w-]{138,300})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Identified a Vault Service Token, potentially compromising infrastructure security and access to sensitive credentials.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n|| matchesAny(finding[\"secret\"], [`s\\.[A-Za-z]{24}`])\n",
+   "id": "vault-service-token",
+   "keywords": [
+    "hvs.",
+    "vault"
+   ],
+   "regex": "\\b((?:hvs\\.[\\w-]{90,120}|s\\.(?i:[a-z0-9]{24})))(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Vercel AI Gateway API Key (vck_), which may expose AI model routing and gateway access to unauthorized parties.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "vercel-ai-gateway-key",
+   "keywords": [
+    "vck_"
+   ],
+   "regex": "(?i)\\b(vck_[A-Za-z0-9_-]{56})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://ai-gateway.vercel.sh/v1/chat/completions\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Content-Type\": \"application/json\"\n  }, \"{\\\"model\\\":\\\"openai/gpt-3.5-turbo\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"x\\\"}],\\\"max_tokens\\\":1}\"); r.status in [200, 403] ? {\n    \"result\": \"valid\"\n  } : r.status in [401] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Vercel API Token, which may expose deployment and serverless infrastructure to unauthorized access.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "vercel-api-token",
+   "keywords": [
+    "vercel"
+   ],
+   "regex": "(?i)(?:vercel)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Z0-9]{24})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.vercel.com/v2/user\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains \"\\\"user\\\"\") && (r.body contains \"\\\"email\\\"\") ? {\n    \"result\": \"valid\",\n    \"email\": (r.json?.user?.email ?? \"\"),\n    \"username\": (r.json?.user?.username ?? \"\"),\n    \"user_id\": (r.json?.user?.id ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Vercel App Access Token (vca_), which may allow Sign in with Vercel apps to access user resources.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "vercel-app-access-token",
+   "keywords": [
+    "vca_"
+   ],
+   "regex": "(?i)\\b(vca_[A-Za-z0-9_-]{56})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.vercel.com/login/oauth/userinfo\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }, \"\"); r.status == 200 && (r.body contains \"\\\"sub\\\"\") ? {\n    \"result\": \"valid\",\n    \"email\": (r.json?.email ?? \"\"),\n    \"user_id\": (r.json?.sub ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Vercel App Refresh Token (vcr_), which may allow persistent unauthorized access through token refresh flows.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "vercel-app-refresh-token",
+   "keywords": [
+    "vcr_"
+   ],
+   "regex": "(?i)\\b(vcr_[A-Za-z0-9_-]{56})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.vercel.com/login/oauth/token/introspect\", {\n    \"Content-Type\": \"application/x-www-form-urlencoded\"\n  }, \"token=\" + finding[\"secret\"]); r.status == 200 && (r.body contains \"\\\"active\\\":true\") ? {\n    \"result\": \"valid\"\n  } : r.status == 200 && (r.body contains \"\\\"active\\\":false\") ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Token inactive\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Vercel Integration Token (vci_), which may allow third-party service integrations to act on behalf of users.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "vercel-integration-token",
+   "keywords": [
+    "vci_"
+   ],
+   "regex": "(?i)\\b(vci_[A-Za-z0-9_-]{56})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.vercel.com/v2/user\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains \"\\\"user\\\"\") ? {\n    \"result\": \"valid\",\n    \"email\": (r.json?.user?.email ?? \"\"),\n    \"username\": (r.json?.user?.username ?? \"\"),\n    \"user_id\": (r.json?.user?.id ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Vercel Personal Access Token (vcp_), which may expose full account and deployment management capabilities.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "vercel-personal-access-token",
+   "keywords": [
+    "vcp_"
+   ],
+   "regex": "(?i)\\b(vcp_[A-Za-z0-9_-]{56})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.vercel.com/v2/user\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"]\n  }); r.status == 200 && (r.body contains \"\\\"user\\\"\") && (r.body contains \"\\\"email\\\"\") ? {\n    \"result\": \"valid\",\n    \"email\": (r.json?.user?.email ?? \"\"),\n    \"username\": (r.json?.user?.username ?? \"\"),\n    \"user_id\": (r.json?.user?.id ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "VirusTotal API key, which may expose private submissions, intelligence, or account API access.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "virustotal-api-key.1",
+   "keywords": [
+    "virustotal"
+   ],
+   "regex": "(?i)(?:virustotal)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://www.virustotal.com/api/v3/domains/google.com\", {\n    \"x-apikey\": finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); let errorCode = (r.json?.error?.code ?? \"\");\nr.status == 200 && (r.body contains \"\\\"data\\\"\") ? {\n  \"result\": \"valid\"\n} : r.status == 403 && errorCode == \"ForbiddenError\" ? {\n  \"result\": \"valid\",\n  \"reason\": \"Authenticated but operation is forbidden\"\n} : r.status == 401 && errorCode == \"UserNotActiveError\" ? {\n  \"result\": \"valid\",\n  \"reason\": \"Authenticated inactive VirusTotal account\"\n} : r.status == 401 && errorCode == \"WrongCredentialsError\" ? {\n  \"result\": \"invalid\",\n  \"reason\": \"Wrong credentials\"\n} : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Detected a Voyage AI API key, which may expose embedding and retrieval model access to unauthorized parties.",
+   "filter": "entropy(finding[\"secret\"]) < 4.0\n",
+   "id": "voyageai-api-key",
+   "keywords": [
+    "voyage"
+   ],
+   "regex": "(?i:(?:voyage)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((?:pa|al)-[A-Za-z0-9_-]{43})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.voyageai.com/v1/embeddings\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Content-Type\": \"application/json\"\n  }, \"{\\\"input\\\":\\\"hi\\\",\\\"model\\\":\\\"nonexistent-model-xyz-12345\\\"}\");\n  let invalidResponse = (r.body contains \"Provided API key is invalid\") ||\n    (r.body contains \"cannot access this endpoint\");\n  r.status == 401 || invalidResponse ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : r.status in [200, 400, 403] ? {\n    \"result\": \"valid\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Vultr API key, which may allow management of cloud account resources.",
+   "filter": "entropy(finding[\"secret\"]) < 3.4\n",
+   "id": "vultr-api-key.1",
+   "keywords": [
+    "vultr"
+   ],
+   "regex": "(?i)(?:vultr)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{36})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.vultr.com/v2/account\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"account\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 && (r.body contains \"Invalid API token\") ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid API token\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "WakaTime API key version 1 (UUID format).",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "wakatime-api-key.1",
+   "keywords": [
+    "wakatime",
+    "waka_time",
+    "waka-time",
+    "waka time",
+    "waka.time"
+   ],
+   "regex": "(?i:(?:waka[_. -]?time(?:[_. -]*(?:api))?[_. -]*(?:secret|key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.wakatime.com/api/v1/users/current?api_key=\" + finding[\"secret\"], {\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"data\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "WakaTime API key version 2 (waka_ format).",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "wakatime-api-key.2",
+   "keywords": [
+    "waka_"
+   ],
+   "regex": "(?i)\\b(waka_[a-z0-9]{36,64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.wakatime.com/api/v1/users/current?api_key=\" + finding[\"secret\"], {\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"data\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Weatherstack API key.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.3 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "weatherstack-api-key.1",
+   "keywords": [
+    "weatherstack"
+   ],
+   "regex": "(?i:(?:weatherstack(?:[_. -]*(?:api))?[_. -]*(?:secret|key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-z]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.weatherstack.com/current?access_key=\" + finding[\"secret\"] + \"&query=Los%20Angeles\", {\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && ((r.body contains \"\\\"location\\\"\") || (r.body contains \"Access Restricted - Your current Subscription Plan does not support HTTPS Encryption\")) ? {\n    \"result\": \"valid\"\n  } : r.status == 401 && (r.body contains \"\\\"invalid_access_key\\\"\") ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid access key\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Detected a Weights & Biases API Key, which may expose ML experiment tracking and model registry access to unauthorized parties.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "weights-and-biases-api-key",
+   "keywords": [
+    "wandb",
+    "weightsandbiases"
+   ],
+   "regex": "(?i)(?:wandb|weightsandbiases)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.wandb.ai/graphql\", {\n    \"Authorization\": \"Basic \" + base64.encode(bytes(\"api:\" + finding[\"secret\"])),\n    \"Content-Type\": \"application/json\"\n  }, \"{\\\"query\\\":\\\"query { viewer { email username } }\\\"}\"); r.status == 200 && (r.body contains \"\\\"username\\\"\") ? {\n    \"result\": \"valid\",\n    \"email\": (r.json?.data?.viewer?.email ?? \"\"),\n    \"username\": (r.json?.data?.viewer?.username ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Weights & Biases v1 API Key (wandb_v1_), which may expose ML experiment tracking and artifact storage to unauthorized access.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "weights-and-biases-api-key-v1",
+   "keywords": [
+    "wandb_v1_"
+   ],
+   "regex": "(?i)\\b(wandb_v1_[A-Za-z0-9_]{77})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.wandb.ai/graphql\", {\n    \"Authorization\": \"Basic \" + base64.encode(bytes(\"api:\" + finding[\"secret\"])),\n    \"Content-Type\": \"application/json\"\n  }, \"{\\\"query\\\":\\\"query { viewer { email username } }\\\"}\"); r.status == 200 && (r.body contains \"\\\"username\\\"\") ? {\n    \"result\": \"valid\",\n    \"email\": (r.json?.data?.viewer?.email ?? \"\"),\n    \"username\": (r.json?.data?.viewer?.username ?? \"\")\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "medium",
+   "description": "Wiz OAuth client ID, used as a component of the Wiz client-secret composite rule.",
+   "filter": "entropy(finding[\"secret\"]) < 4.0\n",
+   "id": "wiz-client-id.1",
+   "keywords": [
+    "wiz"
+   ],
+   "regex": "(?i:(?:wiz)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9]{53,56})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "wiz-client-id.1",
+     "within": "5L"
+    }
+   ],
+   "confidence": "high",
+   "description": "Wiz OAuth client secret, which may allow access to the Wiz API when paired with its client ID.",
+   "filter": "entropy(finding[\"secret\"]) < 4.0\n",
+   "id": "wiz-client-secret.1",
+   "keywords": [
+    "wiz"
+   ],
+   "regex": "(?i:(?:wiz)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([A-Za-z0-9]{64})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://auth.app.wiz.io/oauth/token\", {\n    \"Accept\": \"application/json\",\n    \"Content-Type\": \"application/x-www-form-urlencoded\"\n  }, \"grant_type=client_credentials\" +\n    \"&audience=wiz-api\" +\n    \"&client_id=\" + strings.urlQueryEscape((components[\"wiz-client-id.1\"]?.secret ?? \"\")) +\n    \"&client_secret=\" + strings.urlQueryEscape(finding[\"secret\"]));\n  r.status == 200 && (r.json?.access_token ?? \"\") != \"\" ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "WooCommerce REST API consumer secret, which may allow read or write access to a store with the associated consumer key.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "woocommerce-consumer-secret.1",
+   "keywords": [
+    "wooc",
+    "woo-",
+    "woo_",
+    "cs_"
+   ],
+   "regex": "(?i)(?:woo)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(cs_[a-f0-9]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Workato Developer API token.",
+   "filter": "entropy(finding[\"secret\"]) < 4.0\n",
+   "id": "workato-developer-api-token.1",
+   "keywords": [
+    "wrka"
+   ],
+   "regex": "\\b(wrka(?:[a-z]{2})?-eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{64,})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let token = finding[\"secret\"];\nlet host = filter.matchesAny(token, [\"^wrkaeu-\"]) ? \"https://app.eu.workato.com\" :\n  filter.matchesAny(token, [\"^wrkajp-\"]) ? \"https://app.jp.workato.com\" :\n  filter.matchesAny(token, [\"^wrkasg-\"]) ? \"https://app.sg.workato.com\" :\n  filter.matchesAny(token, [\"^wrkaau-\"]) ? \"https://app.au.workato.com\" :\n  filter.matchesAny(token, [\"^wrkail-\"]) ? \"https://app.il.workato.com\" :\n  filter.matchesAny(token, [\"^wrkacn-\"]) ? \"https://app.workatoapp.cn\" :\n  filter.matchesAny(token, [\"^wrkakr-\"]) ? \"https://app.kr.workato.com\" :\n  \"https://www.workato.com\";\nlet r = http.get(host + \"/api/users/me\", {\n    \"Authorization\": \"Bearer \" + token,\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"id\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but workspace-details access is restricted\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "WorkOS production API key.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5\n|| filter.matchesAny(finding[\"secret\"], [\"(?i)example\"])\n",
+   "id": "workos-production-api-key.1",
+   "keywords": [
+    "workos"
+   ],
+   "regex": "(?i:(?:workos(?:[_. -]*(?:api))?[_. -]*(?:secret|key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(sk_live_a2V5Xz[A-Za-z0-9+/]{69}={0,2})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.workos.com/organizations\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"data\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 403 ? {\n    \"result\": \"valid\",\n    \"reason\": \"Authenticated but organization access is restricted\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected an xAI (Grok) API Key, which may expose Grok AI model access to unauthorized parties.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "xai-api-key",
+   "keywords": [
+    "xai-"
+   ],
+   "regex": "(?i)\\b(xai-[A-Za-z0-9_-]{70,120})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Xendit production API key, which may allow access to payment and balance APIs.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "xendit-production-api-key.1",
+   "keywords": [
+    "xnd_production_"
+   ],
+   "regex": "\\b(xnd_production_[A-Za-z0-9]{56,72})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://api.xendit.co/balance\", {\n    \"Authorization\": \"Basic \" + base64.encode(bytes(finding[\"secret\"] + \":\")),\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"balance\\\"\") ? {\n    \"result\": \"valid\"\n  } : r.status == 401 && (r.json?.error_code ?? \"\") == \"INVALID_API_KEY\" ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Invalid API key\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Found a Yandex Access Token, posing a risk to Yandex service integrations and user data privacy.",
+   "id": "yandex-access-token",
+   "keywords": [
+    "yandex"
+   ],
+   "regex": "(?i)(?:yandex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(t1\\.[A-Z0-9a-z_-]+[=]{0,2}\\.[A-Z0-9a-z_-]{86}[=]{0,2})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Discovered a Yandex API Key, which could lead to unauthorized access to Yandex services and data manipulation.",
+   "id": "yandex-api-key",
+   "keywords": [
+    "yandex"
+   ],
+   "regex": "(?i)(?:yandex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(AQVN[A-Za-z0-9_\\-]{35,38})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Uncovered a Yandex AWS Access Token, potentially compromising cloud resource access and data security on Yandex Cloud.",
+   "id": "yandex-aws-access-token",
+   "keywords": [
+    "yandex"
+   ],
+   "regex": "(?i)(?:yandex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(YC[a-zA-Z0-9_\\-]{38})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Detected a Z.ai API key, which may expose GLM model access and usage to unauthorized parties.",
+   "filter": "entropy(finding[\"secret\"]) <= 3.5\n",
+   "id": "zai-api-key",
+   "keywords": [
+    "zai",
+    "z_ai",
+    "z.ai",
+    "glm",
+    "zlm"
+   ],
+   "regex": "(?i)(?:zai|z_ai|z\\.ai|glm|zlm)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32}\\.[a-z0-9]{16})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://api.z.ai/api/paas/v4/tokenizer\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"Accept\": \"application/json\",\n    \"Content-Type\": \"application/json\"\n  },\n  \"{\" +\n    \"\\\"model\\\":\\\"glm-4.6\\\",\" +\n    \"\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"hello\\\"}]\" +\n  \"}\"); r.status == 200 && (r.body contains '\"usage\"') ? {\n    \"result\": \"valid\"\n  } : r.status == 429 && (r.body contains \"Insufficient balance\") ? {\n    \"result\": \"valid\",\n    \"reason\": \"Insufficient balance but still valid\"\n  } : r.status in [401, 403] ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Unauthorized\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Detected a Zendesk Secret Key, risking unauthorized access to customer support services and sensitive ticketing data.",
+   "filter": "filter.entropy(finding[\"secret\"]) < 3.5 || filter.tokenRatio(finding[\"secret\"]) >= 2.5\n",
+   "id": "zendesk-secret-key",
+   "keywords": [
+    "zendesk"
+   ],
+   "regex": "(?i)(?:zendesk)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{40})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "medium",
+   "description": "Zoho OAuth client ID, used as a component of the zoho-client-secret.1 composite rule.",
+   "filter": "entropy(finding[\"secret\"]) < 3.0\n",
+   "id": "zoho-client-id.1",
+   "keywords": [
+    "zoho"
+   ],
+   "regex": "(?i)(?:zoho)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(1000\\.[a-z0-9]{30})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "skipReport": true
+  },
+  {
+   "components": [
+    {
+     "id": "zoho-client-id.1",
+     "within": "5L"
+    }
+   ],
+   "confidence": "high",
+   "description": "Zoho OAuth client secret, which may allow OAuth client authentication when paired with the associated client ID.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "zoho-client-secret.1",
+   "keywords": [
+    "zoho"
+   ],
+   "regex": "(?i)(?:zoho)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{42})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.post(\"https://accounts.zoho.com/oauth/v2/token\", {\n    \"Accept\": \"application/json\",\n    \"Content-Type\": \"application/x-www-form-urlencoded\"\n  }, \"client_id=\" + strings.urlQueryEscape((components[\"zoho-client-id.1\"]?.secret ?? \"\")) +\n  \"&client_secret=\" + strings.urlQueryEscape(finding[\"secret\"]) +\n  \"&grant_type=authorization_code\" +\n  \"&code=betterleaks_invalid_code\" +\n  \"&redirect_uri=https%3A%2F%2Fexample.com%2Fbetterleaks\");\n  r.status == 200 && (r.json?.error ?? \"\") == \"invalid_code\" ? {\n    \"result\": \"valid\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Zoho OAuth access or refresh token, which may allow access to Zoho APIs or minting of new access tokens.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "zoho-oauth-token.1",
+   "keywords": [
+    "zoho"
+   ],
+   "regex": "(?i)(?:zoho)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(1000\\.[a-f0-9]{32}\\.[a-f0-9]{32})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://www.zohoapis.com/crm/v8/users?type=CurrentUser\", {\n    \"Authorization\": \"Zoho-oauthtoken \" + finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 && (r.body contains \"\\\"users\\\"\") ? {\n    \"result\": \"valid\"\n  } : validate.unknown(r)\n"
+  },
+  {
+   "confidence": "high",
+   "description": "Zoho ZAPI key, which may authorize CRM functions, extensions, webhooks, or other Zoho APIs.",
+   "filter": "entropy(finding[\"secret\"]) < 3.5\n",
+   "id": "zoho-zapi-key.1",
+   "keywords": [
+    "zoho"
+   ],
+   "regex": "(?i)(?:zoho)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((?:1001\\.[a-f0-9]{32}\\.[a-f0-9]{32}(?:-d)?|1003\\.[a-f0-9]{32,64}))(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)"
+  },
+  {
+   "confidence": "high",
+   "description": "Zuplo consumer API key.",
+   "filter": "entropy(finding[\"secret\"]) < 3.3\n",
+   "id": "zuplo-consumer-api-key.1",
+   "keywords": [
+    "zpka_"
+   ],
+   "regex": "\\b(zpka_[a-z0-9]{32}_[0-9a-f]{8})(?:\\\\?['\"\\x60]|[\\s;]|\\\\[nr]|$)",
+   "validate": "let r = http.get(\"https://dev.zuplo.com/v1/who-am-i\", {\n    \"Authorization\": \"Bearer \" + finding[\"secret\"],\n    \"x-api-key\": finding[\"secret\"],\n    \"Accept\": \"application/json\"\n  }); r.status == 200 ? {\n    \"result\": \"valid\"\n  } : r.status == 401 ? {\n    \"result\": \"invalid\",\n    \"reason\": \"Authorization failed\"\n  } : validate.unknown(r)\n"
+  }
+ ]
+}

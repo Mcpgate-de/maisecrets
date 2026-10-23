@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.7.19] - 2026-10-23
+
+### Fixes
+
+- the directory can read the betterleaks rules, in parts and without a literal key (87289cd)
+
 ## [0.7.18] - 2026-10-23
 
 ### Fixes
