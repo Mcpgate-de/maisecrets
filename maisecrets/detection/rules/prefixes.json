@@ -453,7 +453,7 @@
  },
  {
   "id": "pinterest-refresh-token",
-  "regex": "pinr_(?:(?<![A-Za-z0-9_-]pinr_)|(?<=\\\\[nrt]pinr_))[a-zA-Z0-9._\\-]{20,300}(?![A-Za-z0-9_-])"
+  "regex": "pinr_(?:(?<![A-Za-z0-9_-]pinr_)|(?<=\\\\[nrt]pinr_))[a-zA-Z0-9._\\-]{19,299}[a-zA-Z0-9_\\-](?![A-Za-z0-9_-])"
  },
  {
   "id": "plaid-access-token-production",
@@ -569,7 +569,7 @@
  },
  {
   "id": "xata-api-key",
-  "regex": "xau_(?:(?<![A-Za-z0-9_-]xau_)|(?<=\\\\[nrt]xau_))[A-Za-z0-9]{33}(?![A-Za-z0-9_-])"
+  "regex": "xau_(?:(?<![A-Za-z0-9_-]xau_)|(?<=\\\\[nrt]xau_))[A-Za-z0-9]{30,40}(?![A-Za-z0-9_-])"
  },
  {
   "id": "1password-service-account-token-bare",
@@ -577,11 +577,11 @@
  },
  {
   "id": "asaas-production-key",
-  "regex": "\\$aact_prod_(?:(?<![A-Za-z0-9_-]\\$aact_prod_)|(?<=\\\\[nrt]\\$aact_prod_))[A-Za-z0-9_\\-+/=:$]{20,200}(?![A-Za-z0-9_-])"
+  "regex": "\\$aact_prod_(?:(?<![A-Za-z0-9_-]\\$aact_prod_)|(?<=\\\\[nrt]\\$aact_prod_))[A-Za-z0-9_\\-+/=:$]{19,199}[A-Za-z0-9_\\-+/=$](?![A-Za-z0-9_-])"
  },
  {
   "id": "asaas-sandbox-key",
-  "regex": "\\$aact_hmlg_(?:(?<![A-Za-z0-9_-]\\$aact_hmlg_)|(?<=\\\\[nrt]\\$aact_hmlg_))[A-Za-z0-9_\\-+/=:$]{20,200}(?![A-Za-z0-9_-])"
+  "regex": "\\$aact_hmlg_(?:(?<![A-Za-z0-9_-]\\$aact_hmlg_)|(?<=\\\\[nrt]\\$aact_hmlg_))[A-Za-z0-9_\\-+/=:$]{19,199}[A-Za-z0-9_\\-+/=$](?![A-Za-z0-9_-])"
  },
  {
   "id": "atlassian-org-admin-scoped-api-key-sibling",
@@ -641,7 +641,7 @@
  },
  {
   "id": "datadog-personal-access-token",
-  "regex": "ddpat_(?:(?<![A-Za-z0-9_-]ddpat_)|(?<=\\\\[nrt]ddpat_))[A-Za-z0-9]{20,24}_[A-Za-z0-9]{40,52}(?![A-Za-z0-9_-])"
+  "regex": "ddpat_(?:(?<![A-Za-z0-9_-]ddpat_)|(?<=\\\\[nrt]ddpat_))[A-Za-z0-9]{16,24}_[A-Za-z0-9]{40,56}(?![A-Za-z0-9_-])"
  },
  {
   "id": "datadog-service-access-token",
@@ -797,7 +797,7 @@
  },
  {
   "id": "pinterest-client-credentials-access-token",
-  "regex": "pinc(?:(?<![A-Za-z0-9_-]pinc)|(?<=\\\\[nrt]pinc))[._][A-Za-z0-9_.\\-]{20,200}(?![A-Za-z0-9_-])"
+  "regex": "pinc(?:(?<![A-Za-z0-9_-]pinc)|(?<=\\\\[nrt]pinc))[._][A-Za-z0-9_.\\-]{19,199}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
  },
  {
   "id": "polar-customer-session-token",
@@ -833,7 +833,7 @@
  },
  {
   "id": "posthog-project-secret-api-key",
-  "regex": "phs_(?:(?<![A-Za-z0-9_-]phs_)|(?<=\\\\[nrt]phs_))[A-Za-z0-9_\\-]{43,48}(?![A-Za-z0-9_-])"
+  "regex": "phs_(?:(?<![A-Za-z0-9_-]phs_)|(?<=\\\\[nrt]phs_))[A-Za-z0-9_\\-]{43,50}(?![A-Za-z0-9_-])"
  },
  {
   "id": "pydantic-services-inc-write-api-token",
@@ -934,5 +934,505 @@
  {
   "id": "yandex-translate-api-key-legacy-v1-5",
   "regex": "trnsl\\.1\\.1\\.(?:(?<![A-Za-z0-9_-]trnsl\\.1\\.1\\.)|(?<=\\\\[nrt]trnsl\\.1\\.1\\.))[0-9]{8}T[0-9]{6}Z\\.[a-f0-9]{16}\\.[a-f0-9]{40}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "amazon-mws-auth-token",
+  "regex": "amzn\\.mws\\.(?:(?<![A-Za-z0-9_-]amzn\\.mws\\.)|(?<=\\\\[nrt]amzn\\.mws\\.))[0-9a-f]{8}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{12}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "atlassian-api-token-bare",
+  "regex": "ATATT3xFfGF0(?:(?<![A-Za-z0-9_-]ATATT3xFfGF0)|(?<=\\\\[nrt]ATATT3xFfGF0))[a-zA-Z0-9_\\-]{20,200}=[0-9A-F]{8}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "facebook-graph-explorer-access-token",
+  "regex": "EAACEdEose0cBA(?:(?<![A-Za-z0-9_-]EAACEdEose0cBA)|(?<=\\\\[nrt]EAACEdEose0cBA))[a-zA-Z0-9]+(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "new-relic-synthetics-private-location-key",
+  "regex": "NRSP\\-(?:(?<![A-Za-z0-9_-]NRSP\\-)|(?<=\\\\[nrt]NRSP\\-))[a-z]{2}[0-9]{2}[a-f0-9]{31}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "notion-refresh-token",
+  "regex": "nrt_(?:(?<![A-Za-z0-9_-]nrt_)|(?<=\\\\[nrt]nrt_))[A-Z0-9_]{40,55}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "openai-service-api-key-legacy",
+  "regex": "sk\\-service\\-(?:(?<![A-Za-z0-9_-]sk\\-service\\-)|(?<=\\\\[nrt]sk\\-service\\-))[A-Za-z0-9\\-]+\\-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "retool-workflow-api-key",
+  "regex": "retool_wk_(?:(?<![A-Za-z0-9_-]retool_wk_)|(?<=\\\\[nrt]retool_wk_))[0-9a-f]{32}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "slack-app-configuration-access-token",
+  "regex": "xoxe\\.xoxp\\-(?:(?<![A-Za-z0-9_-]xoxe\\.xoxp\\-)|(?<=\\\\[nrt]xoxe\\.xoxp\\-))[\\d]{1,10}\\-[a-zA-Z0-9]{166}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "akamai-edgegrid-client-token-access-token",
+  "regex": "akab\\-(?:(?<![A-Za-z0-9_-]akab\\-)|(?<=\\\\[nrt]akab\\-))[a-z0-9]{16}\\-[a-z0-9]{16}(?![A-Za-z0-9_-])(?!\\.[A-Za-z0-9])"
+ },
+ {
+  "id": "baseten-api-key-2026-format",
+  "regex": "b10_(?:(?<![A-Za-z0-9_-]b10_)|(?<=\\\\[nrt]b10_))[A-Za-z0-9]{8}\\.[A-Za-z0-9]{32}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "browserbase-api-key",
+  "regex": "bb_live_(?:(?<![A-Za-z0-9_-]bb_live_)|(?<=\\\\[nrt]bb_live_))[A-Za-z0-9_\\-]{20,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-agent-access-token",
+  "regex": "bkaa_(?:(?<![A-Za-z0-9_-]bkaa_)|(?<=\\\\[nrt]bkaa_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-agent-job-acquisition-token-jwt",
+  "regex": "bkjat_(?:(?<![A-Za-z0-9_-]bkjat_)|(?<=\\\\[nrt]bkjat_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-agent-job-token",
+  "regex": "bkaj_(?:(?<![A-Za-z0-9_-]bkaj_)|(?<=\\\\[nrt]bkaj_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-api-access-token",
+  "regex": "bkua_(?:(?<![A-Za-z0-9_-]bkua_)|(?<=\\\\[nrt]bkua_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-cluster-queue-token",
+  "regex": "bkcqt_(?:(?<![A-Za-z0-9_-]bkcqt_)|(?<=\\\\[nrt]bkcqt_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-oauth-refresh-token",
+  "regex": "bkur_(?:(?<![A-Za-z0-9_-]bkur_)|(?<=\\\\[nrt]bkur_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-packages-registry-token",
+  "regex": "bkrt_(?:(?<![A-Za-z0-9_-]bkrt_)|(?<=\\\\[nrt]bkrt_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-packages-temporary-token",
+  "regex": "bkpt_(?:(?<![A-Za-z0-9_-]bkpt_)|(?<=\\\\[nrt]bkpt_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-pipeline-access-token",
+  "regex": "bkat_(?:(?<![A-Za-z0-9_-]bkat_)|(?<=\\\\[nrt]bkat_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-pipeline-trigger-token",
+  "regex": "bktr_(?:(?<![A-Za-z0-9_-]bktr_)|(?<=\\\\[nrt]bktr_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-portal-secret",
+  "regex": "bkps_(?:(?<![A-Za-z0-9_-]bkps_)|(?<=\\\\[nrt]bkps_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-portal-token",
+  "regex": "bkpat_(?:(?<![A-Za-z0-9_-]bkpat_)|(?<=\\\\[nrt]bkpat_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "buildkite-token-exchange",
+  "regex": "bktx_(?:(?<![A-Za-z0-9_-]bktx_)|(?<=\\\\[nrt]bktx_))[A-Za-z0-9_.\\-]{37,2047}[A-Za-z0-9_\\-](?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "cartesia-admin-api-key",
+  "regex": "sk_car_admin_(?:(?<![A-Za-z0-9_-]sk_car_admin_)|(?<=\\\\[nrt]sk_car_admin_))[A-Za-z0-9]{20,64}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "cartesia-api-key",
+  "regex": "sk_car_(?:(?<![A-Za-z0-9_-]sk_car_)|(?<=\\\\[nrt]sk_car_))(?!admin_)[A-Za-z0-9]{20,64}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "circleci-personal-api-token",
+  "regex": "CCIPAT_(?:(?<![A-Za-z0-9_-]CCIPAT_)|(?<=\\\\[nrt]CCIPAT_))[A-Za-z0-9]{22}_[A-Za-z0-9]{40}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "circleci-project-api-token",
+  "regex": "CCIPRJ_(?:(?<![A-Za-z0-9_-]CCIPRJ_)|(?<=\\\\[nrt]CCIPRJ_))[A-Za-z0-9]{22}_[A-Za-z0-9]{40}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "cloudflare-account-api-token-2026-scannable",
+  "regex": "cfat_(?:(?<![A-Za-z0-9_-]cfat_)|(?<=\\\\[nrt]cfat_))[A-Za-z0-9_\\-]{40}[A-Za-z0-9_\\-]{6,8}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "cloudflare-oauth-access-token-user",
+  "regex": "cfoat_(?:(?<![A-Za-z0-9_-]cfoat_)|(?<=\\\\[nrt]cfoat_))[A-Za-z0-9_\\-]{40,60}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "context7-upstash-api-key",
+  "regex": "ctx7sk\\-(?:(?<![A-Za-z0-9_-]ctx7sk\\-)|(?<=\\\\[nrt]ctx7sk\\-))[A-Za-z0-9_\\-]{20,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "datadog-application-key-new-format",
+  "regex": "ddapp_(?:(?<![A-Za-z0-9_-]ddapp_)|(?<=\\\\[nrt]ddapp_))[A-Za-z0-9]{16,24}_[A-Za-z0-9]{40,56}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "datadog-service-access-token-bare",
+  "regex": "ddsat_(?:(?<![A-Za-z0-9_-]ddsat_)|(?<=\\\\[nrt]ddsat_))[A-Za-z0-9]{16,24}_[A-Za-z0-9]{40,56}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "depot-ci-job-token",
+  "regex": "depot_cijob_(?:(?<![A-Za-z0-9_-]depot_cijob_)|(?<=\\\\[nrt]depot_cijob_))[A-Za-z0-9]{32,64}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "depot-organization-token",
+  "regex": "depot_org_(?:(?<![A-Za-z0-9_-]depot_org_)|(?<=\\\\[nrt]depot_org_))[A-Za-z0-9]{32,64}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "e2b-access-token-legacy-dropped-2026-08",
+  "regex": "sk_e2b_(?:(?<![A-Za-z0-9_-]sk_e2b_)|(?<=\\\\[nrt]sk_e2b_))[0-9a-f]{40}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "elastic-cloud-serverless-uiam-credential-api-key",
+  "regex": "essu_(?:(?<![A-Za-z0-9_-]essu_)|(?<=\\\\[nrt]essu_))[A-Za-z0-9_=\\-]{30,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "fly-io-macaroon-token-v2",
+  "regex": "fm2_(?:(?<![A-Za-z0-9_-]fm2_)|(?<=\\\\[nrt]fm2_))(?<!FlyV1 fm2_)(?<!,fm2_)[A-Za-z0-9+/_\\-]{100,}={0,3}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "hashicorp-vault-recovery-token",
+  "regex": "hvr\\.(?:(?<![A-Za-z0-9_-]hvr\\.)|(?<=\\\\[nrt]hvr\\.))[A-Za-z0-9_\\-]{24,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "kaggle-api-token-2025-access-token",
+  "regex": "KGAT_(?:(?<![A-Za-z0-9_-]KGAT_)|(?<=\\\\[nrt]KGAT_))[0-9a-f]{32}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "launchdarkly-server-side-sdk-key",
+  "regex": "sdk\\-(?:(?<![A-Za-z0-9_-]sdk\\-)|(?<=\\\\[nrt]sdk\\-))[0-9a-f]{8}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{12}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "letta-api-key",
+  "regex": "sk\\-let\\-(?:(?<![A-Za-z0-9_-]sk\\-let\\-)|(?<=\\\\[nrt]sk\\-let\\-))[A-Za-z0-9_\\-]{20,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "mongodb-atlas-service-account-client-secret",
+  "regex": "mdb_sa_sk_(?:(?<![A-Za-z0-9_-]mdb_sa_sk_)|(?<=\\\\[nrt]mdb_sa_sk_))[A-Za-z0-9_\\-]{24,80}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "neon-api-key-bare",
+  "regex": "napi_(?:(?<![A-Za-z0-9_-]napi_)|(?<=\\\\[nrt]napi_))[A-Za-z0-9]{40,80}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "netbird-personal-access-token",
+  "regex": "nbp_(?:(?<![A-Za-z0-9_-]nbp_)|(?<=\\\\[nrt]nbp_))[A-Za-z0-9]{36}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "netbird-proxy-access-token",
+  "regex": "nbx_(?:(?<![A-Za-z0-9_-]nbx_)|(?<=\\\\[nrt]nbx_))[A-Za-z0-9]{36}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "netbird-user-invite-token",
+  "regex": "nbi_(?:(?<![A-Za-z0-9_-]nbi_)|(?<=\\\\[nrt]nbi_))[A-Za-z0-9]{36}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "netlify-personal-access-token",
+  "regex": "nfp_(?:(?<![A-Za-z0-9_-]nfp_)|(?<=\\\\[nrt]nfp_))(?=[0-9a-f]{0,39}[g-zA-Z])[A-Za-z0-9]{36,40}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "notion-dev-environment-pat",
+  "regex": "development_ntn_(?:(?<![A-Za-z0-9_-]development_ntn_)|(?<=\\\\[nrt]development_ntn_))[0-9]{11}[A-Za-z0-9]{35}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "onesignal-app-api-key-v2",
+  "regex": "os_v2_app_(?:(?<![A-Za-z0-9_-]os_v2_app_)|(?<=\\\\[nrt]os_v2_app_))[a-z0-9]{100,120}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "onesignal-organization-api-key-v2",
+  "regex": "os_v2_org_(?:(?<![A-Za-z0-9_-]os_v2_org_)|(?<=\\\\[nrt]os_v2_org_))[a-z0-9]{100,120}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "openpipe-api-key",
+  "regex": "opk_(?:(?<![A-Za-z0-9_-]opk_)|(?<=\\\\[nrt]opk_))[0-9a-f]{42}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "openstack-keystone-rust-scim-api-key",
+  "regex": "kscim_(?:(?<![A-Za-z0-9_-]kscim_)|(?<=\\\\[nrt]kscim_))[A-Za-z0-9]{43}_[0-9a-f]{8}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "polar-checkout-checkout-link-client-secret",
+  "regex": "polar_c(?:(?<![A-Za-z0-9_-]polar_c)|(?<=\\\\[nrt]polar_c))l?_[A-Za-z0-9]{43}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "posthog-heatmap-screenshot-secret",
+  "regex": "phh_(?:(?<![A-Za-z0-9_-]phh_)|(?<=\\\\[nrt]phh_))[A-Za-z0-9_\\-]{20,26}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "prefect-cloud-service-account-bot-api-key",
+  "regex": "pnb_(?:(?<![A-Za-z0-9_-]pnb_)|(?<=\\\\[nrt]pnb_))[A-Za-z0-9]{36}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "pydantic-ai-gateway-gateway-api-key",
+  "regex": "pylf_v(?:(?<![A-Za-z0-9_-]pylf_v)|(?<=\\\\[nrt]pylf_v))[0-9]+_[a-z]+_[A-Za-z0-9_\\-]{20,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "render-api-key-bare",
+  "regex": "rnd_(?:(?<![A-Za-z0-9_-]rnd_)|(?<=\\\\[nrt]rnd_))[A-Za-z0-9]{32}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "runpod-api-key",
+  "regex": "rpa_(?:(?<![A-Za-z0-9_-]rpa_)|(?<=\\\\[nrt]rpa_))[A-Za-z0-9]{16,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "sentry-org-auth-token",
+  "regex": "sntrys_eyJ(?:(?<![A-Za-z0-9_-]sntrys_eyJ)|(?<=\\\\[nrt]sntrys_eyJ))[A-Za-z0-9+/=]{20,}_[A-Za-z0-9+/]{43}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "socket-dev-api-token",
+  "regex": "sktsec_(?:(?<![A-Za-z0-9_-]sktsec_)|(?<=\\\\[nrt]sktsec_))[A-Za-z0-9_]{30,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "statsig-server-secret-key",
+  "regex": "secret\\-(?:(?<![A-Za-z0-9_-]secret\\-)|(?<=\\\\[nrt]secret\\-))[A-Za-z0-9]{40,46}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "stytch-project-workspace-secret",
+  "regex": "secret\\-(?:(?<![A-Za-z0-9_-]secret\\-)|(?<=\\\\[nrt]secret\\-))(?:test|live)\\-[A-Za-z0-9_=\\-]{36,44}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "supabase-oauth-access-token",
+  "regex": "sbp_oauth_(?:(?<![A-Za-z0-9_-]sbp_oauth_)|(?<=\\\\[nrt]sbp_oauth_))[0-9a-f]{40}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "supabase-pat-supabase-pat-variant",
+  "regex": "supabase_pat_(?:(?<![A-Za-z0-9_-]supabase_pat_)|(?<=\\\\[nrt]supabase_pat_))[A-Za-z0-9]{31,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "tavily-api-key-bare",
+  "regex": "tvly\\-(?:(?<![A-Za-z0-9_-]tvly\\-)|(?<=\\\\[nrt]tvly\\-))(?:dev\\-|prod\\-)?[A-Za-z0-9_\\-]{20,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "together-ai-api-key-v1-format",
+  "regex": "tgp_v1_(?:(?<![A-Za-z0-9_-]tgp_v1_)|(?<=\\\\[nrt]tgp_v1_))[A-Za-z0-9_\\-]{40,50}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "trigger-dev-organization-access-token",
+  "regex": "tr_oat_(?:(?<![A-Za-z0-9_-]tr_oat_)|(?<=\\\\[nrt]tr_oat_))[A-Za-z0-9]{20,64}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "trigger-dev-personal-access-token-bare",
+  "regex": "tr_pat_(?:(?<![A-Za-z0-9_-]tr_pat_)|(?<=\\\\[nrt]tr_pat_))[1-9a-km-z]{40}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "umami-api-key",
+  "regex": "umami_(?:(?<![A-Za-z0-9_-]umami_)|(?<=\\\\[nrt]umami_))[A-Za-z0-9]{32}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "upstash-box-api-key",
+  "regex": "box_(?:(?<![A-Za-z0-9_-]box_)|(?<=\\\\[nrt]box_))[A-Za-z0-9_\\-]{24,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "vercel-api-key",
+  "regex": "vck_(?:(?<![A-Za-z0-9_-]vck_)|(?<=\\\\[nrt]vck_))[A-Za-z0-9]{24,60}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "vercel-app-access-token-bare",
+  "regex": "vca_(?:(?<![A-Za-z0-9_-]vca_)|(?<=\\\\[nrt]vca_))[A-Za-z0-9]{24,60}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "vercel-app-refresh-token-bare",
+  "regex": "vcr_(?:(?<![A-Za-z0-9_-]vcr_)|(?<=\\\\[nrt]vcr_))[A-Za-z0-9]{24,60}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "vercel-integration-token-bare",
+  "regex": "vci_(?:(?<![A-Za-z0-9_-]vci_)|(?<=\\\\[nrt]vci_))[A-Za-z0-9]{24,60}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "vercel-personal-product-token-vcp",
+  "regex": "vcp_(?:(?<![A-Za-z0-9_-]vcp_)|(?<=\\\\[nrt]vcp_))[A-Za-z0-9]{24,60}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "wagtail-api-token",
+  "regex": "wagtail_(?:(?<![A-Za-z0-9_-]wagtail_)|(?<=\\\\[nrt]wagtail_))[A-Za-z0-9]{33}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "weights-biases-api-key-v1-format",
+  "regex": "wandb_v1_(?:(?<![A-Za-z0-9_-]wandb_v1_)|(?<=\\\\[nrt]wandb_v1_))[A-Za-z0-9_]{70,90}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "zuplo-api-key-consumer",
+  "regex": "zpka_(?:(?<![A-Za-z0-9_-]zpka_)|(?<=\\\\[nrt]zpka_))[A-Za-z0-9]{32,}_[A-Za-z0-9]{6,8}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "apify-proxy-password",
+  "regex": "apify_proxy_(?:(?<![A-Za-z0-9_-]apify_proxy_)|(?<=\\\\[nrt]apify_proxy_))[A-Za-z0-9]{36}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "braintree-oauth-access-token-production",
+  "regex": "access_token\\$production\\$(?:(?<![A-Za-z0-9_-]access_token\\$production\\$)|(?<=\\\\[nrt]access_token\\$production\\$))[A-Za-z0-9_]{1,64}\\$[0-9a-f]{8,64}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "braintree-oauth-access-token-sandbox",
+  "regex": "access_token\\$sandbox\\$(?:(?<![A-Za-z0-9_-]access_token\\$sandbox\\$)|(?<=\\\\[nrt]access_token\\$sandbox\\$))[A-Za-z0-9_]{1,64}\\$[0-9a-f]{8,64}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "braintree-oauth-client-secret-production",
+  "regex": "client_secret\\$production\\$(?:(?<![A-Za-z0-9_-]client_secret\\$production\\$)|(?<=\\\\[nrt]client_secret\\$production\\$))[A-Za-z0-9_]{8,64}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "braintree-oauth-client-secret-sandbox",
+  "regex": "client_secret\\$sandbox\\$(?:(?<![A-Za-z0-9_-]client_secret\\$sandbox\\$)|(?<=\\\\[nrt]client_secret\\$sandbox\\$))[A-Za-z0-9_]{8,64}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "byteplus-access-key-id",
+  "regex": "AKLT(?:(?<![A-Za-z0-9_-]AKLT)|(?<=\\\\[nrt]AKLT))[a-zA-Z0-9_\\-]{16,28}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "canva-connect-apps-oauth-client-secret",
+  "regex": "cnvca(?:(?<![A-Za-z0-9_-]cnvca)|(?<=\\\\[nrt]cnvca))[A-Za-z0-9_\\-]{20,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "checkout-com-sandbox-secret-key-abc",
+  "regex": "sk_test_(?:(?<![A-Za-z0-9_-]sk_test_)|(?<=\\\\[nrt]sk_test_))[A-Za-z0-9_]{8}\\-[A-Za-z0-9_]{4}\\-[A-Za-z0-9_]{4}\\-[A-Za-z0-9_]{4}\\-[A-Za-z0-9_]{12}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "chief-tools-oauth-access-token",
+  "regex": "cto_(?:(?<![A-Za-z0-9_-]cto_)|(?<=\\\\[nrt]cto_))[A-Za-z0-9]{36,248}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "chief-tools-oauth-refresh-token",
+  "regex": "ctr_(?:(?<![A-Za-z0-9_-]ctr_)|(?<=\\\\[nrt]ctr_))[A-Za-z0-9]{36,248}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "chief-tools-personal-access-token",
+  "regex": "ctp_(?:(?<![A-Za-z0-9_-]ctp_)|(?<=\\\\[nrt]ctp_))[A-Za-z0-9]{36,248}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "chief-tools-team-access-token",
+  "regex": "ctt_(?:(?<![A-Za-z0-9_-]ctt_)|(?<=\\\\[nrt]ctt_))[A-Za-z0-9]{36,248}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "crates-io-trusted-publishing-token",
+  "regex": "cio_tp_(?:(?<![A-Za-z0-9_-]cio_tp_)|(?<=\\\\[nrt]cio_tp_))[A-Za-z0-9]{32}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "databricks-oauth-u2m-refresh-token",
+  "regex": "doau(?:(?<![A-Za-z0-9_-]doau)|(?<=\\\\[nrt]doau))[a-zA-Z0-9]{32,40}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "duffel-test-access-token",
+  "regex": "duffel_test_(?:(?<![A-Za-z0-9_-]duffel_test_)|(?<=\\\\[nrt]duffel_test_))[A-Za-z0-9_\\-]{20,128}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "fieldguide-user-api-token",
+  "regex": "fg_us_(?:(?<![A-Za-z0-9_-]fg_us_)|(?<=\\\\[nrt]fg_us_))[0-9a-f]{32}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "gitlab-runner-registration-auth-token",
+  "regex": "glrtr\\-(?:(?<![A-Za-z0-9_-]glrtr\\-)|(?<=\\\\[nrt]glrtr\\-))(?:(?:t[0-9a-f]+_)?[A-Za-z0-9_\\-]{20}|[A-Za-z0-9_\\-]{27,600}\\.01\\.[0-9a-z]{9})(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "gitlab-session-cookie-bare",
+  "regex": "_gitlab_session=(?:(?<![A-Za-z0-9_-]_gitlab_session=)|(?<=\\\\[nrt]_gitlab_session=))[A-Za-z0-9%_\\-]{32,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "gitlab-workspace-token-gitlab-18-2",
+  "regex": "glwt\\-(?:(?<![A-Za-z0-9_-]glwt\\-)|(?<=\\\\[nrt]glwt\\-))[A-Za-z0-9_\\-]{27,600}\\.01\\.[0-9a-z]{9}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "google-api-key-bound-to-service-account",
+  "regex": "AQ\\.Ab8R(?:(?<![A-Za-z0-9_-]AQ\\.Ab8R)|(?<=\\\\[nrt]AQ\\.Ab8R))[a-zA-Z0-9_\\-]{46}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "google-cloud-storage-hmac-key-access-id",
+  "regex": "GOOG(?:(?<![A-Za-z0-9_-]GOOG)|(?<=\\\\[nrt]GOOG))(?:[A-Z0-9]{57}|[A-Z0-9]{20})(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "hex-api-key-hex-pm",
+  "regex": "hex_(?:(?<![A-Za-z0-9_-]hex_)|(?<=\\\\[nrt]hex_))[0-9a-f]{40}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "huggingface-organization-api-token-legacy",
+  "regex": "api_org_(?:(?<![A-Za-z0-9_-]api_org_)|(?<=\\\\[nrt]api_org_))[A-Za-z0-9]{34}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "jumpcloud-admin-api-key",
+  "regex": "jca_(?:(?<![A-Za-z0-9_-]jca_)|(?<=\\\\[nrt]jca_))[A-Za-z0-9]{36}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "klarna-live-api-key",
+  "regex": "klarna_live_api_(?:(?<![A-Za-z0-9_-]klarna_live_api_)|(?<=\\\\[nrt]klarna_live_api_))[A-Za-z0-9]{20,256}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "klarna-test-playground-api-key",
+  "regex": "klarna_test_api_(?:(?<![A-Za-z0-9_-]klarna_test_api_)|(?<=\\\\[nrt]klarna_test_api_))[A-Za-z0-9]{20,256}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "limbar-limrun-organization-api-key",
+  "regex": "lim_(?:(?<![A-Za-z0-9_-]lim_)|(?<=\\\\[nrt]lim_))[A-Za-z0-9]{20,64}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "limbar-limrun-scoped-signed-registry-token",
+  "regex": "lim_st_(?:(?<![A-Za-z0-9_-]lim_st_)|(?<=\\\\[nrt]lim_st_))[A-Za-z0-9_\\-]{10,}\\.[A-Za-z0-9_\\-]{10,}\\.[A-Za-z0-9_\\-]{10,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "nylas-v3-api-key",
+  "regex": "nyk_v0(?:(?<![A-Za-z0-9_-]nyk_v0)|(?<=\\\\[nrt]nyk_v0))[A-Za-z0-9_]{20,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "persona-production-api-key-bare",
+  "regex": "persona_production_(?:(?<![A-Za-z0-9_-]persona_production_)|(?<=\\\\[nrt]persona_production_))[A-Za-z0-9_\\-]{20,128}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "persona-sandbox-api-key",
+  "regex": "persona_sandbox_(?:(?<![A-Za-z0-9_-]persona_sandbox_)|(?<=\\\\[nrt]persona_sandbox_))[A-Za-z0-9_\\-]{20,128}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "plaid-assets-token-production",
+  "regex": "assets\\-production\\-(?:(?<![A-Za-z0-9_-]assets\\-production\\-)|(?<=\\\\[nrt]assets\\-production\\-))[0-9a-f]{8}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{12}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "plaid-assets-token-sandbox",
+  "regex": "assets\\-sandbox\\-(?:(?<![A-Za-z0-9_-]assets\\-sandbox\\-)|(?<=\\\\[nrt]assets\\-sandbox\\-))[0-9a-f]{8}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{12}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "plaid-processor-token-production",
+  "regex": "processor\\-production\\-(?:(?<![A-Za-z0-9_-]processor\\-production\\-)|(?<=\\\\[nrt]processor\\-production\\-))[0-9a-f]{8}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{12}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "plaid-processor-token-sandbox",
+  "regex": "processor\\-sandbox\\-(?:(?<![A-Za-z0-9_-]processor\\-sandbox\\-)|(?<=\\\\[nrt]processor\\-sandbox\\-))[0-9a-f]{8}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{12}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "plaid-user-token-production",
+  "regex": "user\\-production\\-(?:(?<![A-Za-z0-9_-]user\\-production\\-)|(?<=\\\\[nrt]user\\-production\\-))[0-9a-f]{8}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{12}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "plaid-user-token-sandbox",
+  "regex": "user\\-sandbox\\-(?:(?<![A-Za-z0-9_-]user\\-sandbox\\-)|(?<=\\\\[nrt]user\\-sandbox\\-))[0-9a-f]{8}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{4}\\-[0-9a-f]{12}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "pubnub-secret-key",
+  "regex": "sec\\-c\\-(?:(?<![A-Za-z0-9_-]sec\\-c\\-)|(?<=\\\\[nrt]sec\\-c\\-))[A-Za-z0-9+/]{48}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "shippo-live-api-token",
+  "regex": "shippo_live_(?:(?<![A-Za-z0-9_-]shippo_live_)|(?<=\\\\[nrt]shippo_live_))[0-9a-f]{32,40}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "shippo-test-api-token",
+  "regex": "shippo_test_(?:(?<![A-Za-z0-9_-]shippo_test_)|(?<=\\\\[nrt]shippo_test_))[0-9a-f]{32,40}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "slack-rotating-access-token",
+  "regex": "xoxe\\.x(?:(?<![A-Za-z0-9_-]xoxe\\.x)|(?<=\\\\[nrt]xoxe\\.x))(?:oxb|oxp|app)\\-1\\-[A-Za-z0-9\\-]{20,}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "square-oauth-refresh-token",
+  "regex": "EQAA(?:(?<![A-Za-z0-9_-]EQAA)|(?<=\\\\[nrt]EQAA))[A-Za-z0-9_\\-]{60}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "stripe-claimable-sandbox-restricted-key",
+  "regex": "rkcs_(?:(?<![A-Za-z0-9_-]rkcs_)|(?<=\\\\[nrt]rkcs_))[A-Za-z0-9_]{16,255}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "stripe-organization-api-key-bare",
+  "regex": "sk_org_(?:(?<![A-Za-z0-9_-]sk_org_)|(?<=\\\\[nrt]sk_org_))[A-Za-z0-9_]{16,255}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "wave-senegal-request-signing-secret",
+  "regex": "wave_sn_AKS_(?:(?<![A-Za-z0-9_-]wave_sn_AKS_)|(?<=\\\\[nrt]wave_sn_AKS_))[A-Za-z0-9]{20,256}(?![A-Za-z0-9_-])"
+ },
+ {
+  "id": "zapier-catch-hook-webhook-url",
+  "regex": "(?<![\\w./-])(?:https?://)?hooks\\.zapier\\.com\\/hooks\\/catch\\/(?:(?<![A-Za-z0-9_-]hooks\\.zapier\\.com\\/hooks\\/catch\\/)|(?<=\\\\[nrt]hooks\\.zapier\\.com\\/hooks\\/catch\\/))[0-9]+\\/[A-Za-z0-9]+\\/?(?![A-Za-z0-9_-])"
  }
 ]

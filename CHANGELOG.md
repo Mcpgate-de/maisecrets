@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## [0.7.10] - 2026-10-23
+
+### Features
+
+- detects 47 more token formats from the providers' own code and documentation (99f8f6f)
+- finds the value of a Kubernetes env entry whose name is a password or a key (955142c)
+- finds keys and passwords in more typed sentences, such as "my stripe key is <value>" (0baf629)
+- finds a password in a note line such as "host (pw:<value>)", "(ID/PW:<value>)" or "-pwd:<value>" (669a13f)
+- finds Laravel's APP_KEY and each key of Strapi's APP_KEYS in an .env file (ba5a771)
+- finds the password of a database URL that holds an unescaped sign such as ! $ & or + (9d752f1)
+- finds the default of a Terraform variable whose name is a key or a password (1e12204)
+- finds the keys and salts that PHP's define() sets, such as the WordPress salts in wp-config.php (f5bfdc2)
+- detects 72 more token formats that providers define in their own code (35b1a01)
+- ms:(…) offers to report the format of a value maisecrets did not catch, with its shape only (8ad067d)
+- masks eight more token formats that Trivy, Veles, nuclei and titus know (6251547)
+- masks 16 more provider keys after the provider's word and a key label (32e21e4)
+
+### Fixes
+
+- a Zapier catch hook URL is found whole with its https:// scheme (8f60527)
+- a Fly.io token of several macaroons is found whole again (23df0ec)
+- a key at the end of a sentence is found again: "the key is <token>." or "(<token>)" (0ba8945)
+- a hex digest after nfp_ is no Netlify token, and the C29 belief anchors the new answer line (2fac9ae)
+- an Akamai host name is no longer taken for an EdgeGrid client token (2c43deb)
+- a token at the end of a sentence no longer takes the full stop or colon into the value (845c20c)
+
 ## [0.7.9] - 2026-10-22
 
 ### Features
