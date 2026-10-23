@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.7.18] - 2026-10-23
+
+### Fixes
+
+- the directory version ships no design documents and no rule source it never reads (dbab8e6)
+- no rule comment carries an example in the shape of a real token (bdb18c6)
+
 ## [0.7.17] - 2026-10-23
 
 ### Fixes
